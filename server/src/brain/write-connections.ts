@@ -46,7 +46,7 @@ import type { RefKind } from '../config/types-knowledge.js';
 import type { DesiredLinks } from './links.js';
 import { invalidRefsMessage, edgeEndpointKindSchema, edgeEndpointKind, isWellFormedRef } from './entity-refs.js';
 import { primitivePropertyError } from './property-values.js';
-import { reconcileLinks } from './links.js';
+import { reconcileLinks, assertDesiredLinks } from './links.js';
 import { linksStartingFrom, linkClassesFrom } from './link-adjacency.js';
 import { upsertEdge } from './edges.js';
 import { retiredWriteFieldError } from './retired-write-fields.js';
@@ -404,6 +404,29 @@ export async function linkAuditSnapshots(
     after[field] = [...(desired[kind] ?? [])];
   }
   return { before, after };
+}
+
+/**
+ * Refuse what can be refused about this body's connections BEFORE the record is written.
+ *
+ * ## Why a door needs this when the writer already asserts
+ *
+ * `applyConnections` runs AFTER the record exists — it has to, because a link needs both ends and the
+ * `from` is what was just minted. So a link id naming nothing is refused with the record already stored:
+ * the caller gets a `400` and a row they did not ask for, which is the silent unlinked write made noisy
+ * rather than fixed.
+ *
+ * The writers assert too, and that is not a duplicate for the sake of it: `files/media/face-embedder.ts`
+ * and the conversion reach a writer directly, past every door there is. This is the same assertion asked
+ * one step earlier, where the answer can still be *nothing happened*.
+ */
+export async function assertConnections(
+  spaceId: string,
+  fromKind: RefKind,
+  body: unknown,
+): Promise<void> {
+  const desired = desiredLinksFrom(body);
+  if (desired) await assertDesiredLinks(spaceId, fromKind, desired);
 }
 
 /**

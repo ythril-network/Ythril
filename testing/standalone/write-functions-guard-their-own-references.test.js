@@ -30,6 +30,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
 import { bodyOf } from './_structural-window.mjs';
+import { trackedSources } from './_sources.mjs';
 
 /**
  * The writers that can be handed a link set, and the kind each one writes from.
@@ -76,6 +77,32 @@ describe('write functions guard their own references', () => {
         'asserting after the write leaves a record stored without the links the same call was refused for');
     });
   }
+
+  it('EVERY door that applies connections asks FIRST, whichever doors those are', () => {
+    /*
+     * The door half, and it is the half that was missing. `applyConnections` runs AFTER the record is
+     * written — it has to, because a link needs both ends and the `from` is what was just minted — so a
+     * door that only calls it answers `400` with the record already stored. Measured: a fact created with
+     * a link id naming nothing was refused AND kept.
+     *
+     * DERIVED from the calls rather than from a list of doors: a seventh write door is covered on the
+     * commit that adds it, which a list of six could never do.
+     */
+    const doors = trackedSources(['server/src/api/brain', 'server/src/mcp/tools'], { floor: 8, untracked: true })
+      .filter(f => /applyConnections\(/.test(stripComments(readFileSync(f, 'utf8'))));
+    assert.ok(doors.length >= 3, `only ${doors.length} file(s) apply connections — the sweep has broken`);
+
+    const offenders = [];
+    for (const file of doors) {
+      const src = stripComments(readFileSync(file, 'utf8'));
+      const applies = [...src.matchAll(/applyConnections\(/g)].length;
+      const asserts = [...src.matchAll(/assertConnections\(/g)].length;
+      if (asserts < applies) offenders.push(`${file} (${applies} apply, ${asserts} assert)`);
+    }
+    assert.deepEqual(offenders, [],
+      'these apply a body\'s connections without refusing them first, so a link id naming nothing is a '
+      + '400 with the record already written: ' + offenders.join(', '));
+  });
 
   it('and the shared assertion keeps EXISTENCE behind strictLinkage, while the class check is absolute', () => {
     /*

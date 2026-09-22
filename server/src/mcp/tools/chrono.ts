@@ -35,7 +35,7 @@ import { mergePropertiesOrKeep } from '../../brain/merge-fields.js';
 import { validateDeleteFields } from '../../brain/delete-fields.js';
 import { parseRecordSuppression } from '../../brain/suppress-embeddings.js';
 import { parseRecordSuperseded } from '../../brain/record-flag.js';
-import { connectionSchemas, applyConnections, desiredLinksFrom, edgeInputsFrom } from '../../brain/write-connections.js';
+import { connectionSchemas, applyConnections, assertConnections, desiredLinksFrom, edgeInputsFrom } from '../../brain/write-connections.js';
 
 export const save_chronoTool: ToolHandler = {
   name: 'save_chrono',
@@ -151,6 +151,11 @@ export const save_chronoTool: ToolHandler = {
 
     const rec = parseRecurrence(a['recurrence']);
     if (!rec.ok) throw new Error(rec.error);
+
+    // Refused BEFORE the record is written: a class this kind cannot hold, and under strict linkage
+    // an id that names nothing. `applyConnections` runs after the write, so a refusal there would
+    // leave the record stored without the links the same call asked for.
+    await assertConnections(wt.target, 'chrono', a);
 
     let entry;
     try {
@@ -435,6 +440,11 @@ export const update_chronoTool: ToolHandler = {
      * throws, so nothing about this tool's failure shape changes — the block was pure duplication, and the
      * duplicate is the one that drifted.
      */
+
+    // Refused BEFORE the record is written: a class this kind cannot hold, and under strict linkage
+    // an id that names nothing. `applyConnections` runs after the write, so a refusal there would
+    // leave the record stored without the links the same call asked for.
+    await assertConnections(wt.target, 'chrono', a);
 
     const entry = await updateChrono(wt.target, id, updates as Parameters<typeof updateChrono>[2], dfPaths, ctx.actor, ttlDaysFromArgs(a));
     if (!entry) throw new Error(`Chrono entry '${id}' not found`);

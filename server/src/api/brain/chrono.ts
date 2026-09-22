@@ -25,7 +25,7 @@ import {
   parseRecordSuppression, RECORD_SUPPRESS_FIELD,
 } from '../../brain/suppress-embeddings.js';
 import { parseRecordSuperseded } from '../../brain/record-flag.js';
-import { connectionInputError, applyConnections, CONNECTION_BODY_KEYS, linkAuditSnapshots } from '../../brain/write-connections.js';
+import { connectionInputError, assertConnections, applyConnections, CONNECTION_BODY_KEYS, linkAuditSnapshots } from '../../brain/write-connections.js';
 
 export const chronoRouter = Router();
 
@@ -135,6 +135,9 @@ chronoRouter.post('/spaces/:spaceId/chrono', globalRateLimit, requireSpaceAuth, 
   // `F-27`: the one-call write — links and labelled edges together. Shape here; existence at the writer.
   const connErr = connectionInputError(req.body, { strict: isStrictLinkage(wt.target) });
   if (connErr) { res.status(400).json({ error: connErr }); return; }
+  // And the half a shape check cannot answer: a class this kind cannot hold, and — under strict
+  // linkage — an id that names nothing. BEFORE the record is written, or a refusal leaves a row.
+  await assertConnections(wt.target, 'chrono', req.body);
 
 
   // `waitForEmbedding` (default false): the vector is normally computed by the embedding queue
@@ -298,6 +301,9 @@ chronoRouter.patch('/spaces/:spaceId/chrono/:id', globalRateLimit, requireSpaceA
   const dfPaths: string[] | undefined = Array.isArray(body['deleteFields']) && body['deleteFields'].length > 0
     ? body['deleteFields'] as string[]
     : undefined;
+
+  // Refused BEFORE the update lands, or a bad link id leaves every other field already changed.
+  await assertConnections(wt.target, 'chrono', req.body);
 
   // Snapshot for the audit change list — see the note in facts.ts. Read before the write, since
   // `updateChrono` returns only the new document.

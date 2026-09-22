@@ -7,7 +7,7 @@ import { Router } from 'express';
 import { requestActor } from '../../auth/request-actor.js';
 import { shapeError } from '../../brain/write-shape.js';
 import { entityDeleteBlockers } from '../../brain/entity-delete-guard.js';
-import { connectionInputError, applyConnections, CONNECTION_BODY_KEYS, desiredLinksFrom, edgeInputsFrom, linkAuditSnapshots } from '../../brain/write-connections.js';
+import { connectionInputError, assertConnections, applyConnections, CONNECTION_BODY_KEYS, desiredLinksFrom, edgeInputsFrom, linkAuditSnapshots } from '../../brain/write-connections.js';
 import { WIPE_COLLECTION_TYPES, type WipeCollectionType, wipeSpace } from '../../spaces/lifecycle.js';
 import { assertRefsResolve } from '../../brain/entity-refs.js';
 import { requireSpaceAuth, requireBodyScopedSpace, denyReadOnly } from '../../auth/middleware.js';
@@ -134,6 +134,9 @@ memoriesRouter.post('/spaces/:spaceId/facts', globalRateLimit, requireSpaceAuth,
   // `F-27`: the one-call write — links and labelled edges together. Shape here; existence at the writer.
   const connErr = connectionInputError(req.body, { strict: isStrictLinkage(wt.target) });
   if (connErr) { res.status(400).json({ error: connErr }); return; }
+  // And the half a shape check cannot answer: a class this kind cannot hold, and — under strict
+  // linkage — an id that names nothing. BEFORE the record is written, or a refusal leaves a row.
+  await assertConnections(wt.target, 'fact', req.body);
 
   // A caller-supplied id becomes the sync identity of a record that replicates across networks, so it is held
   // to the same shape the rest of the API uses. (The entity route accepts any string here — pre-existing, and
@@ -258,6 +261,9 @@ memoriesRouter.patch('/spaces/:spaceId/facts/:id', globalRateLimit, requireSpace
   // `F-27`: the one-call write — links and labelled edges together. Shape here; existence at the writer.
   const connErr = connectionInputError(req.body, { strict: isStrictLinkage(wt.target) });
   if (connErr) { res.status(400).json({ error: connErr }); return; }
+  // And the half a shape check cannot answer: a class this kind cannot hold, and — under strict
+  // linkage — an id that names nothing. BEFORE the record is written, or a refusal leaves a row.
+  await assertConnections(wt.target, 'fact', req.body);
   const ttlDaysProvided = !!req.body && typeof req.body === 'object' && 'ttlDays' in req.body;
   const dfPaths: string[] | undefined = Array.isArray(deleteFields) && deleteFields.length > 0 ? deleteFields : undefined;
   const updates: { fact?: string; type?: string; tags?: string[]; description?: string; properties?: Record<string, string | number | boolean>; suppressEmbeddings?: boolean; superseded?: boolean } = {};

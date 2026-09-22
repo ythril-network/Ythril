@@ -24,7 +24,7 @@ import { TTL_DAYS_SCHEMA, SUPPRESS_EMBEDDINGS_SCHEMA, SUPERSEDED_SCHEMA, ttlDays
 import { mergePropertiesOrKeep } from '../../brain/merge-fields.js';
 import { parseRecordSuppression } from '../../brain/suppress-embeddings.js';
 import { parseRecordSuperseded } from '../../brain/record-flag.js';
-import { connectionSchemas, applyConnections, desiredLinksFrom, edgeInputsFrom } from '../../brain/write-connections.js';
+import { connectionSchemas, applyConnections, assertConnections, desiredLinksFrom, edgeInputsFrom } from '../../brain/write-connections.js';
 
 export const save_factTool: ToolHandler = {
   name: 'save_fact',
@@ -140,6 +140,11 @@ export const save_factTool: ToolHandler = {
     if (!supCreate.ok) throw new Error(supCreate.error);
     const susCreate = parseRecordSuperseded(a);
     if (!susCreate.ok) throw new Error(susCreate.error);
+    // Refused BEFORE the record is written: a class this kind cannot hold, and under strict linkage
+    // an id that names nothing. `applyConnections` runs after the write, so a refusal there would
+    // leave the record stored without the links the same call asked for.
+    await assertConnections(ts, 'fact', a);
+
     const mem = await saveFact(ts, fact, [], tags, description, props, memType,
       {
         checkDuplicates: remDupeCheck, checkContradictions: remContraCheck, dupeThreshold: remDupeThreshold,
@@ -343,6 +348,9 @@ export const update_factTool: ToolHandler = {
      */
 
     // Search member spaces sequentially — consistent with REST endpoint behaviour.
+    // Refused BEFORE the update lands, or a bad link id leaves every other field already changed.
+    await assertConnections(wt.target, 'fact', a);
+
     const updated = await findFirstAcrossMembers(wt.target, mid => updateFact(mid, id, updates, dfPaths, ctx.actor, ttlDays));
     if (!updated) throw new Error(`Fact '${id}' not found`);
     // `Q-30`: connections on the UPDATE too. Links REPLACE per class and edges UPSERT; both semantics
