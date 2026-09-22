@@ -1,5 +1,5 @@
 /**
- * What the ARRAY-based link walk answers today — captured before `M-2` slice 2 replaces it.
+ * What the link walk answers, from a space UPGRADED out of the 4.x array shape.
  *
  * Runs in the OFFLINE subset, like every other `-db` file here: it drives a real MongoDB through the
  * server's own data layer and needs no running instance. Do NOT write the words that preflight's
@@ -61,7 +61,7 @@ const MEM = 'aaaaaaaa-0000-4000-8000-00000000000m'.replace('m', '1');
 const CHR = 'aaaaaaaa-0000-4000-8000-00000000000c'.replace('c', '2');
 const FILE = 'notes/spec.md';
 
-let mongo, edgesMod, entitiesMod, erMod;
+let mongo, edgesMod, entitiesMod, erMod, linksConversion;
 
 const coll = (n) => mongo.col(`${SPACE}_${n}`);
 
@@ -82,13 +82,14 @@ describe('the 3.x link baseline — what the array walk answered', { skip }, () 
     mongo = await openTestMongo('linkbaseline');
     fs.writeFileSync(CONFIG_PATH, JSON.stringify({
       instanceId: 'link-baseline-test', instanceLabel: 'test', tokens: [], networks: [],
-      spaces: [{ id: SPACE, label: 'General', builtIn: true, folders: [] }],
+      spaces: [{ id: SPACE, label: 'General', builtIn: true, folders: [], completeLinkage: true }],
     }, null, 2), { mode: 0o600 });
     const loader = await import('../../server/dist/config/loader.js');
     loader.loadConfig();
     edgesMod = await import('../../server/dist/brain/edges.js');
     entitiesMod = await import('../../server/dist/brain/entities.js');
     erMod = await import('../../server/dist/brain/er-model.js');
+    linksConversion = await import('../../server/dist/brain/links-conversion.js');
   });
 
   after(async () => {
@@ -134,6 +135,21 @@ describe('the 3.x link baseline — what the array walk answered', { skip }, () 
       parentFileId: FILE, chunkIndex: 0, entityIds: [ENT], seq: 5,
       createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
     });
+
+    /*
+     * AND THEN CONVERT, which is what makes this file still mean something in 5.0.
+     *
+     * The records above are written with the 4.x arrays on purpose: raw inserts, so the storage can carry
+     * what the TYPES no longer declare. That is exactly the state a space upgraded from 4.x is in, and the
+     * conversion is what every such space runs on its first 5.0 boot. Running it here means the walk below
+     * is answering from link RECORDS derived from those arrays — so the sets this file pins are still the
+     * sets 3.x answered, reached the way 5.0 reaches them.
+     *
+     * The original of this file was a characterization test captured BEFORE the record walk existed, to
+     * prove the switch changed no answer. The switch is done and the arrays are gone; what is worth keeping
+     * is that an upgraded space answers what it always did.
+     */
+    await linksConversion.convertSpaceLinks(SPACE);
   });
 
   it('the modules are the ones this file thinks they are', () => {
@@ -153,7 +169,8 @@ describe('the 3.x link baseline — what the array walk answered', { skip }, () 
     assert.equal(await coll('files').countDocuments({}), 2, 'the file AND one chunk of it');
     assert.equal(await coll('files').countDocuments({ parentFileId: { $exists: true } }), 1,
       'exactly one of the two is a chunk — the scope the file link class carries has something to exclude');
-    assert.equal(await coll('links').countDocuments({}), 0, 'no link RECORD exists yet — that is slice 2');
+    assert.ok(await coll('links').countDocuments({}) >= 6,
+      'the conversion produced no link records — every walk below would then be about an empty graph');
   });
 
   // ────────────────────────────────────────────────────────────────────────────────────────────
