@@ -9,6 +9,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Two read tools were logged as writes, so an operator who turned reads OFF still got them.** A
+  regression of the 5.0 renames, found the same day. `audit.logReads` is off by default; REST declares
+  which operations are reads with `read: true` on the route rule, and the MCP door held a second,
+  hand-written set of nine operation names beside it.
+
+  `query` became `filter` and `find_similar` became `similar`; the audit MAP was updated and that set was
+  not. So it still named `brain.query`, which nothing records any more, and named neither `brain.filter`
+  nor `brain.similar` — **the two highest-volume read paths an agent has**. Nothing said so, because a
+  read logged as a write is an extra row rather than an error, and a dead name in a hand-written set is
+  never wrong out loud.
+
+  The set is derived from the route rules now, where `read: true` sits beside the route it describes. One
+  rule, one declaration: a capability cannot be a read on one door and not the other, and a new read
+  route classifies the tool that mirrors it without anybody remembering to. `entity.cascade_preview` was
+  also reclassified by that — it reports what a cascade would remove and removes nothing.
+
+- **The audit guide documented 53 of the 115 operations the log can contain** (`Q-40`). The page opens by
+  promising *"a full access trail"* and then lists the operations; 62 were missing, including every
+  `conflict.*` and `contradiction.*`, all of `data.*`, all of `schema_library.*`, `token.update`,
+  `token.regenerate`, `link.create` and `link.delete`. An integrator builds an audit query from that
+  table, so an operation absent from it is a filter nobody writes.
+
+  Found by deriving the set to check that the two operations above were documented — they were not.
+
+  **A gate keeps it true rather than a corrected table**, which would be the same defect with a later
+  date: the set comes from the route rules, the tool map and the one operation neither produces, and the
+  window is the table itself, because several operations appear in that page's prose and a whole-file
+  check would pass while the table stayed short.
+
+  The gate also runs the other way. It found five operations the table named that nothing records —
+  `brain.query`, `brain.er_model`, `brain.find_similar`, `brain.recall_global` and `brain.bulk_write`,
+  all left behind by the 5.0 renames and folds. An integrator filtering for those reads the silence as
+  *"this never happens here"* rather than as a stale page.
+
 - **An agent syncing ONE peer was audited under the network-wide name** (`Q-37`). `network_sync` with a
   `peerId` does exactly what `POST /api/networks/peers/:peerId/sync` does, and that route records
   `peer.sync_trigger` — the tool recorded `network.sync_trigger` for both subjects, because the resolver

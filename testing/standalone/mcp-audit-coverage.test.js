@@ -32,7 +32,9 @@ import { DISPATCH_SOURCES } from './_tool-dispatch.mjs';
 import { readFileSync } from 'node:fs';
 import { balancedFrom } from './_structural-window.mjs';
 
-let MCP_TOOL_OPERATIONS, MCP_OPERATION_SUBJECTS, mcpAuditOperation, isMcpReadOperation;
+let MCP_TOOL_OPERATIONS, MCP_OPERATION_SUBJECTS, MCP_READ_OPERATIONS, mcpAuditOperation,
+  isMcpReadOperation;
+let ROUTE_RULES;
 let ALL_TOOLS;
 
 const MIDDLEWARE = 'server/src/audit/middleware.ts';
@@ -45,8 +47,9 @@ const ROUTER = DISPATCH_SOURCES[0];
 
 describe('MCP audit coverage', () => {
   before(async () => {
-    ({ MCP_TOOL_OPERATIONS, MCP_OPERATION_SUBJECTS, mcpAuditOperation, isMcpReadOperation } =
-      await import('../../server/dist/mcp/audit-map.js'));
+    ({ MCP_TOOL_OPERATIONS, MCP_OPERATION_SUBJECTS, MCP_READ_OPERATIONS, mcpAuditOperation,
+      isMcpReadOperation } = await import('../../server/dist/mcp/audit-map.js'));
+    ({ ROUTE_RULES } = await import('../../server/dist/audit/middleware.js'));
     ({ ALL_TOOLS } = await import('../../server/dist/mcp/tools/index.js'));
   });
 
@@ -122,6 +125,66 @@ describe('MCP audit coverage', () => {
     // a chooser that returned the wrong member of its own list would satisfy every assertion but this.
     assert.equal(mcpAuditOperation('network_sync', { peerId: 'p1' }), 'peer.sync_trigger');
     assert.equal(mcpAuditOperation('network_sync', {}), 'network.sync_trigger');
+  });
+
+  /*
+   * A READ IS A READ ON BOTH DOORS, AND THE MCP SIDE HELD ITS OWN LIST OF WHICH ONES THEY ARE.
+   *
+   * `audit.logReads` is off by default, so an operation classified as a read is not logged and one that
+   * is not is logged on every call. REST declares this per route, as `read: true` on the rule. MCP had a
+   * hand-written set of nine operation names beside it — the same rule, written twice, and the weaker
+   * copy winning silently, which is the defect class this repo produces most.
+   *
+   * **The 5.0 renames broke it, and the break shipped.** `query` became `filter` and `find_similar`
+   * became `similar`; the audit MAP was updated and the hand-written read set was not. So it still named
+   * `brain.query`, which nothing records any more, and named neither `brain.filter` nor `brain.similar`
+   * — the two highest-volume read paths an agent has. An operator running the default configuration got
+   * every one of them in an audit log they had deliberately configured not to log reads.
+   *
+   * The set is derived from the route rules now. These cases assert the two halves of that: nothing in
+   * it is a name no door records, and every non-mutating tool that is audited at all is in it.
+   */
+  it('classifies as a read everything the REST rules call a read', () => {
+    const restReads = ROUTE_RULES.filter(r => r.read && r.operation).map(r => r.operation);
+    assert.ok(restReads.length >= 15, `expected the REST read rules, found ${restReads.length}`);
+
+    const notRead = [...new Set(restReads)].filter(op => !isMcpReadOperation(op)).sort();
+    assert.deepEqual(notRead, [],
+      'REST calls these operations reads and the MCP door does not, so the same capability is gated by '
+      + '`logReads` through one door and logged unconditionally through the other. An operator who '
+      + 'turned reads off still gets them.');
+  });
+
+  it('and calls nothing a read that no door records', () => {
+    /*
+     * The other direction, and it is how the stale `brain.query` survived the rename: a dead name in the
+     * set is invisible, because a classification nothing consults is never wrong out loud.
+     */
+    const recorded = new Set(ROUTE_RULES.filter(r => r.operation).map(r => r.operation));
+    for (const value of Object.values(MCP_TOOL_OPERATIONS)) {
+      if (!value) continue;
+      for (const op of (Array.isArray(value) ? value : [value])) recorded.add(op);
+    }
+    const dead = [...MCP_READ_OPERATIONS].filter(op => !recorded.has(op)).sort();
+    assert.deepEqual(dead, [],
+      'the read set names operation(s) neither a route rule nor a tool records — a rename that updated '
+      + 'the audit map and not this set leaves exactly this residue');
+  });
+
+  it('every non-mutating tool that is audited is audited as a READ', () => {
+    /*
+     * The rule the two above cannot state between them: a tool the registry calls non-mutating, whose
+     * operation is not classified as a read, is logged on every call under the default configuration.
+     * Derived from the registry rather than from a list of tool names, so a read tool written next year
+     * is covered by the gate that already exists.
+     */
+    const offenders = ALL_TOOLS
+      .filter(t => !t.mutating)
+      .map(t => [t.name, mcpAuditOperation(t.name)])
+      .filter(([, op]) => op && !isMcpReadOperation(op));
+    assert.deepEqual(offenders, [],
+      'these non-mutating tools record an operation that is not classified as a read, so every call is '
+      + 'logged even with `logReads` off');
   });
 
   it('every MUTATING tool records an operation', () => {

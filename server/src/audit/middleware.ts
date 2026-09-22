@@ -446,6 +446,17 @@ export function auditMiddleware(req: Request, res: Response, next: NextFunction)
   next();
 }
 
+/**
+ * The one operation no ROUTE RULE produces.
+ *
+ * A rejected credential has no route to match — it is refused before the handler — so it is written
+ * from `logAuthFailure` directly. That makes it invisible to anything deriving the operations from
+ * `ROUTE_RULES`, which is how a sweep of what the log can contain concludes about all of it while
+ * missing the entry an operator most wants to find. Named here so the derivation has three sources
+ * and not two.
+ */
+export const AUTH_FAILED_OPERATION = 'auth.failed';
+
 /** Log a failed auth attempt — called explicitly from auth middleware when needed. */
 export function logAuthFailure(req: Request): void {
   const fullPath = (req.originalUrl || req.url).split('?')[0];
@@ -462,7 +473,7 @@ export function logAuthFailure(req: Request): void {
     method: req.method,
     path: fullPath,
     spaceId: null,
-    operation: 'auth.failed',
+    operation: AUTH_FAILED_OPERATION,
     status: 401,
     entryId: null,
     durationMs: 0,
