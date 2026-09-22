@@ -36,7 +36,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post } from '../sync/helpers.js';
+import { INSTANCES, post, waitForIndexed } from '../sync/helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, '..', 'sync', 'configs');
@@ -52,7 +52,13 @@ let token;
 let hubIds = [];
 let tightChars = 0;
 
-const recall = (body) => post(INSTANCES.a, token, '/api/brain/recall', { space: SPACE, ...({ includeFreshWrites: true, ...body }) });
+/*
+ * It carried `includeFreshWrites: true`, and 5.0 removed that parameter — so EVERY recall in this
+ * file answered 400 and every case skipped, quietly, for as long as 5.0 has existed. The scan it
+ * asked for is unconditional now; what replaces it is `waitForIndexed` in `before`, because this
+ * file's subject is the vector path and the scan never covered that.
+ */
+const recall = (body) => post(INSTANCES.a, token, '/api/brain/recall', { space: SPACE, ...body });
 
 before(async () => {
   token = fs.readFileSync(path.join(CONFIGS, 'a', 'token.txt'), 'utf8').trim();
@@ -90,10 +96,25 @@ before(async () => {
     }
   }
 
+  // The hubs have to be IN THE VECTOR INDEX before anything is measured. Recall's fresh-write scan
+  // covers a record whose embedding is still pending, and this file's whole subject is what
+  // `$vectorSearch` returns — so the window between the embed job finishing and the index holding
+  // the vector is exactly where this fixture used to land.
+  if (hubIds.length > 0) await waitForIndexed(INSTANCES.a, token, SPACE, hubIds, ['entity']);
+
   // Measure the full traversed answer, then take 40% of it — low enough to bite hard, high enough that more
   // than one match still fits.
   const full = await recall({ query: QUERY, types: ['entity'], topK: HUBS, traverse: 1, maxChars: 5_000_000 });
-  if (full.status === 200 && full.body.truncated === false) {
+  /*
+   * A REFUSED recall is not a fixture problem, and telling them apart is the point of this line.
+   * `ready()` below skips when `tightChars` is 0, which is right for "the writes did not land"
+   * and wrong for "the request was rejected" — the 400 that `includeFreshWrites` earned reached
+   * exactly here, became a skip, and read as a fixture that could not be built.
+   */
+  assert.equal(full.status, 200,
+    `the measuring recall was refused rather than answered — this is not index lag: `
+    + JSON.stringify(full.body).slice(0, 300));
+  if (full.body.truncated === false) {
     tightChars = Math.max(1_000, Math.floor(full.body.charsReturned * 0.4));
   }
 });

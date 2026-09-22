@@ -41,7 +41,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post } from '../sync/helpers.js';
+import { INSTANCES, post, waitForIndexed } from '../sync/helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, '..', 'sync', 'configs');
@@ -78,6 +78,14 @@ before(async () => {
     suppressEmbeddings: true, properties: { attributed: true, speaker: 'assistant' },
   });
   assert.ok(att.body?._id, `attributed fact: ${JSON.stringify(att.body)}`);
+
+  /*
+   * The SUBJECT has to be rankable before a query can reach it, and the attributed fact deliberately
+   * must not be — it is written `suppressEmbeddings: true`, so it has no vector and the walk is the only
+   * thing that can produce it. That is the case. Waiting on the subject alone is what makes a failure
+   * here mean "the walk did not carry the claim" rather than "the seed had not been indexed yet".
+   */
+  await waitForIndexed(INSTANCES.a, tokenA, SPACE, [subject], ['entity']);
 });
 
 /** Every record the walk nested under a match, as its text or name. */
