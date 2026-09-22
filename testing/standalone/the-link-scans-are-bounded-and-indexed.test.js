@@ -33,7 +33,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-const { LINK_CLASSES } = await import('../../server/dist/brain/link-adjacency.js');
+const { LINK_INDEXES } = await import('../../server/dist/brain/link-adjacency.js');
 import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
 import { bodyOf } from './_structural-window.mjs';
@@ -44,9 +44,9 @@ describe('every link scan is bounded', () => {
   /*
    * THE READING FUNCTIONS, which is no longer the same list as the two exported scans.
    *
-   * `linkedRecordsAtFrontier` does not read any more: it computes the bound and hands it to one of two
-   * helpers, one per storage shape, because a hop over link records is ONE query and a hop over arrays is one
-   * per class. That split took a measured 3.8× regression off the link path — `benchmarks/LINK-READERS.md`.
+   * `linkedRecordsAtFrontier` does not read any more: it computes the bound and hands it to the helper
+   * that does, one query for the whole hop. That batching took a measured 3.8× regression off the link
+   * path — `benchmarks/LINK-READERS.md`.
    *
    * So the bound is asserted where the read happens. Checking only the exported name would go green on a
    * helper that reads unbounded, which is the whole point of the check.
@@ -58,11 +58,15 @@ describe('every link scan is bounded', () => {
    * `linksPointingAt`, in the adjacency module. Asserting it here would fail on code that is bounded, which
    * is worse than not asserting it: the way to quieten that is to put a bound where one already exists.
    */
+  /*
+   * `entitiesLinkedFromRecords` is in the forwarding case below, not this one, for the same reason: since
+   * 5.0 it asks ONE query for the whole seed set and the `.limit()` is inside `linksStartingFrom`.
+   * Asserting a cursor bound in its body would fail on code that is bounded, and the way to quieten that
+   * is to add a second bound where one already exists.
+   */
   const READERS = [
     ['server/src/brain/link-adjacency.ts', 'linksPointingAt'],
     ['server/src/brain/link-adjacency.ts', 'linksStartingFrom'],
-    ['server/src/brain/link-frontier.ts', 'linkedRecordsFromArrays'],
-    ['server/src/brain/link-frontier.ts', 'entitiesLinkedFromRecords'],
   ];
   for (const [file, fn] of READERS) {
     it(`${fn} passes a limit to Mongo`, () => {
@@ -79,6 +83,24 @@ describe('every link scan is bounded', () => {
         'the bound is applied after the cursor is drained, so the database still returns everything');
     });
   }
+
+  it('and the batching scans FORWARD their bound to the query that reads', () => {
+    /*
+     * The seam the batching created. A scan that computes `remaining` and then calls an unbounded query is
+     * a bound with no effect — and it reads exactly like the bounded version in a diff.
+     */
+    const s = src('server/src/brain/link-frontier.ts');
+    for (const [fn, query] of [
+      ['entitiesLinkedFromRecords', 'linksStartingFrom'],
+      ['linkedRecordsFromRows', 'linksPointingAt'],
+    ]) {
+      const body = bodyOf(s, fn);
+      const at = body.indexOf(query + '(');
+      if (at === -1) continue;   // the one that is handed its rows — its caller is covered below
+      assert.match(body.slice(at, body.indexOf(')', at) + 1), /remaining|left|limit/,
+        `${fn} calls ${query} without its bound, so the whole hop is read and then trimmed`);
+    }
+  });
 
   it('the bound is the caller\'s, not a constant chosen here', () => {
     /*
@@ -108,46 +130,57 @@ describe('every link scan is bounded', () => {
   });
 });
 
-describe('the field every link scan reads is indexed', () => {
-  it('every link CLASS gets an index at creation, not just every link collection', () => {
+describe('the collection every link scan reads is indexed', () => {
+  it('a NEW space gets every link index, from the one declaration', () => {
     /*
      * It was on memories alone. Chrono got startsAt/status/seq/type and files got
-     * tags/updatedAt/parentFileId — neither had the field the link scans actually query, so those reads were
-     * collection scans on top of being unbounded.
+     * tags/updatedAt/parentFileId — neither had the field the link scans actually queried, so those reads
+     * were collection scans on top of being unbounded.
      *
-     * Then it was three hand-placed `{ entityIds: 1 }` calls, which is the same defect one level down: a link
-     * is a (collection, FIELD) pair, and M-2 gave a chrono entry `memoryIds` and a file `memoryIds` and
-     * `chronoIds`. Three classes had no index at all, while this case reported that all three link
-     * collections were covered — and nothing contradicted it, because an unindexed scan returns the right
-     * answer slowly.
+     * Then it was three hand-placed `{ entityIds: 1 }` calls, which is the same defect one level down: a
+     * link was a (collection, FIELD) pair, and `M-2` gave a chrono entry `memoryIds` and a file
+     * `memoryIds` and `chronoIds`. Three classes had no index at all while the case reported all three
+     * collections covered, because an unindexed scan returns the right answer slowly.
      *
-     * So the source derives its loop from `LINK_CLASSES`, and this asserts the derivation rather than the
-     * three names: a seventh class must arrive with its index without either file being edited.
+     * 5.0 moved the reads onto the `links` collection, so the indexes are its own — and the rule is the
+     * same one: they are DECLARED once and asked for by everything that creates them.
      */
     const life = src('server/src/spaces/lifecycle.ts');
-    assert.match(life, /LINK_CLASSES/,
-      'lifecycle names its link indexes instead of deriving them, so a new link class arrives unindexed');
-    assert.match(life, /createIndex\(\{ \[field!?\]: 1 \}\)/,
-      'the derived loop must index each class FIELD — a fixed field covers one class of the six');
-    // The floor: a derivation over an empty set would satisfy both assertions above and index nothing.
-    assert.ok(LINK_CLASSES.length >= 6,
-      `only ${LINK_CLASSES.length} link classes — the import is stale, and the loop is over nothing`);
+    assert.match(life, /LINK_INDEXES/,
+      'lifecycle writes its link indexes out instead of taking the declared set, so the backfill and the '
+      + 'creation can ask for different things');
+    // The floor: a loop over an empty declaration satisfies the assertion above and indexes nothing.
+    assert.ok(LINK_INDEXES.length >= 3,
+      `only ${LINK_INDEXES.length} link index(es) declared — the import is stale, and the loop is over nothing`);
+    /*
+     * BOTH directions, and the uniqueness. From a record: what does this concern. From an entity: what
+     * concerns this — the backlink scan that blocks a delete, once per candidate. Each is a separate
+     * index because each is separately asked.
+     */
+    const keysOf = (ix) => Object.keys(ix.keys).join(',');
+    const declared = LINK_INDEXES.map(keysOf);
+    assert.ok(declared.some(k => k.startsWith('from')), 'no index serves "what does this record concern"');
+    assert.ok(declared.some(k => k.startsWith('to')), 'no index serves "what concerns this record"');
+    assert.ok(declared.includes('seq'), 'no index serves the sync page, so every peer page sorts the collection');
+    assert.ok(LINK_INDEXES.some(ix => ix.unique && keysOf(ix).startsWith('from')),
+      'the identity index is not unique, so two peers noticing the same connection can fork it');
   });
 
-  it('and EXISTING spaces get it too, not just new ones', () => {
+  it('and EXISTING spaces get them too, not just new ones', () => {
     /*
-     * The half that bites twice. `initSpace` runs for a space new to the config, so an index added there
-     * reaches nobody who already runs the product. `ensureQueryIndexes` is the backfill, and it must widen in
-     * the same commit or every existing operator keeps the scan.
+     * The half that bites twice, and 5.0 made it worse before it made it better. `initSpace` runs for a
+     * space NEW to the config, so an index added there reaches nobody who already runs the product — and
+     * an upgraded space got its links collection from the CONVERSION's first insert, which creates a
+     * collection and no indexes at all. The spaces with the most links to read are the ones that would
+     * have had none.
      */
     const ensure = src('server/src/spaces/ensure-query-indexes.ts');
-    assert.match(ensure, /LINK_CLASSES/,
-      'the backfill names its link collections instead of deriving them, so a new link class reaches every '
-      + 'NEW space and no existing one — which is the failure this case exists for');
-    assert.match(ensure, /createIndex\(\{ \[field\]: 1 \}\)/,
-      'the backfill must index each class FIELD; a fixed field covers one class of the six');
+    assert.match(ensure, /LINK_INDEXES/,
+      'the backfill writes its own index list, so a link index added at creation reaches every NEW space '
+      + 'and no existing one — which is the failure this case exists for');
+    assert.match(ensure, /_links`\)\.createIndex\(ix\.keys/,
+      'the backfill must create each declared index on the links collection itself');
   });
-
   it('the backfill still reports how many calls it issued', () => {
     // A boot step that returns nothing cannot be asserted to have run, and a silent no-op looks identical to
     // a successful pass. This is why the function returns a count at all.

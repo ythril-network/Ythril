@@ -166,6 +166,36 @@ export const LINK_CLASSES: readonly LinkClass[] =
     })));
 
 /**
+ * The indexes a space's `links` collection needs — declared here, created in two places.
+ *
+ * ## Why one declaration and two callers
+ *
+ * `initSpace` creates them with the collection, and that only ever reaches a space NEW to the config. A
+ * space upgraded from 4.x got its links collection from the CONVERSION's first insert, which creates a
+ * collection and no indexes at all — so every link read on the spaces that have the most links would be
+ * the one case with none. `ensureQueryIndexes` is the backfill, and it must ask for the same set or the
+ * two drift in the direction nothing reports: an unindexed scan returns the right answer, slowly.
+ *
+ * ## What each is for
+ *
+ * Both directions are asked. From a record: what does this concern. From an entity: what concerns this —
+ * the backlink scan that blocks a delete, once per candidate. `seq` is the sync page, exactly as every
+ * other replicated collection has it: `pageBySeq` orders on it, and without the index every page a peer
+ * asks for sorts the whole collection.
+ *
+ * The first is UNIQUE, and that is what lets the ingest path drop fork resolution: a link is
+ * `(from, fromKind, to, toKind)` and nothing else, so two peers that notice the same connection have
+ * written the same fact and the second write is a duplicate rather than a fork.
+ */
+export const LINK_INDEXES: readonly { keys: Record<string, 1>; unique?: boolean }[] = Object.freeze<
+  { keys: Record<string, 1>; unique?: boolean }[]
+>([
+  { keys: { from: 1, fromKind: 1, to: 1, toKind: 1 }, unique: true },
+  { keys: { to: 1, toKind: 1 } },
+  { keys: { seq: 1 } },
+]);
+
+/**
  * The class for one `(fromKind, toKind)` pair, or `undefined` for a pair that is not a link.
  *
  * **BOTH kinds, since 4.0.** Keyed on the from kind alone it silently returned whichever class happened to be

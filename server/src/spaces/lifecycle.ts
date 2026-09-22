@@ -20,7 +20,7 @@ import { moveSpaceData, applySpaceRenameToConfig } from './rename.js';
 import { unlabelAllFaces } from '../brain/entities.js';
 import { ensureMediaJobIndexes } from '../files/media/job-queue.js';
 import { ensureEmbedJobIndexes } from '../brain/embed-queue.js';
-import { LINK_CLASSES } from '../brain/link-adjacency.js';
+import { LINK_INDEXES } from '../brain/link-adjacency.js';
 import { envInt } from '../config/env-num.js';
 import { spaceCollection } from '../db/space-collection.js';
 
@@ -133,9 +133,7 @@ export async function initSpace(
    * `seq` for the sync page, exactly as every other replicated collection has it: `pageBySeq` orders on it,
    * and without the index every page a peer asks for sorts the whole collection.
    */
-  await linksColl.createIndex({ from: 1, fromKind: 1, to: 1, toKind: 1 }, { unique: true });
-  await linksColl.createIndex({ to: 1, toKind: 1 });
-  await linksColl.createIndex({ seq: 1 });
+  for (const ix of LINK_INDEXES) await linksColl.createIndex(ix.keys, ix.unique ? { unique: true } : {});
   await tombstonesColl.createIndex({ seq: 1 });
   await conflictsColl.createIndex({ detectedAt: -1 });
   // Serves the list query: equality on `status` (now the leading field) + sort by (score desc,

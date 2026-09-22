@@ -7,8 +7,8 @@
  * `assertRefsResolve` before the write — so it held for callers who remembered, and not otherwise:
  *
  *  - `upsertEdge` did not validate its schema; `api/contradictions.ts` and `brain/bulk.ts` went around it.
- *  - `updateFileMeta` did not validate its references; `files/media/face-embedder.ts` goes around it, writing
- *    the `entityIds` of an auto-labelled face with no check at all.
+ *  - `updateFileMeta` did not validate its references; `files/media/face-embedder.ts` goes around it,
+ *    attaching an auto-labelled face's entity with no check at all.
  *  - `brain/merge.ts` validated nothing while rewriting the survivor.
  *
  * Owner's ruling, 2026-08-29: *"all upsert/update/insert things must validate."*
@@ -31,13 +31,13 @@ import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
 import { bodyOf } from './_structural-window.mjs';
 
-/** Write functions that store reference arrays, and the fields each one stores. */
+/** Write functions that store references, and the input field each one resolves. */
 const GUARDED = [
   {
     file: 'server/src/files/file-meta.ts',
     fn: 'updateFileMeta',
-    refs: ['entityIds', 'memoryIds', 'chronoIds'],
-    bypassedBy: 'files/media/face-embedder.ts, which writes an auto-labelled face\'s entityIds directly',
+    refs: ['linkEntities', 'linkFacts', 'linkChronos'],
+    bypassedBy: 'files/media/face-embedder.ts, which attaches an auto-labelled face\'s entity directly',
   },
 ];
 
