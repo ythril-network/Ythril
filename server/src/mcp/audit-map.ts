@@ -142,17 +142,74 @@ export const MCP_TOOL_OPERATIONS: Record<string, string | string[] | null> = {
 };
 
 /**
+ * Which of a capability's operations THIS call performs, for the tools whose subject is an argument.
+ *
+ * ## Why the list alone was not enough — `Q-37`
+ *
+ * A list above says which REST operations one capability is reachable through, and the first entry was
+ * what every call was written under. `network_sync` with a `peerId` does exactly what
+ * `POST /api/networks/peers/:peerId/sync` does, and that route records `peer.sync_trigger` — but the
+ * tool recorded `network.sync_trigger` for both subjects, because the resolver only ever saw the tool
+ * NAME. An operator filtering the audit log for `peer.sync_trigger` saw the browser's peer syncs and
+ * none of the agent's.
+ *
+ * It is the defect `a-tool-and-its-route-log-one-operation` exists for, one level down, and invisible to
+ * that gate because the tool's first operation IS a name a route records.
+ *
+ * ## Why here rather than on the tool definition
+ *
+ * A tool could declare its own operation the way it declares `heavy` and `admin`, and for ONE tool that
+ * looked lighter. It puts the audit name somewhere the coverage gate does not read, and it answers the
+ * question this file already answers — what does this call record — so it would be the same rule in two
+ * places, which is the shape this repo produces most. This map answers it with enough information
+ * instead of a second map answering it again.
+ *
+ * ## The guard that cannot be skipped
+ *
+ * A chooser is a function of CALLER input, so `mcpAuditOperation` never trusts it: it catches, and it
+ * rejects a result that is not one of the tool's own declared operations. Both failures fall back to the
+ * first name, because **an unaudited call is worse than one under a slightly-wrong name** and that is
+ * the direction this must not fail in. `mcp-audit-coverage.test.js` asserts the rule for every chooser,
+ * not for the one tool that has one.
+ */
+export const MCP_OPERATION_SUBJECTS: Record<string, (args: unknown) => string> = {
+  // One peer named, or the whole network: the same split REST spells as two routes, because a path has
+  // to name its subject and an argument does not.
+  network_sync: (args) =>
+    typeof (args as { peerId?: unknown })?.peerId === 'string' && (args as { peerId: string }).peerId
+      ? 'peer.sync_trigger'
+      : 'network.sync_trigger',
+};
+
+/**
  * The operation for a tool call, or `null` when the tool is deliberately not an audited operation.
  *
  * An UNKNOWN tool also returns `null` rather than throwing: the dispatcher already reports unknown tools
  * to the caller, and an audit helper is the wrong place to turn a bad tool name into a 500. The coverage
  * test is what guarantees no *registered* tool reaches here unclassified.
+ *
+ * `args` is the call's own arguments, and it is OPTIONAL on purpose: a caller that does not have them
+ * gets the capability's first operation, which is what every caller got before `Q-37`. Only a tool with
+ * a chooser reads them.
  */
-export function mcpAuditOperation(toolName: string): string | null {
+export function mcpAuditOperation(toolName: string, args?: unknown): string | null {
   const op = MCP_TOOL_OPERATIONS[toolName] ?? null;
-  // The first of a list is what a record is written under. A list says which REST operations the same
+  if (!Array.isArray(op)) return op;
+
+  // The first of a list is the default and the fallback. A list says which REST operations the same
   // capability is reachable through; it does not make one call produce two audit entries.
-  return Array.isArray(op) ? (op[0] ?? null) : op;
+  const first = op[0] ?? null;
+  const choose = MCP_OPERATION_SUBJECTS[toolName];
+  if (!choose) return first;
+
+  try {
+    const picked = choose(args);
+    // A chooser that names an operation outside its own capability would write an audit row no route
+    // records, which is unqueryable — worse than the default, so it is refused rather than trusted.
+    return op.includes(picked) ? picked : first;
+  } catch {
+    return first;
+  }
 }
 
 /** Operations that are reads — logged only when `logReads` is enabled, matching the REST convention. */

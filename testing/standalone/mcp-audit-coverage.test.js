@@ -32,7 +32,7 @@ import { DISPATCH_SOURCES } from './_tool-dispatch.mjs';
 import { readFileSync } from 'node:fs';
 import { balancedFrom } from './_structural-window.mjs';
 
-let MCP_TOOL_OPERATIONS, mcpAuditOperation, isMcpReadOperation;
+let MCP_TOOL_OPERATIONS, MCP_OPERATION_SUBJECTS, mcpAuditOperation, isMcpReadOperation;
 let ALL_TOOLS;
 
 const MIDDLEWARE = 'server/src/audit/middleware.ts';
@@ -45,7 +45,7 @@ const ROUTER = DISPATCH_SOURCES[0];
 
 describe('MCP audit coverage', () => {
   before(async () => {
-    ({ MCP_TOOL_OPERATIONS, mcpAuditOperation, isMcpReadOperation } =
+    ({ MCP_TOOL_OPERATIONS, MCP_OPERATION_SUBJECTS, mcpAuditOperation, isMcpReadOperation } =
       await import('../../server/dist/mcp/audit-map.js'));
     ({ ALL_TOOLS } = await import('../../server/dist/mcp/tools/index.js'));
   });
@@ -64,6 +64,64 @@ describe('MCP audit coverage', () => {
       'Every MCP tool must be classified in audit-map.ts — with an operation, or with `null` and the ' +
       'reason it is not one. A tool missing from the map is silently unaudited, which is exactly how the ' +
       'entire MCP surface came to be unaudited in the first place.');
+  });
+
+  /*
+   * A CAPABILITY WITH TWO SUBJECTS IS AUDITED UNDER THE SUBJECT OF THE CALL, NOT THE FIRST NAME IN ITS
+   * LIST — `Q-37`.
+   *
+   * A list in the map says which REST operations one capability is reachable through, and the first
+   * entry was what every call was written under. `network_sync` with a `peerId` does exactly what
+   * `POST /api/networks/peers/:peerId/sync` does, and that route records `peer.sync_trigger`; the tool
+   * recorded `network.sync_trigger` for both subjects, because the resolver only ever saw the tool NAME.
+   *
+   * So an operator filtering the audit log for `peer.sync_trigger` saw the browser's peer syncs and none
+   * of the agent's — the defect `a-tool-and-its-route-log-one-operation` exists for, one level down, and
+   * invisible to it because the tool's first operation IS a name a route records.
+   *
+   * These cases assert the RULE rather than the one tool: every chooser resolves within its own list,
+   * for every tool that has one, and a chooser that throws falls back rather than dropping the entry.
+   */
+  it('every tool with a chooser resolves to one of its OWN declared operations', () => {
+    const choosers = Object.keys(MCP_OPERATION_SUBJECTS);
+    assert.ok(choosers.length >= 1, 'no chooser is declared — this case is measuring nothing');
+
+    for (const tool of choosers) {
+      const declared = MCP_TOOL_OPERATIONS[tool];
+      assert.ok(Array.isArray(declared),
+        `${tool} has a chooser and a single operation. A chooser picks BETWEEN the names a capability is `
+        + 'reachable through, so the map entry has to be the list it picks from');
+
+      // Both shapes a real call takes, and the empty one a caller may send.
+      for (const args of [undefined, {}, { peerId: 'a-peer' }, { networkId: 'a-network' }]) {
+        const op = mcpAuditOperation(tool, args);
+        assert.ok(declared.includes(op),
+          `${tool} resolved to "${op}" for ${JSON.stringify(args)}, which is not one of its declared `
+          + `operations ${JSON.stringify(declared)} — an audit name no route records is unqueryable`);
+      }
+    }
+  });
+
+  it('a chooser that throws falls back to the first name, because an UNAUDITED call is worse', () => {
+    /*
+     * The direction this must not fail in. Handing the arguments to the resolver turns a static table
+     * into a function of untrusted input; a chooser that throws on a shape nobody anticipated must not
+     * take the audit entry with it. Exercised with a value that is not an object at all.
+     */
+    for (const tool of Object.keys(MCP_OPERATION_SUBJECTS)) {
+      const first = MCP_TOOL_OPERATIONS[tool][0];
+      for (const hostile of [null, 'a string', 42, [], Object.create(null)]) {
+        assert.equal(mcpAuditOperation(tool, hostile), first,
+          `${tool} did not fall back to "${first}" for ${JSON.stringify(hostile)}`);
+      }
+    }
+  });
+
+  it('syncing ONE peer is audited under the operation that route records', () => {
+    // The site, kept as ONE case beside the rule above: the rule cannot say which subject is which, and
+    // a chooser that returned the wrong member of its own list would satisfy every assertion but this.
+    assert.equal(mcpAuditOperation('network_sync', { peerId: 'p1' }), 'peer.sync_trigger');
+    assert.equal(mcpAuditOperation('network_sync', {}), 'network.sync_trigger');
   });
 
   it('every MUTATING tool records an operation', () => {

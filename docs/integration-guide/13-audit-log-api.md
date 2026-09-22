@@ -160,7 +160,7 @@ Audit entries are recorded for all write operations and (when `logReads` is enab
 | Token | `token.create`, `token.delete` |
 | Webhook | `webhook.create`, `webhook.update`, `webhook.delete`, `webhook.test` |
 | Brain | `brain.recall`, `brain.recall_global`, `brain.query`, `brain.find_similar`, `brain.stats`, `brain.er_model`, `brain.bulk_write`, `brain.traverse` |
-| Network | `network.create`, `network.update`, `network.delete`, `network.join_remote`, `network.invite`, `network.member.add`, `network.member.remove`, **`network.invite.generate`** (an admin producing join material), **`network.member.join`** (the moment another instance becomes a member of a network on this one — the invite handshake's `finalize`) |
+| Network | `network.create`, `network.update`, `network.delete`, `network.join_remote`, `network.invite`, `network.member.add`, `network.member.remove`, **`network.invite.generate`** (an admin producing join material), **`network.member.join`** (the moment another instance becomes a member of a network on this one — the invite handshake's `finalize`), **`network.sync_trigger`** (a sync of every peer in a network) and **`peer.sync_trigger`** (a sync of one named peer) |
 | Config | `config.reload` |
 | Audit | `audit.export` — taking a copy of the whole record. Logged even when `logReads` is off |
 | Auth | `auth.failed` (invalid or expired tokens on any endpoint) |
@@ -172,6 +172,13 @@ only REST calls and filtering the former mixed similarity searches into entity l
 
 One pair still differs on purpose. `space_meta` logs `space.list`, because `GET /api/spaces/:id/meta`
 has no operation of its own for it to agree with.
+
+**A capability with two SUBJECTS is logged under the subject of the call, not under the capability.**
+`network_sync` syncs every peer in a network or one named peer, and REST spells those as two routes
+because a path has to name its subject. Send `peerId` and the entry is `peer.sync_trigger`, the same
+name `POST /api/networks/peers/:peerId/sync` records; omit it and it is `network.sync_trigger`. The
+tool used to log the network-wide name for both subjects, so an operator filtering for
+`peer.sync_trigger` saw the browser's peer syncs and none of an agent's.
 
 ### Query audit log
 
