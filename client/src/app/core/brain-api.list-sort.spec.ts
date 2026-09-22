@@ -120,10 +120,21 @@ describe('BrainApi — list sort, filters and freetext reach `filter` (2b)', () 
     flush(r);
   });
 
-  it('a fact filtered by entity id goes as a predicate on its link field', () => {
+  it('a fact filtered by entity id reads the LINKS first, then narrows by id', () => {
+    /*
+     * It was one call: `filter: { entityIds: 'e-1' }`, a predicate over the fact's own field. A
+     * connection is a link record since 5.0, so the ids come from the links collection and narrow `_id`
+     * — and the intersection with every other filter stays the server's, which is what keeps paging and
+     * `total` honest.
+     */
     api.listFacts('work', 20, 0, { entity: 'e-1' }).subscribe();
+
+    const links = expectFilter('links');
+    expect(links.body['filter']).toEqual({ to: { $in: ['e-1'] }, fromKind: 'fact' });
+    links.r.flush({ ok: true, data: { results: [{ from: 'm-1', to: 'e-1', toKind: 'entity' }] } });
+
     const { r, body } = expectFilter('facts');
-    expect(body['filter']).toEqual({ linkEntities: 'e-1' });
+    expect(body['filter']).toEqual({ _id: { $in: ['m-1'] } });
     flush(r);
   });
 
