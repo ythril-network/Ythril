@@ -102,6 +102,42 @@ export const linkIdFor = (from: string, fromKind: RefKind, to: string, toKind: R
 export type DesiredLinks = Partial<Record<RefKind, readonly string[]>>;
 
 /**
+ * Refuse everything about a desired link set that can be refused, BEFORE anything is written.
+ *
+ * ## Two refusals, one place
+ *
+ * A class the record kind cannot hold — a fact naming `linkChronos` — has no label, so `linkIdFor` would
+ * derive an id for a class nothing reads. And under `strictLinkage` every id must name a record that
+ * exists: that check sat at each door for the 4.x arrays and NOWHERE for `linkEntities`, so one spelling
+ * was refused and the other stored.
+ *
+ * ## Why the WRITERS call it as well as the reconcile
+ *
+ * `reconcileLinks` runs after the record is inserted, so a refusal there leaves the record stored without
+ * the links it asked for — a caller gets a `400` and a row they did not want, which is the silent
+ * unlinked write made noisy rather than fixed. So each writer asks first, and the reconcile asks again:
+ * the reconcile is what makes the check unskippable by a caller that reaches it directly, and one extra
+ * `_id` lookup per class on a write that is already several queries is the price of that.
+ */
+export async function assertDesiredLinks(
+  spaceId: string,
+  fromKind: RefKind,
+  desired: DesiredLinks,
+): Promise<void> {
+  const classes = Object.keys(desired) as RefKind[];
+  for (const toKind of classes) {
+    const refusal = linkClassRefusal(fromKind, toKind);
+    if (refusal) throw new ReferenceRefusal(refusal);
+  }
+  if (!isStrictLinkage(spaceId)) return;
+  // Named as the CALLER spells it. Built by hand this said `linkentity`, a field no door accepts, in the
+  // one sentence somebody reads to find out what to send.
+  for (const toKind of classes) {
+    await assertRefsResolve(spaceId, LINK_INPUT_FIELDS[toKind], toKind, desired[toKind]);
+  }
+}
+
+/**
  * Make the link records for one record equal what its arrays now say.
  *
  * `desired` names only the classes the caller wrote. A class it omits is left alone entirely — which is the
@@ -135,33 +171,7 @@ export async function reconcileLinks(
   const classes = Object.keys(desired) as RefKind[];
   if (classes.length === 0) return { added: 0, removed: 0 };
 
-  // A class this record kind cannot hold is refused BEFORE anything is written. Without it a write door
-  // naming one stored a link whose class does not exist, which nothing reads and nothing reports.
-  for (const toKind of classes) {
-    const classRefusal = linkClassRefusal(fromKind, toKind);
-    if (classRefusal) throw new ReferenceRefusal(classRefusal);
-  }
-
-  /*
-   * EXISTENCE, HERE, because this is the writer and `write-connections.ts` says so in as many words:
-   * *"it does NOT check that the targets exist: that is `assertRefsResolve`'s job at the writer, where it
-   * can be done in one query against the records being written rather than once per door."*
-   *
-   * It was not true. The array spelling was existence-checked at each door and the `link*` spelling was
-   * checked nowhere, so on a strict space `entityIds: [<a uuid that names nothing>]` was refused and
-   * `linkEntities: [<the same uuid>]` was stored — one rule, two implementations, and the weaker one was
-   * the newer spelling. 5.0 removes the array spelling, which would have left the hole as the only path.
-   *
-   * Skipped for the CONVERSION, which is additive and reads its desired set from records that already
-   * exist: re-validating a space's whole link graph on every boot is a query per class per record.
-   */
-  if (!opts.additive && isStrictLinkage(spaceId)) {
-    // Named as the CALLER spells it. Built by hand this said `linkentity`, a field no door accepts, in
-    // the one sentence somebody reads to find out what to send.
-    for (const toKind of classes) {
-      await assertRefsResolve(spaceId, LINK_INPUT_FIELDS[toKind], toKind, desired[toKind]);
-    }
-  }
+  if (!opts.additive) await assertDesiredLinks(spaceId, fromKind, desired);
 
   const wanted = new Map<string, { to: string; toKind: RefKind }>();
   for (const toKind of classes) {

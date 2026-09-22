@@ -7,7 +7,7 @@
  */
 import { applyRecordFlags } from './record-flag.js';
 import { v4 as uuidv4 } from 'uuid';
-import { reconcileLinks, removeLinksFrom } from './links.js';
+import { reconcileLinks, removeLinksFrom, assertDesiredLinks } from './links.js';
 import { authorRef } from '../config/author.js';
 import { findInsertContradictions, type ContradictionWarning } from './insert-contradictions.js';
 import { col, asFilter, asDoc, asUpdate } from '../db/mongo.js';
@@ -109,6 +109,15 @@ export async function saveFact(
    * `required` and has a `default` must not be a violation, and on an update an absent property may be one
    * the caller has just removed.
    */
+  /*
+   * THE LINKS ARE REFUSED BEFORE THE RECORD IS WRITTEN.
+   *
+   * `reconcileLinks` asserts them too, and it runs AFTER the insert — so a bad id there leaves the fact
+   * stored without the links it asked for: a `400` and a row the caller did not want, which is the
+   * silent unlinked write made noisy rather than fixed.
+   */
+  await assertDesiredLinks(spaceId, 'fact', { entity: linkEntities });
+
   const meta = getSpaceMeta(spaceId);
   const withDefaults = existing
     ? properties
@@ -297,6 +306,11 @@ export async function updateFact(
     .findOne(asFilter<FactDoc>({ _id: memoryId, spaceId }),
       { projection: NEVER_RETURNED_PROJECTION }) as FactDoc | null;
   if (!existing) return null;
+
+  // Refused BEFORE the update lands, or a bad link id leaves every other field already changed.
+  if (updates.linkEntities !== undefined) {
+    await assertDesiredLinks(spaceId, 'fact', { entity: updates.linkEntities });
+  }
 
   const seq = await nextSeq(spaceId);
   const now = new Date().toISOString();

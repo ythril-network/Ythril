@@ -31,50 +31,66 @@ import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
 import { bodyOf } from './_structural-window.mjs';
 
-/** Write functions that store references, and the input field each one resolves. */
+/**
+ * The writers that can be handed a link set, and the kind each one writes from.
+ *
+ * Three, not one. The check was per FIELD while `updateFileMeta` was the only writer that had it; it is
+ * one call now — class and existence together — and a writer that skips it is the same defect wherever it
+ * happens.
+ */
 const GUARDED = [
-  {
-    file: 'server/src/files/file-meta.ts',
-    fn: 'updateFileMeta',
-    refs: ['linkEntities', 'linkFacts', 'linkChronos'],
-    bypassedBy: 'files/media/face-embedder.ts, which attaches an auto-labelled face\'s entity directly',
-  },
+  { file: 'server/src/brain/fact.ts', fn: 'saveFact' },
+  { file: 'server/src/brain/fact.ts', fn: 'updateFact' },
+  { file: 'server/src/brain/chrono.ts', fn: 'createChrono' },
+  { file: 'server/src/brain/chrono.ts', fn: 'updateChrono' },
+  { file: 'server/src/files/file-meta.ts', fn: 'updateFileMeta' },
 ];
 
 describe('write functions guard their own references', () => {
   for (const target of GUARDED) {
-    const src = stripComments(readFileSync(target.file, 'utf8'));
+    const src = () => stripComments(readFileSync(target.file, 'utf8'));
 
-    it(`${target.fn} validates every reference field it stores`, () => {
-      const body = bodyOf(src, target.fn);
-      for (const field of target.refs) {
-        assert.match(
-          body, new RegExp(`assertRefsResolve\\([^)]*'${field}'`),
-          `${target.fn} stores '${field}' without checking that it resolves. The check used to live only at the `
-          + `API doors, so strictLinkage's guarantee held only for callers who remembered it — and it is `
-          + `bypassed today by ${target.bypassedBy}.`,
-        );
-      }
+    it(`${target.fn} asserts its links itself`, () => {
+      /*
+       * At the WRITER, not at the door. The existence check sat at each door for the 4.x arrays and
+       * NOWHERE for `linkEntities`, so on a strict space one spelling was refused and the other stored —
+       * and `files/media/face-embedder.ts` reaches a writer directly, past every door there is.
+       */
+      const body = bodyOf(src(), target.fn);
+      assert.match(body, /assertDesiredLinks\(/,
+        `${target.fn} writes a link set without asserting it. The check used to live only at the API `
+        + 'doors, so the strict-linkage guarantee held only for callers who remembered it.');
     });
 
-    it(`${target.fn} keeps the check behind strictLinkage`, () => {
-      const body = bodyOf(src, target.fn);
-      assert.match(
-        body, /isStrictLinkage\(/,
-        'the reference check must stay opt-out-able. `strictLinkage: false` exists for staged imports where '
-        + 'targets are resolved in a later pass; making the check unconditional withdraws that silently.',
-      );
-    });
-
-    it(`${target.fn} checks BEFORE it writes`, () => {
-      const body = bodyOf(src, target.fn);
-      const checkAt = body.indexOf('assertRefsResolve(');
+    it(`${target.fn} asserts BEFORE it writes`, () => {
+      /*
+       * The half that makes it worth having. `reconcileLinks` asserts too and runs AFTER the record is
+       * stored, so a refusal there leaves the record written without the links it asked for: a `400` and
+       * a row the caller did not want, which is the silent unlinked write made noisy rather than fixed.
+       */
+      const body = bodyOf(src(), target.fn);
+      const checkAt = body.indexOf('assertDesiredLinks(');
       const writeAt = body.search(/\.(updateOne|replaceOne|insertOne|findOneAndUpdate)\(/);
       assert.notEqual(writeAt, -1, `no write found in ${target.fn} — re-point this gate`);
-      assert.ok(
-        checkAt !== -1 && checkAt < writeAt,
-        'checking after the write would refuse a reference the store already holds',
-      );
+      assert.ok(checkAt !== -1 && checkAt < writeAt,
+        'asserting after the write leaves a record stored without the links the same call was refused for');
     });
   }
+
+  it('and the shared assertion keeps EXISTENCE behind strictLinkage, while the class check is absolute', () => {
+    /*
+     * `strictLinkage: false` is a deliberate per-space choice to accept dangling references — a staged
+     * import whose targets resolve in a later pass — so moving the check must not quietly withdraw it.
+     * The CLASS check is not that: a fact cannot link to a chrono entry whatever the space says, because
+     * there is no such class and the id would be derived from a label nothing reads.
+     */
+    const body = bodyOf(stripComments(readFileSync('server/src/brain/links.ts', 'utf8')), 'assertDesiredLinks');
+    const strictAt = body.indexOf('isStrictLinkage(');
+    const classAt = body.indexOf('linkClassRefusal(');
+    assert.notEqual(strictAt, -1, 'the reference check must stay opt-out-able');
+    assert.notEqual(classAt, -1, 'the class check is missing, so a seventh class could be written');
+    assert.ok(classAt < strictAt,
+      'the class check sits behind the linkage setting, so a lax space can store a link class that does '
+      + 'not exist — which no reader will ever follow');
+  });
 });

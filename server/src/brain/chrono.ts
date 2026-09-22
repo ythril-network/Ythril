@@ -1,6 +1,6 @@
 import { applyRecordFlags } from './record-flag.js';
 import { v4 as uuidv4 } from 'uuid';
-import { reconcileLinks, removeLinksFrom } from './links.js';
+import { reconcileLinks, removeLinksFrom, assertDesiredLinks } from './links.js';
 import { brainWriteSeqTotal } from '../metrics/registry.js';
 import { authorRef } from '../config/author.js';
 import { col, asFilter, asDoc, asUpdate } from '../db/mongo.js';
@@ -151,6 +151,11 @@ export async function createChrono(
   /** `onValidation` rides in `opts` rather than becoming another positional. See `upsertEdge`'s. */
   opts?: DupeCheckOpts & { onValidation?: (check: UpdateValidation) => void },
 ): Promise<ChronoEntry & { similar?: SimilarMatch[]; contradicts?: ContradictionWarning[] }> {
+  // THE LINKS ARE REFUSED BEFORE THE ENTRY IS WRITTEN — see `saveFact` for why the reconcile's own check
+  // is not enough on its own.
+  await assertDesiredLinks(spaceId, 'chrono',
+    { entity: fields.linkEntities ?? [], fact: fields.linkFacts ?? [] });
+
   // When an id is supplied, look for the entry it names first — the same shape as `upsertEntity` and
   // `saveFact`.
   const existing: ChronoEntry | null = fields.id
@@ -313,6 +318,12 @@ export async function updateChrono(
     .findOne(asFilter<ChronoEntry>({ _id: id, spaceId }),
       { projection: NEVER_RETURNED_PROJECTION }) as ChronoEntry | null;
   if (!existing) return null;
+
+  // Refused BEFORE the update lands, or a bad link id leaves every other field already changed.
+  await assertDesiredLinks(spaceId, 'chrono', {
+    ...(updates.linkEntities !== undefined ? { entity: updates.linkEntities } : {}),
+    ...(updates.linkFacts !== undefined ? { fact: updates.linkFacts } : {}),
+  });
 
   const seq = await nextSeq(spaceId);
   const now = new Date().toISOString();

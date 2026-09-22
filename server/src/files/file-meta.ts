@@ -17,8 +17,7 @@ import { toDocId } from '../util/paths.js';
 import { escapeRegex } from '../util/redos.js';
 import { authorRef } from '../config/author.js';
 import { col, asFilter, asDoc, asUpdate } from '../db/mongo.js';
-import { assertRefsResolve } from '../brain/entity-refs.js';
-import { reconcileLinks, removeLinksFrom } from '../brain/links.js';
+import { reconcileLinks, removeLinksFrom, assertDesiredLinks } from '../brain/links.js';
 import { linksStartingFrom } from '../brain/link-adjacency.js';
 import { nextSeq } from '../util/seq.js';
 import { isStrictLinkage } from '../spaces/proxy.js';
@@ -233,24 +232,29 @@ export async function updateFileMeta(
   /*
    * REFERENCES ARE VALIDATED HERE, so a caller cannot reach the collection around the check.
    *
-   * `assertRefsResolve` sat only at the two API doors (`api/brain/file-meta.ts:444-446` and
-   * `mcp/tools/file.ts`), which meant `strictLinkage`'s promise — that a stored reference resolves — held only
-   * for callers who remembered it. `files/media/face-embedder.ts` calls this function directly to write the
-   * `entityIds` of an auto-labelled face, and was never checked. The id comes from a live match so it resolves
-   * in practice, but the guarantee was structural in name only.
+   * The existence check sat only at the two API doors (`api/brain/file-meta.ts` and `mcp/tools/file.ts`),
+   * which meant `strictLinkage`'s promise — that a stored reference resolves — held only for callers who
+   * remembered it. `files/media/face-embedder.ts` calls this function directly to attach an auto-labelled
+   * face's entity, and was never checked. The id comes from a live match so it resolves in practice, but
+   * the guarantee was structural in name only.
+   *
+   * It is `assertDesiredLinks` now — one assertion for the class AND the existence, shared with every
+   * other writer, and made before the record is touched so a refusal cannot leave a half-applied update.
    *
    * Owner's ruling, 2026-08-29: *"all upsert/update/insert things must validate."* Same shape as the
    * `upsertEdge` fix, one record type over.
    *
-   * Gated on `isStrictLinkage` exactly as the doors were, so a space that opted out is unaffected — the setting
-   * exists for staged imports where targets are resolved in a later pass, and moving the check must not
-   * quietly withdraw that.
+   * Existence is gated on `isStrictLinkage` exactly as the doors were, so a space that opted out is
+   * unaffected — the setting exists for staged imports where targets are resolved in a later pass, and
+   * moving the check must not quietly withdraw that. The CLASS check is not gated: a file cannot link to
+   * another file whatever the space says.
    */
-  if (isStrictLinkage(spaceId)) {
-    await assertRefsResolve(spaceId, 'linkEntities', 'entity', opts.linkEntities);
-    await assertRefsResolve(spaceId, 'linkFacts', 'fact', opts.linkFacts);
-    await assertRefsResolve(spaceId, 'linkChronos', 'chrono', opts.linkChronos);
-  }
+  // The one assertion every writer makes before it writes — class and existence, from `links.ts`.
+  await assertDesiredLinks(spaceId, 'file', {
+    ...(opts.linkEntities !== undefined ? { entity: opts.linkEntities } : {}),
+    ...(opts.linkFacts !== undefined ? { fact: opts.linkFacts } : {}),
+    ...(opts.linkChronos !== undefined ? { chrono: opts.linkChronos } : {}),
+  });
 
   const normalised = toDocId(filePath);
   const existing = await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).findOne(asFilter<FileMetaDoc>({ _id: normalised })) as FileMetaDoc | null;
