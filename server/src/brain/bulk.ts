@@ -328,7 +328,7 @@ export async function bulkWrite(spaceId: string, input: BulkInput): Promise<Bulk
         endsAt: typeof item['endsAt'] === 'string' ? item['endsAt'] : undefined,
         status, confidence: typeof item['confidence'] === 'number' ? item['confidence'] : undefined,
         description: typeof item['description'] === 'string' ? item['description'] : undefined,
-        tags: optStrArray(item['tags']), entityIds, memoryIds, properties,
+        tags: optStrArray(item['tags']), linkEntities: entityIds, linkFacts: memoryIds, properties,
         recurrence: rec.value, id: rawId,
       }, undefined, ttlDays);
       /*

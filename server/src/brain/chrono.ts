@@ -126,8 +126,15 @@ export async function createChrono(
     status?: ChronoStatus;
     confidence?: number;
     tags?: string[];
-    entityIds?: string[];
-    memoryIds?: string[];
+    /**
+     * The entities and facts this entry links to — DESIRED LINK SETS, never stored fields.
+     *
+     * They were `entityIds` and `memoryIds`, and they were both: written onto the record AND handed to
+     * `reconcileLinks`, so the record and the link rows were two spellings of one fact. 5.0 removes the
+     * arrays, so these are the input and the link records are the storage.
+     */
+    linkEntities?: string[];
+    linkFacts?: string[];
     properties?: Record<string, string | number | boolean>;
     recurrence?: ChronoEntry['recurrence'];
     /**
@@ -222,8 +229,6 @@ export async function createChrono(
     if (fields.endsAt !== undefined) $set['endsAt'] = fields.endsAt;
     if (fields.description !== undefined) $set['description'] = fields.description;
     if (fields.confidence !== undefined) $set['confidence'] = fields.confidence;
-    if (fields.entityIds !== undefined) $set['entityIds'] = fields.entityIds;
-    if (fields.memoryIds !== undefined) $set['memoryIds'] = fields.memoryIds;
     if (fields.properties !== undefined) $set['properties'] = mergedProps;
     if (fields.recurrence !== undefined) $set['recurrence'] = fields.recurrence;
     const $unset: Record<string, unknown> = {};
@@ -239,7 +244,7 @@ export async function createChrono(
     // Both classes, from the CONVERGED document rather than the parameters: this branch merges, so what
     // the entry now says is the only correct input to a reconcile.
     await reconcileLinks(spaceId, converged._id, 'chrono',
-      { entity: converged.entityIds ?? [], fact: converged.memoryIds ?? [] }, converged.author);
+      { entity: fields.linkEntities ?? [], fact: fields.linkFacts ?? [] }, converged.author);
     // `chrono.updated`, not `created` — a subscriber must be able to tell a converged retry from a new entry.
     if (actor) emitWebhookEvent({ event: 'chrono.updated', spaceId, entry: { ...converged, embedding: undefined }, ...actor });
     return withoutVector((similar || contradicts)
@@ -260,8 +265,6 @@ export async function createChrono(
     startsAt: fields.startsAt,
     status,
     tags,
-    entityIds: fields.entityIds ?? [],
-    memoryIds: fields.memoryIds ?? [],
     author: authorRef(),
     createdAt: now,
     updatedAt: now,
@@ -288,7 +291,7 @@ export async function createChrono(
   // A chrono entry is the only record kind that holds TWO classes, and they are told apart by the to-kind
   // rather than by a field name — which is why one reconcile call takes both.
   await reconcileLinks(spaceId, doc._id, 'chrono',
-    { entity: doc.entityIds ?? [], fact: doc.memoryIds ?? [] }, doc.author);
+    { entity: fields.linkEntities ?? [], fact: fields.linkFacts ?? [] }, doc.author);
   if (actor) emitWebhookEvent({ event: 'chrono.created', spaceId, entry: { ...doc, embedding: undefined }, ...actor });
   // Advisory only — the entry is stored either way.
   return withoutVector((similar || contradicts) ? { ...doc, ...(similar ? { similar } : {}), ...(contradicts ? { contradicts } : {}) } : doc);
@@ -297,7 +300,8 @@ export async function createChrono(
 export async function updateChrono(
   spaceId: string,
   id: string,
-  updates: Partial<Pick<ChronoEntry, 'title' | 'description' | 'type' | 'startsAt' | 'endsAt' | 'status' | 'confidence' | 'tags' | 'entityIds' | 'memoryIds' | 'properties' | 'recurrence' | 'suppressEmbeddings' | 'superseded'>>,
+  updates: Partial<Pick<ChronoEntry, 'title' | 'description' | 'type' | 'startsAt' | 'endsAt' | 'status' | 'confidence' | 'tags' | 'properties' | 'recurrence' | 'suppressEmbeddings' | 'superseded'>>
+    & { linkEntities?: string[]; linkFacts?: string[] },
   deleteFieldsPaths?: string[],
   actor?: WebhookActor,
   ttlDays?: number | null,
@@ -341,8 +345,6 @@ export async function updateChrono(
       title: updates.title ?? existing.title,
       description: updates.description !== undefined ? updates.description : existing.description,
       tags: updates.tags ?? existing.tags,
-      entityIds: updates.entityIds ?? existing.entityIds,
-      memoryIds: updates.memoryIds ?? existing.memoryIds,
       properties: mergedUpdateProps ?? {},
       recurrence: updates.recurrence !== undefined ? updates.recurrence : existing.recurrence,
       endsAt: updates.endsAt !== undefined ? updates.endsAt : existing.endsAt,
@@ -431,13 +433,16 @@ export async function updateChrono(
    * updates object would mean re-deriving which class the loop happened to touch, and getting that wrong is
    * invisible.
    *
-   * Both classes are passed only when the caller named one of them. Omitting `memoryIds` on a patch means
-   * "leave the fact links", not "remove them".
+   * ONLY THE CLASSES THE CALLER NAMED, which is a change 5.0 forces and improves. It used to pass both,
+   * read back from the stored document, whenever either was named — safe only because the arrays were the
+   * storage. With the link records as the storage, passing a class the caller did not name would DELETE
+   * that class's links: `reconcileLinks` replaces a named class wholesale, and an omitted one is untouched.
    */
-  if (updates.entityIds !== undefined || updates.memoryIds !== undefined
-      || deleteFieldsPaths?.some(p => p.startsWith('entityIds') || p.startsWith('memoryIds'))) {
-    await reconcileLinks(spaceId, updatedChrono._id, 'chrono',
-      { entity: updatedChrono.entityIds ?? [], fact: updatedChrono.memoryIds ?? [] }, updatedChrono.author);
+  const desired: { entity?: string[]; fact?: string[] } = {};
+  if (updates.linkEntities !== undefined) desired.entity = updates.linkEntities;
+  if (updates.linkFacts !== undefined) desired.fact = updates.linkFacts;
+  if (Object.keys(desired).length > 0) {
+    await reconcileLinks(spaceId, updatedChrono._id, 'chrono', desired, updatedChrono.author);
   }
   if (actor) emitWebhookEvent({ event: 'chrono.updated', spaceId, entry: { ...updatedChrono, embedding: undefined }, ...actor });
   return withoutVector(updatedChrono);

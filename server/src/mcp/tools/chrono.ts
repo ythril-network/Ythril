@@ -193,8 +193,8 @@ export const save_chronoTool: ToolHandler = {
       status: typeof a['status'] === 'string' ? a['status'] as import('../../config/types.js').ChronoStatus : undefined,
       confidence: typeof a['confidence'] === 'number' ? a['confidence'] : undefined,
       tags: Array.isArray(a['tags']) ? (a['tags'] as string[]) : undefined,
-      entityIds: chronoEntityIds,
-      memoryIds: chronoMemoryIds,
+      linkEntities: chronoEntityIds,
+      linkFacts: chronoMemoryIds,
       properties: chronoProps,
       ...(rec.value ? { recurrence: rec.value } : {}),
     }, ctx.actor, ttlDaysFromArgs(a), {

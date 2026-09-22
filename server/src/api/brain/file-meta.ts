@@ -352,7 +352,7 @@ fileMetaRouter.patch('/spaces/:spaceId/files', globalRateLimit, requireSpaceAuth
   // so handing the record over cannot publish it.
   const prior = await findFirstAcrossMembers(wt.target, mid => getFileMeta(mid, path));
   const updated = await findFirstAcrossMembers(wt.target,
-    mid => updateFileMeta(mid, path, { description, tags, entityIds, chronoIds, memoryIds, properties }, dfPaths));
+    mid => updateFileMeta(mid, path, { description, tags, properties }, dfPaths));
   if (updated) {
     req.auditSnapshots = { before: prior ?? {}, after: updated };
     res.json(updated);
