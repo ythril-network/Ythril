@@ -27,6 +27,20 @@ export class RecordListState {
   /** The `_id` of the row whose delete is awaiting confirmation (empty = none). */
   confirmDeleteId = signal('');
 
+  /**
+   * Why the last delete did not happen, empty when nothing is wrong.
+   *
+   * All four record tabs answered a failed delete with `error: () => {}`. The row stayed on screen
+   * and nothing said anything, so the operator's own click looked like it had not registered —
+   * reported by the owner against entities, where the server refuses a delete that would orphan an
+   * edge and says so in detail.
+   *
+   * It lives HERE rather than in each tab because it was the same omission four times, and the four
+   * already share this state. A fifth tab gets the surface by using the signal that is already
+   * there.
+   */
+  deleteError = signal('');
+
   cancelEdit(): void {
     this.editingId.set('');
     this.editError.set('');

@@ -9,6 +9,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Deleting an entity that has an edge failed SILENTLY in the Brain UI.** Reported by the owner: the row
+  stayed on screen, nothing was said, and the click looked as though it had not registered.
+
+  **The server had already said everything.** It answers `409` with what blocks the delete, the preview
+  route and the name of the parameter that authorises a cascade. The client's handler was
+  `error: () => {}`.
+
+  The refusal now opens a confirmation naming what would go — **counted by kind, not listed as
+  identifiers**, because the decision in front of an operator is *how much goes with it* and twenty UUIDs
+  obscure that. It also says what does NOT go: an edge is removed and the record at the other end of it
+  stays. On confirm the delete repeats with the token from the preview, which removes the entity and the
+  records blocking it. A stale token is not retried — the server returns the CURRENT set with its
+  refusal, so the operator is asked again about the set as it now stands.
+
+  An entity with nothing pointing at it still deletes in one click. Asking to confirm a cascade that
+  would remove nothing is a dialog that teaches people to dismiss dialogs.
+
+- **All four record tabs threw their delete error away, not just entities.** Facts, chrono and edges had
+  the identical `error: () => {}` — the same omission four times, so the surface for it lives on the
+  state the four already share rather than being added to each. A delete that did not happen now says
+  why, above the list, where the row that would not go is still visible.
+
+
+
 - **An integration file stopped testing anything the day 5.0 shipped, and reported itself as skipped**
   (`Q-38`). `a-traversed-recall-returns-whole-graphs` sent `includeFreshWrites: true` on every recall.
   5.0 removed that parameter, so every call answered `400` — and the file's own fixture guard turned that

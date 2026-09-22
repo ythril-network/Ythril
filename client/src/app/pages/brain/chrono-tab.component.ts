@@ -118,6 +118,11 @@ import { TimestampComponent } from '../../shared/timestamp.component';
             <div class="alert alert-error" style="margin-bottom:12px;">{{ createChronoError() }}</div>
           }
 
+          @if (recordList.deleteError()) {
+            <div class="delete-error" role="alert">
+              {{ 'brain.deleteFailed' | transloco: { reason: recordList.deleteError() } }}
+            </div>
+          }
           <div class="table-wrapper" hscrollTop>
             <table>
               <thead>
@@ -467,9 +472,13 @@ export class ChronoTabComponent extends RecordTabBase {
 
   deleteChrono(id: string): void {
     this.recordList.confirmDeleteId.set('');
+    this.recordList.deleteError.set('');
     this.brainApi.deleteChrono(this.spaceId(), id).subscribe({
       next: () => this.store.chrono.update(list => list.filter(c => c._id !== id)),
-      error: () => {},
+      // Said out loud. All four record tabs answered a failed delete with `error: () => {}`,
+      // so the row stayed on screen and nothing explained why — the operator's own click
+      // looked like it had not registered.
+      error: (e) => this.recordList.deleteError.set(fmtApiError(e, 'Failed to delete')),
     });
   }
 }

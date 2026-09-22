@@ -119,6 +119,11 @@ import { TimestampComponent } from '../../shared/timestamp.component';
           @if (createEdgeError()) {
             <div class="alert alert-error" style="margin-bottom:12px;">{{ createEdgeError() }}</div>
           }
+          @if (recordList.deleteError()) {
+            <div class="delete-error" role="alert">
+              {{ 'brain.deleteFailed' | transloco: { reason: recordList.deleteError() } }}
+            </div>
+          }
           <div class="table-wrapper" hscrollTop>
             <table>
               <thead>
@@ -416,9 +421,13 @@ export class EdgesTabComponent extends RecordTabBase {
 
   deleteEdge(id: string): void {
     this.recordList.confirmDeleteId.set('');
+    this.recordList.deleteError.set('');
     this.brainApi.deleteEdge(this.spaceId(), id).subscribe({
       next: () => this.store.edges.update(list => list.filter(e => e._id !== id)),
-      error: () => {},
+      // Said out loud. All four record tabs answered a failed delete with `error: () => {}`,
+      // so the row stayed on screen and nothing explained why — the operator's own click
+      // looked like it had not registered.
+      error: (e) => this.recordList.deleteError.set(fmtApiError(e, 'Failed to delete')),
     });
   }
 

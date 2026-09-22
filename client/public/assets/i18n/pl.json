@@ -1364,9 +1364,7 @@
   "brain.query.projectionPlaceholder": "{\"fact\": 1, \"tags\": 1}",
   "brain.query.resultsFrom": "wynik(i) z {{ collection }}",
   "brain.superseded.badge": "nieaktualne",
-
   "brain.superseded.hint": "Ten rekord nie jest już aktualny. Pozostaje zapisany i nadal jest wyszukiwalny — coś późniejszego go zastąpiło lub wycofało.",
-
   "brain.query.passages": "{{count}} fragmentów",
   "brain.query.groupedPassages": "z {{count}} pasujących fragmentów",
   "graph.stats.nodesEdges": "{{ nodes }} węzłów · {{ edges }} krawędzi",
@@ -2064,5 +2062,15 @@
   "graph.recordUnavailable.file": "Ten plik nie ma tutaj widoku rekordu — otwórz go w zakładce „Pliki”.",
   "graph.recordUnavailable.derived": "To połączenie jest wyprowadzone z odnośnika, a nie zapisaną relacją, więc nie ma własnego rekordu.",
   "networks.network.invite.secretWarning": "Wyślij to tak, jak wysyłasz hasło. Każdy, kto je ma, może dokończyć dołączenie. Wygasa po 24 godzinach i działa tylko raz.",
-  "networks.dialog.join.error.invalidCode": "To nie wygląda na kod zaproszenia. Skopiuj całą linię wygenerowaną przez drugi brain — zaczyna się od ythril1_."
+  "networks.dialog.join.error.invalidCode": "To nie wygląda na kod zaproszenia. Skopiuj całą linię wygenerowaną przez drugi brain — zaczyna się od ythril1_.",
+  "brain.cascade.title": "Usunąć tę encję i to, co na nią wskazuje?",
+  "brain.cascade.intro": "Coś odwołuje się do tej encji, więc nie można jej usunąć samodzielnie. Usunięcie jej spowoduje również usunięcie:",
+  "brain.cascade.otherEndSafe": "Nic po drugiej stronie nie zostanie usunięte — rekordy, na które te wskazują, pozostaną bez zmian.",
+  "brain.cascade.confirm": "Usuń wszystko",
+  "brain.cascade.kind.edge": "powiązania",
+  "brain.cascade.kind.fact": "fakty",
+  "brain.cascade.kind.chrono": "wpisy na osi czasu",
+  "brain.cascade.kind.file": "odwołania do plików",
+  "brain.cascade.kind.face": "etykiety twarzy",
+  "brain.deleteFailed": "Nie udało się usunąć: {{reason}}"
 }

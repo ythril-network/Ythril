@@ -1368,9 +1368,7 @@
   "brain.query.projectionPlaceholder": "{\"fact\": 1, \"tags\": 1}",
   "brain.query.resultsFrom": "Ergebnis(se) aus {{ collection }}",
   "brain.superseded.badge": "überholt",
-
   "brain.superseded.hint": "Dieser Eintrag ist nicht mehr aktuell. Er bleibt erhalten und bleibt durchsuchbar — etwas Späteres hat ihn ersetzt oder zurückgezogen.",
-
   "brain.query.passages": "{{count}} Passagen",
   "brain.query.groupedPassages": "aus {{count}} passenden Passagen",
   "graph.stats.nodesEdges": "{{ nodes }} Knoten · {{ edges }} Kanten",
@@ -2064,5 +2062,15 @@
   "graph.recordUnavailable.file": "Für diese Datei gibt es hier keine Datensatzansicht — öffnen Sie sie im Reiter „Dateien“.",
   "graph.recordUnavailable.derived": "Diese Verbindung ist aus einer Verknüpfung abgeleitet und keine gespeicherte Beziehung, hat also keinen eigenen Datensatz.",
   "networks.network.invite.secretWarning": "Sende dies wie ein Passwort. Wer es hat, kann den Beitritt abschließen. Es läuft nach 24 Stunden ab und ist nur einmal verwendbar.",
-  "networks.dialog.join.error.invalidCode": "Das sieht nicht nach einem Einladungscode aus. Kopiere die ganze Zeile, die das andere Brain erzeugt hat — sie beginnt mit ythril1_."
+  "networks.dialog.join.error.invalidCode": "Das sieht nicht nach einem Einladungscode aus. Kopiere die ganze Zeile, die das andere Brain erzeugt hat — sie beginnt mit ythril1_.",
+  "brain.cascade.title": "Diese Entität und was auf sie verweist löschen?",
+  "brain.cascade.intro": "Etwas verweist auf diese Entität, daher kann sie nicht allein gelöscht werden. Beim Löschen wird außerdem entfernt:",
+  "brain.cascade.otherEndSafe": "Am anderen Ende wird nichts gelöscht — die Datensätze, auf die diese zeigen, bleiben unverändert.",
+  "brain.cascade.confirm": "Alles löschen",
+  "brain.cascade.kind.edge": "Beziehungen",
+  "brain.cascade.kind.fact": "Fakten",
+  "brain.cascade.kind.chrono": "Zeitleisteneinträge",
+  "brain.cascade.kind.file": "Dateiverweise",
+  "brain.cascade.kind.face": "Gesichtsmarkierungen",
+  "brain.deleteFailed": "Löschen fehlgeschlagen: {{reason}}"
 }

@@ -145,4 +145,12 @@ export const BRAIN_RECORD_TABLE_STYLES = `
     .pill-group button:last-child { border-right:none; }
     .pill-group button.active { background:var(--accent-dim); color:var(--accent); }
     .pill-group button:hover:not(.active) { background:var(--bg-surface); }
+
+    /* A delete that did not happen. Shared by every record tab, because all four swallowed it. */
+    .delete-error {
+      margin: 0 0 10px; padding: 8px 12px;
+      border: 1px solid var(--error); border-radius: var(--radius-sm);
+      background: color-mix(in srgb, var(--error) 12%, transparent);
+      color: var(--error); font-size: 12px; line-height: 1.5;
+    }
 `;
