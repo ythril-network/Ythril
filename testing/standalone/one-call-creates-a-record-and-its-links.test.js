@@ -89,17 +89,37 @@ describe('what it refuses', () => {
     assert.match(linkInputError({ linkEntities: UUID }), /must be an array/);
   });
 
-  it('an entry that is not a well-formed reference for its kind', () => {
-    assert.match(linkInputError({ linkEntities: ['not-a-uuid'] }), /UUIDs/);
+  it('an entry that is not a well-formed reference for its kind, NAMING the value', () => {
+    /*
+     * The message comes from `entity-refs.ts` now, and that is the point of the change: this returned
+     * "linkEntities must contain UUIDs" while the writer's own refusal named the offending value. Two
+     * messages for one rule, and the weaker one won because the door runs first — so a caller who sent a
+     * NAME was told the shape was wrong and not which of their ids was the name.
+     */
+    const bad = linkInputError({ linkEntities: ['not-a-uuid'] });
+    assert.match(bad, /UUID v4/);
+    assert.match(bad, /not-a-uuid/, 'the refusal must name the value, or a caller with twenty ids cannot act on it');
     assert.match(linkInputError({ linkEntities: [''] }), /non-empty/);
     assert.match(linkInputError({ linkEntities: [42] }), /non-empty/);
+  });
+
+  it('and NOT the well-formedness when the space accepts dangling references', () => {
+    /*
+     * `strictLinkage: false` is a deliberate per-space choice for a staged import whose targets resolve
+     * in a later pass, and the 4.x arrays honoured it here too — a lax space stored
+     * `entityIds: ['created-later']` on purpose. The SHAPE is still checked: an array of non-empty
+     * strings is what the field IS, whatever the space says about resolution.
+     */
+    assert.equal(linkInputError({ linkEntities: ['created-later'] }, { strict: false }), null);
+    assert.match(linkInputError({ linkEntities: [''] }, { strict: false }), /non-empty/);
+    assert.match(linkInputError({ linkEntities: 'nope' }, { strict: false }), /must be an array/);
   });
 
   it('a file reference is a PATH, and a UUID there is refused', () => {
     // The hazard `save_link` names: the same UUID can name records in two collections, so a file field
     // holding one is a link that reads as correct and points at nothing.
     assert.equal(linkInputError({ linkFiles: ['notes/report.md'] }), null);
-    assert.match(linkInputError({ linkFiles: ['../secrets/keys.txt'] }), /paths/);
+    assert.match(linkInputError({ linkFiles: ['../secrets/keys.txt'] }), /space-relative/);
   });
 
   it('and says nothing about a body that names no link field', () => {

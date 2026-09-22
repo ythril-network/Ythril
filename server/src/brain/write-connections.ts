@@ -44,7 +44,7 @@
 import { REF_KINDS, LINK_INPUT_FIELDS } from '../config/types-knowledge.js';
 import type { RefKind } from '../config/types-knowledge.js';
 import type { DesiredLinks } from './links.js';
-import { isWellFormedRef, edgeEndpointKindSchema, edgeEndpointKind } from './entity-refs.js';
+import { invalidRefsMessage, edgeEndpointKindSchema, edgeEndpointKind, isWellFormedRef } from './entity-refs.js';
 import { primitivePropertyError } from './property-values.js';
 import { reconcileLinks } from './links.js';
 import { linksStartingFrom, linkClassesFrom } from './link-adjacency.js';
@@ -105,12 +105,28 @@ export function linkFieldsFrom(body: unknown): Record<string, string[]> {
 /**
  * Why this body's `link*` fields cannot be honoured, or `null`.
  *
- * Shape first, then well-formedness per kind. It does NOT check that the targets exist: that is
- * `assertRefsResolve`'s job at the writer, where it can be done in one query against the records being
- * written rather than once per door — and a door that checked existence itself would be the second
- * implementation this module exists to avoid.
+ * ## Two questions, and only one of them is unconditional
+ *
+ * **The SHAPE always**: the field is an array (or `null`, which is the caller writing "none"), and every
+ * entry a non-empty string. Reading `"abc"` as one id is how a write silently links to nothing.
+ *
+ * **The WELL-FORMEDNESS under `strictLinkage` only**, which is the same condition existence is checked
+ * under. That setting is a deliberate per-space choice to accept dangling references — the case it exists
+ * for is a staged import whose targets resolve in a later pass — and the 4.x arrays honoured it here too:
+ * a lax space stored `entityIds: ['created-later']` on purpose. Checking the shape of the ID regardless
+ * would close that door while the setting still claimed it was open.
+ *
+ * It does NOT check that the targets exist: that is `assertRefsResolve`'s job at the writer, where it can
+ * be done in one query against the records being written rather than once per door — and a door that
+ * checked existence itself would be the second implementation this module exists to avoid.
+ *
+ * ## The message comes from `entity-refs.ts`
+ *
+ * `invalidRefsMessage` names the offending VALUES, and this returned only the field. Two messages for one
+ * rule, and the weaker one won because it runs first: a caller who sent a name got "linkEntities must
+ * contain UUIDs" where the writer would have told them which value was the name.
  */
-export function linkInputError(body: unknown): string | null {
+export function linkInputError(body: unknown, opts: { strict?: boolean } = {}): string | null {
   if (!body || typeof body !== 'object') return null;
   const bag = body as Record<string, unknown>;
 
@@ -119,19 +135,14 @@ export function linkInputError(body: unknown): string | null {
     if (!(field in bag)) continue;
 
     const value = bag[field];
-    // `null` is the caller writing "none", the same as `[]`. Anything else that is not an array is a shape
-    // error rather than an empty set — reading `"abc"` as one id is how a filter silently matches nothing.
     if (value === null) continue;
     if (!Array.isArray(value)) return `${field} must be an array of ids`;
-
     for (const ref of value) {
       if (typeof ref !== 'string' || !ref.trim()) return `${field} must contain non-empty ids`;
-      if (!isWellFormedRef(kind, ref)) {
-        return kind === 'file'
-          ? `${field} must contain space-relative paths, not ids`
-          : `${field} must contain UUIDs`;
-      }
     }
+    if (opts.strict === false) continue;
+    const malformed = invalidRefsMessage(field, kind, value as string[]);
+    if (malformed) return malformed;
   }
   return null;
 }
@@ -335,8 +346,8 @@ export function edgeInputError(body: unknown): string | null {
  * checked first, so a caller still on the 4.x spelling is told what to send instead of being told their
  * ids are the wrong shape for a field they did not mention.
  */
-export function connectionInputError(body: unknown): string | null {
-  return retiredWriteFieldError(body) ?? linkInputError(body) ?? edgeInputError(body);
+export function connectionInputError(body: unknown, opts: { strict?: boolean } = {}): string | null {
+  return retiredWriteFieldError(body) ?? linkInputError(body, opts) ?? edgeInputError(body);
 }
 
 /**

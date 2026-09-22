@@ -138,9 +138,20 @@ async function syncMemory(space, id, fact, linkTo, seq) {
     _id: id, spaceId: space, fact, tags: [], embedding: [], embeddingModel: 'none',
     seq, author: { instanceId: 'test', instanceLabel: 'Test' }, createdAt: now, updatedAt: now,
   });
+  /*
+   * Through the SYNC door as well, and that is not a shortcut. These fixtures carry READABLE ids —
+   * `trav-B-…` — which the write doors refuse as references: an id must be a UUID v4 that resolves. Sync
+   * ingest is validated, counted and let in, which is what lets this suite ask about the TRAVERSAL
+   * rather than about reference integrity.
+   */
   for (const to of linkTo ?? []) {
-    await post(INSTANCES.a, token(), `/api/brain/spaces/${space}/links`,
-      { from: id, fromKind: 'fact', to, toKind: 'entity' });
+    const lr = await syncPost(INSTANCES.a, token(), `/api/sync/batch-upsert?spaceId=${space}`, {
+      links: [{
+        _id: `link-${id}-${to}`, spaceId: space, from: id, fromKind: 'fact', to, toKind: 'entity',
+        author: { instanceId: 'test', instanceLabel: 'Test' }, createdAt: now, updatedAt: now, seq: seq + 1,
+      }],
+    });
+    assert.ok(lr.status < 400, `link fixture failed: ${lr.status} ${JSON.stringify(lr.body)}`);
   }
 }
 

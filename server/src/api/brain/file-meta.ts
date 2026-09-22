@@ -318,7 +318,7 @@ fileMetaRouter.patch('/spaces/:spaceId/files', globalRateLimit, requireSpaceAuth
   const { description, tags, properties, deleteFields } = req.body ?? {};
   // The three link classes a file holds. Shape and well-formedness here, existence at the writer — the
   // one refusal both doors share, from `write-connections.ts`.
-  const linkErr = linkInputError(req.body);
+  const linkErr = linkInputError(req.body, { strict: isStrictLinkage(wt.target) });
   if (linkErr) { res.status(400).json({ error: linkErr }); return; }
   // X-6: `properties` MERGE on this route now, matching the four brain types. `deleteFields` lands with the
   // merge and not after it — the merge alone would remove the only way a file property could be cleared, so

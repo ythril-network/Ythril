@@ -553,10 +553,9 @@ export const update_file_metaTool: ToolHandler = {
     if (!wt.ok) throw new Error(wt.error);
 
     const { isStrictLinkage } = await import('../../spaces/proxy.js');
-    const { assertRefsResolve } = await import('../../brain/entity-refs.js');
     const { updateFileMeta } = await import('../../files/file-meta.js');
 
-    const linkErr = linkInputError(a);
+    const linkErr = linkInputError(a, { strict: isStrictLinkage(wt.target) });
     if (linkErr) throw new Error(linkErr);
 
     const patch = {

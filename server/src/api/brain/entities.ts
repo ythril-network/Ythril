@@ -120,7 +120,7 @@ entitiesRouter.post('/spaces/:spaceId/entities', globalRateLimit, requireSpaceAu
   const shapeErr = shapeError('entity', req.body);
   if (shapeErr) { res.status(400).json({ error: shapeErr }); return; }
   // `F-27`: the one-call write — links and labelled edges together. Shape here; existence at the writer.
-  const connErr = connectionInputError(req.body);
+  const connErr = connectionInputError(req.body, { strict: isStrictLinkage(wt.target) });
   if (connErr) { res.status(400).json({ error: connErr }); return; }
 
   try {

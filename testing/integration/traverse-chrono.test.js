@@ -168,7 +168,9 @@ describe('traverse reaches chrono entries', () => {
       `the synthetic edge id ${link._id} collides with a node in the same response — a graph library keeps `
       + 'one id namespace and will silently drop one of the two',
     );
-    assert.match(link._id, /^chrono\.linkEntities:/, 'and it names the link it stands for');
+    assert.match(link._id, /^chrono\.entityIds:/,
+      'and it names the link it stands for — the label is a frozen token from the 4.x field this class '
+      + 'replaced, and it is part of the link id');
   });
 
   it('includeChrono:false restores the entity-only shape', async () => {
@@ -218,7 +220,7 @@ describe('traverse — includeMemories and includeEdges', () => {
     const r = await traverse({ startId: ids.inc, direction: 'both', maxDepth: 2, includeMemories: true });
     assert.equal(r.status, 200, JSON.stringify(r.body));
     const mem = (r.body.nodes ?? []).find(n => n._id === ids.memory);
-    assert.ok(mem, `the memory must be reachable through linkEntities: ${JSON.stringify(r.body.nodes)}`);
+    assert.ok(mem, `the memory must be reachable through its link: ${JSON.stringify(r.body.nodes)}`);
     assert.equal(mem.kind, 'fact');
     assert.equal(mem.name, 'The carrier lost the first replacement unit', 'the node name is the fact');
     const link = (r.body.edges ?? []).find(e => e.to === ids.memory);
