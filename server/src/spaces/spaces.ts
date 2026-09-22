@@ -94,7 +94,12 @@ export function updateSpace(
    * which is what made a single-space conversion a genuine pilot. 5.0 removed the arrays, so turning it
    * off would mean "read my links from a shape that does not exist": `assertLinkRecords` would refuse
    * every link read on that space, and the operator who flipped it would see a working space stop
-   * answering. The conversion and space creation set it; nothing else may.
+   * answering.
+   *
+   * **The assignment stays because the CONVERSION comes through here** — `links-conversion.ts` marks a
+   * space by calling this function, which is why this is not simply deleted. What refuses an API caller
+   * is the `'nobody'` row in `auth/space-field-rights.ts`, above the instance-admin shortcut, so the
+   * refusal is declared in the table the totality gate reads rather than as a branch nothing can see.
    */
   if (updates.completeLinkage !== undefined) space.completeLinkage = updates.completeLinkage || undefined;
 
