@@ -184,7 +184,7 @@ describe('Space import — basic import', () => {
 
     const payload = {
       facts: [
-        { _id: 'import-mem-1', spaceId, fact: 'Imported memory', tags: [], entityIds: [], author: { instanceId: 'test', instanceLabel: 'test' }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), seq: 1, embeddingModel: 'none' },
+        { _id: 'import-mem-1', spaceId, fact: 'Imported memory', tags: [], author: { instanceId: 'test', instanceLabel: 'test' }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), seq: 1, embeddingModel: 'none' },
       ],
       entities: [
         { _id: 'import-ent-1', spaceId, name: 'ImportedEnt', type: 'concept', tags: [], properties: {}, author: { instanceId: 'test', instanceLabel: 'test' }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), seq: 2 },
@@ -219,7 +219,7 @@ describe('Space import — basic import', () => {
     importSpaceIds.push(spaceId);
 
     const now = new Date().toISOString();
-    const doc = { _id: 'update-mem-1', spaceId, fact: 'Original', tags: [], entityIds: [], author: { instanceId: 'test', instanceLabel: 'test' }, createdAt: now, updatedAt: now, seq: 1, embeddingModel: 'none' };
+    const doc = { _id: 'update-mem-1', spaceId, fact: 'Original', tags: [], author: { instanceId: 'test', instanceLabel: 'test' }, createdAt: now, updatedAt: now, seq: 1, embeddingModel: 'none' };
 
     // First import — inserts
     const first = await post(INSTANCES.a, tok, `/api/admin/spaces/${spaceId}/import`, { facts: [doc] });

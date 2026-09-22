@@ -58,23 +58,23 @@ before(async () => {
 
   const c1 = await P(`/api/brain/spaces/${SPACE}/chrono`, {
     title: 'Unit collected by carrier', type: 'event',
-    startsAt: '2026-07-04T09:00:00.000Z', entityIds: [ids.inc],
+    startsAt: '2026-07-04T09:00:00.000Z', linkEntities: [ids.inc],
   });
   const c2 = await P(`/api/brain/spaces/${SPACE}/chrono`, {
     title: 'Replacement promised', type: 'event',
-    startsAt: '2026-07-06T09:00:00.000Z', entityIds: [ids.lone],
+    startsAt: '2026-07-06T09:00:00.000Z', linkEntities: [ids.lone],
   });
   ids.chrono = c1.body?._id;
   ids.loneChrono = c2.body?._id;
 
   // A memory about the same incident, for the includeMemories flag.
   const m1 = await P(`/api/brain/spaces/${SPACE}/facts`, {
-    fact: 'The carrier lost the first replacement unit', entityIds: [ids.inc],
+    fact: 'The carrier lost the first replacement unit', linkEntities: [ids.inc],
   });
   ids.memory = m1.body?._id;
 
   // A file about the same incident, for includeFiles. TWO calls, because they are two records: the file write
-  // stores the bytes, and the brain's file META record is where `entityIds` — the link traverse follows — lives.
+  // stores the bytes, and the brain's file META record is the end a link hangs off — which is what traverse follows.
   ids.file = 'rma/carrier-report.md';
   const content = ['# Carrier report', '', 'The unit was lost in transit.', ''].join('\n');
   const w = await P(`/api/files/${SPACE}?path=${encodeURIComponent(ids.file)}`, { content });
@@ -93,7 +93,7 @@ before(async () => {
   const wantDescription = 'Carrier incident report';
   const patchMeta = () => reqJson(INSTANCES.a, token(),
     `/api/brain/spaces/${SPACE}/files?path=${encodeURIComponent(ids.file)}`,
-    { method: 'PATCH', body: JSON.stringify({ description: wantDescription, tags: ['rma'], entityIds: [ids.inc] }) });
+    { method: 'PATCH', body: JSON.stringify({ description: wantDescription, tags: ['rma'], linkEntities: [ids.inc] }) });
 
   let meta = await patchMeta();
   assert.ok(meta.status < 300, `link file to entity: ${meta.status} ${JSON.stringify(meta.body)}`);
@@ -168,7 +168,7 @@ describe('traverse reaches chrono entries', () => {
       `the synthetic edge id ${link._id} collides with a node in the same response — a graph library keeps `
       + 'one id namespace and will silently drop one of the two',
     );
-    assert.match(link._id, /^chrono\.entityIds:/, 'and it names the link it stands for');
+    assert.match(link._id, /^chrono\.linkEntities:/, 'and it names the link it stands for');
   });
 
   it('includeChrono:false restores the entity-only shape', async () => {
@@ -218,7 +218,7 @@ describe('traverse — includeMemories and includeEdges', () => {
     const r = await traverse({ startId: ids.inc, direction: 'both', maxDepth: 2, includeMemories: true });
     assert.equal(r.status, 200, JSON.stringify(r.body));
     const mem = (r.body.nodes ?? []).find(n => n._id === ids.memory);
-    assert.ok(mem, `the memory must be reachable through entityIds: ${JSON.stringify(r.body.nodes)}`);
+    assert.ok(mem, `the memory must be reachable through linkEntities: ${JSON.stringify(r.body.nodes)}`);
     assert.equal(mem.kind, 'fact');
     assert.equal(mem.name, 'The carrier lost the first replacement unit', 'the node name is the fact');
     const link = (r.body.edges ?? []).find(e => e.to === ids.memory);

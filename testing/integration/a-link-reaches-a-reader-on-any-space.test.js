@@ -88,12 +88,26 @@ after(async () => {
 });
 
 describe('a link written on an unconverted space is a link a reader can see', () => {
-  it('the control: `entityIds` lands and is reachable', async () => {
+  it('the control: a link made through the LINK DOOR is reachable', async () => {
     // First, so a failure below cannot be read as "the walk is broken" or "the space is empty".
-    const id = must('fact via entityIds', await P(`/api/brain/spaces/${SPACE}/facts`,
-      { fact: `via entityIds ${RUN}`, entityIds: [personId] }));
+    //
+    // It used to write `entityIds` — the spelling that was known to work — and that spelling is refused
+    // in 5.0. The link door is the other way to make the same link without going through the field under
+    // test, which is what a control has to be.
+    const id = must('fact to link', await P(`/api/brain/spaces/${SPACE}/facts`, { fact: `via the link door ${RUN}` }));
+    const link = await P(`/api/brain/spaces/${SPACE}/links`,
+      { from: id, fromKind: 'fact', to: personId, toKind: 'entity' });
+    assert.ok(link.status < 400, `the control link was refused: ${link.status} ${JSON.stringify(link.body)}`);
     assert.ok((await reachableFromPerson()).includes(id),
       'the control link is unreachable — the reader or the fixture is broken, not the writer');
+  });
+
+  it('and the 4.x spelling is refused, naming the field that replaced it', async () => {
+    const r = await P(`/api/brain/spaces/${SPACE}/facts`,
+      { fact: `via entityIds ${RUN}`, entityIds: [personId] });
+    assert.equal(r.status, 400, `the 4.x array was accepted: ${JSON.stringify(r.body)}`);
+    assert.match(JSON.stringify(r.body), /linkEntities/,
+      'the refusal must name the field to send instead, or an upgrading caller has nothing to act on');
   });
 
   it('`linkEntities` lands too, and that is the same question asked the other way', async () => {
@@ -116,7 +130,7 @@ describe('a link written on an unconverted space is a link a reader can see', ()
     const res = await fetch(`${INSTANCES.a}/api/brain/spaces/${SPACE}/facts/${id}`, {
       method: 'PATCH',
       headers: { Authorization: `Bearer ${tokenA}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ entityIds: [] }),
+      body: JSON.stringify({ linkEntities: [] }),
     });
     assert.ok(res.status < 400, `detach refused: ${res.status} ${await res.text()}`);
     assert.ok(!(await reachableFromPerson()).includes(id),

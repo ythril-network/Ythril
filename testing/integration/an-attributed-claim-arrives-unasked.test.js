@@ -70,11 +70,11 @@ before(async () => {
 
   for (let i = 0; i < ORDINARY; i++) {
     await P(`/api/brain/spaces/${SPACE}/facts`, {
-      fact: `Ordinary note ${i} about the payments service, written by a person.`, entityIds: [subject],
+      fact: `Ordinary note ${i} about the payments service, written by a person.`, linkEntities: [subject],
     });
   }
   const att = await P(`/api/brain/spaces/${SPACE}/facts`, {
-    fact: ATTRIBUTED_TEXT, entityIds: [subject],
+    fact: ATTRIBUTED_TEXT, linkEntities: [subject],
     suppressEmbeddings: true, properties: { attributed: true, speaker: 'assistant' },
   });
   assert.ok(att.body?._id, `attributed fact: ${JSON.stringify(att.body)}`);

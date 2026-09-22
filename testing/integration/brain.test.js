@@ -377,26 +377,45 @@ describe('Brain — memory list filtering', () => {
   const RUN = Date.now();
   let tokenA;
 
-  // Seed 5 memories with distinct tags and entityIds
+  // Seed 5 facts with distinct tags, and the link records that join three of them to entities
   before(async () => {
     tokenA = fs.readFileSync(path.join(CONFIGS, 'a', 'token.txt'), 'utf8').trim();
 
     const seeds = [
-      { _id: `filt-${RUN}-1`, fact: 'Alpha fact', tags: ['physics', 'science'], entityIds: ['ent-x'] },
-      { _id: `filt-${RUN}-2`, fact: 'Beta fact', tags: ['biology', 'science'], entityIds: ['ent-y'] },
-      { _id: `filt-${RUN}-3`, fact: 'Gamma fact', tags: ['physics'], entityIds: ['ent-x', 'ent-y'] },
-      { _id: `filt-${RUN}-4`, fact: 'Delta fact', tags: ['history'], entityIds: [] },
-      { _id: `filt-${RUN}-5`, fact: 'Epsilon fact', tags: ['biology'], entityIds: ['ent-z'] },
+      { _id: `filt-${RUN}-1`, fact: 'Alpha fact', tags: ['physics', 'science'], links: ['ent-x'] },
+      { _id: `filt-${RUN}-2`, fact: 'Beta fact', tags: ['biology', 'science'], links: ['ent-y'] },
+      { _id: `filt-${RUN}-3`, fact: 'Gamma fact', tags: ['physics'], links: ['ent-x', 'ent-y'] },
+      { _id: `filt-${RUN}-4`, fact: 'Delta fact', tags: ['history'], links: [] },
+      { _id: `filt-${RUN}-5`, fact: 'Epsilon fact', tags: ['biology'], links: ['ent-z'] },
     ];
 
     let seqBase = Date.now();
-    for (const s of seeds) {
+    const author = { instanceId: 'test', instanceLabel: 'Test' };
+    for (const { links, ...seed } of seeds) {
+      const now = new Date().toISOString();
       const r = await post(INSTANCES.a, tokenA, '/api/sync/facts?spaceId=general', {
-        ...s, spaceId: 'general', embedding: [],
-        seq: seqBase++, author: { instanceId: 'test', instanceLabel: 'Test' },
-        createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), embeddingModel: 'none',
+        ...seed, spaceId: 'general', embedding: [],
+        seq: seqBase++, author, createdAt: now, updatedAt: now, embeddingModel: 'none',
       });
-      assert.equal(r.status, 200, `Seeding ${s._id}: ${JSON.stringify(r.body)}`);
+      assert.equal(r.status, 200, `Seeding ${seed._id}: ${JSON.stringify(r.body)}`);
+      /*
+       * THE LINKS ARE THEIR OWN RECORDS, so they are seeded as such.
+       *
+       * They rode on the fact as `entityIds` until 5.0. Through the SYNC door, because these entity ids
+       * are fixtures rather than records: the write doors check that a link resolves, and sync ingest is
+       * validated, counted and let in — which is what lets this suite ask about the FILTER rather than
+       * about reference integrity.
+       */
+      for (const to of links) {
+        const lr = await post(INSTANCES.a, tokenA, '/api/sync/batch-upsert?spaceId=general', {
+          links: [{
+            _id: `link-${seed._id}-${to}`, spaceId: 'general',
+            from: seed._id, fromKind: 'fact', to, toKind: 'entity',
+            author, createdAt: now, updatedAt: now, seq: seqBase++,
+          }],
+        });
+        assert.equal(lr.status, 200, `Seeding link ${seed._id}->${to}: ${JSON.stringify(lr.body)}`);
+      }
     }
   });
 
@@ -417,10 +436,22 @@ describe('Brain — memory list filtering', () => {
     assert.ok(ids.includes(`filt-${RUN}-1`), 'Should match physics despite uppercase query');
   });
 
+  /**
+   * The facts linked to an entity — two reads, because a connection is its own record since 5.0.
+   *
+   * It was `filter: { entityIds: '<id>' }`, a predicate over a field the fact carried. The links
+   * collection answers the same question and is indexed both ways; what changes is that the caller asks
+   * it rather than the facts collection.
+   */
+  async function factsLinkedTo(entityId) {
+    const links = await readCollection(INSTANCES.a, tokenA, 'general', 'links',
+      { limit: 500, filter: { to: entityId, fromKind: 'fact' } });
+    assert.equal(links.status, 200, JSON.stringify(links.body));
+    return links.results.map(l => l.from);
+  }
+
   it('Filter by entity returns only linked memories', async () => {
-    const r = await readCollection(INSTANCES.a, tokenA, 'general', 'facts', { limit: 500, filter: { entityIds: 'ent-y' } });
-    assert.equal(r.status, 200, JSON.stringify(r.body));
-    const ids = r.results.map(m => m._id);
+    const ids = await factsLinkedTo('ent-y');
     assert.ok(ids.includes(`filt-${RUN}-2`), 'Beta (ent-y) should match');
     assert.ok(ids.includes(`filt-${RUN}-3`), 'Gamma (ent-x,ent-y) should match');
     assert.ok(!ids.includes(`filt-${RUN}-1`), 'Alpha (ent-x only) should not match');
@@ -428,8 +459,11 @@ describe('Brain — memory list filtering', () => {
   });
 
   it('Combine tag + entity returns intersection', async () => {
-    // tag=physics AND entity=ent-x → items 1 and 3
-    const r = await readCollection(INSTANCES.a, tokenA, 'general', 'facts', { tag: 'physics', limit: 500, filter: { entityIds: 'ent-x' } });
+    // tag=physics AND entity=ent-x → items 1 and 3. The intersection is still the SERVER's: the link ids
+    // narrow `_id` and the tag narrows beside it, in one predicate.
+    const linked = await factsLinkedTo('ent-x');
+    const r = await readCollection(INSTANCES.a, tokenA, 'general', 'facts',
+      { tag: 'physics', limit: 500, filter: { _id: { $in: linked } } });
     assert.equal(r.status, 200, JSON.stringify(r.body));
     const ids = r.results.map(m => m._id);
     assert.ok(ids.includes(`filt-${RUN}-1`), 'Alpha (physics + ent-x) should match');
@@ -464,7 +498,7 @@ describe('Brain â€” memory list limit/skip pagination', () => {
     for (let i = 0; i < 8; i++) {
       await syncPost(INSTANCES.a, token(), '/api/sync/facts?spaceId=general', {
         _id: `paginate-${RUN}-${i}`, spaceId: 'general', fact: `Pagination seed ${RUN} item ${i}`,
-        seq: Date.now() + i, embedding: [], tags: ['pagination-test'], entityIds: [],
+        seq: Date.now() + i, embedding: [], tags: ['pagination-test'],
         author: { instanceId: 'test', instanceLabel: 'Test' },
         createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), embeddingModel: 'none',
       });
@@ -550,7 +584,6 @@ describe('Brain — POST /api/brain/spaces/:spaceId/reindex', () => {
       embedding: [],
       embeddingModel: '__stale__',   // mark as stale so needsReindex triggers
       tags: ['reindex-test'],
-      entityIds: [],
       description: 'Reindex description',
       properties: { aspect: 'test' },
       seq: Date.now(),
@@ -700,7 +733,7 @@ describe('Brain — bulk memory wipe', () => {
       seededIds.push(id);
       const r = await post(INSTANCES.a, tokenA, `/api/sync/facts?spaceId=${WIPE_SPACE}`, {
         _id: id, spaceId: WIPE_SPACE, fact: `Wipe test memory ${i}`,
-        tags: ['wipe-test'], entityIds: [], embedding: [],
+        tags: ['wipe-test'], embedding: [],
         seq: seqBase++, author: { instanceId: 'test', instanceLabel: 'Test' },
         createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), embeddingModel: 'none',
       });
@@ -782,7 +815,7 @@ describe('Brain — bulk memory wipe', () => {
     for (let i = 0; i < 3; i++) {
       await post(INSTANCES.a, tokenA, `/api/sync/facts?spaceId=${WIPE_SPACE}`, {
         _id: `wipe-long-${RUN}-${i}`, spaceId: WIPE_SPACE, fact: `Long-form wipe ${i}`,
-        tags: ['wipe-long'], entityIds: [], embedding: [],
+        tags: ['wipe-long'], embedding: [],
         seq: seqBase++, author: { instanceId: 'test', instanceLabel: 'Test' },
         createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), embeddingModel: 'none',
       });
@@ -985,11 +1018,10 @@ describe('Brain -- chrono CRUD (/api/brain/spaces/:spaceId/chrono)', () => {
       /*
        * `linkEntities`/`linkFacts`, NOT the array fields, and that is `Q-26` rather than a preference.
        *
-       * `general` is converted by the boot conversion — every boot marks every space that is not already
-       * marked — and `array-write-refusal` then answers 400 for `entityIds`/`memoryIds`. This case
-       * asserted 201 and passed only while the stack had not restarted since `general` was created, so it
-       * failed with an error naming a migration it has nothing to do with. The `link*` spelling works on
-       * a converted space and an unconverted one alike (`Q-28`).
+       * `general` was converted by the boot conversion, and a converted space answered 400 for
+       * `entityIds`/`memoryIds`. This case asserted 201 and passed only while the stack had not restarted
+       * since `general` was created, so it failed with an error naming a migration it has nothing to do
+       * with. 5.0 removed the arrays outright, so the `link*` spelling is the only one there is.
        */
       linkEntities: [linkedEnt.body._id],
       linkFacts: [linkedMem.body._id],

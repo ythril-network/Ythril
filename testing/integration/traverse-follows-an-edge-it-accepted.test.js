@@ -86,19 +86,18 @@ before(async () => {
 
   // The knowledge-updates shape: a claim that replaced an earlier one, both about the same person.
   /*
-   * `entityIds`, NOT `linkEntities`, and that is `Q-28` rather than a preference.
+   * `linkEntities`, and the note it replaces is worth keeping because the failure was invisible.
    *
-   * On a space that has not been through the link conversion — which is every space created since the
-   * last boot — `linkEntities` writes a link RECORD, readers read the ARRAY, and the link is accepted
-   * with a `201` and seen by nothing. Written with `linkEntities` this fixture passes its own assertion
-   * and then fails the transitive case for a reason that has nothing to do with traversal.
-   *
-   * When `Q-28` lands this becomes `linkEntities` and `entityIds` starts being refused.
+   * While a link had two shapes, this had to be `entityIds`: on a space created since the last boot
+   * `linkEntities` wrote a link RECORD, readers read the ARRAY, and the link was accepted with a `201`
+   * and seen by nothing — so the fixture passed its own assertion and failed the transitive case for a
+   * reason that had nothing to do with traversal. 5.0 removed the arrays, so there is one shape and one
+   * spelling, and the old one is refused.
    */
   ids.older = must('older fact', await P(`/api/brain/spaces/${SPACE}/facts`,
-    { fact: `Ada works at Acme ${RUN}`, entityIds: [ids.person] }));
+    { fact: `Ada works at Acme ${RUN}`, linkEntities: [ids.person] }));
   ids.newer = must('newer fact', await P(`/api/brain/spaces/${SPACE}/facts`,
-    { fact: `Ada works at Beta ${RUN}`, entityIds: [ids.person] }));
+    { fact: `Ada works at Beta ${RUN}`, linkEntities: [ids.person] }));
   ids.supersedes = must('fact->fact supersedes edge', await P(`/api/brain/spaces/${SPACE}/edges`,
     { from: ids.newer, to: ids.older, label: 'supersedes', fromKind: 'fact', toKind: 'fact' }));
 
@@ -221,7 +220,7 @@ describe('an edge the write accepted is an edge the walk follows', () => {
   });
 
   it('an explicit edge needs no include flag, unlike an implicit link', async () => {
-    // `includeMemories` governs the `fact.entityIds` SCAN, whose cost argument is thousands of implicit
+    // `includeMemories` governs the fact-to-entity LINK scan, whose cost argument is thousands of implicit
     // mentions. An edge document exists only because somebody drew it, so there are exactly as many as
     // were meant — gating it would leave the capability inert for anyone who does not know the flag.
     const res = await traverse({ startId: ids.newer, maxDepth: 1, includeMemories: false });

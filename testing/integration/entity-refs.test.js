@@ -51,15 +51,20 @@ describe('entity references must resolve', () => {
 
   it('a real entity id links, and the link is readable back', async () => {
     const r = await post(INSTANCES.a, token, `/api/brain/spaces/${SPACE}/facts`, {
-      fact: 'links to a real entity', entityIds: [entityId],
+      fact: 'links to a real entity', linkEntities: [entityId],
     });
     assert.equal(r.status, 201, JSON.stringify(r.body));
-    assert.deepEqual(r.body.entityIds, [entityId], 'the link must actually be stored');
+    // READ BACK FROM THE LINKS, because the record does not carry them since 5.0 — and a link nothing
+    // can find is exactly what this case exists to catch.
+    const links = await readCollection(INSTANCES.a, token, SPACE, 'links');
+    assert.equal(links.status, 200, JSON.stringify(links.body));
+    assert.ok((links.results ?? []).some(l => l.from === r.body._id && l.to === entityId),
+      `the link must actually be stored: ${JSON.stringify(links.results)}`);
   });
 
   it('a NAME where an id belongs is refused, and the error names the value', async () => {
     const r = await post(INSTANCES.a, token, `/api/brain/spaces/${SPACE}/facts`, {
-      fact: 'links by name', entityIds: [`Traefik-${RUN}`],
+      fact: 'links by name', linkEntities: [`Traefik-${RUN}`],
     });
     assert.equal(r.status, 400, `expected a refusal, got ${r.status}: ${JSON.stringify(r.body)}`);
     assert.match(JSON.stringify(r.body), /Traefik/, 'the error must name the offending value');
@@ -69,7 +74,7 @@ describe('entity references must resolve', () => {
     // Format alone was never the point: a syntactically perfect id pointing at nothing stores just
     // as silently as a name did.
     const r = await post(INSTANCES.a, token, `/api/brain/spaces/${SPACE}/facts`, {
-      fact: 'links to a ghost', entityIds: [NONEXISTENT_UUID],
+      fact: 'links to a ghost', linkEntities: [NONEXISTENT_UUID],
     });
     assert.equal(r.status, 400, `expected a refusal, got ${r.status}: ${JSON.stringify(r.body)}`);
   });
@@ -130,7 +135,7 @@ describe('entity references must resolve', () => {
       assert.equal(set.status, 200, JSON.stringify(set.body));
 
       const r = await post(INSTANCES.a, token, `/api/brain/spaces/${lax}/facts`, {
-        fact: 'forward reference during an import', entityIds: ['created-later'],
+        fact: 'forward reference during an import', linkEntities: ['created-later'],
       });
       assert.equal(r.status, 201, `the opt-out must still accept a dangling ref: ${JSON.stringify(r.body)}`);
     } finally {

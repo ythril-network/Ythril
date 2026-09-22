@@ -145,23 +145,27 @@ describe('filter answers by entity name', () => {
    * 'only Alice's fact' see two and fail — a test that breaks its neighbours by ordering is the kind
    * of flake that gets blamed on the code.
    */
-  it('the LEGACY array form is found too, and the fixture proves both are live', async () => {
+  it('the 4.x array form is REFUSED, so there is one shape for this filter to read', async () => {
     /*
-     * A record names an entity two ways and both are documented: `linkEntities` writes a link record,
-     * `entityIds` writes the array (and mirrors a link). Reading either side alone drops records silently,
-     * and a space that has been written to since the upgrade holds both — which is every space that is not
-     * brand new. The fixture above uses `linkEntities`; this one adds the array form so the `$or` is
-     * exercised from both directions rather than only the one that was broken.
+     * This case used to write the array form and require the filter to find BOTH — the `$or` that made
+     * `entityName` complete while a record could name an entity two ways.
+     *
+     * 5.0 leaves one way. The write is refused by name, which is what keeps the filter honest: a caller
+     * on the old spelling is told, rather than storing a record the filter then cannot see. The assertion
+     * is therefore that nothing was stored — a `201` here would mean a fact exists that `entityName`
+     * answers nothing about.
      */
     const legacy = await post(INSTANCES.a, tokenA, `/api/brain/spaces/${SPACE}/facts`, {
       fact: `Alice approved the budget ${RUN}`, entityIds: [aliceId],
     });
-    assert.equal(legacy.status, 201, JSON.stringify(legacy.body));
+    assert.equal(legacy.status, 400, JSON.stringify(legacy.body));
+    assert.match(JSON.stringify(legacy.body), /linkEntities/,
+      'the refusal must name the field to send instead, or a caller cannot act on it');
 
     const r = await viaRest('filter', { space: SPACE, collection: 'facts', filter: {}, entityName: ALICE });
     assert.equal(r.status, 200, JSON.stringify(r.body));
     const facts = r.body.data.results.map(x => x.fact).sort();
-    assert.equal(facts.length, 2,
-      `both the link-record form and the array form must be found: ${JSON.stringify(facts)}`);
+    assert.equal(facts.length, 1,
+      `the refused write must not have landed: ${JSON.stringify(facts)}`);
   });
 });

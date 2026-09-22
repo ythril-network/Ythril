@@ -46,10 +46,10 @@ const entB = `trav-B-${RUN}`;
 const entC = `trav-C-${RUN}`;
 const entD = `trav-D-${RUN}`;
 const ghost = `trav-ghost-${RUN}`; // referenced by an edge but never created as an entity
-// A memory ABOUT the chain seed, joined to it by `entityIds` rather than by an edge. Written via sync so it
+// A memory ABOUT the chain seed, joined to it by a LINK rather than by an edge. Written via sync so it
 // is not embedded: it must be reached structurally, never by matching the query itself.
 const memLinked = `trav-mem-${RUN}`;
-let seedMemId = null;   // an embedded MEMORY seed, whose own entityIds names B
+let seedMemId = null;   // an embedded MEMORY seed, whose own link names B
 let siblingMemId = null; // a SECOND memory naming the same entity — the far side of the memory→entity→memory walk
 const DENSE_LEAVES = Array.from({ length: 30 }, (_, i) => `dense-leaf-${i}-${RUN}`);
 
@@ -124,13 +124,24 @@ async function syncEntity(space, id, name, seq) {
   });
 }
 
-async function syncMemory(space, id, fact, entityIds, seq) {
+/**
+ * A fact written through the SYNC door, plus the link records that join it to the entities it names.
+ *
+ * It used to send `entityIds` on the fact. 5.0 removed the arrays and links replicate as their own
+ * documents, so a peer sends the link — and the ingest schema is strict, which is why sending the old
+ * field here would now be a refusal rather than a silently linkless fact.
+ */
+async function syncMemory(space, id, fact, linkTo, seq) {
   const { post: syncPost } = await import('../sync/helpers.js');
   const now = new Date().toISOString();
   await syncPost(INSTANCES.a, token(), `/api/sync/facts?spaceId=${space}`, {
-    _id: id, spaceId: space, fact, entityIds, tags: [], embedding: [], embeddingModel: 'none',
+    _id: id, spaceId: space, fact, tags: [], embedding: [], embeddingModel: 'none',
     seq, author: { instanceId: 'test', instanceLabel: 'Test' }, createdAt: now, updatedAt: now,
   });
+  for (const to of linkTo ?? []) {
+    await post(INSTANCES.a, token(), `/api/brain/spaces/${space}/links`,
+      { from: id, fromKind: 'fact', to, toKind: 'entity' });
+  }
 }
 
 async function syncEdge(space, from, to, label, seq) {
@@ -187,7 +198,7 @@ before(async () => {
     await syncEdge(SPACE, seedAId, ghost, 'references', seq++);
   }
 
-  // A memory linked to the chain seed by `entityIds`. Not embedded, so it can only arrive through a link.
+  // A memory linked to the chain seed. Not embedded, so it can only arrive through that link.
   if (seedAId) await syncMemory(SPACE, memLinked, `Rotation runbook note ${RUN}`, [seedAId], seq++);
 
   /*
@@ -195,7 +206,7 @@ before(async () => {
    * of its own, so before 3.6 it came back with an empty `_graph` at any depth.
    *
    * It names `seedAId` rather than one of the synced entities because the space is strict-linkage and the
-   * route requires every `entityIds` value to be a UUID v4 that resolves to an entity. The synced fixtures
+   * route requires every `linkEntities` value to be a UUID v4 that resolves to an entity. The synced fixtures
    * are readable ids like `trav-B-…`, which the sync endpoint accepts and this route refuses — so linking to
    * one 400s. The status is asserted for the same reason it went unnoticed: a create whose failure is not
    * checked leaves `seedMemId` null, every later assertion looks for an id that is not there, and the
@@ -204,7 +215,7 @@ before(async () => {
   if (seedAId) {
     const seedMem = await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/facts`, {
       fact: `Wombat migration checklist ${RUN} covering marsupial burrow relocation`,
-      entityIds: [seedAId], tags: [],
+      linkEntities: [seedAId], tags: [],
     });
     assert.equal(seedMem.status, 201, `memory seed create failed: ${JSON.stringify(seedMem.body)}`);
     seedMemId = seedMem.body?._id ?? null;
@@ -222,7 +233,7 @@ before(async () => {
      */
     const sibling = await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/facts`, {
       fact: `Quarterly badge inventory ${RUN} for the north annexe`,
-      entityIds: [seedAId], tags: [],
+      linkEntities: [seedAId], tags: [],
     });
     assert.equal(sibling.status, 201, `sibling memory create failed: ${JSON.stringify(sibling.body)}`);
     siblingMemId = sibling.body?._id ?? null;
@@ -350,7 +361,7 @@ describe('Recall traverse — links, which are not edges', () => {
     if (!embeddingAvailable) return t.skip('embedding unavailable');
     /*
      * The backward-compatibility half, and the reason all three flags default off. A memory that names the
-     * seed in `entityIds` is related to it, and an ordinary `traverse: 1` must still not return it: a change
+     * seed through a LINK is related to it, and an ordinary `traverse: 1` must still not return it: a change
      * that silently widened the walk would spend the caller's byte budget on records they did not ask for.
      */
     const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({ query: q, types: ['entity'], topK: 10, traverse: 1 }) });
