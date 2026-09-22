@@ -15,7 +15,6 @@ import { col, asFilter } from '../db/mongo.js';
 import { primitivePropertyError } from './property-values.js';
 import { shapeError } from './write-shape.js';
 import { parseRecurrence } from './chrono.js';
-import { usesLinkRecords } from './link-adjacency.js';
 import { assertRefsResolve } from './entity-refs.js';
 import { getConfig } from '../config/loader.js';
 import {
@@ -104,31 +103,21 @@ export async function bulkWrite(spaceId: string, input: BulkInput): Promise<Bulk
   const mode = meta?.validationMode ?? 'off';
   const strict = isStrictLinkage(spaceId);
   /*
-   * `M-2`: on a converted space the six link arrays are no longer a write surface.
+   * `F-27` item 2, owner's ruling 2026-09-07: on this door a REFERENCE is existence-checked too.
    *
-   * Resolved ONCE for the batch rather than per item — the marker is a property of the space, and reading
-   * config inside a loop over a thousand items is a thousand lookups of a value that cannot change between
-   * them. Each item is still refused individually, so a batch reports which of its items were the problem
-   * instead of failing whole.
+   * This door was deliberately laxer than the single-record ones — references were checked for shape and
+   * never for existence, which is a defensible trade for a bulk import where records legitimately arrive
+   * in an order nobody controls.
    *
-   * ## `F-27` item 2, owner's ruling 2026-09-07: it also decides whether a REFERENCE is existence-checked
+   * It stopped being defensible once the correlation key made this the normal way to write a linked
+   * record. The operator said so plainly: their correspondence, deploy log and ticket updates would all
+   * move onto the door with the weaker guarantee, *"and a dangling `answers` edge is exactly the failure
+   * we would never notice — it reads as an unanswered post forever."*
    *
-   * This door is deliberately laxer than the single-record ones — references are checked for shape and never
-   * for existence, which is a defensible trade for a bulk import where records legitimately arrive in an
-   * order nobody controls.
-   *
-   * It stops being defensible once the correlation key makes this the normal way to write a linked record.
-   * The operator said so plainly: their correspondence, deploy log and ticket updates would all move onto the
-   * door with the weaker guarantee, *"and a dangling `answers` edge is exactly the failure we would never
-   * notice — it reads as an unanswered post forever."*
-   *
-   * Scoped to converted spaces rather than everywhere, which is exactly their concern: a space that has
-   * converted has already declared that links are the model. An unconverted space keeps the import trade.
-   *
-   * ONE flag for both, deliberately. They are the same question — has this space converted — and a second
-   * name for it is a second thing that can be read differently.
+   * It was scoped to CONVERTED spaces while a space could still be unconverted and keep the import trade.
+   * 5.0 leaves one shape — an unconverted space is refused rather than read — so the condition had one
+   * value left and is gone with the flag it read.
    */
-  const converted = usesLinkRecords(spaceId);
 
   /*
    * `F-27` item 2: what this call has minted, by the key its author gave it.
@@ -389,17 +378,15 @@ export async function bulkWrite(spaceId: string, input: BulkInput): Promise<Bulk
     if (!to) { errors.push({ type: 'edge', index: i, reason: 'missing required field: to' }); continue; }
     if (strict && !isWellFormedRef(toKind, to)) { errors.push({ type: 'edge', index: i, reason: `\`to\` must be a valid ${toKind} reference, not a name` }); continue; }
     /*
-     * `F-27` item 2: on a CONVERTED space both ends must EXIST.
+     * `F-27` item 2: both ends must EXIST.
      *
      * A `$ref` that resolved is existent by construction — it names a record this call just wrote — so this
      * costs nothing for the case the feature is for. What it catches is the literal id: a well-formed UUID
      * pointing at nothing, which this door has always stored and which becomes unacceptable once the batch
      * is how linked records are written.
      */
-    if (converted) {
-      const missing = await firstMissingEnd(spaceId, [[from, fromKind, 'from'], [to, toKind, 'to']]);
-      if (missing) { errors.push({ type: 'edge', index: i, reason: missing }); continue; }
-    }
+    const missing = await firstMissingEnd(spaceId, [[from, fromKind, 'from'], [to, toKind, 'to']]);
+    if (missing) { errors.push({ type: 'edge', index: i, reason: missing }); continue; }
     if (!label) { errors.push({ type: 'edge', index: i, reason: 'missing required field: label' }); continue; }
     const properties = optProps(item['properties']);
     const ttlDays = bulkTtlDays(item['ttlDays']);

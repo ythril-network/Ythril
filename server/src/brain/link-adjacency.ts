@@ -21,25 +21,20 @@
  * That was not a policy. It was three fields nobody had written a reader for, and every reader following a
  * different subset of the six is what `M-2` exists to end.
  *
- * ## Two storage shapes, one question, and the SELECTOR is in this file
+ * ## ONE storage shape since 5.0, and the refusal is in this file
  *
- * A link lives in two places during the transition:
+ * A link lived in two places through 4.x: an array on the record, and a link record in the space's
+ * `links` collection. 5.0 removed the arrays, so a link is one small document per connection, indexed
+ * both ways — which is what makes "what points at this?" one indexed lookup instead of a collection scan
+ * per class.
  *
- *   - the **array** on the record (`fact.entityIds` and its five siblings) — the 3.x shape, still written,
- *     still replicated, and the only thing a peer on an older build understands.
- *   - a **link record** in the space's `links` collection — one small document per connection, indexed both
- *     ways, which is what makes "what points at this?" one indexed lookup instead of one collection scan per
- *     class.
+ * What is left of the selector is a REFUSAL. `linkConversionRefusal` answers why a space cannot be read
+ * for links: its walk failed, so the records that replace its arrays were never written. Reading it
+ * anyway would answer "no links" for records that have plenty, and every reader would believe it.
  *
- * `usesLinkRecords` decides which a space is read through, and it is the ONLY place that decides. A reader
- * choosing for itself is how five readers came to follow five different subsets in the first place.
- *
- * **Both shapes answer all six classes.** The array path was widened rather than frozen, deliberately: it
- * means the three classes that never had a reader start working on every space immediately, and running the
- * conversion is a performance and consistency upgrade rather than a correctness prerequisite. An operator who
- * upgrades and runs nothing gets the fix; an operator who converts gets it faster.
- *
- * ## Deliberately not a migration
+ * **All six classes are answered.** The three that never had a reader — `chrono.memoryIds`,
+ * `file.memoryIds`, `file.chronoIds` — work on every converted space, which is every space that answers.
+ * * ## Deliberately not a migration
  *
  * Nothing here changes what is stored, what is embedded, or what crosses a sync.
  */
@@ -184,31 +179,6 @@ export function linkClassFor(kind: RefKind | 'edge', toKind: RefKind): LinkClass
 /** Every class a record of this kind holds — one for a fact, two for a chrono entry, three for a file. */
 export function linkClassesFrom(kind: RefKind | 'edge'): readonly LinkClass[] {
   return LINK_CLASSES.filter(c => c.kind === kind);
-}
-
-/**
- * Does this space answer adjacency from link RECORDS, or from the arrays?
- *
- * The one place that decides, for every reader. `completeLinkage` is set by the conversion script when it has
- * walked a space with no failures, and it is LOCAL — see `SpaceConfig.completeLinkage` for why a marker about
- * what has happened on one disk must not be a thing a network votes on.
- *
- * A space that has not converted has link records only for what was written since the upgrade, so reading
- * records alone there would answer about recent data and silently drop the rest.
- *
- * **THIS USED TO SAY the arrays are complete on every space, always, and that is what made them the
- * safe side of this branch. It stopped being true and nothing noticed.** `linkEntities` on a create
- * writes the link RECORD and leaves the array alone, so a record attached the way the integration
- * guide leads with has an empty `entityIds` — and `entityName`, which read the array, answered
- * `{facts: [], total: 0}` for it. Measured 2026-09-17; filed and fixed as `B-10`.
- *
- * So NEITHER side is complete on its own: the arrays miss what `linkEntities` wrote, the link records
- * miss what predates the upgrade. A reader that must not drop records asks for both —
- * `brain/entity-name-scope.ts` is that predicate. This branch remains right for ADJACENCY, where the
- * question is which reader a converted space should use rather than which records exist.
- */
-export function usesLinkRecords(spaceId: string): boolean {
-  return getConfig().spaces.find(s => s.id === spaceId)?.completeLinkage === true;
 }
 
 /**

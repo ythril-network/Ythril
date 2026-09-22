@@ -1,29 +1,27 @@
 /**
- * What a LINK is — collection, field, chunk rule, projection — is declared once and read from there.
+ * What a LINK is — collection, chunk rule, projection, label — is declared once and read from there.
  *
  * ## The four copies
  *
- * An edge is a record; a **link** is a field. A chrono entry, memory or file names the entities it concerns in
- * `entityIds`, and three readers scanned those collections to answer three different questions — what a graph
- * walk reaches, what blocks a delete, what the ER diagram draws — each carrying its own literal knowledge of
- * the collection name, the field, and the predicate that keeps file CHUNKS out.
+ * An edge is a record; a link says only that one record is ABOUT another. Three readers answered three
+ * different questions from it — what a graph walk reaches, what blocks a delete, what the ER diagram
+ * draws — each carrying its own literal knowledge of the collection, the field it read, and the predicate
+ * that keeps file CHUNKS out.
  *
- * **Only `traverseGraph` had the chunk rule.** Chunks live in the same collection as the file they came from
- * and are told apart only by `parentFileId`, so a scan without `{ $exists: false }` counts a forty-passage
- * document forty times. The other two readers had no such predicate.
- *
- * That was latent rather than live, and the distinction is worth keeping straight: the conversion pipeline
- * never writes `entityIds` onto a chunk, so nothing was actually double-counted — but `updateFileMeta` sets
- * `entityIds` on any filemeta record by id, chunk included, so it was reachable deliberately. One rule, three
- * implementations, and the weakest of them silently in charge of whether an entity can be deleted.
+ * **Only `traverseGraph` had the chunk rule.** Chunks live in the same collection as the file they came
+ * from and are told apart only by `parentFileId`, so a scan without `{ $exists: false }` counts a
+ * forty-passage document forty times. The other two readers had no such predicate.
  *
  * ## What this gate asserts
  *
- * Not "the module exists" — that a module nobody routes through is worse than no module, because it reads as
- * settled. It asserts that **no reader pairs a link collection with the link field on its own**, derived from
- * source rather than from a list of the three files that do it today.
+ * Not "the module exists" — a module nobody routes through is worse than no module, because it reads as
+ * settled. It asserts that **no reader decides for itself what a link row is**, derived from source
+ * rather than from a list of the files that read them today.
  *
- * Run: node --test testing/standalone/one-definition-of-a-link-class.test.js
+ * **5.0 moved where that mistake can happen and not what it is.** The six array fields are gone, so a
+ * rogue reader no longer filters a record collection on a link field — it opens the `links` collection
+ * by hand. Same rule, new spelling, and the chunk exclusion is still the half that gets dropped.
+ * * Run: node --test testing/standalone/one-definition-of-a-link-class.test.js
  * (requires a prior `npm run build` in server/)
  */
 import { describe, it } from 'node:test';
@@ -31,9 +29,9 @@ import assert from 'node:assert/strict';
 import { trackedSources } from './_sources.mjs';
 import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
-import { argumentsOf, statementAround } from './_structural-window.mjs';
+import { argumentsOf, statementAround, bodyOf } from './_structural-window.mjs';
 
-const { LINK_CLASSES, linkClassFor, linksToAny, hasAnyLink } =
+const { LINK_CLASSES, linkClassFor, legacyField } =
   await import('../../server/dist/brain/link-adjacency.js');
 
 const MODULE = 'server/src/brain/link-adjacency.ts';
@@ -43,7 +41,7 @@ function serverFiles() {
 }
 
 describe('the declaration answers for every link class', () => {
-  it('names all SIX, with a collection and a field each', () => {
+  it('names all SIX, with a collection and a label each', () => {
     /*
      * Six since 4.0, and the number is asserted as the SET rather than the count — a count of six is
      * satisfied by any six pairs, including a duplicate and a missing one.
@@ -54,20 +52,23 @@ describe('the declaration answers for every link class', () => {
      * about `chrono.memoryIds` was silently handed the `chrono.entityIds` class and scanned the wrong
      * field.
      */
-    const pairs = LINK_CLASSES.map(c => `${c.kind}.${c.field}`).sort();
-    assert.deepEqual(pairs, [
+    const labels = LINK_CLASSES.map(c => c.label).sort();
+    assert.deepEqual(labels, [
       'chrono.entityIds', 'chrono.memoryIds', 'fact.entityIds',
       'file.chronoIds', 'file.entityIds', 'file.memoryIds',
-    ], 'the six link classes are the six public array fields, one class each');
+    ], 'the six link classes, one label each');
 
+    /*
+     * The labels still READ like the 4.x array fields, and that is deliberate rather than left over. A
+     * link record's `_id` is a UUIDv5 over the pair, the kinds and the LABEL, so renaming one would
+     * re-key every link record on every instance. They are frozen tokens — see `legacyField`.
+     */
     for (const c of LINK_CLASSES) {
+      assert.equal(c.label, `${c.kind}.${legacyField(c.toKind)}`,
+        `${c.label} is not built from the frozen token, so its id would not match the one the writer computes`);
       assert.ok(c.collection, `${c.kind} has no collection`);
-      assert.ok(c.field, `${c.kind} has no link field`);
-      assert.ok(c.toKind, `${c.kind}.${c.field} does not say what it points AT`);
+      assert.ok(c.toKind, `${c.label} does not say what it points AT`);
       assert.ok(Object.keys(c.projection).length > 0, `${c.kind} has no projection`);
-      assert.ok(c.projection[c.field] === 1,
-        `${c.label} does not project its own link field, so a walk cannot tell which frontier node a `
-        + 'record hangs off and every synthetic edge it emits starts from the wrong end');
     }
   });
 
@@ -110,26 +111,20 @@ describe('the declaration answers for every link class', () => {
     }
   });
 
-  it('the file scope reaches both query builders, for every file class', () => {
-    for (const cls of LINK_CLASSES.filter(c => c.kind === 'file')) {
-      assert.match(JSON.stringify(linksToAny('s', cls, ['e1'])), /parentFileId/, `${cls.label} in linksToAny`);
-      assert.match(JSON.stringify(hasAnyLink(cls)), /parentFileId/, `${cls.label} in hasAnyLink`);
+  it('the file scope is applied where a file is RESOLVED, because a link row cannot carry it', () => {
+    /*
+     * The half that moved with the storage. A link row has no `parentFileId`, so the chunk exclusion
+     * cannot live in the link query at all — it has to be applied to the records the ids are read back
+     * as. Every helper that turns link rows into file records must therefore consult the class scope, or
+     * a forty-passage document comes back as forty nodes.
+     */
+    const src = stripComments(readFileSync(MODULE, 'utf8'));
+    for (const fn of ['docsFromCollection', 'scopedDocs']) {
+      const body = bodyOf(src, fn);
+      assert.match(body, /scope/,
+        `${fn} reads records named by link rows without applying the class scope, so a file's chunks `
+        + 'count as links to the file');
     }
-  });
-
-  it('linksToAny takes an array even for one id, so both callers share one shape', () => {
-    // A frontier scan passes many, a backlink scan passes one. Two query shapes is how the chunk predicate
-    // ended up on one of them and not the other in the first place.
-    assert.deepEqual(
-      linksToAny('sp', linkClassFor('chrono', 'entity'), ['a']),
-      { spaceId: 'sp', entityIds: { $in: ['a'] } },
-    );
-    // And it filters on the class's OWN field. Hardcoded `entityIds` here is the bug that would leave the
-    // three new classes looking implemented and answering about the wrong column.
-    assert.deepEqual(
-      linksToAny('sp', linkClassFor('chrono', 'fact'), ['a']),
-      { spaceId: 'sp', memoryIds: { $in: ['a'] } },
-    );
   });
 
   it('linkClassFor answers nothing for a kind that links by EDGE rather than by field', () => {
@@ -148,7 +143,7 @@ describe('the declaration answers for every link class', () => {
     assert.equal(linkClassFor('fact', 'chrono'), undefined);
     assert.equal(linkClassFor('chrono', 'chrono'), undefined, 'a chrono entry does not name chrono entries');
     assert.equal(linkClassFor('chrono', 'file'), undefined, 'a file names a chrono, never the other way');
-    assert.equal(linkClassFor('chrono', 'fact').field, 'memoryIds', 'and the pair that IS a class resolves');
+    assert.equal(linkClassFor('chrono', 'fact').label, 'chrono.memoryIds', 'and the pair that IS a class resolves');
   });
 });
 
@@ -183,36 +178,50 @@ describe('no reader re-derives a link class', () => {
     );
   });
 
-  it('any read that FILTERS on the link field goes through the shared builders', () => {
-    /*
-     * The FILTER argument, not the whole statement.
-     *
-     * A first version tested the statement text and reported three files that were entirely correct:
-     * `reindex.ts` and `face-embedder.ts` name `entityIds` in a PROJECTION, and one of them also as a local
-     * variable. Reading the field is not re-deriving what a link is — deciding which records carry one is,
-     * and that decision lives in the filter.
-     */
-    // EVERY link field, not one. Six classes name three distinct fields, and a sweep for `entityIds` alone
-    // would report a reader that filters on `memoryIds` as clean — which is exactly the kind of reader this
-    // gate exists to catch, arriving through the fields that only just gained readers.
-    const fields = [...new Set(LINK_CLASSES.map(c => c.field))];
-    const rogue = collectionReads()
-      .filter(r => {
-        const at = r.stmt.indexOf('.find(');
-        if (at === -1) return false;
-        const filterArg = argumentsOf(r.stmt, at + '.find'.length, 'the find filter')[0] ?? '';
-        return fields.some(f => new RegExp(`\\b${f}\\b`).test(filterArg))
-          && !/linksToAny\(|hasAnyLink\(/.test(filterArg);
-      })
-      .map(r => `${r.file} (${r.suffix})`);
-    assert.deepEqual(
-      rogue, [],
-      'A reader deciding for itself which records in a link collection carry a link keeps its own copy of what '
-      + 'a link IS — including whether file chunks count. That is how the chunk exclusion came to exist in the '
-      + 'graph walk and in neither the delete guard nor the ER diagram.',
-    );
-  });
+  /**
+   * Files that open the links collection for a reason that is NOT "what links does this record have".
+   *
+   * Each is checked to still do it, below, so an entry cannot outlive the code it excuses — a stale
+   * exemption is a rule nobody can trigger, and it hides that the file was renamed rather than fixed.
+   */
+  const NOT_A_LINK_READER = new Map(Object.entries({
+    'server/src/brain/links.ts':
+      'THE WRITER. It creates and removes link records, which is where the shape is decided rather than '
+      + 'read.',
+    'server/src/brain/links-conversion.ts':
+      'THE MIGRATION. It reads the 4.x arrays off disk and writes the records that replace them, so it is '
+      + 'the one reader of a shape the types no longer declare.',
+    'server/src/api/sync/docs.ts':
+      'REPLICATION, which pages a COLLECTION by `seq` and does not care what a row means. It treats links '
+      + 'exactly as it treats every other collection.',
+    'server/src/brain/merge.ts':
+      'A RE-KEY. When two entities become one, every link naming the absorbed id has to be rewritten to '
+      + 'name the survivor — an update over rows, not a question about a record.',
+    'server/src/spaces/lifecycle.ts':
+      'CREATION. It makes the collection and its indexes when a space is made; there is nothing to read.',
+  }));
 
+  it('nobody outside the module opens the LINKS collection to ask what a record links to', () => {
+    /*
+     * WHERE THE RULE MOVED. It used to be about a reader filtering a record collection on a link FIELD,
+     * and 5.0 removed the fields — so the same mistake now looks like a reader querying the `links`
+     * collection by hand instead of through this module's helpers.
+     *
+     * A file deciding for itself what a link row looks like is the copy that ends up disagreeing: about
+     * the chunk exclusion, about which class a pair belongs to, or about both.
+     */
+    const opens = (file) =>
+      /spaceCollection\(\w+, .links.\)/.test(stripComments(readFileSync(file, 'utf8')));
+    const rogue = serverFiles().filter(f => f !== MODULE && !NOT_A_LINK_READER.has(f) && opens(f));
+    assert.deepEqual(rogue, [],
+      'these open the links collection directly rather than through `link-adjacency.ts`, so each carries '
+      + 'its own idea of what a link row is — including whether a file chunk counts: ' + rogue.join(', '));
+
+    // And the exemptions are REAL, so one cannot outlive the code it excuses.
+    const stale = [...NOT_A_LINK_READER.keys()].filter(f => !opens(f));
+    assert.deepEqual(stale, [],
+      'these are exempted from the sweep and no longer open the collection at all: ' + stale.join(', '));
+  });
   it('the chunk rule is not spelled out again inside a LINK read', () => {
     /*
      * Scoped to link reads, and that scope is the correction.
