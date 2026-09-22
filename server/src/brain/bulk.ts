@@ -13,7 +13,6 @@
 
 import { col, asFilter } from '../db/mongo.js';
 import { primitivePropertyError } from './property-values.js';
-import { arrayWriteError } from './array-write-refusal.js';
 import type { WriteActor } from './legacy-array-writers.js';
 import { shapeError } from './write-shape.js';
 import { parseRecurrence } from './chrono.js';
@@ -169,8 +168,6 @@ export async function bulkWrite(spaceId: string, input: BulkInput): Promise<Bulk
     const properties = optProps(item['properties']);
     const ttlDays = bulkTtlDays(item['ttlDays']);
     if (ttlDays === TTL_INVALID) { errors.push({ type: 'fact', index: i, reason: TTL_INVALID_MSG }); continue; }
-    const linkArrErr = arrayWriteError({ converted, spaceId, body: item, actor: input.actor });
-    if (linkArrErr) { errors.push({ type: 'fact', index: i, reason: linkArrErr }); continue; }
     /*
      * `W-22`: THE CALLER-SUPPLIED `id`, which bulk ENTITIES read and these two ignored.
      *
@@ -287,8 +284,6 @@ export async function bulkWrite(spaceId: string, input: BulkInput): Promise<Bulk
     if (!title) { errors.push({ type: 'chrono', index: i, reason: 'missing required field: title' }); continue; }
     if (!allowedChronoTypes.has(type)) { errors.push({ type: 'chrono', index: i, reason: `\`type\` must be one of: ${[...allowedChronoTypes].join(', ')}` }); continue; }
     if (!startsAt) { errors.push({ type: 'chrono', index: i, reason: 'missing required field: startsAt' }); continue; }
-    const chronoLinkArrErr = arrayWriteError({ converted, spaceId, body: item, actor: input.actor });
-    if (chronoLinkArrErr) { errors.push({ type: 'chrono', index: i, reason: chronoLinkArrErr }); continue; }
     /*
      * `W-22`: THE CALLER-SUPPLIED `id`, which bulk ENTITIES read and these two ignored.
      *

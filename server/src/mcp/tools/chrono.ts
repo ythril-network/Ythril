@@ -1,8 +1,6 @@
 import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.js';
 import { shapeError } from '../../brain/write-shape.js';
 import { CHRONO_STATUSES } from '../../config/types.js';
-import { usesLinkRecords } from '../../brain/link-adjacency.js';
-import { arrayWriteError } from '../../brain/array-write-refusal.js';
 import { UUID_V4_RE, TTL_DAYS_SCHEMA, SUPPRESS_EMBEDDINGS_SCHEMA, SUPERSEDED_SCHEMA, ttlDaysFromArgs, recurrenceSchema, unitScoreSchema, uuidSchema } from './shared.js';
 import { ChronoFilter, createChrono, deleteChrono, getChronoById, listChrono, updateChrono, parseRecurrence } from '../../brain/chrono.js';
 // The API layer's write gate, imported rather than reimplemented — see the note in memory.ts.
@@ -144,11 +142,6 @@ export const save_chronoTool: ToolHandler = {
     // declare.
     const shapeErr = shapeError('chrono', a);
     if (shapeErr) throw new Error(shapeErr);
-    // `M-2`: on a converted space the six arrays are no longer a write surface — see `arrayWriteError`.
-    // Against the WRITE TARGET, because a proxy holds no records of its own and its marker would answer
-    // for a space it never writes to.
-    const linkArrErr = arrayWriteError({ converted: usesLinkRecords(wt.target), spaceId: wt.target, body: a, actor: ctx.actor });
-    if (linkArrErr) throw new Error(linkArrErr);
 
     // Schema validation (single pass)
     // Validate type against the space-specific allowlist (custom or default built-ins).
@@ -418,11 +411,6 @@ export const update_chronoTool: ToolHandler = {
     // declare.
     const shapeErr = shapeError('chrono', a);
     if (shapeErr) throw new Error(shapeErr);
-    // `M-2`: on a converted space the six arrays are no longer a write surface — see `arrayWriteError`.
-    // Against the WRITE TARGET, because a proxy holds no records of its own and its marker would answer
-    // for a space it never writes to.
-    const linkArrErr = arrayWriteError({ converted: usesLinkRecords(wt.target), spaceId: wt.target, body: a, actor: ctx.actor });
-    if (linkArrErr) throw new Error(linkArrErr);
 
     const updates: Record<string, unknown> = {};
     const sup = parseRecordSuppression(a);

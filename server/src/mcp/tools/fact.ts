@@ -7,8 +7,6 @@
 
 import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.js';
 import { shapeError } from '../../brain/write-shape.js';
-import { usesLinkRecords } from '../../brain/link-adjacency.js';
-import { arrayWriteError } from '../../brain/array-write-refusal.js';
 import { validateDeleteFields } from '../../brain/delete-fields.js';
 import { findEntitiesByIds } from '../../brain/entities.js';
 import { assertRefsResolve, UUID_V4_PATTERN } from '../../brain/entity-refs.js';
@@ -109,11 +107,6 @@ export const save_factTool: ToolHandler = {
     // declare.
     const shapeErr = shapeError('fact', a);
     if (shapeErr) throw new Error(shapeErr);
-    // `M-2`: on a converted space the six arrays are no longer a write surface — see `arrayWriteError`.
-    // Against the WRITE TARGET, because a proxy holds no records of its own and its marker would answer
-    // for a space it never writes to.
-    const linkArrErr = arrayWriteError({ converted: usesLinkRecords(wt.target), spaceId: wt.target, body: a, actor: ctx.actor });
-    if (linkArrErr) throw new Error(linkArrErr);
     const ts = wt.target;
 
     // Schema validation (single pass — reuse for both strict gate and warn output)
@@ -307,11 +300,6 @@ export const update_factTool: ToolHandler = {
     // declare.
     const shapeErr = shapeError('fact', a);
     if (shapeErr) throw new Error(shapeErr);
-    // `M-2`: on a converted space the six arrays are no longer a write surface — see `arrayWriteError`.
-    // Against the WRITE TARGET, because a proxy holds no records of its own and its marker would answer
-    // for a space it never writes to.
-    const linkArrErr = arrayWriteError({ converted: usesLinkRecords(wt.target), spaceId: wt.target, body: a, actor: ctx.actor });
-    if (linkArrErr) throw new Error(linkArrErr);
 
     // Validate deleteFields
     const dfResult = validateDeleteFields(a['deleteFields']);

@@ -7,8 +7,6 @@ import { Router } from 'express';
 import { requestActor } from '../../auth/request-actor.js';
 import { shapeError } from '../../brain/write-shape.js';
 import { entityDeleteBlockers } from '../../brain/entity-delete-guard.js';
-import { usesLinkRecords } from '../../brain/link-adjacency.js';
-import { arrayWriteError } from '../../brain/array-write-refusal.js';
 import { connectionInputError, applyConnections, CONNECTION_BODY_KEYS, desiredLinksFrom, edgeInputsFrom } from '../../brain/write-connections.js';
 import { WIPE_COLLECTION_TYPES, type WipeCollectionType, wipeSpace } from '../../spaces/lifecycle.js';
 import { assertRefsResolve } from '../../brain/entity-refs.js';
@@ -67,12 +65,6 @@ memoriesRouter.post('/spaces/:spaceId/facts', globalRateLimit, requireSpaceAuth,
   // Proxy space: resolve target space for write
   const wt = resolveWriteTarget(spaceId, req.query['targetSpace'] as string | undefined);
   if (!wt.ok) { res.status(400).json({ error: wt.error }); return; }
-  // `M-2`: on a converted space the six arrays are no longer a write surface — see `arrayWriteError`.
-  // Checked against the WRITE TARGET, which on a proxy is the member space that will hold the record: the
-  // proxy itself holds nothing and its own marker would answer for a space it never writes to.
-  const linkArrErr = arrayWriteError({ converted: usesLinkRecords(wt.target), spaceId: wt.target, body: req.body,
-    actor: requestActor(req) });
-  if (linkArrErr) { res.status(400).json({ error: linkArrErr }); return; }
   const targetSpace = wt.target;
   const { fact, tags = [], entityIds = [], description, properties, type: memoryType } = req.body ?? {};
   if (!fact || typeof fact !== 'string') {
@@ -248,12 +240,6 @@ memoriesRouter.patch('/spaces/:spaceId/facts/:id', globalRateLimit, requireSpace
   }
   const wt = resolveWriteTarget(spaceId, req.query['targetSpace'] as string | undefined);
   if (!wt.ok) { res.status(400).json({ error: wt.error }); return; }
-  // `M-2`: on a converted space the six arrays are no longer a write surface — see `arrayWriteError`.
-  // Checked against the WRITE TARGET, which on a proxy is the member space that will hold the record: the
-  // proxy itself holds nothing and its own marker would answer for a space it never writes to.
-  const linkArrErr = arrayWriteError({ converted: usesLinkRecords(wt.target), spaceId: wt.target, body: req.body,
-    actor: requestActor(req) });
-  if (linkArrErr) { res.status(400).json({ error: linkArrErr }); return; }
   const ifMatch = ifMatchFromRequest(req);
   if (!ifMatch.ok) { res.status(400).json({ error: ifMatch.error }); return; }
   const { fact, tags, entityIds, description, properties, deleteFields, type: memoryType } = req.body ?? {};

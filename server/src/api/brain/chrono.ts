@@ -6,8 +6,6 @@
 import { Router } from 'express';
 import { requestActor } from '../../auth/request-actor.js';
 import { shapeError } from '../../brain/write-shape.js';
-import { usesLinkRecords } from '../../brain/link-adjacency.js';
-import { arrayWriteError } from '../../brain/array-write-refusal.js';
 import { requireSpaceAuth, denyReadOnly } from '../../auth/middleware.js';
 import { unknownFieldWarnings } from './unknown-fields.js';
 import { globalRateLimit } from '../../rate-limit/middleware.js';
@@ -62,12 +60,6 @@ chronoRouter.post('/spaces/:spaceId/chrono', globalRateLimit, requireSpaceAuth, 
   }
   const wt = resolveWriteTarget(spaceId, req.query['targetSpace'] as string | undefined);
   if (!wt.ok) { res.status(400).json({ error: wt.error }); return; }
-  // `M-2`: on a converted space the six arrays are no longer a write surface — see `arrayWriteError`.
-  // Checked against the WRITE TARGET, which on a proxy is the member space that will hold the record: the
-  // proxy itself holds nothing and its own marker would answer for a space it never writes to.
-  const linkArrErr = arrayWriteError({ converted: usesLinkRecords(wt.target), spaceId: wt.target, body: req.body,
-    actor: requestActor(req) });
-  if (linkArrErr) { res.status(400).json({ error: linkArrErr }); return; }
 
   const { title, type, startsAt, endsAt, status, confidence, tags, entityIds, memoryIds, description, properties, recurrence } = req.body ?? {};
   // `recurrence` was previously persisted straight from the request body with NO shape
@@ -236,12 +228,6 @@ chronoRouter.patch('/spaces/:spaceId/chrono/:id', globalRateLimit, requireSpaceA
   }
   const wt = resolveWriteTarget(spaceId, req.query['targetSpace'] as string | undefined);
   if (!wt.ok) { res.status(400).json({ error: wt.error }); return; }
-  // `M-2`: on a converted space the six arrays are no longer a write surface — see `arrayWriteError`.
-  // Checked against the WRITE TARGET, which on a proxy is the member space that will hold the record: the
-  // proxy itself holds nothing and its own marker would answer for a space it never writes to.
-  const linkArrErr = arrayWriteError({ converted: usesLinkRecords(wt.target), spaceId: wt.target, body: req.body,
-    actor: requestActor(req) });
-  if (linkArrErr) { res.status(400).json({ error: linkArrErr }); return; }
   const ifMatch = ifMatchFromRequest(req);
   if (!ifMatch.ok) { res.status(400).json({ error: ifMatch.error }); return; }
 

@@ -1,6 +1,4 @@
 import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.js';
-import { usesLinkRecords } from '../../brain/link-adjacency.js';
-import { arrayWriteError } from '../../brain/array-write-refusal.js';
 import { recall } from '../../brain/recall.js';
 import { TTL_DAYS_SCHEMA, filePathSchema, ttlDaysFromArgs } from './shared.js';
 import { type InputFormat } from '../../files/converters/pipeline.js';
@@ -564,11 +562,6 @@ export const update_file_metaTool: ToolHandler = {
 
     const wt = resolveWriteTarget(callSpace, a['targetSpace'] as string | undefined);
     if (!wt.ok) throw new Error(wt.error);
-    // `M-2`: on a converted space the six arrays are no longer a write surface — see `arrayWriteError`.
-    // Against the WRITE TARGET, because a proxy holds no records of its own and its marker would answer
-    // for a space it never writes to.
-    const linkArrErr = arrayWriteError({ converted: usesLinkRecords(wt.target), spaceId: wt.target, body: a, actor: ctx.actor });
-    if (linkArrErr) throw new Error(linkArrErr);
 
     const { isStrictLinkage } = await import('../../spaces/proxy.js');
     const { assertRefsResolve } = await import('../../brain/entity-refs.js');

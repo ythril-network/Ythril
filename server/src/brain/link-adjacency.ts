@@ -201,13 +201,47 @@ export function usesLinkRecords(spaceId: string): boolean {
 }
 
 /**
- * The filter matching records of this class that link to ANY of `ids` — the ARRAY shape.
+ * Why a space cannot be read for links, or `null` when it can.
  *
- * `$in` rather than an equality even for a single id, so a frontier and a single-record backlink scan use one
- * shape. Callers that want one id pass a one-element array.
+ * ## The failure it exists to make loud, and it arrives in 5.0
+ *
+ * With the six array fields removed there is ONE shape, so `completeLinkage` stops being a choice and
+ * becomes an invariant: a space either has its links as records or it has not been converted. And a space
+ * that has not been converted **still holds its pre-upgrade links in arrays that no longer exist**, so
+ * reading its link records answers about what was written since the upgrade and silently drops the rest.
+ *
+ * The boot conversion runs for every unmarked space and deliberately **does not refuse the boot** when one
+ * space's walk throws — correct, because one bad space must not stop an instance. What must not follow is
+ * that space answering *"no links"* to every traversal, every backlink scan and every delete guard, which
+ * is what an empty result means to each of them. So it is refused, by name, with the command that fixes it.
+ *
+ * ## Why it takes the space record rather than reading the config
+ *
+ * So the rule can be exercised. Everything else here resolves a space id through `getConfig()`, which a
+ * unit test cannot drive — and the assertion that a refusal is a THROW rather than an empty array is
+ * exactly the kind that gets written as a source grep and proves nothing.
+ *
+ * @param space the space's config record, or `undefined` when no such space is configured
  */
-export function linksToAny(spaceId: string, cls: LinkClass, ids: readonly string[]): Record<string, unknown> {
-  return { spaceId, [cls.field]: { $in: [...ids] }, ...cls.scope };
+export function linkConversionRefusal(space: { id: string; completeLinkage?: boolean } | undefined): string | null {
+  if (!space) return null;
+  if (space.completeLinkage === true) return null;
+  return `space '${space.id}' has no converted link records, so its connections cannot be read. The boot `
+    + 'conversion runs for every space and does not stop the instance when one space fails, so this space '
+    + 'was left behind by a failure that IS in the startup log. Answering with no links would be a lie '
+    + 'every reader believes. Run `npm run links:convert` — a full run walks every space and marks the '
+    + 'ones that finish cleanly — and read what it reports about this one.';
+}
+
+/**
+ * Refuse a link read on a space whose links were never converted. See `linkConversionRefusal`.
+ *
+ * An unknown space is NOT this function's business — every caller has already resolved and authorised the
+ * space, and turning "no such space" into a link error here would replace a clear 404 with a confusing one.
+ */
+export function assertLinkRecords(spaceId: string): void {
+  const refusal = linkConversionRefusal(getConfig().spaces.find(s => s.id === spaceId));
+  if (refusal) throw new Error(refusal);
 }
 
 /** The filter matching records of this class that have ANY link at all — the ER diagram's scan. */

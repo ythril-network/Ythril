@@ -872,7 +872,7 @@ export async function traverseGraph(
     // Bounded by THIS walk's node cap. Without it one hub entity returns its whole mention set per class per
     // member space per hop, and the cap below cannot help because it counts records after they are hydrated.
     const { records: linkedHere, scanCapped: hopScanCapped } = await linkedRecordsAtFrontier(
-      memberIds, frontier, frontierSet, visited,
+      memberIds, frontier, visited,
       { includeChrono, includeMemories, includeFiles }, edgeLabels,
       Math.max(0, limit - resultNodes.length));
 
