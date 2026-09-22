@@ -7,6 +7,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **An integration file stopped testing anything the day 5.0 shipped, and reported itself as skipped**
+  (`Q-38`). `a-traversed-recall-returns-whole-graphs` sent `includeFreshWrites: true` on every recall.
+  5.0 removed that parameter, so every call answered `400` — and the file's own fixture guard turned that
+  into a skip, saying *"could not measure the full traversed answer"*, which reads as a fixture that
+  could not be built.
+
+  **A test that skips is indistinguishable from one that passes in every summary anybody reads.** The
+  measuring call asserts its status now, so a refusal fails loudly instead of disappearing into a guard
+  written for a different problem.
+
+  **Waking it found a SECOND 5.0 change it had been too inert to notice**, which is the argument for
+  doing this rather than deleting the file: `recall`'s hit became `{score, spaceId, type, record}`,
+  so every `r._id` read `undefined`. The comparison keyed every graph on that same `undefined`,
+  collapsed to one entry, and compared one hub's subtree against a different hub's — reporting *"the
+  graph on undefined differs"*, which is the tell. One accessor now reads the record, and it falls
+  back to the hit itself rather than asserting which shape it got.
+
+  A gate derives the allowed parameter names from the `recall` tool's own input schema — which IS the
+  REST body's schema, because the route hands its body to `callTool` — and refuses any test sending a
+  name that is not one of them. A parameter renamed or removed next year is covered as it stands.
+
+- **A missing import in a Docker-only suite now fails in `preflight` instead of in CI.** Adding the
+  index wait above to four files and the import to three of them threw `waitForIndexed is not
+  defined` inside a `before` — which CANCELS every subtest under it, so one missing word reported as
+  **eight failures**, seven of them saying only *"test did not finish before its parent and was
+  cancelled"*.
+
+  There is no ESLint here to lean on, and `preflight` cannot run the integration, sync or red-team
+  suites because they need Docker — so that class of mistake was invisible locally and cost a full
+  CI round trip. A gate derives the helper names from the shared module and checks those three
+  directories, which is where the cost is: a standalone gate with the same mistake fails the moment
+  anybody runs preflight.
+
+- **Three tests recalled a record they had just written without waiting for the vector index** (`Q-38`).
+  Recall's fresh-write scan covers a record whose embedding is still PENDING, so there is a window —
+  after the embed job finishes and before `$vectorSearch` holds the vector — where neither path finds it.
+  A test landing in it fails saying its own control is missing, which reads as a defect in the thing
+  under test.
+
+  **Pinning a seed by `_id` is not an exemption**, which is what two of the three assumed: recall ranks,
+  and a filter narrows what `$vectorSearch` may return rather than replacing it.
+
+  **Read one by one rather than swept.** Of the fifteen recall tests with no wait, most are right without
+  one: some assert a refusal, some assert only a status, and `result-spill-both-doors` deliberately
+  relies on the fresh-write scan and records the measurement behind that choice — waiting there hit the
+  index-lag timeout and failed twelve assertions for a reason unrelated to its subject.
+
 ## [5.0.1] — 2026-09-22
 
 **A read was logged as a write on the MCP door, so an operator who had turned read logging OFF still got

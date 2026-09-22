@@ -50,7 +50,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post } from '../sync/helpers.js';
+import { INSTANCES, post, waitForIndexed } from '../sync/helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, '..', 'sync', 'configs');
@@ -98,6 +98,16 @@ before(async () => {
   // THE CONTROL: one edge, one target, nothing to compete with. If this goes missing the walk is broken
   // rather than incomplete, and every failure below would be misread.
   ids.soloEdge = must('control edge', await edge('contains', ids.hub, ids.solo));
+
+  /*
+   * The seed is pinned by `_id`, and that is NOT the same as not needing the index. Recall ranks: the
+   * filter narrows what `$vectorSearch` may return, it does not replace it, so a hub whose vector has
+   * not landed yet produces an empty answer and every case below reads as a walk that reached nothing.
+   *
+   * Only the hub is waited for. The pair and solo nodes are reached THROUGH the walk, which is the
+   * subject here — waiting for them too would hide the case where the expansion never ran.
+   */
+  await waitForIndexed(INSTANCES.a, tokenA, SPACE, [ids.hub], ['entity']);
 });
 
 after(async () => {

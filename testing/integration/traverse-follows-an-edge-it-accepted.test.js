@@ -53,7 +53,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post } from '../sync/helpers.js';
+import { INSTANCES, post, waitForIndexed } from '../sync/helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, '..', 'sync', 'configs');
@@ -112,6 +112,17 @@ before(async () => {
     { name: `Beta ${RUN}`, type: 'company' }));
   ids.worksAt = must('entity->entity edge', await P(`/api/brain/spaces/${SPACE}/edges`,
     { from: ids.person, to: ids.company, label: 'works_at' }));
+
+  /*
+   * The recall below pins its seed with `filter: { _id: ids.newer }`, and pinning is NOT the same as not
+   * needing the index. Recall RANKS: the filter narrows what `$vectorSearch` may return rather than
+   * replacing it, so a fact whose vector has not landed yet answers empty and the case reads as a walk
+   * that refused an edge it should have followed.
+   *
+   * The seed only. Everything else in this fixture is reached THROUGH the walk, which is the subject —
+   * waiting for those too would hide the case where the expansion never ran at all.
+   */
+  await waitForIndexed(INSTANCES.a, tokenA, SPACE, [ids.newer], ['fact']);
 });
 
 after(async () => {
