@@ -178,7 +178,7 @@ describe('the collection every link scan reads is indexed', () => {
     assert.match(ensure, /LINK_INDEXES/,
       'the backfill writes its own index list, so a link index added at creation reaches every NEW space '
       + 'and no existing one — which is the failure this case exists for');
-    assert.match(ensure, /_links`\)\.createIndex\(ix\.keys/,
+    assert.match(ensure, /spaceCollection\(space\.id, 'links'\)\)\.createIndex\(ix\.keys/,
       'the backfill must create each declared index on the links collection itself');
   });
   it('the backfill still reports how many calls it issued', () => {
