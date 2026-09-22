@@ -298,7 +298,6 @@ export const TOOL_RIGHTS: readonly ToolRight[] = [
   { tool: 'delete_link', area: 'knowledge', needs: 'write' },
   // Reads who wrote a space's legacy link arrays — a view of that space's data, so the same area as the two
   // above at the lowest rung, matching its REST twin's `ROUTE_RIGHTS` row.
-  { tool: 'graph_link_preflight', area: 'knowledge', needs: 'read' },
   { tool: 'save_chrono', area: 'knowledge', needs: 'write' },
   { tool: 'update_chrono', area: 'knowledge', needs: 'write' },
   { tool: 'delete_chrono', area: 'knowledge', needs: 'write' },

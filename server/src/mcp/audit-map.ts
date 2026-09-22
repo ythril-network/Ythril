@@ -57,7 +57,6 @@ export const MCP_TOOL_OPERATIONS: Record<string, string | string[] | null> = {
   delete_edge: 'edge.delete',
   save_link: 'link.create',
   delete_link: 'link.delete',
-  graph_link_preflight: 'link.convert_preflight',
   save_chrono: 'chrono.create',
   update_chrono: 'chrono.update',
   delete_chrono: 'chrono.delete',

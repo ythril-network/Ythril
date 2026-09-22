@@ -13,7 +13,6 @@
 
 import { col, asFilter } from '../db/mongo.js';
 import { primitivePropertyError } from './property-values.js';
-import type { WriteActor } from './legacy-array-writers.js';
 import { shapeError } from './write-shape.js';
 import { parseRecurrence } from './chrono.js';
 import { usesLinkRecords } from './link-adjacency.js';
@@ -54,13 +53,6 @@ export interface BulkInput {
   entities?: unknown;
   edges?: unknown;
   chrono?: unknown;
-  /**
-   * Who is writing, threaded through so the array-write inspection can record it (`F-25`).
-   *
-   * Optional in the type and supplied by both doors: this function is also reachable from a test, and a
-   * required field there would only be satisfied with a placeholder that is worse than an honest `unknown`.
-   */
-  actor?: WriteActor;
 }
 
 export interface BulkResult {

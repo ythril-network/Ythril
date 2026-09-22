@@ -486,22 +486,6 @@ export async function dropSpaceData(spaceId: string): Promise<string[]> {
     log.warn(msg);
     errors.push(msg);
   }
-  // 2c. Forget who wrote its legacy link arrays.
-  //
-  // The SAME reason as 2b, and finding that out is why 2b's comment is worth keeping rather than trimming:
-  // `_legacy_array_writers` is instance-wide, keyed by `spaceId`, so the prefix drop above cannot reach it
-  // either. A space recreated with the same id would have its conversion pre-flight report writers that
-  // wrote to its predecessor -- a wrong answer that looks like a right one, to an operator about to decide
-  // something on it.
-  try {
-    const { purgeLegacyArrayWriters } = await import('../brain/legacy-array-writers.js');
-    const purged = await purgeLegacyArrayWriters(spaceId);
-    if (purged > 0) log.debug(`Purged ${purged} legacy array-writer note(s) for space '${spaceId}'`);
-  } catch (err) {
-    const msg = `Could not purge legacy array-writer notes for '${spaceId}': ${err}`;
-    log.warn(msg);
-    errors.push(msg);
-  }
   // 3. Delete the space files directory
   const filesDir = path.resolve(getDataRoot(), 'files', spaceId);
   try {

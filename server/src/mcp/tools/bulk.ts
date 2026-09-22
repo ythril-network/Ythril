@@ -246,7 +246,6 @@ export const save_bulkTool: ToolHandler = {
     const result = await bulkWrite(ts, {
       facts: a['facts'], entities: a['entities'], edges: a['edges'], chrono: a['chrono'],
       // `F-25`: who wrote it, for the conversion pre-flight.
-      actor: ctx.actor,
     });
     if (bulkWriteTotal(result) > 0) {
       // Bulk suppresses per-item webhooks; emit ONE summary a workflow can inspect.

@@ -145,7 +145,6 @@ export async function redactExpiredChanges(now: number = Date.now()): Promise<nu
   }
 }
 
-import { sweepLegacyArrayWriterNotes } from '../brain/legacy-array-writers.js';
 
 const SWEEP_INTERVAL_MS = 6 * 60 * 60 * 1000;   // 6h — the same cadence as the other housekeeping sweeps
 let _timer: NodeJS.Timeout | null = null;
@@ -161,16 +160,6 @@ export function startAuditChangeRetention(): void {
   if (_timer) return;
   _timer = setInterval(() => {
     void redactExpiredChanges();
-    /*
-     * The conversion pre-flight's notes age out on the same timer, and riding this one is the point.
-     *
-     * They are a different collection with a much longer clock — a note holds a token id and a field name
-     * and no user content, which is why it can be kept for 90 days where a `changes` array cannot. What
-     * they share is being housekeeping nobody will remember to schedule, and a second unref'd 6-hourly
-     * timer to sweep one small collection is a second thing that can be forgotten to start.
-     */
-    void sweepLegacyArrayWriterNotes()
-      .catch(err => log.warn(`Legacy array-writer note sweep: ${err}`));
   }, SWEEP_INTERVAL_MS);
   _timer.unref();   // housekeeping must never hold the process open
   log.debug('Audit change-retention sweep started');
