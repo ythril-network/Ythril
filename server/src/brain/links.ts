@@ -451,22 +451,3 @@ export async function reconcileLinksForDocument(
   return await reconcileLinks(spaceId, docId, fromKind, desired, author ?? NO_AUTHOR, opts);
 }
 
-/**
- * Reconcile a whole PAGE of documents that arrived for one collection, or do nothing if it holds no links.
- *
- * The sync engine's pull applier is handed a collection NAME and a batch, and has no record kind in scope.
- * Deciding here rather than there keeps the collection-to-kind question in this module with everything else
- * about links — and keeps the caller to one line, which is what the god-file ratchet on that file asked for
- * when the first version of this put ten lines and a lookup table into it.
- */
-export async function reconcileLinksForPage(
-  spaceId: string,
-  collectionSuffix: string,
-  docs: readonly { _id: string }[],
-): Promise<void> {
-  const fromKind = LINK_BEARING_COLLECTIONS[collectionSuffix];
-  if (!fromKind) return;
-  for (const doc of docs) {
-    await reconcileLinksForDocument(spaceId, doc._id, fromKind, doc as unknown as Record<string, unknown>);
-  }
-}
