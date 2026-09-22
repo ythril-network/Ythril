@@ -68,7 +68,7 @@ describe('face labels cascade when their person is deleted', { skip }, () => {
     mongo = await openTestMongo('facecascade');
     fs.writeFileSync(CONFIG_PATH, JSON.stringify({
       instanceId: 'face-cascade-test', instanceLabel: 'test', tokens: [], networks: [],
-      spaces: [{ id: SPACE, label: 'General', builtIn: true, folders: [] }],
+      spaces: [{ id: SPACE, label: 'General', builtIn: true, folders: [], completeLinkage: true }],
     }, null, 2), { mode: 0o600 });
     const loader = await import('../../server/dist/config/loader.js');
     loader.loadConfig();

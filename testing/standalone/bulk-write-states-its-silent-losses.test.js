@@ -36,7 +36,7 @@ import { stripComments } from './_strip-comments.mjs';
 
 const TOOL = stripComments(readFileSync('server/src/mcp/tools/bulk.ts', 'utf8'));
 const CORE = stripComments(readFileSync('server/src/brain/bulk.ts', 'utf8'));
-const MEMORY_TOOL = stripComments(readFileSync('server/src/mcp/tools/fact.ts', 'utf8'));
+const LINKS = stripComments(readFileSync('server/src/brain/links.ts', 'utf8'));
 
 const DESC = (() => {
   const at = TOOL.indexOf("name: 'save_bulk'");
@@ -89,30 +89,30 @@ describe('partial success is stated as the trap it is', () => {
   });
 });
 
-describe('the reference-checking asymmetry is stated', () => {
-  it('says shape is always checked, and existence only on a converted space', () => {
+describe('the reference-checking asymmetry is stated — and that it is GONE', () => {
+  it('says shape and existence are both checked, as the single-record tools check them', () => {
     /*
-     * This asserted `SHAPE, NEVER FOR EXISTENCE` — true until `F-27` item 2, when the owner ruled that a
-     * space using link records checks resolution here as everywhere else. Re-pointed rather than relaxed:
-     * the description still has to state BOTH halves, because "sometimes" is the one answer a caller cannot
-     * act on.
+     * This asserted `SHAPE, NEVER FOR EXISTENCE`, then `EXISTENCE ONLY ON A CONVERTED SPACE` when `F-27`
+     * item 2 made it conditional. 5.0 removed the second shape, so the condition has one value and the
+     * asymmetry is over — but the description still has to SAY so, because a caller who built around the
+     * looser door is the person this text is for.
      */
-    assert.match(DESC, /CHECKED FOR SHAPE/, 'the half that is always true');
-    assert.match(DESC, /EXISTENCE ONLY ON A CONVERTED SPACE/i, 'and the condition on the other half');
-    assert.match(DESC, /UNCONVERTED/i, 'stated from both sides, or a reader has to infer the complement');
+    assert.match(DESC, /CHECKED FOR SHAPE AND FOR EXISTENCE/i, 'both halves, unconditionally');
+    assert.match(DESC, /CONVERTED SPACE/i,
+      'and what the condition used to be, or a caller written against 4.x cannot tell their dangling-link '
+      + 'trade is gone');
   });
 
-  it('states the COST of the asymmetry, and what to do about it', () => {
+  it('states what a caller who relied on the trade has to do now', () => {
     /*
-     * The reason used to be given as forward references, which was false — see the note at the top. What is
-     * left is the honest half: the caller has to know a dangling link can land here, and how to find one.
+     * The cost moved sides. It used to be *"this door can write a dangling link"*; it is now *"an import
+     * that used to land will be refused"*, and the caller needs to know which reference to fix.
      */
-    assert.match(DESC, /dangling link/i, 'a caller cannot act on an asymmetry whose consequence is unstated');
+    assert.match(DESC, /refused/i, 'a caller cannot act on a tightening whose consequence is unstated');
     // The tool it names was `traverse` until 5.0 renamed it. Pinned to the LIVE name, so this case
     // fails if the pointer rots again rather than preserving the rot.
-    assert.match(DESC, /`graph_traverse`/, 'and needs to be told how to find one after a large import');
+    assert.match(DESC, /`graph_traverse`/, 'and needs to be told how to check linkage after a large import');
   });
-
   it('and does NOT offer a forward reference as the reason', () => {
     // The claim itself is gated across all five surfaces elsewhere; this is the local floor, so a rewrite of
     // this description cannot quietly reintroduce it while these cases stay green.
@@ -129,11 +129,17 @@ describe('the reference-checking asymmetry is stated', () => {
      * pin the old behaviour — what has to hold is that the description states the condition, so the claim
      * and the code cannot drift apart.
      */
-    assert.match(CORE, /assertRefsResolve/, 'a converted space must check that a reference resolves');
+    assert.match(CORE, /firstMissingEnd\(/, 'and existence, which is no longer conditional');
     assert.match(DESC, /CONVERTED SPACE/i,
-      'the description must say WHEN existence is checked, or the asymmetry it describes is simply wrong');
-    assert.match(MEMORY_TOOL, /assertRefsResolve\(/,
-      'and the single-record path still resolves, which is what makes this a contrast');
+      'the description must say what the condition USED to be, or a caller written against 4.x has no way '
+      + 'to tell that their dangling-link trade is gone');
+    /*
+     * The single-record path resolves at the WRITER since 5.0 — `reconcileLinks` asserts every named class
+     * exists — rather than at each door. Asserting on the tool file would pin the old location and fail on
+     * the change that made the check true of `linkEntities` as well, which never had one.
+     */
+    assert.match(LINKS, /assertRefsResolve\(/,
+      'the single-record path must still resolve, which is what makes the shapes agree');
   });
 });
 
