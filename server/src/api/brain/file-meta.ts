@@ -314,7 +314,7 @@ fileMetaRouter.patch('/spaces/:spaceId/files', globalRateLimit, requireSpaceAuth
     return;
   }
 
-  const { description, tags, entityIds, chronoIds, memoryIds, properties, deleteFields } = req.body ?? {};
+  const { description, tags, properties, deleteFields } = req.body ?? {};
   // X-6: `properties` MERGE on this route now, matching the four brain types. `deleteFields` lands with the
   // merge and not after it — the merge alone would remove the only way a file property could be cleared, so
   // shipping them apart trades one silent data loss for a stale key nobody can delete.
@@ -324,29 +324,20 @@ fileMetaRouter.patch('/spaces/:spaceId/files', globalRateLimit, requireSpaceAuth
     ? deleteFields as string[]
     : undefined;
   if (tags !== undefined && !Array.isArray(tags)) { res.status(400).json({ error: '`tags` must be an array' }); return; }
-  if (entityIds !== undefined && !Array.isArray(entityIds)) { res.status(400).json({ error: '`entityIds` must be an array' }); return; }
-  if (chronoIds !== undefined && !Array.isArray(chronoIds)) { res.status(400).json({ error: '`chronoIds` must be an array' }); return; }
-  if (memoryIds !== undefined && !Array.isArray(memoryIds)) { res.status(400).json({ error: '`memoryIds` must be an array' }); return; }
   // The bag's shape AND its values, in one call. This checked only the shape, so a nested value was
   // refused by `write_file` (which declares `additionalProperties`) and stored here — the entity defect
   // reported on 2026-09-02, surviving one record type over.
   const propErr = primitivePropertyError(properties);
   if (propErr) { res.status(400).json({ error: propErr }); return; }
 
-  // A file carries THREE reference fields, and until now none of them was validated — not even under
-  // strict linkage, which every other brain route already honoured. So this was the widest silent
-  // hole: attach a fact to a file with a name or a stale id and it stored clean, then the file
-  // simply never turned up in anything that traversed the link.
-  if (isStrictLinkage(wt.target)) {
-    try {
-      await assertRefsResolve(wt.target, 'entityIds', 'entity', entityIds as string[] | undefined);
-      await assertRefsResolve(wt.target, 'memoryIds', 'fact', memoryIds as string[] | undefined);
-      await assertRefsResolve(wt.target, 'chronoIds', 'chrono', chronoIds as string[] | undefined);
-    } catch (err) {
-      res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
-      return;
-    }
-  }
+  /*
+   * A file carries THREE link classes and until 4.x none of them was validated — not even under strict
+   * linkage, which every other brain route already honoured, so attaching a fact to a file with a name or
+   * a stale id stored clean and the file simply never turned up in anything that traversed the link.
+   *
+   * The check is at the WRITER now, with the spelling it guarded: `reconcileLinks` asserts every named
+   * class resolves. That is what makes it true of `linkEntities` as well, which had no check at all.
+   */
 
   // Snapshot for the audit change list — see the note in facts.ts. `properties` is not allowlisted,
   // so handing the record over cannot publish it.

@@ -187,9 +187,9 @@ export async function bulkWrite(spaceId: string, input: BulkInput): Promise<Bulk
     // had one. Format only, like the rest of bulk: a payload may legitimately reference an entity
     // created earlier in the SAME payload, so an existence check here would reject valid forward
     // references. Staged imports that need dangling refs use the strictLinkage escape hatch.
-    const memEntityIds = strArray(item['entityIds']);
+    const memEntityIds = strArray(item['linkEntities']);
     if (strict && memEntityIds.some(id => !UUID_V4_RE.test(id))) {
-      errors.push({ type: 'fact', index: i, reason: '`entityIds` must contain valid UUID v4 values (entity IDs), not names' });
+      errors.push({ type: 'fact', index: i, reason: '`linkEntities` must contain valid UUID v4 values (entity IDs), not names' });
       continue;
     }
     try {
@@ -311,10 +311,10 @@ export async function bulkWrite(spaceId: string, input: BulkInput): Promise<Bulk
     // so a batch stored what the single create refuses and reported nothing.
     const shapeErr = shapeError('chrono', item);
     if (shapeErr) { errors.push({ type: 'chrono', index: i, reason: shapeErr }); continue; }
-    const entityIds = optStrArray(item['entityIds']);
-    const memoryIds = optStrArray(item['memoryIds']);
-    if (strict && entityIds && entityIds.some(id => !UUID_V4_RE.test(id))) { errors.push({ type: 'chrono', index: i, reason: '`entityIds` must contain valid UUID v4 values (entity IDs), not names' }); continue; }
-    if (strict && memoryIds && memoryIds.some(id => !UUID_V4_RE.test(id))) { errors.push({ type: 'chrono', index: i, reason: '`memoryIds` must contain valid UUID v4 values (fact IDs), not names' }); continue; }
+    const linkEntities = optStrArray(item['linkEntities']);
+    const linkFacts = optStrArray(item['linkFacts']);
+    if (strict && linkEntities && linkEntities.some(id => !UUID_V4_RE.test(id))) { errors.push({ type: 'chrono', index: i, reason: '`linkEntities` must contain valid UUID v4 values (entity IDs), not names' }); continue; }
+    if (strict && linkFacts && linkFacts.some(id => !UUID_V4_RE.test(id))) { errors.push({ type: 'chrono', index: i, reason: '`linkFacts` must contain valid UUID v4 values (fact IDs), not names' }); continue; }
     const properties = optProps(item['properties']);
     // Normalise status to a known value (drop unknowns) — REST did this; MCP did not.
     const status = typeof item['status'] === 'string' && CHRONO_STATUS_SET.has(item['status'] as ChronoStatus)
@@ -328,7 +328,7 @@ export async function bulkWrite(spaceId: string, input: BulkInput): Promise<Bulk
         endsAt: typeof item['endsAt'] === 'string' ? item['endsAt'] : undefined,
         status, confidence: typeof item['confidence'] === 'number' ? item['confidence'] : undefined,
         description: typeof item['description'] === 'string' ? item['description'] : undefined,
-        tags: optStrArray(item['tags']), linkEntities: entityIds, linkFacts: memoryIds, properties,
+        tags: optStrArray(item['tags']), linkEntities, linkFacts, properties,
         recurrence: rec.value, id: rawId,
       }, undefined, ttlDays);
       /*

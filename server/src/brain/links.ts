@@ -43,6 +43,8 @@ import { getConfig } from '../config/loader.js';
 import { nextSeq } from '../util/seq.js';
 import { edgeIdFor } from './edge-id.js';
 import { fieldFor, linkClassFor, linkClassesFrom, usesLinkRecords } from './link-adjacency.js';
+import { assertRefsResolve } from './entity-refs.js';
+import { isStrictLinkage } from '../spaces/proxy.js';
 import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';
 import type { AuthorRef, LinkDoc, TombstoneDoc } from '../config/types.js';
 // `RefKind` is re-exported by `types.ts` as a type only, so it comes from the leaf that DECLARES it —
@@ -114,6 +116,23 @@ export async function reconcileLinks(
 ): Promise<{ added: number; removed: number }> {
   const classes = Object.keys(desired) as RefKind[];
   if (classes.length === 0) return { added: 0, removed: 0 };
+
+  /*
+   * EXISTENCE, HERE, because this is the writer and `write-connections.ts` says so in as many words:
+   * *"it does NOT check that the targets exist: that is `assertRefsResolve`'s job at the writer, where it
+   * can be done in one query against the records being written rather than once per door."*
+   *
+   * It was not true. The array spelling was existence-checked at each door and the `link*` spelling was
+   * checked nowhere, so on a strict space `entityIds: [<a uuid that names nothing>]` was refused and
+   * `linkEntities: [<the same uuid>]` was stored — one rule, two implementations, and the weaker one was
+   * the newer spelling. 5.0 removes the array spelling, which would have left the hole as the only path.
+   *
+   * Skipped for the CONVERSION, which is additive and reads its desired set from records that already
+   * exist: re-validating a space's whole link graph on every boot is a query per class per record.
+   */
+  if (!opts.additive && isStrictLinkage(spaceId)) {
+    for (const toKind of classes) await assertRefsResolve(spaceId, `link${toKind}`, toKind, desired[toKind]);
+  }
 
   const wanted = new Map<string, { to: string; toKind: RefKind }>();
   for (const toKind of classes) {

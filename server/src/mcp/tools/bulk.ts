@@ -39,7 +39,7 @@ export const save_bulkTool: ToolHandler = {
     + 'ORDER IS facts → entities → chrono → edges, EDGES LAST so that a `$ref` can name a record of any '
     + 'kind. It also matters for records this call UPDATES: an entity '
     + 'addressed by an id that already exists is written before an edge in the same batch reads it. Facts go '
-    + 'first of all, so a fact\'s `entityIds` cannot name an entity from this same call under any ordering.\n\n'
+    + 'first of all, so a fact\'s `linkEntities` cannot name an entity from this same call under any ordering.\n\n'
     + 'A RECORD THIS CALL CREATES IS REFERENCED BY A CORRELATION KEY. Put `"$ref": "post-1"` on an item and later items name it as `"$ref:post-1"` — in an edge\'s `from`/`to`, or in a link field. The key is scoped to this call, is never stored, and is NOT the id: identities are still minted here. Every record array is written before any edge, so an edge can reference any record in the payload; within one array a reference cannot point FORWARDS. A key used twice is refused rather than resolved, and a stated kind that disagrees with the array the key was declared in is refused too — the array decides. A LITERAL id you invent is still not the id the record gets, and still points at nothing.\n\n'
     + 'PARAMETERS: each collection takes the same fields as its single-record tool — `facts` as `saveFact`, '
     + '`entities` as `save_entity`, `edges` as `save_edge`, `chrono` as `save_chrono` — including '
@@ -71,7 +71,7 @@ export const save_bulkTool: ToolHandler = {
                       + 'to merge with. They are embedded along with the fact, so a tag affects ranking as '
                       + 'well as being an exact filter.',
                   },
-                  entityIds:   {
+                  linkEntities: {
                     type: 'array', items: { type: 'string' },
                     description: 'Entity IDs to link this fact to. NEVER checked for existence on this '
                       + 'door — `saveFact` refuses an id that does not resolve, and here a well-formed UUID '
@@ -219,8 +219,8 @@ export const save_bulkTool: ToolHandler = {
                   confidence:  { type: 'number', description: 'Confidence 0 to 1, for entries that are predictions. A non-number is dropped silently and does not appear in `errors`; unlike `save_chrono`, the 0–1 bound is not enforced on this door.' },
                   description: { type: 'string', description: 'Optional longer description of the entry.' },
                   tags:        { type: 'array', items: { type: 'string' }, description: 'Categorisation tags. Every chrono item is an INSERT, so there is nothing to merge with.' },
-                  entityIds:   { type: 'array', items: { type: 'string' }, description: 'Entity IDs this entry concerns — what lets `graph_traverse` reach it from that entity. NEVER checked for existence on this door, and checked for UUID shape only when the space uses strict linkage, so a well-formed id pointing at nothing is stored as a dangling link.' },
-                  memoryIds:   { type: 'array', items: { type: 'string' }, description: 'Fact IDs this entry relates to. Shape-checked under strict linkage only, and never for existence — like `entityIds`.' },
+                  linkEntities: { type: 'array', items: { type: 'string' }, description: 'Entity IDs this entry concerns — what lets `graph_traverse` reach it from that entity. NEVER checked for existence on this door, and checked for UUID shape only when the space uses strict linkage, so a well-formed id pointing at nothing is stored as a dangling link.' },
+                  linkFacts:   { type: 'array', items: { type: 'string' }, description: 'Fact IDs this entry relates to. Shape-checked under strict linkage only, and never for existence — like `linkEntities`.' },
                   properties:  {
                     type: 'object',
                     description: 'Key-value metadata (string, number or boolean values only), validated '

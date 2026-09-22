@@ -41,11 +41,6 @@ export const save_factTool: ToolHandler = {
             id: uuidSchema('UUID v4 of an EXISTING record to update. It is not a way to choose an id: identity is server-generated, so an id that names nothing is ignored rather than adopted. To carry your own reference, use `name` or `description`.'),
             space: s.requiredSpace,
             fact: { type: 'string', minLength: 1, maxLength: 50000, description: 'The fact, observation, or fact to store (1–50 000 characters).' },
-            entityIds: {
-              type: 'array',
-              items: { type: 'string', pattern: UUID_V4_PATTERN },
-              description: 'Entity IDs (UUID v4) to link this fact to. Pass IDs, not names — look the entity up first (search_entities / list) and use its id. Every id must reference an existing entity; an unknown id is rejected rather than stored as a dead link.',
-            },
             /*
              * `F-27`: the one-call write. SPREAD from the shared builder rather than written out, so a
              * fifth kind gets its field here on the day it is declared — and because this tool's schema is
@@ -89,7 +84,6 @@ export const save_factTool: ToolHandler = {
     if (!fact.trim()) throw new Error('fact must not be empty');
     if (fact.length > 50_000) throw new Error('fact must not exceed 50 000 characters');
     const tags = Array.isArray(a['tags']) ? (a['tags'] as string[]) : [];
-    const entityIdsArg = Array.isArray(a['entityIds']) ? (a['entityIds'] as string[]) : [];
     const description = typeof a['description'] === 'string' ? a['description'] : undefined;
     const props = (a['properties'] != null && typeof a['properties'] === 'object' && !Array.isArray(a['properties']))
       ? (a['properties'] as Record<string, string | number | boolean>)
@@ -124,10 +118,9 @@ export const save_factTool: ToolHandler = {
     // when a name did not resolve — a dropped edge in a graph store, invisible until a traversal
     // that should have found it came back empty. Now: wrong shape or unknown id, the write is
     // refused and the agent is told which value was bad.
-    const entityIds: string[] = entityIdsArg;
-    if (isStrictLinkage(ts)) {
-      await assertRefsResolve(ts, 'entityIds', 'entity', entityIds);
-    }
+    // The link set comes from the arguments' `linkEntities`, through `applyConnections` below — one path
+    // for both doors since the `entityIds` spelling went — and `reconcileLinks` is where existence is
+    // asserted, which is what makes the check true of this spelling too. It never had one.
     // Names still go into the embedded text (they are what a search actually matches on), but they
     // are now derived FROM the ids rather than being the input.
     // The entity-name lookup that used to feed the embedding is gone with it (A-3): one fewer round trip
@@ -147,7 +140,7 @@ export const save_factTool: ToolHandler = {
     if (!supCreate.ok) throw new Error(supCreate.error);
     const susCreate = parseRecordSuperseded(a);
     if (!susCreate.ok) throw new Error(susCreate.error);
-    const mem = await saveFact(ts, fact, entityIds, tags, description, props, memType,
+    const mem = await saveFact(ts, fact, [], tags, description, props, memType,
       {
         checkDuplicates: remDupeCheck, checkContradictions: remContraCheck, dupeThreshold: remDupeThreshold,
         ...(a['waitForEmbedding'] === true ? { waitForEmbedding: true } : {}),
@@ -203,7 +196,7 @@ export const update_factTool: ToolHandler = {
     + 'tagged `["a"]` leaves it tagged `["b"]` — `"a"` is gone. The same call on an entity would leave it '
     + 'tagged `["a","b"]`. The difference is deliberate and pinned by a test rather than an accident waiting to '
     + 'be unified, so do not expect it to change: send the FULL tag list you want this fact to end up with. '
-    + '`entityIds` replaces the same way.\n\n'
+    + '`linkEntities` replaces the same way.\n\n'
     + '`properties` MERGES, on this tool and on the other two. Keys you do not name are kept, so patching one '
     + 'key is safe. It used to replace, which silently destroyed every other property on the record; removing a '
     + 'key is `deleteFields`\' job, and an absence never means "delete".\n\n'
@@ -216,7 +209,7 @@ export const update_factTool: ToolHandler = {
     + '- `id` — the fact\'s `_id`, as `recall` and `filter` report it. Required.\n'
     + '- `fact` — the fact\'s text, replaced when sent. Re-embeds. Must not be empty.\n'
     + '- `tags` — REPLACES the stored list. See above.\n'
-    + '- `entityIds` — REPLACES the stored links. UUID v4 each, and in a space with strict linkage every one '
+    + '- `linkEntities` — REPLACES the stored links. UUID v4 each, and in a space with strict linkage every one '
     + 'must resolve to an entity that exists in the member space this write lands in. Before 3.0 this path '
     + 'checked nothing and wrote any string through as a link.\n'
     + '- `description` — replaced when sent.\n'
@@ -263,7 +256,6 @@ export const update_factTool: ToolHandler = {
                 + 'instead; this tool and `update_chrono` replace, and the split is not guessable from the '
                 + 'field name. To clear them, send `deleteFields: ["tags"]`.',
             },
-            entityIds: { type: 'array', items: { type: 'string', pattern: UUID_V4_PATTERN }, description: 'New entity ID links (UUID v4, replaces existing). Every id must reference an existing entity.' },
             description: {
               type: 'string',
               description: 'Replaces the stored prose context. Embedded alongside the fact, so it widens what '
@@ -306,7 +298,7 @@ export const update_factTool: ToolHandler = {
     if (!dfResult.ok) throw new Error(dfResult.error);
     const dfPaths: string[] | undefined = Array.isArray(a['deleteFields']) && (a['deleteFields'] as string[]).length > 0 ? a['deleteFields'] as string[] : undefined;
 
-    const updates: { type?: string; fact?: string; tags?: string[]; entityIds?: string[]; description?: string; properties?: Record<string, string | number | boolean>; suppressEmbeddings?: boolean; superseded?: boolean } = {};
+    const updates: { type?: string; fact?: string; tags?: string[]; description?: string; properties?: Record<string, string | number | boolean>; suppressEmbeddings?: boolean; superseded?: boolean } = {};
     const sup = parseRecordSuppression(a);
     if (!sup.ok) throw new Error(sup.error);
     if (sup.value !== undefined) updates.suppressEmbeddings = sup.value;
@@ -329,15 +321,6 @@ export const update_factTool: ToolHandler = {
       updates.type = (a['type'] as string).trim();
     }
     if (Array.isArray(a['tags'])) updates.tags = a['tags'] as string[];
-    if (Array.isArray(a['entityIds'])) {
-      const ids = a['entityIds'] as string[];
-      // This path had NO validation at all — not even the strict gate the other tools carried — so
-      // any string was written through as a link.
-      // Validate against the resolved write target — for a proxy space that is the concrete member
-      // the fact will be written to, so the entity must exist where the link will live.
-      if (isStrictLinkage(wt.target)) await assertRefsResolve(wt.target, 'entityIds', 'entity', ids);
-      updates.entityIds = ids;
-    }
     if (typeof a['description'] === 'string') updates.description = a['description'] as string;
     if (a['properties'] !== null && typeof a['properties'] === 'object' && !Array.isArray(a['properties'])) {
       updates.properties = a['properties'] as Record<string, string | number | boolean>;
@@ -347,7 +330,7 @@ export const update_factTool: ToolHandler = {
     // A connection field IS a field. Both helpers return `null` for absent, never `undefined` — comparing
     // against `undefined` would be true for `null` and would DISABLE this refusal rather than widen it.
     const hasConnections = desiredLinksFrom(a) !== null || edgeInputsFrom(a) !== null;
-    if (Object.keys(updates).length === 0 && !dfPaths && ttlDays === undefined && !hasConnections) throw new Error('At least one of fact, tags, entityIds, description, properties, suppressEmbeddings, deleteFields, ttlDays, or a connection field must be provided');
+    if (Object.keys(updates).length === 0 && !dfPaths && ttlDays === undefined && !hasConnections) throw new Error('At least one of fact, tags, description, properties, suppressEmbeddings, deleteFields, ttlDays, or a connection field must be provided');
 
     // Validate the fact AS IT WILL BE, against the meta of the member space it actually lives in.
     // This path had no schema validation at all, so an agent could write through MCP a value the same

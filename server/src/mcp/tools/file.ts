@@ -461,8 +461,8 @@ export const retry_embed_fileTool: ToolHandler = {
  * Found by the capability matrix (`scripts/surface-matrix.mjs`). Filed as B-23.
  *
  * **The route's rules, not a second copy of them.** `updateFileMeta` performs the write and the same
- * strict-linkage check runs first, because a file carries three reference fields (`entityIds`, `memoryIds`,
- * `chronoIds`) and storing an unresolvable one is the widest silent hole this record type had.
+ * strict-linkage check runs at the writer, because a file carries three link classes and storing an
+ * unresolvable one is the widest silent hole this record type had.
  */
 export const update_file_metaTool: ToolHandler = {
   name: 'update_file_meta',
@@ -472,12 +472,12 @@ export const update_file_metaTool: ToolHandler = {
     + '`properties` MERGES, like every other record type: patch one key and the others survive. It REPLACED '
     + 'until 3.1, so a caller written against the old behaviour that resends the whole object is unaffected, '
     + 'while one that patches a single key now keeps what it did not name instead of destroying it.\n\n'
-    + 'THE LISTS STILL REPLACE. `tags`, `entityIds`, `memoryIds` and `chronoIds` are each overwritten by what '
+    + 'THE LISTS STILL REPLACE. `tags`, `linkEntities`, `linkFacts` and `linkChronos` are each overwritten by what '
     + 'you send, so sending one id drops the rest — send the full list you want. Only `properties` merges.\n\n'
     + 'REMOVING SOMETHING IS `deleteFields`, NEVER AN OMISSION. An omitted field means "leave alone", so there '
     + 'is no value that clears one; send its dot path instead, applied AFTER the merge and permanent. A path '
     + 'that cannot be honoured is refused by name rather than ignored.\n\n'
-    + 'UNDER STRICT LINKAGE EVERY ID MUST RESOLVE. `entityIds`, `memoryIds` and `chronoIds` are each checked '
+    + 'UNDER STRICT LINKAGE EVERY ID MUST RESOLVE. `linkEntities`, `linkFacts` and `linkChronos` are each checked '
     + 'against records that actually exist in the member space holding the file, and the call is refused '
     + 'rather than storing a dangling link. On a space without strict linkage they are stored as given.\n\n'
     + 'THE FILE CONTENT IS NOT RE-READ. This edits the record ABOUT the file, never the bytes: no '
@@ -489,7 +489,7 @@ export const update_file_metaTool: ToolHandler = {
     + 'extracted text.\n'
     + '- `tags` — REPLACES the tag list. Send the full list you want.\n'
     + '- `properties` — MERGED key by key. Use `deleteFields` with `properties.<key>` to remove one.\n'
-    + '- `entityIds` / `memoryIds` / `chronoIds` — REPLACE those link lists. Sending one id drops the rest.\n'
+    + '- `linkEntities` / `linkFacts` / `linkChronos` — REPLACE those link lists. Sending one id drops the rest.\n'
     + '- `deleteFields` — dot-notation paths to remove, permanently and with no undo. Applied after the '
     + 'merge. The only way to unset anything.\n'
     + '- `targetSpace` — required when `space` is a proxy: the member space holding the file.\n\n'
@@ -527,22 +527,6 @@ export const update_file_metaTool: ToolHandler = {
         description: 'MERGES key by key, like every other record type: patch one key and the others survive. '
           + 'Removing one is `deleteFields`, never an omission. Values must be string, number, or boolean.',
       },
-      entityIds: {
-        type: 'array', items: { type: 'string' },
-        description: 'REPLACES the stored entity links. These are what let `graph_traverse` reach the file from '
-          + 'an entity; they are not edges, so a file with an empty list is reachable only by path or by '
-          + 'search.',
-      },
-      memoryIds: {
-        type: 'array', items: { type: 'string' },
-        description: 'REPLACES the stored fact links — send the full list, because sending one drops the '
-          + 'rest.',
-      },
-      chronoIds: {
-        type: 'array', items: { type: 'string' },
-        description: 'REPLACES the stored chrono links — send the full list, because sending one drops the '
-          + 'rest.',
-      },
       deleteFields: {
         type: 'array', items: { type: 'string' },
         description: 'Dot-notation paths to REMOVE, applied after the merge — the only way to unset, since an '
@@ -571,17 +555,11 @@ export const update_file_metaTool: ToolHandler = {
       description: a['description'] as string | undefined,
       tags: a['tags'] as string[] | undefined,
       properties: a['properties'] as Record<string, string | number | boolean> | undefined,
-      entityIds: a['entityIds'] as string[] | undefined,
-      memoryIds: a['memoryIds'] as string[] | undefined,
-      chronoIds: a['chronoIds'] as string[] | undefined,
     };
 
-    // The same check the route runs, in the same order: refuse an unresolvable reference rather than store it.
-    if (isStrictLinkage(wt.target)) {
-      await assertRefsResolve(wt.target, 'entityIds', 'entity', patch.entityIds);
-      await assertRefsResolve(wt.target, 'memoryIds', 'fact', patch.memoryIds);
-      await assertRefsResolve(wt.target, 'chronoIds', 'chrono', patch.chronoIds);
-    }
+    // The link classes are `linkEntities`, `linkFacts` and `linkChronos` now, and existence is asserted by
+    // `reconcileLinks` at the writer rather than by each door — which is what `write-connections.ts` always
+    // said, and what makes the check true of the newer spelling. It never had one.
 
     // X-6: same parameter, same helper, same refusals as the REST route — checked here rather than trusting
     // the writer, so a bad path is a refusal on both doors instead of a silent no-op on one.
