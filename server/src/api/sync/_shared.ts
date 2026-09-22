@@ -124,7 +124,7 @@ export async function checkEdgeLinkViolations(
  * A link whose FROM is a file. `LinkViolationDoc.docType` has no `file` member, so reporting one would
  * mean widening a STORED shape and the screen that displays it. That gap predates the link migration:
  * sync has never checked a file's links at all, for any class. Tracked as its own row rather than
- * smuggled in here.
+ * smuggled in here — `Q-39`.
  */
 export async function checkLinkViolations(
   spaceId: string,
