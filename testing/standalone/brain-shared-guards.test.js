@@ -8,9 +8,11 @@
  *     value accepted that should not be, or a bound off by one, is silent data loss on a timer.
  *  2. **`applyValidation` is where `validationMode: 'strict'` actually blocks.** If strict stops
  *     blocking, every schema in every space becomes advisory and nothing says so.
- *  3. **`buildFactFilter` turns query params into a Mongo filter.** Query strings are not necessarily
- *     strings — `?tag[]=a&tag[]=b` parses to an array — and the `typeof === 'string'` guards are what
- *     keep a caller-shaped object out of the filter document.
+ *
+ * A third subject lived here — `buildFactFilter`, the facts list route's query-param filter. Both went in
+ * 5.0: the route is `POST /api/filter`, and the `?entity=` clause it built read a link array that no
+ * longer exists. What a caller asks now is `entityName`, and `attachedToEntityNamed` answers it from the
+ * link records.
  *
  * Run: node --test testing/standalone/brain-shared-guards.test.js
  * (requires a prior `npm run build` in server/)
@@ -18,10 +20,10 @@
 import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 
-let ttlDaysFromBody, ttlDaysError, applyValidation, buildFactFilter;
+let ttlDaysFromBody, ttlDaysError, applyValidation;
 
 before(async () => {
-  ({ ttlDaysFromBody, ttlDaysError, applyValidation, buildFactFilter } =
+  ({ ttlDaysFromBody, ttlDaysError, applyValidation } =
     await import('../../server/dist/api/brain/_shared.js'));
 });
 
@@ -111,66 +113,5 @@ describe('applyValidation — strict must actually block', () => {
       assert.deepEqual(applyValidation(meta, violation), { blocked: false, warnings: [] });
     }
     assert.deepEqual(applyValidation({ validationMode: 'strict' }, []), { blocked: false, warnings: [] });
-  });
-});
-
-describe('buildFactFilter — only strings reach the filter document', () => {
-  /*
-   * THE SHAPE CHANGED AND THE RULES DID NOT. The five common conveniences moved into
-   * `conveniencePredicate`, which accumulates under `$and` rather than assigning keys — so a predicate
-   * that used to read `{tags: …, type: …}` now reads `{$and: [{tags: …}, {type: …}]}`.
-   *
-   * Asserting on the layout would have made this file a second copy of the module's internals. What it
-   * asserts instead is what a caller can observe: which CLAUSES are present, and that nothing but a
-   * string ever reaches one.
-   */
-  /** Every clause in the predicate, flattened out of whatever `$and` nesting it arrived in. */
-  const clauses = (f) => {
-    const out = [];
-    const walk = (node) => {
-      if (!node || typeof node !== 'object') return;
-      for (const [k, v] of Object.entries(node)) {
-        if (k === '$and' || k === '$or') { (v ?? []).forEach(walk); continue; }
-        out.push([k, v]);
-      }
-    };
-    walk(f);
-    return out;
-  };
-  const valueOf = (f, key) => clauses(f).find(([k]) => k === key)?.[1];
-  /** True when the predicate narrows nothing at all — no clauses, however it is nested. */
-  const isEmpty = (f) => clauses(f).length === 0;
-
-  it('maps the simple equality params', () => {
-    const f = buildFactFilter({ entity: 'e1', type: 'decision' });
-    assert.equal(valueOf(f, 'entityIds'), 'e1');
-    assert.equal(valueOf(f, 'type'), 'decision');
-  });
-
-  it('ignores a non-string param instead of putting it in the query', () => {
-    // `?tag[]=a&tag[]=b` parses to an array, and an object-valued param is trivially forgeable. Either
-    // reaching the filter document unchecked is how a caller-supplied operator gets into a query.
-    for (const bad of [['a', 'b'], { $ne: null }, 7, true, null]) {
-      const f = buildFactFilter({ tag: bad, entity: bad, type: bad, search: bad, description: bad, properties: bad });
-      assert.ok(isEmpty(f), `a ${typeof bad} param must be ignored, got ${JSON.stringify(f)}`);
-    }
-  });
-
-  it('an empty query produces an empty filter, not a match-nothing one', () => {
-    // Byte for byte `{}`, not an empty `$and`: this is the "list everything" path, and a reader
-    // debugging a query should not find scaffolding in it.
-    assert.deepEqual(buildFactFilter({}), {});
-  });
-
-  it('an empty-string param is treated as absent', () => {
-    assert.deepEqual(buildFactFilter({ tag: '', entity: '', type: '', search: '' }), {});
-  });
-
-  it('and a convenience beside `entity` keeps BOTH', () => {
-    // The merge rule, from the caller's side: `entity` is the fact's own filter and `tag` is a shared
-    // convenience, and the module accumulates rather than assigning — so neither can shadow the other.
-    const f = buildFactFilter({ entity: 'e1', tag: 'release' });
-    assert.equal(valueOf(f, 'entityIds'), 'e1');
-    assert.ok(JSON.stringify(valueOf(f, 'tags')).includes('release'), JSON.stringify(f));
   });
 });

@@ -7,7 +7,7 @@ import { Router } from 'express';
 import { requestActor } from '../../auth/request-actor.js';
 import { shapeError } from '../../brain/write-shape.js';
 import { entityDeleteBlockers } from '../../brain/entity-delete-guard.js';
-import { connectionInputError, applyConnections, CONNECTION_BODY_KEYS, desiredLinksFrom, edgeInputsFrom } from '../../brain/write-connections.js';
+import { connectionInputError, applyConnections, CONNECTION_BODY_KEYS, desiredLinksFrom, edgeInputsFrom, linkAuditSnapshots } from '../../brain/write-connections.js';
 import { WIPE_COLLECTION_TYPES, type WipeCollectionType, wipeSpace } from '../../spaces/lifecycle.js';
 import { assertRefsResolve } from '../../brain/entity-refs.js';
 import { requireSpaceAuth, requireBodyScopedSpace, denyReadOnly } from '../../auth/middleware.js';
@@ -312,6 +312,9 @@ memoriesRouter.patch('/spaces/:spaceId/facts/:id', globalRateLimit, requireSpace
     // The read this needs is the same one the audit snapshot below needed, so it is done once and shared
     // rather than issued twice per patch.
     const existing = await listFacts(mid, { _id: id }, 1, 0);
+    // The link sets BEFORE this write, for the audit entry. Read here because after the write they are
+    // already what the body asked for — see `linkAuditSnapshots`.
+    const linkAudit = await linkAuditSnapshots(mid, id, req.body);
     if (existing.length === 0) continue;
     /*
      * The schema check moved into `updateFact`.
@@ -340,7 +343,7 @@ memoriesRouter.patch('/spaces/:spaceId/facts/:id', globalRateLimit, requireSpace
       throw err;
     }
     if (updated) {
-      req.auditSnapshots = { before: existing[0] ?? {}, after: updated };
+      req.auditSnapshots = { before: { ...(existing[0] ?? {}), ...linkAudit.before }, after: { ...updated, ...linkAudit.after } };
       /*
        * The `warnings` array an update response did not have.
        *

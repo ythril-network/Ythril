@@ -51,7 +51,7 @@ const KNOWLEDGE_MODEL = `An instance holds one or more **spaces** — isolated k
 storage quota, optional type schemas, and sync membership. Every record lives in
 exactly one space. There are five knowledge types:
 
-- **facts** — free-text facts with semantic embeddings; may reference entities via entityIds.
+- **facts** — free-text facts with semantic embeddings; may link to entities.
 - **entities** — named things (people, projects, concepts) with a type, tags, and properties.
 - **edges** — directed, labelled relationships between two entities (from → label → to); the graph part of the knowledge graph.
 - **chrono** — time-anchored entries (event/deadline/plan/milestone) with a status lifecycle.

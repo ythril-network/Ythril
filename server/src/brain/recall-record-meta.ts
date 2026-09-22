@@ -17,11 +17,16 @@
  * absence does not, and a caller reading `result.tags?.length` cannot tell the two apart. There is no
  * reading under which the empty version is the useful one, so this needs no flag and takes nothing away.
  *
- * **Storage bookkeeping is opt-in.** `createdAt`, `updatedAt` and `entityIds` describe the record rather
- * than what it says. `createdAt` is the worse of them: it is routinely read as when the remembered thing
- * happened, which is not what it means — that lives in the record's own properties, put there by whoever
- * wrote it. A caller who needs any of this asks for it; the common case, reading fact in order to answer
- * something, does not.
+ * **Storage bookkeeping is opt-in.** `createdAt` and `updatedAt` describe the record rather than what it
+ * says. `createdAt` is the worse of them: it is routinely read as when the remembered thing happened,
+ * which is not what it means — that lives in the record's own properties, put there by whoever wrote it.
+ * A caller who needs either asks for it; the common case, reading fact in order to answer something,
+ * does not.
+ *
+ * **The link-id arrays were the third of these and are GONE, not hidden.** A record's connections are
+ * link records since 5.0, so no result carries them at any setting of the flag. What a caller wants them
+ * FOR — the records on the other end — is `traverse`, which returns the records rather than ids to look
+ * up one at a time, or a `filter` over the `links` collection.
  *
  * ## What is deliberately never dropped
  *
@@ -32,10 +37,10 @@
  */
 
 /** The fields that describe where a record SITS rather than what it says. Opt-in via `includeRecordMeta`. */
-export const RECORD_META_KEYS = ['createdAt', 'updatedAt', 'entityIds', 'memoryIds', 'chronoIds'] as const;
+export const RECORD_META_KEYS = ['createdAt', 'updatedAt'] as const;
 
 /** Collections whose empty form carries nothing a caller can act on. */
-const COLLECTION_KEYS = ['tags', 'properties', 'entityIds', 'memoryIds', 'chronoIds'] as const;
+const COLLECTION_KEYS = ['tags', 'properties'] as const;
 
 function isEmptyCollection(value: unknown): boolean {
   if (Array.isArray(value)) return value.length === 0;

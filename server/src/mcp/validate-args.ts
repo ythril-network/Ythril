@@ -14,6 +14,7 @@
 import { Ajv, type ValidateFunction } from 'ajv';
 import type { ToolHandler, ToolSchemas } from './tools/types.js';
 import { materialisedSchema } from './tool-schema.js';
+import { retiredWriteFieldHint } from '../brain/retired-write-fields.js';
 
 export interface ArgsValidator {
   /** Returns a human-readable error message if `args` violate the tool's schema, else `null`. */
@@ -46,7 +47,14 @@ export function makeArgsValidator(schemas: ToolSchemas, accessibleSpaceIds: read
         const at = e.instancePath || '(arguments)';
         const p = e.params as Record<string, unknown>;
         switch (e.keyword) {
-          case 'additionalProperties': return `${at}: unexpected property '${String(p['additionalProperty'])}'`;
+          case 'additionalProperties': {
+            // A name this tool USED to take is answered with the sentence the REST doors use, from one
+            // module — otherwise the same mistake is a helpful 400 on one door and 'unexpected property'
+            // on the other, and which one a caller meets depends on the client they picked.
+            const prop = String(p['additionalProperty']);
+            const retired = retiredWriteFieldHint(prop);
+            return retired ?? `${at}: unexpected property '${prop}'`;
+          }
           case 'required':             return `(arguments): missing required property '${String(p['missingProperty'])}'`;
           case 'enum':                 return `${at}: ${e.message} (${(p['allowedValues'] as unknown[] ?? []).join(', ')})`;
           case 'propertyNames':        return `${at}: property name is not allowed here`;

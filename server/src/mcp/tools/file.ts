@@ -13,6 +13,7 @@ import { resolveMemberSpaces, resolveWriteTarget } from '../../spaces/proxy.js';
 import { memberSpacesWithin } from '../../spaces/proxy-scoped.js';
 import { emitWebhookEvent } from '../../webhooks/dispatcher.js';
 import { log } from '../../util/log.js';
+import { linkInputSchemasFor, linkInputError, linkFieldsFrom } from '../../brain/write-connections.js';
 
 export const read_fileTool: ToolHandler = {
   name: 'read_file',
@@ -534,6 +535,10 @@ export const update_file_metaTool: ToolHandler = {
           + '`["properties.oldKey", "description"]`. Permanent, with no undo. Server-owned fields are REFUSED '
           + 'by name rather than ignored.',
       },
+      // The three classes a FILE can link to, from the module both doors build their link fields with.
+      // The description above promises these; declaring them anywhere but here would mean the dispatcher
+      // refusing what the text tells a caller to send.
+      ...linkInputSchemasFor('file'),
       targetSpace: { type: 'string', description: 'Required for proxy spaces: the member space holding the file.' },
     },
     required: ['space', 'path'],
@@ -551,10 +556,14 @@ export const update_file_metaTool: ToolHandler = {
     const { assertRefsResolve } = await import('../../brain/entity-refs.js');
     const { updateFileMeta } = await import('../../files/file-meta.js');
 
+    const linkErr = linkInputError(a);
+    if (linkErr) throw new Error(linkErr);
+
     const patch = {
       description: a['description'] as string | undefined,
       tags: a['tags'] as string[] | undefined,
       properties: a['properties'] as Record<string, string | number | boolean> | undefined,
+      ...linkFieldsFrom(a),
     };
 
     // The link classes are `linkEntities`, `linkFacts` and `linkChronos` now, and existence is asserted by

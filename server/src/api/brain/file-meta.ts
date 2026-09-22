@@ -18,6 +18,7 @@ import { globalRateLimit } from '../../rate-limit/middleware.js';
 import { updateFileMeta, deleteFileMeta, getFileMeta } from '../../files/file-meta.js';
 import { assertRefsResolve } from '../../brain/entity-refs.js';
 import { validateDeleteFields } from '../../brain/delete-fields.js';
+import { linkInputError, linkFieldsFrom, linkAuditSnapshots } from '../../brain/write-connections.js';
 import { primitivePropertyError } from '../../brain/property-values.js';
 import { fileExists, readFile } from '../../files/files.js';
 import { log } from '../../util/log.js';
@@ -315,6 +316,10 @@ fileMetaRouter.patch('/spaces/:spaceId/files', globalRateLimit, requireSpaceAuth
   }
 
   const { description, tags, properties, deleteFields } = req.body ?? {};
+  // The three link classes a file holds. Shape and well-formedness here, existence at the writer — the
+  // one refusal both doors share, from `write-connections.ts`.
+  const linkErr = linkInputError(req.body);
+  if (linkErr) { res.status(400).json({ error: linkErr }); return; }
   // X-6: `properties` MERGE on this route now, matching the four brain types. `deleteFields` lands with the
   // merge and not after it — the merge alone would remove the only way a file property could be cleared, so
   // shipping them apart trades one silent data loss for a stale key nobody can delete.
@@ -341,11 +346,21 @@ fileMetaRouter.patch('/spaces/:spaceId/files', globalRateLimit, requireSpaceAuth
 
   // Snapshot for the audit change list — see the note in facts.ts. `properties` is not allowlisted,
   // so handing the record over cannot publish it.
-  const prior = await findFirstAcrossMembers(wt.target, mid => getFileMeta(mid, path));
+  let homeSpace: string | undefined;
+  const prior = await findFirstAcrossMembers(wt.target, async mid => {
+    const found = await getFileMeta(mid, path);
+    if (found) homeSpace = mid;
+    return found;
+  });
+  // The link sets BEFORE this write, for the audit entry — see `linkAuditSnapshots`. A file is keyed in
+  // the links collection by its stored path, which is what `getFileMeta` was just asked for.
+  const linkAudit = homeSpace
+    ? await linkAuditSnapshots(homeSpace, toDocId(path), req.body)
+    : { before: {}, after: {} };
   const updated = await findFirstAcrossMembers(wt.target,
-    mid => updateFileMeta(mid, path, { description, tags, properties }, dfPaths));
+    mid => updateFileMeta(mid, path, { description, tags, properties, ...linkFieldsFrom(req.body) }, dfPaths));
   if (updated) {
-    req.auditSnapshots = { before: prior ?? {}, after: updated };
+    req.auditSnapshots = { before: { ...(prior ?? {}), ...linkAudit.before }, after: { ...updated, ...linkAudit.after } };
     res.json(updated);
     return;
   }

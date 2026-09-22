@@ -68,7 +68,7 @@ export interface ErEntityType {
   /** Declared naming constraint, if any — shown as the type's key format. */
   namingPattern?: string;
   properties: ErProperty[];
-  /** Records of the other three kinds that point AT this type through their `entityIds`. */
+  /** Records of the other three kinds that LINK to this type — a fact, a chrono entry or a file. */
   linkedFrom: { facts: number; chrono: number; files: number };
 }
 
@@ -104,7 +104,7 @@ export interface ErInputs {
   spaceId: string;
   entities: Array<{ _id: string; type?: string }>;
   edges: Array<{ from: string; to: string; label: string }>;
-  /** `entityIds` arrays from the three linking collections. */
+  /** Per source record, the entity ids it links to — one group list per linking collection. */
   links: { facts: string[][]; chrono: string[][]; files: string[][] };
   declared: DeclaredTypes;
   totals: { entities: number; edges: number };

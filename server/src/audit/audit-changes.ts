@@ -85,13 +85,18 @@ export const AUDIT_CHANGE_FIELDS: Readonly<Record<string, readonly string[]>> = 
   // `properties` is deliberately absent from every one of them. It is a free-form bag whose keys the
   // user chooses, so it is the one field on a record that could hold a pasted credential, and the
   // allowlist cannot vet names it has never seen. Same reasoning that keeps webhook routes out.
-  'fact.update': ['fact', 'description', 'type', 'tags', 'entityIds'],
+  //
+  // The `link*` names are the one group here that is NOT a field on the stored record. 5.0 moved a
+  // record's connections into link records, so the route folds the before/after link sets into its
+  // snapshots — see `linkAuditSnapshots`. Named as the caller writes them, because that is what an
+  // operator reading the entry would go and change.
+  'fact.update': ['fact', 'description', 'type', 'tags', 'linkEntities'],
   'entity.update': ['name', 'type', 'description', 'tags'],
   'edge.update': ['label', 'from', 'to', 'weight', 'type'],
-  'chrono.update': ['title', 'description', 'type', 'status', 'startsAt', 'endsAt', 'tags', 'entityIds', 'memoryIds'],
-  // A file's metadata carries THREE reference lists, and losing track of what a file was linked to is
-  // exactly the kind of change nobody notices until a traversal comes back empty.
-  'file.meta.update': ['description', 'tags', 'entityIds', 'chronoIds', 'memoryIds'],
+  'chrono.update': ['title', 'description', 'type', 'status', 'startsAt', 'endsAt', 'tags', 'linkEntities', 'linkFacts'],
+  // A file links to all THREE other kinds, and losing track of what a file was linked to is exactly
+  // the kind of change nobody notices until a traversal comes back empty.
+  'file.meta.update': ['description', 'tags', 'linkEntities', 'linkFacts', 'linkChronos'],
   // A merge is a deletion wearing an edit's clothes: the absorbed entity ceases to exist. The entry
   // already carries the survivor's id and the path carries the absorbed one, so the only fact that
   // becomes UNRECOVERABLE is the absorbed entity's name — an id alone means nothing once the record it
@@ -120,7 +125,7 @@ function scalarOrDrop(v: unknown): string | number | boolean | null | undefined 
  *
  * `scalarOrDrop` discards arrays, which is right for the general case — allowing an object or array
  * through would let one allowlisted parent name silently ship every child it gains later. But it means
- * `tags` and `entityIds` record NOTHING, and that failure is invisible: the entry appears, the field
+ * `tags` and the link sets record NOTHING, and that failure is invisible: the entry appears, the field
  * is simply missing from `changes`, and an audit reader concludes the tags were untouched.
  *
  * So list handling is opt-in per field and deliberately narrow:
@@ -131,7 +136,7 @@ function scalarOrDrop(v: unknown): string | number | boolean | null | undefined 
  * Recording added/removed rather than the whole before/after list keeps the entry proportional to the
  * change. Re-tagging one fact should not copy forty tags into the audit log twice.
  */
-const LIST_FIELDS: ReadonlySet<string> = new Set(['tags', 'entityIds', 'memoryIds', 'chronoIds']);
+const LIST_FIELDS: ReadonlySet<string> = new Set(['tags', 'linkEntities', 'linkFacts', 'linkChronos']);
 
 /** An array of primitives, or undefined if it is not one. Nested values disqualify the whole field. */
 function primitiveListOrDrop(v: unknown): (string | number | boolean)[] | undefined {

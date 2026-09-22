@@ -150,7 +150,6 @@ interface RecallBase {
 export interface RecallMemory extends RecallBase {
   type: 'fact';
   fact: string;
-  entityIds?: string[];
 }
 
 export interface RecallEntity extends RecallBase {
@@ -179,7 +178,6 @@ export interface RecallChrono extends RecallBase {
   startsAt: string;
   /** Chrono status (upcoming/active/completed/overdue/cancelled). */
   status?: string;
-  entityIds?: string[];
 }
 
 export interface RecallFile extends RecallBase {
@@ -796,13 +794,13 @@ function recallProjection(knowledgeType: RecallKnowledgeType): {
   const commonProject = { _id: 1, spaceId: 1, _knowledgeType: 1, score: 1, createdAt: 1, updatedAt: 1, seq: 1, embeddingModel: 1, matchedText: 1, superseded: 1 };
   let typeProject: Record<string, number> = {};
   if (knowledgeType === 'fact') {
-    typeProject = { fact: 1, tags: 1, entityIds: 1, description: 1, properties: 1 };
+    typeProject = { fact: 1, tags: 1, description: 1, properties: 1 };
   } else if (knowledgeType === 'entity') {
     typeProject = { name: 1, type: 1, tags: 1, description: 1, properties: 1 };
   } else if (knowledgeType === 'edge') {
     typeProject = { from: 1, to: 1, label: 1, weight: 1, type: 1, tags: 1, description: 1, properties: 1 };
   } else if (knowledgeType === 'chrono') {
-    typeProject = { title: 1, description: 1, type: 1, status: 1, startsAt: 1, endsAt: 1, tags: 1, entityIds: 1, properties: 1 };
+    typeProject = { title: 1, description: 1, type: 1, status: 1, startsAt: 1, endsAt: 1, tags: 1, properties: 1 };
   } else if (knowledgeType === 'file') {
     typeProject = { path: 1, description: 1, tags: 1, sizeBytes: 1, properties: 1, headingText: 1, content: 1, parentFileId: 1, chunkIndex: 1, mediaType: 1, embeddingStatus: 1, chunkOffsetMs: 1, chunkDurationMs: 1 };
   }
@@ -1050,14 +1048,14 @@ function mapToRecallResult(doc: Record<string, unknown>, knowledgeType: RecallKn
   };
   switch (knowledgeType) {
     case 'fact':
-      return { ...base, type: 'fact', fact: doc['fact'] as string, entityIds: doc['entityIds'] as string[] | undefined };
+      return { ...base, type: 'fact', fact: doc['fact'] as string };
     case 'entity':
       return { ...base, type: 'entity', name: doc['name'] as string, entityType: doc['type'] as string };
     case 'edge':
       return { ...base, type: 'edge', from: doc['from'] as string, to: doc['to'] as string, label: doc['label'] as string, weight: doc['weight'] as number | undefined, edgeType: doc['type'] as string | undefined };
     case 'chrono':
       return { ...base, type: 'chrono', title: doc['title'] as string, chronoType: doc['type'] as string, startsAt: doc['startsAt'] as string, status: deriveChronoStatus({ status: doc['status'] as ChronoStatus, startsAt: doc['startsAt'] as string, endsAt: doc['endsAt'] as string | undefined },
-        new Date(), datePassedPolicy(getSpaceMeta(doc['spaceId'] as string), doc['type'] as string | undefined)), entityIds: doc['entityIds'] as string[] | undefined };
+        new Date(), datePassedPolicy(getSpaceMeta(doc['spaceId'] as string), doc['type'] as string | undefined)) };
     case 'file':
       return { ...base, type: 'file', path: doc['path'] as string, sizeBytes: doc['sizeBytes'] as number | undefined, headingText: doc['headingText'] as string | null | undefined, content: doc['content'] as string | undefined, parentFileId: doc['parentFileId'] as string | undefined, chunkIndex: doc['chunkIndex'] as number | undefined, mediaType: doc['mediaType'] as 'image' | 'audio' | 'video' | undefined, embeddingStatus: doc['embeddingStatus'] as RecallFile['embeddingStatus'], chunkOffsetMs: doc['chunkOffsetMs'] as number | undefined, chunkDurationMs: doc['chunkDurationMs'] as number | undefined };
   }

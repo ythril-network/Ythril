@@ -47,7 +47,9 @@ import type { DesiredLinks } from './links.js';
 import { isWellFormedRef, edgeEndpointKindSchema, edgeEndpointKind } from './entity-refs.js';
 import { primitivePropertyError } from './property-values.js';
 import { reconcileLinks } from './links.js';
+import { linksStartingFrom, linkClassesFrom } from './link-adjacency.js';
 import { upsertEdge } from './edges.js';
+import { retiredWriteFieldError } from './retired-write-fields.js';
 import type { AuthorRef } from '../config/types.js';
 import type { WebhookActor } from '../webhooks/dispatcher.js';
 
@@ -81,6 +83,24 @@ export function desiredLinksFrom(body: unknown): DesiredLinks | null {
     desired[kind] = (bag[field] as string[] | null) ?? [];
   }
   return Object.keys(desired).length > 0 ? desired as DesiredLinks : null;
+}
+
+/**
+ * The `link*` fields a body names, keyed as the WRITERS take them rather than by kind.
+ *
+ * `saveFact`, `updateChrono` and `updateFileMeta` take `linkEntities` / `linkFacts` / `linkChronos`
+ * directly, so a door spreads this into the options object it was building anyway. A field the body does
+ * not name is ABSENT from the result rather than empty, because those two mean opposite things to
+ * `reconcileLinks` — omitted leaves the class alone, `[]` detaches it.
+ */
+export function linkFieldsFrom(body: unknown): Record<string, string[]> {
+  const desired = desiredLinksFrom(body);
+  if (!desired) return {};
+  const out: Record<string, string[]> = {};
+  for (const kind of Object.keys(desired) as RefKind[]) {
+    out[LINK_INPUT_FIELDS[kind]] = [...(desired[kind] ?? [])];
+  }
+  return out;
 }
 
 /**
@@ -132,8 +152,25 @@ function plural(kind: string): string {
  * parity structural rather than remembered.
  */
 export function linkInputSchemas(): Record<string, unknown> {
+  return linkInputSchemasForKinds(REF_KINDS);
+}
+
+/**
+ * The `link*` properties a record of THIS kind can honour — a fact names entities, a file names all three.
+ *
+ * A door for one record kind declares this rather than the whole set. Declaring a class the record cannot
+ * hold is the worse half of the same defect a missing declaration is: the caller is told they can attach a
+ * file to a file, the writer has no class for it, and what comes back is a success.
+ *
+ * Derived from `LINK_CLASSES`, which is the one definition of what the six classes are.
+ */
+export function linkInputSchemasFor(fromKind: RefKind): Record<string, unknown> {
+  return linkInputSchemasForKinds(linkClassesFrom(fromKind).map(c => c.toKind));
+}
+
+function linkInputSchemasForKinds(kinds: readonly RefKind[]): Record<string, unknown> {
   const out: Record<string, unknown> = {};
-  for (const kind of REF_KINDS) {
+  for (const kind of kinds) {
     const isPath = kind === 'file';
     out[LINK_INPUT_FIELDS[kind]] = {
       type: 'array',
@@ -299,11 +336,13 @@ export function edgeInputError(body: unknown): string | null {
 /**
  * Everything a body says about relationships, refused in one call.
  *
- * A door asks this ONCE. Two separate checks would mean every door remembering both, and a door that
- * remembers one is the shape this repository has paid for over and over.
+ * A door asks this ONCE. Three separate checks would mean every door remembering all of them, and a door
+ * that remembers two is the shape this repository has paid for over and over. The retired NAMES are
+ * checked first, so a caller still on the 4.x spelling is told what to send instead of being told their
+ * ids are the wrong shape for a field they did not mention.
  */
 export function connectionInputError(body: unknown): string | null {
-  return linkInputError(body) ?? edgeInputError(body);
+  return retiredWriteFieldError(body) ?? linkInputError(body) ?? edgeInputError(body);
 }
 
 /** The published properties for a tool schema: the `link*` fields and `edges`, from one place. */
@@ -313,6 +352,46 @@ export function connectionSchemas(): Record<string, unknown> {
 
 /** Every body key these fields occupy, so a door can call them known rather than warn about them. */
 export const CONNECTION_BODY_KEYS: readonly string[] = Object.freeze([...LINK_INPUT_NAMES, 'edges']);
+
+/**
+ * What an audit entry should compare when a write changes a record's links — the pair, from ONE place.
+ *
+ * ## Why the record snapshots cannot answer this any more
+ *
+ * `audit/middleware.ts` records what changed by diffing the record BEFORE against the record AFTER, and
+ * the allowlist named `entityIds`, `memoryIds` and `chronoIds` so a re-link left a trace. 5.0 moved those
+ * connections into link records, so neither snapshot carries them — and the way that fails is the one this
+ * module's neighbours keep warning about: the entry still appears, the field is simply missing from
+ * `changes`, and an audit reader concludes the links were untouched. *"Losing track of what a file was
+ * linked to is exactly the kind of change nobody notices until a traversal comes back empty."*
+ *
+ * ## Only the classes the body NAMED, and that is the same rule the writer applies
+ *
+ * A class the caller omitted is not touched by the write, so reporting it would put an unchanged set into
+ * every entry. A body naming no link field at all gets two empty objects and costs no query — links cannot
+ * have changed, so there is nothing to read.
+ *
+ * Call it BEFORE the write: `before` is read from the link records as they still stand, and `after` is what
+ * the body asked for, which is what `reconcileLinks` will make true of the classes it names.
+ */
+export async function linkAuditSnapshots(
+  spaceId: string,
+  from: string,
+  body: unknown,
+): Promise<{ before: Record<string, string[]>; after: Record<string, string[]> }> {
+  const desired = desiredLinksFrom(body);
+  if (!desired) return { before: {}, after: {} };
+
+  const rows = await linksStartingFrom(spaceId, [from]);
+  const before: Record<string, string[]> = {};
+  const after: Record<string, string[]> = {};
+  for (const kind of Object.keys(desired) as RefKind[]) {
+    const field = LINK_INPUT_FIELDS[kind];
+    before[field] = rows.filter(r => r.toKind === kind).map(r => r.to);
+    after[field] = [...(desired[kind] ?? [])];
+  }
+  return { before, after };
+}
 
 /**
  * Make the relationships a write asked for, AFTER the record exists.

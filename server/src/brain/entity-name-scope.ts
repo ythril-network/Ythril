@@ -3,30 +3,23 @@
  *
  * ## The defect it exists for, measured rather than reasoned
  *
- * A record can name an entity two ways, and both are documented:
+ * A record could name an entity two ways and both were documented: the `entityIds` array, and
+ * `linkEntities`, which writes a link record and left the array alone. This predicate read the array, so
+ * the RECOMMENDED way to attach an entity produced a record the documented filter could not find — and it
+ * said so by answering `{facts: [], total: 0}`, which reads as *there are none* rather than *this cannot
+ * see them*.
  *
- * | written with | `entityIds` array | link record | found by `entityName` before this |
- * |---|---|---|---|
- * | `entityIds: [id]` | populated | written | yes |
- * | `linkEntities: [id]` | **empty** | written | **no** |
+ * **The reasoning that let it ship is worth more than the bug.** `link-adjacency.ts` justified reading the
+ * arrays with *"the arrays are complete on every space, always"*. That was true when every writer
+ * maintained them, and `linkEntities` did not. A sentence that was true when written, load-bearing for a
+ * branch, and never re-checked against a writer added afterwards.
  *
- * `linkEntities` is the newer form and the one the integration guide leads with. So the RECOMMENDED way to
- * attach an entity produced a record the documented filter could not find — and the filter said so by
- * answering `{facts: [], total: 0}`, which reads as *there are none* rather than *this cannot see them*.
+ * ## One shape since 5.0, and that is what removed the `$or`
  *
- * **The reasoning that let it ship is worth more than the bug.** `link-adjacency.ts` justifies reading the
- * arrays as the safe side of its branch with *"the arrays are complete on every space, always"*. That was
- * true when every writer maintained them, and `linkEntities` does not — it writes the link record and
- * leaves the array alone. A sentence that was true when written, load-bearing for a branch, and never
- * re-checked against a writer added afterwards.
- *
- * ## Why BOTH sides, rather than switching on `completeLinkage`
- *
- * `completeLinkage` is set only by `npm run links:convert`, so most spaces do not have it — and the two
- * shapes coexist on every unconverted space that has been written to since the upgrade. Reading either one
- * alone drops records silently: the arrays miss everything written with `linkEntities`, and the link
- * records miss everything written before the upgrade. An `$or` over both is the only answer that is
- * complete on a space mid-migration, which is every space that is not brand new.
+ * This asked both ways round — the array OR the link records — because the two shapes coexisted on every
+ * space that had been written to since the upgrade. 5.0 deleted the arrays and every space is converted
+ * before its links can be read at all, so the link records ARE the set. Keeping the array half would now
+ * be a predicate over a field no document has.
  */
 import { resolveEntityIdsByName } from './entities.js';
 import { linkClassFor, linkedFromIds } from './link-adjacency.js';
@@ -58,10 +51,7 @@ export async function attachedToEntityNamed(
   const cls = linkClassFor(kind, 'entity');
   const viaLinks = cls ? await linkedFromIds(spaceId, cls, entityIds) : [];
 
-  /*
-   * `$or`, not a merge. The two shapes are alternatives on the SAME record set, and a record may satisfy
-   * either — one written before the upgrade has the array, one written with `linkEntities` has the link,
-   * and a record written with `entityIds` has both because that path mirrors.
-   */
-  return { $or: [{ entityIds: { $in: entityIds } }, { _id: { $in: viaLinks } }] };
+  // An id set, because a link record's `from` IS the record being selected. A kind with no class for
+  // entities — there is none today — selects nothing rather than everything.
+  return { _id: { $in: viaLinks } };
 }
