@@ -203,24 +203,18 @@ export async function ingestBrainDoc<T extends { _id: string; suppressEmbeddings
   if (recordType !== null) await enqueueIngestedRecord(spaceId, recordType, incoming);
 
   /*
-   * The link records for an ARRIVING record, and this is the site that matters most for them.
+   * NO LINK RECONCILE HERE ANY MORE, and it was load-bearing until 5.0.
    *
-   * A document reaching us from a peer, or from the admin importer, carries its six array fields and no link
-   * records — the sender may be on a build that has none. Nothing else would ever create them: the reconcile
-   * hooks live in the three writer functions, and this path deliberately bypasses all three by replacing the
-   * whole document.
+   * A document reaching us from a peer carried its six array fields and no link records — the sender might
+   * be on a build that had none — so this derived them, because nothing else would: the reconcile hooks
+   * live in the writer functions and this path bypasses all three by replacing the whole document.
    *
-   * Left out, the collection would be right for locally-written records and empty for everything received,
-   * which is invisible until the readers switch and then presents as a peer's connections having vanished.
-   * Hooked HERE rather than in each caller because this function is already the only thing the ingest router
-   * may use to write a brain document — the same argument that put the embed queue here.
-   *
-   * A link record arriving is skipped: it IS the thing, and reconciling it against itself would recurse.
+   * 5.0 removed the arrays, so an arriving record carries no links to derive and LINKS REPLICATE AS THEIR
+   * OWN DOCUMENTS, through `/api/sync/links` and the `links` family in the push body. Deriving them from a
+   * record would now read fields that are not there and quietly reconcile every arriving record to "no
+   * links at all" — which, because the reconcile REPLACES a named class, would delete the very rows that
+   * arrived beside it.
    */
-  if (recordType !== null) {
-    await reconcileLinksForDocument(spaceId, incoming._id, recordType as RefKind,
-      incoming as unknown as Record<string, unknown>);
-  }
 }
 
 // ── Safety limits ─────────────────────────────────────────────────────────
@@ -250,7 +244,6 @@ export const MAX_FORK_DEPTH = 10;
 
 // ── Incoming document schemas (Zod validation for peer-submitted docs) ─────
 
-import { reconcileLinksForDocument } from '../../brain/links.js';
 import type { RefKind } from '../../config/types-knowledge.js';
 import { CHRONO_STATUSES } from '../../config/types.js';
 import { validateEntity, validateEdge, validateChrono, validateFact, getSpaceMeta, type SchemaViolation }
@@ -295,7 +288,6 @@ export const IncomingFactDoc = z.object({
   spaceId: z.string().min(1),
   fact: z.string(),
   tags: z.array(z.string()).max(100),
-  entityIds: z.array(z.string()).max(500),
   description: z.string().optional(),
   properties: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional(),
   author: AuthorRefSchema,
@@ -337,9 +329,6 @@ export const IncomingFileMetaDoc = z.object({
   description: z.string().optional(),
   descriptionSource: z.enum(['generated', 'extracted']).optional(),
   tags: z.array(z.string()).max(100),
-  entityIds: z.array(z.string()).max(500).optional(),
-  memoryIds: z.array(z.string()).max(500).optional(),
-  chronoIds: z.array(z.string()).max(500).optional(),
   properties: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional(),
   /** See `IncomingFactDoc`: the record tier of suppression, which the receiver needs to honour it. */
   suppressEmbeddings: z.boolean().optional(),
@@ -392,10 +381,6 @@ export async function ingestFileMeta(spaceId: string, incoming: z.infer<typeof I
     asUpdate<FileMetaDoc>({ $set }),
     { upsert: true },
   );
-
-  // The three link arrays, derived here for the same reason every other arriving record has them derived:
-  // the sender may be on a build with no link records, and nothing else would ever create them.
-  await reconcileLinksForDocument(spaceId, incoming._id, 'file', $set);
 
   const haveBytes = existing?.sha256 !== undefined || existing?.sizeBytes !== undefined;
   if (haveBytes) await enqueueIngestedRecord(spaceId, 'file', incoming);
@@ -548,8 +533,6 @@ export const IncomingChronoDoc = z.object({
   status: z.enum(CHRONO_STATUSES),
   confidence: z.number().min(0).max(1).optional(),
   tags: z.array(z.string()).max(100).default([]),
-  entityIds: z.array(z.string()).max(500).default([]),
-  memoryIds: z.array(z.string()).max(500).default([]),
   properties: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional(),
   recurrence: z.object({
     freq: z.enum(['daily', 'weekly', 'monthly', 'yearly']),

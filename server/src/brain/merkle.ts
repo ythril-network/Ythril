@@ -153,7 +153,7 @@ const DERIVED_PROJECTION = { embedding: 0, embeddingModel: 0, matchedText: 0, _e
  */
 const FILE_HASH_PROJECTION = {
   _id: 1, spaceId: 1, path: 1, description: 1, descriptionSource: 1, tags: 1,
-  entityIds: 1, memoryIds: 1, chronoIds: 1, properties: 1,
+  properties: 1,
   suppressEmbeddings: 1,
   author: 1, createdAt: 1, updatedAt: 1, seq: 1,
 } as const;

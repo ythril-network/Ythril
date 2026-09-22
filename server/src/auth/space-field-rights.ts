@@ -93,7 +93,6 @@ export const SPACE_FIELD_RIGHTS: Readonly<Record<string, FieldRight>> = {
   recordTtlDays: area('knowledge', 'admin'),
 
   // Flipping it makes the six legacy array fields start REFUSING writes for every caller in the space.
-  completeLinkage: area('knowledge', 'admin'),
 
   // Tuning how duplicates are judged.
   dupeRules: area('dataQuality', 'write'),
@@ -146,7 +145,24 @@ export function refusalsForSpaceUpdate(
   instanceAdmin: boolean,
   rights: TokenRights | null | undefined,
 ): string[] {
-  // An instance administrator passes everything. Saying it once here keeps every row below about the
+  /*
+   * NOT SETTABLE BY ANYONE, checked before the instance-admin shortcut below.
+   *
+   * `completeLinkage` was an ordinary reversible space setting: turning it off made a space accept the 4.x
+   * link arrays again, which is what made a single-space conversion a genuine pilot. 5.0 removed the
+   * arrays, so turning it off now means "read my links from a shape that does not exist" — every link read
+   * on that space is refused, and the operator who flipped it sees a working space stop answering.
+   *
+   * Above the shortcut on purpose: an instance administrator is allowed to do anything the product can do,
+   * and this is not something the product can do any more. The conversion and space creation set it, and
+   * they do not come through here.
+   */
+  if (Object.prototype.hasOwnProperty.call(body, 'completeLinkage')) {
+    return ['completeLinkage is set by the link conversion and by space creation, and cannot be changed: '
+      + 'with the 4.x link arrays gone there is no other shape for a space to be read through'];
+  }
+
+  // An instance administrator passes everything else. Saying it once here keeps every row below about the
   // per-space question, which is the only question the rows differ on.
   if (instanceAdmin) return [];
 

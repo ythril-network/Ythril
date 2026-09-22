@@ -190,6 +190,17 @@ async function main(): Promise<void> {
     const { convertLinksOnBoot } = await import('./brain/links-convert-on-boot.js');
     await convertLinksOnBoot();
 
+    /*
+     * AFTER the conversion, and the ordering is load-bearing rather than tidy.
+     *
+     * The conversion READS the six retired link arrays to create the records that replace them. Clear them
+     * first and an unconverted space loses the only copy of its pre-upgrade links — silently, because an
+     * emptied array and a converted one look identical to everything downstream. This only touches spaces
+     * the conversion has marked, and says which it left alone.
+     */
+    const { dropLinkArrays } = await import('./db/drop-link-arrays.js');
+    await dropLinkArrays();
+
     // Initialise spaces/indexes and start all background services. On a FIRST-run
     // boot this is skipped (config isn't written yet) — the setup route calls the
     // same function once it writes the config, so a freshly set-up instance is fully

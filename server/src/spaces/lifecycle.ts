@@ -356,6 +356,8 @@ export async function ensureGeneralSpace(): Promise<void> {
       label: 'General',
       builtIn: true,
       folders: [],
+      // Converted from birth, for the reason written out in `createSpace`.
+      completeLinkage: true,
     });
     saveConfig(cfg);
   }
@@ -383,6 +385,17 @@ export async function createSpace(opts: {
     builtIn: false,
     folders: opts.folders ?? [],
     maxGiB: opts.maxGiB,
+    /*
+     * CONVERTED FROM BIRTH, because there is nothing to convert FROM.
+     *
+     * The marker used to mean "somebody has run the conversion over this space", and the conversion runs
+     * at BOOT — so a space created afterwards kept the 4.x array shape until the next restart. 5.0 removed
+     * the arrays, so a new space's links are records from its first write and the marker is simply true.
+     *
+     * Without this a space made between two boots would be refused by `assertLinkRecords` — correctly, by
+     * a rule meant for a space whose conversion FAILED, applied to one that never needed it.
+     */
+    completeLinkage: true,
     // Omitted rather than defaulted when absent, so an existing space and a new one at the built-in width
     // are the same shape on disk — a stored `128` would read as a deliberate choice nobody made.
     ...(opts.faceDescriptorDims ? { faceDescriptorDims: opts.faceDescriptorDims } : {}),

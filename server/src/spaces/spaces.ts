@@ -87,7 +87,15 @@ export function updateSpace(
   if ('audioAnalysis' in updates) space.audioAnalysis = updates.audioAnalysis ?? undefined;
   if ('videoAnalysis' in updates) space.videoAnalysis = updates.videoAnalysis ?? undefined;
   if ('textAnalysis' in updates) space.textAnalysis = updates.textAnalysis ?? undefined;
-  // `M-2`: the conversion marker. Local, never voted — see `SpaceConfig.completeLinkage`.
+  /*
+   * The conversion marker, and it is NOT settable through the space API any more.
+   *
+   * It was an ordinary reversible setting — turn it off and the 4.x array writes were accepted again,
+   * which is what made a single-space conversion a genuine pilot. 5.0 removed the arrays, so turning it
+   * off would mean "read my links from a shape that does not exist": `assertLinkRecords` would refuse
+   * every link read on that space, and the operator who flipped it would see a working space stop
+   * answering. The conversion and space creation set it; nothing else may.
+   */
   if (updates.completeLinkage !== undefined) space.completeLinkage = updates.completeLinkage || undefined;
 
   if (updates.meta !== undefined) {
