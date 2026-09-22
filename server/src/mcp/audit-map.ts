@@ -33,6 +33,11 @@
  * false when checked this week, so a reason here is written to be checkable against the code.
  */
 
+// The REST rules are where `read: true` is declared, beside the route it describes.
+// Importing them is what stops this file holding a second copy of that decision; there is no
+// cycle, because the middleware does not import the MCP door.
+import { ROUTE_RULES } from '../audit/middleware.js';
+
 /**
  * Tool name → the audit operation it performs, or `null` with the reason it is not one.
  *
@@ -212,12 +217,37 @@ export function mcpAuditOperation(toolName: string, args?: unknown): string | nu
   }
 }
 
-/** Operations that are reads — logged only when `logReads` is enabled, matching the REST convention. */
-const READ_OPERATIONS = new Set([
-  'brain.query', 'brain.recall', 'brain.traverse', 'brain.stats',
-  'chrono.list', 'space.list', 'file.list', 'file.read', 'entity.list',
-]);
+/**
+ * Which operations are READS — logged only when `audit.logReads` is on, which it is not by default.
+ *
+ * ## Derived from the route rules, and it used to be a second list
+ *
+ * This was nine operation names written out here, beside the eighteen the REST rules already declare
+ * with `read: true`. One rule, two implementations, and the weaker one winning silently — the defect
+ * class this repo produces most, sitting on a switch an operator sets deliberately.
+ *
+ * **The 5.0 renames broke it and the break shipped.** `query` became `filter` and `find_similar` became
+ * `similar`; the map above was updated and the hand-written set was not. So it still named
+ * `brain.query`, which nothing records any more, and named neither `brain.filter` nor `brain.similar` —
+ * the two highest-volume read paths an agent has. An operator on the default configuration got every one
+ * of those calls in an audit log they had configured not to log reads, and nothing said so: a read
+ * logged as a write is an extra row, not an error.
+ *
+ * A dead name in a hand-written set is invisible for the same reason — a classification nothing consults
+ * is never wrong out loud — which is how `brain.query` survived the rename that removed it.
+ *
+ * ## So the ROUTE RULES are the declaration and this reads them
+ *
+ * `read: true` sits on the rule, next to the route it describes, where the person adding a route sees
+ * it. Deriving from there means a capability cannot be a read on one door and not the other, and a new
+ * read route classifies the MCP tool that mirrors it without anybody remembering to.
+ *
+ * `mcp-audit-coverage.test.js` holds the three halves of that: nothing here is a name no door records,
+ * every REST read is one here, and every non-mutating TOOL records an operation that is one here.
+ */
+export const MCP_READ_OPERATIONS: ReadonlySet<string> =
+  new Set(ROUTE_RULES.filter(r => r.read && r.operation).map(r => r.operation));
 
 export function isMcpReadOperation(operation: string): boolean {
-  return READ_OPERATIONS.has(operation);
+  return MCP_READ_OPERATIONS.has(operation);
 }

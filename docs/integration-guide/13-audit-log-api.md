@@ -152,18 +152,28 @@ Audit entries are recorded for all write operations and (when `logReads` is enab
 | Category | Operations |
 |----------|-----------|
 | Fact | `fact.create`, `fact.update`, `fact.delete`, `fact.list` |
-| Entity | `entity.create`, `entity.update`, `entity.delete`, `entity.list` |
+| Entity | `entity.create`, `entity.update`, `entity.delete`, `entity.list`, `entity.merge`, `entity.cascade_preview` (a read — it reports what a cascade WOULD remove and removes nothing) |
 | Edge | `edge.create`, `edge.update`, `edge.delete`, `edge.list` |
+| Link | `link.create`, `link.delete` |
 | Chrono | `chrono.create`, `chrono.update`, `chrono.delete`, `chrono.list` |
-| File | `file.create`, `file.update`, `file.delete`, `file.read`, `file.list` |
-| Space | `space.create`, `space.update`, `space.delete`, `space.wipe`, `space.list` |
-| Token | `token.create`, `token.delete` |
+| Bulk | `bulk.write` — one entry for the whole call, not one per record |
+| File | `file.create`, `file.update`, `file.delete`, `file.read`, `file.list`, `file.mkdir`, `file.meta.update`, `file.retry_embedding`, `file.retry_embedding_all` |
+| Space | `space.create`, `space.update`, `space.delete`, `space.wipe`, `space.list`, `space.rename`, `space.reorder`, `space.reindex`, `space.indexes.rebuild`, `space.embeddings.reembed`, `space.activity.reset`, `space.schema.update`, `space.schema.delete`, `space.schema.validate` |
+| Token | `token.create`, `token.update`, `token.regenerate`, `token.delete` |
+| MFA | `mfa.enable`, `mfa.disable` |
 | Webhook | `webhook.create`, `webhook.update`, `webhook.delete`, `webhook.test` |
-| Brain | `brain.recall`, `brain.recall_global`, `brain.query`, `brain.find_similar`, `brain.stats`, `brain.er_model`, `brain.bulk_write`, `brain.traverse` |
-| Network | `network.create`, `network.update`, `network.delete`, `network.join_remote`, `network.invite`, `network.member.add`, `network.member.remove`, **`network.invite.generate`** (an admin producing join material), **`network.member.join`** (the moment another instance becomes a member of a network on this one — the invite handshake's `finalize`), **`network.sync_trigger`** (a sync of every peer in a network) and **`peer.sync_trigger`** (a sync of one named peer) |
-| Config | `config.reload` |
+| Brain | `brain.recall`, `brain.filter`, `brain.similar`, `brain.traverse`, `brain.stats`, `brain.retry_embedding`, `brain.events.ticket` (issuing a short-lived ticket for the live event stream) |
+| Duplicates | `duplicate.scan`, `duplicate.merge`, `duplicate.dismiss`, `duplicate.reopen` |
+| Contradictions | `contradiction.scan`, `contradiction.resolve`, `contradiction.dismiss`, `contradiction.reopen` |
+| Conflicts | `conflict.seed`, `conflict.resolve`, `conflict.bulk_resolve`, `conflict.delete`, `conflict.link_violation.delete` |
+| Schema library | `schema_library.create`, `schema_library.update`, `schema_library.delete`, `schema_library.publish`, `schema_library.export`, `schema_library.group.apply`, `schema_library.catalog.add`, `schema_library.catalog.remove` |
+| Network | `network.create`, `network.update`, `network.delete`, `network.join`, `network.join_remote`, `network.fork`, `network.vote`, `network.invite`, `network.member.add`, `network.member.remove`, `network.member.adopt`, `network.member.signing_key`, `network.member.revert_parent`, `network.reparent_self`, **`network.invite.generate`** (an admin producing join material), **`network.member.join`** (the moment another instance becomes a member of a network on this one — the invite handshake's `finalize`), **`network.sync_trigger`** (a sync of every peer in a network) and **`peer.sync_trigger`** (a sync of one named peer) |
+| Data | `data.backup`, `data.restore`, `data.migrate`, `data.maintenance.toggle`, `data.backup_config.update`, `data.config.test` |
+| Config | `config.reload`, `config.media.update`, `config.media.verify`, `config.embed.update` |
+| Local agent | `local_agent.bootstrap`, `local_agent.enable_networks` |
+| About | `about.logs.ticket` (issuing a short-lived ticket for the live server log) |
 | Audit | `audit.export` — taking a copy of the whole record. Logged even when `logReads` is off |
-| Auth | `auth.failed` (invalid or expired tokens on any endpoint) |
+| Auth | `auth.failed` (invalid or expired tokens on any endpoint) — the one entry no route produces, because a rejected credential is refused before any handler |
 
 **An MCP tool logs the same operation as the REST route it mirrors**, so a filter finds the capability
 rather than the door. `similar` was the exception until 4.4: it logged `entity.list` while
