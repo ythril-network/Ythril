@@ -1,5 +1,6 @@
 /**
- * Convert a space's array entries into link records — the operator's entry point for `M-2`.
+ * Convert a space's 4.x array entries into link records — the manual entry point, for a space whose boot
+ * conversion failed.
  *
  * Usage, from the repo root, with the server built:
  *
@@ -12,14 +13,13 @@
  * has before running a migration against live data: how much is there. Run it again afterwards — the link
  * count rises and nothing else moves.
  *
- * **Converting one space does not arm anything.** The marker that makes a space refuse array writes
- * (`completeLinkage`) is set only by a full run, per space, and only where that space's walk had no
- * failures. So a single-space run is a genuine pilot: the links are created, both surfaces keep working,
- * and every existing writer is unaffected.
+ * **It runs itself at boot from 5.0, and this is the manual entry point.** Every start converts each space
+ * that is not yet marked. Reach for this when a space's boot conversion FAILED — its link reads are refused
+ * until it has been walked cleanly, and the refusal names the space.
  *
- * **And the marker is reversible.** It is an ordinary space setting — `PATCH /api/spaces/<id>` with
- * `{"completeLinkage": false}` — and array writes are accepted again the moment it is off. The link records
- * a conversion created stay; they are not the thing being switched.
+ * **Converting one space does not mark it.** `completeLinkage` is set only by a full run, per space, and
+ * only where that space's walk had no failures. The marker cannot be turned off again: with the 4.x arrays
+ * removed in 5.0 there is no other shape for a space to be read through.
  *
  * Safe to run twice. A link's id is derived from the connection, so a second run recomputes the same ids,
  * finds them already stored, and writes nothing — which also means an interrupted run is fixed by running it
