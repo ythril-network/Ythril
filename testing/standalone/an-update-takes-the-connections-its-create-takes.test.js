@@ -120,7 +120,10 @@ describe('an update takes the connections its create takes', () => {
  * applies it twice has both verbs covered, and the count survives either function being renamed.
  */
 describe('and the MCP tools take them on update too', () => {
-  const SCHEMAS = 'connectionSchemas()';
+  // The call takes the record KIND since 5.0 — a fact names entities and nothing else, so a door
+  // advertises only the classes its kind can hold. Matched on the call rather than on `()`, or this
+  // derivation finds nothing and reports every tool clean.
+  const SCHEMAS = 'connectionSchemas(';
 
   /** Every tool module that offers connections at all — derived from the shared builder, never listed. */
   function toolsThatOfferConnections() {
@@ -138,7 +141,7 @@ describe('and the MCP tools take them on update too', () => {
   it('each declares them on BOTH verbs and applies them on both', () => {
     const offenders = [];
     for (const t of toolsThatOfferConnections()) {
-      const declared = (t.src.match(/connectionSchemas\(\)/g) ?? []).length;
+      const declared = (t.src.match(/connectionSchemas\(/g) ?? []).length;
       const applied = (t.src.match(/applyConnections\(/g) ?? []).length;
       // One of each is a create-only module — which is exactly the gap. Two is create and update.
       if (declared < 2) offenders.push(`${t.file}: declares the schema ${declared}x`);
