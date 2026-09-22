@@ -42,7 +42,7 @@ import { col, asFilter, asDoc } from '../db/mongo.js';
 import { getConfig } from '../config/loader.js';
 import { nextSeq } from '../util/seq.js';
 import { edgeIdFor } from './edge-id.js';
-import { fieldFor, linkClassFor, linkClassesFrom, usesLinkRecords } from './link-adjacency.js';
+import { fieldFor, linkClassFor, linkClassesFrom, usesLinkRecords, linksStartingFrom } from './link-adjacency.js';
 import { assertRefsResolve } from './entity-refs.js';
 import { isStrictLinkage } from '../spaces/proxy.js';
 import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';
@@ -249,12 +249,6 @@ async function sourceDoc(spaceId: string, suffix: string, id: string): Promise<R
   return await col(`${spaceId}_${suffix}`).findOne(asFilter({ _id: id, spaceId })) as Record<string, unknown> | null;
 }
 
-/** One class's array off a source document — absent or non-array reads as empty. */
-const idsOn = (doc: Record<string, unknown> | null, toKind: RefKind): string[] => {
-  const raw = doc?.[fieldFor(toKind)];
-  return Array.isArray(raw) ? raw as string[] : [];
-};
-
 /**
  * Tell a subscriber the RECORD changed, because it did — its array gained or lost an id.
  *
@@ -316,20 +310,27 @@ export async function addLink(
     throw new Error(`${fromKind} records cannot link to ${toKind}: there is no ${linkLabel(fromKind, toKind)} field`);
   }
 
-  const seq = await nextSeq(spaceId);
-  const res = await col(`${spaceId}_${suffix}`).updateOne(
-    asFilter({ _id: from, spaceId }),
-    { $addToSet: { [fieldFor(toKind)]: to }, $set: { seq, updatedAt: new Date().toISOString() } },
-  );
-  // `matchedCount`, not `modifiedCount`: re-adding a link that is already there matches and modifies
-  // nothing, and that is a successful idempotent call rather than a missing record.
-  if (res.matchedCount === 0) throw new Error(`${fromKind} '${from}' not found`);
-
+  /*
+   * THE RECORD IS READ, NOT WRITTEN. Until 5.0 this wrote the array entry and let the reconcile derive the
+   * row from it, because a row the array never claimed was deleted by the next ordinary write to that
+   * record — an unrelated PATCH of a fact's text, hours later, by somebody who had never heard of this
+   * link. With the arrays gone, `reconcileLinks` is driven by the set its caller names and a write that
+   * names no link class leaves the links entirely alone, so a directly-created row survives.
+   */
   const doc = await sourceDoc(spaceId, suffix, from);
+  if (!doc) throw new Error(`${fromKind} '${from}' not found`);
+
+  // Existing ∪ {to}, because `reconcileLinks` REPLACES the class it is given. Adding one link by handing
+  // it a one-element set would remove every other link of that class — the same trap the file move and
+  // the face recogniser hit, and the reason this reads the rows first.
+  const existing = (await linksStartingFrom(spaceId, [from]))
+    .filter(r => r.fromKind === fromKind && r.toKind === toKind).map(r => r.to);
+
   // The link's author is the SOURCE RECORD's, not the caller's — the same value the six writers pass. A
   // link belongs to the record that claims it, and a door that stamped itself instead would give one
   // connection two different authors depending on which way it happened to be created.
-  await reconcileLinks(spaceId, from, fromKind, { [toKind]: idsOn(doc, toKind) }, (doc?.['author'] as AuthorRef) ?? NO_AUTHOR);
+  await reconcileLinks(spaceId, from, fromKind, { [toKind]: [...new Set([...existing, to])] },
+    (doc['author'] as AuthorRef) ?? NO_AUTHOR);
   emitRecordUpdated(spaceId, fromKind, from, actor);
 
   const link = await col<LinkDoc>(spaceCollection(spaceId, 'links'))
@@ -347,28 +348,25 @@ export async function addLink(
  */
 export async function removeLink(spaceId: string, id: string, actor?: WebhookActor): Promise<boolean> {
   /*
-   * The seq is claimed BEFORE the row is read, so nothing is awaited between learning which array this link
-   * names and writing to it. Read first and the `nextSeq` round trip is a window a concurrent writer's
-   * change lands in — `no-read-modify-write.test.js` is what asks for this, and it is right to: the values
-   * taken off the row are what the write is aimed at, so a stale read aims it somewhere else.
+   * NO SEQ IS CLAIMED HERE ANY MORE, and the reason it used to be is worth keeping.
    *
-   * A seq spent on an id that turns out not to be a link is a gap in a monotonic counter and costs nothing;
-   * sync compares seqs, it does not count them.
+   * This wrote the source record's array, so the seq was claimed BEFORE the row was read — nothing awaited
+   * between learning which array the link named and writing to it, because the `nextSeq` round trip was a
+   * window a concurrent writer's change landed in. `no-read-modify-write.test.js` asks for that, and it was
+   * right to. 5.0 removed the arrays, so this door does not write the source record at all: the link rows
+   * carry their own seqs and `reconcileLinks` claims them.
    */
-  const seq = await nextSeq(spaceId);
   const link = await col<LinkDoc>(spaceCollection(spaceId, 'links')).findOne(asFilter<LinkDoc>({ _id: id, spaceId }));
   if (!link) return false;
 
   const suffix = COLLECTION_OF[link.fromKind];
   if (!suffix) return false;
 
-  await col(`${spaceId}_${suffix}`).updateOne(
-    asFilter({ _id: link.from, spaceId }),
-    { $pull: { [fieldFor(link.toKind)]: link.to }, $set: { seq, updatedAt: new Date().toISOString() } },
-  );
-
-  const doc = await sourceDoc(spaceId, suffix, link.from);
-  await reconcileLinks(spaceId, link.from, link.fromKind, { [link.toKind]: idsOn(doc, link.toKind) }, link.author);
+  // Existing MINUS this one, for the same reason the add reads them: the class is replaced wholesale.
+  const remaining = (await linksStartingFrom(spaceId, [link.from]))
+    .filter(r => r.fromKind === link.fromKind && r.toKind === link.toKind && r.to !== link.to)
+    .map(r => r.to);
+  await reconcileLinks(spaceId, link.from, link.fromKind, { [link.toKind]: remaining }, link.author);
   emitRecordUpdated(spaceId, link.fromKind, link.from, actor);
   return true;
 }
