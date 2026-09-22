@@ -278,7 +278,7 @@ export async function callTool(req: ToolCallRequest): Promise<ToolCallOutcome> {
     // A tool that returns `isError` failed on its own terms, so the status has to come from the RESULT or
     // every rejected write would be logged as a success. 422: the call was well-formed and it was refused.
     const status = result?.isError ? 422 : 200;
-    recordToolCall(caller, name, callSpace, status, Date.now() - startedAt);
+    recordToolCall(caller, name, callSpace, status, Date.now() - startedAt, a);
     return { result, status, callSpace };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -328,8 +328,11 @@ export async function callTool(req: ToolCallRequest): Promise<ToolCallOutcome> {
  * would be forty-five hand-written copies of a mapping `mcpAuditOperation` already derives, and the row
  * that was forgotten is an unaudited mutation.
  */
-function recordToolCall(caller: ToolCaller, toolName: string, spaceId: string, status: number, durationMs: number): void {
-  const operation = mcpAuditOperation(toolName);
+function recordToolCall(caller: ToolCaller, toolName: string, spaceId: string, status: number,
+  durationMs: number, args: unknown): void {
+  // The ARGUMENTS, because a capability with two subjects is audited under the subject of the call:
+  // `network_sync` with a `peerId` records what the per-peer route records (`Q-37`).
+  const operation = mcpAuditOperation(toolName, args);
   if (!operation) return;                       // deliberately not an audited operation — see audit-map.ts
   if (isMcpReadOperation(operation) && !getConfig().audit?.logReads) return;
   logAuditEntry({

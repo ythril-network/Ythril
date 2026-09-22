@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **An agent syncing ONE peer was audited under the network-wide name** (`Q-37`). `network_sync` with a
+  `peerId` does exactly what `POST /api/networks/peers/:peerId/sync` does, and that route records
+  `peer.sync_trigger` — the tool recorded `network.sync_trigger` for both subjects, because the resolver
+  was handed the tool NAME and nothing else. So an operator filtering the audit log for
+  `peer.sync_trigger` saw the browser's peer syncs and none of an agent's.
+
+  It is the defect `a-tool-and-its-route-log-one-operation` exists for, one level down, and invisible to
+  that gate because the tool's first operation IS a name a route records.
+
+  **The resolver takes the call's arguments now, and it does not trust them.** A chooser is a function of
+  caller input, so it is caught, and a result outside the tool's own declared operations is refused.
+  Both failures fall back to the first name: **an unaudited call is worse than one under a
+  slightly-wrong name**, and that is the direction this must not fail in. The gate asserts the rule for
+  every tool with a chooser rather than for the one that has one.
+
+  **Not put on the tool definition**, where it would have been lighter for a single case: that puts the
+  audit name somewhere the coverage gate does not read, and answers a question the audit map already
+  answers — the same rule in two places.
+
 ## [5.0.0] — 2026-09-22
 
 **Ythril 5 breaks every public name.** A tool, a route, a record type and a link field were each spelled
