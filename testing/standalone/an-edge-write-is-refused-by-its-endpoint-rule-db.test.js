@@ -53,13 +53,19 @@ const coll = (n) => mongo.col(`${SPACE}_${n}`);
 
 const entity = (id, name, type) => ({ _id: id, spaceId: SPACE, name, type, tags: [], seq: 1 });
 
-/** Rewrite the config with the given edge type schemas, and reload it. */
-function withEdgeSchemas(schemas) {
+/**
+ * Rewrite the config with the given edge type schemas, and reload it.
+ *
+ * `strictLinkage` is a parameter because one case is about the space that turns it OFF: that setting is
+ * what says dangling references are allowed, and a gate that could not build such a space could not tell
+ * a refusal about EXISTENCE from one about endpoint types.
+ */
+function withEdgeSchemas(schemas, { strictLinkage = true } = {}) {
   fs.writeFileSync(CONFIG_PATH, JSON.stringify({
     instanceId: 'edge-endpoints-test', instanceLabel: 'test', tokens: [], networks: [],
     spaces: [{
-      id: SPACE, label: 'General', builtIn: true, folders: [],
-      meta: { validationMode: 'strict', typeSchemas: { edge: schemas } },
+      id: SPACE, label: 'General', builtIn: true, folders: [], completeLinkage: true,
+      meta: { validationMode: 'strict', strictLinkage, typeSchemas: { edge: schemas } },
     }],
   }, null, 2), { mode: 0o600 });
   loader.loadConfig();
@@ -231,20 +237,42 @@ describe('an edge write is refused by its endpoint rule', { skip }, () => {
         `the item reason does not say what is allowed: ${res.errors[0].reason}`);
     });
 
-    it('an endpoint that resolves to nothing is accepted, not refused', async () => {
+    it('an endpoint that resolves to nothing is refused for NOT EXISTING, never for its type', async () => {
       /*
-       * The floor under the whole design, and the reason `ResolvedEdgeEnds` distinguishes an absent field from
-       * a null one. Bulk checks references for SHAPE and never for existence — a well-formed id pointing at
-       * nothing is stored on purpose, and a space with `strictLinkage: false` says dangling is allowed. So an
-       * end that cannot be resolved has to come back absent, which no endpoint rule can contradict.
+       * The floor under the whole design, and the reason `ResolvedEdgeEnds` distinguishes an absent field
+       * from a null one: an end that cannot be resolved has no type, so no endpoint rule can have an
+       * opinion about it.
        *
-       * Reported as a violation instead, every dangling edge in every space would become unwritable the moment
-       * an operator declared an endpoint rule — a schema declaration silently changing what linkage means.
+       * Reported as a TYPE violation, every dangling edge in every space would become unwritable the
+       * moment an operator declared an endpoint rule — a schema declaration silently changing what linkage
+       * means.
+       *
+       * **What the answer is has changed and what it is ABOUT has not.** This door stored the dangling
+       * edge while shape-not-existence was its contract; since 5.0 it refuses under `strictLinkage`, as
+       * the single-record doors always did. The refusal has to say the record does not exist — the case
+       * below holds the other half, where linkage is off and the edge is stored.
        */
       withEdgeSchemas({ reports_to: { endpoints: { from: ['person'], to: ['person'] } } });
       const res = await bulkEdge(ALICE, 'aaaaaaaa-0000-4000-8000-0000deadbeef', 'reports_to');
-      assert.deepEqual(res.errors, [], 'an unresolvable endpoint was reported as breaking a rule about types');
-      assert.equal(res.inserted.edges, 1);
+      assert.equal(res.errors.length, 1, `expected one refusal, got ${JSON.stringify(res.errors)}`);
+      assert.match(res.errors[0].reason, /does not exist/,
+        `the refusal must be about the missing record: ${res.errors[0].reason}`);
+      assert.doesNotMatch(res.errors[0].reason, /person/,
+        'an unresolvable endpoint was reported as breaking a rule about types — it has no type to break it');
+    });
+
+    it('and with linkage OFF it is STORED, with no endpoint rule reported against it', async () => {
+      /*
+       * The other half, and the one the design turns on. `strictLinkage: false` is a deliberate per-space
+       * choice to accept dangling references — the case it exists for is a staged import whose targets
+       * resolve in a later pass — so the end simply has no type, and an endpoint rule must stay silent
+       * about it rather than making every such edge unwritable.
+       */
+      withEdgeSchemas({ reports_to: { endpoints: { from: ['person'], to: ['person'] } } }, { strictLinkage: false });
+      const res = await bulkEdge(ALICE, 'aaaaaaaa-0000-4000-8000-0000deadbeef', 'reports_to');
+      assert.deepEqual(res.errors, [],
+        'an unresolvable endpoint was reported although the space allows dangling references');
+      assert.equal(res.inserted.edges, 1, 'the edge was not stored on a space that permits it');
     });
   });
 

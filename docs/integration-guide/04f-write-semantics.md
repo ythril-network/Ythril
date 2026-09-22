@@ -234,11 +234,11 @@ A body carrying only a connection field is a valid patch — it used to answer
 `400 "At least one field must be provided"`, because the field was not in the update allowlist and so was
 not seen at all rather than rejected.
 
-> **Before 5.0 a record's relationships were settled when it was created.** `entityIds` and its siblings were
-> the only way to change them afterwards, and a space that has been through the link conversion refuses
-> those outright — so on a converted space there was no way to change a record's links at all, by either
-> door. If you worked around this by deleting and re-creating a record, you no longer need to, and that
-> workaround cost you the record's id and its history.
+> **Before 5.0 a record's relationships were settled when it was created.** The 4.x arrays were the only
+> way to change them afterwards, and a converted space refused those outright — so on a converted space
+> there was no way to change a record's links at all, by either door. If you worked around this by
+> deleting and re-creating a record, you no longer need to, and that workaround cost you the record's id
+> and its history.
 
 **Removing a key is `deleteFields`' job, never an absence.** Omitting a property does not delete it, and sending
 an empty `properties: {}` is a no-op rather than a wipe. If you need a key gone, name it:
@@ -555,8 +555,8 @@ PATCH /api/brain/spaces/:spaceId/files?path=…
 > **A caller that resends the whole object is unaffected** — until 3.1 that was the only thing that worked.
 > A caller that patches a single key now keeps what it did not name, instead of losing it.
 >
-> **The lists still replace on every type**: `tags`, `entityIds`, `memoryIds` and `chronoIds` are overwritten
-> by what you send. Only `properties` merge. And **patching an edge's `label` changes its `_id`** — see the graph API page, which owns edge identity.
+> **The lists still replace on every type**: `tags`, `linkEntities`, `linkFacts` and `linkChronos` are
+> overwritten by what you send. Only `properties` merge. And **patching an edge's `label` changes its `_id`** — see the graph API page, which owns edge identity.
 >
 > **Also fixed in 4.0: `update_file_meta`'s published SCHEMA said the opposite of all of this.** Its
 > `properties` description read *"REPLACES the whole properties object — keys you do not send are DELETED"*,
@@ -614,7 +614,7 @@ PATCH /api/brain/spaces/:spaceId/files?path=…
 - If the result after `deleteFields` + merge violates a `required: true` property schema in `typeSchemas` (with `validationMode: "strict"`), the request is rejected with `422` listing the missing required keys. No partial mutation occurs.
 - `deleteFields` can be the **only** parameter in the request body (no other updates needed).
 - Omitting `deleteFields` retains the existing merge behaviour — no breaking change for existing clients.
-- **Re-embedding:** deleting any content field (`properties`, `description`, `tags`, `fact`, `entityIds`) triggers re-embedding of the affected document. Bulk `deleteFields` updates may incur embedding service latency.
+- **Re-embedding:** deleting any content field (`properties`, `description`, `tags`, `fact`) triggers re-embedding of the affected document. Bulk `deleteFields` updates may incur embedding service latency.
 
 **Response** — same shape as a normal `PATCH` update (`200` with the updated document).
 

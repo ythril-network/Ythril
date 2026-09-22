@@ -28,6 +28,7 @@
 import { col } from '../db/mongo.js';
 import { COLLECTION_SUFFIX } from '../config/types-knowledge.js';
 import { LINK_INDEXES } from '../brain/link-adjacency.js';
+import { spaceCollection } from '../db/space-collection.js';
 import { getConfig } from '../config/loader.js';
 import { log } from '../util/log.js';
 
@@ -80,10 +81,10 @@ export async function ensureQueryIndexes(): Promise<number> {
     }
     for (const ix of LINK_INDEXES) {
       try {
-        await col(`${space.id}_links`).createIndex(ix.keys, ix.unique ? { unique: true } : {});
+        await col(spaceCollection(space.id, 'links')).createIndex(ix.keys, ix.unique ? { unique: true } : {});
         issued++;
       } catch (err) {
-        log.warn(`ensureQueryIndexes: ${space.id}_links ${Object.keys(ix.keys).join(',')} index: ${err}`);
+        log.warn(`ensureQueryIndexes: ${space.id} links ${Object.keys(ix.keys).join(',')} index: ${err}`);
       }
     }
   }

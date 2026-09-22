@@ -103,7 +103,8 @@ export async function bulkWrite(spaceId: string, input: BulkInput): Promise<Bulk
   const mode = meta?.validationMode ?? 'off';
   const strict = isStrictLinkage(spaceId);
   /*
-   * `F-27` item 2, owner's ruling 2026-09-07: on this door a REFERENCE is existence-checked too.
+   * `F-27` item 2, owner's ruling 2026-09-07: on this door a REFERENCE is existence-checked too, under
+   * the same `strictLinkage` setting the single-record doors read.
    *
    * This door was deliberately laxer than the single-record ones — references were checked for shape and
    * never for existence, which is a defensible trade for a bulk import where records legitimately arrive
@@ -385,8 +386,18 @@ export async function bulkWrite(spaceId: string, input: BulkInput): Promise<Bulk
      * pointing at nothing, which this door has always stored and which becomes unacceptable once the batch
      * is how linked records are written.
      */
-    const missing = await firstMissingEnd(spaceId, [[from, fromKind, 'from'], [to, toKind, 'to']]);
-    if (missing) { errors.push({ type: 'edge', index: i, reason: missing }); continue; }
+    /*
+     * UNDER `strictLinkage`, which is the same condition the single-record doors use.
+     *
+     * It was scoped to a CONVERTED space while an unconverted one could keep the looser import trade, and
+     * 5.0 left that condition one value. Making it unconditional would have been the other half of the
+     * same defect: `strictLinkage: false` exists for staged imports where targets resolve in a later pass,
+     * and this door is where those imports arrive.
+     */
+    if (strict) {
+      const missing = await firstMissingEnd(spaceId, [[from, fromKind, 'from'], [to, toKind, 'to']]);
+      if (missing) { errors.push({ type: 'edge', index: i, reason: missing }); continue; }
+    }
     if (!label) { errors.push({ type: 'edge', index: i, reason: 'missing required field: label' }); continue; }
     const properties = optProps(item['properties']);
     const ttlDays = bulkTtlDays(item['ttlDays']);

@@ -24,8 +24,8 @@ fact. See [Retry Safety](04-brain-api.md#retry-safety).
   "status": "upcoming",
   "confidence": 0.9,
   "tags": ["release"],
-  "entityIds": [],
-  "memoryIds": []
+  "linkEntities": [],
+  "linkFacts": []
 }
 ```
 
@@ -99,8 +99,8 @@ fact. See [Retry Safety](04-brain-api.md#retry-safety).
   than `startsAt` is stored as sent, and on a type that derives the entry then reads as `overdue`
   immediately. Check it yourself if that matters.
 - `confidence` — `0`–`1` (optional, useful for predictions)
-- `entityIds` — array of UUID v4 entity IDs (not names); returns `400` if any value is not a valid UUID and `strictLinkage` is enabled
-- `memoryIds` — array of UUID v4 fact IDs (not names); returns `400` if any value is not a valid UUID and `strictLinkage` is enabled
+- `linkEntities` — array of UUID v4 entity IDs (not names); returns `400` if any value is not a valid UUID, and under `strictLinkage` if any names nothing. The 4.x `entityIds` is refused, and the refusal names this field
+- `linkFacts` — array of UUID v4 fact IDs (not names); same rules. The 4.x `memoryIds` is refused, and the refusal names this field
 
 **Response** `201` — the created `ChronoEntry`.
 
@@ -116,7 +116,7 @@ PATCH /api/brain/spaces/:spaceId/chrono/:id
 > the brain API; it performed no property validation and wrote no audit snapshot. `PATCH` takes the same
 > body and does both.
 
-**Body**: partial object with any updatable fields (`title`, `type`, `status`, `startsAt`, `endsAt`, `confidence`, `tags`, `entityIds`, `memoryIds`, `description`, `properties`, `recurrence`, `suppressEmbeddings`, `ttlDays`), plus `deleteFields`.
+**Body**: partial object with any updatable fields (`title`, `type`, `status`, `startsAt`, `endsAt`, `confidence`, `tags`, `linkEntities`, `linkFacts`, `description`, `properties`, `recurrence`, `suppressEmbeddings`, `ttlDays`), plus `deleteFields`.
 
 > **`deleteFields` arrived in 3.1, and it is the only way to remove anything.** `properties` MERGE — patching
 > one key keeps the others — and an omitted field means *leave it alone*, so before 3.1 there was no request
@@ -193,7 +193,7 @@ DELETE /api/brain/spaces/:spaceId/chrono/:id
 
 **Response** `204`, or `409` when something still points at it and the space has
 `strictLinkage` on. The body carries `error`, `blocking` (what refused it) and
-`references` (everything pointing at it). A file listing this entry in `chronoIds` blocks the delete.
+`references` (everything pointing at it). A file LINKED to this entry blocks the delete; clear the link first (`linkChronos: []` on the file, or `DELETE .../links/:id`).
 
 > **This changed in 4.0 and a running script can hit it.** The same delete always succeeded before, because
 > those link fields had no reader anywhere in the server — the reference was stored and replicated and

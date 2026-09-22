@@ -116,7 +116,7 @@ DELETE /api/brain/spaces/:spaceId/entities/:id
 
 **BOTH ENDS OF AN EDGE COUNT, and the refusal used to say "inbound".** An edge pointing FROM this entity blocks the delete exactly as one pointing at it does, because either would be left dangling. The old message named a direction the check has never had, so a caller filtered on `to`, found nothing, and could not clear the block. It no longer names one, and each edge row carries the end that matched instead — `from`, `to`, or `both` for a self-loop.
 
-Everything that can reference an entity is checked: **edges** on either endpoint, and the `entityIds` of **facts**, **chrono entries** and **files**. Only an edge has ends, so `end` is absent on the other three — they HOLD a reference in a list rather than terminating at one, and labelling them would send you looking for an edge that does not exist.
+Everything that can reference an entity is checked: **edges** on either endpoint, and the LINKS from **facts**, **chrono entries** and **files**. Only an edge has ends, so `end` is absent on the other three — a link says one record is about another rather than terminating at it, and labelling them would send you looking for an edge that does not exist.
 
 Face labels (`file.faceEntityId`) are reported too, with `type: "face"` — but they are deliberately **not blocking**, because a face label is something the system inferred rather than a link somebody wrote. `backlinks` is the blocking set; `references` is everything found, face rows included, so a UI can warn *"this will unlabel N faces"* while showing why the delete was refused.
 
@@ -510,9 +510,9 @@ POST /api/brain/spaces/:spaceId/traverse
 | `edgeLabels` | — | all labels | Filter traversal to specific edge labels only |
 | `maxDepth` | — | `3` | Maximum hops from `startId`; hard-capped at `10` |
 | `limit` | — | `100` | Maximum total nodes returned, **clamped to 1–1000 on both doors** — `limit: 5000` silently becomes 1000. The neighbouring `maxDepth` row states its ceiling and this one did not |
-| `includeChrono` | — | `true` | Also reach chrono entries whose `entityIds` reference a traversed node. Set `false` for entity-only results. A non-boolean is a `400`, never coerced |
-| `includeMemories` | — | `false` | Also reach facts whose `entityIds` reference a traversed node, marked `kind: "fact"`. **Opt-in, unlike `includeChrono`** — see the note below. A non-boolean is a `400`. **This door's `false` is a real default**, so an unsaid flag brings no facts: recall's expansion differs and brings ATTRIBUTED claims when the flag is unsaid, because its caller asked a question rather than asked to explore — see [the recall page](04a-recall-api.md) |
-| `includeFiles` | — | `false` | Also reach files whose `entityIds` reference a traversed node, marked `kind: "file"` and carrying **file meta only**. Opt-in. A non-boolean is a `400` |
+| `includeChrono` | — | `true` | Also reach chrono entries LINKED to a traversed node. Set `false` for entity-only results. A non-boolean is a `400`, never coerced |
+| `includeMemories` | — | `false` | Also reach facts LINKED to a traversed node, marked `kind: "fact"`. **Opt-in, unlike `includeChrono`** — see the note below. A non-boolean is a `400`. **This door's `false` is a real default**, so an unsaid flag brings no facts: recall's expansion differs and brings ATTRIBUTED claims when the flag is unsaid, because its caller asked a question rather than asked to explore — see [the recall page](04a-recall-api.md) |
+| `includeFiles` | — | `false` | Also reach files LINKED to a traversed node, marked `kind: "file"` and carrying **file meta only**. Opt-in. A non-boolean is a `400` |
 | `includeEdges` | — | `true` | Whether the response carries the `edges` list. **This does not change the walk** — edges are how the graph is traversed. A non-boolean is a `400` |
 
 > **`includeMemories` means three things on a RECALL, and this table is the one to read for it.** An
@@ -609,7 +609,7 @@ as many as were meant.
 
 #### Chrono entries are nodes
 
-`chrono.entityIds` is the link between a timeline and the graph, and traversal follows it — a chrono entry
+A chrono-to-entity link is what joins a timeline to the graph, and traversal follows it — a chrono entry
 that references a traversed node is returned as though joined by an **inbound** edge, which is what that
 field is. No schema change was needed; the link already existed and simply had no reader here.
 
@@ -617,7 +617,8 @@ field is. No schema change was needed; the link already existed and simply had n
   were already parsing is unchanged. Read `kind` before following an `_id`: the two live in different
   collections, and `type` cannot tell you which (a chrono's is `event`/`deadline`/…, an entity's is whatever
   the space calls it).
-- **The synthetic edge is labelled `chrono.entityIds`** and carries its own id, shaped
+- **The synthetic edge is labelled `chrono.entityIds`** — a frozen token naming the 4.x field this link
+  class replaced, and part of the link's derived id — and it carries its own id, shaped
   `<label>:<from>:<to>` — deliberately not a UUID, because there is no stored edge behind it and an id that
   looked like a real one would invite a lookup that cannot succeed. **Do not fetch a synthetic edge by id:**
   `GET /edges/:id` reads the edge collection only, so any id here answers `404`. Follow the NODE instead.
@@ -628,14 +629,14 @@ field is. No schema change was needed; the link already existed and simply had n
   > resolve to the chrono. It never did — the edge lookup is collection-scoped — and sharing an id between a
   > node and an edge made graph libraries drop the edge, since they keep one id namespace for both.
 - **A chrono reached through its LINK is a leaf.** Traversal does not expand outward from one — a chrono's
-  `entityIds` points at entities, not at other chrono entries, so expanding would only walk back to entities
+  a chrono entry links to entities, not to other chrono entries, so expanding would only walk back to entities
   already visited. **A chrono reached through an explicit EDGE is not a leaf**: an edge chains, and stopping
   there would answer one hop of a chain and call it the neighbourhood.
 - Set `includeChrono: false` for the previous entity-only behaviour.
 
 #### Facts are nodes too, on request
 
-`fact.entityIds` is the same kind of link, and `includeMemories: true` follows it. A fact node carries
+A fact-to-entity link is the same kind of thing, and `includeMemories: true` follows it. A fact node carries
 `kind: "fact"`, its `name` is the fact's `fact`, and its `type` may be an empty string — a fact's type is
 optional, unlike a chrono's. The synthetic label is `fact.entityIds`, and like the chrono label it is filtered
 by an explicit `edgeLabels`. A fact reached through that link is a leaf, for the same reason a chrono is —
@@ -649,7 +650,7 @@ facts and truncate away the entities you traversed for. Turn it on deliberately,
 
 #### Files are nodes too, and only their meta comes back
 
-`includeFiles: true` follows `file.entityIds`, so a document about an entity is reachable from it. The node is
+`includeFiles: true` follows a file-to-entity link, so a document about an entity is reachable from it. The node is
 the **file**, not its passages: `_id` and `name` are the path, and `description` and `tags` ride along when set.
 
 **No passage text, ever.** A file's body is its chunks — the largest thing this product stores, and what

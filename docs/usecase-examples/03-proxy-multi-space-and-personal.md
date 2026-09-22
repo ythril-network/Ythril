@@ -237,8 +237,8 @@ graph LR
 - `remember("Roof repair $12k on rental property. Insurance claim filed ref #4821.", entities: ["rental-oak-st", "insurance"], tags: ["expense", "maintenance"])` into `property` space.
 - `recall("semiconductor exposure")` on the proxy → pulls trade history from `trading`, any related notes from `savings` (maybe a semiconductor ETF in your 401k), all ranked by relevance with `spaceId` attribution.
 - `query(entities, {type: "stock"})` on the proxy → every position across all accounts. `query(edges, {label: "thesis_for"})` → your investment thesis graph. "Why did I buy AMD again?" — instant recall.
-- `create_chrono({type: "event", title: "NVDA earnings Q1 2026", startsAt: "2026-05-28", entityIds: ["NVDA"]})` → `list_chrono({status: "upcoming"})` → your LLM reminds you of catalysts tied to positions you actually hold.
-- `create_chrono({type: "prediction", title: "AMD will outperform NVDA in inference workloads by Q4", confidence: 0.6, entityIds: ["AMD", "NVDA"]})` → track your own predictions. `query(chrono, {type: "prediction", status: "completed"})` → "How good were my calls?"
+- `create_chrono({type: "event", title: "NVDA earnings Q1 2026", startsAt: "2026-05-28", linkEntities: ["NVDA"]})` → `list_chrono({status: "upcoming"})` → your LLM reminds you of catalysts tied to positions you actually hold.
+- `create_chrono({type: "prediction", title: "AMD will outperform NVDA in inference workloads by Q4", confidence: 0.6, linkEntities: ["AMD", "NVDA"]})` → track your own predictions. `query(chrono, {type: "prediction", status: "completed"})` → "How good were my calls?"
 - Everything stays on your hardware. Your brokerage data, trade theses, and spending patterns never touch a third-party API. Closed network sync to your laptop = offline access.
 
 ---
@@ -280,7 +280,7 @@ graph TD
 - FX analyst: `remember("EUR/USD broke 1.12 support on weak PMI. Next support at 1.095. ECB likely dovish June.", entities: ["EUR/USD", "ECB"], tags: ["technical", "macro"])`. Macro analyst: `remember("US PMI miss — manufacturing at 48.2, services at 51.1. Dollar weakening thesis intact.", entities: ["US-PMI", "USD"], tags: ["data", "leading-indicator"])`.
 - Desk head on the proxy: `recall("dollar weakening")` → gets the FX technical AND the macro data backing it, cross-correlated by semantic relevance. Two analysts, two spaces, one coherent picture.
 - `upsert_edge("EUR/USD", "ECB", "driven_by")` + `upsert_edge("ECB", "US-PMI", "reacts_to")` → the knowledge graph connects the causal chain across desks. `query(edges, {from: "ECB"})` → every factor the team has linked to ECB decisions.
-- `create_chrono({type: "prediction", title: "EUR/USD hits 1.15 by August", confidence: 0.65, entityIds: ["EUR/USD"]})` → desk tracks analyst predictions over time. `query(chrono, {type: "prediction", entityIds: "EUR/USD"})` → full prediction history with confidence scores.
+- `create_chrono({type: "prediction", title: "EUR/USD hits 1.15 by August", confidence: 0.65, linkEntities: ["EUR/USD"]})` → desk tracks analyst predictions over time. `query(chrono, {type: "prediction", linkEntities: "EUR/USD"})` → full prediction history with confidence scores.
 - Each desk is its own democratic network — analyst departure doesn't nuke the knowledge base. New analyst joins, syncs, instant full context.
 
 ---
@@ -367,7 +367,7 @@ graph LR
 **Wow factor:**
 
 - Parent A: `remember("Boiler annual service due in October. Last serviced by PlumbCo, invoice #8812.", entities: ["boiler", "PlumbCo"], tags: ["maintenance"])` → syncs to everyone. Next year, any family member's LLM: `recall("boiler service")` → full history.
-- `create_chrono({type: "deadline", title: "Kid soccer tournament registration closes", startsAt: "2026-04-15", entityIds: ["soccer"]})` → `list_chrono({status: "upcoming"})` → the household LLM surfaces it to whoever asks.
+- `create_chrono({type: "deadline", title: "Kid soccer tournament registration closes", startsAt: "2026-04-15", linkEntities: ["soccer"]})` → `list_chrono({status: "upcoming"})` → the household LLM surfaces it to whoever asks.
 - `upsert_entity("family-van", "vehicle", ["maintenance"], {mileage: 82000, nextService: "85000km"})` → `query(entities, {type: "vehicle"})` → "When is the van due for service?" Structured, not buried in a note.
 - Parent A's `private-a` space is **not in any network** — it never leaves the phone. Medical notes, financial planning, personal journal — truly private. The LLM on that phone can still `recall` with `space` omitted across both `household` and `private-a` locally.
 - Kid's tablet has a space-scoped token for `household` (read/write) and `kids-school` (read/write). No access to parent private spaces — not by policy, by architecture.
@@ -413,7 +413,7 @@ graph TD
 - `remember("HVAC compressor failed 2026-03-15. Error code E-48. Tech replaced capacitor, $180.", entities: ["hvac-main", "E-48"], tags: ["failure", "repair"])` in `devices`. `remember("Energy spike 2026-03-14: 38 kWh consumed (vs 22 kWh avg). HVAC ran continuously.", entities: ["hvac-main"], tags: ["anomaly", "consumption"])` in `energy`.
 - `recall("why was energy high last week")` on the proxy → correlates the energy anomaly with the HVAC failure across two different spaces. Your LLM connects the dots: "The HVAC compressor was failing, causing it to run continuously the day before it died."
 - `upsert_entity("hvac-main", "device", ["climate"], {model: "Daikin RXB35", installed: "2022-06", warrantyEnd: "2027-06"})` → `query(entities, {type: "device", properties.warrantyEnd: {$lte: "2026-12"}})` → "Which devices have warranties expiring this year?"
-- `create_chrono({type: "event", title: "Solar panels cleaned", startsAt: "2026-03-20", entityIds: ["solar-array"]})` + production data in `energy` space → correlate cleaning dates with production improvements over time.
+- `create_chrono({type: "event", title: "Solar panels cleaned", startsAt: "2026-03-20", linkEntities: ["solar-array"]})` + production data in `energy` space → correlate cleaning dates with production improvements over time.
 - `remember("Set automation: if solar production > 4kW and battery > 80%, start dishwasher. Reason: minimize grid draw during peak tariff.", tags: ["automation", "solar", "tariff"])` in `automations` → six months later, `recall("why does the dishwasher run midday")` → instant answer with the original reasoning.
 - `query(edges, {label: "controls"})` → which automations control which devices. `query(edges, {from: "hvac-main"})` → everything linked to the HVAC: energy readings, failure history, automations, warranty info — across all three spaces via the proxy.
 - Phone sync means you can check energy production and device status from anywhere. Closed network = your smart home data never touches a cloud.

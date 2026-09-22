@@ -558,7 +558,7 @@ it was being removed. What replaced it is the generic tool door, which has no pe
 | `sort` | — | Field to order by. Per-collection allowlist; an unlisted field is a `400` naming the allowed ones. Omit for newest-first  **`links` was missing from that allowlist until 5.0 and sorting it CRASHED** — a `500` with `retryable: true` on this door, which told a caller to retry a request that could never succeed. It sorts by `createdAt`, `updatedAt`, `from` and `to`; a link has no name, title or type of its own.|
 | `dir` | — | `asc` or `desc` (default `desc`). Only meaningful with `sort` |
 | `maxTimeMS` | — | Query timeout in milliseconds (default `5000`) |
-| `entityName` | — | *(facts, chrono)* Only records attached to an entity whose name CONTAINS this, case-insensitively. A JOIN rather than a predicate: the server resolves the name to ids per member space first, and reads BOTH shapes a link can take — the `entityIds` array and the link records. A name matching nothing returns nothing, never everything. On any other collection it is a `400` |
+| `entityName` | — | *(facts, chrono)* Only records attached to an entity whose name CONTAINS this, case-insensitively. A JOIN rather than a predicate: the server resolves the name to ids per member space first, then reads the link records. A name matching nothing returns nothing, never everything. A name matching nothing returns nothing, never everything. On any other collection it is a `400` |
 | `fromName` / `toName` | — | *(edges)* Only edges whose FROM / TO end is an entity whose name contains this. Direction is data: an edge from Alice to Bob matches `fromName` and not `toName`. On any other collection it is a `400` |
 | `tag` | — | Only records carrying a tag that CONTAINS this, case-insensitively — `rel` finds `release`. For an EXACT tag use `filter: { tags: "release" }`. Refused on `links` |
 | `type` | — | Only records of this knowledge type, exactly. The same thing as `filter: { type: ... }`, offered because the list routes offer it. Refused on `links` |
@@ -576,8 +576,8 @@ Any other field is a `400`. See **Unknown body fields are refused** below.
 > **The three name fields are on the tool too** — `filter` takes them with the same meaning and the same refusals, and `POST /api/filter` is the same call. They were REST-only until 5.0, which meant an agent could not ask for “facts about Alice” by name at all.
 
 **`links` is read-only through THIS route, and it does have write doors of its own** — `POST /api/brain/spaces/:spaceId/links` and `DELETE /api/brain/spaces/:spaceId/links/:id`, with `save_link` and `delete_link` on MCP. This said it had none, which was true before 4.0 and stopped being when links became records. A link record says that one
-record concerns another — it is what a `fact.entityIds`, `chrono.entityIds`/`memoryIds` or
-`file.entityIds`/`memoryIds`/`chronoIds` entry becomes when it is stored as a record instead of an array
+record concerns another. Its `label` reads like a field name — `fact.entityIds` and its five siblings —
+because each names the 4.x array the class replaced, and the label is part of the link's derived id
 element. You write one by writing that array on the record, exactly as before; querying this collection is how
 you read them back as rows.
 
@@ -686,7 +686,7 @@ The alternative — a `truncated` flag alone — tells a caller their graph was 
 the rest, which on a neighbourhood is a dead end: there is no `total` to page against.
 
 **It is still the right answer in one case, and since 3.6.1 it is used there.** The link scans that follow a
-record's `entityIds` are bounded per hop, and a hop can spend its budget on records it discards as already
+record's links are bounded per hop, and a hop can spend its budget on records it discards as already
 visited — so the graph is short and there is no complete copy to write, because the missing records were never
 read. `graphTruncated: true` arrives on its own. A caller that treated the two as inseparable should read the
 flag and treat `graphComplete` as optional.

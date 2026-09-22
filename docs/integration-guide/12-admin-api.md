@@ -6,8 +6,8 @@
 
 ## Reference integrity
 
-Every link between brain records — a fact's `entityIds`, an edge's `from`/`to`, a chrono entry's
-`entityIds`/`memoryIds`, a file's `entityIds`/`chronoIds`/`memoryIds` — names the target by its **id**,
+Every link between brain records — an edge's `from`/`to`, and the records a fact, chrono entry or file
+is linked to (`linkEntities`, `linkFacts`, `linkChronos`) — names the target by its **id**,
 which is a **UUID v4**. A name is not a reference.
 
 **A reference that cannot resolve is refused.** The write returns `400` (or an MCP `isError`) naming the

@@ -335,7 +335,7 @@ describe('audit changes — file meta and entity merge (the two held back from s
    * them — and a pattern demanding `before: existing ?? {}` and nothing else would fail on the change
    * that made link edits auditable again.
    */
-  const SNAPSHOT = /req\.auditSnapshots = \{ before: \{? *\.{0,3} *\(?[A-Za-z_$][\w$]*(?:\[0\])? \?\? \{\}\)?/;
+  const SNAPSHOT = /req\.auditSnapshots = \{ before: (?:\{ \.\.\.)?\(?[A-Za-z_$][\w$]*(?:\[0\])? \?\? \{\}/;
 
   it('both routes actually supply snapshots — checked per SITE, not per file', () => {
     // The #471 rule: an allowlist with no route behind it records nothing while claiming coverage.
