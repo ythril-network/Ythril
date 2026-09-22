@@ -171,6 +171,12 @@ export async function reconcileLinks(
   const classes = Object.keys(desired) as RefKind[];
   if (classes.length === 0) return { added: 0, removed: 0 };
 
+  /*
+   * Skipped for the CONVERSION, and both halves of that are deliberate. It is additive and reads its
+   * desired set off records that already exist, so re-validating a space's whole link graph on every boot
+   * would be a query per class per record — and the classes it names come from the collection it is
+   * walking rather than from a caller, so there is no seventh class for it to invent.
+   */
   if (!opts.additive) await assertDesiredLinks(spaceId, fromKind, desired);
 
   const wanted = new Map<string, { to: string; toKind: RefKind }>();
@@ -182,7 +188,7 @@ export async function reconcileLinks(
     }
   }
 
-  // Only the classes this write TOUCHED. A `PATCH` that names `entityIds` alone must not disturb the fact
+  // Only the classes this write TOUCHED. A `PATCH` that names `linkEntities` alone must not disturb the fact
   // links, so the existing set is read per class rather than per `from`.
   const existing = await col<LinkDoc>(spaceCollection(spaceId, 'links'))
     .find(asFilter<LinkDoc>({ spaceId, from, fromKind, toKind: { $in: classes } }), { projection: { _id: 1 } })
