@@ -45,7 +45,7 @@ describe('POST /api/sync/facts — conflict rules', () => {
     const id = `seq-test-new-${RUN}`;
     const r = await post(INSTANCES.a, token, '/api/sync/facts?spaceId=general', {
       _id: id, spaceId: 'general', fact: 'inserted fact', seq: 1, embedding: [], tags: [],
-      entityIds: [], author: { instanceId: 'test', instanceLabel: 'Test' },
+      author: { instanceId: 'test', instanceLabel: 'Test' },
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), embeddingModel: 'none',
     });
     assert.equal(r.status, 200, JSON.stringify(r.body));
@@ -57,13 +57,13 @@ describe('POST /api/sync/facts — conflict rules', () => {
     // Insert with seq 10
     await post(INSTANCES.a, token, '/api/sync/facts?spaceId=general', {
       _id: id, spaceId: 'general', fact: 'original fact', seq: 10, embedding: [], tags: [],
-      entityIds: [], author: { instanceId: 'test', instanceLabel: 'Test' },
+      author: { instanceId: 'test', instanceLabel: 'Test' },
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), embeddingModel: 'none',
     });
     // Re-upsert with seq 20 (higher)
     const r = await post(INSTANCES.a, token, '/api/sync/facts?spaceId=general', {
       _id: id, spaceId: 'general', fact: 'updated fact', seq: 20, embedding: [], tags: [],
-      entityIds: [], author: { instanceId: 'test', instanceLabel: 'Test' },
+      author: { instanceId: 'test', instanceLabel: 'Test' },
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), embeddingModel: 'none',
     });
     assert.equal(r.status, 200, JSON.stringify(r.body));
@@ -75,12 +75,12 @@ describe('POST /api/sync/facts — conflict rules', () => {
     const fact = 'same fact same seq';
     await post(INSTANCES.a, token, '/api/sync/facts?spaceId=general', {
       _id: id, spaceId: 'general', fact, seq: 50, embedding: [], tags: [],
-      entityIds: [], author: { instanceId: 'test', instanceLabel: 'Test' },
+      author: { instanceId: 'test', instanceLabel: 'Test' },
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), embeddingModel: 'none',
     });
     const r = await post(INSTANCES.a, token, '/api/sync/facts?spaceId=general', {
       _id: id, spaceId: 'general', fact, seq: 50, embedding: [], tags: [],
-      entityIds: [], author: { instanceId: 'test', instanceLabel: 'Test' },
+      author: { instanceId: 'test', instanceLabel: 'Test' },
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), embeddingModel: 'none',
     });
     assert.equal(r.status, 200, JSON.stringify(r.body));
@@ -91,12 +91,12 @@ describe('POST /api/sync/facts — conflict rules', () => {
     const id = `seq-test-older-${RUN}`;
     await post(INSTANCES.a, token, '/api/sync/facts?spaceId=general', {
       _id: id, spaceId: 'general', fact: 'newer local', seq: 100, embedding: [], tags: [],
-      entityIds: [], author: { instanceId: 'test', instanceLabel: 'Test' },
+      author: { instanceId: 'test', instanceLabel: 'Test' },
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), embeddingModel: 'none',
     });
     const r = await post(INSTANCES.a, token, '/api/sync/facts?spaceId=general', {
       _id: id, spaceId: 'general', fact: 'older remote', seq: 5, embedding: [], tags: [],
-      entityIds: [], author: { instanceId: 'test', instanceLabel: 'Test' },
+      author: { instanceId: 'test', instanceLabel: 'Test' },
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), embeddingModel: 'none',
     });
     assert.equal(r.status, 200, JSON.stringify(r.body));
@@ -107,12 +107,12 @@ describe('POST /api/sync/facts — conflict rules', () => {
     const id = `seq-test-fork-${RUN}`;
     await post(INSTANCES.a, token, '/api/sync/facts?spaceId=general', {
       _id: id, spaceId: 'general', fact: 'branch A fact', seq: 77, embedding: [], tags: [],
-      entityIds: [], author: { instanceId: 'test', instanceLabel: 'Test' },
+      author: { instanceId: 'test', instanceLabel: 'Test' },
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), embeddingModel: 'none',
     });
     const r = await post(INSTANCES.a, token, '/api/sync/facts?spaceId=general', {
       _id: id, spaceId: 'general', fact: 'branch B different fact', seq: 77, embedding: [], tags: [],
-      entityIds: [], author: { instanceId: 'test', instanceLabel: 'Test' },
+      author: { instanceId: 'test', instanceLabel: 'Test' },
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), embeddingModel: 'none',
     });
     assert.equal(r.status, 200, JSON.stringify(r.body));
@@ -132,7 +132,7 @@ describe('POST /api/sync/facts — conflict rules', () => {
     // Now try to insert the same id with a lower seq
     const r = await post(INSTANCES.a, token, '/api/sync/facts?spaceId=general', {
       _id: id, spaceId: 'general', fact: 'should be blocked', seq: 500, embedding: [], tags: [],
-      entityIds: [], author: { instanceId: 'test', instanceLabel: 'Test' },
+      author: { instanceId: 'test', instanceLabel: 'Test' },
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), embeddingModel: 'none',
     });
     assert.equal(r.status, 200, JSON.stringify(r.body));
@@ -151,7 +151,7 @@ describe('POST /api/sync/facts — conflict rules', () => {
     // Incoming has higher seq — should override tombstone
     const r = await post(INSTANCES.a, token, '/api/sync/facts?spaceId=general', {
       _id: id, spaceId: 'general', fact: 'newer than tombstone', seq: 50, embedding: [], tags: [],
-      entityIds: [], author: { instanceId: 'test', instanceLabel: 'Test' },
+      author: { instanceId: 'test', instanceLabel: 'Test' },
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), embeddingModel: 'none',
     });
     assert.equal(r.status, 200, JSON.stringify(r.body));
@@ -161,7 +161,7 @@ describe('POST /api/sync/facts — conflict rules', () => {
   it('returns 400 without spaceId', async () => {
     const r = await post(INSTANCES.a, token, '/api/sync/facts', {
       _id: 'x', spaceId: 'general', fact: 'test', seq: 1, embedding: [], tags: [],
-      entityIds: [], author: { instanceId: 'test', instanceLabel: 'Test' },
+      author: { instanceId: 'test', instanceLabel: 'Test' },
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), embeddingModel: 'none',
     });
     assert.equal(r.status, 400);
@@ -177,8 +177,7 @@ describe('POST /api/sync/facts — conflict rules', () => {
   it('returns 400 for memory with non-numeric seq', async () => {
     const r = await post(INSTANCES.a, token, '/api/sync/facts?spaceId=general', {
       _id: 'bad-seq', spaceId: 'general', fact: 'bad', seq: 'not-a-number',
-      embedding: [], tags: [], entityIds: [],
-      author: { instanceId: 'test', instanceLabel: 'Test' },
+      embedding: [], tags: [],      author: { instanceId: 'test', instanceLabel: 'Test' },
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), embeddingModel: 'none',
     });
     assert.equal(r.status, 400);
@@ -187,8 +186,7 @@ describe('POST /api/sync/facts — conflict rules', () => {
   it('returns 400 for memory with MongoDB operator in tags', async () => {
     const r = await post(INSTANCES.a, token, '/api/sync/facts?spaceId=general', {
       _id: 'inject-tags', spaceId: 'general', fact: 'injection', seq: 1,
-      embedding: [], tags: [{ $ne: '' }], entityIds: [],
-      author: { instanceId: 'test', instanceLabel: 'Test' },
+      embedding: [], tags: [{ $ne: '' }],      author: { instanceId: 'test', instanceLabel: 'Test' },
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), embeddingModel: 'none',
     });
     assert.equal(r.status, 400);
@@ -197,8 +195,7 @@ describe('POST /api/sync/facts — conflict rules', () => {
   it('returns 400 for memory with missing author', async () => {
     const r = await post(INSTANCES.a, token, '/api/sync/facts?spaceId=general', {
       _id: 'no-author', spaceId: 'general', fact: 'test', seq: 1,
-      embedding: [], tags: [], entityIds: [],
-      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), embeddingModel: 'none',
+      embedding: [], tags: [],      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), embeddingModel: 'none',
     });
     assert.equal(r.status, 400);
   });
@@ -206,8 +203,7 @@ describe('POST /api/sync/facts — conflict rules', () => {
   it('returns 400 for memory with seq exceeding safety limit', async () => {
     const r = await post(INSTANCES.a, token, '/api/sync/facts?spaceId=general', {
       _id: 'huge-seq', spaceId: 'general', fact: 'huge', seq: Number.MAX_SAFE_INTEGER,
-      embedding: [], tags: [], entityIds: [],
-      author: { instanceId: 'test', instanceLabel: 'Test' },
+      embedding: [], tags: [],      author: { instanceId: 'test', instanceLabel: 'Test' },
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), embeddingModel: 'none',
     });
     assert.equal(r.status, 400);
@@ -248,7 +244,7 @@ describe('POST /api/sync/batch-upsert', () => {
     const r = await post(INSTANCES.a, token, '/api/sync/batch-upsert?spaceId=general', {
       facts: [{
         _id: memId, spaceId: 'general', fact: `batch fact ${RUN}`, seq: Date.now(), embedding: [], tags: [],
-        entityIds: [], author: { instanceId: 'test', instanceLabel: 'Test' },
+        author: { instanceId: 'test', instanceLabel: 'Test' },
         createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), embeddingModel: 'none',
       }],
       entities: [{
@@ -283,7 +279,7 @@ describe('POST /api/sync/batch-upsert', () => {
     const r = await post(INSTANCES.a, token, '/api/sync/batch-upsert?spaceId=general', {
       facts: [{
         _id: id, spaceId: 'general', fact: `should be blocked ${RUN}`, seq: 500, embedding: [], tags: [],
-        entityIds: [], author: { instanceId: 'test', instanceLabel: 'Test' },
+        author: { instanceId: 'test', instanceLabel: 'Test' },
         createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), embeddingModel: 'none',
       }],
     });
@@ -308,14 +304,13 @@ describe('POST /api/sync/batch-upsert', () => {
         // valid
         {
           _id: goodId, spaceId: 'general', fact: 'good', seq: Date.now(), embedding: [], tags: [],
-          entityIds: [], author: { instanceId: 'test', instanceLabel: 'Test' },
+          author: { instanceId: 'test', instanceLabel: 'Test' },
           createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), embeddingModel: 'none',
         },
         // invalid: tags contain an object (potential MongoDB operator)
         {
           _id: `batch-zod-bad-${RUN}`, spaceId: 'general', fact: 'bad', seq: Date.now() + 1,
-          embedding: [], tags: [{ $ne: '' }], entityIds: [],
-          author: { instanceId: 'test', instanceLabel: 'Test' },
+          embedding: [], tags: [{ $ne: '' }],          author: { instanceId: 'test', instanceLabel: 'Test' },
           createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), embeddingModel: 'none',
         },
       ],
@@ -328,8 +323,7 @@ describe('POST /api/sync/batch-upsert', () => {
     // Build 502 memories — only first 500 should be processed
     const many = Array.from({ length: 502 }, (_, i) => ({
       _id: `batch-cap-${RUN}-${i}`, spaceId: 'general', fact: `cap test ${i}`,
-      seq: Date.now() + i, embedding: [], tags: [], entityIds: [],
-      author: { instanceId: 'test', instanceLabel: 'Test' },
+      seq: Date.now() + i, embedding: [], tags: [],      author: { instanceId: 'test', instanceLabel: 'Test' },
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), embeddingModel: 'none',
     }));
     const r = await post(INSTANCES.a, token, '/api/sync/batch-upsert?spaceId=general', { facts: many });
@@ -377,7 +371,7 @@ describe('GET /api/sync/facts — listing and cursor pagination', () => {
     const seedSeq = Date.now();
     await post(INSTANCES.a, token, '/api/sync/facts?spaceId=general', {
       _id: id, spaceId: 'general', fact: `full mode test ${RUN}`, seq: seedSeq, embedding: [], tags: ['fullmode'],
-      entityIds: [], author: { instanceId: 'test', instanceLabel: 'Test' },
+      author: { instanceId: 'test', instanceLabel: 'Test' },
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), embeddingModel: 'none',
     });
     // Use sinceSeq to target just this item (avoids being buried by earlier batch items)
@@ -393,8 +387,7 @@ describe('GET /api/sync/facts — listing and cursor pagination', () => {
     for (let i = 0; i < 5; i++) {
       await post(INSTANCES.a, token, '/api/sync/facts?spaceId=general', {
         _id: `cursor-page-${RUN}-${i}`, spaceId: 'general', fact: `cursor page test ${RUN} ${i}`,
-        seq: Date.now() + i + 10000, embedding: [], tags: [], entityIds: [],
-        author: { instanceId: 'test', instanceLabel: 'Test' },
+        seq: Date.now() + i + 10000, embedding: [], tags: [],        author: { instanceId: 'test', instanceLabel: 'Test' },
         createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), embeddingModel: 'none',
       });
     }
@@ -437,8 +430,6 @@ describe('POST /api/sync/chrono — recurrence field validation', () => {
       startsAt: new Date().toISOString(),
       status: 'upcoming',
       tags: [],
-      entityIds: [],
-      memoryIds: [],
       author: { instanceId: 'test', instanceLabel: 'Test' },
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
