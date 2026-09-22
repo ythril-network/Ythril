@@ -5,6 +5,7 @@ import { ActivatedRoute } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { TranslocoPipe } from '@jsverse/transloco';
 import { Entity } from '../../core/api.types';
+import { CascadePreview } from '../../core/cascade-preview.types';
 import { BrainApi } from '../../core/brain-api.service';
 import { httpErrorReason } from '../../core/http-error';
 import { TagInputComponent } from '../../shared/tag-input.component';
@@ -21,6 +22,9 @@ import { BRAIN_CHIP_STYLES } from './brain-form.styles';
 import { BRAIN_RECORD_TABLE_STYLES } from './brain-table.styles';
 import { HscrollTopDirective } from '../../shared/hscroll-top.directive';
 import { TimestampComponent } from '../../shared/timestamp.component';
+import { ConfirmDialogService } from '../../core/confirm-dialog.service';
+import { TranslocoService } from '@jsverse/transloco';
+import { firstValueFrom } from 'rxjs';
 
 /**
  * The Entities record tab, extracted from BrainComponent (A17.9b-6e) following the facts pattern.
@@ -116,6 +120,16 @@ import { TimestampComponent } from '../../shared/timestamp.component';
             <div class="alert alert-error" style="margin-bottom:12px;">{{ createEntityError() }}</div>
           }
 
+          <!--
+            A delete that did not happen, said out loud. It sits ABOVE the table rather than in the
+            empty-state block, because the row that would not delete is still in the list — the
+            empty block only renders when there is nothing, which is exactly when this cannot happen.
+          -->
+          @if (recordList.deleteError()) {
+            <div class="delete-error" role="alert">
+              {{ 'brain.deleteFailed' | transloco: { reason: recordList.deleteError() } }}
+            </div>
+          }
           <div class="table-wrapper" hscrollTop>
             <table>
               <thead>
@@ -250,6 +264,8 @@ export class EntitiesTabComponent extends RecordTabBase {
   readonly drawerState = inject(RecordDrawerState);
   private brainApi = inject(BrainApi);
   private route = inject(ActivatedRoute);
+  private confirmDialog = inject(ConfirmDialogService);
+  private transloco = inject(TranslocoService);
 
   /**
    * `?type=` seeds the type filter, so the Overview's data-model panel can link straight to "the entities
@@ -394,11 +410,85 @@ export class EntitiesTabComponent extends RecordTabBase {
     });
   }
 
-  deleteEntity(id: string): void {
+  /**
+   * Delete an entity, and offer the cascade when the server refuses because something points at it.
+   *
+   * ## What was wrong, reported by the owner 2026-09-22
+   *
+   * *"in brain ui when i want to delete an entity that has an edge it silently fails to delete"*. The
+   * handler was `error: () => {}`. The server answers `409` with the blocking records, the preview route
+   * and the name of the parameter that authorises a cascade — all of it thrown away, leaving the row on
+   * screen and nothing said. The operator's own click looked like it had not registered.
+   *
+   * ## Why the preview is fetched rather than taken from the refusal
+   *
+   * The `409` lists what blocks the delete but carries no TOKEN, and the token is what authorises the
+   * set. It is derived from the set rather than stored, so it cannot be minted here — one extra GET on a
+   * path that is about to open a dialog anyway.
+   *
+   * ## Why a plain delete is still tried first
+   *
+   * An entity with nothing pointing at it deletes in one click, as it always has. Asking for confirmation
+   * of a cascade that would remove nothing is a dialog that teaches people to dismiss dialogs.
+   */
+  async deleteEntity(id: string): Promise<void> {
     this.recordList.confirmDeleteId.set('');
-    this.brainApi.deleteEntity(this.spaceId(), id).subscribe({
-      next: () => { this.store.entities.update(list => list.filter(e => e._id !== id)); this.mutated.emit(); },
-      error: () => {},
+    this.recordList.deleteError.set('');
+    await this.tryDelete(id);
+  }
+
+  /**
+   * One attempt, and the `409` handling that can ask again.
+   *
+   * Recursive on a STALE token only, and bounded by the operator: each pass opens a dialog, so it cannot
+   * spin. The server recomputes the set and returns the CURRENT preview with its refusal, which is why
+   * the answer is to re-ask rather than to retry — a record added since they looked must not be removed
+   * by a decision taken before it existed.
+   */
+  private async tryDelete(id: string, cascadeToken?: string): Promise<void> {
+    try {
+      await firstValueFrom(this.brainApi.deleteEntity(this.spaceId(), id, cascadeToken));
+      this.store.entities.update(list => list.filter(e => e._id !== id));
+      this.mutated.emit();
+    } catch (err: unknown) {
+      const e = err as { status?: number; error?: { error?: string; preview?: CascadePreview } };
+      if (e?.status !== 409) {
+        // Every other failure — a 500, an expired token, a space that has gone away. Identical to a
+        // click that never happened until this line existed.
+        this.recordList.deleteError.set(fmtApiError(e ?? {}, 'Failed to delete entity'));
+        return;
+      }
+      // A refusal that already carries the fresh preview (a stale token) saves the round trip.
+      const preview = e.error?.preview
+        ?? await firstValueFrom(this.brainApi.cascadePreview(this.spaceId(), id));
+      if (await this.confirmCascade(preview)) await this.tryDelete(id, preview.token);
+    }
+  }
+
+  /**
+   * Ask, showing what goes — COUNTED BY KIND rather than listed.
+   *
+   * A list of identifiers is not something an operator can act on, and the decision in front of them is
+   * *how much goes with it*. Twenty UUIDs obscure that; "3 edges, 1 chrono entry" is the answer.
+   *
+   * It also says what does NOT go, because that is the half people fear: an edge is removed, and the
+   * record at the other end of it is not.
+   */
+  private confirmCascade(preview: CascadePreview): Promise<boolean> {
+    const counts = new Map<string, number>();
+    for (const r of preview.removes) counts.set(r.type, (counts.get(r.type) ?? 0) + 1);
+    const lines = [...counts].map(([type, n]) =>
+      `  • ${n} ${this.transloco.translate(`brain.cascade.kind.${type}`, { count: n })}`);
+
+    return this.confirmDialog.confirm({
+      title: this.transloco.translate('brain.cascade.title'),
+      message: [
+        this.transloco.translate('brain.cascade.intro'),
+        lines.join('\n'),
+        this.transloco.translate('brain.cascade.otherEndSafe'),
+      ].join('\n\n'),
+      confirmLabel: this.transloco.translate('brain.cascade.confirm'),
+      danger: true,
     });
   }
 }

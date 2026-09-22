@@ -7,8 +7,9 @@
 import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { of } from 'rxjs';
+import { of, throwError } from 'rxjs';
 import type { Entity, SpaceMetaResponse } from '../../core/api.types';
+import type { CascadePreview } from '../../core/cascade-preview.types';
 import { getTranslocoModule } from '../../testing/transloco-testing';
 import { BrainApi } from '../../core/brain-api.service';
 import { BrainStore } from './brain-store.service';
@@ -16,6 +17,7 @@ import { EntityRefPicker } from './entity-ref-picker.service';
 import { RecordDrawerState } from './record-drawer-state.service';
 import { RecordListState } from './record-list-state.service';
 import { EntitiesTabComponent } from './entities-tab.component';
+import { ConfirmDialogService } from '../../core/confirm-dialog.service';
 import { isOnPush } from '../../testing/onpush';
 
 const api = {
@@ -35,7 +37,9 @@ const api = {
   getEntitiesByIds: vi.fn(() => of({ entities: [] })),
   createEntity: vi.fn(() => of({ _id: 'new' } as Entity)),
   updateEntity: vi.fn((_s: string, id: string) => of({ _id: id, name: 'UPDATED' } as Entity)),
-  deleteEntity: vi.fn(() => of({})),
+  deleteEntity: vi.fn((_s: string, _id: string, _cascadeToken?: string) => of({})),
+  cascadePreview: vi.fn((_s: string, id: string) => of(
+    { entityId: id, removes: [{ type: 'edge', _id: 'x1', end: 'from' }], token: 'tok-1' } as CascadePreview)),
 };
 
 function make() {
@@ -48,6 +52,7 @@ function make() {
       provideRouter([]),
       RecordListState, BrainStore, EntityRefPicker, RecordDrawerState,
       { provide: BrainApi, useValue: api },
+      { provide: ConfirmDialogService, useValue: confirmDialog },
     ],
   });
   const fixture = TestBed.createComponent(EntitiesTabComponent);
@@ -56,7 +61,30 @@ function make() {
   return fixture;
 }
 
-beforeEach(() => { for (const fn of Object.values(api)) (fn as any).mockClear(); });
+/** The cascade confirmation. `answer` is what the operator clicks, set per test. */
+const confirmDialog = {
+  // The parameter is DECLARED, or `mock.calls.at(-1)![0]` reads an empty tuple and the message
+  // assertion below could never have caught the wording changing.
+  confirm: vi.fn(async (_data: { title: string; message: string }) => confirmDialog.answer),
+  answer: true,
+};
+
+beforeEach(() => {
+  for (const fn of Object.values(api)) (fn as any).mockClear();
+  /*
+   * `mockClear` forgets the CALLS and KEEPS a queued `mockReturnValueOnce`, so a refusal armed by one
+   * cascade test fired inside the next test that deleted anything — and failed there, about
+   * something that test does not exercise. `mockReset` is the one that drops the queue, so the two
+   * the cascade tests queue onto are reset and re-armed rather than cleared.
+   */
+  api.deleteEntity.mockReset();
+  api.deleteEntity.mockReturnValue(of({}));
+  api.cascadePreview.mockReset();
+  api.cascadePreview.mockReturnValue(of(
+    { entityId: 'e1', removes: [{ type: 'edge', _id: 'x1', end: 'from' }], token: 'tok-1' } as CascadePreview));
+  confirmDialog.confirm.mockClear();
+  confirmDialog.answer = true;
+});
 
 describe('EntitiesTabComponent', () => {
   it('is compiled as OnPush', () => {
@@ -121,14 +149,136 @@ describe('EntitiesTabComponent', () => {
     expect(c.store.entities()[0].name).toBe('UPDATED');
   });
 
-  it('deleteEntity removes from the store, clears confirmDeleteId, and emits mutated', () => {
+  /*
+   * DELETING AN ENTITY THAT HAS AN EDGE FAILED SILENTLY, AND THE SERVER HAD ALREADY SAID EVERYTHING.
+   *
+   * Reported by the owner, 2026-09-22: *"in brain ui when i want to delete an entity that has an edge
+   * it silently fails to delete"*. The `DELETE` answers `409` with the blocking list, the preview route
+   * and the name of the parameter that authorises the cascade — and the component's handler was
+   * `error: () => {}`. The row simply stayed on screen, so the operator's own click looked like it had
+   * not registered.
+   *
+   * The server side needs nothing: `F-17` shipped the preview and the token. What follows is the door.
+   */
+  const conflict = (body: unknown) => ({ status: 409, error: body });
+
+  it('a blocked delete opens the cascade confirmation instead of failing silently', async () => {
+    const fixture = make();
+    const c = fixture.componentInstance;
+    c.store.entities.set([{ _id: 'e1' } as Entity]);
+    api.deleteEntity.mockReturnValueOnce(throwError(() => conflict({ error: 'has edges' })));
+
+    await c.deleteEntity('e1');
+
+    expect(api.cascadePreview).toHaveBeenCalledWith('work', 'e1');
+    expect(confirmDialog.confirm).toHaveBeenCalled();
+    // Whether the row then goes is the CONFIRM case below; what this one asserts is that the refusal
+    // reaches the operator at all, which is the whole of the report.
+  });
+
+  it('the confirmation says WHAT goes, counted by kind rather than listing ids', async () => {
+    const fixture = make();
+    const c = fixture.componentInstance;
+    c.store.entities.set([{ _id: 'e1' } as Entity]);
+    api.cascadePreview.mockReturnValueOnce(of({
+      entityId: 'e1', token: 'tok-2',
+      removes: [
+        { type: 'edge', _id: 'x1', end: 'from' },
+        { type: 'edge', _id: 'x2', end: 'to' },
+        { type: 'chrono', _id: 'c1' },
+      ],
+    } as CascadePreview));
+    api.deleteEntity.mockReturnValueOnce(throwError(() => conflict({ error: 'has edges' })));
+
+    await c.deleteEntity('e1');
+
+    /*
+     * Counts, not ids. A list of UUIDs is not a thing an operator can act on, and the decision they are
+     * making is "how much goes with it" — which a count answers and twenty identifiers obscure.
+     */
+    const msg = confirmDialog.confirm.mock.calls.at(-1)![0].message as string;
+    expect(msg).toMatch(/2/);
+    expect(msg).toMatch(/1/);
+    expect(msg).not.toMatch(/x1/);
+  });
+
+  it('on confirm it repeats the DELETE with the token from the preview', async () => {
+    const fixture = make();
+    const c = fixture.componentInstance;
+    const mutated = vi.fn();
+    c.mutated.subscribe(mutated);
+    c.store.entities.set([{ _id: 'e1' } as Entity, { _id: 'e2' } as Entity]);
+    api.deleteEntity.mockReturnValueOnce(throwError(() => conflict({ error: 'has edges' })));
+
+    await c.deleteEntity('e1');
+
+    expect(api.deleteEntity).toHaveBeenLastCalledWith('work', 'e1', 'tok-1');
+    expect(c.store.entities().map(e => e._id)).toEqual(['e2']);
+    expect(mutated).toHaveBeenCalled();
+  });
+
+  it('on cancel it deletes nothing — the second call is never made', async () => {
+    const fixture = make();
+    const c = fixture.componentInstance;
+    c.store.entities.set([{ _id: 'e1' } as Entity]);
+    confirmDialog.answer = false;
+    api.deleteEntity.mockReturnValueOnce(throwError(() => conflict({ error: 'has edges' })));
+
+    await c.deleteEntity('e1');
+
+    expect(api.deleteEntity).toHaveBeenCalledTimes(1);
+    expect(c.store.entities().map(e => e._id)).toEqual(['e1']);
+  });
+
+  it('a failure that is NOT a conflict is shown, not swallowed', async () => {
+    /*
+     * The other half of the report, and the one that covers every future failure: a 500, an expired
+     * token, a space that has gone away. `error: () => {}` made all of them identical to a click that
+     * never happened.
+     */
+    const fixture = make();
+    const c = fixture.componentInstance;
+    c.store.entities.set([{ _id: 'e1' } as Entity]);
+    api.deleteEntity.mockReturnValueOnce(throwError(() => ({ status: 500, error: { error: 'boom' } })));
+
+    await c.deleteEntity('e1');
+
+    expect(c.recordList.deleteError()).toMatch(/boom/);
+    expect(confirmDialog.confirm).not.toHaveBeenCalled();
+    expect(c.store.entities().map(e => e._id)).toEqual(['e1']);
+  });
+
+  it('a token that went stale re-asks with the set as it stands now', async () => {
+    /*
+     * The server recomputes the set and returns the CURRENT preview with its refusal, so the next step
+     * is one call rather than two. A record added between the preview and the confirm cannot be removed
+     * by a decision taken before it existed — so the operator is asked again, about the new set.
+     */
+    const fixture = make();
+    const c = fixture.componentInstance;
+    c.store.entities.set([{ _id: 'e1' } as Entity]);
+    api.deleteEntity
+      .mockReturnValueOnce(throwError(() => conflict({ error: 'has edges' })))
+      .mockReturnValueOnce(throwError(() => conflict({
+        error: 'cascadeToken does not match what would be removed.',
+        preview: { entityId: 'e1', token: 'tok-fresh', removes: [{ type: 'edge', _id: 'x9' }] },
+      })));
+
+    await c.deleteEntity('e1');
+
+    expect(confirmDialog.confirm).toHaveBeenCalledTimes(2);
+    expect(api.deleteEntity).toHaveBeenLastCalledWith('work', 'e1', 'tok-fresh');
+  });
+
+  it('deleteEntity removes from the store, clears confirmDeleteId, and emits mutated', async () => {
     const fixture = make();
     const c = fixture.componentInstance;
     const mutated = vi.fn();
     c.mutated.subscribe(mutated);
     c.store.entities.set([{ _id: 'e1' } as Entity, { _id: 'e2' } as Entity]);
     c.recordList.confirmDeleteId.set('e1');
-    c.deleteEntity('e1');
+    // `await`, because the handler is async since it may have to ask before it can finish.
+    await c.deleteEntity('e1');
     expect(c.store.entities().map(e => e._id)).toEqual(['e2']);
     expect(c.recordList.confirmDeleteId()).toBe('');
     expect(mutated).toHaveBeenCalled();

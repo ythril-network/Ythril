@@ -1364,9 +1364,7 @@
   "brain.query.projectionPlaceholder": "{\"fact\": 1, \"tags\": 1}",
   "brain.query.resultsFrom": "result(s) from {{ collection }}",
   "brain.superseded.badge": "superseded",
-
   "brain.superseded.hint": "This record is no longer true. It is kept and still searchable — something later replaced or retired it.",
-
   "brain.query.passages": "{{count}} passages",
   "brain.query.groupedPassages": "from {{count}} matching passages",
   "graph.stats.nodesEdges": "{{ nodes }} nodes · {{ edges }} edges",
@@ -2064,5 +2062,15 @@
   "graph.recordUnavailable.file": "This file has no record view here — open it from the Files tab.",
   "graph.recordUnavailable.derived": "This connection is derived from a link, not a stored relationship, so it has no record of its own.",
   "networks.network.invite.secretWarning": "Send this the way you would send a password. Anyone who has it can complete the join. It expires after 24 hours and can only be used once.",
-  "networks.dialog.join.error.invalidCode": "That does not look like an invite code. Copy the whole line the other brain produced — it starts with ythril1_."
+  "networks.dialog.join.error.invalidCode": "That does not look like an invite code. Copy the whole line the other brain produced — it starts with ythril1_.",
+  "brain.cascade.title": "Delete this entity and what points at it?",
+  "brain.cascade.intro": "Something references this entity, so it cannot be deleted on its own. Deleting it will also remove:",
+  "brain.cascade.otherEndSafe": "Nothing at the other end is deleted — the records these point at stay exactly as they are.",
+  "brain.cascade.confirm": "Delete all of it",
+  "brain.cascade.kind.edge": "relationship(s)",
+  "brain.cascade.kind.fact": "fact(s)",
+  "brain.cascade.kind.chrono": "timeline entry/entries",
+  "brain.cascade.kind.file": "file reference(s)",
+  "brain.cascade.kind.face": "face label(s)",
+  "brain.deleteFailed": "Could not delete: {{reason}}"
 }

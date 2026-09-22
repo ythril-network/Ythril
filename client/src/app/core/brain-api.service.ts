@@ -9,6 +9,7 @@ import type {
   QueryCollection, QueryResult, RecallKnowledgeType, RecallResponse, TraverseResult, EmbeddingQueue,
   TokenAccessEntry, ErModel, ErModelMembers,
 } from './api.types';
+import type { CascadePreview } from './cascade-preview.types';
 
 /**
  * A server-side sort request for a brain list endpoint. `field` must be one the server whitelists
@@ -387,8 +388,30 @@ export class BrainApi {
     }) as Observable<{ entities: Entity[] }>;
   }
 
-  deleteEntity(spaceId: string, id: string): Observable<void> {
-    return this.http.delete<void>(`/api/brain/spaces/${spaceId}/entities/${id}`);
+  /**
+   * Delete an entity, optionally taking its edges with it.
+   *
+   * Without a token the server REFUSES a delete that would orphan an edge, with a `409` naming what
+   * blocks it, the preview route and this parameter. With one it removes the blocking records and the
+   * entity, and nothing at the other end of those edges.
+   *
+   * The token binds to the SET rather than to the entity, so a record added between the preview and this
+   * call cannot be removed by a decision taken before it existed — the server answers `409` again with
+   * the CURRENT preview, which is why the caller re-asks rather than retries.
+   */
+  deleteEntity(spaceId: string, id: string, cascadeToken?: string): Observable<void> {
+    const q = cascadeToken ? `?cascadeToken=${encodeURIComponent(cascadeToken)}` : '';
+    return this.http.delete<void>(`/api/brain/spaces/${spaceId}/entities/${id}${q}`);
+  }
+
+  /**
+   * What a cascade delete would remove, and the token that authorises removing exactly that.
+   *
+   * A GET, and it needs only read rights: it answers the same question the `409` already answers for
+   * anybody who tried the delete.
+   */
+  cascadePreview(spaceId: string, id: string): Observable<CascadePreview> {
+    return this.http.get<CascadePreview>(`/api/brain/spaces/${spaceId}/entities/${id}/cascade-preview`);
   }
 
   /**

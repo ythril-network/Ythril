@@ -111,11 +111,23 @@ tells you where to look. **Both ends count.** A link that runs out of this entit
 one that runs into it does — either would be left half-attached — and the message used to say "inbound", which
 sent people looking at the wrong side of their own links.
 
-Two things worth knowing. **Faces do not block.** A photo where this person was recognised is listed, so you
-can see the labels that are about to come off, but it never stops the delete — the labels are removed with the
-entity. And **there is no "delete everything attached"** button: nothing removes an entity together with its
-links in one action, on purpose, because the pause is what stops a hub record taking a hundred relationships
-with it. Clear what you meant to clear, then delete.
+**Faces do not block.** A photo where this person was recognised is listed, so you can see the labels that
+are about to come off, but it never stops the delete — the labels are removed with the entity.
+
+**And you can now delete it together with what points at it, in one action.** This paragraph used to say
+there was deliberately no such button, because *"the pause is what stops a hub record taking a hundred
+relationships with it"*. The pause is still there and it is now worth something: the refusal opens a
+confirmation that tells you **how many** records would go, counted by kind, so the hub case announces
+itself as *"127 relationships"* rather than being prevented by the absence of a button. Clearing them by
+hand first is still perfectly good, and is what to do when you only meant to remove some of them.
+
+**Nothing at the other end is deleted.** A link that runs from this entity to another is removed; the
+record it pointed at stays exactly as it is. That is the whole of what the cascade does — it clears what
+is holding the delete, not the neighbourhood.
+
+**A change made while you were looking is not swept up.** The confirmation is bound to the exact set it
+showed you, so if anything gained a link to this entity in the meantime, the delete stops and asks again
+with the new list rather than removing something you were never shown.
 
 If a space has turned linkage checking off in its settings, none of this applies there and the delete just
 happens.
