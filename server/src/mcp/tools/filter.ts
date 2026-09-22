@@ -80,8 +80,7 @@ export const queryTool: ToolHandler = {
               description: 'Fields to include (1) or exclude (0). The `embedding` field is always excluded and cannot be re-included. Worth using rather than skipping: a bare query over a dozen records with full bodies is the cheapest way to overrun a token budget, and a projection of the four fields you actually branch on turns that into a page you can read.',
             },
             /*
-             * `minimum` and NO `maximum`, and the asymmetry is deliberate — the same one `windowDays`
-             * carries on `graph_link_preflight`, for the same reason. The MCP dispatcher enforces this
+             * `minimum` and NO `maximum`, and the asymmetry is deliberate. The MCP dispatcher enforces this
              * schema BEFORE the handler runs, so a `maximum` here would REFUSE a page the REST door
              * serves: a 400 on one door and an answer on the other, which `CLAUDE.md` names in those
              * words as worse than either alone.

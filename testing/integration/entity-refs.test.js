@@ -19,7 +19,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { INSTANCES, post, patch, get, delWithBody, readCollection } from '../sync/helpers.js';
-import { LINK_ARRAY_FIELDS } from '../../server/dist/brain/array-write-refusal.js';
+import { linkInputSchemasFor } from '../../server/dist/brain/write-connections.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const TOKEN_FILE = path.join(__dirname, '..', 'sync', 'configs', 'a', 'token.txt');
@@ -92,16 +92,17 @@ describe('entity references must resolve', () => {
     assert.ok([200, 201, 202].includes(write.status), JSON.stringify(write.body));
 
     /*
-     * DERIVED from `LINK_ARRAY_FIELDS`, and the COUNT is out of the title (`Q-6`, 2026-09-07).
+     * DERIVED from the classes a FILE can hold, and the COUNT is out of the title (`Q-6`, 2026-09-07).
      *
      * It named the three fields a file carries today and said "three" out loud. A seventh link class would
-     * declare a fourth field, and this case would go on asserting about the old three while its title claimed
-     * all of them — which is the shape `LINK_ARRAY_FIELDS` exists to prevent one layer down: it is derived
-     * from `LINK_CLASSES` for exactly this reason.
+     * give a file a fourth, and this case would go on asserting about the old three while its title claimed
+     * all of them. The source moved in 5.0 — the link arrays went and `linkEntities` and its siblings are
+     * the input — and the derivation moved with it rather than becoming a list.
      */
-    assert.ok(LINK_ARRAY_FIELDS.length >= 3,
-      `only ${LINK_ARRAY_FIELDS.length} link array field(s); the three a file carries are the minimum`);
-    for (const field of LINK_ARRAY_FIELDS) {
+    const fileLinkFields = Object.keys(linkInputSchemasFor('file'));
+    assert.ok(fileLinkFields.length >= 3,
+      `only ${fileLinkFields.length} link field(s); the three a file carries are the minimum`);
+    for (const field of fileLinkFields) {
       const r = await patch(
         INSTANCES.a, token,
         `/api/brain/spaces/${SPACE}/files?path=${encodeURIComponent('note.txt')}`,

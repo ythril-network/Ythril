@@ -51,9 +51,6 @@ const NOT_A_SECOND_DOOR = new Map(Object.entries({
     'A DIFFERENT QUESTION. It answers what DELETING this entity would take with it, walking the edges, '
     + 'facts and chrono entries that reference it. A traversal of four collections expressed as a question '
     + 'about one, and no predicate over `entities` states it.',
-  'GET /api/brain/spaces/:spaceId/links/convert-preflight':
-    'A DIFFERENT QUESTION. A dry run over a MIGRATION — what converting the legacy edge-shaped links would '
-    + 'do before it is done. It shares the path segment with the collection and nothing else.',
 }));
 
 /** The path shape this gate is about: a `GET` under a space whose next segment is a collection name. */

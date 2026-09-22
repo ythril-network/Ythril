@@ -144,7 +144,6 @@ export const ROUTE_RIGHTS: readonly RouteRight[] = [
   { route: '/api/brain/spaces/:spaceId/links/:id', method: 'DELETE', area: 'knowledge', needs: 'write', scope: 'path' },
   // A VIEW of one space's data — who wrote its legacy link arrays — so it is area-scoped like the two above
   // and takes the lowest rung. Read before converting; `F-25`.
-  { route: '/api/brain/spaces/:spaceId/links/convert-preflight', method: 'GET', area: 'knowledge', needs: 'read', scope: 'path' },
   { route: '/api/brain/spaces/:spaceId/chrono', method: 'POST', area: 'knowledge', needs: 'write', scope: 'path' },
   { route: '/api/brain/spaces/:spaceId/chrono/:id', method: 'PATCH', area: 'knowledge', needs: 'write', scope: 'path' },
   { route: '/api/brain/spaces/:spaceId/chrono/:id', method: 'DELETE', area: 'knowledge', needs: 'write', scope: 'path' },

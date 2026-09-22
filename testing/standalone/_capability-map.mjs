@@ -50,7 +50,6 @@ export const CAPABILITIES = [
 
   ['Brain — links', 'save_link', 'POST /api/brain/spaces/:spaceId/links'],
   ['Brain — links', 'delete_link', 'DELETE /api/brain/spaces/:spaceId/links/:id'],
-  ['Brain — links', 'graph_link_preflight', 'GET /api/brain/spaces/:spaceId/links/convert-preflight'],
 
   ['Brain — search', 'recall', 'POST /api/brain/recall'],
   ['Brain — search', 'similar', 'POST /api/brain/similar'],

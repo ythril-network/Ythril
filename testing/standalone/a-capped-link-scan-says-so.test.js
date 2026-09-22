@@ -47,17 +47,17 @@ const SEEDS = 'server/src/brain/recall-seed-traversal.ts';
 const SPILL = 'server/src/brain/graph-spill.ts';
 
 /*
- * THE READING FUNCTIONS, which is not the same list as the two exported scans any more.
+ * THE READING FUNCTIONS, which is not the same list as the two exported scans.
  *
- * `linkedRecordsAtFrontier` no longer reads: it computes the bound and hands it to one of two helpers, one
- * per storage shape, because a hop over link records is ONE query and a hop over arrays is one per class.
- * That split is what took a measured 3.8× regression off the link path — see
+ * `linkedRecordsAtFrontier` no longer reads: it computes the bound and hands it to the helper that does,
+ * one query for the whole hop. There were two helpers while the arrays were a second storage shape, and
+ * the batched one is where the measured 3.8× regression on the link path went — see
  * `benchmarks/LINK-READERS.md`.
  *
  * So the property is asserted where the read happens, and separately that the caller still forwards a
  * bound. Checking only the exported name would have gone green on a helper that reads unbounded.
  */
-const SCANS = ['linkedRecordsFromRows', 'linkedRecordsFromArrays', 'entitiesLinkedFromRecords'];
+const SCANS = ['linkedRecordsFromRows', 'entitiesLinkedFromRecords'];
 
 /** The two exported scans, which must still compute a bound and report what their helper found. */
 const EXPORTED = ['linkedRecordsAtFrontier', 'entitiesLinkedFromRecords'];
@@ -128,7 +128,7 @@ describe('an EXHAUSTED budget is reported too, where a whole class goes unread',
    * there is no later class for a spent budget to skip; the zero check lives in its caller, which is on the
    * list. That is the batching this file's numbers come from — see `benchmarks/LINK-READERS.md`.
    */
-  for (const fn of ['linkedRecordsAtFrontier', 'linkedRecordsFromArrays', 'entitiesLinkedFromRecords']) {
+  for (const fn of ['linkedRecordsAtFrontier', 'entitiesLinkedFromRecords']) {
     it(`${fn} says so`, () => {
       const body = bodyOf(read(FRONTIER), fn);
       assert.match(body, /(remaining|left) === 0[^\n]*[Cc]apped: true/,
@@ -167,7 +167,7 @@ describe('and the caller turns that into a truncation the API states', () => {
 
     /*
      * BOTH of the recall walk's scans, and they are separate code paths: a seed pre-pass that follows a
-     * matched record's `entityIds` out to entities, and the per-hop scan. Counting the propagations is what
+     * matched record's links out to entities, and the per-hop scan. Counting the propagations is what
      * makes deleting either one visible — checking that "capped is set somewhere" passes with one of the two
      * gone, which is the same defect this whole file is about.
      */

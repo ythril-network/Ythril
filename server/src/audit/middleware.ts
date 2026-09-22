@@ -58,7 +58,6 @@ export const ROUTE_RULES: RouteRule[] = [
   // ── Links ────────────────────────────────────────────────────────────────
   // No `link.list`: links are read through `/query` like any other collection, so the read is already
   // audited under that route rather than under a second one that does not exist.
-  { method: 'GET',    pattern: /^\/api\/brain\/(?:spaces\/)?([^/]+)\/links\/convert-preflight$/, operation: 'link.convert_preflight', spaceGroup: 1 },
   { method: 'POST',   pattern: /^\/api\/brain\/(?:spaces\/)?([^/]+)\/links$/,      operation: 'link.create',    spaceGroup: 1 },
   { method: 'DELETE', pattern: /^\/api\/brain\/(?:spaces\/)?([^/]+)\/links\/([^/]+)$/, operation: 'link.delete', spaceGroup: 1, entryGroup: 2 },
 
