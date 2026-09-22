@@ -367,7 +367,7 @@ describe('er-layout on a big, lopsided model', () => {
  * ── Memories, chrono and files are boxes too ─────────────────────────────────────────────────────
  *
  * The server has always scanned three extra collections per space to count, for every entity type, how many
- * facts, chrono entries and files point AT it through their `entityIds` — and the client rendered that in
+ * facts, chrono entries and files point AT it through their `linkEntities` — and the client rendered that in
  * ZERO places. So the diagram called itself the data model while showing one of four record kinds, and every
  * Overview load paid for the scan and got nothing back.
  *

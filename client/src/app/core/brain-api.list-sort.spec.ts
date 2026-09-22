@@ -123,7 +123,7 @@ describe('BrainApi — list sort, filters and freetext reach `filter` (2b)', () 
   it('a fact filtered by entity id goes as a predicate on its link field', () => {
     api.listFacts('work', 20, 0, { entity: 'e-1' }).subscribe();
     const { r, body } = expectFilter('facts');
-    expect(body['filter']).toEqual({ entityIds: 'e-1' });
+    expect(body['filter']).toEqual({ linkEntities: 'e-1' });
     flush(r);
   });
 

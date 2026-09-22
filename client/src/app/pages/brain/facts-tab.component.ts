@@ -210,9 +210,9 @@ import { TimestampComponent } from '../../shared/timestamp.component';
                         @if (!(mem.tags?.length)) { <span style="color:var(--text-muted)">—</span> }
                       </td>
                       <td style="font-size:11px;">
-                        @if (mem.entityIds?.length) {
+                        @if (mem.linkEntities?.length) {
                           <div class="chip-list">
-                            @for (id of mem.entityIds!; track id) {
+                            @for (id of mem.linkEntities!; track id) {
                               <span class="chip" [title]="id">{{ picker.entityNameCache()[id] || id.slice(0,8) + '…' }}</span>
                             }
                           </div>
@@ -276,8 +276,8 @@ export class FactsTabComponent extends RecordTabBase {
   showMemoryForm = signal(false);
   creatingMemory = signal(false);
   createMemoryError = signal('');
-  memoryForm = { fact: '', type: '', tags: [] as string[], entityIds: '', description: '', properties: {} as Record<string, string | number | boolean> };
-  editMemory = { fact: '', tags: [] as string[], entityIds: '', description: '', properties: {} as Record<string, string | number | boolean> };
+  memoryForm = { fact: '', type: '', tags: [] as string[], linkEntities: '', description: '', properties: {} as Record<string, string | number | boolean> };
+  editMemory = { fact: '', tags: [] as string[], linkEntities: '', description: '', properties: {} as Record<string, string | number | boolean> };
 
   private _memSemTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -301,7 +301,7 @@ export class FactsTabComponent extends RecordTabBase {
     this.brainApi.listFacts(spaceId, this.pageSize, this.skip(), filters, this.sortParam(), this.searchParam()).subscribe({
       next: ({ facts }) => {
         this.store.facts.set(facts);
-        const ids = [...new Set(facts.flatMap(m => m.entityIds ?? []))];
+        const ids = [...new Set(facts.flatMap(m => m.linkEntities ?? []))];
         if (ids.length) this.picker.resolveEntityNames(ids);
         this.recordList.loading.set(false);
       },
@@ -332,7 +332,7 @@ export class FactsTabComponent extends RecordTabBase {
         _id: r['_id'] as string,
         fact: (r['fact'] as string) ?? '',
         tags: (r['tags'] as string[]) ?? [],
-        entityIds: (r['entityIds'] as string[]) ?? [],
+        linkEntities: (r['linkEntities'] as string[]) ?? [],
         description: r['description'] as string | undefined,
         properties: (r['properties'] as Record<string, string | number | boolean>) ?? {},
         createdAt: (r['createdAt'] as string) ?? '',
@@ -357,7 +357,7 @@ export class FactsTabComponent extends RecordTabBase {
   }
 
   openMemoryForm(): void {
-    this.memoryForm = { fact: '', type: '', tags: [], entityIds: '', description: '', properties: this.store.buildPropertiesObject('fact') };
+    this.memoryForm = { fact: '', type: '', tags: [], linkEntities: '', description: '', properties: this.store.buildPropertiesObject('fact') };
     this.showMemoryForm.set(true);
   }
 
@@ -365,20 +365,20 @@ export class FactsTabComponent extends RecordTabBase {
     if (!this.memoryForm.fact.trim()) return;
     this.creatingMemory.set(true);
     this.createMemoryError.set('');
-    const entityIds = this.memoryForm.entityIds.split(',').map(s => s.trim()).filter(Boolean);
+    const linkEntities = this.memoryForm.linkEntities.split(',').map(s => s.trim()).filter(Boolean);
     const body: Parameters<BrainApi['createMemory']>[1] = { fact: this.memoryForm.fact.trim() };
     // Sent only when non-empty: an empty `type` must stay ABSENT rather than become the string "", which would
     // select typeSchemas.fact[""], find nothing, and store a type nobody can filter for.
     if (this.memoryForm.type.trim()) body.type = this.memoryForm.type.trim();
     if (this.memoryForm.tags.length) body.tags = this.memoryForm.tags;
-    if (entityIds.length) body.entityIds = entityIds;
+    if (linkEntities.length) body.linkEntities = linkEntities;
     if (this.memoryForm.description.trim()) body.description = this.memoryForm.description.trim();
     if (Object.keys(this.memoryForm.properties).length) body.properties = this.memoryForm.properties;
     this.brainApi.createMemory(this.spaceId(), body).subscribe({
       next: () => {
         this.creatingMemory.set(false);
         this.showMemoryForm.set(false);
-        this.memoryForm = { fact: '', type: '', tags: [], entityIds: '', description: '', properties: {} as Record<string, string | number | boolean> };
+        this.memoryForm = { fact: '', type: '', tags: [], linkEntities: '', description: '', properties: {} as Record<string, string | number | boolean> };
         this.mutated.emit();
         this.load();
       },
@@ -392,7 +392,7 @@ export class FactsTabComponent extends RecordTabBase {
     this.editMemory = {
       fact: mem.fact,
       tags: mem.tags ?? [],
-      entityIds: (mem.entityIds ?? []).join(', '),
+      linkEntities: (mem.linkEntities ?? []).join(', '),
       description: mem.description ?? '',
       properties: this.store.buildPropertiesObject('fact', mem.properties ?? {}),
     };
@@ -405,7 +405,7 @@ export class FactsTabComponent extends RecordTabBase {
     this.brainApi.updateFact(this.spaceId(), id, {
       fact: this.editMemory.fact.trim(),
       tags: this.editMemory.tags,
-      entityIds: this.editMemory.entityIds.split(',').map(s => s.trim()).filter(Boolean),
+      linkEntities: this.editMemory.linkEntities.split(',').map(s => s.trim()).filter(Boolean),
       description: this.editMemory.description.trim(),
       ...(Object.keys(memProps).length ? { properties: memProps } : {}),
     }).subscribe({

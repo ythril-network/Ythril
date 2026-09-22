@@ -6,11 +6,11 @@ import { BrainStore } from './brain-store.service';
 /**
  * A form slice that carries a comma-separated entity-id string. Every entity-chip field on the brain
  * page exposes this exact shape — the memory/chrono/file-meta create forms, their inline-edit forms,
- * and the detail drawer's edit models all have an `entityIds: string`. That shared shape is what lets
+ * and the detail drawer's edit models all have an `linkEntities: string`. That shared shape is what lets
  * the picker append to any of them without knowing which one it is.
  */
 export interface EntityIdTarget {
-  entityIds: string;
+  linkEntities: string;
 }
 
 /**
@@ -18,7 +18,7 @@ export interface EntityIdTarget {
  *
  * Extracted from BrainComponent (A17.9b). Shared name/title caches plus the inline entity / memory /
  * chrono pickers serve every form on the page. Previously they were wired by a string-keyed god-switch
- * — `pickEntity(ent, mode, field)` branched on a field key like `'drawer-memory-entityIds'` and reached
+ * — `pickEntity(ent, mode, field)` branched on a field key like `'drawer-memory-linkEntities'` and reached
  * directly into the matching form object. This service replaces that switch with a target-based API:
  * the caller passes its OWN form ref, exactly as `removeEntityId(target, id)` already did. That is the
  * seam that lets the drawer and the tab views become their own components (A17.9b-4/5), each holding
@@ -26,7 +26,7 @@ export interface EntityIdTarget {
  * pickers was retired in slice 4d, when file-meta — its last user — moved to the inline ref-fields.)
  *
  * Behaviour preserved verbatim (pinned by the A17.9b-2 characterization tests): picking an entity
- * updates the name cache and appends the id to the target's `entityIds`; edge endpoints (from/to) are
+ * updates the name cache and appends the id to the target's `linkEntities`; edge endpoints (from/to) are
  * NOT handled here — they set display fields without touching the cache, and stay on the shell with
  * `edgeForm`. Name resolution only runs for the *uncached* ids of a field.
  *
@@ -46,9 +46,9 @@ export class EntityRefPicker {
 
   entityNameCache = signal<Record<string, string>>({});
 
-  removeEntityId(target: { entityIds: string }, id: string): void {
-    const parts = target.entityIds.split(',').map(s => s.trim()).filter(s => s && s !== id);
-    target.entityIds = parts.join(', ');
+  removeEntityId(target: { linkEntities: string }, id: string): void {
+    const parts = target.linkEntities.split(',').map(s => s.trim()).filter(s => s && s !== id);
+    target.linkEntities = parts.join(', ');
   }
 
   entityChips(ids: string): Array<{ id: string; name: string }> {
@@ -60,7 +60,7 @@ export class EntityRefPicker {
   /** Append the picked entity to a chip field and remember its name for display. */
   pickEntity(ent: Entity, target: EntityIdTarget): void {
     this.entityNameCache.update(c => ({ ...c, [ent._id]: ent.name }));
-    target.entityIds = this.appendEntityId(target.entityIds, ent._id);
+    target.linkEntities = this.appendEntityId(target.linkEntities, ent._id);
   }
 
   /** Bulk-resolve entity names into the cache (used when opening a record for editing). */
@@ -90,7 +90,7 @@ export class EntityRefPicker {
     return parts.join(', ');
   }
 
-  // ── Inline memory picker (slice 3c "memoryIds searchable like entity") ───────────────────────
+  // ── Inline memory picker (slice 3c "linkFacts searchable like entity") ───────────────────────
   //
   // Backs app-fact-ref-field: an INLINE search + a title cache so chips show the memory's fact, not a
   // truncated id. Server-searched via listFacts(?search=). Used by the chrono create form, the
@@ -115,15 +115,15 @@ export class EntityRefPicker {
   }
 
   /** Cache the picked memory's fact for chip display, append its id to the form, and clear the search. */
-  addMemoryRef(form: { memoryIds: string[] }, mem: Fact): void {
+  addMemoryRef(form: { linkFacts: string[] }, mem: Fact): void {
     this.memoryTitleCache.update(c => ({ ...c, [mem._id]: mem.fact }));
-    if (!form.memoryIds.includes(mem._id)) form.memoryIds.push(mem._id);
+    if (!form.linkFacts.includes(mem._id)) form.linkFacts.push(mem._id);
     this.memPickQuery.set('');
     this.memPickResults.set([]);
   }
 
-  removeMemoryRef(form: { memoryIds: string[] }, id: string): void {
-    form.memoryIds = form.memoryIds.filter(m => m !== id);
+  removeMemoryRef(form: { linkFacts: string[] }, id: string): void {
+    form.linkFacts = form.linkFacts.filter(m => m !== id);
   }
 
   /** Chip label for a linked fact: cached fact → loaded list → truncated id, trimmed for display. */
@@ -132,7 +132,7 @@ export class EntityRefPicker {
     return full ? full.slice(0, 40) + (full.length > 40 ? '…' : '') : id.slice(0, 8) + '…';
   }
 
-  /** Resolve the uncached facts of a memoryIds list (opening a record for editing). Small N → per-id. */
+  /** Resolve the uncached facts of a linkFacts list (opening a record for editing). Small N → per-id. */
   resolveMemoryTitles(ids: string[]): void {
     const spaceId = this.spaceId();
     if (!spaceId) return;
@@ -144,7 +144,7 @@ export class EntityRefPicker {
     }
   }
 
-  // ── Inline chrono picker (file-meta; slice 4d "chronoIds searchable like memories") ──────────
+  // ── Inline chrono picker (file-meta; slice 4d "linkChronos searchable like memories") ──────────
   //
   // Sibling of the memory picker above, backing app-chrono-ref-field. Replaces the old file-meta `fm*`
   // chrono flyout; a title cache lets chips show the entry's title (not a truncated id) and search is
@@ -169,15 +169,15 @@ export class EntityRefPicker {
   }
 
   /** Cache the picked entry's title for chip display, append its id to the form, and clear the search. */
-  addChronoRef(form: { chronoIds: string[] }, c: ChronoEntry): void {
+  addChronoRef(form: { linkChronos: string[] }, c: ChronoEntry): void {
     this.chronoTitleCache.update(t => ({ ...t, [c._id]: c.title }));
-    if (!form.chronoIds.includes(c._id)) form.chronoIds.push(c._id);
+    if (!form.linkChronos.includes(c._id)) form.linkChronos.push(c._id);
     this.chronoPickQuery.set('');
     this.chronoPickResults.set([]);
   }
 
-  removeChronoRef(form: { chronoIds: string[] }, id: string): void {
-    form.chronoIds = form.chronoIds.filter(c => c !== id);
+  removeChronoRef(form: { linkChronos: string[] }, id: string): void {
+    form.linkChronos = form.linkChronos.filter(c => c !== id);
   }
 
   /** Chip label for a linked chrono entry: cached title → loaded list → truncated id, trimmed. */
@@ -186,7 +186,7 @@ export class EntityRefPicker {
     return full ? full.slice(0, 40) + (full.length > 40 ? '…' : '') : id.slice(0, 8) + '…';
   }
 
-  /** Resolve the uncached titles of a chronoIds list (opening a record for editing). Small N → per-id. */
+  /** Resolve the uncached titles of a linkChronos list (opening a record for editing). Small N → per-id. */
   resolveChronoTitles(ids: string[]): void {
     const spaceId = this.spaceId();
     if (!spaceId) return;

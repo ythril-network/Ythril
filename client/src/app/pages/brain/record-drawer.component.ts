@@ -92,7 +92,7 @@ import { BRAIN_CHIP_STYLES, BRAIN_DRAWER_STYLES } from './brain-form.styles';
                   <app-tag-input [(value)]="state.drawerEditMemory.tags" [suggestions]="store.memoryTagSuggestions()" inputName="drwMemTags" />
                 </div>
                 <div class="drawer-field">
-                  <div class="drawer-label">{{ 'common.entityIds' | transloco }}</div>
+                  <div class="drawer-label">{{ 'common.linkEntities' | transloco }}</div>
                   <app-entity-ref-field [target]="state.drawerEditMemory" [spaceId]="state.spaceId()" />
                 </div>
                 <div class="drawer-field">
@@ -253,11 +253,11 @@ import { BRAIN_CHIP_STYLES, BRAIN_DRAWER_STYLES } from './brain-form.styles';
                   <app-tag-input [(value)]="state.drawerEditChrono.tags" [suggestions]="store.chronoTagSuggestions()" inputName="drwChronoTags" />
                 </div>
                 <div class="drawer-field">
-                  <div class="drawer-label">{{ 'common.entityIds' | transloco }}</div>
+                  <div class="drawer-label">{{ 'common.linkEntities' | transloco }}</div>
                   <app-entity-ref-field [target]="state.drawerEditChrono" [spaceId]="state.spaceId()" />
                 </div>
                 <div class="drawer-field">
-                  <div class="drawer-label">{{ 'common.memoryIds' | transloco }}</div>
+                  <div class="drawer-label">{{ 'common.linkFacts' | transloco }}</div>
                   <app-fact-ref-field [target]="state.drawerEditChrono" />
                 </div>
                 <div class="drawer-field">

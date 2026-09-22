@@ -27,7 +27,7 @@ const ent = (name: string, over: Partial<Entity> = {}): Entity =>
 const edge = (label: string, over: Partial<Edge> = {}): Edge =>
   ({ _id: label, from: 'a', to: 'b', label, tags: [], createdAt: '', ...over } as Edge);
 const chrono = (title: string, over: Partial<ChronoEntry> = {}): ChronoEntry =>
-  ({ _id: title, title, type: 'event', tags: [], entityIds: [], memoryIds: [], startsAt: '', status: 'upcoming', ...over } as ChronoEntry);
+  ({ _id: title, title, type: 'event', tags: [], linkEntities: [], linkFacts: [], startsAt: '', status: 'upcoming', ...over } as ChronoEntry);
 
 function create(): BrainStore {
   TestBed.resetTestingModule();

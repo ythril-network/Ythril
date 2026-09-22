@@ -1,8 +1,9 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
-import { Observable } from 'rxjs';
-import { map } from 'rxjs/operators';
+import { Observable, of } from 'rxjs';
+import { map, switchMap } from 'rxjs/operators';
 import { filterCall } from './filter-call';
+import { hydrateLinks, recordsLinkingTo } from './record-links';
 import type {
   Fact, Entity, Edge, ChronoEntry, ChronoType, ChronoStatus,
   QueryCollection, QueryResult, RecallKnowledgeType, RecallResponse, TraverseResult, EmbeddingQueue,
@@ -303,30 +304,41 @@ export class BrainApi {
 
   // ── Brain — facts ──────────────────────────────────────────────────────
 
+  /**
+   * A page of facts, with the links each one has.
+   *
+   * **`entity` costs a first call now.** It was a predicate over the fact's own `linkEntities`; a connection
+   * is a link record since 5.0, so the ids of the facts linked to that entity are read first and narrow
+   * `_id`. The intersection with the other filters stays the SERVER's — they travel in the same
+   * predicate — which is what keeps paging and `total` honest.
+   */
   listFacts(spaceId: string, limit = 20, skip = 0, filters?: { tag?: string; entity?: string; type?: string; description?: string; properties?: string; entityName?: string }, sort?: ListSort, search?: string): Observable<{ facts: Fact[]; limit: number; skip: number }> {
-    // `entity` is a fact's OWN filter — an id against its link field — so it is a predicate. The other
-    // five are conveniences `filter` takes by name; `entityName` is a per-member JOIN it also takes.
-    return this.filterPage<Fact>(spaceId, 'facts', 'facts', {
+    const linked$: Observable<string[] | null> = filters?.entity
+      ? recordsLinkingTo(this.http, spaceId, 'fact', [filters.entity])
+      : of(null);
+    return linked$.pipe(switchMap(linkedIds => this.filterPage<Fact>(spaceId, 'facts', 'facts', {
       limit, skip, ...this.sortBody(sort),
-      ...(filters?.entity ? { filter: { entityIds: filters.entity } } : {}),
+      ...(linkedIds ? { filter: { _id: { $in: linkedIds } } } : {}),
       ...(filters?.tag ? { tag: filters.tag } : {}),
       ...(filters?.type ? { type: filters.type } : {}),
       ...(filters?.description ? { description: filters.description } : {}),
       ...(filters?.properties ? { properties: filters.properties } : {}),
       ...(filters?.entityName ? { entityName: filters.entityName } : {}),
       ...(search ? { search } : {}),
-    }) as Observable<{ facts: Fact[]; limit: number; skip: number }>;
+    }) as unknown as Observable<{ facts: Fact[]; limit: number; skip: number }>),
+      switchMap(page => hydrateLinks(this.http, spaceId, 'fact', page.facts)
+        .pipe(map(facts => ({ ...page, facts: facts as Fact[] })))));
   }
 
   deleteFact(spaceId: string, id: string): Observable<void> {
     return this.http.delete<void>(`/api/brain/spaces/${spaceId}/facts/${id}`);
   }
 
-  createMemory(spaceId: string, body: { fact: string; type?: string; tags?: string[]; entityIds?: string[]; description?: string; properties?: Record<string, string | number | boolean> }): Observable<Fact> {
+  createMemory(spaceId: string, body: { fact: string; type?: string; tags?: string[]; linkEntities?: string[]; description?: string; properties?: Record<string, string | number | boolean> }): Observable<Fact> {
     return this.http.post<Fact>(`/api/brain/spaces/${spaceId}/facts`, body);
   }
 
-  updateFact(spaceId: string, id: string, body: Partial<{ fact: string; type: string; tags: string[]; entityIds: string[]; description: string; properties: Record<string, string | number | boolean>; deleteFields: string[] }>): Observable<Fact> {
+  updateFact(spaceId: string, id: string, body: Partial<{ fact: string; type: string; tags: string[]; linkEntities: string[]; description: string; properties: Record<string, string | number | boolean>; deleteFields: string[] }>): Observable<Fact> {
     return this.http.patch<Fact>(`/api/brain/spaces/${spaceId}/facts/${id}`, body);
   }
 
@@ -523,10 +535,16 @@ export class BrainApi {
       ...(filters?.description ? { description: filters.description } : {}),
       ...(filters?.entityName ? { entityName: filters.entityName } : {}),
       ...(filters?.search ? { search: filters.search } : {}),
-    }) as Observable<{ chrono: ChronoEntry[] }>;
+    }).pipe(switchMap(page => {
+      // The chips this tab draws are LINKS since 5.0, so the page is hydrated from the links collection
+      // in one call — see `record-links.ts` for why it is per page and never per row.
+      const rows = (page as { chrono: ChronoEntry[] }).chrono;
+      return hydrateLinks(this.http, spaceId, 'chrono', rows)
+        .pipe(map(chrono => ({ ...page, chrono: chrono as ChronoEntry[] })));
+    })) as unknown as Observable<{ chrono: ChronoEntry[] }>;
   }
 
-  createChrono(spaceId: string, body: { title: string; type: ChronoType; startsAt: string; endsAt?: string; status?: ChronoStatus; confidence?: number; tags?: string[]; entityIds?: string[]; memoryIds?: string[]; description?: string; properties?: Record<string, string | number | boolean> }): Observable<ChronoEntry> {
+  createChrono(spaceId: string, body: { title: string; type: ChronoType; startsAt: string; endsAt?: string; status?: ChronoStatus; confidence?: number; tags?: string[]; linkEntities?: string[]; linkFacts?: string[]; description?: string; properties?: Record<string, string | number | boolean> }): Observable<ChronoEntry> {
     return this.http.post<ChronoEntry>(`/api/brain/spaces/${spaceId}/chrono`, body);
   }
 
@@ -537,7 +555,7 @@ export class BrainApi {
   // the same space would reject on the create form next to it), and it stores NO audit snapshot (so every
   // chrono edit made in this app was absent from the before/after trail that entities, facts and edges
   // all leave). An integrator found nine of their own flows on this route before we found one of ours.
-  updateChrono(spaceId: string, id: string, body: Partial<{ title: string; type: ChronoType; startsAt: string; endsAt: string; status: ChronoStatus; confidence: number; tags: string[]; entityIds: string[]; memoryIds: string[]; description: string; properties: Record<string, string | number | boolean>; suppressEmbeddings: boolean }>): Observable<ChronoEntry> {
+  updateChrono(spaceId: string, id: string, body: Partial<{ title: string; type: ChronoType; startsAt: string; endsAt: string; status: ChronoStatus; confidence: number; tags: string[]; linkEntities: string[]; linkFacts: string[]; description: string; properties: Record<string, string | number | boolean>; suppressEmbeddings: boolean }>): Observable<ChronoEntry> {
     return this.http.patch<ChronoEntry>(`/api/brain/spaces/${spaceId}/chrono/${id}`, body);
   }
 

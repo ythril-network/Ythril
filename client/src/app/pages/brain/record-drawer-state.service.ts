@@ -64,10 +64,10 @@ export class RecordDrawerState {
    */
   readonly lastSaved = signal<DrawerRecord | null>(null);
 
-  drawerEditMemory = { fact: '', type: '', tags: [] as string[], entityIds: '', description: '', properties: {} as Record<string, string | number | boolean> };
+  drawerEditMemory = { fact: '', type: '', tags: [] as string[], linkEntities: '', description: '', properties: {} as Record<string, string | number | boolean> };
   drawerEditEntity = { name: '', type: '', tags: [] as string[], description: '', properties: {} as Record<string, string | number | boolean> };
   drawerEditEdge = { label: '', type: '', weight: null as number | null, tags: [] as string[], description: '', properties: {} as Record<string, string | number | boolean> };
-  drawerEditChrono = { title: '', kind: 'event' as string, status: 'upcoming' as string, startsAt: '', endsAt: '', description: '', tags: [] as string[], entityIds: '', confidence: null as number | null, memoryIds: [] as string[], properties: {} as Record<string, string | number | boolean> };
+  drawerEditChrono = { title: '', kind: 'event' as string, status: 'upcoming' as string, startsAt: '', endsAt: '', description: '', tags: [] as string[], linkEntities: '', confidence: null as number | null, linkFacts: [] as string[], properties: {} as Record<string, string | number | boolean> };
 
   /** Re-seed a drawer entity's properties when its type changes (mirrors the create/inline forms). */
   onEntityTypeChange(type: string): void {
@@ -104,7 +104,7 @@ export class RecordDrawerState {
     this.drawerError.set('');
     this.drawerSaving.set(false);
     // Only facts and chrono entries carry entity references — the other two kinds have no such field.
-    const ids: string[] = 'entityIds' in record ? (record.entityIds ?? []) : [];
+    const ids: string[] = 'linkEntities' in record ? (record.linkEntities ?? []) : [];
     if (ids.length) this.picker.resolveEntityNames(ids);
     if (target.kind === 'fact') {
       const r = target.record;
@@ -112,7 +112,7 @@ export class RecordDrawerState {
         fact: r.fact,
         type: r.type ?? '',
         tags: [...(r.tags ?? [])],
-        entityIds: (r.entityIds ?? []).join(', '),
+        linkEntities: (r.linkEntities ?? []).join(', '),
         description: r.description ?? '',
         properties: this.store.buildPropertiesObject('fact', r.properties ?? {}),
       };
@@ -147,12 +147,12 @@ export class RecordDrawerState {
         endsAt: r.endsAt ? toLocalDatetime(r.endsAt) : '',
         description: r.description ?? '',
         tags: [...(r.tags ?? [])],
-        entityIds: (r.entityIds ?? []).join(', '),
+        linkEntities: (r.linkEntities ?? []).join(', '),
         confidence: r.confidence ?? null,
-        memoryIds: [...(r.memoryIds ?? [])],
+        linkFacts: [...(r.linkFacts ?? [])],
         properties: this.store.buildPropertiesObject('chrono', r.properties ?? {}, r.type),
       };
-      this.picker.resolveMemoryTitles(r.memoryIds ?? []);
+      this.picker.resolveMemoryTitles(r.linkFacts ?? []);
     }
   }
 
@@ -176,7 +176,7 @@ export class RecordDrawerState {
         // box has to reach the API as an explicit empty value or the type could be set and never unset.
         type: this.drawerEditMemory.type.trim(),
         tags: this.drawerEditMemory.tags,
-        entityIds: this.drawerEditMemory.entityIds.split(',').map(s => s.trim()).filter(Boolean),
+        linkEntities: this.drawerEditMemory.linkEntities.split(',').map(s => s.trim()).filter(Boolean),
         description: this.drawerEditMemory.description.trim(),
         ...(Object.keys(props).length ? { properties: props } : {}),
       }).subscribe({
@@ -234,8 +234,8 @@ export class RecordDrawerState {
         ...(this.drawerEditChrono.endsAt ? { endsAt: new Date(this.drawerEditChrono.endsAt).toISOString() } : {}),
         description: this.drawerEditChrono.description.trim(),
         tags: this.drawerEditChrono.tags,
-        entityIds: this.drawerEditChrono.entityIds.split(',').map(s => s.trim()).filter(Boolean),
-        ...(this.drawerEditChrono.memoryIds.length ? { memoryIds: this.drawerEditChrono.memoryIds } : {}),
+        linkEntities: this.drawerEditChrono.linkEntities.split(',').map(s => s.trim()).filter(Boolean),
+        ...(this.drawerEditChrono.linkFacts.length ? { linkFacts: this.drawerEditChrono.linkFacts } : {}),
         ...(this.drawerEditChrono.confidence != null ? { confidence: this.drawerEditChrono.confidence } : {}),
         ...(Object.keys(chronoProps).length ? { properties: chronoProps } : {}),
       }).subscribe({

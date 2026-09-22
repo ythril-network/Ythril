@@ -109,10 +109,32 @@ export function invalidRefsMessage(field: string, kind: RefKind, values: readonl
     `Look the record up by name first and pass its id — a name is not a reference.`;
 }
 
+/**
+ * A reference the caller asked for cannot be honoured — the wrong shape, a record that does not exist, or
+ * a link class that is not one of the six.
+ *
+ * ## Why it is a TYPE and not just a message
+ *
+ * The existence check moved from the seven write doors into the writers, which is what finally made it
+ * true of `linkEntities` as well as of the 4.x arrays. It also meant a plain `Error` reaching a REST
+ * route's catch-all: a caller who named a record that does not exist got **500 Internal server error**
+ * where they had been getting a `400` naming the id. A refusal that reads as a server fault is worse than
+ * the silent write it replaced, because there is nothing in it to act on.
+ *
+ * So the doors recognise this one class and answer `400`. MCP needs no change: a thrown error is already
+ * an `isError` result carrying the same sentence.
+ */
+export class ReferenceRefusal extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ReferenceRefusal';
+  }
+}
+
 /** Throwing form, for the MCP handlers whose errors surface to the agent as `isError` text. */
 export function assertRefs(field: string, kind: RefKind, values: readonly string[] | undefined): void {
   const msg = invalidRefsMessage(field, kind, values);
-  if (msg) throw new Error(msg);
+  if (msg) throw new ReferenceRefusal(msg);
 }
 
 // Typed as `SpacePart` rather than `string` so a caller can hand the result straight to
@@ -244,7 +266,7 @@ export async function assertRefsResolve(
   if (missing.length === 0) return;
   const shown = missing.slice(0, 5).map(v => JSON.stringify(v)).join(', ');
   const more = missing.length > 5 ? ` (+${missing.length - 5} more)` : '';
-  throw new Error(
+  throw new ReferenceRefusal(
     `\`${field}\` references ${missing.length} ${REF_NOUN[kind]}${missing.length === 1 ? '' : 's'} that ` +
     `do${missing.length === 1 ? 'es' : ''} not exist in space '${spaceId}': ${shown}${more}. ` +
     `Create the record first, then link it — the write was refused rather than stored with a dead link.`,

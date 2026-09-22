@@ -6,7 +6,7 @@
  *            the user picks an entity from the dropdown. Used in the Entities
  *            tab to drive list filtering (parent controls actual load).
  *   picker — Compact inline picker for form fields (edge from/to, memory/chrono
- *            entityIds). Emits `selected` on pick. Parent owns the display text.
+ *            linkEntities). Emits `selected` on pick. Parent owns the display text.
  *
  * Inputs:
  *   spaceId      — Required. Which space to search in.

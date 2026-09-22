@@ -43,7 +43,7 @@ import { getConfig } from '../config/loader.js';
 import { nextSeq } from '../util/seq.js';
 import { edgeIdFor } from './edge-id.js';
 import { legacyField, linkClassFor, linkClassesFrom, linksStartingFrom } from './link-adjacency.js';
-import { assertRefsResolve } from './entity-refs.js';
+import { assertRefsResolve, ReferenceRefusal } from './entity-refs.js';
 import { isStrictLinkage } from '../spaces/proxy.js';
 import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';
 import type { AuthorRef, LinkDoc, TombstoneDoc } from '../config/types.js';
@@ -139,7 +139,7 @@ export async function reconcileLinks(
   // naming one stored a link whose class does not exist, which nothing reads and nothing reports.
   for (const toKind of classes) {
     const classRefusal = linkClassRefusal(fromKind, toKind);
-    if (classRefusal) throw new Error(classRefusal);
+    if (classRefusal) throw new ReferenceRefusal(classRefusal);
   }
 
   /*
@@ -336,7 +336,7 @@ export async function addLink(
 ): Promise<LinkDoc> {
   const suffix = COLLECTION_OF[fromKind];
   const refusal = linkClassRefusal(fromKind, toKind);
-  if (refusal) throw new Error(refusal);
+  if (refusal) throw new ReferenceRefusal(refusal);
 
   /*
    * THE RECORD IS READ, NOT WRITTEN. Until 5.0 this wrote the array entry and let the reconcile derive the

@@ -5,6 +5,7 @@
  * pieces every sub-router needs: webhook token attribution, space-meta lookup, the schema
  * validation gate, the fact list filter, and the UUID matcher.
  */
+import { ReferenceRefusal } from '../../brain/entity-refs.js';
 import type express from 'express';
 import { getConfig } from '../../config/loader.js';
 import { parseRecordSuppression } from '../../brain/suppress-embeddings.js';
@@ -200,3 +201,26 @@ export function preconditionFailedBody(record: string, currentSeq?: number): Rec
   };
 }
 
+
+/**
+ * Answer a REFERENCE refusal as a `400`, or say it was not one.
+ *
+ * ## The failure it exists for, and it is a 500
+ *
+ * The existence check moved from the seven write doors into the writers — which is what made it true of
+ * `linkEntities` as well as of the 4.x arrays it guarded. A door's catch-all then saw a plain thrown error
+ * and answered **500 Internal server error** where a caller naming a record that does not exist used to
+ * get a `400` naming the id. A refusal that reads as a server fault is worse than the silent write it
+ * replaced: there is nothing in it to act on, and nothing says the request was the problem.
+ *
+ * ## Why a helper rather than a branch per door
+ *
+ * Seven doors, one rule. A branch each is seven chances for the next door to be written without it, and
+ * the symptom is a 500 on the one path nobody exercised — see `CLAUDE.md` on the defect class this repo
+ * produces most. Returns `true` when it answered, so a caller's catch reads `if (…) return;`.
+ */
+export function answeredReferenceRefusal(res: express.Response, err: unknown): boolean {
+  if (!(err instanceof ReferenceRefusal)) return false;
+  res.status(400).json({ error: err.message });
+  return true;
+}

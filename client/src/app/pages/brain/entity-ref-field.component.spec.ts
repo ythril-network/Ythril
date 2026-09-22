@@ -17,7 +17,7 @@ import { BrainStore } from './brain-store.service';
 import { EntityRefFieldComponent } from './entity-ref-field.component';
 import { isOnPush } from '../../testing/onpush';
 
-function make(target: { entityIds: string }) {
+function make(target: { linkEntities: string }) {
   TestBed.resetTestingModule();
   TestBed.configureTestingModule({
     imports: [EntityRefFieldComponent, getTranslocoModule()],
@@ -41,12 +41,12 @@ describe('EntityRefFieldComponent', () => {
   });
 
   it('always hosts the inline entity picker', () => {
-    const f = make({ entityIds: '' });
+    const f = make({ linkEntities: '' });
     expect(f.nativeElement.querySelector('app-entity-search')).toBeTruthy();
   });
 
   it('renders a chip per linked id, using the picker name cache for the label', () => {
-    const f = make({ entityIds: 'e1, e2' });
+    const f = make({ linkEntities: 'e1, e2' });
     const picker = TestBed.inject(EntityRefPicker);
     picker.entityNameCache.set({ e1: 'Ada' });
     f.detectChanges();
@@ -55,16 +55,16 @@ describe('EntityRefFieldComponent', () => {
   });
 
   it('picking appends to the bound target by reference', () => {
-    const target = { entityIds: '' };
+    const target = { linkEntities: '' };
     make(target);
     TestBed.inject(EntityRefPicker).pickEntity({ _id: 'e9', name: 'Grace' } as Entity, target);
-    expect(target.entityIds).toBe('e9');
+    expect(target.linkEntities).toBe('e9');
   });
 
   it('removing a chip mutates the bound target by reference', () => {
-    const target = { entityIds: 'e1, e2' };
+    const target = { linkEntities: 'e1, e2' };
     make(target);
     TestBed.inject(EntityRefPicker).removeEntityId(target, 'e1');
-    expect(target.entityIds).toBe('e2');
+    expect(target.linkEntities).toBe('e2');
   });
 });

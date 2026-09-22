@@ -4,7 +4,7 @@
  * ## The defect
  *
  * A graph carries four kinds of node. Entities are stored records; a chrono entry, a memory or a file reached
- * through its `entityIds` link is a node too, and `TraverseNode.kind` says which. `loadNodeDetails` ignored
+ * through its `linkEntities` link is a node too, and `TraverseNode.kind` says which. `loadNodeDetails` ignored
  * that and always called `getEntity`, so tapping any non-entity node issued a request that 404s. It is caught
  * — `catchError(() => of(null))` — so nothing breaks visibly: the detail drawer simply opens empty, with no
  * indication that anything was asked for or refused.

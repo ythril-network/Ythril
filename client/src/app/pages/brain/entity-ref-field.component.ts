@@ -14,8 +14,8 @@ import { BRAIN_CHIP_STYLES } from './brain-form.styles';
  * `<label>` / `.drawer-label` and field wrapper, so the component drops into both the form and the
  * drawer contexts unchanged.
  *
- * Dumb + OnPush: it owns no state. `target` is the caller's form object (any `{ entityIds: string }`);
- * picking mutates `target.entityIds` and the shared name cache via the picker, exactly as the inline
+ * Dumb + OnPush: it owns no state. `target` is the caller's form object (any `{ linkEntities: string }`);
+ * picking mutates `target.linkEntities` and the shared name cache via the picker, exactly as the inline
  * copies did — `pickEntity`/`removeEntityId`/`entityChips` are unchanged, so behaviour is preserved.
  */
 @Component({
@@ -25,9 +25,9 @@ import { BRAIN_CHIP_STYLES } from './brain-form.styles';
   imports: [EntitySearchComponent, PhIconComponent],
   styles: [BRAIN_CHIP_STYLES],
   template: `
-    @if (picker.entityChips(target().entityIds).length) {
+    @if (picker.entityChips(target().linkEntities).length) {
       <div class="entity-multi">
-        @for (chip of picker.entityChips(target().entityIds); track chip.id) {
+        @for (chip of picker.entityChips(target().linkEntities); track chip.id) {
           <span class="chip" [title]="chip.id"><span class="chip-name">{{ chip.name }}</span><button type="button" class="chip-remove" (mousedown)="picker.removeEntityId(target(), chip.id)"><ph-icon name="x" [size]="12"/></button></span>
         }
       </div>
@@ -37,7 +37,7 @@ import { BRAIN_CHIP_STYLES } from './brain-form.styles';
 })
 export class EntityRefFieldComponent {
   readonly picker = inject(EntityRefPicker);
-  /** The caller's form object; picking appends to its `entityIds`. */
+  /** The caller's form object; picking appends to its `linkEntities`. */
   readonly target = input.required<EntityIdTarget>();
   readonly spaceId = input.required<string>();
 }

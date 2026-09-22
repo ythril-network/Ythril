@@ -174,7 +174,7 @@ describe('the node card, for every kind that reaches it', () => {
 
   /*
    * G-5, fixed. This block used to pin the DEFECT: a graph node is one of four kinds, and since 3.6 a chrono
-   * entry, memory or file reaches the canvas through its `entityIds` link. `loadNodeDetails` fetched the right
+   * entry, memory or file reaches the canvas through its `linkEntities` link. `loadNodeDetails` fetched the right
    * record and then cast it `as Entity`; the card had no branch on `kind` and never read it. A memory has
    * `fact` and no `name`, so the name row rendered EMPTY and the fact — the only thing the record says — was
    * never shown. Every other field rendered, which is why nobody reported it.
