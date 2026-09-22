@@ -153,6 +153,23 @@ export function isBreaking(entry) {
  * common case, every release before 4.0.0 — because reordering notes that fit would be a change to what
  * gets published for no reason at all.
  *
+ * ## And a breaking entry is never DROPPED, only shortened — measured a third time, cutting 5.0.0
+ *
+ * Lifting them first is not enough on its own. 5.0.0 carries 20 breaking entries totalling 26 452
+ * characters, so any budget under that dropped whole entries off the end of the lifted block — the same
+ * failure as the original prefix, one level in, and with the reader's guard down because the notes now
+ * promise the breaking ones come first. It did not reach a reader: at the real ceiling all 20 fit, and it
+ * was the gate squeezing to 20 000 that showed it.
+ *
+ * **So the headlines are RESERVED before anything is spent.** Every breaking entry's first line — the bold
+ * sentence that says what breaks — is charged to the budget up front; what is left then upgrades entries
+ * to their full text in order. Below the reserve the old greedy behaviour returns, because at that point
+ * nothing can be promised and pretending otherwise is worse than the truncation notice.
+ *
+ * The reason to prefer twenty headlines over fifteen full entries is not space, it is what a reader DOES
+ * with them: a headline they can act on sends them to the full notes, and an entry that is not there at
+ * all cannot.
+ *
  * @param {string} body      the full release body
  * @param {string} version   the version, for the pointer at the end
  * @param {number} [limit]   the ceiling, overridable so a test can exercise this without a 335 KB fixture
@@ -166,10 +183,18 @@ export function abridgeForRelease(body, version, limit = RELEASE_BODY_TARGET) {
   const breaking = entries.filter(isBreaking);
   const rest = entries.filter(e => !isBreaking(e));
 
-  const head = (kept, shownBreaking) => `> **These notes are abridged** — ${kept} of ${entries.length} entries. `
+  // `shortened` is how many breaking entries appear as their headline alone. Disclosed rather than counted
+  // as shown in full: "20 of 20 shown" over five one-line entries is the reassurance this abridger's own
+  // history argues against.
+  const head = (kept, shownBreaking, shortened) => `> **These notes are abridged** — ${kept} of `
+    + `${entries.length} entries. `
     + (breaking.length
       ? `**${shownBreaking} of ${breaking.length} breaking ${breaking.length === 1 ? 'entry is' : 'entries are'} `
         + `shown first**, ahead of everything else. `
+        + (shortened
+          ? `${shortened} of them ${shortened === 1 ? 'is cut to its opening line'
+       : 'are cut to their opening lines'} — the link below has the rest. `
+          : '')
       : '')
     + `The full ${version} notes are in [CHANGELOG.md at this tag](${link}).\n\n`;
   const foot = (kept) => `\n\n---\n\n**End of the abridged notes** — ${kept} of ${entries.length} entries `
@@ -183,7 +208,7 @@ export function abridgeForRelease(body, version, limit = RELEASE_BODY_TARGET) {
   // Sized against the WORST case the notices can grow to, because their own numbers are part of their
   // length: sizing against the final count could push the body back over the limit it just fitted.
   let budget = limit
-    - head(entries.length, breaking.length).length
+    - head(entries.length, breaking.length, breaking.length).length
     - foot(entries.length).length
     - (breaking.length ? BREAKING_HEADING.length + REST_HEADING.length : 0)
     - (preamble ? preamble.length + 2 : 0);
@@ -198,7 +223,30 @@ export function abridgeForRelease(body, version, limit = RELEASE_BODY_TARGET) {
     return kept;
   };
 
-  const keptBreaking = take(breaking);
+  /**
+   * Every breaking entry, shortened to its headline rather than dropped.
+   *
+   * Returns `null` when even the headlines do not fit, and the caller falls back to `take` — there is no
+   * honest guarantee below that line, and a silently half-kept reserve would be the same defect again.
+   */
+  const takeBreakingWhole = (list) => {
+    const headlines = list.map(e => e.text.split('\n')[0]);
+    const reserve = headlines.reduce((n, h) => n + h.length + 1, 0);
+    if (reserve > budget) return null;
+
+    const kept = [...headlines];
+    let spare = budget - reserve;
+    for (const [i, e] of list.entries()) {
+      const extra = e.text.length - headlines[i].length;
+      if (extra === 0 || extra > spare) continue;
+      kept[i] = e.text;
+      spare -= extra;
+    }
+    budget = spare;
+    return kept;
+  };
+
+  const keptBreaking = takeBreakingWhole(breaking) ?? take(breaking);
   const keptRest = take(rest);
   const kept = keptBreaking.length + keptRest.length;
 
@@ -210,5 +258,7 @@ export function abridgeForRelease(body, version, limit = RELEASE_BODY_TARGET) {
     ? BREAKING_HEADING + keptBreaking.join('\n') + (keptRest.length ? REST_HEADING + keptRest.join('\n') : '')
     : keptRest.join('\n');
 
-  return head(kept, keptBreaking.length) + (preamble ? preamble + '\n\n' : '') + parts + foot(kept);
+  const shortened = keptBreaking.filter((text, i) => text !== breaking[i]?.text).length;
+  return head(kept, keptBreaking.length, shortened) + (preamble ? preamble + '\n\n' : '') + parts
+    + foot(kept);
 }

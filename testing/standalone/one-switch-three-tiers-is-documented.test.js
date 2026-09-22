@@ -35,7 +35,7 @@
 import { describe, it, before } from 'node:test';
 import { trackedSources } from './_sources.mjs';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
 
 let embeddingSuppressed, recordSuppression, parseRecordSuppression;
@@ -226,39 +226,48 @@ describe('both doors name the one tier name', () => {
 
   it('the rename is written down where an upgrader looks', () => {
     // A renamed request field that appears in no changelog is a caller debugging a 200 that did nothing.
-    // Bounded by headings, not by an offset: `\n## ` lands on a different character on this CRLF working
-    // copy than in CI's LF checkout, and a window that starts in the wrong place passes by reading less.
-    // `[\s\S]` rather than `.` so the sections' own blank lines are inside the window.
     //
-    // The window is `[Unreleased]` PLUS the newest released section, and that is the fix for this gate's
-    // first version rather than a convenience. It pinned `[Unreleased]` alone, so cutting 3.1.0 — which
-    // moved the entry into a dated heading, exactly as a release is supposed to — turned it red against a
-    // CHANGELOG that had become MORE correct. The rule is that an upgrader searching the old spelling finds
-    // it in the current notes; which heading it sits under is the release process's business, not this
-    // gate's.
     /*
-     * THE WHOLE CURRENT-MAJOR CHANGELOG, and that is the second correction this assertion has needed for the
-     * same underlying reason: a window measured in RELEASES decays every time one is cut.
+     * THE CHANGELOG SERIES, not one file of it — and this is the THIRD correction to the same assertion,
+     * for the same underlying reason each time: a window that moves when a release is cut.
      *
-     * Version one pinned `[Unreleased]` alone, and cutting 3.1.0 — which moved the entry into a dated heading,
-     * exactly as a release is supposed to — turned it red against a CHANGELOG that had become more correct.
-     * Version two widened to "[Unreleased] plus the newest released section", which survived one release and
-     * broke on the next: cutting 3.2.0 pushed 3.1.0 into second place and the entry out of the window.
+     * Version one pinned `[Unreleased]` alone, and cutting 3.1.0 turned it red against a CHANGELOG that had
+     * become more correct. Version two widened to "[Unreleased] plus the newest released section", and
+     * cutting 3.2.0 pushed the entry out of it. Version three read the whole CURRENT-MAJOR file, on the
+     * reasoning that `CHANGELOG.md` is the current series by construction.
      *
-     * A window of N sections is just a magic number wearing release clothes. The actual rule is the one the
-     * comment above always stated — **an upgrader searching the old spelling finds it in the current notes** —
-     * and `CHANGELOG.md` IS the current major series by construction: its own header says earlier majors are
-     * archived under `changelog/`.
+     * **Cutting 5.0 broke version three, and the comment above it had predicted the day exactly** — "when
+     * this file is archived, the gate goes red and asks to be revisited". Archiving 4.x moved both spellings
+     * into `changelog/CHANGELOG-4.x.md`, so the current file names neither, and the gate reported a
+     * documentation hole where a release process had done precisely what it is supposed to do.
      *
-     * So this holds while the old spelling is still ACCEPTED, which is the whole point of documenting it. When
-     * 4.0 removes the field and this file is archived, the gate goes red and asks to be revisited — which is
-     * correct, because that is the release where an upgrader stops needing to find it and starts needing to be
-     * told it is gone.
+     * The rule the comment always stated is the one that does not decay: **an upgrader searching the old
+     * spelling finds it in these notes**. What that takes is that some file in the series names it and that
+     * the series is reachable from the current file — which is the archive link, asserted here rather than
+     * borrowed, because a gate that depends on another gate's assertion concludes about something it did not
+     * look at. Where the entry sits is the release process's business, and it will move again at 6.0.
      */
-    const ch = readFileSync('CHANGELOG.md', 'utf8');
-    assert.match(ch, /^## \[Unreleased\]$/m, 'the changelog has no [Unreleased] heading — this gate measures nothing');
-    assert.match(ch, /excludeFromVectorSearch/,
-      'the current-major changelog must name the OLD spelling — that is the word an upgrader searches for');
-    assert.match(ch, /suppressEmbeddings/, 'and the new one');
+    const current = readFileSync('CHANGELOG.md', 'utf8');
+    assert.match(current, /^## \[Unreleased\]$/m,
+      'the changelog has no [Unreleased] heading — this gate measures nothing');
+
+    // Derived, and with a floor: an empty series would pass every `some` written over it.
+    const archives = readdirSync('changelog').filter(f => /^CHANGELOG-\d+\.x\.md$/.test(f));
+    assert.ok(archives.length >= 4, `expected the archived series, found ${archives.length}`);
+    const series = [['CHANGELOG.md', current],
+      ...archives.map(f => [`changelog/${f}`, readFileSync(`changelog/${f}`, 'utf8')])];
+
+    const namesOld = series.filter(([, src]) => src.includes('excludeFromVectorSearch'));
+    assert.ok(namesOld.length > 0,
+      'no file in the changelog series names the OLD spelling — that is the word an upgrader searches for');
+    assert.ok(series.some(([, src]) => src.includes('suppressEmbeddings')), 'and the new one');
+
+    // Reachable: every file that holds the answer is either the current one or linked from it.
+    for (const [path] of namesOld) {
+      if (path === 'CHANGELOG.md') continue;
+      assert.ok(current.includes(path),
+        `${path} names the old spelling and CHANGELOG.md does not link it, so the search ends at a file `
+        + 'nobody opens');
+    }
   });
 });
