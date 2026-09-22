@@ -35,7 +35,7 @@ import { nextSeq } from '../util/seq.js';
 import { getConfig } from '../config/loader.js';
 import { updateSpace } from '../spaces/spaces.js';
 import { reconcileLinksForDocument, LINK_BEARING_COLLECTIONS } from './links.js';
-import { LINK_CLASSES } from './link-adjacency.js';
+import { LINK_CLASSES, legacyField } from './link-adjacency.js';
 import { log } from '../util/log.js';
 import { spaceCollection } from '../db/space-collection.js';
 
@@ -163,16 +163,24 @@ export async function previewSpaceLinks(spaceId: string): Promise<ConversionPrev
     links: await col(spaceCollection(spaceId, 'links')).countDocuments(asFilter({ spaceId })),
   };
 
-  // DERIVED from the class table, so a seventh link class appears here on the day it is declared. A
-  // hand-written list of six field names is the shape this file's own header argues against.
+  /*
+   * DERIVED from the class table, so a seventh link class appears here on the day it is declared. A
+   * hand-written list of six field names is the shape this file's own header argues against.
+   *
+   * `legacyField` and not a property of the class: 5.0 took the six arrays off the document types, and
+   * this file is the ONE place that still knows they can be on disk — a space that never converted
+   * holds its pre-upgrade links in them and nowhere else. Reading stored data the type no longer
+   * declares is what a migration is for, and keeping the name on `LinkClass` would have offered it to
+   * every reader instead.
+   */
   for (const c of LINK_CLASSES) {
-    const nonEmpty = asFilter({ [c.field]: { $exists: true, $ne: [] } });
+    const nonEmpty = asFilter({ [legacyField(c.toKind)]: { $exists: true, $ne: [] } });
     out.records[c.label] = await col(`${spaceId}_${c.collection}`).countDocuments(nonEmpty);
     const grouped = await col(`${spaceId}_${c.collection}`).aggregate([
       { $match: nonEmpty },
       // `$isArray` because a legacy record can carry the key as something that is not an array, and `$size`
       // on a non-array fails the whole aggregation rather than skipping that one document.
-      { $group: { _id: null, n: { $sum: { $cond: [{ $isArray: `$${c.field}` }, { $size: `$${c.field}` }, 0] } } } },
+      { $group: { _id: null, n: { $sum: { $cond: [{ $isArray: `$${legacyField(c.toKind)}` }, { $size: `$${legacyField(c.toKind)}` }, 0] } } } },
     ]).toArray() as Array<{ n?: number }>;
     out.entries[c.label] = grouped[0]?.n ?? 0;
   }

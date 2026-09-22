@@ -94,14 +94,14 @@ export async function checkEdgeLinkViolations(
 }
 
 /**
- * Record what an arriving document's link arrays point at that is not there — every class it can hold.
+ * Record what an arriving LINK points at that is not there.
  *
- * ## What it used to check, and what that missed
+ * ## What it used to check, twice over
  *
- * It took `entityIds` and a `docType` of `'fact' | 'chrono'`, and hardcoded the field name, the target
- * collection and the UUID shape. So it saw ONE of the six link classes. `chrono.memoryIds` and all three of
- * a file's arrays were invisible to sync — and there was no file call site at all, so a file arriving with a
- * dangling `entityIds` was never reported even for the class that was implemented.
+ * The first version took `entityIds` and a `docType` of `'fact' | 'chrono'` and hardcoded the field name,
+ * the target collection and the UUID shape, so it saw ONE of the six link classes. The second read an
+ * arriving RECORD's six arrays. 5.0 removed those arrays and links replicate as their own documents, so
+ * the subject is the LINK: one arriving row, one target, one question.
  *
  * That is the shape `CLAUDE.md` names as this codebase's commonest: one rule, several implementations, and
  * **the copy that RECORDS rather than refuses is the one to check hardest** — an operator reads a link
@@ -121,38 +121,30 @@ export async function checkEdgeLinkViolations(
  *
  * ## What is still not checked, and why it is not a half-done job here
  *
- * A FILE's three arrays. Files replicate, but not through this router — they arrive on the file transfer
- * path, and `LinkViolationDoc.docType` has no `file` member, so reporting one would mean widening a STORED
- * shape and the screen that displays it. That gap predates the link migration: sync has never checked a
- * file's links at all, for any class. Tracked as its own row rather than smuggled in here.
+ * A link whose FROM is a file. `LinkViolationDoc.docType` has no `file` member, so reporting one would
+ * mean widening a STORED shape and the screen that displays it. That gap predates the link migration:
+ * sync has never checked a file's links at all, for any class. Tracked as its own row rather than
+ * smuggled in here.
  */
 export async function checkLinkViolations(
   spaceId: string,
-  docId: string,
-  docType: 'fact' | 'chrono',
-  doc: object | undefined,
+  link: { _id: string; from: string; fromKind: string; to: string; toKind: string } | undefined,
   peerInstanceId: string,
 ): Promise<void> {
-  if (!isStrictLinkage(spaceId) || !doc) return;
+  if (!isStrictLinkage(spaceId) || !link) return;
+  if (link.fromKind !== 'fact' && link.fromKind !== 'chrono') return;
 
-  for (const cls of LINK_CLASSES) {
-    if (cls.kind !== docType) continue;
-    const raw = (doc as Record<string, unknown>)[cls.field];
-    if (!Array.isArray(raw) || raw.length === 0) continue;
-
-    for (const id of raw as string[]) {
-      if (cls.toKind !== 'file' && !UUID_V4_RE.test(id)) {
-        await recordLinkViolation(spaceId, docId, docType, cls.field,
-          `${cls.field} contains non-UUID value '${id}'`, peerInstanceId);
-        continue;
-      }
-      const coll = `${spaceId}_${collectionForRefKind(cls.toKind)}`;
-      const exists = await col<{ _id: string }>(coll).findOne(asFilter<{ _id: string }>({ _id: id }));
-      if (!exists) {
-        await recordLinkViolation(spaceId, docId, docType, cls.field,
-          `${cls.field} references non-existent ${cls.toKind} '${id}'`, peerInstanceId);
-      }
-    }
+  const field = `${link.fromKind}.${link.toKind}`;
+  if (link.toKind !== 'file' && !UUID_V4_RE.test(link.to)) {
+    await recordLinkViolation(spaceId, link.from, link.fromKind, field,
+      `${field} contains non-UUID value '${link.to}'`, peerInstanceId);
+    return;
+  }
+  const coll = `${spaceId}_${collectionForRefKind(link.toKind as RefKind)}`;
+  const exists = await col<{ _id: string }>(coll).findOne(asFilter<{ _id: string }>({ _id: link.to }));
+  if (!exists) {
+    await recordLinkViolation(spaceId, link.from, link.fromKind, field,
+      `${field} references non-existent ${link.toKind} '${link.to}'`, peerInstanceId);
   }
 }
 

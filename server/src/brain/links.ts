@@ -42,7 +42,7 @@ import { col, asFilter, asDoc } from '../db/mongo.js';
 import { getConfig } from '../config/loader.js';
 import { nextSeq } from '../util/seq.js';
 import { edgeIdFor } from './edge-id.js';
-import { fieldFor, linkClassFor, linkClassesFrom, usesLinkRecords, linksStartingFrom } from './link-adjacency.js';
+import { legacyField, linkClassFor, linkClassesFrom, usesLinkRecords, linksStartingFrom } from './link-adjacency.js';
 import { assertRefsResolve } from './entity-refs.js';
 import { isStrictLinkage } from '../spaces/proxy.js';
 import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';
@@ -74,7 +74,7 @@ import { spaceCollection } from '../db/space-collection.js';
  * the id a writer computes come from one expression: store it and the two can disagree, which is the defect
  * shape this migration exists to remove rather than to reproduce.
  */
-export const linkLabel = (fromKind: RefKind, toKind: RefKind): string => `${fromKind}.${fieldFor(toKind)}`;
+export const linkLabel = (fromKind: RefKind, toKind: RefKind): string => `${fromKind}.${legacyField(toKind)}`;
 
 /** The id one connection always has. Exported so the conversion script derives it the same way. */
 export const linkIdFor = (from: string, fromKind: RefKind, to: string, toKind: RefKind): string =>
@@ -307,7 +307,7 @@ export async function addLink(
 ): Promise<LinkDoc> {
   const suffix = COLLECTION_OF[fromKind];
   if (!suffix || !(CLASSES_BY_FROM[fromKind] ?? []).includes(toKind)) {
-    throw new Error(`${fromKind} records cannot link to ${toKind}: there is no ${linkLabel(fromKind, toKind)} field`);
+    throw new Error(`${fromKind} records cannot link to ${toKind}: there is no ${linkLabel(fromKind, toKind)} link class`);
   }
 
   /*

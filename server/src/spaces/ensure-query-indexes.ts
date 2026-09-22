@@ -50,15 +50,14 @@ const TYPE_FILTERED = Object.values(COLLECTION_SUFFIX);
  * the two lists have to widen together: `entityIds` was created for facts alone, while
  * `linkedRecordsAtFrontier` reads it on all three, once per class per member space per hop.
  *
- * **It said three collections and one field, and a link is a (collection, FIELD) pair.** M-2 gave a chrono
- * entry `memoryIds` and a file `memoryIds` and `chronoIds` — three link classes whose scans had no index at
- * all, because the list named the collections while the field stayed written out as `entityIds`. Nothing
- * reported it: an unindexed scan returns the right answer, slowly, and only on a space large enough to
- * notice. Derived from `LINK_CLASSES` now, so a seventh class arrives with its index.
+ * **IT IS EMPTY IN 5.0, and the list is kept rather than deleted.** The six arrays are gone, so there is
+ * no record field for a link scan to index — the links collection carries its own indexes on `from` and
+ * `to`, created with the collection. The shape stays here because the lesson does: it once said three
+ * collections and ONE field, while a link is a (collection, field) pair, so three classes had no index at
+ * all and nothing reported it. An unindexed scan returns the right answer, slowly, and only on a space
+ * large enough to notice.
  */
-const LINK_SCANNED: readonly { collection: string; field: string }[] =
-  [...new Map(LINK_CLASSES.map(c => [`${c.collection}.${c.field}`, { collection: c.collection, field: c.field }]))
-    .values()];
+const LINK_SCANNED: readonly { collection: string; field: string }[] = [];
 
 /**
  * Create any missing read-path index, for every space.

@@ -232,8 +232,6 @@ syncDocsRouter.post('/facts', syncRateLimit, requireAuth, denyReadOnly, async (r
     if (!existing) {
       // No local copy — insert directly
       await ingestBrainDoc<FactDoc>(spaceId, 'fact', 'facts', incoming);
-      const peerInst = (req.authToken as Record<string, unknown>)?.['peerInstanceId'] as string ?? 'unknown';
-      checkLinkViolations(spaceId, incoming._id, 'fact', incoming, peerInst).catch(() => {});
       res.status(200).json(withSchemaViolations({ status: 'inserted' }, violations));
       return;
     }
@@ -241,8 +239,6 @@ syncDocsRouter.post('/facts', syncRateLimit, requireAuth, denyReadOnly, async (r
     if (incoming.seq > existing.seq) {
       // Remote is newer — overwrite
       await ingestBrainDoc<FactDoc>(spaceId, 'fact', 'facts', incoming);
-      const peerInst = (req.authToken as Record<string, unknown>)?.['peerInstanceId'] as string ?? 'unknown';
-      checkLinkViolations(spaceId, incoming._id, 'fact', incoming, peerInst).catch(() => {});
       res.status(200).json(withSchemaViolations({ status: 'updated' }, violations));
       return;
     }
@@ -493,8 +489,6 @@ syncDocsRouter.post('/chrono', syncRateLimit, requireAuth, denyReadOnly, async (
     }
 
     // Fire-and-forget: check strict linkage violations after ingest
-    const peerInst = (req.authToken as Record<string, unknown>)?.['peerInstanceId'] as string ?? 'unknown';
-    checkLinkViolations(spaceId, incoming._id, 'chrono', incoming, peerInst).catch(() => {});
 
     // The violations travel back so the receiving operator can see what arrived out of shape. Absent when
     // there are none, so a clean ingest keeps its existing response byte for byte.
@@ -763,6 +757,19 @@ syncDocsRouter.post('/batch-upsert', syncRateLimit, requireAuth, denyReadOnly, a
         .findOne(asFilter<LinkDoc>({ _id: incoming._id })) as LinkDoc | null;
       if (!existing || incoming.seq > existing.seq) {
         await ingestBrainDoc<LinkDoc>(spaceId, null, 'links', incoming);
+        /*
+         * THE LINK VIOLATION CHECK LIVES HERE NOW, on the arriving LINK.
+         *
+         * It used to read the six arrays off an arriving fact or chrono entry. 5.0 removed them and links
+         * replicate as their own documents, so the subject moved with the data — a link whose `to` names
+         * nothing is exactly what an operator needs told, and reading a record's fields for it would now
+         * find nothing and report clean for ever.
+         *
+         * Still only RECORDS, per `P-21`: sync ingest is validated, counted and let in, and a refusal here
+         * would hold the watermark and stop the channel making progress.
+         */
+        const peerInst = (req.authToken as Record<string, unknown>)?.['peerInstanceId'] as string ?? 'unknown';
+        checkLinkViolations(spaceId, incoming, peerInst).catch(() => {});
         linkStats.upserted++;
       } else {
         linkStats.skipped++;

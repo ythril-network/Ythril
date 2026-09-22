@@ -38,12 +38,13 @@ import { LINK_CLASSES } from '../brain/link-adjacency.js';
  * exact failure `validateDeleteFields` exists to prevent at the other end. So a seventh link class must not
  * depend on somebody remembering this file.
  *
- * The other four are this record's own optional fields and have no list to derive from — they are named,
- * and `file-meta-merges-like-the-brain-tools.test.js` checks the derived half against `LINK_CLASSES`.
+ * **THE THREE LINK CLASSES ARE NOT HERE, and they used to be — derived from `LINK_CLASSES`.** 5.0 removed
+ * the arrays, so a file's links are not fields on it and `deleteFields` has nothing to clear: detaching a
+ * class is `linkEntities: []` or one of its two siblings, which says the same thing in the vocabulary that
+ * still exists. What is left are this record's own optional fields, which have no list to derive from.
  */
 export const DELETABLE_FILE_META_FIELDS: readonly string[] = [
   'description', 'excerpt', 'tags', 'properties',
-  ...LINK_CLASSES.filter(c => c.kind === 'file').map(c => c.field),
 ];
 import { applyDeleteFields } from '../brain/delete-fields.js';
 import { getConfig } from '../config/loader.js';

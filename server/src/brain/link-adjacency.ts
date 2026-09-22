@@ -57,8 +57,6 @@ export interface LinkClass {
   toKind: RefKind;
   /** Collection suffix of the FROM record: the collection is `${spaceId}_${collection}`. */
   collection: 'chrono' | 'facts' | 'files';
-  /** The array field naming the linked records — the 3.x shape, and still the fallback. */
-  field: 'entityIds' | 'memoryIds' | 'chronoIds';
   /**
    * The label the synthetic edge for this link carries — `chrono.memoryIds` and its five siblings.
    *
@@ -106,15 +104,29 @@ export interface LinkClass {
  * Found by `a-converted-space-refuses-an-array-write.test.js`, which derives the six from here. A grep
  * could not have found it: the name is built, not written.
  */
-const STORED_FIELD: Partial<Record<RefKind, LinkClass['field']>> = { fact: 'memoryIds' };
-export const fieldFor = (toKind: RefKind): LinkClass['field'] =>
-  STORED_FIELD[toKind] ?? (`${toKind}Ids` as LinkClass['field']);
+const STORED_FIELD: Partial<Record<RefKind, string>> = { fact: 'memoryIds' };
+
+/**
+ * The 4.x array name for a link class — a LEGACY NAME with exactly two jobs left.
+ *
+ * The fields are gone in 5.0. This survives because:
+ *
+ *  - **the link conversion still reads them off disk.** A space that never converted holds its pre-upgrade
+ *    links in those arrays and nowhere else, so the migration has to know the old name. It is the one
+ *    reader of stored data the types no longer declare, which is what a migration is;
+ *  - **the class LABEL is built from it, and the label is an IDENTITY.** `linkIdFor` derives a link
+ *    record's `_id` as a UUIDv5 over `(from, to, label, fromKind, toKind)`. Renaming `fact.entityIds` to
+ *    something that does not name a dead field would re-key every link record on every instance, with
+ *    tombstones and replication in between, for a cosmetic gain. **So the label is a frozen token that
+ *    happens to look like a field name. Do not tidy it.**
+ */
+export const legacyField = (toKind: RefKind): string => STORED_FIELD[toKind] ?? `${toKind}Ids`;
 
 /** The projection each FROM kind needs, whatever it links to. */
 const PROJECTION: Record<LinkClass['kind'], Record<string, 1>> = {
-  chrono: { title: 1, type: 1, entityIds: 1, memoryIds: 1 },
-  fact: { fact: 1, type: 1, entityIds: 1 },
-  file: { path: 1, description: 1, tags: 1, entityIds: 1, memoryIds: 1, chronoIds: 1 },
+  chrono: { title: 1, type: 1 },
+  fact: { fact: 1, type: 1 },
+  file: { path: 1, description: 1, tags: 1 },
 };
 
 /** The collection each FROM kind lives in. */
@@ -153,8 +165,7 @@ export const LINK_CLASSES: readonly LinkClass[] =
       kind,
       toKind,
       collection: COLLECTION[kind],
-      field: fieldFor(toKind),
-      label: `${kind}.${fieldFor(toKind)}`,
+      label: `${kind}.${legacyField(toKind)}`,
       scope: SCOPE[kind],
       projection: PROJECTION[kind],
     })));
@@ -244,9 +255,41 @@ export function assertLinkRecords(spaceId: string): void {
   if (refusal) throw new Error(refusal);
 }
 
-/** The filter matching records of this class that have ANY link at all — the ER diagram's scan. */
-export function hasAnyLink(cls: LinkClass): Record<string, unknown> {
-  return { [cls.field]: { $exists: true, $ne: [] }, ...cls.scope };
+/**
+ * The links of one class, grouped by the record that holds them — the ER diagram's scan.
+ *
+ * It was `hasAnyLink`, a filter over the record's own array. With the arrays gone the question is asked of
+ * the link rows, and the answer has the same shape: one entry per source record that has any link of this
+ * class, each entry the ids it names.
+ *
+ * **The scope still applies, and it cannot be applied to a link row.** A link row has no `parentFileId`, so
+ * a file link and a chunk link are indistinguishable in the links collection — the narrowing has to happen
+ * against the records, which is why the ids are read back. Skipped entirely for a class with no scope, so
+ * the two classes that do not need it do not pay a query.
+ *
+ * `limit` bounds the ROWS read, not the groups, and the caller is told whether it bit: a diagram built from
+ * a truncated scan has to say so.
+ */
+export async function linkGroupsOfClass(
+  spaceId: string, cls: LinkClass, limit: number,
+): Promise<{ groups: string[][]; truncated: boolean }> {
+  const rows = await col<LinkDoc>(spaceCollection(spaceId, 'links'))
+    .find(asFilter<LinkDoc>({ spaceId, fromKind: cls.kind, toKind: cls.toKind }),
+          { projection: { from: 1, to: 1 }, limit })
+    .toArray() as Array<{ from: string; to: string }>;
+
+  const byFrom = new Map<string, string[]>();
+  for (const r of rows) {
+    const ids = byFrom.get(r.from);
+    if (ids) ids.push(r.to); else byFrom.set(r.from, [r.to]);
+  }
+
+  if (Object.keys(cls.scope).length > 0) {
+    const admitted = new Set((await docsFromCollection<{ _id: string }>(
+      spaceId, cls.collection, [...byFrom.keys()], { _id: 1 })).map(d => d._id));
+    for (const from of [...byFrom.keys()]) if (!admitted.has(from)) byFrom.delete(from);
+  }
+  return { groups: [...byFrom.values()], truncated: rows.length >= limit };
 }
 
 /** One link row, as both batched readers below project it. */

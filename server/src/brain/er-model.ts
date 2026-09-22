@@ -44,7 +44,7 @@
 import { col, asFilter } from '../db/mongo.js';
 import { getSpaceMeta } from '../spaces/schema-validation.js';
 import type { EntityDoc, EdgeDoc, PropertySchema } from '../config/types.js';
-import { LINK_CLASSES, hasAnyLink } from './link-adjacency.js';
+import { LINK_CLASSES, linkGroupsOfClass } from './link-adjacency.js';
 import { spaceCollection } from '../db/space-collection.js';
 
 /** Read caps. Generous enough that no real space hits them, low enough that a runaway one cannot hang a page. */
@@ -236,12 +236,9 @@ export async function buildErModel(spaceId: string): Promise<ErModel> {
    */
   for (const cls of LINK_CLASSES) {
     if (cls.toKind !== 'entity') continue;
-    const rows = await col(`${spaceId}_${cls.collection}`)
-      .find(asFilter(hasAnyLink(cls)),
-        { projection: { [cls.field]: 1 }, limit: ER_ENTITY_SCAN_LIMIT })
-      .toArray() as Array<Record<string, unknown>>;
-    if (rows.length >= ER_ENTITY_SCAN_LIMIT) linksTruncated = true;
-    links[cls.collection] = rows.map(r => (r[cls.field] as string[] | undefined) ?? []);
+    const { groups, truncated } = await linkGroupsOfClass(spaceId, cls, ER_ENTITY_SCAN_LIMIT);
+    if (truncated) linksTruncated = true;
+    links[cls.collection] = groups;
   }
 
   // The first cap hit wins the report. One name is enough to tell a reader the diagram is partial; listing

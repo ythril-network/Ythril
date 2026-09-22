@@ -172,23 +172,15 @@ export async function initSpace(
   // The key patterns are declared next to the queries they serve, in job-queue.ts, and created by its own
   // function — so this cannot drift from them and the database-level test exercises the same call.
   /*
-   * The field every LINK scan reads, one index per link CLASS, derived from `LINK_CLASSES`.
+   * ONE INDEX PER LINK CLASS USED TO BE CREATED HERE, on the record's own array field. 5.0 removed the six
+   * arrays, so there is no record field for a link scan to read: a walk asks the `links` collection, whose
+   * `from` and `to` indexes are created with it.
    *
-   * `linkedRecordsAtFrontier` asks "which records of this class point at the frontier" once per class, per
-   * member space, per hop — so an unindexed class is a collection scan on every hop of every traversal.
-   *
-   * **It used to be three hand-placed `{ entityIds: 1 }` calls, and a link is a (collection, FIELD) pair.**
-   * The first version of this fixed the collections and left the field written out, which was right while
-   * `entityIds` was the only link field. M-2 gave a chrono entry `memoryIds` and a file `memoryIds` and
-   * `chronoIds`: three classes whose scans had no index at all. Nothing reported it, because an unindexed
-   * scan returns the correct answer — slowly, and only visibly on a space large enough to feel it.
-   *
-   * Deduplicated because a collection can carry several link fields, and each needs its own index.
+   * The lesson is kept because the shape recurs. It was three hand-placed `{ entityIds: 1 }` calls, and a
+   * link is a (collection, FIELD) pair — so when `M-2` gave a chrono entry `memoryIds` and a file
+   * `memoryIds` and `chronoIds`, three classes had no index at all and nothing reported it. An unindexed
+   * scan returns the correct answer, slowly, and only visibly on a space large enough to feel it.
    */
-  for (const key of new Set(LINK_CLASSES.map(c => `${c.collection}.${c.field}`))) {
-    const [collection, field] = key.split('.');
-    await db.collection(`${spaceId}_${collection}`).createIndex({ [field!]: 1 });
-  }
 
   await ensureMediaJobIndexes(spaceId);
   await ensureEmbedJobIndexes(spaceId);
