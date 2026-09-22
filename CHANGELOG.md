@@ -379,6 +379,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   checks its edge endpoints under the same `strictLinkage` setting the single-record doors read — a space
   that turns linkage off still accepts a staged import whose targets resolve later.
 
+- **A refused link no longer leaves the record behind.** The existence check moved into the writers, and
+  they reconcile AFTER the insert — so a link id naming nothing answered `400` with the record already
+  stored, which is the silent unlinked write made noisy rather than fixed. Every writer now refuses the
+  whole call before it touches anything, and the refusal is a `400` rather than a `500`.
+
+- **A write door cannot ask for a link class that does not exist.** There are six, and a pair outside them
+  has no label — so `save_fact` naming `linkChronos` stored a link nothing reads. Refused now, on both
+  doors, and the create tools advertise only the classes their record kind can hold.
+
+- **The UI reads a record's links as records.** The Brain and Files tabs draw their chips from one query
+  over the links collection per page, and every form and label names the field the API takes. A searched
+  list shows the same links the paged list does.
+
 - **An index the conversion never created.** A space upgraded from 4.x got its `links` collection from the
   conversion's first insert, which creates a collection and no indexes — so the spaces with the most links
   to read were the ones reading them unindexed. The boot backfill now asks for the same index set space
