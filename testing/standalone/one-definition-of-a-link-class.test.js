@@ -250,26 +250,13 @@ describe('no reader re-derives a link class', () => {
     assert.deepEqual(stale, [],
       'these are exempted from the sweep and no longer open the collection at all: ' + stale.join(', '));
   });
-  it('the chunk rule is not spelled out again inside a LINK read', () => {
-    /*
-     * Scoped to link reads, and that scope is the correction.
-     *
-     * A first version asserted nobody outside the module spells `parentFileId: { $exists: false }` at all, and
-     * named four files that were right to: `api/files.ts` listing files, `search.ts` counting them,
-     * `reindex.ts` re-embedding them. That predicate answers "is this a file or a chunk", which is a general
-     * question — it is only part of the LINK class when the question is "which files link to this entity".
-     *
-     * What must not happen is a link read routing through the builder AND carrying its own copy beside it,
-     * which would be two rules again with the second one invisible.
-     */
-    const doubled = collectionReads()
-      .filter(r => /linksToAny\(|hasAnyLink\(/.test(r.stmt))
-      .filter(r => /parentFileId/.test(r.stmt))
-      .map(r => `${r.file} (${r.suffix})`);
-    assert.deepEqual(
-      doubled, [],
-      'a link read is using the shared builder and ALSO spelling the chunk predicate itself — the builder '
-      + 'already carries it for the file class, so the second copy can only ever disagree',
-    );
-  });
+  /*
+   * A CASE LIVED HERE and its subject went with the arrays: a link read that routed through the shared
+   * query builder AND spelled the chunk predicate itself, which would have been two rules again with the
+   * second one invisible.
+   *
+   * There is no per-class query builder any more — one query asks the links collection for the whole hop
+   * — so the chunk exclusion has exactly one place it can be applied: where a link row is resolved to a
+   * file record. That is the case above, asserted on `docsFromCollection` and `scopedDocs`.
+   */
 });

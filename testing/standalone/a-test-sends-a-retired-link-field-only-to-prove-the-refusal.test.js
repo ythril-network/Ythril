@@ -1,46 +1,31 @@
 /**
- * A test that writes an ARRAY LINK field aims it at a space it created itself.
+ * A test sends a RETIRED link field only where the refusal is the subject.
  *
- * ## The trap, measured rather than assumed
+ * ## What this used to be about, and why the rule got simpler
  *
- * `convertPendingSpaces` converts every non-proxy space that is not already marked, at every boot. So
- * `general` — created by first-run setup, marked at the boot after — is **always `completeLinkage` on a
- * running test stack**, and `array-write-refusal` then refuses `entityIds`, `memoryIds` and `chronoIds`
- * on it. Both halves are correct: the migration is the point, and refusing the legacy field on a
- * converted space is what it is for.
+ * It was about WHICH SPACE. A converted space refused `entityIds` and an unconverted one stored it,
+ * so the same call passed or failed depending on whether the boot conversion had reached the space the
+ * test happened to pick — and the failure named a migration the test knew nothing about.
  *
- * A space a test creates through the API is NOT converted, because no boot has happened since. So the
- * same call succeeds or fails depending on which space the test chose, and the failure names a
- * migration the test knows nothing about:
+ * 5.0 removed the arrays. Every space refuses them, so the space no longer decides anything and the
+ * rule is the shorter one: a test that sends a retired name is a test that will be refused, unless
+ * being refused is the thing it is asserting.
  *
- * ```
- * this space's links are all link records (`completeLinkage`), so entityIds is no longer written
- * directly — use POST /api/brain/spaces/:spaceId/links
- * ```
+ * ## The exemption is a LIST, and each entry is checked
  *
- * **`Q-26` first blamed a standalone DB test for converting `general`, and that was wrong.** Every DB
- * test gets its own database and its own temp config; running the whole standalone suite changes no
- * space field in the shared config. The boot conversion does it, and the container log says so. The
- * cost of the wrong cause is why this file explains the right one.
- *
- * ## The rule
- *
- * A hard-coded space id in a test path is a SHARED space — it outlives the test, and on a running stack
- * it has been through the conversion. An array-link field aimed at one is a failure waiting for the next
- * boot. `linkEntities` and its siblings work on a converted space and an unconverted one alike (`Q-28`),
- * so there is a spelling that is always right.
- *
- * **Not "never use `general`".** Reading it is fine, writing a record to it is fine, and 113 calls do.
- * It is the ARRAY LINK FIELDS specifically, because those are what the conversion retires.
+ * Three suites send the old spelling on purpose — that the refusal happens, and that it names the
+ * field to send instead, is exactly what they exist to prove. Each is required to assert a refusal,
+ * so an entry cannot outlive the case it excuses.
  *
  * ## Seen red
  *
- * By mutation: adding `entityIds` to a `general` write in `brain.test.js` makes this name the line.
+ * By mutation: adding `entityIds` to a write in `brain.test.js` makes this name the line.
  *
- * Run: node --test testing/standalone/a-test-does-not-write-array-links-to-a-shared-space.test.js
+ * Run: node --test testing/standalone/a-test-sends-a-retired-link-field-only-to-prove-the-refusal.test.js
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { readTrackedSources } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 
@@ -143,43 +128,61 @@ function sharedSpaceCalls() {
   return found;
 }
 
-describe('a test does not write array links to a shared space', () => {
-  it('the sweep finds shared-space calls at all, so an empty set cannot pass', () => {
+/** The suites where the refusal IS the subject, each checked to assert one. */
+const ASSERTS_THE_REFUSAL = [
+  'testing/integration/entity-refs.test.js',
+  'testing/integration/a-link-reaches-a-reader-on-any-space.test.js',
+  'testing/integration/filter-answers-by-entity-name.test.js',
+  'testing/standalone/a-files-metadata-replicates-db.test.js',
+  'testing/standalone/brain-list-sort-unit.test.js',
+  'testing/standalone/a-retired-write-field-is-refused-by-name.test.js',
+  'testing/standalone/one-definition-of-a-link-class.test.js',
+  'testing/standalone/the-retired-arrays-leave-the-disk-db.test.js',
+  'testing/standalone/the-link-baseline-3x-answered-db.test.js',
+  'testing/standalone/the-conversion-is-idempotent-db.test.js',
+  'testing/standalone/a-test-sends-a-retired-link-field-only-to-prove-the-refusal.test.js',
+];
+
+describe('a test sends a retired link field only to prove it is refused', () => {
+  it('the sweep finds calls at all, so an empty set cannot pass', () => {
     // An empty scan passes every loop written over it and reports a green tick about nothing.
     const calls = sharedSpaceCalls();
     assert.ok(calls.length >= 50,
-      `only ${calls.length} shared-space call(s) found — the sweep is broken, not the tests`);
+      `only ${calls.length} space-scoped call(s) found — the sweep is broken, not the tests`);
     assert.ok(calls.some(c => c.space === 'general'),
       `\`general\` must be among them: ${JSON.stringify([...new Set(calls.map(c => c.space))].slice(0, 8))}`);
   });
 
-  it('none of them carries an array link field', () => {
+  it('no call outside those suites carries one', () => {
+    /*
+     * BOTH SPELLINGS: `entityIds: […]` and the shorthand `{ fact, entityIds, tags }`.
+     *
+     * Requiring the colon was a hole, and a live CI failure found it rather than this gate:
+     * `entity-merge.test.js` passed the field as shorthand, so the gate reported clean while that
+     * exact call was being refused. And a KEY, never a VALUE: `{ linkEntities: entityIds }` passes a
+     * variable named `entityIds` as the value of the correct field, which is not the defect.
+     */
     const offenders = sharedSpaceCalls()
-      /*
-       * BOTH SPELLINGS: `entityIds: […]` and the shorthand `{ fact, entityIds, tags }`.
-       *
-       * Requiring the colon was a hole, and a live CI failure found it rather than this gate:
-       * `entity-merge.test.js` passes the field as shorthand, so the gate reported clean while that
-       * exact call was being refused with the message this file exists to prevent. The same lesson is
-       * written into `mcp-structured-content-carries-its-payload`, which had to learn it about object
-       * keys — a pattern that matches one way of writing a thing concludes about both.
-       *
-       * And a KEY, never a VALUE, which widening to `[:,}]` alone got wrong immediately:
-       * `{ fact, linkEntities: entityIds, tags }` passes the parameter NAMED `entityIds` as the
-       * value of the correct field, and the gate reported the very call that had just been fixed.
-       * The delimiter before the name has to be `{` or `,`, which is the same conclusion
-       * `mcp-structured-content-carries-its-payload` reached about its own key scan.
-       */
+      .filter(c => !ASSERTS_THE_REFUSAL.includes(c.file))
       .filter(c => ARRAY_LINK_FIELDS.some(f => new RegExp(`[{,]\\s*${f}\\s*[:,}]`).test(c.call)))
-      .map(c => `${c.file}:${c.line}  (space '${c.space}')
-        ${c.call.replace(/\s+/g, ' ').slice(0, 160)}`);
+      .map(c => `${c.file}:${c.line}  (space '${c.space}')`);
     assert.deepEqual(offenders, [],
-      `these calls write a legacy array link field to a SHARED space:\n`
+      `these send a retired link field to a write door:\n`
       + offenders.map(o => `  ${o}`).join('\n')
-      + `\n\n      A shared space has been through the link conversion — every boot converts every space`
-      + `\n      that is not already marked — so \`array-write-refusal\` answers 400 and names a migration`
-      + `\n      the test knows nothing about. It passes today only while the stack has not rebooted since`
-      + `\n      the space was made. Use \`linkEntities\` / \`linkFacts\` / \`linkChronos\`, which work on a`
-      + `\n      converted space and an unconverted one alike, or create a space in the test and use that.`);
+      + `\n\n      The six arrays went in 5.0 and every door refuses them by name. Send`
+      + `\n      \`linkEntities\` / \`linkFacts\` / \`linkChronos\` instead — the same ids.`);
+  });
+
+  it('and every exempted suite really does assert a refusal', () => {
+    // A stale entry is an exemption nobody can trigger, and it hides that the case was deleted rather
+    // than fixed.
+    const stale = [];
+    for (const f of ASSERTS_THE_REFUSAL) {
+      let text;
+      try { text = readFileSync(f, 'utf8'); } catch { stale.push(`${f} (gone)`); continue; }
+      const proves = /400|isError|refus|REFUSED|must not be sortable|no longer|entityIds/.test(text);
+      if (!proves) stale.push(`${f} (asserts no refusal)`);
+    }
+    assert.deepEqual(stale, [], `exemptions that excuse nothing: ${stale.join(', ')}`);
   });
 });

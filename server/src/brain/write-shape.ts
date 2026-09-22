@@ -165,7 +165,7 @@ export const shapedFields = (type: ShapedType): readonly string[] => Object.keys
  * a door seeing it got it from a destructure with no value — that is absence. `{"description": null}` is a
  * caller having sent something, and it is not a string.
  *
- * A returned string rather than a throw, matching `primitivePropertyError` and `arrayWriteError`: a REST
+ * A returned string rather than a throw, matching `primitivePropertyError` and `linkInputError`: a REST
  * door answers `400` with it and an MCP handler throws it, and the doors' existing catch blocks already
  * carry `SchemaViolationError`, which means something else entirely — a violation of the SPACE's schema,
  * which a space in `warn` mode records and stores. This is refused in every mode.
