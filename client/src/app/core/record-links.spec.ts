@@ -57,7 +57,7 @@ describe('record links — one call per page', () => {
 
   it('gives EVERY row the fields, so "no links" is not the same value as "not hydrated"', async () => {
     const got = new Promise<Record<string, unknown>[]>(resolve =>
-      hydrateLinks(http, 'work', 'fact', rows).subscribe(r => resolve(r as Record<string, unknown>[])));
+      hydrateLinks(http, 'work', 'fact', rows).subscribe(r => resolve(r as unknown as Record<string, unknown>[])));
     ctrl.expectOne('/api/filter').flush({
       ok: true, data: { results: [{ from: 'm-2', to: 'e-1', toKind: 'entity' }] },
     });

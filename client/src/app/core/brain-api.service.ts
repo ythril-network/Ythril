@@ -3,7 +3,7 @@ import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable, of } from 'rxjs';
 import { map, switchMap } from 'rxjs/operators';
 import { filterCall } from './filter-call';
-import { hydrateLinks, recordsLinkingTo } from './record-links';
+import { hydrateLinks, recordsLinkingTo, type LinkFromKind } from './record-links';
 import type {
   Fact, Entity, Edge, ChronoEntry, ChronoType, ChronoStatus,
   QueryCollection, QueryResult, RecallKnowledgeType, RecallResponse, TraverseResult, EmbeddingQueue,
@@ -164,6 +164,17 @@ export interface RecallRequestBody {
 @Injectable({ providedIn: 'root' })
 export class BrainApi {
   private http = inject(HttpClient);
+
+  /**
+   * Fill in the links for rows this service did not page — a SEARCH result, which arrives from `recall`.
+   *
+   * The list paths hydrate themselves; a semantic search is the other way records reach a tab, and a
+   * ranked answer carries no links either. Without this the same record shows its chips in the list and
+   * none after a search, which reads as the links having been lost.
+   */
+  withLinks<T extends { _id: string }>(spaceId: string, kind: LinkFromKind, rows: T[]): Observable<T[]> {
+    return hydrateLinks(this.http, spaceId, kind, rows) as Observable<T[]>;
+  }
 
   /** Append `sort`/`dir` to a list request when a sort is active; a no-op otherwise. */
   /**

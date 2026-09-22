@@ -344,7 +344,7 @@ export class ChronoTabComponent extends RecordTabBase {
     this.brainApi.recallBrain(spaceId, { query: q, types: ['chrono'], topK: 20 }).pipe(
       catchError(() => of({ results: [], count: 0 })),
     ).subscribe(res => {
-      this.store.chrono.set(res.results.filter(r => r.type === 'chrono').map(r => ({
+      const rows = res.results.filter(r => r.type === 'chrono').map(r => ({
         _id: r['_id'] as string,
         spaceId: (r['spaceId'] as string) ?? spaceId,
         title: (r['title'] as string) ?? '',
@@ -361,7 +361,10 @@ export class ChronoTabComponent extends RecordTabBase {
         createdAt: (r['createdAt'] as string) ?? '',
         updatedAt: (r['createdAt'] as string) ?? '',
         seq: (r['seq'] as number) ?? 0,
-      } as ChronoEntry)));
+      } as ChronoEntry));
+      // The chips again: a ranked answer carries no links, so they come from the same hydration the
+      // list path uses — see `record-links.ts`.
+      this.brainApi.withLinks(spaceId, 'chrono', rows).subscribe(hydrated => this.store.chrono.set(hydrated));
     });
   }
 

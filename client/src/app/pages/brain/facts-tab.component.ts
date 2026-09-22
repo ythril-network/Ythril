@@ -328,7 +328,7 @@ export class FactsTabComponent extends RecordTabBase {
     this.brainApi.recallBrain(spaceId, { query: q, types: ['fact'], topK: 20 }).pipe(
       catchError(() => of({ results: [], count: 0 })),
     ).subscribe(res => {
-      this.store.facts.set(res.results.filter(r => r.type === 'fact').map(r => ({
+      const rows = res.results.filter(r => r.type === 'fact').map(r => ({
         _id: r['_id'] as string,
         fact: (r['fact'] as string) ?? '',
         tags: (r['tags'] as string[]) ?? [],
@@ -338,7 +338,11 @@ export class FactsTabComponent extends RecordTabBase {
         createdAt: (r['createdAt'] as string) ?? '',
         seq: (r['seq'] as number) ?? 0,
         author: r['author'] as { instanceId: string } | undefined,
-      } as Fact)));
+      } as Fact));
+      // A ranked answer carries no links — they are records of their own — so the chips come from the
+      // same one-call hydration the list path uses. Without it a search shows none where the list shows
+      // them, which reads as the links having been lost.
+      this.brainApi.withLinks(spaceId, 'fact', rows).subscribe(hydrated => this.store.facts.set(hydrated));
     });
   }
 
