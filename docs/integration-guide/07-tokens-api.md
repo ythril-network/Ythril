@@ -210,9 +210,15 @@ POST /api/tokens
 ```json
 {
   "name": "MCP Agent",
-  "spaces": ["general", "research"],
-  "admin": false,
-  "readOnly": false,
+  "rights": {
+    "instanceAdmin": false,
+    "createSpaces": false,
+    "floor": null,
+    "perSpace": {
+      "general": { "knowledge": "write", "files": "write", "schema": "read", "dataQuality": "read" },
+      "research": { "knowledge": "read", "files": "read", "schema": "read", "dataQuality": "none" }
+    }
+  },
   "expiresAt": "2027-01-01T00:00:00.000Z"
 }
 ```

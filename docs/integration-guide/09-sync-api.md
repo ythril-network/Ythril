@@ -81,14 +81,14 @@ Every `/api/sync/*` endpoint refuses a caller whose member record carries a vers
 
 ```json
 {
-  "error": "Peer runs 3.4.0, below the minimum of 4.0.0 this network requires. Upgrade the peer to 4.0.0 or later.",
-  "minPeerVersion": "4.0.0",
-  "peerVersion": "3.4.0"
+  "error": "Peer runs 4.4.0, below the minimum of 5.0.0 this network requires. Upgrade the peer to 5.0.0 or later.",
+  "minPeerVersion": "5.0.0",
+  "peerVersion": "4.4.0"
 }
 ```
 
-**`minPeerVersion` is THIS INSTANCE'S OWN MAJOR at `.0.0`, derived rather than configured.** A 4.x
-instance requires 4.0.0; a 5.x instance requires 5.0.0. There is no setting, and the value moves with
+**`minPeerVersion` is THIS INSTANCE'S OWN MAJOR at `.0.0`, derived rather than configured.** A 5.x
+instance requires 5.0.0; a 6.x instance requires 6.0.0. There is no setting, and the value moves with
 the release.
 
 Two reasons, and the first is the one that decided it:

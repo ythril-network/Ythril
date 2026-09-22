@@ -192,6 +192,38 @@ describe('a body too long for GitHub is abridged, not refused', () => {
       + 'happened to use the word');
   });
 
+  it('shortens a breaking entry rather than dropping it, when they cannot all fit whole', () => {
+    /*
+     * The third measurement, found cutting 5.0.0: lifting the breaking entries first is not enough on its
+     * own once they no longer fit BETWEEN THEM. 20 entries totalling 26 452 characters meant any budget
+     * under that dropped whole entries off the end of the lifted block — the original failure one level
+     * in, with the reader's guard down because the notes now promise the breaking ones come first.
+     *
+     * The fixture is sized so the headlines fit and the bodies cannot, which is the case the reserve
+     * exists for. Every headline present; at least one entry NOT present in full, or the fixture has
+     * stopped exercising anything.
+     */
+    const fat = Array.from({ length: 12 }, (_, i) => `- **BREAKING: fat ${i}.**
+  ${'x'.repeat(800)}`);
+    const out = abridgeForRelease(fat.join('\n'), '9.9.9', 4_000);
+    for (let i = 0; i < 12; i++) {
+      assert.ok(out.includes(`BREAKING: fat ${i}.`),
+        `breaking entry ${i} is absent entirely — a headline costs one line and is what sends a reader to `
+        + 'the full notes; an entry that is not there cannot');
+    }
+    assert.ok(!out.includes(fat[11]),
+      'every entry fitted whole, so this fixture no longer exercises the reserve — widen the bodies');
+  });
+
+  it('and says which of them were shortened, rather than counting them as shown', () => {
+    const fat = Array.from({ length: 12 }, (_, i) => `- **BREAKING: fat ${i}.**
+  ${'x'.repeat(800)}`);
+    const out = abridgeForRelease(fat.join('\n'), '9.9.9', 4_000);
+    assert.match(out, /are cut to their opening lines/,
+      '"12 of 12 breaking entries are shown" over entries cut to one line each is the reassurance this '
+      + "abridger's own history argues against");
+  });
+
   it('says how many breaking entries it is showing, not only how many entries', () => {
     const out = abridgeForRelease(late, '9.9.9', 3_000);
     assert.match(out, /2 of 2 breaking entries are shown first/,

@@ -116,6 +116,18 @@ const MANUAL_VERIFY = new Map([
       + 're-read the row rather than a forecast. An exemption dated past the bound is a deletion wearing a '
       + 'date.',
   }],
+  ['Q-23', {
+    by: '2026-10-22',
+    why: 'What is LEFT of cutting 5.0 is not in the tree. The bump, the dated section, the archive '
+      + 'split and the docs all land in the release PR, and the moment they do, every `grep -c` this row '
+      + 'could name returns the shipped answer while the release itself has not happened. The remainder '
+      + 'is the tag, the two registries, the canary exercise and the board replies that ride with it - '
+      + 'four acts against GitHub, GHCR, Docker Hub and a Ythril space, none of which a file in this repo '
+      + 'records. Its own earlier verify (the CHANGELOG opening line) went green the hour the notes were '
+      + 'written, which is the failure this entry replaces rather than hides. Dated one month out, not at '
+      + 'the 120-day bound: if the tag is not cut by then the row is not waiting on a publish step, it is '
+      + 'stuck, and it should come back and say so.',
+  }],
 ]);
 
 const failures = [];
