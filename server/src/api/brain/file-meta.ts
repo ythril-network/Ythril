@@ -1,7 +1,7 @@
 /**
  * File-metadata routes (/api/brain/spaces/:spaceId/files).
  *
- * This is the brain's file RECORD (a knowledge-graph doc: tags/entityIds/properties, one of the
+ * This is the brain's file RECORD (a knowledge-graph doc: tags, properties, links — one of the
  * five `query` collections). The file STORE — the bytes on disk — is `fileStoreRouter` in
  * api/files.ts, mounted at /api/files. The two are deliberately named as a Store/Meta pair: they
  * were both `filesRouter` at first, which broke name-keyed route analysis (the audit-coverage guard

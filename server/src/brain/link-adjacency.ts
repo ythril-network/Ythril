@@ -81,7 +81,7 @@ export interface LinkClass {
   projection: Record<string, 1>;
 }
 
-/** The array field a kind is named through — `entity` → `entityIds`. Derived; see `brain/links.ts`. */
+/** The 4.x array field a kind was named through — `entity` → `entityIds`. See `legacyField`. */
 /*
  * THE STORED FIELD NAME IS NOT ALWAYS `${kind}Ids`, AND THE EXCEPTION IS DELIBERATE.
  *

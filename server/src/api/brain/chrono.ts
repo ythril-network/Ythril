@@ -390,7 +390,7 @@ chronoRouter.delete('/spaces/:spaceId/chrono/:id', globalRateLimit, requireSpace
    * Until the three unread link fields gained readers, deleting a record another one named was never refused
    * — the reference existed, was stored and replicated, and nothing could see it. The naming record was then
    * left pointing at something that does not exist, which is the outcome `strictLinkage` is bought to
-   * prevent. Here the naming record is a FILE, through `file.chronoIds`.
+   * prevent. Here the naming record is a FILE, through a file-to-chrono link.
    *
    * ONE guard for both doors, and the same one entities use. `409` and not `404`: the record IS there.
    */

@@ -1,8 +1,8 @@
 /**
  * The one definition of what a reference between brain records looks like.
  *
- * Every link field — a fact's `entityIds`, an edge's `from`/`to`, a chrono entry's
- * `entityIds`/`memoryIds`, a file's `entityIds`/`chronoIds`/`memoryIds` — names another record by its
+ * Every reference — an edge's `from`/`to`, and the ids a record links to through `linkEntities`,
+ * `linkFacts` or `linkChronos` — names another record by its
  * `_id`. For every record type but one that is a UUID v4 (`brain/entities.ts` assigns `uuidv4()` on insert);
  * a FILE's `_id` is its space-relative path, so `RefKind` decides which shape is meant. Anything else is not
  * a reference, it is a string that happens to be stored in a reference field.
@@ -89,7 +89,7 @@ function malformedRefs(kind: RefKind, values: readonly string[]): string[] {
  * message that names the field AND the offending values.
  *
  * The message matters as much as the check: the caller is usually an LLM agent, and "invalid
- * reference" tells it nothing it can act on, while "`entityIds` expects entity IDs (UUID v4), got
+ * reference" tells it nothing it can act on, while "`linkEntities` expects entity IDs (UUID v4), got
  * 'Traefik'" tells it exactly what to fix and how. Listing the bad values (not just the count) is what
  * makes the error self-correcting.
  */

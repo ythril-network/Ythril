@@ -652,11 +652,11 @@ export async function findEntityReferences(spaceId: string, targetId: string, ta
   }
 
   /*
-   * Files that reference this entity in `entityIds` — a modelled reference, exactly like a fact's.
+   * Files LINKED to this entity — a modelled reference, exactly like a fact's.
    *
    * This was missing while the `faceEntityId` scan below was present, which is the interesting part: the same
    * collection had already been patched once, for the other field, and its sibling was not added alongside. So
-   * an entity referenced ONLY by a file's `entityIds` deleted cleanly under `strictLinkage` and the file was
+   * an entity referenced ONLY by a file's link deleted cleanly under `strictLinkage` and the file was
    * left pointing at a record that no longer exists — the very outcome the setting is bought for.
    *
    * It blocks, unlike the face scan. Both doors filter `b.type !== 'face'`, and that exemption is deliberate
