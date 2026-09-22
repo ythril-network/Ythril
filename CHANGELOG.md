@@ -43,9 +43,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   measuring call asserts its status now, so a refusal fails loudly instead of disappearing into a guard
   written for a different problem.
 
+  **Waking it found a SECOND 5.0 change it had been too inert to notice**, which is the argument for
+  doing this rather than deleting the file: `recall`'s hit became `{score, spaceId, type, record}`,
+  so every `r._id` read `undefined`. The comparison keyed every graph on that same `undefined`,
+  collapsed to one entry, and compared one hub's subtree against a different hub's — reporting *"the
+  graph on undefined differs"*, which is the tell. One accessor now reads the record, and it falls
+  back to the hit itself rather than asserting which shape it got.
+
   A gate derives the allowed parameter names from the `recall` tool's own input schema — which IS the
   REST body's schema, because the route hands its body to `callTool` — and refuses any test sending a
   name that is not one of them. A parameter renamed or removed next year is covered as it stands.
+
+- **A missing import in a Docker-only suite now fails in `preflight` instead of in CI.** Adding the
+  index wait above to four files and the import to three of them threw `waitForIndexed is not
+  defined` inside a `before` — which CANCELS every subtest under it, so one missing word reported as
+  **eight failures**, seven of them saying only *"test did not finish before its parent and was
+  cancelled"*.
+
+  There is no ESLint here to lean on, and `preflight` cannot run the integration, sync or red-team
+  suites because they need Docker — so that class of mistake was invisible locally and cost a full
+  CI round trip. A gate derives the helper names from the shared module and checks those three
+  directories, which is where the cost is: a standalone gate with the same mistake fails the moment
+  anybody runs preflight.
 
 - **Three tests recalled a record they had just written without waiting for the vector index** (`Q-38`).
   Recall's fresh-write scan covers a record whose embedding is still PENDING, so there is a window —
