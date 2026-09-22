@@ -119,7 +119,9 @@ describe('brain embedding queue drains (real MongoDB, real embed() over a stub e
     // The property that makes async embedding invisible to the searcher. If the worker built the text
     // differently, a record's vector would silently stop corresponding to its own content — no error,
     // nothing to grep for, only worse recall.
-    const doc = await memory.saveFact(SPACE, 'shared text check', ['e-missing'], ['a', 'b'], 'a description');
+    // No link ids: this case is about the embed TEXT, and since 5.0 a link id is existence-checked at the
+    // writer, so an invented one is a refusal rather than a stored dangling reference.
+    const doc = await memory.saveFact(SPACE, 'shared text check', [], ['a', 'b'], 'a description');
     const storedBefore = await memories().findOne({ _id: doc._id });
 
     await worker.runOneEmbedJob();

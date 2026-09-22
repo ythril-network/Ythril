@@ -50,6 +50,7 @@ import type { AuthorRef, LinkDoc, TombstoneDoc } from '../config/types.js';
 // `RefKind` is re-exported by `types.ts` as a type only, so it comes from the leaf that DECLARES it —
 // the same import every other `brain/` module that needs it uses.
 import type { RefKind } from '../config/types-knowledge.js';
+import { LINK_INPUT_FIELDS } from '../config/types-knowledge.js';
 import { spaceCollection } from '../db/space-collection.js';
 
 /*
@@ -131,7 +132,11 @@ export async function reconcileLinks(
    * exist: re-validating a space's whole link graph on every boot is a query per class per record.
    */
   if (!opts.additive && isStrictLinkage(spaceId)) {
-    for (const toKind of classes) await assertRefsResolve(spaceId, `link${toKind}`, toKind, desired[toKind]);
+    // Named as the CALLER spells it. Built by hand this said `linkentity`, a field no door accepts, in
+    // the one sentence somebody reads to find out what to send.
+    for (const toKind of classes) {
+      await assertRefsResolve(spaceId, LINK_INPUT_FIELDS[toKind], toKind, desired[toKind]);
+    }
   }
 
   const wanted = new Map<string, { to: string; toKind: RefKind }>();

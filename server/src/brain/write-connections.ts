@@ -41,7 +41,7 @@
  * This module does not implement that. It maps input to the shape `reconcileLinks` already takes — see the
  * `CLAUDE.md` rule on reusing a module rather than writing the rule a second time.
  */
-import { REF_KINDS } from '../config/types-knowledge.js';
+import { REF_KINDS, LINK_INPUT_FIELDS } from '../config/types-knowledge.js';
 import type { RefKind } from '../config/types-knowledge.js';
 import type { DesiredLinks } from './links.js';
 import { isWellFormedRef, edgeEndpointKindSchema, edgeEndpointKind } from './entity-refs.js';
@@ -54,14 +54,13 @@ import type { AuthorRef } from '../config/types.js';
 import type { WebhookActor } from '../webhooks/dispatcher.js';
 
 /**
- * The write field for each kind — DERIVED from the kind vocabulary, so a fifth kind gets its field on the
- * day it is declared rather than whenever somebody notices.
+ * The write field for each kind — declared beside the kind vocabulary and re-exported here.
  *
- * `entity` → `linkEntities`, `fact` → `linkFacts`, `chrono` → `linkChronos`, `file` → `linkFiles`.
+ * `entity` → `linkEntities`, `fact` → `linkFacts`, `chrono` → `linkChronos`, `file` → `linkFiles`. It sits
+ * in `config/types-knowledge.ts` because `brain/links.ts` names these fields in its refusals and cannot
+ * import this module — it is the writer this one calls. One map, both ends.
  */
-export const LINK_INPUT_FIELDS: Readonly<Record<RefKind, string>> = Object.freeze(
-  Object.fromEntries(REF_KINDS.map(k => [k, `link${plural(k)}`])) as Record<RefKind, string>,
-);
+export { LINK_INPUT_FIELDS } from '../config/types-knowledge.js';
 
 /** Every `link*` field name, for a door that needs to spot one in a body. */
 export const LINK_INPUT_NAMES: readonly string[] = Object.freeze(Object.values(LINK_INPUT_FIELDS));
@@ -137,11 +136,6 @@ export function linkInputError(body: unknown): string | null {
   return null;
 }
 
-/** `entity` → `Entities`, `chrono` → `Chronos`. Kept beside the field map so the two cannot disagree. */
-function plural(kind: string): string {
-  const capital = kind.charAt(0).toUpperCase() + kind.slice(1);
-  return capital.endsWith('y') ? `${capital.slice(0, -1)}ies` : `${capital}s`;
-}
 
 /**
  * The `link*` properties for a tool's `inputSchema`, built from the same map the readers use.

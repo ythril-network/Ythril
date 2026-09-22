@@ -444,6 +444,24 @@ export const REF_KINDS = ['entity', 'fact', 'chrono', 'file'] as const;
 /** @see REF_KINDS — derived, never written out a second time. */
 export type RefKind = typeof REF_KINDS[number];
 
+/**
+ * The WRITE FIELD a caller uses to link to each kind — `entity` → `linkEntities`, derived from the kind
+ * vocabulary so a fifth kind gets its field on the day it is declared.
+ *
+ * It lives beside the kinds rather than with the write doors because two very different callers need it
+ * and one of them is underneath the other: `write-connections.ts` builds every door's schema from it, and
+ * `brain/links.ts` names the field in its REFUSALS. The writer building `link${toKind}` by hand said
+ * `linkentity` — a field name no door accepts, in the one sentence a caller reads to find out what to
+ * send.
+ */
+export const LINK_INPUT_FIELDS: Readonly<Record<RefKind, string>> = Object.freeze(
+  Object.fromEntries(REF_KINDS.map(k => {
+    const capital = k.charAt(0).toUpperCase() + k.slice(1);
+    return [k, `link${capital.endsWith('y') ? `${capital.slice(0, -1)}ies` : `${capital}s`}`];
+  })) as Record<RefKind, string>,
+);
+
+
 
 /** Structured schema and metadata for a space — all fields optional. */
 /**
