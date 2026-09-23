@@ -19,7 +19,14 @@ The model never decides what happens next.
 test fixtures for it and nothing more; no identifier, vocabulary or rule below comes from a benchmark, and
 the extractor has no notion of a question — so the prompt's *"do not use the questions"* is structural here.
 
-Status: **decomposition only — nothing below is implemented yet.**
+Status, kept current per PR:
+
+| phase | state | where |
+|---|---|---|
+| 1 load | **built** | `load.ts` |
+| 2 classify turns | **built**: 2.1, 2.2, 2.4, 2.6. Not built: 2.3, 2.5 (judgements) | `classify.ts` |
+| 3 resolve time | **built** except 3.4, 3.8, 3.9, 3.12 (the judgements, handed in as inputs) and weekday RANGES (*"Friday to Sunday"*) in 3.10 | `time.ts`, `time-lexicon.ts` |
+| everything else | decomposed, not built | — |
 
 ---
 
@@ -46,8 +53,8 @@ the steps tagged below; phases 0, 1, 9 and 10 are code end to end.
 
 | treatment | steps | share |
 |---|---|---|
-| mechanical | 40 | 61% |
-| jev | 22 | 33% |
+| mechanical | 40 | 60% |
+| jev | 23 | 34% |
 | generative | 4 | 6% |
 
 Counted from the step tables below, and recounted by
@@ -55,8 +62,8 @@ Counted from the step tables below, and recounted by
 A step that is code in one case and a decision in another (2.3) counts as `jev`; one with any generative
 part (5.8) counts as `generative`.
 
-Of the 66 steps, five are new — the three preconditions, the candidate judgement (4.12) and the citation
-check (5.10); the other 61 are rules the prompt today hands to one model call. The count is the argument
+Of the 67 steps, six are new — the three preconditions, the candidate judgement (4.12), the citation check
+(5.10) and the bare-weekday direction (3.12); the other 61 are rules the prompt today hands to one model call. The count is the argument
 for this design: most of what the model is asked to do is arithmetic, bookkeeping or a rule it can only get
 wrong, and one step in sixteen is writing.
 
@@ -70,7 +77,7 @@ The extractor writes a vocabulary, so the space has to hold it before anything r
 |---|---|---|---|
 | 0.1 | The extractor's full schema is `schemas/`: one Schema Library entry per type, all in group `conversation` | mechanical | Already the library's own format (`name`, `knowledgeType`, `typeName`, `schemaGroup`, `schema`), so no second format exists |
 | 0.2 | Refuse the ingest unless the target space declares every type of the group, naming the missing ones | mechanical | Checked against the space's `typeSchemas` before a single model call — a run that would be refused at write time must not be paid for first |
-| 0.3 | The way a space gets the group is the library's group import | mechanical | That is `F-20`'s second ask; it lands before or with `ingest`, and `ingest` never writes schema itself — a write door that silently changes a space's rules is how an operator loses track of them |
+| 0.3 | The way a space gets the group is the library's group apply | mechanical | `POST /api/schema-library/groups/:group/apply` and its Settings button, which exist since `#103`. `ingest` never writes schema itself — a write door that silently changes a space's rules is how an operator loses track of them |
 
 ## 1 · Load — mechanical
 
@@ -120,6 +127,7 @@ quietly: *"a confidently wrong date on a timeline has nothing anywhere to contra
 | 3.9 | Did the event genuinely take more than a day — entailed by what it IS (camping, a stay, a festival), not merely likely? | **jev `noul`** | Asked about the event noun, not the date. Policy: only a confident yes makes a span |
 | 3.10 | Does the conversation hand BOTH ends? | mechanical | From 3.2: a weekend or an explicit range does; an end inferred from a later session does not — the resolver never looks across sessions for ends |
 | 3.11 | Write a span only when 3.9 and 3.10 are both yes; otherwise no chrono entry, the date lives in the claim | mechanical | The whole *"`endsAt` is never uncertainty"* table, as a conjunction |
+| 3.12 | A BARE weekday (*"we met Friday"*, *"on Friday"*): does the sentence point back or forward? | **jev `choice`** {past, future, `unclear`} | Found while building 3.3: the direction of an unqualified weekday is the TENSE, and tense is a judgement, not a pattern. Policy: `unclear` → no day, the weekday stays in the claim's text; until this step exists the resolver returns nothing for it rather than a guess |
 
 ## 4 · Entities
 
