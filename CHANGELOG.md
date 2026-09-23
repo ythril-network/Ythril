@@ -90,6 +90,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Internal
 
+- **The conversation extractor's first two phases are code** (`F-31`). `load.ts` refuses a conversation it
+  cannot read, naming every problem at once. It puts sessions in time order rather than page order, keys
+  two sessions on one day apart, and gives every turn an id. `time.ts` finds temporal expressions and
+  resolves them by the prompt's own rules, as calendar arithmetic in UTC:
+  - *"last Friday"* said on a Friday is seven days back;
+  - a weekend that contains today is not *"last weekend"*;
+  - *"about three weeks ago"* stays approximate, with no day derived from it;
+  - *"last week"* gives no day.
+
+  It also decides what may reach a timeline. A two-ended range becomes a span only when the event
+  genuinely took more than a day. That judgement, and whether the exchange places a weekday today, are
+  handed in rather than guessed. So is a bare weekday's direction — newly decomposed as step 3.12,
+  because it is the sentence's tense. 30 tests, each worked from a rule the prompt states; two were seen
+  red by letting the day of speaking count. No route yet.
+
 - **The conversation extractor is decomposed before it is built** (`F-31`, first step). `ingest` will turn
   a raw conversation into records inside the product, so an independent harness can reproduce what today
   needs an assistant session. `server/src/extractor/conversation/DECOMPOSITION.md` traces every rule of the
