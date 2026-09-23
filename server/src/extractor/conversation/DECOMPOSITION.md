@@ -94,7 +94,7 @@ ASSISTANT*.
 |---|---|---|---|
 | 2.1 | Split an image caption (`[image: …]` and similar) from the speech around it | mechanical | A pattern, not a judgement |
 | 2.2 | Mark a caption as CONTEXT, never a source of claims | mechanical | *"Never write a claim from a caption alone"* becomes a policy: phase 5 is not handed captions as claim text |
-| 2.3 | Speaker role: person or assistant | mechanical when the source declares roles; **jev `choice`** {person, assistant} otherwise | Policy: below threshold, treat as person — the safe default, because it never adds an `attributed` claim |
+| 2.3 | Speaker role: person or assistant | mechanical when the source declares roles; **jev `choice`** {person, assistant, `unclear`} otherwise | Policy: `unclear` or below threshold → treat as person — the safe default, because it never adds an `attributed` claim |
 | 2.4 | Candidate pastes: turns far longer than the speaker's median, or with document structure (headings, code fences, log lines) | mechanical | Code proposes; it does not decide |
 | 2.5 | For each candidate: is this MATERIAL the speaker brought, not their assertion? | **jev `noul`** | Policy: a paste yields one claim (*"X pasted … and asked …"*) and is excluded from mining |
 | 2.6 | Photo-only turns (*"Wow, great photo!"*) carry nothing of their own | mechanical | Short turn + caption + no content words → rides in a neighbour's `sourceTurns` |
@@ -130,7 +130,7 @@ the ENTITIES*.
 |---|---|---|---|
 | 4.1 | Candidate mentions: proper-noun runs, possessive and determiner noun phrases (*"my mom's old house"*, *"the park near my house"*), noun phrases repeated across sessions | mechanical | A part-of-speech tagger, in code, offline. **Select instead of generate**: the model is never asked to NAME a mention, only to judge one the code found (4.12) |
 | 4.12 | Is this candidate a THING the conversation is about, not a passing noun? | **jev `noul`** | One Noul per candidate, asked together over the same turn. Coverage is checked: a turn that yields no accepted candidate and no claim is reported, because *the model cannot choose an omitted value* |
-| 4.2 | Type of each new entity | **jev `choice`** over the schema's entity types | *"Do not invent a type"* becomes impossible, not forbidden |
+| 4.2 | Type of each new entity | **jev `choice`** over the schema's entity types + `none` | *"Do not invent a type"* becomes impossible, not forbidden. Policy: `none` → no entity; the mention stays in the claim's text, which is what the prompt says for anything the vocabulary cannot express |
 | 4.3 | Shortlist existing entities a mention could be — from THIS run's entities and from the SPACE: same type, exact name or alias, fuzzy name, and `similar` over the mention's context | mechanical | Code supplies the candidates… No full list of people is ever built: one bounded lookup per DISTINCT mention, cached for the run, a handful of candidates each. A second conversation ingested into the same space matches against what the first one wrote |
 | 4.4 | Is this mention one of the shortlisted, or new? | **jev `choice`** over the shortlist + `new` | …the model picks a card. *"Identity is the whole job"* — and it is now one bounded question per mention |
 | 4.5 | Merge policy: prefer merging when consistent, never when something rules it out | mechanical | Thresholds on 4.4's confidence; a merge ruled out by dates (4.7) wins over a confident merge. The residual risk is a shortlist that MISSED the right entity — a duplicate, not a wrong merge — and the space's existing near-duplicate scanner is the net for that |
@@ -148,10 +148,10 @@ appear*, the ASSISTANT section's three rules.
 
 | # | step | tag | notes |
 |---|---|---|---|
-| 5.1 | Group turns into exchanges about one thing | **jev `choice`** per turn: continues the previous exchange, or starts one | Bounded; the boundary is the decision, not the text |
+| 5.1 | Group turns into exchanges about one thing | **jev `choice`** per turn: continues the previous exchange, starts one, or `neither` (a turn about nothing — thanks, greetings) | Bounded; the boundary is the decision, not the text. Policy: `neither` → the turn rides in the adjacent claim's `sourceTurns` (5.7) |
 | 5.2 | Write one claim per exchange: subjects named, dates resolved, pronouns replaced | **generative** | Handed the resolved dates from phase 3 and the entity names from phase 4 as inputs, so it has nothing to resolve itself |
 | 5.3 | Lint the claim: every resolved date present in the text, no leading pronoun, no turn numbers or session ordinals | mechanical | *"Every claim reads on its own"* and *"do not put the conversation's structure into the graph"*, checked |
-| 5.4 | Who ORIGINATED the fact: the person, the assistant restating the person, or the assistant as origin | **jev `choice`** | Policy: `restating` → the person's claim; `origin` → `speaker: "assistant"`, `attributed: true`. Nobody else gets the mark — mechanical |
+| 5.4 | Who ORIGINATED the fact: the person, the assistant restating the person, the assistant as origin, or `unclear` | **jev `choice`** | Policy: `restating` or `unclear` → the person's claim, because it never adds an unearned `attributed`; `origin` → `speaker: "assistant"`, `attributed: true`. Nobody else gets the mark — mechanical |
 | 5.5 | Assistant-originated: did the exchange DO something with it (picked, booked, returned to)? | **jev `noul`** | Policy: *"When in doubt, leave it out"* — below threshold, no claim |
 | 5.6 | Link the claim to its entities and chrono entries | mechanical | From the mentions in its exchange |
 | 5.7 | Every turn in some claim's `sourceTurns`; an uncovered turn joins the nearest claim of its exchange | mechanical | The coverage rule, enforced by construction |
@@ -181,7 +181,7 @@ Source: *When a later session makes an earlier fact WRONG*, *When the conversati
 | 7.3 | Is the earlier claim still true of its own period (a habit that stopped, a pet that died)? | **jev `noul`** | A yes vetoes 7.2 — the carve-out as a second question rather than a sentence to remember |
 | 7.4 | Retirement with no successor | mechanical | No edge when nothing replaced it |
 | 7.5 | Same unchanged world, incompatible tellings? | **jev `noul`** | Policy: date both claims to their telling (*"as of 9 June 2023 X said…"*) — a template, mechanical |
-| 7.6 | A count that grew: replaced composition, or a cumulative tally? | **jev `choice`** {replaced, cumulative} | Replaced → supersede; cumulative → qualify by date |
+| 7.6 | A count that grew: replaced composition, or a cumulative tally? | **jev `choice`** {replaced, cumulative, `neither`} | Replaced → supersede; cumulative → qualify by date; `neither` → both claims stand unmarked, since *"never retire something the conversation did not retire"* |
 
 ## 8 · Timeline
 
@@ -190,7 +190,7 @@ Source: *Every dated thing is an `event`*.
 | # | step | tag | notes |
 |---|---|---|---|
 | 8.1 | Anything with a resolved day from phase 3 becomes an `event` | mechanical | |
-| 8.2 | Status: completed, upcoming or cancelled | **jev `choice`** | `active` and `overdue` are not options, so they cannot be written |
+| 8.2 | Status: completed, upcoming, cancelled, or `unclear` | **jev `choice`** | `active` and `overdue` are not options, so they cannot be written. Policy: `unclear` → no chrono entry; the event stays a claim |
 | 8.3 | Set up and never mentioned again stays `upcoming` | mechanical | No later claim about it → no promotion |
 | 8.4 | Merely ongoing (a course, a diet) → an entity, not an event | **jev `noul`**: has a stated start moment? | Policy: no → no chrono entry |
 | 8.5 | Title written the same self-contained way | **generative** | Usually the claim's sentence, shortened |
@@ -218,8 +218,9 @@ Source: *Before you return it*, *Do not leave a key dangling*.
 Taken from TypeSafe's own building guide (`typesafe-ai/skills` → `SKILL.md`, and the docs it points at),
 because the decomposition above is only as good as the questions it turns into.
 
-- **One narrow judgment per question, with its possible answers stated as criteria.** A `choice` always
-  includes a no-match outcome (`none`, `new`) where nothing may fit; a condition that several labels can
+- **One narrow judgment per question, with its possible answers stated as criteria.** EVERY `choice` above
+  carries a no-match outcome (`none`, `new`, `neither`, `unclear`), and its policy says where that case
+  routes — never to a guess. A `noul` needs none, because *no* is already one of its two answers; a condition that several labels can
   satisfy is one `noul` per label, not a `choice` among them.
 - **Independent questions over the same state are asked TOGETHER.** Phase 2's and phase 3's per-turn
   questions (2.3, 2.5, 3.4, 3.8, 3.9, 4.12) share one turn as their state, so they go as one request; a

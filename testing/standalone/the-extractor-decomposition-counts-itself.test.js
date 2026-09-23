@@ -45,6 +45,15 @@ describe('the decomposition counts itself', () => {
     assert.equal(new Set(ids).size, ids.length, 'a step id appears twice');
   });
 
+  it('every choice names its no-match answer', () => {
+    // Owner, 2026-09-23: a no-match option wherever a Jev-style choice is used. The model can only pick
+    // what the code offered, so a choice with no way to say "none of these" forces a guess.
+    const rows = doc.split('\n').filter(l => /^\| \d+\.\d+ \|/.test(l) && /jev `choice`/.test(l));
+    assert.ok(rows.length >= 5, `only ${rows.length} choice steps found — the parse broke`);
+    const bare = rows.filter(l => !/`(none|new|neither|unclear)`|\+ `?(none|new)`?/.test(l)).map(l => l.split('|')[1].trim());
+    assert.deepEqual(bare, [], `choice steps with no no-match answer: ${bare.join(', ')}`);
+  });
+
   it('the tally table matches the step tables', () => {
     const counted = { mechanical: 0, jev: 0, generative: 0 };
     for (const s of steps) counted[treatmentOf(s.tag)]++;
