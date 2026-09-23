@@ -1,0 +1,15 @@
+{
+  "name": "conversation.condition",
+  "knowledgeType": "entity",
+  "typeName": "condition",
+  "schemaGroup": "conversation",
+  "published": true,
+  "description": "A health or life condition attributed to a person. Its severity and course are claims, not properties.",
+  "schema": {
+    "propertySchemas": {
+      "kind": {
+        "type": "string"
+      }
+    }
+  }
+}

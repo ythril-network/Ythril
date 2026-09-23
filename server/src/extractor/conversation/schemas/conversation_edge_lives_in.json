@@ -1,0 +1,27 @@
+{
+  "name": "conversation.lives_in",
+  "knowledgeType": "edge",
+  "typeName": "lives_in",
+  "schemaGroup": "conversation",
+  "published": true,
+  "description": "Residence.",
+  "schema": {
+    "endpoints": {
+      "from": [
+        "person"
+      ],
+      "to": [
+        "place"
+      ]
+    },
+    "propertySchemas": {
+      "since": {
+        "type": "date"
+      },
+      "until": {
+        "type": "date"
+      }
+    },
+    "suppressEmbeddings": true
+  }
+}

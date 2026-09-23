@@ -1,0 +1,30 @@
+{
+  "name": "conversation.works_on",
+  "knowledgeType": "edge",
+  "typeName": "works_on",
+  "schemaGroup": "conversation",
+  "published": true,
+  "description": "Involvement in a bounded undertaking.",
+  "schema": {
+    "endpoints": {
+      "from": [
+        "person"
+      ],
+      "to": [
+        "project"
+      ]
+    },
+    "propertySchemas": {
+      "role": {
+        "type": "string"
+      },
+      "since": {
+        "type": "date"
+      },
+      "until": {
+        "type": "date"
+      }
+    },
+    "suppressEmbeddings": true
+  }
+}

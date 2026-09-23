@@ -1,0 +1,24 @@
+{
+  "name": "conversation.created_by",
+  "knowledgeType": "edge",
+  "typeName": "created_by",
+  "schemaGroup": "conversation",
+  "published": true,
+  "description": "Authorship.",
+  "schema": {
+    "endpoints": {
+      "from": [
+        "work"
+      ],
+      "to": [
+        "person"
+      ]
+    },
+    "propertySchemas": {
+      "role": {
+        "type": "string"
+      }
+    },
+    "suppressEmbeddings": true
+  }
+}

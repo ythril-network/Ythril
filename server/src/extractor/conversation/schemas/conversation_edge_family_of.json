@@ -1,0 +1,30 @@
+{
+  "name": "conversation.family_of",
+  "knowledgeType": "edge",
+  "typeName": "family_of",
+  "schemaGroup": "conversation",
+  "published": true,
+  "description": "A kin tie. ONE label with a `relation` discriminator rather than eight labels, so `label` stays a coarse filter that actually narrows and extraction stays consistent.",
+  "schema": {
+    "endpoints": {
+      "from": [
+        "person"
+      ],
+      "to": [
+        "person"
+      ]
+    },
+    "propertySchemas": {
+      "relation": {
+        "type": "string"
+      },
+      "since": {
+        "type": "date"
+      },
+      "until": {
+        "type": "date"
+      }
+    },
+    "suppressEmbeddings": true
+  }
+}

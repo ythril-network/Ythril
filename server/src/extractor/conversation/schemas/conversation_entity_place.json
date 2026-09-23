@@ -1,0 +1,28 @@
+{
+  "name": "conversation.place",
+  "knowledgeType": "entity",
+  "typeName": "place",
+  "schemaGroup": "conversation",
+  "published": true,
+  "description": "A named location at geographic or venue scale. Places are cheap, highly connective and containment-structured, so one hop generalises a location the question never named.",
+  "schema": {
+    "propertySchemas": {
+      "kind": {
+        "type": "string",
+        "enum": [
+          "city",
+          "country",
+          "region",
+          "venue",
+          "natural"
+        ]
+      },
+      "country": {
+        "type": "string"
+      },
+      "aliases": {
+        "type": "string"
+      }
+    }
+  }
+}

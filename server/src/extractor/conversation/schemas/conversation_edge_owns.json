@@ -1,0 +1,28 @@
+{
+  "name": "conversation.owns",
+  "knowledgeType": "edge",
+  "typeName": "owns",
+  "schemaGroup": "conversation",
+  "published": true,
+  "description": "Possession.",
+  "schema": {
+    "endpoints": {
+      "from": [
+        "person"
+      ],
+      "to": [
+        "animal",
+        "object"
+      ]
+    },
+    "propertySchemas": {
+      "since": {
+        "type": "date"
+      },
+      "until": {
+        "type": "date"
+      }
+    },
+    "suppressEmbeddings": true
+  }
+}
