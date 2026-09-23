@@ -24,6 +24,7 @@ Status, kept current per PR:
 | phase | state | where |
 |---|---|---|
 | 1 load | **built** | `load.ts` |
+| 2 classify turns | **built**: 2.1, 2.2, 2.4, 2.6. Not built: 2.3, 2.5 (judgements) | `classify.ts` |
 | 3 resolve time | **built** except 3.4, 3.8, 3.9, 3.12 (the judgements, handed in as inputs) and weekday RANGES (*"Friday to Sunday"*) in 3.10 | `time.ts`, `time-lexicon.ts` |
 | everything else | decomposed, not built | — |
 

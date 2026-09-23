@@ -144,3 +144,46 @@ describe('the tagger finds several, never overlapping, longest first', () => {
     assert.deepEqual(found.map(f => f.text), ['last weekend', 'on Tuesday', 'about three weeks ago']);
   });
 });
+
+describe('classify turns, the code half (§2)', () => {
+  let classifyTurns, splitCaptions, medianWithout;
+  before(async () => {
+    ({ classifyTurns, splitCaptions, medianWithout } = await import('../../server/dist/extractor/conversation/classify.js'));
+  });
+  const conv = (turns) => loadConversation({ sessions: [{ date: '2023-05-08', turns }] });
+
+  it('a caption is split from the speech, and kept apart (2.1, 2.2)', () => {
+    const x = splitCaptions('Look what I made! [image: a black-and-white bowl with a flower design]');
+    assert.equal(x.speech, 'Look what I made!');
+    assert.deepEqual(x.captions, ['a black-and-white bowl with a flower design']);
+  });
+
+  it('a photo and "Wow, great photo!" rides along; a photo with a real sentence does not (2.6)', () => {
+    const [[a, b]] = classifyTurns(conv([
+      { speaker: 'Mel', text: "Wow, that's a great photo! [image: two dogs in a field]" },
+      { speaker: 'Mel', text: 'We adopted Bailey in August! [image: a dog]' },
+    ]));
+    assert.equal(a.ridesAlong, true);
+    assert.equal(b.ridesAlong, false, 'a turn with its own fact must never ride along');
+  });
+
+  it('a pasted document is a candidate, with its reason; a normal turn is not (2.4)', () => {
+    const doc = ['# Terms', '', '## Clause 4', 'The party of the first part…'.repeat(40)].join('\n');
+    const [[short, pasted]] = classifyTurns(conv([
+      { speaker: 'Dana', text: 'Can you read this for me?' },
+      { speaker: 'Dana', text: doc },
+    ]));
+    assert.deepEqual(short.pasteReasons, []);
+    assert.ok(pasted.pasteReasons.some(r => r === 'headings'), JSON.stringify(pasted.pasteReasons));
+    assert.ok(pasted.pasteReasons.some(r => /chars against/.test(r)), JSON.stringify(pasted.pasteReasons));
+  });
+
+  it('the leave-one-out median agrees with the obvious one', () => {
+    const naive = (xs, v) => { const c = [...xs]; c.splice(c.indexOf(v), 1); c.sort((a, b) => a - b);
+      const n = c.length; return n === 0 ? 0 : n % 2 ? c[(n - 1) / 2] : (c[n / 2 - 1] + c[n / 2]) / 2; };
+    for (const xs of [[5], [1, 9], [1, 2, 3], [4, 4, 4, 10], [3, 1, 4, 1, 5, 9, 2, 6]]) {
+      const sorted = [...xs].sort((a, b) => a - b);
+      for (const v of xs) assert.equal(medianWithout(sorted, v), naive(xs, v), `${JSON.stringify(xs)} without ${v}`);
+    }
+  });
+});

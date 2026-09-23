@@ -90,7 +90,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Internal
 
-- **The conversation extractor's first two phases are code** (`F-31`). `load.ts` refuses a conversation it
+- **The conversation extractor's load, classify and time phases are code** (`F-31`). `classify.ts` splits
+  image captions from speech and keeps them apart, so a caption can never become a claim. It proposes paste
+  candidates, each with the reason it was proposed. It also marks a photo-only reaction to ride along in a
+  neighbour's claim. `load.ts` refuses a conversation it
   cannot read, naming every problem at once. It puts sessions in time order rather than page order, keys
   two sessions on one day apart, and gives every turn an id. `time.ts` finds temporal expressions and
   resolves them by the prompt's own rules, as calendar arithmetic in UTC:
