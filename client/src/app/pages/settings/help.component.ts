@@ -39,7 +39,7 @@ export const HELP_DOCS = [
     id: 'userguide', file: 'userguide.md',
     parts: [
       'userguide/01-getting-started.md', 'userguide/02-brain.md',
-      'userguide/03-files-and-schemas.md', 'userguide/04-settings.md',
+      'userguide/03-files-and-schemas.md', 'userguide/04-settings.md', 'userguide/04a-media-and-embedding.md',
       'userguide/05-storage-data-and-audit.md', 'userguide/06-connecting-an-ai-assistant.md',
     ],
   },

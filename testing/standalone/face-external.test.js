@@ -3,7 +3,7 @@
  *
  * This endpoint receives face crops, which are biometric data. Two properties carry that weight:
  *
- *  1. **It cannot be reached without consent.** `faceEndpointConsented()` requires `acknowledgedHost` to
+ *  1. **It cannot be reached without consent.** `egressConsented()` requires `acknowledgedHost` to
  *     match the host of `baseUrl`. The API enforces the same rule on write, but this is the check that
  *     survives a config edited on disk — the write path is not the only way a value gets into config.
  *  2. **A provider's answer is not trusted.** A descriptor of the wrong width would not fail loudly; it
@@ -19,7 +19,8 @@ import { readFileSync } from 'node:fs';
 let faceEndpointConsented;
 
 before(async () => {
-  ({ faceEndpointConsented } = await import('../../server/dist/files/media/face-external.js'));
+  // The rule is shared by every egressing slot since F-31 (`config/egress-consent.ts`); the face model is one.
+  ({ egressConsented: faceEndpointConsented } = await import('../../server/dist/config/egress-consent.js'));
 });
 
 /** The rule is a pure function of the endpoint block, so it needs no config plumbing to test. */

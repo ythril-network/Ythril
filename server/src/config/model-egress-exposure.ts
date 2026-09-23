@@ -12,6 +12,7 @@
  * because only the resolution-time guard inside `ssrfSafeFetch` can know where it actually points.
  */
 import { getConfig, getMediaEmbeddingConfig, getEmbeddingConfig } from './loader.js';
+import { getDecisionModelConfig } from './decision-model.js';
 import { isSsrfSafeUrl } from '../util/ssrf.js';
 import { allowPrivateForSlot, isLocalModelEndpoint, type EgressSlot } from './model-egress-policy.js';
 import { resolveVlmEndpoint } from '../files/converters/vlm-endpoint.js';
@@ -108,6 +109,13 @@ export function modelEndpointExposure(): EndpointExposure[] {
   try {
     // The assist model is external by definition (F11-b) — no provider switch to check.
     add('documentAssist', 'assist', getConfig().mediaEmbedding?.documentProcessing?.assistModel?.baseUrl);
+  } catch { /* pre-setup */ }
+
+  try {
+    // The decision slot has a DEFAULT base URL, so "has a URL" is not "is in use". It is in use once the
+    // operator consented to a host — which is also the only state in which anything is sent there.
+    const d = getDecisionModelConfig();
+    if (d.acknowledgedHost) add('decisionModel', 'decision', d.baseUrl);
   } catch { /* pre-setup */ }
 
   return out;

@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A decision model for the extractors, configurable on Settings → Models** (`F-31`). The conversation
+  extractor asks a model only its judgement questions (*who is "she"*, *is this turn pasted*), and this is
+  the model it asks. It defaults to TypeSafe's System One (`https://api.typesafe.ai`, `jev-latest`) and
+  follows that API's contract, so choices come back with their full probability distribution. Set it in
+  config (`decisionModel`), through `PATCH /api/admin/media-config`, or with `DECISION_URL` /
+  `DECISION_MODEL` / `DECISION_API_KEY`. The key lives in `secrets.json`. **Nothing is sent until the operator
+  acknowledges the host**, and that is checked when the call is made as well as on save. Without consent,
+  the same questions go to the assist model, constrained to the listed options. With neither, extraction
+  is refused up front instead of guessed. Code checks every answer before anything reads it: a choice
+  outside its options, or a missing answer, is marked `invalid`. A question that offers no no-match option
+  is refused before it is sent. It has its own call budget (`modelSlots.decision`) and private-address
+  switch (`YTHRIL_ALLOW_PRIVATE_DECISION`), and appears in the egress matrix.
 - **`graph_traverse` returns the records it reached, not only their names** (`F-32`). A new `projection`
   parameter on both doors (MCP `graph_traverse` and `POST /spaces/:spaceId/traverse`) takes the same
   grammar as `query` and `recall` and is applied to every node and every stored edge. With it, one call
@@ -68,6 +80,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The user guide's media, model and embedding settings are their own chapter**
+  (`docs/userguide/04a-media-and-embedding.md`). The settings chapter had reached the 900-line limit, and
+  the Models tab is a topic of its own. Every anchor is unchanged, so the in-app help links still land.
+
 - **The README describes Ythril as a knowledge management system, and its quickstart works on 5.x.**
   It pitched a memory for one assistant, and a rename had left it saying *"give your AI a fact"* and *"the
   fact layer"*. The quickstart pointed MCP clients at `/mcp/general`, a 4.x per-space address that 5.0
@@ -104,6 +120,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rename, so the table now says to reconnect.
 
 ### Internal
+
+- **Egress consent is one function** (`config/egress-consent.ts`). The *"is this the host the operator
+  acknowledged"* comparison was written out in the document describer, the repair pass, the face model and
+  the settings route. All four now ask `egressConsented`, and a gate refuses a hand-written comparison
+  anywhere in `server/src`. The save-time refusal moved there too, so the decision model's settings reuse it.
 
 - **The conversation extractor's load, classify and time phases are code** (`F-31`). `classify.ts` splits
   image captions from speech and keeps them apart, so a caption can never become a claim. It proposes paste

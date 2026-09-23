@@ -1,5 +1,5 @@
 import type { TokenRights } from './rights-shape.js';
-import type { ModelSlotsConfig } from './model-slots.js';
+import type { ModelSlot, ModelSlotsConfig } from './model-slots.js';
 export interface TokenRecord {
   id: string;
   name: string;
@@ -670,6 +670,16 @@ export interface DocumentProcessingConfig {
   assistModel?: DocAssistModelConfig;
 }
 
+/** `F-31` — the extractors' decision model. See `Config.decisionModel`. */
+export interface DecisionModelConfig {
+  /** Default `https://api.typesafe.ai`. A base already ending in `/v1` is accepted. SSRF-checked at the call. */
+  baseUrl?: string;
+  /** Default `jev-latest`. */
+  model?: string;
+  /** The host the operator consented to sending conversation text to. Must match `baseUrl`'s host. */
+  acknowledgedHost?: string;
+}
+
 /** F11-b — external assist-model configuration. OpenAI-compatible endpoint reached via `ssrfSafeFetch`. */
 export interface DocAssistModelConfig {
   /** External OpenAI-compatible base URL (e.g. `https://api.example.com`). SSRF-validated on save. */
@@ -1266,8 +1276,7 @@ export interface Config {
   allowPrivateModelEndpoints?: boolean;
   /**
    * Per-endpoint override of {@link allowPrivateModelEndpoints}, keyed by model slot
-   * (`vision`, `stt`, `embedding`, `rerank`, `nli`, `assist`, `docVlm`, `docRepair`, `docVerify`,
-   * `faceExternal`).
+   * — every slot in `MODEL_SLOTS` (`config/model-slots.ts`), which is the list.
    *
    * The global flag is all-or-nothing, which is wrong for the common deployment: everything on the
    * operator's own infra except one model that genuinely lives on the public internet. Turning the global
@@ -1281,11 +1290,7 @@ export interface Config {
    *
    * Same admin-surface exclusion as the global flag, and the crown-jewel ranges stay blocked regardless.
    */
-  allowPrivateModelEndpointsBySlot?: Partial<Record<
-    'vision' | 'stt' | 'embedding' | 'rerank' | 'nli'
-    | 'assist' | 'docVlm' | 'docRepair' | 'docVerify' | 'faceExternal',
-    boolean
-  >>;
+  allowPrivateModelEndpointsBySlot?: Partial<Record<ModelSlot, boolean>>;
   /**
    * Per-slot model tuning — how long ONE call to each model slot may take.
    *
@@ -1299,6 +1304,21 @@ export interface Config {
    * `PATCH /api/admin/media-config` and pinnable per slot via `YTHRIL_PINNED_FIELDS`.
    */
   modelSlots?: ModelSlotsConfig;
+  /**
+   * `F-31` — the model the extractors ask their judgement questions: *which of these is "she"*, *is this
+   * turn pasted material*, *does this claim already exist*. Shaped like TypeSafe's System One API
+   * (`POST <baseUrl>/v1/systemone`) because that contract is what every step is written against, and the
+   * defaults point at it: `https://api.typesafe.ai`, model `jev-latest`.
+   *
+   * **It egresses conversation text**, so it is used only while `acknowledgedHost` matches `baseUrl`'s host
+   * (`config/egress-consent.ts`) — the same consent the assist model and the external face model carry.
+   * Not consented to, the extractors fall back to `documentProcessing.assistModel`; neither, and an extraction
+   * is refused up front rather than guessed (`extractor/decide.ts`).
+   *
+   * The key is in `secrets.json` (`decisionApiKey`), never here. Env: `DECISION_URL`, `DECISION_MODEL`,
+   * `DECISION_API_KEY`.
+   */
+  decisionModel?: DecisionModelConfig;
   /** Dynamically-registered OAuth clients (RFC 7591) for the MCP browser
    *  authorization flow. Populated automatically when a client registers; not
    *  meant to be hand-edited. See mcp/oauth.ts. */
@@ -1352,6 +1372,8 @@ export interface SecretsFile {
    * config.json so API keys are never world-readable. Env vars
    * (`VISION_API_KEY` / `STT_API_KEY`) still take precedence.
    */
+  /** `F-31` — the decision model's key (`Config.decisionModel`). `DECISION_API_KEY` takes precedence. */
+  decisionApiKey?: string;
   mediaEmbedding?: {
     visionApiKey?: string;
     sttApiKey?: string;

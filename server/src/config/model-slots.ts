@@ -49,7 +49,7 @@
  */
 export const MODEL_SLOTS = [
   'vision', 'stt', 'embedding', 'rerank', 'nli',
-  'assist', 'docVlm', 'docRepair', 'docVerify', 'faceExternal',
+  'assist', 'docVlm', 'docRepair', 'docVerify', 'faceExternal', 'decision',
 ] as const;
 
 export type ModelSlot = (typeof MODEL_SLOTS)[number];
@@ -91,6 +91,7 @@ export const MODEL_SLOT_DEFAULT_MS: Record<ModelSlot, number> = {
   docRepair: 60_000,
   docVerify: 60_000,
   faceExternal: 30_000,
+  decision: 60_000,       // one batch of extractor questions (F-31); the same budget as the other hosted LLM slot
 };
 
 /** What an operator may have configured, as stored. */

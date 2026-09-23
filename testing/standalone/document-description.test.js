@@ -143,7 +143,7 @@ describe('provenance is recorded, not assumed', () => {
     // The ACK is re-checked at call time rather than trusted from save time — the same rule the repair
     // path applies, because config.json can be hand-edited.
     const describeSrc = src('server/src/files/converters/describe.ts');
-    assert.match(describeSrc, /acknowledgedHost === new URL\(assist\.baseUrl\)\.host/);
+    assert.match(describeSrc, /egressConsented\(assist\)/, 'the consent rule every egressing slot shares (config/egress-consent.ts)');
     /*
      * And the fall-through has to be the LOCAL model, not "send it anyway".
      *
@@ -153,7 +153,7 @@ describe('provenance is recorded, not assumed', () => {
      * the local endpoint must be what runs when the host was NOT acknowledged. So the branch is bounded by its
      * own brace, and the claim is stated on both sides of it.
      */
-    const ackAt = describeSrc.indexOf('if (acknowledged) {');
+    const ackAt = describeSrc.indexOf('if (egressConsented(assist)) {');
     assert.ok(ackAt > -1, 'the acknowledged branch is gone — re-anchor this gate');
     const branch = blockAfter(describeSrc, ackAt, 'the acknowledged branch');
     assert.doesNotMatch(branch, /resolveVlmEndpoint\('repair'\)/,

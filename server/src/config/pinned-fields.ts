@@ -65,7 +65,9 @@ export const PINNABLE_FIELD_PATHS: readonly string[] = [
   // path would be accepted here and then reported as successfully written while never taking effect.
   'modelSlots.vision', 'modelSlots.stt', 'modelSlots.embedding', 'modelSlots.rerank', 'modelSlots.nli',
   'modelSlots.assist', 'modelSlots.docVlm', 'modelSlots.docRepair', 'modelSlots.docVerify',
-  'modelSlots.faceExternal',
+  'modelSlots.faceExternal', 'modelSlots.decision',
+  // F-31 — the extractors' decision model, the whole block, like the assist model's.
+  'decisionModel',
   // Document processing — the whole block, so an infra deployment can fix the extraction policy and its budgets.
   'documentProcessing.mode', 'documentProcessing.strategy', 'documentProcessing.assistModel',
   'documentProcessing.extractImages', 'documentProcessing.renderDpi', 'documentProcessing.maxPages',

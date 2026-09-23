@@ -273,3 +273,53 @@ describe('Media config — external assist model (F11-b)', () => {
         .body?.documentProcessing?.assistModel?.apiKey);
   });
 });
+
+describe('Media config — the extractors\' decision model (F-31)', () => {
+  const read = async () => (await get(INSTANCES.a, tokenA, '/api/admin/media-config')).body?.decisionModel;
+  before(async () => {
+    tokenA = fs.readFileSync(path.join(CONFIGS, 'a', 'token.txt'), 'utf8').trim();
+  });
+  after(async () => {
+    // Withdraw consent and drop the key, so no later suite finds a decision endpoint it did not configure.
+    await restoreOrFail('decisionModel (consent withdrawn, key cleared)',
+      () => patch(INSTANCES.a, tokenA, '/api/admin/media-config', { decisionModel: { acknowledgedHost: '', apiKey: null } }),
+      async () => { const d = await read(); return d?.inUse === false && !d?.apiKey; });
+  });
+
+  it('the GET reports the defaults, not in use, before anything is configured', async () => {
+    const d = await read();
+    assert.equal(d?.model, 'jev-latest');
+    assert.equal(d?.inUse, false, 'nothing is sent anywhere until a host is consented to');
+  });
+
+  it('setting it up without consent to its host is refused, naming the host', async () => {
+    const r = await patch(INSTANCES.a, tokenA, '/api/admin/media-config', {
+      decisionModel: { baseUrl: 'https://decide.example.com', apiKey: 'sk-decide-xyz' },
+    });
+    assert.equal(r.status, 400, JSON.stringify(r.body));
+    assert.equal(r.body?.needsAcknowledgment, 'decide.example.com');
+    assert.equal((await read())?.apiKey, undefined, 'a refused patch writes nothing — not even the key');
+  });
+
+  it('with consent it is stored, in use, and the key is masked and kept out of the config block', async () => {
+    const r = await patch(INSTANCES.a, tokenA, '/api/admin/media-config', {
+      decisionModel: { baseUrl: 'https://decide.example.com', acknowledgedHost: 'decide.example.com', apiKey: 'sk-decide-xyz' },
+    });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    const d = await read();
+    assert.equal(d?.baseUrl, 'https://decide.example.com');
+    assert.equal(d?.inUse, true);
+    assert.ok(d?.apiKey && !d.apiKey.includes('sk-decide-xyz'), `key must be masked, got ${d?.apiKey}`);
+  });
+
+  it('withdrawing consent needs no consent', async () => {
+    const r = await patch(INSTANCES.a, tokenA, '/api/admin/media-config', { decisionModel: { acknowledgedHost: '' } });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.equal((await read())?.inUse, false);
+  });
+
+  it('an unknown field is refused, not stored', async () => {
+    const r = await patch(INSTANCES.a, tokenA, '/api/admin/media-config', { decisionModel: { uses: ['all'] } });
+    assert.equal(r.status, 400, JSON.stringify(r.body));
+  });
+});

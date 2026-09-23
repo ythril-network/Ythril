@@ -175,7 +175,7 @@ describe('the surfaces no longer claim it is create-only', () => {
     for (const [file, must] of [
       ['docs/integration-guide/05c-face-recognition.md', /can be changed afterwards/i],
       ['docs/integration-guide/06-spaces-api.md', /both \*\*accept\*\* the field/],
-      ['docs/userguide/04-settings.md', /can be moved to a new width/],
+      ['docs/userguide/04a-media-and-embedding.md', /can be moved to a new width/],
     ]) {
       const text = readFileSync(file, 'utf8');
       assert.match(text, must, `${file} still describes the width as unchangeable`);

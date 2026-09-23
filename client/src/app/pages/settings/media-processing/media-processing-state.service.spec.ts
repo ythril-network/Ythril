@@ -987,3 +987,44 @@ describe('MediaProcessingStateService — the per-pipeline Save and egress conse
     expect(c2.faceAwaitingAcknowledgment(), 'absent is not awaiting').toBe(false);
   });
 });
+
+describe('MediaProcessingStateService — the decision model card (F-31)', () => {
+  beforeEach(() => TestBed.resetTestingModule());
+  const decisionCfg = (over: Record<string, unknown> = {}) => cfgFixture({
+    decisionModel: { baseUrl: 'https://api.typesafe.ai', model: 'jev-latest', locked: false, inUse: false, ...over },
+  });
+
+  it('keeps the server-owned fields out of the block it edits and sends — the PATCH is strict', () => {
+    const { c } = make(decisionCfg({ apiKey: '••••••••', locked: true }));
+    expect(Object.keys(c.decision).sort()).toEqual(['baseUrl', 'model']);
+    expect(c.decisionLocked(), 'the lock is read from the server').toBe(true);
+    expect(c.decisionKeySet(), 'the mask says a key is set, and is never kept').toBe(true);
+  });
+
+  it('a budget-only save sends no endpoint, so it asks for no consent', async () => {
+    const { c, confirm, patch } = make(decisionCfg());
+    c.modelSlots['decision'] = { timeoutMs: 90_000 };
+    c.touched.set(true);
+    await c.saveCard('decision');
+    expect(confirm).not.toHaveBeenCalled();
+    expect(sent(patch)['decisionModel']).toBeUndefined();
+    expect(sent(patch)['modelSlots']).toEqual({ decision: { timeoutMs: 90_000 } });
+  });
+
+  it('setting up the endpoint asks for consent to its host, and sends it with the acknowledgement', async () => {
+    const { c, confirm, patch } = make(decisionCfg());
+    c.decisionApiKeyInput = 'sk-decide';
+    await c.saveCard('decision');
+    expect(confirm).toHaveBeenCalledOnce();
+    expect(sent(patch)['decisionModel']).toEqual({
+      baseUrl: 'https://api.typesafe.ai', model: 'jev-latest', acknowledgedHost: 'api.typesafe.ai', apiKey: 'sk-decide',
+    });
+  });
+
+  it('a declined consent sends nothing', async () => {
+    const { c, patch } = make(decisionCfg(), false);
+    c.decision.baseUrl = 'https://decide.example.com';
+    await c.saveCard('decision');
+    expect(patch).not.toHaveBeenCalled();
+  });
+});
