@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Sync never checked a FILE's links, so a broken one was recorded as nothing at all** (`Q-39`). A peer
+  sending a file linked to an entity this instance does not hold produced no violation, no warning and no
+  trace — and an operator reads an empty violation list as everything being fine. Absent and clean looked
+  identical, which is the one failure a diagnostic must not have.
+
+  A file's links are checked like any other record's now, and `docType` on a link violation can be `file`.
+  For that one, `docId` is the file's **path** rather than a UUID, because that is what identifies a file.
+
+  **The narrowing was removed rather than extended.** It read `fromKind !== 'fact' && fromKind !== 'chrono'`;
+  what decides whether a link is checked is now the link vocabulary itself, so a fifth kind declared next
+  year is checked on the day it is declared instead of waiting for somebody to add it to a list.
+
 - **Deleting an entity that has an edge failed SILENTLY in the Brain UI.** Reported by the owner: the row
   stayed on screen, nothing was said, and the click looked as though it had not registered.
 

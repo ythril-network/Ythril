@@ -1880,8 +1880,13 @@ export interface ConflictDoc {
 export interface LinkViolationDoc {
   _id: string;            // UUID v4
   spaceId: string;
-  docId: string;          // ID of the violating document (entity/edge/fact/chrono)
-  docType: KnowledgeType;
+  docId: string;          // ID of the violating document — an id, or a path when docType is 'file'
+  /*
+   * `RecordType` rather than `KnowledgeType`, since `Q-39`: a FILE's links are checked too, and a violation
+   * it causes has to be able to say so. The union is the knowledge types plus `file` and is derived from
+   * `RECORD_TYPES`, so it cannot drift from the kinds that actually exist.
+   */
+  docType: RecordType;
   field: string;          // field name that violated (e.g. "from", "to", "entityIds")
   reason: string;         // human-readable explanation
   peerInstanceId: string; // which peer sent the document
