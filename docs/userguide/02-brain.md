@@ -637,6 +637,12 @@ table and the canvas was only showing one per pair.
 
 The detail panel below the canvas shows all facts and chrono entries linked to the selected entity. Use the type filter and description filter to narrow what you see.
 
+**For an assistant or a script, one call brings the whole neighbourhood with its content.** The graph API
+normally returns just the names and connections it walked; ask it for a `projection` (for example
+`{"description": 1, "properties": 1}`) and every node and every connection comes back with those fields too,
+so reading a whole subgraph no longer needs a second lookup per record. The Graph tab itself is unchanged: it
+loads a record's details when you click it. See the integration guide's graph page, *Bodies in one call*.
+
 **Editing from the graph:** click any fact or chrono row in that panel to open the same editable detail drawer used on the Brain tabs — including tag suggestions, the entity and fact pickers, and the property fields defined by the record type's schema. Saving updates the row in the panel behind it.
 
 ---

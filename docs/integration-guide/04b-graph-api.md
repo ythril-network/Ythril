@@ -514,6 +514,8 @@ POST /api/brain/spaces/:spaceId/traverse
 | `includeMemories` | — | `false` | Also reach facts LINKED to a traversed node, marked `kind: "fact"`. **Opt-in, unlike `includeChrono`** — see the note below. A non-boolean is a `400`. **This door's `false` is a real default**, so an unsaid flag brings no facts: recall's expansion differs and brings ATTRIBUTED claims when the flag is unsaid, because its caller asked a question rather than asked to explore — see [the recall page](04a-recall-api.md) |
 | `includeFiles` | — | `false` | Also reach files LINKED to a traversed node, marked `kind: "file"` and carrying **file meta only**. Opt-in. A non-boolean is a `400` |
 | `includeEdges` | — | `true` | Whether the response carries the `edges` list. **This does not change the walk** — edges are how the graph is traversed. A non-boolean is a `400` |
+| `projection` | — | none | Return each reached record's **body**, projected — see [Bodies in one call](#bodies-in-one-call-projection) below. Omitted, the answer is the lean one, unchanged. A non-object is a `400` |
+| `includeDiagnostics` | — | `false` | With `projection`: add back `matchedText`, `embeddingModel` and `seq` on each body. Never the vector. A non-boolean is a `400` |
 
 > **`includeMemories` means three things on a RECALL, and this table is the one to read for it.** An
 > *attributed* claim is one an AI assistant originated rather than a person. It is stored with no vector, so
@@ -672,6 +674,31 @@ with the list included. Use it when you want what is reachable and the connectin
 tokens — a large traversal spends much of its payload on edges.
 
 If you need fewer edges *followed*, that is `edgeLabels`, which genuinely narrows the walk.
+
+#### Bodies in one call: `projection`
+
+A walk returns nodes as `_id`, `name`, `type`, `depth` (and `kind`), and edges as `_id`, `from`, `to`, `label`.
+That is what makes it cheap, and it is also why reading a subgraph's CONTENT used to take the walk plus a
+`query` per collection over the ids it returned. Send a `projection` and each reached record comes back with
+its body instead — the same grammar `query` and `recall` take, applied to every node and every stored edge:
+
+```json
+{ "startId": "cd2c0dc6-e7b0-4759-a3a9-bd537e4f2d64", "maxDepth": 10, "limit": 1000,
+  "includeChrono": false, "projection": { "description": 1, "properties": 1 } }
+```
+
+- **The walk's envelope always survives.** `_id`, `depth` and `kind` on a node; `_id`, `from`, `to` and `label`
+  on an edge. A projection cannot remove them, because they are how the answer hangs together.
+- **The vector never comes back**, and `matchedText`/`embeddingModel`/`seq` only with `includeDiagnostics`.
+- **An edge's `properties` come with it**, which is where a conditional edge keeps its instruction and
+  predicate.
+- **A link-derived edge** (`chrono.entityIds` and the like) has no stored document and is returned as it was;
+  so is a node whose record was deleted between the walk and the read.
+- It costs one read per collection per member space, bounded by the ids the walk already returned — the
+  walk's own `limit` bounds it.
+
+Same parameters on MCP `graph_traverse`. Added in `F-32`, after the owner, shown a three-call recipe for this,
+asked: *"is that not just an includes flag?"*
 
 This closes a gap an integrator measured: reconstructing a 33-day hardware-RMA timeline took four `query()`
 calls plus two repository greps, and the first pass still missed the carrier ticket — it had to be found by a
