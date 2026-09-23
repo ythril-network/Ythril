@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.1.0] — 2026-09-23
+
+**A batch item can carry its own relationships, and five things that answered success while doing nothing
+now say so.** One capability and a week of reports from the canary operator and the fleet integrator,
+released before the benchmark work starts so none of it waits behind that.
+
+| | |
+|---|---|
+| new | a `/bulk` / `save_bulk` item takes the `link*` fields its kind can hold plus `edges`, and the reply counts them under `connections` |
+| now refused | `/bulk` with a retired key (`memories`) or an item with a retired link array (`entityIds`), which used to answer `207` with nothing written |
+| now visible | a failed watched config reload, on `ythril_config_reload_pending` and `ythril_config_reload_failed_total` |
+| now works | reranking against a stock reranker, which refused the unbatched request |
+| what to do | upgrade. A batch still sending `memories` gets a `400` naming `facts` — that is the fix, not a regression |
+
 ### Added
 
 - **A batch item attaches its own relationships, exactly as a single write does** (`Q-44`). Every
