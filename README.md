@@ -7,9 +7,9 @@
 
 ### Self-hosted knowledge management for people, teams and their AI tools.
 
-**One place for what you know** — facts, people, decisions, timelines and files — searchable by meaning,
-connected as a graph, synced between the machines you choose, and open to every program through
-**MCP and a REST API that are the same thing**. On your hardware. Under your control.
+**One place for what you know** — facts, people, decisions, timelines and files. Search it by meaning,
+follow how things connect, keep it in sync between your own machines, and let AI assistants use it over
+**MCP** and your own programs over a **REST API**. On your hardware, under your control.
 
 [![License: PolyForm SB](https://img.shields.io/badge/license-PolyForm%20Small%20Business-2b7bb9)](LICENSE)
 [![MCP](https://img.shields.io/badge/Model%20Context%20Protocol-native-9eec55?labelColor=0d1117)](https://modelcontextprotocol.io)
@@ -23,10 +23,10 @@ connected as a graph, synced between the machines you choose, and open to every 
 
 ## Knowledge is scattered. Ythril puts it in one place.
 
-Decisions live in chats, documents live in drives, who-knows-whom lives in people's heads, and every AI
-assistant you use starts each conversation knowing none of it. Ythril is one store for all of it — and
-everything that can talk to it, whether a person in the web UI, a script over REST or an assistant over MCP,
-reads and writes the same knowledge.
+Decisions sit in chat threads, documents in drives, and who-knows-whom in people's heads. Every AI assistant
+you use starts each conversation knowing none of it. Ythril keeps all of it in one store, and everything
+that talks to that store — you in the web UI, a script over REST, an assistant over MCP — reads and writes
+the same records.
 
 > Months later: *"What did we decide about the auth rewrite, and who owns it?"* — one question, and the answer
 > comes back with the record it came from.
@@ -37,17 +37,17 @@ reads and writes the same knowledge.
 
 | | |
 |---|---|
-| 🔎 **Search by meaning** | Ask a question in your own words and get back the facts, people, events and files that answer it — even when none of them use your words. Narrowing a search (say, to one project) never quietly drops a match. |
-| 🎯 **Four ways to look** | *Search by meaning* (`recall`) for the best few answers. *Exact lookup* (`filter`) when you need every record that matches, like a database query. *More like this* (`similar`) to find near-copies of a record. *Follow the connections* (`graph_traverse`) from one thing to everything linked to it. Each one says in its own description what it cannot find — its blind spots — so an assistant picks the right one. |
-| 🕸️ **Things and how they connect** | Store people, projects and places, and the links between them — *Ada works on Apollo*, *Apollo depends on Billing* — then ask about chains of links, not just single records. |
-| 📅 **Timeline** | Events, deadlines, plans and milestones with dates, tags and text search. |
-| 📎 **Files that answer back** | Drop in PDFs, office documents, images, audio and video. Ythril reads the text, reads scans, writes down what is said in recordings and describes pictures — and all of it becomes searchable. |
-| 🙂 **Faces** | Name a person in one photo, and later photos of them are recognised. Runs on your CPU, nothing sent out. |
-| 📐 **Rules for your data** | Say what a record must look like — required fields, allowed values, naming patterns — and choose whether a breach is refused, warned about or ignored. Each problem is reported as introduced or pre-existing, and strict mode refuses only what a new edit broke, never what was already broken, so tightening the rules never locks you out of old records. |
-| ⚖️ **Contradictions and duplicates** | When two records disagree, both are kept and flagged for you instead of one silently overwriting the other. Near-copies are suggested for merging, and a "no, these are different" answer sticks. |
-| 🔁 **Sync between machines** | Copy the spaces you choose between Ythril instances — your laptop, your team's server — with no cloud in the middle, and rules for who may join. |
-| 🔌 **One API, two doors** | AI assistants connect over MCP; programs call the REST API. Both doors are the same code: every tool is also `POST /api/<tool>` with the same body — same parameters, same limits, same refusals. A refusal says what went wrong in a machine-readable form, so a program can fix and retry. |
-| 🧾 **History and housekeeping** | A log of who changed what — field-level, the value before and after; notifications to your own systems when data changes; automatic deletion after an age you set; one-file backup and restore. |
+| 🔎 **Search by meaning** | Ask in your own words across facts, people, relationships, events and files at once, and find what answers the question even when it uses different words. Narrowing a search to one project or tag never quietly drops a match. |
+| 🎯 **Four ways to look** | `recall` finds the best matches by meaning. `filter` is an exact query (`$or`, `$and`, `$regex`, `$elemMatch`, sorting, paging, totals) for when you need *every* match. `similar` finds near-copies of a record. `graph_traverse` follows the links from one record to everything connected to it. Each tool's description lists its blind spots — what it will not find — so an assistant picks the right one. |
+| 🕸️ **Knowledge graph** | Store people, projects and places as entities, connect them with named relationships (*works on*, *depends on*), and ask about chains of them. A space can set rules for which kinds of things a relationship may connect. |
+| 📅 **Timeline** | Events, deadlines, plans and milestones with date ranges, tags and text search. |
+| 📎 **Files that answer back** | Upload PDFs, office documents, images, audio and video. Ythril pulls out the text, reads scanned pages, transcribes speech and describes pictures, and all of it becomes searchable. |
+| 🙂 **Faces** | Name a person in one photo and later photos of them are recognised. Runs on the CPU, inside Ythril. |
+| 📐 **Rules for your data** | Define what each type of record must contain — required fields, allowed values, naming patterns — and choose strict, warn or off. Each problem is reported as introduced or pre-existing, and strict refuses only what an edit broke, never what was already broken, so tightening the rules never locks you out of old records. |
+| ⚖️ **Contradictions and duplicates** | When two records disagree, both are kept and flagged instead of one overwriting the other. Near-duplicates are suggested for merging, and "these are different" is remembered. |
+| 🔁 **Sync networks** | Copy the spaces you choose between Ythril instances, with no cloud in between. Who may join is decided by signed votes, under one of five governance models. |
+| 🔌 **MCP + REST, one API** | Every tool is also `POST /api/<tool>` with the same body: same parameters, same limits, same refusals, whichever way you call it. A refusal comes back machine-readable, so a program can fix the request and retry. |
+| 🧾 **Audit, webhooks, retention** | A field-level log of who changed what, signed webhooks to your own systems, automatic deletion after an age you set, and one-file export and restore. |
 
 Everything above is a callable MCP tool (45 of them), a REST endpoint and a screen in the web UI. The full
 reference is the [Integration Guide](docs/integration-guide.md).
@@ -56,22 +56,24 @@ reference is the [Integration Guide](docs/integration-guide.md).
 
 ## Measured, not promised
 
-On **LoCoMo** — ten long multi-session conversations, 1,540 questions — answers written from what Ythril
-retrieved were judged correct **82.5%** of the time. Answers written with the *whole conversation* in front of
-the same model scored 84.5%. Ythril's answers used **about 2% of the text** to get there.
+**97.6% of the score of reading the whole conversation, from about 2% of the text per question.**
 
-| | judged correct (n=200) | text per question |
+The test is **LoCoMo**: ten long conversations, each spread over weeks of sessions, with 1,540 questions
+about them. Answers built from what Ythril retrieved were judged correct **82.5%** of the time. Answers built
+from the entire conversation scored 84.5%, which is the most the same answering model could reach.
+
+| | judged correct (n=200) | text read per question |
 |---|---|---|
 | **Ythril** | **82.5%** | ~1.8k characters |
-| whole conversation in context | 84.5% | ~86k characters |
+| whole conversation | 84.5% | ~86k characters |
 
-**In plain words:** Ythril found the right handful of notes almost every time the whole conversation
-would have — and the 2-point gap is small enough to be chance on a sample this size (95% interval −6.2 to
-+2.2). Reading everything stops working once your history is bigger than a model can hold; Ythril does not.
+**In plain words:** Ythril hands the model the right few notes almost every time reading everything would
+have, and the 2-point gap is small enough to be chance on a sample this size (95% CI −6.2 to +2.2). Reading
+everything stops working once a history is larger than a model can hold. Ythril keeps working.
 
-How it was measured: the same AI (Claude Opus 5.5) answered both ways, and an AI from a different company (a
-GPT model) graded the answers without knowing which way each was written. Other published scores use other
-AIs, so compare the **gap to reading everything**, not the percentage. Full method and what the misses look
+How it was measured: Claude Opus 5.5 answered both ways, and a GPT model from a different vendor graded a
+blind sample without knowing which way each answer was produced. Published leaderboards use other models, so
+compare the **gap to reading everything**, not the raw percentage. Method, F1 scores and what the misses look
 like: [benchmarks/](benchmarks/README.md#results).
 
 ---
@@ -79,12 +81,14 @@ like: [benchmarks/](benchmarks/README.md#results).
 ## Your data, your rules
 
 - **Self-hosted with `docker compose up`.** No accounts, no per-seat pricing, no data leaving your machine.
-- **Works fully offline, and the image enforces it.** Local models for embeddings, vision and speech are
-  bundled, and runtime model downloads are switched off (`HF_HUB_OFFLINE=1`), so a missing model fails loudly
-  instead of quietly fetching one. Connect hosted models under **Settings → Models** only if you want to.
+- **Works fully offline, and the image enforces it.** The models for search, pictures and speech ship
+  inside it, and runtime model downloads are switched off (`HF_HUB_OFFLINE=1`), so a missing model fails
+  loudly instead of quietly downloading one. Connect hosted models under **Settings → Models** only if you
+  want to.
 - **Never trains on your knowledge.** It is a database you run, not a service that mines you.
-- **Security built in** — OIDC/SSO, optional MFA, scoped and read-only tokens, OAuth for MCP clients, an
-  immutable audit log, and SSRF and injection hardening. [Details ↓](#-under-the-hood)
+- **Security built in** — single sign-on (OIDC), optional two-factor login, access tokens limited to a space
+  or to reading, OAuth for MCP clients, an audit log that cannot be edited, and hardening against request
+  forgery and injection. [Details ↓](#-under-the-hood)
 
 ---
 
@@ -108,7 +112,7 @@ Create a token under **Settings → Tokens**, then point any MCP client at your 
 }
 ```
 
-The client sees every space the token can reach, each space's purpose and schema, and every tool it can
+The client sees every space the token can reach, what each space is for, its schema, and every tool it can
 call. Clients that support OAuth can connect without a pasted token and ask you to approve them instead.
 
 Or call the same tools over HTTP:
@@ -119,7 +123,7 @@ curl -X POST http://localhost:3200/api/recall \
   -d '{"space": "general", "query": "what did we decide about auth?"}'
 ```
 
-> A **space** is an isolated store with its own records, files, schema and retention. Keep *work*, *home* and
+> A **space** is a separate store with its own records, files, schema and retention. Keep *work*, *home* and
 > *client-X* apart, or search several at once.
 
 <div align="center">
@@ -138,8 +142,8 @@ curl -X POST http://localhost:3200/api/recall \
 
 ## Sync networks
 
-Run one instance, or several that copy only the spaces you choose to each other. The table is who decides
-when a new instance wants to join.
+Run one instance, or several that copy only the spaces you choose to each other. The type of network decides
+who may join.
 
 <div align="center">
 
@@ -169,16 +173,14 @@ flowchart LR
 | **Braintree** | push-only, root → leaves | ancestor approves |
 | **Pub / Sub** | one publisher → many subscribers | auto-accept |
 
-Only what changed is sent, and each side can check that it holds exactly what the other holds (SHA-256
-manifests, Merkle verification). Every vote to let someone in is signed with that instance's own key
-(Ed25519), so nobody can fake another member's vote, even when it is passed along through others. Full spec: [Network Types](docs/network-types.md) ·
-[Sync Protocol](docs/sync-protocol.md).
+Only changes are sent, and each side can prove it holds the same data as the other (SHA-256 file manifests,
+Merkle verification). Every membership vote is signed with the voting instance's own Ed25519 key, so no member
+can fake another's vote, even when the vote is passed along through other members. Full spec:
+[Network Types](docs/network-types.md) · [Sync Protocol](docs/sync-protocol.md).
 
 ---
 
 ## 🔐 Under the hood
-
-For the security reviewer. Everyone else can skip this section.
 
 - **Auth** — personal access tokens (bcrypt-hashed, per-space scope, per-area rights, read-only mode, expiry) ·
   **OIDC/SSO** (Keycloak, Entra ID, Okta, Auth0…) · OAuth with dynamic client registration for MCP clients ·
