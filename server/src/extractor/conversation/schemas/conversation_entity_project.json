@@ -1,0 +1,11 @@
+{
+  "name": "conversation.project",
+  "knowledgeType": "entity",
+  "typeName": "project",
+  "schemaGroup": "conversation",
+  "published": true,
+  "description": "A bounded undertaking with an end in view. Its start, milestones and completion are chrono entries.",
+  "schema": {
+    "propertySchemas": {}
+  }
+}

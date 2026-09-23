@@ -1,0 +1,27 @@
+{
+  "name": "conversation.practices",
+  "knowledgeType": "edge",
+  "typeName": "practices",
+  "schemaGroup": "conversation",
+  "published": true,
+  "description": "Someone does this. How often, and how well, are claims.",
+  "schema": {
+    "endpoints": {
+      "from": [
+        "person"
+      ],
+      "to": [
+        "activity"
+      ]
+    },
+    "propertySchemas": {
+      "since": {
+        "type": "date"
+      },
+      "until": {
+        "type": "date"
+      }
+    },
+    "suppressEmbeddings": true
+  }
+}

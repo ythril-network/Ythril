@@ -1,0 +1,21 @@
+{
+  "name": "conversation.located_in",
+  "knowledgeType": "edge",
+  "typeName": "located_in",
+  "schemaGroup": "conversation",
+  "published": true,
+  "description": "Containment. The place-in-place chain is what lets one hop reach a fact filed under a narrower location.",
+  "schema": {
+    "endpoints": {
+      "from": [
+        "place",
+        "organization"
+      ],
+      "to": [
+        "place"
+      ]
+    },
+    "propertySchemas": {},
+    "suppressEmbeddings": true
+  }
+}

@@ -90,6 +90,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Internal
 
+- **The conversation extractor is decomposed before it is built** (`F-31`, first step). `ingest` will turn
+  a raw conversation into records inside the product, so an independent harness can reproduce what today
+  needs an assistant session. `server/src/extractor/conversation/DECOMPOSITION.md` traces every rule of the
+  extraction prompt to one of three treatments:
+  - code;
+  - a bounded Jev-style decision over a domain the code supplies (choice, score or probability);
+  - open-world writing.
+
+  Of 66 steps, 40 become code and 4 remain writing: even a mention is found by code and judged by the
+  model, never named by it, and every written claim is checked against its own source turns. The space must already hold the extractor's schema
+  group; `ingest` refuses before any model call otherwise, and never writes schema itself. The type and label choices draw from the schema, so an
+  invented type is impossible rather than forbidden. The schemas sit beside it one file per record type, the
+  way the `flows` space lays its own out. A gate recounts the tally from the tables and holds the split
+  schemas identical to the benchmark's until the benchmark reads them from here.
+
 - **`F-19` leaves the manual-verify exemption map.** Its exploration finished — no demand signal for a rules
   engine, and the cheap parts already exist — so it became an owner decision rather than open work, and a
   stale exemption fails `todo:check`. The map stays, empty, for the next item whose evidence cannot be a count.

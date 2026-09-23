@@ -1,0 +1,15 @@
+{
+  "name": "conversation.person",
+  "knowledgeType": "entity",
+  "typeName": "person",
+  "schemaGroup": "conversation",
+  "published": true,
+  "description": "Someone the conversation is about, including both speakers. The one type no corpus can do without: people are the only reliable coreference anchor and the subject of nearly every claim.",
+  "schema": {
+    "propertySchemas": {
+      "aliases": {
+        "type": "string"
+      }
+    }
+  }
+}

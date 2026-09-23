@@ -1,0 +1,27 @@
+{
+  "name": "conversation.organization",
+  "knowledgeType": "entity",
+  "typeName": "organization",
+  "schemaGroup": "conversation",
+  "published": true,
+  "description": "A named employer, school, club, team, course, non-profit, band or business. The standard second hop off a person, and how two people who never share a turn become connected.",
+  "schema": {
+    "propertySchemas": {
+      "kind": {
+        "type": "string",
+        "enum": [
+          "employer",
+          "school",
+          "club",
+          "team",
+          "nonprofit",
+          "business",
+          "course"
+        ]
+      },
+      "aliases": {
+        "type": "string"
+      }
+    }
+  }
+}

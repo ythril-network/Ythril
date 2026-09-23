@@ -1,0 +1,24 @@
+{
+  "name": "conversation.part_of",
+  "knowledgeType": "edge",
+  "typeName": "part_of",
+  "schemaGroup": "conversation",
+  "published": true,
+  "description": "Structural containment between non-place things.",
+  "schema": {
+    "endpoints": {
+      "from": [
+        "organization",
+        "project",
+        "work"
+      ],
+      "to": [
+        "organization",
+        "project",
+        "work"
+      ]
+    },
+    "propertySchemas": {},
+    "suppressEmbeddings": true
+  }
+}

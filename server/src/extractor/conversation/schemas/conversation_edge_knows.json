@@ -1,0 +1,39 @@
+{
+  "name": "conversation.knows",
+  "knowledgeType": "edge",
+  "typeName": "knows",
+  "schemaGroup": "conversation",
+  "published": true,
+  "description": "A non-kin social tie. A different question from kinship, so it must not share a label with it.",
+  "schema": {
+    "endpoints": {
+      "from": [
+        "person"
+      ],
+      "to": [
+        "person"
+      ]
+    },
+    "propertySchemas": {
+      "kind": {
+        "type": "string",
+        "enum": [
+          "friend",
+          "colleague",
+          "neighbour",
+          "partner",
+          "ex_partner",
+          "acquaintance",
+          "mentor"
+        ]
+      },
+      "since": {
+        "type": "date"
+      },
+      "until": {
+        "type": "date"
+      }
+    },
+    "suppressEmbeddings": true
+  }
+}
