@@ -99,7 +99,7 @@ describe('egress matrix ↔ code', () => {
     // Both refuse to run without a recorded acknowledgement, and a matrix that did not say so would
     // understate the two rows a reader most needs to stop on.
     const required = rows.filter(r => /required/i.test(r.ack)).map(r => r.key).sort();
-    assert.deepEqual(required, ['assist', 'faceExternal']);
+    assert.deepEqual(required, ['assist', 'decision', 'faceExternal']);
   });
 
   it('the guarded-endpoints bullet no longer enumerates a stale subset', () => {

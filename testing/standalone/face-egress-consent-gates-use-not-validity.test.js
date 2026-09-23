@@ -15,7 +15,7 @@
  * second. If the send-site check ever goes, the write-time gate is no longer there to catch it.
  *
  * It was already enforced there and always has been — `detectFacesExternal` returns null unless
- * `faceEndpointConsented` matches, and its own comment says why: *"a config edited on disk (bypassing the API)
+ * `egressConsented` matches, and its own comment says why: *"a config edited on disk (bypassing the API)
  * still cannot silently egress biometric data."* So the write-time refusal protected nothing the use-time one
  * does not. That is the finding, and it is what turned their principle from defensible into obvious.
  *
@@ -35,33 +35,36 @@ import { blockAfter, statementFrom } from './_structural-window.mjs';
 
 const strip = (t) => t.replace(/^\s*\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
 const API = strip(readFileSync('server/src/api/media-config.ts', 'utf8'));
+// The refusal helper itself moved to the shared consent module (F-31), where the decision slot reuses it.
+const HELPER = strip(readFileSync('server/src/config/egress-consent.ts', 'utf8'));
 const EXT = strip(readFileSync('server/src/files/media/face-external.ts', 'utf8'));
 
-let faceEndpointConsented, detectFacesExternal;
+let egressConsented, detectFacesExternal;
 before(async () => {
-  ({ faceEndpointConsented, detectFacesExternal } =
-    await import('../../server/dist/files/media/face-external.js'));
+  ({ detectFacesExternal } = await import('../../server/dist/files/media/face-external.js'));
+  // The rule is shared by every egressing slot since F-31 (`config/egress-consent.ts`); the face model is one.
+  ({ egressConsented } = await import('../../server/dist/config/egress-consent.js'));
 });
 
 describe('THE PROPERTY: no crop is sent to an unacknowledged host', () => {
   it('consent requires the acknowledged host to MATCH the host it would send to', () => {
     // Exercised, not read. An acknowledgement for a different host is the interesting case: it is what an
     // operator produces by acknowledging once and then repointing the endpoint.
-    assert.equal(faceEndpointConsented({ baseUrl: 'https://faces.example.com/embed', acknowledgedHost: 'faces.example.com' }), true);
-    assert.equal(faceEndpointConsented({ baseUrl: 'https://faces.example.com/embed', acknowledgedHost: 'other.example.com' }), false,
+    assert.equal(egressConsented({ baseUrl: 'https://faces.example.com/embed', acknowledgedHost: 'faces.example.com' }), true);
+    assert.equal(egressConsented({ baseUrl: 'https://faces.example.com/embed', acknowledgedHost: 'other.example.com' }), false,
       'an acknowledgement for another host must not carry over when the endpoint is repointed');
-    assert.equal(faceEndpointConsented({ baseUrl: 'https://faces.example.com/embed' }), false,
+    assert.equal(egressConsented({ baseUrl: 'https://faces.example.com/embed' }), false,
       'no acknowledgement at all is not consent');
-    assert.equal(faceEndpointConsented({ acknowledgedHost: 'faces.example.com' }), false,
+    assert.equal(egressConsented({ acknowledgedHost: 'faces.example.com' }), false,
       'an acknowledgement with no endpoint is not a usable endpoint');
-    assert.equal(faceEndpointConsented(undefined), false);
+    assert.equal(egressConsented(undefined), false);
   });
 
   it('a port is part of the host, so acknowledging the bare name is not consent', () => {
     // Their own first mistake, and the error message is what corrected them: they wrote the acknowledgement as
     // a bare host copying the assist model's shape. The rule must stay strict about it.
-    assert.equal(faceEndpointConsented({ baseUrl: 'http://face-embed.svc:3120/embed', acknowledgedHost: 'face-embed.svc' }), false);
-    assert.equal(faceEndpointConsented({ baseUrl: 'http://face-embed.svc:3120/embed', acknowledgedHost: 'face-embed.svc:3120' }), true);
+    assert.equal(egressConsented({ baseUrl: 'http://face-embed.svc:3120/embed', acknowledgedHost: 'face-embed.svc' }), false);
+    assert.equal(egressConsented({ baseUrl: 'http://face-embed.svc:3120/embed', acknowledgedHost: 'face-embed.svc:3120' }), true);
   });
 
   it('the SEND SITE refuses before it does anything else', () => {
@@ -90,7 +93,7 @@ describe('THE PROPERTY: no crop is sent to an unacknowledged host', () => {
     // the consent read goes through `getConfig()`. That is not a defect — the media worker runs long after
     // boot — but the test was asserting something untrue, so it says what it can prove instead.
     //
-    // The behaviour that matters is exercised above through `faceEndpointConsented`, which is the rule; this
+    // The behaviour that matters is exercised above through `egressConsented`, which is the rule; this
     // pins that the function REPORTS a refusal rather than raising one, because a throw here would take the
     // media job down instead of letting it fall back in-process.
     const at = EXT.indexOf('export async function detectFacesExternal');
@@ -107,7 +110,7 @@ describe('the ROUTE gates on the patch, not on the stored state', () => {
     // rather than about the request.
     assert.match(API, /facePatch !== undefined \|\| facesRunAt\(patchedImageLevel\)/,
       'the face consent block no longer gates on the patch — an unrelated write can be refused again');
-    assert.match(API, /needsAcknowledgment: host/,
+    assert.match(HELPER, /needsAcknowledgment: host/,
       'it must still name the host, which is the affordance a client acts on');
     assert.match(API, /face crops \(biometric data\)/,
       'and still say WHY in plain language — they asked for that not to be weakened');
@@ -207,7 +210,7 @@ describe('the ROUTE gates on the patch, not on the stored state', () => {
     // Either half alone is a shipped bug, and both have now happened: reachable-without-caused refused every
     // unrelated write, and caused-without-reachable made setting up an endpoint impossible. The conjunction is
     // the rule, so it is asserted as one expression rather than as two facts about the file.
-    assert.match(API, /if \(!reachableAfterThisPatch \|\| !causedByThisPatch \|\| !effBaseUrl\) return null;/,
+    assert.match(HELPER, /if \(!reachableAfterThisPatch \|\| !causedByThisPatch \|\| !effBaseUrl\) return null;/,
       'the helper must require reachability AND causation; either alone has already shipped as a defect');
   });
 
@@ -241,7 +244,7 @@ describe('the ROUTE gates on the patch, not on the stored state', () => {
     const at = API.indexOf("masked['faceEndpointAwaitingAcknowledgment']");
     assert.ok(at > -1, 're-anchor this gate');
     const stmt = statementFrom(API, at, 'the awaiting-acknowledgment derivation');
-    assert.match(stmt, /faceEndpointConsented/,
+    assert.match(stmt, /egressConsented/,
       'derived from the shared rule, not from a second comparison that could disagree with it');
     assert.match(stmt, /baseUrl/,
       'and only when an endpoint is actually configured — an empty slot is not awaiting anything');
@@ -250,7 +253,7 @@ describe('the ROUTE gates on the patch, not on the stored state', () => {
   it('the route and the send site read ONE consent rule', () => {
     // Two implementations of "is this endpoint consented to" is the defect this codebase produces most, and on
     // this rule the weaker one would mean biometric data on the wire.
-    assert.match(API, /faceEndpointConsented/, 'the route must import the shared predicate');
+    assert.match(API, /egressConsented/, 'the route must import the shared predicate');
     assert.doesNotMatch(API, /acknowledgedHost === new URL/,
       'a second copy of the comparison in the route is how the two drift');
   });

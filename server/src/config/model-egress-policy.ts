@@ -69,6 +69,7 @@ export const SLOT_ENV_VARS = {
   docRepair: 'YTHRIL_ALLOW_PRIVATE_DOC_REPAIR',
   docVerify: 'YTHRIL_ALLOW_PRIVATE_DOC_VERIFY',
   faceExternal: 'YTHRIL_ALLOW_PRIVATE_FACE_EXTERNAL',
+  decision: 'YTHRIL_ALLOW_PRIVATE_DECISION',
 } as const satisfies Record<EgressSlot, string>;
 
 /** The env var pinning one slot's permission. */

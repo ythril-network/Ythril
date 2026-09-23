@@ -526,6 +526,7 @@ see the egress table above. You can optionally point a **bigger, external model*
 > | `docVerify` | Document verify pass | `YTHRIL_ALLOW_PRIVATE_DOC_VERIFY` |
 > | `assist` | External assist model (F11-b) | `YTHRIL_ALLOW_PRIVATE_ASSIST` |
 > | `faceExternal` | External face recogniser | `YTHRIL_ALLOW_PRIVATE_FACE_EXTERNAL` |
+> | `decision` | The extractors' decision model (`F-31`) | `YTHRIL_ALLOW_PRIVATE_DECISION` |
 >
 > The env vars accept `true` **or** `false` — unlike the instance-wide one, a `false` here is meaningful,
 > because it is how you pin one endpoint strict from the Deployment. Anything other than those two exact

@@ -78,6 +78,15 @@ export interface DocAssistCfg {
   baseUrl?: string; model?: string; apiKey?: string; uses?: DocAssistUse[]; acknowledgedHost?: string;
 }
 
+/**
+ * `F-31` — the extractors' decision model, as the Models tab edits it. The server's GET also carries `locked`
+ * and `inUse`; those are facts about the stored config and are read into the state service's flags, never
+ * kept here, because this block is what gets sent back and the PATCH is `.strict()`.
+ */
+export interface DecisionModelCfg {
+  baseUrl?: string; model?: string; acknowledgedHost?: string; apiKey?: string;
+}
+
 export interface DocProcCfg {
   mode?: DocMode;
   renderDpi?: number; maxPages?: number; pageTimeoutMs?: number; concurrency?: number; ocrTimeoutMs?: number;
@@ -177,6 +186,8 @@ export const CARD_SLOT: Record<string, { slot: string; effort: boolean }> = {
   'doc-vlm': { slot: 'docVlm', effort: true },
   'doc-repair': { slot: 'docRepair', effort: true },
   'doc-verify': { slot: 'docVerify', effort: true },
+  // No reasoning effort: a System One endpoint takes no such field, and the assist fallback has its own card.
+  decision: { slot: 'decision', effort: false },
 };
 
 /**
@@ -187,6 +198,7 @@ export const CARD_SLOT: Record<string, { slot: string; effort: boolean }> = {
 export const SLOT_DEFAULT_MS: Record<string, number> = {
   vision: 120_000, stt: 300_000, embedding: 30_000, rerank: 20_000, nli: 20_000,
   assist: 60_000, docVlm: 60_000, docRepair: 60_000, docVerify: 60_000, faceExternal: 30_000,
+  decision: 60_000,
 };
 
 export interface MediaCfg {
@@ -202,6 +214,7 @@ export interface MediaCfg {
   nli?: NliCfg;
   documentProcessing?: DocProcCfg;
   modelSlots?: Record<string, SlotTuningCfg | undefined>;
+  decisionModel?: DecisionModelCfg;
   workerConcurrency?: number;
   fallbackToExternal?: boolean;
   maxFileSizeBytes?: number;

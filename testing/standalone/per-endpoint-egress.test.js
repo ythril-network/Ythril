@@ -85,7 +85,7 @@ describe('per-endpoint egress permission', () => {
       // document stages build their keys as `doc-${slot}` and no literal exists to grep for. A set that is
       // silently short reports "nothing else is exposed" by omission.
       assert.deepEqual([...EGRESS_SLOTS].sort(), [
-        'assist', 'docRepair', 'docVerify', 'docVlm', 'embedding',
+        'assist', 'decision', 'docRepair', 'docVerify', 'docVlm', 'embedding',
         'faceExternal', 'nli', 'rerank', 'stt', 'vision',
       ]);
     });

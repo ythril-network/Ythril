@@ -19,7 +19,7 @@ import { StatusVariant } from '../../../shared/status-pill.component';
 import {
   MediaCfg, MediaClass, DocProcCfg, DocAssistCfg, DocMode, EmbeddingCfg,
   TestResult, TestTarget, VerifyResult, VerifyTarget, FaceRecognitionCfg, MODE_STAGES, FaceExternalCfg, RerankCfg, NliCfg,
-  CARD_SLOT, type SlotTuningCfg,
+  CARD_SLOT, type SlotTuningCfg, type DecisionModelCfg,
 } from './media-processing.types';
 
 /**
@@ -35,9 +35,9 @@ import {
  */
 export type ModelCardId =
   | 'embedding' | 'rerank' | 'nli' | 'vision' | 'stt' | 'assist' | 'face'
-  | 'doc-vlm' | 'doc-repair' | 'doc-verify';
+  | 'doc-vlm' | 'doc-repair' | 'doc-verify' | 'decision';
 export const MODEL_CARDS: readonly ModelCardId[] =
-  ['embedding', 'rerank', 'nli', 'vision', 'stt', 'assist', 'face', 'doc-vlm', 'doc-repair', 'doc-verify'];
+  ['embedding', 'rerank', 'nli', 'vision', 'stt', 'assist', 'face', 'doc-vlm', 'doc-repair', 'doc-verify', 'decision'];
 
 /**
  * One pipeline on the Pipelines tab.
@@ -91,6 +91,7 @@ export class MediaProcessingStateService {
   visionApiKeyInput = '';
   sttApiKeyInput = '';
   assistApiKeyInput = '';
+  decisionApiKeyInput = '';
   embeddingApiKeyInput = '';
 
   /** Serialized model|dimensions|similarity at load — changing any of these re-indexes every vector. */
@@ -159,6 +160,32 @@ export class MediaProcessingStateService {
    */
   faceAwaitingAcknowledgment(): boolean {
     return this.serverFlags['faceEndpointAwaitingAcknowledgment'] === true;
+  }
+
+  // ── F-31: the extractors' decision model ──
+  /** Live handle to the editable block. Holds only what the PATCH accepts — see `DecisionModelCfg`. */
+  get decision(): DecisionModelCfg { return (this.form.decisionModel ??= {}); }
+  /** Pinned by `YTHRIL_PINNED_FIELDS=decisionModel`, or by a `DECISION_*` env var — both reported by the server. */
+  decisionLocked(): boolean { return this.isLocked('decisionModel') || this.serverFlags['decisionLocked'] === true; }
+  decisionKeySet(): boolean { return this.serverFlags['decisionKeySet'] === true; }
+  decisionHost(): string { try { return this.decision.baseUrl ? new URL(this.decision.baseUrl).host : ''; } catch { return ''; } }
+  /** In use once its host is consented to. There is no rung to sit behind, so consent is the whole switch. */
+  decisionInUse(): boolean { return !!this.decisionHost() && this.decision.acknowledgedHost === this.decisionHost(); }
+  /**
+   * Is a save of this card about to set up an endpoint nobody has consented to? The endpoint is sent only
+   * when something about it changed (see `cardBlock`), so a card saved for its budget alone asks nothing.
+   */
+  decisionNeedsAck(): boolean {
+    return this.decisionEndpointChanged() && !!this.decisionHost() && !this.decisionInUse();
+  }
+  /** The endpoint fields as loaded, to tell a budget-only save from an endpoint change. */
+  private decisionLoaded = '';
+  private decisionEndpoint(): DecisionModelCfg {
+    const d = this.decision;
+    return { baseUrl: d.baseUrl || undefined, model: d.model || undefined, acknowledgedHost: d.acknowledgedHost };
+  }
+  private decisionEndpointChanged(): boolean {
+    return !!this.decisionApiKeyInput || JSON.stringify(this.decisionEndpoint()) !== this.decisionLoaded;
   }
 
   /**
@@ -375,15 +402,22 @@ export class MediaProcessingStateService {
          * break in the first place — a server-owned field sitting in the editable object is one echo away
          * from a 400.
          */
+        // The decision block's server-owned fields go to the flags, and only its editable ones to `form`.
+        const { locked: decisionLocked, inUse: _inUse, apiKey: decisionKey, ...decisionModel } =
+          ((cfg as Record<string, unknown>)['decisionModel'] ?? {}) as DecisionModelCfg & { locked?: boolean; inUse?: boolean };
         this.serverFlags = {
           faceEndpointAwaitingAcknowledgment:
             (cfg as Record<string, unknown>)['faceEndpointAwaitingAcknowledgment'] === true,
+          decisionLocked: decisionLocked === true,
+          decisionKeySet: !!decisionKey,
         };
         const dp: DocProcCfg = { mode: 'auto', renderDpi: 150, maxPages: 50, pageTimeoutMs: 60000, concurrency: 2, ocrTimeoutMs: 120000, ...cfg.documentProcessing };
         // F11-b — the masked apiKey stays
         // only so the UI can show "key set" — it is never sent back (assistApiKeyInput carries changes).
         dp.assistModel = { ...cfg.documentProcessing?.assistModel };
-        this.form = { vision: {}, stt: {}, ...cfg, documentProcessing: dp };
+        this.form = { vision: {}, stt: {}, ...cfg, documentProcessing: dp, decisionModel };
+        this.decisionLoaded = JSON.stringify(this.decisionEndpoint());
+        this.decisionApiKeyInput = '';
         this.form.vision = { ...cfg.vision, apiKey: undefined };
         this.form.stt = { ...cfg.stt, apiKey: undefined };
         this.form.embedding = { provider: 'local', ...cfg.embedding };
@@ -464,6 +498,10 @@ export class MediaProcessingStateService {
       case 'doc-repair':
       case 'doc-verify':
         return withSlot({});
+      // The endpoint only when it changed: it is reachable the moment it is set, so sending it unchanged
+      // would have a budget-only save ask for consent to a transfer the operator did not touch.
+      case 'decision':
+        return withSlot(this.decisionEndpointChanged() ? { decisionModel: this.decisionEndpoint() } : {});
     }
   }
 
@@ -629,6 +667,7 @@ export class MediaProcessingStateService {
       : card === 'face' ? this.faceApiKeyInput
       : card === 'rerank' ? this.rerankApiKeyInput
       : card === 'nli' ? this.nliApiKeyInput
+      : card === 'decision' ? this.decisionApiKeyInput
       : '';
   }
 
@@ -659,7 +698,7 @@ export class MediaProcessingStateService {
    */
   isDirty(): boolean {
     if (this.managed || this.loading()) return false;
-    if (this.visionApiKeyInput || this.sttApiKeyInput || this.assistApiKeyInput || this.embeddingApiKeyInput || this.faceApiKeyInput || this.rerankApiKeyInput) return true;
+    if (this.visionApiKeyInput || this.sttApiKeyInput || this.assistApiKeyInput || this.embeddingApiKeyInput || this.faceApiKeyInput || this.rerankApiKeyInput || this.decisionApiKeyInput) return true;
     if (!this.touched()) return false;
     // Derived from the sections rather than one whole-config snapshot, so that saving one card leaves the
     // guard still warning about the others. A single snapshot would have gone clean for all of them.
@@ -840,6 +879,18 @@ export class MediaProcessingStateService {
       if (!ok) return;
       this.faceExternal.acknowledgedHost = host;
     }
+    if (card === 'decision' && !this.decisionLocked() && this.decisionNeedsAck()) {
+      const host = this.decisionHost();
+      const ok = await this.confirmDialog.confirm({
+        title: this.transloco.translate('mediaProcessing.confirm.decisionEgressTitle'),
+        message: this.transloco.translate('mediaProcessing.confirm.decisionEgressMessage', { host }),
+        confirmLabel: this.transloco.translate('mediaProcessing.confirm.egressConfirm'),
+        cancelLabel: this.transloco.translate('common.cancel'),
+        danger: true,
+      });
+      if (!ok) return;
+      this.decision.acknowledgedHost = host;
+    }
     if (card === 'embedding' && this.embeddingNeedsReindex()) {
       const ok = await this.confirmDialog.confirm({
         title: this.transloco.translate('mediaProcessing.confirm.reindexTitle'),
@@ -871,6 +922,7 @@ export class MediaProcessingStateService {
       else if (card === 'face') {
         block.faceRecognition = { ...block.faceRecognition, externalModel: { ...block.faceRecognition?.externalModel, apiKey: key } };
       }
+      else if (card === 'decision') block.decisionModel = { ...this.decisionEndpoint(), apiKey: key };
     }
 
     const body = JSON.parse(JSON.stringify(block)) as MediaCfg;
@@ -884,6 +936,11 @@ export class MediaProcessingStateService {
         else if (card === 'rerank') { this.rerankApiKeyInput = ''; }
         else if (card === 'nli') { this.nliApiKeyInput = ''; }
         if (card === 'face') { this.faceApiKeyInput = ''; }
+        if (card === 'decision') {
+          if (key) this.serverFlags['decisionKeySet'] = true;
+          this.decisionApiKeyInput = '';
+          this.decisionLoaded = JSON.stringify(this.decisionEndpoint());
+        }
         this.rebaseline([card]);
         this.saving.set(false);
         setTimeout(() => this.saveOk.set(''), 3000);

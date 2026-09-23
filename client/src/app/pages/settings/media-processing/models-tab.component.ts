@@ -17,6 +17,7 @@ import { PhIconComponent } from '../../../shared/ph-icon.component';
 import { StatusPillComponent } from '../../../shared/status-pill.component';
 import { ModelProviderCardComponent } from './model-provider-card.component';
 import { CardSaveComponent } from './card-save.component';
+import { DecisionModelCardComponent } from './decision-model-card.component';
 import { MediaProcessingStateService } from './media-processing-state.service';
 import { PipelineStatusService } from './pipeline-status.service';
 import { SchemaApi } from '../../../core/schema-api.service';
@@ -26,8 +27,7 @@ import { TestTarget } from './media-processing.types';
   selector: 'app-models-tab',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule, TranslocoPipe, PhIconComponent, StatusPillComponent, ModelProviderCardComponent,
-    CardSaveComponent],
+  imports: [FormsModule, TranslocoPipe, PhIconComponent, StatusPillComponent, ModelProviderCardComponent, CardSaveComponent, DecisionModelCardComponent],
   styles: [`
     :host { display: block; }
     /* align-items: stretch is what pins every footer to a shared baseline (owner's point 4). */
@@ -475,6 +475,7 @@ import { TestTarget } from './media-processing.types';
           <app-card-save card="assist"/>
         </div>
       </app-model-provider-card>
+      <app-decision-model-card/>
 
       <!-- ── Document VLM / repair / verify (env-only) ──────────────────── -->
       <!-- These had NO cards. A customer's ticket enumerated nine model endpoints from this screen and

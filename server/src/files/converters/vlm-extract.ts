@@ -13,6 +13,7 @@
  * (with ssrfSafeFetch) are later phases.
  */
 import { log } from '../../util/log.js';
+import { egressConsented } from '../../config/egress-consent.js';
 import { getDocumentProcessingConfig, getMediaEmbeddingConfig, getDocAssistApiKey } from '../../config/loader.js';
 import type { DocExtractionMode } from '../../config/types.js';
 import { UnstructuredConverter, type UnstructuredResult } from './unstructured.js';
@@ -229,7 +230,7 @@ export async function vlmExtractDocument(
       const assist = cfg.assistModel;
       let useExternal = false;
       if (assist?.baseUrl && assist.model) {
-        try { useExternal = assist.acknowledgedHost === new URL(assist.baseUrl).host; } catch { useExternal = false; }
+        useExternal = egressConsented(assist);
         if (!useExternal) log.warn('VLM extract: an external assist model is configured but its egress host is not acknowledged — using local repair');
       }
       const repairModel = useExternal ? assist!.model! : (cfg.repairModel || cfg.vlmModel);

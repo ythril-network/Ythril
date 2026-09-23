@@ -49,7 +49,7 @@ agree:
 4. **`docs/userguide/` — the page an operator would actually open for this capability.** Six pages, and which one it is
    follows the surface the operator uses: a search parameter is `02-brain.md` → Brain → Query → Semantic Search, a
    token control is
-   `04-settings.md`, retention and audit are `05-storage-data-and-audit.md`. Do not read this row as "the Brain page" —
+   `04-settings.md`, a model or media control `04a-media-and-embedding.md`, retention and audit are `05-storage-data-and-audit.md`. Do not read this row as "the Brain page" —
    that is only where it was learned, and a capability documented on the wrong page is the failure it prevents. A
    parameter that exists on both APIs and is absent from the operator's page is a capability nobody using the UI knows
    about; a control described there that no longer matches the API is worse

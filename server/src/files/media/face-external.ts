@@ -4,6 +4,7 @@ import { boundedJson } from '../../util/bounded-read.js';
 import { getConfig, getSecrets } from '../../config/loader.js';
 import { allowPrivateForSlot } from '../../config/model-egress-policy.js';
 import { log } from '../../util/log.js';
+import { egressConsented } from '../../config/egress-consent.js';
 import { slotTimeoutMs } from '../../config/model-slots.js';
 import { getModelSlots } from '../../config/loader.js';
 
@@ -27,26 +28,9 @@ export const FACE_TIMEOUT_MS = 30_000;
 /** A single image cannot legitimately contain more than this; caps a hostile or broken provider. */
 const MAX_FACES = 64;
 
-/**
- * Is the external face model configured AND consented to?
- *
- * Both halves are required. The endpoint is only usable once `acknowledgedHost` matches the host it
- * would send to — the same rule `media-config.ts` enforces on write. Checking it again here means a
- * config edited on disk (bypassing the API) still cannot silently egress biometric data.
- */
-export function faceEndpointConsented(ext?: { baseUrl?: string; acknowledgedHost?: string }): boolean {
-  const baseUrl = ext?.baseUrl?.trim();
-  if (!baseUrl) return false;
-  try {
-    return ext?.acknowledgedHost === new URL(baseUrl).host;
-  } catch {
-    return false;
-  }
-}
-
-/** `faceEndpointConsented` against the live config. Split so the rule itself is testable without it. */
+/** Is the external face model configured AND consented to — see `egressConsented` for why it is re-checked here. */
 export function externalFaceReady(): boolean {
-  return faceEndpointConsented(getConfig().mediaEmbedding?.faceRecognition?.externalModel);
+  return egressConsented(getConfig().mediaEmbedding?.faceRecognition?.externalModel);
 }
 
 /**

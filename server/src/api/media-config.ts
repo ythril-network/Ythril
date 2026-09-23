@@ -42,7 +42,10 @@ function bounded(path: keyof typeof DUAL_DOOR_BOUNDS) {
   return z.number().int().min(b.min).max(b.max).optional();
 }
 import { mergeEmbeddingPatch } from '../config/embedding-patch.js';
-import { faceEndpointConsented } from '../files/media/face-external.js';
+import { egressConsented, refuseUnacknowledgedEgress } from '../config/egress-consent.js';
+import { DecisionModelPatchSchema, refuseDecisionModelPatch, applyDecisionModelPatch, decisionModelView } from '../config/decision-model.js';
+// Re-exported: its unit tests import it from here, where its two callers are.
+export { refuseUnacknowledgedEgress };
 
 export const mediaConfigRouter = Router();
 
@@ -79,7 +82,7 @@ mediaConfigRouter.get('/', requireAdmin, (req, res) => {
    */
   masked['faceEndpointAwaitingAcknowledgment'] =
     !!cfg.faceRecognition?.externalModel?.baseUrl?.trim()
-    && !faceEndpointConsented(cfg.faceRecognition?.externalModel);
+    && !egressConsented(cfg.faceRecognition?.externalModel);
   // Text embedding lives at top-level config.embedding but is surfaced here so it's on the Models page.
   const emb = getEmbeddingConfig();
   masked['embedding'] = { ...emb, apiKey: emb.apiKey ? '••••••••' : undefined };
@@ -98,6 +101,7 @@ mediaConfigRouter.get('/', requireAdmin, (req, res) => {
    * schema, so the next top-level block cannot be added to one door alone.
    */
   masked['modelSlots'] = getModelSlots();
+  masked['decisionModel'] = decisionModelView();
   res.json(masked);
 });
 
@@ -270,6 +274,7 @@ const ModelSlotsPatchSchema = z.object({
   docRepair: SlotTuningPatchSchema.optional(),
   docVerify: SlotTuningPatchSchema.optional(),
   faceExternal: SlotTuningPatchSchema.optional(),
+  decision: SlotTuningPatchSchema.optional(),
 }).strict() satisfies z.ZodType<Partial<Record<ModelSlot, unknown>>>;
 
 /**
@@ -327,6 +332,7 @@ const MediaConfigPatchSchema = z.object({
   embedding: EmbeddingPatchSchema.optional(),
   rerank: RerankPatchSchema.optional(),
   modelSlots: ModelSlotsPatchSchema.optional(),
+  decisionModel: DecisionModelPatchSchema.optional(),
   nli: NliPatchSchema.optional(),
   documentProcessing: DocumentProcessingPatchSchema.optional(),
   workerConcurrency: bounded('mediaEmbedding.workerConcurrency'),
@@ -527,7 +533,7 @@ mediaConfigRouter.patch('/', requireAdminMfa, (req, res) => {
    * Their words: *"the acknowledgement should gate USE of the endpoint, not VALIDITY of the config."*
    *
    * **The USE side already enforces it, independently, and by design.** `detectFacesExternal` returns null
-   * unless `faceEndpointConsented` matches `acknowledgedHost` against the host it would send to, and that
+   * unless `egressConsented` matches `acknowledgedHost` against the host it would send to, and that
    * function's own comment says why it is checked there as well: *"a config edited on disk (bypassing the API)
    * still cannot silently egress biometric data."* So the guarantee that matters — no crop leaves without
    * consent — never depended on this write-time refusal. Refusing the write protected nothing that refusing
@@ -632,6 +638,10 @@ mediaConfigRouter.patch('/', requireAdminMfa, (req, res) => {
     });
     if (refusal) { res.status(refusal.status).json(refusal.body); return; }
   }
+
+  // F-31 — the extractors' decision model: env lock, SSRF, egress consent (config/decision-model.ts).
+  const decisionRefusal = refuseDecisionModelPatch(parsed.data.decisionModel);
+  if (decisionRefusal) { res.status(decisionRefusal.status).json(decisionRefusal.body); return; }
 
   try {
     // ── Split sensitive fields into secrets.json ─────────────────────────────
@@ -782,6 +792,9 @@ mediaConfigRouter.patch('/', requireAdminMfa, (req, res) => {
     // `embedding` and the document slots.
     delete merged['modelSlots'];
     if (parsed.data.modelSlots) cfg.modelSlots = mergeModelSlots(cfg.modelSlots, parsed.data.modelSlots);
+    // Top-level too, and its key goes to secrets.json inside the helper — never into config.json.
+    delete merged['decisionModel'];
+    applyDecisionModelPatch(cfg, parsed.data.decisionModel);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     cfg.mediaEmbedding = merged as any;
     saveConfig(cfg);
@@ -789,6 +802,7 @@ mediaConfigRouter.patch('/', requireAdminMfa, (req, res) => {
     const respBody = maskSecrets(getMediaEmbeddingConfig()) as Record<string, unknown>;
     const emb = getEmbeddingConfig();
     respBody['embedding'] = { ...emb, apiKey: emb.apiKey ? '••••••••' : undefined };
+    respBody['decisionModel'] = decisionModelView();
     res.json({ ok: true, config: respBody });
   } catch (err) {
     log.warn(`Failed to save media config: ${err}`);
@@ -893,111 +907,6 @@ mediaConfigRouter.post('/test-connection', requireAdminMfa, async (req, res) => 
  *
  * Exported for unit testing.
  */
-/**
- * Does THIS PATCH activate an external endpoint that has not been consented to?
- *
- * ## One rule for two endpoints, because they had two copies of it and one bug each
- *
- * Face crops (biometric) and document content (OCR text and page images) are the two things that leave the
- * instance, and each had its own inline consent gate. Both keyed the refusal on the STORED STATE:
- *
- *     face:    if (effBaseUrl)                       an endpoint is configured
- *     assist:  if (repairReachable && effBaseUrl)     ...and the rung that uses it is reachable
- *
- * So once either endpoint was stored without an acknowledgement, **every subsequent patch to this route was
- * refused, whatever it touched.** The canary operator's owner met the face one raising an image level, which has
- * nothing to do with face egress, and described the resulting flow as *"not even i understand it"* — having
- * built the service on the other end of it.
- *
- * ## Their principle, and the reason it is safe
- *
- * *"The acknowledgement should gate USE of the endpoint, not VALIDITY of the config."*
- *
- * The USE side already enforces it and always has. `detectFacesExternal` returns null unless
- * `faceEndpointConsented` matches the host it would send to, and that function's comment says why it is
- * checked there as well: *"a config edited on disk (bypassing the API) still cannot silently egress biometric
- * data."* Refusing the WRITE protected nothing that refusing the USE does not — and the collateral was an
- * optional endpoint bricking a settings page.
- *
- * ## But "gate the use" is not the whole answer, and the assist model's own comment is why
- *
- * It reads: *"the trigger is the PIPELINE RUNG, not a separate tick... consent is demanded exactly when repair
- * becomes reachable — whether that happened by configuring the endpoint or by raising the extraction mode in
- * the same or an earlier save."* The words "or an earlier save" are the defect; the rest is the right idea.
- *
- * Consent is owed at ACTIVATION, which is TWO conditions and not one. The first draft of this fix collapsed
- * them and CI caught it — a test whose name is the contract: *"configuring the endpoint BELOW the repair rung
- * is allowed (not reachable yet) and round-trips"*. Setting up an endpoint while the rung that uses it is off
- * has always been permitted, deliberately: nothing can be sent at that rung, so there is nothing to consent to
- * yet. Demanding it there asks the operator to consent to a transfer that cannot happen.
- *
- * So both halves are required:
- *
- *   REACHABLE AFTER THIS PATCH   the endpoint is set AND the rung that uses it is on. Read from the EFFECTIVE
- *                                state — patch ?? stored — because reachability is a fact about the config
- *                                that results, not about who caused it.
- *   CAUSED BY THIS PATCH         this request touched the endpoint, or raised the rung. Read from the REQUEST
- *                                only, because a rung raised in an earlier save is not this caller's act.
- *
- * The old gate had the first and not the second, so one stored endpoint refused every later write. The first
- * draft of the fix had the second and not the first, so setting up an endpoint became impossible without
- * consenting to a transfer that could not occur. Both are needed and they answer different questions.
- *
- * That is also the owner's ruling of 2026-08-20 (P-12, A + C): consent is accepted — and therefore demanded —
- * from the PIPELINE entry point as well as from the endpoint's own control, because raising an image level to
- * its recognition rung is equally an act of switching faces on.
- *
- * ## What is deliberately NOT relaxed
- *
- * A patch that activates an unacknowledged endpoint is still refused, with the host named and the reason in
- * plain language. They asked us not to weaken that and were right to: it caught a real mistake of theirs
- * within minutes, when they had written the acknowledgement as a bare host without its port.
- *
- * Exported for unit testing — this rule is the reason the function exists.
- */
-export function refuseUnacknowledgedEgress(input: {
-  /** Names the slot in the refusal, e.g. `external face model`. */
-  what: string;
-  /** What leaves the instance, in words an operator recognises. */
-  sends: string;
-  /** The endpoint after this patch: `patch.baseUrl ?? stored.baseUrl`. */
-  effBaseUrl: string | undefined;
-  /** The acknowledgement after this patch. */
-  effAck: string | undefined;
-  /**
-   * Is the endpoint REACHABLE after this patch — set, and behind a rung that is on?
-   *
-   * From the EFFECTIVE state (patch ?? stored). An endpoint configured below its rung is not reachable and
-   * needs no consent yet, which is a deliberate behaviour with a test named after it.
-   */
-  reachableAfterThisPatch: boolean;
-  /**
-   * Did THIS REQUEST cause it — by touching the endpoint, or by raising the rung?
-   *
-   * From the request only. A rung raised in an earlier save is not this caller's act, and asking them to
-   * consent to it is what made one stored endpoint refuse every unrelated write.
-   */
-  causedByThisPatch: boolean;
-}): { status: 400; body: { error: string; needsAcknowledgment: string } } | { status: 400; body: { error: string } } | null {
-  const { what, sends, effBaseUrl, effAck, reachableAfterThisPatch, causedByThisPatch } = input;
-  // BOTH, and the `&&` is the whole rule: reachable but not caused by this caller is somebody else's decision;
-  // caused but not reachable is a transfer that cannot happen yet.
-  if (!reachableAfterThisPatch || !causedByThisPatch || !effBaseUrl) return null;
-  let host: string;
-  try { host = new URL(effBaseUrl).host; } catch {
-    return { status: 400, body: { error: `${what} baseUrl is not a valid URL` } };
-  }
-  // Host INCLUDING port, deliberately: `face-embed.svc` and `face-embed.svc:3120` are different destinations,
-  // and accepting the bare name would let an acknowledgement cover an endpoint nobody consented to.
-  if (effAck === host) return null;
-  return {
-    status: 400,
-    body: {
-      error: `Egress to ${host} must be acknowledged before the ${what} can be used: ${sends} would be sent there.`,
-      needsAcknowledgment: host,
-    },
-  };
-}
 
 export function blockedByInfra(patch: Record<string, unknown>, locked: Set<string>): string[] {
   const blocked = Object.keys(patch).filter(k => locked.has(k));

@@ -438,6 +438,7 @@ broken, and nothing compared the two.
 | Document verify | `docVerify` | `DOC_VERIFY_URL`, `DOC_VERIFY_MODEL` | draft transcription + OCR text | yes, unless it is the bundled model | — |
 | Assist model | `assist` | `DOC_ASSIST_URL` | draft transcription + OCR text | yes, always | **required** |
 | External face model | `faceExternal` | `FACE_RECOGNITION_EXTERNAL_MODEL` | **face crops (biometric data)** | yes, always | **required** |
+| Decision model (extractors) | `decision` | `DECISION_URL`, `DECISION_MODEL`, `DECISION_API_KEY` | **conversation text** and the questions asked about it | yes, always | **required** |
 
 Six things worth reading twice:
 

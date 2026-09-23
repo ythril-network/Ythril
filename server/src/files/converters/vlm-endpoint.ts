@@ -104,6 +104,15 @@ export function listUrlFor(wire: VlmWire, baseUrl: string): string {
     : `${normalizeOpenAiBase(baseUrl)}/models`;
 }
 
+/**
+ * Where a System One evaluation is POSTed (`F-31`, the extractors' decision slot). Not an OpenAI route, but the
+ * same `/v1` rule — TypeSafe documents `https://api.typesafe.ai/v1/systemone` — and spelled here so that an
+ * operator typing the base with or without `/v1` lands on the one URL, like every other slot.
+ */
+export function systemOneUrlFor(baseUrl: string): string {
+  return `${normalizeOpenAiBase(baseUrl)}/systemone`;
+}
+
 /** Where text embeddings are POSTed. OpenAI-compatible only — the bundled model is in-process. */
 export function embeddingsUrlFor(baseUrl: string): string {
   return `${normalizeOpenAiBase(baseUrl)}/embeddings`;
