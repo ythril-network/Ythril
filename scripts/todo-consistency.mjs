@@ -104,18 +104,11 @@ const MANUAL_VERIFY = new Map([
   // express — and it shipped, so the exemption went with it. The rule below is what made that happen rather
   // than leaving a stale row behind, which is exactly how `_PARKED-DECISIONS.md` accumulated resolved history
   // for weeks.
-  ['F-19', {
-    by: '2026-12-20',
-    why: 'Owner-directed 2026-09-02: EXPLORE whether Ythril wants deterministic reasoning over the graph — '
-      + 'the one axis a capability-for-capability comparison found genuinely missing rather than undersold. '
-      + 'No `grep -c` can express it because the likely outcome is a DECISION and not code: if the answer is '
-      + '"no demand signal, and the cheap parts already exist", nothing tracked changes, and a verify that '
-      + 'greps for an implementation would report the row open for ever. The decision record lands in '
-      + '`_REFERENCE.md`, which is gitignored. Dated at the 120-day bound rather than at when the work is '
-      + 'expected: it sits behind F-18, which sits behind the 4.0 release, so the date is a prompt to '
-      + 're-read the row rather than a forecast. An exemption dated past the bound is a deletion wearing a '
-      + 'date.',
-  }],
+  //
+  // F-19 stood here until 2026-09-23, when its exploration finished and the row became the owner's
+  // build-or-close decision: the finding went to `_REFERENCE.md` and the question to `_PARKED-DECISIONS.md`.
+  // The map is empty rather than gone, because the next item whose evidence cannot be a count needs a place
+  // that costs a PR diff to use.
 ]);
 
 const failures = [];

@@ -42,6 +42,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   stayed connected across the upgrade holds the old tool list and sees every call fail rather than the
   rename, so the table now says to reconnect.
 
+### Internal
+
+- **`F-19` leaves the manual-verify exemption map.** Its exploration finished — no demand signal for a rules
+  engine, and the cheap parts already exist — so it became an owner decision rather than open work, and a
+  stale exemption fails `todo:check`. The map stays, empty, for the next item whose evidence cannot be a count.
+
 ## [5.1.0] — 2026-09-23
 
 **A batch item can carry its own relationships, and five things that answered success while doing nothing
