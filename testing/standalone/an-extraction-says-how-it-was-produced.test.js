@@ -26,24 +26,28 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, existsSync, readdirSync } from 'node:fs';
-import { promptFingerprint, provenanceProblems, corpusProvenance }
+import { readFileSync, existsSync, readdirSync, writeFileSync, mkdtempSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { inputFingerprint, provenanceProblems, corpusProvenance }
   from '../../benchmarks/writer/extraction-provenance.mjs';
 
 const EXTRACTIONS = 'benchmarks/locomo/extractions';
-const ok = (over = {}) => ({ promptSha256: 'a'.repeat(64), unattended: true, ...over });
+const SCHEMA = 'benchmarks/space/schema.json';
+const ok = (over = {}) => ({ promptSha256: 'a'.repeat(64), schemaSha256: 'c'.repeat(64), unattended: true, ...over });
 
 describe('the fingerprint is of the prompt itself', () => {
   it('is the hash of the file on disk, not a version somebody typed', () => {
-    const a = promptFingerprint('benchmarks/prompt/extraction.md');
+    const a = inputFingerprint('benchmarks/prompt/extraction.md');
     assert.match(a, /^[0-9a-f]{64}$/);
-    assert.equal(a, promptFingerprint('benchmarks/prompt/extraction.md'), 'it must be stable');
+    assert.equal(a, inputFingerprint('benchmarks/prompt/extraction.md'), 'it must be stable');
   });
 
   it('changes when the prompt changes by one character', () => {
     // The whole point. A version string stays put through an edit; this cannot.
     const src = readFileSync('benchmarks/prompt/extraction.md', 'utf8');
-    assert.notEqual(promptFingerprint(null, src), promptFingerprint(null, src + ' '));
+    assert.notEqual(inputFingerprint(null, src), inputFingerprint(null, src + ' '));
   });
 
   it('is the same on a CRLF checkout and an LF one', () => {
@@ -52,13 +56,63 @@ describe('the fingerprint is of the prompt itself', () => {
     // "made by two prompts" permanently and on nothing. A permanent false alarm trains a reader to ignore
     // the one signal that means something.
     const lf = '# Extraction prompt\n\nA line.\nAnother.\n';
-    assert.equal(promptFingerprint(null, lf), promptFingerprint(null, lf.replace(/\n/g, '\r\n')));
+    assert.equal(inputFingerprint(null, lf), inputFingerprint(null, lf.replace(/\n/g, '\r\n')));
   });
 
   it('throws on a prompt that does not exist rather than hashing an empty string', () => {
     // A missing file hashing to the empty-string digest gives every run the same fingerprint, which is the
     // one value that makes the whole field useless while looking like it works.
-    assert.throws(() => promptFingerprint('benchmarks/prompt/nope.md'), /cannot fingerprint/);
+    assert.throws(() => inputFingerprint('benchmarks/prompt/nope.md'), /cannot fingerprint/);
+  });
+});
+
+describe('the SCHEMA is fingerprinted beside the prompt (`Q-27`)', () => {
+  /*
+   * `space/schema.json` is an input every extractor reads, exactly as the prompt is, and it was the one that
+   * was not recorded. So a vocabulary change landing mid-round would leave half a corpus written against one
+   * schema and half against another, with nothing in any file to say so — the hazard the prompt fingerprint
+   * was built for, one input over.
+   */
+  it('the schema hashes like the prompt, through the same function', () => {
+    const a = inputFingerprint(SCHEMA);
+    assert.match(a, /^[0-9a-f]{64}$/);
+    assert.notEqual(a, inputFingerprint('benchmarks/prompt/extraction.md'), 'two inputs, two fingerprints');
+  });
+
+  it('a missing input is refused BY NAME, whichever input it is', () => {
+    assert.throws(() => inputFingerprint('benchmarks/space/nope.json'), /nope\.json/);
+  });
+
+  it('a file with no schema fingerprint is refused, and so is a malformed one', () => {
+    assert.ok(provenanceProblems({ producedBy: ok({ schemaSha256: undefined }) }).some(p => /schemaSha256/.test(p)));
+    assert.ok(provenanceProblems({ producedBy: ok({ schemaSha256: 'v1' }) }).some(p => /schemaSha256/.test(p)));
+  });
+
+  it('a corpus made against two schemas is CAUGHT, and says which files used which', () => {
+    const r = corpusProvenance([
+      { conversationId: 'a', producedBy: ok() },
+      { conversationId: 'b', producedBy: ok({ schemaSha256: 'd'.repeat(64) }) },
+    ]);
+    assert.equal(r.onePrompt, true, 'one prompt');
+    assert.equal(r.oneSchema, false, 'two schemas');
+    assert.deepEqual(r.schemas.find(x => x.sha === 'd'.repeat(64)).conversations, ['b']);
+  });
+
+  it('`bench.mjs merge` stamps the schema in the tree, as it stamps the prompt', () => {
+    /*
+     * Driven through the CLI rather than read out of its source, because a gate that finds the call cannot
+     * see where it landed — a fingerprint computed and put on the wrong object passes every grep.
+     */
+    const dir = mkdtempSync(join(tmpdir(), 'q27-'));
+    const part = join(dir, 'whole.json');
+    writeFileSync(part, JSON.stringify({
+      conversationId: 'conv-x', sessions: [], entities: [], chrono: [], edges: [], claims: [],
+      producedBy: { unattended: true },
+    }));
+    const out = JSON.parse(execFileSync(process.execPath, ['benchmarks/bench.mjs', 'merge', part], { encoding: 'utf8' }));
+    assert.equal(out.producedBy.schemaSha256, inputFingerprint(SCHEMA));
+    assert.equal(out.producedBy.promptSha256, inputFingerprint('benchmarks/prompt/extraction.md'));
+    assert.equal(out.producedBy.unattended, true);
   });
 });
 
@@ -136,5 +190,11 @@ describe('the committed corpus', () => {
       const problems = provenanceProblems(JSON.parse(readFileSync(`${EXTRACTIONS}/${f}`, 'utf8')));
       assert.deepEqual(problems, [], `${f}: ${problems.join('; ')}`);
     }
+  });
+
+  it('and was produced against ONE schema', () => {
+    const files = readdirSync(EXTRACTIONS).filter(f => f.endsWith('.json'));
+    const r = corpusProvenance(files.map(f => JSON.parse(readFileSync(`${EXTRACTIONS}/${f}`, 'utf8'))));
+    assert.equal(r.oneSchema, true, JSON.stringify(r.schemas));
   });
 });

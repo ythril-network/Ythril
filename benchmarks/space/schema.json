@@ -514,7 +514,8 @@
     "schema": {
       "endpoints": {
         "from": [
-          "person"
+          "person",
+          "animal"
         ],
         "to": [
           "work",

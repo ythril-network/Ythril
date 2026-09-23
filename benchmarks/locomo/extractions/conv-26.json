@@ -4462,6 +4462,7 @@
   ],
   "producedBy": {
     "promptSha256": "a3e8136cc4025a760933677b5e80082f6c9221ee52c4e7c66c72477b9142bca4",
+    "schemaSha256": "5ea053342381cda74bf0014915232570d1a157819d1677f47bf041ef2cf4916d",
     "unattended": true
   }
 }

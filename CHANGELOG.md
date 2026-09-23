@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The benchmark schema is fingerprinted beside the prompt, and a pet can like a place** (`Q-27`). The
+  schema is an input every extractor reads, exactly as the prompt is, and it went unrecorded — so a
+  vocabulary change landing mid-round would leave half a corpus written against one schema and half against
+  another, with nothing in any file to say so. Every extraction now carries `schemaSha256` beside
+  `promptSha256`; `check` refuses a file without it, `merge` stamps it from the tree, `status` counts a file
+  done only under both, and `stats` warns on a two-schema corpus.
+
+  **The ten committed extractions are stamped with the schema of the commit that produced them**, which
+  neither the schema nor any of the ten has moved from since. Then `likes` widened to run from an `animal`
+  as well as a `person`: `conv-44`'s extractor drew one from a dog to a dog park and the merge refused it.
+  Landed between rounds and after the stamp, so the corpus records the vocabulary it was written against.
+
 - **One graded benchmark run: every question, both arms, every seed, one report** (`B-6`). The retrieve, arm
   and grade steps each held one rule; `benchmarks/harness/run.mjs` holds the ones that only exist once they
   are joined, and each of them produces a plausible number when dropped. The judge's independence is checked
