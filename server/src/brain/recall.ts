@@ -28,7 +28,8 @@ export { observeRecallPath, type RecallPathObservation };
 import { deriveChronoStatus } from './chrono-status.js';
 import { datePassedPolicy } from './chrono-date-policy.js';
 import { getSpaceMeta } from '../spaces/schema-validation.js';
-import { rerank, rerankConfigured, candidateMultiplier, MAX_CANDIDATES } from './rerank-client.js';
+import { rerankConfigured, candidateMultiplier } from './rerank-client.js';
+import { rerankPool } from './rerank-pool.js';
 import { lexicalSearch, rrfFuse, hybridSearchEnabled, LEXICAL_LIMIT_MULTIPLIER, type LexicalHit } from './lexical-search.js';
 import { atlasVectorScore, scoresAgree } from './vector-score.js';
 import { matchFreshWrites, addFreshWrites } from './fresh-writes.js';
@@ -260,6 +261,13 @@ export async function recall(
      * because this signature was already eight parameters long.
      */
     embedded?: EmbeddingResult;
+    /**
+     * Skip the rerank stage and return the whole candidate pool, because the CALLER will rerank it —
+     * set only by `recallGlobal`, which merges every space's pool and asks the reranker once. Without it a
+     * recall over N spaces sent N rerank requests (platform operator, 2026-09-23T1842Z). The pool rather
+     * than the top `topK` so the one pass can still promote a candidate from outside a space's own top.
+     */
+    deferRerank?: boolean;
     /*
      * `includeFreshWrites` WAS HERE, AND IT IS NOT A PARAMETER ANY MORE — the scan always runs.
      *
@@ -301,14 +309,8 @@ export async function recall(
   // The effective budget for THIS call: the caller may lower the instance ceiling, never raise it. A floor
   // keeps `maxTimeMS: 1` from being a guaranteed empty answer that reads as a bug — the caller asked for a
   // deadline, not for nothing, and 250 ms is short enough to honour the intent.
-  const effectiveBudgetMs = Math.max(
-    MIN_RECALL_BUDGET_MS,
-    Math.min(opts?.maxTimeMS ?? RECALL_BUDGET_MS, RECALL_BUDGET_MS),
-  );
-  const noteDegraded = (reason: string): void => {
-    recallDegradedTotal.labels({ reason }).inc();
-    if (opts?.degraded && !opts.degraded.includes(reason)) opts.degraded.push(reason);
-  };
+  const effectiveBudgetMs = effectiveBudgetFor(opts?.maxTimeMS);
+  const noteDegraded = degradedNoter(opts?.degraded);
   /** What is left of the budget, as a Mongo deadline. Never below a floor, or the search cannot start. */
   const searchDeadline = (): number =>
     Math.max(MIN_SEARCH_DEADLINE_MS, effectiveBudgetMs - (Date.now() - startedAt));
@@ -399,7 +401,7 @@ export async function recall(
   }
 
   // Phase 3: rerank the candidate pool, if a cross-encoder is configured. Best-effort by construction —
-  // `applyRerank` leaves the vector order untouched when the reranker has no opinion.
+  // `rerankPool` leaves the fused order untouched when the reranker has no opinion.
   //
   // Skipped outright when the budget is nearly gone. The reranker is the last hop and the only optional
   // one, so it is where a deadline should bite: starting a 20-second cross-encoder pass with three
@@ -407,15 +409,15 @@ export async function recall(
   // order — slightly worse ranking, delivered. Degrading beats being right too late.
   // The per-call budget, not the instance one: a caller who asked for 5 s must have the reranker skipped at
   // 5 s, or the parameter bounds nothing that matters. `RECALL_BUDGET_MS` remains the ceiling.
-  const remaining = effectiveBudgetMs - (Date.now() - startedAt);
-  if (reranking && remaining < RERANK_MIN_BUDGET_MS) {
-    noteDegraded('rerank_skipped_budget');
-    log.warn(`Recall: ${remaining}ms of the ${effectiveBudgetMs}ms budget left — skipping the reranker and returning the fused order`);
-  } else if (reranking) {
-    await applyRerank(query, guaranteed, allResults, remaining, noteDegraded);
+  if (reranking && !opts?.deferRerank) {
+    const remaining = effectiveBudgetMs - (Date.now() - startedAt);
+    await rerankStage(query, guaranteed, allResults, remaining, effectiveBudgetMs, noteDegraded);
   }
 
-  const final = mergeRecallResults(guaranteed, allResults, topK, minScore, opts?.maxPerType);
+  // A deferred call hands back the whole pool for the caller's single pass; `minScore` still applies here,
+  // because it is a statement about vector similarity and each space already knows its own.
+  const final = mergeRecallResults(guaranteed, allResults,
+    opts?.deferRerank ? guaranteed.length + allResults.length : topK, minScore, opts?.maxPerType);
 
   // Enrich file chunk results with inline parent metadata.
   //
@@ -608,63 +610,40 @@ async function introduceLexicalOnly(
 
 
 
+/** The effective budget for one recall: the caller may lower the instance ceiling, never raise it. */
+function effectiveBudgetFor(maxTimeMS: number | undefined): number {
+  return Math.max(MIN_RECALL_BUDGET_MS, Math.min(maxTimeMS ?? RECALL_BUDGET_MS, RECALL_BUDGET_MS));
+}
+
+/** Count a degradation on the metric AND tell the caller, once per reason. One channel, two readers. */
+function degradedNoter(collector: string[] | undefined): (reason: string) => void {
+  return (reason) => {
+    recallDegradedTotal.labels({ reason }).inc();
+    if (collector && !collector.includes(reason)) collector.push(reason);
+  };
+}
+
 /**
- * Score the candidate pool with the cross-encoder and stamp `rerankScore` on each result, in place.
+ * Phase 3, in one place for both callers: rerank the pool, unless too little budget is left to finish.
  *
- * Both lists are passed because a floor-guaranteed result competes for order with the global ones — a
- * reranker that saw only half the pool would produce two incomparable orderings in one response.
- * Deduped by `_id` so a record appearing in both lists is scored once and both references updated.
- *
- * Best-effort throughout: a `null` from the reranker leaves every result untouched, and the caller falls
- * back to vector order. It never throws, because a reranker outage must not turn into a failed search.
+ * The reranker is the last hop and the only optional one, so it is where a deadline should bite: starting a
+ * 20-second cross-encoder pass with three seconds left guarantees the caller times out and gets NOTHING,
+ * where skipping returns the fused order — slightly worse ranking, delivered.
  */
-async function applyRerank(
+async function rerankStage(
   query: string,
   guaranteed: RecallResult[],
-  allResults: RecallResult[],
-  /** What is left of the call's budget. The reranker's own timeout is capped to it. */
+  pool: RecallResult[],
+  remaining: number,
   budgetMs: number,
-  /**
-   * How this step says a stage did not run — the SAME channel the budget skip uses.
-   *
-   * It used to increment `recallDegradedTotal` directly, which told an operator with a dashboard and nobody
-   * else. Two ways the reranker fails to run, one signature — results ordered by meaning alone, a 200, and
-   * a plausible list — and only the budget one reachable from the answer.
-   *
-   * Found by wiring a real cross-encoder to a bench instance for the first time: every call came back
-   * `413 Payload Too Large`, because `MAX_CANDIDATES` is 100 and a stock text-embeddings-inference server
-   * accepts 32 per request. `degraded` was null and the results looked fine.
-   */
   noteDegraded: (reason: string) => void,
 ): Promise<void> {
-  // One entry per distinct record, holding every reference to it so a single score updates all of them.
-  const byId = new Map<string, RecallResult[]>();
-  for (const r of [...guaranteed, ...allResults]) {
-    const refs = byId.get(r._id);
-    if (refs) refs.push(r); else byId.set(r._id, [r]);
+  if (remaining < RERANK_MIN_BUDGET_MS) {
+    noteDegraded('rerank_skipped_budget');
+    log.warn(`Recall: ${remaining}ms of the ${budgetMs}ms budget left — skipping the reranker and returning the fused order`);
+    return;
   }
-  // Highest vector score first, so the absolute cap drops the least plausible candidates rather than an
-  // arbitrary slice — the cap is a cost ceiling, not a sampling strategy.
-  const ids = [...byId.keys()]
-    .sort((a, b) => ((byId.get(b)![0].score ?? 0) - (byId.get(a)![0].score ?? 0)) || (a < b ? -1 : a > b ? 1 : 0))
-    .slice(0, MAX_CANDIDATES);
-  if (ids.length === 0) return;
-
-  const passages = ids.map(id => rerankTextOf(byId.get(id)![0]));
-  const scores = await rerank(query, passages, budgetMs);
-  if (!scores) {
-    // Configured but it did not answer. `rerank()` already logged why; this is what makes a reranker
-    // that has been down for a week visible without anyone reading a week of logs — and, through
-    // `noteDegraded`, visible to the caller holding the answer rather than only on a dashboard.
-    noteDegraded('rerank_unavailable');
-    return; // no opinion — vector order stands
-  }
-
-  for (const { index, score } of scores) {
-    const id = ids[index];
-    if (id === undefined) continue; // parseScores bounds this, but the pairing is worth not assuming
-    for (const ref of byId.get(id)!) ref.rerankScore = score;
-  }
+  await rerankPool(query, guaranteed, pool, remaining, noteDegraded);
 }
 
 // ── Insert-time duplicate detection ──────────────────────────────────────────
@@ -1134,12 +1113,22 @@ export async function recallGlobal(
   // Embed ONCE for the whole fan-out. Every space below searches the same text, so without this the query is
   // embedded once per space: identical input, identical vector, N times the cost and N times the chance that
   // a busy embedder refuses one of them and takes the whole recall with it.
+  const startedAt = Date.now();
   const embedded = await embed(query, 'query');
 
+  // Rerank ONCE, over the merged pool, for the same reason the query is embedded once: every space would
+  // otherwise send its own pass to the same model — 13 concurrent requests for one recall on the platform
+  // operator's instance, ten of them killed by the shared deadline. One space needs no merge, so it keeps
+  // the ordinary path.
+  const deferRerank = spaceIds.length > 1 && rerankConfigured();
   const results = await Promise.all(spaceIds.map(
-    id => recall(id, query, topK, tags, types, minPerType, minScore, filter, { ...opts, embedded }),
+    id => recall(id, query, topK, tags, types, minPerType, minScore, filter, { ...opts, embedded, deferRerank }),
   ));
   const flat = results.flat();
+  if (deferRerank) {
+    const budgetMs = effectiveBudgetFor(opts?.maxTimeMS);
+    await rerankStage(query, [], flat, budgetMs - (Date.now() - startedAt), budgetMs, degradedNoter(opts?.degraded));
+  }
   // Sort by score descending, deduplicate by _id
   const seen = new Set<string>();
   const deduped: RecallResult[] = [];

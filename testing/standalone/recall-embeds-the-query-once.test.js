@@ -52,7 +52,7 @@ describe('the query is embedded once per RECALL, not once per space', () => {
 
   it('and hands the SAME vector to every space', () => {
     const g = fn('recallGlobal');
-    assert.match(g, /\{ \.\.\.opts, embedded \}/,
+    assert.match(g, /\{ \.\.\.opts, embedded[ ,}]/,
       'the precomputed vector must reach each recall call, or embedding it up front is pure waste added to N '
       + 'per-space calls that still embed');
     // Spreading `opts` matters as much as adding `embedded`: replacing the bag would silently drop

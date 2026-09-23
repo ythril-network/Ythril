@@ -36,7 +36,7 @@ import { dirname, join } from 'node:path';
 // make a check see less than the thing it means to bound. Both are rules this repository already gates, and
 // this file broke both on its first draft.
 import { stripComments } from './_strip-comments.mjs';
-import { bodyOf, between } from './_structural-window.mjs';
+import { bodyOf } from './_structural-window.mjs';
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const code = stripComments(readFileSync(join(repoRoot, 'server', 'src', 'brain', 'recall.ts'), 'utf8'));
@@ -53,10 +53,9 @@ describe('a degradation is reported once, in one place', () => {
   test('and that one place also tells the caller', () => {
     // Asserted together because either half alone is the bug: a metric with no caller signal is invisible to
     // whoever holds the answer, and a caller signal with no metric is invisible to whoever runs the instance.
-    // `between`, not `bodyOf`: the helper is declared INSIDE `recall`, so it is not a top-level
-    // declaration and the structural window for those cannot anchor on it. Both ends are markers the
-    // language puts there, which is the property that matters — neither is a guess at a length.
-    const helper = between(code, 'const noteDegraded', '};');
+    // A top-level function since `P-35`, because `recall` and `recallGlobal` both need it — the
+    // cross-space rerank reports through the same channel as the per-space one.
+    const helper = bodyOf(code, 'degradedNoter');
     assert.match(helper, /recallDegradedTotal\s*\.labels/, 'the helper does not increment the metric');
     assert.match(helper, /degraded/, 'the helper does not reach the caller');
   });
@@ -67,9 +66,11 @@ describe('a degradation is reported once, in one place', () => {
      * had no way to tell anybody what happened — so the one thing it knew, that the reranker gave no
      * opinion, went to a counter and stopped there.
      */
-    const fn = bodyOf(code, 'applyRerank');
+    // In its own module since `P-35`, where both callers reach it.
+    const pool = stripComments(readFileSync(join(repoRoot, 'server', 'src', 'brain', 'rerank-pool.ts'), 'utf8'));
+    const fn = bodyOf(pool, 'rerankPool');
     assert.match(fn, /noteDegraded/,
-      'applyRerank cannot report a degradation, so a reranker that is unreachable, refusing the batch size '
+      'rerankPool cannot report a degradation, so a reranker that is unreachable, refusing the batch size '
       + 'or answering nonsense is invisible in the response');
   });
 });
