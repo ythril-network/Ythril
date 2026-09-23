@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`graph_traverse` returns the records it reached, not only their names** (`F-32`). A new `projection`
+  parameter on both doors (MCP `graph_traverse` and `POST /spaces/:spaceId/traverse`) takes the same
+  grammar as `query` and `recall` and is applied to every node and every stored edge. With it, one call
+  reads a whole subgraph with its content. Without it, reading one flow from a space took a walk plus a
+  `query` per collection over the ids the walk returned.
+  - Omitted, the answer is the lean one, unchanged.
+  - The walk's envelope always survives: `_id`, `depth` and `kind` on a node; `_id`, `from`, `to` and `label`
+    on an edge.
+  - The vector never comes back, and the diagnostics only with the new `includeDiagnostics`.
+  - An edge's `properties` come with it, so a conditional edge's instruction and predicate arrive in the
+    same answer.
+
+  The owner, shown the three-call recipe, asked *"is that not just an includes flag?"* — and `recall`'s own
+  traverse has taken a projection for a long time.
+
 - **The benchmark schema is fingerprinted beside the prompt, and a pet can like a place** (`Q-27`). The
   schema is an input every extractor reads, exactly as the prompt is, and it went unrecorded — so a
   vocabulary change landing mid-round would leave half a corpus written against one schema and half against

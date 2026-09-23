@@ -37,6 +37,7 @@ import {
 } from '../../brain/recall-shape.js';
 import { mapGraphNodes, graphNodeRecord } from '../../brain/recall-graph.js';
 import { applyProjection, normaliseProjection, type NormalisedProjection } from '../../brain/projection.js';
+import { withTraverseBodies } from '../../brain/traverse-bodies.js';
 import { resolveBudget, resolvePaging, budgetedEnvelope, type BudgetRequest } from '../../brain/result-budget.js';
 import { sendReadFailure, statesRetryability } from './_read-failure.js';
 import { spaceCollection } from '../../db/space-collection.js';
@@ -227,9 +228,20 @@ searchRouter.post('/spaces/:spaceId/traverse', globalRateLimit, requireSpaceAuth
   }
 
   const memberIds = memberSpacesForRequest(req, spaceId);
+  // `F-32`: the same two parameters, the same refusal of a wrong type, and the same module as the MCP tool.
+  const { projection, includeDiagnostics } = req.body as Record<string, unknown>;
+  if (projection !== undefined && (projection === null || typeof projection !== 'object' || Array.isArray(projection))) {
+    res.status(400).json({ error: '`projection` must be an object' });
+    return;
+  }
+  if (includeDiagnostics !== undefined && typeof includeDiagnostics !== 'boolean') {
+    res.status(400).json({ error: '`includeDiagnostics` must be a boolean' });
+    return;
+  }
   const result = await traverseGraph(memberIds, startId.trim(), effectiveDirection, effectiveEdgeLabels, effectiveDepth, effectiveLimit,
     inclusions.includeChrono, inclusions.includeMemories, inclusions.includeFiles, inclusions.includeEdges);
-  res.json(result);
+  res.json(await withTraverseBodies(memberIds, result,
+    normaliseProjection(projection as Record<string, unknown> | undefined), includeDiagnostics === true));
 });
 
 
