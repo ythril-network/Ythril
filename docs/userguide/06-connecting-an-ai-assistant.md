@@ -141,6 +141,11 @@ Once connected, your AI assistant can:
   and PDFs. Roughly 7 MB is the most an assistant can save in one go; anything larger has to be uploaded
   through the Files page or the upload API instead.
 - **Query directly** — run structured MongoDB-style queries against any collection.
+- **Write a batch** — save up to 500 records of each kind in one call, **each with its own links and
+  labelled relationships attached**. That matters for what it costs you: an assistant importing a hundred
+  notes that each point at two entities used to make three hundred calls and now makes one, and every call
+  is a row in the audit log and a tick against the token's rate limit. The reply says how many records went
+  in and, separately, how many relationships were attached.
 
 Use a **read-only token** to give an assistant search access without the ability to write or delete anything.
 

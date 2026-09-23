@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **A batch item attaches its own relationships, exactly as a single write does** (`Q-44`). Every
+  single-record door takes the link classes its kind can hold plus `edges`, so a record and everything it
+  points at is one call. The batch door took two link classes, validated by its own copy of the rule, and
+  refused `edges` outright — so the door where the arithmetic is worst, hundreds of records at a time, was
+  the one that still needed a second pass.
+
+  Both surfaces now build those fields from the same module the single doors call, which is also what
+  retires the copy: this loop had a UUID pattern per link field that checked less than the shared one and
+  had drifted from it in the direction nothing reports — a `linkFiles` on a fact was accepted and never
+  read, a non-array `linkEntities` was quietly treated as empty.
+
+  **The response grew a `connections` count**, separate from `inserted.edges` deliberately: that number is
+  the top-level `edges` array, a collection the caller wrote, while these are relationships hung off records
+  the caller wrote. Folded together neither could be reconciled against the payload. The `bulk.write`
+  webhook carries it too, and it counts toward whether that webhook fires at all — fifty attachments to
+  records that were only updated is fifty rows written, and a workflow watching for exactly that would have
+  been told nothing happened.
+
+  **An item's own `edges` name records that already exist; a `$ref` there is refused** and the refusal names
+  the top-level array, which runs after every record array and resolves one. An item is applied when it is
+  written, so a key declared further down could not resolve, and resolving only backwards would make a
+  payload's validity depend on the order it was typed in. **A connection that cannot be honoured is refused
+  before the record is written**, so a bad `edges` entry leaves no row behind.
+
 ### Fixed
 
 - **A config reload that failed left one log line and nothing to alert on** (`Q-43`). Reported by the
@@ -88,8 +114,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the identical `error: () => {}` — the same omission four times, so the surface for it lives on the
   state the four already share rather than being added to each. A delete that did not happen now says
   why, above the list, where the row that would not go is still visible.
-
-
 
 - **An integration file stopped testing anything the day 5.0 shipped, and reported itself as skipped**
   (`Q-38`). `a-traversed-recall-returns-whole-graphs` sent `includeFreshWrites: true` on every recall.

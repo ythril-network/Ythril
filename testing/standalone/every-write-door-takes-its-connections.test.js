@@ -17,6 +17,17 @@
  * the answer to it: there is one implementation, and what each door does is call it twice — once to refuse,
  * once to apply. A door that grew its own copy of either half fails here.
  *
+ * ## The SCAN is the whole of `server/src`, and that is the correction (`Q-44`)
+ *
+ * The creator regex was right and the two DIRECTORIES it was pointed at were not. `server/src/brain/bulk.ts`
+ * calls all three creators and lives in neither, so the batch door — the highest-volume write path in the
+ * product — was outside the set while the gate's title claimed every door. It passed throughout, because a
+ * gate that never sees a subject cannot fail about it.
+ *
+ * That is this repository's own named shape: a gate whose title is a claim about a whole set and whose body
+ * reads part of it. The fix is not to add the file — a seventh door written next year in a third directory
+ * would be invisible the same way — but to derive the set from where the creators are ACTUALLY called.
+ *
  * Run: node --test testing/standalone/every-write-door-takes-its-connections.test.js
  */
 import { describe, it } from 'node:test';
@@ -36,14 +47,21 @@ const code = (f) => stripComments(readFileSync(join(REPO_ROOT, f), 'utf8'));
  */
 const CREATORS = /\b(?:await saveFact\(|await createChrono\(|await upsertEntity\()/;
 
-const doors = trackedSources(['server/src/api/brain', 'server/src/mcp/tools'], { floor: 10 })
+const doors = trackedSources(['server/src'], { floor: 100 })
   .filter(f => CREATORS.test(code(f)));
 
 describe('the create doors are found at all', () => {
-  it('there are at least the six known ones', () => {
+  it('there are at least the seven known ones', () => {
     // A FLOOR: an empty scan passes every loop below and reports a green tick about nothing.
-    assert.ok(doors.length >= 6, `found ${doors.length} create door(s): ${doors.join(', ')}`);
-    for (const known of ['server/src/api/brain/facts.ts', 'server/src/mcp/tools/fact.ts']) {
+    assert.ok(doors.length >= 7, `found ${doors.length} create door(s): ${doors.join(', ')}`);
+    /*
+     * Three surfaces named, one per PLACE a door has turned up: the REST route, its MCP twin, and the
+     * batch writer that is in neither directory. Naming the batch one is what stops the scan quietly
+     * narrowing back to the two directories it used to read — `Q-44` is that narrowing, found from outside.
+     */
+    for (const known of [
+      'server/src/api/brain/facts.ts', 'server/src/mcp/tools/fact.ts', 'server/src/brain/bulk.ts',
+    ]) {
       assert.ok(doors.includes(known), `${known} is not being seen as a create door — the scan is wrong`);
     }
   });
@@ -83,9 +101,14 @@ describe('and no door grew its own copy of either half', () => {
      * door that called `upsertEdge` in a loop would be the second implementation of the UPSERT ones — and
      * the two would drift apart exactly where a caller cannot see it.
      *
-     * `edges.ts` and the edge doors are excluded: writing an edge directly is what those are FOR.
+     * `edges.ts` and the edge doors are excluded: writing an edge directly is what those are FOR. The batch
+     * writer is one of them — its body carries an `edges` ARRAY alongside the record arrays, and that array's
+     * `$ref` correlation is the reason it resolves and writes edges itself. Its ITEMS still go through the
+     * module, which is what the two rules above check.
      */
-    const EDGE_DOORS = ['server/src/api/brain/edges.ts', 'server/src/mcp/tools/edge.ts'];
+    const EDGE_DOORS = [
+      'server/src/api/brain/edges.ts', 'server/src/mcp/tools/edge.ts', 'server/src/brain/bulk.ts',
+    ];
     const offenders = doors
       .filter(f => !EDGE_DOORS.includes(f))
       .filter(f => /reconcileLinks\(|upsertEdge\(/.test(code(f)));
