@@ -23,19 +23,18 @@ export const bulkRouter = Router();
 /**
  * POST /api/brain/spaces/:spaceId/bulk
  *
- * Batch upsert facts, entities, edges, and chrono entries in a single
- * request.  Processing order: facts → entities → edges → chrono, which matters
- * for records the batch UPDATES: an entity addressed by an existing id is written
- * before an edge in the same batch reads it.
+ * Batch upsert facts, entities, edges, and chrono entries in a single request. Processing order:
+ * facts → entities → chrono → EDGES LAST, so a correlation key can name a record of any kind.
  *
- * It does NOT let a batch reference a record it creates. A supplied `id` addresses an
- * existing record and never becomes a new one's identity — that is minted — so an edge
- * naming an id the caller invented points at nothing, and since references here are
- * shape-checked and never existence-checked it is stored dangling and counted as
- * inserted. A graph takes two calls, with the ids coming from the first one's response.
+ * A record this call creates is referenced by a `$ref` key rather than by an id: identities are
+ * minted here, so an id the caller invents addresses an existing record or nothing at all.
  *
- * All four arrays are optional.  Entries that fail per-item validation are
- * recorded in `errors` and do not abort the remaining batch items.
+ * An ITEM carries its own relationships — the `link*` fields its kind can hold, and `edges` — through
+ * the same module every single-record door calls (`Q-44`). Those name records that already exist; a
+ * `$ref` belongs to the top-level `edges` array, which runs late enough to resolve one.
+ *
+ * All four arrays are optional. Entries that fail per-item validation are recorded in `errors` and do
+ * not abort the remaining batch items.
  */
 bulkRouter.post('/spaces/:spaceId/bulk', globalRateLimit, requireSpaceAuth, denyReadOnly, async (req, res) => {
   const spaceId = req.params['spaceId'] as string;
@@ -85,7 +84,7 @@ bulkRouter.post('/spaces/:spaceId/bulk', globalRateLimit, requireSpaceAuth, deny
   });
   if (bulkWriteTotal(result) > 0) {
     // Bulk suppresses per-item webhooks; emit ONE summary a workflow can inspect.
-    emitWebhookEvent({ event: 'bulk.write', spaceId: targetSpace, entry: { inserted: result.inserted, updated: result.updated, errorCount: result.errors.length }, ...webhookToken(req) });
+    emitWebhookEvent({ event: 'bulk.write', spaceId: targetSpace, entry: { inserted: result.inserted, updated: result.updated, connections: result.connections, errorCount: result.errors.length }, ...webhookToken(req) });
   }
   res.status(207).json(result);
 });

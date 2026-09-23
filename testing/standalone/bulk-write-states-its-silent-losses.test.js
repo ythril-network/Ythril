@@ -122,7 +122,16 @@ describe('the reference-checking asymmetry is stated — and that it is GONE', (
   });
 
   it('and the asymmetry is real: bulk checks format, the single-record path checks resolution', () => {
-    assert.match(CORE, /UUID_V4_RE\.test\(id\)/, 'bulk checks the shape');
+    /*
+     * The shape check is the SHARED one since `Q-44`, not a UUID pattern written out here.
+     *
+     * This asserted `UUID_V4_RE.test(id)` — bulk's own copy, which checked less than the module every
+     * single-record door calls: a `linkFiles` on a fact was accepted and never read, and a non-array
+     * `linkEntities` was treated as empty. Pinning the copy would have made the gate an argument for
+     * keeping it, which is the failure mode of asserting on a SITE rather than on the rule.
+     */
+    assert.match(CORE, /itemConnectionError\(/, 'bulk checks the shape, through the shared refusal');
+    assert.match(CORE, /connectionInputError\(/, 'and that refusal is the one every other door calls');
     /*
      * The asymmetry is CONDITIONAL since `F-27` item 2, on the owner's ruling: a converted space
      * existence-checks, an unconverted one keeps the import trade. Asserting the check is absent would now

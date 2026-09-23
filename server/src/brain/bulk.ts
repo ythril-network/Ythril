@@ -24,9 +24,10 @@ import { isStrictLinkage } from '../spaces/proxy.js';
 import { saveFact } from './fact.js';
 import { upsertEntity } from './entities.js';
 import { upsertEdge, findEdgeByTriplet } from './edges.js';
-import { BatchRefs, resolveRef, refKeyDeclared } from './batch-refs.js';
+import { BatchRefs, resolveRef, refKeyDeclared, isRefUse } from './batch-refs.js';
 import { resolveEdgeEndsForWrite } from './edge-endpoint-names.js';
 import { mergeTagsAndProperties, mergePropertiesOrKeep } from './merge-fields.js';
+import { connectionInputError, assertConnections, applyConnections, edgeInputsFrom } from './write-connections.js';
 import { createChrono } from './chrono.js';
 import { CHRONO_STATUSES } from '../config/types.js';
 import type { EntityDoc, ChronoType, ChronoStatus } from '../config/types.js';
@@ -66,6 +67,18 @@ export type BulkInput = Partial<Record<typeof BULK_BODY_KEYS[number], unknown>>;
 export interface BulkResult {
   inserted: Counts;
   updated: Counts;
+  /**
+   * What the ITEMS' own `link*` and `edges` fields attached (`Q-44`).
+   *
+   * Separate from `inserted.edges`, which counts the top-level `edges` ARRAY, because they answer different
+   * questions: that array is a collection the caller wrote, these are relationships hung off records the
+   * caller wrote. Folding them together would make `inserted.edges` a number nobody could reconcile against
+   * the payload they sent.
+   *
+   * Links are the rows `reconcileLinks` ADDED, edges are the upserts — an edge that already existed is
+   * updated rather than created, and this door does not tell the two apart for an item's own edges.
+   */
+  connections: { links: number; edges: number };
   errors: { type: string; index: number; reason: string }[];
 }
 
@@ -92,6 +105,32 @@ function bulkTtlDays(v: unknown): number | null | undefined | typeof TTL_INVALID
 const TTL_INVALID_MSG = '`ttlDays` must be an integer number of days between 0 and 36500, or null to clear the expiry';
 function slice(v: unknown): Record<string, unknown>[] {
   return Array.isArray(v) ? (v.slice(0, BULK_MAX_PER_TYPE) as Record<string, unknown>[]) : [];
+}
+
+/**
+ * Why this ITEM's own `link*` and `edges` fields cannot be honoured, or `null` (`Q-44`).
+ *
+ * Everything but the first line is `connectionInputError`, the one module every single-record door already
+ * calls — this door used to carry its own copy, a UUID pattern per link field, which checked less than the
+ * shared one and drifted from it in the direction nothing reports: a `linkFiles` on a fact was accepted and
+ * never read, and a non-array `linkEntities` was quietly treated as empty.
+ *
+ * ## The one thing this door has to say that the module does not
+ *
+ * A correlation key belongs to the TOP-LEVEL `edges` array. That array runs after every record array, so a
+ * `$ref` there can name a record of any kind in the payload. An item's own `edges` are applied with the
+ * item, so a reference forwards cannot resolve — and resolving only backwards would make whether a payload
+ * works depend on the order somebody happened to write it in. Refused, naming the array that does resolve
+ * one, rather than stored as an edge pointing at the literal string.
+ */
+function itemConnectionError(item: unknown, strict: boolean): string | null {
+  const at = (edgeInputsFrom(item) ?? []).findIndex(e => isRefUse(e?.to));
+  if (at >= 0) {
+    return `edges[${at}].to is a \`$ref\`, and an item's own \`edges\` do not resolve one — they name records `
+      + 'that already exist. Use the top-level `edges` array for a relationship to a record this same call '
+      + 'creates: it runs after every record array, so a reference there can point at any of them.';
+  }
+  return connectionInputError(item, { strict });
 }
 
 /**
@@ -140,6 +179,12 @@ export async function bulkWrite(spaceId: string, input: BulkInput): Promise<Bulk
   const inserted: Counts = { facts: 0, entities: 0, edges: 0, chrono: 0 };
   const updated: Counts = { facts: 0, entities: 0, edges: 0, chrono: 0 };
   const errors: { type: string; index: number; reason: string }[] = [];
+  /** What the ITEMS' own connection fields attached, added up across all three record loops (`Q-44`). */
+  const connections = { links: 0, edges: 0 };
+  const addConnections = (applied: { links: number; edges: number }): void => {
+    connections.links += applied.links;
+    connections.edges += applied.edges;
+  };
 
   const schemaFails = (type: string, index: number, violations: { field: string; reason: string }[]): boolean => {
     if (mode === 'off' || !meta || violations.length === 0) return false;
@@ -174,20 +219,25 @@ export async function bulkWrite(spaceId: string, input: BulkInput): Promise<Bulk
     // so a batch stored what the single create refuses and reported nothing.
     const shapeErr = shapeError('fact', item);
     if (shapeErr) { errors.push({ type: 'fact', index: i, reason: shapeErr }); continue; }
-    // Fact items were the one bulk shape with no reference check at all — edges and chrono both
-    // had one. Format only, like the rest of bulk: a payload may legitimately reference an entity
-    // created earlier in the SAME payload, so an existence check here would reject valid forward
-    // references. Staged imports that need dangling refs use the strictLinkage escape hatch.
-    const memEntityIds = strArray(item['linkEntities']);
-    if (strict && memEntityIds.some(id => !UUID_V4_RE.test(id))) {
-      errors.push({ type: 'fact', index: i, reason: '`linkEntities` must contain valid UUID v4 values (entity IDs), not names' });
-      continue;
-    }
+    // `Q-44`: the SHARED refusal, which this loop used to restate as a UUID pattern per link field.
+    const connErr = itemConnectionError(item, strict);
+    if (connErr) { errors.push({ type: 'fact', index: i, reason: connErr }); continue; }
     try {
       if (schemaFails('fact', i, validateFact(meta ?? {}, { type, properties }))) continue;
-      const memDoc = await saveFact(spaceId, fact, memEntityIds, strArray(item['tags']),
+      /*
+       * `Q-44`: BEFORE the write, so a connection naming nothing leaves no record behind.
+       *
+       * `applyConnections` runs after the insert — it has to, because a link needs both ends and the `from`
+       * is what was just minted. Asserting there alone would report the refusal with the fact already
+       * stored, which on a batch means a caller reconciling hundreds of rows they did not ask for.
+       */
+      await assertConnections(spaceId, 'fact', item);
+      // No link set here: the connections come from the item's own fields, through `applyConnections`
+      // below, which is the one path every other create door takes.
+      const memDoc = await saveFact(spaceId, fact, [], strArray(item['tags']),
         typeof item['description'] === 'string' ? item['description'] : undefined, properties, type,
         undefined, undefined, ttlDays, rawId);
+      addConnections(await applyConnections(spaceId, memDoc._id, 'fact', item, memDoc.author));
       /*
        * `F-27` item 2: record what this item's key names, if it declared one.
        *
@@ -223,6 +273,14 @@ export async function bulkWrite(spaceId: string, input: BulkInput): Promise<Bulk
     // so a batch stored what the single create refuses and reported nothing.
     const shapeErr = shapeError('entity', item);
     if (shapeErr) { errors.push({ type: 'entity', index: i, reason: shapeErr }); continue; }
+    /*
+     * `Q-44`: an entity holds NO link classes — it is only ever the far end of one — and it can still be
+     * the start of a labelled edge. Asking the shared module here is what makes that distinction the link
+     * vocabulary's rather than this loop's: `linkEntities` on an entity item is refused by the class table,
+     * not by a condition somebody wrote out again.
+     */
+    const connErr = itemConnectionError(item, strict);
+    if (connErr) { errors.push({ type: 'entity', index: i, reason: connErr }); continue; }
     try {
       // The MERGED record, not the payload — an id that matches an existing entity makes this an
       // update, and the importer had the merge target in hand two lines later for its own counter.
@@ -245,8 +303,10 @@ export async function bulkWrite(spaceId: string, input: BulkInput): Promise<Bulk
       if (propErr) { errors.push({ type: 'entity', index: i, reason: propErr }); continue; }
       const mergedEnt = mergeTagsAndProperties(existing as EntityDoc | null, { tags: strArray(item['tags']), properties });
       if (schemaFails('entity', i, validateEntity(meta ?? {}, { name, type, properties: mergedEnt.properties }))) continue;
+      await assertConnections(spaceId, 'entity', item);
       const result = await upsertEntity(spaceId, name, type, strArray(item['tags']), properties,
         typeof item['description'] === 'string' ? item['description'] : undefined, rawId, undefined, undefined, ttlDays);
+      addConnections(await applyConnections(spaceId, result.entity._id, 'entity', item, result.entity.author));
       /*
        * `F-27` item 2: record what this item's key names, if it declared one.
        *
@@ -302,10 +362,9 @@ export async function bulkWrite(spaceId: string, input: BulkInput): Promise<Bulk
     // so a batch stored what the single create refuses and reported nothing.
     const shapeErr = shapeError('chrono', item);
     if (shapeErr) { errors.push({ type: 'chrono', index: i, reason: shapeErr }); continue; }
-    const linkEntities = optStrArray(item['linkEntities']);
-    const linkFacts = optStrArray(item['linkFacts']);
-    if (strict && linkEntities && linkEntities.some(id => !UUID_V4_RE.test(id))) { errors.push({ type: 'chrono', index: i, reason: '`linkEntities` must contain valid UUID v4 values (entity IDs), not names' }); continue; }
-    if (strict && linkFacts && linkFacts.some(id => !UUID_V4_RE.test(id))) { errors.push({ type: 'chrono', index: i, reason: '`linkFacts` must contain valid UUID v4 values (fact IDs), not names' }); continue; }
+    // `Q-44`: the SHARED refusal, which this loop used to restate as a UUID pattern per link field.
+    const connErr = itemConnectionError(item, strict);
+    if (connErr) { errors.push({ type: 'chrono', index: i, reason: connErr }); continue; }
     const properties = optProps(item['properties']);
     // Normalise status to a known value (drop unknowns) — REST did this; MCP did not.
     const status = typeof item['status'] === 'string' && CHRONO_STATUS_SET.has(item['status'] as ChronoStatus)
@@ -314,14 +373,17 @@ export async function bulkWrite(spaceId: string, input: BulkInput): Promise<Bulk
     if (ttlDays === TTL_INVALID) { errors.push({ type: 'chrono', index: i, reason: TTL_INVALID_MSG }); continue; }
     try {
       if (schemaFails('chrono', i, validateChrono(meta ?? {}, { type, properties }))) continue;
+      await assertConnections(spaceId, 'chrono', item);
+      // No link set here: the connections come from the item's own fields, through `applyConnections`.
       const chronoDoc = await createChrono(spaceId, {
         title, type: type as ChronoType, startsAt,
         endsAt: typeof item['endsAt'] === 'string' ? item['endsAt'] : undefined,
         status, confidence: typeof item['confidence'] === 'number' ? item['confidence'] : undefined,
         description: typeof item['description'] === 'string' ? item['description'] : undefined,
-        tags: optStrArray(item['tags']), linkEntities, linkFacts, properties,
+        tags: optStrArray(item['tags']), properties,
         recurrence: rec.value, id: rawId,
       }, undefined, ttlDays);
+      addConnections(await applyConnections(spaceId, chronoDoc._id, 'chrono', item, chronoDoc.author));
       /*
        * `F-27` item 2: record what this item's key names, if it declared one. After the write, because the
        * id is minted by it.
@@ -454,13 +516,20 @@ export async function bulkWrite(spaceId: string, input: BulkInput): Promise<Bulk
     } catch (err) { errors.push({ type: 'edge', index: i, reason: err instanceof Error ? err.message : String(err) }); }
   }
 
-  return { inserted, updated, errors };
+  return { inserted, updated, connections, errors };
 }
 
-/** Total records actually written (used to decide whether to fire the bulk.write webhook). */
+/**
+ * Total records actually written (used to decide whether to fire the bulk.write webhook).
+ *
+ * The items' own connections count (`Q-44`). A link and an edge ARE records — a batch that attached fifty
+ * relationships to records it updated wrote fifty rows, and a webhook that stayed silent about it would be
+ * reporting "nothing happened" to the workflow watching for exactly that.
+ */
 export function bulkWriteTotal(r: BulkResult): number {
   return r.inserted.facts + r.inserted.entities + r.inserted.edges + r.inserted.chrono
-    + r.updated.entities + r.updated.edges;
+    + r.updated.entities + r.updated.edges
+    + r.connections.links + r.connections.edges;
 }
 
 /**

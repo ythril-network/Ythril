@@ -460,17 +460,25 @@ Content-Type: application/json
 ```
 
 Batch-upsert facts, entities, edges, and/or chrono entries in a single HTTP call. All four arrays are
-optional. Processing order: **facts → entities → edges → chrono**, which matters for records this call
-UPDATES — an entity addressed by an id that already exists is written before an edge in the same batch reads
-it.
+optional. Processing order: **facts → entities → chrono → edges last**, so an edge can name a record of any
+kind that the same call created.
 
-**A batch cannot reference a record it creates.** An `id` you send ADDRESSES an existing record; it never
-becomes a new record's identity, which is minted here — a supplied id would make you a co-author of our
-primary key, and across a sync two instances deriving ids from one key would collide by design. So an entity
-inserted by this call comes back under a different id than the one you sent, and an edge in the same payload
-naming the id you chose points at nothing. References here are checked for shape and never for existence, so
-that edge is **accepted, stored dangling, and reported in `inserted` with an empty `errors`**. Build a graph in
-two calls: entities first, take their ids from the response, edges second.
+**An id you send ADDRESSES an existing record; it never becomes a new record's identity.** Identities are
+minted here — a supplied id would make you a co-author of our primary key, and across a sync two instances
+deriving ids from one key would collide by design. So an id you invent for a new record names nothing, and
+since references on this door are shape-checked and not existence-checked, an edge naming it is accepted and
+stored dangling.
+
+**To connect records this call creates, use a `$ref` correlation key** — `{"$ref": "post-1"}` on an item and
+`"$ref:post-1"` where it is referenced. See
+[A batch that connects what it creates](04-brain-api.md#a-batch-that-connects-what-it-creates) for the full
+rules, including what a key means on a space that uses link records.
+
+**An item also carries its own `link*` fields and `edges`**, the same ones its single-record endpoint takes
+and through the same code. Those name records that already exist; a `$ref` in an item's `edges` is refused
+and points you at the top-level array, which runs late enough to resolve one. A connection that cannot be
+honoured is reported against the item's index and the record is not written. See
+[An item carries its own relationships](04-brain-api.md#an-item-carries-its-own-relationships).
 
 Each array is capped at 500 entries. Per-item validation failures are recorded in `errors` without aborting the remaining items.
 
@@ -493,9 +501,10 @@ Each item accepts the same fields as its corresponding individual endpoint (`POS
 
 ```json
 {
-  "inserted": { "facts": 1, "entities": 1, "edges": 0, "chrono": 1 },
-  "updated":  { "facts": 0, "entities": 0, "edges": 1, "chrono": 0 },
-  "errors":   [
+  "inserted":    { "facts": 1, "entities": 1, "edges": 0, "chrono": 1 },
+  "updated":     { "facts": 0, "entities": 0, "edges": 1, "chrono": 0 },
+  "connections": { "links": 2, "edges": 1 },
+  "errors":      [
     { "type": "edge", "index": 0, "reason": "missing required field: from" }
   ]
 }
@@ -503,6 +512,7 @@ Each item accepts the same fields as its corresponding individual endpoint (`POS
 
 - `inserted` — count of new documents written per type.
 - `updated` — count of existing documents merged per type (entities are upserted by `id` when supplied; edges are upserted by their natural key `(from, to, label)`).
+- `connections` — what the ITEMS' own `link*` and `edges` fields attached. **A different question from `inserted.edges`**, which counts the top-level `edges` array: that one is a collection you wrote, these are relationships hung off records you wrote. Folded together the number could not be reconciled against the payload you sent. `links` is the rows that were added; `edges` is the upserts, and this door does not tell a new one from an updated one for an item's own edges.
 - `errors` — per-item failures (`type`, zero-based `index`, human-readable `reason`). Valid items are still written even when errors are present.
 
 Entity items in the `entities` array accept an optional `id` field (UUID v4). If `id` is supplied, the entity with that ID is updated (or created with that ID). If `id` is omitted, a new entity is always inserted. See [Upsert an Entity](04b-graph-api.md#upsert-an-entity) for full identity semantics.

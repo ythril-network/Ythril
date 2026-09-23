@@ -213,6 +213,40 @@ single-record ones — shape only — which is a deliberate trade for an import 
 nobody controls. Once a space uses link records, that trade is off: a well-formed id pointing at nothing is
 refused here as it is everywhere else. A resolved `$ref` always exists, so this costs a batch nothing.
 
+#### An item carries its own relationships
+
+Every single-record write takes the link classes its kind can hold plus an `edges` array, so attaching a
+record to three things is one call. **A batch item takes the same fields, through the same code.** Until 5.1
+it did not: a bulk item could name two link classes and could not carry `edges` at all, so the door where
+the arithmetic is worst — hundreds of records in one request — was the one that still needed a second pass.
+
+```json
+{
+  "facts": [
+    {
+      "fact": "The 20s budget is what the canary's 502 was hitting.",
+      "linkEntities": ["3f2b1c9e-…"],
+      "edges": [ { "to": "7a1e4d2b-…", "label": "corrects" } ]
+    }
+  ]
+}
+```
+
+**An item's own `edges` name records that ALREADY EXIST, and a `$ref` there is refused.** An item is applied
+at the moment it is written, so a key declared further down the payload could not resolve — and resolving
+only backwards would make whether a payload works depend on the order somebody happened to type it in. The
+refusal names the top-level `edges` array, which runs after every record array and resolves a key to
+anything in the call.
+
+**A connection that cannot be honoured is refused before the record is written.** An `edges` entry with no
+label, or a link class the record's kind cannot hold, is reported against that item's index and the record
+does not exist afterwards. The alternative is an error plus a row you did not ask for, which on a batch of
+five hundred is worse than either.
+
+**What each kind may hold is the link vocabulary's answer, not this door's.** An entity holds no link
+classes — it is only ever the far end of one — and it still takes `edges`, because a labelled relationship
+starts anywhere.
+
 **Response** `201`:
 
 ```json

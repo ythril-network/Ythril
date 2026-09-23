@@ -15,6 +15,7 @@ import { emitWebhookEvent } from '../../webhooks/dispatcher.js';
 import { edgeEndpointKindSchema } from '../../brain/entity-refs.js';
 import { CHRONO_STATUSES } from '../../config/types.js';
 import { refDeclareSchema } from '../../brain/batch-refs.js';
+import { connectionSchemas } from '../../brain/write-connections.js';
 
 export const save_bulkTool: ToolHandler = {
   name: 'save_bulk',
@@ -40,11 +41,19 @@ export const save_bulkTool: ToolHandler = {
     + 'addressed by an id that already exists is written before an edge in the same batch reads it. Facts go '
     + 'first of all, so a fact\'s `linkEntities` cannot name an entity from this same call under any ordering.\n\n'
     + 'A RECORD THIS CALL CREATES IS REFERENCED BY A CORRELATION KEY. Put `"$ref": "post-1"` on an item and later items name it as `"$ref:post-1"` — in an edge\'s `from`/`to`, or in a link field. The key is scoped to this call, is never stored, and is NOT the id: identities are still minted here. Every record array is written before any edge, so an edge can reference any record in the payload; within one array a reference cannot point FORWARDS. A key used twice is refused rather than resolved, and a stated kind that disagrees with the array the key was declared in is refused too — the array decides. A LITERAL id you invent is still not the id the record gets, and still points at nothing.\n\n'
+    + 'AN ITEM CARRIES ITS OWN RELATIONSHIPS, exactly as the single-record tools do: the `link*` fields its '
+    + 'kind can hold, and `edges` for labelled ones. So a record and everything it attaches to is one item '
+    + 'rather than a second pass. An item\'s `edges` name records that ALREADY EXIST — a `$ref` there is '
+    + 'refused, because an item is applied when it is written and a reference forwards could not resolve. '
+    + 'For a relationship to a record this same call creates, use the top-level `edges` array, which runs '
+    + 'after every record array.\n\n'
     + 'PARAMETERS: each collection takes the same fields as its single-record tool — `facts` as `saveFact`, '
     + '`entities` as `save_entity`, `edges` as `save_edge`, `chrono` as `save_chrono` — including '
     + '`ttlDays` per item. `targetSpace` is required when `space` is a proxy.\n\n'
-    + 'RESPONSE: `inserted` (a count per collection) and `errors` (one entry per rejected item, with its '
-    + 'collection and index). Neither tells you about items dropped by the 500 cap; only your own count does.',
+    + 'RESPONSE: `inserted` (a count per collection), `connections` (the links and edges the ITEMS\' own '
+    + 'fields attached, which is a different question from `inserted.edges` — that one counts the top-level '
+    + '`edges` array), and `errors` (one entry per rejected item, with its collection and index). None of '
+    + 'them tells you about items dropped by the 500 cap; only your own count does.',
   mutating: true,
   spaceRequired: true,
   // Partial-success contract: invalid items are reported per-item in `errors`, not rejected up front.
@@ -70,14 +79,16 @@ export const save_bulkTool: ToolHandler = {
                       + 'to merge with. They are embedded along with the fact, so a tag affects ranking as '
                       + 'well as being an exact filter.',
                   },
-                  linkEntities: {
-                    type: 'array', items: { type: 'string' },
-                    description: 'Entity IDs to link this fact to. NEVER checked for existence on this '
-                      + 'door — `saveFact` refuses an id that does not resolve, and here a well-formed UUID '
-                      + 'pointing at nothing is stored as a dangling link. The ids have to come from an '
-                      + 'EARLIER call: facts are written before the entities in this same payload, and an '
-                      + 'id you invent for one of them is not the id it gets — identities are minted here.',
-                  },
+                  /*
+                   * `Q-44`: the SAME connection fields the single-record tools declare, from the one builder.
+                   *
+                   * The hand-written `linkEntities` that stood here said it was *"NEVER checked for existence
+                   * on this door"* while the tool description three screens up said references are checked
+                   * for shape AND existence. Both were read while constructing arguments; one of them was
+                   * pre-`F-27`. Building the properties from `connectionSchemas` is what stops a sentence
+                   * about this door's behaviour existing in a second place.
+                   */
+                  ...connectionSchemas('fact'),
                   description: {
                     type: 'string',
                     description: 'Optional prose context or rationale. Embedded with the fact, so it widens '
@@ -113,6 +124,9 @@ export const save_bulkTool: ToolHandler = {
                     description: 'Categorisation tags. MERGED over the stored tags when `id` names an '
                       + 'existing entity, exactly as `save_entity` merges — so no value here removes a tag.',
                   },
+                  // `Q-44`: an entity holds no link classes — it is only ever the far end of one — so this is
+                  // `edges` alone, and it is the class table that decides that rather than this file.
+                  ...connectionSchemas('entity'),
                   description: { type: 'string', description: 'Optional prose description or summary of this entity. Replaced when sent.' },
                   properties:  {
                     type: 'object',
@@ -218,8 +232,9 @@ export const save_bulkTool: ToolHandler = {
                   confidence:  { type: 'number', description: 'Confidence 0 to 1, for entries that are predictions. A non-number is dropped silently and does not appear in `errors`; unlike `save_chrono`, the 0–1 bound is not enforced on this door.' },
                   description: { type: 'string', description: 'Optional longer description of the entry.' },
                   tags:        { type: 'array', items: { type: 'string' }, description: 'Categorisation tags. Every chrono item is an INSERT, so there is nothing to merge with.' },
-                  linkEntities: { type: 'array', items: { type: 'string' }, description: 'Entity IDs this entry concerns — what lets `graph_traverse` reach it from that entity. NEVER checked for existence on this door, and checked for UUID shape only when the space uses strict linkage, so a well-formed id pointing at nothing is stored as a dangling link.' },
-                  linkFacts:   { type: 'array', items: { type: 'string' }, description: 'Fact IDs this entry relates to. Shape-checked under strict linkage only, and never for existence — like `linkEntities`.' },
+                  // `Q-44`: the same two link classes a chrono entry has always held, plus `edges`, from the
+                  // one builder — see the note on the `facts` item above for what the hand-written pair said.
+                  ...connectionSchemas('chrono'),
                   properties:  {
                     type: 'object',
                     description: 'Key-value metadata (string, number or boolean values only), validated '
@@ -248,9 +263,12 @@ export const save_bulkTool: ToolHandler = {
     });
     if (bulkWriteTotal(result) > 0) {
       // Bulk suppresses per-item webhooks; emit ONE summary a workflow can inspect.
-      emitWebhookEvent({ event: 'bulk.write', spaceId: ts, entry: { inserted: result.inserted, updated: result.updated, errorCount: result.errors.length }, ...(ctx.actor ?? {}) });
+      emitWebhookEvent({ event: 'bulk.write', spaceId: ts, entry: { inserted: result.inserted, updated: result.updated, connections: result.connections, errorCount: result.errors.length }, ...(ctx.actor ?? {}) });
     }
-    const summary = `bulk_write complete — inserted: ${JSON.stringify(result.inserted)}, updated: ${JSON.stringify(result.updated)}, errors: ${result.errors.length}`;
+    // `connections` is in the line and not only in `structuredContent`, deliberately: an agent that reads
+    // the text and not the structured half would otherwise see `inserted` unchanged by fifty attachments
+    // and conclude the `link*` fields it sent were ignored.
+    const summary = `bulk_write complete — inserted: ${JSON.stringify(result.inserted)}, updated: ${JSON.stringify(result.updated)}, connections: ${JSON.stringify(result.connections)}, errors: ${result.errors.length}`;
     return {
       content: [{ type: 'text' as const, text: summary + (result.errors.length > 0 ? '\n' + JSON.stringify(result.errors) : '') }],
       structuredContent: { ...result },
