@@ -28,22 +28,27 @@ import { readFileSync } from 'node:fs';
 const SHA256 = /^[0-9a-f]{64}$/;
 
 /**
- * The prompt's own fingerprint.
+ * The fingerprint of an INPUT every extractor reads — the prompt, and since `Q-27` the schema.
  *
- * @param {string|null} path the prompt file, or null when passing `source` directly (tests)
- * @param {string} [source] the prompt text, when there is no file to read
+ * One function for both, because what a copy would drop is the same for both: the refusal to hash a
+ * missing file, and the newline normalisation. The schema went unrecorded while the prompt was recorded, so
+ * a vocabulary change landing mid-round could leave half a corpus written against one schema and half
+ * against another with nothing in any file to say so — the prompt's hazard, one input over.
+ *
+ * @param {string|null} path the input file, or null when passing `source` directly (tests)
+ * @param {string} [source] the input text, when there is no file to read
  *
  * It throws on a missing file rather than hashing an empty string. That is the guard a hand-written copy
  * drops, and it is the worst possible failure here: every run would carry the digest of `''`, identical and
  * plausible, and the field would look like it was working while recording nothing.
  */
-export function promptFingerprint(path, source) {
+export function inputFingerprint(path, source) {
   let text = source;
   if (text === undefined) {
     try {
       text = readFileSync(path, 'utf8');
     } catch (err) {
-      throw new Error(`cannot fingerprint the prompt at '${path}': ${err.message}. Hashing nothing would `
+      throw new Error(`cannot fingerprint the input at '${path}': ${err.message}. Hashing nothing would `
         + 'give every extraction the same fingerprint, which is worse than having no field at all.');
     }
   }
@@ -72,10 +77,12 @@ export function provenanceProblems(extraction) {
       + 'leaves any other trace.'];
   }
   const problems = [];
-  if (!SHA256.test(String(p.promptSha256 ?? ''))) {
-    problems.push(`producedBy.promptSha256 is '${p.promptSha256}', which is not a lowercase sha256 hex `
-      + 'digest. It is the hash of the prompt file\'s bytes, not a version number — a version stays put '
-      + 'through an edit and the whole point is that this cannot.');
+  for (const [field, input] of [['promptSha256', 'prompt'], ['schemaSha256', 'schema']]) {
+    if (!SHA256.test(String(p[field] ?? ''))) {
+      problems.push(`producedBy.${field} is '${p[field]}', which is not a lowercase sha256 hex digest. It is `
+        + `the hash of the ${input} file's bytes, not a version number — a version stays put through an edit `
+        + 'and the whole point is that this cannot.');
+    }
   }
   /*
    * Absent is REFUSED; `false` is accepted and is a real answer. Reading absence as `true` would make the
@@ -95,7 +102,8 @@ export function provenanceProblems(extraction) {
  * This is the question nothing could ask before, and the one that matters for any number taken off the
  * corpus: a delta between conversations extracted by two different prompts measures the prompts.
  *
- * @returns {{onePrompt: boolean, prompts: {sha: string, conversations: string[]}[], attended: string[]}}
+ * @returns {{onePrompt: boolean, prompts: {sha: string, conversations: string[]}[],
+ *            oneSchema: boolean, schemas: {sha: string, conversations: string[]}[], attended: string[]}}
  */
 export function corpusProvenance(extractions) {
   if (!Array.isArray(extractions) || extractions.length === 0) {
@@ -105,15 +113,18 @@ export function corpusProvenance(extractions) {
      */
     throw new Error('no extractions to check — agreement across an empty corpus is not agreement');
   }
-  const byPrompt = new Map();
-  const attended = [];
-  for (const x of extractions) {
-    const id = x.conversationId;
-    const sha = x.producedBy?.promptSha256 ?? '(none)';
-    if (!byPrompt.has(sha)) byPrompt.set(sha, []);
-    byPrompt.get(sha).push(id);
-    if (x.producedBy?.unattended !== true) attended.push(id);
-  }
-  const prompts = [...byPrompt.entries()].map(([sha, conversations]) => ({ sha, conversations }));
-  return { onePrompt: prompts.length === 1, prompts, attended };
+  /** Group the corpus by one fingerprint field — the same question for every input, asked one way. */
+  const groupBy = (field) => {
+    const by = new Map();
+    for (const x of extractions) {
+      const sha = x.producedBy?.[field] ?? '(none)';
+      if (!by.has(sha)) by.set(sha, []);
+      by.get(sha).push(x.conversationId);
+    }
+    return [...by.entries()].map(([sha, conversations]) => ({ sha, conversations }));
+  };
+  const prompts = groupBy('promptSha256');
+  const schemas = groupBy('schemaSha256');
+  const attended = extractions.filter(x => x.producedBy?.unattended !== true).map(x => x.conversationId);
+  return { onePrompt: prompts.length === 1, prompts, oneSchema: schemas.length === 1, schemas, attended };
 }

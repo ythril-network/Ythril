@@ -38,7 +38,7 @@ import { loadConversations } from './locomo/loader.mjs';
 import { validateExtraction } from './writer/validate-extraction.mjs';
 import { mergeExtractionParts } from './writer/merge-extraction.mjs';
 import { corpusSpread } from './writer/corpus-spread.mjs';
-import { promptFingerprint, provenanceProblems, corpusProvenance } from './writer/extraction-provenance.mjs';
+import { inputFingerprint, provenanceProblems, corpusProvenance } from './writer/extraction-provenance.mjs';
 import { extractionMatchesConversation } from './writer/extraction-matches-conversation.mjs';
 import { resumePoint } from './writer/extraction-parts.mjs';
 import { writeSpace, loadSpaceDefinition } from './writer/write-space.mjs';
@@ -46,6 +46,7 @@ import { makeYthril } from './writer/ythril-client.mjs';
 
 const EXTRACTIONS = 'benchmarks/locomo/extractions';
 const PROMPT = 'benchmarks/prompt/extraction.md';
+const SCHEMA = 'benchmarks/space/schema.json';
 
 const die = (msg) => { console.error(msg); process.exit(1); };
 
@@ -69,7 +70,7 @@ function conversations() {
  */
 function status() {
   const all = conversations();
-  const sha = promptFingerprint(PROMPT);
+  const sha = inputFingerprint(PROMPT);
   /*
    * DONE MEANS DONE UNDER THE PROMPT IN THE TREE, and that is the whole question a resuming session has.
    *
@@ -78,15 +79,20 @@ function status() {
    * and the round was declared complete while most of it described the old rules. `stats` warns about a
    * two-prompt corpus after the fact; this says which files to redo before anyone spends a session on it.
    */
+  // `Q-27`: and under the SCHEMA in the tree. A vocabulary change makes a file stale exactly as a prompt
+  // change does, and a status that checked only the prompt would call a round finished across one.
+  const schemaSha = inputFingerprint(SCHEMA);
   const stale = [];
   const done = new Set();
   for (const f of existsSync(EXTRACTIONS) ? readdirSync(EXTRACTIONS).filter(x => x.endsWith('.json')) : []) {
     const id = f.replace(/\.json$/, '');
-    const was = JSON.parse(readFileSync(`${EXTRACTIONS}/${f}`, 'utf8')).producedBy?.promptSha256;
-    if (was === sha) done.add(id); else stale.push({ id, was });
+    const by = JSON.parse(readFileSync(`${EXTRACTIONS}/${f}`, 'utf8')).producedBy ?? {};
+    const was = by.promptSha256;
+    if (was === sha && by.schemaSha256 === schemaSha) done.add(id);
+    else stale.push({ id, was: was === sha ? `schema ${String(by.schemaSha256 ?? '(none)').slice(0, 12)}` : was });
   }
-  console.log(`${done.size} of ${all.length} extracted under prompt ${sha.slice(0, 12)}`
-    + (stale.length > 0 ? `, ${stale.length} left from an earlier prompt` : ''));
+  console.log(`${done.size} of ${all.length} extracted under prompt ${sha.slice(0, 12)} and schema `
+    + `${schemaSha.slice(0, 12)}` + (stale.length > 0 ? `, ${stale.length} left from an earlier prompt or schema` : ''));
   /*
    * THE FULL DIGEST, ON ITS OWN LINE, because the abbreviated one above is what gets copied.
    *
@@ -238,6 +244,12 @@ WARNING: this corpus was produced by ${prov.prompts.length} different prompts, s
       + ' figure taken across it is partly a figure about the prompts:');
     for (const q of prov.prompts) console.log(`  ${q.sha.slice(0, 12)}  ${q.conversations.join(', ')}`);
   }
+  if (!prov.oneSchema) {
+    console.log(`
+WARNING: this corpus was produced against ${prov.schemas.length} different schemas, so a`
+      + ' figure taken across it is partly a figure about the vocabulary:');
+    for (const q of prov.schemas) console.log(`  ${q.sha.slice(0, 12)}  ${q.conversations.join(', ')}`);
+  }
   if (prov.attended.length > 0) {
     console.log(`
 WARNING: not produced unattended: ${prov.attended.join(', ')}. A retrieval score was`
@@ -265,7 +277,9 @@ function merge(paths) {
   const merged = mergeExtractionParts(parts);
   const attested = parts.find(p => p.producedBy?.unattended !== undefined)?.producedBy?.unattended;
   merged.producedBy = {
-    promptSha256: promptFingerprint(PROMPT),
+    promptSha256: inputFingerprint(PROMPT),
+    // `Q-27`: the vocabulary is an input too, and is taken from the tree for the same reason the prompt is.
+    schemaSha256: inputFingerprint(SCHEMA),
     ...(attested !== undefined ? { unattended: attested } : {}),
   };
   console.log(JSON.stringify(merged, null, 2));
