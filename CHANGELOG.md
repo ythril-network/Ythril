@@ -124,6 +124,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   relies on the fresh-write scan and records the measurement behind that choice — waiting there hit the
   index-lag timeout and failed twelve assertions for a reason unrelated to its subject.
 
+### Internal
+
+- **A test named after the bulk 500-item cap had never exercised it** — exposed by the `/bulk` refusal
+  above. It posted its 502 items under the retired `memories` key, so nothing was written, and its
+  assertion — `inserted + errors <= 500` — was satisfied by zero. It sends `facts` now and asserts that
+  exactly 500 of the 502 were processed, because a bound a zero satisfies is not a bound.
+
 ## [5.0.1] — 2026-09-22
 
 **A read was logged as a write on the MCP door, so an operator who had turned read logging OFF still got
