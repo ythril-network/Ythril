@@ -62,7 +62,10 @@ const ORDERED = '_TODO-ORDERED.md';
 const NOT_A_QUEUE = new Map([
   ['_REFERENCE.md', 'resolved rationale — where closed work is supposed to end up'],
   ['_AUDIT-LENSES.md', 'a catalogue of review methods, not a list of work'],
-  ['_THE_LOOP.md', 'the process description itself'],
+  // The loop itself moved into the `flows` space as a graph (owner, 2026-09-23). These two stay as the record
+  // of where it came from and how it was translated — history, so nothing in them is a queue item.
+  ['_THE_LOOP.md', 'history: the process description the flows graph was translated from'],
+  ['_LOOP-DECOMPOSED.md', 'history: the letter-by-letter record of translating _THE_LOOP.md into the flows graph'],
   ['_CRYPTO-INVENTORY.md', 'a fact sheet kept for reference; its subject is closed'],
   // Exempt from the QUEUE rules — its items are decisions, not work, so they have no verify line and are not in
   // the ordered index. It is NOT unchecked: rule 5 holds it to open-decisions-only.

@@ -106,6 +106,8 @@ export const QUERY_BODY_FIELDS: ReadonlySet<string> = new Set([
 export const TRAVERSE_BODY_FIELDS: ReadonlySet<string> = new Set([
   'startId', 'direction', 'edgeLabels', 'maxDepth', 'limit',
   'includeChrono', 'includeMemories', 'includeFiles', 'includeEdges',
+  // `F-32`: the bodies of what the walk reached, projected — the same parameters the MCP tool takes.
+  'projection', 'includeDiagnostics',
 ]);
 
 /*

@@ -712,7 +712,7 @@ keys:
 |---|---|
 | `POST /filter` | `space`, `collection`, `filter`, `projection`, `limit`, `skip`, `sort`, `dir`, `maxTimeMS`, `entityName`, `fromName`, `toName`, `path`, `tag`, `type`, `description`, `properties`, `search`, `includeDiagnostics`, `deriveStatus`, `maxChars`, `maxBytes`, `maxTokens` |
 | `POST /recall` | `space`, `query`, `topK`, `types`, `minScore`, `filter`, `traverse`, `tags`, `minPerType`, `maxPerType`, `maxTimeMS`, `includeFileContent`, `includeDiagnostics`, `includeRecordMeta`, `projection`, `maxChars`, `maxBytes`, `maxTokens`, `skip`, `remainderDump` |
-| `POST /traverse` | `startId`, `direction`, `edgeLabels`, `maxDepth`, `limit`, `includeChrono`, `includeMemories`, `includeFiles`, `includeEdges` |
+| `POST /traverse` | `startId`, `direction`, `edgeLabels`, `maxDepth`, `limit`, `includeChrono`, `includeMemories`, `includeFiles`, `includeEdges`, `projection`, `includeDiagnostics` |
 | `POST /similar` | `space`, `entryId`, `entryType`, `topK`, `minScore`, `targetTypes`, `traverse`, `includeFileContent`, `includeDiagnostics`, `projection`, `maxChars`, `maxBytes`, `maxTokens`, `skip`, `remainderDump`, `crossSpace` *(not deprecated: `space` pins the seed ENTRY here, `crossSpace` widens the SEARCH)* |
 
 ```json

@@ -14,6 +14,8 @@ import { resolveMetaRefs, validateEdge } from '../../spaces/schema-validation.js
 import { mergePropertiesOrKeep } from '../../brain/merge-fields.js';
 import { parseRecordSuppression } from '../../brain/suppress-embeddings.js';
 import { parseRecordSuperseded } from '../../brain/record-flag.js';
+import { withTraverseBodies } from '../../brain/traverse-bodies.js';
+import { normaliseProjection } from '../../brain/projection.js';
 
 export const save_edgeTool: ToolHandler = {
   name: 'save_edge',
@@ -346,6 +348,11 @@ export const graph_traverseTool: ToolHandler = {
             includeMemories: { type: 'boolean', default: false, description: 'Follow fact-to-entity links inbound, so facts about a node are reached too. Fact nodes carry kind:"fact". Opt-IN rather than on by default, unlike includeChrono: facts are usually the most numerous record type and every node counts against `limit`, so enabling it on a fact-heavy space can truncate away the entities you traversed for. Raise `limit` with it.' },
             includeFiles: { type: 'boolean', default: false, description: 'Follow file-to-entity links inbound, so documents about a node are reached too. File nodes carry kind:"file" and file META ONLY — the path as `name`, plus `description` and `tags`. Never passage text: a file body is its chunks, they are the largest thing stored, and a structural walk must not pay for them. Read a chunk with the file API once you know which document you want. Opt-in, like includeMemories.' },
             includeEdges: { type: 'boolean', default: true, description: 'Whether the response carries the edge list. This does NOT change the walk — edges are how the graph is traversed, so declining to follow them would return different nodes rather than a smaller answer. Set false when you only want the reachable nodes and the connecting relationships would be wasted tokens.' },
+            projection: {
+              type: 'object',
+              description: 'Return each reached record\'s BODY, projected — so one call reads a whole subgraph with its content instead of a walk plus a `filter` per collection over the ids it returned. The same grammar `filter` and `recall` take: fields to include (1) or exclude (0), dotted paths allowed, e.g. `{"description": 1, "properties": 1}`. Applied to every node AND every stored edge (an edge\'s `properties` carry its conditions). OMIT IT for the lean answer, which is unchanged. The walk\'s envelope always survives — `_id`, `depth`, `kind` on a node, `_id`, `from`, `to`, `label` on an edge — the vector never comes back, and `matchedText`/`embeddingModel`/`seq` only with `includeDiagnostics`. A link-derived edge has no stored document and is returned as it was.',
+            },
+            includeDiagnostics: { type: 'boolean', default: false, description: 'With `projection`: add back `matchedText`, `embeddingModel` and `seq` on each body. Never the vector. Has no effect without `projection`, because the lean answer carries none of them.' },
           },
           required: ['space', 'startId'],
           additionalProperties: false,
@@ -371,12 +378,14 @@ export const graph_traverseTool: ToolHandler = {
     const result = await traverseGraph(memberIds, startId, direction, edgeLabels, maxDepth, limit,
       a['includeChrono'] !== false, a['includeMemories'] === true, a['includeFiles'] === true,
       a['includeEdges'] !== false);
+    const bodies = await withTraverseBodies(memberIds, result,
+      normaliseProjection(a['projection'] as Record<string, unknown> | undefined), a['includeDiagnostics'] === true);
     return {
       content: [{
         type: 'text' as const,
-        text: JSON.stringify(result),
+        text: JSON.stringify(bodies),
       }],
-      structuredContent: { ...result },
+      structuredContent: { ...bodies },
     };
   },
 };
