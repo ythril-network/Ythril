@@ -27,7 +27,8 @@ Status: **decomposition only — nothing below is implemented yet.**
 
 ```mermaid
 flowchart TD
-  A[1 load] --> B[2 classify turns]
+  Z[0 preconditions] --> A[1 load]
+  A --> B[2 classify turns]
   B --> C[3 resolve time]
   C --> D[4 entities]
   D --> E[5 claims]
@@ -39,14 +40,14 @@ flowchart TD
 ```
 
 Each phase reads the output of the ones before it. The model is called inside phases 2–8 only, and only at
-the steps tagged below; phases 1, 9 and 10 are code end to end.
+the steps tagged below; phases 0, 1, 9 and 10 are code end to end.
 
 ## Tally
 
 | treatment | steps | share |
 |---|---|---|
-| mechanical | 36 | 59% |
-| jev | 20 | 33% |
+| mechanical | 39 | 61% |
+| jev | 20 | 31% |
 | generative | 5 | 8% |
 
 Counted from the step tables below, and recounted by
@@ -54,11 +55,21 @@ Counted from the step tables below, and recounted by
 A step that is code in one case and a decision in another (2.3) counts as `jev`; one with any generative
 part (5.8) counts as `generative`.
 
-The prompt today hands all 61 to one model call. The count is the argument for this design: most of what
-the model is asked to do is arithmetic, bookkeeping or a rule it can only get wrong, and a twelfth of it is
-writing.
+Of the 64 steps, the three preconditions are new; the other 61 are rules the prompt today hands to one
+model call. The count is the argument for this design: most of what the model is asked to do is arithmetic,
+bookkeeping or a rule it can only get wrong, and a twelfth of it is writing.
 
 ---
+
+## 0 · Preconditions — mechanical
+
+The extractor writes a vocabulary, so the space has to hold it before anything runs.
+
+| # | step | tag | notes |
+|---|---|---|---|
+| 0.1 | The extractor's full schema is `schemas/`: one Schema Library entry per type, all in group `conversation` | mechanical | Already the library's own format (`name`, `knowledgeType`, `typeName`, `schemaGroup`, `schema`), so no second format exists |
+| 0.2 | Refuse the ingest unless the target space declares every type of the group, naming the missing ones | mechanical | Checked against the space's `typeSchemas` before a single model call — a run that would be refused at write time must not be paid for first |
+| 0.3 | The way a space gets the group is the library's group import | mechanical | That is `F-20`'s second ask; it lands before or with `ingest`, and `ingest` never writes schema itself — a write door that silently changes a space's rules is how an operator loses track of them |
 
 ## 1 · Load — mechanical
 
@@ -118,9 +129,9 @@ the ENTITIES*.
 |---|---|---|---|
 | 4.1 | Find mentions of things: names as spoken, and unnamed returned-to subjects (*"my mom's old house"*) | **generative** | Open-world by nature. Returns spans pointing into turns, so every mention is checkable against its text |
 | 4.2 | Type of each new entity | **jev `choice`** over the schema's entity types | *"Do not invent a type"* becomes impossible, not forbidden |
-| 4.3 | Shortlist existing entities a mention could be: alias and string similarity, same type, embedding neighbours | mechanical | Code supplies the candidates… |
+| 4.3 | Shortlist existing entities a mention could be — from THIS run's entities and from the SPACE: same type, exact name or alias, fuzzy name, and `similar` over the mention's context | mechanical | Code supplies the candidates… No full list of people is ever built: one bounded lookup per DISTINCT mention, cached for the run, a handful of candidates each. A second conversation ingested into the same space matches against what the first one wrote |
 | 4.4 | Is this mention one of the shortlisted, or new? | **jev `choice`** over the shortlist + `new` | …the model picks a card. *"Identity is the whole job"* — and it is now one bounded question per mention |
-| 4.5 | Merge policy: prefer merging when consistent, never when something rules it out | mechanical | Thresholds on 4.4's confidence; a merge ruled out by dates (4.7) wins over a confident merge |
+| 4.5 | Merge policy: prefer merging when consistent, never when something rules it out | mechanical | Thresholds on 4.4's confidence; a merge ruled out by dates (4.7) wins over a confident merge. The residual risk is a shortlist that MISSED the right entity — a duplicate, not a wrong merge — and the space's existing near-duplicate scanner is the net for that |
 | 4.6 | Does the mention name a GROUP (*"the kids"*, *"my parents"*)? | **jev `noul`** | Policy: one entity for the group, typed as its members |
 | 4.7 | Rule out a merge when dates contradict (*a "first game" released after a different game*) | mechanical | Dates from phase 3 |
 | 4.8 | Mint only what the conversation returns to: ≥2 mentions, or linked by a claim or edge | mechanical | *"Do not pad"* as a count, not an exhortation |

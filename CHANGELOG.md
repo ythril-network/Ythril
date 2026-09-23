@@ -90,7 +90,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - a bounded Jev-style decision over a domain the code supplies (choice, score or probability);
   - open-world writing.
 
-  Of 61 steps, 36 become code and 5 remain writing. The type and label choices draw from the schema, so an
+  Of 64 steps, 39 become code and 5 remain writing. The space must already hold the extractor's schema
+  group; `ingest` refuses before any model call otherwise, and never writes schema itself. The type and label choices draw from the schema, so an
   invented type is impossible rather than forbidden. The schemas sit beside it one file per record type, the
   way the `flows` space lays its own out. A gate recounts the tally from the tables and holds the split
   schemas identical to the benchmark's until the benchmark reads them from here.

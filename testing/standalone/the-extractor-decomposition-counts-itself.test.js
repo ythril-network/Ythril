@@ -54,7 +54,7 @@ describe('the decomposition counts itself', () => {
       assert.equal(Number(m[1]), counted[t], `the tally says ${m[1]} ${t} steps; the tables hold ${counted[t]}`);
       assert.equal(Number(m[2]), Math.round(100 * counted[t] / steps.length), `the ${t} share is stale`);
     }
-    const total = doc.match(/hands all (\d+) to one model call/);
+    const total = doc.match(/^Of the (\d+) steps/m);
     assert.ok(total, 'the total is no longer stated where this test reads it');
     assert.equal(Number(total[1]), steps.length, `the prose says ${total[1]} steps; the tables hold ${steps.length}`);
   });
