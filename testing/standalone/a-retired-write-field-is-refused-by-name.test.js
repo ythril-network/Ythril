@@ -21,9 +21,11 @@
  *
  * ## What is derived
  *
- * The retired names come from the module that declares them, and the replacement each one names is read out
- * of the message rather than written here a second time. A fourth retirement is covered on the day it is
- * added; a message that stops naming its replacement fails here even though the refusal still happens.
+ * The retired names come from the module that declares them, and so does the replacement each one names —
+ * DECLARED on the entry since `Q-41` rather than inferred by filtering the three link input names, which
+ * was true of every member while every member replaced a link array and became the wrong rule the moment
+ * one replaced a collection key. A fourth retirement is covered on the day it is added; a message that
+ * stops naming its replacement fails here even though the refusal still happens.
  *
  * Run: node --test testing/standalone/a-retired-write-field-is-refused-by-name.test.js
  * (requires a prior `npm run build` in server/)
@@ -31,13 +33,21 @@
 import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 
-let RETIRED, retiredWriteFieldError, retiredWriteFieldHint, connectionInputError, LINK_INPUT_NAMES, validateArgsSrc;
+let RETIRED, retiredWriteFieldError, retiredWriteFieldHint, connectionInputError, LINK_INPUT_NAMES,
+    ACCEPTED_NAMES, validateArgsSrc;
 
 before(async () => {
   ({ RETIRED_WRITE_FIELDS: RETIRED, retiredWriteFieldError, retiredWriteFieldHint } =
     await import('../../server/dist/brain/retired-write-fields.js'));
   ({ connectionInputError, LINK_INPUT_NAMES } =
     await import('../../server/dist/brain/write-connections.js'));
+  /*
+   * What a door will actually take, gathered from the doors rather than listed here: the connection fields
+   * a single-record create accepts, and the collection keys a batch body accepts. A replacement named in a
+   * refusal has to be one of these, or the sentence sends its reader to a field that does not exist.
+   */
+  const { BULK_BODY_KEYS } = await import('../../server/dist/brain/bulk.js');
+  ACCEPTED_NAMES = [...LINK_INPUT_NAMES, ...BULK_BODY_KEYS];
   const { readFileSync } = await import('node:fs');
   validateArgsSrc = readFileSync('server/src/mcp/validate-args.ts', 'utf8');
 });
@@ -62,10 +72,18 @@ describe('a retired write field is refused by name', () => {
        * The half that makes the refusal worth having. "This field is gone" sends the reader back to the
        * guide they were reading when they wrote it; the replacement has to be IN the sentence, and it has
        * to be a name the doors actually accept rather than a plausible one.
+       *
+       * DERIVED from the entry, not inferred from the sentence (`Q-41`). This used to filter
+       * `LINK_INPUT_NAMES` and require exactly one hit — true of every member while every member replaced
+       * a link array, and the wrong rule the moment one replaced a collection key instead. The entry now
+       * declares its own replacement, so the assertion is that the sentence names THAT.
        */
-      const named = LINK_INPUT_NAMES.filter(f => err.includes(f));
-      assert.equal(named.length, 1,
-        `the refusal for ${name} names ${named.length} replacement fields; it must name exactly the one to send`);
+      const { replacement } = RETIRED[name];
+      assert.ok(err.includes(replacement),
+        `the refusal for ${name} does not name its declared replacement '${replacement}'`);
+      assert.ok(ACCEPTED_NAMES.includes(replacement),
+        `${name} is told to send '${replacement}', which no door accepts — the refusal sends the reader `
+        + 'to a field that does not exist, which is worse than the silence it replaced');
     }
   });
 
@@ -93,13 +111,13 @@ describe('a retired write field is refused by name', () => {
      */
     const err = connectionInputError({ entityIds: ['aaaaaaaa-0000-4000-8000-000000000001'] });
     assert.ok(err, 'the shared connection check lets a retired field through');
-    assert.equal(err, RETIRED['entityIds'], 'the doors must say what the module says, not a second wording');
+    assert.equal(err, RETIRED['entityIds'].message, 'the doors must say what the module says, not a second wording');
   });
 
   it('and the retired name is answered BEFORE the shape rules, so the advice fits the mistake', () => {
     // A caller sending `entityIds: "not-an-array"` must be told the field is retired, not that its value is
     // the wrong shape for a field they cannot use at all.
-    assert.equal(connectionInputError({ entityIds: 'nope' }), RETIRED['entityIds']);
+    assert.equal(connectionInputError({ entityIds: 'nope' }), RETIRED['entityIds'].message);
   });
 
   it('the MCP dispatcher answers with the same sentence, not "unexpected property"', () => {
@@ -114,7 +132,7 @@ describe('a retired write field is refused by name', () => {
       + 'name REST explains');
     assert.match(validateArgsSrc, /retired \?\? `\$\{at\}: unexpected property/,
       'the generic message must be the fallback, not the answer that wins');
-    assert.equal(retiredWriteFieldHint('entityIds'), RETIRED['entityIds']);
+    assert.equal(retiredWriteFieldHint('entityIds'), RETIRED['entityIds'].message);
     assert.equal(retiredWriteFieldHint('somethingElse'), null,
       'an ordinary unknown property must still get the ordinary message');
   });

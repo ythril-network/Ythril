@@ -47,12 +47,21 @@ const MAX_FACT_LENGTH = 50_000;
 
 interface Counts { facts: number; entities: number; edges: number; chrono: number }
 
-export interface BulkInput {
-  facts?: unknown;
-  entities?: unknown;
-  edges?: unknown;
-  chrono?: unknown;
-}
+/**
+ * The keys a batch body may carry, as a runtime tuple (`Q-41`).
+ *
+ * `BulkInput` is derived from it rather than written beside it, because the route has to REFUSE a key this
+ * type does not declare and a TypeScript interface does not exist at runtime. Two hand-kept lists would
+ * drift the moment a fifth collection is added — and the drift would be silent in the safe direction for
+ * the compiler and the wrong one for a caller, who would be told a legitimate key is unknown.
+ */
+// NOT ALL BRAIN COLLECTIONS, deliberately: a batch writes the four knowledge kinds and nothing else.
+// `files` are bytes and arrive through the file store, and `links` are written by the connection fields on
+// an item rather than as a collection of their own — so this is a subset by capability, not by omission,
+// and adding either here would be declaring a batch can do something it cannot.
+export const BULK_BODY_KEYS = ['facts', 'entities', 'edges', 'chrono'] as const;
+
+export type BulkInput = Partial<Record<typeof BULK_BODY_KEYS[number], unknown>>;
 
 export interface BulkResult {
   inserted: Counts;

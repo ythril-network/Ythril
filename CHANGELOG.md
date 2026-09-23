@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`/bulk` read a retired name as success, and it was the one write door that did** (`Q-41`). Reported by
+  the fleet integrator: `{"memories": […]}` answered `207` with nothing inserted and an empty `errors`
+  array — the same answer a body that legitimately wrote nothing gives. Around thirty of their builders had
+  been writing into that key and seeing success.
+
+  The batch body takes its four keys and no others now. `memories` is refused by name with `facts` as the
+  replacement; any other unrecognised key is refused with the four that are accepted. **An item carrying a
+  retired link array is refused the same way** — `entityIds`, `memoryIds` and `chronoIds` were dropped just
+  as quietly one level down, and a batch is where that costs most.
+
+  Both go through the module every single-record door already calls, rather than a second check that would
+  need its own sentence kept in step. The allowed keys are derived from one tuple, so a fifth collection
+  cannot be accepted by the writer and refused by the door.
+
 - **The reranker was sent up to a hundred passages in one request, and a stock server refuses that**
   (`Q-42`). Reported by the canary operator: every unfiltered search on their fleet had been served in
   fused order, for as long as their settings had been what they are. A `413 Payload Too Large` reaches the
@@ -109,6 +123,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   one: some assert a refusal, some assert only a status, and `result-spill-both-doors` deliberately
   relies on the fresh-write scan and records the measurement behind that choice — waiting there hit the
   index-lag timeout and failed twelve assertions for a reason unrelated to its subject.
+
+### Internal
+
+- **A test named after the bulk 500-item cap had never exercised it** — exposed by the `/bulk` refusal
+  above. It posted its 502 items under the retired `memories` key, so nothing was written, and its
+  assertion — `inserted + errors <= 500` — was satisfied by zero. It sends `facts` now and asserts that
+  exactly 500 of the 502 were processed, because a bound a zero satisfies is not a bound.
 
 ## [5.0.1] — 2026-09-22
 

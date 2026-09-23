@@ -2578,15 +2578,29 @@ describe('Brain — bulk write caps at 500 items per type', () => {
     await delWithBody(INSTANCES.a, token(), `/api/spaces/${testSpaceId}`, { confirm: true }).catch(() => {});
   });
 
-  it('Items beyond 500 are silently dropped', async () => {
-    const memories = [];
+  /*
+   * THIS TEST WAS VACUOUS and `Q-41` is what exposed it.
+   *
+   * It posted the items under `memories` — the 4.x key — which 5.0 renamed to `facts`. The door carried the
+   * unknown key in and never read it, so the answer was `207` with `inserted.facts: 0` and `errors: []`, and
+   * `0 + 0 <= 500` passed. The cap it claims to check was never exercised: the assertion was true of a
+   * request that wrote nothing at all.
+   *
+   * Two changes, and the second is the one that keeps it honest. It sends `facts`, so the items reach the
+   * writer; and it asserts the cap BIT — exactly 500 of the 502 processed — because `<= 500` is satisfied by
+   * zero, which is how this passed for as long as it did.
+   */
+  it('Items beyond 500 are dropped, and the cap is what decides it', async () => {
+    const facts = [];
     for (let i = 0; i < 502; i++) {
-      memories.push({ fact: `BulkCap-${RUN}-${i}` });
+      facts.push({ fact: `BulkCap-${RUN}-${i}` });
     }
-    const r = await post(INSTANCES.a, token(), `/api/brain/spaces/${testSpaceId}/bulk`, { memories });
+    const r = await post(INSTANCES.a, token(), `/api/brain/spaces/${testSpaceId}/bulk`, { facts });
     assert.equal(r.status, 207, JSON.stringify(r.body));
     const total = r.body.inserted.facts + r.body.errors.length;
-    assert.ok(total <= 500, `Total processed must be <= 500, got ${total}`);
+    assert.equal(total, 500,
+      `the cap must process exactly 500 of the 502 sent, got ${total} — `
+      + `${r.body.inserted.facts} inserted, ${r.body.errors.length} errored`);
   });
 });
 

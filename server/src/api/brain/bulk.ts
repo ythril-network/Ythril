@@ -7,7 +7,9 @@ import { Router } from 'express';
 import { requestActor } from '../../auth/request-actor.js';
 import { requireSpaceAuth, denyReadOnly } from '../../auth/middleware.js';
 import { globalRateLimit } from '../../rate-limit/middleware.js';
-import { bulkWrite, bulkWriteTotal, type BulkInput } from '../../brain/bulk.js';
+import { bulkWrite, bulkWriteTotal, BULK_BODY_KEYS, type BulkInput } from '../../brain/bulk.js';
+import { retiredWriteFieldError } from '../../brain/retired-write-fields.js';
+import { unknownBodyFields } from '../../brain/query.js';
 import { getConfig } from '../../config/loader.js';
 import { resolveWriteTarget } from '../../spaces/proxy.js';
 import { emitWebhookEvent } from '../../webhooks/dispatcher.js';
@@ -46,8 +48,38 @@ bulkRouter.post('/spaces/:spaceId/bulk', globalRateLimit, requireSpaceAuth, deny
   if (!wt.ok) { res.status(400).json({ error: wt.error }); return; }
   const targetSpace = wt.target;
 
+  /*
+   * A NAME THIS DOOR DOES NOT KNOW IS REFUSED, at both levels (`Q-41`).
+   *
+   * The body used to be spread through a bare cast, so a key `BulkInput` does not declare rode in and was
+   * never read by anything downstream: `{"memories":[…]}` answered `207` with nothing inserted and an empty
+   * `errors` array — the same answer a body that legitimately wrote nothing gives. Reported by the fleet
+   * integrator after about thirty of their builders had been writing into it and seeing success.
+   *
+   * The retired name is checked FIRST so `memories` is answered with `facts` rather than with the generic
+   * "unknown field" sentence: this is the one door where a caller migrating from 4.x lands, and the
+   * sentence they need is the replacement, not the inventory.
+   *
+   * ITEMS are checked too, because the same silence was one level down. `brain/bulk.ts` never mentions
+   * `entityIds`, `memoryIds` or `chronoIds`, so an item carrying one was written without its connections —
+   * and a batch is where that costs most, since one accepted request can carry hundreds.
+   */
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  const retired = retiredWriteFieldError(body);
+  if (retired) { res.status(400).json({ error: retired }); return; }
+  const unknown = unknownBodyFields(body, new Set(BULK_BODY_KEYS));
+  if (unknown) { res.status(400).json(unknown); return; }
+  for (const key of BULK_BODY_KEYS) {
+    const items = body[key];
+    if (!Array.isArray(items)) continue;
+    for (const item of items) {
+      const itemRetired = retiredWriteFieldError(item);
+      if (itemRetired) { res.status(400).json({ error: itemRetired }); return; }
+    }
+  }
+
   const result = await bulkWrite(targetSpace, {
-    ...((req.body ?? {}) as BulkInput),
+    ...(body as BulkInput),
     // `F-25`: who wrote it, for the conversion pre-flight. Spread AFTER the body so a caller cannot
     // supply its own actor and be recorded as somebody else.
   });
