@@ -119,20 +119,28 @@ export async function checkEdgeLinkViolations(
  * testing it against `UUID_V4_RE` would report every legitimate `file.` reference as malformed — a violation
  * log full of correct data, which is worse than an empty one.
  *
- * ## What is still not checked, and why it is not a half-done job here
+ * ## A file's links are checked too, since `Q-39`
  *
- * A link whose FROM is a file. `LinkViolationDoc.docType` has no `file` member, so reporting one would
- * mean widening a STORED shape and the screen that displays it. That gap predates the link migration:
- * sync has never checked a file's links at all, for any class. Tracked as its own row rather than
- * smuggled in here — `Q-39`.
+ * This opened with `if (link.fromKind !== 'fact' && link.fromKind !== 'chrono') return;`, so a link
+ * arriving FROM a file was skipped — and a peer sending a file linked to an entity this instance does not
+ * hold was recorded as nothing at all. An operator reads an empty violation list as everything being fine,
+ * which is the one failure a diagnostic must not have: absent and clean look identical.
+ *
+ * The narrowing is gone rather than extended, and that is the point — `fromKind` is a `RefKind`, the
+ * vocabulary decides what a link may start at, and a fifth kind declared next year is checked on the day it
+ * is declared instead of waiting for somebody to add it to a list here.
+ *
+ * `LinkViolationDoc.docType` widened from `KnowledgeType` to `RecordType` to carry it. That is the same
+ * union plus `file`, already derived from `RECORD_TYPES`, so nothing had to be written out twice. It is a
+ * LOCAL diagnostic collection — it does not replicate and no screen reads it — so widening the field needed
+ * no migration: the members it already held are still members.
  */
 export async function checkLinkViolations(
   spaceId: string,
-  link: { _id: string; from: string; fromKind: string; to: string; toKind: string } | undefined,
+  link: { _id: string; from: string; fromKind: RefKind; to: string; toKind: string } | undefined,
   peerInstanceId: string,
 ): Promise<void> {
   if (!isStrictLinkage(spaceId) || !link) return;
-  if (link.fromKind !== 'fact' && link.fromKind !== 'chrono') return;
 
   const field = `${link.fromKind}.${link.toKind}`;
   if (link.toKind !== 'file' && !UUID_V4_RE.test(link.to)) {

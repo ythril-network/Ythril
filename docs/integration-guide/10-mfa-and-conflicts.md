@@ -215,6 +215,10 @@ GET /api/conflicts/link-violations
 
 Returns sync-ingested documents that violate strict linkage rules.
 
+`docType` is `entity`, `edge`, `fact`, `chrono` or **`file`**. A file's links are checked like any other
+record's, so `docType: "file"` is a value a caller must expect — and for that one `docId` is the file's
+**path** rather than a UUID, because that is what identifies a file in a space.
+
 **Response** `200`:
 
 ```json
@@ -227,6 +231,16 @@ Returns sync-ingested documents that violate strict linkage rules.
       "docType": "edge",
       "field": "from",
       "reason": "from must be UUID v4 when strictLinkage is enabled",
+      "peerInstanceId": "peer-uuid",
+      "detectedAt": "2026-04-12T12:00:00.000Z"
+    },
+    {
+      "_id": "uuid",
+      "spaceId": "general",
+      "docId": "handbook/onboarding.md",
+      "docType": "file",
+      "field": "file.entity",
+      "reason": "file.entity references non-existent entity '…'",
       "peerInstanceId": "peer-uuid",
       "detectedAt": "2026-04-12T12:00:00.000Z"
     }
