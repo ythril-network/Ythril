@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A config reload that failed left one log line and nothing to alert on** (`Q-43`). Reported by the
+  canary operator, whose edit sat out of effect until the next restart with the only evidence in a pod log
+  nobody was tailing. The endpoint they blamed is correct — `POST /api/admin/reload-config` answers `500`
+  on a file it refuses. The silent half is the **watcher**, which has no caller to answer and logs instead.
+
+  Two metrics now, because they answer different questions. `ythril_config_reload_pending` is the one to
+  alert on: `1` while a refused reload has left the running configuration older than the file, cleared by
+  the next reload that succeeds. `ythril_config_reload_failed_total` is the history beside it.
+
+  **The gauge matters more than the counter here**, and the reason is in the watcher: it claims the file's
+  modification time *before* reloading, so broken bytes are not re-read every tick — which means a failed
+  watched reload is never retried on its own. A counter that moved an hour ago says it happened; the gauge
+  says it is still true.
+
 - **`/bulk` read a retired name as success, and it was the one write door that did** (`Q-41`). Reported by
   the fleet integrator: `{"memories": […]}` answered `207` with nothing inserted and an empty `errors`
   array — the same answer a body that legitimately wrote nothing gives. Around thirty of their builders had

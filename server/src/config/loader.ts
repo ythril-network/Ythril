@@ -530,6 +530,18 @@ function recordConfigMtime(): void {
 export function startConfigWatcher(
   onExternalChange: () => Promise<void> | void,
   intervalMs = 2000,
+  /**
+   * Told whether each WATCHED reload applied, so somebody other than the log can know (`Q-43`).
+   *
+   * A callback rather than this module touching the metrics registry, and that is not style: `registry.ts`
+   * reaches back here through `quota` and `db/mongo`, so importing it would close a runtime import cycle —
+   * which `no-runtime-import-cycles.test.js` refuses, correctly. The composition root wires it to the two
+   * metrics, the same shape `setPostureProvider` uses for the same reason.
+   *
+   * Optional because a caller that does not care must not have to care, and the watcher's behaviour is
+   * unchanged without it.
+   */
+  onReloadOutcome?: (applied: boolean) => void,
 ): void {
   if (_configWatchActive) return;
   _configWatchActive = true;
@@ -552,8 +564,22 @@ export function startConfigWatcher(
     _reloadChain = _reloadChain
       .catch(() => { /* a prior failure must not break the chain */ })
       .then(() => onExternalChange())
-      .then(() => { recordConfigMtime(); })
-      .catch(err => log.error(`Reload after external config change failed; keeping current config: ${err}`));
+      .then(() => { recordConfigMtime(); onReloadOutcome?.(true); })
+      .catch(err => {
+        /*
+         * A LOG LINE IS NOT ENOUGH HERE, and `Q-43` is why.
+         *
+         * There is no caller to return a status to — that is what a watcher is — so this catch was the
+         * whole trace. The canary operator's edit sat out of effect until the next restart and the only
+         * evidence was this line, in a pod log nobody was tailing.
+         *
+         * The mtime was claimed ABOVE, before the reload, so nothing retries this on its own: what is
+         * running stays older than what is on disk until somebody writes the file again. That is why the
+         * outcome is reported as a CONDITION and not only as an event.
+         */
+        onReloadOutcome?.(false);
+        log.error(`Reload after external config change failed; keeping current config: ${err}`);
+      });
   });
 }
 

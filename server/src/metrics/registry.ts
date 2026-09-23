@@ -1020,3 +1020,46 @@ export function setPostureProvider(fn: () => Array<{ level: string }>): void {
   postureProvider = fn;
 }
 for (const level of POSTURE_LEVELS) securityPostureChecks.set({ level }, 0);
+
+/**
+ * A config reload that FAILED, counted and — separately — held as a condition (`Q-43`).
+ *
+ * ## Why this is not only a log line
+ *
+ * The canary operator edited `config.json`, the watcher refused the half-written file, and the edit sat
+ * out of effect until the next restart. The only evidence anywhere was one line in a pod log nobody was
+ * tailing. `startConfigWatcher` ends its chain in `.catch(err => log.error(...))`, which is the right
+ * shape for a watcher — there is no caller to return a status to — and the wrong amount of evidence.
+ *
+ * ## Why BOTH, and it is not belt-and-braces
+ *
+ * The watcher claims the file's mtime BEFORE reloading, so broken bytes are not retried every tick. That
+ * makes a failed watched reload permanent on its own: the running config stays older than the file until
+ * something writes it again or the instance restarts.
+ *
+ * So the two answer different questions. The counter is the history — *"has this been happening?"* — and
+ * the gauge is the condition — *"is the config I am running the config on disk, right now?"*. An alert
+ * wants the second; a postmortem wants the first. The canary named that distinction themselves, for the
+ * reranker: transient versus permanent, and only a series over time can tell them apart.
+ */
+export const configReloadFailedTotal = new Counter({
+  name: 'ythril_config_reload_failed_total',
+  help: 'Config reloads that were refused and left the running configuration unchanged',
+  registers: [register],
+});
+// Pre-declared, for the reason every counter here is: absent and zero look identical on a graph, and an
+// operator reading a missing series as "never happened" is the failure this metric exists to prevent.
+configReloadFailedTotal.inc(0);
+
+/**
+ * 1 while the last watched reload failed, so what is running is older than what is on disk.
+ *
+ * Cleared by the next reload that succeeds, deliberately: an alert that cannot resolve is one somebody
+ * silences, and then the next real occurrence is invisible for the same reason as the first.
+ */
+export const configReloadPending = new Gauge({
+  name: 'ythril_config_reload_pending',
+  help: '1 if a config reload was refused and the running configuration is older than the file on disk',
+  registers: [register],
+});
+configReloadPending.set(0);

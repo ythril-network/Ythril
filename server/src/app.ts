@@ -60,6 +60,8 @@ import {
   httpRequestDurationSeconds,
   httpRequestSizeBytes,
   httpResponseSizeBytes,
+  configReloadFailedTotal,
+  configReloadPending,
 } from './metrics/registry.js';
 import { spaceCollection } from './db/space-collection.js';
 
@@ -551,7 +553,18 @@ export function createApp() {
     await rearmCronSchedulers();
   }
 
-  startConfigWatcher(() => applyConfigFromDisk());
+  /*
+   * The watcher's outcome reaches the metrics from HERE, not from the loader (`Q-43`).
+   *
+   * `registry.ts` reaches the config loader through `quota` and `db/mongo`, so the loader importing it
+   * would close a runtime import cycle. The composition root has both in scope already, which is what a
+   * composition root is for.
+   */
+  startConfigWatcher(() => applyConfigFromDisk(), undefined, applied => {
+    if (applied) { configReloadPending.set(0); return; }
+    configReloadFailedTotal.inc();
+    configReloadPending.set(1);
+  });
   app.post('/api/admin/reload-config', globalRateLimit, requireAdminMfa, async (_req, res) => {
     try {
       await applyConfigFromDisk();
