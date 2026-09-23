@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`/bulk` read a retired name as success, and it was the one write door that did** (`Q-41`). Reported by
+  the fleet integrator: `{"memories": […]}` answered `207` with nothing inserted and an empty `errors`
+  array — the same answer a body that legitimately wrote nothing gives. Around thirty of their builders had
+  been writing into that key and seeing success.
+
+  The batch body takes its four keys and no others now. `memories` is refused by name with `facts` as the
+  replacement; any other unrecognised key is refused with the four that are accepted. **An item carrying a
+  retired link array is refused the same way** — `entityIds`, `memoryIds` and `chronoIds` were dropped just
+  as quietly one level down, and a batch is where that costs most.
+
+  Both go through the module every single-record door already calls, rather than a second check that would
+  need its own sentence kept in step. The allowed keys are derived from one tuple, so a fifth collection
+  cannot be accepted by the writer and refused by the door.
+
 - **The reranker was sent up to a hundred passages in one request, and a stock server refuses that**
   (`Q-42`). Reported by the canary operator: every unfiltered search on their fleet had been served in
   fused order, for as long as their settings had been what they are. A `413 Payload Too Large` reaches the

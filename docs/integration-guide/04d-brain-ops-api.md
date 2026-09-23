@@ -487,6 +487,8 @@ Each array is capped at 500 entries. Per-item validation failures are recorded i
 
 Each item accepts the same fields as its corresponding individual endpoint (`POST /facts`, `POST /entities`, `POST /edges`, `POST /chrono`), with one exception: **an entity's `type` is required in bulk** (an item missing it is skipped with `"missing required field: type"`), whereas the single `POST /entities` defaults `type` to empty.
 
+**The body takes those four keys and no others, and a retired name is refused by name.** `{"memories": […]}` — the 4.x spelling — answers `400` naming `facts` as the replacement, and any other unrecognised top-level key answers `400` listing the four that are accepted. The same applies to a retired field **on an item**: `entityIds`, `memoryIds` and `chronoIds` are each refused with their `linkEntities` / `linkFacts` / `linkChronos` replacement. Until 5.1 an unknown key was carried in and never read, so a batch built against 4.x answered `207` with nothing inserted and an empty `errors` array — indistinguishable from a body that legitimately wrote nothing.
+
 **Response** `207`:
 
 ```json
