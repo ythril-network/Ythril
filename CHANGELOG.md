@@ -45,8 +45,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   of all ten conversations, memory arm first and each arm independently of the other, so a baseline
   answer never saw the retrieved hits and a memory answer never saw the transcript. On F1 over 1,540
   scored questions the memory arm reads 62.7 against the baseline's 67.5. The baseline is the whole
-  transcript in context, which is the ceiling and not a competitor. The judged figure follows from the
-  judge's replies.
+  transcript in context, which is the ceiling and not a competitor. **Judged by a GPT model from a
+  different vendor on a blind, balanced 200-question sample: memory 82.5% against the baseline's 84.5%,
+  a gap of −2.0 with a 95% interval of −6.2 to +2.2**, from about 2% of the text per question. With the
+  judge in place the graded runner shipped: retrieve, both arms, a different-family judge and the baseline
+  column. Method and caveats are in `benchmarks/README.md` → Results.
+
+### Changed
+
+- **The README describes Ythril as a knowledge management system, and its quickstart works on 5.x.**
+  It pitched a memory for one assistant, and a rename had left it saying *"give your AI a fact"* and *"the
+  fact layer"*. The quickstart pointed MCP clients at `/mcp/general`, a 4.x per-space address that 5.0
+  replaced with the single `/mcp`, and it named two tools, `find_similar` and `er_model`, that 5.x does
+  not register. It now leads with what the product holds (semantic search, the graph, the timeline,
+  files, sync, one API over MCP and REST), shows the REST door beside the MCP one, and publishes the
+  LoCoMo result with its method. The gate holding the README's lookup claim matched the retired
+  `find_similar` name, so it kept passing on a stale sentence. It now matches the blind-spots claim, and
+  the tool names are checked against the registry.
 
 ### Fixed
 
