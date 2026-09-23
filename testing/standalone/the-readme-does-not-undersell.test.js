@@ -138,7 +138,9 @@ const CLAIMS = [
   },
   {
     what: 'four lookup primitives, each stating its blind spots',
-    phrase: /find_similar/,
+    // The claim is the blind spots, not a tool name: this matched `find_similar` and kept matching a README
+    // that named a tool retired in 5.0. Names are checked against ALL_TOOLS below, where a rename fails.
+    phrase: /blind spots/i,
     mechanism: () => {
       // All four registered, and the "what this is bad at" half is the part that would quietly rot: a tool
       // description is what a caller reads WHILE constructing arguments, so a missing warning is invisible.

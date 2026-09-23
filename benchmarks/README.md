@@ -5,7 +5,7 @@ about something it was told earlier. One is being run here, one is prepared, one
 
 | folder | benchmark | what it asks | state here |
 |---|---|---|---|
-| `locomo/` | LoCoMo | can you answer a question about a conversation that ran over weeks | running; one conversation ingested |
+| `locomo/` | LoCoMo | can you answer a question about a conversation that ran over weeks | all ten conversations ingested; first graded round below |
 | `longmemeval/` | LongMemEval | five named memory abilities, including knowing when to say you do not know | pinned, not yet run |
 | `memoryarena/` | MemoryArena | does memory make an agent finish the task, not just recall the fact | not released by its authors |
 
@@ -44,6 +44,43 @@ conversation's number rather than left to be inferred.
 **The extraction is committed as data.** Extraction needs a model; replaying it does not. Pinning the output
 means the exact graph can be rebuilt from this repository by anybody, and every record in it checked against
 the transcript it came from. Only re-deriving an extraction needs a model of your own.
+
+## Results
+
+### LoCoMo, round `tier0-1` — 2026-09-23, Ythril 5.1.0
+
+All ten conversations and the 1,540 scored questions (categories 1–4; category 5, the adversarial set, is
+excluded as Bench'd excludes it). Two arms, same answerer, same questions:
+
+- **memory** — the answerer sees only what one `recall` against the conversation's space returned for that
+  question, and nothing from any other question;
+- **baseline** — the answerer sees the whole conversation, image captions included. This is the ceiling the
+  section below asks for, not a competitor: it stops being possible once a history outgrows the context.
+
+| measure | n | memory | baseline | memory − baseline |
+|---|---|---|---|---|
+| judged correct | 200 (paired, balanced by category) | **82.5%** | 84.5% | −2.0 (95% CI −6.2 to +2.2) |
+| token F1 (LoCoMo normalisation) | 1,540 | 62.7 | 67.5 | −4.8 |
+| text in front of the answerer, per question | 1,540 | ~1.8k chars | ~86k chars | ~2% |
+
+**So: with about a fiftieth of the text, the answers are as good as reading everything, within what a
+200-question judged sample can resolve.** F1 shows a wider gap than the judge because it counts shared
+words, and a retrieved fact is usually phrased differently from the reference answer; most of it sits in
+category 4 (−7.7 F1).
+
+**How it was run, because every item bounds the number:**
+
+- **Answerer:** Claude Opus 5.5, for both arms, memory arm first, each arm answered without sight of the
+  other. The answerer is not blind to which arm it is in, which is why the judge is.
+- **Judge:** a GPT model from a different vendor, web search off, grading a blind sample. It saw question,
+  reference and answer only, never the arm; a key file held the mapping.
+- **Not a leaderboard figure.** Published LoCoMo numbers use other answerers and judges, so compare the
+  *gap to the baseline*, not the percentage — see the next section for why.
+- **What misses look like:** the memory arm answered *"not mentioned"* 25 times against the baseline's 7.
+  Those are questions whose evidence the retrieval did not return, and they are the work list.
+
+The run is reproducible from `tier0.mjs` (`prepare`, `record`, `score`, `judge-export`, `judge-import`,
+`report`); the extractions it ingests are committed under `locomo/extractions/`.
 
 ## Using this without any benchmark
 
