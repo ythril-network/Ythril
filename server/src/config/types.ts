@@ -441,6 +441,20 @@ export interface RerankConfig extends MediaProviderConfig {
    * cannot turn one search into a thousand-passage rerank.
    */
   candidateMultiplier?: number;
+
+  /**
+   * How many passages may travel in ONE request to the reranker (`Q-42`).
+   *
+   * Separate from `candidateMultiplier`, which decides how many passages are SCORED. This decides how
+   * many share a body, and the two are independent: a stock text-embeddings-inference server accepts 32
+   * per request and answers `413` above it, whatever the candidate count is. That 413 surfaces as
+   * `rerank_unavailable`, so the search is served in fused order and looks entirely healthy.
+   *
+   * Default 32, clamped to 1..100. Total work is unchanged — a cross-encoder is a forward pass per
+   * passage — so this trades one large body for several a stock server will accept. Raise it to get the
+   * single request back on a reranker that takes one.
+   */
+  maxPassagesPerRequest?: number;
 }
 
 export interface MediaEmbeddingConfig {

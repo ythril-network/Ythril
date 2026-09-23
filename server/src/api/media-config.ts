@@ -23,7 +23,7 @@ import {
 import { listUrlFor, type VlmWire } from '../files/converters/vlm-endpoint.js';
 import { log } from '../util/log.js';
 import { providerSignature, getActiveProviderSignature } from '../files/media/worker.js';
-import { MIN_CANDIDATE_MULTIPLIER, MAX_CANDIDATE_MULTIPLIER } from '../brain/rerank-client.js';
+import { MIN_CANDIDATE_MULTIPLIER, MAX_CANDIDATE_MULTIPLIER, MAX_PASSAGES_PER_REQUEST_MIN, MAX_PASSAGES_PER_REQUEST_MAX } from '../brain/rerank-client.js';
 import { DUAL_DOOR_BOUNDS } from '../config/setting-bounds.js';
 import { SERVER_OWNED_MEDIA_PATHS, SERVER_OWNED_MEDIA_HOW } from './media-config-server-owned.js';
 import { MODEL_TIMEOUT_MIN_MS, MODEL_TIMEOUT_MAX_MS, MODEL_SLOTS, REASONING_EFFORTS,
@@ -166,6 +166,14 @@ const RerankPatchSchema = z.object({
   model: z.string().max(128).optional().nullable(),
   apiKey: z.string().max(512).optional().nullable(),
   candidateMultiplier: bounded('mediaEmbedding.rerank.candidateMultiplier'),
+  /*
+   * Single-door, so an explicit range rather than a `bounded()` row: `DUAL_DOOR_BOUNDS` is the shared range
+   * for a setting that has BOTH an env var and this field, and this one has no env var — for the same reason
+   * `modelSlots` has none, which `model-slots.ts` states. The bounds come from the consumer's own exported
+   * constants so the clamp and the refusal cannot drift apart.
+   */
+  maxPassagesPerRequest: z.number().int()
+    .min(MAX_PASSAGES_PER_REQUEST_MIN).max(MAX_PASSAGES_PER_REQUEST_MAX).optional().nullable(),
 }).strict();
 
 /**

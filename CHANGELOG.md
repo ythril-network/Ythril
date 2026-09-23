@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The reranker was sent up to a hundred passages in one request, and a stock server refuses that**
+  (`Q-42`). Reported by the canary operator: every unfiltered search on their fleet had been served in
+  fused order, for as long as their settings had been what they are. A `413 Payload Too Large` reaches the
+  caller as `degraded: ["rerank_unavailable"]`, which is indistinguishable from a search with no reranker
+  configured — so it can be true for months with nothing to see.
+
+  Candidates are split into batches of **32** now, settable as
+  `mediaEmbedding.rerank.maxPassagesPerRequest` (1 … 100) through the admin API. Total work is unchanged —
+  a cross-encoder is a forward pass per passage — and the pass keeps **one** deadline rather than one per
+  batch, so a recall somebody is waiting on is bounded exactly as it was.
+
+  **If any batch fails the whole pass is abandoned** and the vector order stands. A list ordered partly by
+  cross-encoder score and partly by vector score, with nothing saying which is which, is a plausible wrong
+  answer; no opinion at all is an honest one.
+
+  The candidate pool still scales with the number of knowledge types searched, which is why an unfiltered
+  recall is the most expensive shape there is. That is a separate question and is not changed here.
+
 - **Sync never checked a FILE's links, so a broken one was recorded as nothing at all** (`Q-39`). A peer
   sending a file linked to an entity this instance does not hold produced no violation, no warning and no
   trace — and an operator reads an empty violation list as everything being fine. Absent and clean looked
