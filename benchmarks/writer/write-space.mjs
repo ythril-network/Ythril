@@ -125,7 +125,7 @@ export async function writeSpace({ extraction, ythril, space }) {
        */
       status: c.status,
       ...(c.description ? { description: c.description } : {}),
-      ...(linked.length > 0 ? { entityIds: linked } : {}),
+      ...(linked.length > 0 ? { linkEntities: linked } : {}),
     });
     const cid = created.id ?? created._id;
     chronoId.set(c.key, cid);
@@ -183,7 +183,7 @@ export async function writeSpace({ extraction, ythril, space }) {
        * would make *"where DID she work?"* unanswerable in order to fix *"where does she work?"*.
        */
       ...(c.superseded === true ? { superseded: true } : {}),
-      ...(linked.length > 0 ? { entityIds: linked } : {}),
+      ...(linked.length > 0 ? { linkEntities: linked } : {}),
     });
     const id = created.id ?? created._id;
     // Only a claim something points at carries a key, and almost none do — see the edge resolver below.
@@ -272,8 +272,8 @@ export async function writeSpace({ extraction, ythril, space }) {
     const claims = claimIdsBySession.get(sessionKey(s)) ?? [];
     const keys = [...(entityKeysBySession.get(sessionKey(s)) ?? [])];
     const links = {
-      ...(claims.length > 0 ? { memoryIds: claims } : {}),
-      ...(keys.length > 0 ? { entityIds: keys.map(k => entityId.get(k)) } : {}),
+      ...(claims.length > 0 ? { linkFacts: claims } : {}),
+      ...(keys.length > 0 ? { linkEntities: keys.map(k => entityId.get(k)) } : {}),
     };
     await ythril.writeFile(space, {
       path: `transcripts/${sessionKey(s)}.md`,
