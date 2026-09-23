@@ -17,12 +17,14 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 let resolveEndpoint, buildBody, parseScores, MAX_CANDIDATES,
-    MIN_CANDIDATE_MULTIPLIER, MAX_CANDIDATE_MULTIPLIER, DEFAULT_CANDIDATE_MULTIPLIER;
+    MIN_CANDIDATE_MULTIPLIER, MAX_CANDIDATE_MULTIPLIER, DEFAULT_CANDIDATE_MULTIPLIER,
+    planBatches, DEFAULT_MAX_PASSAGES_PER_REQUEST, MAX_PASSAGES_PER_REQUEST_MAX;
 
 before(async () => {
   ({
     resolveEndpoint, buildBody, parseScores, MAX_CANDIDATES,
     MIN_CANDIDATE_MULTIPLIER, MAX_CANDIDATE_MULTIPLIER, DEFAULT_CANDIDATE_MULTIPLIER,
+    planBatches, DEFAULT_MAX_PASSAGES_PER_REQUEST, MAX_PASSAGES_PER_REQUEST_MAX,
   } = await import('../../server/dist/brain/rerank-client.js'));
 });
 
@@ -118,6 +120,70 @@ describe('bounds', () => {
     // Cross-encoder cost is linear in the candidate count. Without this, a large topK turns one search
     // into a several-hundred-passage batch on the request path.
     assert.ok(Number.isInteger(MAX_CANDIDATES) && MAX_CANDIDATES > 0 && MAX_CANDIDATES <= 500);
+  });
+});
+
+/**
+ * `Q-42`. The cap above bounds the candidate COUNT and said nothing about how many go in one request, so
+ * a hundred passages were sent as one body. A stock text-embeddings-inference server accepts 32 and
+ * answers `413`, which reaches the caller as `rerank_unavailable` — a permanently unreranked search that
+ * looks exactly like a working one.
+ *
+ * The split is a pure function on purpose: the failure it prevents is an index from the second batch
+ * being read as an index into the first, which moves the WRONG passage. That is a wrong answer rather
+ * than a missing one — the same class `parseScores` drops out-of-range indices for — and it is
+ * arithmetic, so it is testable without a server.
+ */
+describe('planBatches — one request per batch, and the indices stay global', () => {
+  it('splits a hundred passages into batches no larger than the limit', () => {
+    const b = planBatches(100, 32);
+    assert.equal(b.length, 4);
+    assert.deepEqual(b[0], { start: 0, end: 32 });
+    assert.deepEqual(b[3], { start: 96, end: 100 }, 'the last batch is the remainder, not a padded one');
+    assert.ok(b.every(x => x.end - x.start <= 32));
+  });
+
+  it('leaves a set that already fits as ONE batch', () => {
+    // The common case must not gain a round trip: below the limit this has to be exactly what it was.
+    assert.deepEqual(planBatches(20, 32), [{ start: 0, end: 20 }]);
+    assert.deepEqual(planBatches(32, 32), [{ start: 0, end: 32 }]);
+  });
+
+  it('covers every passage exactly once, with no gap and no overlap', () => {
+    for (const [total, size] of [[100, 32], [7, 3], [1, 1], [64, 32], [65, 32]]) {
+      const seen = planBatches(total, size).flatMap(({ start, end }) =>
+        Array.from({ length: end - start }, (_, i) => start + i));
+      assert.deepEqual(seen, Array.from({ length: total }, (_, i) => i),
+        `planBatches(${total}, ${size}) must cover 0..${total - 1} once each`);
+    }
+  });
+
+  it('returns nothing for an empty set', () => {
+    assert.deepEqual(planBatches(0, 32), []);
+  });
+
+  it('refuses a junk size rather than looping or sending one passage per request', () => {
+    // A zero or negative batch size is what a half-finished edit looks like. Slicing by it would either
+    // never advance or make one request per passage — both worse than the behaviour being replaced.
+    for (const junk of [0, -1, Number.NaN, 0.5]) {
+      const b = planBatches(10, junk);
+      assert.ok(b.length >= 1 && b.length <= 10, `size ${junk} produced ${b.length} batches`);
+      assert.ok(b.every(x => x.end > x.start), 'every batch must contain at least one passage');
+    }
+  });
+});
+
+describe('maxPassagesPerRequest — bounded, and a default a stock server accepts', () => {
+  it('defaults to something text-embeddings-inference takes in one request', () => {
+    assert.ok(Number.isInteger(DEFAULT_MAX_PASSAGES_PER_REQUEST));
+    assert.ok(DEFAULT_MAX_PASSAGES_PER_REQUEST >= 1);
+    assert.ok(DEFAULT_MAX_PASSAGES_PER_REQUEST <= 32,
+      'a stock TEI server answers 413 above 32, and the default has to work against one');
+  });
+
+  it('never exceeds the absolute candidate cap', () => {
+    // A batch larger than the whole candidate set would be a setting that cannot take effect.
+    assert.ok(MAX_PASSAGES_PER_REQUEST_MAX <= MAX_CANDIDATES);
   });
 });
 

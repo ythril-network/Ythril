@@ -305,7 +305,14 @@ Measured on a live instance with records of six to nine kilobytes: asking for on
 three took sixteen, and above four the reranker ran out of time. Another instance on the same server, same
 model, reranked a similar-sized set in under three seconds — the difference was the length of the records.
 So there is no single number to expect. **If your records are long and you want reranking on more than a
-handful of results, ask your administrator to raise the reranking time limit** (`modelSlots.rerank.timeoutMs`).
+handful of results, ask your administrator to raise the reranking time limit** (`modelSlots.rerank.timeoutMs`,
+described in the hosting guide's model-slot table).
+
+**If nothing is ever reranked, the cause may not be the time limit.** Some reranking servers refuse a request
+carrying more than a few dozen passages outright, and the search then falls back to ranking by meaning every
+single time — which looks identical to a search with no reranker configured. Ythril sends them in batches
+small enough for a standard server by default; an administrator can raise the batch size
+(`mediaEmbedding.rerank.maxPassagesPerRequest`) on a server that accepts more.
 
 **The answer arrives in its own card, and you can read it two ways.** *Rendered* is the default: one card
 per result with its score, its neighbourhood underneath it, and the record itself as a tree you can fold. Any

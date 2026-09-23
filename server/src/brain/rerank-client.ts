@@ -47,6 +47,52 @@ export const DEFAULT_CANDIDATE_MULTIPLIER = 4;
  */
 export const MAX_CANDIDATES = 100;
 
+/**
+ * How many passages may go in ONE request to the reranker (`Q-42`).
+ *
+ * `MAX_CANDIDATES` bounds how many passages are scored and said nothing about how many travel together, so
+ * a hundred went as one body. A stock text-embeddings-inference server accepts 32 and answers
+ * `413 Payload Too Large`, which reaches the caller as `rerank_unavailable` — a search permanently served
+ * in fused order while looking exactly like a working one. Reported by the canary operator 2026-09-23.
+ *
+ * **32 rather than 100, and the total work is unchanged.** A cross-encoder is a forward pass per passage,
+ * so four requests of 32 cost what one of 128 costs; what changes is that each body is one a stock server
+ * will accept. A deployment whose reranker takes more can raise it and get its single request back.
+ */
+export const DEFAULT_MAX_PASSAGES_PER_REQUEST = 32;
+
+/** Floor and ceiling for that setting. One passage per request is legal and slow; above the candidate cap
+ *  is a setting that could never take effect, which is worse than a refusal. */
+export const MAX_PASSAGES_PER_REQUEST_MIN = 1;
+export const MAX_PASSAGES_PER_REQUEST_MAX = MAX_CANDIDATES;
+
+/** The configured batch size, clamped and defaulted. Junk must not become a junk request pattern. */
+export function maxPassagesPerRequest(): number {
+  const raw = getMediaEmbeddingConfig().rerank?.maxPassagesPerRequest;
+  if (typeof raw !== 'number' || !Number.isFinite(raw)) return DEFAULT_MAX_PASSAGES_PER_REQUEST;
+  return Math.min(MAX_PASSAGES_PER_REQUEST_MAX, Math.max(MAX_PASSAGES_PER_REQUEST_MIN, Math.floor(raw)));
+}
+
+/**
+ * Split `total` passages into request-sized windows, in GLOBAL index space.
+ *
+ * Pure, and exported so it can be tested without a server, because the failure it prevents is arithmetic:
+ * a score whose index is local to the second batch, read as an index into the first, moves the WRONG
+ * passage. That is a wrong answer rather than a missing one — the class `parseScores` already drops
+ * out-of-range indices for — and it would be invisible in every response.
+ *
+ * A junk `size` falls back to the default rather than propagating: zero or negative would never advance
+ * the window, and a fraction would make one request per passage.
+ */
+export function planBatches(total: number, size: number): { start: number; end: number }[] {
+  const step = Number.isInteger(size) && size >= MAX_PASSAGES_PER_REQUEST_MIN
+    ? size
+    : DEFAULT_MAX_PASSAGES_PER_REQUEST;
+  const out: { start: number; end: number }[] = [];
+  for (let start = 0; start < total; start += step) out.push({ start, end: Math.min(start + step, total) });
+  return out;
+}
+
 /** One passage's verdict: its position in the input array and the cross-encoder's relevance score. */
 export interface RerankScore {
   index: number;
@@ -153,32 +199,60 @@ export async function rerank(
   if (passages.length === 0) return null;
 
   const { url, dialect } = resolveEndpoint(cfg.baseUrl);
-  const init: RequestInit = {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      ...(cfg.apiKey ? { authorization: `Bearer ${cfg.apiKey}` } : {}),
-    },
-    body: JSON.stringify(buildBody(dialect, cfg.model, query, passages)),
-    signal: AbortSignal.timeout(
-      Number.isFinite(budgetMs) && budgetMs! > 0 ? Math.min(rerankTimeout(), budgetMs!) : rerankTimeout(),
-    ),
+  /*
+   * ONE deadline for the whole pass, shared by every batch (`Q-42`).
+   *
+   * Not one budget each: the caller's `budgetMs` is what is left of a recall somebody is waiting on, and
+   * four batches each allowed the full slot budget could spend four times it. The signal is built once and
+   * every request takes it, so the pass as a whole is bounded exactly as the single request was.
+   */
+  const signal = AbortSignal.timeout(
+    Number.isFinite(budgetMs) && budgetMs! > 0 ? Math.min(rerankTimeout(), budgetMs!) : rerankTimeout(),
+  );
+  const headers = {
+    'content-type': 'application/json',
+    ...(cfg.apiKey ? { authorization: `Bearer ${cfg.apiKey}` } : {}),
   };
 
-  try {
-    const res = isLocalModelEndpoint(cfg.baseUrl)
+  const batches = planBatches(passages.length, maxPassagesPerRequest());
+
+  const one = async ({ start, end }: { start: number; end: number }): Promise<RerankScore[] | null> => {
+    const slice = passages.slice(start, end);
+    const init: RequestInit = {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(buildBody(dialect, cfg.model!, query, slice)),
+      signal,
+    };
+    const res = isLocalModelEndpoint(cfg.baseUrl!)
       ? await fetch(url, init)
       : await ssrfSafeFetch(url, init, { allowPrivate: allowPrivateForSlot('rerank') });
     if (!res.ok) {
       log.warn(`Rerank: HTTP ${res.status} from the reranker — keeping the vector order`);
       return null;
     }
-    const scores = parseScores(await boundedJson(res, 'reranker'), passages.length);
+    const scores = parseScores(await boundedJson(res, 'reranker'), slice.length);
     if (!scores) {
       log.warn('Rerank: unreadable response shape — keeping the vector order');
       return null;
     }
-    return scores;
+    // Back into the caller's index space. A batch scores 0..n-1 of its own slice and the caller holds the
+    // whole list, so an un-offset index would move a different passage entirely.
+    return scores.map(s => ({ index: s.index + start, score: s.score }));
+  };
+
+  try {
+    const results = await Promise.all(batches.map(one));
+    /*
+     * ANY batch failing abandons the whole pass, deliberately.
+     *
+     * Merging the ones that answered would order part of the list by cross-encoder score and the rest by
+     * vector score, in one list, with nothing saying which is which — two orderings interleaved is a
+     * plausible wrong answer, and this file's whole contract is that a reranker may make search worse but
+     * never silently wrong. `null` means "keep the vector order", which is one ordering and an honest one.
+     */
+    if (results.some(r => r === null)) return null;
+    return results.flat() as RerankScore[];
   } catch (err) {
     // Deliberately logs neither the query nor the passages: both are user content and this line goes to
     // the log. The same rule the NLI client follows.

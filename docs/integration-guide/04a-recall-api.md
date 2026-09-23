@@ -169,6 +169,16 @@ unavailable, and **none of them can fail a search** — a stage that cannot answ
    did not finish was cut off by their gateway's own twenty seconds, not by ours. Read `rerankScore` to tell
    the cases apart: no field means the stage had no opinion.
 
+   **Both keys are documented in [05b — media embedding](05b-media-embedding.md)**, the model-slot table for
+   `modelSlots.<slot>.timeoutMs` and the reranker rows for the rest. Said explicitly because an operator
+   searching the guide for the concrete spelling `modelSlots.rerank.timeoutMs` finds only this sentence —
+   the table writes the key generically — and concluded from that the key did not exist.
+
+   **A permanently degraded reranker is not always the budget.** A server that refuses a large request
+   body answers in milliseconds rather than at the deadline, and reaches you as the same
+   `rerank_unavailable`. `mediaEmbedding.rerank.maxPassagesPerRequest` is the control for that one; the
+   `ythril_recall_degraded_total{reason}` counter is how you notice either has been true for a week.
+
 **Ordering precedence is `rerankScore` → `fusedScore` → `score`** — the order of how much each signal
 actually knows.
 

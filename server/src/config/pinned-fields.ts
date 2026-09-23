@@ -55,6 +55,7 @@ export const PINNABLE_FIELD_PATHS: readonly string[] = [
   'stt.label', 'stt.baseUrl', 'stt.model', 'stt.apiKey',
   'nli.baseUrl', 'nli.model', 'nli.apiKey',
   'rerank.baseUrl', 'rerank.model', 'rerank.apiKey', 'rerank.candidateMultiplier',
+  'rerank.maxPassagesPerRequest',
   'embedding.provider', 'embedding.baseUrl', 'embedding.model', 'embedding.apiKey', 'embedding.dimensions',
   'embedding.prefixScheme', 'embedding.embedConcurrency', 'embedding.similarity',
   // Per-slot model call budgets, pinned at the SLOT rather than at `modelSlots.<slot>.timeoutMs`.
