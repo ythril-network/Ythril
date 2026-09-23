@@ -56,7 +56,8 @@ describe('ythril_recall_degraded_total', () => {
     // partial answer can say so. When that helper replaced the direct calls this gate failed, correctly
     // noticing the literal was gone and wrongly concluding the reason was uncounted. Matching both keeps it
     // honest without forcing the code back into a shape that serves the test rather than the caller.
-    const recall = readFileSync('server/src/brain/recall.ts', 'utf8');
+    // Both files: the rerank step reports from `rerank-pool.ts` since `P-35`, where both callers reach it.
+    const recall = readFileSync('server/src/brain/recall.ts', 'utf8') + readFileSync('server/src/brain/rerank-pool.ts', 'utf8');
     for (const reason of REASONS) {
       const direct = recall.includes(`reason: '${reason}'`);
       const viaHelper = recall.includes(`noteDegraded('${reason}')`);
@@ -69,11 +70,15 @@ describe('ythril_recall_degraded_total', () => {
     // and the metric never moves — so the dashboard says a degradation that operators are reading about in
     // API responses never happens. One helper, both jobs, asserted rather than assumed.
     const recall = readFileSync('server/src/brain/recall.ts', 'utf8');
-    const helper = recall.slice(recall.indexOf('const noteDegraded'), recall.indexOf('const searchDeadline'));
-    assert.ok(helper.length > 0, 'noteDegraded not found — this gate is measuring nothing');
+    // `degradedNoter` builds every `noteDegraded` since `P-35`, because the cross-space rerank reports too.
+    const at = recall.indexOf('function degradedNoter(');
+    assert.ok(at > 0, 'degradedNoter not found — this gate is measuring nothing');
+    const helper = recall.slice(at, recall.indexOf('\n}', at));
     assert.match(helper, /recallDegradedTotal\.labels\(\{ reason \}\)\.inc\(\)/,
       'noteDegraded must increment the metric, not only collect the reason for the response');
-    assert.match(helper, /opts\?\.degraded/, 'noteDegraded must also record the reason for the caller');
+    assert.match(helper, /collector\.push\(reason\)/, 'noteDegraded must also record the reason for the caller');
+    assert.match(recall, /const noteDegraded = degradedNoter\(opts\?\.degraded\)/,
+      "recall must hand the caller's collector to the helper, or the reason reaches the metric and nobody else");
   });
 
   it('the lexical channel is deliberately NOT counted, and the reason is recorded', () => {

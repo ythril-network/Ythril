@@ -467,7 +467,11 @@ Six things worth reading twice:
 
 - **A reranker must accept 100 passages in one request, and the common self-hosted server does not by
   default.** One recall sends up to a hundred candidates in a single call, because the over-fetch IS
-  the reranking mechanism — a cross-encoder can only reorder what the vector search already found.
+  the reranking mechanism — a cross-encoder can only reorder what the vector search already found. **One
+  call however many spaces it searches:** a recall across several spaces merges their candidates and reranks
+  them once. Builds up to 5.1.0 sent one call per space, so a broad recall on an instance reaching 15 spaces
+  put 13 concurrent requests on the reranker at once — size a reranker's concurrency for your recall rate,
+  not for your space count.
   `text-embeddings-inference` caps a client batch at **32** unless you start it with
   `--max-client-batch-size 512`, and Ythril's request comes back `413`. The search still answers, ordered by
   meaning alone, and looks entirely reasonable; the only signs are a `WARN` in the log and

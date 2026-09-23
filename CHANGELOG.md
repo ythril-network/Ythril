@@ -65,6 +65,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A recall across several spaces reranks once, over all of them** (`P-35`). Reported by the platform
+  operator, 2026-09-23T1842Z: one recall naming no space, on an instance reaching 15 spaces, put 13
+  concurrent requests on the reranker. Ten of them died under the shared deadline, so the answer came back
+  `degraded: ["rerank_unavailable"]` with 2 of 10 rows reranked. Each per-space `recall` ran its own
+  cross-encoder pass, the same fan-out the query embedding had until it was embedded once. The spaces now
+  hand back their candidate pools, and the merged pool is scored in one request of at most 100 passages, so
+  the scores in one answer also come from one call. Single-space recall is unchanged.
+
 - **The benchmark harness reaches a 5.x instance** (`B-6`). Three 4.x addresses stopped it the first
   time it ran against 5.1. The writer sent `entityIds`/`memoryIds`, which 5.0 refuses by name, so every
   conversation stopped at its first chrono entry. The client called `recall` and `query` at their 4.x

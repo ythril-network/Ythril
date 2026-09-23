@@ -220,7 +220,8 @@ describe('recall wiring', () => {
   // source these assertions read is both — a gate that followed only one half would go quietly vacuous the
   // next time a function moves between them.
   const src = readFileSync(new URL('../../server/src/brain/recall.ts', import.meta.url), 'utf8')
-    + readFileSync(new URL('../../server/src/brain/recall-shape.ts', import.meta.url), 'utf8');
+    + readFileSync(new URL('../../server/src/brain/recall-shape.ts', import.meta.url), 'utf8')
+    + readFileSync(new URL('../../server/src/brain/rerank-pool.ts', import.meta.url), 'utf8');
 
   it('over-fetches when a reranker is configured', () => {
     // Reranking exactly topK candidates returns the same set in a different order and buys nothing.
@@ -262,7 +263,7 @@ describe('recall wiring', () => {
     // character-for-character and broke when a metrics counter was added inside the same branch —
     // the behaviour was identical and the test failed anyway. What must hold is that a falsy `scores`
     // returns before anything is assigned to `rerankScore`.
-    const fn = src.slice(src.indexOf('async function applyRerank('));
+    const fn = src.slice(src.indexOf('export async function rerankPool('));
     const guard = fn.indexOf('if (!scores)');
     const assigns = fn.indexOf('rerankScore =');
     assert.ok(guard > 0, 'a falsy rerank result must be guarded');

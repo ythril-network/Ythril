@@ -60,7 +60,9 @@ where you read `hit.<field>`**; `score`, `spaceId`, `type`, `_graph` and the per
 ### Bounding a recall in time: `maxTimeMS` and `degraded`
 
 A recall runs its hops in series — embed the query, search each collection, fuse the lexical channel, rerank —
-and a slow one can outlast the client waiting for it. `maxTimeMS` puts the bound where the work is instead of
+and a slow one can outlast the client waiting for it. Across several spaces the query is embedded once and
+the spaces' candidates are merged and reranked in ONE pass, so the rerank scores in one answer come from one
+call and are directly comparable. `maxTimeMS` puts the bound where the work is instead of
 in each caller's HTTP timeout, which is the difference between a rule and a convention.
 
 **What happens on expiry is the useful part: you get what finished.** Collections that answered are returned;

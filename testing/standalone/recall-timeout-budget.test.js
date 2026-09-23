@@ -67,7 +67,7 @@ describe('the deadline is threaded through the pipeline', () => {
     // assertion is about `remaining` reaching the reranker, not about how many parameters the call has.
     // Pinned to the exact argument list, it failed the day the step gained a way to report a degradation —
     // a passing gate broken by a change it has no opinion about.
-    assert.match(recall, /applyRerank\(query, guaranteed, allResults, remaining[,)]/);
+    assert.match(recall, /rerankPool\(query, guaranteed, pool, remaining[,)]/);
     const client = readFileSync('server/src/brain/rerank-client.ts', 'utf8');
     // `rerankTimeout()` rather than a `TIMEOUT_MS` constant: the reranker's own ceiling became
     // operator-settable, so it is resolved per call. A module constant would ignore a config reload, and this
@@ -114,7 +114,7 @@ describe('the deadline is threaded through the pipeline', () => {
   it('a per-call deadline can only LOWER the instance budget', () => {
     // Letting a request body raise the ceiling hands any caller a denial-of-service lever, and how long the
     // server may spend is the operator's decision. Asserted on the arithmetic rather than on prose.
-    assert.match(recall, /Math\.min\(opts\?\.maxTimeMS \?\? RECALL_BUDGET_MS, RECALL_BUDGET_MS\)/,
+    assert.match(recall, /Math\.min\(maxTimeMS \?\? RECALL_BUDGET_MS, RECALL_BUDGET_MS\)/,
       'the effective budget must be a min() against the instance ceiling');
     assert.match(recall, /MIN_RECALL_BUDGET_MS/,
       'a floor must exist, or maxTimeMS: 1 is a guaranteed empty answer that reads as a broken parameter');
