@@ -1,0 +1,15 @@
+{
+  "name": "conversation.activity",
+  "knowledgeType": "entity",
+  "typeName": "activity",
+  "schemaGroup": "conversation",
+  "published": true,
+  "description": "Something a person does repeatedly — a sport, a craft, a practice. Distinct from a project: an activity has no end.",
+  "schema": {
+    "propertySchemas": {
+      "kind": {
+        "type": "string"
+      }
+    }
+  }
+}

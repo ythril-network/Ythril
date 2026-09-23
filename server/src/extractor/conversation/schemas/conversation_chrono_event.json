@@ -1,0 +1,11 @@
+{
+  "name": "conversation.event",
+  "knowledgeType": "chrono",
+  "typeName": "event",
+  "schemaGroup": "conversation",
+  "published": true,
+  "description": "Something that happened, or is due to happen, on a date or over a run of days. This is where a date lands when it is not qualifying an edge: a birth, an acquisition, a move, a diagnosis, a release, a trip, a plan for next month. `status` says whether it has happened; `endsAt` says whether it took more than one day. Linked to the entities it concerns.",
+  "schema": {
+    "propertySchemas": {}
+  }
+}

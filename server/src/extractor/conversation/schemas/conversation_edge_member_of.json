@@ -1,0 +1,30 @@
+{
+  "name": "conversation.member_of",
+  "knowledgeType": "edge",
+  "typeName": "member_of",
+  "schemaGroup": "conversation",
+  "published": true,
+  "description": "Membership without employment — a club, a team, a course.",
+  "schema": {
+    "endpoints": {
+      "from": [
+        "person"
+      ],
+      "to": [
+        "organization"
+      ]
+    },
+    "propertySchemas": {
+      "role": {
+        "type": "string"
+      },
+      "since": {
+        "type": "date"
+      },
+      "until": {
+        "type": "date"
+      }
+    },
+    "suppressEmbeddings": true
+  }
+}

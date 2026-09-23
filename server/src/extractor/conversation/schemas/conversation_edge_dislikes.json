@@ -1,0 +1,26 @@
+{
+  "name": "conversation.dislikes",
+  "knowledgeType": "edge",
+  "typeName": "dislikes",
+  "schemaGroup": "conversation",
+  "published": true,
+  "description": "A stated aversion.",
+  "schema": {
+    "endpoints": {
+      "from": [
+        "person"
+      ],
+      "to": [
+        "work",
+        "activity",
+        "place",
+        "organization",
+        "object",
+        "animal",
+        "person"
+      ]
+    },
+    "propertySchemas": {},
+    "suppressEmbeddings": true
+  }
+}

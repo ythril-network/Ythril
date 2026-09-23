@@ -1,0 +1,27 @@
+{
+  "name": "conversation.likes",
+  "knowledgeType": "edge",
+  "typeName": "likes",
+  "schemaGroup": "conversation",
+  "published": true,
+  "description": "A stated preference. How strongly, and when it was said, live on the claim that stated it.",
+  "schema": {
+    "endpoints": {
+      "from": [
+        "person",
+        "animal"
+      ],
+      "to": [
+        "work",
+        "activity",
+        "place",
+        "organization",
+        "object",
+        "animal",
+        "person"
+      ]
+    },
+    "propertySchemas": {},
+    "suppressEmbeddings": true
+  }
+}

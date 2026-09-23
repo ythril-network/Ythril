@@ -1,0 +1,27 @@
+{
+  "name": "conversation.has_condition",
+  "knowledgeType": "edge",
+  "typeName": "has_condition",
+  "schemaGroup": "conversation",
+  "published": true,
+  "description": "A condition attributed to a person. Severity and course are claims.",
+  "schema": {
+    "endpoints": {
+      "from": [
+        "person"
+      ],
+      "to": [
+        "condition"
+      ]
+    },
+    "propertySchemas": {
+      "since": {
+        "type": "date"
+      },
+      "until": {
+        "type": "date"
+      }
+    },
+    "suppressEmbeddings": true
+  }
+}

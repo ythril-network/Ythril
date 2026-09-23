@@ -1,0 +1,21 @@
+{
+  "name": "conversation.animal",
+  "knowledgeType": "entity",
+  "typeName": "animal",
+  "schemaGroup": "conversation",
+  "published": true,
+  "description": "A named animal. An unnamed one (\"a dog we saw\") is not an entity.",
+  "schema": {
+    "propertySchemas": {
+      "species": {
+        "type": "string"
+      },
+      "breed": {
+        "type": "string"
+      },
+      "aliases": {
+        "type": "string"
+      }
+    }
+  }
+}
