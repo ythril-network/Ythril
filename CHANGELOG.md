@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The 5.0.0 breaking table names the retired routes with their methods, and says to reconnect MCP clients.**
+  Reported by the canary operator, 2026-09-23T0850Z and 0840Z. It said *"the five per-collection list routes
+  are gone"* — ten `GET` routes went, and an audit that matched on PATH cleared `GET .../files` because
+  `PATCH .../files` still exists. The path survived, the method did not, and their documentation ingest
+  went stale with one warning in a long log. The table now lists all ten with their verb. A client that
+  stayed connected across the upgrade holds the old tool list and sees every call fail rather than the
+  rename, so the table now says to reconnect.
+
 ## [5.1.0] — 2026-09-23
 
 **A batch item can carry its own relationships, and five things that answered success while doing nothing
@@ -271,7 +281,8 @@ restart any of them.
 | A peer below 5.0.0 is refused at the handshake (`426`) | Upgrade every instance in the network together |
 | The knowledge type `memory` is now `fact`, everywhere | Send `fact`; `memory` is refused, not translated |
 | Every MCP tool is renamed verb-first, and three fold into others — 45 tools, not 48 | Re-read `tools/list`; a retired name is an error, not an alias |
-| Every tool is `POST /api/<tool-name>`, and the five per-collection list routes are gone | Read a collection with `POST /api/filter` |
+| Every tool is `POST /api/<tool-name>`, and ten `GET` routes are gone: `GET /api/brain/spaces/:spaceId/{facts,entities,edges,chrono,files}`, `GET /api/brain/spaces/:spaceId/{facts,entities,edges,chrono}/:id` and `GET /api/brain/spaces/:spaceId/entities/by-ids`. **Match on METHOD and path**: `PATCH`/`DELETE` on the `:id` paths, `PATCH .../files`, `GET .../entities/:id/cascade-preview` and `GET .../files/extract` all still exist | Read a collection with `POST /api/filter` |
+| An MCP client that stayed connected across the upgrade still holds the 4.x tool list | Reconnect it. The list is fetched at connect, so a live session sees every call fail rather than the rename |
 | The search family drops the space from its path | `POST /api/brain/recall`, with `space` in the BODY |
 | The six link ARRAY fields are gone | Send `linkEntities` / `linkFacts` / `linkChronos` — the same ids. The refusal names the field |
 | A record no longer returns its links | Walk them: `traverse`, or a `filter` over the `links` collection |
