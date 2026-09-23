@@ -32,7 +32,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the previous `B-6` increment and existed in one working tree only. The answerer and the judge are handed
   in, so all of this runs against fakes today; with the two provider keys it is configuration, not a build.
 
+- **A graded run that needs no provider key, and survives a rate limit** (`B-6`). `benchmarks/tier0.mjs`
+  runs the whole round as files: one input and one answer file per conversation per arm, one batch file
+  per judge upload, every write atomic, and `status` read off the disk. So a run stopped at any point
+  resumes from what is already there. An answer file counts as done only for the input it was made
+  from, so a changed input cannot be graded against a stale answer. Every answer gets LoCoMo's token F1
+  with no model. A balanced 200-question sample goes to an external judge blind to the arm, and a
+  truncated reply leaves the rest ungraded rather than wrong. What the answerer is handed is checked to
+  carry no reference answer, adversarial answer or evidence.
+
+  **The first round is recorded, and its method is disclosed with it.** One answerer answered both arms
+  of all ten conversations, memory arm first and each arm independently of the other, so a baseline
+  answer never saw the retrieved hits and a memory answer never saw the transcript. On F1 over 1,540
+  scored questions the memory arm reads 62.7 against the baseline's 67.5. The baseline is the whole
+  transcript in context, which is the ceiling and not a competitor. The judged figure follows from the
+  judge's replies.
+
 ### Fixed
+
+- **The benchmark harness reaches a 5.x instance** (`B-6`). Three 4.x addresses stopped it the first
+  time it ran against 5.1. The writer sent `entityIds`/`memoryIds`, which 5.0 refuses by name, so every
+  conversation stopped at its first chrono entry. The client called `recall` and `query` at their 4.x
+  per-space addresses, both removed in 5.0. And retrieval flattened recall's results but not the
+  `_graph` each one carries, so a run recorded `traverse: 1` and handed the answerer nothing the
+  traversal reached. The dropped half was the multi-hop half of the graph.
 
 - **The 5.0.0 breaking table names the retired routes with their methods, and says to reconnect MCP clients.**
   Reported by the canary operator, 2026-09-23T0850Z and 0840Z. It said *"the five per-collection list routes

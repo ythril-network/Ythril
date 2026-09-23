@@ -53,8 +53,24 @@ function hitOf(result) {
      * current one — or the reverse.
      */
     ...(record.superseded === true ? { superseded: true } : {}),
+    ...whenOf(record),
     score: typeof result?.score === 'number' ? result.score : null,
   };
+}
+
+/**
+ * A dated record's dates — which are its CONTENT, not metadata.
+ *
+ * A timeline entry's title is "Jon visited Paris"; the answer to *"when was Jon in Paris?"* is its
+ * `startsAt`. Found on the first 5.x run, where every retrieved chrono hit reached the answerer as a title
+ * alone, so a temporal question could only be answered from a fact that happened to repeat the date.
+ */
+function whenOf(record) {
+  const day = (v) => (typeof v === 'string' && v ? v.slice(0, 10) : null);
+  const starts = day(record?.startsAt);
+  const ends = day(record?.endsAt);
+  if (!starts) return {};
+  return { when: ends && ends !== starts ? `${starts} to ${ends}` : starts };
 }
 
 /**
@@ -86,7 +102,39 @@ export async function retrieveOne({ ythril, space, question, topK = 10, traverse
      */
     return { request, hits: [], error: err instanceof Error ? err.message : String(err) };
   }
-  return { request, hits: (answer?.results ?? []).map(hitOf) };
+  const results = answer?.results ?? [];
+  const hits = results.map(hitOf);
+  /*
+   * THE TRAVERSAL'S RECORDS, which recall nests under each match's `_graph` rather than listing.
+   *
+   * Flattening `results` alone recorded `traverse` in the request and dropped everything it reached — the
+   * multi-hop half of the graph, lost by the reader and not by the retriever. Matches first, in rank order,
+   * then every reached node once, in the order the walk met them. The edge label travels with the node,
+   * because "Beta Corp" means nothing to an answerer until it says `works_at`.
+   */
+  const seen = new Set(hits.map(h => h.id));
+  const walk = (nodes) => {
+    for (const n of nodes ?? []) {
+      const record = n?.node ?? {};
+      const id = record._id ?? null;
+      if (id !== null && !seen.has(id)) {
+        seen.add(id);
+        hits.push({
+          id,
+          kind: record.kind ?? 'entity',
+          text: record.fact ?? record.name ?? record.title ?? record.path ?? record.label ?? null,
+          ...(record.superseded === true ? { superseded: true } : {}),
+          ...whenOf(record),
+          score: null,
+          via: 'traverse',
+          relation: n.edges?.[0]?.label ?? null,
+        });
+      }
+      walk(n._graph);
+    }
+  };
+  for (const r of results) walk(r?._graph ?? r?.record?._graph);
+  return { request, hits };
 }
 
 /**

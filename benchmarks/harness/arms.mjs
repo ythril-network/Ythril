@@ -54,7 +54,9 @@ export function wholeHistory(conversation) {
   }
   return sessions.map(s => {
     const head = `# session ${s.index} — ${String(s.startsAt ?? '').slice(0, 10)}`;
-    return [head, ...s.turns.map(t => `${t.speaker}: ${t.text}`)].join('\n');
+    // The image caption in the same form `bench.mjs dump` gives the extractor: a baseline that sees less of
+    // the conversation than the memory was built from inflates the delta by exactly the difference.
+    return [head, ...s.turns.map(t => `${t.speaker}: ${t.text}${t.imageCaption ? ` [image: ${t.imageCaption}]` : ''}`)].join('\n');
   }).join('\n\n');
 }
 

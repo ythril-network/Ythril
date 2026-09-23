@@ -75,6 +75,41 @@ describe('one question', () => {
     assert.equal('superseded' in r.hits[1], false, 'a current record must carry no mark at all');
   });
 
+  it('the records the TRAVERSAL reached are hits too, once each, and say how they were reached', async () => {
+    /*
+     * Found 2026-09-23 on the first run against a 5.x instance. Recall nests what a traversal reaches
+     * under each match's `_graph`, and this flattened `results` alone — so a run recorded `traverse: 1` in
+     * its request and handed the answerer none of what the traversal found. That is the multi-hop half of
+     * the graph, the half `#1282` was deleted for failing, dropped by a reader rather than by the retriever.
+     */
+    const reached = (id, name, label, deeper) => ({
+      edges: [{ label, direction: 'out' }], node: { _id: id, name }, paths: [['m', id]],
+      ...(deeper ? { _graph: deeper } : {}),
+    });
+    const ythril = stubYthril([{ results: [
+      { ...hit({ _id: 'm' }), _graph: [reached('e1', 'Beta Corp', 'works_at', [reached('e2', 'Berlin', 'located_in')])] },
+      { ...hit({ _id: 'm2', fact: 'Ada joined Beta in May.' }), _graph: [reached('e1', 'Beta Corp', 'works_at')] },
+    ] }]);
+    const r = await retrieveOne({ ythril, space: 's', question: 'where does Ada work', traverse: 2 });
+    const ids = r.hits.map(h => h.id);
+    assert.deepEqual(ids, ['m', 'm2', 'e1', 'e2'], 'matches first, then every traversed node, each once');
+    const e1 = r.hits.find(h => h.id === 'e1');
+    assert.equal(e1.text, 'Beta Corp');
+    assert.equal(e1.via, 'traverse');
+    assert.equal(e1.relation, 'works_at', 'the edge label is what makes a reached name mean something');
+    assert.equal('via' in r.hits[0], false, 'a match carries no traversal mark');
+  });
+
+  it('a dated record carries its date, because for a timeline entry the date IS the content', async () => {
+    const ythril = stubYthril([{ results: [
+      { score: 0.8, type: 'chrono', record: { _id: 'c1', title: 'Jon visited Paris', startsAt: '2023-01-28T00:00:00Z' } },
+      { score: 0.7, type: 'chrono', record: { _id: 'c2', title: 'Trip', startsAt: '2023-06-12T00:00:00Z', endsAt: '2023-06-18T00:00:00Z' } },
+    ] }]);
+    const r = await retrieveOne({ ythril, space: 's', question: 'when was Jon in Paris' });
+    assert.equal(r.hits[0].when, '2023-01-28');
+    assert.equal(r.hits[1].when, '2023-06-12 to 2023-06-18');
+  });
+
   it('A FAILED CALL IS NOT AN EMPTY RESULT', async () => {
     // The one that matters most. Conflating them makes a run against a down instance publish a low score
     // instead of an error, and nothing in the report distinguishes them afterwards.

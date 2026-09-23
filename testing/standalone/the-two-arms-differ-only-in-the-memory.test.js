@@ -81,6 +81,19 @@ describe('the baseline context', () => {
     assert.match(text, /Gina: Hey Jon!/);
   });
 
+  it('carries the image captions the extractor saw, or the baseline reads less than the memory was built from', () => {
+    /*
+     * Found 2026-09-23 on the first graded run. `bench.mjs dump` — what the extractor reads — prints each
+     * shared photo as `[image: …]`, and this dropped them, so a question about a photo was answerable from
+     * the memory the extraction built and not from the history the baseline was handed. That inflates the
+     * delta by exactly the questions the baseline could not see, which is the figure this module exists to
+     * keep honest.
+     */
+    const withPhoto = { id: 'c', sessions: [{ index: 1, startsAt: '2023-01-01T00:00:00Z',
+      turns: [{ speaker: 'Jon', text: 'Look at this!', imageCaption: 'a dance crew holding a trophy' }] }] };
+    assert.match(wholeHistory(withPhoto), /Jon: Look at this! \[image: a dance crew holding a trophy\]/);
+  });
+
   it('refuses an empty conversation rather than scoring the baseline zero', () => {
     // A baseline handed nothing answers nothing, and the memory then looks better by exactly that much —
     // a flattering result produced by a bug, which is the direction nobody checks.

@@ -84,10 +84,10 @@ describe('two sessions on one day', () => {
     const { files, memories } = await write(SAME_DAY);
     const idOf = (text) => `id-${memories.findIndex(m => m.fact === text) + 2}`;   // entity is id-1
     for (const f of files) {
-      assert.equal(f.links?.memoryIds?.length, 1,
-        `${f.path} names ${f.links?.memoryIds?.length} claims; each session produced exactly one`);
+      assert.equal(f.links?.linkFacts?.length, 1,
+        `${f.path} names ${f.links?.linkFacts?.length} claims; each session produced exactly one`);
     }
-    assert.notDeepEqual(files[0].links.memoryIds, files[1].links.memoryIds,
+    assert.notDeepEqual(files[0].links.linkFacts, files[1].links.linkFacts,
       'the two transcripts name the same claims, so the bucket is still keyed on the date');
     assert.ok(idOf('Ada planned a road trip.'), 'sanity: the claims were written');
   });
@@ -131,6 +131,6 @@ describe('the ten committed LoCoMo extractions keep working', () => {
       sessions: [{ date: '2023-05-20', text: 'only' }],
       claims: [claim('Ada planned a road trip.')],
     });
-    assert.equal(files[0].links?.memoryIds?.length, 1, 'the date fallback must still link the claim');
+    assert.equal(files[0].links?.linkFacts?.length, 1, 'the date fallback must still link the claim');
   });
 });

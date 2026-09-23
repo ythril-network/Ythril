@@ -23,8 +23,8 @@
  *   - `server/src/api/brain/chrono.ts:38`    POST   `/spaces/:spaceId/chrono`
  *   - the four matching `PATCH .../:id` handlers (facts.ts:227, entities.ts:246, edges.ts:205,
  *     chrono.ts:154) — the only door `suppressEmbeddings` has; see `writeRecord`
- *   - `server/src/api/brain/search.ts:351`   POST   `/spaces/:spaceId/recall`        (docs 04a-recall-api.md)
- *   - `server/src/api/brain/search.ts:267`   POST   `/spaces/:spaceId/query`         (docs 04-brain-api.md:375)
+ *   - `server/src/api/brain/search.ts`       POST   `/api/brain/recall`, space in the body (5.0)
+ *   - the generic tool door                  POST   `/api/filter`, space in the body (5.0; was `/query`)
  *   - `server/src/api/brain/embed-jobs.ts:74` GET   `/spaces/:spaceId/embedding-queue/records`
  *                                                                                   (docs 04d-brain-ops-api.md:304)
  *   - `server/src/api/spaces.ts:270`         POST   `/api/spaces`                    (docs 06-spaces-api.md:90)
@@ -146,7 +146,7 @@ function requireString(value, what) {
  *
  * The write routes reject any `id` that is not a UUID v4 (`entities.ts:45`, `facts.ts:112`,
  * `chrono.ts:121`), and with `strictLinkage` on — the default posture for a new space,
- * `spaces/space-create.ts:113` — an edge's `from`/`to` and a fact's `entityIds` must also RESOLVE.
+ * `spaces/space-create.ts:113` — an edge's `from`/`to` and a fact's `linkEntities` must also RESOLVE.
  * Meanwhile a caller wanting a re-run to address the same records rather than mint duplicates needs an id
  * it can recompute, which is the one thing a server-minted UUID is not.
  *
@@ -190,10 +190,10 @@ function refIdFor(spaceId, localId) {
  * An edge has no `id`: its identity is (from, to, label), so a repeat POST merges — `edges.ts:88`.
  */
 const WRITE_ROUTES = {
-  fact: { segment: 'facts', idField: 'id', refs: [], refArrays: ['entityIds'] },
+  fact: { segment: 'facts', idField: 'id', refs: [], refArrays: ['linkEntities'] },
   entity: { segment: 'entities', idField: 'id', refs: [], refArrays: [] },
   edge: { segment: 'edges', idField: null, refs: ['from', 'to'], refArrays: [] },
-  chrono: { segment: 'chrono', idField: 'id', refs: [], refArrays: ['entityIds', 'memoryIds'] },
+  chrono: { segment: 'chrono', idField: 'id', refs: [], refArrays: ['linkEntities', 'linkFacts'] },
 };
 
 /**
@@ -645,7 +645,13 @@ export function makeYthril({ baseUrl, token, totpCode, timeoutMs = DEFAULT_TIMEO
       checkTraverse(params.traverse);
       let answer;
       try {
-        answer = await request('POST', brain(space, '/recall'), { body: params });
+        /*
+         * `POST /api/brain/recall` with the space in the BODY, since 5.0 dropped it from the search family's
+         * path. This called `/api/brain/spaces/:space/recall` until 2026-09-23 — a route 5.0 removed — and
+         * nothing noticed, because no graded run had been made against a 5.x instance: the first one would
+         * have 404'd on every question, and the harness correctly reports that as a failed retrieval.
+         */
+        answer = await request('POST', '/api/brain/recall', { body: { ...params, space } });
       } catch (err) {
         // An instance predating the object form refuses it with the numeric-only message, and the caller's
         // grid cell is the thing that has to change. Said here because the server's own text cannot know
@@ -671,7 +677,11 @@ export function makeYthril({ baseUrl, token, totpCode, timeoutMs = DEFAULT_TIMEO
     async query(space, params) {
       requireString(space, 'query: space');
       if (!isPlainObject(params)) throw new TypeError('query: params must be a plain object');
-      return request('POST', brain(space, '/query'), { body: params });
+      // `POST /api/filter` since 5.0, which unwraps to `{ ok, data }`; the rows are under `data`. The
+      // per-space `/query` route this called is gone, and nothing in the harness calls `query` today —
+      // which is how its address outlived the route by a release.
+      const envelope = await request('POST', '/api/filter', { body: { ...params, space } });
+      return envelope?.data ?? envelope;
     },
 
     /**
@@ -837,8 +847,9 @@ export function makeYthril({ baseUrl, token, totpCode, timeoutMs = DEFAULT_TIMEO
     const spaceCounts = await request('GET', brain(space, '/stats'));
     const held = (spaceCounts?.facts ?? 0) + (spaceCounts?.entities ?? 0) + (spaceCounts?.chrono ?? 0);
     if (held === 0) return true;
-    const probe = await request('POST', brain(space, '/recall'),
-      { body: { query: SEARCHABLE_PROBE, topK: 1 } });
+    // The 5.0 address, space in the body — see `recall` above for what the 4.x one did to a 5.x instance.
+    const probe = await request('POST', '/api/brain/recall',
+      { body: { space, query: SEARCHABLE_PROBE, topK: 1 } });
     return (probe?.results ?? []).length > 0;
   }
 

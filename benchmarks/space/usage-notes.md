@@ -37,8 +37,8 @@ is a claim.
 schema, so the path and the tag are what identify it; there is nothing to declare.
 
 **The file names the claims, not the other way round.** A claim can only link to entities. A file can link
-to entities, claims and chrono entries, so the transcript is written with `memoryIds` naming the claims
-drawn from it and `entityIds` naming the people in it. A walk reads links in both directions, so a match on
+to entities, claims and chrono entries, so the transcript is written with `linkFacts` naming the claims
+drawn from it and `linkEntities` naming the people in it. A walk reads links in both directions, so a match on
 a claim still reaches its transcript.
 
 **Never fold the transcript into a claim.** The file is the evidence; the claim is the thing a question
