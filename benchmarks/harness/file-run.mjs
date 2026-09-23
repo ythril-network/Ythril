@@ -83,18 +83,31 @@ export function prepareConversation({ runDir, conversation, questions, hitsFor, 
    * FIELD BY FIELD, never a spread of the loader's row — the row carries `answer`, `adversarialAnswer`,
    * `evidence` and `category`, and a spread is how the key would reach the answerer in a file that looks
    * exactly like this one.
+   *
+   * PER ARM, and only the arm that is missing. Regenerating one arm's input must not rewrite the other's:
+   * an input that changes invalidates every answer built on it, so a baseline fix would otherwise throw
+   * away memory-arm answers that were correct — and re-run the retrieval behind them for nothing.
    */
-  const memory = {
-    conversationId: conversation.id, arm: 'memory', retrieval,
-    questions: scored.map(q => ({ id: q.id, question: q.question, context: hitsFor(q.question) })),
-  };
-  const baseline = {
-    conversationId: conversation.id, arm: 'baseline', context: wholeHistory(conversation),
-    questions: scored.map(q => ({ id: q.id, question: q.question })),
-  };
-  atomicWrite(inputPath(runDir, conversation.id, 'memory'), JSON.stringify(memory, null, 2));
-  atomicWrite(inputPath(runDir, conversation.id, 'baseline'), JSON.stringify(baseline, null, 2));
+  if (!existsSync(inputPath(runDir, conversation.id, 'memory'))) {
+    const memory = {
+      conversationId: conversation.id, arm: 'memory', retrieval,
+      questions: scored.map(q => ({ id: q.id, question: q.question, context: hitsFor(q.question) })),
+    };
+    atomicWrite(inputPath(runDir, conversation.id, 'memory'), JSON.stringify(memory, null, 2));
+  }
+  if (!existsSync(inputPath(runDir, conversation.id, 'baseline'))) {
+    const baseline = {
+      conversationId: conversation.id, arm: 'baseline', context: wholeHistory(conversation),
+      questions: scored.map(q => ({ id: q.id, question: q.question })),
+    };
+    atomicWrite(inputPath(runDir, conversation.id, 'baseline'), JSON.stringify(baseline, null, 2));
+  }
   return { skipped: false, ids };
+}
+
+/** Is one arm's input written? The CLI asks before paying for retrieval. */
+export function isArmPrepared(runDir, conversationId, arm) {
+  return existsSync(inputPath(runDir, conversationId, arm));
 }
 
 /** Record one arm's answers for one conversation, stamped with the input they answer. */

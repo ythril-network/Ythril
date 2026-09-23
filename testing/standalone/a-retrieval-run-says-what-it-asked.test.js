@@ -100,6 +100,16 @@ describe('one question', () => {
     assert.equal('via' in r.hits[0], false, 'a match carries no traversal mark');
   });
 
+  it('a dated record carries its date, because for a timeline entry the date IS the content', async () => {
+    const ythril = stubYthril([{ results: [
+      { score: 0.8, type: 'chrono', record: { _id: 'c1', title: 'Jon visited Paris', startsAt: '2023-01-28T00:00:00Z' } },
+      { score: 0.7, type: 'chrono', record: { _id: 'c2', title: 'Trip', startsAt: '2023-06-12T00:00:00Z', endsAt: '2023-06-18T00:00:00Z' } },
+    ] }]);
+    const r = await retrieveOne({ ythril, space: 's', question: 'when was Jon in Paris' });
+    assert.equal(r.hits[0].when, '2023-01-28');
+    assert.equal(r.hits[1].when, '2023-06-12 to 2023-06-18');
+  });
+
   it('A FAILED CALL IS NOT AN EMPTY RESULT', async () => {
     // The one that matters most. Conflating them makes a run against a down instance publish a low score
     // instead of an error, and nothing in the report distinguishes them afterwards.

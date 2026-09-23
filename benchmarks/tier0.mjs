@@ -27,7 +27,7 @@ import { join } from 'node:path';
 import { loadConversations, loadQuestions } from './locomo/loader.mjs';
 import { retrieveAll } from './harness/retrieve.mjs';
 import {
-  prepareConversation, isPrepared, answerStatus, writeAnswers, scoredQuestions,
+  prepareConversation, isPrepared, isArmPrepared, answerStatus, writeAnswers, scoredQuestions,
   exportJudgeBatches, importJudgeReply, judgeStatus,
 } from './harness/file-run.mjs';
 import { f1Scores, judgeScores } from './harness/score.mjs';
@@ -57,6 +57,23 @@ async function prepare(runId) {
   for (const conversation of conversations) {
     if (isPrepared(runDir, conversation.id)) { console.log(`${conversation.id}: already prepared`); continue; }
     const scored = scoredQuestions(questions, conversation.id);
+    // Only the baseline is owed: no retrieval, and the memory input — and every answer on it — stays as it is.
+    if (isArmPrepared(runDir, conversation.id, 'memory')) {
+      prepareConversation({ runDir, conversation, questions, hitsFor: () => { throw new Error('unreachable'); }, retrieval: RETRIEVAL });
+      console.log(`${conversation.id}: baseline prepared`);
+      continue;
+    }
+    /*
+     * NOT BEFORE THE SPACE IS SEARCHABLE. An embed queue still draining reads exactly like a poor retriever,
+     * and a run would publish it as one. `waitForEmbeddings` throws rather than proceeds; that is caught as a
+     * conversation not prepared, so the next `prepare` tries it again.
+     */
+    try {
+      await client.waitForEmbeddings(spaceOf(conversation.id));
+    } catch (err) {
+      console.log(`${conversation.id}: not searchable yet, NOT prepared — ${err.message.split('\n')[0]}`);
+      continue;
+    }
     const results = await retrieveAll({
       ythril, space: spaceOf(conversation.id), questions: scored.map(q => q.question), ...RETRIEVAL,
     });
@@ -151,7 +168,7 @@ function show(conv, arm, from = '0', count = '25', runId) {
   for (const q of qs) {
     console.log(`\n${q.id} :: ${q.question}`);
     for (const h of q.context ?? []) {
-      console.log(`  - ${h.via === 'traverse' ? `(${h.relation}) ` : ''}${h.superseded ? '[superseded] ' : ''}${h.text}`);
+      console.log(`  - ${h.via === 'traverse' ? `(${h.relation}) ` : ''}${h.superseded ? '[superseded] ' : ''}${h.when ? `[${h.when}] ` : ''}${h.text}`);
     }
   }
   console.log(`\n(${qs.length} of ${input.questions.length}, from ${from})`);

@@ -53,8 +53,24 @@ function hitOf(result) {
      * current one — or the reverse.
      */
     ...(record.superseded === true ? { superseded: true } : {}),
+    ...whenOf(record),
     score: typeof result?.score === 'number' ? result.score : null,
   };
+}
+
+/**
+ * A dated record's dates — which are its CONTENT, not metadata.
+ *
+ * A timeline entry's title is "Jon visited Paris"; the answer to *"when was Jon in Paris?"* is its
+ * `startsAt`. Found on the first 5.x run, where every retrieved chrono hit reached the answerer as a title
+ * alone, so a temporal question could only be answered from a fact that happened to repeat the date.
+ */
+function whenOf(record) {
+  const day = (v) => (typeof v === 'string' && v ? v.slice(0, 10) : null);
+  const starts = day(record?.startsAt);
+  const ends = day(record?.endsAt);
+  if (!starts) return {};
+  return { when: ends && ends !== starts ? `${starts} to ${ends}` : starts };
 }
 
 /**
@@ -108,6 +124,7 @@ export async function retrieveOne({ ythril, space, question, topK = 10, traverse
           kind: record.kind ?? 'entity',
           text: record.fact ?? record.name ?? record.title ?? record.path ?? record.label ?? null,
           ...(record.superseded === true ? { superseded: true } : {}),
+          ...whenOf(record),
           score: null,
           via: 'traverse',
           relation: n.edges?.[0]?.label ?? null,
