@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **One graded benchmark run: every question, both arms, every seed, one report** (`B-6`). The retrieve, arm
+  and grade steps each held one rule; `benchmarks/harness/run.mjs` holds the ones that only exist once they
+  are joined, and each of them produces a plausible number when dropped. The judge's independence is checked
+  before anything is called. Retrieval runs once per question, not once per seed. The answerer is handed
+  the question, the context and the seed, and nothing that names which arm it is in. A failed step leaves a
+  seed UNSCORED rather than low, and the published figure carries its min and max across seeds.
+
+  **The grade step ships with it, and had never been committed.** `grade.mjs` and its test were written for
+  the previous `B-6` increment and existed in one working tree only. The answerer and the judge are handed
+  in, so all of this runs against fakes today; with the two provider keys it is configuration, not a build.
+
 ### Fixed
 
 - **The 5.0.0 breaking table names the retired routes with their methods, and says to reconnect MCP clients.**
