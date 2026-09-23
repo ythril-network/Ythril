@@ -160,7 +160,7 @@ describe('the source keeps its contracts', () => {
   it('fusion runs BEFORE the reranker, so the cross-encoder sees the fused pool', () => {
     const body = rec.slice(rec.indexOf('export async function recall('));
     const fuse = body.indexOf('applyLexicalFusion(');
-    const rerank = body.indexOf('applyRerank(');
+    const rerank = body.indexOf('rerankStage(');
     assert.ok(fuse > 0 && rerank > 0, 'both stages must run');
     assert.ok(fuse < rerank, 'fusion must widen/reorder the pool before the cross-encoder reads it');
   });
