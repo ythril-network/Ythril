@@ -46,18 +46,19 @@ the steps tagged below; phases 0, 1, 9 and 10 are code end to end.
 
 | treatment | steps | share |
 |---|---|---|
-| mechanical | 39 | 61% |
-| jev | 20 | 31% |
-| generative | 5 | 8% |
+| mechanical | 40 | 61% |
+| jev | 22 | 33% |
+| generative | 4 | 6% |
 
 Counted from the step tables below, and recounted by
 `testing/standalone/the-extractor-decomposition-counts-itself.test.js`, so this table cannot drift from them.
 A step that is code in one case and a decision in another (2.3) counts as `jev`; one with any generative
 part (5.8) counts as `generative`.
 
-Of the 64 steps, the three preconditions are new; the other 61 are rules the prompt today hands to one
-model call. The count is the argument for this design: most of what the model is asked to do is arithmetic,
-bookkeeping or a rule it can only get wrong, and a twelfth of it is writing.
+Of the 66 steps, five are new — the three preconditions, the candidate judgement (4.12) and the citation
+check (5.10); the other 61 are rules the prompt today hands to one model call. The count is the argument
+for this design: most of what the model is asked to do is arithmetic, bookkeeping or a rule it can only get
+wrong, and one step in sixteen is writing.
 
 ---
 
@@ -127,7 +128,8 @@ the ENTITIES*.
 
 | # | step | tag | notes |
 |---|---|---|---|
-| 4.1 | Find mentions of things: names as spoken, and unnamed returned-to subjects (*"my mom's old house"*) | **generative** | Open-world by nature. Returns spans pointing into turns, so every mention is checkable against its text |
+| 4.1 | Candidate mentions: proper-noun runs, possessive and determiner noun phrases (*"my mom's old house"*, *"the park near my house"*), noun phrases repeated across sessions | mechanical | A part-of-speech tagger, in code, offline. **Select instead of generate**: the model is never asked to NAME a mention, only to judge one the code found (4.12) |
+| 4.12 | Is this candidate a THING the conversation is about, not a passing noun? | **jev `noul`** | One Noul per candidate, asked together over the same turn. Coverage is checked: a turn that yields no accepted candidate and no claim is reported, because *the model cannot choose an omitted value* |
 | 4.2 | Type of each new entity | **jev `choice`** over the schema's entity types | *"Do not invent a type"* becomes impossible, not forbidden |
 | 4.3 | Shortlist existing entities a mention could be — from THIS run's entities and from the SPACE: same type, exact name or alias, fuzzy name, and `similar` over the mention's context | mechanical | Code supplies the candidates… No full list of people is ever built: one bounded lookup per DISTINCT mention, cached for the run, a handful of candidates each. A second conversation ingested into the same space matches against what the first one wrote |
 | 4.4 | Is this mention one of the shortlisted, or new? | **jev `choice`** over the shortlist + `new` | …the model picks a card. *"Identity is the whole job"* — and it is now one bounded question per mention |
@@ -155,6 +157,7 @@ appear*, the ASSISTANT section's three rules.
 | 5.7 | Every turn in some claim's `sourceTurns`; an uncovered turn joins the nearest claim of its exchange | mechanical | The coverage rule, enforced by construction |
 | 5.8 | Arcs: an entity with claims in ≥3 sessions gets an arc claim | mechanical trigger, **generative** text | *"Write the ARC as well as the moments"* |
 | 5.9 | A background STATE told many times is written once, later mentions become `sourceTurns` | **jev `noul`** per pair: same state? | Policy: merge the telling, keep contradictions (phase 7) apart |
+| 5.10 | Is the written claim SUPPORTED by its own `sourceTurns`? | **jev `noul`** | A citation check on the one generative output that matters most. Policy: below threshold, the claim is rewritten once by the generative step with the failure as input, then dropped and reported — *verify and escalate* |
 
 ## 6 · Relations
 
@@ -209,6 +212,28 @@ Source: *Before you return it*, *Do not leave a key dangling*.
 | 10.1 | Replay into the space: entities, then chrono, then claims, then edges, then transcripts linked to their claims | mechanical | `write-space.mjs`, moved into the server |
 
 ---
+
+## How every `jev` step is asked
+
+Taken from TypeSafe's own building guide (`typesafe-ai/skills` → `SKILL.md`, and the docs it points at),
+because the decomposition above is only as good as the questions it turns into.
+
+- **One narrow judgment per question, with its possible answers stated as criteria.** A `choice` always
+  includes a no-match outcome (`none`, `new`) where nothing may fit; a condition that several labels can
+  satisfy is one `noul` per label, not a `choice` among them.
+- **Independent questions over the same state are asked TOGETHER.** Phase 2's and phase 3's per-turn
+  questions (2.3, 2.5, 3.4, 3.8, 3.9, 4.12) share one turn as their state, so they go as one request; a
+  second request is warranted only when an answer is needed to build the next question's candidates (4.4
+  needs 4.3's shortlist).
+- **Candidate coverage is the extractor's responsibility, not the model's.** The model can only pick what
+  the code offered, so every shortlist (4.3, 6.2, 7.1) is tested for recall against the fixtures before its
+  decision is tuned.
+- **Raw probabilities are kept, policy is applied after.** Every judgment is stored with the run, so a
+  threshold can change without re-running inference. Thresholds are measured per step on the fixtures, never
+  copied from an example.
+- **Confidence is not correctness.** A `choice` confidence says how concentrated the answer is; a `noul`
+  near 0.5 means yes and no are equally likely, not "medium". Policies are written against that, and a
+  typed answer is a guarantee of the interface, not of the truth — which is what 5.10 is for.
 
 ## What does not carry over, and why
 
