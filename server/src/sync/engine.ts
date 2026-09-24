@@ -984,8 +984,7 @@ async function pullFromPeer(
    */
   const stoppedEarly: string[] = [];
   highestSeq = resolveWatermark({
-    heldBack: stoppedEarly,
-    direction: 'receive', peerLabel: member.label ?? member.instanceId, spaceId,
+    heldBack: stoppedEarly, direction: 'receive', peerLabel: member.label ?? member.instanceId, spaceId,
     from: sinceSeq,
     transfers: pulled,
     // Bounds the advance, never raises it: a tombstone seq is not a position in the data stream.
@@ -1173,8 +1172,7 @@ async function pushToPeer(
    */
   const stoppedEarly: string[] = [];
   maxSeqPushed = resolveWatermark({
-    heldBack: stoppedEarly,
-    direction: 'push', peerLabel: member.label ?? member.instanceId, spaceId,
+    heldBack: stoppedEarly, direction: 'push', peerLabel: member.label ?? member.instanceId, spaceId,
     from: lastSeqPushed,
     transfers: pushed,
     alsoCheck: { tombstones },
