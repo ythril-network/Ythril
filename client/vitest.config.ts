@@ -1,4 +1,5 @@
 import angular from '@analogjs/vite-plugin-angular';
+import { availableParallelism } from 'node:os';
 import { defineConfig } from 'vitest/config';
 
 /**
@@ -70,6 +71,15 @@ export default defineConfig({
      * a test failing, and the suite summary immediately above it will say so.
      */
     pool: 'threads',
+    /**
+     * A ceiling on worker threads, because the default is one per core less one — 15 on a 16-core dev machine.
+     *
+     * Each thread compiles Angular components and renders them into its own jsdom, and under `npm run preflight`
+     * on 2026-09-24 that took the Windows node process to `FATAL ERROR: Zone Allocation failed - process out of
+     * memory` and the machine with it. The same suite with two workers finished clean. Four keeps most of the
+     * speed and bounds the memory to a number that does not depend on how many cores the machine happens to have.
+     */
+    maxWorkers: Math.min(4, Math.max(1, availableParallelism() - 1)),
     // Default per-file isolation (each spec file in its own fork) — so each file gets a fresh
     // Angular test platform and TestBed. A shared/single fork instead leaked TestBed state
     // between files (a component created by one file broke the next) and double-created the

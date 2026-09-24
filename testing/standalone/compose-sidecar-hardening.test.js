@@ -213,6 +213,18 @@ describe('docker-compose.yml — untrusted-parser sidecar hardening', () => {
     }
   });
 
+  it('every compose service declares a memory ceiling — the app and the database too', () => {
+    /*
+     * EXEMPT above waives CONFINEMENT for `ythril` and `ythril-mongo`, not a memory ceiling. Uncapped, MongoDB
+     * sizes its cache from the whole host and the app grows without bound, so on a shared compose host one
+     * Ythril can take the machine with it — which is what happened on 2026-09-24. Infra sets its own pod limits;
+     * this is the compose default.
+     */
+    const uncapped = Object.keys(services).filter(n => services[n]?.mem_limit === undefined);
+    assert.ok(Object.keys(services).length >= 5, 'the compose parser found almost no services — it is wrong, not the file');
+    assert.deepEqual(uncapped, [], `compose service(s) with no mem_limit: ${uncapped.join(', ')}`);
+  });
+
   it('the operator can raise every ceiling from .env without editing the compose file', () => {
     /*
      * EVERY service that declares a ceiling, read out of the compose file.
