@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.1.1] — 2026-09-24
+
+A security patch: a network invite that was applied and never finalized no longer leaves a permanent peer
+token behind, and any left by earlier handshakes are revoked when the instance starts.
+
 ### Fixed
 
 - **A network invite that was applied and never finalized left a permanent peer token behind** (security). Apply
