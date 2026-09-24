@@ -106,6 +106,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A REST upload whose metadata write failed answered 2xx** (`files/store-file.ts`). The single-request
+  upload swallowed that failure and reported the file as written, so the bytes sat on disk with no record
+  behind them and nothing said so. It now fails the request, the same as MCP `write_file` always did.
 - **MCP clients were told to call tools that no longer exist** (Q-45). The server instructions, the first
   text a connecting agent reads, named `list_chrono`, `find_similar`, `list_peers` and `sync_now`. `help()`
   named `find_entities_by_name`, `get_space_meta` and a `query` tool. All of these were renamed or folded
@@ -141,6 +144,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Internal
 
+- **Every door writes a file through one sequence** (`files/store-file.ts`, `storeFile` / `recordStoredFile`):
+  quota, bytes, metadata, the processing queue and the webhook. The REST upload (single and chunked) and MCP
+  `write_file` each held a copy, and `ingest` was about to be the third. The hash-hand-over gate now asserts
+  the sequence once and that no door writes metadata or dispatches on its own.
 - **The extraction validator moved into the server** (`F-31`, 9.2, `extractor/validate-extraction.ts`). The
   benchmark's `writer/validate-extraction.mjs` now re-exports it, so the benchmark writer and the product's
   `ingest` refuse the same files for the same reasons, from one copy of the rules.

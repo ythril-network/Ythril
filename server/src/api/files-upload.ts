@@ -21,15 +21,12 @@ import { globalRateLimit } from '../rate-limit/middleware.js';
 import { requireSpaceAuth, denyReadOnly } from '../auth/middleware.js';
 import { getConfig } from '../config/loader.js';
 import { resolveSafePath, assertNoSymlinkEscape } from '../files/sandbox.js';
-import { writeFileBytes } from '../files/files.js';
 import { decodeContent } from '../files/content-encoding.js';
-import { upsertFileMeta } from '../files/file-meta.js';
 import { parseContentRange, storeChunk, assembleChunks } from '../files/chunks.js';
 import { checkQuota, QuotaError } from '../quota/quota.js';
-import { dispatchFileProcessing } from '../files/dispatch.js';
+import { storeFile, recordStoredFile, type StoreFileMeta } from '../files/store-file.js';
 import { isMediaFormat, type InputFormat } from '../files/converters/pipeline.js';
 import { resolveWriteTarget } from '../spaces/proxy.js';
-import { emitWebhookEvent } from '../webhooks/dispatcher.js';
 import { log } from '../util/log.js';
 import { primitivePropertyError } from '../brain/property-values.js';
 import { webhookToken, parseTtlDaysQuery, requireQueryPath, enforceSizeLimit } from './files-request.js';
@@ -122,17 +119,15 @@ export function registerUploadRoute(router: Router): void {
             const absTarget = resolveSafePath(targetSpace, filePath);
             await assertNoSymlinkEscape(targetSpace, absTarget);
             const sha256 = await assembleChunks(targetSpace, filePath, range.total, absTarget);
-            await upsertFileMeta(targetSpace, filePath, range.total, { ttlDays: parseTtlDaysQuery(req), sha256 }).catch(err => {
-              log.warn(`upsertFileMeta error for space ${targetSpace}, path ${filePath}: ${err}`);
-            });
-
-            // Resolve format, record media state, and enqueue the async embedding job (same path as
-            // the single-request upload). Previously the media branch here only recorded `pending` —
-            // `disabled`/`skipped` states were dropped; the shared helper records all three.
-            const { resolvedFormat: resolvedFmt, embeddingStatus: chunkedEmbeddingStatus } =
-              await dispatchFileProcessing(targetSpace, filePath, { bytes: range.total, contentType: req.headers['content-type'], sha256 });
-
-            emitWebhookEvent({ event: 'file.created', spaceId: targetSpace, entry: { path: filePath, sha256 }, ...webhookToken(req) });
+            // Metadata, the processing queue and the webhook — the same sequence as every other door
+            // (files/store-file.ts); the bytes are already assembled on disk.
+            const ttlDays = parseTtlDaysQuery(req);
+            const { resolvedFormat: resolvedFmt, embeddingStatus: chunkedEmbeddingStatus } = await recordStoredFile(
+              targetSpace, filePath, range.total, sha256, {
+                meta: ttlDays !== undefined ? { ttlDays } : {},
+                ...(req.headers['content-type'] ? { contentType: req.headers['content-type'] } : {}),
+                actor: webhookToken(req) as Record<string, unknown>,
+              });
             const isDocFormat = resolvedFmt !== 'text' && !isMediaFormat(resolvedFmt);
             const chunkedStatusCode = (chunkedEmbeddingStatus === 'pending' && isDocFormat) ? 202 : 201;
             const chunkedResponse: Record<string, unknown> = { path: filePath, sha256 };
@@ -155,11 +150,11 @@ export function registerUploadRoute(router: Router): void {
       // ── Single-request upload ────────────────────────────────────────────
       try {
         let sha256: string;
-        let incomingBytes = 0;
         let decoded: Buffer | undefined;
 
+        // A raw body is already bytes; a JSON body carries them as a string to decode.
         if (Buffer.isBuffer(req.body)) {
-          incomingBytes = req.body.length;
+          decoded = req.body;
         } else if (req.body && typeof req.body === 'object' && typeof req.body.content === 'string') {
           // DECODED ONCE, up here, and the buffer is what gets written below.
           //
@@ -174,7 +169,6 @@ export function registerUploadRoute(router: Router): void {
             res.status(400).json({ error: (err as Error).message });
             return;
           }
-          incomingBytes = decoded.length;
         } else {
           res
             .status(400)
@@ -185,58 +179,41 @@ export function registerUploadRoute(router: Router): void {
           return;
         }
 
-        // Storage quota check — rejects with 507 if hard limit exceeded
-        let quotaResult;
-        try {
-          quotaResult = await checkQuota('files', incomingBytes);
-        } catch (err) {
-          if (err instanceof QuotaError) {
-            res.status(507).json({ error: err.message, storageExceeded: true });
-            return;
-          }
-          throw err;
-        }
-
-        ({ sha256 } = await writeFileBytes(targetSpace, filePath, Buffer.isBuffer(req.body) ? req.body : decoded!));
-
-        // Persist file metadata to MongoDB
-        const metaOpts: { description?: string; tags?: string[]; properties?: Record<string, string | number | boolean>; ttlDays?: number; sha256?: string } = {};
-        if (typeof req.body?.description === 'string') metaOpts.description = req.body.description;
-        if (Array.isArray(req.body?.tags)) metaOpts.tags = req.body.tags as string[];
-        // The CREATE door for a file's properties, and it silently DROPPED a malformed bag rather than
-        // refusing it — so an upload carrying a nested value answered 2xx with the file stored and its
-        // properties gone, saying nothing.
-        //
-        // Refused now, matching the other three file-meta doors and every entity door. An upload is not a
-        // cheap request to repeat, which is exactly why a caller has to be told rather than left to
-        // discover it on a later read.
-        //
-        // LINE comments, not a block, and that is not a style choice: this file contains `'*/*'` as a
-        // content-type string, and every comment stripper in the test suite is string-blind — it reads
-        // that as a comment START and deletes everything up to the next `*/`. A block comment here moves
-        // where that swallowed region ends, so a gate reading this file sees less than it thinks. Filed.
+        // The CREATE door for a file's properties refuses a malformed bag rather than dropping it — an upload
+        // is not a cheap request to repeat, so a caller has to be told rather than left to find the properties
+        // gone on a later read. Checked before anything is written. (LINE comments: this file contains a
+        // content-type string that every comment stripper in the suite reads as a block-comment start.)
         const propErr = primitivePropertyError(req.body?.properties);
         if (propErr) { res.status(400).json({ error: propErr }); return; }
-        if (req.body?.properties != null) {
-          metaOpts.properties = req.body.properties as Record<string, string | number | boolean>;
-        }
+        const metaOpts: StoreFileMeta = {};
+        if (typeof req.body?.description === 'string') metaOpts.description = req.body.description;
+        if (Array.isArray(req.body?.tags)) metaOpts.tags = req.body.tags as string[];
+        if (req.body?.properties != null) metaOpts.properties = req.body.properties as Record<string, string | number | boolean>;
         const ttlDaysQ = parseTtlDaysQuery(req);
         if (ttlDaysQ !== undefined) metaOpts.ttlDays = ttlDaysQ;
-        metaOpts.sha256 = sha256;
-        await upsertFileMeta(targetSpace, filePath, incomingBytes, metaOpts).catch(err => {
-          log.warn(`upsertFileMeta error for space ${targetSpace}, path ${filePath}: ${err}`);
-        });
-
-        // Resolve format, record media state, and enqueue the async embedding job (media or document).
         const inputFormat = typeof req.body?.inputFormat === 'string' ? req.body.inputFormat as InputFormat : 'auto';
-        const { resolvedFormat, embeddingStatus: embeddingStatusForResponse } = await dispatchFileProcessing(
-          targetSpace, filePath, { bytes: incomingBytes, contentType: req.headers['content-type'], inputFormat, sha256 },
-        );
+
+        // Quota, bytes, metadata, the processing queue and the webhook — one sequence for every door
+        // (files/store-file.ts). A metadata write that fails is no longer swallowed into a 2xx.
+        let stored;
+        try {
+          stored = await storeFile(targetSpace, filePath, decoded!, {
+            meta: metaOpts, inputFormat,
+            ...(req.headers['content-type'] ? { contentType: req.headers['content-type'] } : {}),
+            actor: webhookToken(req) as Record<string, unknown>,
+          });
+        } catch (err) {
+          if (err instanceof QuotaError) { res.status(507).json({ error: err.message, storageExceeded: true }); return; }
+          throw err;
+        }
+        sha256 = stored.sha256;
+        const quotaResult = stored.quota;
+        const embeddingStatusForResponse = stored.embeddingStatus;
+        const resolvedFormat = stored.resolvedFormat;
 
         const response: { path: string; sha256: string; storageWarning?: boolean; embeddingStatus?: string } = { path: filePath, sha256 };
         if (quotaResult.softBreached) response.storageWarning = true;
         if (embeddingStatusForResponse !== undefined) response.embeddingStatus = embeddingStatusForResponse;
-        emitWebhookEvent({ event: 'file.created', spaceId: targetSpace, entry: { path: filePath, sha256 }, ...webhookToken(req) });
         // Return 202 Accepted for document uploads so the HTTP client gets an
         // immediate response before the background embedding worker completes.
         // Media files and unknown-format files keep 201 (no async work or already

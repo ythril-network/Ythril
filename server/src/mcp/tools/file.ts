@@ -2,13 +2,12 @@ import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.
 import { recall } from '../../brain/recall.js';
 import { TTL_DAYS_SCHEMA, filePathSchema, ttlDaysFromArgs } from './shared.js';
 import { type InputFormat } from '../../files/converters/pipeline.js';
-import { renameFileMeta, renameFileMetaByPrefix, upsertFileMeta } from '../../files/file-meta.js';
-import { createDir, listDir, listFilesRecursive, moveFile, readFile, writeFileBytes } from '../../files/files.js';
+import { renameFileMeta, renameFileMetaByPrefix } from '../../files/file-meta.js';
+import { createDir, listDir, listFilesRecursive, moveFile, readFile } from '../../files/files.js';
 import { CONTENT_ENCODINGS, decodeContent } from '../../files/content-encoding.js';
-import { dispatchFileProcessing } from '../../files/dispatch.js';
+import { storeFile, type StoreFileMeta } from '../../files/store-file.js';
 import { writeFileTombstones } from '../../files/tombstones.js';
 import { deleteFileCascade } from '../../files/delete-cascade.js';
-import { QuotaError, checkQuota } from '../../quota/quota.js';
 import { resolveMemberSpaces, resolveWriteTarget } from '../../spaces/proxy.js';
 import { memberSpacesWithin } from '../../spaces/proxy-scoped.js';
 import { emitWebhookEvent } from '../../webhooks/dispatcher.js';
@@ -129,29 +128,17 @@ export const write_fileTool: ToolHandler = {
      * buffer rather than an error.
      */
     const bytes = decodeContent(content, a['encoding']);
-    // Quota check — project the incoming size so a write that would exceed the hard limit is
-    // rejected up-front (parity with the REST upload), throwing QuotaError (caught below).
-    const sizeBytes = bytes.length;
-    const wfQuota = await checkQuota('files', sizeBytes);
-    const { sha256 } = await writeFileBytes(wt.target, filePath, bytes);
-    const metaOpts: { description?: string; tags?: string[]; properties?: Record<string, string | number | boolean>; ttlDays?: number | null; sha256?: string } = {};
-    if (typeof a['description'] === 'string') metaOpts.description = a['description'];
-    if (Array.isArray(a['tags'])) metaOpts.tags = a['tags'] as string[];
+    const meta: StoreFileMeta = { ttlDays: ttlDaysFromArgs(a) };
+    if (typeof a['description'] === 'string') meta.description = a['description'];
+    if (Array.isArray(a['tags'])) meta.tags = a['tags'] as string[];
     if (a['properties'] != null && typeof a['properties'] === 'object' && !Array.isArray(a['properties'])) {
-      metaOpts.properties = a['properties'] as Record<string, string | number | boolean>;
+      meta.properties = a['properties'] as Record<string, string | number | boolean>;
     }
-    metaOpts.ttlDays = ttlDaysFromArgs(a);
-    metaOpts.sha256 = sha256;
-    await upsertFileMeta(wt.target, filePath, sizeBytes, metaOpts);
-    // Resolve format, record media state, and enqueue the async embedding job — one shared policy
-    // with the REST upload path. Documents are converted by the background worker (not inline), so
-    // the tool returns immediately with `embeddingStatus: 'pending'`; the worker produces chunks and
-    // sets `chunkCount`/`convertedFileId` shortly after. MCP has no Content-Type; the dispatcher
-    // derives the type from the file extension, so an image written here reaches the vision provider
-    // as `image/png` rather than the byte-blob type this comment used to describe as intended.
+    // Quota, bytes, metadata, the processing queue and the webhook — one sequence for every door
+    // (`files/store-file.ts`). MCP has no Content-Type; the dispatcher derives it from the extension.
     const ifFmt = typeof a['inputFormat'] === 'string' ? a['inputFormat'] as InputFormat : 'auto';
-    await dispatchFileProcessing(wt.target, filePath, { bytes: sizeBytes, inputFormat: ifFmt, sha256 });
-    emitWebhookEvent({ event: 'file.created', spaceId: wt.target, entry: { path: filePath, sha256 }, ...(ctx.actor ?? {}) });
+    const { sha256, sizeBytes, quota: wfQuota } = await storeFile(wt.target, filePath, bytes,
+      { meta, inputFormat: ifFmt, ...(ctx.actor ? { actor: ctx.actor as Record<string, unknown> } : {}) });
     const wfText = `Written (sha256: ${sha256}).`
       + (wfQuota.softBreached ? `\n⚠️ Storage warning: ${wfQuota.warning}` : '');
     return {
