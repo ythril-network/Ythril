@@ -31,6 +31,14 @@ export interface IngestRun {
   judgements?: number;
   /** Set when transcripts were not written, and why. */
   transcripts?: string;
+  /** Every key the extraction named, and the record id it has now — written by this run or already there. */
+  ids?: WriteOutcome['ids'];
+  /**
+   * Record id → the turns it came from. PROVENANCE REPORTED, NOT STORED: a turn id in a record would be noise in
+   * every vector of the space, so the only place it lives is here — which is how a caller joins a record back to
+   * the conversation (the benchmark joins its answer keys this way).
+   */
+  sourceTurns?: WriteOutcome['sourceTurns'];
 }
 
 const FINISHED: ReadonlySet<IngestPhase> = new Set(['done', 'failed']);

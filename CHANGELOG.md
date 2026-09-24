@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **An `ingest` run reports its provenance** — `ids` (each key of the extraction → the record id it has now)
+  and `sourceTurns` (record id → the turns it came from), on `GET …/ingest/:runId` and `ingest_status`.
+  Reported, never stored: a turn id in a record would be noise in its vector, so the run is the one place a
+  caller can join a record back to the conversation.
 - **`ingest`: a conversation in, records out** (`F-31`; `POST /api/brain/spaces/:spaceId/ingest` and
   `GET …/ingest/:runId`, MCP `ingest` and `ingest_status`). A raw conversation (`sessions`) runs every phase of
   the conversation extractor; an extraction already made (`extraction`) is validated and written with no model.
@@ -106,6 +110,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The benchmark writes its corpus through `ingest`** (`F-31`). `benchmarks/writer/write-space.mjs` validates
+  an extraction, creates the space and hands the extraction to the product's door, so the space a benchmark
+  scores is written exactly as a user's conversation is — by one writer. Three things the old writer never
+  did now happen, so **a score measured after this is not comparable blind to one before it**: an entity's
+  description is written, a chrono entry links the claims that dated it, and transcripts live under
+  `transcripts/<conversationId>/`.
 - **The External assist model is consented to per use** (`F-35`). It does two jobs that send different things —
   the document repair pass, and conversation work for `ingest` (writing claims, and answering the extractor's
   questions when no decision model is set). Consent was one host acknowledgement, given under a dialog that

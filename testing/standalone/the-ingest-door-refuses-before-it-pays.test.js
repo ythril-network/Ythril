@@ -99,13 +99,16 @@ describe('a run', () => {
     const seen = [];
     await runIngest(run, 'space-1', parseIngestRequest({ kind: 'conversation', sessions: SESSIONS }).request, spaceContextFrom(groupMeta()), {
       extract: async () => { seen.push(run.phase); return { extraction, judgements: [{}], dropped: [{ reason: 'not supported' }], uncovered: ['x'] }; },
-      write: async (spaceId, x) => { seen.push(run.phase); assert.equal(x.sessions[0].text, 'Ada: We adopted Luna!\nBo: Congrats!'); return { written: { entities: 0, claims: 0, chrono: 0, edges: 0, transcripts: 1 }, ids: {}, sourceTurns: {}, errors: [] }; },
+      write: async (spaceId, x) => { seen.push(run.phase); assert.equal(x.sessions[0].text, 'Ada: We adopted Luna!\nBo: Congrats!'); return { written: { entities: 0, claims: 0, chrono: 0, edges: 0, transcripts: 1 }, ids: { ada: 'id-1' }, sourceTurns: { 'id-1': ['2023-05-10:1'] }, errors: [] }; },
     });
     assert.deepEqual(seen, ['extracting', 'writing']);
     assert.equal(run.phase, 'done');
     assert.equal(run.written.transcripts, 1);
     assert.equal(run.dropped.length, 1);
     assert.deepEqual(run.uncovered, ['x']);
+    // Provenance, reported rather than stored: each key's record id, and which turns each record came from.
+    assert.deepEqual(run.ids, { ada: 'id-1' });
+    assert.deepEqual(run.sourceTurns, { 'id-1': ['2023-05-10:1'] });
     assert.ok(run.finishedAt);
   });
 
