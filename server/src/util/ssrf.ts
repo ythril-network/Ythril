@@ -541,7 +541,6 @@ export async function ssrfSafeFetch(
       resp = await injected(current, { ...safeInit, redirect: 'manual' });
     } else {
       agent = pinnedAgent(addresses[0]!);
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       resp = await (undiciFetch as any)(current, { ...safeInit, redirect: 'manual', dispatcher: agent }) as Response;
     }
 

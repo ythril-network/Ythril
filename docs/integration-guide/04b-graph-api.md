@@ -124,7 +124,7 @@ Response body:
 
 ```json
 {
-  "error": "Cannot delete: entity still has references — edge e1b2c3d4-... (at its from end), fact m5f6a7b8-.... Delete or relink those first; there is no cascade delete for an entity.",
+  "error": "Cannot delete: entity still has references — edge e1b2c3d4-... (at its from end), fact m5f6a7b8-.... Delete or relink those first — or remove the entity with its blocking edges in one step, through the cascade below.",
   "backlinks": [
     { "type": "edge", "_id": "e1b2c3d4-...", "end": "from" },
     { "type": "fact", "_id": "m5f6a7b8-..." },

@@ -123,7 +123,11 @@ export async function entityDeleteBlockers(spaceId: string, entityId: string, ta
 
   return {
     message: `Cannot delete: ${targetKind} still has references — ${blocking.map(describe).join(', ')}. `
-      + `Delete or relink those first; there is no cascade delete for ${targetKind === 'entity' ? 'an entity' : `a ${targetKind}`}.`,
+      // Only an entity has a cascade, and it removes blocking EDGES only — a fact or file that names it is
+      // somebody's record and stays (entity-delete-cascade.ts). The route adds the token instructions.
+      + (targetKind === 'entity'
+        ? 'Delete or relink those first — or remove the entity with its blocking edges in one step, through the cascade below.'
+        : 'Delete or relink those first.'),
     backlinks,
     blocking,
   };

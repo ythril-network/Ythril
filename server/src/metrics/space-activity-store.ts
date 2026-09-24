@@ -117,7 +117,6 @@ export async function flushSpaceActivity(now = Date.now()): Promise<number> {
   });
 
   try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     await col<ActivityDoc>(ACTIVITY_COLLECTION).bulkWrite(ops as any, { ordered: false });
     return ops.length;
   } catch (err) {
@@ -182,7 +181,6 @@ export async function renameSpaceActivity(fromId: string, toId: string): Promise
     { insertOne: { document: { ...row, _id: activityDocId(toId, row.bucket), space: toId } } },
     { deleteOne: { filter: { _id: row._id } } },
   ]);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   await c.bulkWrite(ops as any, { ordered: false });
   return rows.length;
 }

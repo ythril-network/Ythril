@@ -255,10 +255,10 @@ describe('help() does not narrow what the caller has', () => {
       'help() still claims projection exists only on query');
   });
 
-  it('and find_similar is in the omit-space set it belongs to', () => {
+  it('and similar is in the omit-space set it belongs to', () => {
     // `spaceRequired: false`, with its own description telling callers to omit it.
-    assert.match(readFileSync(HELP, 'utf8'), /find_similar[^\n]*across|across[^\n]*find_similar/,
-      'help() lists the omit-space tools and leaves out find_similar');
+    assert.match(readFileSync(HELP, 'utf8'), /\bsimilar\b[^\n]*across|across[^\n]*\bsimilar\b/,
+      'help() lists the omit-space tools and leaves out similar');
   });
 });
 

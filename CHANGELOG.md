@@ -106,6 +106,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **MCP clients were told to call tools that no longer exist** (Q-45). The server instructions, the first
+  text a connecting agent reads, named `list_chrono`, `find_similar`, `list_peers` and `sync_now`. `help()`
+  named `find_entities_by_name`, `get_space_meta` and a `query` tool. All of these were renamed or folded
+  away. The instructions' space sentence is now derived from the tools' own schemas.
+  `mcp-text-names-only-real-tools.test.js` fails on any snake_case word in the help, the instructions or a
+  tool description that is neither a tool nor a parameter. `retry_embed_record` pointed files at a
+  nonexistent `retry_embedding` (it is `retry_embed_file`), and a schema refusal said `get_space_meta`.
+- **The entity-delete refusal contradicted itself** (Q-45). The 409 said *"there is no cascade delete for an
+  entity"* while the same body described the cascade. It now says the cascade removes the blocking edges.
+
 - **A recall across several spaces reranks once, over all of them** (`P-35`). Reported by the platform
   operator, 2026-09-23T1842Z: one recall naming no space, on an instance reaching 15 spaces, put 13
   concurrent requests on the reranker. Ten of them died under the shared deadline, so the answer came back
@@ -130,6 +140,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rename, so the table now says to reconnect.
 
 ### Internal
+
+- **Cleanup, part 1** (Q-45). Removed, in each case with nothing referencing it:
+  - 165 committed build files (`client/out-tsc/`, now ignored).
+  - Debris files: `purge_networks.py`, `server/_gen_token.mjs`, two `testing/_init` scratch scripts, and a
+    one-off script carrying a personal path.
+  - Eight npm packages that nothing imports: `multer`, `@types/multer`, eslint and its two plugins (there is no
+    eslint config), `@phosphor-icons/core`, `@angular/platform-browser-dynamic`, `@types/sharp`,
+    `@types/dompurify`. The lockfile is ~1,100 lines shorter.
+  - 24 eslint-disable comments.
+  - 30 exported functions and constants that no code or test used, including a second, unused file-quota
+    check.
+  - Six test files that guarded features removed in 3.0/3.1 or tested local copies of the code instead of the
+    code.
 
 - **Sidecar health probes are one module** (`util/sidecar-health.ts`). The cached `/health` probe was private
   to the render client, and the NLP client would have been its second copy.

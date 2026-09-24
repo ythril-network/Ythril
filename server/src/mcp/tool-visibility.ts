@@ -50,22 +50,3 @@ export function toolIsVisible(tool: VisibilityFlags, rights: TokenRights | undef
   return true;
 }
 
-/**
- * A stable key for a connection's scope, used to decide when a cached MCP server can be reused.
- *
- * Keyed on the MATRIX rather than the legacy `admin`/`readOnly`/`spaces` triple. It has to change whenever
- * anything that alters what the connection may see or do changes, or a token edited through the rights
- * editor keeps serving the previous scope for the life of its SSE stream.
- */
-export function rightsSignature(rights: TokenRights | undefined): string {
-  if (!rights) return 'none';
-  // Sorted, because `perSpace` key order is not meaningful and an order change is not a scope change.
-  const perSpace = Object.keys(rights.perSpace).sort()
-    .map(id => `${id}:${JSON.stringify(rights.perSpace[id])}`).join(',');
-  return [
-    rights.instanceAdmin ? 'ia' : '-',
-    rights.createSpaces ? 'cs' : '-',
-    rights.floor ? JSON.stringify(rights.floor) : 'nofloor',
-    perSpace,
-  ].join('|');
-}

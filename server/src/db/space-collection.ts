@@ -122,12 +122,3 @@ export function spaceCollection(spaceId: string, part: SpacePart): string {
   return `${spaceId}_${suffix}`;
 }
 
-/**
- * The same answer for a knowledge/record TYPE rather than a part name — `'fact'` → `general_facts`.
- *
- * Kept as its own entry point instead of making callers map the type themselves, because that mapping is
- * exactly the step `COLLECTION_SUFFIX` exists to own and a caller doing it inline re-opens the gap.
- */
-export const recordCollection = (spaceId: string, type: keyof typeof RECORD_COLLECTION): string =>
-  spaceCollection(spaceId, RECORD_COLLECTION[type] as SpacePart);
-

@@ -112,7 +112,6 @@ export function updateSpace(
     // Preserve previous version history (capped)
     const history = prev?.previousVersions ?? [];
     if (prev) {
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const { previousVersions: _drop, ...snapshot } = prev;
       history.unshift({ version: prevVersion, meta: snapshot, updatedAt: prev.updatedAt ?? now });
       if (history.length > META_VERSION_CAP) history.length = META_VERSION_CAP;

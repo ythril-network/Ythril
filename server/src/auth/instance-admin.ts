@@ -26,10 +26,8 @@
  *
  * ## The two provably agree
  *
- * `instance-admin-agrees-with-the-legacy-flag.test.js` exercises `migrateToken` over all nine storable legacy
- * shapes, and the mint route refuses `admin` as an input so a divergent pair cannot be created. That evidence
- * landed before the guards moved onto this, deliberately — see `auth/space-reach.ts` for why this feature
- * sequences that way.
+ * `rights-migration-never-widens.test.js` exercises `migrateToken` over the storable legacy shapes, and the
+ * mint route refuses `admin` as an input so a divergent pair cannot be created.
  */
 import type { TokenRights } from '../config/rights-shape.js';
 

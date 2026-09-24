@@ -480,7 +480,6 @@ spacesRouter.get('/:id/meta', globalRateLimit, requireSpaceAuthScoped('id'), asy
 
   // Strip previousVersions from public response (available via dedicated endpoint if needed)
   // (`needsReindex` is attached where the response is assembled, just below.)
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const { previousVersions: _pv, ...metaPublic } = meta;
 
   /*

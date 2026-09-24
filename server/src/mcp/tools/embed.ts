@@ -112,7 +112,7 @@ export const retry_embed_recordTool: ToolHandler = {
   description: 'Re-queue one brain record whose embedding failed, so the worker picks it up again. Resets the job to '
     + 'pending and clears its attempt count and last error. Returns `processing` unchanged if the worker already holds '
     + 'it — not a failure, and retrying would interrupt a run. Get `recordType`/`recordId` from list_embed_jobs. For '
-    + 'files use retry_embedding instead: that re-runs the media pipeline, this only re-embeds.',
+    + 'files use retry_embed_file instead: that re-runs the media pipeline, this only re-embeds.',
   mutating: true,
   spaceRequired: true,
   inputSchema: (s: ToolSchemas) => ({
@@ -295,7 +295,7 @@ export const space_reindexTool: ToolHandler = {
       content: [{ type: 'text' as const, text:
         `Reindex STARTED for '${callSpace}' (${decision.plan.memberIds.length === 1 ? '1 space' : `${decision.plan.memberIds.length} member spaces`}). `
         + 'It runs in the background — this reply does not mean it finished. Progress is in the server log, and '
-        + 'get_space_meta reflects the result once it completes.' }],
+        + 'space_meta reflects the result once it completes.' }],
       structuredContent: { status: 'started', spaceId: callSpace, memberSpaces: decision.plan.memberIds },
     };
   },

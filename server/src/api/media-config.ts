@@ -676,7 +676,6 @@ mediaConfigRouter.patch('/', requireAdminMfa, (req, res) => {
 
     if (visionApiKeyChange !== undefined || sttApiKeyChange !== undefined || assistApiKeyChange !== undefined || embApiKeyChange !== undefined || faceApiKeyChange !== undefined || rerankApiKeyChange !== undefined || nliApiKeyChange !== undefined) {
       const secrets = getSecrets();
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const sAny = secrets as any;
       sAny.mediaEmbedding = sAny.mediaEmbedding ?? {};
       if (visionApiKeyChange !== undefined) {
@@ -784,7 +783,6 @@ mediaConfigRouter.patch('/', requireAdminMfa, (req, res) => {
     if (parsed.data.embedding) {
       // Merge, then clear — see mergeEmbeddingPatch. Doing it the other way round (delete the null from the
       // patch, then spread) is what made `baseUrl: null` a no-op instead of "back to the bundled model".
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       cfg.embedding = mergeEmbeddingPatch(cfg.embedding as any, parsed.data.embedding) as any;
     }
     // Per-slot budgets live at TOP-LEVEL `config.modelSlots`, for the same reason `embedding` does: the ten
@@ -795,7 +793,6 @@ mediaConfigRouter.patch('/', requireAdminMfa, (req, res) => {
     // Top-level too, and its key goes to secrets.json inside the helper — never into config.json.
     delete merged['decisionModel'];
     applyDecisionModelPatch(cfg, parsed.data.decisionModel);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     cfg.mediaEmbedding = merged as any;
     saveConfig(cfg);
     log.info(`Media embedding config updated by admin`);

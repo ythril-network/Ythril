@@ -103,7 +103,7 @@ PERFORMANCE OF THIS SOFTWARE.
 
 ## Bundled Components
 
-### @angular/animations, @angular/cdk, @angular/common, @angular/compiler, @angular/core, @angular/forms, @angular/platform-browser, @angular/platform-browser-dynamic, @angular/router
+### @angular/animations, @angular/cdk, @angular/common, @angular/compiler, @angular/core, @angular/forms, @angular/platform-browser, @angular/router
 
 License: MIT
 Copyright (c) 2010-2026 Google LLC. https://angular.dev/license
@@ -150,11 +150,6 @@ Copyright (c) 2009-present MongoDB, Inc.
 
 License: MIT
 Copyright (c) Matteo Collina and Undici contributors
-
-### multer
-
-License: MIT
-Copyright (c) 2014 Hage Yaapa
 
 ### node-cron
 
@@ -379,7 +374,7 @@ INSTANCE — the UI fetches no font from a third party, so an air-gapped install
 operator's IP reaches a font CDN. The OFL requires this notice and permits bundling; "Inter" is not a
 Reserved Font Name in the upstream licence, and the files are shipped unmodified.
 
-### @phosphor-icons/core
+### Vendored: Phosphor Icons SVG paths (from @phosphor-icons/core, copied into client/src/app/shared/ph-icon.component.ts)
 
 License: MIT
 Copyright (c) 2021 Phosphor Icons contributors

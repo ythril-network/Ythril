@@ -5,10 +5,8 @@
  * `entityIds`/`memoryIds`, a file's three) names another record by its UUID v4 `_id`. This file tests
  * the canonical implementation in `brain/entity-refs.ts` and the real `isStrictLinkage` default.
  *
- * It exists because the previous coverage (`strict-link-enforcement.test.js`) validated a LOCAL
- * REIMPLEMENTATION — a private `validateEdgeRef()` carrying its own `meta?.strictLinkage === true`.
- * That test passes whatever production does, so it could never have caught the default being wrong,
- * and it did not notice when the default flipped. A test that cannot fail is not coverage.
+ * It tests the real functions, never a local copy: a private reimplementation passes whatever production
+ * does, so it could never catch the default being wrong. A test that cannot fail is not coverage.
  *
  * Run: node --test testing/standalone/entity-refs.test.js
  */

@@ -87,7 +87,6 @@ describe('log.ts — structural invariants (SEC-14)', () => {
     // unexercised and silently passing. Set for the duration and restored, never left on afterwards.
     const savedDebug = process.env['DEBUG'];
     process.env['DEBUG'] = '1';
-    /* eslint-disable no-console */
     const saved = { log: console.log, warn: console.warn, error: console.error };
     console.log = console.warn = console.error = () => {};
     try {
@@ -106,7 +105,6 @@ describe('log.ts — structural invariants (SEC-14)', () => {
       if (savedDebug === undefined) delete process.env['DEBUG'];
       else process.env['DEBUG'] = savedDebug;
     }
-    /* eslint-enable no-console */
     assert.ok(src.includes('export const log') || src.includes('export { log }'), 'log must be exported');
   });
 

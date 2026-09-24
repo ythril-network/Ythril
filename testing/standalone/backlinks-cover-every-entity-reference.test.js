@@ -21,10 +21,9 @@
  *
  * ## Why it asserts on source
  *
- * `findEntityReferences` is four Mongo round trips and nothing else; exercising it needs a live database, and the
- * neighbouring `strict-link-enforcement.test.js` shows what happens when that is avoided by other means — it
- * asserts against a **local reimplementation** of the backlink logic, so it passed happily for as long as the
- * real function was missing a collection. A test of a copy of the rule cannot see the rule being wrong.
+ * `findEntityReferences` is four Mongo round trips and nothing else; exercising it needs a live database. The
+ * alternative — asserting against a local reimplementation of the backlink logic — passes for as long as the
+ * real function is missing a collection: a test of a copy of the rule cannot see the rule being wrong.
  *
  * Run: node --test testing/standalone/backlinks-cover-every-entity-reference.test.js
  */

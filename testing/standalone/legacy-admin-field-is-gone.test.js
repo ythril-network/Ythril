@@ -5,8 +5,8 @@
  *
  * Two changes had to land first, and deliberately did so separately:
  *
- * 1. **The evidence** — `instance-admin-agrees-with-the-legacy-flag.test.js` proved `rights.instanceAdmin`
- *    and the boolean answer identically for all nine storable token shapes.
+ * 1. **The evidence** — `rights.instanceAdmin` and the boolean were proved to answer identically for all nine
+ *    storable token shapes before the switch.
  * 2. **The switch** — seven call sites that each read `record.admin` their own way became one predicate,
  *    `isInstanceAdmin`.
  *

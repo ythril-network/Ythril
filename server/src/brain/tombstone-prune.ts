@@ -67,17 +67,6 @@ export async function pruneTombstonesToFloor(spaceId: string, floor: TombstoneFl
 }
 
 /**
- * Prune one space's record tombstones to the floor its peers have earned.
- *
- * Returns the number removed, or -1 when the space was skipped, so the caller can report the two apart.
- */
-export async function pruneSpaceTombstones(spaceId: string): Promise<number> {
-  let floor: TombstoneFloor;
-  try { floor = tombstoneFloorForSpace(getConfig(), spaceId); } catch { return -1; }
-  return pruneTombstonesToFloor(spaceId, floor);
-}
-
-/**
  * Prune every real (non-proxy) space — record tombstones by served seq, file tombstones by acknowledgement —
  * reporting what was skipped and why.
  *
@@ -145,13 +134,6 @@ export async function pruneFileTombstonesToFloor(spaceId: string, floor: FileTom
   }
 }
 
-/** Prune one space's file tombstones to the position its peers have acknowledged. */
-export async function pruneSpaceFileTombstones(spaceId: string): Promise<number> {
-  let floor: FileTombstoneFloor;
-  try { floor = fileTombstoneFloorForSpace(getConfig(), spaceId); } catch { return -1; }
-  return pruneFileTombstonesToFloor(spaceId, floor);
-}
-
 let _timer: NodeJS.Timeout | null = null;
 
 /**
@@ -168,3 +150,4 @@ export function startTombstonePrune(): void {
 export function stopTombstonePrune(): void {
   if (_timer) { clearInterval(_timer); _timer = null; }
 }
+

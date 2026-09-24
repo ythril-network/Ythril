@@ -64,7 +64,3 @@ export function consumeSseTicket(ticket: string, path: string, now: number = Dat
   return entry.bearer;
 }
 
-/** Test-only: clear all tickets between cases. */
-export function _clearSseTickets(): void {
-  tickets.clear();
-}

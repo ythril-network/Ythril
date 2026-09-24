@@ -419,5 +419,3 @@ export function buildMcpOAuthRouter(): Router | null {
   return router;
 }
 
-// Exposed for tests.
-export const __test = { authCodes, provider, clientsStore, renderConsentPage };

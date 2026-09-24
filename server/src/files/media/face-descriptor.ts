@@ -78,5 +78,3 @@ export function isUsableDescriptor(
   return false;
 }
 
-/** Test seam: the once-per-process latch would otherwise make the second test in a file assert nothing. */
-export function resetDescriptorWarning(): void { warned = false; }

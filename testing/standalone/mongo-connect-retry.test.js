@@ -61,7 +61,6 @@ function loadClassifier() {
     .replace(/\(err as \{ name\?: string \} \| null\)/g, 'err')
     .replace(/\(err as \{ code\?: unknown \} \| null\)/g, 'err');
 
-  // eslint-disable-next-line no-new-func
   return new Function(`${setSrc}\n${codeSrc}\n${fnSrc}\nreturn isTransientConnectError;`)();
 }
 

@@ -357,7 +357,7 @@ export async function runSyncForPeer(
       networksSynced++;
       _setFailureCount(net.id, member.instanceId, 0);
     } catch (err) {
-      log.error(`sync_now failed for peer ${member.label} (${member.instanceId}) in network '${net.label}': ${err}`);
+      log.error(`network_sync failed for peer ${member.label} (${member.instanceId}) in network '${net.label}': ${err}`);
       errors++;
       _setFailureCount(net.id, member.instanceId, 'increment');
     }

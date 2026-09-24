@@ -75,8 +75,6 @@ export interface TraverseResult {
   truncated: boolean;
 }
 
-
-
 /**
  * Upsert a directed edge (from → to with label).
  * One edge per (from, to, label) triplet.
@@ -650,8 +648,6 @@ export async function updateEdgeById(
  */
 // `!` because `LINK_CLASSES` declares all three — a missing one is a programming error, not a runtime state.
 export const CHRONO_LINK_LABEL = linkClassFor('chrono', 'entity')!.label;
-export const FACT_LINK_LABEL = linkClassFor('fact', 'entity')!.label;
-export const FILE_LINK_LABEL = linkClassFor('file', 'entity')!.label;
 
 /**
  * Every synthetic link label, all six.
