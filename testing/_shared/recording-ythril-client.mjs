@@ -1,6 +1,15 @@
 /**
  * A Ythril client that records what it was asked to write, so `writeSpace` runs for real without a server.
  *
+ * ## `ingest` runs the SERVER's writer, in process
+ *
+ * The benchmark writer hands an extraction to `ingest` (`F-31`), so the records a space holds are written by
+ * `server/src/extractor/conversation/write-extraction.ts`. This client's `ingest` runs that module, with a door
+ * that records each batch item where the old single-record calls were recorded — `wrote.memories` for claims,
+ * `wrote.entities`, `wrote.chrono`, `wrote.edges`, `wrote.files`. So a test about what the writer sends tests
+ * the writer that actually runs, not a second copy of it. The claim type and the schema are read from the
+ * `createSpace` call, exactly as the server reads them from the space.
+ *
  * ## What this makes un-skippable
  *
  * The ids. A hand-written stub returns something id-shaped, and the easiest something is a constant — at
@@ -16,9 +25,12 @@
  * every other test's needs.
  */
 
+const BUCKET = { entities: 'entities', facts: 'memories', chrono: 'chrono', edges: 'edges' };
+const KIND = { entities: 'entity', facts: 'fact', chrono: 'chrono', edges: 'edge' };
+
 /**
  * @returns a client with a `wrote` bag holding, per collection, the record objects the writer sent — in the
- *   order it sent them. Every call returns `{ id }` with an id no other call returned.
+ *   order it sent them. Every record gets an id no other record got.
  */
 export function recordingYthril() {
   let n = 0;
@@ -32,13 +44,54 @@ export function recordingYthril() {
     return v;
   };
   const push = (bucket) => async (_space, record) => { wrote[bucket].push(record); return { id: id() }; };
+
+  let typeSchemas = {};
+  const runs = new Map();
+
+  /** The batch door, recording. Each item is stored as sent; each `$ref` is answered with a fresh id. */
+  const door = {
+    bulk: async (_space, input) => {
+      const refs = {};
+      for (const [collection, items] of Object.entries(input)) {
+        for (const item of items) {
+          wrote[BUCKET[collection]].push(item);
+          const minted = id();
+          if (item.$ref) refs[item.$ref] = { id: minted, kind: KIND[collection] };
+        }
+      }
+      return { errors: [], refs };
+    },
+    storeFile: async (_space, path, bytes, opts) => {
+      wrote.files.push({ path, content: bytes.toString('utf8'), ...(opts?.meta?.tags ? { tags: opts.meta.tags } : {}) });
+    },
+    linkFile: async (_space, path, links) => {
+      const f = wrote.files.find(x => x.path === path);
+      if (!f) throw new Error(`recordingYthril: links for '${path}', which was never written`);
+      f.links = links;
+    },
+  };
+
   return {
     wrote,
-    createSpace: async () => ({}),
+    createSpace: async (_space, opts = {}) => { typeSchemas = opts.typeSchemas ?? {}; return {}; },
     writeEntity: push('entities'),
     writeChrono: push('chrono'),
     writeMemory: push('memories'),
     writeEdge: push('edges'),
     writeFile: push('files'),
+
+    async ingest(space, body) {
+      const { writeExtraction } = await import('../../server/dist/extractor/conversation/write-extraction.js');
+      const schemaEntries = Object.entries(typeSchemas).flatMap(([knowledgeType, types]) =>
+        Object.entries(types).map(([typeName, schema]) => ({ knowledgeType, typeName, schema })));
+      const claimType = schemaEntries.find(e => e.knowledgeType === 'fact')?.typeName;
+      if (!claimType) throw new Error('recordingYthril.ingest: createSpace declared no fact type, so a claim has nowhere to go');
+      const outcome = await writeExtraction(space, body.extraction, { schemaEntries, claimType, transcripts: true }, door);
+      const runId = `run-${runs.size + 1}`;
+      runs.set(runId, { runId, phase: 'done', written: outcome.written, writeErrors: outcome.errors, ids: outcome.ids, sourceTurns: outcome.sourceTurns });
+      return { runId };
+    },
+    async ingestStatus(_space, runId) { return runs.get(runId); },
+    async waitForIngest(_space, runId) { return runs.get(runId); },
   };
 }

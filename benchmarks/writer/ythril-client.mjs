@@ -306,10 +306,9 @@ export function makeYthril({ baseUrl, token, totpCode, timeoutMs = DEFAULT_TIMEO
   /**
    * One request, with the retry policy in the single place every call passes through.
    *
-   * The alternative to retrying was batching writes through `POST /spaces/:id/bulk`, which would cut the
-   * request count by an order of magnitude and cost the thing the benchmark is for: bulk applies its own
-   * ordering and its own partial-failure reporting, so the write path measured would not be the write path
-   * a caller uses one record at a time. Pacing is the cheaper thing to give up.
+   * The corpus itself is written through `ingest` (`F-31`) — the product's door for a conversation, which goes
+   * through the batch door on the server — so what the benchmark measures is the write path a user's
+   * conversation takes. The single-record methods below remain for the probes and tests that write one record.
    */
   async function request(method, path, { body, headers } = {}) {
     const url = `${root}${path}`;
@@ -624,6 +623,47 @@ export function makeYthril({ baseUrl, token, totpCode, timeoutMs = DEFAULT_TIMEO
         await request('PATCH', `/api/brain/spaces/${encodeURIComponent(space)}/files${q}`, { body: meta });
       }
       return { path };
+    },
+
+    /**
+     * Start an `ingest` run: the product's own door for a conversation (`F-31`). `body` is
+     * `{ kind: 'conversation', extraction }` for an extraction already made — validated and written by the server,
+     * no model asked — or `{ kind: 'conversation', sessions }` for a raw one. Answers `{ runId }` at once.
+     */
+    async ingest(space, body) {
+      requireString(space, 'ingest: space');
+      return request('POST', brain(space, '/ingest'), { body });
+    },
+
+    /** One `ingest` run as the server holds it: phase, counts, write errors, `ids` and `sourceTurns`. */
+    async ingestStatus(space, runId) {
+      requireString(space, 'ingestStatus: space');
+      requireString(runId, 'ingestStatus: runId');
+      return request('GET', brain(space, `/ingest/${encodeURIComponent(runId)}`));
+    },
+
+    /**
+     * Wait for an `ingest` run to finish, and REFUSE a partial one.
+     *
+     * A run that ends `failed`, or `done` with write errors, left the space holding part of a conversation — and a
+     * score over a partial corpus is a wrong number rather than a low one. Both throw, quoting what the server
+     * said. Runs are held in the server's memory, so a restart mid-run is a 404 here: thrown too, never waited on.
+     */
+    async waitForIngest(space, runId, { timeoutMs = 10 * 60_000, pollMs = 500 } = {}) {
+      const startedAt = Date.now();
+      for (;;) {
+        const run = await this.ingestStatus(space, runId);
+        if (run.phase === 'failed') throw new Error(`ingest ${runId} into ${space} failed: ${run.error}`);
+        if (run.phase === 'done') {
+          if ((run.writeErrors ?? []).length > 0) {
+            throw new Error(`ingest ${runId} into ${space} wrote a partial space — ${run.writeErrors.length} record(s) refused: `
+              + JSON.stringify(run.writeErrors.slice(0, 5)));
+          }
+          return run;
+        }
+        if (Date.now() - startedAt > timeoutMs) throw new Error(`ingest ${runId} into ${space} still '${run.phase}' after ${timeoutMs} ms`);
+        await new Promise(r => setTimeout(r, pollMs));
+      }
     },
 
     /**

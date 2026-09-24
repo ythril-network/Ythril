@@ -1028,3 +1028,51 @@ describe('MediaProcessingStateService — the decision model card (F-31)', () =>
     expect(patch).not.toHaveBeenCalled();
   });
 });
+
+describe('MediaProcessingStateService — conversations are consented on their own (F-35)', () => {
+  beforeEach(() => TestBed.resetTestingModule());
+  const assistOf = (patch: ReturnType<typeof vi.fn>) =>
+    (sent(patch)['documentProcessing'] as Record<string, Record<string, unknown>>)['assistModel'];
+
+  it('a documents acknowledgement is not a conversations one', () => {
+    const { c } = make();
+    const assist = c.form.documentProcessing!.assistModel!;
+    assist.baseUrl = 'https://api.example.com/v1';
+    assist.acknowledgedHost = 'api.example.com';
+    expect(c.assistConversationsConsented()).toBe(false);
+  });
+
+  it('allowing asks in its own dialog, and a decline records nothing', async () => {
+    const { c, confirm } = make(cfgFixture(), false);
+    c.form.documentProcessing!.assistModel!.baseUrl = 'https://api.example.com/v1';
+    await c.setAssistConversations(true);
+    expect(confirm).toHaveBeenCalledOnce();
+    expect(confirm.mock.calls[0][0].message).toMatch(/conversationEgressMessage/); // its OWN dialog, not the documents one
+    expect(c.assistConversationsConsented()).toBe(false);
+  });
+
+  it('an accepted consent is sent on save, and withdrawing sends null — never left out', async () => {
+    const { c, patch } = make();
+    const assist = c.form.documentProcessing!.assistModel!;
+    assist.baseUrl = 'https://api.example.com/v1';
+    assist.model = 'gpt-4o';
+    await c.setAssistConversations(true);
+    expect(c.assistConversationsConsented()).toBe(true);
+    await c.save();
+    expect(assistOf(patch)['acknowledgedHostForConversations']).toBe('api.example.com');
+    await c.setAssistConversations(false);
+    await c.save();
+    // The server replaces the assist block whole, so an omitted field would also withdraw it — sent explicitly.
+    expect('acknowledgedHostForConversations' in assistOf(patch)).toBe(true);
+    expect(assistOf(patch)['acknowledgedHostForConversations']).toBeNull();
+  });
+
+  it('a changed endpoint withdraws it', async () => {
+    const { c } = make();
+    const assist = c.form.documentProcessing!.assistModel!;
+    assist.baseUrl = 'https://api.example.com/v1';
+    await c.setAssistConversations(true);
+    assist.baseUrl = 'https://elsewhere.example/v1';
+    expect(c.assistConversationsConsented()).toBe(false);
+  });
+});

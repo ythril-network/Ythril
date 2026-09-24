@@ -153,3 +153,26 @@ describe('the policy over the answers', () => {
     assert.equal(r.judgements[0].backend, 'jev');
   });
 });
+
+describe('4.7 a merge the dates rule out', () => {
+  it('the turn\'s resolved dates reach the judge, and the merge question says they can rule a card out', async () => {
+    // A card's description carries its own dates ("released in 2019"); what the judge could not see was that the
+    // turn's "yesterday" is 9 May 2023. With both, a card whose dates contradict the turn is not the same thing.
+    const m = model((id, q) => yesThing(id, q) ?? { choice: 'new' });
+    const { turns, mentions } = input([['t1', 'Ada', 'We adopted Luna yesterday.', ['Luna']]]);
+    turns[0].dates = ['9 May 2023'];
+    const shortlister = new Shortlister({ searchSpace: async () => [{ id: 'x1', name: 'Luna', type: 'animal', description: 'Luna is a cat Bo adopted in 2019.', source: 'space' }] });
+    await judgeEntities({ turns, mentions, entityTypes: TYPES, shortlister, decide: m.decide });
+    const call = m.calls.find(c => Object.keys(c.questions).some(id => id.startsWith('match:')));
+    assert.ok(call, 'a match question was asked');
+    assert.deepEqual(call.state.turn.dates, ['9 May 2023']);
+    const match = Object.entries(call.questions).find(([id]) => id.startsWith('match:'))[1];
+    assert.match(match.instructions.question, /dates/);
+  });
+  it('a turn with no resolved date carries none — the rule is not invented', async () => {
+    const m = model((id, q) => yesThing(id, q) ?? { choice: 'new' });
+    const { turns, mentions } = input([['t1', 'Ada', 'We adopted Luna.', ['Luna']]]);
+    await judgeEntities({ turns, mentions, entityTypes: TYPES, shortlister: new Shortlister({}), decide: m.decide });
+    assert.equal(m.calls[0].state.turn.dates, undefined);
+  });
+});

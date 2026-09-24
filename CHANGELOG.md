@@ -17,6 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   peers, topology, votes and sync stay instance-admin. Existing tokens hold `networks: none`; a matrix body may
   omit `networks` and gets `none`, so a client written before the column keeps minting. Space admin does not
   include it — sharing a space with another instance is its own decision.
+- **An `ingest` run reports its provenance** — `ids` (each key of the extraction → the record id it has now)
+  and `sourceTurns` (record id → the turns it came from), on `GET …/ingest/:runId` and `ingest_status`.
+  Reported, never stored: a turn id in a record would be noise in its vector, so the run is the one place a
+  caller can join a record back to the conversation.
 - **`ingest`: a conversation in, records out** (`F-31`; `POST /api/brain/spaces/:spaceId/ingest` and
   `GET …/ingest/:runId`, MCP `ingest` and `ingest_status`). A raw conversation (`sessions`) runs every phase of
   the conversation extractor; an extraction already made (`extraction`) is validated and written with no model.
@@ -114,6 +118,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The benchmark writes its corpus through `ingest`** (`F-31`). `benchmarks/writer/write-space.mjs` validates
+  an extraction, creates the space and hands the extraction to the product's door, so the space a benchmark
+  scores is written exactly as a user's conversation is — by one writer. Three things the old writer never
+  did now happen, so **a score measured after this is not comparable blind to one before it**: an entity's
+  description is written, a chrono entry links the claims that dated it, and transcripts live under
+  `transcripts/<conversationId>/`.
+- **The External assist model is consented to per use** (`F-35`). It does two jobs that send different things —
+  the document repair pass, and conversation work for `ingest` (writing claims, and answering the extractor's
+  questions when no decision model is set). Consent was one host acknowledgement, given under a dialog that
+  named document content alone, and both jobs read it. `acknowledgedHost` now means documents only, so no
+  consent given before grows; conversations have their own `acknowledgedHostForConversations`, set by the card's
+  **Allow conversations** in a dialog that names what they send. **An instance that ingested raw conversations
+  through the assist model must allow conversations once** — until then ingest refuses and says so.
 - **The user guide's media, model and embedding settings are their own chapter**
   (`docs/userguide/04a-media-and-embedding.md`). The settings chapter had reached the 900-line limit, and
   the Models tab is a topic of its own. Every anchor is unchanged, so the in-app help links still land.
@@ -133,6 +150,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A stored rights matrix missing an area read as reaching the space** (`reachesSpace`). The check compared each
   area's rung to `none`, and a missing area is `undefined`, which is not `none` — so a matrix without an area
   reached every space it had a row or floor for. Latent until an area was added; a missing area is now `none`.
+- **A document pasted into an ingested conversation could be mined into claims** (`F-31`, 2.5). The claim
+  writer now sees a pasted turn marked as material the speaker brought, as a bounded preview, under a rule to
+  say what was shared and asked — never to state its contents as facts. A pasted document also no longer sets
+  the size of the writer's prompt.
+- **An ingested conversation with an assistant in it filed the assistant's facts as the person's** (`F-31`,
+  5.4 / 5.5). A claim took the speaker of its exchange's first turn, so a restaurant or a dosage an assistant
+  supplied became something the person said — and a speaker named `assistant` failed the whole ingest at
+  validation. Where an assistant speaks, the extractor now asks who originated the fact: only the assistant
+  as origin is its claim, marked `attributed` and stored unranked; restating, unclear or a refused answer is the
+  person's. An assistant's fact the conversation did nothing with is dropped and reported.
 - **A batch item dropped `superseded` and `suppressEmbeddings`** (`POST /bulk`, `save_bulk`), on all four
   record kinds and both doors. The guide says an item takes the same fields as its single-record endpoint,
   and every single create takes both; the batch answered 207 and stored the record without them. Both are
@@ -176,6 +203,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Internal
 
+- **A merge its dates contradict can be seen as one** (`F-31`, 4.7). The entity judge now sees each turn's resolved
+  dates beside every candidate's description, and the merge question says a card whose dates contradict them is
+  not it — judged where both halves are visible, rather than guessed by a code rule.
+- **The conversation extractor writes the ARC as well as the moments** (`F-31`, 5.8, `arcs.ts`). A subject with
+  claims in three or more sessions gets one claim saying how it developed, written from those claims and checked
+  like any claim — linted, refused by the evidence gate, citation-checked, one rewrite; the writer may answer NONE.
+  It cites a few turns, never most of the conversation, and is added after change tracking so it cannot retire
+  the moments it describes.
+- **A state told in several sessions is written once** (`F-31`, 5.9, `repeats.ts`). A later telling of the same
+  unchanged fact is folded into the first claim as its source turns, so one answer does not fill five ranked slots.
+  Asked only across sessions and between claims sharing an entity; it runs before change tracking, so a change is
+  never folded away, and a person's claim is never merged with an assistant's.
+- **The conversation extractor dates an edge only when its text does** (`F-31`, 6.3, `edge-dates.ts`). `since`
+  and `until` are asked per day-precise, non-approximate date of the edge's own claims, and written only on a
+  confident yes; a date merely near the relationship dates nothing, and an end before its start writes neither.
 - **The server build copies `src/**/*.json` into `dist/`** (`server/scripts/copy-src-assets.mjs`). `tsc` emits
   JavaScript only and the image ships `dist` only, so a data file under `src` did not exist at runtime; an empty
   copy fails the build.

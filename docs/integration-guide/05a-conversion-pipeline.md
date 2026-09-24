@@ -475,8 +475,8 @@ see the egress table above. You can optionally point a **bigger, external model*
 | `baseUrl` | External **OpenAI-compatible** endpoint (`POST {baseUrl}/chat/completions`, with `/v1` inserted if the base does not already carry it — `…:8080` and `…:8080/v1` both work). Validated against SSRF on save (must be a public http(s) URL — no private/loopback/metadata addresses) and reached only through the SSRF-guarded fetch. Env: `DOC_ASSIST_URL`. |
 | `model` | Model tag to request. Env: `DOC_ASSIST_MODEL`. |
 | `apiKey` | Optional bearer token. Stored in `secrets.json` (never `config.json`), masked in the admin API. Env: `DOC_ASSIST_API_KEY`. |
-| `uses` | Which tasks the external model powers — `["repair"]` today (the repair pass); more are planned. Empty ⇒ configured but inert (no egress). |
-| `acknowledgedHost` | The endpoint host the operator acknowledged egress to. **Required to match `baseUrl`'s host whenever `uses` is non-empty** — the admin API rejects the save otherwise, and the extractor re-checks it at runtime, so document content never leaves the box without recorded consent. |
+| `acknowledgedHost` | The endpoint host the operator acknowledged **document** egress to — the repair pass. **Required to match `baseUrl`'s host whenever the extraction rung can reach the endpoint** (`repair` / `auto`) — the admin API rejects the save otherwise, and the pipeline re-checks it at runtime, so document content never leaves the box without recorded consent. |
+| `acknowledgedHostForConversations` | The endpoint host the operator acknowledged **conversation** egress to: [`ingest`](04i-ingest-api.md) writing claims, and answering the extractor's questions when no decision model is set. **Its own consent** — a documents acknowledgement never sends conversations — and it must match `baseUrl`'s host too. `null` withdraws it. The `assistModel` block is replaced whole on a PATCH, so a block sent without this field withdraws it as well. |
 
 > **Self-hosting inference on a private address?** The `local` / `external` choice selects a **wire
 > protocol**, not a trust level: `local` speaks Ollama's (`/api/chat`), `external` speaks OpenAI's
