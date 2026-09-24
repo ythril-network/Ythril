@@ -38,6 +38,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { between } from './_structural-window.mjs';
 
 const ROOT = process.cwd();
 
@@ -341,8 +342,10 @@ describe('every per-record flag is reachable on every surface that can set it', 
     const bulk = code('server/src/brain/bulk.ts');
     const kinds = ['fact', 'entity', 'chrono', 'edge'];
     for (const kind of kinds) {
-      const loop = new RegExp(`shapeError\\('${kind}', item\\);[\\s\\S]{0,200}?= parseRecordFlags\\(item\\);`);
-      assert.match(bulk, loop, `the ${kind} loop in brain/bulk.ts does not parse the record flags`);
+      // From the kind's shape check to its write: the item-validation run of that loop, bounded by the
+      // `try {` that opens the write rather than by a character count.
+      const validation = between(bulk, `shapeError('${kind}', item);`, 'try {', `bulk ${kind} loop`);
+      assert.match(validation, /= parseRecordFlags\(item\);/, `the ${kind} loop in brain/bulk.ts does not parse the record flags`);
     }
     // Four parses and four forwards — a parse whose result never reaches the writer is the mention-only shape.
     assert.equal((bulk.match(/Flags\.flags/g) ?? []).length, kinds.length,
