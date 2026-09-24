@@ -139,19 +139,27 @@ describe('the writers supply the hash, or the guard is dead code', () => {
      * from where the writers are rather than from where they used to be: pointed at the old file these four
      * assertions would all fail at once, which reads as four broken writers instead of one moved module.
      */
-    const rest = strip(readFileSync('server/src/api/files-upload.ts', 'utf8'));
-    assert.match(rest, /upsertFileMeta\(targetSpace, filePath, range\.total, \{ ttlDays: parseTtlDaysQuery\(req\), sha256 \}/,
-      'chunked assembly must store the hash it computed');
-    assert.match(rest, /dispatchFileProcessing\(targetSpace, filePath, \{ bytes: range\.total,[^)]*sha256 \}/,
-      'chunked assembly must pass the hash to the dispatcher');
-    assert.match(rest, /metaOpts\.sha256 = sha256;/, 'the single-request upload must store the hash');
-    assert.match(rest, /\{ bytes: incomingBytes,[^)]*sha256 \}/,
-      'the single-request upload must pass the hash to the dispatcher');
+    //
+    // The sequence now lives ONCE, in `files/store-file.ts`, and every door goes through it — so the hand-over
+    // is asserted there, and each door is asserted to have no private copy of the sequence to forget it in.
+    const store = strip(readFileSync('server/src/files/store-file.ts', 'utf8'));
+    assert.match(store, /upsertFileMeta\(spaceId, filePath, sizeBytes, \{.*, sha256 \}\)/,
+      'the shared sequence must store the hash it was handed');
+    assert.match(store, /dispatchFileProcessing\(spaceId, filePath, \{[^}]*sha256,/,
+      'the shared sequence must pass the hash to the dispatcher');
+    assert.match(store, /const \{ sha256 \} = await writeFileBytes\(/, 'storeFile must use the hash of the bytes it wrote');
 
-    const mcp = strip(readFileSync('server/src/mcp/tools/file.ts', 'utf8'));
-    assert.match(mcp, /metaOpts\.sha256 = sha256;/, 'MCP write_file must store the hash');
-    assert.match(mcp, /dispatchFileProcessing\(wt\.target, filePath, \{ bytes: sizeBytes,[^)]*sha256 \}/,
-      'MCP write_file must pass the hash to the dispatcher — both doors, or one of them keeps burning GPU');
+    const doors = {
+      'server/src/api/files-upload.ts': /recordStoredFile\(\s*targetSpace, filePath, range\.total, sha256,/,
+      'server/src/mcp/tools/file.ts': null,
+    };
+    for (const [file, chunked] of Object.entries(doors)) {
+      const src = strip(readFileSync(file, 'utf8'));
+      assert.doesNotMatch(src, /\b(upsertFileMeta|dispatchFileProcessing)\(/,
+        `${file} writes metadata or dispatches itself — a private copy of the sequence is where the hash gets dropped`);
+      assert.match(src, /\bstoreFile\(/, `${file} must store through files/store-file.ts`);
+      if (chunked) assert.match(src, chunked, 'chunked assembly must hand over the hash it computed');
+    }
   });
 
   it('the stored hash is never erased by a writer that does not have one', async () => {

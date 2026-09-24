@@ -39,6 +39,11 @@ describe('4.10 descriptions', () => {
     const r2 = await describeEntities([luna], claims, writer('In session 2 Luna chewed shoes.', 'At turn 4 Luna slept.').write);
     assert.equal(r2.get('run:0'), 'Ada adopted a cat named Luna on 9 May 2023.');
   });
+  it('a description that adds a name or a number its claims never state is refused', async () => {
+    const r = await describeEntities([luna], claims, writer('Luna is a 3-year-old cat Ada adopted from Oslo.', 'Luna is a cat Ada adopted.').write);
+    assert.equal(r.get('run:0'), 'Luna is a cat Ada adopted.');
+  });
+
   it('an entity no claim names is described by its name and type, and the writer is not asked', async () => {
     const w = writer();
     const r = await describeEntities([{ id: 'run:9', name: 'Oslo', type: 'place' }], claims, w.write);

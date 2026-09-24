@@ -6,9 +6,11 @@
  * phase 3, formatted the way a reader reads them, and the entity names from phase 4. It has nothing to resolve
  * itself, which is the whole point — every judgement that could be a choice was made before it was asked to write.
  *
- * Then the claim is checked twice, because generated text is the one output nothing structural guarantees:
+ * Then the claim is checked three times, because generated text is the one output nothing structural guarantees:
  *
  *  - **5.3 lint** in code (`lintClaim`): dates present, subject named, no conversation structure;
+ *  - **the evidence gate** in code (`evidence/evidence-check.ts`): no name, number or date the turns do not hold
+ *    — what code can prove wrong never reaches the judge;
  *  - **5.10 citation** by the decision model: is the claim supported by its own source turns?
  *
  * Either failure gets ONE rewrite with the failure as input. A second failure drops the claim and reports why —
@@ -19,6 +21,7 @@
 import type { Decide } from './judge-turns.js';
 import type { Resolution } from './time.js';
 import { lintClaim } from './claims.js';
+import { checkEvidence } from '../../evidence/evidence-check.js';
 import { MONTHS } from './time-lexicon.js';
 
 /** Where the citation check's probability becomes a yes. UNMEASURED — see judge-turns.ts `TurnPolicy`. */
@@ -84,6 +87,9 @@ export async function writeClaim(
     text = (await models.write({ system: SYSTEM, user: failure ? `${brief}\n\nYour previous attempt was refused: ${failure}\nWrite it again.` : brief })).trim();
     const problems = lintClaim(text, { dates });
     if (problems.length) { failure = `"${text}" — ${problems.join('; ')}`; continue; }
+    // What code can prove wrong is never sent to the judge: a name, number or date the turns do not hold.
+    const gate = checkEvidence(text, spoken.map(t => t.speech), { names: [...x.entities, ...x.turns.map(t => t.speaker)], dates });
+    if (gate.verdict === 'refuted') { failure = `"${text}" — it ${gate.reasons.join('; it ')}.`; continue; }
     const d = await models.decide({ turns: spoken.map(t => ({ speaker: t.speaker, text: t.speech })) },
       { supported: { type: 'noul', instructions: { claim: text,
         question: 'Is every part of `claim` stated in `state.turns` — nothing added, guessed or changed?' } } });

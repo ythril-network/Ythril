@@ -106,6 +106,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A REST upload whose metadata write failed answered 2xx** (`files/store-file.ts`). The single-request
+  upload swallowed that failure and reported the file as written, so the bytes sat on disk with no record
+  behind them and nothing said so. It now fails the request, the same as MCP `write_file` always did.
 - **MCP clients were told to call tools that no longer exist** (Q-45). The server instructions, the first
   text a connecting agent reads, named `list_chrono`, `find_similar`, `list_peers` and `sync_now`. `help()`
   named `find_entities_by_name`, `get_space_meta` and a `query` tool. All of these were renamed or folded
@@ -140,6 +143,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rename, so the table now says to reconnect.
 
 ### Internal
+
+- **Every door writes a file through one sequence** (`files/store-file.ts`, `storeFile` / `recordStoredFile`):
+  quota, bytes, metadata, the processing queue and the webhook. The REST upload (single and chunked) and MCP
+  `write_file` each held a copy, and `ingest` was about to be the third. The hash-hand-over gate now asserts
+  the sequence once and that no door writes metadata or dispatches on its own.
+- **The extraction validator moved into the server** (`F-31`, 9.2, `extractor/validate-extraction.ts`). The
+  benchmark's `writer/validate-extraction.mjs` now re-exports it, so the benchmark writer and the product's
+  `ingest` refuse the same files for the same reasons, from one copy of the rules.
+
+- **An evidence check refutes what code can prove, before any model is asked** (`evidence/evidence-check.ts`).
+  - **What it refutes.** A text that names someone, states a number or states a date its evidence does not
+    hold is refused, with the reason.
+  - **What it never does.** It never passes a text: every term being present proves nothing about the relation
+    between them. A negation mismatch is reported as a signal and decides nothing.
+  - **Where it runs.** It is reusable. The extractor calls it in front of the citation check on claims and on
+    entity descriptions, so those failures are rewritten without a model call.
+  - The month and number words it shares with the time tagger now live in one list (`text/english.ts`).
+
+- **The conversation extractor runs end to end** (`F-31`, `extract.ts`, `assemble.ts`). Phases 1–9 run in order,
+  from a raw conversation to an extraction in the committed format. The benchmark's own validator accepts
+  the output under test.
+  - **Injected.** Every model and service is: the decision model, the writer, the NLP sidecar, the space's
+    search.
+  - **Returned.** Every judgement is kept with its raw answers, alongside the dropped claims and any
+    uncovered turns.
+  - **Existing entities.** Mentions merged into entities the space already holds go in `existingEntities`,
+    so no Ythril id appears inside a record.
 
 - **The conversation extractor describes each entity from its own claims** (`F-31`, 4.10,
   `describe-entities.ts`). Each description is written once, at the end, and the assist model is handed only

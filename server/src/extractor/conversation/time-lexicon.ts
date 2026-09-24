@@ -7,21 +7,9 @@
  * second table here, not a second resolver.
  */
 
-/** Index is `Date.getUTCDay()`: 0 = Sunday. */
-export const WEEKDAYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'] as const;
-
-/** Index + 1 is the month number. */
-export const MONTHS = [
-  'january', 'february', 'march', 'april', 'may', 'june',
-  'july', 'august', 'september', 'october', 'november', 'december',
-] as const;
-
-/** Spelled-out amounts. `a`/`an` are one; `a couple` is two AND approximate (see APPROXIMATE). */
-export const NUMBER_WORDS: Readonly<Record<string, number>> = {
-  a: 1, an: 1, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
-  eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16, seventeen: 17, eighteen: 18,
-  nineteen: 19, twenty: 20, thirty: 30, forty: 40, fifty: 50,
-};
+// The calendar words and spelled-out numbers are shared English (`text/english.ts`): the evidence checks read
+// them too, and a second copy would be the one that falls behind.
+export { WEEKDAYS, MONTHS, NUMBER_WORDS } from '../../text/english.js';
 
 /**
  * Words that make an amount approximate. *"Keep an approximation approximate"*: an offset carrying one of
