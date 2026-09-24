@@ -141,6 +141,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Internal
 
+- **The conversation extractor tracks change over time** (`F-31`, 7.1–7.6, `change.ts`). Each claim is compared
+  with the few earlier claims that share an entity with it. The decision model is asked four things:
+  - whether the situation was replaced, simply ended, or is unchanged;
+  - whether the earlier claim was still true of its own period (a yes vetoes retiring it);
+  - whether the two are incompatible tellings of the same fact;
+  - how two numbers relate.
+
+  Only a clear change supersedes, and a `supersedes` edge is drawn only when something replaced the earlier
+  claim. Incompatible tellings and cumulative counts are both dated to their telling ("As of 9 June 2023, …").
+
 - **The conversation extractor builds its timeline** (`F-31`, 8.1–8.4, `timeline.ts`). A claim with a resolved
   day is a candidate event, and the decision model is asked three things:
   - its status: completed, upcoming, cancelled, or unclear (`active` and `overdue` cannot be chosen);
