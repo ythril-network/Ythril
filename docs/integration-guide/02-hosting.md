@@ -265,9 +265,11 @@ models are baked into its image and it runs with `HF_HUB_OFFLINE=1` on an intern
 Each container that carries a memory, CPU or process limit reads it from a variable with a default:
 `OLLAMA_*`, `WHISPER_*` and `UNSTRUCTURED_*` for the model and extraction services, and for the two
 document sidecars `DOC_RENDER_MEM_LIMIT`, `DOC_RENDER_PIDS_LIMIT`, `DOC_RENDER_CPUS`,
-`DOC_OFFICE_MEM_LIMIT`, `DOC_OFFICE_PIDS_LIMIT` and `DOC_OFFICE_CPUS`. A job that exceeds its memory ceiling is OOM-killed, which
+`DOC_OFFICE_MEM_LIMIT`, `DOC_OFFICE_PIDS_LIMIT` and `DOC_OFFICE_CPUS`, and the NLP sidecar's `DOC_NLP_MEM_LIMIT`, `DOC_NLP_PIDS_LIMIT` and `DOC_NLP_CPUS`. A job that exceeds its memory ceiling is OOM-killed, which
 surfaces as a failed caption, transcription or extraction rather than a hung stack — so if large or dense
-documents are failing, that is the first thing to check. The full list with defaults is in
+documents are failing, that is the first thing to check. Conversation extraction (`F-31`) needs the bundled
+`doc-nlp` sidecar (reached via `NLP_SIDECAR_URL`; `DOC_NLP_REPLICAS=0` leaves it out), which
+`/api/about/health` reports as `doc-nlp`. The full list with defaults is in
 [`docs/dependencies.md`](../dependencies.md).
 
 ### Security Posture Check
@@ -407,7 +409,7 @@ logged, the failure is not the egress guard — look at `GET /api/about/health` 
 
 Two private addresses in the same cluster can behave differently, and that is not a bug in your network:
 
-- **Render/conversion sidecars** (`CONVERSION_SIDECAR_URL`, doc-render) are reached with a plain `fetch`.
+- **Render/conversion/NLP sidecars** (`CONVERSION_SIDECAR_URL`, doc-render, `NLP_SIDECAR_URL`) are reached with a plain `fetch`.
   They are declared infrastructure, expected to be private, and are not subject to the egress guard.
 - **Model provider endpoints** — every slot in the egress matrix below — go through the SSRF-guarded
   fetch, because those URLs are admin-settable and become egress targets.

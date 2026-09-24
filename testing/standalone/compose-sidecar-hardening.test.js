@@ -95,7 +95,7 @@ function parseComposeServices(text) {
 }
 
 /** Sidecars that parse untrusted user input. Every one of them must be confined. */
-const UNTRUSTED_PARSERS = ['ollama', 'whisper', 'unstructured', 'doc-render', 'doc-office'];
+const UNTRUSTED_PARSERS = ['ollama', 'whisper', 'unstructured', 'doc-render', 'doc-office', 'doc-nlp'];
 
 /** Services that legitimately need no such confinement, with the reason they are exempt. */
 const EXEMPT = {
@@ -118,6 +118,9 @@ const WAIVED = {
   },
   'doc-office': {
     // doc-office declares its own tmpfs already; no waiver needed for the others.
+  },
+  'doc-nlp': {
+    // doc-nlp declares its own tmpfs (the Transformers cache); no waiver needed.
   },
 };
 

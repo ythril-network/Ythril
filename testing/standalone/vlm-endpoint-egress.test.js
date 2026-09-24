@@ -229,6 +229,8 @@ describe('no operator-configurable URL is fetched without the guard', () => {
   const NOT_A_MODEL_ENDPOINT = new Map([
     ['server/src/files/converters/renderer.ts', 'render sidecars (RENDER_SIDECAR_URL) — declared infrastructure'],
     ['server/src/files/converters/unstructured.ts', 'conversion sidecar (CONVERSION_SIDECAR_URL) — declared infrastructure'],
+    ['server/src/extractor/conversation/nlp-client.ts', 'NLP sidecar (NLP_SIDECAR_URL) — declared infrastructure'],
+    ['server/src/util/sidecar-health.ts', 'the shared sidecar /health probe — the sidecars above, never a model endpoint'],
     ['server/src/api/pipeline-status.ts', 'sidecar /health probes; model endpoints go through probeModelEndpoint'],
     ['server/src/api/local-agent.ts', 'loopback-only by default; its own remote opt-in + HTTPS requirement'],
     ['server/src/util/ssrf.ts', 'the guard itself'],

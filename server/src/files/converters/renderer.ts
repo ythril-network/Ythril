@@ -13,10 +13,10 @@
  */
 import { log } from '../../util/log.js';
 import { boundedJson, boundedErrorText } from '../../util/bounded-read.js';
+import { sidecarHealthy, resetSidecarHealth } from '../../util/sidecar-health.js';
 
 const RENDER_URL = (process.env['RENDER_SIDECAR_URL'] ?? 'http://localhost:8100').replace(/\/$/, '');
 const OFFICE_URL = (process.env['RENDER_OFFICE_SIDECAR_URL'] ?? 'http://localhost:8101').replace(/\/$/, '');
-const HEALTH_TTL_MS = 10_000; // cache the probe so per-document routing doesn't re-hit /health each time
 
 /** Office formats LibreOffice can convert → PDF for rasterization (the `doc-office` sidecar). */
 const OFFICE_EXTS = new Set(['docx', 'doc', 'odt', 'rtf', 'epub', 'pptx', 'ppt', 'odp', 'xlsx', 'xls', 'ods']);
@@ -27,36 +27,11 @@ export function isOfficeDocument(fileName: string): boolean {
   return OFFICE_EXTS.has(ext);
 }
 
-let _renderHealth: { at: number; ok: boolean } | null = null;
-let _officeHealth: { at: number; ok: boolean } | null = null;
-
-async function probe(url: string, cache: { at: number; ok: boolean } | null): Promise<{ ok: boolean; cache: { at: number; ok: boolean } }> {
-  const now = Date.now();
-  if (cache && now - cache.at < HEALTH_TTL_MS) return { ok: cache.ok, cache };
-  let ok = false;
-  try {
-    const res = await fetch(`${url}/health`, { signal: AbortSignal.timeout(3_000) });
-    ok = res.ok;
-  } catch {
-    ok = false;
-  }
-  const next = { at: now, ok };
-  return { ok, cache: next };
-}
-
-/** Whether the PDF render sidecar is reachable. Cached for a few seconds so routing doesn't re-probe. */
-export async function isRenderAvailable(): Promise<boolean> {
-  const r = await probe(RENDER_URL, _renderHealth);
-  _renderHealth = r.cache;
-  return r.ok;
-}
+/** Whether the PDF render sidecar is reachable. Cached — see `util/sidecar-health.ts`. */
+export async function isRenderAvailable(): Promise<boolean> { return sidecarHealthy(RENDER_URL); }
 
 /** Whether the (opt-in) office render sidecar is reachable. */
-export async function isOfficeRenderAvailable(): Promise<boolean> {
-  const r = await probe(OFFICE_URL, _officeHealth);
-  _officeHealth = r.cache;
-  return r.ok;
-}
+export async function isOfficeRenderAvailable(): Promise<boolean> { return sidecarHealthy(OFFICE_URL); }
 
 /** The right rasterizer availability for a given file — the PDF sidecar, or the office one. */
 export async function isRenderAvailableFor(fileName: string): Promise<boolean> {
@@ -64,7 +39,7 @@ export async function isRenderAvailableFor(fileName: string): Promise<boolean> {
 }
 
 /** Reset the cached health probes (tests). */
-export function _resetRenderHealthCache(): void { _renderHealth = null; _officeHealth = null; }
+export function _resetRenderHealthCache(): void { resetSidecarHealth(); }
 
 /** Rendered document pages (PNG bytes per page). */
 export interface RenderedPages {

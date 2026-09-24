@@ -109,7 +109,7 @@ describe('the reporting/gating boundary', () => {
     // and a dead optional container starts pulling healthy instances out of the load balancer.
     assert.match(ready, /ready:\s*mongodb\.status === 'ok' && vectorSearch\.status === 'ok'/,
       'readiness must not depend on any optional component');
-    for (const optional of ['isRenderAvailable', 'isOfficeRenderAvailable', 'summariseHealth']) {
+    for (const optional of ['isRenderAvailable', 'isOfficeRenderAvailable', 'isNlpAvailable', 'summariseHealth']) {
       assert.equal(ready.includes(optional), false,
         `ready.ts must not reference ${optional} — optional components report, they do not gate`);
     }
@@ -125,5 +125,6 @@ describe('the reporting/gating boundary', () => {
     // so one failing probe cannot 500 the panel.
     assert.match(about, /isRenderAvailable\(\)\.catch\(\(\) => false\)/);
     assert.match(about, /isOfficeRenderAvailable\(\)\.catch\(\(\) => false\)/);
+    assert.match(about, /isNlpAvailable\(\)\.catch\(\(\) => false\)/);
   });
 });
