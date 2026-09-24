@@ -63,8 +63,8 @@ the steps tagged below; phases 0, 1, 9 and 10 are code end to end.
 
 | treatment | steps | share |
 |---|---|---|
-| mechanical | 40 | 60% |
-| jev | 23 | 34% |
+| mechanical | 39 | 58% |
+| jev | 24 | 36% |
 | generative | 4 | 6% |
 
 Counted from the step tables below, and recounted by
