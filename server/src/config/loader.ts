@@ -1249,13 +1249,14 @@ export function getDocumentProcessingConfig(): Required<DocumentProcessingConfig
     repairBaseUrl: process.env['DOC_REPAIR_URL'] ?? base.repairBaseUrl ?? d.repairBaseUrl,
     verifyModel: process.env['DOC_VERIFY_MODEL'] ?? base.verifyModel ?? d.verifyModel,
     verifyBaseUrl: process.env['DOC_VERIFY_URL'] ?? base.verifyBaseUrl ?? d.verifyBaseUrl,
-    // F11-b — external assist model. Env (DOC_ASSIST_URL/MODEL) pins baseUrl/model over config; `uses` and
-    // `acknowledgedHost` are config-only (they encode operator intent + consent). apiKey lives in secrets —
+    // F11-b — external assist model. Env (DOC_ASSIST_URL/MODEL) pins baseUrl/model over config; the two
+    // acknowledgements are config-only (they encode operator intent + consent). apiKey lives in secrets —
     // read it via getDocAssistApiKey(). Absent baseUrl ⇒ no external assist model.
     assistModel: {
       baseUrl: process.env['DOC_ASSIST_URL'] ?? base.assistModel?.baseUrl,
       model: process.env['DOC_ASSIST_MODEL'] ?? base.assistModel?.model,
       acknowledgedHost: base.assistModel?.acknowledgedHost,
+      acknowledgedHostForConversations: base.assistModel?.acknowledgedHostForConversations,
     },
   };
 }

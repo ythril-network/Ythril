@@ -14,7 +14,8 @@ before(async () => {
   ({ pickGenerationBackend, generate, GenerationError, GenerationUnavailableError } = await import('../../server/dist/extractor/generate.js'));
 });
 
-const assist = { baseUrl: 'https://llm.example.com/v1', model: 'big', acknowledgedHost: 'llm.example.com', apiKey: 'k' };
+// Consented for CONVERSATIONS: the claim writer sends turns, and a documents consent does not cover that (F-35).
+const assist = { baseUrl: 'https://llm.example.com/v1', model: 'big', acknowledgedHostForConversations: 'llm.example.com', apiKey: 'k' };
 const transport = (...replies) => {
   const calls = [];
   return { calls, sleep: async () => {}, post: async (url, init) => {
@@ -28,11 +29,16 @@ const reply = (content) => ({ body: { model: 'big-2', choices: [{ message: { con
 describe('which model writes', () => {
   it('the assist model, once its host is consented to — and nothing otherwise', () => {
     assert.equal(pickGenerationBackend(assist)?.model, 'big');
-    assert.equal(pickGenerationBackend({ ...assist, acknowledgedHost: 'x' }), null);
+    assert.equal(pickGenerationBackend({ ...assist, acknowledgedHostForConversations: 'x' }), null);
     assert.equal(pickGenerationBackend(undefined), null);
+  });
+  it('a consent given for DOCUMENTS does not send conversations', () => {
+    const documentsOnly = { baseUrl: assist.baseUrl, model: assist.model, acknowledgedHost: 'llm.example.com' };
+    assert.equal(pickGenerationBackend(documentsOnly), null);
   });
   it('refusing names the setting', () => {
     assert.match(new GenerationUnavailableError().message, /documentProcessing\.assistModel/);
+    assert.match(new GenerationUnavailableError().message, /conversations/);
   });
 });
 

@@ -9,7 +9,7 @@
  * (`config/egress-consent.ts`) — and otherwise refused up front, naming the setting. `F-33` adds its budget and a
  * local fallback; this is the one place that will change.
  */
-import { egressConsented } from '../config/egress-consent.js';
+import { assistConsented } from '../config/egress-consent.js';
 import { allowPrivateForSlot } from '../config/model-egress-policy.js';
 import { slotTimeoutMs } from '../config/model-slots.js';
 import { getDocumentProcessingConfig, getDocAssistApiKey, getModelSlots } from '../config/loader.js';
@@ -22,8 +22,8 @@ export interface GenerationBackend { baseUrl: string; model: string; apiKey?: st
 
 export class GenerationUnavailableError extends Error {
   constructor() {
-    super('No model is available to write with: configure `documentProcessing.assistModel` and acknowledge its host '
-      + '— extraction sends conversation text there.');
+    super('No model is available to write with: configure `documentProcessing.assistModel` and consent it for '
+      + 'conversations — extraction sends conversation text there.');
     this.name = 'GenerationUnavailableError';
   }
 }
@@ -35,11 +35,12 @@ export class GenerationError extends Error {
   }
 }
 
-type Slot = { baseUrl?: string; model?: string; acknowledgedHost?: string; apiKey?: string } | undefined;
+type Slot = { baseUrl?: string; model?: string; acknowledgedHostForConversations?: string; apiKey?: string } | undefined;
 
 /** The assist model as a writer, when it is configured and its host consented to. Pure. */
 export function pickGenerationBackend(assist: Slot): GenerationBackend | null {
-  if (!assist?.baseUrl || !assist.model || !egressConsented(assist)) return null;
+  // Its CONVERSATIONS consent: a claim is written from conversation turns, which a documents consent never named.
+  if (!assist?.baseUrl || !assist.model || !assistConsented(assist, 'conversations')) return null;
   return { baseUrl: assist.baseUrl, model: assist.model, ...(assist.apiKey ? { apiKey: assist.apiKey } : {}) };
 }
 

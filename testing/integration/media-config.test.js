@@ -241,6 +241,24 @@ describe('Media config — external assist model (F11-b)', () => {
     assert.equal(reread.body?.documentProcessing?.assistModel?.baseUrl, 'https://assist.example.com');
   });
 
+  it('the CONVERSATIONS consent is its own field: it round-trips, and null withdraws it (F-35)', async () => {
+    // A documents acknowledgement never covers conversations — ingest reads this field alone.
+    const set = await patch(INSTANCES.a, tokenA, '/api/admin/media-config', {
+      documentProcessing: { mode: 'vlm', assistModel: { baseUrl: 'https://assist.example.com', model: 'big', acknowledgedHostForConversations: 'assist.example.com' } },
+    });
+    assert.equal(set.status, 200, JSON.stringify(set.body));
+    let reread = await get(INSTANCES.a, tokenA, '/api/admin/media-config');
+    assert.equal(reread.body?.documentProcessing?.assistModel?.acknowledgedHostForConversations, 'assist.example.com');
+    assert.equal(reread.body?.documentProcessing?.assistModel?.acknowledgedHost, undefined, 'granting conversations grants nothing else');
+    const withdrawn = await patch(INSTANCES.a, tokenA, '/api/admin/media-config', {
+      documentProcessing: { assistModel: { baseUrl: 'https://assist.example.com', model: 'big', acknowledgedHostForConversations: null } },
+    });
+    assert.equal(withdrawn.status, 200, JSON.stringify(withdrawn.body));
+    reread = await get(INSTANCES.a, tokenA, '/api/admin/media-config');
+    assert.equal('acknowledgedHostForConversations' in (reread.body?.documentProcessing?.assistModel ?? {}), false,
+      'withdrawn means absent, not stored as null');
+  });
+
   it('the retired `uses` key is rejected outright', async () => {
     const r = await patch(INSTANCES.a, tokenA, '/api/admin/media-config', {
       documentProcessing: { assistModel: { uses: ['repair'] } },

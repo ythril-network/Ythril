@@ -452,6 +452,21 @@ import { TestTarget } from './media-processing.types';
             @if (s.assistNeedsAck()) { {{ 'mediaProcessing.assist.egressPending' | transloco: { host: s.assistHost() } }} }
           </span>
         </div>
+        <!-- F-35: conversations are consented on their own. A button, not a checkbox, because allowing opens
+             a dialog and a checkbox would show "on" while the operator is still deciding. -->
+        @if (s.assistHost()) {
+          <div class="hint" style="margin:10px 0 6px;">{{ 'mediaProcessing.assist.conversationsHint' | transloco: { host: s.assistHost() } }}</div>
+          <div class="testrow">
+            @if (s.assistConversationsConsented()) {
+              <app-status-pill variant="ok">{{ 'mediaProcessing.assist.pillConversations' | transloco: { host: s.assistHost() } }}</app-status-pill>
+              <button class="btn btn-sm btn-secondary" type="button" [disabled]="s.assistLocked()"
+                (click)="s.setAssistConversations(false)">{{ 'mediaProcessing.assist.conversationsWithdraw' | transloco }}</button>
+            } @else {
+              <button class="btn btn-sm btn-secondary" type="button" [disabled]="s.assistLocked()"
+                (click)="s.setAssistConversations(true)">{{ 'mediaProcessing.assist.conversationsAllow' | transloco }}</button>
+            }
+          </div>
+        }
 
         <div footer class="testrow">
           <button class="btn btn-sm btn-secondary" type="button" (click)="s.testConnection('assist')"

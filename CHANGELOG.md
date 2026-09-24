@@ -106,6 +106,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The External assist model is consented to per use** (`F-35`). It does two jobs that send different things —
+  the document repair pass, and conversation work for `ingest` (writing claims, and answering the extractor's
+  questions when no decision model is set). Consent was one host acknowledgement, given under a dialog that
+  named document content alone, and both jobs read it. `acknowledgedHost` now means documents only, so no
+  consent given before grows; conversations have their own `acknowledgedHostForConversations`, set by the card's
+  **Allow conversations** in a dialog that names what they send. **An instance that ingested raw conversations
+  through the assist model must allow conversations once** — until then ingest refuses and says so.
 - **The user guide's media, model and embedding settings are their own chapter**
   (`docs/userguide/04a-media-and-embedding.md`). The settings chapter had reached the 900-line limit, and
   the Models tab is a topic of its own. Every anchor is unchanged, so the in-app help links still land.
