@@ -141,6 +141,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Internal
 
+- **An evidence check refutes what code can prove, before any model is asked** (`evidence/evidence-check.ts`).
+  - **What it refutes.** A text that names someone, states a number or states a date its evidence does not
+    hold is refused, with the reason.
+  - **What it never does.** It never passes a text: every term being present proves nothing about the relation
+    between them. A negation mismatch is reported as a signal and decides nothing.
+  - **Where it runs.** It is reusable. The extractor calls it in front of the citation check on claims and on
+    entity descriptions, so those failures are rewritten without a model call.
+  - The month and number words it shares with the time tagger now live in one list (`text/english.ts`).
+
 - **The conversation extractor runs end to end** (`F-31`, `extract.ts`, `assemble.ts`). Phases 1–9 run in order,
   from a raw conversation to an extraction in the committed format. The benchmark's own validator accepts
   the output under test.

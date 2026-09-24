@@ -12,6 +12,7 @@
  * An entity no claim names — a speaker who only said *"hi"* — is described by its name and type, without asking.
  */
 import { lintClaim } from './claims.js';
+import { checkEvidence } from '../../evidence/evidence-check.js';
 
 const SYSTEM = [
   'Describe the entity in one to three sentences, using ONLY the claims given.',
@@ -36,8 +37,11 @@ export async function describeEntities(
     for (let attempt = 1; attempt <= 2 && !text; attempt++) {
       const got = (await write({ system: SYSTEM, user: failure ? `${brief}\n\nYour previous attempt was refused: ${failure}\nWrite it again.` : brief })).trim();
       const problems = lintClaim(got, {});
+      // A description may say nothing its claims do not: no new name, number or date (the evidence gate).
+      const gate = got ? checkEvidence(got, own, { names: [e.name] }) : undefined;
       if (!got) failure = 'it was empty';
       else if (problems.length) failure = `"${got}" — ${problems.join('; ')}`;
+      else if (gate?.verdict === 'refuted') failure = `"${got}" — it ${gate.reasons.join('; it ')}.`;
       else text = got;
     }
     out.set(e.id, text || own[0]!);

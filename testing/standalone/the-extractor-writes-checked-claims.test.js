@@ -68,7 +68,8 @@ describe('write, lint, check', () => {
 
   it('an unsupported claim is rewritten once, then dropped and reported — never kept', async () => {
     const r = await writeClaim(exchange, {
-      write: writer('Ada adopted two cats on 9 May 2023.', 'Ada adopted three cats on 9 May 2023.').write,
+      // Wrong in a way only a judge can see: no name, number or date the evidence gate could refute.
+      write: writer('Ada adopted a dog named Luna on 9 May 2023.', 'Ada bought a cat named Luna on 9 May 2023.').write,
       decide: judge(0.1, 0.2).decide,
     });
     assert.equal(r.claim, null);
@@ -79,6 +80,15 @@ describe('write, lint, check', () => {
   it('a refused citation check is not a pass', async () => {
     const r = await writeClaim(exchange, { write: writer('Ada adopted a cat named Luna on 9 May 2023.', 'Ada adopted a cat named Luna on 9 May 2023.').write, decide: judge(null, null).decide });
     assert.equal(r.claim, null);
+  });
+
+  it('a claim code can prove wrong never reaches the judge — rewritten with the proof as the reason', async () => {
+    const w = writer('Ada adopted a cat named Bella on 9 May 2023.', 'Ada adopted a cat named Luna on 9 May 2023.');
+    const j = judge(0.9);
+    const r = await writeClaim(exchange, { write: w.write, decide: j.decide });
+    assert.equal(j.calls.length, 1, 'only the second, clean attempt was judged');
+    assert.match(w.calls[1].user, /Bella/);
+    assert.equal(r.claim.text, 'Ada adopted a cat named Luna on 9 May 2023.');
   });
 
   it('the citation check is asked about the claim against its own turns', async () => {
