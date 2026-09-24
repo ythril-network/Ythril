@@ -139,6 +139,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A network invite that was applied and never finalized left a permanent peer token behind** (security). Apply
+  creates the joiner's token on the inviting instance before finalize registers the member, and it had no expiry;
+  the handshake session that knew about it lived only in memory for an hour. So a joiner that crashed, was
+  refused, or lost the connection between the two steps — or a restart in between — left a token to the
+  network's spaces that never expired and belonged to no member. The token now expires with its handshake and
+  finalize clears the expiry once the member is real. **At start, peer tokens whose instance shares no network
+  with this one are revoked**, which removes any left by earlier handshakes; a member or a joiner with an open
+  vote round is never touched.
 - **A document pasted into an ingested conversation could be mined into claims** (`F-31`, 2.5). The claim
   writer now sees a pasted turn marked as material the speaker brought, as a bounded preview, under a rule to
   say what was shared and asked — never to state its contents as facts. A pasted document also no longer sets
