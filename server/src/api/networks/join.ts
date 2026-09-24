@@ -8,8 +8,10 @@ import { boundedJson } from '../../util/bounded-read.js';
 import { v4 as uuidv4 } from 'uuid';
 import bcrypt from 'bcrypt';
 import { z } from 'zod';
-import { requireAdmin } from '../../auth/middleware.js';
+import { requireAdmin, requireAuth, denyReadOnly } from '../../auth/middleware.js';
 import { globalRateLimit } from '../../rate-limit/middleware.js';
+import { networkJoinRefusal } from '../../auth/network-rights.js';
+import { recordOrigin } from '../../auth/network-membership.js';
 import { getConfig, saveConfig, getSecrets, saveSecrets } from '../../config/loader.js';
 import { createToken, revokeToken } from '../../auth/tokens.js';
 import { createSpace } from '../../spaces/lifecycle.js';
@@ -71,7 +73,9 @@ const JoinRemoteBody = z.object({
 //   5. This endpoint executes the RSA handshake against Brain A on behalf of Brain B
 //   6. Both sides end up with tokens for each other; network registered locally on Brain B.
 
-joinRouter.post('/join-remote', globalRateLimit, requireAdmin, async (req, res) => {
+// F-34.1: the Networks column, checked between apply and finalize — the only point the space list is known and
+// nothing is yet written. `denyReadOnly` because this was `requireAdmin`, which a read-only token never passed.
+joinRouter.post('/join-remote', globalRateLimit, requireAuth, denyReadOnly, async (req, res) => {
   try {
     const parsed = JoinRemoteBody.safeParse(req.body);
     if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
@@ -151,6 +155,15 @@ joinRouter.post('/join-remote', globalRateLimit, requireAdmin, async (req, res) 
     const existingSpaces: string[] = [];
     const createdSpaces: string[] = [];
     const spaceMap: Record<string, string> = {};
+
+    // F-34.1: which local spaces this join would touch — before ANY local write. Refused here, nothing was created
+    // and finalize is never called, so the inviter's token for us expires with the handshake.
+    const localOf = (remoteId: string) => requestedSpaceMap?.[remoteId] ?? remoteId;
+    const joinRefusal = networkJoinRefusal(req.authToken as Parameters<typeof networkJoinRefusal>[0], {
+      existing: remoteSpaceIds.map(localOf).filter(id => cfg.spaces.some(cs => cs.id === id)),
+      toCreate: remoteSpaceIds.map(localOf).filter(id => !cfg.spaces.some(cs => cs.id === id)),
+    });
+    if (joinRefusal) { res.status(403).json({ error: joinRefusal }); return; }
 
     for (const remoteId of remoteSpaceIds) {
       // Check if the user chose a different local ID for this remote space
@@ -256,6 +269,9 @@ joinRouter.post('/join-remote', globalRateLimit, requireAdmin, async (req, res) 
       };
       freshCfg.networks.push(net);
     }
+    // Who established each membership, so the leave rule can tell this token's own from another's.
+    const joiner = (req.authToken as { id?: string } | undefined)?.id;
+    if (joiner) for (const s of allNetworkSpaces) if (!net.spaceOrigins?.[s]) net.spaceOrigins = recordOrigin(net.spaceOrigins, s, joiner);
 
     if (!net.members.some(m => m.instanceId === applyData.instanceId)) {
       net.members.push({

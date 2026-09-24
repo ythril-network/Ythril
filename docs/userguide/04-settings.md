@@ -470,8 +470,9 @@ Networks sync selected spaces between multiple Ythril instances over the interne
 
 **Who can manage them.** An instance administrator can do everything here. A token with the **Networks** right
 on a space (Settings → Tokens) can create a network with that space, see it, and leave a membership it created;
-at **admin** it can also change a network's settings and leave any membership. Joining a network from an invite,
-inviting others, peers, votes and sync stay with the instance administrator.
+at **admin** it can also change a network's settings and leave any membership. **Joining** a network from an
+invite needs the Networks right at write on each of your spaces it will share — and, if it brings spaces you do not
+have yet, the right to create spaces too. Inviting others, peers, votes and sync stay with the instance administrator.
 
 ### Network types
 

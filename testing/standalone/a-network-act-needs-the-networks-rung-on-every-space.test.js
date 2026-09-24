@@ -98,3 +98,26 @@ describe('seeing a network, and changing its settings', () => {
     assert.equal(networkSettingsRefusal(token({ qa: areas('admin'), ops: areas('admin') }), nets[1]), null);
   });
 });
+
+describe('joining a remote network (F-34.1)', () => {
+  let networkJoinRefusal;
+  before(async () => { ({ networkJoinRefusal } = await import('../../server/dist/auth/network-rights.js')); });
+
+  it('write on every EXISTING space it maps to joins', () => {
+    assert.equal(networkJoinRefusal(token({ qa: areas('write') }), { existing: ['qa'], toCreate: [] }), null);
+  });
+  it('an existing space short is refused, named', () => {
+    assert.match(networkJoinRefusal(token({ qa: areas('write'), ops: areas('read') }), { existing: ['qa', 'ops'], toCreate: [] }), /ops/);
+  });
+  it('a space the join would CREATE needs createSpaces and a floor of networks: write — it has no row yet', () => {
+    const rowOnly = token({ qa: areas('write') });
+    assert.match(networkJoinRefusal(rowOnly, { existing: [], toCreate: ['new-one'] }), /new-one/);
+    const floorNoCreate = token({}, { floor: areas('write') });
+    assert.match(networkJoinRefusal(floorNoCreate, { existing: [], toCreate: ['new-one'] }), /createSpaces|create/);
+    const both = token({}, { floor: areas('write'), createSpaces: true });
+    assert.equal(networkJoinRefusal(both, { existing: [], toCreate: ['new-one'] }), null);
+  });
+  it('an instance admin passes', () => {
+    assert.equal(networkJoinRefusal({ id: 'a', rights: { instanceAdmin: true, createSpaces: true, floor: null, perSpace: {} } }, { existing: ['x'], toCreate: ['y'] }), null);
+  });
+});

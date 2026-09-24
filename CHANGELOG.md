@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Joining a remote network goes by the Networks column too** (`F-34.1`, `POST /api/networks/join-remote`). A
+  token below instance admin may join with `networks: write` on every local space the join maps to; a space the
+  join would create also needs `createSpaces` and a floor of `write`. The check runs after the handshake's apply
+  and before finalize — the only point the space list is known and nothing is written — so a refused join leaves
+  nothing behind, and the membership is recorded as the joining token's for the leave rule.
 - **Token rights gain a Networks column** (`F-34`). A token below instance admin can now act on networks through
   the `networks` rung it holds on the spaces a network carries — on EVERY one of them: `read` sees a network
   (`GET /api/networks`, `GET /api/networks/:id`, MCP `network_peers`; one it may not see is a 404), `write` creates
