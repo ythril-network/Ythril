@@ -47,7 +47,7 @@ import { z } from 'zod';
 import { requireAdmin } from '../auth/middleware.js';
 import { authRateLimit, globalRateLimit } from '../rate-limit/middleware.js';
 import { getConfig, saveConfig, getSecrets, saveSecrets } from '../config/loader.js';
-import { createToken } from '../auth/tokens.js';
+import { createToken, setTokenExpiry } from '../auth/tokens.js';
 import { concludeRoundIfReady } from '../sync/governance.js';
 import { buildBraintreeAncestors } from '../util/braintree.js';
 import { makeSignedOwnCast } from '../util/signing.js';
@@ -335,7 +335,10 @@ inviteRouter.post('/apply', authRateLimit, async (req, res) => {
   // Create a PAT that B will use to authenticate inbound requests to A
   const { record, plaintext: tokenForB } = await createToken({
     name: `peer:${instanceLabel} (handshake)`,
-    expiresAt: null,
+    // Expires WITH the handshake: until finalize registers the member, this token belongs to nothing. It used to be
+    // `null` — so a joiner that applied and never finalized left a token to the network's spaces that never expired,
+    // was listed under no member, and outlived the in-memory session (and any restart) that knew it existed.
+    expiresAt: new Date(session.expiresAt).toISOString(),
     spaces: net.spaces, // scoped to only the network's spaces
     peerInstanceId: instanceId, // link this PAT to the peer that will present it
   });
@@ -542,6 +545,8 @@ inviteRouter.post('/finalize', authRateLimit, async (req, res) => {
   }
 
   saveConfig(cfg);
+  // The membership is real now, so the handshake's token lives with it rather than with the handshake.
+  setTokenExpiry(session.tokenForPeerId, null);
 
   // Discard the session — private key is no longer needed
   _sessions.delete(sessionKey);

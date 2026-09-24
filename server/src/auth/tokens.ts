@@ -3,7 +3,7 @@ import bcrypt from 'bcrypt';
 import { v4 as uuidv4 } from 'uuid';
 import { getConfig, saveConfig, mutateConfig, getSecrets, saveSecrets } from '../config/loader.js';
 import { log } from '../util/log.js';
-import type { TokenRecord } from '../config/types.js';
+import type { TokenRecord, Config } from '../config/types.js';
 import { migrateToken } from './rights-migration.js';
 import { resolveLimitFor } from '../rate-limit/per-token.js';
 
@@ -406,6 +406,37 @@ export function setTokenRateLimit(id: string, perMinute: number | null): boolean
 }
 
 /** Revoke a token by ID */
+/**
+ * Set or clear a token's expiry. `null` means it no longer expires.
+ *
+ * For the invite handshake: the peer token apply creates carries the handshake's expiry, and finalize clears it
+ * once the membership is real — see `api/invite.ts`. The cache is evicted so an expiry takes effect at once.
+ */
+export function setTokenExpiry(id: string, expiresAt: string | null): boolean {
+  const config = getConfig();
+  const t = config.tokens.find(x => x.id === id);
+  if (!t) return false;
+  t.expiresAt = expiresAt;
+  saveConfig(config);
+  for (const [key, val] of _tokenCache) if (val.tokenId === id) _tokenCache.delete(key);
+  return true;
+}
+
+/**
+ * The peer instances holding an inbound token while sharing no network with us — nothing a live membership needs.
+ *
+ * A token an unfinished handshake created was never cleaned up: its session lived in memory and expired, and the
+ * token outlived it with no expiry and no member record. Pure, so the choice is testable without a config; the boot
+ * sweep hands each id to `revokePeerCredentialsIfOrphaned`, which re-checks membership before revoking anything.
+ */
+export function orphanedPeerInstanceIds(config: Pick<Config, 'tokens' | 'networks'>): string[] {
+  const live = new Set(config.networks.flatMap(n => [
+    ...n.members.map(m => m.instanceId),
+    ...(n.pendingRounds ?? []).filter(r => !r.concluded && r.pendingMember).map(r => r.pendingMember!.instanceId),
+  ]));
+  return [...new Set(config.tokens.flatMap(t => (t.peerInstanceId && !live.has(t.peerInstanceId) ? [t.peerInstanceId] : [])))];
+}
+
 export async function revokeToken(id: string): Promise<boolean> {
   const config = getConfig();
   const before = config.tokens.length;
