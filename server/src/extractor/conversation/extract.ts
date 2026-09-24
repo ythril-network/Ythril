@@ -23,6 +23,7 @@ import { Shortlister, type KnownEntity } from './shortlist.js';
 import { judgeEntities } from './judge-entities.js';
 import { groupExchanges, coverTurns, linkClaims } from './claims.js';
 import { writeClaim } from './write-claim.js';
+import { judgeOrigin } from './origin.js';
 import { describeEntities } from './describe-entities.js';
 import { drawEdges, type EdgeLabel } from './relations.js';
 import { trackChange } from './change.js';
@@ -94,7 +95,7 @@ export async function extractConversation(
     key: s.key, date: s.date, turns: s.turns.map(t => ({ id: t.id, speaker: t.speaker, speech: byId.get(t.id)!.speech })),
   })), decide);
   judgements.push(...grouped.judgements);
-  const written: { text: string; sourceTurns: string[]; speaker: string; statedOn: string; session: string; dates: Resolution[] }[] = [];
+  const written: { text: string; sourceTurns: string[]; speaker: string; attributed?: boolean; statedOn: string; session: string; dates: Resolution[] }[] = [];
   const dropped: ExtractResult['dropped'] = [];
   for (const x of grouped.exchanges) {
     const xTurns = x.turnIds.map(id => byId.get(id)!);
@@ -109,7 +110,18 @@ export async function extractConversation(
       entities: [...new Set(x.turnIds.flatMap(id => [...(namesByTurn.get(id) ?? [])]))],
     }, { write: deps.write, decide });
     if (!outcome.claim) { dropped.push({ exchange: x.turnIds, ...outcome.dropped! }); continue; }
-    written.push({ ...outcome.claim, speaker: (spoken[0] ?? xTurns[0]!).speaker, statedOn: session.date, session: session.key, dates });
+    // 5.4 / 5.5: whose claim it is — asked only when an assistant speaks in the exchange.
+    const origin = await judgeOrigin({
+      claim: outcome.claim.text,
+      turns: spoken.map(t => ({ id: t.id, speaker: t.speaker, speech: t.speech, role: t.role })),
+      person: flat.find(t => sessionOf.get(t.id) === session && t.role !== 'assistant')?.speaker,
+    }, decide);
+    if (origin.judgement) judgements.push(origin.judgement);
+    if (origin.drop) { dropped.push({ exchange: x.turnIds, reason: origin.drop, lastText: outcome.claim.text }); continue; }
+    written.push({
+      ...outcome.claim, speaker: origin.speaker, ...(origin.attributed ? { attributed: true } : {}),
+      statedOn: session.date, session: session.key, dates,
+    });
   }
   const covered = coverTurns(written, grouped.exchanges);
   // A speaker takes part in every turn they speak, and nobody mentions themselves by name — so without this a

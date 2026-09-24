@@ -92,3 +92,30 @@ describe('end to end, with stand-ins', () => {
     assert.ok(r.judgements.every(j => j.backend === 'jev'));
   });
 });
+
+describe('an assistant in the conversation (5.4 / 5.5)', () => {
+  const withAssistant = { sessions: [...source.sessions, { date: '2023-06-02', turns: [
+    { speaker: 'Ada', role: 'person', text: 'Which vet should Luna see?' },
+    { speaker: 'Vetbot', role: 'assistant', text: 'Luna could see Dr Kim at the Pawsville clinic.' },
+  ] }] };
+  // The obvious answers, plus: the assistant originated what it said, and the exchange acted on it.
+  const deciding = async (state, questions) => {
+    const d = await decide(state, questions);
+    if (questions.origin) d.answers.origin = { type: 'choice', choice: /Pawsville|Kim/.test(JSON.stringify(state)) ? 'origin' : 'person' };
+    if (questions.acted) d.answers.acted = { type: 'noul', noul: 0.9 };
+    return d;
+  };
+  const writing = async (p) => (/Pawsville/.test(p.user) ? 'Luna could see Dr Kim at the Pawsville clinic.' : write(p));
+
+  it('an assistant-originated claim is the assistant\'s, attributed — and the file still validates', async () => {
+    const r = await extractConversation('conv-e2e-a', withAssistant, vocabulary, { decide: deciding, write: writing, spans });
+    const x = r.extraction;
+    const theirs = x.claims.filter(c => c.attributed);
+    assert.equal(theirs.length, 1, JSON.stringify(x.claims, null, 1));
+    assert.equal(theirs[0].speaker, 'assistant');
+    assert.ok(x.claims.filter(c => !c.attributed).every(c => c.speaker !== 'assistant'), 'nobody else gets the mark');
+    const problems = validateExtraction({ ...x, producedBy: { ...x.producedBy, promptSha256: '0'.repeat(64), schemaSha256: '0'.repeat(64) } }, SCHEMA)
+      .filter(p => !/producedBy/.test(p));
+    assert.deepEqual(problems, []);
+  });
+});

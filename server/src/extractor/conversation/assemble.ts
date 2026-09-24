@@ -54,7 +54,7 @@ export interface AssembleInput {
   /** Entities the space already held, that mentions were merged into. */
   existing: (KnownEntity & { aliases: string[] })[];
   descriptions: Map<string, string>;
-  claims: { text: string; sourceTurns: string[]; entityIds: string[]; speaker: string; statedOn: string; session: string }[];
+  claims: { text: string; sourceTurns: string[]; entityIds: string[]; speaker: string; attributed?: boolean; statedOn: string; session: string }[];
   edges: DrawnEdge[];
   events: TimelineEvent[];
   change: Pick<ChangeOutcome, 'superseded' | 'supersedes' | 'rewritten'>;
@@ -117,6 +117,7 @@ export function assembleExtraction(input: AssembleInput): Extraction {
     ...(input.conversation.sessions.find(s => s.key === c.session && s.key !== s.date) ? { session: c.session } : {}),
     text: input.change.rewritten[i] ?? c.text,
     speaker: c.speaker,
+    ...(c.attributed ? { attributed: true } : {}),
     statedOn: c.statedOn,
     ...(superseded.has(i) ? { superseded: true } : {}),
     entities: keysOf(c.entityIds),

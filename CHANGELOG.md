@@ -139,6 +139,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **An ingested conversation with an assistant in it filed the assistant's facts as the person's** (`F-31`,
+  5.4 / 5.5). A claim took the speaker of its exchange's first turn, so a restaurant or a dosage an assistant
+  supplied became something the person said — and a speaker named `assistant` failed the whole ingest at
+  validation. Where an assistant speaks, the extractor now asks who originated the fact: only the assistant
+  as origin is its claim, marked `attributed` and stored unranked; restating, unclear or a refused answer is the
+  person's. An assistant's fact the conversation did nothing with is dropped and reported.
 - **A batch item dropped `superseded` and `suppressEmbeddings`** (`POST /bulk`, `save_bulk`), on all four
   record kinds and both doors. The guide says an item takes the same fields as its single-record endpoint,
   and every single create takes both; the batch answered 207 and stored the record without them. Both are
