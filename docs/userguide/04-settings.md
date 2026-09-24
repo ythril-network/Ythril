@@ -529,6 +529,11 @@ One case is worth checking after upgrading: a short form outside cron's range, s
 
 Expand a network card and click **Sync History** to see a log of every sync cycle — timestamp, status, items pulled and pushed, and any errors.
 
+A cycle shows **success** only when every member's transfers completed. If a peer refused a transfer or a transfer
+was cut short, the cycle shows **partial** (some members completed) or **failed** (none did), and its errors name
+the space, the direction and what stopped. A network that shows **failed** on every cycle is not syncing at all,
+even though it looks connected.
+
 Each member row in the expanded card also shows its **last successful sync** (or *Never synced*) and, when a peer's recent sync attempts have been failing, a red **Failing (N)** badge counting the consecutive failures since the last success — so you can spot a stuck peer without opening the full history.
 
 **A *Version too old* badge is a different thing from *Failing (N)*, and telling them apart saves an

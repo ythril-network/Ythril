@@ -209,6 +209,10 @@ async function _runSyncForNetworkImpl(networkId: string): Promise<{ synced: numb
       pushed.edges += counts.pushed.edges;
       pushed.files += counts.pushed.files;
       pushed.chrono += counts.pushed.chrono;
+      // A member whose transfers were refused or cut short moved nothing it was asked to move. Counting it as
+      // synced recorded `success` for a network that had transferred nothing since it was created (`Q-48`), so
+      // it takes the failure path below: an error for the cycle, a reason in the history, a failure counted.
+      if (counts.incomplete.length > 0) throw new Error(`transfer did not complete — ${counts.incomplete.join('; ')}`);
       synced++;
       // Reset failure counter on success
       _setFailureCount(net.id, member.instanceId, 0);
@@ -369,14 +373,17 @@ export async function runSyncForPeer(
 async function runSyncForMember(
   net: NetworkConfig,
   member: NetworkMember,
-): Promise<{ pulled: SyncCounts; pushed: SyncCounts }> {
+): Promise<{ pulled: SyncCounts; pushed: SyncCounts; incomplete: string[] }> {
   const pulled: SyncCounts = { facts: 0, entities: 0, edges: 0, files: 0, chrono: 0, links: 0 };
   const pushed: SyncCounts = { facts: 0, entities: 0, edges: 0, files: 0, chrono: 0, links: 0 };
+  // What did not complete this cycle, one entry per space and direction. Non-empty makes the member's sync a
+  // failure in the cycle's accounting (`Q-48`) — the watermarks were held correctly; what was missing was saying so.
+  const incomplete: string[] = [];
   const secrets = getSecrets();
   const peerToken = secrets.peerTokens[member.instanceId];
   if (!peerToken) {
     log.warn(`No peer token for ${member.label} (${member.instanceId}) — skipping sync`);
-    return { pulled, pushed };
+    return { pulled, pushed, incomplete: ['no peer token for this member'] };
   }
 
   const cfg = getConfig();
@@ -491,10 +498,12 @@ async function runSyncForMember(
     if (shouldPull) {
       const pc = await pullFromPeer(member, spaceId, remoteSpaceId, net.id, headers, fetchOpts, batchFetchOpts);
       pulled.facts += pc.facts; pulled.entities += pc.entities; pulled.edges += pc.edges; pulled.chrono += pc.chrono;
+      if (pc.stoppedEarly.length > 0) incomplete.push(`space '${spaceId}' receive: ${pc.stoppedEarly.join(', ')} stopped early`);
     }
     if (shouldPush) {
       const pc = await pushToPeer(member, spaceId, remoteSpaceId, net.id, headers, fetchOpts, batchFetchOpts);
       pushed.facts += pc.facts; pushed.entities += pc.entities; pushed.edges += pc.edges; pushed.chrono += pc.chrono;
+      if (pc.stoppedEarly.length > 0) incomplete.push(`space '${spaceId}' push: ${pc.stoppedEarly.join(', ')} stopped early`);
     }
 
     // Sync file manifest — respect direction guards like pull/push above
@@ -534,7 +543,7 @@ async function runSyncForMember(
   // Hot-path bookkeeping: a cosmetic timestamp written every member every cycle.
   if (m) { m.lastSyncAt = new Date().toISOString(); saveConfigSoon(freshCfg); }
 
-  return { pulled, pushed };
+  return { pulled, pushed, incomplete };
 }
 
 // ── Gossip: member list exchange ────────────────────────────────────────────
@@ -854,7 +863,7 @@ async function pullFromPeer(
   headers: Record<string, string>,
   opts: () => RequestInit,
   batchOpts: () => RequestInit,
-): Promise<{ facts: number; entities: number; edges: number; chrono: number; links: number }> {
+): Promise<{ facts: number; entities: number; edges: number; chrono: number; links: number; stoppedEarly: string[] }> {
   let pulledMemories = 0, pulledEntities = 0, pulledEdges = 0, pulledChrono = 0, pulledLinks = 0;
   const cfg = getConfig();
   const freshNet = cfg.networks.find(n => n.id === networkId);
@@ -973,7 +982,9 @@ async function pullFromPeer(
    * actually vouch for. EVERY transfer is passed — an omitted one places no ceiling, which makes it
    * exactly the one that gets skipped.
    */
+  const stoppedEarly: string[] = [];
   highestSeq = resolveWatermark({
+    heldBack: stoppedEarly,
     direction: 'receive', peerLabel: member.label ?? member.instanceId, spaceId,
     from: sinceSeq,
     transfers: pulled,
@@ -1025,7 +1036,7 @@ async function pullFromPeer(
 
   return {
     facts: pulledMemories, entities: pulledEntities, edges: pulledEdges, chrono: pulledChrono,
-    links: pulledLinks,
+    links: pulledLinks, stoppedEarly,
   };
 }
 
@@ -1039,7 +1050,7 @@ async function pushToPeer(
   headers: Record<string, string>,
   opts: () => RequestInit,
   batchOpts: () => RequestInit,
-): Promise<{ facts: number; entities: number; edges: number; chrono: number; links: number }> {
+): Promise<{ facts: number; entities: number; edges: number; chrono: number; links: number; stoppedEarly: string[] }> {
   let pushedMemories = 0, pushedEntities = 0, pushedEdges = 0, pushedChrono = 0, pushedLinks = 0;
   const cfg = getConfig();
   const freshNet = cfg.networks.find(n => n.id === networkId);
@@ -1160,7 +1171,9 @@ async function pushToPeer(
    * this watermark back and never advance it, and a cycle whose only change was file metadata re-pushed the
    * same page for ever. The candidate is derived from the transfers now.
    */
+  const stoppedEarly: string[] = [];
   maxSeqPushed = resolveWatermark({
+    heldBack: stoppedEarly,
     direction: 'push', peerLabel: member.label ?? member.instanceId, spaceId,
     from: lastSeqPushed,
     transfers: pushed,
@@ -1197,7 +1210,7 @@ async function pushToPeer(
 
   return {
     facts: pushedMemories, entities: pushedEntities, edges: pushedEdges, chrono: pushedChrono,
-    links: pushedLinks,
+    links: pushedLinks, stoppedEarly,
   };
 }
 
