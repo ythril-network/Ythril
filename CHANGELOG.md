@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Token rights gain a Networks column** (`F-34`). A token below instance admin can now act on networks through
+  the `networks` rung it holds on the spaces a network carries — on EVERY one of them: `read` sees a network
+  (`GET /api/networks`, `GET /api/networks/:id`, MCP `network_peers`; one it may not see is a 404), `write` creates
+  one with the space and leaves a membership it established, `admin` changes a network's settings and leaves
+  anyone's. A membership with no recorded establisher needs `admin` to leave. Joining a remote network, invites,
+  peers, topology, votes and sync stay instance-admin. Existing tokens hold `networks: none`; a matrix body may
+  omit `networks` and gets `none`, so a client written before the column keeps minting. Space admin does not
+  include it — sharing a space with another instance is its own decision.
 - **An `ingest` run reports its provenance** — `ids` (each key of the extraction → the record id it has now)
   and `sourceTurns` (record id → the turns it came from), on `GET …/ingest/:runId` and `ingest_status`.
   Reported, never stored: a turn id in a record would be noise in its vector, so the run is the one place a
@@ -139,6 +147,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A stored rights matrix missing an area read as reaching the space** (`reachesSpace`). The check compared each
+  area's rung to `none`, and a missing area is `undefined`, which is not `none` — so a matrix without an area
+  reached every space it had a row or floor for. Latent until an area was added; a missing area is now `none`.
 - **A document pasted into an ingested conversation could be mined into claims** (`F-31`, 2.5). The claim
   writer now sees a pasted turn marked as material the speaker brought, as a bounded preview, under a rule to
   say what was shared and asked — never to state its contents as facts. A pasted document also no longer sets

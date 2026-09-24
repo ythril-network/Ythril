@@ -41,12 +41,12 @@
 import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 
-let effectiveRung, floorRung, isSpaceAdminFor, capRights, repairRights, SPACE_AREAS;
+let effectiveRung, floorRung, isSpaceAdminFor, capRights, repairRights, SPACE_AREAS, SPACE_ADMIN_AREAS;
 
 before(async () => {
   ({ effectiveRung, floorRung, capRights } = await import('../../server/dist/auth/mint-cap.js'));
   ({ isSpaceAdminFor } = await import('../../server/dist/auth/editor-scope.js'));
-  ({ repairRights, SPACE_AREAS } = await import('../../server/dist/config/rights-shape.js'));
+  ({ repairRights, SPACE_AREAS, SPACE_ADMIN_AREAS } = await import('../../server/dist/config/rights-shape.js'));
 });
 
 const rights = (over = {}) => ({
@@ -54,13 +54,19 @@ const rights = (over = {}) => ({
 });
 
 describe('the flag grants the rungs rather than sitting beside them', () => {
-  it('a space named in spaceAdmin holds admin in EVERY area', () => {
+  it('a space named in spaceAdmin holds admin in every area administering a space covers', () => {
     const r = rights({ spaceAdmin: { floor: false, spaces: ['work'] } });
-    for (const area of SPACE_AREAS) {
+    for (const area of SPACE_ADMIN_AREAS) {
       assert.equal(effectiveRung(r, 'work', area), 'admin',
         `${area} is not admin in a space this token administers — the flag would then be a claim the rungs `
         + 'contradict, which is exactly the objection this design answers');
     }
+  });
+
+  it('but NOT on networks — a membership shares the space with other instances, and is its own column (F-34)', () => {
+    const r = rights({ spaceAdmin: { floor: false, spaces: ['work'] } });
+    assert.equal(effectiveRung(r, 'work', 'networks'), 'none',
+      'administering a space must not let a token put it into a network — the column exists to decide that');
   });
 
   it('and the grant is what makes an administrator', () => {
@@ -76,7 +82,7 @@ describe('the flag grants the rungs rather than sitting beside them', () => {
      * The predicate used to BE this expression, so the assertion is the exact inverse of what shipped
      * before and is the reason the migration exists.
      */
-    const allFour = Object.fromEntries(SPACE_AREAS.map(a => [a, 'admin']));
+    const allFour = Object.fromEntries(SPACE_ADMIN_AREAS.map(a => [a, 'admin']));
     assert.equal(isSpaceAdminFor(rights({ perSpace: { work: allFour } }), 'work'), false,
       'four admin rungs made a space administrator — administration is a different authority from '
       + 'maximal data rights, and conflating them hands the space\'s token surface to any token that '
@@ -84,7 +90,7 @@ describe('the flag grants the rungs rather than sitting beside them', () => {
   });
 
   it('and a FLOOR of all-admin does not either — it reaches spaces nobody has created', () => {
-    const allFour = Object.fromEntries(SPACE_AREAS.map(a => [a, 'admin']));
+    const allFour = Object.fromEntries(SPACE_ADMIN_AREAS.map(a => [a, 'admin']));
     assert.equal(isSpaceAdminFor(rights({ floor: allFour }), 'work'), false,
       'a floor granted administration of every space present and future, from one setting');
   });
@@ -167,7 +173,7 @@ describe('the upgrade does not take administration away silently', () => {
     ({ migrateSpaceAdminGrant } = await import('../../server/dist/config/migrate-space-admin-grant.js'));
   });
 
-  const allFour = () => Object.fromEntries(SPACE_AREAS.map(a => [a, 'admin']));
+  const allFour = () => Object.fromEntries(SPACE_ADMIN_AREAS.map(a => [a, 'admin']));
 
   it('writes the grant for a token that held all four', () => {
     /*

@@ -21,7 +21,7 @@
  *  - **Never the instance-administrator switch**, and never `createSpaces`, from a non-administrator. Those
  *    are not areas and do not cap — they are held or they are not.
  */
-import { SPACE_AREAS, RUNG_IMPLICATIONS } from '../config/rights-shape.js';
+import { SPACE_AREAS, SPACE_ADMIN_AREAS, RUNG_IMPLICATIONS } from '../config/rights-shape.js';
 import type { TokenRights, AreaRungs, Rung, SpaceArea } from '../config/rights-shape.js';
 
 const ORDER: readonly Rung[] = ['none', 'read', 'write', 'admin'];
@@ -75,7 +75,8 @@ function grantedRung(rights: TokenRights, space: string, area: SpaceArea): Rung 
    * ones created later, and a per-space grant reaching it would make one space's administrator the
    * instance's.
    */
-  if (administers(rights, space)) return 'admin';
+  // `SPACE_ADMIN_AREAS`, not every area: a network membership is its own column even for a space's administrator.
+  if (administers(rights, space) && (SPACE_ADMIN_AREAS as readonly SpaceArea[]).includes(area)) return 'admin';
   const floor = rights.floor?.[area] ?? 'none';
   const row = rights.perSpace[space]?.[area] ?? 'none';
   return rank(row) > rank(floor) ? row : floor;
@@ -178,7 +179,8 @@ export function capRights(minter: TokenRights, requested: TokenRights): Excess[]
    * delegate a floor, because a floor reaches spaces the minter cannot.
    */
   if (requested.spaceAdmin?.floor && !minter.spaceAdmin?.floor) {
-    for (const area of AREAS) {
+    // The areas the grant RESOLVES to — not every area: networks is its own column (`SPACE_ADMIN_AREAS`).
+    for (const area of SPACE_ADMIN_AREAS) {
       const have = floorRung(minter, area);
       if (rank('admin') > rank(have)) {
         excess.push({ space: '*', area, requested: 'admin', allowed: have });
@@ -187,7 +189,7 @@ export function capRights(minter: TokenRights, requested: TokenRights): Excess[]
   }
 
   for (const space of requested.spaceAdmin?.spaces ?? []) {
-    for (const area of AREAS) {
+    for (const area of SPACE_ADMIN_AREAS) {
       const have = effectiveRung(minter, space, area);
       if (rank('admin') > rank(have)) {
         excess.push({ space, area, requested: 'admin', allowed: have });

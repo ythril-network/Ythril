@@ -25,10 +25,24 @@ export type Rung = 'none' | 'read' | 'write' | 'admin';
  * one level deeper. Exported as a tuple so `z.enum` can consume it and there is one list rather than the four
  * hand-written copies that existed before.
  */
-export const SPACE_AREAS = ['knowledge', 'files', 'schema', 'dataQuality'] as const;
+export const SPACE_AREAS = ['knowledge', 'files', 'schema', 'dataQuality', 'networks'] as const;
 
 /** The four space-scoped areas. Instance capabilities are not here — they have no space to scope to. */
 export type SpaceArea = typeof SPACE_AREAS[number];
+
+/**
+ * The areas ADMINISTERING A SPACE covers — every area but `networks` (`F-34`).
+ *
+ * A space administrator runs that space: its data, its tokens, its settings. A network membership shares the
+ * space with OTHER instances, which is the instance's trust as much as the space's, so it keeps its own column
+ * even for the space's administrator. Named, because three places ask this question — the grant's resolution
+ * (`grantedRung`), its published definition (`DERIVED_RUNGS`) and the 5.0 migration that granted it — and each
+ * wrote "every area". When `networks` joined the areas, "every area" quietly meant one more: a token holding the
+ * four data areas at `admin` could no longer mint a space administrator, and an instance upgrading from before
+ * 5.0 would have granted space admin to nobody. A token that administered a space before the column existed
+ * administers exactly what it did.
+ */
+export const SPACE_ADMIN_AREAS = SPACE_AREAS.filter((a): a is Exclude<SpaceArea, 'networks'> => a !== 'networks');
 
 /** The rungs as values, for the same reason. */
 export const RUNGS = ['none', 'read', 'write', 'admin'] as const;
@@ -105,7 +119,7 @@ export const DERIVED_RUNGS = [
   {
     id: 'spaceAdmin',
     /** Every area at its top rung, FOR ONE SPACE — never the instance. */
-    requires: Object.fromEntries(SPACE_AREAS.map(a => [a, 'admin'])) as AreaRungs,
+    requires: Object.fromEntries(SPACE_ADMIN_AREAS.map(a => [a, 'admin'])) as Partial<AreaRungs>,
     /**
      * What it unlocks BEYOND what the four rungs already grant, in words rather than as a route list.
      *

@@ -262,7 +262,7 @@ rename and a scope change are two edits, not one — this paragraph said they we
 request, which is the opposite of what it warns about. The secret is untouched by either; use **Rotate** for
 that.
 
-#### The four areas
+#### The areas
 
 Every space row has one cell per area, and they are not interchangeable — `write` on Files and `write` on
 Knowledge are different permissions:
@@ -273,6 +273,13 @@ Knowledge are different permissions:
 | **Files** | Documents stored in the space: reading them, writing them, and the folder structure they live in |
 | **Schema** | The shape the space expects its records to take — which types exist and which properties they carry |
 | **Data quality** | Finding and resolving duplicates, contradictions and gaps, and the review decisions that follow |
+| **Networks** | Sharing the space with other instances: **read** sees the networks it is in, **write** creates a network with it and leaves a membership this token made, **admin** changes a network's settings and leaves anyone's |
+
+**Networks is different from the other four in two ways.** A network carries several spaces, so a token needs the
+rung on **every** space in it — one space short and the action is refused, naming that space. And it is **not
+part of administering a space**: a space admin runs the space's data, tokens and settings, while sharing it with
+another instance is its own decision, so the Space admin column leaves the Networks cell as it is. Tokens
+created before this column existed hold `none` there.
 
 > **This page named three of them and never mentioned Data quality**, while a paragraph further down told
 > you to *"set all four cells"*. So the instruction counted an area the guide had not introduced, and an
@@ -460,6 +467,11 @@ Click **Disable MFA**. This **requires a current 6-digit code** — you cannot t
 ## Settings — Networks
 
 Networks sync selected spaces between multiple Ythril instances over the internet.
+
+**Who can manage them.** An instance administrator can do everything here. A token with the **Networks** right
+on a space (Settings → Tokens) can create a network with that space, see it, and leave a membership it created;
+at **admin** it can also change a network's settings and leave any membership. Joining a network from an invite,
+inviting others, peers, votes and sync stay with the instance administrator.
 
 ### Network types
 

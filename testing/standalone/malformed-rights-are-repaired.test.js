@@ -36,7 +36,7 @@ before(async () => {
 });
 
 const tok = (over) => ({ id: 'i', name: 'n', hash: 'h', prefix: 'p', createdAt: '', lastUsed: null, expiresAt: null, admin: false, ...over });
-const ALL = (r) => ({ knowledge: r, files: r, schema: r, dataQuality: r });
+const ALL = (r) => ({ knowledge: r, files: r, schema: r, dataQuality: r, networks: r });
 /** The exact shape the owner reported: three areas plus a key that is not an area. */
 const REPORTED = (r) => ({ knowledge: r, files: r, schema: r, admin: r });
 
@@ -51,7 +51,7 @@ describe('repairRights — the normalizer', () => {
   it('drops a key that is not an area and fills the area that is missing', () => {
     const out = repairRights({ instanceAdmin: false, createSpaces: false, floor: REPORTED('admin'), perSpace: {} });
     assert.equal(out.changed, true);
-    assert.deepEqual(Object.keys(out.rights.floor), ['knowledge', 'files', 'schema', 'dataQuality']);
+    assert.deepEqual(Object.keys(out.rights.floor), ['knowledge', 'files', 'schema', 'dataQuality', 'networks']);
     assert.equal(out.rights.floor.dataQuality, 'none', 'the absent area must come back at the LOWEST rung');
     assert.equal('admin' in out.rights.floor, false, '`admin` is not an area and must not survive');
   });
@@ -76,7 +76,7 @@ describe('repairRights — the normalizer', () => {
       floor: { knowledge: 'admin', files: 'write', schema: 'read', admin: 'admin' },
       perSpace: { qa: { knowledge: 'write', admin: 'admin' } },
     });
-    assert.deepEqual(out.rights.floor, { knowledge: 'admin', files: 'write', schema: 'read', dataQuality: 'none' });
+    assert.deepEqual(out.rights.floor, { knowledge: 'admin', files: 'write', schema: 'read', dataQuality: 'none', networks: 'none' });
     assert.equal(out.rights.perSpace.qa.knowledge, 'write');
     assert.equal(out.rights.instanceAdmin, true, 'the instance flags are not areas and must survive');
     assert.equal(out.rights.createSpaces, true);
@@ -84,7 +84,7 @@ describe('repairRights — the normalizer', () => {
 
   it('an unreadable rung becomes none rather than being kept or throwing', () => {
     const out = repairRights({ instanceAdmin: false, createSpaces: false, floor: { knowledge: 'ADMIN', files: 7, schema: null, dataQuality: 'read' }, perSpace: {} });
-    assert.deepEqual(out.rights.floor, { knowledge: 'none', files: 'none', schema: 'none', dataQuality: 'read' });
+    assert.deepEqual(out.rights.floor, { knowledge: 'none', files: 'none', schema: 'none', dataQuality: 'read', networks: 'none' });
   });
 
   it('never invents a floor where there was none', () => {

@@ -17,9 +17,12 @@
 import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 
-let migrateToken, grantsMoreThan, AREAS;
+let migrateToken, grantsMoreThan, AREAS, DATA;
 before(async () => {
   ({ migrateToken, grantsMoreThan, AREAS } = await import('../../server/dist/auth/rights-migration.js'));
+  // The legacy level maps onto the DATA areas. `networks` is its own rule (F-34): network routes were
+  // instance-admin in the legacy model, so below `admin` a legacy token maps to `networks: none`.
+  DATA = AREAS.filter(a => a !== 'networks');
 });
 
 
@@ -37,13 +40,15 @@ describe('the shapes that exist today', () => {
     const r = migrateToken({ readOnly: true });
     assert.equal(r.instanceAdmin, false);
     assert.equal(r.createSpaces, false, 'creating spaces was admin-only; a read-only token never had it');
-    for (const a of AREAS) assert.equal(r.floor[a], 'read');
+    for (const a of DATA) assert.equal(r.floor[a], 'read');
+    assert.equal(r.floor.networks, 'none', 'a legacy token below admin gains no network rights');
   });
 
   it('ordinary, unscoped — write everywhere', () => {
     const r = migrateToken({});
     assert.equal(r.instanceAdmin, false);
-    for (const a of AREAS) assert.equal(r.floor[a], 'write');
+    for (const a of DATA) assert.equal(r.floor[a], 'write');
+    assert.equal(r.floor.networks, 'none', 'a legacy token below admin gains no network rights');
   });
 
   it('space-scoped — rows, and NO floor', () => {
@@ -51,13 +56,15 @@ describe('the shapes that exist today', () => {
     assert.equal(r.floor, null,
       'a scoped token could not reach spaces created later; a floor would hand it every future space');
     assert.deepEqual(Object.keys(r.perSpace).sort(), ['qa', 'tasks']);
-    for (const a of AREAS) assert.equal(r.perSpace['qa'][a], 'write');
+    for (const a of DATA) assert.equal(r.perSpace['qa'][a], 'write');
+    assert.equal(r.perSpace['qa'].networks, 'none', 'a legacy token below admin gains no network rights');
   });
 
   it('space-scoped AND read-only — rows at read', () => {
     const r = migrateToken({ readOnly: true, spaces: ['qa'] });
     assert.equal(r.floor, null);
-    for (const a of AREAS) assert.equal(r.perSpace['qa'][a], 'read');
+    for (const a of DATA) assert.equal(r.perSpace['qa'][a], 'read');
+    assert.equal(r.perSpace['qa'].networks, 'none', 'a legacy token below admin gains no network rights');
   });
 
   it('space-scoped AND admin — rows at admin, instance switch still on', () => {

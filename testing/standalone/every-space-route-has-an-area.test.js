@@ -81,6 +81,12 @@ const SPACE_ROUTERS = [
    * `spaces.ts` alone cannot see them — which is the same blind spot one level down.
    */
   { glob: 'server/src/api/spaces*.ts', mount: '/api/spaces' },
+  /*
+   * THE NETWORKS ROUTER, added with the Networks column (`F-34`). A network carries spaces, so its membership acts
+   * are space-scoped by ITERATING them, and the rest act on the network as a whole and are exempted with reasons.
+   * Left out, the new rows would have looked like rows for routes that do not exist.
+   */
+  { glob: 'server/src/api/networks', mount: '/api/networks' },
 ];
 
 function filesUnder(p) {
