@@ -39,6 +39,11 @@ let TOOL_RIGHTS, ROUTE_RIGHTS, ALL_TOOLS, effectiveRung, satisfies, toolRightsRe
  */
 const capabilityMap = () => CAPABILITIES;
 
+/** Tools whose route scopes by ITERATING spaces, priced by the one filter both doors call. */
+const ITERATES_IN_HANDLER = {
+  network_peers: { filter: 'visibleNetworks', tool: 'server/src/mcp/tools/sync.ts', route: 'server/src/api/networks/crud.ts' },
+};
+
 before(async () => {
   ({ TOOL_RIGHTS, ROUTE_RIGHTS } = await import('../../server/dist/auth/space-rights.js'));
   ({ ALL_TOOLS } = await import('../../server/dist/mcp/tools/index.js'));
@@ -71,6 +76,20 @@ describe('TOOL_RIGHTS agrees with ROUTE_RIGHTS, row for row', () => {
          * flag to a rung is a change to who can wipe a space.
          */
         const handler = ALL_TOOLS.find(t => t.name === tool);
+        /*
+         * THE THIRD WAY, for a route that scopes by ITERATING spaces (`F-34`, `network_peers`). The MCP guard
+         * refuses a `TOOL_RIGHTS` tool that names no space — correctly, *cannot be checked is not passes* — so a
+         * tool that lists across spaces cannot carry a row. It is priced instead by the SAME function its route
+         * filters with, and this asserts both call it: one rule, one implementation, on both doors.
+         */
+        const iterating = ITERATES_IN_HANDLER[tool];
+        if (expected.scope === 'iterates' && iterating) {
+          assert.match(readFileSync(iterating.tool, 'utf8'), new RegExp(`\\b${iterating.filter}\\(`),
+            `${tool} must filter with ${iterating.filter}, the function its route ${route} uses`);
+          assert.match(readFileSync(iterating.route, 'utf8'), new RegExp(`\\b${iterating.filter}\\(`),
+            `${route} must filter with ${iterating.filter}, or the two doors can disagree`);
+          continue;
+        }
         assert.ok(handler?.admin || handler?.spaceAdmin,
           `${tool}: absent from TOOL_RIGHTS, and governed by neither flag — its route ${route} is `
           + 'area-scoped, so nothing prices it on the MCP door at all');

@@ -1,7 +1,11 @@
 import { ChangeDetectionStrategy, Component, computed, input } from '@angular/core';
 
-/** The four areas, in the order the matrix shows them. Bars follow this order so a row reads left to right. */
-export const RIGHT_AREAS = ['knowledge', 'files', 'schema', 'dataQuality'] as const;
+/**
+ * The areas, in the order the matrix shows them. Bars follow this order so a row reads left to right. Must equal
+ * the server's `SPACE_AREAS` — `networks` joined it with F-34 — and `a-client-area-list-matches-the-server` holds
+ * the two to one list.
+ */
+export const RIGHT_AREAS = ['knowledge', 'files', 'schema', 'dataQuality', 'networks'] as const;
 export type RightArea = (typeof RIGHT_AREAS)[number];
 export type Rung = 'none' | 'read' | 'write' | 'admin';
 export type AreaRungs = Record<RightArea, Rung>;

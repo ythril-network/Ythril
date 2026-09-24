@@ -32,9 +32,11 @@ import { SPACE_AREAS as AREAS } from '../config/rights-shape.js';
  */
 export function reachesSpace(rights: TokenRights, spaceId: string): boolean {
   const row = rights.perSpace[spaceId];
-  if (row && AREAS.some(a => row[a] !== 'none')) return true;
+  // `?? 'none'`: a key the stored row does not carry is NO rung. Compared bare, `undefined !== 'none'` read a missing
+  // area as reach — which is what adding an area (F-34) did to every matrix stored before it, until repaired.
+  if (row && AREAS.some(a => (row[a] ?? 'none') !== 'none')) return true;
   const floor = rights.floor;
-  return !!floor && AREAS.some(a => floor[a] !== 'none');
+  return !!floor && AREAS.some(a => (floor[a] ?? 'none') !== 'none');
 }
 
 /**

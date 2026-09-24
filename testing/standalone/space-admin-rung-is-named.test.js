@@ -18,7 +18,7 @@
  *
  * A published definition is a SECOND statement of a security rule, and the copy that drifts is the one people
  * read — the reason `rights-catalog` publishes `ROUTE_RIGHTS` rather than letting the client type a list. So
- * `DERIVED_RUNGS.requires` is COMPUTED from `SPACE_AREAS`, and this file proves it still agrees with
+ * `DERIVED_RUNGS.requires` is COMPUTED from `SPACE_ADMIN_AREAS`, and this file proves it still agrees with
  * `isSpaceAdminFor` by running the predicate over a rights object built from the published value.
  *
  * That is the difference between "we wrote the same thing twice" and "one of them is derived from the other".
@@ -31,7 +31,7 @@ import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
 import { bodyOf } from './_structural-window.mjs';
 
-const { DERIVED_RUNGS, SPACE_AREAS, RUNGS } = await import('../../server/dist/config/rights-shape.js');
+const { DERIVED_RUNGS, SPACE_ADMIN_AREAS, RUNGS } = await import('../../server/dist/config/rights-shape.js');
 const { effectiveRung } = await import('../../server/dist/auth/mint-cap.js');
 const { isSpaceAdminFor } = await import('../../server/dist/auth/editor-scope.js');
 
@@ -86,15 +86,15 @@ describe('the published definition IS the enforced predicate', () => {
       + 'definition, and the definition would be a lie without it');
   });
 
-  it('names every area, so a fifth area cannot be silently omitted', () => {
-    assert.deepEqual(Object.keys(spaceAdmin.requires).sort(), [...SPACE_AREAS].sort(),
+  it('names every area administering a space covers, so a new one cannot be silently omitted', () => {
+    assert.deepEqual(Object.keys(spaceAdmin.requires).sort(), [...SPACE_ADMIN_AREAS].sort(),
       'requires must cover exactly the areas the predicate iterates');
     for (const v of Object.values(spaceAdmin.requires)) {
       assert.ok(RUNGS.includes(v), `${v} is not a published rung`);
     }
   });
 
-  it('`requires` is COMPUTED from SPACE_AREAS, not written out', () => {
+  it('`requires` is COMPUTED from SPACE_ADMIN_AREAS, not written out', () => {
     /*
      * The anti-drift property, asserted on source because it cannot be seen from the value.
      *
@@ -105,8 +105,8 @@ describe('the published definition IS the enforced predicate', () => {
      */
     const src = stripComments(readFileSync('server/src/config/rights-shape.ts', 'utf8'));
     const block = bodyOf(src, 'DERIVED_RUNGS');
-    assert.match(block, /SPACE_AREAS\.map/,
-      'requires must be built from SPACE_AREAS, or it is a second copy of the predicate free to disagree');
+    assert.match(block, /SPACE_ADMIN_AREAS\.map/,
+      'requires must be built from SPACE_ADMIN_AREAS, or it is a second copy of the predicate free to disagree');
     assert.doesNotMatch(block, /knowledge:\s*'admin'/,
       'a hand-written area list is the drift this exists to prevent');
   });

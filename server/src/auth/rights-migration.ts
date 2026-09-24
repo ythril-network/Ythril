@@ -64,8 +64,13 @@ export interface LegacyToken {
   peerInstanceId?: string;
 }
 
+/**
+ * The four DATA areas take the legacy level. `networks` does not: every network route was instance-admin in the
+ * legacy model, so below `admin` a legacy token held no network capability — mapping `write` onto it would hand
+ * every old write token the right to create and leave networks at the moment the column appeared.
+ */
 const rungs = (r: Rung): AreaRungs =>
-  ({ knowledge: r, files: r, schema: r, dataQuality: r });
+  ({ knowledge: r, files: r, schema: r, dataQuality: r, networks: r === 'admin' ? 'admin' : 'none' });
 
 const NONE = (): AreaRungs => rungs('none');
 

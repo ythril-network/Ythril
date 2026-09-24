@@ -41,7 +41,7 @@ describe('rights area names are validated, not merely typed', () => {
   });
 
   it('the areas are VALUES, so a validator can use them', () => {
-    assert.deepEqual([...SPACE_AREAS], ['knowledge', 'files', 'schema', 'dataQuality']);
+    assert.deepEqual([...SPACE_AREAS], ['knowledge', 'files', 'schema', 'dataQuality', 'networks']);
     assert.deepEqual([...RUNGS], ['none', 'read', 'write', 'admin']);
   });
 

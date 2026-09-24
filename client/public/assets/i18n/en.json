@@ -2014,6 +2014,8 @@
   "tokens.rights.area.schema.desc": "The shape the space expects its records to take — which types exist and which properties they carry.",
   "tokens.rights.area.dataQuality": "Data quality",
   "tokens.rights.area.dataQuality.desc": "Finding and resolving duplicates, contradictions and gaps, and the review decisions that follow.",
+  "tokens.rights.area.networks": "Networks",
+  "tokens.rights.area.networks.desc": "Sharing this space with other instances: read sees its networks, write creates one with it and leaves a membership it made, admin changes a network's settings and leaves anyone's. Not part of administering the space.",
   "tokens.rights.rung.read.desc": "may look at everything in this area and change nothing — an agent can search and read, and every write it tries is refused",
   "tokens.rights.rung.write.desc": "everything read allows, plus creating, editing and deleting individual records — this is the level normal MCP use needs",
   "tokens.rights.rung.admin.desc": "everything write allows, plus the settings and the irreversible operations for this area, such as emptying a collection",

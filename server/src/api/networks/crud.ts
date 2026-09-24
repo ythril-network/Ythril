@@ -6,7 +6,9 @@
 import { Router } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { z } from 'zod';
-import { requireAdmin } from '../../auth/middleware.js';
+import { requireAdmin, requireAuth, denyReadOnly } from '../../auth/middleware.js';
+import { networkCreateRefusal, networkLeaveRefusal, networkSettingsRefusal, visibleNetworks } from '../../auth/network-rights.js';
+import { recordOrigin } from '../../auth/network-membership.js';
 import { globalRateLimit } from '../../rate-limit/middleware.js';
 import { syncScheduleRefusal } from '../../sync/schedule.js';
 import { MIN_PEER_VERSION, peerFloorRefusal } from '../../sync/peer-floor.js';
@@ -41,10 +43,13 @@ const UpdateNetworkBody = z.object({
 
 // ── GET /api/networks ──────────────────────────────────
 
-crudRouter.get('/', globalRateLimit, requireAdmin, (_req, res) => {
+// F-34: the networks this token may see — `networks: read` on every space each carries. Same filter as MCP
+// `network_peers`, so the two doors list the same networks.
+crudRouter.get('/', globalRateLimit, requireAuth, (req, res) => {
   const cfg = getConfig();
+  const visible = visibleNetworks(req.authToken as Parameters<typeof visibleNetworks>[0], cfg.networks);
   // Strip sensitive fields
-  const networks = cfg.networks.map(n => ({
+  const networks = visible.map(n => ({
     ...n,
     members: n.members.map(({ tokenHash: _th, skipTlsVerify: _sv, ...m }) => ({
       ...m,
@@ -67,9 +72,10 @@ crudRouter.get('/', globalRateLimit, requireAdmin, (_req, res) => {
 
 // ── GET /api/networks/:id ──────────────────────────────────────────────────
 
-crudRouter.get('/:id', globalRateLimit, requireAdmin, (req, res) => {
+// F-34: readable with `networks: read` on every space it carries; otherwise a 404, because a 403 says it exists.
+crudRouter.get('/:id', globalRateLimit, requireAuth, (req, res) => {
   const cfg = getConfig();
-  const net = cfg.networks.find(n => n.id === req.params['id']);
+  const net = visibleNetworks(req.authToken as Parameters<typeof visibleNetworks>[0], cfg.networks).find(n => n.id === req.params['id']);
   if (!net) { res.status(404).json({ error: 'Network not found' }); return; }
 
   const safe = {
@@ -144,7 +150,9 @@ crudRouter.post('/peers/:peerId/sync', globalRateLimit, requireAdmin, async (req
 });
 
 
-crudRouter.post('/', globalRateLimit, requireAdmin, async (req, res) => {
+// F-34: `networks: write` on EVERY space it carries (instance admin passes). `denyReadOnly` because this was
+// `requireAdmin`, which a read-only token never passed — swapping down to a rung check must not let it in.
+crudRouter.post('/', globalRateLimit, requireAuth, denyReadOnly, async (req, res) => {
   try {
     const parsed = CreateNetworkBody.safeParse(req.body);
     if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
@@ -164,6 +172,9 @@ crudRouter.post('/', globalRateLimit, requireAdmin, async (req, res) => {
       res.status(400).json({ error: `Unknown spaces: ${unknownSpaces.join(', ')}` });
       return;
     }
+    const caller = req.authToken as Parameters<typeof networkCreateRefusal>[0];
+    const refusal = networkCreateRefusal(caller, spaces);
+    if (refusal) { res.status(403).json({ error: refusal }); return; }
 
     // If a preset ID is given, ensure it is not already in use
     if (presetId && cfg.networks.some(n => n.id === presetId)) {
@@ -184,6 +195,9 @@ crudRouter.post('/', globalRateLimit, requireAdmin, async (req, res) => {
       members: [],
       pendingRounds: [],
       createdAt: new Date().toISOString(),
+      // Who established each membership, so the leave rule can tell a token's own from another's. Recorded for an
+      // instance admin too: the record is about the membership, not about whether its maker needed permission.
+      ...(caller.id ? { spaceOrigins: spaces.reduce<Record<string, string>>((o, s) => recordOrigin(o, s, caller.id!), {}) } : {}),
     };
 
     cfg.networks.push(network);
@@ -201,12 +215,18 @@ crudRouter.post('/', globalRateLimit, requireAdmin, async (req, res) => {
 
 // ── DELETE /api/networks/:id — leave/delete a network ─────────────────────
 
-crudRouter.delete('/:id', globalRateLimit, requireAdmin, async (req, res) => {
+// F-34: leaving takes each of the network's spaces out of it, so each membership is decided by the leave rule —
+// its own at `networks: write`, anyone's at `admin`, an unknown establisher only at `admin`.
+crudRouter.delete('/:id', globalRateLimit, requireAuth, denyReadOnly, async (req, res) => {
   const cfg = getConfig();
   const idx = cfg.networks.findIndex(n => n.id === req.params['id']);
-  if (idx < 0) { res.status(404).json({ error: 'Network not found' }); return; }
+  if (idx < 0 || !visibleNetworks(req.authToken as Parameters<typeof visibleNetworks>[0], [cfg.networks[idx]!]).length) {
+    res.status(404).json({ error: 'Network not found' }); return;
+  }
 
   const net = cfg.networks[idx]!;
+  const leaveRefusal = networkLeaveRefusal(req.authToken as Parameters<typeof networkLeaveRefusal>[0], net);
+  if (leaveRefusal) { res.status(403).json({ error: leaveRefusal }); return; }
 
   // Broadcast member_departed to all peers before removing the network locally.
   const secrets = getSecrets();
@@ -257,7 +277,8 @@ crudRouter.delete('/:id', globalRateLimit, requireAdmin, async (req, res) => {
 
 // ── PATCH /api/networks/:id — update mutable network fields ───────────────
 
-crudRouter.patch('/:id', globalRateLimit, requireAdmin, (req, res) => {
+// F-34: the settings are shared by every space the network carries, so `networks: admin` on every one.
+crudRouter.patch('/:id', globalRateLimit, requireAuth, denyReadOnly, (req, res) => {
   const parsed = UpdateNetworkBody.safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
 
@@ -267,8 +288,11 @@ crudRouter.patch('/:id', globalRateLimit, requireAdmin, (req, res) => {
   if (scheduleRefusal) { res.status(400).json({ error: scheduleRefusal }); return; }
 
   const cfg = getConfig();
-  const net = cfg.networks.find(n => n.id === req.params['id']);
+  const caller = req.authToken as Parameters<typeof visibleNetworks>[0];
+  const net = visibleNetworks(caller, cfg.networks).find(n => n.id === req.params['id']);
   if (!net) { res.status(404).json({ error: 'Network not found' }); return; }
+  const settingsRefusal = networkSettingsRefusal(caller, net);
+  if (settingsRefusal) { res.status(403).json({ error: settingsRefusal }); return; }
 
   // Snapshot before mutating. Only the three fields this route can change — the record also holds
   // `inviteKeyHash` and members' `tokenHash`, and handing the whole thing over would rest entirely on

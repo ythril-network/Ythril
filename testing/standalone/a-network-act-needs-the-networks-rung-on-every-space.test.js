@@ -79,3 +79,22 @@ describe('nothing widens when the column arrives', () => {
     assert.equal(migrateToken({}).floor.knowledge, 'write', 'the data areas map as they always did');
   });
 });
+
+describe('seeing a network, and changing its settings', () => {
+  let visibleNetworks, networkSettingsRefusal;
+  before(async () => { ({ visibleNetworks, networkSettingsRefusal } = await import('../../server/dist/auth/network-rights.js')); });
+  const nets = [{ id: 'n1', spaces: ['qa'] }, { id: 'n2', spaces: ['qa', 'ops'] }, { id: 'n3', spaces: ['hr'] }];
+
+  it('a network is visible only with networks: read on EVERY space it carries', () => {
+    const t = token({ qa: areas('read'), ops: areas('none'), hr: areas('none') });
+    assert.deepEqual(visibleNetworks(t, nets).map(n => n.id), ['n1']);
+  });
+  it('an instance admin sees them all; a token with no matrix sees none', () => {
+    assert.equal(visibleNetworks({ id: 'a', rights: { instanceAdmin: true, createSpaces: true, floor: null, perSpace: {} } }, nets).length, 3);
+    assert.equal(visibleNetworks({ id: 'x' }, nets).length, 0);
+  });
+  it('settings need networks: admin on every space — write is not enough', () => {
+    assert.match(networkSettingsRefusal(token({ qa: areas('write'), ops: areas('admin') }), nets[1]), /admin/);
+    assert.equal(networkSettingsRefusal(token({ qa: areas('admin'), ops: areas('admin') }), nets[1]), null);
+  });
+});

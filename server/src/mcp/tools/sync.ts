@@ -1,3 +1,4 @@
+import { visibleNetworks } from '../../auth/network-rights.js';
 import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.js';
 import { getConfig } from '../../config/loader.js';
 import { MIN_PEER_VERSION, peerFloorRefusal } from '../../sync/peer-floor.js';
@@ -5,8 +6,9 @@ import { unknownPeerRefusal } from '../../sync/peer-target.js';
 
 export const network_peersTool: ToolHandler = {
   name: 'network_peers',
-  description: 'List every peer instance this brain is connected to, flattened across all of its networks. '
-    + 'Requires instance-admin rights. Read-only — it configures nothing and triggers nothing.\n\n'
+  description: 'List the peer instances of the networks you may see, flattened across them. A network is visible '
+    + 'with `networks: read` on EVERY space it carries (an instance admin sees all of them); a token with no '
+    + 'network rights gets an empty list. Read-only — it configures nothing and triggers nothing.\n\n'
     + 'ONE PEER APPEARS ONCE PER NETWORK IT BELONGS TO, not once overall. The same instance in two networks '
     + 'gives two rows with the same `instanceId` and different `network`/`networkId`. Deduplicate on '
     + '`instanceId` if you want distinct machines; keep the rows as they are if you care about which network a '
@@ -31,14 +33,15 @@ export const network_peersTool: ToolHandler = {
     + 'answered and named no version predates version reporting, so it IS refused; a peer this instance '
     + 'has never exchanged with is simply unknown, and is not refused on version grounds. Do not infer '
     + 'a verdict from `version` being null — read `belowFloor`.\n\n'
-    + 'An empty list means this instance is in no network, not that syncing failed.',
-  admin: true,
+    + 'An empty list means no network you may see has peers — not that syncing failed.',
+  // F-34: no longer instance-admin — it lists the networks this token may SEE (`networks: read` on every space
+  // each carries), through the same filter as `GET /api/networks`. A token with no network rungs sees none.
   inputSchema: (_s: ToolSchemas) => ({ type: 'object', properties: {}, required: [], additionalProperties: false }),
   async handle(ctx: ToolContext): Promise<ToolResult> {
     const listPeersCfg = getConfig();
     // Build a flat list of peers across all networks, scrubbing all
     // credential fields (tokenHash, inviteKeyHash must never be exposed).
-    const peers = listPeersCfg.networks.flatMap(net =>
+    const peers = visibleNetworks({ ...(ctx.rights ? { rights: ctx.rights } : {}) }, listPeersCfg.networks).flatMap(net =>
       net.members.map(m => ({
         instanceId: m.instanceId,
         label: m.label,

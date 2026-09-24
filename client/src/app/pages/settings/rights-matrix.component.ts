@@ -5,7 +5,7 @@ import { SpaceAdminToggleComponent } from './space-admin-toggle.component';
 import { RIGHT_AREAS, type Rung, type TokenRights, type WireRungs } from './rights-glyph.component';
 import { RightsCatalogService } from './rights-catalog.service';
 
-const EMPTY = (): WireRungs => ({ knowledge: 'none', files: 'none', schema: 'none', dataQuality: 'none' });
+const EMPTY = (): WireRungs => Object.fromEntries(RIGHT_AREAS.map(a => [a, 'none'])) as WireRungs;
 
 /**
  * The rights matrix: an all-spaces FLOOR on top, then one row per space.
@@ -324,7 +324,8 @@ export class RightsMatrixComponent implements OnInit {
    * with nothing saying so, and nothing in the matrix could answer *"was this token MEANT to administer
    * this space"*.
    *
-   * It now writes `spaceAdmin`, which the server resolves to `admin` in every area through `grantedRung`.
+   * It now writes `spaceAdmin`, which the server resolves to `admin` through `grantedRung` in every area administering
+   * a space covers — all but Networks, which stays its own column (F-34, `SPACE_ADMIN_AREAS`).
    * One emit, whole object — a loop would let a listener observe three inconsistent intermediate states,
    * and the parent form persists on change.
    *
