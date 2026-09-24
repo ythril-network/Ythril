@@ -141,6 +141,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Internal
 
+- **The conversation extractor judges its entities** (`F-31`, 4.12 / 4.2 / 4.4 / 4.6, `judge-entities.ts`).
+  - **What is asked.** Per turn, one request asks the decision model about every mention: is it a thing the
+    conversation is about, which shortlisted entity is it or is it new, which of the space's types it would
+    be, and whether it names a group.
+  - **What is not asked.** A pronoun is only asked what it refers to. *"I"* and *"you"* are the speaker and
+    the addressee, and are not asked at all.
+  - **The policy, in code.**
+    - A picked entity is a merge.
+    - A type the space does not declare, or `none`, means no entity.
+    - Only what the conversation returns to is minted: a thing mentioned once is kept aside for a claim to
+      link.
+    - Every other surface form becomes an alias.
+  - Raw answers are kept with the run; the thresholds are 0.5 and still unmeasured.
+
 - **The conversation extractor shortlists what a mention could be** (`F-31`, 4.3, `shortlist.ts`). The
   decision model then picks from the shortlist (4.4); it can only pick a card it was dealt, so the hand is
   generous, bounded to six, and built from four sources:

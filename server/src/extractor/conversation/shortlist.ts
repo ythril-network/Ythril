@@ -52,6 +52,13 @@ const PLURAL_FIRST = new Set(['we', 'us', 'our', 'ours', 'ourselves']);
 const POINTING = new Set(['he', 'him', 'his', 'she', 'her', 'hers', 'they', 'them', 'their', 'theirs', 'it', 'its',
   'this', 'that', 'these', 'those', 'one', 'ones']);
 
+/** Which kind of name-less mention this is, if it is one — the grammar the hand is dealt by. */
+export function pronounKind(mentionName: string): 'first' | 'second' | 'plural-first' | 'pointing' | null {
+  const key = normalizeName(mentionName);
+  return FIRST_PERSON.has(key) ? 'first' : SECOND_PERSON.has(key) ? 'second'
+    : PLURAL_FIRST.has(key) ? 'plural-first' : POINTING.has(key) ? 'pointing' : null;
+}
+
 export interface ShortlistSources {
   /** The space's entities that could be `text`. Absent: the run's own entities only. */
   searchSpace?: (text: string) => Promise<KnownEntity[]>;
@@ -123,10 +130,12 @@ export class Shortlister {
       const seen = new Set<string>();
       return xs.filter((e): e is KnownEntity => !!e && !seen.has(e.id) && (seen.add(e.id), true)).slice(0, this.max);
     };
-    if (FIRST_PERSON.has(key)) return bounded([ctx.speaker]);
-    if (SECOND_PERSON.has(key)) return bounded([ctx.addressee]);
-    if (PLURAL_FIRST.has(key)) return bounded([ctx.speaker, ...(ctx.recent ?? [])]);
-    if (POINTING.has(key)) return bounded(ctx.recent ?? []);
+    switch (pronounKind(key)) {
+      case 'first': return bounded([ctx.speaker]);
+      case 'second': return bounded([ctx.addressee]);
+      case 'plural-first': return bounded([ctx.speaker, ...(ctx.recent ?? [])]);
+      case 'pointing': return bounded(ctx.recent ?? []);
+    }
     const fromRun = this.run
       .map(e => ({ e, c: closeness(key, normalizeName(e.name)) }))
       .filter(x => x.c > 0)
