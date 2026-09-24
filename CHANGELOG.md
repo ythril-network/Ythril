@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **An NLP sidecar for the conversation extractor** (`F-31`, `sidecars/doc-nlp`, opt-in:
+  `docker compose --profile nlp up -d`). It returns spaCy's named entities and noun phrases, which the
+  extractor proposes as candidate mentions (step 4.1). The decision model then judges them, so casing and
+  misspellings are its to handle, not a rule's.
+  - **Why spaCy's transformer model:** measured on the ten committed LoCoMo extractions, it proposes 96% of
+    the entities whose name the conversation says. That is ahead of spaCy's large model (92%), wink-nlp
+    (87%), hand-written rules (88%) and GLiNER (87%), at about 30 ms a turn over HTTP.
+  - **Hardening and wiring:** it is hardened like `doc-render` (non-root, read-only, internal network, no
+    egress) and never downloads at runtime. The server reaches it through `NLP_SIDECAR_URL`.
+
 - **A decision model for the extractors, configurable on Settings → Models** (`F-31`). The conversation
   extractor asks a model only its judgement questions (*who is "she"*, *is this turn pasted*), and this is
   the model it asks. It defaults to TypeSafe's System One (`https://api.typesafe.ai`, `jev-latest`) and
@@ -120,6 +130,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rename, so the table now says to reconnect.
 
 ### Internal
+
+- **Sidecar health probes are one module** (`util/sidecar-health.ts`). The cached `/health` probe was private
+  to the render client, and the NLP client would have been its second copy.
 
 - **The conversation extractor asks its first judgement questions** (`F-31`, DECOMPOSITION.md 2.3, 2.5,
   3.4, 3.12). `judge-turns.ts` asks only about what the code half flagged:

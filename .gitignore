@@ -141,3 +141,4 @@ benchmarks/.cache/
 # Local scratch — the benchmark ingest walkthrough (owner-requested, not for commit)
 example.md
 gen-example.mjs
+__pycache__/

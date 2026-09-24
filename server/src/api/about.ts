@@ -7,6 +7,7 @@ import { requireAuth, requireAdmin } from '../auth/middleware.js';
 import { mintSseTicket } from '../auth/sse-ticket.js';
 import { getConfig, getDocumentProcessingConfig, getMediaEmbeddingConfig } from '../config/loader.js';
 import { isRenderAvailable, isOfficeRenderAvailable } from '../files/converters/renderer.js';
+import { isNlpAvailable } from '../extractor/conversation/nlp-client.js';
 import { summariseHealth } from './health-summary.js';
 import { getMongo } from '../db/mongo.js';
 import { getLogLines, subscribeLogLines } from '../util/log.js';
@@ -112,9 +113,10 @@ aboutRouter.get('/health', requireAdmin, async (_req, res) => {
 
   // Each probe is already cached and timeout-bounded at its source, so this route cannot hang on a
   // sidecar that accepts connections and never answers.
-  const [render, office] = await Promise.all([
+  const [render, office, nlpUp] = await Promise.all([
     isRenderAvailable().catch(() => false),
     isOfficeRenderAvailable().catch(() => false),
+    isNlpAvailable().catch(() => false),
   ]);
 
   const renderWanted = docCfg.mode !== 'off';
@@ -132,6 +134,14 @@ aboutRouter.get('/health', requireAdmin, async (_req, res) => {
       configured: renderWanted,
       reachable: renderWanted ? office : null,
       impact: 'Office formats (docx, pptx, xlsx…) cannot be rasterised; they fall back to text.',
+    },
+    {
+      id: 'doc-nlp',
+      label: 'NLP (conversation extraction)',
+      // Opt-in like doc-office (the `nlp` profile), and reported the same way: wired by compose, probed here.
+      configured: true,
+      reachable: nlpUp,
+      impact: 'Conversations cannot be extracted — there is nothing to find their mentions with.',
     },
     {
       id: 'nli',

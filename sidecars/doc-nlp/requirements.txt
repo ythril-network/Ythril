@@ -1,0 +1,7 @@
+# Pinned for reproducible, auditable builds. All permissive licenses — NO copyleft (see LICENSES.md).
+# torch comes from the CPU-only index in the Dockerfile, so no CUDA libraries land in the image.
+spacy==3.8.16               # MIT
+spacy-transformers==1.4.0   # MIT
+transformers==4.53.2        # Apache-2.0
+fastapi==0.115.6            # MIT
+uvicorn==0.34.0             # BSD-3-Clause

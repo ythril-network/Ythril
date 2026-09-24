@@ -249,6 +249,7 @@ Legal principle that runtime infrastructure must be listed with its licensing im
 | `unstructured-io/unstructured-api` | Server-side PDF / DOCX / EPUB conversion (`hi_res` OCR + layout detection, table and embedded-image extraction). | Apache 2.0. |
 | `ythril-doc-render` (first-party, built from `sidecars/doc-render`) | Renders PDF pages to PNG images for the F11 VLM document-extraction path (`documentProcessing.mode` `vlm`/`auto`/`max`). | Apache-2.0. Wraps **PDFium** via `pypdfium2` (Apache-2.0 / BSD-3-Clause) + Pillow (HPND) — all permissive. Deliberately **not** PyMuPDF (AGPL-3.0). See [`sidecars/doc-render/LICENSES.md`](../sidecars/doc-render/LICENSES.md). |
 | `ythril-doc-office` (first-party, built from `sidecars/doc-office`) — **optional** | Renders **office** docs (DOCX/EPUB/…) to PNG images for the same VLM path: LibreOffice converts to PDF, then PDFium rasterizes. Opt-in via the compose `office` profile. | LibreOffice is **MPL-2.0 / LGPL-3.0** (not AGPL), invoked as a **separate process** (not linked); PDFium/Pillow permissive. See [`sidecars/doc-office/LICENSES.md`](../sidecars/doc-office/LICENSES.md). |
+| `ythril-doc-nlp` (first-party, built from `sidecars/doc-nlp`) — **optional** | Finds the candidate mentions the conversation extractor (`F-31`) builds entities from: spaCy's `en_core_web_trf` named entities and noun phrases. Opt-in via the compose `nlp` profile. | MIT (spaCy, the model, RoBERTa-base, spacy-transformers), Apache-2.0 (Transformers), BSD-3-Clause (PyTorch CPU). See `sidecars/doc-nlp/LICENSES.md`. |
 
 **Where they are referenced.** `ollama`, `whisper`, `unstructured`, and `doc-render` are all services in
 [`docker-compose.yml`](../docker-compose.yml). `ollama`/`whisper` also have matching Kubernetes manifests
@@ -282,6 +283,18 @@ with `docker compose --profile office up -d`. Without it, office docs in a `vlm`
 mode transparently fall back to OCR (unchanged from before). Everything happens **on-box** on the isolated
 `ythril-convert` network — no page images or text leave the instance. Licensing: LibreOffice is MPL-2.0 /
 LGPL-3.0 (not AGPL) and runs as a separate process (not linked), so it carries no copyleft into Ythril.
+
+**`doc-nlp` (candidate mentions for the conversation extractor) is opt-in and heavy.** It runs spaCy's
+transformer pipeline on CPU PyTorch, so the image is ≈ 3 GB and the model ≈ 0.5 GB in memory. Start it with
+`docker compose --profile nlp up -d`; Ythril reaches it via `NLP_SIDECAR_URL` (default
+`http://doc-nlp:8102`). Without it, conversation extraction is refused with that instruction rather than
+run with nothing to judge. It proposes spans only — every judgement about them is the decision model's — and
+it was chosen by measurement: on the ten committed LoCoMo extractions it proposes 96% of the entities whose
+name the conversation says (on conversations nothing was tuned against), against 92% for spaCy's large
+statistical model, 87% for wink-nlp and 88% for hand-written rules, at about 30 ms a turn including the
+HTTP hop. The model is installed at build time, so the container never downloads anything, and it runs on
+the isolated `ythril-convert` network. Its own caps: `NLP_MAX_TEXTS` (256 texts a request) and
+`NLP_MAX_CHARS` (200 000 characters a request); `NLP_MODEL` names the spaCy pipeline to load.
 
 ### Sandboxing and resource ceilings
 
@@ -340,6 +353,7 @@ WHISPER_MEM_LIMIT=8g       # default 4g  / WHISPER_PIDS_LIMIT 1024      / WHISPE
 UNSTRUCTURED_MEM_LIMIT=8g  # default 6g  / UNSTRUCTURED_PIDS_LIMIT 1024 / UNSTRUCTURED_CPUS 4.0
 DOC_RENDER_MEM_LIMIT=2g    # default 1g  / DOC_RENDER_PIDS_LIMIT 128    / DOC_RENDER_CPUS 1.0
 DOC_OFFICE_MEM_LIMIT=4g    # default 2g  / DOC_OFFICE_PIDS_LIMIT 512    / DOC_OFFICE_CPUS 2.0
+DOC_NLP_MEM_LIMIT=4g       # default 3g  / DOC_NLP_PIDS_LIMIT 256       / DOC_NLP_CPUS 2.0
 ```
 
 The last two are the document sidecars: `doc-render` turns PDF pages into images, and `doc-office`

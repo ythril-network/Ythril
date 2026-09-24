@@ -26,6 +26,7 @@ Status, kept current per PR:
 | 1 load | **built** | `load.ts` |
 | 2 classify turns | **built**: all six. 2.3 and 2.5 ask through `decide()`; thresholds unmeasured (0.5) | `classify.ts`, `judge-turns.ts` |
 | 3 resolve time | **built** except 3.8, 3.9 (asked about events, so they come with phase 5) and weekday RANGES (*"Friday to Sunday"*) in 3.10. 3.4 and 3.12 ask through `decide()` | `time.ts`, `time-lexicon.ts`, `judge-turns.ts` |
+| 4 entities | **built**: 4.1 (candidates, via the `doc-nlp` sidecar) | `mentions.ts`, `nlp-client.ts` |
 | the decision client | **built**: Jev (System One) or the assist model, answers checked by code | `../decide.ts` |
 | everything else | decomposed, not built | — |
 
@@ -137,7 +138,7 @@ the ENTITIES*.
 
 | # | step | tag | notes |
 |---|---|---|---|
-| 4.1 | Candidate mentions: proper-noun runs, possessive and determiner noun phrases (*"my mom's old house"*, *"the park near my house"*), noun phrases repeated across sessions | mechanical | A part-of-speech tagger, in code, offline. **Select instead of generate**: the model is never asked to NAME a mention, only to judge one the code found (4.12) |
+| 4.1 | Candidate mentions: named entities and noun phrases with their head nouns, and *"my X"* resolved to the speaker (*"Ada's mom"*) | mechanical | spaCy's transformer pipeline in the `doc-nlp` sidecar, offline — chosen by measurement over wink-nlp, compromise, GLiNER, spaCy's statistical models and hand-written rules (`sidecars/doc-nlp/app.py`). Casing and misspellings are the judge's, not the finder's. **Select instead of generate**: the model is never asked to NAME a mention, only to judge one the code found (4.12) |
 | 4.12 | Is this candidate a THING the conversation is about, not a passing noun? | **jev `noul`** | One Noul per candidate, asked together over the same turn. Coverage is checked: a turn that yields no accepted candidate and no claim is reported, because *the model cannot choose an omitted value* |
 | 4.2 | Type of each new entity | **jev `choice`** over the schema's entity types + `none` | *"Do not invent a type"* becomes impossible, not forbidden. Policy: `none` → no entity; the mention stays in the claim's text, which is what the prompt says for anything the vocabulary cannot express |
 | 4.3 | Shortlist existing entities a mention could be — from THIS run's entities and from the SPACE: same type, exact name or alias, fuzzy name, and `similar` over the mention's context | mechanical | Code supplies the candidates… No full list of people is ever built: one bounded lookup per DISTINCT mention, cached for the run, a handful of candidates each. A second conversation ingested into the same space matches against what the first one wrote |

@@ -66,8 +66,8 @@ jobs:
           # not an upstream that can disappear — so they are out of scope for this check.
           # First-party images we build in-repo (from a Dockerfile in this repo) — not pullable
           # upstreams, so out of scope for this "is it pullable?" check. `ythril-doc-render` is built
-          # from sidecars/doc-render and `ythril-doc-office` from sidecars/doc-office (F11).
-          FIRST_PARTY='^(ghcr\.io/ythril-network/ythril|ythril-local|ythril-test|ythril-doc-render|ythril-doc-office)'
+          # from sidecars/doc-render `ythril-doc-office` from sidecars/doc-office (F11), and `ythril-doc-nlp` from sidecars/doc-nlp (F-31).
+          FIRST_PARTY='^(ghcr\.io/ythril-network/ythril|ythril-local|ythril-test|ythril-doc-render|ythril-doc-office|ythril-doc-nlp)'
 
           fail=0
           echo "## Image pin check" >> "$GITHUB_STEP_SUMMARY"
