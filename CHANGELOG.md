@@ -141,6 +141,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Internal
 
+- **The conversation extractor groups turns into exchanges and checks its claims** (`F-31`, 5.1 / 5.3 / 5.7,
+  `claims.ts`).
+  - **Grouping.** Per session, one request asks whether each turn continues the exchange before it, starts
+    one, or is about nothing. A refused answer continues; a turn about nothing rides along and is never
+    written from.
+  - **Checking.** A written claim is refused if a resolved date is missing, if it opens with a pronoun, or if
+    it carries turn or session references.
+  - **Coverage.** Every turn ends up in some claim's source turns, and an exchange with no claim is reported.
+
 - **The conversation extractor judges its entities** (`F-31`, 4.12 / 4.2 / 4.4 / 4.6, `judge-entities.ts`).
   - **What is asked.** Per turn, one request asks the decision model about every mention: is it a thing the
     conversation is about, which shortlisted entity is it or is it new, which of the space's types it would
