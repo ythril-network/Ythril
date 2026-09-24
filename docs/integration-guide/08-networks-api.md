@@ -2,7 +2,6 @@
 
 > Part of the [Ythril Integration Guide](../integration-guide.md).
 
-
 ## Who may call what
 
 Since F-34 a token below instance admin acts on a network through the **`networks`** rung it holds on the spaces the network carries — on **every** one of them ([Tokens API → the `networks` area](07-tokens-api.md#what-a-right-grants)).
