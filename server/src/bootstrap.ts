@@ -22,6 +22,16 @@ import { log } from './util/log.js';
  * self-heals while the instance stays operational in the meantime.
  */
 export async function startConfiguredInstanceServices(): Promise<void> {
+  // The Schema Library entries the product ships (the `conversation` group `ingest` needs). Local state, before
+  // the DB, and its own try: a library that cannot be written must not stop the instance starting.
+  try {
+    const { seedShippedLibraryEntries } = await import('./config/shipped-library-entries.js');
+    const added = seedShippedLibraryEntries();
+    if (added > 0) log.info(`Schema Library: added ${added} shipped entr${added === 1 ? 'y' : 'ies'}`);
+  } catch (err) {
+    log.error(`Seeding the shipped Schema Library entries failed: ${err}`);
+  }
+
   // ── Phase 1: DB initialisation (best-effort) ──────────────────────────────
   try {
     // Ensure the built-in general space exists BEFORE initAllSpaces() so its

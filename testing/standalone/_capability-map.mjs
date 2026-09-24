@@ -56,6 +56,8 @@ export const CAPABILITIES = [
   ['Brain — search', 'graph_traverse', 'POST /api/brain/spaces/:spaceId/traverse'],
 
   ['Brain — bulk', 'save_bulk', 'POST /api/brain/spaces/:spaceId/bulk'],
+  ['Brain — ingest', 'ingest', 'POST /api/brain/spaces/:spaceId/ingest'],
+  ['Brain — ingest status', 'ingest_status', 'GET /api/brain/spaces/:spaceId/ingest/:runId'],
 
   // ONE route, because it was five — each hard-coding a collection against a tool taking `types[]`.
   // `delete_space_data` had a row here and no longer needs one: it is reached through the generic tool

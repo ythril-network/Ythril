@@ -15,6 +15,7 @@ import { chronoRouter } from './chrono.js';
 import { fileMetaRouter } from './file-meta.js';
 import { searchRouter } from './search.js';
 import { bulkRouter } from './bulk.js';
+import { ingestRouter } from './ingest.js';
 import { brainEventsRouter } from './events.js';
 import { embedJobsRouter } from './embed-jobs.js';
 
@@ -27,5 +28,6 @@ brainRouter.use(chronoRouter);
 brainRouter.use(fileMetaRouter);
 brainRouter.use(searchRouter);
 brainRouter.use(bulkRouter);
+brainRouter.use(ingestRouter);
 brainRouter.use(brainEventsRouter);
 brainRouter.use(embedJobsRouter);

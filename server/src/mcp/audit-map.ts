@@ -66,6 +66,7 @@ export const MCP_TOOL_OPERATIONS: Record<string, string | string[] | null> = {
   update_chrono: 'chrono.update',
   delete_chrono: 'chrono.delete',
   save_bulk: 'bulk.write',
+  ingest: 'brain.ingest',
   update_space: 'space.update',
   schema_update: 'space.update',
   save_space: 'space.create',
@@ -105,6 +106,7 @@ export const MCP_TOOL_OPERATIONS: Record<string, string | string[] | null> = {
   recall: 'brain.recall',
   graph_traverse: 'brain.traverse',
   space_stats: 'brain.stats',
+  ingest_status: 'brain.ingest.status',
   // Audited for the same reason `space_stats` is: it reports what a space CONTAINS — type names, edge labels
   // and counts. The REST route was not audited while `stats` was, which was an asymmetry rather than a
   // decision; both are now.

@@ -36,7 +36,8 @@ function traverseBounds(prop) {
 }
 
 describe('MCP tool schemas — universal invariants', () => {
-  it('exposes exactly 46 tools', () => {
+  // The count lives in the assertion alone: a title that repeats it is a second copy, and it had drifted to 46.
+  it('exposes exactly the tools the history below accounts for', () => {
     // 45 -> 46: `space_reembed`. It is not a NEW capability — `POST /api/spaces/:id/reembed` has always
     // backfilled records with no vector. It had no tool, and nobody could see that because the capability
     // map paired the route with `space_reindex`, which does the opposite thing. Prerequisites done: a
@@ -85,7 +86,9 @@ describe('MCP tool schemas — universal invariants', () => {
     // twin, in the same commit. It answered "who still writes the link arrays" so an operator could
     // convert with their eyes open; the arrays are gone, so the question has no subject. The array-write
     // pre-flight tool went with it for the same reason.
-    assert.equal(ALL_TOOLS.length, 45);
+    // 45 -> 47: `ingest` + `ingest_status` (`F-31`), with their REST twins `POST /api/brain/spaces/:spaceId/ingest`
+    // and `GET …/ingest/:runId` in the same commit; `TOOL_RIGHTS` and `audit-map.ts` rows beside them.
+    assert.equal(ALL_TOOLS.length, 47);
   });
 
   it('every tool advertises a closed object schema (type:object, additionalProperties:false)', () => {

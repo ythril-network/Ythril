@@ -286,6 +286,8 @@ export const ROUTE_RULES: RouteRule[] = [
 
   // ── Bulk write ───────────────────────────────────────────────────────────
   { method: 'POST',   pattern: /^\/api\/brain\/(?:spaces\/)?([^/]+)\/bulk$/,       operation: 'bulk.write',     spaceGroup: 1 },
+  { method: 'POST',   pattern: /^\/api\/brain\/(?:spaces\/)?([^/]+)\/ingest$/,     operation: 'brain.ingest',   spaceGroup: 1 },
+  { method: 'GET',    pattern: /^\/api\/brain\/(?:spaces\/)?([^/]+)\/ingest\/[^/]+$/, operation: 'brain.ingest.status', spaceGroup: 1, read: true },
 
   // ── Traverse ─────────────────────────────────────────────────────────────
   { method: 'POST',   pattern: /^\/api\/brain\/(?:spaces\/)?([^/]+)\/traverse$/,   operation: 'brain.traverse', spaceGroup: 1, read: true },

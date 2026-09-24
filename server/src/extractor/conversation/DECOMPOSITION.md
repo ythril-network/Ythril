@@ -34,6 +34,7 @@ Status, kept current per PR:
 | 9 assemble | **built**: 9.1 into the committed format (`existingEntities`, with id and type, the one product addition); 9.2 / 9.3 in the server, the benchmark re-exports it | `assemble.ts`, `../validate-extraction.ts` |
 | 10 write | **built**: through the batch door (`bulkWrite`), never the bare writers — entities, claims, chrono, edges, each step split at the door's cap; existing entities linked by id; transcripts per conversation and session via `files/store-file.ts`; `sourceTurns` returned, stored nowhere | `write-extraction.ts` |
 | end to end | phases 1–9 run in order with every model injected (`extractConversation`) | `extract.ts` |
+| 0 preconditions + the door | **built**: 0.1 the group ships in every library (seeded at start); 0.2 refused with `409` before any model call, naming the missing types and models; `ingest` / `ingest_status` on both doors, runs in memory | `../ingest.ts`, `../ingest-door.ts`, `../ingest-runs.ts`, `../../config/shipped-library-entries.ts` |
 | the decision client | **built**: Jev (System One) or the assist model, answers checked by code | `../decide.ts` |
 | everything else | decomposed, not built | — |
 
