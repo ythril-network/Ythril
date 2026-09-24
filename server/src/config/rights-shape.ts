@@ -25,7 +25,7 @@ export type Rung = 'none' | 'read' | 'write' | 'admin';
  * one level deeper. Exported as a tuple so `z.enum` can consume it and there is one list rather than the four
  * hand-written copies that existed before.
  */
-export const SPACE_AREAS = ['knowledge', 'files', 'schema', 'dataQuality'] as const;
+export const SPACE_AREAS = ['knowledge', 'files', 'schema', 'dataQuality', 'networks'] as const;
 
 /** The four space-scoped areas. Instance capabilities are not here — they have no space to scope to. */
 export type SpaceArea = typeof SPACE_AREAS[number];
