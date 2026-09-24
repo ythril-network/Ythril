@@ -323,12 +323,17 @@ GET /api/networks/:id/sync-history?limit=20
       "completedAt": "2026-03-26T12:00:02.500Z",
       "status": "success",
       "pulled": { "facts": 5, "entities": 2, "edges": 1, "files": 0 },
-      "pushed": { "facts": 3, "entities": 0, "edges": 0, "files": 1 },
-      "errors": []
+      "pushed": { "facts": 3, "entities": 0, "edges": 0, "files": 1 }
     }
   ]
 }
 ```
+
+**`status` says whether every member's transfers completed.** `success` means each member was reached and every
+transfer finished; `partial` means some members did not; `failed` means none did. A member counts as not
+completed when any of its transfers was refused or cut short (a `403`, a failed batch, no peer token), and
+`errors` then names the member, the space, the direction and the transfers that stopped. `errors` is present
+only when something failed.
 
 `limit` defaults to 20, max 100. Ordered most-recent-first. The last 100 records per network are retained; older entries are pruned automatically.
 

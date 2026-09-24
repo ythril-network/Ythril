@@ -166,6 +166,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   withdraws its spaces. The joining side also no longer hands over an all-spaces token when the network carries no
   spaces — it reaches none.
 
+- **A sync cycle whose transfers were refused is no longer recorded as a success** (`Q-48`). A refused or
+  cut-short transfer held its watermark and logged a warning, and the cycle still counted the member as synced —
+  so a network answering `403` on every request showed `success` in its history, `1 ok, 0 errors` in the log and
+  a healthy page, while nothing had transferred since it was created. Such a member now fails the cycle
+  (`partial` or `failed`), the history's `errors` names the space, direction and transfers that stopped, and the
+  member's consecutive-failure count rises, so a peer that stays refused reaches the unreachable warning. A member
+  with no peer token is reported the same way instead of being skipped silently.
+
 - **A stored rights matrix missing an area read as reaching the space** (`reachesSpace`). The check compared each
   area's rung to `none`, and a missing area is `undefined`, which is not `none` — so a matrix without an area
   reached every space it had a row or floor for. Latent until an area was added; a missing area is now `none`.
