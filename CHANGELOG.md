@@ -153,6 +153,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Joining a second network with the same peer no longer cuts off the first** (`Q-47`). Each instance keeps one
+  token per peer, and every handshake replaced it with a token that reached only the network being joined — so the
+  moment two instances shared a second network, every push and pull on the first answered `403`, in both
+  directions, with nothing logged as an error. A peer token now reaches every network the two instances share; each
+  request is still admitted only to the spaces of networks the peer is a member of, so leaving one network still
+  withdraws its spaces. The joining side also no longer hands over an all-spaces token when the network carries no
+  spaces — it reaches none.
+
 - **A stored rights matrix missing an area read as reaching the space** (`reachesSpace`). The check compared each
   area's rung to `none`, and a missing area is `undefined`, which is not `none` — so a matrix without an area
   reached every space it had a row or floor for. Latent until an area was added; a missing area is now `none`.
