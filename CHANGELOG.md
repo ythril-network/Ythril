@@ -141,6 +141,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Internal
 
+- **The conversation extractor describes each entity from its own claims** (`F-31`, 4.10,
+  `describe-entities.ts`). Each description is written once, at the end, and the assist model is handed only
+  the claims that name the entity. It is checked like a claim and gets one rewrite. If it still fails, the
+  entity's first claim is used as the description, because the format requires every entity to have one.
+
 - **The conversation extractor tracks change over time** (`F-31`, 7.1–7.6, `change.ts`). Each claim is compared
   with the few earlier claims that share an entity with it. The decision model is asked four things:
   - whether the situation was replaced, simply ended, or is unchanged;
