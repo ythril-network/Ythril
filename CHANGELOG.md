@@ -153,6 +153,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Internal
 
+- **The conversation extractor writes what it found** (`F-31`, phase 10, `extractor/conversation/write-extraction.ts`).
+  The server port of the benchmark's `write-space.mjs`, over the batch door rather than the bare record
+  writers, so an ingested record meets the same schema, linkage and flag rules as any other write. An
+  entity the space already held is linked by id; the validator now accepts those keys and requires a UUID.
 - **Every door writes a file through one sequence** (`files/store-file.ts`, `storeFile` / `recordStoredFile`):
   quota, bytes, metadata, the processing queue and the webhook. The REST upload (single and chunked) and MCP
   `write_file` each held a copy, and `ingest` was about to be the third. The hash-hand-over gate now asserts

@@ -76,7 +76,7 @@ describe('9.1 the assembled extraction', () => {
     r.existing = [{ id: 'x9', name: 'Caroline', type: 'person', source: 'space', aliases: [] }];
     r.claims[0].entityIds.push('x9');
     const x = assembleExtraction(r);
-    assert.deepEqual(x.existingEntities, [{ key: 'caroline', id: 'x9' }]);
+    assert.deepEqual(x.existingEntities, [{ key: 'caroline', id: 'x9', type: 'person' }]);
     assert.ok(x.claims[0].entities.includes('caroline'));
     assert.ok(!x.entities.some(e => e.key === 'caroline'), 'not re-created');
   });
