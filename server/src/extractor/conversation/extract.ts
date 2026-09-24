@@ -8,8 +8,7 @@
  * What it returns besides the extraction: every judgement with its raw answers (so a threshold can be measured
  * and changed without asking again), the claims that were dropped and why, and the turns no claim covers.
  *
- * Not yet here: 2.5's one-claim rule for pasted material (pasted turns are kept out of mention finding and
- * covered by their exchange's claim), and 4.7 (a merge that dates rule out).
+ * Not yet here: 4.7 (a merge that dates rule out).
  */
 import type { Question } from '../decide.js';
 import type { Decision } from '../decide.js';
@@ -106,7 +105,7 @@ export async function extractConversation(
     const session = sessionOf.get(x.turnIds[0]!)!;
     const outcome = await writeClaim({
       sessionDate: session.date,
-      turns: xTurns.map(t => ({ id: t.id, speaker: t.speaker, speech: t.speech })),
+      turns: xTurns.map(t => ({ id: t.id, speaker: t.speaker, speech: t.speech, ...(t.pasted ? { pasted: true } : {}) })),
       ridesAlong: x.ridesAlong,
       dates,
       entities: [...new Set(x.turnIds.flatMap(id => [...(namesByTurn.get(id) ?? [])]))],

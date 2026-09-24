@@ -99,3 +99,28 @@ describe('write, lint, check', () => {
     assert.match(JSON.stringify(j.calls[0].questions.supported.instructions), /adopted a cat named Luna/);
   });
 });
+
+describe('2.5 pasted material yields one claim about the paste, never its contents', () => {
+  const pasted = 'CLINICAL NOTE. Patient presents with elevated markers. '.repeat(40);
+  const pasteExchange = {
+    sessionDate: '2023-05-10',
+    turns: [{ id: 's1:5', speaker: 'Ada', speech: `Can you explain this? ${pasted}`, pasted: true }],
+    ridesAlong: [],
+    dates: [],
+    entities: ['Ada'],
+  };
+
+  it('the writer is told it is pasted material, and shown a bounded preview rather than the document', async () => {
+    const w = writer('Ada shared a clinical note and asked for it to be explained.');
+    await writeClaim(pasteExchange, { write: w.write, decide: judge(0.9).decide });
+    assert.match(w.calls[0].user, /pasted/i);
+    assert.ok(w.calls[0].user.length < pasted.length, 'the whole paste is not handed to the writer');
+    assert.match(w.calls[0].system, /pasted/i, 'the rule is in the instructions, not left to the model');
+  });
+
+  it('a turn that is not pasted is handed over whole, as before', async () => {
+    const w = writer('Ada adopted a cat named Luna on 9 May 2023.');
+    await writeClaim(exchange, { write: w.write, decide: judge(0.9).decide });
+    assert.doesNotMatch(w.calls[0].user, /pasted/i);
+  });
+});

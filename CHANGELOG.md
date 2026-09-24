@@ -139,6 +139,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A document pasted into an ingested conversation could be mined into claims** (`F-31`, 2.5). The claim
+  writer now sees a pasted turn marked as material the speaker brought, as a bounded preview, under a rule to
+  say what was shared and asked — never to state its contents as facts. A pasted document also no longer sets
+  the size of the writer's prompt.
 - **An ingested conversation with an assistant in it filed the assistant's facts as the person's** (`F-31`,
   5.4 / 5.5). A claim took the speaker of its exchange's first turn, so a restaurant or a dosage an assistant
   supplied became something the person said — and a speaker named `assistant` failed the whole ingest at
