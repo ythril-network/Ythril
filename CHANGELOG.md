@@ -165,6 +165,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Checking.** A written claim is refused if a resolved date is missing, if it opens with a pronoun, or if
     it carries turn or session references.
   - **Coverage.** Every turn ends up in some claim's source turns, and an exchange with no claim is reported.
+  - **Linking.** A claim is linked to the entities it names among those its turns mention. A thing
+    mentioned once is minted when a claim names it; a turn that merely falls inside a claim is not enough.
 
 - **The conversation extractor judges its entities** (`F-31`, 4.12 / 4.2 / 4.4 / 4.6, `judge-entities.ts`).
   - **What is asked.** Per turn, one request asks the decision model about every mention: is it a thing the

@@ -13,6 +13,7 @@
  */
 import type { Question } from '../decide.js';
 import type { Decide, JudgementRecord } from './judge-turns.js';
+import type { EntityJudgement, RunEntity } from './judge-entities.js';
 
 export interface ExchangeSession {
   key: string;
@@ -110,4 +111,36 @@ export function coverTurns<C extends { sourceTurns: string[] }>(
     owner.sourceTurns.sort((a, b) => x.turnIds.indexOf(a) - x.turnIds.indexOf(b));
   }
   return { claims: out, uncovered };
+}
+
+/**
+ * 5.6 — each claim linked to the entities it is ABOUT: mentioned in its `sourceTurns` AND named in its text,
+ * by name or alias. Made by this run, already in the space, or a speaker.
+ *
+ * Both halves, and the second is not decoration. Coverage (5.7) puts every turn in some claim, so "mentioned in
+ * the claim's turns" alone would link everything said near it — and would make 4.8 vacuous, because every
+ * unreturned thing would then be linked by the claim that happened to cover its turn. The writer was handed
+ * the names (5.2), so a claim about a thing names it.
+ *
+ * It also finishes 4.8: a thing mentioned once is minted if a claim names it; one no claim names stays out.
+ */
+export function linkClaims<C extends { text: string; sourceTurns: string[] }>(
+  claims: C[],
+  judged: Pick<EntityJudgement, 'entities' | 'unreturned' | 'matchedExisting' | 'speakers'>,
+): { claims: (C & { entityIds: string[] })[]; minted: RunEntity[] } {
+  const all: { id: string; name: string; aliases: string[]; mentions: { turnId: string }[] }[] =
+    [...judged.entities, ...judged.unreturned, ...judged.matchedExisting, ...judged.speakers];
+  const byTurn = new Map<string, Set<string>>();
+  for (const e of all) for (const m of e.mentions) (byTurn.get(m.turnId) ?? byTurn.set(m.turnId, new Set()).get(m.turnId)!).add(e.id);
+  const byId = new Map(all.map(e => [e.id, e]));
+  const named = (text: string, e: { name: string; aliases: string[] }) => {
+    const t = text.toLowerCase();
+    return [e.name, ...e.aliases].some(n => n.length > 1 && t.includes(n.toLowerCase()));
+  };
+  const linked = claims.map(c => ({
+    ...c,
+    entityIds: [...new Set(c.sourceTurns.flatMap(t => [...(byTurn.get(t) ?? [])]))].filter(id => named(c.text, byId.get(id)!)),
+  }));
+  const used = new Set(linked.flatMap(c => c.entityIds));
+  return { claims: linked, minted: [...judged.entities, ...judged.unreturned.filter(e => used.has(e.id))] };
 }

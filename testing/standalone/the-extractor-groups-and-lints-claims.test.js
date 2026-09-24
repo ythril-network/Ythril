@@ -84,3 +84,24 @@ describe('5.7 every turn appears in some claim', () => {
     assert.deepEqual(r.uncovered, ['s1:2', 's1:3']);
   });
 });
+
+describe('5.6 a claim links the entities its turns mention — and a linked single mention is minted after all (4.8)', () => {
+  let linkClaims;
+  before(async () => { ({ linkClaims } = await import('../../server/dist/extractor/conversation/claims.js')); });
+  const judged = {
+    entities: [{ id: 'run:0', name: 'Luna', type: 'animal', group: false, aliases: [], mentions: [{ turnId: 's1:1' }, { turnId: 's2:4' }] }],
+    unreturned: [{ id: 'run:1', name: 'Dune', type: 'work', group: false, aliases: [], mentions: [{ turnId: 's1:2' }] },
+      { id: 'run:2', name: 'Paris', type: 'place', group: false, aliases: [], mentions: [{ turnId: 's9:9' }] }],
+    matchedExisting: [{ id: 'x9', name: 'Caroline', type: 'person', source: 'space', aliases: [], mentions: [{ turnId: 's1:2' }] }],
+    speakers: [{ id: 'speaker:Ada', name: 'Ada', type: 'person', group: false, aliases: [], mentions: [{ turnId: 's1:1' }] }],
+  };
+  it('links what the claim NAMES among what its turns mention — made, existing or a speaker', () => {
+    const r = linkClaims([{ text: 'Ada lent Caroline her copy of Dune.', sourceTurns: ['s1:1', 's1:2'] }], judged);
+    assert.deepEqual(r.claims[0].entityIds.sort(), ['run:1', 'speaker:Ada', 'x9'], 'Luna was mentioned nearby but the claim is not about her');
+  });
+  it('an unreturned thing a claim names is minted; one merely in a covered turn is not', () => {
+    assert.deepEqual(linkClaims([{ text: 'Ada read Dune.', sourceTurns: ['s1:2'] }], judged).minted.map(e => e.id).sort(), ['run:0', 'run:1']);
+    assert.deepEqual(linkClaims([{ text: 'Ada was busy.', sourceTurns: ['s1:2'] }], judged).minted.map(e => e.id), ['run:0'],
+      'coverage put the turn in this claim; that alone must not mint what was said in it');
+  });
+});
