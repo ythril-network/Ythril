@@ -69,7 +69,8 @@ const claimRef = (c: { key?: string }, i: number) => c.key ?? `claim#${i}`;
 export async function writeExtraction(
   spaceId: string,
   extraction: Extraction,
-  opts: { schemaEntries: SchemaEntry[]; claimType: string },
+  /** `transcripts: false` writes the records and no files — for a caller that may not write files. */
+  opts: { schemaEntries: SchemaEntry[]; claimType: string; transcripts: boolean },
   writers: ExtractionWriters = DOOR,
 ): Promise<WriteOutcome> {
   // Refused before a single record is written — a half-written conversation is worse than none.
@@ -151,7 +152,7 @@ export async function writeExtraction(
   })), i => edges[i] && `${edges[i]!.from} ${edges[i]!.label} ${edges[i]!.to}`);
 
   /* ── transcripts ── by SESSION, not by day: several sessions can share a date (`validateExtraction` refuses a collision). */
-  for (const s of extraction.sessions ?? []) {
+  for (const s of opts.transcripts ? extraction.sessions ?? [] : []) {
     if (!s.text) continue;
     const sessionKey = s.key ?? s.date;
     const said = claims.flatMap((c, i) => ((c.session ?? c.statedOn) === sessionKey ? [[c, i] as const] : []));

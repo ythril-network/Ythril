@@ -4,6 +4,7 @@ import { save_factTool, update_factTool, delete_factTool } from './fact.js';
 import { recallTool, find_similarTool } from './search.js';
 import { queryTool } from './filter.js';
 import { save_bulkTool } from './bulk.js';
+import { ingestTool, ingest_statusTool } from './ingest.js';
 import { graph_mergeTool, save_entityTool, update_entityTool, delete_entityTool } from './entity.js';
 import { save_edgeTool, graph_traverseTool, update_edgeTool, delete_edgeTool } from './edge.js';
 import { save_linkTool, delete_linkTool } from './link.js';
@@ -66,6 +67,8 @@ export const ALL_TOOLS: ToolHandler[] = [
   delete_space_dataTool,
   list_tokensTool,
   save_bulkTool,
+  ingestTool,
+  ingest_statusTool,
   network_peersTool,
   network_syncTool,
   list_embed_jobsTool,

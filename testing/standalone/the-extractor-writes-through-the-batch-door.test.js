@@ -81,7 +81,7 @@ function fakeDoor({ refuse = () => false } = {}) {
   };
 }
 
-const write = (door, x = extraction()) => writeExtraction('space-1', x, { schemaEntries: SCHEMA, claimType: CLAIM_TYPE }, door.writers);
+const write = (door, x = extraction()) => writeExtraction('space-1', x, { schemaEntries: SCHEMA, claimType: CLAIM_TYPE, transcripts: true }, door.writers);
 
 describe('the validator knows the entities a space already holds', () => {
   it('an existing entity key is an entity key, and its id must be one', () => {
@@ -157,6 +157,14 @@ describe('phase 10: through the batch door, in order', () => {
     assert.deepEqual(door.files[0].opts.meta.tags, ['transcript']);
     assert.equal(door.files[0].links.linkFacts.length, 2, 'the two claims stated that day');
     assert.ok(door.files[0].links.linkEntities.includes(EXISTING));
+  });
+
+  it('transcripts are written only when the caller may write files', async () => {
+    const door = fakeDoor();
+    const r = await writeExtraction('space-1', extraction(), { schemaEntries: SCHEMA, claimType: CLAIM_TYPE, transcripts: false }, door.writers);
+    assert.equal(door.files.length, 0);
+    assert.equal(r.written.transcripts, 0);
+    assert.equal(door.calls.length, 4, 'the records are still written');
   });
 
   it('sourceTurns come back keyed by record id, and nothing else carries them', async () => {

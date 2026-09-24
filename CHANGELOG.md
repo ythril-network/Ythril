@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`ingest`: a conversation in, records out** (`F-31`; `POST /api/brain/spaces/:spaceId/ingest` and
+  `GET …/ingest/:runId`, MCP `ingest` and `ingest_status`). A raw conversation (`sessions`) runs every phase of
+  the conversation extractor; an extraction already made (`extraction`) is validated and written with no model.
+  It answers `202` with a run id at once and the run is read back: phase, counts written, claims dropped and
+  why, turns no claim covers, which backends answered. Refused with `409` BEFORE any model is paid for when the
+  space lacks the `conversation` group or, for a raw conversation, a decision model, the assist model or the
+  `doc-nlp` sidecar — each refusal names what to change. Every record goes through the batch door's rules;
+  transcripts are files, so they are written only for a token that also holds `files: write`. Runs are held in
+  memory. See the integration guide's Ingest page.
+- **The Schema Library ships the `conversation` group** — the types the extractor writes — seeded into every
+  instance at start, first run included. Seeding adds a missing entry by name and never replaces one, so an
+  operator's edit is kept. Apply it to a space with **Apply group to space**.
 - **A batch answers with the ids its keys were given** (`refs` on `POST /bulk` and `save_bulk`). An item's
   `$ref` key was resolved inside the call and thrown away, so a caller that needed the new ids read the
   space back by text. The response now carries `{ "post-1": { id, kind } }`, one row per key whose item
@@ -153,6 +165,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Internal
 
+- **The server build copies `src/**/*.json` into `dist/`** (`server/scripts/copy-src-assets.mjs`). `tsc` emits
+  JavaScript only and the image ships `dist` only, so a data file under `src` did not exist at runtime; an empty
+  copy fails the build.
 - **The conversation extractor writes what it found** (`F-31`, phase 10, `extractor/conversation/write-extraction.ts`).
   The server port of the benchmark's `write-space.mjs`, over the batch door rather than the bare record
   writers, so an ingested record meets the same schema, linkage and flag rules as any other write. An

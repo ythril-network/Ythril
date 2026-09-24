@@ -157,6 +157,7 @@ Audit entries are recorded for all write operations and (when `logReads` is enab
 | Link | `link.create`, `link.delete` |
 | Chrono | `chrono.create`, `chrono.update`, `chrono.delete`, `chrono.list` |
 | Bulk | `bulk.write` — one entry for the whole call, not one per record |
+| Ingest | `brain.ingest` — one entry for the start of a run; `brain.ingest.status` (a read, recorded only with `logReads`) |
 | File | `file.create`, `file.update`, `file.delete`, `file.read`, `file.list`, `file.mkdir`, `file.meta.update`, `file.retry_embedding`, `file.retry_embedding_all` |
 | Space | `space.create`, `space.update`, `space.delete`, `space.wipe`, `space.list`, `space.rename`, `space.reorder`, `space.reindex`, `space.indexes.rebuild`, `space.embeddings.reembed`, `space.activity.reset`, `space.schema.update`, `space.schema.delete`, `space.schema.validate` |
 | Token | `token.create`, `token.update`, `token.regenerate`, `token.delete` |

@@ -150,6 +150,10 @@ export const ROUTE_RIGHTS: readonly RouteRight[] = [
   // `bulk` can create OR delete, so it takes the higher rung of what it can do rather than of what it is
   // usually used for. A bulk endpoint gated at `write` is a delete endpoint with a friendly name.
   { route: '/api/brain/spaces/:spaceId/bulk', method: 'POST', area: 'knowledge', needs: 'write', scope: 'path' },
+  // `ingest` creates records and deletes nothing, so `write`. Its transcripts are FILES: they are written only for
+  // a token that also holds `files: write` (checked in `beginIngest`), never through this row alone.
+  { route: '/api/brain/spaces/:spaceId/ingest', method: 'POST', area: 'knowledge', needs: 'write', scope: 'path' },
+  { route: '/api/brain/spaces/:spaceId/ingest/:runId', method: 'GET', area: 'knowledge', needs: 'read', scope: 'path' },
   // COLLECTION-level deletes. Every one of these empties a whole record type in the space, and not one was
   // in the first draft of this list — the gate found them. They are the single most destructive thing in the
   // area and would have been the least governed.
@@ -305,6 +309,8 @@ export const TOOL_RIGHTS: readonly ToolRight[] = [
   { tool: 'similar', area: 'knowledge', needs: 'read' },
   { tool: 'graph_traverse', area: 'knowledge', needs: 'read' },
   { tool: 'save_bulk', area: 'knowledge', needs: 'write' },
+  { tool: 'ingest', area: 'knowledge', needs: 'write' },
+  { tool: 'ingest_status', area: 'knowledge', needs: 'read' },
   { tool: 'space_stats', area: 'knowledge', needs: 'read' },
   { tool: 'space_reindex', area: 'knowledge', needs: 'admin' },
   // The BACKFILL, priced with its route rather than with the other `write` mutations: it rewrites what

@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "local-connector:dev": "tsx watch src/local-agent-connector/index.ts",
-    "build": "tsc",
+    "build": "tsc && node scripts/copy-src-assets.mjs",
     "start": "node dist/index.js",
     "local-connector:start": "node dist/local-agent-connector/index.js"
   },

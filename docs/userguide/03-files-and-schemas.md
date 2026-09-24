@@ -265,6 +265,17 @@ Together they are how a space stops carrying its own definitions: export once to
 apply it back to that space and to every space that should match it. Doing this entry by entry is the
 same work with more clicks and more chances to miss one.
 
+**The group Ythril ships: `conversation`.** Every instance's library holds the types the conversation
+extractor writes — people, places, animals and the other things a conversation is about, the relationships
+between them, the dated events, and the `utterance` fact a claim is stored as. **Ingesting a conversation into a
+space needs every one of them**, and the way a space gets them is **Apply group to space** with the group
+`conversation`. Ingest never adds them itself; a space without them is refused before any model is asked, and
+the refusal names the types that are missing.
+
+You can edit a shipped entry and the edit is kept. A shipped entry you delete comes back the next time the
+instance starts, because ingest cannot run without it. They arrive published (globe on); unpublish them if your
+library endpoint should not offer them.
+
 **Publishing:** Click the globe icon on a card to make the entry visible to other Ythril instances. The icon turns accented when published. Click again to unpublish. No space data is ever exposed — only the schema definition.
 
 **Sharing your library:** The **Share This Library** panel shows your instance's **Public endpoint** URL. Click **Copy URL** to copy it. Other instances can paste this URL when adding a catalog link.

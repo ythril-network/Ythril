@@ -139,7 +139,7 @@ are the shapes this door replaces, and they are documented on their own pages.
 
 ### Read-Only Tokens
 
-When connecting with a `readOnly` token, mutating tools (`save_fact`, `update_fact`, `delete_fact`, `save_entity`, `update_entity`, `delete_entity`, `graph_merge`, `save_edge`, `update_edge`, `delete_edge`, `save_link`, `delete_link`, `save_chrono`, `update_chrono`, `delete_chrono`, `save_bulk`, `write_file`, `delete_file`, `create_dir`, `move_file`, `retry_embed_file`, `retry_embed_record`, `retry_embed_media`, `update_file_meta`, `network_sync`, `update_space`, `schema_update`, `save_space`, `space_reindex`, `space_reembed`, `delete_space_data`) are **hidden** from `tools/list` and rejected with an error if called directly. Read-only tools (`help`, `recall`, `similar`, `query`, `space_stats`, `space_meta`, `list_spaces`, `read_file`, `list_dir`, `traverse`, `list_embed_jobs`, `delete_entity_preview`) work normally. `list_tokens` is read-only but **admin-gated**, like `network_peers`. `network_peers` is read-only but **admin-gated** — see the admin-only note below.
+When connecting with a `readOnly` token, mutating tools (`save_fact`, `update_fact`, `delete_fact`, `save_entity`, `update_entity`, `delete_entity`, `graph_merge`, `save_edge`, `update_edge`, `delete_edge`, `save_link`, `delete_link`, `save_chrono`, `update_chrono`, `delete_chrono`, `save_bulk`, `ingest`, `write_file`, `delete_file`, `create_dir`, `move_file`, `retry_embed_file`, `retry_embed_record`, `retry_embed_media`, `update_file_meta`, `network_sync`, `update_space`, `schema_update`, `save_space`, `space_reindex`, `space_reembed`, `delete_space_data`) are **hidden** from `tools/list` and rejected with an error if called directly. Read-only tools (`help`, `recall`, `similar`, `query`, `space_stats`, `space_meta`, `list_spaces`, `read_file`, `list_dir`, `traverse`, `list_embed_jobs`, `delete_entity_preview`, `ingest_status`) work normally. `list_tokens` is read-only but **admin-gated**, like `network_peers`. `network_peers` is read-only but **admin-gated** — see the admin-only note below.
 
 ### Connecting
 
@@ -325,6 +325,8 @@ row survives its own tool being built, so the list cannot keep advertising a gap
 | `update_chrono` | Update an existing chrono entry, including `suppressEmbeddings`. Requires at least one field beyond `id` |
 | `delete_chrono` | Delete a chrono entry by ID |
 | `save_bulk` | Batch-upsert facts, entities, edges, and/or chrono entries in a single call (schema-validated) |
+| `ingest` | Turn a conversation into records — entities, claims, dated events, edges and transcripts. Answers at once with a `runId`; see [Ingest API](04i-ingest-api.md) |
+| `ingest_status` | Read an ingest run: its phase, what it wrote, what it dropped and why |
 | `read_file` | Read a text file from the space file store |
 | `write_file` | Write a file to the space file store, as text or as bytes. `content` is UTF-8 text by default; set `encoding: "base64"` for an image, a PDF or anything else that is not text, and base64 that is not base64 is refused rather than decoded as far as it goes. **The ceiling is the request, not the file store:** a tool call arrives as one JSON body capped at 10 MB and base64 costs a third more than the bytes it carries, so about 7 MB of file fits — larger goes through [`POST /api/files/:spaceId`](05-files-api.md), which takes a raw body and supports chunked upload. Optional `description` and `tags` are stored as metadata |
 | `list_dir` | List directory contents |
@@ -646,6 +648,9 @@ only shape and the two are identical by construction.
 | | `graph_traverse` | `POST /api/brain/spaces/:spaceId/traverse` | read `knowledge` |
 | **Brain — bulk** | | | |
 | | `save_bulk` | `POST /api/brain/spaces/:spaceId/bulk` | write `knowledge` |
+| **Brain — ingest** | | | |
+| | `ingest` | `POST /api/brain/spaces/:spaceId/ingest` | write `knowledge` |
+| | `ingest_status` | `GET /api/brain/spaces/:spaceId/ingest/:runId` | read `knowledge` |
 | **Brain — ops** | | | |
 | | `space_stats` | `GET /api/brain/spaces/:spaceId/stats` | read `knowledge` |
 | | `space_reindex` | `POST /api/brain/spaces/:spaceId/reindex` | admin `knowledge` |
