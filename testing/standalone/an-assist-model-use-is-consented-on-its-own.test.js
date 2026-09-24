@@ -18,12 +18,13 @@ import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { trackedSources } from './_sources.mjs';
+import { stripComments } from './_strip-comments.mjs';
 
 let assistConsented;
 before(async () => { ({ assistConsented } = await import('../../server/dist/config/egress-consent.js')); });
 
 const base = { baseUrl: 'https://llm.example.com/v1' };
-const strip = s => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+const strip = stripComments;
 
 describe('each use has its own consent', () => {
   it('documents: acknowledgedHost, as it always was', () => {
