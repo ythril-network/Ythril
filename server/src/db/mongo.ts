@@ -192,12 +192,6 @@ export function isVectorSearchAvailable(): boolean {
   return _vectorSearchAvailable === true;
 }
 
-/** Reset the cached availability state (for testing). */
-export function _resetVectorSearchCache(): void {
-  _vectorSearchAvailable = null;
-  _vectorSearchDetails = '';
-}
-
 /** Reset the active database name (for testing). */
 export function _resetDbName(): void {
   _dbName = '';

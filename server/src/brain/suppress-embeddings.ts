@@ -96,9 +96,6 @@ export function recordNotSuppressedFilter(): Record<string, unknown> {
   return { [RECORD_SUPPRESS_FIELD]: { $ne: true } };
 }
 
-/** The one refusal text for a bad record-tier value, so both doors say the same thing. */
-export const RECORD_SUPPRESS_TYPE_ERROR = recordFlagTypeError(RECORD_SUPPRESS_FIELD);
-
 /**
  * Read the record tier out of a request body or a set of MCP tool args.
  *

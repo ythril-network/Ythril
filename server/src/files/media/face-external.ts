@@ -72,7 +72,6 @@ export async function detectFacesExternal(imageBytes: Buffer, expectedDims: numb
   const baseUrl = ext?.baseUrl?.trim();
   if (!baseUrl) return null;
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const apiKey = (getSecrets() as any)?.mediaEmbedding?.faceApiKey as string | undefined;
 
   try {

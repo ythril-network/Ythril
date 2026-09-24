@@ -56,11 +56,6 @@ import { spaceCollection } from '../db/space-collection.js';
  */
 let reindexJobRunning = false;
 
-/** Whether a job is running. Both surfaces read this rather than each keeping its own flag. */
-export function reindexRunning(): boolean {
-  return reindexJobRunning;
-}
-
 /** A refusal, carrying the status the contract suite pins. */
 export type ReindexRefusal = {
   status: 400 | 404 | 409;
@@ -159,7 +154,6 @@ export function startReindex(plan: ReindexPlan): void {
             // Re-embed facts
             {
               let cursor: string | null = null;
-              // eslint-disable-next-line no-constant-condition
               while (true) {
                 const q: Record<string, unknown> = cursor ? { _id: { $gt: cursor } } : {};
                 const batch: FactDoc[] = await col<FactDoc>(spaceCollection(mid, 'facts'))
@@ -186,7 +180,6 @@ export function startReindex(plan: ReindexPlan): void {
             // Re-embed entities (name + type + tags + description + properties)
             {
               let cursor: string | null = null;
-              // eslint-disable-next-line no-constant-condition
               while (true) {
                 const q: Record<string, unknown> = cursor ? { _id: { $gt: cursor } } : {};
                 const batch: EntityDoc[] = await col<EntityDoc>(spaceCollection(mid, 'entities'))
@@ -213,7 +206,6 @@ export function startReindex(plan: ReindexPlan): void {
             // Re-embed edges (tags + from-name + label + to-name + type + description + properties)
             {
               let cursor: string | null = null;
-              // eslint-disable-next-line no-constant-condition
               while (true) {
                 const q: Record<string, unknown> = cursor ? { _id: { $gt: cursor } } : {};
                 const batch: EdgeDoc[] = await col<EdgeDoc>(spaceCollection(mid, 'edges'))
@@ -243,7 +235,6 @@ export function startReindex(plan: ReindexPlan): void {
             // Re-embed chrono (type + status + title + tags + description + properties)
             {
               let cursor: string | null = null;
-              // eslint-disable-next-line no-constant-condition
               while (true) {
                 const q: Record<string, unknown> = cursor ? { _id: { $gt: cursor } } : {};
                 const batch: ChronoEntry[] = await col<ChronoEntry>(spaceCollection(mid, 'chrono'))
@@ -270,7 +261,6 @@ export function startReindex(plan: ReindexPlan): void {
             // Re-embed files (path + entity names + tags + description + property values)
             {
               let cursor: string | null = null;
-              // eslint-disable-next-line no-constant-condition
               while (true) {
                 // Exclude chunk records (parentFileId set) — they have their own embedding logic
                 const q: Record<string, unknown> = cursor

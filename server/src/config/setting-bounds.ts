@@ -156,7 +156,6 @@ export const ENV_TO_CONFIG_PATH = {
 export function dualDoorOrExit(envName: keyof typeof ENV_TO_CONFIG_PATH, raw: string): number {
   const checked = checkDualDoorValue(envName, raw);
   if (checked && !checked.ok) {
-    // eslint-disable-next-line no-console -- the logger imports the loader, which imports this file.
     console.error(`Configuration: ${checked.why}`);
     process.exit(1);
   }
@@ -211,7 +210,3 @@ export function isDualDoorEnv(name: string): name is keyof typeof ENV_TO_CONFIG_
   return Object.prototype.hasOwnProperty.call(ENV_TO_CONFIG_PATH, name);
 }
 
-/** The shared range for a config path, for whichever door is asking. */
-export function boundsFor(path: keyof typeof DUAL_DOOR_BOUNDS): SettingBound {
-  return DUAL_DOOR_BOUNDS[path];
-}

@@ -28,7 +28,6 @@ import { isInstanceAdmin } from './instance-admin.js';
 
 // Augment Express Request type
 declare global {
-  // eslint-disable-next-line @typescript-eslint/no-namespace
   namespace Express {
     interface Request {
       authToken?: Omit<TokenRecord, 'hash'> | OidcTokenRecord;

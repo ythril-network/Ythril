@@ -402,22 +402,6 @@ export async function docsFromCollection<T extends { _id: string }>(
 }
 
 /**
- * The ids of records that `ids` NAME, for this class — the link read forwards, in the LINK RECORD shape.
- *
- * The mirror of `linkedFromIds` on the `{from, fromKind, …}` index. Returned as pairs rather than a flat set
- * because the caller needs to know which record named which — a synthetic edge has two ends.
- */
-export async function linkedToPairs(
-  spaceId: string, cls: LinkClass, ids: readonly string[], limit?: number,
-): Promise<Array<{ from: string; to: string }>> {
-  const cursor = col<LinkDoc>(spaceCollection(spaceId, 'links'))
-    .find(asFilter<LinkDoc>({ from: { $in: [...ids] }, fromKind: cls.kind, toKind: cls.toKind }),
-          { projection: { from: 1, to: 1 } });
-  if (limit !== undefined) cursor.limit(limit);
-  return await cursor.toArray() as Array<{ from: string; to: string }>;
-}
-
-/**
  * Narrow a set of FROM ids to the ones the class's `scope` admits, by reading the records themselves.
  *
  * This is the chunk exclusion after a link-record lookup, and it is the step that is easy to leave out: a

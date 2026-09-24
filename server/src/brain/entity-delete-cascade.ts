@@ -154,10 +154,3 @@ export async function deleteEntityCascade(
   return { ok: true, removed };
 }
 
-/** The ids of the edges a cascade would remove — for a caller that wants the set without the token. */
-export async function cascadeEdgeIds(spaceId: string, entityId: string): Promise<string[]> {
-  const rows = await col<EdgeDoc>(spaceCollection(spaceId, 'edges'))
-    .find(asFilter<EdgeDoc>({ spaceId, $or: [{ from: entityId }, { to: entityId }] }), { projection: { _id: 1 } })
-    .toArray() as Array<{ _id: string }>;
-  return rows.map(r => r._id);
-}

@@ -409,7 +409,7 @@ export function buildSchemaSummary(meta: SpaceMeta): string {
   // an absent field as "not stated", so nothing rewrites it away; it is simply inert, and no request
   // can put a new one there.
   if (parts.length > 0) {
-    parts.push('Call get_space_meta for full schema and usage notes.');
+    parts.push('Call space_meta for full schema and usage notes.');
   }
   return parts.join('\n');
 }

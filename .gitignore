@@ -142,3 +142,6 @@ benchmarks/.cache/
 example.md
 gen-example.mjs
 __pycache__/
+
+# TypeScript emit (tsc without --noEmit) — build output, never source
+out-tsc/

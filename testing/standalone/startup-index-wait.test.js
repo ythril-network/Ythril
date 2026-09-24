@@ -146,7 +146,6 @@ describe('the readiness timeout is a parameter, and generous off the boot path',
       .exec(LIFECYCLE);
     assert.ok(m, 'startup timeout should be defined and env-overridable');
     m[1] = m[1] ?? m[2];
-    // eslint-disable-next-line no-eval
     const ms = eval(m[1].replaceAll('_', ''));
     assert.ok(ms >= 5 * 60_000, `expected a multi-minute ceiling, got ${ms}ms`);
   });

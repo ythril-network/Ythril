@@ -200,31 +200,3 @@ export interface QuotaCheckResult {
   softWarning: boolean;
 }
 
-/**
- * Check files storage quotas before a write operation.
- *
- * Checks:
- *  1. Global files hard limit (storage.files.hardLimitGiB): total bytes in data/files/
- *  2. Global files soft limit (storage.files.softLimitGiB): warn but allow
- *
- * @param incomingBytes estimated size of the incoming write (0 for a safe check with no addend)
- */
-export async function checkFilesQuota(incomingBytes: number): Promise<QuotaCheckResult> {
-  const fileLimits = getStorageConfig()?.files;
-  if (!fileLimits) return { allowed: true, softWarning: false };
-
-  const filesRoot = path.join(getDataRoot(), 'files');
-  const currentBytes = await getDirSizeBytes(filesRoot);
-  const projectedBytes = currentBytes + incomingBytes;
-
-  const GiB = 1024 ** 3;
-
-  if (fileLimits.hardLimitGiB !== undefined && projectedBytes > fileLimits.hardLimitGiB * GiB) {
-    return { allowed: false, softWarning: false };
-  }
-
-  const softWarning = fileLimits.softLimitGiB !== undefined
-    && currentBytes >= fileLimits.softLimitGiB * GiB;
-
-  return { allowed: true, softWarning };
-}

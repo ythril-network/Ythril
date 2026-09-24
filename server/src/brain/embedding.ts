@@ -74,7 +74,6 @@ export function prepareInput(
 const MAX_LOCAL_EMBED_CHARS = 8_000;
 
 // ── Local ONNX pipeline singleton ─────────────────────────────────────────
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 type LocalPipeline = (text: string, opts: Record<string, unknown>) => Promise<any>;
 
 let _pipelineInit: Promise<LocalPipeline> | null = null;

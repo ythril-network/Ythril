@@ -100,10 +100,10 @@ this is why you could not find it.
 
 What you CAN control, and where:
 
-- projection, on query AND recall AND find_similar. The field-selection lever,
+- projection, on filter AND recall AND similar. The field-selection lever,
   and it works on all three: naming the four fields you actually branch on
   turns a page of full record bodies into something you can read, and on the
-  two search tools it applies through the graph expansion as well. A bare query
+  two search tools it applies through the graph expansion as well. A bare filter
   over a dozen records with descriptions and properties is the cheapest way to
   overrun a context budget. Reach for this on an entity search rather than
   includeFileContent, which only drops file-passage bodies.
@@ -127,17 +127,13 @@ rerankScore > fusedScore > score, and minScore filters on score ALONE -- so on a
 instance with a reranker configured, the number that decided a result's position
 is rerankScore and the number you can threshold on is a different one. Read the
 highest of the three that is present to know why something placed where it did.
-- The other read tools return a formatted summary line per record rather than a
-  document. list_chrono and find_entities_by_name cost you an id, a name and a
-  type whatever the record holds, so there is nothing to trim.
 
-Rule of thumb: exact criteria you can name as a FIELD → query; meaning, or an
-exact TOKEN you can only find inside the text → recall; both → recall +
-tags/filter. (Before hybrid ranking, recall was a poor choice for exact tokens
-and this guide said so; it no longer holds.) find_similar finds records semantically near an EXISTING record;
-traverse walks the entity graph structurally (no semantics).`;
+Rule of thumb: exact criteria you can name as a FIELD → filter; meaning, or an
+exact TOKEN you can only find inside the text → recall; both → recall with its
+filter. similar finds records semantically near an EXISTING record;
+graph_traverse walks the entity graph structurally (no semantics).`;
 
-const SCHEMA_GUIDE = `Call get_space_meta(space) to see a space's purpose, typeSchemas, validation mode,
+const SCHEMA_GUIDE = `Call space_meta(space) to see a space's purpose, typeSchemas, validation mode,
 and entry counts — do this before writing into an unfamiliar space. A schema
 declares entity/record types and their expected properties. Validation modes:
 **off** (anything goes), **warn** (violations logged, write succeeds), **strict**
@@ -177,7 +173,7 @@ export function helpSections(
     id: 'spaces',
     title: 'Spaces accessible to this token',
     body: '',
-    preamble: 'Most tools take a "space" parameter; recall, find_similar and list_chrono search across all your spaces when it is '
+    preamble: 'Most tools take a "space" parameter; recall, similar and filter search across all your spaces when it is '
       /*
        * This used to read "Call list_spaces for storage/quota details" while `list_spaces` returned counts and
        * nothing else. A caller who read the authoritative reference and believed it found no storage anywhere

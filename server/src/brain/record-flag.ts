@@ -143,7 +143,3 @@ export function applyRecordFlags(doc: RecordFlags, opts?: RecordFlags): void {
   }
 }
 
-/** Mongo fragment matching the records that have NOT been retired. */
-export function notSupersededFilter(): Record<string, unknown> {
-  return { [RECORD_SUPERSEDED_FIELD]: { $ne: true } };
-}

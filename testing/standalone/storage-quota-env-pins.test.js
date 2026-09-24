@@ -146,7 +146,6 @@ describe('storage quota env pins', () => {
     // A resolver nothing calls is decoration. Each of these read `cfg.storage` directly before.
     const CONSUMERS = [
       ['server/src/quota/quota.ts', /const storage = getStorageConfig\(\)/],
-      ['server/src/files/files.ts', /const fileLimits = getStorageConfig\(\)\?\.files/],
       ['server/src/metrics/registry.ts', /const storage = getStorageConfig\(\)/],
       ['server/src/api/spaces.ts', /const resolvedStorage = getStorageConfig\(\)/],
     ];

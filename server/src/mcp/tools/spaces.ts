@@ -191,7 +191,6 @@ export const space_metaTool: ToolHandler = {
       chrono: await col(spaceCollection(mid, 'chrono')).countDocuments(),
       files: await col(spaceCollection(mid, 'files')).countDocuments(),
     })));
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { buildErModel: buildMetaErModel } = await import('../../brain/er-model.js');
     const metaActual = await Promise.all(metaMemberIds.map(mid => buildMetaErModel(mid)));
     const { previousVersions: _pv, ...metaPublic } = metaBlock;

@@ -537,9 +537,6 @@ export const wakeEmbedWorkers = (): void => _signal.wake();
 /** Test seam: forget the probe hint, forcing the next claim to scan every space. */
 export const resetEmbedPendingHint = (): void => _signal.reset();
 
-/** Exported for the job doc's own sake — see `asDoc` usage in tests that seed jobs directly. */
-export const _asEmbedJobDoc = asDoc<BrainEmbedJobDoc>;
-
 /**
  * Offer a record that arrived from a peer to THIS instance's embedder.
  *

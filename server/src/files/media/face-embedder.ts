@@ -49,7 +49,7 @@ import { spaceCollection } from '../../db/space-collection.js';
 // ── Singleton Human instance (lazy init) ──────────────────────────────────
 
 type HumanInstance = {
-  tf: any; // eslint-disable-line @typescript-eslint/no-explicit-any
+  tf: any;
   load(): Promise<void>;
   detect(input: unknown): Promise<Result>;
 };
@@ -65,9 +65,6 @@ let _humanLoading: Promise<HumanInstance> | null = null;
  * thousands of identical lines and bury the one an operator needs to read.
  */
 let warnedFallbackDisabled = false;
-
-/** Test seam: the latch would otherwise make the second test in a file assert nothing. */
-export function resetFallbackWarning(): void { warnedFallbackDisabled = false; }
 
 async function getHuman(): Promise<HumanInstance> {
   if (_human) return _human;
@@ -125,7 +122,6 @@ async function getHuman(): Promise<HumanInstance> {
       segmentation: { enabled: false },
     };
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const instance = new (Human as any)(humanCfg) as HumanInstance;
     log.info('Face recogniser: loading models…');
     await instance.load();
@@ -225,7 +221,6 @@ async function gallerySearch(
 }
 
 // ── Public API ─────────────────────────────────────────────────────────────
-
 
 /**
  * Detect all faces in an image and persist one face-chunk record per face.

@@ -177,8 +177,9 @@ describe('NOTICE covers everything we redistribute', () => {
     // something actually installed. 43 headings, and it found exactly one stale entry.
     const stale = [];
     for (const heading of [...NOTICE.matchAll(/^### (.+)$/gm)].map(m => m[1].trim())) {
-      // Headings that are not packages: licence texts, pulled images, model weights, the typeface, Ythril itself.
-      if (/^(MIT|Apache License|BSD-|ISC|0BSD|Runtime Dependency|Bundled model|Inter |Ythril|SIL |Mozilla|Eclipse|GNU)/i.test(heading)) continue;
+      // Headings that are not packages: licence texts, pulled images, model weights, the typeface, Ythril itself,
+      // and code VENDORED into ours — copied, not installed, so the attribution stays after the package goes.
+      if (/^(MIT|Apache License|BSD-|ISC|0BSD|Runtime Dependency|Bundled model|Inter |Ythril|SIL |Mozilla|Eclipse|GNU|Vendored:)/i.test(heading)) continue;
       // One heading may list several packages, and several carry a parenthetical gloss —
       // `mongodb (Node.js Driver)`, `jszip (transitive, via exceljs)`. ANY trailing parenthetical is stripped
       // rather than a hardcoded list of the two that exist today: the third one would otherwise fail the gate for

@@ -66,20 +66,6 @@ export type FilterExpression = Record<string, FilterOperator>;
 export const ALLOWED_FILTER_KEY_PREFIXES =
   ['properties.', 'tags', 'type', 'name', 'status', 'label', 'superseded'] as const;
 
-/**
- * Does this key reach an allowed path? The three clauses are the rule, and they are not obvious:
- * an exact match, a dotted path under a bare prefix, and a `properties.`-style prefix that already ends in
- * a dot. A copy that dropped the third would silently refuse every property filter.
- */
-export const filterKeyAllowed = (key: string): boolean =>
-  ALLOWED_FILTER_KEY_PREFIXES.some(
-    p => key === p || key.startsWith(p + '.') || (p.endsWith('.') && key.startsWith(p)),
-  );
-
-/** The prefixes as an operator reads them, built from the list so the refusal cannot describe a stale set. */
-export const allowedFilterKeysSentence = (): string =>
-  ALLOWED_FILTER_KEY_PREFIXES.map((p, i, all) => (i === all.length - 1 ? `or ${p}` : p)).join(', ');
-
 /*
  * The key-shape guard lives in `brain/filter-sanitizer.ts`, with the operator refusals and the ReDoS
  * check, because all three answer one question — *what may this filter do to the database?* — and both
@@ -236,6 +222,5 @@ export function toNativeVectorFilter(
   if (clauses.length === 0) return null;
   return clauses.length === 1 ? clauses[0] : { $and: clauses };
 }
-
 
 /** Derive the text to embed for a fact (tags + entity names + fact + description + properties). */

@@ -62,14 +62,7 @@ export async function verifyToken(token: string, hash: string): Promise<boolean>
 // bcrypt.compare() is intentionally slow; cache successful verifications to
 // avoid O(n×bcrypt) cost on every authenticated request.
 const _tokenCache = new Map<string, { tokenId: string; expiresAt: number }>();
-const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
-
-/** Invalidate the in-memory cache entry for a given token plaintext.
- *  Call when revoking or rotating a token. */
-export function invalidateTokenCache(plaintext: string): void {
-  _tokenCache.delete(plaintext);
-}
-
+const CACHE_TTL_MS = 5 * 60 * 1000;
 /** Clear the entire token verification cache.
  *  Called on config reload so revoked tokens aren't honoured from cache. */
 export function clearTokenCache(): void {
@@ -336,7 +329,6 @@ export function listTokens(): (Omit<TokenRecord, 'hash'> & { rateLimitEffective:
     rateLimitEffective: resolveLimitFor(rest),
   }));
 }
-
 
 /** Rename a token — updates only its human-readable label (`name`); the secret and scope are untouched. */
 /**

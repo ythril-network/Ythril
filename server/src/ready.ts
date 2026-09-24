@@ -101,12 +101,6 @@ export interface ReadinessResult {
 let _cached: ReadinessResult | null = null;
 let _cachedAt = 0;
 
-/** Exposed only for unit tests — resets the cache */
-export function _resetCache(): void {
-  _cached = null;
-  _cachedAt = 0;
-}
-
 // ── Individual checks ─────────────────────────────────────────────────────────
 
 async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {

@@ -559,7 +559,6 @@ export class EntryPopupComponent {
     id: string,
     body: Record<string, unknown>,
   ): import('rxjs').Observable<unknown> {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const b = body as any;
     switch (this.recordType) {
       case 'entity':

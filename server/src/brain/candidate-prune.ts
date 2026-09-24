@@ -177,3 +177,4 @@ export function startCandidatePrune(): void {
 export function stopCandidatePrune(): void {
   if (_timer) { clearInterval(_timer); _timer = null; }
 }
+

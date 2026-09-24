@@ -1757,17 +1757,12 @@ export interface TombstoneDoc {
 export interface FileTombstoneDoc {
   _id: string;         // UUID
   spaceId: string;
-  /** Relative path (same convention as ManifestEntry.path). NOTE: a path is often personal in itself, so this
-   *  record outliving the file means the file's NAME survives its deletion. That is the reason retention here
-   *  matters, and it is not bounded yet — see below. */
+  /** Relative path (same convention as ManifestEntry.path). A path is often personal in itself, so this record
+   *  outliving the file means the file's NAME survives its deletion — which is why its retention is bounded. */
   path: string;
-  /** ISO8601. **Nothing prunes on this today.** It used to be documented as "used by peers to prune expired
-   *  tombstones", which was never true: the peer pull (`GET /api/sync/file-tombstones`) is called with no
-   *  `since` at all, so the full set goes over the wire every cycle and none of it is ever removed. Record
-   *  tombstones ARE bounded, by a served-seq floor (`sync/served-watermark.ts`); the file half needs the
-   *  equivalent built from push acknowledgement, because its wire protocol has no seq. Until then, treat this
-   *  field as provenance only — a comment describing behaviour that does not exist is worse than none,
-   *  because it stops the next reader looking. */
+  /** ISO8601. What pruning keys on: a file tombstone goes once every peer has acknowledged deletions up to it
+   *  (`sync/file-tombstone-ack.ts`, applied by `brain/tombstone-prune.ts`). File tombstones carry no seq, so
+   *  the acknowledgement is by this timestamp rather than the served-seq floor record tombstones use. */
   deletedAt: string;
 }
 

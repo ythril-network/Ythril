@@ -69,7 +69,6 @@ function nextClaimableAfter(nextAttempt: number): string {
   return new Date(Date.now() + withJitter(delay)).toISOString();
 }
 
-
 function jobCollection(spaceId: string) {
   return col<MediaJobDoc>(spaceCollection(spaceId, 'mediaJobs'));
 }
@@ -350,11 +349,6 @@ export function wakeWorkers(): void {
 /** Record that a space may have claimable work (enqueue, requeue-on-failure, stall reset). */
 export function markSpaceMayHaveWork(spaceId: string): void {
   _signal.markSpaceMayHaveWork(spaceId);
-}
-
-/** Test seam: forget everything the hint knows, forcing the next claim to do a full scan. */
-export function resetPendingHint(): void {
-  _signal.reset();
 }
 
 export async function claimNextJob(

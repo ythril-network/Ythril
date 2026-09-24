@@ -800,8 +800,6 @@ export async function finalizeSpaceIndexReady(
  */
 const faceDimsBySpace = new Map<string, number>();
 
-export function resetFaceDimsCache(): void { faceDimsBySpace.clear(); }
-
 /**
  * The width the face index is BUILT at, or `null` when there is no such index.
  *

@@ -583,13 +583,6 @@ export function startConfigWatcher(
   });
 }
 
-/** Stop watching (tests, and shutdown). */
-export function stopConfigWatcher(): void {
-  if (!_configWatchActive) return;
-  fs.unwatchFile(CONFIG_PATH);
-  _configWatchActive = false;
-}
-
 /**
  * Persist config.json off the event loop, coalescing bursts. For the sync
  * engine's high-frequency bookkeeping writes only — see the header above.

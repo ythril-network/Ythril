@@ -575,9 +575,6 @@ export async function getPipelineStatus(): Promise<PipelineStatus> {
   return inFlight;
 }
 
-/** Test seam — drops the cache so a test never observes a previous test's probes. */
-export function resetPipelineStatusCache(): void { cached = null; inFlight = null; }
-
 pipelineStatusRouter.use(globalRateLimit);
 
 // requireAdmin, not requireAdminMfa: this reads status and mutates nothing. It does disclose which
