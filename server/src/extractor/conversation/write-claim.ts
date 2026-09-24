@@ -29,7 +29,8 @@ export const SUPPORTED_AT = 0.5;
 
 export interface ClaimExchange {
   sessionDate: string;
-  turns: { id: string; speaker: string; speech: string }[];
+  /** `pasted` (2.5): material the speaker brought — a document, a log — rather than their own words. */
+  turns: { id: string; speaker: string; speech: string; pasted?: boolean }[];
   ridesAlong: string[];
   /** Phase 3's resolutions for the exchange; only those with a day, month or year are handed on. */
   dates: Pick<Resolution, 'precision' | 'value'>[];
@@ -63,8 +64,16 @@ const SYSTEM = [
   '- Use the dates exactly as given; do not compute or add any other date.',
   '- State only what the turns say. Do not guess, generalise or add.',
   '- Never mention the conversation itself: no turns, messages or sessions.',
+  '- A turn marked PASTED is material the speaker brought, not their own words: say that they shared it and what',
+  '  they asked about it. Never state its contents as facts.',
   'Reply with the sentence only.',
 ].join('\n');
+
+/**
+ * 2.5 — how much of a pasted turn the writer sees. Enough to say WHAT was shared; not enough to mine it, and a
+ * pasted document no longer sets the size of the prompt.
+ */
+const PASTE_PREVIEW = 300;
 
 export async function writeClaim(
   x: ClaimExchange,
@@ -78,7 +87,9 @@ export async function writeClaim(
     dates.length ? `Dates, already resolved — use them as written: ${dates.join('; ')}.` : 'No dates to state.',
     x.entities.length ? `Names to use for what is mentioned: ${x.entities.join('; ')}.` : '',
     'Turns:',
-    ...spoken.map(t => `${t.speaker}: ${t.speech}`),
+    ...spoken.map(t => (t.pasted
+      ? `${t.speaker} (PASTED material, not their own words): ${t.speech.length > PASTE_PREVIEW ? `${t.speech.slice(0, PASTE_PREVIEW)}…` : t.speech}`
+      : `${t.speaker}: ${t.speech}`)),
   ].filter(Boolean).join('\n');
 
   let failure = '';

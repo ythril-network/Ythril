@@ -190,6 +190,8 @@ export async function runIngest(
     const w = await deps.write(spaceId, extraction, { schemaEntries: ctx.schemaEntries, claimType: ctx.claimType, transcripts: grants.transcripts });
     run.written = w.written;
     run.writeErrors = w.errors;
+    run.ids = w.ids;
+    run.sourceTurns = w.sourceTurns;
     run.phase = 'done';
   } catch (err) {
     run.phase = 'failed';

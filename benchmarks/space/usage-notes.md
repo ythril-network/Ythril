@@ -32,8 +32,8 @@ is a claim.
 
 ## The transcript
 
-**One file per session, holding the turns as they were said.** Name it by the session date —
-`transcripts/2023-05-08.md` — and tag it `transcript`. A file has no type field and therefore no type
+**One file per session, holding the turns as they were said.** It lives under its conversation and is named
+by the session — `transcripts/conv-26/2023-05-08.md` — and is tagged `transcript`. A file has no type field and therefore no type
 schema, so the path and the tag are what identify it; there is nothing to declare.
 
 **The file names the claims, not the other way round.** A claim can only link to entities. A file can link

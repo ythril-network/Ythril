@@ -7,10 +7,6 @@
  *
  * What it returns besides the extraction: every judgement with its raw answers (so a threshold can be measured
  * and changed without asking again), the claims that were dropped and why, and the turns no claim covers.
- *
- * Not yet here: 2.5's one-claim rule for pasted material (pasted turns are kept out of mention finding and
- * covered by their exchange's claim), 4.7 (a merge dates rule out), 5.4/5.5 (assistant-originated claims),
- * 5.8 arcs, 5.9 repeated background states, 6.3 edge dates.
  */
 import type { Question } from '../decide.js';
 import type { Decision } from '../decide.js';
@@ -22,9 +18,13 @@ import type { Span } from './nlp-client.js';
 import { Shortlister, type KnownEntity } from './shortlist.js';
 import { judgeEntities } from './judge-entities.js';
 import { groupExchanges, coverTurns, linkClaims } from './claims.js';
-import { writeClaim } from './write-claim.js';
+import { writeClaim, formatDate } from './write-claim.js';
+import { judgeOrigin } from './origin.js';
+import { mergeRepeats } from './repeats.js';
+import { writeArcs } from './arcs.js';
 import { describeEntities } from './describe-entities.js';
 import { drawEdges, type EdgeLabel } from './relations.js';
+import { dateEdges } from './edge-dates.js';
 import { trackChange } from './change.js';
 import { buildTimeline } from './timeline.js';
 import { assembleExtraction, type Extraction } from './assemble.js';
@@ -80,7 +80,11 @@ export async function extractConversation(
     turns.map(s => s.map(t => ({ id: t.id, speaker: t.speaker, speech: t.pasted ? '' : t.speech }))), deps.spans);
   const shortlister = new Shortlister({ ...(deps.searchSpace ? { searchSpace: deps.searchSpace } : {}) });
   const judged = await judgeEntities({
-    turns: flat.map(t => ({ id: t.id, speaker: t.speaker, speech: t.speech })),
+    // 4.7: each turn's resolved dates, so a merge its dates contradict can be seen as one.
+    turns: flat.map(t => {
+      const dates = [...new Set(t.times.map(tm => formatDate(tm.resolution)).filter((d): d is string => !!d))];
+      return { id: t.id, speaker: t.speaker, speech: t.speech, ...(dates.length ? { dates } : {}) };
+    }),
     mentions, entityTypes: vocabulary.entityTypes, shortlister, decide,
   });
   judgements.push(...judged.judgements);
@@ -94,7 +98,7 @@ export async function extractConversation(
     key: s.key, date: s.date, turns: s.turns.map(t => ({ id: t.id, speaker: t.speaker, speech: byId.get(t.id)!.speech })),
   })), decide);
   judgements.push(...grouped.judgements);
-  const written: { text: string; sourceTurns: string[]; speaker: string; statedOn: string; session: string; dates: Resolution[] }[] = [];
+  const written: { text: string; sourceTurns: string[]; speaker: string; attributed?: boolean; statedOn: string; session: string; dates: Resolution[] }[] = [];
   const dropped: ExtractResult['dropped'] = [];
   for (const x of grouped.exchanges) {
     const xTurns = x.turnIds.map(id => byId.get(id)!);
@@ -103,13 +107,24 @@ export async function extractConversation(
     const session = sessionOf.get(x.turnIds[0]!)!;
     const outcome = await writeClaim({
       sessionDate: session.date,
-      turns: xTurns.map(t => ({ id: t.id, speaker: t.speaker, speech: t.speech })),
+      turns: xTurns.map(t => ({ id: t.id, speaker: t.speaker, speech: t.speech, ...(t.pasted ? { pasted: true } : {}) })),
       ridesAlong: x.ridesAlong,
       dates,
       entities: [...new Set(x.turnIds.flatMap(id => [...(namesByTurn.get(id) ?? [])]))],
     }, { write: deps.write, decide });
     if (!outcome.claim) { dropped.push({ exchange: x.turnIds, ...outcome.dropped! }); continue; }
-    written.push({ ...outcome.claim, speaker: (spoken[0] ?? xTurns[0]!).speaker, statedOn: session.date, session: session.key, dates });
+    // 5.4 / 5.5: whose claim it is — asked only when an assistant speaks in the exchange.
+    const origin = await judgeOrigin({
+      claim: outcome.claim.text,
+      turns: spoken.map(t => ({ id: t.id, speaker: t.speaker, speech: t.speech, role: t.role })),
+      person: flat.find(t => sessionOf.get(t.id) === session && t.role !== 'assistant')?.speaker,
+    }, decide);
+    if (origin.judgement) judgements.push(origin.judgement);
+    if (origin.drop) { dropped.push({ exchange: x.turnIds, reason: origin.drop, lastText: outcome.claim.text }); continue; }
+    written.push({
+      ...outcome.claim, speaker: origin.speaker, ...(origin.attributed ? { attributed: true } : {}),
+      statedOn: session.date, session: session.key, dates,
+    });
   }
   const covered = coverTurns(written, grouped.exchanges);
   // A speaker takes part in every turn they speak, and nobody mentions themselves by name — so without this a
@@ -120,29 +135,40 @@ export async function extractConversation(
     for (const t of flat) if (t.speaker === sp.name && !own.has(t.id)) sp.mentions.push({ turnId: t.id, start: -1, end: -1, text: '' });
   }
   const linked = linkClaims(covered.claims, judged);
+  // 5.9: a state told in several sessions is written once — before phase 7, so a change is never folded away.
+  const repeats = await mergeRepeats(linked.claims, decide);
+  judgements.push(...repeats.judgements);
+  const claims = repeats.claims;
 
   // 4.10: descriptions of what this file creates.
   const created = [...linked.minted, ...judged.speakers];
-  const descriptions = await describeEntities(created, linked.claims, deps.write);
+  const descriptions = await describeEntities(created, claims, deps.write);
 
   // 6–8: relations, change over time, timeline.
   const typed = new Map(allEntities.map(e => [e.id, { id: e.id, name: e.name, type: e.type }]));
-  const rel = await drawEdges(linked.claims, { entities: typed, vocabulary: vocabulary.edgeLabels, decide });
+  const rel = await drawEdges(claims, { entities: typed, vocabulary: vocabulary.edgeLabels, decide });
   judgements.push(...rel.judgements);
-  const change = await trackChange(linked.claims.map(c => ({ text: c.text, entityIds: c.entityIds, sessionDate: c.statedOn })), decide);
+  // 6.3: an edge's `since` / `until`, only when its own claims say so.
+  const dated = await dateEdges(rel.edges, claims, { entities: typed, decide });
+  judgements.push(...dated.judgements);
+  const change = await trackChange(claims.map(c => ({ text: c.text, entityIds: c.entityIds, sessionDate: c.statedOn })), decide);
   judgements.push(...change.judgements);
-  const timeline = await buildTimeline(linked.claims.map(c => ({ text: c.text, entityIds: c.entityIds, dates: c.dates })), decide);
+  const timeline = await buildTimeline(claims.map(c => ({ text: c.text, entityIds: c.entityIds, dates: c.dates })), decide);
   judgements.push(...timeline.judgements);
 
+  // 5.8: arcs, as well as the moments — added after phase 7, so an arc can never retire the claims it describes.
+  const arcs = await writeArcs(claims, typed, { write: deps.write, decide });
+  judgements.push(...arcs.judgements);
+
   // 9: the committed format.
-  const usedExisting = new Set(linked.claims.flatMap(c => c.entityIds));
+  const usedExisting = new Set(claims.flatMap(c => c.entityIds));
   const extraction = assembleExtraction({
     conversationId, conversation,
     entities: created,
     existing: judged.matchedExisting.filter(e => usedExisting.has(e.id)),
     descriptions,
-    claims: linked.claims,
-    edges: rel.edges,
+    claims: [...claims, ...arcs.arcs],
+    edges: dated.edges,
     events: timeline.events,
     change,
     backends: [...backends, 'assist'],

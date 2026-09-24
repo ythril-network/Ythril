@@ -3,7 +3,8 @@
  *
  * ## The measurement that found this
  *
- * The writer files claims by `statedOn` and writes each session's transcript to `transcripts/<date>.md`.
+ * The writer files claims by `statedOn` and writes each session's transcript to
+ * `transcripts/<conversationId>/<date>.md`.
  * That is correct for LoCoMo and was read as a general rule — measured across both pinned corpora:
  *
  * | corpus | sessions | sharing a date with another |
@@ -113,7 +114,7 @@ describe('a collision that was not declared is refused, never absorbed', () => {
 });
 
 describe('the ten committed LoCoMo extractions keep working', () => {
-  it('sessions with distinct dates and no keys behave exactly as before', async () => {
+  it('sessions with distinct dates and no keys are named by their date, under their conversation', async () => {
     const { files } = await write({
       sessions: [
         { date: '2023-05-20', text: 'first' },
@@ -122,8 +123,10 @@ describe('the ten committed LoCoMo extractions keep working', () => {
       claims: [claim('Ada planned a road trip.'), claim('Ada bought a guitar.', { statedOn: '2023-06-01' })],
     });
     assert.deepEqual(files.map(f => f.path).sort(),
-      ['transcripts/2023-05-20.md', 'transcripts/2023-06-01.md'],
-      'a conversation with one session per day must produce the paths it always did');
+      ['transcripts/conv-x/2023-05-20.md', 'transcripts/conv-x/2023-06-01.md'],
+      // Under the conversation since the space is the caller's (`ingest`, F-31): two conversations written into one
+      // space would otherwise overwrite each other's transcripts, one session per shared date.
+      'a session with no key is named by its date, inside the folder of its conversation');
   });
 
   it('a claim with no session still reaches its day\'s transcript', async () => {
