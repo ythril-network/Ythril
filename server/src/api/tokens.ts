@@ -165,11 +165,32 @@ function stripServerOwnedToken(body: unknown): unknown {
  * subject disappears is the reason that case now names the matrix.
  */
 const MAX_SCOPED_SPACES = 1000;
+
+/**
+ * Areas added AFTER the matrix shipped — optional in a body, and `none` when absent.
+ *
+ * Every area the matrix shipped with is required: a partial matrix is a 400, the safe direction, and that is
+ * unchanged. But an area added later cannot be required, or every client written before it breaks at once — zod 4
+ * makes an enum-keyed record exhaustive, so when `networks` joined the areas (`F-34`) a four-area mint became a
+ * 400 for every integrator. Absent reads as `none`, which grants nothing: the same safe direction as refusing,
+ * without breaking a caller who never heard of the area. A future area goes on this list for the same reason.
+ */
+const AREAS_ADDED_LATER: readonly string[] = ['networks'];
+const rung = z.enum(RUNGS);
+const AreaRungsBody = z.object(
+  // Built from SPACE_AREAS, so a new area is validated the moment it exists; the cast is only for the compiler,
+  // which cannot see a record's keys through `fromEntries` — every value parses to a rung either way.
+  Object.fromEntries(SPACE_AREAS.map(a => [a, AREAS_ADDED_LATER.includes(a) ? rung.default('none') : rung])) as unknown as
+    Record<(typeof SPACE_AREAS)[number], typeof rung>,
+)
+  // Strict, so an area NAME the server does not know is still refused rather than stored and granting nothing.
+  .strict();
+
 const RightsMatrix = z.object({
   instanceAdmin: z.boolean(),
   createSpaces: z.boolean(),
-  floor: z.record(z.enum(SPACE_AREAS), z.enum(RUNGS)).nullable(),
-  perSpace: z.record(z.string().min(1), z.record(z.enum(SPACE_AREAS), z.enum(RUNGS)))
+  floor: AreaRungsBody.nullable(),
+  perSpace: z.record(z.string().min(1), AreaRungsBody)
     .refine(m => Object.keys(m).length <= MAX_SCOPED_SPACES,
       { message: `perSpace may name at most ${MAX_SCOPED_SPACES} spaces` }),
   /*

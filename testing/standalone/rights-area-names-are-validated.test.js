@@ -60,7 +60,7 @@ describe('rights area names are validated, not merely typed', () => {
      * `z.record` would otherwise accept `""` as a key. So this allows a refinement on the string rather
      * than demanding a bare one: the property is *keyed on a space id*, not *spelled exactly this way*.
      */
-    assert.match(src, /perSpace:\s*z\.record\(z\.string\(\)[^,]*,\s*z\.record\(z\.enum\(SPACE_AREAS\)/,
+    assert.match(src, /perSpace:\s*z\.record\(z\.string\(\)[^,]*,\s*AreaRungsBody\)/,
       'perSpace keys on a space id and its INNER map keys on an area — that inner map is the one that was open');
     /*
      * TWO, not four, and that is a strengthening rather than a relaxation. The matrix used to be written
@@ -68,8 +68,15 @@ describe('rights area names are validated, not merely typed', () => {
      * `RightsMatrix` that both use. `minting-and-editing-share-one-scope-rule` holds it to exactly ONE
      * declaration, so a third copy fails there instead of passing here on a bigger count.
      */
-    const strict = [...src.matchAll(/z\.record\(z\.enum\(SPACE_AREAS/g)].length;
-    assert.ok(strict >= 2, `expected both area maps to use z.enum(SPACE_AREAS), found ${strict}`);
+    // Both area maps are ONE schema since F-34 — `AreaRungsBody`, a strict object built from SPACE_AREAS. An
+    // enum-keyed record in zod 4 is exhaustive, so adding an area made every four-area mint a 400; the strict
+    // object keeps refusing an unknown area NAME, which is the property this case exists for.
+    assert.match(src, /floor:\s*AreaRungsBody\.nullable\(\)/, 'floor must use the shared area schema');
+    assert.match(src, /const AreaRungsBody = z\.object\(/, 'the shared area schema is gone');
+    assert.match(src, /SPACE_AREAS\.map\(/, 'the shared area schema must be built from SPACE_AREAS');
+    // Strict: bounded by the declaration itself, from `const AreaRungsBody` to the `;` that ends it.
+    const decl = src.slice(src.indexOf('const AreaRungsBody'), src.indexOf(';', src.indexOf('const AreaRungsBody')));
+    assert.match(decl, /\.strict\(\)\s*$/, 'the shared area schema must be strict, or an unknown area name stores and grants nothing');
   });
 
   it('the schemas import the shared list rather than spelling the names again', () => {

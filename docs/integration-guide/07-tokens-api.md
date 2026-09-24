@@ -50,7 +50,7 @@ Authorization: Bearer <token>
 
 ```json
 {
-  "areas": ["knowledge", "files", "schema", "dataQuality"],
+  "areas": ["knowledge", "files", "schema", "dataQuality", "networks"],
   "rungs": ["none", "read", "write", "admin"],
   "implications": [
     { "when": "knowledge", "atLeast": "write", "grants": "schema", "rung": "read" }
@@ -71,6 +71,24 @@ Authorization: Bearer <token>
   ]
 }
 ```
+
+**The `networks` area** (since F-34) governs sharing a space with other instances, per space:
+
+| rung | what it lets a token do |
+|---|---|
+| `read` | see a network that carries the space — listed, and readable by id |
+| `write` | create a network with the space, and leave a membership **it** established |
+| `admin` | change a network's settings, and leave a membership **any** token established |
+
+A network carries several spaces, so an act on it needs the rung on **every** space it carries; one short is
+refused with a `403` naming it. A network you may not see is a `404`, never a `403`. A membership that predates
+the column has no recorded establisher, so leaving it needs `admin`. Space admin (`spaceAdmin`) does **not**
+include `networks` — administering a space is its data, tokens and settings; sharing it with another instance is
+its own decision — so `derivedRungs[spaceAdmin].requires` names the four data areas. Joining a *remote* network,
+invites, peers, topology, votes and sync stay instance-admin.
+
+**`networks` is optional in a matrix body and `none` when absent**, so a client written before it existed keeps
+minting four-area matrices. Every other area is required; an unknown area name is a `400`.
 
 This is the table the server **enforces** against, not a description of it, so it cannot disagree with the gate.
 Use it instead of maintaining your own map of rights to endpoints.

@@ -2,6 +2,21 @@
 
 > Part of the [Ythril Integration Guide](../integration-guide.md).
 
+
+## Who may call what
+
+Since F-34 a token below instance admin acts on a network through the **`networks`** rung it holds on the spaces the network carries — on **every** one of them ([Tokens API → the `networks` area](07-tokens-api.md#what-a-right-grants)).
+
+| route | needs, on every space the network carries |
+|---|---|
+| `GET /api/networks` | `read` — the list holds only the networks you may see |
+| `GET /api/networks/:id` | `read` — otherwise `404`, never `403` |
+| `POST /api/networks` | `write` — the membership is recorded as yours |
+| `PATCH /api/networks/:id` | `admin` — the settings are shared by every space |
+| `DELETE /api/networks/:id` | `write` for a membership you established, `admin` for anyone's (or one with no recorded establisher) |
+
+Everything else on this router — joining a remote network, invites, members, signing keys, topology, votes, sync and sync history — acts on the network as a whole and stays **instance-admin**. MCP `network_peers` lists the peers of the networks you may see, through the same filter as `GET /api/networks`.
+
 ## Networks API
 
 Base path: `/api/networks` — requires `admin` token.
