@@ -141,6 +141,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Internal
 
+- **The conversation extractor builds its timeline** (`F-31`, 8.1–8.4, `timeline.ts`). A claim with a resolved
+  day is a candidate event, and the decision model is asked three things:
+  - its status: completed, upcoming, cancelled, or unclear (`active` and `overdue` cannot be chosen);
+  - whether it is merely ongoing;
+  - whether it genuinely lasted more than a day, asked only when the conversation gave both ends.
+
+  An unclear status, an ongoing thing, or no usable date means no timeline entry, and the date stays in the
+  claim. A span needs both given ends and a confident multi-day answer.
+
 - **The conversation extractor draws only legal edges** (`F-31`, 6.1 / 6.2, `relations.ts`). For each pair of
   entities one claim names, the decision model chooses among the labels whose declared endpoint types fit the
   pair, in the direction they fit, or `none`. Code filters the vocabulary before asking and checks the answer
