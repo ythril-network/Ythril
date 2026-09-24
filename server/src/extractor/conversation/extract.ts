@@ -26,6 +26,7 @@ import { writeClaim } from './write-claim.js';
 import { judgeOrigin } from './origin.js';
 import { describeEntities } from './describe-entities.js';
 import { drawEdges, type EdgeLabel } from './relations.js';
+import { dateEdges } from './edge-dates.js';
 import { trackChange } from './change.js';
 import { buildTimeline } from './timeline.js';
 import { assembleExtraction, type Extraction } from './assemble.js';
@@ -141,6 +142,9 @@ export async function extractConversation(
   const typed = new Map(allEntities.map(e => [e.id, { id: e.id, name: e.name, type: e.type }]));
   const rel = await drawEdges(linked.claims, { entities: typed, vocabulary: vocabulary.edgeLabels, decide });
   judgements.push(...rel.judgements);
+  // 6.3: an edge's `since` / `until`, only when its own claims say so.
+  const dated = await dateEdges(rel.edges, linked.claims, { entities: typed, decide });
+  judgements.push(...dated.judgements);
   const change = await trackChange(linked.claims.map(c => ({ text: c.text, entityIds: c.entityIds, sessionDate: c.statedOn })), decide);
   judgements.push(...change.judgements);
   const timeline = await buildTimeline(linked.claims.map(c => ({ text: c.text, entityIds: c.entityIds, dates: c.dates })), decide);
@@ -154,7 +158,7 @@ export async function extractConversation(
     existing: judged.matchedExisting.filter(e => usedExisting.has(e.id)),
     descriptions,
     claims: linked.claims,
-    edges: rel.edges,
+    edges: dated.edges,
     events: timeline.events,
     change,
     backends: [...backends, 'assist'],

@@ -188,6 +188,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Internal
 
+- **The conversation extractor dates an edge only when its text does** (`F-31`, 6.3, `edge-dates.ts`). `since`
+  and `until` are asked per day-precise, non-approximate date of the edge's own claims, and written only on a
+  confident yes; a date merely near the relationship dates nothing, and an end before its start writes neither.
 - **The server build copies `src/**/*.json` into `dist/`** (`server/scripts/copy-src-assets.mjs`). `tsc` emits
   JavaScript only and the image ships `dist` only, so a data file under `src` did not exist at runtime; an empty
   copy fails the build.

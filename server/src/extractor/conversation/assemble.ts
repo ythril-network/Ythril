@@ -14,7 +14,7 @@
 import type { LoadedConversation } from './load.js';
 import type { RunEntity } from './judge-entities.js';
 import type { KnownEntity } from './shortlist.js';
-import type { DrawnEdge } from './relations.js';
+import type { DatedEdge } from './edge-dates.js';
 import type { TimelineEvent } from './timeline.js';
 import type { ChangeOutcome } from './change.js';
 
@@ -55,7 +55,7 @@ export interface AssembleInput {
   existing: (KnownEntity & { aliases: string[] })[];
   descriptions: Map<string, string>;
   claims: { text: string; sourceTurns: string[]; entityIds: string[]; speaker: string; attributed?: boolean; statedOn: string; session: string }[];
-  edges: DrawnEdge[];
+  edges: DatedEdge[];
   events: TimelineEvent[];
   change: Pick<ChangeOutcome, 'superseded' | 'supersedes' | 'rewritten'>;
   backends: string[];
@@ -128,7 +128,7 @@ export function assembleExtraction(input: AssembleInput): Extraction {
   const edges = [
     ...input.edges.flatMap(e => {
       const from = entityKey.get(e.from), to = entityKey.get(e.to);
-      return from && to ? [{ label: e.label, from, to }] : [];
+      return from && to ? [{ label: e.label, from, to, ...(e.properties ? { properties: e.properties } : {}) }] : [];
     }),
     ...input.change.supersedes.map(s => ({ label: 'supersedes', from: claimKey.get(s.later)!, to: claimKey.get(s.earlier)! })),
   ];
