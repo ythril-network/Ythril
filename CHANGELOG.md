@@ -121,6 +121,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Internal
 
+- **The conversation extractor asks its first judgement questions** (`F-31`, DECOMPOSITION.md 2.3, 2.5,
+  3.4, 3.12). `judge-turns.ts` asks only about what the code half flagged:
+  - a speaker's role, when the source does not say, asked once per speaker;
+  - whether a candidate paste is material the speaker brought;
+  - whether a bare weekday points back or forward;
+  - whether a forward weekday said on that same weekday means today.
+
+  A turn with nothing to ask sends no request. An unclear or refused answer always takes the outcome that
+  cannot add a wrong fact: a person, the speaker's own words, no day. The raw answers are kept with the run,
+  so the thresholds (0.5, unmeasured) can be measured later without asking again.
+
 - **Egress consent is one function** (`config/egress-consent.ts`). The *"is this the host the operator
   acknowledged"* comparison was written out in the document describer, the repair pass, the face model and
   the settings route. All four now ask `egressConsented`, and a gate refuses a hand-written comparison

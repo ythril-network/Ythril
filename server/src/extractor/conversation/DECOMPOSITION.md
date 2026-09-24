@@ -24,8 +24,9 @@ Status, kept current per PR:
 | phase | state | where |
 |---|---|---|
 | 1 load | **built** | `load.ts` |
-| 2 classify turns | **built**: 2.1, 2.2, 2.4, 2.6. Not built: 2.3, 2.5 (judgements) | `classify.ts` |
-| 3 resolve time | **built** except 3.4, 3.8, 3.9, 3.12 (the judgements, handed in as inputs) and weekday RANGES (*"Friday to Sunday"*) in 3.10 | `time.ts`, `time-lexicon.ts` |
+| 2 classify turns | **built**: all six. 2.3 and 2.5 ask through `decide()`; thresholds unmeasured (0.5) | `classify.ts`, `judge-turns.ts` |
+| 3 resolve time | **built** except 3.8, 3.9 (asked about events, so they come with phase 5) and weekday RANGES (*"Friday to Sunday"*) in 3.10. 3.4 and 3.12 ask through `decide()` | `time.ts`, `time-lexicon.ts`, `judge-turns.ts` |
+| the decision client | **built**: Jev (System One) or the assist model, answers checked by code | `../decide.ts` |
 | everything else | decomposed, not built | — |
 
 ---
