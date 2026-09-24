@@ -238,6 +238,9 @@ export const ROUTE_RIGHTS: readonly RouteRight[] = [
   { route: '/api/networks/:id', method: 'GET', area: 'networks', needs: 'read', scope: 'iterates' },
   { route: '/api/networks/:id', method: 'PATCH', area: 'networks', needs: 'admin', scope: 'iterates' },
   { route: '/api/networks/:id', method: 'DELETE', area: 'networks', needs: 'write', scope: 'iterates' },
+  // Joining a REMOTE network (F-34.1): `write` on every existing space it maps to; creating one needs `createSpaces`
+  // and a floor of `write` too. Checked between the handshake's apply and finalize, in `networkJoinRefusal`.
+  { route: '/api/networks/join-remote', method: 'POST', area: 'networks', needs: 'write', scope: 'iterates' },
   { route: '/api/duplicates', method: 'GET', area: 'dataQuality', needs: 'read', scope: 'iterates' },
   { route: '/api/duplicates/scan', method: 'POST', area: 'dataQuality', needs: 'write', scope: 'iterates' },
   { route: '/api/duplicates/:id/merge', method: 'POST', area: 'dataQuality', needs: 'write', scope: 'iterates' },
@@ -393,7 +396,6 @@ export const NOT_AREA_SCOPED: readonly { route: string; why: string }[] = [
    * instance-admin and the Networks column does not reach them. The five that DO govern a space's membership are
    * in `ROUTE_RIGHTS` above.
    */
-  { route: '/api/networks/join-remote', why: 'joining a REMOTE network learns its space list only during the RSA handshake and auto-creates missing spaces, so the rung cannot be checked before the act it would refuse — instance-admin until F-34.1 designs a check that can' },
   { route: '/api/networks/:id/join', why: 'called by a JOINING PEER presenting an invite key, not by a local token acting on its spaces — the peer protocol, instance-admin' },
   { route: '/api/networks/:id/invite', why: 'mints the invite key another instance joins with: an act on the network as a whole, not on a space\'s membership — instance-admin' },
   { route: '/api/networks/:id/fork', why: 'creates a new network from an existing one\'s topology: a network-wide act — instance-admin' },

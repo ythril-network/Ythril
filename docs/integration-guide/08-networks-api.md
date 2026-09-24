@@ -13,8 +13,9 @@ Since F-34 a token below instance admin acts on a network through the **`network
 | `POST /api/networks` | `write` — the membership is recorded as yours |
 | `PATCH /api/networks/:id` | `admin` — the settings are shared by every space |
 | `DELETE /api/networks/:id` | `write` for a membership you established, `admin` for anyone's (or one with no recorded establisher) |
+| `POST /api/networks/join-remote` | `write` on every existing local space the join maps to; a space it would create needs `createSpaces` and a floor of `write` too. Checked after the handshake's apply and before finalize — refused, nothing is written and the handshake expires |
 
-Everything else on this router — joining a remote network, invites, members, signing keys, topology, votes, sync and sync history — acts on the network as a whole and stays **instance-admin**. MCP `network_peers` lists the peers of the networks you may see, through the same filter as `GET /api/networks`.
+Everything else on this router — invites, members, signing keys, topology, votes, sync and sync history — acts on the network as a whole and stays **instance-admin**. MCP `network_peers` lists the peers of the networks you may see, through the same filter as `GET /api/networks`.
 
 ## Networks API
 

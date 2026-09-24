@@ -22,9 +22,14 @@
  *
  * ## What stays instance-admin, deliberately
  *
- * Joining a REMOTE network learns its space list only during the RSA handshake and auto-creates missing spaces,
- * so it cannot be checked before the act it would refuse (F-34.1). Votes, topology, peer members, signing keys,
- * invites and sync are acts on the network as a whole, not on a space's membership of it.
+ * Votes, topology, peer members, signing keys, invites and sync are acts on the network as a whole, not on a
+ * space's membership of it.
+ *
+ * ## Joining a remote network (F-34.1)
+ *
+ * The remote network's space list arrives in the handshake's APPLY step, before anything is written locally and
+ * before FINALIZE — so the check runs in that gap (`networkJoinRefusal`). Refused there, the handshake is simply
+ * never finalized, and the token apply created on the inviter expires with the handshake.
  *
  * An instance admin passes both, as it always did.
  */
@@ -80,4 +85,25 @@ export function visibleNetworks<N extends { spaces: string[] }>(caller: Caller, 
 export function networkSettingsRefusal(caller: Caller, net: { spaces: string[] }): string | null {
   if (holdsOnEvery(caller, net, 'admin')) return null;
   return "Changing a network's settings needs 'admin' on networks for every space it carries: they are shared by all of them.";
+}
+
+/**
+ * Why this token may not join a remote network whose spaces map to `existing` local spaces and would CREATE
+ * `toCreate`, or `null` when it may. An existing space needs `networks: write`; a space the join creates needs
+ * `createSpaces` and `networks: write` from the FLOOR — it has no row yet, so the floor is the only rung it can hold.
+ */
+export function networkJoinRefusal(caller: Caller, spaces: { existing: string[]; toCreate: string[] }): string | null {
+  if (isInstanceAdmin(caller)) return null;
+  const rights = caller.rights;
+  const short = spaces.existing.filter(s => !rights || !holdsRung(rights, s, 'networks', 'write'));
+  const reasons: string[] = [];
+  if (short.length) reasons.push(`'write' on networks is short on: ${short.join(', ')}`);
+  if (spaces.toCreate.length) {
+    if (!rights?.createSpaces) reasons.push(`the join would create ${spaces.toCreate.join(', ')}, and this token may not create spaces (createSpaces)`);
+    else {
+      const noFloor = spaces.toCreate.filter(s => !holdsRung(rights, s, 'networks', 'write'));
+      if (noFloor.length) reasons.push(`the join would create ${noFloor.join(', ')}, which needs a floor of 'write' on networks — a new space has no row`);
+    }
+  }
+  return reasons.length ? `This token may not join the network: ${reasons.join('; ')}.` : null;
 }
