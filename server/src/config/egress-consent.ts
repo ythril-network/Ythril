@@ -29,6 +29,34 @@ export function egressConsented(slot: { baseUrl?: string; acknowledgedHost?: str
   }
 }
 
+/** What the external assist model can be consented to do, each on its own (`F-35`). */
+export type AssistUse = 'repair' | 'conversations';
+
+/**
+ * Has the operator consented to THIS USE of the external assist model?
+ *
+ * The assist model does two jobs that send different things: the document repair pass (OCR text and page
+ * images) and, since `ingest`, conversation work — writing claims, and answering the extractor's questions when
+ * no decision model is set (conversation turns). Consent was one field, `acknowledgedHost`, given under a dialog
+ * that named document content alone, and every path read it. So a host acknowledged for documents received
+ * conversations too, under a consent that never mentioned them.
+ *
+ * `acknowledgedHost` keeps meaning documents, so no consent given before this grows. Conversations have their own
+ * field, set by a dialog that names them. Every egress path of the assist slot asks here and names its use —
+ * `an-assist-model-use-is-consented-on-its-own.test.js` refuses a direct `egressConsented(assist)`, because that
+ * reads the documents consent whatever the path sends.
+ */
+export function assistConsented(
+  assist: { baseUrl?: string; acknowledgedHost?: string; acknowledgedHostForConversations?: string } | undefined,
+  use: AssistUse,
+): boolean {
+  return egressConsented({
+    ...(assist?.baseUrl !== undefined ? { baseUrl: assist.baseUrl } : {}),
+    ...((use === 'repair' ? assist?.acknowledgedHost : assist?.acknowledgedHostForConversations) !== undefined
+      ? { acknowledgedHost: use === 'repair' ? assist!.acknowledgedHost! : assist!.acknowledgedHostForConversations! } : {}),
+  });
+}
+
 /**
  * Does THIS PATCH activate an external endpoint that has not been consented to?
  *

@@ -69,13 +69,13 @@ export interface NliCfg {
 }
 
 export type DocMode = 'off' | 'ocr' | 'vlm' | 'repair' | 'auto';
-export type DocAssistUse = 'repair';
 
-/** F11-b — external "assist model": a bigger, hosted LLM (own endpoint) assigned to specific tasks.
- *  The only path that sends document content off the instance, so it is gated by an egress
- *  acknowledgment that must be re-given whenever the host changes. */
+/** F11-b — external "assist model": a bigger, hosted LLM (own endpoint). Each USE is consented on its own
+ *  (`F-35`): `acknowledgedHost` for documents (the repair pass), `acknowledgedHostForConversations` for
+ *  ingest. Both must match the endpoint's host, so changing the endpoint withdraws both. */
 export interface DocAssistCfg {
-  baseUrl?: string; model?: string; apiKey?: string; uses?: DocAssistUse[]; acknowledgedHost?: string;
+  baseUrl?: string; model?: string; apiKey?: string; acknowledgedHost?: string;
+  acknowledgedHostForConversations?: string | null;
 }
 
 /**

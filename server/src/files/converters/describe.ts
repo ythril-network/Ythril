@@ -34,7 +34,7 @@
 
 import { getDocumentProcessingConfig, getDocAssistApiKey } from '../../config/loader.js';
 import { log } from '../../util/log.js';
-import { egressConsented } from '../../config/egress-consent.js';
+import { assistConsented } from '../../config/egress-consent.js';
 import { describeDocumentText } from './vlm-client.js';
 import { resolveVlmEndpoint, vlmSlotUsable } from './vlm-endpoint.js';
 import { summariseMarkdown } from './summarise.js';
@@ -131,7 +131,7 @@ export function describeTarget(): { baseUrl: string; model: string; wire?: 'olla
   if (assist?.baseUrl && assist.model) {
     // The ACK is the gate, re-checked here rather than trusted from save time — the same rule the repair
     // path applies, for the same reason: config.json could have been hand-edited.
-    if (egressConsented(assist)) {
+    if (assistConsented(assist, 'repair')) {
       return { baseUrl: assist.baseUrl, model: assist.model, wire: 'openai', external: true, apiKey: getDocAssistApiKey(), slot: 'assist' };
     }
     log.debug('Describe: an assist model is configured but its egress host is not acknowledged — using the local document model');

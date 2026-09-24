@@ -62,8 +62,10 @@ Everything that would make the run fail is checked first, and the answer lists e
   Library. Add it to a space with
   [`POST /api/schema-library/groups/conversation/apply`](06b-schema-library-api.md); `ingest` never changes a
   space's schema itself.
-- **For `sessions` only:** a decision model (Settings → Media Processing → Models → Decision model, or the assist
-  model it falls back to), the assist model that writes claims, and the `doc-nlp` sidecar (`NLP_SIDECAR_URL`) must all answer.
+- **For `sessions` only:** a decision model (Settings → Media Processing → Models → Decision model, or the External
+  assist model it falls back to), the External assist model that writes claims — **consented for conversations**
+  (`documentProcessing.assistModel.acknowledgedHostForConversations`, the card's **Allow conversations**), which a
+  documents consent does not cover — and the `doc-nlp` sidecar (`NLP_SIDECAR_URL`) must all answer.
 
 `400` is a malformed body (with every problem the loader found); `404` a space that does not exist.
 

@@ -371,6 +371,28 @@ export class MediaProcessingStateService {
     const host = this.assistHost();
     return !!host && this.repairReachable() && this.assist.acknowledgedHost !== host;
   }
+  /** `F-35`: consented for CONVERSATIONS (ingest) — its own acknowledgement, matching the current host. */
+  assistConversationsConsented(): boolean {
+    const host = this.assistHost();
+    return !!host && this.assist.acknowledgedHostForConversations === host;
+  }
+  /**
+   * Allow or withdraw conversations. Allowing asks first, in a dialog that names what conversations send — a
+   * documents acknowledgement never covers them. Takes effect with the card's next save, like every field on it.
+   */
+  async setAssistConversations(on: boolean): Promise<void> {
+    if (!on) { this.assist.acknowledgedHostForConversations = null; return; }
+    const host = this.assistHost();
+    if (!host) return;
+    const ok = await this.confirmDialog.confirm({
+      title: this.transloco.translate('mediaProcessing.confirm.conversationEgressTitle'),
+      message: this.transloco.translate('mediaProcessing.confirm.conversationEgressMessage', { host }),
+      confirmLabel: this.transloco.translate('mediaProcessing.confirm.egressConfirm'),
+      cancelLabel: this.transloco.translate('common.cancel'),
+      danger: true,
+    });
+    if (ok) this.assist.acknowledgedHostForConversations = host;
+  }
 
   /** The loaded doc-processing config (read-only fields like vlmModel live here). */
   /**
@@ -489,6 +511,8 @@ export class MediaProcessingStateService {
         const a = this.assist;
         return withSlot({ documentProcessing: { assistModel: {
           baseUrl: a.baseUrl || undefined, model: a.model || undefined, acknowledgedHost: a.acknowledgedHost,
+          // Always sent: the server replaces this block whole, so leaving it out would withdraw the consent.
+          acknowledgedHostForConversations: a.acknowledgedHostForConversations ?? null,
         } } });
       }
       // The three document cards own their SLOT and nothing else — the model and the endpoint really are
@@ -1008,6 +1032,7 @@ export class MediaProcessingStateService {
       baseUrl: assist.baseUrl || undefined,
       model: assist.model || undefined,
       acknowledgedHost: assist.acknowledgedHost,
+      acknowledgedHostForConversations: assist.acknowledgedHostForConversations ?? null,
       ...(this.assistApiKeyInput ? { apiKey: this.assistApiKeyInput } : {}),
     };
     const base = this.payload();

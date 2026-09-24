@@ -33,7 +33,7 @@
  * it is sent — a question with no way to say "none of these" forces a wrong pick, which is the failure the
  * decomposition's own gate exists to stop.
  */
-import { egressConsented } from '../config/egress-consent.js';
+import { egressConsented, assistConsented } from '../config/egress-consent.js';
 import { allowPrivateForSlot, type EgressSlot } from '../config/model-egress-policy.js';
 import { slotTimeoutMs } from '../config/model-slots.js';
 import { getDocumentProcessingConfig, getDocAssistApiKey, getModelSlots } from '../config/loader.js';
@@ -84,7 +84,8 @@ export const NO_MATCH_OPTIONS = ['none', 'new', 'neither', 'unclear'] as const;
 export class DecisionUnavailableError extends Error {
   constructor() {
     super('No decision model is available: configure `decisionModel` (a System One endpoint, TypeSafe by default) '
-      + 'or `documentProcessing.assistModel`, and acknowledge its host — extraction sends conversation text there.');
+      + 'and acknowledge its host, or consent `documentProcessing.assistModel` for conversations — extraction sends '
+      + 'conversation text there.');
     this.name = 'DecisionUnavailableError';
   }
 }
@@ -97,18 +98,20 @@ export class DecisionError extends Error {
   }
 }
 
-type SlotInput = { baseUrl?: string; model?: string; acknowledgedHost?: string; apiKey?: string } | undefined;
+type SlotInput = { baseUrl?: string; model?: string; acknowledgedHost?: string; acknowledgedHostForConversations?: string; apiKey?: string } | undefined;
 
 /**
  * Which backend answers, from the two slots as configured. Pure, so the choice is testable without a config.
  * The decision slot first; the assist model only when the decision slot is not consented to.
  */
 export function pickDecisionBackend(slots: { decision?: SlotInput; assist?: SlotInput }): DecisionBackend | null {
-  for (const kind of ['jev', 'assist'] as const) {
-    const s = kind === 'jev' ? slots.decision : slots.assist;
-    if (s?.baseUrl && s.model && egressConsented(s)) {
-      return { kind, baseUrl: s.baseUrl, model: s.model, ...(s.apiKey ? { apiKey: s.apiKey } : {}) };
-    }
+  const { decision, assist } = slots;
+  if (decision?.baseUrl && decision.model && egressConsented(decision)) {
+    return { kind: 'jev', baseUrl: decision.baseUrl, model: decision.model, ...(decision.apiKey ? { apiKey: decision.apiKey } : {}) };
+  }
+  // The assist model answers only under its CONVERSATIONS consent: the questions carry conversation turns.
+  if (assist?.baseUrl && assist.model && assistConsented(assist, 'conversations')) {
+    return { kind: 'assist', baseUrl: assist.baseUrl, model: assist.model, ...(assist.apiKey ? { apiKey: assist.apiKey } : {}) };
   }
   return null;
 }

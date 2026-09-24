@@ -124,6 +124,8 @@ const AssistModelPatchSchema = z.object({
   model: z.string().max(128).optional(),
   apiKey: z.string().max(512).optional().nullable(),
   acknowledgedHost: z.string().max(255).optional(),
+  // `F-35`: the conversations consent, set by its own dialog; `null` withdraws it.
+  acknowledgedHostForConversations: z.string().max(255).optional().nullable(),
 }).strict();
 
 const DocumentProcessingPatchSchema = z.object({
@@ -773,6 +775,9 @@ mediaConfigRouter.patch('/', requireAdminMfa, (req, res) => {
       if (assistPatch) {
         const a = { ...assistPatch } as Record<string, unknown>;
         delete a['apiKey']; // never in config.json
+        // `F-35`: `null` withdraws the conversations consent. The block is replaced WHOLE, so a client that
+        // omits the field withdraws it too — which is why the Models tab always sends it.
+        if (a['acknowledgedHostForConversations'] == null) delete a['acknowledgedHostForConversations'];
         dpMerged['assistModel'] = a;
       }
       merged['documentProcessing'] = dpMerged;

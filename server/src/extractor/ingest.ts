@@ -136,10 +136,10 @@ export async function ingestRefusals(request: IngestRequest, ctx: IngestSpaceCon
   if (request.conversation) {
     const fails = (probe: () => unknown) => { try { probe(); return false; } catch { return true; } };
     if (fails(probes.decision)) {
-      refusals.push('no decision model answers: configure Settings → Media Processing → Models → Decision model, or the assist model it falls back to');
+      refusals.push('no decision model answers: configure Settings → Media Processing → Models → Decision model, or allow conversations on the External assist model it falls back to');
     }
     if (fails(probes.generation)) {
-      refusals.push('no assist model writes claims: configure Settings → Media Processing → Models → External assist model (documentProcessing.assistModel) and consent to its host');
+      refusals.push('no assist model writes claims: configure Settings → Media Processing → Models → External assist model (documentProcessing.assistModel) and press Allow conversations — a documents consent does not cover them');
     }
     if (!(await probes.nlp())) {
       refusals.push('the doc-nlp sidecar does not answer (NLP_SIDECAR_URL): mention finding needs it — start the doc-nlp service');
