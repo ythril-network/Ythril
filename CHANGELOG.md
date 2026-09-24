@@ -141,6 +141,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Internal
 
+- **The extraction validator moved into the server** (`F-31`, 9.2, `extractor/validate-extraction.ts`). The
+  benchmark's `writer/validate-extraction.mjs` now re-exports it, so the benchmark writer and the product's
+  `ingest` refuse the same files for the same reasons, from one copy of the rules.
+
 - **An evidence check refutes what code can prove, before any model is asked** (`evidence/evidence-check.ts`).
   - **What it refutes.** A text that names someone, states a number or states a date its evidence does not
     hold is refused, with the reason.
