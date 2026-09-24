@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.1.2] — 2026-09-25
+
+A patch: two instances that share more than one network keep syncing all of them.
+
+### Fixed
+
+- **Joining a second network with the same peer no longer cuts off the first.** Each instance keeps one token per
+  peer, and every handshake replaced it with a token that reached only the network being joined — so the moment
+  two instances shared a second network, every push and pull on the first answered `403`, in both directions, with
+  nothing logged as an error. A peer token now reaches every network the two instances share; each request is still
+  admitted only to the spaces of networks the peer is a member of, so leaving one network still withdraws its
+  spaces. The joining side also no longer hands over an all-spaces token when the network carries no spaces — it
+  reaches none. **After upgrading, re-join any second network created between the same two instances**, so both
+  sides hold a token that reaches all of them.
+
 ## [5.1.1] — 2026-09-24
 
 A security patch: a network invite that was applied and never finalized no longer leaves a permanent peer

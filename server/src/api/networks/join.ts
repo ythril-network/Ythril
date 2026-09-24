@@ -12,6 +12,7 @@ import { requireAdmin } from '../../auth/middleware.js';
 import { globalRateLimit } from '../../rate-limit/middleware.js';
 import { getConfig, saveConfig, getSecrets, saveSecrets } from '../../config/loader.js';
 import { createToken, revokeToken } from '../../auth/tokens.js';
+import { peerTokenSpaces } from '../../auth/peer-token-scope.js';
 import { createSpace } from '../../spaces/lifecycle.js';
 import { concludeRoundIfReady } from '../../sync/governance.js';
 import { buildBraintreeAncestors } from '../../util/braintree.js';
@@ -182,7 +183,8 @@ joinRouter.post('/join-remote', globalRateLimit, requireAdmin, async (req, res) 
     const { record: tokenForARecord, plaintext: tokenForAPlaintext } = await createToken({
       name: `peer:${applyData.instanceLabel ?? 'remote'}`,
       expiresAt: null,
-      spaces: allNetworkSpaces.length > 0 ? allNetworkSpaces : undefined,
+      // Every network the pair shares, not this one alone: the inviter keeps one token for us and this one replaces it.
+      spaces: peerTokenSpaces(applyData.instanceId, allNetworkSpaces),
       peerInstanceId: applyData.instanceId, // link this PAT to the peer that will present it
     });
 

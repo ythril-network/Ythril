@@ -528,6 +528,11 @@ Finalize within the window, or that token stops authenticating and the join has 
 invite. A token for a membership that never completed used to live for ever, belonging to no member — so an
 instance also revokes, at start, any peer token whose instance shares no network with it.
 
+**One token per peer, reaching every network the two share.** An instance stores one token per peer, so the token a
+handshake hands over replaces the previous one for every network the pair shares. It is therefore scoped to the
+spaces of all of those networks, not only the one being joined. That is not wider access: each sync request is
+admitted only to the spaces of networks the peer is currently a member of.
+
 **Why the whole bundle travels rather than a short URL to fetch it from.** `rsaPublicKeyPem` is what pins
 the handshake to the intended instance. If the joiner fetched it instead, whoever controls that fetch could
 substitute their own key, and the joiner would encrypt to them. Carrying it keeps the key out of band and
