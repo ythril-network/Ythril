@@ -24,6 +24,7 @@ import { judgeEntities } from './judge-entities.js';
 import { groupExchanges, coverTurns, linkClaims } from './claims.js';
 import { writeClaim } from './write-claim.js';
 import { judgeOrigin } from './origin.js';
+import { mergeRepeats } from './repeats.js';
 import { describeEntities } from './describe-entities.js';
 import { drawEdges, type EdgeLabel } from './relations.js';
 import { dateEdges } from './edge-dates.js';
@@ -133,31 +134,35 @@ export async function extractConversation(
     for (const t of flat) if (t.speaker === sp.name && !own.has(t.id)) sp.mentions.push({ turnId: t.id, start: -1, end: -1, text: '' });
   }
   const linked = linkClaims(covered.claims, judged);
+  // 5.9: a state told in several sessions is written once — before phase 7, so a change is never folded away.
+  const repeats = await mergeRepeats(linked.claims, decide);
+  judgements.push(...repeats.judgements);
+  const claims = repeats.claims;
 
   // 4.10: descriptions of what this file creates.
   const created = [...linked.minted, ...judged.speakers];
-  const descriptions = await describeEntities(created, linked.claims, deps.write);
+  const descriptions = await describeEntities(created, claims, deps.write);
 
   // 6–8: relations, change over time, timeline.
   const typed = new Map(allEntities.map(e => [e.id, { id: e.id, name: e.name, type: e.type }]));
-  const rel = await drawEdges(linked.claims, { entities: typed, vocabulary: vocabulary.edgeLabels, decide });
+  const rel = await drawEdges(claims, { entities: typed, vocabulary: vocabulary.edgeLabels, decide });
   judgements.push(...rel.judgements);
   // 6.3: an edge's `since` / `until`, only when its own claims say so.
-  const dated = await dateEdges(rel.edges, linked.claims, { entities: typed, decide });
+  const dated = await dateEdges(rel.edges, claims, { entities: typed, decide });
   judgements.push(...dated.judgements);
-  const change = await trackChange(linked.claims.map(c => ({ text: c.text, entityIds: c.entityIds, sessionDate: c.statedOn })), decide);
+  const change = await trackChange(claims.map(c => ({ text: c.text, entityIds: c.entityIds, sessionDate: c.statedOn })), decide);
   judgements.push(...change.judgements);
-  const timeline = await buildTimeline(linked.claims.map(c => ({ text: c.text, entityIds: c.entityIds, dates: c.dates })), decide);
+  const timeline = await buildTimeline(claims.map(c => ({ text: c.text, entityIds: c.entityIds, dates: c.dates })), decide);
   judgements.push(...timeline.judgements);
 
   // 9: the committed format.
-  const usedExisting = new Set(linked.claims.flatMap(c => c.entityIds));
+  const usedExisting = new Set(claims.flatMap(c => c.entityIds));
   const extraction = assembleExtraction({
     conversationId, conversation,
     entities: created,
     existing: judged.matchedExisting.filter(e => usedExisting.has(e.id)),
     descriptions,
-    claims: linked.claims,
+    claims: claims,
     edges: dated.edges,
     events: timeline.events,
     change,

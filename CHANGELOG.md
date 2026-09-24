@@ -188,6 +188,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Internal
 
+- **A state told in several sessions is written once** (`F-31`, 5.9, `repeats.ts`). A later telling of the same
+  unchanged fact is folded into the first claim as its source turns, so one answer does not fill five ranked slots.
+  Asked only across sessions and between claims sharing an entity; it runs before change tracking, so a change is
+  never folded away, and a person's claim is never merged with an assistant's.
 - **The conversation extractor dates an edge only when its text does** (`F-31`, 6.3, `edge-dates.ts`). `since`
   and `until` are asked per day-precise, non-approximate date of the edge's own claims, and written only on a
   confident yes; a date merely near the relationship dates nothing, and an end before its start writes neither.
