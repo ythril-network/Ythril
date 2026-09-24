@@ -1,5 +1,7 @@
 # Ingest API — a conversation in, records out
 
+> Part of the [Ythril Integration Guide](../integration-guide.md).
+
 `ingest` reads a conversation and writes what was in it: the people, places and things (entities), one claim per
 exchange (facts), the dated events (chrono), the relationships between them (edges), and one transcript file per
 session, linked to the claims it produced. The same capability on both doors:
@@ -60,8 +62,8 @@ Everything that would make the run fail is checked first, and the answer lists e
   Library. Add it to a space with
   [`POST /api/schema-library/groups/conversation/apply`](06b-schema-library-api.md); `ingest` never changes a
   space's schema itself.
-- **For `sessions` only:** a decision model (Settings → Models → Decision model, or the assist model it falls back
-  to), the assist model that writes claims, and the `doc-nlp` sidecar (`NLP_SIDECAR_URL`) must all answer.
+- **For `sessions` only:** a decision model (Settings → Media Processing → Models → Decision model, or the assist
+  model it falls back to), the assist model that writes claims, and the `doc-nlp` sidecar (`NLP_SIDECAR_URL`) must all answer.
 
 `400` is a malformed body (with every problem the loader found); `404` a space that does not exist.
 

@@ -218,13 +218,15 @@ const ADMIN_DOMAINS = [
 
 /**
  * Operations that are transport plumbing rather than use. Currently just SSE ticket minting: one per stream
- * connection, so a browser tab reopening after a deploy would read as demand on a space nobody queried.
+ * connection, so a browser tab reopening after a deploy would read as demand on a space nobody queried. And
+ * polling an ingest run: one start is polled many times, so counting the polls would read one import as dozens
+ * of questions asked of the space. The start itself counts, as a write.
  */
-const NON_USAGE_SUFFIXES = ['.ticket'] as const;
+const NON_USAGE_SUFFIXES = ['.ticket', '.ingest.status'] as const;
 
 /**
  * Verbs that mean something changed. `retry_embed_file` and `mkdir` are here because they are mutations whose
  * names do not end in an obvious verb, and `write` because the bulk endpoint is called `bulk.write`.
  */
 const MUTATION_VERB =
-  /\.(create|update|delete|merge|import|restore|reindex|rebuild|wipe|write|mkdir|retry_embedding(_all)?|resolve|bulk_resolve|dismiss|reopen|seed|scan|publish|apply|fork|adopt)$/;
+  /\.(create|update|delete|merge|import|restore|reindex|rebuild|wipe|write|mkdir|retry_embedding(_all)?|resolve|bulk_resolve|dismiss|reopen|seed|scan|publish|apply|fork|adopt|ingest)$/;
