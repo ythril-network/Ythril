@@ -118,6 +118,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The compose install caps the app and the database's memory** (`Q-46`). `ythril` and `ythril-mongo` had no
+  ceiling while every sidecar did, so on a shared host MongoDB sized its cache from the whole machine and the
+  app grew without bound. Both now default to 4 GB (`YTHRIL_MEM_LIMIT`, `YTHRIL_MONGO_MEM_LIMIT`), and MongoDB
+  sizes its cache from the ceiling. An existing install picks the limit up on the next `docker compose up`;
+  raise it in `.env` for very large spaces or ingests. Kubernetes deployments keep setting their own pod limits.
+
 - **The benchmark writes its corpus through `ingest`** (`F-31`). `benchmarks/writer/write-space.mjs` validates
   an extraction, creates the space and hands the extraction to the product's door, so the space a benchmark
   scores is written exactly as a user's conversation is — by one writer. Three things the old writer never

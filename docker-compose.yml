@@ -3,6 +3,10 @@
     image: ghcr.io/ythril-network/ythril:latest
     container_name: ythril
     restart: unless-stopped
+    # A memory ceiling, so one instance cannot take a shared host down with it. Node sizes its heap from
+    # the container limit, so the app runs inside it rather than into it. Raise YTHRIL_MEM_LIMIT in .env for
+    # very large ingests or document batches; an infra deployment sets its own pod limit instead.
+    mem_limit: ${YTHRIL_MEM_LIMIT:-4g}
     ports:
       - "${YTHRIL_PORT:-3200}:3200"
     volumes:
@@ -94,6 +98,10 @@
     # causing "Our replica set config is invalid or we are not a member of it".
     hostname: ythril-mongo
     restart: unless-stopped
+    # Uncapped, MongoDB sizes its cache from the WHOLE host (half of it, less a gigabyte). With a ceiling it
+    # sizes the cache from the ceiling instead, so this caps the cache too. The image also runs mongot, the
+    # vector-search process, inside the same limit. Raise YTHRIL_MONGO_MEM_LIMIT for very large spaces.
+    mem_limit: ${YTHRIL_MONGO_MEM_LIMIT:-4g}
     logging:
       driver: "none"
     environment:
