@@ -349,6 +349,8 @@ If you run a larger model (a 13B vision model, a `large-v3` transcription model)
 scans, raise the relevant ceiling in `.env` rather than editing `docker-compose.yml`:
 
 ```bash
+YTHRIL_MEM_LIMIT=8g        # default 4g  — the app itself
+YTHRIL_MONGO_MEM_LIMIT=8g  # default 4g  — MongoDB and vector search; the database cache is sized from it
 OLLAMA_MEM_LIMIT=16g       # default 8g  / OLLAMA_PIDS_LIMIT 2048       / OLLAMA_CPUS 8.0
 WHISPER_MEM_LIMIT=8g       # default 4g  / WHISPER_PIDS_LIMIT 1024      / WHISPER_CPUS 4.0
 UNSTRUCTURED_MEM_LIMIT=8g  # default 6g  / UNSTRUCTURED_PIDS_LIMIT 1024 / UNSTRUCTURED_CPUS 4.0
