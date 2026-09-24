@@ -194,8 +194,10 @@ Put `"$ref"` on an item and name it later in the same call:
 }
 ```
 
-**It is a correlation key, not an id.** It is scoped to the one call, never stored, and means nothing in the
-response — the record's identity is still minted by the write.
+**It is a correlation key, not an id.** It is scoped to the one call and never stored; the record's identity
+is still minted by the write. The response answers with what each key was given, in `refs`:
+`{ "post-1": { "id": "…", "kind": "entity" } }`. A key whose item was refused is absent, so every row in
+`refs` names a record that exists — take the ids from there rather than reading the space back by text.
 
 **Every record array is written before any edge**, so an edge can reference any record in the payload.
 Within a single array a reference cannot point forwards: an item can only name something declared above it.

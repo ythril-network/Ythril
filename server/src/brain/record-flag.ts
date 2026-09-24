@@ -143,3 +143,21 @@ export function applyRecordFlags(doc: RecordFlags, opts?: RecordFlags): void {
   }
 }
 
+
+/**
+ * Every per-record flag a body states, each read by `parseRecordFlag` — for a door that takes them all at once.
+ *
+ * A batch item is the case: the single-record doors name each flag at its own call site (the gate detects the
+ * forward by name there), while a batch loop that named them would be the fourth copy of a list this file
+ * already holds. Iterating `RECORD_FLAGS` is what makes a third flag reach the batch door by being declared,
+ * and the first non-boolean refuses the item rather than being dropped.
+ */
+export function parseRecordFlags(body: unknown): { ok: true; flags: RecordFlags } | { ok: false; error: string } {
+  const flags: RecordFlags = {};
+  for (const flag of RECORD_FLAGS) {
+    const r = parseRecordFlag(body, flag);
+    if (!r.ok) return r;
+    if (r.value !== undefined) flags[flag] = r.value;
+  }
+  return { ok: true, flags };
+}
