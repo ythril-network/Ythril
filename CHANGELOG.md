@@ -9,7 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [5.1.2] — 2026-09-25
 
-A patch: two instances that share more than one network keep syncing all of them.
+A patch for networks: two instances that share more than one network keep syncing all of them, a sync that
+transferred nothing no longer reports success, and a space-settings change your own vote passes applies at once.
 
 ### Fixed
 
@@ -21,6 +22,12 @@ A patch: two instances that share more than one network keep syncing all of them
   spaces. The joining side also no longer hands over an all-spaces token when the network carries no spaces — it
   reaches none. **After upgrading, re-join any second network created between the same two instances**, so both
   sides hold a token that reaches all of them.
+
+- **A sync cycle whose transfers were refused is no longer recorded as a success.** A refused or cut-short
+  transfer held its watermark and logged a warning, and the cycle still counted the member as synced — so a network
+  answering `403` on every request showed `success` in its history while nothing transferred. Such a member now
+  fails the cycle (`partial` or `failed`), the history's `errors` names the space, direction and transfers that
+  stopped, and the member's consecutive-failure count rises. A member with no peer token is reported the same way.
 
 ## [5.1.1] — 2026-09-24
 

@@ -137,6 +137,13 @@ export function resolveWatermark<T extends TransferOutcome>(opts: {
    */
   seqOf: (t: T) => number;
   warn: (msg: string) => void;
+  /**
+   * Receives the label of every transfer that stopped early, so the CYCLE can say it did not complete.
+   *
+   * Required because the warning alone was the defect: a refused batch held the watermark and logged, and the
+   * cycle above it still counted the member as synced and recorded `success` with nothing transferred (`Q-48`).
+   */
+  heldBack: string[];
 }): number {
   /*
    * THE CANDIDATE IS DERIVED HERE, and it used to be a parameter.
@@ -159,6 +166,7 @@ export function resolveWatermark<T extends TransferOutcome>(opts: {
   ];
   const at = safeWatermark(opts.from, candidate, labelled);
   const heldBack = truncatedTransfers(labelled);
+  opts.heldBack?.push(...heldBack);
   if (heldBack.length > 0) {
     opts.warn(
       `Sync ${opts.direction} from/to ${opts.peerLabel} space '${opts.spaceId}': ${heldBack.join(', ')} stopped `
