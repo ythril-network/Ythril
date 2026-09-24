@@ -141,6 +141,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Internal
 
+- **The conversation extractor draws only legal edges** (`F-31`, 6.1 / 6.2, `relations.ts`). For each pair of
+  entities one claim names, the decision model chooses among the labels whose declared endpoint types fit the
+  pair, in the direction they fit, or `none`. Code filters the vocabulary before asking and checks the answer
+  after, so an illegal edge is never written. The same edge from two claims is one edge citing both.
+
 - **The conversation extractor writes one claim per exchange, and checks it** (`F-31`, 5.2 + 5.10,
   `write-claim.ts`).
   - **Writing.** The assist model is handed the exchange with its dates already resolved ("9 May 2023") and
