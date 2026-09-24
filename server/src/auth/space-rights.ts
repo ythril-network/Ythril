@@ -228,6 +228,16 @@ export const ROUTE_RIGHTS: readonly RouteRight[] = [
   // ── Data quality — every one of these is `iterates` ───────────────────────────────────────────────────
   // These take no space. They walk the token's accessible spaces and resolve the space from the record, so
   // the gate is the ITERATION SET: narrow the loop to spaces holding `needs`, do not gate the call.
+  // ── Networks (F-34) ─────────────────────────────────────────────────────────────────────────────────
+  // A network carries several spaces, so the handler checks the rung on EVERY one (`auth/network-rights.ts`).
+  // Leaving is `write` for a token's own membership and `admin` for anyone's — the row names the lowest.
+  // Every verb on these two paths is governed, because an exemption is a claim about a whole PATH: the list and
+  // one network are read at `read`, creating and leaving at `write`, the shared settings at `admin`.
+  { route: '/api/networks', method: 'GET', area: 'networks', needs: 'read', scope: 'iterates' },
+  { route: '/api/networks', method: 'POST', area: 'networks', needs: 'write', scope: 'iterates' },
+  { route: '/api/networks/:id', method: 'GET', area: 'networks', needs: 'read', scope: 'iterates' },
+  { route: '/api/networks/:id', method: 'PATCH', area: 'networks', needs: 'admin', scope: 'iterates' },
+  { route: '/api/networks/:id', method: 'DELETE', area: 'networks', needs: 'write', scope: 'iterates' },
   { route: '/api/duplicates', method: 'GET', area: 'dataQuality', needs: 'read', scope: 'iterates' },
   { route: '/api/duplicates/scan', method: 'POST', area: 'dataQuality', needs: 'write', scope: 'iterates' },
   { route: '/api/duplicates/:id/merge', method: 'POST', area: 'dataQuality', needs: 'write', scope: 'iterates' },
@@ -376,6 +386,28 @@ export const TOOL_RIGHTS: readonly ToolRight[] = [
  * matches the same way, and a gate below asserts the two agree rather than trusting that they do.
  */
 export const NOT_AREA_SCOPED: readonly { route: string; why: string }[] = [
+
+  /*
+   * THE NETWORKS ROUTER, beyond the space-membership acts (`F-34`). A network is shared across spaces and
+   * instances; these act on the network as a whole — its peers, its topology, its votes, its sync — so they stay
+   * instance-admin and the Networks column does not reach them. The five that DO govern a space's membership are
+   * in `ROUTE_RIGHTS` above.
+   */
+  { route: '/api/networks/join-remote', why: 'joining a REMOTE network learns its space list only during the RSA handshake and auto-creates missing spaces, so the rung cannot be checked before the act it would refuse — instance-admin until F-34.1 designs a check that can' },
+  { route: '/api/networks/:id/join', why: 'called by a JOINING PEER presenting an invite key, not by a local token acting on its spaces — the peer protocol, instance-admin' },
+  { route: '/api/networks/:id/invite', why: 'mints the invite key another instance joins with: an act on the network as a whole, not on a space\'s membership — instance-admin' },
+  { route: '/api/networks/:id/fork', why: 'creates a new network from an existing one\'s topology: a network-wide act — instance-admin' },
+  { route: '/api/networks/:id/members', why: 'adds a peer INSTANCE to the network: who this instance trusts, not which spaces are shared — instance-admin' },
+  { route: '/api/networks/:id/members/:instanceId', why: 'removes a peer INSTANCE: the instance\'s trust relationships — instance-admin' },
+  { route: '/api/networks/:id/members/:instanceId/signing-key', why: 'a peer\'s vote-signing key: the network\'s trust, not a space\'s data — instance-admin' },
+  { route: '/api/networks/:id/reparent-self', why: 'braintree topology: where this instance sits in the tree — instance-admin' },
+  { route: '/api/networks/:id/members/:instanceId/adopt', why: 'braintree topology — instance-admin' },
+  { route: '/api/networks/:id/members/:instanceId/revert-parent', why: 'braintree topology — instance-admin' },
+  { route: '/api/networks/:id/votes', why: 'the network\'s governance rounds: an instance votes, not a space — instance-admin' },
+  { route: '/api/networks/:id/votes/:roundId', why: 'casting this instance\'s vote in a round — instance-admin' },
+  { route: '/api/networks/:id/sync', why: 'starting a sync cycle is instance operations (it spends the instance\'s bandwidth and every peer\'s), not a view of a space — instance-admin, like MCP network_sync' },
+  { route: '/api/networks/peers/:peerId/sync', why: 'syncing with one peer: instance operations — instance-admin' },
+  { route: '/api/networks/:id/sync-history', why: 'the instance\'s sync telemetry for a network, not a view of any space\'s data — instance-admin' },
 
   /*
    * THE TOOL DOOR, and this row is the one most worth reading before deciding it looks like a hole.

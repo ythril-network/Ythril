@@ -144,9 +144,18 @@ describe('M2 — ?token= is accepted on no route at all', () => {
 
 // ── M9 — instance-level MCP tools require admin ──────────────────────────────
 
-describe('M9 — list_peers / sync_now require an admin token', () => {
+/*
+ * M9, restated by F-34. `network_peers` stopped being instance-admin when the Networks rights column arrived: it now
+ * lists the peers of the networks a token may SEE (`networks: read` on every space each carries). The property this
+ * suite protects did not change and is asserted directly — a token without network rights learns NOTHING about this
+ * instance's peers — with a real peer present, so an empty answer means filtered rather than merely empty.
+ * `network_sync` is still instance-admin and still refused.
+ */
+describe('M9 — peers are hidden from a token without network rights; sync_now requires an admin token', () => {
   const spaceId = `m9-${RUN}`;
+  const PEER = '99999999-9999-4999-8999-999999999999';
   let plainToken;
+  let networkId;
   const tokenIds = [];
 
   before(async () => {
@@ -158,9 +167,16 @@ describe('M9 — list_peers / sync_now require an admin token', () => {
     assert.equal(t.status, 201, JSON.stringify(t.body));
     plainToken = t.body.plaintext;
     if (t.body.token?.id) tokenIds.push(t.body.token.id);
+    // A network on the plain token's own space, with a peer in it: what would leak if the filter did not hold.
+    const n = await post(INSTANCES.a, adminToken, '/api/networks', { label: `m9-${RUN}`, type: 'club', spaces: [spaceId], votingDeadlineHours: 1 });
+    assert.equal(n.status, 201, JSON.stringify(n.body));
+    networkId = n.body.id;
+    const m = await post(INSTANCES.a, adminToken, `/api/networks/${networkId}/members`, { instanceId: PEER, label: 'm9-peer', url: 'http://ythril-b:3200', token: `ythril_${crypto.randomBytes(16).toString('hex')}` });
+    assert.equal(m.status, 201, JSON.stringify(m.body));
   });
 
   after(async () => {
+    if (networkId) await del(INSTANCES.a, adminToken, `/api/networks/${networkId}`).catch(() => {});
     for (const id of tokenIds) await del(INSTANCES.a, adminToken, `/api/tokens/${id}`).catch(() => {});
     await fetch(`${INSTANCES.a}/api/spaces/${spaceId}`, {
       method: 'DELETE',
@@ -185,10 +201,10 @@ describe('M9 — list_peers / sync_now require an admin token', () => {
   const callTool = (token, name, args = {}) =>
     mcp(token, { method: 'tools/call', params: { name, arguments: args } });
 
-  it('list_peers via a non-admin token is refused', async () => {
+  it('network_peers via a token without network rights reveals no peer', async () => {
     const r = await callTool(plainToken, 'network_peers');
-    assert.match(r.text, /requires a token with instance-admin rights/i,
-      `VULNERABILITY: non-admin token reached list_peers: ${r.text.slice(0, 300)}`);
+    assert.ok(!r.text.includes(PEER), `VULNERABILITY: a token without network rights saw a peer: ${r.text.slice(0, 300)}`);
+    assert.ok(!r.text.includes('ythril-b'), `VULNERABILITY: a peer URL reached a token without network rights: ${r.text.slice(0, 300)}`);
   });
 
   it('sync_now via a non-admin token is refused', async () => {
@@ -199,7 +215,7 @@ describe('M9 — list_peers / sync_now require an admin token', () => {
 
   it('tools/list hides the admin-only tools from a non-admin token', async () => {
     const r = await mcp(plainToken, { method: 'tools/list', params: {} });
-    assert.ok(!/"name"\s*:\s*"network_peers"/.test(r.text), 'list_peers must not be advertised to a non-admin token');
+    // network_peers is no longer admin-only (F-34) — it filters instead, asserted above.
     assert.ok(!/"name"\s*:\s*"network_sync"/.test(r.text), 'sync_now must not be advertised to a non-admin token');
   });
 
@@ -213,6 +229,7 @@ describe('M9 — list_peers / sync_now require an admin token', () => {
     // than erroring.
     assert.ok(!/"isError"\s*:\s*true/.test(r.text), `admin call returned an error: ${r.text.slice(0, 300)}`);
     assert.match(r.text, /peers|instanceId|\[\]/i, `expected a peer listing shape: ${r.text.slice(0, 300)}`);
+    assert.ok(r.text.includes(PEER), 'the admin sees the peer the plain token was denied — the filter, not an empty network');
   });
 });
 

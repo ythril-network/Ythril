@@ -52,8 +52,10 @@ describe('the empty legacy record really is the widest one', () => {
      */
     const r = migrateToken({});
     assert.ok(r.floor, 'an empty legacy record no longer grants a floor — re-read the call-site guards');
-    assert.deepEqual(Object.keys(r.floor).sort(), ['dataQuality', 'files', 'knowledge', 'schema']);
-    for (const area of Object.keys(r.floor)) assert.equal(r.floor[area], 'write');
+    assert.deepEqual(Object.keys(r.floor).sort(), ['dataQuality', 'files', 'knowledge', 'networks', 'schema']);
+    // Every DATA area at write. `networks` is none below admin (F-34): network routes were instance-admin in the
+    // legacy model, so even the widest legacy record gains no network rights.
+    for (const area of Object.keys(r.floor)) assert.equal(r.floor[area], area === 'networks' ? 'none' : 'write');
   });
 
   it('and that reading is deliberate, for a REAL pre-3.0 token', () => {

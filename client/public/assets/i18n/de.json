@@ -2020,6 +2020,8 @@
   "tokens.rights.area.schema.desc": "Die Struktur, die der Space von seinen Datensätzen erwartet — welche Typen es gibt und welche Eigenschaften sie tragen.",
   "tokens.rights.area.dataQuality": "Datenqualität",
   "tokens.rights.area.dataQuality.desc": "Duplikate, Widersprüche und Lücken finden und auflösen, samt der daraus folgenden Prüfentscheidungen.",
+  "tokens.rights.area.networks": "Netzwerke",
+  "tokens.rights.area.networks.desc": "Diesen Space mit anderen Instanzen teilen: Lesen sieht seine Netzwerke, Schreiben legt eines damit an und verlässt eine selbst begründete Mitgliedschaft, Admin ändert die Einstellungen eines Netzwerks und verlässt jede Mitgliedschaft. Gehört nicht zur Verwaltung des Space.",
   "tokens.rights.rung.read.desc": "darf in diesem Bereich alles ansehen und nichts ändern — ein Agent kann suchen und lesen, jeder Schreibversuch wird abgelehnt",
   "tokens.rights.rung.write.desc": "alles von read, zusätzlich Datensätze anlegen, bearbeiten und löschen — dieses Niveau braucht die übliche MCP-Nutzung",
   "tokens.rights.rung.admin.desc": "alles von write, zusätzlich die Einstellungen und die unwiderruflichen Vorgänge dieses Bereichs, etwa das Leeren einer Sammlung",

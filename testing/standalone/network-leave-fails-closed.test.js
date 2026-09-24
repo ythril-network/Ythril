@@ -3,8 +3,9 @@
  *
  * ## What is being protected
  *
- * A token at the Networks `out` rung may join a network and may leave one it joined itself. Removing a
- * membership another token established needs the admin rung. Leaving does not stop data leaving
+ * A token at `networks: write` may join a network and may leave one it joined itself. Removing a
+ * membership another token established needs `networks: admin`. (The rungs were `in`/`out`/`leave` before the
+ * column existed; F-34 gave Networks the same four rungs as every other area.) Leaving does not stop data leaving
  * retroactively — peers keep what they hold — so the thing worth guarding is not the egress but the
  * dismantling: a publisher leaving strands its subscribers, a braintree parent orphans its subtree.
  *
@@ -27,13 +28,13 @@ before(async () => {
     await import('../../server/dist/auth/network-membership.js'));
 });
 
-const req = (over) => ({ origins: {}, spaceId: 'qa', tokenId: 't1', rung: 'out', ...over });
+const req = (over) => ({ origins: {}, spaceId: 'qa', tokenId: 't1', rung: 'write', ...over });
 
 describe('who may leave a network', () => {
   it('the admin rung may leave anything, with no origin recorded at all', () => {
-    // Order matters: `leave` must short-circuit BEFORE the ownership check, or the admin rung would depend
+    // Order matters: `admin` must short-circuit BEFORE the ownership check, or the admin rung would depend
     // on data that is absent for every pre-existing membership — the exact case it exists to unblock.
-    const v = mayLeaveNetwork(req({ rung: 'leave', origins: undefined }));
+    const v = mayLeaveNetwork(req({ rung: 'admin', origins: undefined }));
     assert.deepEqual(v, { allowed: true, because: 'admin-rung' });
   });
 
@@ -60,7 +61,7 @@ describe('who may leave a network', () => {
   it('the lower rungs cannot leave at all, whoever established it', () => {
     // set-claim: the two rungs BELOW the threshold, a deliberate subset of the ladder rather than a copy
     // of it -- the cases either side assert what the higher rungs may do, which is the other half.
-    for (const rung of ['none', 'in']) {
+    for (const rung of ['none', 'read']) {
       assert.deepEqual(mayLeaveNetwork(req({ rung, origins: { qa: 't1' } })),
         { allowed: false, because: 'insufficient-rung' },
         `rung ${rung} was allowed to leave a network`);
@@ -71,7 +72,7 @@ describe('who may leave a network', () => {
     // Three refusals with one reason between them would make "you may not" unactionable: ask an admin, ask
     // the token that joined, or record the origin are three different next steps.
     const reasons = new Set([
-      mayLeaveNetwork(req({ rung: 'in' })).because,
+      mayLeaveNetwork(req({ rung: 'read' })).because,
       mayLeaveNetwork(req({ origins: {} })).because,
       mayLeaveNetwork(req({ origins: { qa: 't2' } })).because,
     ]);
@@ -104,9 +105,9 @@ describe('the origin map', () => {
     let o = recordOrigin(undefined, 'qa', 't1');
     o = forgetOrigin(o, 'qa');
     o = recordOrigin(o, 'qa', 't2');
-    assert.deepEqual(mayLeaveNetwork({ origins: o, spaceId: 'qa', tokenId: 't1', rung: 'out' }),
+    assert.deepEqual(mayLeaveNetwork({ origins: o, spaceId: 'qa', tokenId: 't1', rung: 'write' }),
       { allowed: false, because: 'not-your-membership' });
-    assert.deepEqual(mayLeaveNetwork({ origins: o, spaceId: 'qa', tokenId: 't2', rung: 'out' }),
+    assert.deepEqual(mayLeaveNetwork({ origins: o, spaceId: 'qa', tokenId: 't2', rung: 'write' }),
       { allowed: true, because: 'own-membership' });
   });
 });

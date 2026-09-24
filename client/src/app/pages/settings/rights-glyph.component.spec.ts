@@ -5,7 +5,7 @@ import { RightsGlyphComponent, RIGHT_AREAS, type TokenRights, type AreaRungs, ty
  * The glyph has to be right about two different things at once — how high a token goes, and how much of that
  * it holds everywhere — and both are easy to get subtly wrong in the direction that flatters a token.
  */
-const R = (r: Rung): AreaRungs => ({ knowledge: r, files: r, schema: r, dataQuality: r });
+const R = (r: Rung): AreaRungs => ({ knowledge: r, files: r, schema: r, dataQuality: r, networks: r });
 const rights = (over: Partial<TokenRights> = {}): TokenRights =>
   ({ instanceAdmin: false, createSpaces: false, floor: null, perSpace: {}, ...over });
 

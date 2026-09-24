@@ -23,8 +23,8 @@
  * dismantled by a token that was never meant to be able to.
  */
 
-/** The Networks rungs, in the order they contain one another. */
-export type NetworkRung = 'none' | 'in' | 'out' | 'leave';
+import type { Rung } from '../config/rights-shape.js';
+
 
 export interface LeaveRequest {
   /** `spaceId` -> id of the token that established the membership. Absent entries are unknown. */
@@ -32,8 +32,11 @@ export interface LeaveRequest {
   spaceId: string;
   /** The id of the token asking to leave. */
   tokenId: string;
-  /** This token's rung on the Networks column for this space. */
-  rung: NetworkRung;
+  /**
+   * This token's `networks` rung for this space — the standard four since F-34 gave Networks its column: `write`
+   * may leave a membership it established, `admin` may leave any. (They were `out` and `leave` before.)
+   */
+  rung: Rung;
 }
 
 export type LeaveVerdict =
@@ -43,13 +46,13 @@ export type LeaveVerdict =
 /**
  * Decide a leave request. Pure: no config, no database, no clock.
  *
- * Order matters and is deliberate — `leave` short-circuits before the ownership check, so an admin never
+ * Order matters and is deliberate — `admin` short-circuits before the ownership check, so an admin never
  * needs an origin record to act. Checking ownership first would make the admin rung depend on data that is
  * absent for every pre-existing membership, which is precisely the case the admin rung exists to unblock.
  */
 export function mayLeaveNetwork(req: LeaveRequest): LeaveVerdict {
-  if (req.rung === 'leave') return { allowed: true, because: 'admin-rung' };
-  if (req.rung !== 'out') return { allowed: false, because: 'insufficient-rung' };
+  if (req.rung === 'admin') return { allowed: true, because: 'admin-rung' };
+  if (req.rung !== 'write') return { allowed: false, because: 'insufficient-rung' };
 
   const establisher = req.origins?.[req.spaceId];
   if (establisher === undefined) return { allowed: false, because: 'origin-unknown' };

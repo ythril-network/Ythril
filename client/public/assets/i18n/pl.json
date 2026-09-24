@@ -2020,6 +2020,8 @@
   "tokens.rights.area.schema.desc": "Kształt, jakiego przestrzeń oczekuje od swoich rekordów — jakie typy istnieją i jakie mają właściwości.",
   "tokens.rights.area.dataQuality": "Jakość danych",
   "tokens.rights.area.dataQuality.desc": "Znajdowanie i rozwiązywanie duplikatów, sprzeczności i luk oraz wynikające z tego decyzje przeglądu.",
+  "tokens.rights.area.networks": "Sieci",
+  "tokens.rights.area.networks.desc": "Udostępnianie tej przestrzeni innym instancjom: odczyt widzi jej sieci, zapis tworzy z nią sieć i opuszcza członkostwo, które sam założył, admin zmienia ustawienia sieci i opuszcza każde członkostwo. Nie wchodzi w zakres administrowania przestrzenią.",
   "tokens.rights.rung.read.desc": "może wszystko w tym obszarze obejrzeć i nic nie zmienić — agent może wyszukiwać i czytać, a każda próba zapisu jest odrzucana",
   "tokens.rights.rung.write.desc": "wszystko co read, a dodatkowo tworzenie, edycja i usuwanie pojedynczych rekordów — tyle wystarcza do zwykłej pracy MCP",
   "tokens.rights.rung.admin.desc": "wszystko co write, a dodatkowo ustawienia i nieodwracalne operacje tego obszaru, na przykład opróżnienie kolekcji",

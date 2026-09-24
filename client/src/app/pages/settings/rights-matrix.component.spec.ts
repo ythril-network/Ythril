@@ -502,7 +502,7 @@ describe('RightsMatrixComponent — the Space Admin column', () => {
     // Setting one area alone still emits exactly that.
     row.querySelectorAll('app-rung-picker')[2]!.querySelectorAll('button')[1]!.click();
     expect(emitted[0]!.perSpace['qa']).toEqual(
-      { knowledge: 'none', files: 'none', schema: 'read', dataQuality: 'none' });
+      { knowledge: 'none', files: 'none', schema: 'read', dataQuality: 'none', networks: 'none' });
   });
 
   it('is disabled in a read-only view, like every other control in the grid', () => {

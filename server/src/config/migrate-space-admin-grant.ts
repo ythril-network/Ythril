@@ -34,7 +34,7 @@
  * Idempotent: a token already carrying the flag for a space is left alone.
  */
 import type { TokenRecord } from './types.js';
-import { SPACE_AREAS } from './rights-shape.js';
+import { SPACE_ADMIN_AREAS } from './rights-shape.js';
 import { log } from '../util/log.js';
 
 export interface SpaceAdminGrantOutcome {
@@ -57,7 +57,7 @@ export function migrateSpaceAdminGrant(tokens: TokenRecord[] | undefined): Space
 
     const already = new Set(rights.spaceAdmin?.spaces ?? []);
     const floorAdmin = rights.spaceAdmin?.floor
-      || SPACE_AREAS.every(area => rights.floor?.[area] === 'admin');
+      || SPACE_ADMIN_AREAS.every(area => rights.floor?.[area] === 'admin');
     const earned: string[] = [];
     for (const [spaceId, rungs] of Object.entries(rights.perSpace)) {
       if (already.has(spaceId)) continue;
@@ -66,7 +66,7 @@ export function migrateSpaceAdminGrant(tokens: TokenRecord[] | undefined): Space
        * it here would ask whether the flag is already set and migrate nothing, while looking exactly like
        * the right thing to call.
        */
-      if (SPACE_AREAS.every(area => (rungs as Record<string, string>)[area] === 'admin')) {
+      if (SPACE_ADMIN_AREAS.every(area => (rungs as Record<string, string>)[area] === 'admin')) {
         earned.push(spaceId);
       }
     }
