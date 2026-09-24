@@ -67,7 +67,8 @@ Click the gear icon on any space row to open its settings panel. Changes save an
 > **A `Governed` badge in the panel header means Save opens a vote.** The space belongs to one or more
 > networks (hover the badge to see which), so a change to its purpose, usage notes or schema is **submitted
 > for a vote** in each network rather than applied immediately — you'll see *"saved as a proposal"* and the
-> change takes effect when the vote passes. Local, operational settings (storage quota, auto-delete window,
+> change takes effect when the vote passes. **If your vote alone decides it** — you organise the club, you
+> publish the pub/sub network, or you are the only member — it passes on Save and applies at once. Local, operational settings (storage quota, auto-delete window,
 > extraction and media-analysis overrides, duplicate rules) are never voted and apply at once. No badge
 > means the space is in no network and everything applies immediately.
 

@@ -36,6 +36,7 @@ import { updateSpace, refuseRemovedDescription } from './spaces.js';
 import { ensureTtlIndex } from '../brain/ttl.js';
 import { peerSafeFetch } from '../sync/peer-fetch.js';
 import { proposedMetaFields } from '../sync/meta-round-merge.js';
+import { concludeRoundIfReady } from '../sync/governance.js';
 import { log } from '../util/log.js';
 import { v4 as uuidv4 } from 'uuid';
 import { capDocExtractionMode } from '../files/converters/extraction-level.js';
@@ -345,7 +346,16 @@ export async function applySpaceMetaUpdate(plan: MetaUpdatePlan): Promise<MetaUp
           metaChangedFields: proposedMetaFields(patchData.meta ?? {}),
           baseMetaVersion: space.meta?.version ?? 0,
         });
-        rounds.push({ networkId: net.id, networkLabel: net.label, roundId });
+        /*
+         * Evaluated now, because the proposer's yes above may already be enough (`Q-49`).
+         *
+         * On club and pub/sub one yes passes a round, and a closed network with no other member needs only ours —
+         * but nothing looked at the round until another vote arrived, so the change answered 202 and sat unapplied
+         * until somebody cast the identical yes again or the deadline expired it. The round stays in the list
+         * either way, concluded or not, so peers learn of it exactly as before.
+         */
+        const opened = net.pendingRounds[net.pendingRounds.length - 1]!;
+        if (!concludeRoundIfReady(net, opened)) rounds.push({ networkId: net.id, networkLabel: net.label, roundId });
       }
 
       // Non-meta updates apply immediately (label, maxGiB). `description` is not among them: the planner rewrote it
@@ -383,7 +393,14 @@ export async function applySpaceMetaUpdate(plan: MetaUpdatePlan): Promise<MetaUp
         }
       }
 
-      return { outcome: 'vote_pending', rounds };
+      if (rounds.length > 0) return { outcome: 'vote_pending', rounds };
+
+      // Every round passed on the proposer's own vote, so the meta is already written by the conclusion.
+      const applied = getConfig().spaces.find(s => s.id === id);
+      if (!applied) return { outcome: 'not_found' };
+      void sweepSuppressedVectors(id, applied.meta as SpaceMeta)
+        .catch(err => log.warn(`Suppression sweep failed for ${id}: ${err instanceof Error ? err.message : String(err)}`));
+      return { outcome: 'applied', space: applied };
     }
   }
 

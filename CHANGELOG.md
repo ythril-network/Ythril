@@ -29,6 +29,11 @@ transferred nothing no longer reports success, and a space-settings change your 
   fails the cycle (`partial` or `failed`), the history's `errors` names the space, direction and transfers that
   stopped, and the member's consecutive-failure count rises. A member with no peer token is reported the same way.
 
+- **A space-settings change your own vote already passes is applied at once.** On a club or pub/sub network one
+  yes passes a vote, and the proposer's yes was recorded when the vote opened, but nothing counted it — so the
+  change answered `202 vote_pending` and did nothing until somebody cast the same yes again or the vote expired a
+  day later. It now concludes when it opens if the proposer's vote is enough, and answers `200`.
+
 ## [5.1.1] — 2026-09-24
 
 A security patch: a network invite that was applied and never finalized no longer leaves a permanent peer
