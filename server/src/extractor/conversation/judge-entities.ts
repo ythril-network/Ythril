@@ -18,7 +18,8 @@
  *
  * - **4.5 prefer the merge.** A picked card IS a merge, whatever the confidence: a wrong duplicate is netted by
  *   the space's near-duplicate scanner, while a missing merge splits one person in two with nothing to join
- *   them. (A merge that dates rule out — 4.7 — waits for phase 3's dates to reach claims.)
+ *   them. A merge the DATES rule out (4.7) is judged in the same question: the turn's resolved dates are in the
+ *   state beside each card's description, which is where both halves of a contradiction can be seen.
  * - **4.2 no type, no entity.** `none`, or an answer outside the space's types, and the mention stays text in
  *   the claim. *"Do not invent a type"* is structural: the choice has no other options.
  * - **4.8 mint only what the conversation returns to.** A new entity mentioned once is `unreturned`, not
@@ -40,7 +41,8 @@ export const DEFAULT_ENTITY_POLICY = { thingAt: 0.5, groupAt: 0.5 };
 /** How many turns back "the recent turns" reach, for a pronoun's or a bare noun's hand. */
 const RECENT_TURNS = 6;
 
-export interface EntityTurn { id: string; speaker: string; speech: string }
+/** `dates` (4.7): phase 3's resolutions for the turn, as a reader reads them — what "yesterday" means. */
+export interface EntityTurn { id: string; speaker: string; speech: string; dates?: string[] }
 
 export interface RunEntity {
   id: string;
@@ -127,7 +129,9 @@ export async function judgeEntities(input: {
       if (hand.length) {
         questions[`match:${i}`] = { type: 'choice', instructions: {
           mention: m.text,
-          question: kind ? 'Who or what does `mention` refer to in `turn.text`?' : 'Is `mention` in `turn.text` one of these, or something new?',
+          question: (kind ? 'Who or what does `mention` refer to in `turn.text`?' : 'Is `mention` in `turn.text` one of these, or something new?')
+            // 4.7: a card whose own dates contradict the turn's is not the same thing — judged here, where both are seen.
+            + (turn.dates?.length ? ' A card whose dates contradict `turn.dates` is not it.' : ''),
         }, criteria: {
           ...Object.fromEntries(hand.map(e => [e.id, card(e)])),
           ...(kind ? { none: 'None of these — it refers to something not listed, or to nothing specific.' }
@@ -147,7 +151,7 @@ export async function judgeEntities(input: {
     let answers: Record<string, import('../decide.js').Answer> = {};
     if (Object.keys(questions).length) {
       const d = await decide({
-        turn: { speaker: turn.speaker, text: turn.speech },
+        turn: { speaker: turn.speaker, text: turn.speech, ...(turn.dates?.length ? { dates: turn.dates } : {}) },
         before: turns[ti - 1]?.speech,
         after: turns[ti + 1]?.speech,
       }, questions);

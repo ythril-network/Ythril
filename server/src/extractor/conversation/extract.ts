@@ -7,8 +7,6 @@
  *
  * What it returns besides the extraction: every judgement with its raw answers (so a threshold can be measured
  * and changed without asking again), the claims that were dropped and why, and the turns no claim covers.
- *
- * Not yet here: 4.7 (a merge that dates rule out).
  */
 import type { Question } from '../decide.js';
 import type { Decision } from '../decide.js';
@@ -20,7 +18,7 @@ import type { Span } from './nlp-client.js';
 import { Shortlister, type KnownEntity } from './shortlist.js';
 import { judgeEntities } from './judge-entities.js';
 import { groupExchanges, coverTurns, linkClaims } from './claims.js';
-import { writeClaim } from './write-claim.js';
+import { writeClaim, formatDate } from './write-claim.js';
 import { judgeOrigin } from './origin.js';
 import { mergeRepeats } from './repeats.js';
 import { writeArcs } from './arcs.js';
@@ -82,7 +80,11 @@ export async function extractConversation(
     turns.map(s => s.map(t => ({ id: t.id, speaker: t.speaker, speech: t.pasted ? '' : t.speech }))), deps.spans);
   const shortlister = new Shortlister({ ...(deps.searchSpace ? { searchSpace: deps.searchSpace } : {}) });
   const judged = await judgeEntities({
-    turns: flat.map(t => ({ id: t.id, speaker: t.speaker, speech: t.speech })),
+    // 4.7: each turn's resolved dates, so a merge its dates contradict can be seen as one.
+    turns: flat.map(t => {
+      const dates = [...new Set(t.times.map(tm => formatDate(tm.resolution)).filter((d): d is string => !!d))];
+      return { id: t.id, speaker: t.speaker, speech: t.speech, ...(dates.length ? { dates } : {}) };
+    }),
     mentions, entityTypes: vocabulary.entityTypes, shortlister, decide,
   });
   judgements.push(...judged.judgements);

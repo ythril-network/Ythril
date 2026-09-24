@@ -192,6 +192,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Internal
 
+- **A merge its dates contradict can be seen as one** (`F-31`, 4.7). The entity judge now sees each turn's resolved
+  dates beside every candidate's description, and the merge question says a card whose dates contradict them is
+  not it — judged where both halves are visible, rather than guessed by a code rule.
 - **The conversation extractor writes the ARC as well as the moments** (`F-31`, 5.8, `arcs.ts`). A subject with
   claims in three or more sessions gets one claim saying how it developed, written from those claims and checked
   like any claim — linted, refused by the evidence gate, citation-checked, one rewrite; the writer may answer NONE.
