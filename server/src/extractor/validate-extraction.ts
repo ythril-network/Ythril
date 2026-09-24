@@ -6,6 +6,8 @@
  *
  * The original header follows.
  */
+import { UUID_V4_RE } from '../brain/entity-refs.js';
+
 /** A Schema Library entry, as `schemas/` and `benchmarks/space/schema.json` hold them. */
 export interface SchemaEntry { knowledgeType: string; typeName: string; schema: any; [k: string]: unknown }
 
@@ -201,6 +203,19 @@ export function validateExtraction(extraction: any, schemaEntries: SchemaEntry[]
     if (!String(e.description ?? '').trim()) {
       say(`${at} ('${e.key}') has no description. A bare name is a tag, not something a question can match.`);
     }
+    entityType.set(e.key, e.type);
+  }
+
+  /*
+   * Entities the SPACE already holds, that a mention was merged into (`F-31`, the product's one addition to the
+   * format). They are entity keys like any other — a claim or an edge may name one — but they are not written,
+   * so they carry an id instead of a description, and the id has to be one the instance could hold.
+   */
+  for (const [i, e] of (extraction.existingEntities ?? []).entries()) {
+    const at = `existingEntities[${i}]`;
+    if (!e.key) { say(`${at} has no key`); continue; }
+    defineKey(e.key, 'entity', at);
+    if (!UUID_V4_RE.test(String(e.id ?? ''))) say(`${at} ('${e.key}') has id '${e.id}', which is not a UUID v4 — it cannot name a record in a space`);
     entityType.set(e.key, e.type);
   }
 

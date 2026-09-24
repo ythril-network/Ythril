@@ -84,6 +84,15 @@ export class BatchRefs {
   get size(): number {
     return this.minted.size;
   }
+
+  /**
+   * Every key this call minted, with its id — what the batch answers with, so a caller never reads the space
+   * back by text to learn the ids it just created. Only keys whose item was WRITTEN are here: `declare` runs
+   * after the write, so a refused item's key is absent rather than present with an id nobody was given.
+   */
+  toJSON(): Record<string, ResolvedRef> {
+    return Object.fromEntries(this.minted);
+  }
 }
 
 /** What went wrong resolving one reference, phrased for the caller who wrote it. */

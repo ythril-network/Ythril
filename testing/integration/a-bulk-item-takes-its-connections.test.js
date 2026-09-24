@@ -79,7 +79,7 @@ const edgesFrom = async (from) => {
   return r.results;
 };
 
-/** The fact this batch just wrote, by its text — bulk does not return ids. */
+/** The fact this batch just wrote, by its text — these items declare no `$ref`, so `refs` has nothing to name. */
 const factByText = async (text) => {
   const r = await readCollection(INSTANCES.a, token, SPACE, 'facts', { filter: { fact: text }, limit: 2 });
   assert.equal(r.status, 200, JSON.stringify(r.body));

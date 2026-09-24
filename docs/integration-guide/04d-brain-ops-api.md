@@ -506,7 +506,8 @@ Each item accepts the same fields as its corresponding individual endpoint (`POS
   "connections": { "links": 2, "edges": 1 },
   "errors":      [
     { "type": "edge", "index": 0, "reason": "missing required field: from" }
-  ]
+  ],
+  "refs":        { "post-1": { "id": "3f2b1c9e-…", "kind": "entity" } }
 }
 ```
 
@@ -514,6 +515,7 @@ Each item accepts the same fields as its corresponding individual endpoint (`POS
 - `updated` — count of existing documents merged per type (entities are upserted by `id` when supplied; edges are upserted by their natural key `(from, to, label)`).
 - `connections` — what the ITEMS' own `link*` and `edges` fields attached. **A different question from `inserted.edges`**, which counts the top-level `edges` array: that one is a collection you wrote, these are relationships hung off records you wrote. Folded together the number could not be reconciled against the payload you sent. `links` is the rows that were added; `edges` is the upserts, and this door does not tell a new one from an updated one for an item's own edges.
 - `errors` — per-item failures (`type`, zero-based `index`, human-readable `reason`). Valid items are still written even when errors are present.
+- `refs` — the id each `$ref` key was given, keyed by the key, with the kind of record it names. Only keys whose item was written appear. It is how you learn the ids a batch minted, for a second batch or a file's links, without reading them back.
 
 Entity items in the `entities` array accept an optional `id` field (UUID v4). If `id` is supplied, the entity with that ID is updated (or created with that ID). If `id` is omitted, a new entity is always inserted. See [Upsert an Entity](04b-graph-api.md#upsert-an-entity) for full identity semantics.
 

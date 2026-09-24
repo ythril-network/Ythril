@@ -36,9 +36,10 @@ export interface AssembledClaim {
 
 export interface Extraction {
   conversationId: string;
-  sessions: { key?: string; date: string; turns: string[] }[];
+  /** `text` is the session's transcript, attached by `ingest` before the write; the extractor never sets it. */
+  sessions: { key?: string; date: string; turns: string[]; text?: string }[];
   entities: { key: string; type: string; name: string; description: string; properties?: Record<string, string>; sourceTurns?: string[] }[];
-  existingEntities: { key: string; id: string }[];
+  existingEntities: { key: string; id: string; type: string }[];
   edges: { label: string; from: string; to: string; properties?: Record<string, string> }[];
   chrono: { key: string; type: 'event'; title: string; date: string; endsAt?: string; status: string; entities: string[]; sourceTurns?: string[] }[];
   claims: AssembledClaim[];
@@ -91,7 +92,7 @@ export function assembleExtraction(input: AssembleInput): Extraction {
   const existingEntities = input.existing.map(e => {
     const key = keyFor(e.name);
     entityKey.set(e.id, key);
-    return { key, id: e.id };
+    return { key, id: e.id, type: e.type };
   });
   const keysOf = (ids: string[]) => [...new Set(ids.map(id => entityKey.get(id)).filter((k): k is string => !!k))];
 

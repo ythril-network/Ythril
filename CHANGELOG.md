@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A batch answers with the ids its keys were given** (`refs` on `POST /bulk` and `save_bulk`). An item's
+  `$ref` key was resolved inside the call and thrown away, so a caller that needed the new ids read the
+  space back by text. The response now carries `{ "post-1": { id, kind } }`, one row per key whose item
+  was written; a refused item's key is absent.
 - **An NLP sidecar for the conversation extractor** (`F-31`, `sidecars/doc-nlp`). It is bundled like the
   other models, and `DOC_NLP_REPLICAS=0` leaves it out. It returns spaCy's named entities and noun phrases, which the
   extractor proposes as candidate mentions (step 4.1). The decision model then judges them, so casing and
@@ -106,6 +110,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A batch item dropped `superseded` and `suppressEmbeddings`** (`POST /bulk`, `save_bulk`), on all four
+  record kinds and both doors. The guide says an item takes the same fields as its single-record endpoint,
+  and every single create takes both; the batch answered 207 and stored the record without them. Both are
+  now read by one shared parser that iterates the declared flags (`parseRecordFlags`), so a non-boolean
+  refuses the item and a future flag reaches the batch door by being declared.
 - **A REST upload whose metadata write failed answered 2xx** (`files/store-file.ts`). The single-request
   upload swallowed that failure and reported the file as written, so the bytes sat on disk with no record
   behind them and nothing said so. It now fails the request, the same as MCP `write_file` always did.
@@ -144,6 +153,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Internal
 
+- **The conversation extractor writes what it found** (`F-31`, phase 10, `extractor/conversation/write-extraction.ts`).
+  The server port of the benchmark's `write-space.mjs`, over the batch door rather than the bare record
+  writers, so an ingested record meets the same schema, linkage and flag rules as any other write. An
+  entity the space already held is linked by id; the validator now accepts those keys and requires a UUID.
 - **Every door writes a file through one sequence** (`files/store-file.ts`, `storeFile` / `recordStoredFile`):
   quota, bytes, metadata, the processing queue and the webhook. The REST upload (single and chunked) and MCP
   `write_file` each held a copy, and `ingest` was about to be the third. The hash-hand-over gate now asserts

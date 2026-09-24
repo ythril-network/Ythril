@@ -38,6 +38,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { between } from './_structural-window.mjs';
 
 const ROOT = process.cwd();
 
@@ -333,6 +334,29 @@ describe('every per-record flag is reachable on every surface that can set it', 
    * wrong — removing the property does not hide the alias, it makes the tool REFUSE it, which is a
    * capability difference between the doors rather than a documentation one.
    */
+  it('the BATCH door carries every flag on every item kind, on both doors', () => {
+    // The door this file's title always covered and its body never looked at. `POST /bulk` and `save_bulk`
+    // say an item takes the same fields as its single-record endpoint, and until F-31 no loop read either
+    // flag: both doors answered 207 with the flag dropped. The wire test is
+    // `a-batch-item-carries-its-record-flags.test.js`; this holds the source to the derived set.
+    const bulk = code('server/src/brain/bulk.ts');
+    const kinds = ['fact', 'entity', 'chrono', 'edge'];
+    for (const kind of kinds) {
+      // From the kind's shape check to its write: the item-validation run of that loop, bounded by the
+      // `try {` that opens the write rather than by a character count.
+      const validation = between(bulk, `shapeError('${kind}', item);`, 'try {', `bulk ${kind} loop`);
+      assert.match(validation, /= parseRecordFlags\(item\);/, `the ${kind} loop in brain/bulk.ts does not parse the record flags`);
+    }
+    // Four parses and four forwards — a parse whose result never reaches the writer is the mention-only shape.
+    assert.equal((bulk.match(/Flags\.flags/g) ?? []).length, kinds.length,
+      'each bulk loop must hand its parsed flags to its writer');
+    const mcp = code('server/src/mcp/tools/bulk.ts');
+    for (const flag of recordFlags()) {
+      const declared = (mcp.match(new RegExp(`\\n\\s+${flag}:\\s+\\w+,`, 'g')) ?? []).length;
+      assert.equal(declared, kinds.length, `save_bulk declares ${flag} on ${declared} of ${kinds.length} item schemas`);
+    }
+  });
+
   it('the legacy chrono POST-as-update form is GONE, so there is no deprecated door to drop it on', () => {
     // This assertion is inverted from what it was. While the route existed it had to REFUSE the flag —
     // performing no property validation and writing no audit snapshot, it was not a place to grant new

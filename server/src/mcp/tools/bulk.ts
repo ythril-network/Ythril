@@ -8,7 +8,7 @@
  */
 
 import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.js';
-import { TTL_DAYS_SCHEMA, uuidSchema } from './shared.js';
+import { TTL_DAYS_SCHEMA, SUPERSEDED_SCHEMA, SUPPRESS_EMBEDDINGS_SCHEMA, uuidSchema } from './shared.js';
 import { bulkWrite, bulkWriteTotal } from '../../brain/bulk.js';
 import { resolveWriteTarget } from '../../spaces/proxy.js';
 import { emitWebhookEvent } from '../../webhooks/dispatcher.js';
@@ -40,7 +40,7 @@ export const save_bulkTool: ToolHandler = {
     + 'kind. It also matters for records this call UPDATES: an entity '
     + 'addressed by an id that already exists is written before an edge in the same batch reads it. Facts go '
     + 'first of all, so a fact\'s `linkEntities` cannot name an entity from this same call under any ordering.\n\n'
-    + 'A RECORD THIS CALL CREATES IS REFERENCED BY A CORRELATION KEY. Put `"$ref": "post-1"` on an item and later items name it as `"$ref:post-1"` — in an edge\'s `from`/`to`, or in a link field. The key is scoped to this call, is never stored, and is NOT the id: identities are still minted here. Every record array is written before any edge, so an edge can reference any record in the payload; within one array a reference cannot point FORWARDS. A key used twice is refused rather than resolved, and a stated kind that disagrees with the array the key was declared in is refused too — the array decides. A LITERAL id you invent is still not the id the record gets, and still points at nothing.\n\n'
+    + 'A RECORD THIS CALL CREATES IS REFERENCED BY A CORRELATION KEY. Put `"$ref": "post-1"` on an item and later items name it as `"$ref:post-1"` — in an edge\'s `from`/`to`, or in a link field. The key is scoped to this call, is never stored, and is NOT the id: identities are still minted here — and the `refs` in the response answers with them, `{ "post-1": { id, kind } }`, one row per key whose item was written, so you never read the space back to learn an id this call created. Every record array is written before any edge, so an edge can reference any record in the payload; within one array a reference cannot point FORWARDS. A key used twice is refused rather than resolved, and a stated kind that disagrees with the array the key was declared in is refused too — the array decides. A LITERAL id you invent is still not the id the record gets, and still points at nothing.\n\n'
     + 'AN ITEM CARRIES ITS OWN RELATIONSHIPS, exactly as the single-record tools do: the `link*` fields its '
     + 'kind can hold, and `edges` for labelled ones. So a record and everything it attaches to is one item '
     + 'rather than a second pass. An item\'s `edges` name records that ALREADY EXIST — a `$ref` there is '
@@ -52,7 +52,8 @@ export const save_bulkTool: ToolHandler = {
     + '`ttlDays` per item. `targetSpace` is required when `space` is a proxy.\n\n'
     + 'RESPONSE: `inserted` (a count per collection), `connections` (the links and edges the ITEMS\' own '
     + 'fields attached, which is a different question from `inserted.edges` — that one counts the top-level '
-    + '`edges` array), and `errors` (one entry per rejected item, with its collection and index). None of '
+    + '`edges` array), `errors` (one entry per rejected item, with its collection and index), and `refs` '
+    + '(the id each `$ref` key was given). None of '
     + 'them tells you about items dropped by the 500 cap; only your own count does.',
   mutating: true,
   spaceRequired: true,
@@ -103,6 +104,8 @@ export const save_bulkTool: ToolHandler = {
                     additionalProperties: { oneOf: [{ type: 'string' }, { type: 'number' }, { type: 'boolean' }] },
                   },
                   ttlDays:     TTL_DAYS_SCHEMA,
+                  superseded:  SUPERSEDED_SCHEMA,
+                  suppressEmbeddings: SUPPRESS_EMBEDDINGS_SCHEMA,
                 },
                 required: ['fact'],
               },
@@ -137,6 +140,8 @@ export const save_bulkTool: ToolHandler = {
                     additionalProperties: { oneOf: [{ type: 'string' }, { type: 'number' }, { type: 'boolean' }] },
                   },
                   ttlDays:     TTL_DAYS_SCHEMA,
+                  superseded:  SUPERSEDED_SCHEMA,
+                  suppressEmbeddings: SUPPRESS_EMBEDDINGS_SCHEMA,
                 },
                 required: ['name', 'type'],
               },
@@ -193,6 +198,8 @@ export const save_bulkTool: ToolHandler = {
                     additionalProperties: { oneOf: [{ type: 'string' }, { type: 'number' }, { type: 'boolean' }] },
                   },
                   ttlDays:     TTL_DAYS_SCHEMA,
+                  superseded:  SUPERSEDED_SCHEMA,
+                  suppressEmbeddings: SUPPRESS_EMBEDDINGS_SCHEMA,
                 },
                 required: ['from', 'to', 'label'],
               },
@@ -242,6 +249,8 @@ export const save_bulkTool: ToolHandler = {
                     additionalProperties: { oneOf: [{ type: 'string' }, { type: 'number' }, { type: 'boolean' }] },
                   },
                   ttlDays:     TTL_DAYS_SCHEMA,
+                  superseded:  SUPERSEDED_SCHEMA,
+                  suppressEmbeddings: SUPPRESS_EMBEDDINGS_SCHEMA,
                 },
                 required: ['title', 'type', 'startsAt'],
               },

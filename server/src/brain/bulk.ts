@@ -24,12 +24,13 @@ import { isStrictLinkage } from '../spaces/proxy.js';
 import { saveFact } from './fact.js';
 import { upsertEntity } from './entities.js';
 import { upsertEdge, findEdgeByTriplet } from './edges.js';
-import { BatchRefs, resolveRef, refKeyDeclared, isRefUse } from './batch-refs.js';
+import { BatchRefs, resolveRef, refKeyDeclared, isRefUse, type ResolvedRef } from './batch-refs.js';
 import { resolveEdgeEndsForWrite } from './edge-endpoint-names.js';
 import { mergeTagsAndProperties, mergePropertiesOrKeep } from './merge-fields.js';
 import { connectionInputError, assertConnections, applyConnections, edgeInputsFrom } from './write-connections.js';
 import { createChrono } from './chrono.js';
 import { CHRONO_STATUSES } from '../config/types.js';
+import { parseRecordFlags } from './record-flag.js';
 import type { EntityDoc, ChronoType, ChronoStatus } from '../config/types.js';
 
 /** Max items processed per collection in a single bulk call. */
@@ -80,6 +81,11 @@ export interface BulkResult {
    */
   connections: { links: number; edges: number };
   errors: { type: string; index: number; reason: string }[];
+  /**
+   * The id each `$ref` key was given, keyed by the key: `{ "e1": { id, kind } }`. A refused item's key is
+   * absent. It is how a caller learns the ids a batch minted without reading them back by text.
+   */
+  refs: Record<string, ResolvedRef>;
 }
 
 function strArray(v: unknown): string[] {
@@ -143,7 +149,7 @@ function itemConnectionError(item: unknown, strict: boolean): string | null {
  * mints the identity on insert — a supplied id addresses an existing record and never becomes a new one's — so
  * an id a caller invents for an entity in this payload is not the id that entity gets, and an edge naming it
  * points at nothing. Combined with shape-not-existence below, that edge is stored dangling and counted as
- * inserted. Callers build a graph in two passes, taking ids from the first response.
+ * inserted. Callers build a graph in two passes, taking ids from the first response's `refs`.
  */
 export async function bulkWrite(spaceId: string, input: BulkInput): Promise<BulkResult> {
   const metaRaw = getConfig().spaces.find(s => s.id === spaceId)?.meta;
@@ -219,6 +225,8 @@ export async function bulkWrite(spaceId: string, input: BulkInput): Promise<Bulk
     // so a batch stored what the single create refuses and reported nothing.
     const shapeErr = shapeError('fact', item);
     if (shapeErr) { errors.push({ type: 'fact', index: i, reason: shapeErr }); continue; }
+    const factFlags = parseRecordFlags(item);
+    if (!factFlags.ok) { errors.push({ type: 'fact', index: i, reason: factFlags.error }); continue; }
     // `Q-44`: the SHARED refusal, which this loop used to restate as a UUID pattern per link field.
     const connErr = itemConnectionError(item, strict);
     if (connErr) { errors.push({ type: 'fact', index: i, reason: connErr }); continue; }
@@ -236,7 +244,7 @@ export async function bulkWrite(spaceId: string, input: BulkInput): Promise<Bulk
       // below, which is the one path every other create door takes.
       const memDoc = await saveFact(spaceId, fact, [], strArray(item['tags']),
         typeof item['description'] === 'string' ? item['description'] : undefined, properties, type,
-        undefined, undefined, ttlDays, rawId);
+        factFlags.flags, undefined, ttlDays, rawId);
       addConnections(await applyConnections(spaceId, memDoc._id, 'fact', item, memDoc.author));
       /*
        * `F-27` item 2: record what this item's key names, if it declared one.
@@ -273,6 +281,8 @@ export async function bulkWrite(spaceId: string, input: BulkInput): Promise<Bulk
     // so a batch stored what the single create refuses and reported nothing.
     const shapeErr = shapeError('entity', item);
     if (shapeErr) { errors.push({ type: 'entity', index: i, reason: shapeErr }); continue; }
+    const entityFlags = parseRecordFlags(item);
+    if (!entityFlags.ok) { errors.push({ type: 'entity', index: i, reason: entityFlags.error }); continue; }
     /*
      * `Q-44`: an entity holds NO link classes — it is only ever the far end of one — and it can still be
      * the start of a labelled edge. Asking the shared module here is what makes that distinction the link
@@ -305,7 +315,7 @@ export async function bulkWrite(spaceId: string, input: BulkInput): Promise<Bulk
       if (schemaFails('entity', i, validateEntity(meta ?? {}, { name, type, properties: mergedEnt.properties }))) continue;
       await assertConnections(spaceId, 'entity', item);
       const result = await upsertEntity(spaceId, name, type, strArray(item['tags']), properties,
-        typeof item['description'] === 'string' ? item['description'] : undefined, rawId, undefined, undefined, ttlDays);
+        typeof item['description'] === 'string' ? item['description'] : undefined, rawId, entityFlags.flags, undefined, ttlDays);
       addConnections(await applyConnections(spaceId, result.entity._id, 'entity', item, result.entity.author));
       /*
        * `F-27` item 2: record what this item's key names, if it declared one.
@@ -362,6 +372,8 @@ export async function bulkWrite(spaceId: string, input: BulkInput): Promise<Bulk
     // so a batch stored what the single create refuses and reported nothing.
     const shapeErr = shapeError('chrono', item);
     if (shapeErr) { errors.push({ type: 'chrono', index: i, reason: shapeErr }); continue; }
+    const chronoFlags = parseRecordFlags(item);
+    if (!chronoFlags.ok) { errors.push({ type: 'chrono', index: i, reason: chronoFlags.error }); continue; }
     // `Q-44`: the SHARED refusal, which this loop used to restate as a UUID pattern per link field.
     const connErr = itemConnectionError(item, strict);
     if (connErr) { errors.push({ type: 'chrono', index: i, reason: connErr }); continue; }
@@ -382,7 +394,7 @@ export async function bulkWrite(spaceId: string, input: BulkInput): Promise<Bulk
         description: typeof item['description'] === 'string' ? item['description'] : undefined,
         tags: optStrArray(item['tags']), properties,
         recurrence: rec.value, id: rawId,
-      }, undefined, ttlDays);
+      }, undefined, ttlDays, chronoFlags.flags);
       addConnections(await applyConnections(spaceId, chronoDoc._id, 'chrono', item, chronoDoc.author));
       /*
        * `F-27` item 2: record what this item's key names, if it declared one. After the write, because the
@@ -478,6 +490,8 @@ export async function bulkWrite(spaceId: string, input: BulkInput): Promise<Bulk
     // so a batch stored what the single create refuses and reported nothing.
     const shapeErr = shapeError('edge', item);
     if (shapeErr) { errors.push({ type: 'edge', index: i, reason: shapeErr }); continue; }
+    const edgeFlags = parseRecordFlags(item);
+    if (!edgeFlags.ok) { errors.push({ type: 'edge', index: i, reason: edgeFlags.error }); continue; }
     try {
       /*
        * `upsertEdge` validates too, since 2026-08-29 — this check is kept for REPORTING, not for enforcement.
@@ -509,6 +523,7 @@ export async function bulkWrite(spaceId: string, input: BulkInput): Promise<Bulk
         typeof item['description'] === 'string' ? item['description'] : undefined,
         properties, optStrArray(item['tags']), undefined, ttlDays,
         {
+          ...edgeFlags.flags,
           ...(rawFromKind !== undefined ? { fromKind } : {}),
           ...(rawToKind !== undefined ? { toKind } : {}),
         });
@@ -516,7 +531,7 @@ export async function bulkWrite(spaceId: string, input: BulkInput): Promise<Bulk
     } catch (err) { errors.push({ type: 'edge', index: i, reason: err instanceof Error ? err.message : String(err) }); }
   }
 
-  return { inserted, updated, connections, errors };
+  return { inserted, updated, connections, errors, refs: refs.toJSON() };
 }
 
 /**
