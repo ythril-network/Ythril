@@ -141,6 +141,76 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Internal
 
+- **The conversation extractor describes each entity from its own claims** (`F-31`, 4.10,
+  `describe-entities.ts`). Each description is written once, at the end, and the assist model is handed only
+  the claims that name the entity. It is checked like a claim and gets one rewrite. If it still fails, the
+  entity's first claim is used as the description, because the format requires every entity to have one.
+
+- **The conversation extractor tracks change over time** (`F-31`, 7.1–7.6, `change.ts`). Each claim is compared
+  with the few earlier claims that share an entity with it. The decision model is asked four things:
+  - whether the situation was replaced, simply ended, or is unchanged;
+  - whether the earlier claim was still true of its own period (a yes vetoes retiring it);
+  - whether the two are incompatible tellings of the same fact;
+  - how two numbers relate.
+
+  Only a clear change supersedes, and a `supersedes` edge is drawn only when something replaced the earlier
+  claim. Incompatible tellings and cumulative counts are both dated to their telling ("As of 9 June 2023, …").
+
+- **The conversation extractor builds its timeline** (`F-31`, 8.1–8.4, `timeline.ts`). A claim with a resolved
+  day is a candidate event, and the decision model is asked three things:
+  - its status: completed, upcoming, cancelled, or unclear (`active` and `overdue` cannot be chosen);
+  - whether it is merely ongoing;
+  - whether it genuinely lasted more than a day, asked only when the conversation gave both ends.
+
+  An unclear status, an ongoing thing, or no usable date means no timeline entry, and the date stays in the
+  claim. A span needs both given ends and a confident multi-day answer.
+
+- **The conversation extractor draws only legal edges** (`F-31`, 6.1 / 6.2, `relations.ts`). For each pair of
+  entities one claim names, the decision model chooses among the labels whose declared endpoint types fit the
+  pair, in the direction they fit, or `none`. Code filters the vocabulary before asking and checks the answer
+  after, so an illegal edge is never written. The same edge from two claims is one edge citing both.
+
+- **The conversation extractor writes one claim per exchange, and checks it** (`F-31`, 5.2 + 5.10,
+  `write-claim.ts`).
+  - **Writing.** The assist model is handed the exchange with its dates already resolved ("9 May 2023") and
+    its entities already named, so it has nothing to work out itself. Turns about nothing are cited but never
+    handed to it.
+  - **Checking.** The claim is linted, then the decision model judges whether its own turns support it.
+  - **Failures.** Either failure gets one rewrite with the reason attached; a second failure drops the claim
+    and reports it. A refused check is not a pass.
+
+- **The extractors write through the assist model, and wait out a busy model in one place** (`F-31`,
+  `extractor/generate.ts`, `extractor/model-post.ts`).
+  - **Who writes.** The steps that must write text (a claim's sentence, an arc, a description) go to
+    `documentProcessing.assistModel`, and only once its host is consented to.
+  - **Waiting.** The retry-and-stop logic for 429, 503 and 529 is now one helper, shared by the decision
+    client and the generation client.
+
+- **The conversation extractor groups turns into exchanges and checks its claims** (`F-31`, 5.1 / 5.3 / 5.7,
+  `claims.ts`).
+  - **Grouping.** Per session, one request asks whether each turn continues the exchange before it, starts
+    one, or is about nothing. A refused answer continues; a turn about nothing rides along and is never
+    written from.
+  - **Checking.** A written claim is refused if a resolved date is missing, if it opens with a pronoun, or if
+    it carries turn or session references.
+  - **Coverage.** Every turn ends up in some claim's source turns, and an exchange with no claim is reported.
+  - **Linking.** A claim is linked to the entities it names among those its turns mention. A thing
+    mentioned once is minted when a claim names it; a turn that merely falls inside a claim is not enough.
+
+- **The conversation extractor judges its entities** (`F-31`, 4.12 / 4.2 / 4.4 / 4.6, `judge-entities.ts`).
+  - **What is asked.** Per turn, one request asks the decision model about every mention: is it a thing the
+    conversation is about, which shortlisted entity is it or is it new, which of the space's types it would
+    be, and whether it names a group.
+  - **What is not asked.** A pronoun is only asked what it refers to. *"I"* and *"you"* are the speaker and
+    the addressee, and are not asked at all.
+  - **The policy, in code.**
+    - A picked entity is a merge.
+    - A type the space does not declare, or `none`, means no entity.
+    - Only what the conversation returns to is minted: a thing mentioned once is kept aside for a claim to
+      link.
+    - Every other surface form becomes an alias.
+  - Raw answers are kept with the run; the thresholds are 0.5 and still unmeasured.
+
 - **The conversation extractor shortlists what a mention could be** (`F-31`, 4.3, `shortlist.ts`). The
   decision model then picks from the shortlist (4.4); it can only pick a card it was dealt, so the hand is
   generous, bounded to six, and built from four sources:
