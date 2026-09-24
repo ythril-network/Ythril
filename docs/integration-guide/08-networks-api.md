@@ -537,6 +537,11 @@ fields; an operator sending an invite to a colleague should send the code.
 would send a password. What limits the exposure is the same thing that limits any short-lived ticket: the
 handshake expires (see `expiresAt`) and is consumed when it is applied.
 
+**The token `apply` hands the joiner expires with the handshake, until `finalize` makes the membership real.**
+Finalize within the window, or that token stops authenticating and the join has to start again with a new
+invite. A token for a membership that never completed used to live for ever, belonging to no member — so an
+instance also revokes, at start, any peer token whose instance shares no network with it.
+
 **Why the whole bundle travels rather than a short URL to fetch it from.** `rsaPublicKeyPem` is what pins
 the handshake to the intended instance. If the joiner fetched it instead, whoever controls that fetch could
 substitute their own key, and the joiner would encrypt to them. Carrying it keeps the key out of band and

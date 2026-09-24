@@ -32,6 +32,17 @@ export async function startConfiguredInstanceServices(): Promise<void> {
     log.error(`Seeding the shipped Schema Library entries failed: ${err}`);
   }
 
+  // Peer tokens whose instance shares no network with us — left by handshakes that applied and never finalized,
+  // before those tokens expired with their handshake. Local state, and `revokePeerCredentialsIfOrphaned` re-checks
+  // membership before revoking anything, so a live peer is never touched.
+  try {
+    const { getConfig } = await import('./config/loader.js');
+    const { orphanedPeerInstanceIds, revokePeerCredentialsIfOrphaned } = await import('./auth/tokens.js');
+    for (const id of orphanedPeerInstanceIds(getConfig())) await revokePeerCredentialsIfOrphaned(id);
+  } catch (err) {
+    log.error(`Sweeping orphaned peer tokens failed: ${err}`);
+  }
+
   // ── Phase 1: DB initialisation (best-effort) ──────────────────────────────
   try {
     // Ensure the built-in general space exists BEFORE initAllSpaces() so its
