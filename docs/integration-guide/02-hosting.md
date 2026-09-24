@@ -267,8 +267,8 @@ Each container that carries a memory, CPU or process limit reads it from a varia
 document sidecars `DOC_RENDER_MEM_LIMIT`, `DOC_RENDER_PIDS_LIMIT`, `DOC_RENDER_CPUS`,
 `DOC_OFFICE_MEM_LIMIT`, `DOC_OFFICE_PIDS_LIMIT` and `DOC_OFFICE_CPUS`, and the NLP sidecar's `DOC_NLP_MEM_LIMIT`, `DOC_NLP_PIDS_LIMIT` and `DOC_NLP_CPUS`. A job that exceeds its memory ceiling is OOM-killed, which
 surfaces as a failed caption, transcription or extraction rather than a hung stack — so if large or dense
-documents are failing, that is the first thing to check. Conversation extraction (`F-31`) needs the opt-in
-`doc-nlp` sidecar (`docker compose --profile nlp up -d`, reached via `NLP_SIDECAR_URL`), which
+documents are failing, that is the first thing to check. Conversation extraction (`F-31`) needs the bundled
+`doc-nlp` sidecar (reached via `NLP_SIDECAR_URL`; `DOC_NLP_REPLICAS=0` leaves it out), which
 `/api/about/health` reports as `doc-nlp`. The full list with defaults is in
 [`docs/dependencies.md`](../dependencies.md).
 

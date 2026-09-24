@@ -9,8 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **An NLP sidecar for the conversation extractor** (`F-31`, `sidecars/doc-nlp`, opt-in:
-  `docker compose --profile nlp up -d`). It returns spaCy's named entities and noun phrases, which the
+- **An NLP sidecar for the conversation extractor** (`F-31`, `sidecars/doc-nlp`). It is bundled like the
+  other models, and `DOC_NLP_REPLICAS=0` leaves it out. It returns spaCy's named entities and noun phrases, which the
   extractor proposes as candidate mentions (step 4.1). The decision model then judges them, so casing and
   misspellings are its to handle, not a rule's.
   - **Why spaCy's transformer model:** measured on the ten committed LoCoMo extractions, it proposes 96% of

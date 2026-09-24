@@ -34,8 +34,7 @@
       # Office → page-image rendering (F11-a). Points at the opt-in `doc-office` sidecar (below, enabled
       # with `--profile office`). When that service isn't running, office docs fall back to OCR.
       RENDER_OFFICE_SIDECAR_URL: ${RENDER_OFFICE_SIDECAR_URL:-http://doc-office:8100}
-      # F-31 — the NLP sidecar the conversation extractor finds its candidate mentions with. Opt-in: start it
-      # with `docker compose --profile nlp up -d`; without it, conversation extraction is refused, named.
+      # F-31 — the NLP sidecar the conversation extractor finds its candidate mentions with (`doc-nlp` below).
       NLP_SIDECAR_URL: ${NLP_SIDECAR_URL:-http://doc-nlp:8102}
       # Managed infra: set to "true" to make the whole media/model config (vision, STT, document extraction,
       # assist model) read-only in the admin UI/API — set the values in config.json / env instead. Mirrors
@@ -380,15 +379,17 @@
     networks:
       - ythril-convert   # isolated: no DB, no internet
 
-  # Candidate mentions for the conversation extractor (F-31) — OPTIONAL / opt-in, the `nlp` profile: spaCy's
-  # transformer pipeline on CPU PyTorch, ~3 GB. It reads conversation text, so it gets the doc-render
-  # hardening: non-root, read-only rootfs (a tmpfs for the model cache), internal network, no egress.
+  # Candidate mentions for the conversation extractor (F-31): spaCy's transformer pipeline on CPU PyTorch,
+  # ~3 GB. Bundled like the other models; `DOC_NLP_REPLICAS=0` in .env leaves it out, and conversation
+  # extraction is then refused with that setting named. It reads conversation text, so it gets the
+  # doc-render hardening: non-root, read-only rootfs (a tmpfs for the model cache), internal network, no egress.
   doc-nlp:
-    profiles: ["nlp"]
     build: ./sidecars/doc-nlp
     image: ythril-doc-nlp:0.1.0
     container_name: ythril-doc-nlp
     restart: unless-stopped
+    deploy:
+      replicas: ${DOC_NLP_REPLICAS:-1}
     read_only: true
     tmpfs:
       - /tmp:size=256m

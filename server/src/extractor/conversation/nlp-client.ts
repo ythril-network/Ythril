@@ -1,7 +1,7 @@
 /**
  * Client for the NLP sidecar (`sidecars/doc-nlp`, `F-31`): the spans spaCy finds in a batch of turns.
  *
- * The sidecar is opt-in (a compose profile — its image carries PyTorch and a transformer model), so an
+ * The sidecar is bundled like the other models, but can be left out (`DOC_NLP_REPLICAS=0`) or be down, so an
  * extraction checks `isNlpAvailable()` first and is refused with the setting named when it is not running,
  * rather than silently proposing nothing.
  *
@@ -34,8 +34,8 @@ export function isNlpAvailable(): Promise<boolean> { return sidecarHealthy(NLP_U
 
 export class NlpUnavailableError extends Error {
   constructor(detail: string) {
-    super(`The NLP sidecar is not available (${detail}). Start it with \`docker compose --profile nlp up -d\` `
-      + 'or point NLP_SIDECAR_URL at it — conversation extraction needs it to find what a conversation is about.');
+    super(`The NLP sidecar (doc-nlp) is not available (${detail}). It is left out when DOC_NLP_REPLICAS=0, and `
+      + 'NLP_SIDECAR_URL says where it is — conversation extraction needs it to find what a conversation is about.');
     this.name = 'NlpUnavailableError';
   }
 }

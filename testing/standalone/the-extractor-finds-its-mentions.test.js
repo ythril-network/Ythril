@@ -8,11 +8,11 @@
  *
  * ## A skip has to be loud
  *
- * The transcripts are not in CI and the sidecar is opt-in, so the recall gate runs where both exist and says
+ * The transcripts are not in CI and the sidecar is not in the CI stack, so the recall gate runs where both exist and says
  * so where they do not.
  *
  * Run: node --test testing/standalone/the-extractor-finds-its-mentions.test.js
- * (requires a prior `npm run build` in server/; the recall gate needs `docker compose --profile nlp up -d`)
+ * (requires a prior `npm run build` in server/; the recall gate needs the `doc-nlp` sidecar running)
  */
 import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
@@ -79,7 +79,7 @@ describe('the sidecar client', () => {
   });
 
   it('unreachable, refused or short is an error that says how to start it — never an empty answer', async () => {
-    const named = (e) => e instanceof NlpUnavailableError && /--profile nlp/.test(e.message);
+    const named = (e) => e instanceof NlpUnavailableError && /DOC_NLP_REPLICAS/.test(e.message) && /NLP_SIDECAR_URL/.test(e.message);
     await assert.rejects(spansOf(['a'], async () => { throw new Error('ECONNREFUSED'); }), named);
     await assert.rejects(spansOf(['a'], async () => new Response('no', { status: 503 })), named);
     await assert.rejects(spansOf(['a', 'b'], async () => new Response(JSON.stringify({ results: [{ spans: [] }] }))), named);
