@@ -141,6 +141,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Internal
 
+- **The conversation extractor shortlists what a mention could be** (`F-31`, 4.3, `shortlist.ts`). The
+  decision model then picks from the shortlist (4.4); it can only pick a card it was dealt, so the hand is
+  generous, bounded to six, and built from four sources:
+  - the run's own entities, exact names first, then near spellings and shared distinctive words;
+  - the speaker for *"I"* and the other person for *"you"*;
+  - the recent turns' entities for *"it"*, *"they"* and *"the book"*;
+  - the space's own entity search, once per distinct mention.
+
+  On the committed extractions it deals the right entity for 85% of later mentions, up from 62% on names
+  alone. The recall gate is local-only.
+
 - **Cleanup, part 1** (Q-45). Removed, in each case with nothing referencing it:
   - 165 committed build files (`client/out-tsc/`, now ignored).
   - Debris files: `purge_networks.py`, `server/_gen_token.mjs`, two `testing/_init` scratch scripts, and a
