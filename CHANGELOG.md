@@ -188,6 +188,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Internal
 
+- **The conversation extractor writes the ARC as well as the moments** (`F-31`, 5.8, `arcs.ts`). A subject with
+  claims in three or more sessions gets one claim saying how it developed, written from those claims and checked
+  like any claim — linted, refused by the evidence gate, citation-checked, one rewrite; the writer may answer NONE.
+  It cites a few turns, never most of the conversation, and is added after change tracking so it cannot retire
+  the moments it describes.
 - **A state told in several sessions is written once** (`F-31`, 5.9, `repeats.ts`). A later telling of the same
   unchanged fact is folded into the first claim as its source turns, so one answer does not fill five ranked slots.
   Asked only across sessions and between claims sharing an entity; it runs before change tracking, so a change is

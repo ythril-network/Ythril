@@ -9,8 +9,7 @@
  * and changed without asking again), the claims that were dropped and why, and the turns no claim covers.
  *
  * Not yet here: 2.5's one-claim rule for pasted material (pasted turns are kept out of mention finding and
- * covered by their exchange's claim), 4.7 (a merge dates rule out), 5.4/5.5 (assistant-originated claims),
- * 5.8 arcs, 5.9 repeated background states, 6.3 edge dates.
+ * covered by their exchange's claim), and 4.7 (a merge that dates rule out).
  */
 import type { Question } from '../decide.js';
 import type { Decision } from '../decide.js';
@@ -25,6 +24,7 @@ import { groupExchanges, coverTurns, linkClaims } from './claims.js';
 import { writeClaim } from './write-claim.js';
 import { judgeOrigin } from './origin.js';
 import { mergeRepeats } from './repeats.js';
+import { writeArcs } from './arcs.js';
 import { describeEntities } from './describe-entities.js';
 import { drawEdges, type EdgeLabel } from './relations.js';
 import { dateEdges } from './edge-dates.js';
@@ -155,6 +155,10 @@ export async function extractConversation(
   const timeline = await buildTimeline(claims.map(c => ({ text: c.text, entityIds: c.entityIds, dates: c.dates })), decide);
   judgements.push(...timeline.judgements);
 
+  // 5.8: arcs, as well as the moments — added after phase 7, so an arc can never retire the claims it describes.
+  const arcs = await writeArcs(claims, typed, { write: deps.write, decide });
+  judgements.push(...arcs.judgements);
+
   // 9: the committed format.
   const usedExisting = new Set(claims.flatMap(c => c.entityIds));
   const extraction = assembleExtraction({
@@ -162,7 +166,7 @@ export async function extractConversation(
     entities: created,
     existing: judged.matchedExisting.filter(e => usedExisting.has(e.id)),
     descriptions,
-    claims: claims,
+    claims: [...claims, ...arcs.arcs],
     edges: dated.edges,
     events: timeline.events,
     change,

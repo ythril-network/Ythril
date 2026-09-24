@@ -114,6 +114,9 @@ describe('an assistant in the conversation (5.4 / 5.5)', () => {
     assert.equal(theirs.length, 1, JSON.stringify(x.claims, null, 1));
     assert.equal(theirs[0].speaker, 'assistant');
     assert.ok(x.claims.filter(c => !c.attributed).every(c => c.speaker !== 'assistant'), 'nobody else gets the mark');
+    // Luna is in three sessions now, so an arc is written (5.8) — and the validator below accepts it.
+    const sessionsOf = (c) => new Set(c.sourceTurns.map(t => t.split(':')[0])).size;
+    assert.ok(x.claims.some(c => sessionsOf(c) >= 3), 'an arc spanning the three sessions');
     const problems = validateExtraction({ ...x, producedBy: { ...x.producedBy, promptSha256: '0'.repeat(64), schemaSha256: '0'.repeat(64) } }, SCHEMA)
       .filter(p => !/producedBy/.test(p));
     assert.deepEqual(problems, []);
