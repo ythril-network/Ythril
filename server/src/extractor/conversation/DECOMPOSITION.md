@@ -31,6 +31,8 @@ Status, kept current per PR:
 | 6 relations | **built**: 6.1 (pairs a claim names), 6.2 (only legal labels, re-checked), 6.4 (structural). Not built: 6.3 (`since`/`until`, with the claim's dates in assembly) | `relations.ts` |
 | 7 change over time | **built**: 7.1–7.6. 7.2 and 7.4 asked as ONE choice (replaced / ended / unchanged / unclear), so an edge is drawn only for a successor | `change.ts` |
 | 8 timeline | **built**: 8.1–8.4 with 3.9 / 3.11 (status, ongoing, multi-day asked per claim). Title is the claim sentence; 8.5's generated title is polish | `timeline.ts` |
+| 9 assemble | **built**: 9.1 into the committed format (`existingEntities` the one product addition); 9.2 checked by the benchmark validator under test, not yet in the server | `assemble.ts` |
+| end to end | phases 1–9 run in order with every model injected (`extractConversation`) | `extract.ts` |
 | the decision client | **built**: Jev (System One) or the assist model, answers checked by code | `../decide.ts` |
 | everything else | decomposed, not built | — |
 

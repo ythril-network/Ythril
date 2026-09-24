@@ -141,6 +141,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Internal
 
+- **The conversation extractor runs end to end** (`F-31`, `extract.ts`, `assemble.ts`). Phases 1–9 run in order,
+  from a raw conversation to an extraction in the committed format. The benchmark's own validator accepts
+  the output under test.
+  - **Injected.** Every model and service is: the decision model, the writer, the NLP sidecar, the space's
+    search.
+  - **Returned.** Every judgement is kept with its raw answers, alongside the dropped claims and any
+    uncovered turns.
+  - **Existing entities.** Mentions merged into entities the space already holds go in `existingEntities`,
+    so no Ythril id appears inside a record.
+
 - **The conversation extractor describes each entity from its own claims** (`F-31`, 4.10,
   `describe-entities.ts`). Each description is written once, at the end, and the assist model is handed only
   the claims that name the entity. It is checked like a claim and gets one rewrite. If it still fails, the
