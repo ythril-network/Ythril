@@ -29,8 +29,8 @@ Status, kept current per PR:
 | 4 entities | **built**: 4.1 (candidates, via the `doc-nlp` sidecar), 4.3 (the shortlist — names, pronouns, recent turns, the space), 4.12 / 4.2 / 4.4 / 4.6 asked through `decide()` with 4.5, 4.8, 4.9 as policy. 4.10 written once per entity from its own claims, linted, with a first-claim fallback (`describe-entities.ts`). Not built: 4.7 (needs claim dates), 4.11. Thresholds unmeasured (0.5) | `mentions.ts`, `nlp-client.ts`, `shortlist.ts`, `judge-entities.ts` |
 | 5 claims | **built**: 5.1 (exchanges, asked per session), 5.2 (written by the assist model from resolved dates and names), 5.3 (lint), 5.7 (coverage), 5.10 (citation check, one rewrite then drop). Not built: 5.4 / 5.5 (assistant origin), 5.6, 5.8 (arcs), 5.9 | `claims.ts`, `write-claim.ts`, `../generate.ts` |
 | 6 relations | **built**: 6.1 (pairs a claim names), 6.2 (only legal labels, re-checked), 6.4 (structural). Not built: 6.3 (`since`/`until`, with the claim's dates in assembly) | `relations.ts` |
-| 8 timeline | **built**: 8.1–8.4 with 3.9 / 3.11 (status, ongoing, multi-day asked per claim). Title is the claim sentence; 8.5's generated title is polish | `timeline.ts` |
 | 7 change over time | **built**: 7.1–7.6. 7.2 and 7.4 asked as ONE choice (replaced / ended / unchanged / unclear), so an edge is drawn only for a successor | `change.ts` |
+| 8 timeline | **built**: 8.1–8.4 with 3.9 / 3.11 (status, ongoing, multi-day asked per claim). Title is the claim sentence; 8.5's generated title is polish | `timeline.ts` |
 | the decision client | **built**: Jev (System One) or the assist model, answers checked by code | `../decide.ts` |
 | everything else | decomposed, not built | — |
 
