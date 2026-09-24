@@ -141,6 +141,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Internal
 
+- **The conversation extractor writes one claim per exchange, and checks it** (`F-31`, 5.2 + 5.10,
+  `write-claim.ts`).
+  - **Writing.** The assist model is handed the exchange with its dates already resolved ("9 May 2023") and
+    its entities already named, so it has nothing to work out itself. Turns about nothing are cited but never
+    handed to it.
+  - **Checking.** The claim is linted, then the decision model judges whether its own turns support it.
+  - **Failures.** Either failure gets one rewrite with the reason attached; a second failure drops the claim
+    and reports it. A refused check is not a pass.
+
 - **The extractors write through the assist model, and wait out a busy model in one place** (`F-31`,
   `extractor/generate.ts`, `extractor/model-post.ts`).
   - **Who writes.** The steps that must write text (a claim's sentence, an arc, a description) go to

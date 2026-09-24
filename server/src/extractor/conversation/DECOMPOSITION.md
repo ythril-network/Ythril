@@ -27,7 +27,7 @@ Status, kept current per PR:
 | 2 classify turns | **built**: all six. 2.3 and 2.5 ask through `decide()`; thresholds unmeasured (0.5) | `classify.ts`, `judge-turns.ts` |
 | 3 resolve time | **built** except 3.8, 3.9 (asked about events, so they come with phase 5) and weekday RANGES (*"Friday to Sunday"*) in 3.10. 3.4 and 3.12 ask through `decide()` | `time.ts`, `time-lexicon.ts`, `judge-turns.ts` |
 | 4 entities | **built**: 4.1 (candidates, via the `doc-nlp` sidecar), 4.3 (the shortlist — names, pronouns, recent turns, the space), 4.12 / 4.2 / 4.4 / 4.6 asked through `decide()` with 4.5, 4.8, 4.9 as policy. Not built: 4.7 (needs claim dates), 4.10 (generative), 4.11. Thresholds unmeasured (0.5) | `mentions.ts`, `nlp-client.ts`, `shortlist.ts`, `judge-entities.ts` |
-| 5 claims | **built**: 5.1 (exchanges, asked per session), 5.3 (lint), 5.7 (coverage). Not built: 5.2 / 5.8 (generative), 5.4 / 5.5 / 5.9 / 5.10 (judgements over written claims), 5.6 | `claims.ts` |
+| 5 claims | **built**: 5.1 (exchanges, asked per session), 5.2 (written by the assist model from resolved dates and names), 5.3 (lint), 5.7 (coverage), 5.10 (citation check, one rewrite then drop). Not built: 5.4 / 5.5 (assistant origin), 5.6, 5.8 (arcs), 5.9 | `claims.ts`, `write-claim.ts`, `../generate.ts` |
 | the decision client | **built**: Jev (System One) or the assist model, answers checked by code | `../decide.ts` |
 | everything else | decomposed, not built | — |
 
