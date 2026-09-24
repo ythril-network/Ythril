@@ -141,6 +141,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Internal
 
+- **The extractors write through the assist model, and wait out a busy model in one place** (`F-31`,
+  `extractor/generate.ts`, `extractor/model-post.ts`).
+  - **Who writes.** The steps that must write text (a claim's sentence, an arc, a description) go to
+    `documentProcessing.assistModel`, and only once its host is consented to.
+  - **Waiting.** The retry-and-stop logic for 429, 503 and 529 is now one helper, shared by the decision
+    client and the generation client.
+
 - **The conversation extractor groups turns into exchanges and checks its claims** (`F-31`, 5.1 / 5.3 / 5.7,
   `claims.ts`).
   - **Grouping.** Per session, one request asks whether each turn continues the exchange before it, starts

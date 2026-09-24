@@ -40,7 +40,8 @@ import { getDocumentProcessingConfig, getDocAssistApiKey, getModelSlots } from '
 import { getDecisionModelConfig, getDecisionApiKey } from '../config/decision-model.js';
 import { chatUrlFor, systemOneUrlFor } from '../files/converters/vlm-endpoint.js';
 import { ssrfSafeFetch } from '../util/ssrf.js';
-import { boundedJson, boundedErrorText } from '../util/bounded-read.js';
+import { boundedJson } from '../util/bounded-read.js';
+import { postWithBackoff, type ModelTransport } from './model-post.js';
 
 /** An instruction or a criterion: TypeSafe accepts a string, an object or an array, and so do we. */
 type Rubric = string | Record<string, unknown> | unknown[];
@@ -123,16 +124,8 @@ export function decisionBackend(): DecisionBackend {
   return b;
 }
 
-/** How the request travels. Handed in by tests; in production an SSRF-guarded fetch with the slot's policy. */
-export interface DecideTransport {
-  post?: (url: string, init: RequestInit & { headers: Record<string, string>; body: string }) => Promise<Response>;
-  sleep?: (ms: number) => Promise<void>;
-}
-
-/** Statuses that mean "not now" rather than "not this": rate-limited, overloaded, unavailable. */
-const RETRYABLE = new Set([429, 503, 529]);
-/** Waits before each retry. Four attempts in all: a backend overloaded for longer than this is an outage. */
-const BACKOFF_MS = [1_000, 4_000, 15_000];
+/** How the request travels — the shared shape, so both extractor model clients are driven the same way in tests. */
+export type DecideTransport = ModelTransport;
 
 /**
  * Ask `questions` about `state`, and get one checked answer per question.
@@ -161,7 +154,8 @@ export async function decide(
     ...(backend.apiKey ? { Authorization: `Bearer ${backend.apiKey}` } : {}),
   };
 
-  const res = await postWithBackoff(post, sleep, request.url, { method: 'POST', headers, body: JSON.stringify(request.body) });
+  const res = await postWithBackoff({ post, sleep }, request.url, { method: 'POST', headers, body: JSON.stringify(request.body) },
+    (message, status) => new DecisionError(`Decision backend ${message}`, status));
   const reply = await boundedJson<Record<string, unknown>>(res, `Decision (${backend.kind})`)
     .catch((e: unknown) => { throw new DecisionError(`Decision (${backend.kind}): unreadable reply — ${e instanceof Error ? e.message : String(e)}`); });
 
@@ -183,24 +177,6 @@ function refuseQuestionsWithoutNoMatch(questions: Record<string, Question>): voi
   if (missing.length) {
     throw new DecisionError(`Choice question(s) ${missing.join(', ')} list no no-match option — add one of `
       + `${NO_MATCH_OPTIONS.join(' / ')}, or the model is forced to pick a wrong answer.`);
-  }
-}
-
-async function postWithBackoff(
-  post: NonNullable<DecideTransport['post']>, sleep: NonNullable<DecideTransport['sleep']>,
-  url: string, init: RequestInit & { headers: Record<string, string>; body: string },
-): Promise<Response> {
-  for (let attempt = 0; ; attempt++) {
-    let res: Response;
-    try { res = await post(url, init); }
-    catch (e) { throw new DecisionError(`Decision backend unreachable (${url}): ${e instanceof Error ? e.message : String(e)}`); }
-    if (res.ok) return res;
-    if (!RETRYABLE.has(res.status) || attempt >= BACKOFF_MS.length) {
-      throw new DecisionError(`Decision backend HTTP ${res.status}: ${await boundedErrorText(res)}`, res.status);
-    }
-    // A Retry-After in seconds is the backend telling us exactly how long; otherwise the schedule.
-    const after = Number(res.headers.get('retry-after'));
-    await sleep(Number.isFinite(after) && after > 0 ? Math.min(after * 1_000, 60_000) : BACKOFF_MS[attempt]!);
   }
 }
 
