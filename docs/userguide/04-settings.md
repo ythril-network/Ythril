@@ -67,8 +67,7 @@ Click the gear icon on any space row to open its settings panel. Changes save an
 > **A `Governed` badge in the panel header means Save opens a vote.** The space belongs to one or more
 > networks (hover the badge to see which), so a change to its purpose, usage notes or schema is **submitted
 > for a vote** in each network rather than applied immediately — you'll see *"saved as a proposal"* and the
-> change takes effect when the vote passes. **If your vote alone decides it** — you organise the club, you
-> publish the pub/sub network, or you are the only member — it passes on Save and applies at once. Local, operational settings (storage quota, auto-delete window,
+> change takes effect when the vote passes (at once, when your vote alone decides it). Local, operational settings (storage quota, auto-delete window,
 > extraction and media-analysis overrides, duplicate rules) are never voted and apply at once. No badge
 > means the space is in no network and everything applies immediately.
 
@@ -515,12 +514,7 @@ One case is worth checking after upgrading: a short form outside cron's range, s
 
 ### Sync history
 
-Expand a network card and click **Sync History** to see a log of every sync cycle — timestamp, status, items pulled and pushed, and any errors.
-
-A cycle shows **success** only when every member's transfers completed. If a peer refused a transfer or a transfer
-was cut short, the cycle shows **partial** (some members completed) or **failed** (none did), and its errors name
-the space, the direction and what stopped. A network that shows **failed** on every cycle is not syncing at all,
-even though it looks connected.
+Expand a network card and click **Sync History** to see a log of every sync cycle — timestamp, status, items pulled and pushed, and any errors. A cycle shows **success** only when every member's transfers completed; a refused or cut-short transfer makes it **partial** or **failed**, and its errors name the space, direction and what stopped.
 
 Each member row in the expanded card also shows its **last successful sync** (or *Never synced*) and, when a peer's recent sync attempts have been failing, a red **Failing (N)** badge counting the consecutive failures since the last success — so you can spot a stuck peer without opening the full history.
 
