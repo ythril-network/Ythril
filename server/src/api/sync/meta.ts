@@ -10,7 +10,7 @@ import { syncRateLimit } from '../../rate-limit/middleware.js';
 import { requireAuth } from '../../auth/middleware.js';
 import { getConfig } from '../../config/loader.js';
 import { reportServerFailure } from '../../util/report-failure.js';
-import { replicatedMetaOf } from '../../sync/replicated-meta.js';
+import { metaForNetwork, replicatedMetaOf } from '../../sync/replicated-meta.js';
 import { spaceAllowed } from './_shared.js';
 
 export const syncMetaRouter = Router();
@@ -23,7 +23,10 @@ syncMetaRouter.get('/meta', syncRateLimit, requireAuth, (req, res) => {
     if (!spaceAllowed(spaceId, networkId, req.authToken as Record<string, unknown>)) { res.status(403).json({ error: 'Forbidden' }); return; }
     const space = getConfig().spaces.find(s => s.id === spaceId);
     if (!space) { res.status(404).json({ error: 'Space not found' }); return; }
-    res.json({ meta: replicatedMetaOf(space.meta) });
+    // Own definitions plus THIS network's layer only — never another network's, never the effective mix (F-39.2).
+    const layer = getConfig().networks.find(n => n.id === networkId)?.schemaLayers?.[spaceId];
+    const own = space.ownMeta ?? space.meta;
+    res.json({ meta: replicatedMetaOf(metaForNetwork(own, layer ? { networkId, meta: layer } : undefined)) });
   } catch (err) {
     reportServerFailure('sync GET /meta', err);
     res.status(500).json({ error: 'Internal error' });

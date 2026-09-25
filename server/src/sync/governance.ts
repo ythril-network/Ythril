@@ -11,7 +11,7 @@
 import { getConfig, getSecrets } from '../config/loader.js';
 import { revokePeerCredentialsIfOrphaned } from '../auth/tokens.js';
 import { log } from '../util/log.js';
-import { updateSpace } from '../spaces/spaces.js';
+import { commitOwnMetaEdit } from '../spaces/effective-meta.js';
 import { peerSafeFetch } from './peer-fetch.js';
 import { buildBraintreeAncestors } from '../util/braintree.js';
 import { applyMetaRound, type MetaRoundProposal } from './meta-round-merge.js';
@@ -153,8 +153,10 @@ export function concludeRoundIfReady(
     // in the meantime, with no error and a correctly-recorded carried vote to hide it.
     if (round.type === 'meta_change' && round.spaceId && round.pendingMeta) {
       const currentMeta = getConfig().spaces.find(s => s.id === round.spaceId)?.meta;
-      const applied = applyMetaRound(currentMeta, round as MetaRoundProposal);
-      updateSpace(round.spaceId, { meta: applied.meta as SpaceMeta });
+      // Through the own definitions (F-39.2): a space whose meta is rebuilt from layers would lose a direct write
+      // at the next recompute. Before any layer exists this is the same plain write as before.
+      let applied = applyMetaRound(currentMeta, round as MetaRoundProposal);
+      commitOwnMetaEdit(round.spaceId, base => (applied = applyMetaRound(base, round as MetaRoundProposal)).meta as SpaceMeta);
       if (applied.conflicts.length > 0) {
         // The vote wins — the network decided this value — but the operator whose edit it superseded has
         // to be able to find out, and the only place that can say so is here.

@@ -212,7 +212,7 @@ export interface SchemaCatalog {
 // `SpaceMeta` moved to `types-knowledge.ts` with the schema vocabulary it carries, and is re-exported below.
 
 
-export interface SpaceConfig {
+export interface SpaceConfig extends SpaceSchemaLayering {
   id: string;
   label: string;
   builtIn: boolean;
@@ -241,7 +241,7 @@ export interface SpaceConfig {
    */
   description?: string;
   proxyFor?: string[];  // virtual proxy space — aggregates reads, routes writes to member spaces
-  meta?: SpaceMeta;     // structured schema and metadata — all fields optional
+  meta?: SpaceMeta;     // structured schema and metadata — all fields optional; the EFFECTIVE meta once layers exist (F-39.2)
   /** Local duplicate-action policy (not governed/synced — operational, per-instance).
    *  Rules are evaluated highest-minScore first; the first match decides the action. */
   dupeRules?: DupeActionRule[];
@@ -892,7 +892,7 @@ export interface FaceRecognitionConfig {
 //
 // Imported as well as re-exported: `export ... from` does not bring a name into local scope, and types below
 // this line are built from these.
-import type { NetworkType, SyncDirection, VoteValue, VoteRoundType, NetworkMember, VoteCast, VoteRound, NetworkConfig } from './types-networks.js';
+import type { NetworkType, SyncDirection, VoteValue, VoteRoundType, NetworkMember, VoteCast, VoteRound, NetworkConfig, SpaceSchemaLayering } from './types-networks.js';
 export type { NetworkType, SyncDirection, VoteValue, VoteRoundType, NetworkMember, VoteCast, VoteRound, NetworkConfig };
 
 

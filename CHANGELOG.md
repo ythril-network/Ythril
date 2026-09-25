@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A space in two networks keeps each network's schema apart** (`F-39.2`). What each network sends is kept as
+  its own layer beside this instance's own definitions, and the space runs on own ⊕ layers in precedence: the network
+  joined first wins where two define the same property differently, and both keep syncing their records. Each
+  network is sent only this instance's own definitions plus its own layer, never the other network's, and an
+  operator's schema edits land in the own definitions so they survive the next layer. Seeing clashes and reordering
+  come next (`F-39.3`).
+
 - **A space can be added to a club, closed or democratic network too** (`F-38.4`). There it is a `space_addition`
   vote: a club organiser's own yes carries it at once, a closed network needs every member, a democratic one a
   majority with no veto. Same route, tool and picker as the pub/sub and braintree case; a vote answers `202`. Each

@@ -151,6 +151,17 @@ export interface VoteRound {
   requiredVoters?: string[];     // braintree only: instanceIds that must ALL vote yes
 }
 
+/**
+ * The two fields a space carries once it is in a network that sends schema (F-39.2). Here rather than inline in
+ * `SpaceConfig` because they exist for the networks, and `types.ts` is on the god-file ratchet.
+ */
+export interface SpaceSchemaLayering {
+  /** This instance's own definitions, kept apart once a network layer arrives; absent = `meta` is all its own. */
+  ownMeta?: SpaceMeta;
+  /** Network ids, highest precedence first; absent or partial = the order the networks were joined. */
+  networkPrecedence?: string[];
+}
+
 export interface NetworkConfig {
   id: string;
   label: string;
@@ -175,6 +186,12 @@ export interface NetworkConfig {
    *  translate between peer space IDs on the wire and local collection/file IDs.
    *  Key = remote space ID, Value = local space ID. */
   spaceMap?: Record<string, string>;
+  /**
+   * F-39.2: this network's governed meta for each LOCAL space id, as last received from it (the upstream's
+   * `GET /api/sync/meta`). Local state: it is what lets a space in two networks keep each network's definitions
+   * apart, apply them in precedence, and send each network only its own. See `spaces/effective-meta.ts`.
+   */
+  schemaLayers?: Record<string, SpaceMeta>;
   votingDeadlineHours: number;
   merkle?: boolean;
   /** When true, governance vote casts must carry a valid Ed25519 signature from

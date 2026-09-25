@@ -357,6 +357,9 @@ Before pulling a space's records from its upstream, the engine pulls the space's
 - **The merge only adds.** A type the receiver lacks is added. A type both hold keeps every local property and gains the network's; a property both hold takes the network's definition, as does a type's own field (a naming pattern, an edge's endpoints) where the network sets one. A schema-library reference is one unit and is replaced whole. Nothing local is removed.
 - **Refused whole, never in part.** A meta the local API would reject, or one that references schema-library entries this instance lacks, is logged and nothing is merged.
 - **It never stops data.** A schema that cannot be fetched or merged leaves the record sync to run as it would have.
+- **A space in two networks keeps each network's schema apart** (F-39.2). What a network sends is stored as that network's *layer* for the space, next to the instance's own definitions, and the meta the space runs on is rebuilt from them: own definitions, then the layers in precedence, so the network joined first wins where two define the same thing differently (`networkPrecedence` on the space reorders it). A clash never stops either network's records.
+- **Nothing mixed is sent on.** `GET /api/sync/meta?networkId=` answers with the instance's own definitions plus *that* network's layer — never another network's, never the combined result — so one network's definition cannot leak into the other.
+- **An operator's edit lands in the own definitions**, so it survives the next layer arriving; a type a network defines cannot be removed locally, because the replicated schema is additive.
 
 ### Gossip poisoning protection
 

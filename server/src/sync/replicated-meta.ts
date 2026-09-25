@@ -94,3 +94,75 @@ export function mergeReplicatedMeta(
   const comparable = (m: Obj) => replicatedMetaOf(m as SpaceMeta);
   return { meta: next as SpaceMeta, changed: !isDeepStrictEqual(comparable(next), comparable(base)) };
 }
+
+// ── F-39.2: a space in more than one network ────────────────────────────────────────────────────────────
+
+/** One network's governed meta for a space, as last received from it. */
+export interface MetaLayer { networkId: string; meta: unknown }
+
+/**
+ * The meta a space runs on: its own definitions, then each network's layer merged additively, the LOWEST precedence
+ * first so the network first in `layers` wins an exact type-and-property clash. Owner decision 2026-09-25, option A:
+ * default precedence is the order the networks were joined, and the operator may reorder it.
+ */
+export function effectiveMeta(own: SpaceMeta | undefined, layers: readonly MetaLayer[]): SpaceMeta {
+  let meta: SpaceMeta = { ...(own ?? {}) };
+  for (const layer of [...layers].reverse()) meta = mergeReplicatedMeta(meta, layer.meta).meta;
+  return meta;
+}
+
+/**
+ * What this instance sends network `layer.networkId`: its own definitions plus that network's own layer — never
+ * another network's layer, never the effective result. "Nothing mixed is sent on" (owner, 2026-09-25): otherwise
+ * one network's definition would leak into the other, where nobody voted for it.
+ */
+export function metaForNetwork(own: SpaceMeta | undefined, layer: MetaLayer | undefined): SpaceMeta {
+  return layer ? mergeReplicatedMeta({ ...(own ?? {}) }, layer.meta).meta : { ...(own ?? {}) };
+}
+
+export interface MetaClash {
+  /** A top-level meta field (`purpose`, `validationMode`, …) — or absent for a type-schema clash. */
+  field?: string;
+  kind?: string;
+  type?: string;
+  /** A property of the type — or absent when the clash is one of the type's own fields (see `typeField`). */
+  property?: string;
+  typeField?: string;
+  values: { networkId: string; value: unknown }[];
+}
+
+/**
+ * Every place two layers define the same thing differently, with each network's value. Shown to the operator and
+ * never resolved by arrival order: precedence decides what applies, and a clash is what the operator may settle by
+ * proposing a combined definition to a network as an ordinary `meta_change`.
+ */
+export function clashesOf(layers: readonly MetaLayer[]): MetaClash[] {
+  const out: MetaClash[] = [];
+  const add = (key: Omit<MetaClash, 'values'>, networkId: string, value: unknown) => {
+    const hit = out.find(c => c.field === key.field && c.kind === key.kind && c.type === key.type
+      && c.property === key.property && c.typeField === key.typeField);
+    if (hit) hit.values.push({ networkId, value });
+    else out.push({ ...key, values: [{ networkId, value }] });
+  };
+  for (const { networkId, meta } of layers) {
+    const m = replicatedMetaOf((isObj(meta) ? meta : {}) as SpaceMeta);
+    for (const [field, value] of Object.entries(m)) {
+      if (field === 'typeSchemas') continue;
+      add({ field }, networkId, value);
+    }
+    const schemas = isObj(m['typeSchemas']) ? m['typeSchemas'] : {};
+    for (const [kind, types] of Object.entries(schemas)) {
+      if (!isObj(types)) continue;
+      for (const [type, def] of Object.entries(types)) {
+        if (!isObj(def)) continue;
+        for (const [typeField, value] of Object.entries(def)) {
+          if (typeField === 'propertySchemas' && isObj(value)) {
+            for (const [property, p] of Object.entries(value)) add({ kind, type, property }, networkId, p);
+          } else add({ kind, type, typeField }, networkId, value);
+        }
+      }
+    }
+  }
+  // A clash is two or more networks holding DIFFERENT values; one network, or agreement, is not one.
+  return out.filter(c => c.values.length > 1 && c.values.some(v => !isDeepStrictEqual(v.value, c.values[0]!.value)));
+}

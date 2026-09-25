@@ -501,7 +501,9 @@ It only adds: types you do not have are added, a type you both have keeps your p
 where you both define the same property the network's definition is used. Nothing of yours is removed, and your own
 settings — duplicate rules, retention, document extraction — stay yours. Nothing flows back up. A schema that cannot be
 merged (for instance, one using a schema-library entry you do not have) is skipped and noted in the log; the records
-still sync.
+still sync. A space shared through two networks keeps each network's schema apart: where they define the same
+property differently, the network you joined first wins, both keep syncing their records, and each network is only
+ever sent your own definitions plus its own, never the other network's. Your own edits stay yours across updates.
 
 ### Network types
 

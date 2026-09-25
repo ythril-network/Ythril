@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { commitOwnMetaEdit } from '../spaces/effective-meta.js';
 import { registerReembedRoute } from './spaces-reembed.js';
 import { registerActivityResetRoute } from './spaces-activity.js';
 import {
@@ -418,7 +419,8 @@ spacesRouter.put('/:id/schema', globalRateLimit, requireSpaceAuthMfaScoped('id')
     typeSchemas: parsed.data.typeSchemas as SpaceMeta['typeSchemas'],
   };
 
-  const updated = updateSpace(id, { meta: newMeta });
+  // Through the own definitions (F-39.2), so a space whose meta is rebuilt from network layers keeps the edit.
+  const updated = commitOwnMetaEdit(id, base => ({ ...base, typeSchemas: parsed.data.typeSchemas as SpaceMeta['typeSchemas'] }));
   if (!updated) {
     res.status(404).json({ error: `Space '${id}' not found` });
     return;
@@ -631,7 +633,9 @@ spacesRouter.put('/:id/meta/typeSchemas/:knowledgeType/:typeName', globalRateLim
     },
   };
 
-  const updated = updateSpace(id, { meta: updatedMeta });
+  // Through the own definitions (F-39.2), so a space whose meta is rebuilt from network layers keeps the edit.
+  const updated = commitOwnMetaEdit(id, base => ({ ...base, typeSchemas: { ...base.typeSchemas,
+    [kt]: { ...(base.typeSchemas?.[kt] ?? {}), [typeName]: parsed.data as import('../config/types.js').TypeSchema } } }));
   if (!updated) {
     res.status(404).json({ error: `Space '${id}' not found` });
     return;
@@ -693,7 +697,13 @@ spacesRouter.delete('/:id/meta/typeSchemas/:knowledgeType/:typeName', globalRate
     typeSchemas: updatedTypeSchemas,
   };
 
-  const updated = updateSpace(id, { meta: updatedMeta });
+  // Through the own definitions (F-39.2). A type a network layer defines comes back at the next recompute: a
+  // replicated schema is additive, so only the network can take its own type away.
+  const updated = commitOwnMetaEdit(id, base => {
+    const kept = { ...(base.typeSchemas?.[kt] ?? {}) };
+    delete kept[typeName];
+    return { ...base, typeSchemas: { ...base.typeSchemas, [kt]: kept } };
+  });
   if (!updated) {
     res.status(404).json({ error: `Space '${id}' not found` });
     return;
