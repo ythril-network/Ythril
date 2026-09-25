@@ -27,6 +27,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   supplied unknown id is ignored and the server mints one, an entity's `type` is required, and `filter`'s default
   `limit` is 200.
 
+- **Cleanup, part 2** (`Q-45.3`, `Q-45.4`). No behaviour changes:
+  - About 250 unused imports, locals and parameters are gone from server and client, and the compiler now
+    refuses new ones (`noUnusedLocals`, `noUnusedParameters`). An intentionally unused parameter starts with `_`.
+  - Four of the most commented server files keep what each comment prevents and lose the history, about 680
+    lines.
+  - Four rules that were asserted in several test files each have one home. Two gates that could miss a case
+    now derive what they check, and a third that passed on an unused import reads the file that applies the rule.
+  - Eleven test files carried mis-decoded UTF-8; they are repaired, and the encoding gate now covers `testing/`.
+
 ## [5.2.0] — 2026-09-25
 
 **Networks become a whole feature on both doors, a space's schema travels with its records, and a conversation can
