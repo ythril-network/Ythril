@@ -30,14 +30,17 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { routeAcceptKeys } from './_route-accept-keys.mjs';
+import { trackedSources } from './_sources.mjs';
 
 const { ROUTE_RULES } = await import('../../server/dist/audit/middleware.js');
 const { MCP_TOOL_OPERATIONS } = await import('../../server/dist/mcp/audit-map.js');
 const { ALL_TOOLS } = await import('../../server/dist/mcp/tools/index.js');
 const query = await import('../../server/dist/brain/query.js');
 const bodySchemas = await import('../../server/dist/spaces/body-schemas.js');
-// The network acts' bodies (F-36): the routes parse with them, and so do the tools through the same acts.
-const networkActs = await import('../../server/dist/networks/network-acts.js');
+// The network acts' bodies (F-36): the routes parse with them, and so do the tools through the same acts. Every
+// module in `networks/`, read from the tree rather than named, so an act file added next is not invisible here.
+const networkActs = Object.assign({}, ...await Promise.all(trackedSources(['server/src/networks/*.ts'], { floor: 3 })
+  .map(f => import(`../../${f.replace('server/src/', 'server/dist/').replace(/\.ts$/, '.js')}`))));
 
 /** Schemas the parser cannot see from inside a route file: supplied, never guessed. */
 function exportedSets() {

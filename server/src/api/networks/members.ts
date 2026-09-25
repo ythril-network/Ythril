@@ -11,7 +11,7 @@ import { globalRateLimit } from '../../rate-limit/middleware.js';
 import { getConfig, saveConfig } from '../../config/loader.js';
 import { forceSetMemberSigningKey } from '../../util/signing.js';
 import { log } from '../../util/log.js';
-import { addMemberAct, removeMemberAct } from '../../networks/member-acts.js';
+import { AddMemberBody, addMemberAct, removeMemberAct } from '../../networks/member-acts.js';
 import { sendAct } from './_shared.js';
 
 export const membersRouter = Router();
@@ -43,7 +43,9 @@ membersRouter.put('/:id/members/:instanceId/signing-key', globalRateLimit, requi
 
 membersRouter.post('/:id/members', globalRateLimit, requireAdmin, async (req, res) => {
   try {
-    sendAct(res, await addMemberAct(String(req.params['id']), req.body));
+    const parsed = AddMemberBody.safeParse(req.body);
+    if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
+    sendAct(res, await addMemberAct(String(req.params['id']), parsed.data));
   } catch (err) {
     log.error(`POST /api/networks/:id/members: ${err}`);
     res.status(500).json({ error: 'Internal error' });

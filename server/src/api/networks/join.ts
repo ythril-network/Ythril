@@ -5,7 +5,7 @@
  * with their MCP tools (F-36); the peer-protocol `/:id/join` stays here.
  */
 import { ForkNetworkBody, forkNetworkAct, inviteKeyAct } from '../../networks/network-acts.js';
-import { joinRemoteAct } from '../../networks/join-remote-act.js';
+import { JoinRemoteBody, joinRemoteAct } from '../../networks/join-remote-act.js';
 import { sendAct } from './_shared.js';
 import { Router } from 'express';
 import { v4 as uuidv4 } from 'uuid';
@@ -29,7 +29,9 @@ export const joinRouter = Router();
 // `requireAdmin`, which a read-only token never passed.
 joinRouter.post('/join-remote', globalRateLimit, requireAuth, denyReadOnly, async (req, res) => {
   try {
-    sendAct(res, await joinRemoteAct(req.authToken as Parameters<typeof joinRemoteAct>[0], req.body));
+    const parsed = JoinRemoteBody.safeParse(req.body);
+    if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
+    sendAct(res, await joinRemoteAct(req.authToken as Parameters<typeof joinRemoteAct>[0], parsed.data));
   } catch (err) {
     log.error(`POST /api/networks/join-remote: ${err}`);
     res.status(500).json({ error: 'Internal error' });
