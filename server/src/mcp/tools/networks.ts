@@ -91,7 +91,9 @@ export const network_updateTool: ToolHandler = {
   }),
   async handle(ctx: ToolContext): Promise<ToolResult> {
     const { id, ...body } = ctx.args;
-    return toResult(updateNetworkAct(callerOf(ctx), String(id), body), '');
+    const r = updateNetworkAct(callerOf(ctx), String(id), body);
+    if (r.audit) ctx.recordChanges?.(r.audit.before, r.audit.after);  // Q-50: the entry PATCH writes
+    return toResult(r, '');
   },
 };
 
@@ -118,7 +120,9 @@ export const network_add_spaceTool: ToolHandler = {
   }),
   async handle(ctx: ToolContext): Promise<ToolResult> {
     const { id, ...body } = ctx.args;
-    return toResult(addNetworkSpaceAct(callerOf(ctx), String(id), body), '');
+    const r = addNetworkSpaceAct(callerOf(ctx), String(id), body);
+    if (r.audit) ctx.recordChanges?.(r.audit.before, r.audit.after);  // Q-50: the entry the route writes
+    return toResult(r, '');
   },
 };
 

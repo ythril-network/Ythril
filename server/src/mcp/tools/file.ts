@@ -3,6 +3,7 @@ import { recall } from '../../brain/recall.js';
 import { TTL_DAYS_SCHEMA, filePathSchema, ttlDaysFromArgs } from './shared.js';
 import { type InputFormat } from '../../files/converters/pipeline.js';
 import { renameFileMeta, renameFileMetaByPrefix } from '../../files/file-meta.js';
+import { readEditAudit } from '../../brain/edit-audit.js';
 import { createDir, listDir, listFilesRecursive, moveFile, readFile } from '../../files/files.js';
 import { CONTENT_ENCODINGS, decodeContent } from '../../files/content-encoding.js';
 import { storeFile, type StoreFileMeta } from '../../files/store-file.js';
@@ -565,8 +566,13 @@ export const update_file_metaTool: ToolHandler = {
       ? a['deleteFields'] as string[]
       : undefined;
 
+    // Q-50: the before, read ahead of the write, so the audit entry carries the change list its REST twin's does.
+    const { getFileMeta } = await import('../../files/file-meta.js');
+    const { toDocId } = await import('../../util/paths.js');
+    const audit = await readEditAudit(wt.target, mid => getFileMeta(mid, filePath), toDocId(filePath), a);
     const updated = await updateFileMeta(wt.target, filePath, patch, dfPaths);
     if (!updated) throw new Error(`No file metadata record for '${filePath}' in '${wt.target}'.`);
+    { const s = audit.snapshots(updated); ctx.recordChanges?.(s.before, s.after); }
 
     return {
       content: [{ type: 'text' as const, text: `Updated metadata for '${filePath}' in '${wt.target}'.` }],

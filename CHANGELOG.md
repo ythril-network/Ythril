@@ -14,6 +14,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   refusals, instance-admin on both doors. A vote is how a networked space approves a destructive act, and until now
   an agent could be a member of a governance process it could not take part in.
 
+- **A space in two networks keeps each network's schema apart** (`F-39.2`). What each network sends is kept as
+  its own layer beside this instance's own definitions, and the space runs on own ⊕ layers in precedence: the network
+  joined first wins where two define the same property differently, and both keep syncing their records. Each
+  network is sent only this instance's own definitions plus its own layer, never the other network's, and an
+  operator's schema edits land in the own definitions so they survive the next layer. Seeing clashes and reordering
+  come next (`F-39.3`).
+
 - **A space can be added to a club, closed or democratic network too** (`F-38.4`). There it is a `space_addition`
   vote: a club organiser's own yes carries it at once, a closed network needs every member, a democratic one a
   majority with no veto. Same route, tool and picker as the pub/sub and braintree case; a vote answers `202`. Each
@@ -208,6 +215,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the tool names are checked against the registry.
 
 ### Fixed
+
+- **An edit made through MCP is audited with what it changed** (`Q-50`). The REST door recorded each edit's
+  before and after as the audit entry's `changes`; the same edit through an MCP tool left the operation alone, and
+  no record id. Ten tools now record both — the record edits, the entity merge, the network settings and space
+  additions, and the space and schema updates — and a gate derives the set from the routes that record changes, so a
+  new pair cannot miss it.
 
 - **A space mapped under another name at join answers its peers** (`Q-51`). When a join maps a network's space onto
   a local space of a different name, this instance translated the name on its own requests but not on its peers':

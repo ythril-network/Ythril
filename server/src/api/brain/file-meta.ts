@@ -18,7 +18,8 @@ import { globalRateLimit } from '../../rate-limit/middleware.js';
 import { updateFileMeta, deleteFileMeta, getFileMeta } from '../../files/file-meta.js';
 import { assertRefsResolve } from '../../brain/entity-refs.js';
 import { validateDeleteFields } from '../../brain/delete-fields.js';
-import { linkInputError, linkFieldsFrom, linkAuditSnapshots } from '../../brain/write-connections.js';
+import { linkInputError, linkFieldsFrom } from '../../brain/write-connections.js';
+import { readEditAudit } from '../../brain/edit-audit.js';
 import { primitivePropertyError } from '../../brain/property-values.js';
 import { fileExists, readFile } from '../../files/files.js';
 import { log } from '../../util/log.js';
@@ -346,21 +347,13 @@ fileMetaRouter.patch('/spaces/:spaceId/files', globalRateLimit, requireSpaceAuth
 
   // Snapshot for the audit change list — see the note in facts.ts. `properties` is not allowlisted,
   // so handing the record over cannot publish it.
-  let homeSpace: string | undefined;
-  const prior = await findFirstAcrossMembers(wt.target, async mid => {
-    const found = await getFileMeta(mid, path);
-    if (found) homeSpace = mid;
-    return found;
-  });
-  // The link sets BEFORE this write, for the audit entry — see `linkAuditSnapshots`. A file is keyed in
-  // the links collection by its stored path, which is what `getFileMeta` was just asked for.
-  const linkAudit = homeSpace
-    ? await linkAuditSnapshots(homeSpace, toDocId(path), req.body)
-    : { before: {}, after: {} };
+  // The before and the link sets, from whichever member holds the file — one read shared with the MCP tool (Q-50).
+  // A file is keyed in the links collection by its stored path.
+  const editAudit = await readEditAudit(wt.target, mid => getFileMeta(mid, path), toDocId(path), req.body);
   const updated = await findFirstAcrossMembers(wt.target,
     mid => updateFileMeta(mid, path, { description, tags, properties, ...linkFieldsFrom(req.body) }, dfPaths));
   if (updated) {
-    req.auditSnapshots = { before: { ...(prior ?? {}), ...linkAudit.before }, after: { ...updated, ...linkAudit.after } };
+    req.auditSnapshots = editAudit.snapshots(updated);
     res.json(updated);
     return;
   }

@@ -303,7 +303,7 @@ export const update_spaceTool: ToolHandler = {
     // this tool applied it immediately. So a directive change made over MCP skipped the vote in precisely the
     // spaces that had voted to govern directive changes — the same *two surfaces, one rule, one weaker* defect the
     // rest of this batch is about, one field over. Found while adding `schema_update` below.
-    return await runSpaceMetaUpdate(callSpace, updates, `Space '${callSpace}' updated.`, ctx.rights);
+    return await runSpaceMetaUpdate(callSpace, updates, `Space '${callSpace}' updated.`, ctx.rights, ctx.recordChanges);
   },
 };
 
@@ -319,6 +319,7 @@ async function runSpaceMetaUpdate(
   body: Record<string, unknown>,
   okText: string,
   rights: TokenRights | undefined,
+  recordChanges?: ToolContext['recordChanges'],
 ): Promise<ToolResult> {
   const { planSpaceMetaUpdate, applySpaceMetaUpdate } = await import('../../spaces/meta-update.js');
   const space = getConfig().spaces.find(s => s.id === spaceId);
@@ -352,6 +353,8 @@ async function runSpaceMetaUpdate(
     };
   }
 
+  // Q-50: the snapshot pair the REST route hands its audit entry, taken before anything is applied.
+  recordChanges?.(decision.plan.audit.before, decision.plan.audit.after);
   const result = await applySpaceMetaUpdate(decision.plan);
   if (result.outcome === 'not_found') {
     return { content: [{ type: 'text' as const, text: `Space '${spaceId}' not found` }], isError: true };
@@ -511,7 +514,7 @@ export const schema_updateTool: ToolHandler = {
     if (a['typeSchemasMode'] !== undefined) body['typeSchemasMode'] = a['typeSchemasMode'];
 
     const wrote = Object.keys(meta).join(', ');
-    return await runSpaceMetaUpdate(callSpace, body, `Space '${callSpace}' schema updated (${wrote}).`, ctx.rights);
+    return await runSpaceMetaUpdate(callSpace, body, `Space '${callSpace}' schema updated (${wrote}).`, ctx.rights, ctx.recordChanges);
   },
 };
 

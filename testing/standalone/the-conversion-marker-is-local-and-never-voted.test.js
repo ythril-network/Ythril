@@ -47,7 +47,9 @@ const code = (f) => stripComments(readFileSync(f, 'utf8'));
 
 /** The block of a named `export interface`, brace-matched so a nested type does not end it early. */
 function interfaceBody(src, name) {
-  const at = src.indexOf(`export interface ${name} {`);
+  // `extends …` allowed: SpaceConfig takes its F-39.2 layering fields from `types-networks.ts`.
+  const m = new RegExp(`export interface ${name}(?: extends [^{]+)? \\{`).exec(src);
+  const at = m ? m.index : -1;
   assert.ok(at > 0, `${name} not found — re-anchor this gate`);
   const open = src.indexOf('{', at);
   let depth = 0;
