@@ -98,11 +98,12 @@ describe('the check cannot pass vacuously', () => {
     // The WIRING, not the names. Renaming the declaration while leaving the call site passed a name-only check —
     // the script would have crashed at runtime and this gate would have stayed green.
     assert.match(CODE, /const range = unreleasedRange\(\)/, 'the range must be computed');
-    assert.match(CODE, /addedChangelogLines\(\)\s*\.filter\(/,
-      'the added line numbers must be FILTERED by the range — that is what makes it "inside [Unreleased]" rather '
+    // Q-56: the added lines are judged by `linesUnderUnshippedSections` — [Unreleased], or a version section the same
+    // change adds (a patch). What it counts is tested as behaviour in `a-patch-entry-counts-under-the-section-it-adds`;
+    // this pins that the check hands it the added lines rather than counting that the file was touched.
+    assert.match(CODE, /linesUnderUnshippedSections\([^;]*?addedChangelogLines\(\)\)/,
+      'the added line numbers must be judged by section — that is what makes it "an unshipped section" rather '
       + 'than "the file was touched"');
-    assert.match(CODE, /n > range\.start && n <= range\.end/,
-      'the filter must compare against the section bounds');
     assert.match(CODE, /function unreleasedRange\(\)/, 'the helper must still be declared');
     assert.match(CODE, /function addedChangelogLines\(\)/, 'the helper must still be declared');
   });

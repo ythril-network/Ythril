@@ -741,8 +741,7 @@ async function propagateVotesWithPeer(
         const newRound: VoteRound = {
           ...(peerRound as VoteRound),
           votes: [],        // votes are merged below
-          concluded: false,
-          appliedHere: false,  // local state, never a peer's (S-9)
+          concluded: false, appliedHere: false,  // appliedHere is local state, never a peer's (S-9)
         };
         freshNet.pendingRounds.push(newRound);
         local = newRound;
