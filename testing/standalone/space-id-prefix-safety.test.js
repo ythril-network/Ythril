@@ -31,7 +31,7 @@ const read = (rel) => readFileSync(new URL(`../../${rel}`, import.meta.url), 'ut
 /** Every place a caller-supplied space id is validated. */
 const VALIDATION_SITES = [
   { file: 'server/src/spaces/body-schemas.ts', what: 'create + rename' },
-  { file: 'server/src/api/networks/join.ts', what: 'peer space map' },
+  { file: 'server/src/networks/join-remote-act.ts', what: 'peer space map' },
   { file: 'server/src/spaces/lifecycle.ts', what: 'wipe guard' },
 ];
 

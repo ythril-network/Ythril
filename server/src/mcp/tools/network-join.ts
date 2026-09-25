@@ -29,9 +29,9 @@ export const network_join_remoteTool: ToolHandler = {
   inputSchema: (_s: ToolSchemas) => ({
     type: 'object',
     properties: {
-      handshakeId: uuidSchema('From the invite bundle.'),
+      handshakeId: uuidSchema('From the invite bundle. Single-use, and it expires: a handshake cannot be replayed.'),
       inviteUrl: { type: 'string', minLength: 1, description: 'From the invite bundle: the inviter\'s `/api/invite/apply` URL. Must be https unless this instance allows insecure peers.' },
-      rsaPublicKeyPem: { type: 'string', minLength: 100, description: 'From the invite bundle.' },
+      rsaPublicKeyPem: { type: 'string', minLength: 100, description: 'From the invite bundle, as given; the inviter\'s own key is read back from its apply answer.' },
       networkId: uuidSchema('From the invite bundle: the network being joined.'),
       myUrl: { type: 'string', minLength: 1, description: 'This instance\'s externally reachable base URL, which the inviter will sync with.' },
       expiresAt: { type: 'string', description: 'From the invite bundle; informational only.' },
@@ -58,7 +58,7 @@ export const network_member_addTool: ToolHandler = {
     type: 'object',
     properties: {
       id: networkIdSchema,
-      instanceId: { type: 'string', minLength: 1, description: 'The peer\'s instance id.' },
+      instanceId: { type: 'string', minLength: 1, description: 'The peer\'s instance id, as its `/api/about` reports it. A member already present is a 409.' },
       label: { type: 'string', minLength: 1, maxLength: 200, description: 'A display name for the peer, 1-200 characters.' },
       url: { type: 'string', minLength: 1, description: 'The peer\'s base URL. Must be https unless this instance allows insecure peers.' },
       token: { type: 'string', minLength: 1, description: 'The token this instance presents to the peer. Stored in secrets; never returned.' },
