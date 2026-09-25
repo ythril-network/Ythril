@@ -49,7 +49,7 @@ the same records.
 | 🔌 **MCP + REST, one API** | Every tool is also `POST /api/<tool>` with the same body: same parameters, same limits, same refusals, whichever way you call it. A refusal comes back machine-readable, so a program can fix the request and retry. |
 | 🧾 **Audit, webhooks, retention** | A field-level log of who changed what, signed webhooks to your own systems, automatic deletion after an age you set, and one-file export and restore. |
 
-Everything above is a callable MCP tool (47 of them), a REST endpoint and a screen in the web UI. The full
+Everything above is a callable MCP tool (51 of them), a REST endpoint and a screen in the web UI. The full
 reference is the [Integration Guide](docs/integration-guide.md).
 
 ---

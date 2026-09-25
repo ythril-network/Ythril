@@ -120,6 +120,11 @@ export const CAPABILITIES = [
   // the same question `GET /api/networks` answers, in the shape an agent wants. Everything else about
   // a network is a declared gap in `parity.ts`.
   ['Networks', 'network_peers', 'GET /api/networks'],
+  // F-36 slice 1: each tool calls the same act its route calls (`networks/network-acts.ts`).
+  ['Networks', 'network_get', 'GET /api/networks/:id'],
+  ['Networks', 'network_create', 'POST /api/networks'],
+  ['Networks', 'network_update', 'PATCH /api/networks/:id'],
+  ['Networks', 'network_leave', 'DELETE /api/networks/:id'],
   ['Networks', 'network_sync', 'POST /api/networks/:id/sync'],
   ['Networks', 'network_sync', 'POST /api/networks/peers/:peerId/sync'],
 ];

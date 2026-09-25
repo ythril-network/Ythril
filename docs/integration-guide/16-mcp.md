@@ -139,7 +139,7 @@ are the shapes this door replaces, and they are documented on their own pages.
 
 ### Read-Only Tokens
 
-When connecting with a `readOnly` token, mutating tools (`save_fact`, `update_fact`, `delete_fact`, `save_entity`, `update_entity`, `delete_entity`, `graph_merge`, `save_edge`, `update_edge`, `delete_edge`, `save_link`, `delete_link`, `save_chrono`, `update_chrono`, `delete_chrono`, `save_bulk`, `ingest`, `write_file`, `delete_file`, `create_dir`, `move_file`, `retry_embed_file`, `retry_embed_record`, `retry_embed_media`, `update_file_meta`, `network_sync`, `update_space`, `schema_update`, `save_space`, `space_reindex`, `space_reembed`, `delete_space_data`) are **hidden** from `tools/list` and rejected with an error if called directly. Read-only tools (`help`, `recall`, `similar`, `query`, `space_stats`, `space_meta`, `list_spaces`, `read_file`, `list_dir`, `traverse`, `list_embed_jobs`, `delete_entity_preview`, `ingest_status`) work normally. `list_tokens` is read-only but **admin-gated**, like `network_peers`. `network_peers` is read-only but **admin-gated** — see the admin-only note below.
+When connecting with a `readOnly` token, mutating tools (`save_fact`, `update_fact`, `delete_fact`, `save_entity`, `update_entity`, `delete_entity`, `graph_merge`, `save_edge`, `update_edge`, `delete_edge`, `save_link`, `delete_link`, `save_chrono`, `update_chrono`, `delete_chrono`, `save_bulk`, `ingest`, `write_file`, `delete_file`, `create_dir`, `move_file`, `retry_embed_file`, `retry_embed_record`, `retry_embed_media`, `update_file_meta`, `network_sync`, `network_create`, `network_update`, `network_leave`, `update_space`, `schema_update`, `save_space`, `space_reindex`, `space_reembed`, `delete_space_data`) are **hidden** from `tools/list` and rejected with an error if called directly. Read-only tools (`help`, `recall`, `similar`, `query`, `space_stats`, `space_meta`, `list_spaces`, `read_file`, `list_dir`, `traverse`, `list_embed_jobs`, `delete_entity_preview`, `ingest_status`, `network_peers`, `network_get`) work normally. `list_tokens` is read-only but **admin-gated** — see the admin-only note below. `network_peers` and `network_get` show only the networks the token may see.
 
 ### Connecting
 
@@ -345,10 +345,14 @@ row survives its own tool being built, so the list cannot keep advertising a gap
 | `save_space` | Create a space (admin only). The id is derived from the label when omitted. A new space is seeded `validationMode: strict` + `strictLinkage: true` unless `meta` says otherwise; a `proxyFor` space is left un-seeded because it stores nothing of its own. **`faceDescriptorDims` is create-only and permanent** — 128 for MobileFaceNet-class models, 512 for ArcFace / AdaFace / FaceNet / EdgeFace. Same refusals as `POST /api/spaces`, including `422` for a missing schema-library `$ref` and `409` when the id is taken |
 | `schema_update` | Write the space's type schemas and its other meta fields — `validationMode`, `strictLinkage`, `usageNotes`, `suppressEmbeddings`, `whenDuePasses` (needs `schema` `admin` on the space). **Merges** by default: types you do not name are preserved. `typeSchemasMode: "replace"` makes the payload authoritative, which is the only way to DELETE a type. Same refusals as `PATCH /api/spaces/:id`, including `422` for a `$ref` to a schema-library entry that does not exist. In a networked space it opens a meta vote rather than applying at once |
 | `delete_space_data` | Wipe all or specific collection types from the space. Needs the **space-admin** grant on the space named (or instance admin), and `confirm: true`. Throttled to five calls a minute per token, on both doors |
-| `network_peers` | List all configured peer instances (admin only) |
+| `network_peers` | List the peers of the networks you may see — `networks: read` on every space a network carries, or administering every one |
+| `network_get` | Read one network you may see: type, spaces, members with their sync state and version verdict, settings. A network you may not see is "not found" |
+| `network_create` | Create a network carrying one or more of your spaces — `networks: write`, or administering, on every one. Same parameters and refusals as `POST /api/networks` |
+| `network_update` | Change a network's label, schedule or signed-vote mode — `networks: admin` on every space it carries. Same as `PATCH /api/networks/:id` |
+| `network_leave` | Leave a network: peers are told, credentials of peers you no longer share a network with are revoked. Same rule and answer as `DELETE /api/networks/:id` |
 | `network_sync` | Trigger immediate sync (all networks, or one peer via `peerId`) (admin only). The REST doors are `POST /api/networks/:id/sync` and `POST /api/networks/peers/:peerId/sync` |
 
-> **Instance-admin tools.** `network_peers`, `network_sync`, `save_space` and `space_reindex` require
+> **Instance-admin tools.** `network_sync`, `save_space` and `space_reindex` require
 > instance-admin rights: they expose the whole peer topology, drive outbound connections to every peer, or
 > create spaces, and none of them is scoped to one space. They are hidden from `tools/list` for other
 > tokens and rejected if called directly.
@@ -676,7 +680,11 @@ only shape and the two are identical by construction.
 | **Tokens** | | | |
 | | `list_tokens` | `GET /api/tokens` | admin (MCP) · instance-level |
 | **Networks / sync** | | | |
-| | `network_peers` | `GET /api/networks` | admin (MCP) · instance-level |
+| | `network_peers` | `GET /api/networks` | read `networks` on every space of each network |
+| | `network_get` | `GET /api/networks/:id` | read `networks` on every space it carries |
+| | `network_create` | `POST /api/networks` | write `networks` on every space, or administering each |
+| | `network_update` | `PATCH /api/networks/:id` | admin `networks` on every space |
+| | `network_leave` | `DELETE /api/networks/:id` | write `networks` (own membership) · admin (anyone's) |
 | | `network_sync` | `POST /api/networks/:id/sync` | admin (MCP) · instance-level |
 | **Meta** | | | |
 | | `help` | **MCP only** | read (MCP) |

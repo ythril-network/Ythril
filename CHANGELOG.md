@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A network can be read, created, updated and left over MCP** (`F-36`, first slice): `network_get`,
+  `network_create`, `network_update` and `network_leave`. Each is the same act as its REST route — same parameters,
+  the same rights (the Networks column, or administering every space), the same refusal sentence and the same body
+  — so an agent is no longer limited to listing peers and triggering a sync. Joining, invites, members, votes,
+  topology and sync history stay REST-only for now and are listed as such.
+
 - **A space admin creates, joins and invites into networks with the spaces it administers** (`F-37`). A token
   administering every space an act touches may create a network carrying them, join a network mapped onto them —
   onto a new space too, when it may also create spaces — see that network, and generate its invite, with no

@@ -19,6 +19,8 @@ Since F-34 a token below instance admin acts on a network through the **`network
 
 Everything else on this router — members, signing keys, topology (including a reparent invite), votes, sync and sync history — acts on the network as a whole and stays **instance-admin**. Invites do too, except for the space admin above. MCP `network_peers` lists the peers of the networks you may see, through the same filter as `GET /api/networks`.
 
+**On MCP** (F-36): `network_get`, `network_create`, `network_update` and `network_leave` are the same acts as `GET /api/networks/:id`, `POST /api/networks`, `PATCH /api/networks/:id` and `DELETE /api/networks/:id` — same parameters (the network is `id`), the same rights, the same refusal sentences and the same body. Joining, invites, members, votes, topology and sync history are not on MCP yet.
+
 ## Networks API
 
 Base path: `/api/networks` — requires `admin` token.

@@ -275,7 +275,8 @@ describe('both doors report the floor the same way', () => {
      * array by contract and an envelope breaks every caller that indexes it. Per-member on both is
      * the shape that is identical through both doors and breaks nothing.
      */
-    for (const f of ['server/src/mcp/tools/sync.ts', 'server/src/api/networks/crud.ts']) {
+    // `networks/network-acts.ts` builds every REST network body (`networkView`), and network_get's too (F-36).
+    for (const f of ['server/src/mcp/tools/sync.ts', 'server/src/networks/network-acts.ts']) {
       const src = code(f);
       for (const field of ['version', 'belowFloor', 'minPeerVersion']) {
         assert.match(src, new RegExp(field), `${f} does not report ${field}`);
