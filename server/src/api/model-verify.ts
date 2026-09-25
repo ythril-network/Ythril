@@ -41,6 +41,7 @@ import { createMediaProviders } from '../files/media/providers.js';
 import { embed } from '../brain/embedding.js';
 import { repairMarkdownExternal } from '../files/converters/vlm-client.js';
 import { log } from '../util/log.js';
+import { assistProbeTarget } from '../config/assist-backend.js';
 import { envInt } from '../config/env-num.js';
 
 export const modelVerifyRouter = Router();
@@ -100,6 +101,8 @@ export interface VerifyResult {
 
 const VerifySchema = z.object({
   target: z.enum(['vision', 'stt', 'embedding', 'assist']),
+  // `F-33`: on the assist target, exercise its fallback instead of the primary.
+  fallback: z.boolean().optional(),
 }).strict();
 
 /** Race a real call against the budget, so a swapping backend reports `still-loading`, not `failed`. */
@@ -123,7 +126,7 @@ async function withBudget<T>(work: Promise<T>): Promise<{ value?: T; timedOut: b
  * Exported so it can be tested without an HTTP round trip. Never throws: a verification that blew up is
  * a `failed` outcome with the reason, not a 500 — the whole point is to report on a broken endpoint.
  */
-export async function verifyTarget(target: z.infer<typeof VerifySchema>['target']): Promise<VerifyResult> {
+export async function verifyTarget(target: z.infer<typeof VerifySchema>['target'], opts: { fallback?: boolean } = {}): Promise<VerifyResult> {
   const started = Date.now();
   const done = (outcome: VerifyOutcome, extra: Partial<VerifyResult> = {}): VerifyResult =>
     ({ target, outcome, latencyMs: Date.now() - started, ...extra });
@@ -145,11 +148,12 @@ export async function verifyTarget(target: z.infer<typeof VerifySchema>['target'
     }
 
     if (target === 'assist') {
-      const assist = getMediaEmbeddingConfig().documentProcessing?.assistModel;
-      if (!assist?.baseUrl || !assist.model) return done('unconfigured', { detail: 'no assist model is configured' });
+      // The primary or its fallback (`F-33`), each over the API it speaks — the Claude API included (`F-33.1`).
+      const assist = assistProbeTarget(opts.fallback === true);
+      if (!assist.baseUrl || !assist.model) return done('unconfigured', { detail: `no assist model ${opts.fallback ? 'fallback ' : ''}is configured` });
       // The assist path is an acknowledged egress path, so it gets synthetic text like everything else.
       const r = await withBudget(repairMarkdownExternal({
-        baseUrl: assist.baseUrl, model: assist.model, apiKey: getDocAssistApiKey(),
+        baseUrl: assist.baseUrl, model: assist.model, api: assist.wire, ...(assist.apiKey ? { apiKey: assist.apiKey } : {}),
         draft: 'ping', evidence: 'ping', hardTimeoutMs: VERIFY_TIMEOUT_MS,
       }));
       if (r.timedOut) return done('still-loading');
@@ -201,5 +205,5 @@ modelVerifyRouter.post('/verify', requireAdminMfa, async (req, res) => {
     res.status(400).json({ error: 'Invalid request body', details: parsed.error.issues });
     return;
   }
-  res.json(await verifyTarget(parsed.data.target));
+  res.json(await verifyTarget(parsed.data.target, { fallback: parsed.data.fallback === true }));
 });
