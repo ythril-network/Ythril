@@ -1834,6 +1834,8 @@
   "mediaProcessing.render.purpose": "Renderuje strony dokumentów do obrazów, aby model wizyjny mógł je odczytać. Tworzy obrazy stron, nigdy tekst — wydobywanie tekstu należy do konwertera dokumentów.",
   "mediaProcessing.office.title": "Renderer Office",
   "mediaProcessing.office.purpose": "Renderuje strony Worda, Excela i PowerPointa do obrazów. Oddzielny od renderera stron, ponieważ formaty Office wymagają innego silnika.",
+  "mediaProcessing.nlp.title": "NLP (ekstrakcja rozmów)",
+  "mediaProcessing.nlp.purpose": "Wyszukuje osoby, miejsca i rzeczy wspomniane w rozmowie, aby przebieg ingest mógł zamienić je w rekordy. Bez niego rozmów nie da się zaimportować.",
   "mediaProcessing.converter.title": "Konwerter dokumentów",
   "mediaProcessing.converter.purpose": "Wydobywa tekst i tabele z plików PDF, dokumentów Word i EPUB. Czyta strukturę pliku bezpośrednio i nigdy nie renderuje stron do obrazów — to zadanie renderera stron.",
   "mediaProcessing.docVlm.title": "VLM dokumentów",

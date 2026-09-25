@@ -26,16 +26,20 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-const { MODEL_STAGE_KEYS } = await import('../../server/dist/api/pipeline-status.js');
+const { MODEL_STAGE_KEYS, SIDECARS } = await import('../../server/dist/api/pipeline-status.js');
 
 const STATUS_SRC = readFileSync('server/src/api/pipeline-status.ts', 'utf8');
 const MODELS_TAB = readFileSync('client/src/app/pages/settings/media-processing/models-tab.component.ts', 'utf8');
 const PIPELINES_TAB = readFileSync('client/src/app/pages/settings/media-processing/pipelines-tab.component.ts', 'utf8');
 
-/** `<app-model-provider-card id="…">` — the ids the Models screen actually renders. */
+/** `<app-model-provider-card id="…">` and `<app-sidecar-card id="…">` — the ids the Models screen renders. */
 const cardIds = new Set(
-  [...MODELS_TAB.matchAll(/app-model-provider-card\s+id="([a-z0-9-]+)"/g)].map(m => m[1]),
+  [...MODELS_TAB.matchAll(/app-(?:model-provider|sidecar)-card\s+id="([a-z0-9-]+)"/g)].map(m => m[1]),
 );
+
+/** Every `*_SIDECAR_URL` the compose file hands the server: the sidecars a deployment actually wires. */
+const COMPOSE = readFileSync('docker-compose.yml', 'utf8');
+const wiredSidecarEnv = new Set([...COMPOSE.matchAll(/^\s+([A-Z_]+_SIDECAR_URL):/gm)].map(m => m[1]));
 
 describe('the enumeration is real', () => {
   it('MODEL_STAGE_KEYS is exported and non-trivial', () => {
@@ -63,7 +67,7 @@ describe('every model the pipeline calls has a card', () => {
    * are checked separately by their own probes; they are listed so this test's arithmetic is honest
    * rather than approximate.
    */
-  const SIDECAR_CARDS = new Set(['doc-render', 'doc-office', 'unstructured', 'face']);
+  const SIDECAR_CARDS = new Set([...SIDECARS.map(s => s.key), 'face']);
 
   for (const key of MODEL_STAGE_KEYS) {
     it(`${key} has a card`, () => {
@@ -81,6 +85,28 @@ describe('every model the pipeline calls has a card', () => {
     const known = new Set([...MODEL_STAGE_KEYS, ...SIDECAR_CARDS]);
     const orphans = [...cardIds].filter(id => !known.has(id));
     assert.deepEqual(orphans, [], `cards with no corresponding stage or sidecar: ${orphans.join(', ')}`);
+  });
+});
+
+describe('every sidecar the deployment wires has a card', () => {
+  /*
+   * The sidecar half of the same gap. The card list here was typed by hand, so the NLP sidecar shipped wired,
+   * probed on the About page, and absent from this screen and from the pipeline status it reads. Derived from
+   * the compose file, a new sidecar fails here until it is probed and carded.
+   */
+  it('the compose wiring was found at all', () => {
+    assert.ok(wiredSidecarEnv.size >= 4, `found ${wiredSidecarEnv.size} *_SIDECAR_URL entries — the shape changed`);
+  });
+
+  it('every wired sidecar is probed by the pipeline status', () => {
+    const probed = new Set(SIDECARS.map(s => s.envVar));
+    const unprobed = [...wiredSidecarEnv].filter(v => !probed.has(v));
+    assert.deepEqual(unprobed, [], `wired in docker-compose.yml but not in SIDECARS (api/pipeline-status.ts): ${unprobed.join(', ')}`);
+  });
+
+  it('every probed sidecar has a card', () => {
+    const missing = SIDECARS.filter(s => !cardIds.has(s.key)).map(s => s.key);
+    assert.deepEqual(missing, [], `no card on the Models screen for: ${missing.join(', ')} — add an <app-sidecar-card>`);
   });
 });
 

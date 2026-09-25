@@ -36,6 +36,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     now derive what they check, and a third that passed on an unused import reads the file that applies the rule.
   - Eleven test files carried mis-decoded UTF-8; they are repaired, and the encoding gate now covers `testing/`.
 
+### Fixed
+
+- **The NLP sidecar has a card on the Models tab** (`F-31`). It was wired and probed on the About page, but
+  missing from the Models screen and from the pipeline status that screen reads. So an operator could not see
+  from there that conversation ingest has what it needs. The sidecar cards are now one shared component, and the
+  gate that checks every sidecar has a card reads the list from the compose file instead of a hand-written one.
+
 ## [5.2.0] — 2026-09-25
 
 **Networks become a whole feature on both doors, a space's schema travels with its records, and a conversation can

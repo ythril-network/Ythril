@@ -19,6 +19,7 @@ import { ModelProviderCardComponent } from './model-provider-card.component';
 import { CardSaveComponent } from './card-save.component';
 import { AssistEgressConsentComponent } from './assist-egress-consent.component'; import { AssistExtrasComponent } from './assist-extras.component';
 import { DecisionModelCardComponent } from './decision-model-card.component';
+import { SidecarCardComponent } from './sidecar-card.component';
 import { MediaProcessingStateService } from './media-processing-state.service';
 import { PipelineStatusService } from './pipeline-status.service';
 import { SchemaApi } from '../../../core/schema-api.service';
@@ -28,7 +29,7 @@ import { TestTarget } from './media-processing.types';
   selector: 'app-models-tab',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule, TranslocoPipe, PhIconComponent, StatusPillComponent, ModelProviderCardComponent, CardSaveComponent, DecisionModelCardComponent, AssistEgressConsentComponent, AssistExtrasComponent],
+  imports: [FormsModule, TranslocoPipe, PhIconComponent, StatusPillComponent, ModelProviderCardComponent, CardSaveComponent, DecisionModelCardComponent, AssistEgressConsentComponent, AssistExtrasComponent, SidecarCardComponent],
   styles: [`
     :host { display: block; }
     /* align-items: stretch is what pins every footer to a shared baseline (owner's point 4). */
@@ -539,55 +540,12 @@ import { TestTarget } from './media-processing.types';
         </div>
       </app-model-provider-card>
 
-      <!-- ── Page renderer (infra) ──────────────────────────────────────── -->
-      <app-model-provider-card id="doc-render" icon="file-image"
-        [heading]="'mediaProcessing.render.title' | transloco"
-        [purpose]="'mediaProcessing.render.purpose' | transloco"
-        [health]="pipeline.sidecarState('doc-render')"
-        [infra]="true" envVar="RENDER_SIDECAR_URL">
-        <div class="field">
-          <label>{{ 'mediaProcessing.field.endpoint' | transloco }}</label>
-          <div class="ro">{{ sidecarUrl('doc-render') }}</div>
-        </div>
-        @if (sidecarDetail('doc-render'); as d) {
-          <div class="field"><label>{{ 'mediaProcessing.field.lastProbe' | transloco }}</label><div class="ro">{{ d }}</div></div>
-        }
-      </app-model-provider-card>
-
-      <!-- ── Office renderer (infra) ────────────────────────────────────── -->
-      <!-- Probed by the server and reported on the About page, but absent from this tab, so the one
-           screen that claims to list the pipeline's models was quietly missing one of them. -->
-      <!-- "stack" and not a Word/Office glyph: the registry has none, and an unregistered ph-icon name
-           renders as nothing at all, with no error. A layered stack reads well enough for multi-sheet
-           and multi-slide formats. -->
-      <app-model-provider-card id="doc-office" icon="stack"
-        [heading]="'mediaProcessing.office.title' | transloco"
-        [purpose]="'mediaProcessing.office.purpose' | transloco"
-        [health]="pipeline.sidecarState('doc-office')"
-        [infra]="true" envVar="RENDER_OFFICE_SIDECAR_URL">
-        <div class="field">
-          <label>{{ 'mediaProcessing.field.endpoint' | transloco }}</label>
-          <div class="ro">{{ sidecarUrl('doc-office') }}</div>
-        </div>
-        @if (sidecarDetail('doc-office'); as d) {
-          <div class="field"><label>{{ 'mediaProcessing.field.lastProbe' | transloco }}</label><div class="ro">{{ d }}</div></div>
-        }
-      </app-model-provider-card>
-
-      <!-- ── Document converter (infra) ─────────────────────────────────── -->
-      <app-model-provider-card id="unstructured" icon="file"
-        [heading]="'mediaProcessing.converter.title' | transloco"
-        [purpose]="'mediaProcessing.converter.purpose' | transloco"
-        [health]="pipeline.sidecarState('unstructured')"
-        [infra]="true" envVar="CONVERSION_SIDECAR_URL">
-        <div class="field">
-          <label>{{ 'mediaProcessing.field.endpoint' | transloco }}</label>
-          <div class="ro">{{ sidecarUrl('unstructured') }}</div>
-        </div>
-        @if (sidecarDetail('unstructured'); as d) {
-          <div class="field"><label>{{ 'mediaProcessing.field.lastProbe' | transloco }}</label><div class="ro">{{ d }}</div></div>
-        }
-      </app-model-provider-card>
+      <!-- ── Sidecars (infra): one line each, so a new one cannot ship without its card ── -->
+      <app-sidecar-card id="doc-render" icon="file-image" copy="render" envVar="RENDER_SIDECAR_URL"/>
+      <!-- "stack": the registry has no Office glyph, and an unregistered ph-icon name renders nothing. -->
+      <app-sidecar-card id="doc-office" icon="stack" copy="office" envVar="RENDER_OFFICE_SIDECAR_URL"/>
+      <app-sidecar-card id="unstructured" icon="file" copy="converter" envVar="CONVERSION_SIDECAR_URL"/>
+      <app-sidecar-card id="doc-nlp" icon="text-align-left" copy="nlp" envVar="NLP_SIDECAR_URL"/>
 
       <!-- ── Face recognition ───────────────────────────────────────────── -->
       <!-- The one model in the pipeline an operator could not switch off: it was absent from the
@@ -787,8 +745,6 @@ export class ModelsTabComponent implements OnInit {
     this.s.touched.set(true);
   }
 
-  sidecarUrl(key: string): string { return this.pipeline.bySidecarKey().get(key)?.url ?? '—'; }
-  sidecarDetail(key: string): string | null { return this.pipeline.bySidecarKey().get(key)?.detail ?? null; }
 
 
   /** Narrows the string union for `testConnection` call sites in the template. */
