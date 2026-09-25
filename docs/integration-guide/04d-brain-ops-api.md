@@ -171,8 +171,8 @@ Re-computes **all** embeddings with the current model. **Runs asynchronously** �
 
 Returns `409 { "error": "Reindex already in progress" }` if one is already running — **instance-wide, not
 per space.** One reindex runs at a time across the whole instance, and a second request is *refused rather
-than queued*. An operator who fired thirteen at once got one `200` and twelve `409`s; a loop that counts only
-non-200s as failures would report thirteen dispatched having dispatched one. **Retry on 409** is the correct
+than queued*. Thirteen fired at once get one `200` and twelve `409`s, so a loop that counts only non-200s as
+failures would report thirteen dispatched having dispatched one. **Retry on 409** is the correct
 client, and it self-paces.
 
 Returns `400` with the member spaces named if `:spaceId` is a **proxy**:
@@ -182,9 +182,7 @@ Returns `400` with the member spaces named if `:spaceId` is a **proxy**:
   "proxyFor": ["qa", "research"] }
 ```
 
-A proxy has no index of its own — its members do. This used to answer `200` and re-embed those members, which
-the caller was usually reindexing individually as well, so everything under the proxy was embedded twice.
-`GET /api/spaces` carries `proxyFor` on any space that has one, so a client can skip proxies without
+A proxy has no index of its own — its members do; reindex each member. `GET /api/spaces` carries `proxyFor` on any space that has one, so a client can skip proxies without
 discovering this by trying.
 
 > **Reindexing does NOT repair "search returns nothing".** It re-computes the embeddings *stored on*
@@ -256,12 +254,8 @@ The **media** half of the queue — file chunks produced by the conversion pipel
 edges, chrono) see [Vectorless records](#vectorless-records--the-embed-queue-for-brain-records), which is a separate
 collection with a separate worker.
 
-> **The `/media` segment is new in 3.1, and this path was `/embedding-queue` with nothing after it.** The
-> namespace always had two halves — `/records` for brain records, and the bare path for media — but only one
-> of them said which it was, so "no qualifier means files" was true and knowable only from this paragraph.
-> Both halves are named now.
->
-> **This is a breaking change with no alias.** Update the path; the response is unchanged.
+> **Before 3.1 this path was `/embedding-queue` with nothing after it, and there is no alias.** Update the path;
+> the response is unchanged.
 
 **Response** `200`:
 
@@ -299,7 +293,7 @@ chokes it, the record is **stored** and a job records the failure — it is not 
 **invisible to `recall` and to `query`'s semantic path**: the vector search cannot return it, and the lexical fallback
 needs an embedding to score. These two endpoints are how you find those records and get them embedded.
 
-This is the **record** half of the queue. `GET /embedding-queue` (without `/records`) is the **media** half — file chunks
+This is the **record** half of the queue. `GET /embedding-queue/media` is the **media** half — file chunks
 from the conversion pipeline. They are separate collections with separate workers.
 
 ```http
@@ -430,8 +424,8 @@ POST /api/spaces/:spaceId/rebuild-indexes
 
 Recreates the space's `$vectorSearch` indexes. Needs the `admin` rung on the space's **`knowledge`** area,
 plus MFA, and is recorded in the audit log as `space.indexes.rebuild`. It rewrites what recall searches rather
-than any type definition, which is why the area is `knowledge` and not `schema` — the same move applied to
-`POST /reindex` and `POST /:id/reembed` in 4.4. Also available in the UI at **Settings → Spaces → Danger Zone →
+than any type definition, which is why the area is `knowledge` and not `schema` — the same area as
+`POST /reindex` and `POST /:id/reembed`. Also available in the UI at **Settings → Spaces → Danger Zone →
 Rebuild search indexes**.
 
 **Runs asynchronously** — the call returns as soon as the build is submitted. **Recall returns empty
@@ -495,7 +489,7 @@ Each array is capped at 500 entries. Per-item validation failures are recorded i
 
 Each item accepts the same fields as its corresponding individual endpoint (`POST /facts`, `POST /entities`, `POST /edges`, `POST /chrono`), with one exception: **an entity's `type` is required in bulk** (an item missing it is skipped with `"missing required field: type"`), whereas the single `POST /entities` defaults `type` to empty.
 
-**The body takes those four keys and no others, and a retired name is refused by name.** `{"memories": […]}` — the 4.x spelling — answers `400` naming `facts` as the replacement, and any other unrecognised top-level key answers `400` listing the four that are accepted. The same applies to a retired field **on an item**: `entityIds`, `memoryIds` and `chronoIds` are each refused with their `linkEntities` / `linkFacts` / `linkChronos` replacement. Until 5.1 an unknown key was carried in and never read, so a batch built against 4.x answered `207` with nothing inserted and an empty `errors` array — indistinguishable from a body that legitimately wrote nothing.
+**The body takes those four keys and no others, and a retired name is refused by name.** `{"memories": […]}` — the 4.x spelling — answers `400` naming `facts` as the replacement, and any other unrecognised top-level key answers `400` listing the four that are accepted. The same applies to a retired field **on an item**: `entityIds`, `memoryIds` and `chronoIds` are each refused with their `linkEntities` / `linkFacts` / `linkChronos` replacement.
 
 **Response** `207`:
 
@@ -534,19 +528,16 @@ POST /api/filter
 Run a constrained Mongo-style read against one logical collection. This is how you read a collection —
 there is no per-collection `GET` and no second POST beside it.
 
-**IT ANSWERS THE TOOL ENVELOPE, and that is the 5.0 break to port first.** `POST /api/<tool-name>` is one
-shape for every tool, so a caller writes the response handling once:
+**IT ANSWERS THE TOOL ENVELOPE.** `POST /api/<tool-name>` is one shape for every tool, so a caller writes the
+response handling once:
 
 | | |
 |---|---|
 | `200` | `{ok: true, text, data}` — `data` holds `results`, `count`, `total`, `limit`, `skip`, `truncated` and the budget figures |
 | `4xx`/`5xx` | `{ok: false, error, data}` — `error` is the same sentence the MCP door puts in its `content`, word for word |
 
-The route that used to live at `/api/brain/filter` answered `{results, total, …}` at the top level until
-5.0. It was not a thin
-route over the tool: it was a second implementation of it, with its own body validation, its own paging
-parse and its own proxy fan-out — and three defects were found in the differences between the two while
-it was being removed. What replaced it is the generic tool door, which has no per-tool code at all.
+A client of `/api/brain/filter` (removed in 5.0), which answered `{results, total, …}` at the top level, must
+read them from `data` instead.
 
 ```json
 { "ok": true, "data": { "results": [ ... ], "count": 20, "total": 4831, "limit": 20, "skip": 0 } }
@@ -567,9 +558,9 @@ it was being removed. What replaced it is the generic tool door, which has no pe
 | `collection` | ✅ | One of: `facts`, `entities`, `edges`, `chrono`, `files`, `links` |
 | `filter` | — | Query filter object (defaults to `{}`) |
 | `projection` | — | Projection object (`1` include / `0` exclude) |
-| `limit` | — | Max rows, default `200` and NOT capped. It was silently clamped to 100 until 5.0, so a caller asking for 200 got 100 with `truncated` making it read as a correct short page — and the per-collection list routes this call replaces serve 200 or 500. What bounds an answer instead: the byte budget (`maxChars`/`maxBytes`) trims it and returns `nextSkip`, `maxTimeMS` bounds the query's duration, and on a PROXY space a `skip + limit` past the merge ceiling is an explicit `400` naming the limit |
+| `limit` | — | Max rows, default `200` and NOT capped. What bounds an answer instead: the byte budget (`maxChars`/`maxBytes`) trims it and returns `nextSkip`, `maxTimeMS` bounds the query's duration, and on a PROXY space a `skip + limit` past the merge ceiling is an explicit `400` naming the limit |
 | `skip` | — | Rows to discard before the page (default `0`) — see below |
-| `sort` | — | Field to order by. Per-collection allowlist; an unlisted field is a `400` naming the allowed ones. Omit for newest-first  **`links` was missing from that allowlist until 5.0 and sorting it CRASHED** — a `500` with `retryable: true` on this door, which told a caller to retry a request that could never succeed. It sorts by `createdAt`, `updatedAt`, `from` and `to`; a link has no name, title or type of its own.|
+| `sort` | — | Field to order by. Per-collection allowlist; an unlisted field is a `400` naming the allowed ones. Omit for newest-first. `links` sorts by `createdAt`, `updatedAt`, `from` and `to`; a link has no name, title or type of its own.|
 | `dir` | — | `asc` or `desc` (default `desc`). Only meaningful with `sort` |
 | `maxTimeMS` | — | Query timeout in milliseconds (default `5000`) |
 | `entityName` | — | *(facts, chrono)* Only records attached to an entity whose name CONTAINS this, case-insensitively. A JOIN rather than a predicate: the server resolves the name to ids per member space first, then reads the link records. A name matching nothing returns nothing, never everything. On any other collection it is a `400` |
@@ -580,20 +571,19 @@ it was being removed. What replaced it is the generic tool door, which has no pe
 | `properties` | — | Only records where some property VALUE contains this. Keys are not matched. It SCANS, so prefer a predicate on the property you mean when you know its name. Refused on `links` |
 | `search` | — | Freetext substring over the collection's own text fields: `name`/`description` for entities, `fact`/`description` for facts, `label`/`description` for edges, `title`/`description` for chrono, `path`/`description` for files. The value is escaped, so it is a substring and never a regex. Refused on `links`, which has no text of its own |
 | `path` | — | *(files)* The one file with this stored path. It is an ARGUMENT rather than `filter: { path }` because it is NORMALISED: backslashes read as separators, a leading slash ignored, so a Windows-style spelling and a leading-slash spelling both find `notes/a.md`. Exact after that — not a prefix, not a substring; for those use `search`, which also spans the description. Sending both spellings at once is a `400` rather than one of them silently winning. On any other collection it is a `400` |
-| `deriveStatus` | — | *(chrono)* Present each entry's DERIVED status instead of the stored one: `overdue` where its due moment has passed, unless `whenDuePasses` on that type says a passed date means nothing. Default `false`, so this call answers with what the collection HOLDS — which is what you want when repairing data. The chrono LIST route derives unconditionally, so until 5.0 the meaning of `status` depended on which door you used. On any other collection it is a `400` |
-| `includeDiagnostics` | — | Add back the two fields a listed record carries for the SYSTEM rather than for you: `matchedText` (the pre-embedding source string — for a file chunk, the passage a SECOND time) and `embeddingModel` (identical for every record in a space). Default `false`. The per-collection list routes honoured it and this call did not, so it was a `400` here and an `additionalProperties` refusal on the tool |
+| `deriveStatus` | — | *(chrono)* Present each entry's DERIVED status instead of the stored one: `overdue` where its due moment has passed, unless `whenDuePasses` on that type says a passed date means nothing. Default `false`, so this call answers with what the collection HOLDS — which is what you want when repairing data. On any other collection it is a `400` |
+| `includeDiagnostics` | — | Add back the two fields a listed record carries for the SYSTEM rather than for you: `matchedText` (the pre-embedding source string — for a file chunk, the passage a SECOND time) and `embeddingModel` (identical for every record in a space). Default `false` |
 
 Any other field is a `400`. See **Unknown body fields are refused** below.
 
-> **The five CONVENIENCES were REST-only until 5.0**, on the nine per-collection list routes this call replaces. A browser could ask for "facts tagged release" and an agent could not — both doors present, one accepting less. They are assembled by one module now, so `tag` cannot come to mean different things on the two doors, and a collection that cannot honour one says so rather than ignoring it.
->
-> **The three name fields are on the tool too** — `filter` takes them with the same meaning and the same refusals, and `POST /api/filter` is the same call. They were REST-only until 5.0, which meant an agent could not ask for “facts about Alice” by name at all.
+> **The five CONVENIENCES and the three name fields are on both doors** — the MCP `filter` tool takes them with the same meaning and the same refusals, and `POST /api/filter` is the same call. They are assembled by one module, so `tag` cannot mean different things on the two doors, and a collection that cannot honour one says so rather than ignoring it.
 
-**`links` is read-only through THIS route, and it does have write doors of its own** — `POST /api/brain/spaces/:spaceId/links` and `DELETE /api/brain/spaces/:spaceId/links/:id`, with `save_link` and `delete_link` on MCP. This said it had none, which was true before 4.0 and stopped being when links became records. A link record says that one
+**`links` is read-only through THIS route, and it does have write doors of its own** — `POST /api/brain/spaces/:spaceId/links` and `DELETE /api/brain/spaces/:spaceId/links/:id`, with `save_link` and `delete_link` on MCP. A link record says that one
 record concerns another. Its `label` reads like a field name — `fact.entityIds` and its five siblings —
-because each names the 4.x array the class replaced, and the label is part of the link's derived id
-element. You write one by writing that array on the record, exactly as before; querying this collection is how
-you read them back as rows.
+because each names the 4.x array the class replaced. That label is computed from the two kinds and goes into
+the link's derived id, but it is never stored: the document has no label field. You write links by setting a
+record's `link*` fields (`linkEntities`, `linkFacts`, `linkChronos`, …), or with `save_link`; querying this
+collection is how you read them back as rows.
 
 A link document is deliberately small: `from` and `to` with a `fromKind` and `toKind` (`entity`,
 `fact`, `chrono` or `file`), plus `author`, `createdAt`, `updatedAt` and `seq`. There is no label, type,
@@ -639,7 +629,7 @@ endpoints. **`_id` is appended to every order**, including one you choose — th
 
 | Field | Default | Meaning |
 |---|---|---|
-| `limit` | `20` | Max documents, clamped to 100 |
+| `limit` | `200` | Max documents, not capped — see the `limit` row above |
 | `skip` | `0` | Rows to discard before the page. Must be a **non-negative integer** — a negative or fractional value is a `400`, not a silent `0` |
 
 The result order is **total** — `seq`, then `updatedAt`, `createdAt`, `_id` — so no row can drift between pages and be
@@ -664,19 +654,13 @@ place the two doors deliberately differ) and, if you set it, by **`maxBytes`**, 
 UTF-8 bytes. Set both and both apply: the answer stops at whichever it reaches first. `maxTokens` is a convenience
 onto `maxChars`, converted at a fixed 3.5 characters per token (the `charsPerToken` override was removed in 5.0).
 
-> **This paragraph named `maxBytes` as the defaulting parameter, at 100 000.** Neither half was right: the
-> defaulting parameter is `maxChars` at 50 000, and `maxBytes` defaults to nothing. A caller sizing to 100 KB
-> was truncated at 50 000 characters; one who set `maxBytes` expecting it to be *the* budget got both ceilings.
-> The name changed meaning in 3.7 — it used to bound characters while its name, its refusal and its response
-> field all said bytes. What fits comes back as the longest **prefix** of the
-ranked matches, every record whole, and `nextSkip` says where to continue from — send it back as **`skip`** for
+What fits comes back as the longest **prefix** of the ranked matches, every record whole, and `nextSkip` says where to continue from — send it back as **`skip`** for
 the next prefix, with no match repeated and none missed. A match is counted together with its whole `_graph`
 subtree, so a deeper or wider traversal means fewer matches fit — they are absent, not shortened.
 
 `returned`, `count`, `truncated`, `budgetChars`, `budgetBytes`, `charsReturned` and `bytesReturned` are on
 **every** response, whether the budget bit or not, so an absence never has to be interpreted — `budgetBytes` is
-`null` unless you asked for a byte ceiling. That is SEVEN fields; this listed five, omitting both character
-figures, which is the same confusion as the paragraph above. `nextSkip` is there exactly when `truncated` is.
+`null` unless you asked for a byte ceiling. `nextSkip` is there exactly when `truncated` is.
 `count` stays the FULL total on a skipped page rather than shrinking as you advance.
 
 **`remainderDump: true`** additionally writes what did not fit to the space's `_tmp/` as JSON and reports it as
@@ -685,10 +669,7 @@ read path counts against space storage and most callers want the next page rathe
 carries **only** what did not fit — a continuation, not a copy. The file carries no embedding vectors and
 expires after one day.
 
-> **This replaced a 25-record cap that collapsed the answer to three inline matches plus a download of
-> everything**, including the three already sent. `read_file` takes no offset or limit, so that roughly doubled
-> what a caller had to read rather than reducing it. The full reasoning is in
-> [Prefiltered Recall and the byte budget](04a-recall-api.md).
+> The full treatment is in [Prefiltered Recall and the byte budget](04a-recall-api.md).
 
 `recall` and `similar` with `traverse > 0` cap the traversed nodes they return inline. Past that cap the
 **complete** graph is written to the space's file store under `_tmp/` as JSON, and the response carries
@@ -699,11 +680,10 @@ and never embedded.
 The alternative — a `truncated` flag alone — tells a caller their graph was cut and leaves them no way to get
 the rest, which on a neighbourhood is a dead end: there is no `total` to page against.
 
-**It is still the right answer in one case, and since 3.6.1 it is used there.** The link scans that follow a
+**A `truncated` flag alone is still the right answer in one case.** The link scans that follow a
 record's links are bounded per hop, and a hop can spend its budget on records it discards as already
 visited — so the graph is short and there is no complete copy to write, because the missing records were never
-read. `graphTruncated: true` arrives on its own. A caller that treated the two as inseparable should read the
-flag and treat `graphComplete` as optional.
+read. `graphTruncated: true` arrives on its own. Read the flag, and treat `graphComplete` as optional.
 
 #### Unknown body fields are refused
 
@@ -724,13 +704,10 @@ keys:
 }
 ```
 
-**This is a deliberate break with the previous behaviour, and it is the point.** These bodies used to accept any key and
-honour the ones they recognised. The fleet integrator paged a sweep with `skip` before it was implemented, got `200` every time, and
-counted page one repeatedly as if it had advanced — *"it cost us a fabricated number"*. A parameter the server cannot
-honour is now an error rather than a wrong answer that looks right.
+**A parameter the server cannot honour is an error rather than a wrong answer that looks right** — an ignored
+paging key would answer `200` with page one on every call.
 
-`sort` and `dir` **are** accepted on `/query` — they were added after this refusal shipped, and this table is the
-authoritative list rather than a summary of it. `client-bodies-match-server.test.js` compares every row here against the
+`sort` and `dir` **are** accepted on `/query`; this table is the authoritative list rather than a summary of it. `client-bodies-match-server.test.js` compares every row here against the
 sets the routes enforce, so a parameter cannot be added to a route and left undocumented, or documented as refused while
 being accepted.
 
@@ -738,8 +715,8 @@ being accepted.
 
 ### List file metadata records
 
-There is no `GET .../files`, and there has not been since 5.0 — file metadata is a collection like any
-other, so it is read the same way:
+There is no `GET .../files` (removed in 5.0) — file metadata is a collection like any other, so it is read
+the same way:
 
 ```http
 POST /api/filter
@@ -752,7 +729,7 @@ Rows carry what the collection stores — `path`, tags, description, properties,
 plus the embedding job's step progress for any file still in flight, joined per member space so a UI can
 draw which stage is running instead of a spinner that never resolves.
 
-Two of the route's query parameters are worth naming, because neither is a plain predicate:
+Porting from the removed route, two of its query parameters need care, because neither is a plain predicate:
 
 | the route | `filter` |
 |---|---|

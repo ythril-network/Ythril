@@ -9,7 +9,7 @@ Base path: `/api/tokens`.
 - `GET /api/tokens/me` requires any valid token.
 - The read-only list `GET /api/tokens` requires an **admin** token (but not MFA).
 - All **mutating** token routes (create/rename/delete/regenerate) require admin scope **and** MFA where enabled.
-- A **space-restricted administrator** is admitted by those guards and then narrowed: every one of them resolves the caller's scope and refuses a token that reaches spaces outside it. That holds for reading the list (fewer rows), minting (an out-of-scope grant is refused), editing, **rotating** and **revoking** — the last two only from this release.
+- A **space-restricted administrator** is admitted by those guards and then narrowed: every one of them resolves the caller's scope and refuses a token that reaches spaces outside it. That holds for reading the list (fewer rows), minting (an out-of-scope grant is refused), editing, **rotating** and **revoking**.
 
 ### Current Token Context
 
@@ -72,7 +72,7 @@ Authorization: Bearer <token>
 }
 ```
 
-**The `networks` area** (since F-34) governs sharing a space with other instances, per space:
+**The `networks` area** governs sharing a space with other instances, per space:
 
 | rung | what it lets a token do |
 |---|---|
@@ -83,15 +83,14 @@ Authorization: Bearer <token>
 A network carries several spaces, so an act on it needs the rung on **every** space it carries; one short is
 refused with a `403` naming it. A network you may not see is a `404`, never a `403`. A membership that predates
 the column has no recorded establisher, so leaving it needs `admin`. Space admin (`spaceAdmin`) does not grant the
-`networks` cells — `derivedRungs[spaceAdmin].requires` still names the four data areas — but since F-37 it is
+`networks` cells — `derivedRungs[spaceAdmin].requires` still names the four data areas — but it is
 **enough for the two acts that share its own spaces**: a token administering every space an act touches may create
 a network with them, join one mapped onto them (onto a new space too, with `createSpaces`), see it, and generate
 its invite. Otherwise joining a *remote* network needs `write` — and `createSpaces` plus a floor of `write` for any
 space the join would create. Peers, topology, votes and sync stay instance-admin, and so do invites except for that
 space admin.
 
-**`networks` is optional in a matrix body and `none` when absent**, so a client written before it existed keeps
-minting four-area matrices. Every other area is required; an unknown area name is a `400`.
+**`networks` is optional in a matrix body and `none` when absent**, so a four-area matrix is still valid. Every other area is required; an unknown area name is a `400`.
 
 This is the table the server **enforces** against, not a description of it, so it cannot disagree with the gate.
 Use it instead of maintaining your own map of rights to endpoints.
@@ -120,8 +119,7 @@ Three properties worth building against:
 
 #### `derivedRungs` — the rungs beyond the four areas
 
-**A space administrator holds `admin` in all four areas of one space.** Since 5.0 that is something you can
-**grant directly**, with `spaceAdmin` on the rights matrix:
+**A space administrator holds `admin` in all four areas of one space.** You can **grant that directly**, with `spaceAdmin` on the rights matrix:
 
 ```json
 {
@@ -139,8 +137,7 @@ instance-wide.** It cannot grant `instanceAdmin` or `createSpaces`, cannot set a
 cannot reach, mint for or edit tokens for any space it does not administer — it does not even list them.
 Those rules are red-teamed, not aspirational.
 
-**The four rungs still work and nothing was migrated.** A token whose four areas are all at `admin` for a
-space administers it exactly as before. The two spellings are one right: the server resolves `spaceAdmin`
+**The four rungs work too.** A token whose four areas are all at `admin` for a space administers it. The two spellings are one right: the server resolves `spaceAdmin`
 into `admin` in every area of the named space before any check runs, so no code compares the two and neither
 can disagree with the other. Send whichever you have; read both.
 
@@ -148,16 +145,10 @@ can disagree with the other. Send whichever you have; read both.
 ones created later, so it stays its own field — granting a space administrator the floor would be granting
 them the instance.
 
-> **This section used to say the opposite**, in as many words: *"There is no `spaceAdmin: true` field on a
-> token and there will not be — the four rungs already express it, and a second field could disagree with
-> them."* The second half of that was the real objection and it is what the design answers: a field
-> **checked beside** the rungs can disagree with them, and a field they are **resolved from** cannot.
-
 To show it in your own UI: read `derivedRungs`, then compare a token's effective rung per area (after
 `implications`) against `requires`.
 
-**That is what our own matrix does since 3.2.0**, and it is worth saying because the field existed for several
-releases before anything read it: the `Space admin` column is computed from the four displayed rungs, and setting
+**That is what Ythril's own matrix does**: the `Space admin` column is computed from the four displayed rungs, and setting
 it writes all four areas in ONE update rather than four. Compare against the DISPLAYED rung, not the stored one —
 a row that reaches admin through the floor is administered, and a column reading the stored matrix would
 contradict the cells beside it. Write the whole row at once for the same reason a patch is whole: four sequential
@@ -176,9 +167,9 @@ Some space-scoped routes are deliberately outside the four data areas, and each 
 space is Space-admin. Reading which tokens reach a space is a read of **auth** state, not of the space's
 contents. Per-space usage counters are instance observability that happens to be keyed by space.
 
-**Why this is published rather than left implicit.** A route absent from `routes` used to be indistinguishable
-from one nobody had classified — so "the matrix does not govern renaming" was a fact only the server's source
-held, and a grid of four areas read as complete while three routes sat outside all of them. Same argument as
+**Why this is published rather than left implicit.** Without it, a route absent from `routes` would be
+indistinguishable from one nobody had classified, and a grid of four areas would read as complete while routes
+sat outside all of them. Same argument as
 `routes` itself: the list the server decides from is the only description of a right that cannot be wrong.
 
 **No `method`, unlike `routes`.** An exemption is a claim about what the route *is*, so it covers every verb on
@@ -249,7 +240,7 @@ POST /api/tokens
 | Field | Notes |
 |---|---|
 | `name` | Required. Human-readable label. |
-| `rights` | The per-space permission matrix. **This is how scope, admin and read-only are all expressed since 4.0** — see *The three fields 4.0 removed* below. |
+| `rights` | The per-space permission matrix. **This is how scope, admin and read-only are all expressed** — see *The three fields 4.0 removed* below. |
 | `expiresAt` | ISO 8601 expiry timestamp. Omit for non-expiring. |
 | `peerInstanceId` | Bind this token to a network peer (UUID). Required for tokens a peer will present on the `/api/sync/*` **data-write** endpoints in manually-configured networks — the invite handshake sets it automatically. Peer identity is server-issued and cannot be self-declared by the caller. |
 | `schemaLibrary` | `true` to issue a **library access token**. See below. |
@@ -265,59 +256,36 @@ naming its replacement:
 | `admin: true` | `rights.instanceAdmin: true` |
 | `readOnly: true` | `rights.floor` with read rungs |
 
-The matrix has been the permission model since 2.6 and can express everything the three could — that is
-not a claim, it is what the upgrade path does: every pre-matrix token has its matrix derived from exactly
+The matrix can express everything the three could: every pre-matrix token has its matrix derived from exactly
 those three fields, and a check holds that derivation to never granting more than the original.
 
 **The refusal names the replacement rather than answering *unrecognised field*.** A strict schema alone
 would tell you that you are wrong without telling you what to do, on the endpoint most integrations meet
 first.
 
-**Existing tokens keep working, and the reason is not the one this paragraph used to give.** It said the
-old fields *"are still honoured"*. They are not read at all. `spaces`, `admin` and `readOnly` left the token
-record in 3.1, and 4.0 removed the last place anything fell back to them: **a token that reaches this
-instance with no rights matrix now reaches nothing.** There is no legacy path left to be honoured.
+**Existing tokens keep working, but the old fields are not read at all.** **A token that reaches this
+instance with no rights matrix reaches nothing.**
 
 What keeps a pre-matrix token working is that it never arrives without a matrix. One is derived from those
 three fields **in memory, on every start**, and every other way a token comes into being carries one
 already — a personal access token gets one when it is created, and an OIDC session carries one per request
 from its claim mapping. The fields may still sit in `config.json`; nothing enforces from them.
 
-**Why the fallback went rather than staying as a safety net.** It read an ABSENT allowlist as *unrestricted*,
-so a token carrying neither a matrix nor an allowlist would have been handed every space on the instance.
-Nothing could reach that branch — which is the worse of the two ways to be unreachable, because nothing
-exercises it and anything that ever did would be given everything.
+**A space-restricted administrator minting a token is judged on the matrix.** The mint route decides *outside
+your scope* with the same function the edit routes use, so a matrix-only request needs no `spaces` array.
 
-**One behaviour changed with them, and it was a defect rather than a policy.** A space-restricted
-administrator minting a token was refused unless the body carried a `spaces` array — so a matrix-only
-request, which is what this product's own interface sends, was read as unrestricted and refused with a
-message about being unrestricted. The mint route now decides *outside your scope* with the same function
-the edit routes use.
-
-> **`readOnly` is no longer STORED on a token — 3.1 — and 4.0 stopped accepting it as INPUT.** Two changes,
-> a release apart, and only the second one is visible to you: **sending `readOnly` to `POST /api/tokens` is
-> now a `400`**, as the table above says. Write `rights.floor` with read rungs instead. This note said
-> *"nothing you send or read changes"*, which was true of the 3.1 half alone.
+> **`readOnly` is not stored on a token, and sending it to `POST /api/tokens` is a `400`**, as the table above
+> says. Write `rights.floor` with read rungs instead.
 >
-> **What you READ is unchanged.** The token responses still carry `readOnly`. What changed there is where
-> the answer comes from — the rights matrix rather than a separate boolean on the record.
->
-> Nothing had decided on that boolean since 3.0, because every write check reads the matrix. Keeping it
-> stored alongside meant two spellings of one fact, with the older one free to drift.
->
-> **The returned value is now derived**: a token is read-only exactly when its matrix grants no write rung
-> anywhere. That is also correct for a token nobody ever set the flag on but which holds only `read` — a case
-> the stored boolean could not express and answered `false` for. Tokens created before 3.1 keep their scope:
-> the load-time migration still reads the stored flag to derive their matrix.
->
-> `spaces` said *"unchanged for now, and follows separately"* here. It followed: 4.0 refuses it on this
-> route with the other two.
+> **The token responses still carry `readOnly`, derived from the matrix**: a token is read-only exactly when its
+> matrix grants no write rung anywhere — including a token that holds only `read` and never had the flag set.
+> Tokens created before 3.1 keep their scope: the load-time migration reads the stored flag to derive their
+> matrix.
 
 <!-- markdownlint-disable-next-line MD028 -->
 
-> **`admin` is no longer STORED either — 3.1 — and 4.0 stopped accepting it as input, exactly as `readOnly`
-> did.** Sending it to `POST /api/tokens` is a `400`; write `rights.instanceAdmin: true` instead. Responses
-> still carry `admin`, derived from `rights.instanceAdmin`, so what you READ is unchanged.
+> **`admin` is not stored either, and sending it to `POST /api/tokens` is a `400`**; write
+> `rights.instanceAdmin: true` instead. Responses still carry `admin`, derived from `rights.instanceAdmin`.
 >
 > **If you branch on it, read `rights.instanceAdmin`.** And note what it is *not*: holding the `admin` rung
 > in every space is a different thing. That grants those spaces, and says nothing about spaces created
@@ -343,9 +311,7 @@ the edit routes use.
 > | `token` | **The record**, not the secret — id, name, prefix, flags, scoping. Safe to log, store and display. It carries no credential. |
 > | `plaintext` | **The secret.** Shown once, never retrievable again. Treat it as you would a password. |
 >
-> The names invite the opposite reading, and an integrator made it: they took the field called `token`,
-> wrote it into a handover file, and rendered the actual secret to a terminal — then revoked and re-minted
-> rather than reason about the exposure. The mistake is silent, so nothing tells you it happened.
+> The names invite the opposite reading, and the mistake is silent, so nothing tells you it happened.
 >
 > `prefix` on the record is the first characters of the secret, kept so a token can be identified in a list.
 > It is not enough to authenticate with, and it is the only part of the secret the record contains.
@@ -367,7 +333,7 @@ Use cases:
 - The remote instance's `/public` endpoint is behind an auth proxy (Cloudflare Access, nginx auth, etc.) that requires a Bearer token.
 - A consumer instance adds a foreign catalog and stores this token as the catalog's `accessToken`. It is forwarded as `Authorization: Bearer` on every catalog browse request.
 
-Constraints: `admin` must be `false`/omitted; `spaces` must be empty/omitted. The token is always `readOnly: true` — this cannot be overridden. Multiple library access tokens may coexist.
+Constraints: its `rights`, if sent, may hold no `instanceAdmin`, no `floor` and no `perSpace` grant — any of them answers `400` (*"A schemaLibrary token cannot have admin or space access"*). The token is always `readOnly: true` — this cannot be overridden. Multiple library access tokens may coexist.
 
 ---
 
@@ -491,11 +457,6 @@ DELETE /api/tokens/:id
 | `403` | you are a **space-restricted administrator** and this token reaches spaces outside your scope. The body carries `refusals` naming which — the same shape `PATCH` answers with |
 | `409` | it is the instance's last administrator token |
 | `500` | the token was listed but could not be removed, and **is still valid**. A server-side inconsistency between the token list and the stored config; retrying will not help |
-
-**The `403` and the `500` are both new.** Until this release the route resolved no scope at all, so an
-administrator of one space could revoke any token on the instance — including instance-admin tokens and tokens
-for spaces it cannot see. And it discarded the outcome of the removal, answering `204` even when nothing was
-deleted, which told a caller a live credential was gone.
 
 **The scope refusal is answered before the last-admin check**, deliberately: the other order would tell a
 caller whether a token it may not touch is the instance's only administrator.
