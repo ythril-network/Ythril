@@ -237,6 +237,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A network card counts one member in the singular** (`Q-54`). The role badge read "1 peers", "1 subscribers";
+  one member now takes its own string in English, German and Polish.
+
 - **An unchanged network schema no longer rewrites the config every sync cycle** (`F-39.2` follow-up). Storing what
   an upstream sent, and rebuilding the space's schema from it, saved the whole config file for every space on every
   cycle even when nothing had changed. An identical layer is now nothing to do, and a rebuild writes only when

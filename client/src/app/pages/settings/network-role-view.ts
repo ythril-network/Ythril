@@ -8,12 +8,19 @@
 import type { Network, NetworkMember } from '../../core/api.types';
 import type { NetworkRole } from '../../core/network-role.types';
 
-/** The count the header shows for this role, or null when the role shows none (a subscriber, a lone root). */
+/**
+ * The count the header shows for this role, or null when the role shows none (a subscriber, a lone root).
+ *
+ * One member takes the singular key (`…One`), so a card never reads "1 peers" (`Q-54`). A key per form rather than
+ * an ICU plural because every string on the page is a plain `{{ count }}` template, and one rule for one page beats
+ * a second grammar for three strings.
+ */
 export function roleCountKey(r: NetworkRole): string | null {
-  if (r.role === 'publisher') return 'networks.role.count.subscribers';
+  const one = r.members.length === 1 ? 'One' : '';
+  if (r.role === 'publisher') return `networks.role.count.subscribers${one}`;
   if (r.role === 'subscriber') return null;
-  if (r.role === 'root' || r.role === 'node' || r.role === 'leaf') return r.members.length ? 'networks.role.count.below' : null;
-  return 'networks.role.count.peers';
+  if (r.role === 'root' || r.role === 'node' || r.role === 'leaf') return r.members.length ? `networks.role.count.below${one}` : null;
+  return `networks.role.count.peers${one}`;
 }
 
 /** The network space a local space was mapped from on join, when it differs from the local id. */
