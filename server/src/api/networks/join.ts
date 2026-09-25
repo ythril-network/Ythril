@@ -13,6 +13,7 @@ import { globalRateLimit } from '../../rate-limit/middleware.js';
 import { getConfig, saveConfig, getSecrets, saveSecrets } from '../../config/loader.js';
 import { createToken, revokeToken } from '../../auth/tokens.js';
 import { peerTokenSpaces, widenPeerTokensOf } from '../../auth/peer-token-scope.js';
+import { inviterIsWhoItClaims, knownPeerAt } from '../../auth/peer-identity.js';
 import { createSpace } from '../../spaces/lifecycle.js';
 import { concludeRoundIfReady } from '../../sync/governance.js';
 import { buildBraintreeAncestors } from '../../util/braintree.js';
@@ -92,11 +93,15 @@ joinRouter.post('/join-remote', globalRateLimit, requireAdmin, async (req, res) 
       privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
     });
 
+    // S-6: when the inviter is a peer this instance already knows, present the token it issued to us, so the inviter
+    // can tell this is the genuine peer joining a second network and not someone claiming its id.
+    const knownInviter = knownPeerAt(cfg, inviteUrl);
+    const proof = knownInviter ? getSecrets().peerTokens[knownInviter] : undefined;
     let applyRes: Response;
     try {
       applyRes = await peerSafeFetch(inviteUrl, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...(proof ? { Authorization: `Bearer ${proof}` } : {}) },
         body: JSON.stringify({
           handshakeId,
           networkId,
@@ -129,6 +134,13 @@ joinRouter.post('/join-remote', globalRateLimit, requireAdmin, async (req, res) 
       networkType: string;
       spaces: string[];
     }>(applyRes, 'network peer');
+
+    // S-6: the inviter's id is its own claim. A peer this instance already knows must be answering from the origin it
+    // is recorded at — otherwise another server is borrowing its id. Refused before anything is written.
+    if (!inviterIsWhoItClaims(cfg, applyData.instanceId, inviteUrl)) {
+      res.status(403).json({ error: `The inviter claims the instance id of a peer this instance reaches at another address (${applyData.instanceId}); refused` });
+      return;
+    }
 
     // Decrypt tokenForB — the PAT Brain A created on its own server for Brain B to use
     let tokenForB: string;

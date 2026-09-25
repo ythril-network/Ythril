@@ -127,13 +127,12 @@ describe('the round carries what was voted for', () => {
 });
 
 describe('all three conclusion sites apply it, through one function', () => {
-  // Two spellings, one module. The vote handlers apply a single round they just touched; the gossip pass
-  // sweeps a list it did not vote on, so it calls the batch form — which also absorbed the `space_deletion`
-  // side-effect that used to be written out inline there. Both routes through `apply-wipe-round.ts`, which
+  // One spelling (S-9): every site hands its rounds to `applyConcludedSpaceRounds`, which decides deletion and wipe
+  // through `spaceRoundAction` — the inline `space_deletion` copies in the two vote handlers are gone. Both routes through `apply-wipe-round.ts`, which
   // is what the last assertion in this block actually guarantees.
   for (const [file, where, call] of [
-    ['server/src/api/networks/votes.ts', 'an operator voting locally', /applyWipeRoundIfPassed\(round, /],
-    ['server/src/api/sync/votes.ts', "a peer's vote arriving", /applyWipeRoundIfPassed\(round, /],
+    ['server/src/api/networks/votes.ts', 'an operator voting locally', /applyConcludedSpaceRounds\(net, \[round\], /],
+    ['server/src/api/sync/votes.ts', "a peer's vote arriving", /applyConcludedSpaceRounds\(net, \[round\], /],
     ['server/src/sync/engine.ts', 'the gossip pass', /applyConcludedSpaceRounds\(/],
   ]) {
     it(`${where} concludes the wipe`, () => {

@@ -7,6 +7,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.1.7] — 2026-09-25
+
+A security patch for networks: a deletion or wipe vote can only act on a space its network carries, and only once it
+has passed, and a member can no longer be named as a round's proposer to have its vote ignored. Please roll it onto
+every instance that is in a network.
+
+**Who is affected.** Every instance in a network. A `space_deletion` or `space_wipe` round was applied whenever it had
+concluded with no veto — so a proposal that EXPIRED without enough yes deleted or emptied the space as if it had
+passed — and it acted on the space id exactly as the round named it, without checking that the network shares that
+space. Any member of any network could therefore delete or empty any space on another member, including a private
+one no network carries, and an old deletion round re-applied to a space later re-created under the same name.
+
+**What to do.** Roll the image. There is no config change and no migration. If a space disappeared or was emptied
+on a networked instance and nobody voted for it, it is gone; restore it from a backup.
+
+### Fixed
+
+- **A deletion or wipe vote acts only on a round that passed, only on a space its network carries, and once**
+  (security). An expired round deletes nothing, a round naming a space the network does not share is ignored, and a
+  concluded round is applied here at most once.
+- **A member cannot be named as another round's proposer to drop its vote** (security). A round's subject was left
+  out of its voters on every round type, so a peer could name any member as the proposer of a deletion or schema
+  change and that member's vote was no longer needed on the other members. The subject is now left out only on a
+  join or a removal; the real proposer's yes is cast, signed, when it opens the round.
+
+## [5.1.6] — 2026-09-25
+
+A security patch for networks: an invite can no longer be applied under another peer's instance id. Please roll it onto
+every instance that is in a network.
+
+**Who is affected.** Every instance in two or more networks with the same peer. Since 5.1.2 the token an invite
+handshake mints reaches every network the two instances already share, and the joining side's instance id was taken
+on its word. So anyone handed an invite bundle for one network — including, since 5.1.x, one minted by a space
+administrator — could apply under the id of a peer the inviter already syncs with, and read every space the inviter
+shares with that peer. The joining side trusted the inviter's claimed id the same way.
+
+**What to do.** Roll the image. There is no config change and no migration. An instance joining a network for the
+first time is unaffected; a peer that is already connected and joins a SECOND network proves itself automatically once
+it runs 5.1.6 too — an older joiner is refused (`403`, naming the reason) by a patched inviter until it is upgraded.
+
+### Fixed
+
+- **An invite cannot be applied under another peer's instance id** (security). An id that is already a peer must now
+  present a token the inviter issued to it, which a genuine peer's own join does, and a joiner refuses an inviter that
+  claims a known peer's id from another address. A refused apply mints nothing and is logged.
+
 ## [5.1.5] — 2026-09-25
 
 A patch for networks: two networks joined from the same peer at the same moment both keep syncing.

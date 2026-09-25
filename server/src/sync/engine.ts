@@ -741,7 +741,7 @@ async function propagateVotesWithPeer(
         const newRound: VoteRound = {
           ...(peerRound as VoteRound),
           votes: [],        // votes are merged below
-          concluded: false,
+          concluded: false, appliedHere: false,  // appliedHere is local state, never a peer's (S-9)
         };
         freshNet.pendingRounds.push(newRound);
         local = newRound;
@@ -812,7 +812,7 @@ async function propagateVotesWithPeer(
       }
       // Space-scoped side-effects for rounds that just concluded — deletion and wipe. The gossip pass
       // concludes rounds nobody here voted on, so this is where a decision made elsewhere lands.
-      applyConcludedSpaceRounds(freshNet.pendingRounds, 'gossip');
+      applyConcludedSpaceRounds(freshNet, freshNet.pendingRounds, 'gossip');
       saveConfig(fresh);
     }
   } catch (err) {

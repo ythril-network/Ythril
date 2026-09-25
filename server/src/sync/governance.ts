@@ -46,7 +46,11 @@ export function concludeRoundIfReady(
   net: import('../config/types.js').NetworkConfig,
   round: import('../config/types.js').VoteRound,
 ): boolean {
-  const voters = net.members.filter(m => !round.subjectInstanceId || m.instanceId !== round.subjectInstanceId);
+  // The subject is left out only where it is the member voted ON (join, remove). On every other round it is the
+  // PROPOSER, a voter like any member whose yes is cast when it opens the round; dropping it let a peer name any
+  // member as proposer and so drop that member's vote from the quorum (S-7).
+  const subjectIsVotedOn = round.type === 'join' || round.type === 'remove';
+  const voters = net.members.filter(m => !subjectIsVotedOn || m.instanceId !== round.subjectInstanceId);
   const vetoCount = round.votes.filter(v => v.vote === 'veto').length;
   const pastDeadline = new Date(round.deadline) < new Date();
 

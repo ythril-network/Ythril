@@ -130,6 +130,11 @@ export interface VoteRound {
    * would let a round approved for `files` conclude by emptying the knowledge graph.
    */
   wipeTypes?: string[];
+  /**
+   * LOCAL: this instance has already applied this concluded space round (`S-9`), so gossip handing it the same round
+   * again does nothing. Never taken from a peer: adopting a round and serving one both strip it.
+   */
+  appliedHere?: boolean;
   pendingMeta?: SpaceMeta;       // stored on meta_change rounds; applied when vote passes
   /**
    * Top-level `meta` fields the proposer changed (meta_change rounds).
