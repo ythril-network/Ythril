@@ -29,7 +29,7 @@ import type { SpaceMeta } from './types-knowledge.js';
 export type NetworkType = 'closed' | 'democratic' | 'club' | 'braintree' | 'pubsub';
 export type SyncDirection = 'both' | 'push' | 'pull';
 export type VoteValue = 'yes' | 'veto';
-export type VoteRoundType = 'join' | 'remove' | 'space_deletion' | 'space_wipe' | 'meta_change';
+export type VoteRoundType = 'join' | 'remove' | 'space_deletion' | 'space_wipe' | 'meta_change' | 'space_addition';
 
 export interface NetworkMember {
   instanceId: string;
@@ -121,7 +121,7 @@ export interface VoteRound {
   concluded?: boolean;
   passed?: boolean;          // true if concluded and the motion carried; false if vetoed/expired
   pendingMember?: NetworkMember;  // stored on join rounds; added to members when vote passes
-  spaceId?: string;              // populated for space_deletion, space_wipe and meta_change rounds
+  spaceId?: string;              // populated for space_deletion, space_wipe, meta_change and space_addition rounds (space_addition: the NETWORK's id for it)
   /**
    * Which collections a `space_wipe` round will empty, or absent for all five.
    *

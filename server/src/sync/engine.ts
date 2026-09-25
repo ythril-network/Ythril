@@ -810,7 +810,7 @@ async function propagateVotesWithPeer(
       }
       // Space-scoped side-effects for rounds that just concluded — deletion and wipe. The gossip pass
       // concludes rounds nobody here voted on, so this is where a decision made elsewhere lands.
-      applyConcludedSpaceRounds(freshNet.pendingRounds, 'gossip');
+      applyConcludedSpaceRounds(freshNet, freshNet.pendingRounds, 'gossip');
       saveConfig(fresh);
     }
   } catch (err) {

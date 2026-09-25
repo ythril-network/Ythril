@@ -17,7 +17,7 @@
  * copy of a space emptied is not outvoted, because the wipe is irreversible on their instance too.
  */
 import { log } from '../util/log.js';
-import type { VoteRound } from '../config/types.js';
+import type { NetworkConfig, VoteRound } from '../config/types.js';
 import type { WipeCollectionType } from './lifecycle.js';
 
 /**
@@ -50,7 +50,7 @@ export function applyWipeRoundIfPassed(round: VoteRound, where: string): boolean
 }
 
 /**
- * Apply every space-scoped side-effect for a list of rounds — deletion and wipe both.
+ * Apply every space-scoped side-effect for a list of rounds — deletion, wipe and addition.
  *
  * The gossip pass in `sync/engine.ts` concludes rounds nobody on this instance voted on, and had the
  * `space_deletion` side-effect written out inline there: a third copy of the same eight lines that already
@@ -60,8 +60,15 @@ export function applyWipeRoundIfPassed(round: VoteRound, where: string): boolean
  * of the largest files in the tree, and the reason it is large is that every change lands where the code
  * already is.
  */
-export function applyConcludedSpaceRounds(rounds: readonly VoteRound[], where: string): void {
+export function applyConcludedSpaceRounds(net: NetworkConfig, rounds: readonly VoteRound[], where: string): void {
   for (const round of rounds) {
+    // F-38.4: a passed space_addition adds the space here. The two vote routes call this too, so a round carried by
+    // a local vote, a peer's vote or gossip lands the same way.
+    if (round.concluded && round.passed && round.type === 'space_addition') {
+      void import('../networks/network-spaces.js')
+        .then(({ applySpaceAdditionRound }) => applySpaceAdditionRound(net, round, where))
+        .catch((err: unknown) => log.error(`space_addition side-effect (${where}): ${err}`));
+    }
     if (round.concluded && round.type === 'space_deletion') {
       // Unchanged: zero vetoes, and a space id to act on. Moved, not rewritten.
       if (!round.votes.some(v => v.vote === 'veto') && round.spaceId) {

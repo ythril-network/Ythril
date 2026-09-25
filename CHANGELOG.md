@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A space can be added to a club, closed or democratic network too** (`F-38.4`). There it is a `space_addition`
+  vote: a club organiser's own yes carries it at once, a closed network needs every member, a democratic one a
+  majority with no veto. Same route, tool and picker as the pub/sub and braintree case; a vote answers `202`. Each
+  member applies the passed round itself, and a member that already has a local space of that name keeps it out of
+  the network unless it voted yes, because those networks sync both ways and joining it would send its records to
+  everyone.
+
 - **A space's schema flows down its network with the records** (`F-39.1`). On a pub/sub network or a tree, each
   instance now takes a shared space's type schemas, purpose, usage notes and the rest of its governed meta from the
   instance above it every cycle (`GET /api/sync/meta`), so a space created by a join is no longer bare. The merge only
@@ -21,7 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `POST /api/networks/:id/spaces` or MCP `network_add_space` — same parameters, rights and refusals on all three. The
   members' tokens reach the new space at once, and each instance below adopts it on its next sync from its upstream
   only (a subscriber from its publisher, a node from its parent): created if missing, merged into if present, nothing
-  overwritten or deleted. Club, closed and democratic networks refuse it until a vote for it exists. Audited as
+  overwritten or deleted. Club, closed and democratic networks decide it by vote (`F-38.4`, below). Audited as
   `network.space.add`.
 
 - **Joining a network lets you choose where each of its spaces goes** (`F-38.2`). The join dialog lists every space
@@ -196,6 +203,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the tool names are checked against the registry.
 
 ### Fixed
+
+- **The Networks page lists open votes, and Yes and Veto reach the round.** The page read a vote round in a shape
+  the server never sent (`id`, `subject`, `status` where the server sends `roundId`, `subjectLabel`, `concluded`),
+  so no open round was ever listed, on the Networks page or the Brain overview's Governance panel, and a cast would
+  have gone to `/votes/undefined`. The rounds are now translated in one place, where both pages read them.
 
 - **A network member's link direction and address were never shown on the Networks page.** Each member row read two
   field names the server does not send, so every member was labelled `both` — a publisher's subscriber included —
