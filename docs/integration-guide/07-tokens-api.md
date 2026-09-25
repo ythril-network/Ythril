@@ -82,11 +82,13 @@ Authorization: Bearer <token>
 
 A network carries several spaces, so an act on it needs the rung on **every** space it carries; one short is
 refused with a `403` naming it. A network you may not see is a `404`, never a `403`. A membership that predates
-the column has no recorded establisher, so leaving it needs `admin`. Space admin (`spaceAdmin`) does **not**
-include `networks` — administering a space is its data, tokens and settings; sharing it with another instance is
-its own decision — so `derivedRungs[spaceAdmin].requires` names the four data areas. Joining a *remote* network
-needs `write` too — and `createSpaces` plus a floor of `write` for any space the join would create. Invites, peers,
-topology, votes and sync stay instance-admin.
+the column has no recorded establisher, so leaving it needs `admin`. Space admin (`spaceAdmin`) does not grant the
+`networks` cells — `derivedRungs[spaceAdmin].requires` still names the four data areas — but since F-37 it is
+**enough for the two acts that share its own spaces**: a token administering every space an act touches may create
+a network with them, join one mapped onto them (onto a new space too, with `createSpaces`), see it, and generate
+its invite. Otherwise joining a *remote* network needs `write` — and `createSpaces` plus a floor of `write` for any
+space the join would create. Peers, topology, votes and sync stay instance-admin, and so do invites except for that
+space admin.
 
 **`networks` is optional in a matrix body and `none` when absent**, so a client written before it existed keeps
 minting four-area matrices. Every other area is required; an unknown area name is a `400`.

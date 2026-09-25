@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A space admin creates, joins and invites into networks with the spaces it administers** (`F-37`). A token
+  administering every space an act touches may create a network carrying them, join a network mapped onto them —
+  onto a new space too, when it may also create spaces — see that network, and generate its invite, with no
+  Networks column. A space it does not administer still needs the column and is named in the refusal; a network
+  carrying one stays invisible to it. Peers, votes, topology and sync are unchanged and instance-admin.
+
 - **Joining a remote network goes by the Networks column too** (`F-34.1`, `POST /api/networks/join-remote`). A
   token below instance admin may join with `networks: write` on every local space the join maps to; a space the
   join would create also needs `createSpaces` and a floor of `write`. The check runs after the handshake's apply
@@ -157,6 +163,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the tool names are checked against the registry.
 
 ### Fixed
+
+- **A token granted only space administration was refused as read-only.** Since 5.0 space administration can be
+  granted on its own, and it means `admin` in every data area of those spaces — but the read-only check counted
+  only written rungs, so a token holding just the grant was turned away with *"This token has read-only access"* by
+  every route that refuses read-only tokens, before that route's own check ran. It now counts the grant.
 
 - **A stored rights matrix missing an area read as reaching the space** (`reachesSpace`). The check compared each
   area's rung to `none`, and a missing area is `undefined`, which is not `none` — so a matrix without an area

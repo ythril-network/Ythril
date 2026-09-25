@@ -397,7 +397,7 @@ export const NOT_AREA_SCOPED: readonly { route: string; why: string }[] = [
    * in `ROUTE_RIGHTS` above.
    */
   { route: '/api/networks/:id/join', why: 'called by a JOINING PEER presenting an invite key, not by a local token acting on its spaces — the peer protocol, instance-admin' },
-  { route: '/api/networks/:id/invite', why: 'mints the invite key another instance joins with: an act on the network as a whole, not on a space\'s membership — instance-admin' },
+  { route: '/api/networks/:id/invite', why: 'mints the invite key another instance joins with: an act on the network as a whole, decided in the handler by `networkInviteRefusal` — instance admin, or a token that administers EVERY space the network carries (F-37); no single area rung expresses that' },
   { route: '/api/networks/:id/fork', why: 'creates a new network from an existing one\'s topology: a network-wide act — instance-admin' },
   { route: '/api/networks/:id/members', why: 'adds a peer INSTANCE to the network: who this instance trusts, not which spaces are shared — instance-admin' },
   { route: '/api/networks/:id/members/:instanceId', why: 'removes a peer INSTANCE: the instance\'s trust relationships — instance-admin' },

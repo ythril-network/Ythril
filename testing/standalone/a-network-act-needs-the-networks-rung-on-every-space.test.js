@@ -121,3 +121,46 @@ describe('joining a remote network (F-34.1)', () => {
     assert.equal(networkJoinRefusal({ id: 'a', rights: { instanceAdmin: true, createSpaces: true, floor: null, perSpace: {} } }, { existing: ['x'], toCreate: ['y'] }), null);
   });
 });
+
+/*
+ * F-37 — a space admin creates and joins networks with the spaces it administers (owner 2026-09-25): "Space admin
+ * may create networks for his space and join network mapped onto his space; or a new space if he also has can
+ * create space" — plural when it administers several. Nothing else on the router widens.
+ */
+describe('a space admin and its own spaces (F-37)', () => {
+  let networkJoinRefusal, networkInviteRefusal;
+  before(async () => { ({ networkJoinRefusal, networkInviteRefusal } = await import('../../server/dist/auth/network-rights.js')); });
+  const admins = (spaces, over = {}) => token({}, { spaceAdmin: { floor: false, spaces }, ...over });
+
+  it('creates a network carrying any number of the spaces it administers, with no Networks column', () => {
+    assert.equal(networkCreateRefusal(admins(['qa', 'ops']), ['qa', 'ops']), null);
+  });
+  it('is refused a network carrying a space it does not administer, and that space is named', () => {
+    const refusal = networkCreateRefusal(admins(['qa']), ['qa', 'hr']);
+    assert.match(refusal, /\bhr\b/);
+    assert.doesNotMatch(refusal, /\bqa\b/);
+  });
+  it('joins a network mapped onto several spaces it administers', () => {
+    assert.equal(networkJoinRefusal(admins(['qa', 'ops']), { existing: ['qa', 'ops'], toCreate: [] }), null);
+  });
+  it('is refused a join mapped onto a space it does not administer, named', () => {
+    assert.match(networkJoinRefusal(admins(['qa']), { existing: ['qa', 'hr'], toCreate: [] }), /\bhr\b/);
+  });
+  it('joins onto a NEW space only when it may also create spaces', () => {
+    assert.equal(networkJoinRefusal(admins(['qa'], { createSpaces: true }), { existing: ['qa'], toCreate: ['fresh'] }), null);
+    assert.match(networkJoinRefusal(admins(['qa']), { existing: ['qa'], toCreate: ['fresh'] }), /create/);
+  });
+  it('generates the invite for a network carrying only spaces it administers', () => {
+    assert.equal(networkInviteRefusal(admins(['qa', 'ops']), { spaces: ['qa', 'ops'] }), null);
+    assert.match(networkInviteRefusal(admins(['qa']), { spaces: ['qa', 'ops'] }), /\bops\b/);
+  });
+  it('sees a network carrying only spaces it administers, and not one carrying any other', async () => {
+    const { visibleNetworks } = await import('../../server/dist/auth/network-rights.js');
+    const nets = [{ id: 'mine', spaces: ['qa', 'ops'] }, { id: 'mixed', spaces: ['qa', 'hr'] }];
+    assert.deepEqual(visibleNetworks(admins(['qa', 'ops']), nets).map(n => n.id), ['mine']);
+  });
+  it('invites otherwise stay instance-admin: the Networks column alone does not generate one', () => {
+    assert.match(networkInviteRefusal(token({ qa: areas('admin') }), { spaces: ['qa'] }), /qa/);
+    assert.equal(networkInviteRefusal({ id: 'a', rights: { instanceAdmin: true, createSpaces: true, floor: null, perSpace: {} } }, { spaces: ['qa'] }), null);
+  });
+});
