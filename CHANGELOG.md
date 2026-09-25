@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.1.5] — 2026-09-25
+
+A patch for networks: two networks joined from the same peer at the same moment both keep syncing.
+
+**Who is affected.** An operator who joins two networks from the same instance within seconds of each other — or
+whose two instances join each other into two networks at once. Each instance keeps one token per peer, and each
+handshake hands over a new one scoped to the networks the pair shared at that moment. When the two handshakes'
+steps interleaved, the token that was kept lacked one of the two networks, and that network answered every sync with
+`403` until another handshake happened. Joins made one after the other were never affected (fixed in 5.1.2).
+
+**What to do.** Roll the image. A pair already caught by it recovers on its next handshake, or by leaving and
+rejoining the network that answers `403`. There is no config change and no migration.
+
+### Fixed
+
+- **Two networks joined from the same peer at once both keep syncing.** Once a join is registered, every token
+  either side keeps for the other now also reaches that network's spaces — at finalize on the inviter, and after
+  registration on the joiner — so whichever token a racing second handshake leaves in place reaches both. A wider
+  token is not wider access: a peer is still admitted only to the spaces of networks it is a member of.
+
 ## [5.1.4] — 2026-09-25
 
 A patch for the web interface: network votes can be seen and cast from the Networks page again.
