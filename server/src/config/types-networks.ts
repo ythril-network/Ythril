@@ -191,6 +191,11 @@ export interface NetworkConfig {
   /** Braintree only: this instance's parent instanceId in the network tree.
    *  When unset this instance is treated as the root. */
   myParentInstanceId?: string;
+  /**
+   * Whether THIS instance created the network or joined it (`F-38.1`). Local, like the rest of this record: it is
+   * what makes a club's creator its organiser. Absent on networks stored before it existed, which read as joined.
+   */
+  origin?: 'created' | 'joined';
   /** Set on THIS instance when it has been temporarily re-parented in a braintree.
    *  Cleared when the reparent is made permanent (`adopt`) or reverted. */
   temporaryReparent?: {

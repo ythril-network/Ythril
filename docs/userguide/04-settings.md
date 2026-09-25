@@ -477,6 +477,14 @@ have yet, the right to create spaces too. **A space admin needs none of that for
 network with any of the spaces it administers, join a network onto them (or onto new spaces, if it may create
 spaces), and generate the invite. Peers, votes and sync stay with the instance administrator.
 
+**Each network card says what this instance is in it.** Beside the type is its role — Publisher or Subscriber on
+a pub/sub network, Organiser or Member on a club, Member on a closed or democratic one, Root, Node or Leaf in a tree
+— and the members shown follow the role: a publisher sees its subscribers, a subscriber sees only its publisher, a
+club or voted network shows your peers, and a tree shows the path up to the root and everything below you. The
+card also lists the spaces the network carries, and for a space you mapped under another name when joining, the
+network's name for it. A subscriber sees no invite and cannot remove its publisher: on pub/sub only the publisher
+invites and removes; a subscriber that wants out leaves the network.
+
 ### Network types
 
 | Type | Who approves joins and leaves |
@@ -517,8 +525,11 @@ Click **Create Network**. The dialog asks for a **label**, a **type**, the **spa
 2. Paste the invite code — the line starting `ythril1_`. (An older brain may have sent you the earlier JSON
    form; paste that instead and it works the same.)
 3. Enter your brain's publicly reachable URL (e.g. `https://brain.example.com`).
-4. If any space IDs overlap with existing local spaces, a dialog lets you choose to merge into the existing space or map the remote space to a new local ID.
-5. Click **Join network**.
+4. For **each space the network carries**, choose where it goes: under the same name here (into your space of that
+   name if you have one, otherwise it is created), **into another space you already have**, or under a new name.
+   Joining only adds — the network's records are added next to what a space holds, nothing is overwritten or
+   deleted, and a peer can never delete a record your instance wrote.
+5. Click **Confirm and join**.
 
 ### Sync schedule
 

@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Joining a network lets you choose where each of its spaces goes** (`F-38.2`). The join dialog lists every space
+  the invite carries, not only the ones whose name collides with a local space, and each can go under the same name,
+  into any space you already have, or under a new name. The dialog says, beside the choice, that joining only adds:
+  nothing local is overwritten or deleted.
+
+- **Each network says what this instance is in it** (`F-38.1`). The Networks page shows a role — Publisher or
+  Subscriber, Organiser or Member, Root, Node or Leaf — instead of a flat member count, and lists the members that
+  role acts on: a publisher's subscribers, a subscriber's publisher, a club's or voted network's peers, and in a tree
+  the path to the root and the subtree below. It also lists the spaces the network carries. `GET /api/networks/:id`,
+  the list, and MCP `network_get` carry the same `myRole`. A club created from now on remembers its organiser; one
+  stored before reads as Member.
+
 - **A network can be read, created, updated and left over MCP** (`F-36`, first slice): `network_get`,
   `network_create`, `network_update` and `network_leave`. Each is the same act as its REST route — same parameters,
   the same rights (the Networks column, or administering every space), the same refusal sentence and the same body
@@ -169,6 +181,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the tool names are checked against the registry.
 
 ### Fixed
+
+- **A network member's link direction and address were never shown on the Networks page.** Each member row read two
+  field names the server does not send, so every member was labelled `both` — a publisher's subscriber included —
+  and no address appeared. The rows now show the real direction and the peer's URL.
 
 - **A stored rights matrix missing an area read as reaching the space** (`reachesSpace`). The check compared each
   area's rung to `none`, and a missing area is `undefined`, which is not `none` — so a matrix without an area

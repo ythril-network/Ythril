@@ -2,6 +2,7 @@ import { Component, inject, signal, computed, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Network, Space, SyncHistoryRecord, VoteRound } from '../../core/api.types';
+import { roleCountKey, remoteOf, memberGroups } from './network-role-view';
 import { NetworksApi } from '../../core/networks-api.service';
 import { NetworkInvitePanelComponent } from './network-invite-panel.component';
 import { SpacesApi } from '../../core/spaces-api.service';
@@ -44,6 +45,13 @@ import { NetworkEnableWizardComponent } from './network-enable-wizard.component'
 
     .network-card-header:hover { background: var(--bg-elevated); }
 
+    /* This instance's role (F-38.1): outlined, so it never reads as one more network TYPE colour beside it. */
+    .badge-role {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--text-primary);
+      font-weight: 600;
+    }
     .network-name {
       font-size: 14px;
       font-weight: 600;
@@ -161,7 +169,14 @@ import { NetworkEnableWizardComponent } from './network-enable-wizard.component'
           <div class="network-card-header" (click)="toggleNetwork(net.id)">
             <span class="network-name">{{ net.label }}</span>
             <span class="badge" [ngClass]="typeBadge(net.type)">{{ net.type }}</span>
-            <span class="badge badge-gray">{{ net.members.length }} {{ net.members.length === 1 ? ('networks.memberBadge.singular' | transloco) : ('networks.memberBadge.plural' | transloco) }}</span>
+            @if (net.myRole; as r) {
+              <span class="badge badge-role" [attr.aria-label]="'networks.role.ariaLabel' | transloco">{{ ('networks.role.' + r.role) | transloco }}</span>
+              @if (roleCountKey(r); as key) {
+                <span class="badge badge-gray">{{ key | transloco: { count: r.members.length } }}</span>
+              }
+            } @else {
+              <span class="badge badge-gray">{{ net.members.length }} {{ net.members.length === 1 ? ('networks.memberBadge.singular' | transloco) : ('networks.memberBadge.plural' | transloco) }}</span>
+            }
             @if (openVotes(net.id).length > 0) {
               <app-status-pill variant="warn" [dot]="true">{{ openVotes(net.id).length }} {{ 'networks.header.pendingVote' | transloco }}</app-status-pill>
             }
@@ -172,8 +187,10 @@ import { NetworkEnableWizardComponent } from './network-enable-wizard.component'
           @if (expanded() === net.id) {
             <div class="network-body">
 
-              <!-- Invite bundle -->
-              <app-network-invite-panel [networkId]="net.id" [networkType]="net.type" />
+              <!-- Invite bundle — not for a pub/sub subscriber: only the publisher invites (F-38.1). -->
+              @if (net.myRole?.role !== 'subscriber') {
+                <app-network-invite-panel [networkId]="net.id" [networkType]="net.type" />
+              }
 
               <!-- Sync -->
               <div style="margin-bottom:16px;">
@@ -247,13 +264,29 @@ import { NetworkEnableWizardComponent } from './network-enable-wizard.component'
                 }
               </div>
 
-              <!-- Members -->
-              <div class="section-title">{{ 'networks.network.members.title' | transloco }}</div>
-              @for (m of net.members; track m.instanceId) {
-                <app-network-member-row
-                  [member]="m"
-                  [removing]="!!removingMember[net.id + ':' + m.instanceId]"
-                  (remove)="removeMember(net, m.instanceId, m.label)" />
+              <!-- Spaces the network carries (F-38.1) -->
+              <div style="margin-bottom:16px;">
+                <div class="section-title">{{ 'networks.network.spaces.title' | transloco }}</div>
+                <div style="display:flex; gap:6px; flex-wrap:wrap;">
+                  @for (s of net.spaces; track s) {
+                    <span class="badge badge-gray">{{ s }}@if (remoteOf(net, s); as remote) { <span style="color:var(--text-muted);"> · {{ 'networks.network.spaces.mappedFrom' | transloco: { remote } }}</span> }</span>
+                  }
+                </div>
+              </div>
+
+              <!-- Members, as this instance's role sees them (F-38.1) -->
+              @for (group of memberGroups(net); track group.titleKey) {
+                <div class="section-title">{{ group.titleKey | transloco }}</div>
+                @if (group.members.length === 0 && group.emptyKey) {
+                  <div style="padding:4px 0 8px; color:var(--text-muted); font-size:12px;">{{ group.emptyKey | transloco }}</div>
+                }
+                @for (m of group.members; track m.instanceId) {
+                  <app-network-member-row
+                    [member]="m"
+                    [removable]="net.myRole?.role !== 'subscriber'"
+                    [removing]="!!removingMember[net.id + ':' + m.instanceId]"
+                    (remove)="removeMember(net, m.instanceId, m.label)" />
+                }
               }
               <!-- Open votes -->
               @if (openVotes(net.id).length > 0) {
@@ -625,6 +658,11 @@ export class NetworksComponent implements OnInit {
       },
     });
   }
+
+  // The role's presentation (F-38.1) lives in network-role-view.ts; the template calls it through these.
+  readonly roleCountKey = roleCountKey;
+  readonly remoteOf = remoteOf;
+  readonly memberGroups = memberGroups;
 
   typeBadge(type: string): string {
     const map: Record<string, string> = {

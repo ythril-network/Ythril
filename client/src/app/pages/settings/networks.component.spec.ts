@@ -285,8 +285,8 @@ describe('NetworksComponent (characterization)', () => {
   it('member rows show per-peer sync health: a failing badge on a streak, never-synced when unsynced', () => {
     make(); // configures the TestBed (providers) and resets it; we build our own fixture below
     const members = [
-      { instanceId: 'aaaaaaaa1111', label: 'Peer A', endpoint: 'https://a.example', consecutiveFailures: 3, lastSyncAt: '2026-07-20T10:00:00Z' },
-      { instanceId: 'bbbbbbbb2222', label: 'Peer B', endpoint: 'https://b.example', consecutiveFailures: 0, lastSyncAt: null },
+      { instanceId: 'aaaaaaaa1111', label: 'Peer A', url: 'https://a.example', consecutiveFailures: 3, lastSyncAt: '2026-07-20T10:00:00Z' },
+      { instanceId: 'bbbbbbbb2222', label: 'Peer B', url: 'https://b.example', consecutiveFailures: 0, lastSyncAt: null },
     ];
     api.listNetworks.mockReturnValue(of({ networks: [net({ id: 'n1', members: members as never })] }));
     const fixture = TestBed.createComponent(NetworksComponent);
@@ -309,5 +309,55 @@ describe('NetworksComponent (characterization)', () => {
     expect(rows[1].querySelector('.member-failing')).toBeNull();
     // Peer B never synced → the never-synced label (test transloco emits the raw key), not a date.
     expect(rows[1].querySelector('.member-sync')?.textContent).toContain('networks.member.neverSynced');
+  });
+
+  /*
+   * F-38.1 — the card shows this instance's ROLE and the members that role acts on, not a flat member count.
+   * Owner, 2026-09-25: "subscribers if im pub and nothing if im sub, on club i want to see peers, on braintree i
+   * want to see the path to root and my sub-path".
+   */
+  describe('the role this instance has in each network (F-38.1)', () => {
+    const m = (instanceId: string) => ({ instanceId, label: instanceId, url: `https://${instanceId}` });
+    const titles = (groups: { titleKey: string }[]) => groups.map(g => g.titleKey);
+    const ids = (groups: { members: { instanceId: string }[] }[]) => groups.map(g => g.members.map(x => x.instanceId));
+
+    it('a publisher lists its subscribers and counts them', () => {
+      const c = make();
+      const n = net({ type: 'pubsub', members: [m('s1'), m('s2')], myRole: { role: 'publisher', members: ['s1', 's2'] } } as Partial<Network>);
+      expect(titles(c.memberGroups(n))).toEqual(['networks.network.members.subscribers']);
+      expect(ids(c.memberGroups(n))).toEqual([['s1', 's2']]);
+      expect(c.roleCountKey(n.myRole!)).toBe('networks.role.count.subscribers');
+    });
+    it('a subscriber shows only its publisher and no count', () => {
+      const c = make();
+      const n = net({ type: 'pubsub', members: [m('pub')], myRole: { role: 'subscriber', members: [], publisher: 'pub' } } as Partial<Network>);
+      expect(titles(c.memberGroups(n))).toEqual(['networks.network.members.publisher']);
+      expect(ids(c.memberGroups(n))).toEqual([['pub']]);
+      expect(c.roleCountKey(n.myRole!)).toBeNull();
+    });
+    it('a club organiser sees its peers', () => {
+      const c = make();
+      const n = net({ type: 'club', members: [m('a')], myRole: { role: 'organiser', members: ['a'] } } as Partial<Network>);
+      expect(titles(c.memberGroups(n))).toEqual(['networks.network.members.peers']);
+      expect(c.roleCountKey(n.myRole!)).toBe('networks.role.count.peers');
+    });
+    it('a tree node sees the path to the root and what is below it', () => {
+      const c = make();
+      const n = net({ type: 'braintree', members: [m('root'), m('mid'), m('kid')],
+        myRole: { role: 'node', members: ['kid'], pathToRoot: ['mid', 'root'], subtree: ['kid'] } } as Partial<Network>);
+      expect(titles(c.memberGroups(n))).toEqual(['networks.network.members.pathToRoot', 'networks.network.members.subtree']);
+      expect(ids(c.memberGroups(n))).toEqual([['mid', 'root'], ['kid']]);
+    });
+    it('without a role from the server, every member is listed as before', () => {
+      const c = make();
+      const n = net({ members: [m('a'), m('b')] });
+      expect(titles(c.memberGroups(n))).toEqual(['networks.network.members.title']);
+    });
+    it('a space mapped from a differently named network space says where it came from', () => {
+      const c = make();
+      const n = net({ spaces: ['team-flows'], spaceMap: { flows: 'team-flows' } } as Partial<Network>);
+      expect(c.remoteOf(n, 'team-flows')).toBe('flows');
+      expect(c.remoteOf(net({ spaces: ['x'] } as Partial<Network>), 'x')).toBeNull();
+    });
   });
 });

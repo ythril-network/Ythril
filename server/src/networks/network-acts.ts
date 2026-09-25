@@ -27,6 +27,7 @@ import { syncScheduleRefusal } from '../sync/schedule.js';
 import { MIN_PEER_VERSION, peerFloorRefusal } from '../sync/peer-floor.js';
 import { peerSafeFetch } from '../sync/peer-fetch.js';
 import { log } from '../util/log.js';
+import { networkRole } from './network-role.js';
 
 type Caller = Parameters<typeof visibleNetworks>[0] & { id?: string };
 
@@ -57,8 +58,18 @@ export const UpdateNetworkBody = z.object({
 /** A network as any caller may see it: no credential of any kind, and each member's version verdict. */
 export function networkView(net: NetworkConfig): Record<string, unknown> {
   const { inviteKeyHash: _ikh, ...rest } = net;
+  // What this instance is in the network, and who that role acts on (F-38.1), by instance id into `members`.
+  const role = networkRole(net);
+  const myRole = {
+    role: role.role,
+    members: role.members.map(m => m.instanceId),
+    ...(role.publisher ? { publisher: role.publisher.instanceId } : {}),
+    ...(role.pathToRoot ? { pathToRoot: role.pathToRoot.map(m => m.instanceId) } : {}),
+    ...(role.subtree ? { subtree: role.subtree.map(m => m.instanceId) } : {}),
+  };
   return {
     ...rest,
+    myRole,
     members: net.members.map(({ tokenHash: _th, skipTlsVerify: _sv, ...m }) => ({
       ...m,
       belowFloor: peerFloorRefusal(m.version, m.versionCheckedAt),
@@ -104,6 +115,7 @@ export function createNetworkAct(caller: Caller, input: unknown): NetworkActResu
     members: [],
     pendingRounds: [],
     createdAt: new Date().toISOString(),
+    origin: 'created',
     // Who established each membership, so the leave rule can tell a token's own from another's. Recorded for an
     // instance admin too: the record is about the membership, not about whether its maker needed permission.
     ...(caller.id ? { spaceOrigins: spaces.reduce<Record<string, string>>((o, s) => recordOrigin(o, s, caller.id!), {}) } : {}),
