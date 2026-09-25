@@ -29,6 +29,7 @@ import { peerSafeFetch } from '../sync/peer-fetch.js';
 import { BCRYPT_ROUNDS, SSRF_SAFE_URL } from '../api/networks/_shared.js';
 import type { NetworkActResult } from './network-acts.js';
 import { widenPeerTokensOf } from './network-spaces.js';
+import { inviterIsWhoItClaims, knownPeerAt } from '../auth/peer-identity.js';
 
 type Caller = Parameters<typeof networkJoinRefusal>[0] & { id?: string };
 
@@ -92,11 +93,15 @@ export async function joinRemoteAct(caller: Caller, input: unknown): Promise<Net
     privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
   });
 
+  // S-6: when the inviter is a peer this instance already knows, present the token it issued to us, so the inviter can
+  // tell this is the genuine peer joining a second network and not someone claiming its id.
+  const knownInviter = knownPeerAt(cfg, inviteUrl);
+  const proof = knownInviter ? getSecrets().peerTokens[knownInviter] : undefined;
   let applyRes: Response;
   try {
     applyRes = await peerSafeFetch(inviteUrl, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...(proof ? { Authorization: `Bearer ${proof}` } : {}) },
       body: JSON.stringify({
         handshakeId,
         networkId,
@@ -126,6 +131,13 @@ export async function joinRemoteAct(caller: Caller, input: unknown): Promise<Net
     networkType: string;
     spaces: string[];
   }>(applyRes, 'network peer');
+
+  // S-6: the inviter's id is its own claim. A peer this instance already knows must be answering from the origin it
+  // is recorded at — otherwise another server is borrowing its id, and a token scoped by it would reach that peer's
+  // networks here and overwrite the one this instance keeps for it. Refused before anything is written.
+  if (!inviterIsWhoItClaims(cfg, applyData.instanceId, inviteUrl)) {
+    return { status: 403, error: `The inviter claims the instance id of a peer this instance reaches at another address (${applyData.instanceId}); refused` };
+  }
 
   // Decrypt tokenForB — the PAT Brain A created on its own server for Brain B to use
   let tokenForB: string;
