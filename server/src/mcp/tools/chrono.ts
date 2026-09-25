@@ -3,6 +3,7 @@ import { shapeError } from '../../brain/write-shape.js';
 import { CHRONO_STATUSES } from '../../config/types.js';
 import { UUID_V4_RE, TTL_DAYS_SCHEMA, SUPPRESS_EMBEDDINGS_SCHEMA, SUPERSEDED_SCHEMA, ttlDaysFromArgs, recurrenceSchema, unitScoreSchema, uuidSchema } from './shared.js';
 import { ChronoFilter, createChrono, deleteChrono, getChronoById, listChrono, updateChrono, parseRecurrence } from '../../brain/chrono.js';
+import { readEditAudit } from '../../brain/edit-audit.js';
 // The API layer's write gate, imported rather than reimplemented — see the note in memory.ts.
 import { SchemaViolationError, type UpdateValidation } from '../../brain/write-validation.js';
 
@@ -446,8 +447,11 @@ export const update_chronoTool: ToolHandler = {
     // leave the record stored without the links the same call asked for.
     await assertConnections(wt.target, 'chrono', a);
 
+    // Q-50: the before, read ahead of the write, so the audit entry carries the change list its REST twin's does.
+    const audit = await readEditAudit(wt.target, mid => getChronoById(mid, id), id, a);
     const entry = await updateChrono(wt.target, id, updates as Parameters<typeof updateChrono>[2], dfPaths, ctx.actor, ttlDaysFromArgs(a));
     if (!entry) throw new Error(`Chrono entry '${id}' not found`);
+    { const s = audit.snapshots(entry); ctx.recordChanges?.(s.before, s.after); }
     // `Q-30`: connections on the UPDATE too. Links REPLACE per class and edges UPSERT; both semantics
     // live in `applyConnections`, after the record write, exactly as the create tool does it.
     // `entry.spaceId` rather than `wt.target`: a proxy write lands where the record actually is.

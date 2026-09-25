@@ -57,9 +57,14 @@ Consequences worth knowing when reading the log:
 - Values are **scalars**. A field whose value is an object or array is skipped rather than serialised.
 - `from` absent means the field did not previously exist; `from: null` means it existed and was null.
 - A request that **failed** (status ≥ 400) records no changes, because it changed nothing.
+- **Both doors record them.** An edit made through an MCP tool carries the same `changes` as the same edit
+  through its REST route, and the same `entryId` (the record the call acted on), so filtering by record finds
+  both (Q-50).
 
-Currently allowlisted: `space.update`. Coverage expands per release; token and webhook operations are
-excluded by design, since the interesting value in those payloads is the secret itself.
+Allowlisted today: space and schema updates, network settings and space additions, token renames and rights,
+media levels, backup settings, and the brain record edits (fact, entity, edge, chrono, file metadata, and the
+name an entity merge makes unrecoverable). Token creation and webhook operations are excluded by design, since
+the interesting value in those payloads is the secret itself.
 
 ### Configuration
 

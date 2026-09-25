@@ -66,6 +66,12 @@ export interface ToolContext {
   /** Identity of the calling token, for webhook attribution. Passed to shared brain/file
    *  mutation functions so agent-driven writes emit attributed webhooks like REST writes. */
   actor?: WebhookActor;
+  /**
+   * Hand the audit entry the record as it was and as it now is (`Q-50`). The REST twin of every editing tool sets
+   * `req.auditSnapshots`, and the audit middleware turns it into the entry's `changes`; without this the same edit
+   * left a thinner entry on MCP. Called once, after a successful write. `callTool` supplies it on every call.
+   */
+  recordChanges?: (before: Record<string, unknown>, after: Record<string, unknown>) => void;
 }
 
 export type ToolResult = {

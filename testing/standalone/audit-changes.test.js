@@ -335,7 +335,8 @@ describe('audit changes — file meta and entity merge (the two held back from s
    * them — and a pattern demanding `before: existing ?? {}` and nothing else would fail on the change
    * that made link edits auditable again.
    */
-  const SNAPSHOT = /req\.auditSnapshots = \{ before: (?:\{ \.\.\.)?\(?[A-Za-z_$][\w$]*(?:\[0\])? \?\? \{\}/;
+  // Or through `readEditAudit` (Q-50), whose `before` is the prior read — pinned by the case below.
+  const SNAPSHOT = /req\.auditSnapshots = (?:\{ before: (?:\{ \.\.\.)?\(?[A-Za-z_$][\w$]*(?:\[0\])? \?\? \{\}|[A-Za-z_$][\w$]*\.snapshots\()/;
 
   it('both routes actually supply snapshots — checked per SITE, not per file', () => {
     // The #471 rule: an allowlist with no route behind it records nothing while claiming coverage.
@@ -370,6 +371,12 @@ describe('audit changes — file meta and entity merge (the two held back from s
       assert.match(read(file), SNAPSHOT, `${file} has an update handler and no audit snapshot, so its audit `
         + 'entry records that something changed without recording what');
     }
+  });
+
+  it('the shared edit read builds `before` from the record it read, not from nothing', () => {
+    // Q-50: two routes and five tools take their snapshot from `readEditAudit`, so its `before` is theirs.
+    assert.match(read('server/src/brain/edit-audit.ts'), /before: \{ \.\.\.\(\(prior \?\? \{\}\)/,
+      'readEditAudit must spread the prior record into before');
   });
 
   it('the merge snapshot reads the absorbed entity, not the survivor', () => {

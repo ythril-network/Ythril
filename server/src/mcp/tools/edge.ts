@@ -3,6 +3,7 @@ import { shapeError } from '../../brain/write-shape.js';
 import { UUID_V4_RE, TTL_DAYS_SCHEMA, SUPPRESS_EMBEDDINGS_SCHEMA, SUPERSEDED_SCHEMA, ttlDaysFromArgs, unitScoreSchema } from './shared.js';
 import { validateDeleteFields, applyDeleteFields as applyDeleteFieldsPaths } from '../../brain/delete-fields.js';
 import { deleteEdge, getEdgeById, traverseGraph, updateEdgeById, upsertEdge, EdgeSchemaViolation } from '../../brain/edges.js';
+import { readEditAudit } from '../../brain/edit-audit.js';
 // The shared write gate, imported rather than reimplemented — see the note in memory.ts.
 import { type UpdateValidation } from '../../brain/write-validation.js';
 import { getConfig } from '../../config/loader.js';
@@ -306,7 +307,10 @@ export const update_edgeTool: ToolHandler = {
      * duplicate is the one that drifted.
      */
 
+    // Q-50: the before, read ahead of the write, so the audit entry carries the change list its REST twin's does.
+    const audit = await readEditAudit(wt.target, mid => getEdgeById(mid, id), id, a);
     const updatedEdge = await findFirstAcrossMembers(wt.target, mid => updateEdgeById(mid, id, updates, dfPaths, ctx.actor, ttlDays));
+    if (updatedEdge) { const s = audit.snapshots(updatedEdge); ctx.recordChanges?.(s.before, s.after); }
     if (!updatedEdge) throw new Error(`Edge '${id}' not found`);
     return {
       content: [{ type: 'text' as const, text: `Edge '${updatedEdge.label}' updated (ID ${updatedEdge._id}, seq ${updatedEdge.seq}).` }],
