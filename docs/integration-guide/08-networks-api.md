@@ -245,6 +245,11 @@ POST /api/networks/:id/votes/:roundId
 
 Accepted values: `yes`, `veto`.
 
+A concluded `space_deletion` or `space_wipe` round acts on a member only when it **passed** with no veto — a round
+that expired is concluded but not passed, and deletes nothing — and only on the space it names as mapped to that
+member and carried by the round's own network. Each member applies it once; gossip re-delivering the round does not
+re-apply it.
+
 ---
 
 ### List Open Vote Rounds

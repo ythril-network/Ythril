@@ -639,6 +639,10 @@ stays where it is, but a brain still below it does not sync in the meantime.
 
 When a vote is open (e.g. a member wants to leave), expand the network card and scroll to **Open votes**. Each open vote shows its **Deadline** and a running tally (`N yes · M veto`). Click **✓ Yes** to approve, or **✗ Veto** to block the round — a veto asks you to confirm ("A veto blocks this pending round for the whole network. This cannot be undone.") before it is cast.
 
+**A vote to delete or empty a space acts only if it passes.** A round that reaches its deadline without enough yes
+lapses and the space is kept on every member. A member acts on such a vote only for a space its network actually
+carries, and only once — a vote cannot reach a space the network does not share.
+
 **Signed votes:** a network can set `requireSignedVotes` so every vote cast must carry a valid Ed25519 signature from the voting member (verified against its pinned signing key). Enable it once all members have published a signing key; if a member rotates its signing key, the new key is accepted with a rotation proof that references the previous one.
 
 ### Leaving a network
