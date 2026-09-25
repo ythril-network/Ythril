@@ -808,13 +808,27 @@ export interface Network {
   votingDeadlineHours?: number;
   syncSchedule?: string;
   merkle?: boolean;
+  /** What THIS instance is in the network, and which members that role acts on — ids into `members` (F-38.1). */
+  myRole?: NetworkRole;
+}
+
+export type NetworkRoleName = 'publisher' | 'subscriber' | 'organiser' | 'member' | 'root' | 'node' | 'leaf';
+
+export interface NetworkRole {
+  role: NetworkRoleName;
+  members: string[];
+  publisher?: string;
+  pathToRoot?: string[];
+  subtree?: string[];
 }
 
 export interface NetworkMember {
   instanceId: string;
   label: string;
-  endpoint: string;
-  syncDirection?: 'both' | 'push' | 'pull';
+  /** The peer's base URL. */
+  url: string;
+  /** This instance's link to the peer: `push` sends to it, `pull` receives from it, `both` does both. */
+  direction?: 'both' | 'push' | 'pull';
   /** ISO8601 of the last SUCCESSFUL sync with this member (absent = never synced yet). */
   lastSyncAt?: string;
   /** Consecutive failed sync attempts since the last success (0/absent = healthy). */

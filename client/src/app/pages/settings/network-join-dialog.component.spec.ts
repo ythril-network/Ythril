@@ -48,17 +48,19 @@ describe('NetworkJoinDialogComponent (characterization)', () => {
     expect(api.joinRemote).not.toHaveBeenCalled();
   });
 
-  it('detects space-id collisions and holds for resolution instead of joining', () => {
+  // F-38.2: EVERY invited space waits for a target, not only one whose id collides — the operator may want a
+  // non-colliding space to land on a space they already have.
+  it('holds every invited space for a target instead of joining straight away', () => {
     const f = make();
     f.componentRef.setInput('availableSpaces', [{ id: 'general', label: 'General' }] as never);
     const c = f.componentInstance;
     c.joinBundle = JSON.stringify({ handshakeId: 'h', inviteUrl: 'u', rsaPublicKeyPem: 'k', networkId: 'n1', spaces: ['general', 'remote-only'] });
     c.joinNetwork();
-    expect(c.joinCollisionSpaces()).toEqual(['general']);
+    expect(c.joinMapSpaces()).toEqual(['general', 'remote-only']);
     expect(api.joinRemote).not.toHaveBeenCalled();
   });
 
-  it('with no collisions joins immediately and emits "joined" on success', () => {
+  it('keeping every name joins with no map, and emits "joined" on success', () => {
     const f = make();
     f.componentRef.setInput('availableSpaces', [{ id: 'general', label: 'General' }] as never);
     const c = f.componentInstance;
@@ -66,8 +68,25 @@ describe('NetworkJoinDialogComponent (characterization)', () => {
     c.joined.subscribe(joined);
     c.joinBundle = JSON.stringify({ handshakeId: 'h', inviteUrl: 'u', rsaPublicKeyPem: 'k', networkId: 'n1', spaces: ['remote-only'] });
     c.joinNetwork();
+    c.confirmJoin();
     expect(api.joinRemote).toHaveBeenCalledWith(expect.objectContaining({ handshakeId: 'h', myUrl: 'https://me.example', networkId: 'n1' }));
+    expect(api.joinRemote.mock.calls[0][0].spaceMap).toBeUndefined();
     expect(joined).toHaveBeenCalled();
+  });
+
+  it('a space mapped onto an existing local space joins with that mapping, and must name one', () => {
+    const f = make();
+    f.componentRef.setInput('availableSpaces', [{ id: 'team-flows', label: 'Team flows' }] as never);
+    const c = f.componentInstance;
+    c.joinBundle = JSON.stringify({ handshakeId: 'h', inviteUrl: 'u', rsaPublicKeyPem: 'k', networkId: 'n1', spaces: ['flows'] });
+    c.joinNetwork();
+    c.onCollisionActionChange('flows', 'mapToExisting');
+    c.confirmJoin();                                   // no space picked yet
+    expect(c.joinError()).toContain('pickExisting');
+    expect(api.joinRemote).not.toHaveBeenCalled();
+    c.joinSpaceTargets['flows'] = 'team-flows';
+    c.confirmJoin();
+    expect(api.joinRemote).toHaveBeenCalledWith(expect.objectContaining({ spaceMap: { flows: 'team-flows' } }));
   });
 
   it('confirmJoin() validates alias inputs, then joins with a spaceMap', () => {
@@ -75,8 +94,8 @@ describe('NetworkJoinDialogComponent (characterization)', () => {
     f.componentRef.setInput('availableSpaces', [{ id: 'general' }] as never);
     const c = f.componentInstance;
     c.joinBundle = JSON.stringify({ handshakeId: 'h', inviteUrl: 'u', rsaPublicKeyPem: 'k', networkId: 'n1', spaces: ['general'] });
-    c.joinNetwork(); // → collision, holds
-    expect(c.joinCollisionSpaces()).toEqual(['general']);
+    c.joinNetwork(); // → holds for a target
+    expect(c.joinMapSpaces()).toEqual(['general']);
 
     c.onCollisionActionChange('general', 'alias');
     c.joinSpaceAliases['general'] = ''; // blank alias → error, no join
@@ -106,6 +125,7 @@ describe('NetworkJoinDialogComponent (characterization)', () => {
     // Pasted with the whitespace a selection picks up, because that is how one arrives.
     f.componentInstance.joinBundle = `  ${code}\n`;
     f.componentInstance.joinNetwork();
+    f.componentInstance.confirmJoin();   // the space mapping step, keeping the name
 
     expect(f.componentInstance.joinError()).toBe('');
     expect(api.joinRemote).toHaveBeenCalledWith(expect.objectContaining({

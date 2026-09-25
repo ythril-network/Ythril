@@ -64,7 +64,21 @@ GET /api/networks/:id
 
 Returns one network object (same shape as entries in `GET /api/networks`).
 
-**Response** `200` on success, `404` when the network does not exist.
+**Response** `200` on success, `404` when the network does not exist or you may not see it.
+
+**`myRole` says what THIS instance is in the network** (F-38.1), and which members that role acts on — each list
+holds instance ids into `members`:
+
+| type | `role` | `members` | also |
+|---|---|---|---|
+| `pubsub` | `publisher` | its subscribers | |
+| `pubsub` | `subscriber` | empty | `publisher` |
+| `club` | `organiser` (it created the network) or `member` | its peers | |
+| `closed`, `democratic` | `member` | its peers | |
+| `braintree` | `root`, `node` or `leaf` | everything below it | `pathToRoot` (parent first), `subtree` |
+
+A club network stored before 5.2 has no record of which instance created it and reads as `member`. MCP
+`network_get` returns the same field.
 
 ---
 

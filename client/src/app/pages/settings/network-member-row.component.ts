@@ -36,7 +36,8 @@ import type { NetworkMember } from '../../core/api.types';
   template: `
     <span class="mono badge badge-gray" style="font-size:11px;">{{ member().instanceId.slice(0, 8) }}</span>
     <span style="font-weight:500; flex:1;">{{ member().label }}</span>
-    <span class="badge badge-gray">{{ member().syncDirection ?? 'both' }}</span>
+    <!-- direction, the field the server sends. This read syncDirection, which nothing sends, so every row showed 'both'. -->
+    <span class="badge badge-gray">{{ member().direction ?? 'both' }}</span>
 
     <!-- Without this, a peer refused on version grounds is indistinguishable from a brand-new one:
          no failure streak (never dialled) and no timestamp. -->
@@ -62,9 +63,11 @@ import type { NetworkMember } from '../../core/api.types';
       }
     </span>
 
-    <a class="member-endpoint" [href]="member().endpoint" target="_blank" rel="noopener"
-      [attr.title]="member().endpoint">{{ member().endpoint }}</a>
+    <!-- url, the field the server sends; this read endpoint, which nothing sends, so no address was ever shown. -->
+    <a class="member-endpoint" [href]="member().url" target="_blank" rel="noopener"
+      [attr.title]="member().url">{{ member().url }}</a>
 
+    @if (removable()) {
     <button
       class="btn-danger btn btn-sm"
       style="padding:2px 8px;"
@@ -73,6 +76,7 @@ import type { NetworkMember } from '../../core/api.types';
       [attr.title]="'networks.network.members.removeTitle' | transloco"
       [attr.aria-label]="'networks.network.members.removeAriaLabel' | transloco"
     ><ph-icon name="x" [size]="14"/></button>
+    }
   `,
   styles: [`
     /* The HOST is the row — see the class note above. An inline host would shrink-wrap the border and gap. */
@@ -111,6 +115,8 @@ export class NetworkMemberRowComponent {
   readonly member = input.required<NetworkMember>();
   /** Disables the remove button while the parent's request is in flight. */
   readonly removing = input(false);
+  /** Whether this instance may remove this member at all — a pub/sub subscriber may not remove its publisher (F-38.1). */
+  readonly removable = input(true);
   /** The parent owns the removal: it holds the network and the confirmation. */
   readonly remove = output<void>();
 }

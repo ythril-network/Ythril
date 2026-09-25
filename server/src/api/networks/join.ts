@@ -268,6 +268,7 @@ joinRouter.post('/join-remote', globalRateLimit, requireAuth, denyReadOnly, asyn
         pendingRounds: [],
         createdAt: new Date().toISOString(),
         myParentInstanceId: applyData.networkType === 'braintree' ? applyData.instanceId : undefined,
+        origin: 'joined',
       };
       freshCfg.networks.push(net);
     }
@@ -584,6 +585,7 @@ joinRouter.post('/:id/fork', globalRateLimit, requireAdmin, (req, res) => {
       members: [],
       pendingRounds: [],
       createdAt: new Date().toISOString(),
+      origin: 'created',  // a fork is a new network this instance founded
     };
 
     cfg.networks.push(forkedNet);

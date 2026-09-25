@@ -11,7 +11,8 @@ import { ModalDirective } from '../../shared/modal.directive';
 /**
  * Join-network dialog, extracted from the (large) NetworksComponent (PR-U3). Owns the invite-bundle
  * textarea, the bundle validation (JSON / required fields / this brain's URL), the space-id
- * **collision-resolution** UI (merge vs alias, with alias validation), and the `joinRemote` call.
+ * **space mapping** step — every invited space gets a target: its own name here, an existing local space, or a new
+ * name (F-38.2) — and the `joinRemote` call.
  *
  * `myUrl` is a one-way input: the host computes this brain's own URL (used to gate the enable-networks
  * flow) and passes it in; the join dialog never lets the user edit it, it only needs it to submit. On a
@@ -73,33 +74,48 @@ import { ModalDirective } from '../../shared/modal.directive';
           ></textarea>
         </div>
 
-        @if (joinCollisionSpaces().length > 0) {
+        @if (joinMapSpaces().length > 0) {
           <div style="margin:0 0 12px; padding:12px; border:1px solid var(--border); border-radius:var(--radius-sm); background:var(--bg-elevated);">
-            <div style="font-weight:600; font-size:13px; margin-bottom:8px;">{{ 'networks.dialog.join.collisions.title' | transloco }}</div>
-            <p style="font-size:12px; color:var(--text-muted); margin:0 0 12px;">
-              {{ 'networks.dialog.join.collisions.body' | transloco }}
-            </p>
-            @for (remoteId of joinCollisionSpaces(); track remoteId) {
-              <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
+            <div style="font-weight:600; font-size:13px; margin-bottom:8px;">{{ 'networks.dialog.join.mapping.title' | transloco }}</div>
+            <!-- F-38.2: mapping is additive, and the operator is told so beside the choice (owner 2026-09-25). -->
+            <p style="font-size:12px; color:var(--text-muted); margin:0 0 12px;">{{ 'networks.dialog.join.mapping.additive' | transloco }}</p>
+            @for (remoteId of joinMapSpaces(); track remoteId) {
+              <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px; flex-wrap:wrap;">
                 <span class="badge badge-gray mono" style="min-width:80px;">{{ remoteId }}</span>
                 <select
                   [ngModel]="joinSpaceActions[remoteId]"
                   (ngModelChange)="onCollisionActionChange(remoteId, $event)"
-                  [name]="'collision-' + remoteId"
-                  style="width:140px;"
+                  [name]="'target-' + remoteId"
+                  [attr.aria-label]="'networks.dialog.join.mapping.targetAriaLabel' | transloco: { remoteId }"
+                  style="width:210px;"
                 >
-                  <option value="merge">{{ 'networks.dialog.join.collision.merge' | transloco }}</option>
-                  <option value="alias">{{ 'networks.dialog.join.collision.alias' | transloco }}</option>
+                  <option value="merge">{{ (existsLocally(remoteId) ? 'networks.dialog.join.mapping.sameMerge' : 'networks.dialog.join.mapping.sameCreate') | transloco: { remoteId } }}</option>
+                  <option value="mapToExisting">{{ 'networks.dialog.join.mapping.mapToExisting' | transloco }}</option>
+                  <option value="alias">{{ 'networks.dialog.join.mapping.newName' | transloco }}</option>
                 </select>
+                @if (joinSpaceActions[remoteId] === 'mapToExisting') {
+                  <select
+                    [(ngModel)]="joinSpaceTargets[remoteId]"
+                    [name]="'existing-' + remoteId"
+                    [attr.aria-label]="'networks.dialog.join.mapping.existingAriaLabel' | transloco: { remoteId }"
+                    style="width:160px;"
+                  >
+                    <option value="">{{ 'networks.dialog.join.mapping.pickSpace' | transloco }}</option>
+                    @for (s of availableSpaces(); track s.id) {
+                      <option [value]="s.id">{{ s.label || s.id }}</option>
+                    }
+                  </select>
+                }
                 @if (joinSpaceActions[remoteId] === 'alias') {
                   <input
                     type="text"
                     [(ngModel)]="joinSpaceAliases[remoteId]"
                     [name]="'alias-' + remoteId"
                     [placeholder]="'networks.dialog.join.aliasPlaceholder' | transloco"
+                    [attr.aria-label]="'networks.dialog.join.mapping.newNameAriaLabel' | transloco: { remoteId }"
                     pattern="[a-z0-9-]+"
                     maxlength="40"
-                    style="width:140px; padding:4px 8px; font-size:12px;"
+                    style="width:160px; padding:4px 8px; font-size:12px;"
                     required
                   />
                 }
@@ -112,11 +128,11 @@ import { ModalDirective } from '../../shared/modal.directive';
           <button class="btn-secondary btn" type="button" (click)="close.emit()">{{ 'common.cancel' | transloco }}</button>
           <button
             class="btn-primary btn"
-            (click)="joinCollisionSpaces().length > 0 ? confirmJoin() : joinNetwork()"
+            (click)="joinMapSpaces().length > 0 ? confirmJoin() : joinNetwork()"
             [disabled]="joining() || !joinBundle.trim() || !myUrl().trim()"
           >
             @if (joining()) { <span class="spinner" style="width:12px;height:12px;border-width:2px;"></span> }
-            {{ joinCollisionSpaces().length > 0 ? ('networks.dialog.join.confirmJoinButton' | transloco) : ('networks.dialog.join.submitButton' | transloco) }}
+            {{ joinMapSpaces().length > 0 ? ('networks.dialog.join.confirmJoinButton' | transloco) : ('networks.dialog.join.submitButton' | transloco) }}
           </button>
         </div>
       </div>
@@ -141,15 +157,19 @@ export class NetworkJoinDialogComponent {
   joining = signal(false);
   joinError = signal('');
   joinSuccess = signal('');
-  joinCollisionSpaces = signal<string[]>([]);
-  joinSpaceActions: Record<string, 'merge' | 'alias'> = {};
+  /** Every space the invite carries, each waiting for a target (F-38.2) — not only the ones whose id collides. */
+  joinMapSpaces = signal<string[]>([]);
+  /** Per invited space: `merge` keeps its id (into the local space of that name, or a new one), `alias` creates it
+   *  under a new id, `mapToExisting` lands it on a local space the operator picks. */
+  joinSpaceActions: Record<string, 'merge' | 'alias' | 'mapToExisting'> = {};
   joinSpaceAliases: Record<string, string> = {};
+  joinSpaceTargets: Record<string, string> = {};
   private joinParsedBundle: any = null;
 
   joinNetwork(): void {
     this.joinError.set('');
     this.joinSuccess.set('');
-    this.joinCollisionSpaces.set([]);
+    this.joinMapSpaces.set([]);
     /*
      * TWO input shapes, and which one it is decided by what the text STARTS with rather than by trying
      * both and seeing what sticks.
@@ -186,38 +206,43 @@ export class NetworkJoinDialogComponent {
       return;
     }
 
-    // Detect space name collisions — show resolution UI if any overlap
+    // Every invited space gets a target before the join runs (F-38.2): the same name here, an existing local space,
+    // or a new name. Holding here also shows the operator, once, what the join will touch.
     if (bundle.spaces?.length) {
-      const localIds = new Set(this.availableSpaces().map(s => s.id));
-      const overlap = (bundle.spaces as string[]).filter((s: string) => localIds.has(s));
-      if (overlap.length > 0) {
-        this.joinParsedBundle = bundle;
-        this.joinSpaceActions = {};
-        this.joinSpaceAliases = {};
-        for (const id of overlap) {
-          this.joinSpaceActions[id] = 'merge';
-          this.joinSpaceAliases[id] = '';
-        }
-        this.joinCollisionSpaces.set(overlap);
-        return; // wait for user to resolve collisions
+      this.joinParsedBundle = bundle;
+      this.joinSpaceActions = {};
+      this.joinSpaceAliases = {};
+      this.joinSpaceTargets = {};
+      for (const id of bundle.spaces as string[]) {
+        this.joinSpaceActions[id] = 'merge';
+        this.joinSpaceAliases[id] = '';
+        this.joinSpaceTargets[id] = '';
       }
+      this.joinMapSpaces.set(bundle.spaces as string[]);
+      return; // wait for the operator to confirm the targets
     }
 
     this.joinParsedBundle = bundle;
     this.executeJoin();
   }
 
-  onCollisionActionChange(remoteId: string, action: 'merge' | 'alias'): void {
+  onCollisionActionChange(remoteId: string, action: 'merge' | 'alias' | 'mapToExisting'): void {
     this.joinSpaceActions[remoteId] = action;
     if (action === 'alias' && !this.joinSpaceAliases[remoteId]) {
       this.joinSpaceAliases[remoteId] = remoteId + '-local';
     }
   }
 
+  /** Whether this instance already holds a space with the invited id — what "same name" then means. */
+  existsLocally(remoteId: string): boolean {
+    return this.availableSpaces().some(s => s.id === remoteId);
+  }
+
   confirmJoin(): void {
-    // Validate alias inputs
-    for (const remoteId of this.joinCollisionSpaces()) {
-      if (this.joinSpaceActions[remoteId] === 'alias') {
+    const localIds = new Set(this.availableSpaces().map(s => s.id));
+    for (const remoteId of this.joinMapSpaces()) {
+      const action = this.joinSpaceActions[remoteId];
+      if (action === 'alias') {
         const alias = this.joinSpaceAliases[remoteId]?.trim();
         if (!alias) {
           this.joinError.set(this.transloco.translate('networks.dialog.join.error.aliasRequired', { remoteId }));
@@ -227,11 +252,14 @@ export class NetworkJoinDialogComponent {
           this.joinError.set(this.transloco.translate('networks.dialog.join.error.aliasInvalid', { alias }));
           return;
         }
-        const localIds = new Set(this.availableSpaces().map(s => s.id));
         if (localIds.has(alias)) {
           this.joinError.set(this.transloco.translate('networks.dialog.join.error.aliasExists', { alias }));
           return;
         }
+      }
+      if (action === 'mapToExisting' && !localIds.has(this.joinSpaceTargets[remoteId] ?? '')) {
+        this.joinError.set(this.transloco.translate('networks.dialog.join.error.pickExisting', { remoteId }));
+        return;
       }
     }
     this.executeJoin();
@@ -241,12 +269,13 @@ export class NetworkJoinDialogComponent {
     const bundle = this.joinParsedBundle;
     if (!bundle) return;
 
-    // Build spaceMap from collision resolutions
+    // Build spaceMap from the operator's targets
     const spaceMap: Record<string, string> = {};
-    for (const remoteId of this.joinCollisionSpaces()) {
-      if (this.joinSpaceActions[remoteId] === 'alias') {
-        spaceMap[remoteId] = this.joinSpaceAliases[remoteId].trim();
-      }
+    for (const remoteId of this.joinMapSpaces()) {
+      const action = this.joinSpaceActions[remoteId];
+      if (action === 'alias') spaceMap[remoteId] = this.joinSpaceAliases[remoteId].trim();
+      // Onto an existing local space: the same kind of entry, naming a space that already exists — join-remote merges.
+      if (action === 'mapToExisting' && this.joinSpaceTargets[remoteId] !== remoteId) spaceMap[remoteId] = this.joinSpaceTargets[remoteId];
     }
 
     this.joining.set(true);
@@ -280,7 +309,7 @@ export class NetworkJoinDialogComponent {
         this.joinSuccess.set(msg);
         this.joinBundle = '';
         this.joinParsedBundle = null;
-        this.joinCollisionSpaces.set([]);
+        this.joinMapSpaces.set([]);
         this.joinSpaceActions = {};
         this.joinSpaceAliases = {};
         this.joined.emit(); // host reloads networks + refreshes spaces (a join can create local spaces)

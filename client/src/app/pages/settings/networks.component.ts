@@ -1,7 +1,7 @@
 import { Component, inject, signal, computed, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { Network, Space, SyncHistoryRecord, VoteRound } from '../../core/api.types';
+import { Network, NetworkMember, NetworkRole, Space, SyncHistoryRecord, VoteRound } from '../../core/api.types';
 import { NetworksApi } from '../../core/networks-api.service';
 import { NetworkInvitePanelComponent } from './network-invite-panel.component';
 import { SpacesApi } from '../../core/spaces-api.service';
@@ -44,6 +44,13 @@ import { NetworkEnableWizardComponent } from './network-enable-wizard.component'
 
     .network-card-header:hover { background: var(--bg-elevated); }
 
+    /* This instance's role (F-38.1): outlined, so it never reads as one more network TYPE colour beside it. */
+    .badge-role {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--text-primary);
+      font-weight: 600;
+    }
     .network-name {
       font-size: 14px;
       font-weight: 600;
@@ -161,7 +168,14 @@ import { NetworkEnableWizardComponent } from './network-enable-wizard.component'
           <div class="network-card-header" (click)="toggleNetwork(net.id)">
             <span class="network-name">{{ net.label }}</span>
             <span class="badge" [ngClass]="typeBadge(net.type)">{{ net.type }}</span>
-            <span class="badge badge-gray">{{ net.members.length }} {{ net.members.length === 1 ? ('networks.memberBadge.singular' | transloco) : ('networks.memberBadge.plural' | transloco) }}</span>
+            @if (net.myRole; as r) {
+              <span class="badge badge-role" [attr.aria-label]="'networks.role.ariaLabel' | transloco">{{ ('networks.role.' + r.role) | transloco }}</span>
+              @if (roleCountKey(r); as key) {
+                <span class="badge badge-gray">{{ key | transloco: { count: r.members.length } }}</span>
+              }
+            } @else {
+              <span class="badge badge-gray">{{ net.members.length }} {{ net.members.length === 1 ? ('networks.memberBadge.singular' | transloco) : ('networks.memberBadge.plural' | transloco) }}</span>
+            }
             @if (openVotes(net.id).length > 0) {
               <app-status-pill variant="warn" [dot]="true">{{ openVotes(net.id).length }} {{ 'networks.header.pendingVote' | transloco }}</app-status-pill>
             }
@@ -172,8 +186,10 @@ import { NetworkEnableWizardComponent } from './network-enable-wizard.component'
           @if (expanded() === net.id) {
             <div class="network-body">
 
-              <!-- Invite bundle -->
-              <app-network-invite-panel [networkId]="net.id" [networkType]="net.type" />
+              <!-- Invite bundle — not for a pub/sub subscriber: only the publisher invites (F-38.1). -->
+              @if (net.myRole?.role !== 'subscriber') {
+                <app-network-invite-panel [networkId]="net.id" [networkType]="net.type" />
+              }
 
               <!-- Sync -->
               <div style="margin-bottom:16px;">
@@ -247,13 +263,29 @@ import { NetworkEnableWizardComponent } from './network-enable-wizard.component'
                 }
               </div>
 
-              <!-- Members -->
-              <div class="section-title">{{ 'networks.network.members.title' | transloco }}</div>
-              @for (m of net.members; track m.instanceId) {
-                <app-network-member-row
-                  [member]="m"
-                  [removing]="!!removingMember[net.id + ':' + m.instanceId]"
-                  (remove)="removeMember(net, m.instanceId, m.label)" />
+              <!-- Spaces the network carries (F-38.1) -->
+              <div style="margin-bottom:16px;">
+                <div class="section-title">{{ 'networks.network.spaces.title' | transloco }}</div>
+                <div style="display:flex; gap:6px; flex-wrap:wrap;">
+                  @for (s of net.spaces; track s) {
+                    <span class="badge badge-gray">{{ s }}@if (remoteOf(net, s); as remote) { <span style="color:var(--text-muted);"> · {{ 'networks.network.spaces.mappedFrom' | transloco: { remote } }}</span> }</span>
+                  }
+                </div>
+              </div>
+
+              <!-- Members, as this instance's role sees them (F-38.1) -->
+              @for (group of memberGroups(net); track group.titleKey) {
+                <div class="section-title">{{ group.titleKey | transloco }}</div>
+                @if (group.members.length === 0 && group.emptyKey) {
+                  <div style="padding:4px 0 8px; color:var(--text-muted); font-size:12px;">{{ group.emptyKey | transloco }}</div>
+                }
+                @for (m of group.members; track m.instanceId) {
+                  <app-network-member-row
+                    [member]="m"
+                    [removable]="net.myRole?.role !== 'subscriber'"
+                    [removing]="!!removingMember[net.id + ':' + m.instanceId]"
+                    (remove)="removeMember(net, m.instanceId, m.label)" />
+                }
               }
               <!-- Open votes -->
               @if (openVotes(net.id).length > 0) {
@@ -624,6 +656,41 @@ export class NetworksComponent implements OnInit {
         this.toast.error(err.error?.error ?? this.transloco.translate('networks.error.castVoteFailed'));
       },
     });
+  }
+
+  /** The count the header shows for this role, or null when the role shows none (a subscriber, a lone root). */
+  roleCountKey(r: NetworkRole): string | null {
+    if (r.role === 'publisher') return 'networks.role.count.subscribers';
+    if (r.role === 'subscriber') return null;
+    if (r.role === 'root' || r.role === 'node' || r.role === 'leaf') return r.members.length ? 'networks.role.count.below' : null;
+    return 'networks.role.count.peers';
+  }
+
+  /** The network space a local space was mapped from on join, when it differs from the local id. */
+  remoteOf(net: Network, local: string): string | null {
+    const hit = Object.entries(net.spaceMap ?? {}).find(([remote, l]) => l === local && remote !== local);
+    return hit ? hit[0] : null;
+  }
+
+  /**
+   * The member lists this instance's role acts on (F-38.1). A publisher sees its subscribers, a subscriber only its
+   * publisher, a club or voted network its peers, a tree node the path to the root and what is below it. Without a
+   * role (an older server) it falls back to every member, as before.
+   */
+  memberGroups(net: Network): { titleKey: string; members: NetworkMember[]; emptyKey?: string }[] {
+    const r = net.myRole;
+    const pick = (ids: string[] | undefined) =>
+      (ids ?? []).map(id => net.members.find(m => m.instanceId === id)).filter((m): m is NetworkMember => !!m);
+    if (!r) return [{ titleKey: 'networks.network.members.title', members: net.members }];
+    switch (r.role) {
+      case 'publisher': return [{ titleKey: 'networks.network.members.subscribers', members: pick(r.members), emptyKey: 'networks.network.members.noSubscribers' }];
+      case 'subscriber': return [{ titleKey: 'networks.network.members.publisher', members: pick(r.publisher ? [r.publisher] : []) }];
+      case 'root': case 'node': case 'leaf': return [
+        { titleKey: 'networks.network.members.pathToRoot', members: pick(r.pathToRoot), emptyKey: 'networks.network.members.isRoot' },
+        { titleKey: 'networks.network.members.subtree', members: pick(r.subtree), emptyKey: 'networks.network.members.noneBelow' },
+      ];
+      default: return [{ titleKey: 'networks.network.members.peers', members: pick(r.members) }];
+    }
   }
 
   typeBadge(type: string): string {
