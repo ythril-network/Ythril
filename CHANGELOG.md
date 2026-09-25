@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.1.6] — 2026-09-25
+
+A security patch for networks: an invite can no longer be applied under another peer's instance id. Please roll it onto
+every instance that is in a network.
+
+**Who is affected.** Every instance in two or more networks with the same peer. Since 5.1.2 the token an invite
+handshake mints reaches every network the two instances already share, and the joining side's instance id was taken
+on its word. So anyone handed an invite bundle for one network — including, since 5.1.x, one minted by a space
+administrator — could apply under the id of a peer the inviter already syncs with, and read every space the inviter
+shares with that peer. The joining side trusted the inviter's claimed id the same way.
+
+**What to do.** Roll the image. There is no config change and no migration. An instance joining a network for the
+first time is unaffected; a peer that is already connected and joins a SECOND network proves itself automatically once
+it runs 5.1.6 too — an older joiner is refused (`403`, naming the reason) by a patched inviter until it is upgraded.
+
+### Fixed
+
+- **An invite cannot be applied under another peer's instance id** (security). An id that is already a peer must now
+  present a token the inviter issued to it, which a genuine peer's own join does, and a joiner refuses an inviter that
+  claims a known peer's id from another address. A refused apply mints nothing and is logged.
+
 ## [5.1.5] — 2026-09-25
 
 A patch for networks: two networks joined from the same peer at the same moment both keep syncing.
