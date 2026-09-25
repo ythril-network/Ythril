@@ -3,6 +3,7 @@ import { shapeError } from '../../brain/write-shape.js';
 import { UUID_V4_RE, TTL_DAYS_SCHEMA, SUPPRESS_EMBEDDINGS_SCHEMA, SUPERSEDED_SCHEMA, ttlDaysFromArgs, uuidSchema, unitScoreSchema } from './shared.js';
 import { validateDeleteFields, applyDeleteFields as applyDeleteFieldsPaths } from '../../brain/delete-fields.js';
 import { deleteEntity, findEntitiesByName, getEntityById, updateEntityById, upsertEntity } from '../../brain/entities.js';
+import { readEditAudit } from '../../brain/edit-audit.js';
 import { entityDeleteBlockers } from '../../brain/entity-delete-guard.js';
 import { deleteEntityCascade } from '../../brain/entity-delete-cascade.js';
 // The shared write gate, imported rather than reimplemented — see the note in memory.ts.
@@ -302,7 +303,10 @@ export const update_entityTool: ToolHandler = {
     // Refused BEFORE the update lands, or a bad link id leaves every other field already changed.
     await assertConnections(wt.target, 'entity', a);
 
+    // Q-50: the before, read ahead of the write, so the audit entry carries the change list its REST twin's does.
+    const audit = await readEditAudit(wt.target, mid => getEntityById(mid, id), id, a);
     const updatedEnt = await findFirstAcrossMembers(wt.target, mid => updateEntityById(mid, id, updates, dfPaths, ctx.actor, ttlDays));
+    if (updatedEnt) { const s = audit.snapshots(updatedEnt); ctx.recordChanges?.(s.before, s.after); }
     if (!updatedEnt) throw new Error(`Entity '${id}' not found`);
     // `Q-30`: connections on the UPDATE too. Links REPLACE per class and edges UPSERT; both
     // semantics live in `applyConnections`, after the record write, exactly as the create does it.
@@ -450,6 +454,8 @@ export const graph_mergeTool: ToolHandler = {
       plan.absorbedOnlyProperties,
     );
 
+    // Q-50: the one fact a merge makes unrecoverable, recorded as the REST route records it — see api/brain/entities.ts.
+    ctx.recordChanges?.({ absorbedName: absorbed.name }, { absorbedName: null });
     const mergeResult = await executeMerge(wt.target, survivor, absorbed, mergedProperties, ctx.actor);
     const mergedEntity = mergeResult.entity;
 

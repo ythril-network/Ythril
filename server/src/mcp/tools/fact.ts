@@ -11,6 +11,7 @@ import { validateDeleteFields } from '../../brain/delete-fields.js';
 import { findEntitiesByIds } from '../../brain/entities.js';
 import { assertRefsResolve, UUID_V4_PATTERN } from '../../brain/entity-refs.js';
 import { deleteFact, listFacts, saveFact, updateFact } from '../../brain/fact.js';
+import { readEditAudit } from '../../brain/edit-audit.js';
 import { applyDeleteFields as applyDeleteFieldsPaths } from '../../brain/delete-fields.js';
 // The API layer's write gate, imported rather than reimplemented: `update_chrono` once shipped without
 // the allowlist `save_chrono` enforced, and two copies of a validation rule is how that happens.
@@ -351,7 +352,10 @@ export const update_factTool: ToolHandler = {
     // Refused BEFORE the update lands, or a bad link id leaves every other field already changed.
     await assertConnections(wt.target, 'fact', a);
 
+    // Q-50: the before, read ahead of the write, so the audit entry carries the change list its REST twin's does.
+    const audit = await readEditAudit(wt.target, mid => listFacts(mid, { _id: id }, 1, 0).then(r => r[0] ?? null), id, a);
     const updated = await findFirstAcrossMembers(wt.target, mid => updateFact(mid, id, updates, dfPaths, ctx.actor, ttlDays));
+    if (updated) { const s = audit.snapshots(updated); ctx.recordChanges?.(s.before, s.after); }
     if (!updated) throw new Error(`Fact '${id}' not found`);
     // `Q-30`: connections on the UPDATE too. Links REPLACE per class and edges UPSERT; both semantics
     // live in `applyConnections`, after the record write, exactly as the create tool does it.

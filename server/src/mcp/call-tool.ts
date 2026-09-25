@@ -46,6 +46,7 @@ import { makeArgsValidator } from './validate-args.js';
 import { toolSchemasFor } from './tool-schema.js';
 import { consumeHeavyToolCall } from '../rate-limit/heavy-tool.js';
 import { logAuditEntry } from '../audit/audit.js';
+import { auditChanges } from '../audit/audit-changes.js';
 import { mcpAuditOperation, isMcpReadOperation } from './audit-map.js';
 import { toolCallsTotal } from '../metrics/registry.js';
 /** Who is calling, for the rung checks and the audit trail. Snapshotted by the door at its own edge. */
@@ -257,6 +258,7 @@ export async function callTool(req: ToolCallRequest): Promise<ToolCallOutcome> {
       return refuse(429, `Error: tool '${name}' is rate limited — too many destructive calls, try again shortly`, callSpace);
     }
     const startedAt = Date.now();
+    let snapshots: { before: Record<string, unknown>; after: Record<string, unknown> } | undefined;
     const result = await tool.handle({
       args: a,
       callSpace,
@@ -274,11 +276,12 @@ export async function callTool(req: ToolCallRequest): Promise<ToolCallOutcome> {
       // so an unpopulated `rights` here would empty `help`'s listing while `tools/list` stayed correct.
       rights,
       actor: { tokenId: caller.tokenId, tokenLabel: caller.tokenLabel },
+      recordChanges: (before, after) => { snapshots = { before, after }; },
     });
     // A tool that returns `isError` failed on its own terms, so the status has to come from the RESULT or
     // every rejected write would be logged as a success. 422: the call was well-formed and it was refused.
     const status = result?.isError ? 422 : 200;
-    recordToolCall(caller, name, callSpace, status, Date.now() - startedAt, a);
+    recordToolCall(caller, name, callSpace, status, Date.now() - startedAt, a, snapshots);
     return { result, status, callSpace };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -329,7 +332,7 @@ export async function callTool(req: ToolCallRequest): Promise<ToolCallOutcome> {
  * that was forgotten is an unaudited mutation.
  */
 function recordToolCall(caller: ToolCaller, toolName: string, spaceId: string, status: number,
-  durationMs: number, args: unknown): void {
+  durationMs: number, args: unknown, snapshots?: { before: Record<string, unknown>; after: Record<string, unknown> }): void {
   // The ARGUMENTS, because a capability with two subjects is audited under the subject of the call:
   // `network_sync` with a `peerId` records what the per-peer route records (`Q-37`).
   const operation = mcpAuditOperation(toolName, args);
@@ -345,9 +348,15 @@ function recordToolCall(caller: ToolCaller, toolName: string, spaceId: string, s
     method: caller.transport === 'mcp' ? 'MCP' : 'POST',
     path: caller.transport === 'mcp' ? `http:${toolName}` : `/api/${toolName}`,
     spaceId: spaceId || null,
+    // Q-50: the record the call acted on, as the REST entry names it from the path. A tool's `id` argument is always
+    // its subject's id, so an operator filtering the log by record finds the MCP edit beside the REST one.
+    entryId: typeof (args as Record<string, unknown> | null)?.['id'] === 'string' ? (args as Record<string, string>)['id']! : null,
     operation,
     status,
     durationMs,
+    // Q-50: the same `changes` the REST twin's entry carries, and on the same condition — only a call that
+    // succeeded, because a refused edit changed nothing and its intended values would claim one.
+    ...(status < 400 && snapshots ? { changes: auditChanges(operation, snapshots.before, snapshots.after) } : {}),
   });
 }
 

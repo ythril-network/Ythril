@@ -197,6 +197,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **An edit made through MCP is audited with what it changed** (`Q-50`). The REST door recorded each edit's
+  before and after as the audit entry's `changes`; the same edit through an MCP tool left the operation alone, and
+  no record id. Ten tools now record both — the record edits, the entity merge, the network settings and space
+  additions, and the space and schema updates — and a gate derives the set from the routes that record changes, so a
+  new pair cannot miss it.
+
 - **A network member's link direction and address were never shown on the Networks page.** Each member row read two
   field names the server does not send, so every member was labelled `both` — a publisher's subscriber included —
   and no address appeared. The rows now show the real direction and the peer's URL.
