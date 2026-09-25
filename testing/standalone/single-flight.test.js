@@ -165,7 +165,6 @@ describe('outbound calls carry a deadline', () => {
          */
         // `modelFetch` too (F-33): it is a pass-through wrapper, so ITS callers are where the deadline has to be.
         for (const m of src.matchAll(/\b(ssrfSafeFetch|modelFetch)\(/g)) {
-          if (/export function\s*$/.test(src.slice(Math.max(0, m.index - 20), m.index))) continue;
           const argsList = balancedFrom(src, src.indexOf('(', m.index), `${rel}: the ${m[1]} arguments`);
           if (!/signal\s*:/.test(argsList)) {
             offenders.push(`${rel}: ${m[1]} with no signal`);
