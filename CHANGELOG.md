@@ -325,10 +325,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Internal
 
+- **Build & Test runs on pull requests into a release branch** (`Q-56`). A patch is bumped through a PR into
+  `release/X.Y.x`, and the changelog check counts an entry under a version section that same change adds, as it
+  counts one under `[Unreleased]` — a section that already existed still does not.
+
 - **Which endpoint each assist-model caller uses is pinned before it changes** (`F-33`, characterization).
   `which-assist-endpoint-each-caller-uses.test.js` states, through a loaded config, when the describe step, the
   extractor's writer and its decision fallback use the assist model, so the resolver `F-33` moves them to is held to
   the same answers.
+
+- **`npm run machine:free` gives the machine back its disk and memory in one command** (`Q-55`, `scripts/machine-free.ps1`):
+  removes the test stack, prunes everything no running container needs, trims the VM disk, then runs
+  `docker:compact` — which restarts WSL, the only thing that returns the Docker VM's held memory. `-Wipe` deletes
+  the whole data disk instead. First run: 21.9 GB returned to O:, 14 GB of memory freed.
 
 - **A merge its dates contradict can be seen as one** (`F-31`, 4.7). The entity judge now sees each turn's resolved
   dates beside every candidate's description, and the merge question says a card whose dates contradict them is

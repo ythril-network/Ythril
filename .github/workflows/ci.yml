@@ -1,8 +1,9 @@
 name: CI
 
 on:
+  # Release branches too (Q-56): a patch is bumped through a PR into release/X.Y.x, and Build & Test is the merge gate.
   pull_request:
-    branches: [main]
+    branches: [main, 'release/**']
   push:
     branches: [main]
 
