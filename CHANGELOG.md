@@ -164,11 +164,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **A token granted only space administration was refused as read-only.** Since 5.0 space administration can be
-  granted on its own, and it means `admin` in every data area of those spaces — but the read-only check counted
-  only written rungs, so a token holding just the grant was turned away with *"This token has read-only access"* by
-  every route that refuses read-only tokens, before that route's own check ran. It now counts the grant.
-
 - **A stored rights matrix missing an area read as reaching the space** (`reachesSpace`). The check compared each
   area's rung to `none`, and a missing area is `undefined`, which is not `none` — so a matrix without an area
   reached every space it had a row or floor for. Latent until an area was added; a missing area is now `none`.
@@ -423,6 +418,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`F-19` leaves the manual-verify exemption map.** Its exploration finished — no demand signal for a rules
   engine, and the cheap parts already exist — so it became an owner decision rather than open work, and a
   stale exemption fails `todo:check`. The map stays, empty, for the next item whose evidence cannot be a count.
+
+## [5.1.3] — 2026-09-25
+
+A patch: a token granted only space administration can write again.
+
+**Who is affected.** Only tokens whose rights are a space-administration grant and nothing else — no floor and no
+per-space rungs. That shape has been possible since 5.0, when space administration became a grant of its own. Such a token could read its
+spaces and was refused every write with *"This token has read-only access"*, although it administers them. A token
+that also holds any written `write` rung was never affected.
+
+**What to do.** Nothing, beyond rolling the image. There is no config change and no migration: the grant was always
+stored correctly, and it is only the check that now reads it.
+
+### Fixed
+
+- **A token granted only space administration was refused as read-only.** Since 5.0 space administration can be
+  granted on its own, and it means `admin` in every data area of those spaces — but the read-only check counted
+  only written rungs, so a token holding just the grant was turned away with *"This token has read-only access"* by
+  every route that refuses read-only tokens, before that route's own check ran. It now counts the grant.
 
 ## [5.1.2] — 2026-09-25
 
