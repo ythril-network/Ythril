@@ -134,6 +134,36 @@ Returns `404` when the space or type name does not exist. Returns `400` for an i
 
 ---
 
+### Network Schema Layers
+
+```http
+GET /api/spaces/:id/schema-layers
+PUT /api/spaces/:id/network-precedence
+```
+
+A space in networks that send schema (pub/sub and braintree) keeps each network's schema as its own **layer**
+beside this instance's own definitions, and enforces own ⊕ layers in **precedence**: the network first in the list
+wins where two define the same type, property or field differently (F-39.2). The GET answers:
+
+```json
+{
+  "spaceId": "research",
+  "own": { "typeSchemas": { } },
+  "layers": [{ "networkId": "…", "networkLabel": "Publisher A", "meta": { } }],
+  "precedence": ["…", "…"],
+  "clashes": [{ "kind": "entity", "type": "person", "property": "tier",
+                "values": [{ "networkId": "…", "value": { "type": "number" } }, { "networkId": "…", "value": { "type": "string" } }] }]
+}
+```
+
+In each clash the network listed first is the one that applies. A clash never stops either network's records.
+
+The PUT sets the order, highest first — `{ "networks": ["…", "…"] }` — rebuilds the space's schema and answers as
+the GET does. Networks left out keep the order they were joined in, after the ones named; an id that is not a
+network carrying the space is `400`, naming it. Rights: `schema: read` to see, `schema: admin` to reorder. MCP:
+`space_schema_layers` and `space_set_network_precedence`, same parameters and answers. Audited as
+`space.precedence.update`.
+
 ### Validate Schema (Dry Run)
 
 ```http

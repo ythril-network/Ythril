@@ -1,4 +1,5 @@
 import type { ToolHandler } from './types.js';
+import { space_schema_layersTool, space_set_network_precedenceTool } from './schema-layers.js';
 import { list_spacesTool, space_statsTool, space_metaTool, update_spaceTool, schema_updateTool, save_spaceTool, delete_space_dataTool , list_tokensTool } from './spaces.js';
 import { save_factTool, update_factTool, delete_factTool } from './fact.js';
 import { recallTool, find_similarTool } from './search.js';
@@ -36,6 +37,8 @@ export const ALL_TOOLS: ToolHandler[] = [
   delete_factTool,
   space_statsTool,
   space_metaTool,
+  space_schema_layersTool,
+  space_set_network_precedenceTool,
   queryTool,
   save_entityTool,
   save_edgeTool,

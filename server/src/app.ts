@@ -11,6 +11,7 @@ import { fileURLToPath } from 'url';
 import { tokensRouter } from './api/tokens.js';
 import { brainRouter } from './api/brain/index.js';
 import { spacesRouter } from './api/spaces.js';
+import { spaceSchemaLayersRouter } from './api/spaces-schema-layers.js';
 import { fileStoreRouter } from './api/files.js';
 import { toolsRouter } from './api/tools.js';
 import { conflictsRouter } from './api/conflicts.js';
@@ -319,6 +320,7 @@ export function createApp() {
   app.use('/api', toolsRouter);
   app.use('/api/brain', brainRouter);
   app.use('/api/spaces', spacesRouter);
+  app.use('/api/spaces', spaceSchemaLayersRouter);  // F-39.3: schema layers and network precedence
   app.use('/api/files', fileStoreRouter);
   app.use('/api/conflicts', conflictsRouter);
   app.use('/api/duplicates', duplicatesRouter);

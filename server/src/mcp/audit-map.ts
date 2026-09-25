@@ -105,6 +105,8 @@ export const MCP_TOOL_OPERATIONS: Record<string, string | string[] | null> = {
   network_update: 'network.update',
   network_leave: 'network.delete',
   network_add_space: 'network.space.add',
+  space_schema_layers: null,
+  space_set_network_precedence: 'space.precedence.update',
   network_vote: 'network.vote',
   network_votes: null,
   network_sync_history: null,
