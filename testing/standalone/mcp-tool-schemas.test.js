@@ -97,7 +97,8 @@ describe('MCP tool schemas — universal invariants', () => {
     // `network.space.add`, the route's own operation.
     // 52 -> 55: `network_votes`, `network_vote`, `network_sync_history` (`F-36` slice 2), doors onto
     // `networks/vote-acts.ts` like their routes; instance-admin (`admin: true`) as the routes are.
-    assert.equal(ALL_TOOLS.length, 55);
+    // 55 -> 57: `space_schema_layers`, `space_set_network_precedence` (`F-39.3`), doors onto `spaces/schema-layers-acts.ts`.
+    assert.equal(ALL_TOOLS.length, 57);
   });
 
   it('every tool advertises a closed object schema (type:object, additionalProperties:false)', () => {

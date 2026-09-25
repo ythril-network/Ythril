@@ -14,6 +14,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   change stayed on the instance that proposed it. The passed round is now served to peers, each member re-decides it
   from the casts, and applies it as that network's definition — beside its own, never over it.
 
+- **See and settle a schema clash between networks** (`F-39.3`). A space in several schema-sending networks
+  shows, on its Schema tab, each network's layer in the order it applies and every clash between them, with the
+  network that currently applies marked; the order can be changed there. `GET /api/spaces/:id/schema-layers` and
+  `PUT /api/spaces/:id/network-precedence`, and MCP `space_schema_layers` / `space_set_network_precedence`, with the
+  same parameters and answers.
+
 - **An agent can see and cast network votes over MCP** (`F-36`, slice 2). `network_votes`, `network_vote` and
   `network_sync_history` are the same acts as the votes and sync-history routes — same parameters, answers and
   refusals, instance-admin on both doors. A vote is how a networked space approves a destructive act, and until now

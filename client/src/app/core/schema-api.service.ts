@@ -3,10 +3,29 @@ import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import type { SchemaLibraryEntry, ForeignCatalogEntry, SchemaCatalog } from './api.types';
 
+/** A space's network schema layers (F-39.3), as `GET /api/spaces/:id/schema-layers` answers. */
+export interface SchemaLayersView {
+  spaceId: string;
+  own: Record<string, unknown>;
+  layers: { networkId: string; networkLabel: string; meta: Record<string, unknown> }[];
+  precedence: string[];
+  clashes: { field?: string; kind?: string; type?: string; property?: string; typeField?: string; values: { networkId: string; value: unknown }[] }[];
+}
+
 /** Instance-level schema library and external schema catalogs. */
 @Injectable({ providedIn: 'root' })
 export class SchemaApi {
   private http = inject(HttpClient);
+
+  // ── Network schema layers (F-39.3) ─────────────────────────────────────────
+
+  getSchemaLayers(spaceId: string): Observable<SchemaLayersView> {
+    return this.http.get<SchemaLayersView>(`/api/spaces/${encodeURIComponent(spaceId)}/schema-layers`);
+  }
+
+  setNetworkPrecedence(spaceId: string, networks: string[]): Observable<SchemaLayersView> {
+    return this.http.put<SchemaLayersView>(`/api/spaces/${encodeURIComponent(spaceId)}/network-precedence`, { networks });
+  }
 
   // ── Schema Library ─────────────────────────────────────────────────────────
 

@@ -94,6 +94,8 @@ export const CAPABILITIES = [
   ['Spaces', 'update_space', 'PATCH /api/spaces/:id'],
   ['Spaces', 'space_meta', 'GET /api/spaces/:id/meta'],
   ['Spaces', 'schema_update', 'PUT /api/spaces/:id/schema'],
+  ['Spaces', 'space_schema_layers', 'GET /api/spaces/:id/schema-layers'],
+  ['Spaces', 'space_set_network_precedence', 'PUT /api/spaces/:id/network-precedence'],
   // The PER-TYPE write is NOT `schema_update` and mapping it here overstated the coverage.
   // `schema_update` replaces the whole map at `schema: admin`; this route edits ONE type at
   // `schema: write`. An agent reaching it through the whole-map replace needs a higher rung and a
