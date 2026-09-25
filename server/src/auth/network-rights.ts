@@ -138,3 +138,21 @@ export function networkInviteRefusal(caller: Caller, net: { spaces: string[] }):
   return `Inviting into a network needs instance admin, or administering EVERY space it carries; this token does not administer: `
     + `${(short.length ? short : ['(the network carries no space)']).join(', ')}.`;
 }
+
+/**
+ * Why this token may not add `space` to `net`, or `null` when it may (`F-38.3`).
+ *
+ * Two questions, because the act touches two things. The ADDED space is shared with every peer from now on, so it
+ * needs what sharing a space at create needs (`mayShare`). The NETWORK changes what it carries for every space
+ * already in it, which is a change to the network as a whole — `networks: admin` on every space it carries, or
+ * administering every one of them, the same as `F-37` asks of an invite.
+ */
+export function networkAddSpaceRefusal(caller: Caller, net: { spaces: string[] }, space: string): string | null {
+  if (isInstanceAdmin(caller)) return null;
+  const reasons: string[] = [];
+  if (!mayShare(caller, space)) reasons.push(`sharing '${space}' needs 'write' on networks, or administering it`);
+  const governs = holdsOnEvery(caller, net, 'admin')
+    || (!!caller.rights && net.spaces.length > 0 && net.spaces.every(s => administers(caller.rights, s)));
+  if (!governs) reasons.push("changing what the network carries needs 'admin' on networks, or administering, for every space it already carries");
+  return reasons.length ? `This token may not add the space: ${reasons.join('; ')}.` : null;
+}

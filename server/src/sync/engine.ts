@@ -31,6 +31,7 @@ import { resolveWatermark, truncationWarn, type TransferOutcome } from './waterm
 import { pullTombstones, pushTombstones } from './tombstone-transfer.js';
 import { applyConcludedSpaceRounds } from '../spaces/apply-wipe-round.js';
 import { bumpSeq, isSeqImplausible } from '../util/seq.js';
+import { adoptAnnouncedSpaces, announcedSpaces } from '../networks/network-spaces.js';
 import { peerSafeFetch, isPeerUrlAllowed, transferInit, PEER_TRANSFER_TIMEOUT_MS } from './peer-fetch.js';
 import { concludeRoundIfReady, sendMemberRemovedNotify } from './governance.js';
 import { enqueueMediaJob } from '../files/media/job-queue.js';
@@ -395,15 +396,8 @@ async function runSyncForMember(
   // Build fresh RequestInit per call so each fetch gets its own AbortSignal.
   // Sharing one AbortSignal.timeout() across sequential fetches starves later
   // requests because the timer starts at creation time, not at fetch time.
-  const fetchOpts = (): RequestInit => ({
-    headers,
-    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-  });
-
-  const batchFetchOpts = (): RequestInit => ({
-    headers,
-    signal: AbortSignal.timeout(BATCH_FETCH_TIMEOUT_MS),
-  });
+  const fetchOpts = (): RequestInit => ({ headers, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+  const batchFetchOpts = (): RequestInit => ({ headers, signal: AbortSignal.timeout(BATCH_FETCH_TIMEOUT_MS) });
 
   // ── Presync warm-up ────────────────────────────────────────────────────
   // Ask the peer to eagerly warm its embedding model, bcrypt token cache,
@@ -576,6 +570,7 @@ async function gossipWithPeer(
       instanceId: cfg.instanceId,
       label: cfg.instanceLabel,
       version: SERVER_VERSION,
+      spaces: announcedSpaces(net), // F-38.3: what a peer below us adopts; `adoptAnnouncedSpaces` ignores it from anyone else
       children: net.members
         .filter(m => m.parentInstanceId === cfg.instanceId)
         .map(m => m.instanceId),
@@ -596,6 +591,7 @@ async function gossipWithPeer(
         const body = await boundedJson<{ status: string; self?: Partial<NetworkMember> & { signingKeyRotation?: import('../util/signing.js').SigningKeyRotation } }>(resp, 'sync peer');
         const peerSelf = body.self;
         if (peerSelf?.instanceId === member.instanceId) {
+          await adoptAnnouncedSpaces(net.id, member.instanceId, (peerSelf as { spaces?: unknown }).spaces);
           const freshCfg = getConfig();
           const freshNet = freshCfg.networks.find(n => n.id === net.id);
           if (freshNet) {

@@ -1,5 +1,6 @@
 /**
- * Network governance on MCP, slice 1 (`F-36`): read, create, update and leave a network.
+ * Network governance on MCP, slice 1 (`F-36`): read, create, update and leave a network — and add a space to one
+ * (`F-38.3`).
  *
  * Each tool is a door onto `networks/network-acts.ts` and nothing more — the same act the REST route calls, so the
  * rights, the refusals, their wording and the body a caller receives cannot differ between the two. None carries
@@ -9,7 +10,7 @@
 import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.js';
 import { uuidSchema } from './shared.js';
 import {
-  readNetworkAct, createNetworkAct, updateNetworkAct, leaveNetworkAct, type NetworkActResult,
+  readNetworkAct, createNetworkAct, updateNetworkAct, leaveNetworkAct, addNetworkSpaceAct, type NetworkActResult,
 } from '../../networks/network-acts.js';
 
 /** The caller an act sees: this connection's matrix, and the token id memberships are recorded against. */
@@ -90,6 +91,31 @@ export const network_updateTool: ToolHandler = {
   async handle(ctx: ToolContext): Promise<ToolResult> {
     const { id, ...body } = ctx.args;
     return toResult(updateNetworkAct(callerOf(ctx), String(id), body), '');
+  },
+};
+
+export const network_add_spaceTool: ToolHandler = {
+  name: 'network_add_space',
+  description: 'Add one of your spaces to a network this instance governs. Same parameters and refusals as '
+    + '`POST /api/networks/:id/spaces`. The members\' tokens reach it at once, and the instances below learn it on '
+    + 'their next sync — a subscriber creates the space if it has none, and merges into it if it has.\n\n'
+    + 'WHO GOVERNS: the publisher of a pub/sub network, the root of a braintree. A club, closed or democratic network '
+    + 'refuses it, because every member would have to agree and that vote does not exist yet.\n\n'
+    + 'WHO MAY: sharing the space (`networks: write` on it, or administering it) AND `networks: admin` on, or '
+    + 'administering, every space the network already carries.',
+  mutating: true,
+  inputSchema: (_s: ToolSchemas) => ({
+    type: 'object',
+    properties: {
+      id: networkIdSchema,
+      spaceId: { type: 'string', minLength: 1, description: 'The local id of the space to add. It must exist on this instance and not be carried already (409).' },
+    },
+    required: ['id', 'spaceId'],
+    additionalProperties: false,
+  }),
+  async handle(ctx: ToolContext): Promise<ToolResult> {
+    const { id, ...body } = ctx.args;
+    return toResult(addNetworkSpaceAct(callerOf(ctx), String(id), body), '');
   },
 };
 

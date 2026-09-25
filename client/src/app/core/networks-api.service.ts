@@ -60,6 +60,11 @@ export class NetworksApi {
     return this.http.delete<void>(`/api/networks/${networkId}/members/${instanceId}`);
   }
 
+  /** Add one of this instance's spaces to a network it governs (F-38.3). Answers the network as it now is. */
+  addNetworkSpace(networkId: string, spaceId: string): Observable<Network> {
+    return this.http.post<Network>(`/api/networks/${networkId}/spaces`, { spaceId });
+  }
+
   updateNetworkSchedule(networkId: string, syncSchedule: string): Observable<any> {
     return this.http.patch<any>(`/api/networks/${networkId}`, { syncSchedule });
   }

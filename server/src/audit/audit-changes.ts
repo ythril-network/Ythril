@@ -73,6 +73,8 @@ export const AUDIT_CHANGE_FIELDS: Readonly<Record<string, readonly string[]>> = 
   // it off silently weakens vote verification for the whole network, and "an admin patched the network"
   // does not tell you that happened.
   'network.update': ['label', 'syncSchedule', 'requireSignedVotes'],
+  // The space list before and after `POST /api/networks/:id/spaces` — ids only; the act hands over nothing wider.
+  'network.space.add': ['spaces'],
   // Backup schedule and retention. `offsite.destPath` is a container filesystem path (mounted volume),
   // not a URL, so it cannot carry credentials in userinfo the way a webhook target can.
   'data.backup_config.update': ['schedule', 'retention.keepLocal', 'offsite.destPath', 'offsite.retention.keepCount'],

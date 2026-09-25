@@ -93,7 +93,9 @@ describe('MCP tool schemas — universal invariants', () => {
     // entries under their routes' own operations (`network_get` a read, `null`), the three writers `mutating: true`
     // and listed among the tools a readOnly token cannot see, `16-mcp.md` rows in the tool table and the REST map,
     // and their four `mcp/parity.ts` rows deleted.
-    assert.equal(ALL_TOOLS.length, 51);
+    // 51 -> 52: `network_add_space` (`F-38.3`), a door onto `addNetworkSpaceAct` like the four above; audit-map row
+    // `network.space.add`, the route's own operation.
+    assert.equal(ALL_TOOLS.length, 52);
   });
 
   it('every tool advertises a closed object schema (type:object, additionalProperties:false)', () => {

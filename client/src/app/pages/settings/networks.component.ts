@@ -5,6 +5,7 @@ import { Network, Space, SyncHistoryRecord, VoteRound } from '../../core/api.typ
 import { roleCountKey, remoteOf, memberGroups } from './network-role-view';
 import { NetworksApi } from '../../core/networks-api.service';
 import { NetworkInvitePanelComponent } from './network-invite-panel.component';
+import { NetworkAddSpaceComponent } from './network-add-space.component';
 import { SpacesApi } from '../../core/spaces-api.service';
 import { AdminApi } from '../../core/admin-api.service';
 import { TranslocoPipe } from '@jsverse/transloco';
@@ -24,7 +25,7 @@ import { NetworkEnableWizardComponent } from './network-enable-wizard.component'
 @Component({
   selector: 'app-networks',
   standalone: true,
-  imports: [CommonModule, FormsModule, TranslocoPipe, PhIconComponent, StatusPillComponent, SummaryStripComponent, RelativeTimeComponent, ErrorStateComponent, NetworkCreateDialogComponent, NetworkJoinDialogComponent, NetworkEnableWizardComponent, NetworkMemberRowComponent, NetworkInvitePanelComponent],
+  imports: [CommonModule, FormsModule, TranslocoPipe, PhIconComponent, StatusPillComponent, SummaryStripComponent, RelativeTimeComponent, ErrorStateComponent, NetworkCreateDialogComponent, NetworkJoinDialogComponent, NetworkEnableWizardComponent, NetworkMemberRowComponent, NetworkInvitePanelComponent, NetworkAddSpaceComponent],
   styles: [`
     .network-card {
       background: var(--bg-surface);
@@ -272,6 +273,7 @@ import { NetworkEnableWizardComponent } from './network-enable-wizard.component'
                     <span class="badge badge-gray">{{ s }}@if (remoteOf(net, s); as remote) { <span style="color:var(--text-muted);"> · {{ 'networks.network.spaces.mappedFrom' | transloco: { remote } }}</span> }</span>
                   }
                 </div>
+                <app-network-add-space [network]="net" [spaces]="availableSpaces()" (added)="load()" />
               </div>
 
               <!-- Members, as this instance's role sees them (F-38.1) -->

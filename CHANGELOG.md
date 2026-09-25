@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A space can be added to an existing network** (`F-38.3`). Until now a network carried the spaces it was created
+  with and nothing more. The publisher of a pub/sub network, or the root of a tree, now adds one from the network card,
+  `POST /api/networks/:id/spaces` or MCP `network_add_space` — same parameters, rights and refusals on all three. The
+  members' tokens reach the new space at once, and each instance below adopts it on its next sync from its upstream
+  only (a subscriber from its publisher, a node from its parent): created if missing, merged into if present, nothing
+  overwritten or deleted. Club, closed and democratic networks refuse it until a vote for it exists. Audited as
+  `network.space.add`.
+
 - **Joining a network lets you choose where each of its spaces goes** (`F-38.2`). The join dialog lists every space
   the invite carries, not only the ones whose name collides with a local space, and each can go under the same name,
   into any space you already have, or under a new name. The dialog says, beside the choice, that joining only adds:

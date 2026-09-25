@@ -15,6 +15,7 @@ import { getSigningPublicKey, getSigningKeyRotation, pinMemberSigningKey, type S
 import { SERVER_VERSION } from '../../util/server-version.js';
 import { peerFloorRefusal } from '../../sync/peer-floor.js';
 import type { NetworkMember } from '../../config/types.js';
+import { adoptAnnouncedSpaces, announcedSpaces } from '../../networks/network-spaces.js';
 
 export const syncMembersRouter = Router();
 
@@ -161,6 +162,13 @@ syncMembersRouter.post('/networks/:networkId/members', syncRateLimit, requireAut
       }
     }
 
+    /*
+     * F-38.3: a space the caller's network carries and ours does not. Adopted only when the caller is our UPSTREAM —
+     * our publisher, our tree parent — and `adoptAnnouncedSpaces` is where that is decided, so a subscriber announcing
+     * a space to its publisher changes nothing. After the member update, which saved: adoption re-reads the config.
+     */
+    if (callerPeerId) await adoptAnnouncedSpaces(net.id, callerPeerId, (incoming as { spaces?: unknown }).spaces);
+
     // Piggyback our own identity in the response so the caller can update their record for us
     const selfUrl = process.env['INSTANCE_URL'] ?? '';
     /*
@@ -173,6 +181,8 @@ syncMembersRouter.post('/networks/:networkId/members', syncRateLimit, requireAut
       instanceId: cfg.instanceId,
       label: cfg.instanceLabel,
       version: SERVER_VERSION,
+      // What the caller adopts when we are its upstream (F-38.3) — read from the config as it is NOW, after adoption.
+      spaces: announcedSpaces(getConfig().networks.find(n => n.id === net.id) ?? net),
     };
     if (selfUrl) selfRecord['url'] = selfUrl;
     const ownSigningKey = getSigningPublicKey();

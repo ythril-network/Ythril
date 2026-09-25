@@ -12,7 +12,7 @@ import { delete_entity_previewTool } from './entity-cascade.js';
 import { save_chronoTool, update_chronoTool, delete_chronoTool } from './chrono.js';
 import { read_fileTool, write_fileTool, update_file_metaTool, list_dirTool, delete_fileTool, create_dirTool, move_fileTool, retry_embed_fileTool } from './file.js';
 import { network_peersTool, network_syncTool } from './sync.js';
-import { network_getTool, network_createTool, network_updateTool, network_leaveTool } from './networks.js';
+import { network_getTool, network_createTool, network_updateTool, network_leaveTool, network_add_spaceTool } from './networks.js';
 import { helpTool } from './help.js';
 import { list_embed_jobsTool, retry_embed_recordTool, retry_embed_mediaTool, space_reindexTool, space_reembedTool } from './embed.js';
 
@@ -76,6 +76,7 @@ export const ALL_TOOLS: ToolHandler[] = [
   network_createTool,
   network_updateTool,
   network_leaveTool,
+  network_add_spaceTool,
   list_embed_jobsTool,
   retry_embed_recordTool,
   retry_embed_mediaTool,
