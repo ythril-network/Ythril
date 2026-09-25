@@ -253,6 +253,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   spaces the network shares, and gossip re-applied old rounds on every change. Any member of any network could delete
   or empty any space on another member, including one no network carries. Now: passed rounds only, the space mapped
   to this instance's id and carried by that network, applied once.
+- **An invite cannot be applied under another peer's instance id** (security, `S-6`). Since 5.1.2 the token an invite
+  handshake mints reaches every network the two instances already share, and the joining side's instance id was taken
+  on its word — so anyone handed an invite bundle for one network could apply as a peer the inviter already syncs with
+  and reach every space the inviter shares with that peer. An id that is already a peer must now present a token the
+  inviter issued to it, which a genuine peer's own join does; and a joiner refuses an inviter claiming a known peer's id
+  from another address. An instance joining for the first time is unaffected.
 
 - **Two networks joined from the same peer at once both keep syncing** (`Q-53`). Each side keeps one token per peer,
   and each handshake's token was scoped to the networks the pair shared at that moment, so two handshakes whose

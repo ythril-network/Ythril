@@ -654,6 +654,13 @@ POST /api/invite/apply
 
 All tokens are RSA-OAEP-SHA256 encrypted — never plaintext over the wire.
 
+**An `instanceId` that is already a peer here must prove it.** The token this step mints reaches every network the
+inviter already shares with that instance id, so when the id is a member of any network on the inviter, the request
+must carry `Authorization: Bearer <a token the inviter issued to that peer>` — the one the joiner syncs with. Without
+it the apply is refused with `403` and nothing is minted. An id the inviter does not know needs no header.
+`POST /api/networks/join-remote` sends the header itself, and on the joiner's side it refuses an inviter that claims
+the id of a peer it already knows unless the invite URL has that peer's recorded origin.
+
 ---
 
 ### Finalize

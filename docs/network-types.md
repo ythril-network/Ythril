@@ -421,7 +421,7 @@ sequenceDiagram
 | Method | Path | Auth | Purpose |
 |--------|------|------|---------|
 | `POST` | `/api/invite/generate` | Bearer token (admin) | Start a session for a specific network |
-| `POST` | `/api/invite/apply` | none (handshakeId is credential) | B submits its RSA public key; receives encrypted token |
+| `POST` | `/api/invite/apply` | none (handshakeId is credential); a B that is already a peer of A must add a Bearer token A issued to it | B submits its RSA public key; receives encrypted token |
 | `POST` | `/api/invite/finalize` | none (handshakeId is credential) | B delivers encrypted token for A; session completed |
 | `GET` | `/api/invite/status/:handshakeId` | none | Check if a session is still pending or completed |
 
