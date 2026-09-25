@@ -197,6 +197,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A space mapped under another name at join answers its peers** (`Q-51`). When a join maps a network's space onto
+  a local space of a different name, this instance translated the name on its own requests but not on its peers':
+  they asked for the network's name and were refused with `403`, so every sync cycle a peer ran for that space
+  failed, while this instance's own cycle still moved the data. Incoming sync requests are now translated before
+  anything admits or reads by them.
+
 - **A network member's link direction and address were never shown on the Networks page.** Each member row read two
   field names the server does not send, so every member was labelled `both` — a publisher's subscriber included —
   and no address appeared. The rows now show the real direction and the peer's URL.
