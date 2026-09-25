@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.3.0] — 2026-09-25
+
+**The assist model can keep to a budget, fall back when it cannot answer, and be a Claude model.** A token budget
+caps what the External assist model spends in a rolling window, and a fallback answers when the main endpoint is
+unreachable, rate-limited, over budget or declines a request — a local fallback needs no consent, a hosted one is
+consented per use. Either endpoint can speak the Claude API with a Claude Console API key. The guides now describe
+only what exists, and the code lost about a thousand lines of dead code and history.
+
+| | |
+|---|---|
+| new | assist budget and fallback; the Claude API as an assist backend; the Models card shows which endpoint is answering and what the budget has spent |
+| consent | a hosted fallback asks for its own per-use consent; a local one sends nothing off the instance |
+| docs | the integration guide and user guide name only tools, routes and types that exist, and state rules rather than their history |
+| fixed | the NLP sidecar has its card on the Models tab; a file deleted while it was being processed no longer leaves records behind |
+| what to do | upgrade. Nothing changes until an operator sets a budget or a fallback |
+
+**Documents that changed**, for anyone who keeps a copy: `CLAUDE.md`, `docs/integration-guide/04-brain-api.md`, `docs/integration-guide/04a-recall-api.md`, `docs/integration-guide/04b-graph-api.md`, `docs/integration-guide/04c-chrono-api.md`, `docs/integration-guide/04d-brain-ops-api.md`, `docs/integration-guide/04f-write-semantics.md`, `docs/integration-guide/05a-conversion-pipeline.md`, `docs/integration-guide/07-tokens-api.md`, `docs/integration-guide/16-mcp.md`, `docs/sync-protocol.md`, `docs/usecase-examples/01-sharing-and-distribution.md`, `docs/usecase-examples/02-operations-research-and-agents.md`, `docs/usecase-examples/03-proxy-multi-space-and-personal.md`, `docs/userguide/02-brain.md`, `docs/userguide/04-settings.md`, `docs/userguide/04a-media-and-embedding.md`, `NOTICE`.
+
 ### Added
 
 - **The assist model gets a token budget and a fallback, and can be a Claude model** (`F-33`, `F-33.1`). A budget
@@ -27,15 +45,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   supplied unknown id is ignored and the server mints one, an entity's `type` is required, and `filter`'s default
   `limit` is 200.
 
-- **Cleanup, part 2** (`Q-45.3`, `Q-45.4`). No behaviour changes:
-  - About 250 unused imports, locals and parameters are gone from server and client, and the compiler now
-    refuses new ones (`noUnusedLocals`, `noUnusedParameters`). An intentionally unused parameter starts with `_`.
-  - Four of the most commented server files keep what each comment prevents and lose the history, about 680
-    lines.
-  - Four rules that were asserted in several test files each have one home. Two gates that could miss a case
-    now derive what they check, and a third that passed on an unused import reads the file that applies the rule.
-  - Eleven test files carried mis-decoded UTF-8; they are repaired, and the encoding gate now covers `testing/`.
-
 ### Fixed
 
 - **The NLP sidecar has a card on the Models tab** (`F-31`). It was wired and probed on the About page, but
@@ -47,6 +56,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   are written at the end of its processing job, so deleting the file or its folder during the job left those
   records behind as orphans that still appeared in file metadata. The job now checks that its file still exists
   after writing, and removes what it wrote if not.
+
+### Internal
+
+- **Cleanup, part 2** (`Q-45.3`, `Q-45.4`). No behaviour changes:
+  - About 250 unused imports, locals and parameters are gone from server and client, and the compiler now
+    refuses new ones (`noUnusedLocals`, `noUnusedParameters`). An intentionally unused parameter starts with `_`.
+  - Four of the most commented server files keep what each comment prevents and lose the history, about 680
+    lines.
+  - Four rules that were asserted in several test files each have one home. Two gates that could miss a case
+    now derive what they check, and a third that passed on an unused import reads the file that applies the rule.
+  - Eleven test files carried mis-decoded UTF-8; they are repaired, and the encoding gate now covers `testing/`.
 
 ## [5.2.0] — 2026-09-25
 
