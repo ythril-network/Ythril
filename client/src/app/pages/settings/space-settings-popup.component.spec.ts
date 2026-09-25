@@ -43,6 +43,8 @@ function makeApi(spaces: Space[] = []) {
     getSchema: () => of({ meta: {} }),
     listEntries: () => of({ entries: [] }),
     listSchemaLibrary: () => of({ entries: [] }),
+    // F-39.3: a space no network sends schema to — the layers panel renders nothing.
+    getSchemaLayers: () => of({ spaceId: 'work', own: {}, layers: [], precedence: [], clashes: [] }),
     getSpaceStats: () => of({ spaceId: 'work', facts: 1, entities: 2, edges: 3, chrono: 4, files: 5 }),
   };
 }
