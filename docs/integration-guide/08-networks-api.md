@@ -13,7 +13,7 @@ Since F-34 a token below instance admin acts on a network through the **`network
 | `POST /api/networks` | `write` — the membership is recorded as yours |
 | `PATCH /api/networks/:id` | `admin` — the settings are shared by every space |
 | `DELETE /api/networks/:id` | `write` for a membership you established, `admin` for anyone's (or one with no recorded establisher) |
-| `POST /api/networks/:id/spaces` | `admin` on every space it already carries, and `write` on the space being added — or administering each of them |
+| `POST /api/networks/:id/spaces` | `admin` on every space it already carries, and `write` on the space being added — or administering each of them. On club, closed and democratic networks it opens a vote |
 | `POST /api/networks/join-remote` | `write` on every existing local space the join maps to; a space it would create needs `createSpaces` and a floor of `write` too. Checked after the handshake's apply and before finalize — refused, nothing is written and the handshake expires |
 
 **A space admin needs no Networks column for its own spaces** (F-37). A token that administers every space an act touches may create a network carrying them, join one mapped onto them (onto a NEW space too, when it also holds `createSpaces`), see the network, and generate its invite (`POST /api/invite/generate`, `POST /api/networks/:id/invite`) — which is what makes a network it created joinable. A space it does not administer still needs the column, and the refusal names it.
@@ -150,22 +150,31 @@ POST /api/networks/:id/spaces
 { "spaceId": "research" }
 ```
 
-Adds one of this instance's spaces to a network it governs, and answers `200` with the network as `GET /api/networks/:id` shows it. MCP: `network_add_space` with `{ "id", "spaceId" }`.
+Adds one of this instance's spaces to a network. Answers `200` with the network as `GET /api/networks/:id` shows it when the space is carried at once, or `202` with `{ "status": "vote_pending", "round" }` when the network has to agree first. MCP: `network_add_space` with `{ "id", "spaceId" }`.
 
-**Who governs:** the publisher of a `pubsub` network and the root of a `braintree`. Anyone else gets `409` naming the position. A `club`, `closed` or `democratic` network answers `409` too: every member would have to agree to the change, and that vote does not exist yet — create a second network for the space instead.
+**Who decides, per type:**
+
+| type | who may add | what happens |
+|---|---|---|
+| `pubsub` | the publisher | added at once |
+| `braintree` | the root | added at once |
+| `club` | the organiser (the instance that created it) | a `space_addition` round its own yes carries, so added at once |
+| `closed` | any member | a `space_addition` round; added when every member votes yes |
+| `democratic` | any member | a `space_addition` round; added on a majority with no veto |
 
 **What follows, without another call:**
 
-- The tokens this instance issued to the network's members reach the new space at once, so their sync of it is not refused.
-- Every sync cycle's member exchange now names the space. An instance adopts a space only from its **upstream** — a subscriber from its publisher, a tree node from its parent — and ignores the same announcement from anyone else, so a subscriber cannot push a space into its publisher.
-- Adopting is **additive**. A space the downstream instance lacks is created with the same id; a space it already has is merged into, and nothing in it is overwritten or deleted. A space never leaves a network this way.
+- The tokens this instance issued to the network's members reach the new space as soon as it is carried, so their sync of it is not refused.
+- On `pubsub` and `braintree` the member exchange names the space, and an instance adopts it only from its **upstream** (a subscriber from its publisher, a tree node from its parent), never from anyone else.
+- On `club`, `closed` and `democratic` every member applies the passed round itself, re-deciding it from the casts under its own rule. The proposer keeps serving the passed round on `GET /api/sync/networks/:id/votes`, so a member that never saw it open still learns it.
+- The receiving side only adds. A space it lacks is created with the network's id. **On the three voted types, a member that already has a local space of that name keeps it out of the network unless it voted yes**: those networks sync both ways, so joining it would send its records to every member. The skip is logged. On `pubsub` and `braintree` the space only flows down, so it merges into a same-named space, and nothing there is overwritten or deleted.
 
 | status | when |
 |---|---|
 | `400` | `spaceId` missing, or no such space on this instance |
 | `403` | the token is short on a right above; the refusal names what |
 | `404` | no network with this id that the token may see |
-| `409` | the network already carries the space, this instance is not its publisher or root, or its type needs a vote |
+| `409` | the network already carries the space, a vote to add it is already open, or this instance is not the publisher, root or organiser the type requires |
 
 ---
 

@@ -9,8 +9,8 @@
  *  3. a subscriber adopts what its PUBLISHER announces — creating the space when it has none — and ignores the
  *     same announcement from anybody else.
  *
- * Club, closed and democratic networks need every member to honour the change, which is a vote round of its own,
- * so they refuse it for now — with the same sentence on both doors.
+ * Club, closed and democratic networks share every space both ways, so there it is a `space_addition` round
+ * (`F-38.4`): a club organiser's own yes carries it at once, a closed network waits for every member.
  *
  * Run: node --test testing/integration/a-space-is-added-to-a-network-on-both-doors.test.js
  */
@@ -133,14 +133,34 @@ describe('the publisher adds a space', () => {
   });
 });
 
-describe('a network whose change needs every member', () => {
-  it('a club network refuses it with the same sentence on both doors', async () => {
+describe('a network whose members share every space', () => {
+  it('a club organiser adds a space at once — its own yes carries the round', async () => {
     const r = await post(INSTANCES.a, admin, '/api/networks', { label: `f383-club-${RUN}`, type: 'club', spaces: [FIRST] });
     assert.equal(r.status, 201, JSON.stringify(r.body));
     networks.push(r.body.id);
     const rest = await post(INSTANCES.a, admin, `/api/networks/${r.body.id}/spaces`, { spaceId: ADDED });
-    assert.equal(rest.status, 409, JSON.stringify(rest.body));
-    assert.equal((await tool('network_add_space', { id: r.body.id, spaceId: ADDED })).text, `Error (409): ${rest.body.error}`);
+    assert.equal(rest.status, 200, JSON.stringify(rest.body));
+    assert.ok(rest.body.spaces.includes(ADDED));
+    const round = rest.body.pendingRounds.find(x => x.type === 'space_addition');
+    assert.ok(round?.passed, `the passed round must stay listed, so the members learn it: ${JSON.stringify(rest.body.pendingRounds)}`);
+  });
+
+  it('a closed network with another member opens a vote, on both doors, and refuses a second one', async () => {
+    const n = await post(INSTANCES.a, admin, '/api/networks', { label: `f384-closed-${RUN}`, type: 'closed', spaces: [FIRST] });
+    assert.equal(n.status, 201, JSON.stringify(n.body));
+    networks.push(n.body.id);
+    // A real member, by the handshake: adding one by hand to a closed network is itself a vote.
+    await join(n.body.id, '88888888-8888-4888-8888-888888888888');
+    assert.equal((await get(INSTANCES.a, admin, `/api/networks/${n.body.id}`)).body.members.length, 1, 'the peer must be a member');
+    const rest = await post(INSTANCES.a, admin, `/api/networks/${n.body.id}/spaces`, { spaceId: ADDED });
+    assert.equal(rest.status, 202, JSON.stringify(rest.body));
+    assert.equal(rest.body.round.type, 'space_addition');
+    assert.ok(!(await get(INSTANCES.a, admin, `/api/networks/${n.body.id}`)).body.spaces.includes(ADDED), 'added before the vote passed');
+    const again = await tool('network_add_space', { id: n.body.id, spaceId: ADDED });
+    assert.match(again.text, /^Error \(409\): A vote to add/);
+    const viaMcp = await tool('network_add_space', { id: n.body.id, spaceId: VIA_MCP });
+    assert.equal(viaMcp.isError, false, viaMcp.text);
+    assert.equal(viaMcp.body.status, 'vote_pending');
   });
 });
 

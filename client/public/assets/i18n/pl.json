@@ -838,6 +838,8 @@
   "networks.network.spaces.addLabel": "Przestrzeń do dodania",
   "networks.network.spaces.addButton": "Dodaj przestrzeń",
   "networks.network.spaces.addHint": "Każda instancja poniżej tej otrzyma przestrzeń przy następnej synchronizacji. To tylko dodaje: istniejąca przestrzeń zostaje scalona, a nic w niej nie jest nadpisywane ani usuwane.",
+  "networks.network.spaces.addHintVote": "Członkowie najpierw głosują; po przyjęciu głosowania każdy członek otrzyma przestrzeń przy następnej synchronizacji. Członek, który ma już przestrzeń o tej nazwie, nie włącza jej do sieci, chyba że głosował za.",
+  "networks.network.spaces.voteOpened": "Otwarto głosowanie — przestrzeń zostanie dodana, gdy sieć się zgodzi",
   "networks.error.addSpaceFailed": "Nie udało się dodać przestrzeni",
   "networks.network.members.subscribers": "Subskrybenci",
   "networks.network.members.publisher": "Wydawca",

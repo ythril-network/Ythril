@@ -10,7 +10,7 @@ import { requireAuth, denyReadOnly } from '../../auth/middleware.js';
 import { peerRelayCaller, PEER_RELAY_REFUSAL } from '../../auth/peer-relay.js';
 import { log } from '../../util/log.js';
 import { reportServerFailure } from '../../util/report-failure.js';
-import { applyWipeRoundIfPassed } from '../../spaces/apply-wipe-round.js';
+import { applyConcludedSpaceRounds } from '../../spaces/apply-wipe-round.js';
 import { acceptVoteCast } from '../../util/signing.js';
 import { concludeRoundIfReady, sendMemberRemovedNotify } from '../../sync/governance.js';
 
@@ -27,8 +27,11 @@ syncVotesRouter.get('/networks/:networkId/votes', syncRateLimit, requireAuth, as
     const net = cfg.networks.find(n => n.id === req.params['networkId']);
     if (!net) { res.status(404).json({ error: 'Network not found' }); return; }
 
+    // Open rounds, and PASSED space_addition rounds (F-38.4): on a club the organiser's own yes concludes one the moment
+    // it opens, so a member would never see it otherwise. The receiver re-decides it from the casts under its own rule
+    // — it adopts the round as open and never takes "passed" on a peer's word.
     const open = net.pendingRounds
-      .filter(r => !r.concluded)
+      .filter(r => !r.concluded || (r.passed && r.type === 'space_addition'))
       .map(r => {
         // Strip sensitive key material before sending to a peer instance
         const { inviteKeyHash: _ikh, ...safeRound } = r;
@@ -115,19 +118,9 @@ syncVotesRouter.post('/networks/:networkId/votes/:roundId', syncRateLimit, requi
     // Check if the round should auto-conclude
     concludeRoundIfReady(net, round);
 
-    // If a space_deletion round just passed, remove the space on this instance
-    if (round.concluded && round.type === 'space_deletion') {
-      const vetoCount = round.votes.filter(v => v.vote === 'veto').length;
-      if (vetoCount === 0 && round.spaceId) {
-        import('../../spaces/lifecycle.js').then(({ removeSpace }) => {
-          removeSpace(round.spaceId!).catch(err => log.error(`space_deletion gossip side-effect: ${err}`));
-        }).catch(err => log.error(`space_deletion import: ${err}`));
-      }
-    }
-
-    // X-5: same shared side-effect as the local-vote path. A peer's yes can be the one that carries the
-    // round, so this instance must wipe on THIS path too — that is the half a per-site copy tends to miss.
-    applyWipeRoundIfPassed(round, 'peer vote');
+    // Deletion, wipe and addition, through the function the other two conclusion sites call (X-5, F-38.4). A peer's
+    // yes can be the one that carries the round, so this path must apply it too — the half a per-site copy misses.
+    applyConcludedSpaceRounds(net, [round], 'peer vote');
 
     // If a remove round just passed, notify the ejected member
     if (round.concluded && round.passed && round.type === 'remove') {
