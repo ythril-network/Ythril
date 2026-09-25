@@ -14,7 +14,7 @@ export const ingestRouter = Router();
 
 ingestRouter.post('/spaces/:spaceId/ingest', globalRateLimit, requireSpaceAuth, denyReadOnly, async (req, res) => {
   const r = await beginIngest(req.params['spaceId'] as string, req.query['targetSpace'] as string | undefined, req.body,
-    (req.authToken as { rights?: TokenRights } | undefined)?.rights);
+    (req.authToken as { rights?: TokenRights } | undefined)?.rights, req.authToken?.id ?? req.ip ?? 'unknown');
   if (r.status === 202) { res.status(202).json({ runId: r.run.runId, conversationId: r.run.conversationId, phase: r.run.phase }); return; }
   res.status(r.status).json({ error: r.error, ...('refusals' in r ? { refusals: r.refusals } : {}) });
 });

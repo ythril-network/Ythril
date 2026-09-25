@@ -257,7 +257,8 @@ export async function callTool(req: ToolCallRequest): Promise<ToolCallOutcome> {
      * it — five 400s and an integrator learning the shape of the call is locked out of the real one. The
      * rail exists to bound DESTRUCTION, and destruction begins one line below this.
      */
-    if (tool.heavy && !consumeHeavyToolCall(caller.tokenId ?? caller.ip)) {
+    const rateKey = caller.tokenId ?? caller.ip;
+    if (tool.heavy && !consumeHeavyToolCall(rateKey)) {
       return refuse(429, `Error: tool '${name}' is rate limited — too many destructive calls, try again shortly`, callSpace);
     }
     const startedAt = Date.now();
@@ -272,6 +273,7 @@ export async function callTool(req: ToolCallRequest): Promise<ToolCallOutcome> {
       // `defaultBudgetChars`. Before this the tool modules chose MCP's number themselves, so a caller on
       // `POST /api/<tool>` got half the answer a caller on the legacy REST route got.
       transport: caller.transport,
+      rateKey,
       cfg,
       accessibleSpaces,
       accessibleSpaceIds,

@@ -30,6 +30,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { getConfig, saveConfig } from '../config/loader.js';
 import type { NetworkConfig, VoteRound } from '../config/types.js';
 import { makeSignedOwnCast } from '../util/signing.js';
+import { openRoundHere } from '../networks/round-local-state.js';
 
 /** The verdict: wipe now, or a round was opened on each network holding the space. */
 export type WipePlan =
@@ -92,7 +93,7 @@ export function planSpaceWipe(spaceId: string, types?: readonly string[]): WipeP
       ...(types && types.length > 0 ? { wipeTypes: [...types] } : {}),
     };
     round.votes = [makeSignedOwnCast(net.id, round, cfg.instanceId, 'yes')];
-    net.pendingRounds.push(round);
+    openRoundHere(net, round);
     rounds.push({ networkId: net.id, networkLabel: net.label, roundId });
   }
 

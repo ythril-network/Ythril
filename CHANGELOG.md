@@ -247,12 +247,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A peer can no longer name another member as a round's proposer** (security, `S-7`, unreleased). A round
+  arriving from a peer kept the member it named as subject, and that was read as "who proposed it": naming a member
+  made that member treat a space addition as its own (joining a private space of the same name to the network) and a
+  passed schema change as an edit of its own definitions, and on every other member it dropped that member's vote from
+  the quorum. Now an instance records which rounds it opened itself and never takes that from a peer, and a proposer is
+  a voter like any member, whose yes is cast automatically — and signed — when it opens the round.
 - **A deletion or wipe vote acts only on a round that passed, and only on a space its network carries** (security,
   `S-9`). A `space_deletion` or `space_wipe` round was applied whenever it had concluded with no veto — so one that
   expired without enough yes deleted too — to the space id exactly as the round named it, never checked against the
   spaces the network shares, and gossip re-applied old rounds on every change. Any member of any network could delete
   or empty any space on another member, including one no network carries. Now: passed rounds only, the space mapped
   to this instance's id and carried by that network, applied once.
+- **Starting ingest runs is rate limited on REST as it already was on MCP** (security, `S-8`, unreleased). The MCP
+  `ingest` tool was held to the heavy-call limit while `POST /api/brain/spaces/:spaceId/ingest` had only the global
+  limiter, so a token allowed to write knowledge could start runs without bound over REST and exhaust the model
+  backends. The limit now sits in the one module both doors call, the two doors share a single count per token, and
+  only a run that actually starts is counted.
 - **An invite cannot be applied under another peer's instance id** (security, `S-6`). Since 5.1.2 the token an invite
   handshake mints reaches every network the two instances already share, and the joining side's instance id was taken
   on its word — so anyone handed an invite bundle for one network could apply as a peer the inviter already syncs with

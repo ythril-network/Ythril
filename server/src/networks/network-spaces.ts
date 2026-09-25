@@ -169,14 +169,15 @@ export async function adoptAnnouncedSpaces(networkId: string, fromInstanceId: st
  */
 export function spaceAdditionTarget(
   net: NetworkConfig,
-  round: { spaceId?: string; subjectInstanceId: string; votes: { instanceId: string; vote: string }[] },
+  round: { spaceId?: string; proposedHere?: boolean; votes: { instanceId: string; vote: string }[] },
   selfId: string,
   localSpaceIds: readonly string[],
 ): { localId: string } | { skip: string } | null {
   if (!round.spaceId || !SPACE_ID.test(round.spaceId)) return null;
   const localId = remoteToLocal(net, round.spaceId);
   if (net.spaces.includes(localId)) return null;
-  if (round.subjectInstanceId === selfId) return { localId };
+  // The proposer is who opened the round HERE — never `subjectInstanceId`, which a peer sets (S-7).
+  if (round.proposedHere) return { localId };
   const exists = localSpaceIds.includes(localId);
   const votedYes = round.votes.some(v => v.instanceId === selfId && v.vote === 'yes');
   if (exists && !votedYes) {

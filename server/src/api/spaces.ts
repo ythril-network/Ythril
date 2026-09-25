@@ -13,6 +13,8 @@ import { getConfig, saveConfig, getSecrets, getSchemaLibrary, getDocumentProcess
 import { capDocExtractionMode } from '../files/converters/extraction-level.js';
 import { slugify, SPACE_PURPOSE_MAX, needsReindex } from '../spaces/_shared.js';
 import { createSpace, removeSpace } from '../spaces/lifecycle.js';
+import { openRoundHere } from '../networks/round-local-state.js';
+import { makeSignedOwnCast } from '../util/signing.js';
 import { renameSpace } from '../spaces/rename.js';
 import { updateSpace, reorderSpaces } from '../spaces/spaces.js';
 import { checkMetaPrecondition, preconditionErrorBody } from '../spaces/meta-precondition.js';
@@ -835,7 +837,7 @@ spacesRouter.delete('/:id', globalRateLimit, requireAdminMfaScoped('id'), async 
   for (const net of networkedIn) {
     const roundId = uuidv4();
     const deadline = new Date(Date.now() + net.votingDeadlineHours * 3_600_000).toISOString();
-    net.pendingRounds.push({
+    const opened = openRoundHere(net, {
       roundId,
       type: 'space_deletion',
       subjectInstanceId: cfg.instanceId,
@@ -843,9 +845,12 @@ spacesRouter.delete('/:id', globalRateLimit, requireAdminMfaScoped('id'), async 
       subjectUrl: '',       // not meaningful for space deletion
       deadline,
       openedAt: now,
-      votes: [{ instanceId: cfg.instanceId, vote: 'yes', castAt: now }],
+      votes: [],
       spaceId: id,
     });
+    // The proposer is a voter like any member (S-7): its yes is required and cast here, SIGNED, so a relayed copy of
+    // it survives — a bare cast is taken only from the voter itself.
+    opened.votes.push(makeSignedOwnCast(net.id, opened, cfg.instanceId, 'yes'));
     rounds.push({ networkId: net.id, networkLabel: net.label, roundId });
   }
   saveConfig(cfg);

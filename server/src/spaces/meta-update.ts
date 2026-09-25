@@ -39,6 +39,8 @@ import { ensureTtlIndex } from '../brain/ttl.js';
 import { peerSafeFetch } from '../sync/peer-fetch.js';
 import { proposedMetaFields } from '../sync/meta-round-merge.js';
 import { concludeRoundIfReady } from '../sync/governance.js';
+import { openRoundHere } from '../networks/round-local-state.js';
+import { makeSignedOwnCast } from '../util/signing.js';
 import { log } from '../util/log.js';
 import { v4 as uuidv4 } from 'uuid';
 import { capDocExtractionMode } from '../files/converters/extraction-level.js';
@@ -355,7 +357,7 @@ export async function applySpaceMetaUpdate(plan: MetaUpdatePlan): Promise<MetaUp
       for (const net of networkedIn) {
         const roundId = uuidv4();
         const deadline = new Date(Date.now() + net.votingDeadlineHours * 3_600_000).toISOString();
-        net.pendingRounds.push({
+        const opened = openRoundHere(net, {
           roundId,
           type: 'meta_change',
           subjectInstanceId: cfg.instanceId,
@@ -363,7 +365,7 @@ export async function applySpaceMetaUpdate(plan: MetaUpdatePlan): Promise<MetaUp
           subjectUrl: '',
           deadline,
           openedAt: now,
-          votes: [{ instanceId: cfg.instanceId, vote: 'yes', castAt: now }],
+          votes: [],
           // The network's id for the space, so each member resolves it to its own local id (F-39.4).
           spaceId: localToRemote(net, id),
           pendingMeta: mergedMeta,
@@ -375,6 +377,9 @@ export async function applySpaceMetaUpdate(plan: MetaUpdatePlan): Promise<MetaUp
           baseMetaVersion: space.meta?.version ?? 0,
           ...(plan.targetNetwork !== undefined ? { proposesLayer: true } : {}),
         });
+        // The proposer is a voter like any member (S-7), so its yes is required — and cast for it here, SIGNED, because
+        // a bare cast is taken only from the voter itself and a relayed copy of it would be dropped.
+        opened.votes.push(makeSignedOwnCast(net.id, opened, cfg.instanceId, 'yes'));
         /*
          * Evaluated now, because the proposer's yes above may already be enough (`Q-49`).
          *
@@ -383,7 +388,6 @@ export async function applySpaceMetaUpdate(plan: MetaUpdatePlan): Promise<MetaUp
          * until somebody cast the identical yes again or the deadline expired it. The round stays in the list
          * either way, concluded or not, so peers learn of it exactly as before.
          */
-        const opened = net.pendingRounds[net.pendingRounds.length - 1]!;
         if (!concludeRoundIfReady(net, opened)) rounds.push({ networkId: net.id, networkLabel: net.label, roundId });
       }
 

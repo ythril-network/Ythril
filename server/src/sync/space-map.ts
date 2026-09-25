@@ -26,6 +26,20 @@ export function remoteToLocal(net: NetworkConfig, remoteId: string): string {
 }
 
 /**
+ * The local id of a space a round names — or `null` unless THIS network carries it here.
+ *
+ * A round names its space by the network's id and a peer chooses that id, so acting on it unchecked lets any
+ * member of any network reach any space on this instance, including one no network shares (`S-9`, and `S-7` for
+ * `meta_change`). Every decision that acts on a concluded round's space resolves it through here, so the mapping and
+ * the "is it carried" check cannot be taken one without the other.
+ */
+export function carriedLocalId(net: Pick<NetworkConfig, 'spaces' | 'spaceMap'>, remoteId: string | undefined): string | null {
+  if (!remoteId) return null;
+  const localId = remoteToLocal(net as NetworkConfig, remoteId);
+  return net.spaces.includes(localId) ? localId : null;
+}
+
+/**
  * Resolve a local space ID to its remote (peer-side) equivalent — a reverse lookup over `spaceMap`.
  *
  * **First match wins.** `spaceMap` is keyed by remote ID, so nothing prevents two remote spaces being

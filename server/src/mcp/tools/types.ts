@@ -63,6 +63,11 @@ export interface ToolContext {
    * way out; nothing should read them for a new decision.
    */
   rights?: TokenRights;
+  /**
+   * Who a rate limit counts against: the calling token's id, or the IP when there is none — the key `callTool` uses
+   * for `heavy` tools, handed on so a shared module that holds its own rail (`beginIngest`) counts the same caller.
+   */
+  rateKey: string;
   /** Identity of the calling token, for webhook attribution. Passed to shared brain/file
    *  mutation functions so agent-driven writes emit attributed webhooks like REST writes. */
   actor?: WebhookActor;

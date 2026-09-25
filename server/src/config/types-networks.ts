@@ -159,6 +159,11 @@ export interface VoteRound {
    * again does nothing. Never taken from a peer: adopting a round and serving one both strip it.
    */
   appliedHere?: boolean;
+  /**
+   * LOCAL: this instance opened the round (`S-7`). Never inferred from `subjectInstanceId`, which a peer sets, and
+   * never taken from or served to a peer — `networks/round-local-state.ts` is the only writer.
+   */
+  proposedHere?: boolean;
   requiredVoters?: string[];     // braintree only: instanceIds that must ALL vote yes
 }
 
