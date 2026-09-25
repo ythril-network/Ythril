@@ -114,21 +114,9 @@ describe('a synced-in record is queued for embedding', { skip }, () => {
       + 'and a queue full of work that exists to be thrown away hides a real backlog');
   });
 
-  it('and the pre-3.1 spelling is NOT honoured — it is an ordinary field now', async () => {
-    /*
-     * Inverted by `D-6`. This asserted that a peer on an older build sending `excludeFromVectorSearch`
-     * was still suppressed, so the outcome did not depend on the sender's version. The peer floor makes
-     * that sender impossible on a 4.x network — it refuses every 3.x peer — and the ingest schemas no
-     * longer declare the field, so it is stripped on push before this path ever sees it.
-     *
-     * Kept and inverted rather than deleted: a leftover read of the retired key would suppress a record
-     * on a stale field nobody set, which is the same class of silent wrongness the original guarded
-     * against, pointing the other way.
-     */
-    await queue.enqueueIngestedRecord(SPACE, 'chrono', { _id: 'c-1', excludeFromVectorSearch: true });
-    assert.ok(await jobs().findOne({ _id: 'chrono:c-1' }),
-      'the retired spelling still suppresses on ingest, so a stale field silently skips embedding');
-  });
+  // That the pre-3.1 spelling is NOT honoured on ingest is asserted in
+  // `the-legacy-suppression-spelling-is-gone.test.js` (`Q-45.4`): ingest resolves the record tier through
+  // `recordSuppression`, which that file calls directly, with no database.
 
   it('but `false` is "not stated" and still queues', async () => {
     // The tier resolution treats `false` as absent so it falls through to the schema and the space rather than

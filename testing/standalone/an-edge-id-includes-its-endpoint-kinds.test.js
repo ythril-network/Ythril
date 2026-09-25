@@ -41,7 +41,8 @@ import assert from 'node:assert/strict';
 
 import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
-import { bodyOf } from './_structural-window.mjs';
+import { bodyOf, argumentsOf } from './_structural-window.mjs';
+import { trackedSources } from './_sources.mjs';
 
 const { edgeIdFor } = await import('../../server/dist/brain/edge-id.js');
 const { storedEdgeKind } = await import('../../server/dist/brain/entity-refs.js');
@@ -115,24 +116,8 @@ describe('a different KIND of endpoint is a different relationship', () => {
 });
 
 describe('the properties the old encoding had are not lost', () => {
-  it('direction still matters', () => {
-    // `(a)-[knows]->(b)` and `(b)-[knows]->(a)` are two rows under the unique index, so they must be two ids.
-    assert.notEqual(edgeIdFor(A, B, 'knows'), edgeIdFor(B, A, 'knows'));
-    assert.notEqual(
-      edgeIdFor(A, B, 'knows', 'entity', 'file'),
-      edgeIdFor(B, A, 'knows', 'file', 'entity'),
-    );
-  });
-
-  it('the encoding is still injective when a part contains the separator', () => {
-    /*
-     * The reason every part is length-prefixed: a label is operator-supplied text and nothing forbids a pipe or
-     * a colon in it. Two genuinely different relationships must not encode to one key — they would collide
-     * under the unique index while being distinct.
-     */
-    assert.notEqual(edgeIdFor('a|b', 'c', 'd'), edgeIdFor('a', 'b|c', 'd'));
-    assert.notEqual(edgeIdFor('a', 'b', '4:file'), edgeIdFor('a', 'b', '', 'entity', 'file'));
-  });
+  // Direction and separator-injectivity — with and without kinds — are asserted in
+  // `an-edge-id-is-derived-from-its-identity.test.js`, the one home of the derivation's properties (`Q-45.4`).
 
   it('a file endpoint is a path, and a path derives a stable id', () => {
     // Files are the one kind whose id is not a UUID. Nothing about the encoding cares, but the case is here
@@ -183,16 +168,35 @@ describe('every derivation site passes the kinds', () => {
    * pre-M-3 id and land on a collision for exactly the widened edges this exists for.
    *
    * Scoped from the SHAPE of a call rather than a list of files — a name list is how a sweep of the merge rule
-   * once missed its twelfth copy.
+   * once missed its twelfth copy. It WAS a list of three here, and deriving it found two more callers
+   * (`links.ts`, and the kind-rename migration) that the list had never looked at.
    */
-  for (const file of ['server/src/brain/edges.ts', 'server/src/brain/edge-rekey.ts', 'server/src/brain/merge.ts']) {
-    it(`${file.split('/').pop()} derives with the kinds`, () => {
-      const calls = [...src(file).matchAll(/edgeIdFor\(([^)]*)\)/g)].map(m => m[1]);
-      assert.ok(calls.length > 0, `no edgeIdFor call found in ${file} — re-anchor this gate`);
+  /*
+   * Each call's arguments are split STRUCTURALLY, at the call's own depth. A `[^)]*` window stops at the first
+   * closing paren, so `edgeIdFor(from, to, linkLabel(fromKind, toKind))` read as passing the kinds when it
+   * passes three arguments — the nested call supplied the word the regex was looking for.
+   */
+  const callers = () => {
+    const found = trackedSources('server/src')
+      .filter(f => !f.endsWith('brain/edge-id.ts'))
+      .map(f => {
+        const s = src(f);
+        const calls = [...s.matchAll(/\bedgeIdFor\(/g)].map(m => argumentsOf(s, m.index, f));
+        return [f, calls];
+      })
+      .filter(([, calls]) => calls.length > 0);
+    // The floor: an empty sweep passes every loop written over it.
+    assert.ok(found.length >= 3, `only ${found.length} file(s) call edgeIdFor — the sweep is measuring nothing`);
+    return found;
+  };
+
+  it('every caller derives with the kinds', () => {
+    const offenders = [];
+    for (const [file, calls] of callers()) {
       for (const args of calls) {
-        assert.match(args, /Kind/,
-          `edgeIdFor(${args}) omits the endpoint kinds, so it derives the pre-M-3 id`);
+        if (args.length !== 5) offenders.push(`${file}: edgeIdFor(${args.join(', ')})`);
       }
-    });
-  }
+    }
+    assert.deepEqual(offenders, [], 'these omit the endpoint kinds, so they derive the pre-M-3 id');
+  });
 });

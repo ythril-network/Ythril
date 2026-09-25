@@ -242,11 +242,7 @@ describe('brain embedding queue drains (real MongoDB, real embed() over a stub e
     assert.equal(after.embedding, undefined, 'the stale vector is UNSET, not left behind');
     assert.equal(after.embeddingModel, undefined);
     assert.equal(after.suppressEmbeddings, true, 'and the record itself is still there');
-    // The mirror onto the pre-3.1.0 key was asserted here and went with `D-6` in 4.0. The ABSENCE is
-    // asserted instead: a leftover write would put back a key nothing reads, which is a field on every
-    // record and a difference between two instances' hashes for no gain.
-    assert.equal(after.excludeFromVectorSearch, undefined,
-      'the retired spelling is still being written alongside the current one');
+    // The retired spelling's absence is asserted in `the-legacy-suppression-spelling-is-gone.test.js`.
     assert.ok(after.fact, 'suppressed is not deleted — an operator must still be able to find it by listing');
   });
 
@@ -265,8 +261,6 @@ describe('brain embedding queue drains (real MongoDB, real embed() over a stub e
     const back = await coll.findOne({ _id: doc._id });
     assert.ok(Array.isArray(back.embedding),
       'clearing the flag re-embeds — the job handles both directions, so no caller has to know which');
-    assert.equal(back.excludeFromVectorSearch, undefined,
-      'the retired spelling reappears when the flag is cleared');
   });
 
   it('a record created ALREADY suppressed is never embedded, not embedded then cleared', async () => {

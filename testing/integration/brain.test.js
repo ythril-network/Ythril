@@ -940,8 +940,8 @@ describe('Brain -- chrono CRUD (/api/brain/spaces/:spaceId/chrono)', () => {
      * this feature was consistent in three route files and unreachable in the fourth, and the report that
      * found it came from reading code rather than from a response.
      *
-     * The second assertion is new: the write must NOT also carry the retired spelling. It did until 4.0,
-     * deliberately, so an older peer rewriting the record kept a flag it understood.
+     * That the write no longer mirrors onto the retired spelling is asserted in
+     * `the-legacy-suppression-spelling-is-gone.test.js`, the one home of that rule (`Q-45.4`).
      */
     const r = await patch(INSTANCES.a, token(), `/api/brain/spaces/general/chrono/${chronoId}`, {
       suppressEmbeddings: true,
@@ -949,8 +949,6 @@ describe('Brain -- chrono CRUD (/api/brain/spaces/:spaceId/chrono)', () => {
     assert.equal(r.status, 200, JSON.stringify(r.body));
     const back = await readRecord(INSTANCES.a, token(), 'general', 'chrono', chronoId);
     assert.equal(back.body.suppressEmbeddings, true, 'the STORED record must carry the name');
-    assert.equal(back.body.excludeFromVectorSearch, undefined,
-      'the retired spelling is still being written alongside');
   });
 
   it('and clearing it stores false rather than treating it as absent', async () => {

@@ -949,10 +949,8 @@ describe('MCP brain tools � update_memory / delete_memory / get_stats', () => 
      * This case used to also assert that the pre-3.1.0 key was written ALONGSIDE, so a peer on an older
      * build still honoured the suppression, and that the new name won when a body carried both. Both
      * halves went with `D-6`: there is one name, and the peer floor keeps the builds that knew only the
-     * old one off the network.
-     *
-     * The absence is asserted rather than dropped — a leftover mirror would put a field on every record
-     * that nothing reads, and make two instances' hashes differ over it.
+     * old one off the network. The absence of the mirror is asserted in
+     * `the-legacy-suppression-spelling-is-gone.test.js`, the one home of that rule (`Q-45.4`).
      */
     const on = await session.callTool('update_fact', {
       space: 'general', id: storedMemoryId, suppressEmbeddings: true,
@@ -960,8 +958,6 @@ describe('MCP brain tools � update_memory / delete_memory / get_stats', () => 
     assert.ok(!on?.isError, `update_memory rejected suppressEmbeddings: ${JSON.stringify(on)}`);
     let reread = await readRecord(INSTANCES.a, tokenA, 'general', 'facts', storedMemoryId);
     assert.equal(reread.body.suppressEmbeddings, true, 'the name must persist');
-    assert.equal(reread.body.excludeFromVectorSearch, undefined,
-      'the retired key is still being written alongside');
 
     // And back off again, so the suite does not leave a record suppressed for whatever runs next.
     const off = await session.callTool('update_fact', {

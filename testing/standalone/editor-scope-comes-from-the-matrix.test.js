@@ -96,20 +96,8 @@ describe('editorScopeFor — where an administrator may act', () => {
     assert.deepEqual(editorScopeFor({ rights: r }), ['qa']);
   });
 
-  it('does NOT fall back to the legacy allowlist — no matrix is no scope', () => {
-    /*
-     * This asserted the fallback, for "an OIDC session, or a record that predates the backfill". Neither
-     * exists any more: an OIDC session carries `rights` as a REQUIRED field derived by `migrateToken`,
-     * and a pre-matrix PAT gets one from `migrateTokenRightsOnBoot` on every start.
-     *
-     * What the fallback did in the meantime was read an absent allowlist as UNRESTRICTED — and the
-     * field has been absent on every token since 3.1. Owner, 2026-09-05: *"no matrix = refuse - no
-     * fallback no backwards compatibility anymore"*.
-     */
-    assert.deepEqual(editorScopeFor({ spaces: ['qa'] }), [], 'the allowlist is still being read');
-    assert.deepEqual(editorScopeFor({ spaces: undefined }), [], 'absent must be NOTHING, not everything');
-    assert.deepEqual(editorScopeFor({ spaces: [] }), []);
-  });
+  // That it does NOT fall back to the legacy allowlist — no matrix is no scope — is asserted, for every
+  // guard, in `no-matrix-reaches-nothing-not-everything.test.js` (`Q-45.4`).
 
   it('prefers the matrix over a legacy allowlist that disagrees', () => {
     // Both present is the state every migrated token is in. The matrix is the model; the allowlist is the

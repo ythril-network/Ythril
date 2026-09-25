@@ -165,7 +165,7 @@ describe('the guard REFUSES and ALLOWS — behaviourally, not by reading the sou
     assert.equal(toolRightsRefusal('write_file', r, 'general'), null);
   });
 
-  it('does nothing for a tool with no row — and REFUSES a token with no matrix', () => {
+  it('does nothing for a tool with no row — and a tool that cannot be checked is not passed', () => {
     /*
      * HALF INVERTED by `Q-5`. This asserted both as *"deliberate pass-throughs"*, on the grounds that
      * *"OIDC records carry no matrix, and instance-level tools are governed by `instanceAdmin`"*. The second
@@ -178,12 +178,10 @@ describe('the guard REFUSES and ALLOWS — behaviourally, not by reading the sou
      * row lookup has to come first. Refusing on an absent matrix before it would have 403'd every
      * instance-level tool, which is the same mistake pointing the other way.
      */
-    assert.ok(toolRightsRefusal('delete_fact', undefined, 'general'),
-      'an MCP tool call with no rights matrix was allowed');
+    // The no-matrix half — refused for a rights-row tool, passed through for an instance-level one, which is
+    // the ORDER — is asserted in `no-matrix-reaches-nothing-not-everything.test.js` (`Q-45.4`).
     assert.equal(toolRightsRefusal('list_spaces', rights({ floor: 'none' }), 'general'), null,
       'an instance-level tool has no rights row and is governed by `instanceAdmin` — still a pass-through');
-    assert.equal(toolRightsRefusal('list_spaces', undefined, ''), null,
-      'the row lookup must run BEFORE the matrix check, or every instance-level tool is refused');
     assert.ok(toolRightsRefusal('delete_fact', rights({ floor: 'none' }), ''),
       'a tool that needs an area rung cannot be checked without a space, and cannot-be-checked is not passes');
   });

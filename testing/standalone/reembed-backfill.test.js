@@ -185,11 +185,8 @@ describe('suppression is expressible as a query, which is what makes the sweep t
     const { query } = suppressionExclusion(undefined, 'fact');
     assert.deepEqual(query['suppressEmbeddings'], { $ne: true },
       '$exists:false would also exclude a record that carries the flag as FALSE — an explicit opt-in');
-    // The pre-3.1.0 spelling was asserted here too and went with `D-6` in 4.0. Its ABSENCE is asserted
-    // instead: a leftover clause would filter on a key nothing writes, which silently narrows a sweep
-    // that is supposed to reach everything.
-    assert.equal(query['excludeFromVectorSearch'], undefined,
-      'the retired spelling is still in the exclusion, narrowing the sweep on a key nothing writes');
+    // That the retired spelling is NOT in the exclusion is asserted, for every kind, in
+    // `the-legacy-suppression-spelling-is-gone.test.js`.
   });
 
   it('excludes suppressed TYPE NAMES, on the right field per kind', async () => {

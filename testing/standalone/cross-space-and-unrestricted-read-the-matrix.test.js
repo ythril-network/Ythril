@@ -57,28 +57,15 @@ describe('"unrestricted" is answered from the matrix', () => {
     assert.equal(editorScopeFor({ rights: rights({ floor: ALL('read') }) }), undefined);
   });
 
-  it('NO MATRIX is no scope — it used to be unrestricted', () => {
+  it('a MISSING RECORD is not a scope question', () => {
     /*
-     * Inverted 2026-09-05. Owner: *"no matrix = refuse - no fallback no backwards compatibility
-     * anymore"*.
+     * That a record with NO MATRIX — or only the pre-3.0 allowlist — answers `[]` rather than unrestricted
+     * is asserted, for every guard, in `no-matrix-reaches-nothing-not-everything.test.js` (`Q-45.4`).
      *
-     * `undefined` from this function means UNRESTRICTED, and a record with no matrix used to return
-     * `record.spaces` — which is `undefined` on every token since 3.1 took the field off `TokenRecord`.
-     * So a token with no matrix read as an instance-wide administrator to every caller. `[]` is the
-     * opposite answer and the safe one: reaches nothing.
-     *
-     * `undefined` for a MISSING RECORD is unchanged and is a different question — there is no token to
-     * scope, which is the caller having nothing rather than a token having everything.
+     * `undefined` for a missing record is a different question: there is no token to scope, which is the
+     * caller having nothing rather than a token having everything.
      */
-    assert.deepEqual(editorScopeFor({}), [], 'no matrix must reach nothing, not everything');
     assert.equal(editorScopeFor(undefined), undefined, 'no record at all is still not a scope question');
-  });
-
-  it('and the pre-3.0 allowlist is not consulted at all', () => {
-    // It left `TokenRecord` in 3.1, so a record carrying one is pre-3.1 data. Reading it would keep the
-    // field alive in the one place that still had an opinion about it.
-    assert.deepEqual(editorScopeFor({ spaces: ['qa'] }), [],
-      'the legacy allowlist is still being read as scope');
   });
 
   it('and the rotation route really asks it that way', () => {
@@ -104,20 +91,8 @@ describe('cross-space recall searches only what the token reaches', () => {
       'a token holding files-only in a space should not have its records ranked here');
   });
 
-  it('the helper it uses has no allowlist left to conflate', () => {
-    /*
-     * This asserted the distinction the class rests on: an ABSENT allowlist is every space, an EMPTY one is
-     * none, and reading empty as absent turns the narrowest token into the widest.
-     *
-     * 4.0 removed the allowlist arm, so neither reading is possible here. What replaces the assertion is the
-     * stronger one: no matrix reaches NOTHING. The composite the two rules made — no matrix and no allowlist
-     * — used to reach every space, which is the same failure the conflation caused, arrived at from the
-     * other side.
-     */
-    const src = stripComments(readFileSync('server/src/auth/reachable-spaces.ts', 'utf8'));
-    assert.doesNotMatch(src, /legacySpaces/, 'the matrix is the only scoping input');
-    assert.match(src, /if \(!rights\) return \[\]/, 'and the absent case is explicit and closed');
-  });
+  // That the helper it uses has no allowlist left, and closes the absent-matrix case explicitly, is asserted
+  // in `no-matrix-reaches-nothing-not-everything.test.js` (`Q-45.4`).
 });
 
 describe('the legacy reads that remain are deliberate', () => {
