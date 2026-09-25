@@ -26,7 +26,7 @@ import {
 import { listUrlFor, type VlmWire } from '../files/converters/vlm-endpoint.js';
 import { log } from '../util/log.js';
 import { providerSignature, getActiveProviderSignature } from '../files/media/worker.js';
-import { MIN_CANDIDATE_MULTIPLIER, MAX_CANDIDATE_MULTIPLIER, MAX_PASSAGES_PER_REQUEST_MIN, MAX_PASSAGES_PER_REQUEST_MAX } from '../brain/rerank-client.js';
+import { MAX_PASSAGES_PER_REQUEST_MIN, MAX_PASSAGES_PER_REQUEST_MAX } from '../brain/rerank-client.js';
 import { DUAL_DOOR_BOUNDS } from '../config/setting-bounds.js';
 import { SERVER_OWNED_MEDIA_PATHS, SERVER_OWNED_MEDIA_HOW } from './media-config-server-owned.js';
 import { MODEL_TIMEOUT_MIN_MS, MODEL_TIMEOUT_MAX_MS, MODEL_SLOTS, REASONING_EFFORTS,
@@ -59,7 +59,7 @@ mediaConfigRouter.use(globalRateLimit);
 
 // ── GET /api/admin/media-config ───────────────────────────────────────────────
 
-mediaConfigRouter.get('/', requireAdmin, (req, res) => {
+mediaConfigRouter.get('/', requireAdmin, (_req, res) => {
   const cfg = getMediaEmbeddingConfig();
   // Never return API keys in plaintext — mask them
   const masked = maskSecrets(cfg) as Record<string, unknown>;

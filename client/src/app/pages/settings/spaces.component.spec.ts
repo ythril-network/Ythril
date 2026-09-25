@@ -22,7 +22,7 @@
  * What stayed here is what the component still owns: the list view state and rendering.
  */
 import { TestBed } from '@angular/core/testing';
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { of, throwError } from 'rxjs';
 import { NetworksApi } from '../../core/networks-api.service';
 import { SchemaApi } from '../../core/schema-api.service';

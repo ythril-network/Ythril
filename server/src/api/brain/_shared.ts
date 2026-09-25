@@ -6,11 +6,8 @@
  * validation gate, the fact list filter, and the UUID matcher.
  */
 import type express from 'express';
-import { getConfig } from '../../config/loader.js';
 import { parseRecordSuppression } from '../../brain/suppress-embeddings.js';
 import { parseRecordSuperseded } from '../../brain/record-flag.js';
-import { resolveMetaRefs, type SchemaViolation } from '../../spaces/schema-validation.js';
-import type { SpaceMeta } from '../../config/types.js';
 import type { DupeCheckOpts } from '../../brain/write-options.js';
 import { parseIfMatch } from '../../util/if-match.js';
 

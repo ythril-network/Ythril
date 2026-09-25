@@ -1,4 +1,4 @@
-﻿import { MongoClient, type Db, type Collection, type Document, type Filter, type UpdateFilter, type OptionalUnlessRequiredId, type AnyBulkWriteOperation } from 'mongodb';
+﻿import { MongoClient, type Db, type Collection, type Filter, type UpdateFilter, type OptionalUnlessRequiredId, type AnyBulkWriteOperation } from 'mongodb';
 import { getMongoUri } from '../config/loader.js';
 import { log } from '../util/log.js';
 import { dbNameFromUri } from './db-name.js';

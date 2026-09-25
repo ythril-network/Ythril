@@ -1,7 +1,5 @@
 import { Router } from 'express';
 import fs from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import path from 'node:path';
 import { globalRateLimit } from '../rate-limit/middleware.js';
 import { requireAuth, requireAdmin } from '../auth/middleware.js';
 import { mintSseTicket } from '../auth/sse-ticket.js';

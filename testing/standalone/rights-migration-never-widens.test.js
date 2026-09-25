@@ -47,6 +47,9 @@ describe('the shapes that exist today', () => {
   it('ordinary, unscoped — write everywhere', () => {
     const r = migrateToken({});
     assert.equal(r.instanceAdmin, false);
+    // The migration derives TWO instance-level flags from the one `admin` boolean, and this is the half that
+    // is easy to forget — in both directions.
+    assert.equal(r.createSpaces, false, 'creating spaces was admin-only; an ordinary token never had it');
     for (const a of DATA) assert.equal(r.floor[a], 'write');
     assert.equal(r.floor.networks, 'none', 'a legacy token below admin gains no network rights');
   });

@@ -6,7 +6,6 @@ import path from 'path';
 import { requireAuth, requireAdmin, denyReadOnly } from '../auth/middleware.js';
 import { globalRateLimit } from '../rate-limit/middleware.js';
 import { col, asFilter, asDoc } from '../db/mongo.js';
-import { getConfig } from '../config/loader.js';
 import { log } from '../util/log.js';
 import { resolveSafePath, spaceRoot } from '../files/sandbox.js';
 import type { ConflictDoc, LinkViolationDoc } from '../config/types.js';

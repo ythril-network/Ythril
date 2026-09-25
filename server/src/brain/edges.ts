@@ -3,8 +3,7 @@ import { edgeIdFor } from './edge-id.js';
 import { rekeyEdge, embedQueueWorkFor, type EdgeRekey } from './edge-rekey.js';
 import { brainWriteSeqTotal } from '../metrics/registry.js';
 import { authorRef } from '../config/author.js';
-import { col, getMongo, asFilter, asDoc, asUpdate, asBulk } from '../db/mongo.js';
-import type { ClientSession } from 'mongodb';
+import { col, getMongo, asFilter, asDoc, asUpdate } from '../db/mongo.js';
 import { nextSeq } from '../util/seq.js';
 import { parseLimit, parseSkip } from '../util/pagination.js';
 import { toMongoSort, type SortSpec } from './list-sort.js';
@@ -24,14 +23,13 @@ import { mergePropertiesOrKeep, mergeTagsOrKeep } from './merge-fields.js';
 import { enqueueEmbedJob, retireEmbedJob } from './embed-queue.js';
 import { embeddingSuppressedFor } from './suppress-embeddings.js';
 import { linkClassFor, LINK_CLASSES } from './link-adjacency.js';
-import { frontierEdgeQuery, type TraverseNarrowing } from './frontier-query.js';
-import { linkedRecordsAtFrontier, entitiesLinkedFromRecords, recordDisplayName, recordDisplayType, type LinkedRecord, type LinkInclusion }
+import { frontierEdgeQuery } from './frontier-query.js';
+import { linkedRecordsAtFrontier, recordDisplayName, recordDisplayType }
   from './link-frontier.js';
-import { getEntityById } from './entities.js';
 import { resolveEdgeEndpointNames, resolveEdgeEndsForWrite, neighbourNodes, startNode } from './edge-endpoint-names.js';
-import { storedEdgeKind, edgeEndpointKind } from './entity-refs.js';
+import { storedEdgeKind } from './entity-refs.js';
 import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';
-import type { EdgeDoc, EntityDoc, TombstoneDoc, ChronoEntry, FactDoc, FileMetaDoc } from '../config/types.js';
+import type { EdgeDoc, TombstoneDoc, FileMetaDoc } from '../config/types.js';
 import type { RefKind } from '../config/types-knowledge.js';
 import { PROPERTIES_SCAN_MAX_MS } from './tag-filter.js';
 import { writeFilterFor, writeOutcome } from './write-precondition.js';

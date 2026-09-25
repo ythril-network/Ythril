@@ -22,13 +22,13 @@
 
 import { col, asFilter } from '../db/mongo.js';
 import { NEVER_RETURNED_PROJECTION } from './read-projection.js';
-import { linkedRecordsAtFrontier, entitiesLinkedFromRecords, recordDisplayName, recordDisplayType, type LinkedRecord } from './link-frontier.js';
+import { linkedRecordsAtFrontier, entitiesLinkedFromRecords, type LinkedRecord } from './link-frontier.js';
 import { frontierEdgeQuery, type TraverseNarrowing } from './frontier-query.js';
 import { edgeEndpointKind } from './entity-refs.js';
 import { endpointRecordsByKind } from './edge-endpoint-names.js';
 import type { RefKind } from '../config/types-knowledge.js';
 import { syntheticEdgeId } from './edges.js';
-import type { EdgeDoc, EntityDoc, FileMetaDoc } from '../config/types.js';
+import type { EdgeDoc, EntityDoc } from '../config/types.js';
 import { spaceCollection } from '../db/space-collection.js';
 
 /** Hard cap on the `traverse` depth accepted by graph-augmented recall. */

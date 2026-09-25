@@ -27,7 +27,7 @@ import { mergeTags, mergeProperties, mergePropertiesOrKeep } from './merge-field
 import { enqueueEmbedJob, retireEmbedJob } from './embed-queue.js';
 import { embeddingSuppressedFor } from './suppress-embeddings.js';
 import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';
-import type { FactDoc, EntityDoc, TombstoneDoc } from '../config/types.js';
+import type { FactDoc, TombstoneDoc } from '../config/types.js';
 import { SimilarMatch, checkDuplicates } from './recall.js';
 import type { DupeCheckOpts } from './write-options.js';
 import { PROPERTIES_SCAN_MAX_MS } from './tag-filter.js';

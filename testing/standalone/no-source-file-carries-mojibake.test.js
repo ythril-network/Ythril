@@ -41,6 +41,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 import { findMojibake, mojibakeOf } from './_mojibake.mjs';
+import { trackedSources } from './_sources.mjs';
 
 /**
  * Detection is STRUCTURAL now, not a list of signatures — see `_mojibake.mjs` for why and how.
@@ -88,6 +89,18 @@ describe('no source file carries mis-decoded UTF-8', () => {
     const offenders = docs.filter(f => MOJIBAKE.test(readFileSync(f, 'utf8')));
     assert.deepEqual(offenders, [],
       'these ship to customers and were written by a tool that decoded UTF-8 as ANSI:\n  '
+      + offenders.join('\n  ') + '\nRepair with node, not PowerShell.');
+  });
+
+  it('the test suites are clean — a test title is what a failing run prints', () => {
+    // The detector's own module and this gate carry mojibake on purpose, as the thing they detect.
+    const files = trackedSources('testing', {
+      ext: ['.js', '.mjs', '.cjs', '.ts'],
+      floor: 300,
+      exclude: ['testing/standalone/_mojibake.mjs', 'testing/standalone/no-source-file-carries-mojibake.test.js'],
+    });
+    const offenders = files.filter(f => MOJIBAKE.test(readFileSync(f, 'utf8')));
+    assert.deepEqual(offenders, [], 'these were written by a tool that decoded UTF-8 as ANSI:\n  '
       + offenders.join('\n  ') + '\nRepair with node, not PowerShell.');
   });
 

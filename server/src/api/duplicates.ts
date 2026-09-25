@@ -9,7 +9,7 @@
  */
 
 import { Router } from 'express';
-import { requireAuth, requireAdminMfa, denyReadOnly, requireAuthMfa } from '../auth/middleware.js';
+import { requireAuth, denyReadOnly, requireAuthMfa } from '../auth/middleware.js';
 import { globalRateLimit } from '../rate-limit/middleware.js';
 import { col, asFilter, asUpdate } from '../db/mongo.js';
 import { spacesWhereTokenMay } from '../auth/reachable-spaces.js';

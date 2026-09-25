@@ -33,8 +33,7 @@
  * a patch that repairs the pre-existing violation passes. The error names exactly what to include.
  */
 import { validateEntity, validateEdge, validateChrono, validateFact, type SchemaViolation } from '../spaces/schema-validation.js';
-import type { SpaceMeta, ChronoEntry } from '../config/types.js';
-import { col, asFilter } from '../db/mongo.js';
+import type { SpaceMeta } from '../config/types.js';
 import { resolveMemberSpaces } from '../spaces/proxy.js';
 import { applyValidation, getSpaceMeta } from '../spaces/schema-validation.js';
 import type { ResolvedEdgeEnds } from '../spaces/schema-validation.js';

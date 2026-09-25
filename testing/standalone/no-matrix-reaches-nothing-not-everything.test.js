@@ -39,15 +39,40 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { stripComments } from './_strip-comments.mjs';
+import { trackedSources } from './_sources.mjs';
 
 const SHARED = 'server/src/api/sync/_shared.ts';
+const REACH = 'server/src/auth/reachable-spaces.ts';
+const MIDDLEWARE = 'server/src/auth/middleware.ts';
 const code = (f) => stripComments(readFileSync(f, 'utf8'));
+
+/*
+ * The config is written and `CONFIG_PATH` set BEFORE anything imports the loader.
+ *
+ * `CONFIG_PATH` is read when `config/loader.js` is first evaluated, and the modules imported below reach it —
+ * so setting the variable later has no effect, and `loadConfig()` then throws and CANCELS the block rather
+ * than failing it. A cancelled block reports `fail 0`, which reads as a pass at a glance.
+ */
+const cfgDir = mkdtempSync(join(tmpdir(), 'ythril-reach-'));
+const CFG = join(cfgDir, 'config.json');
+process.env['CONFIG_PATH'] = CFG;
+writeFileSync(CFG, JSON.stringify({
+  instanceId: 'reach-test', instanceLabel: 'test', tokens: [], networks: [],
+  spaces: [
+    { id: 'alpha', label: 'Alpha', builtIn: true, folders: [] },
+    { id: 'beta', label: 'Beta', folders: [] },
+  ],
+}, null, 2), { mode: 0o600 });
 
 const sync = await import('../../server/dist/api/sync/_shared.js');
 const editor = await import('../../server/dist/auth/editor-scope.js');
 const mcp = await import('../../server/dist/mcp/tool-rights-guard.js');
+const reach = await import('../../server/dist/auth/reachable-spaces.js');
+(await import('../../server/dist/config/loader.js')).loadConfig();
 
 /**
  * A matrix that grants something, used only to prove each guard can ALSO say yes.
@@ -63,35 +88,13 @@ const GRANTING = {
   perSpace: { demo: { knowledge: 'admin', files: 'admin', schema: 'admin', dataQuality: 'admin' } },
 };
 
-describe('every token shape that exists carries a matrix', () => {
-  it('a PAT gets one at mint, or derived from the legacy inputs', () => {
-    // `createToken` stores `opts.rights ?? migrateToken(…)`. The `??` is what makes this true for a caller
-    // that named no matrix — omitting the field left a newly minted token with none until the next boot.
-    const src = code('server/src/auth/tokens.ts');
-    assert.match(src, /rights: opts\.rights \?\?/,
-      'createToken no longer guarantees a matrix, so a freshly minted token can have none');
-  });
-
-  it('a pre-matrix PAT gets one at boot, in memory', () => {
-    assert.match(code('server/src/config/loader.ts'), /migrateTokenRightsOnBoot\(_config\)/,
-      'the boot derivation is gone, so a token predating the matrix reaches this branch with none');
-  });
-
-  it('and an OIDC session carries one as a REQUIRED field', () => {
-    /*
-     * The surface that genuinely has no STORED matrix. It builds one per request from its claim mapping,
-     * with `migrateToken` — the same function, so an OIDC session and a legacy PAT with identical settings
-     * resolve identically. Required rather than optional is the half that matters here: an optional field
-     * would put OIDC straight back on the fallback.
-     */
-    const src = code('server/src/auth/oidc.ts');
-    assert.match(src, /rights: TokenRights;/,
-      'OidcTokenRecord no longer requires a matrix, so an OIDC session can reach the no-matrix branch');
-    assert.match(src, /rights: migrateToken\(/,
-      'OIDC no longer derives its matrix, so its claim mapping is not enforced through `rights`');
-  });
-});
-
+/*
+ * ── THE PREMISE — that every token shape carries a matrix — is asserted in ONE place ────────────
+ *
+ * `a-token-without-a-matrix-reaches-nothing.test.js`: one attachment point, one resolver, and both of its
+ * branches produce a matrix. Three cases restating it stood here until `Q-45.4`; this file asserts the
+ * CONSEQUENCE, for every guard.
+ */
 describe('so no matrix means no reach', () => {
   it('the legacy allowlist fallback is gone', () => {
     const src = code(SHARED);
@@ -141,6 +144,10 @@ describe('and every other guard that can see an absent matrix answers the same w
   it('the space-reach guard refuses, and admits a matrix that grants', () => {
     assert.equal(sync.tokenReachesSpace({}, 'demo'), false, 'a token with no matrix reached a space');
     assert.equal(sync.tokenReachesSpace(undefined, 'demo'), false, 'no token at all reached a space');
+    // A record carrying only the pre-3.0 allowlist IS a record with no matrix — the allowlist left
+    // `TokenRecord` in 3.1, and reading it would be the fallback coming back under another name.
+    assert.equal(sync.tokenReachesSpace({ spaces: ['demo'] }, 'demo'), false,
+      'the legacy allowlist is still being read as scope');
     assert.equal(sync.tokenReachesSpace({ rights: GRANTING }, 'demo'), true,
       'the guard refuses a matrix that grants — every refusal above would then pass while nothing worked');
   });
@@ -149,8 +156,62 @@ describe('and every other guard that can see an absent matrix answers the same w
     // The two values mean opposite things and look identical at a call site: `undefined` is unrestricted,
     // `[]` is nothing. That is what made this one dangerous rather than merely wrong.
     assert.deepEqual(editor.editorScopeFor({}), [], 'a token with no matrix was read as unrestricted');
+    assert.deepEqual(editor.editorScopeFor({ spaces: ['demo'] }), [], 'the legacy allowlist is still being read');
+    assert.deepEqual(editor.editorScopeFor({ spaces: [] }), [], 'an empty legacy allowlist is still no matrix');
     assert.equal(editor.editorScopeFor({ rights: GRANTING })?.includes('demo'), true,
       'the guard denies a matrix that grants — the vacuity half');
+  });
+
+  it('the reach-listing guard answers NO spaces, and a matrix still lists what it grants', () => {
+    /*
+     * `spacesWhereTokenMay` fell through to the legacy allowlist, and an absent allowlist meant
+     * "unrestricted" — so a record carrying neither piece of scope information reached every space.
+     *
+     * The granting half is exercised against a REAL config, because the matrix arm reads
+     * `getConfig().spaces` and the fail-closed arm returns before it does. Without it "reaches nothing"
+     * would pass for the wrong reason too: a helper that threw on every input satisfies it.
+     */
+    assert.deepEqual(reach.spacesWhereTokenMay(undefined, 'dataQuality', 'read'), [],
+      'a record with no matrix must reach nothing — the answer to "no scope information" is none, not all');
+    const one = { instanceAdmin: false, createSpaces: false, floor: null, perSpace: { alpha: { dataQuality: 'read' } } };
+    assert.deepEqual(reach.spacesWhereTokenMay(one, 'dataQuality', 'read'), ['alpha'],
+      'a matrix granting one space must reach that space and no other');
+    assert.deepEqual(reach.spacesWhereTokenMay(one, 'dataQuality', 'write'), [],
+      'the rung is compared, not merely present');
+    const floor = { instanceAdmin: false, createSpaces: false, floor: { dataQuality: 'read' }, perSpace: {} };
+    assert.deepEqual(reach.spacesWhereTokenMay(floor, 'dataQuality', 'read').sort(), ['alpha', 'beta'],
+      'a floor grants every space, including one the matrix never names');
+  });
+
+  it('and the reach rule says so in its source, with no legacy input threaded into it', () => {
+    const s = code(REACH);
+    assert.doesNotMatch(s, /legacySpaces/,
+      'the legacy allowlist must no longer be a scoping input — it was the second implementation of this rule');
+    assert.match(s, /if \(!rights\) return \[\]/,
+      'the absent-matrix case must be an explicit, fail-closed return');
+    assert.match(s, /holdsRung\(rights, id, area, needs\)/,
+      'the per-space listing must ask the shared predicate');
+    assert.match(s, /satisfies\(effectiveRung\(rights, space, area\), needs\)/,
+      'and that predicate must read the matrix per space and area, compared against the rung needed');
+
+    // Swept, not named: every server source that calls the rule, plus the auth modules that thread scope in.
+    const callers = trackedSources('server/src')
+      .filter(f => /spacesWhereTokenMay\(|legacySpacesOf\(/.test(code(f)));
+    assert.ok(callers.length >= 4,
+      `only ${callers.length} caller(s) of the reach rule found — the sweep is wrong, and an empty one `
+      + 'reports every caller clean');
+    const offenders = [];
+    for (const f of [...new Set([...callers, MIDDLEWARE, 'server/src/auth/proxy-reach.ts'])]) {
+      const s2 = code(f);
+      if (/legacySpacesOf\(/.test(s2)) offenders.push(`${f}: passes a legacy allowlist`);
+      if (/spacesWhereTokenMay\([^)]*\?\.spaces/.test(s2)) offenders.push(`${f}: passes record.spaces`);
+    }
+    assert.deepEqual(offenders, [], `${offenders.join('\n  ')}`);
+
+    let present = true;
+    try { readFileSync('server/src/auth/legacy-spaces.ts', 'utf8'); } catch { present = false; }
+    assert.equal(present, false,
+      'auth/legacy-spaces.ts still exists — a helper with no callers gets callers by accident');
   });
 
   it('the MCP tool-rights guard refuses, and still lets an instance-level tool through', () => {
@@ -205,7 +266,7 @@ describe('and every other guard that can see an absent matrix answers the same w
      * a matched route, and a token record. What it is asserted on is the SHAPE that was wrong: an early
      * `return true` keyed on the matrix being absent.
      */
-    const src = code('server/src/auth/middleware.ts');
+    const src = code(MIDDLEWARE);
     const at = src.indexOf('function enforceAreaRung');
     assert.ok(at > 0, 'enforceAreaRung is gone — re-point this gate');
     const body = src.slice(at, src.indexOf('\n}', at));

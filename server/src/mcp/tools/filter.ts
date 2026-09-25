@@ -133,7 +133,7 @@ export const queryTool: ToolHandler = {
           additionalProperties: false,
         }),
   async handle(ctx: ToolContext): Promise<ToolResult> {
-    const { args: a, callSpace } = ctx;
+    const { args: a } = ctx;
     const collName = String(a['collection'] ?? '');
     if (!(BRAIN_COLLECTIONS as readonly string[]).includes(collName)) {
       /*

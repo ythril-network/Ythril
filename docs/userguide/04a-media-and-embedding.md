@@ -180,6 +180,17 @@ rather than guess. Saving only the card's call budget asks nothing.
 When the card is read-only, the endpoint is pinned by the `DECISION_URL`, `DECISION_MODEL` or
 `DECISION_API_KEY` environment variables.
 
+### Sidecars
+
+The dashed cards at the end of the Models tab are the services the deployment runs beside Ythril: the page
+renderer, the Office renderer, the document converter and the **NLP** sidecar. Each shows the address it is
+reached at, whether it answers, and the environment variable that sets the address — they are configured in
+the deployment, not on this screen.
+
+The **NLP** card is the one conversation ingest needs: it finds the people, places and things a conversation
+mentions. When it is down, ingesting a conversation is refused and says so; documents and media are not
+affected. It is set by `NLP_SIDECAR_URL`, and a compose install runs it unless `DOC_NLP_REPLICAS=0`.
+
 ---
 
 ### Face Recognition

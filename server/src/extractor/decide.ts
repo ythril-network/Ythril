@@ -39,7 +39,7 @@ import type { EgressSlot } from '../config/model-egress-policy.js';
 import { slotTimeoutMs } from '../config/model-slots.js';
 import { getModelSlots } from '../config/loader.js';
 import { getDecisionModelConfig, getDecisionApiKey } from '../config/decision-model.js';
-import { chatUrlFor, systemOneUrlFor } from '../files/converters/vlm-endpoint.js';
+import { systemOneUrlFor } from '../files/converters/vlm-endpoint.js';
 import { modelFetch } from '../util/model-fetch.js';
 import { chatOnce } from '../util/model-chat.js';
 import { boundedJson } from '../util/bounded-read.js';

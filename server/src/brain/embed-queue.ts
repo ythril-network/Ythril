@@ -34,7 +34,7 @@
  * shared with the media queue. Only the job shape and the collection differ.
  */
 
-import { col, asFilter, asDoc, asUpdate } from '../db/mongo.js';
+import { col, asFilter, asUpdate } from '../db/mongo.js';
 import { withJitter } from '../util/backoff.js';
 import { createWorkSignal } from '../util/work-signal.js';
 import { newClaimToken } from '../files/media/lease.js';

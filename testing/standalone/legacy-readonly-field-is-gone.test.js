@@ -136,26 +136,15 @@ describe('what it is replaced BY still answers the question', () => {
   });
 });
 
-describe('a pre-matrix token keeps its scope', () => {
-  it('migrateToken still reads readOnly and still derives `read` everywhere', () => {
-    // The safety property of the whole deletion. `LegacyToken` is its own interface over raw stored config,
-    // so the runtime field going away cannot strand a record written before the matrix existed.
-    const m = migrateToken({ readOnly: true, spaces: ['qa'] });
-    for (const area of ['knowledge', 'files', 'schema', 'dataQuality']) {
-      assert.equal(m.perSpace.qa[area], 'read', `${area} must come back as read`);
-    }
-  });
-
-  it('and an unrestricted read-only token still gets a floor rather than nothing', () => {
-    const m = migrateToken({ readOnly: true });
-    assert.ok(m.floor, 'no allowlist means every space, including ones created later');
-    assert.equal(m.floor.knowledge, 'read');
-  });
-
-  it('write is still the default when neither flag is set', () => {
-    assert.equal(migrateToken({ spaces: ['qa'] }).perSpace.qa.knowledge, 'write');
-  });
-});
+/*
+ * ── A PRE-MATRIX TOKEN KEEPS ITS SCOPE ───────────────────────────────────────────────────────
+ *
+ * The safety property of the whole deletion: `LegacyToken` is its own interface over raw stored config, so
+ * the runtime field going away cannot strand a record written before the matrix existed. That
+ * `migrateToken` still reads `readOnly` — rows at `read`, a `read` floor when unscoped, `write` when neither
+ * flag is set — is asserted per shape in `rights-migration-never-widens.test.js`, the one home of the
+ * legacy-field mapping (`Q-45.4`).
+ */
 
 describe('minting a read-only token is still sayable', () => {
   it('createToken keeps it as an input', () => {

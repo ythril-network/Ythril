@@ -14,7 +14,7 @@ import { unknownPeerRefusal } from '../../sync/peer-target.js';
 import { triggerNetworkSync, triggerPeerSync, syncTimeoutMs } from '../../sync/trigger.js';
 import { log } from '../../util/log.js';
 import {
-  networkView, readNetworkAct, createNetworkAct, updateNetworkAct, leaveNetworkAct, addNetworkSpaceAct, type NetworkActResult,
+  networkView, readNetworkAct, createNetworkAct, updateNetworkAct, leaveNetworkAct, addNetworkSpaceAct, 
   CreateNetworkBody, UpdateNetworkBody, AddNetworkSpaceBody,
 } from '../../networks/network-acts.js';
 

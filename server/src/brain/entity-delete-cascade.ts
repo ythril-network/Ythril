@@ -40,14 +40,11 @@
  * `deleteEntity` unlabels them, which is what it has always done.
  */
 import { createHash } from 'node:crypto';
-import { col, asFilter } from '../db/mongo.js';
 import { entityDeleteBlockers } from './entity-delete-guard.js';
 import { deleteEntity } from './entities.js';
 import { deleteEdge } from './edges.js';
 import type { BacklinkEntry } from './entities.js';
 import type { WebhookActor } from '../webhooks/dispatcher.js';
-import type { EdgeDoc } from '../config/types.js';
-import { spaceCollection } from '../db/space-collection.js';
 
 /** What a preview answers: the set, and the token that authorises removing exactly it. */
 export interface CascadePreview {

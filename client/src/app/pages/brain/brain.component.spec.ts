@@ -634,7 +634,7 @@ describe('BrainComponent — Overview load cascade (characterization for G-2)', 
       // than null, or the Governance panel decides it is loading for ever.
       const c = create().componentInstance as any;
       c.ov.overviewVotes.set(null);
-      c.ov.loadOverviewVotes('work', () => c.activeSpaceId() === 'work', []);
+      c.ov.loadOverviewVotes(() => c.activeSpaceId() === 'work', []);
       expect(c.ov.overviewVotes()).toEqual([]);
     });
   });

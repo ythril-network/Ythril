@@ -41,8 +41,6 @@ import { bodyOf, argumentsOf } from './_structural-window.mjs';
 
 const src = (p) => stripComments(readFileSync(p, 'utf8'));
 
-const { edgeIdFor } = await import('../../server/dist/brain/edge-id.js');
-
 describe('the re-key is one implementation, not one per path', () => {
   it('there is a named helper, and both paths reach it', () => {
     /*
@@ -341,21 +339,15 @@ describe('merge computes the post-relink identity the same way the index does', 
       'the post-relink key is a joined string, so a label containing a pipe collides two distinct edges');
   });
 
-  it('and the derivation says those two are different edges', () => {
-    // The property the joined key cannot express, asserted against the real function rather than described.
-    assert.notEqual(edgeIdFor('a|b', 'c', 'd'), edgeIdFor('a', 'b|c', 'd'));
-  });
+  // That the derivation keeps those two apart — the property the joined key cannot express — is asserted
+  // against the real function in `an-edge-id-is-derived-from-its-identity.test.js` (`Q-45.4`).
 });
 
 describe('the limit is gone from where it was stated', () => {
-  it('edge-id.ts no longer says an identity change keeps the old id', () => {
-    // A stale limit is invisible: nobody reports being able to do the thing they were told they could not.
-    const raw = readFileSync('server/src/brain/edge-id.ts', 'utf8');
-    assert.doesNotMatch(raw, /keeps its old id/i,
-      'the docblock still states the limit this change removed');
-  });
+  // That `edge-id.ts` no longer says an identity change keeps the old id, and points at `rekeyEdge`, is
+  // asserted in `an-edge-id-is-derived-from-its-identity.test.js` (`Q-45.4`).
 
-  it('and both doors TELL a caller their id moved', () => {
+  it('both doors TELL a caller their id moved', () => {
     /*
      * Not the absence of a limit — this one was never written down, and asserting a phrase is missing from a
      * page that never had it passes for the wrong reason. What a caller needs is the positive statement: a

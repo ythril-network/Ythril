@@ -68,7 +68,7 @@ describe('a matrix-scoped token is confined to its own spaces', () => {
   });
 });
 
-describe('the legacy allowlist is not consulted, and no matrix reaches nothing', () => {
+describe('the legacy allowlist is not consulted: the matrix wins wherever both are present', () => {
   /*
    * INVERTED 2026-09-05. Owner: *"no matrix = refuse - no fallback no backwards compatibility anymore"*.
    *
@@ -85,18 +85,8 @@ describe('the legacy allowlist is not consulted, and no matrix reaches nothing',
    * ways to be unreachable, because nothing exercises it and anything that ever did would be handed the
    * whole instance.
    */
-  it('a record carrying only the pre-3.0 allowlist reaches NOTHING', () => {
-    assert.equal(tokenReachesSpace({ spaces: ['qa'] }, 'qa'), false,
-      'the allowlist is still being read as scope');
-    assert.equal(tokenReachesSpace({ spaces: ['qa'] }, 'finance'), false);
-  });
-
-  it('and no scope of either kind reaches nothing, where it used to reach everything', () => {
-    assert.equal(tokenReachesSpace({}, 'anything'), false,
-      'an absent scope is still read as unrestricted — the shape this codebase has shipped three times');
-    assert.equal(tokenReachesSpace(undefined, 'anything'), false,
-      'no token at all must reach nothing');
-  });
+  // A record carrying only the allowlist, or no scope of either kind, reaching NOTHING is asserted in
+  // `no-matrix-reaches-nothing-not-everything.test.js`, the one home of that rule (`Q-45.4`).
   it('the MATRIX WINS when both are present, and it is the narrower answer that survives', () => {
     // The ordering assertion. A token carrying a stale wide allowlist and a narrow matrix must be held to the
     // matrix — reading the allowlist first would restore the hole in a different shape.

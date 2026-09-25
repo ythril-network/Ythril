@@ -4,7 +4,7 @@
  * Covers:
  *  - Setup endpoint returns 404 after first run (SEC-13)
  *  - Health endpoint is always available without auth
- *  - Root redirect: / â†’ /setup (pre-setup) or /settings (post-setup)
+ *  - Root redirect: / → /setup (pre-setup) or /settings (post-setup)
  *
  * Run: node --test testing/integration/setup.test.js
  * Note: This test runs AFTER setup has been completed on instance A/B/C.
@@ -30,7 +30,7 @@ describe('First-run setup gating', () => {
     });
     // After setup is complete, /setup POST must return 404.
     // If the auth rate limit is exhausted (e.g. when run after other auth-heavy
-    // tests in the same minute window), it returns 429 â€” also acceptable since
+    // tests in the same minute window), it returns 429 — also acceptable since
     // both mean the setup endpoint is effectively unavailable.
     assert.ok(r.status === 404 || r.status === 429,
       `Setup endpoint should be 404 (or 429 rate-limited) after first run, got ${r.status}`);
@@ -73,7 +73,7 @@ describe('First-run setup gating', () => {
 
   it('Root / redirects to /brain (post-setup)', async () => {
     const r = await fetch(`${INSTANCES.a}/`, { redirect: 'manual' });
-    // Should redirect â€” 302 to /brain (the default post-setup landing page)
+    // Should redirect — 302 to /brain (the default post-setup landing page)
     assert.ok(r.status === 302 || r.status === 301 || r.status === 303,
       `Root should redirect after setup, got ${r.status}`);
     const location = r.headers.get('location') ?? '';

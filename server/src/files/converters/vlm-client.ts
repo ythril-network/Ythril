@@ -14,9 +14,7 @@
 import { ssrfSafeFetch } from '../../util/ssrf.js';
 import { modelFetch } from '../../util/model-fetch.js';
 import { chatOnce, type ChatWire } from '../../util/model-chat.js';
-import { boundedJson, boundedErrorText } from '../../util/bounded-read.js';
 import { allowPrivateForSlot, type EgressSlot } from '../../config/model-egress-policy.js';
-import { chatUrlFor, type VlmWire } from './vlm-endpoint.js';
 import { slotTimeoutMsOr, reasoningEffortBody } from '../../config/model-slots.js';
 import { getModelSlots } from '../../config/loader.js';
 

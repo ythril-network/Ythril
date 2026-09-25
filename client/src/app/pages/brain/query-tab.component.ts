@@ -4,7 +4,7 @@ import { groupRecallResults, chunkLabel, passageText, relatedOf, orderingOf } fr
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
-import { QueryCollection, QueryResult, RecallKnowledgeType, RecallResult, RecallResponse, RECORD_TYPES, BRAIN_COLLECTIONS } from '../../core/api.types';
+import { QueryCollection, QueryResult, RecallResult, RecallResponse, RECORD_TYPES, BRAIN_COLLECTIONS } from '../../core/api.types';
 import { BrainApi } from '../../core/brain-api.service';
 import { PhIconComponent } from '../../shared/ph-icon.component';
 import { RecallFormComponent, type RecallFormState, type RecallTypeOpt } from './recall-form.component';

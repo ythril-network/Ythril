@@ -7,7 +7,7 @@
  */
 import { Router, type Request, type Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
-import { col, asFilter, asDoc, asUpdate } from '../../db/mongo.js';
+import { col, asFilter, asUpdate } from '../../db/mongo.js';
 import { syncRateLimit } from '../../rate-limit/middleware.js';
 import { getAllowedChronoTypes } from '../../spaces/schema-validation.js';
 import { getConfig } from '../../config/loader.js';

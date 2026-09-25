@@ -4,22 +4,20 @@ import { commitOwnMetaEdit, withType, withoutType } from '../spaces/effective-me
 import { registerReembedRoute } from './spaces-reembed.js';
 import { registerActivityResetRoute } from './spaces-activity.js';
 import {
-  requireAuth, requireSpaceAuthScoped, requireSpaceAuthMfaScoped, requireAdmin, requireAdminMfa, requireAdminMfaScoped,
-  requireAdminOrSpaceAdminMfaScoped, isInstanceAdmin, denyReadOnly,
+  requireAuth, requireSpaceAuthScoped, requireSpaceAuthMfaScoped, requireAdminMfa, requireAdminMfaScoped,
+  requireAdminOrSpaceAdminMfaScoped, denyReadOnly,
 } from '../auth/middleware.js';
 import { globalRateLimit } from '../rate-limit/middleware.js';
 import { editorScopeFor } from '../auth/editor-scope.js';
-import { getConfig, saveConfig, getSecrets, getSchemaLibrary, getDocumentProcessingConfig, getMediaEmbeddingConfig, getStorageConfig } from '../config/loader.js';
-import { capDocExtractionMode } from '../files/converters/extraction-level.js';
-import { slugify, SPACE_PURPOSE_MAX, needsReindex } from '../spaces/_shared.js';
-import { createSpace, removeSpace } from '../spaces/lifecycle.js';
+import { getConfig, saveConfig, getSecrets, getDocumentProcessingConfig, getMediaEmbeddingConfig, getStorageConfig } from '../config/loader.js';
+import { needsReindex } from '../spaces/_shared.js';
+import { removeSpace } from '../spaces/lifecycle.js';
 import { openRoundHere } from '../networks/round-local-state.js';
 import { makeSignedOwnCast } from '../util/signing.js';
 import { renameSpace } from '../spaces/rename.js';
-import { updateSpace, reorderSpaces } from '../spaces/spaces.js';
+import { reorderSpaces } from '../spaces/spaces.js';
 import { checkMetaPrecondition, preconditionErrorBody } from '../spaces/meta-precondition.js';
 import { gatherCompletenessFacts, scoreCompleteness } from '../spaces/completeness.js';
-import { ensureTtlIndex } from '../brain/ttl.js';
 import { measureUsage, usageIsComplete } from '../quota/quota.js';
 import { measureSpaceUsage } from '../spaces/space-usage.js';
 import { col } from '../db/mongo.js';
@@ -30,17 +28,14 @@ import { z } from 'zod';
 import { v4 as uuidv4 } from 'uuid';
 import { log } from '../util/log.js';
 import { buildSpaceVectorIndexes } from '../spaces/vector-index.js';
-import { isSsrfSafeUrl, SSRF_SAFE_MESSAGE } from '../util/ssrf.js';
 import { peerSafeFetch } from '../sync/peer-fetch.js';
-import { proposedMetaFields } from '../sync/meta-round-merge.js';
-import type { SpaceMeta, KnowledgeType, TypeSchema } from '../config/types.js';
+import type { SpaceMeta, KnowledgeType } from '../config/types.js';
 import { KNOWLEDGE_TYPES } from '../config/types.js';
-import { DOC_EXTRACTION_MODES_IN, IMAGE_LEVELS, AUDIO_LEVELS, VIDEO_LEVELS, TEXT_LEVELS, normalizeDocExtractionMode } from '../config/types.js';
 import { writeFile as writeSpaceFile } from '../files/files.js';
 import {
-  TypeSchemaZ, TypeSchemasZ, SpaceMetaBody, SERVER_OWNED_META_FIELDS,
-  stripServerOwnedMeta, findBrokenLibraryRefs, brokenRefsError,
-  CreateSpaceBody, DeleteSpaceBody, RenameSpaceBody, ReorderSpacesBody, PutSchemaBody,
+  TypeSchemaZ, TypeSchemasZ, SpaceMetaBody,
+  stripServerOwnedMeta, findBrokenLibraryRefs,
+  DeleteSpaceBody, RenameSpaceBody, ReorderSpacesBody, PutSchemaBody,
 } from '../spaces/body-schemas.js';
 import { requireSettingsFields } from '../auth/require-settings-fields.js';
 import { planSpaceMetaUpdate, applySpaceMetaUpdate } from '../spaces/meta-update.js';
@@ -196,7 +191,7 @@ spacesRouter.get('/', globalRateLimit, requireAuth, async (req, res) => {
     }
   }
 
-  const spaces = visibleSpaces.map((space, idx) => {
+  const spaces = visibleSpaces.map((space) => {
     const { id, label, builtIn, folders, maxGiB, flex, proxyFor, meta, dupeRules, dupeMergeSurvivor, dupeRulesOnInsert, recordTtlDays, documentExtraction, imageAnalysis, audioAnalysis, videoAnalysis, textAnalysis, indexStatus } = space;
     return {
     id, label, builtIn, folders, maxGiB, flex,
@@ -740,7 +735,7 @@ spacesRouter.post('/:id/validate-schema', globalRateLimit, requireSpaceAuthMfaSc
   const dryMeta = parsedMeta.data as SpaceMeta;
 
   // Import validation functions dynamically to avoid circular deps
-  const { validateEntity, validateEdge, validateFact, validateChrono, resolveMetaRefs } = await import('../spaces/schema-validation.js');
+  const { validateEntity, validateFact, validateChrono, resolveMetaRefs } = await import('../spaces/schema-validation.js');
   const resolvedMeta = resolveMetaRefs(dryMeta);
 
   const violations: Array<{ collection: string; _id: string; violations: Array<{ field: string; value: unknown; reason: string }> }> = [];

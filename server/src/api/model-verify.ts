@@ -36,7 +36,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { requireAdminMfa } from '../auth/middleware.js';
-import { getMediaEmbeddingConfig, getEmbeddingConfig, getDocAssistApiKey } from '../config/loader.js';
+import { getMediaEmbeddingConfig, getEmbeddingConfig } from '../config/loader.js';
 import { createMediaProviders } from '../files/media/providers.js';
 import { embed } from '../brain/embedding.js';
 import { repairMarkdownExternal } from '../files/converters/vlm-client.js';

@@ -1,5 +1,5 @@
 ﻿/**
- * Integration tests: Network governance â€” invite key, voting, removal
+ * Integration tests: Network governance — invite key, voting, removal
  *
  * Covers per-type governance as described in PLAN.md:
  *  - Closed network: unanimous yes required, veto blocks
@@ -195,7 +195,7 @@ describe('Network CRUD', () => {
   });
 });
 
-describe('Network voting â€” closed (unanimous)', () => {
+describe('Network voting — closed (unanimous)', () => {
   let networkId;
 
   before(async () => {
@@ -228,7 +228,7 @@ describe('Network voting â€” closed (unanimous)', () => {
   });
 
   it('Second add of same member is rejected with 409', async () => {
-    // Instance is in pending state â€” should still be rejected
+    // Instance is in pending state — should still be rejected
     const r = await post(INSTANCES.a, tokenA, `/api/networks/${networkId}/members`, {
       instanceId: 'instance-b-vote-test',
       label: 'Duplicate',
@@ -316,10 +316,10 @@ describe('RSA invite handshake', () => {
   });
 
   it('Handshake apply with invalid ID returns 401', async () => {
-    // Use a valid-formatted (but non-existent) handshakeId â€” the nil UUID is
+    // Use a valid-formatted (but non-existent) handshakeId — the nil UUID is
     // explicitly allowed by Zod's uuid() (it's in the pattern allowlist).
     // instanceId must pass RFC 4122 variant bits (4th segment starts with [89abAB]).
-    // rsaPublicKeyPem must be â‰¥ 100 chars per the schema.
+    // rsaPublicKeyPem must be ≥ 100 chars per the schema.
     const fakePem = '-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA' +
       'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n' +
       '-----END PUBLIC KEY-----';
@@ -331,7 +331,7 @@ describe('RSA invite handshake', () => {
       instanceUrl: 'http://attacker:3200',
       rsaPublicKeyPem: fakePem,
     });
-    // Non-existent handshakeId â†’ 401 (after schema passes)
+    // Non-existent handshakeId → 401 (after schema passes)
     assert.equal(r.status, 401, `Expected 401, got ${r.status}: ${JSON.stringify(r.body)}`);
   });
 
@@ -373,7 +373,7 @@ describe('RSA invite handshake', () => {
     const tokenForB = tokenForBBuf.toString('utf8');
     assert.ok(tokenForB.startsWith('ythril_'), 'Decrypted token should be valid PAT');
 
-    // B generates a synthetic peer token for A â€” avoids requiring instance B to be running.
+    // B generates a synthetic peer token for A — avoids requiring instance B to be running.
     // The finalize endpoint only validates that the decrypted value starts with 'ythril_'
     // and stores it in secrets.peerTokens; it does not verify the token against any instance.
     const tokenForA = `ythril_${randomBytes(32).toString('base64url')}`;

@@ -41,7 +41,7 @@
  * complete. "Absent" and "not looked at" are different answers and this endpoint is required to say
  * which one it is giving.
  */
-import { col, asFilter } from '../db/mongo.js';
+import { col } from '../db/mongo.js';
 import { getSpaceMeta } from '../spaces/schema-validation.js';
 import type { EntityDoc, EdgeDoc, PropertySchema } from '../config/types.js';
 import { LINK_CLASSES, linkGroupsOfClass } from './link-adjacency.js';

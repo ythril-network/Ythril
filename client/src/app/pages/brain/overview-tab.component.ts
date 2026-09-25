@@ -32,10 +32,6 @@ import { retentionSummary as summariseRetention, retentionTypeOverrides as reten
 import { CollectionTab } from './brain-tabs';
 import { ErModelPanelComponent } from './er-model-panel.component';
 
-/** `key` doubles as the Brain tab this tile jumps to. Typed from the shared union rather than re-declared,
- *  so a tab added to the Brain and a tile added here can no longer disagree in silence. */
-interface StatCard { key: CollectionTab; icon: string; label: string; value: number }
-
 @Component({
   selector: 'app-overview-tab',
   standalone: true,

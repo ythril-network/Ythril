@@ -1,13 +1,13 @@
 ﻿/**
- * Integration tests: Voting API â€” member join and remove vote rounds
+ * Integration tests: Voting API — member join and remove vote rounds
  *
  * Covers:
  *  - GET /api/networks/:id/votes: list rounds, empty when none pending
- *  - POST /api/networks/:id/votes/:roundId: cast yes â†’ member added / member removed
- *  - POST /api/networks/:id/votes/:roundId: cast veto â†’ member blocked / member kept
- *  - Invalid vote value â†’ 400
- *  - Vote on non-existent round â†’ 404
- *  - Re-voting on an already-concluded round â†’ 409 or 404
+ *  - POST /api/networks/:id/votes/:roundId: cast yes → member added / member removed
+ *  - POST /api/networks/:id/votes/:roundId: cast veto → member blocked / member kept
+ *  - Invalid vote value → 400
+ *  - Vote on non-existent round → 404
+ *  - Re-voting on an already-concluded round → 409 or 404
  *
  * Targets instance A (port 3200) only. No sync stack required.
  *
@@ -27,7 +27,7 @@ const TOKEN_FILE = path.join(__dirname, '..', 'sync', 'configs', 'a', 'token.txt
 let token;
 let run;
 
-// â”€â”€ helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── helpers ───────────────────────────────────────────────────────────────────
 
 async function createClosedNetwork() {
   const r = await post(INSTANCES.a, token, '/api/networks', {
@@ -60,9 +60,9 @@ async function isMember(networkId, instanceId) {
   return (r.body.members ?? []).some(m => m.instanceId === instanceId);
 }
 
-// â”€â”€ GET /api/networks/:id/votes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── GET /api/networks/:id/votes ───────────────────────────────────────────────
 
-describe('Votes API â€” list rounds', () => {
+describe('Votes API — list rounds', () => {
   let networkId;
 
   before(async () => {
@@ -98,9 +98,9 @@ describe('Votes API â€” list rounds', () => {
   });
 });
 
-// â”€â”€ Join vote â€” yes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Join vote — yes ────────────────────────────────────────────────────────────
 
-describe('Votes API â€” join round: yes vote adds member', () => {
+describe('Votes API — join round: yes vote adds member', () => {
   let networkId;
   let memberId;
   let roundId;
@@ -138,9 +138,9 @@ describe('Votes API â€” join round: yes vote adds member', () => {
   });
 });
 
-// â”€â”€ Join vote â€” veto â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Join vote — veto ───────────────────────────────────────────────────────────
 
-describe('Votes API â€” join round: veto blocks member', () => {
+describe('Votes API — join round: veto blocks member', () => {
   let networkId;
   let memberId;
   let roundId;
@@ -176,9 +176,9 @@ describe('Votes API â€” join round: veto blocks member', () => {
   });
 });
 
-// â”€â”€ Remove vote â€” yes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Remove vote — yes ──────────────────────────────────────────────────────────
 
-describe('Votes API â€” remove round: yes vote removes member', () => {
+describe('Votes API — remove round: yes vote removes member', () => {
   let networkId;
   let memberId;
   let removeRoundId;  // set in first test, used by subsequent tests
@@ -220,9 +220,9 @@ describe('Votes API â€” remove round: yes vote removes member', () => {
   });
 });
 
-// â”€â”€ Remove vote â€” veto â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Remove vote — veto ─────────────────────────────────────────────────────────
 
-describe('Votes API â€” remove round: veto keeps member', () => {
+describe('Votes API — remove round: veto keeps member', () => {
   let networkId;
   let memberId;
   let removeRoundId;
@@ -255,9 +255,9 @@ describe('Votes API â€” remove round: veto keeps member', () => {
   });
 });
 
-// â”€â”€ Error paths â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Error paths ────────────────────────────────────────────────────────────────
 
-describe('Votes API â€” error paths', () => {
+describe('Votes API — error paths', () => {
   let networkId;
   let roundId;
 

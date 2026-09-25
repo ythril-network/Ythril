@@ -42,7 +42,7 @@ import { col, asFilter, asDoc } from '../db/mongo.js';
 import { getConfig } from '../config/loader.js';
 import { nextSeq } from '../util/seq.js';
 import { edgeIdFor } from './edge-id.js';
-import { legacyField, linkClassFor, linkClassesFrom, linksStartingFrom } from './link-adjacency.js';
+import { legacyField, linksStartingFrom } from './link-adjacency.js';
 import { assertRefsResolve, ReferenceRefusal } from './entity-refs.js';
 import { isStrictLinkage } from '../spaces/proxy.js';
 import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';

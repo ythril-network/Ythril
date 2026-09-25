@@ -14,7 +14,7 @@ import { ChronoTabComponent } from './chrono-tab.component';
 import { OverviewTabComponent } from './overview-tab.component';
 import { ReviewTabComponent } from './review-tab.component';
 import { FormsModule } from '@angular/forms';
-import { Space, SpaceStats, AboutInfo, EmbeddingQueue, VoteRound, TokenAccessEntry, CompletenessReport, SpaceActivity } from '../../core/api.types';
+import { Space, SpaceStats, AboutInfo } from '../../core/api.types';
 import { SpacesApi } from '../../core/spaces-api.service';
 import { OverviewDataService } from './overview-data.service';
 import { SpaceSettingsPopupComponent } from '../settings/space-settings-popup.component';
@@ -22,9 +22,6 @@ import { SpacesStore } from '../settings/spaces-store.service';
 import { SpaceSettingsState } from '../settings/space-settings-state.service';
 import { BrainApi } from '../../core/brain-api.service';
 import { AdminApi } from '../../core/admin-api.service';
-import { NetworksApi } from '../../core/networks-api.service';
-import { forkJoin, of } from 'rxjs';
-import { catchError } from 'rxjs/operators';
 import { GraphComponent } from '../graph/graph.component';
 import { FileManagerComponent } from '../files/file-manager.component';
 import { PhIconComponent } from '../../shared/ph-icon.component';
@@ -392,7 +389,6 @@ export class BrainComponent implements OnInit, OnDestroy {
   readonly spaceSettings = inject(SpaceSettingsState);
   private brainApi = inject(BrainApi);
   private adminApi = inject(AdminApi);
-  private networksApi = inject(NetworksApi);
   private transloco = inject(TranslocoService);
   /** Transient outcomes go through the app's one toast channel — see runReindex() for why not inline. */
   private toast = inject(ToastService);

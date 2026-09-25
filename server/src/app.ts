@@ -5,7 +5,6 @@ import { shouldCompress, staticCacheControl } from './util/transfer.js';
 import { importDocuments, importPayloadError } from './api/admin-import.js';
 import { SERVER_VERSION } from './util/server-version.js';
 import path from 'path';
-import fs from 'node:fs';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'url';
 import { tokensRouter } from './api/tokens.js';
@@ -46,12 +45,12 @@ import { pipelineStatusRouter } from './api/pipeline-status.js';
 import { spaceActivityRouter } from './api/space-activity.js';
 import { maintenanceMiddleware } from './maintenance.js';
 import { globalRateLimit, ipFloodBackstop } from './rate-limit/middleware.js';
-import { configExists, reloadConfig, getConfig, saveConfig, loadSecrets, startConfigWatcher } from './config/loader.js';
-import { requireAuth, requireAdminMfa, requireAdminMfaScoped } from './auth/middleware.js';
+import { configExists, reloadConfig, getConfig, loadSecrets, startConfigWatcher } from './config/loader.js';
+import { requireAdminMfa, requireAdminMfaScoped } from './auth/middleware.js';
 import { clearTokenCache } from './auth/tokens.js';
 import { clearOidcCache } from './auth/oidc.js';
 import { initSpace, ensureGeneralSpace, wipeSpace, reconcilePendingSpaceOp, WIPE_COLLECTION_TYPES, type WipeCollectionType } from './spaces/lifecycle.js';
-import { col, asFilter, asDoc } from './db/mongo.js';
+import { col } from './db/mongo.js';
 import { log, runWithRequestId } from './util/log.js';
 import { rearmCronSchedulers } from './schedulers.js';
 import { getReadiness, classifyCheckError } from './ready.js';
@@ -659,7 +658,7 @@ export function createApp() {
   });
 
   // ── Global error handler ─────────────────────────────────────────────────
-  app.use((err: unknown, req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
     // Propagate HTTP-level errors from body-parser (e.g. 413 Payload Too Large)
     if (err && typeof err === 'object' && 'status' in err && typeof (err as { status: unknown }).status === 'number') {
       const httpErr = err as { status: number; message: string };

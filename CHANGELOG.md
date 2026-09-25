@@ -27,6 +27,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   supplied unknown id is ignored and the server mints one, an entity's `type` is required, and `filter`'s default
   `limit` is 200.
 
+- **Cleanup, part 2** (`Q-45.3`, `Q-45.4`). No behaviour changes:
+  - About 250 unused imports, locals and parameters are gone from server and client, and the compiler now
+    refuses new ones (`noUnusedLocals`, `noUnusedParameters`). An intentionally unused parameter starts with `_`.
+  - Four of the most commented server files keep what each comment prevents and lose the history, about 680
+    lines.
+  - Four rules that were asserted in several test files each have one home. Two gates that could miss a case
+    now derive what they check, and a third that passed on an unused import reads the file that applies the rule.
+  - Eleven test files carried mis-decoded UTF-8; they are repaired, and the encoding gate now covers `testing/`.
+
+### Fixed
+
+- **The NLP sidecar has a card on the Models tab** (`F-31`). It was wired and probed on the About page, but
+  missing from the Models screen and from the pipeline status that screen reads. So an operator could not see
+  from there that conversation ingest has what it needs. The sidecar cards are now one shared component, and the
+  gate that checks every sidecar has a card reads the list from the compose file instead of a hand-written one.
+
+- **A file deleted while it was being processed no longer leaves records behind.** A text file's chunk records
+  are written at the end of its processing job, so deleting the file or its folder during the job left those
+  records behind as orphans that still appeared in file metadata. The job now checks that its file still exists
+  after writing, and removes what it wrote if not.
+
 ## [5.2.0] — 2026-09-25
 
 **Networks become a whole feature on both doors, a space's schema travels with its records, and a conversation can

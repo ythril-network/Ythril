@@ -73,12 +73,11 @@ describe('the resolver really is one switch at three tiers', () => {
 });
 
 describe('`false` at the record tier never reaches the resolver as `false`', () => {
-  it('a stored false arrives as "not stated", under either spelling', () => {
+  it('a stored false arrives as "not stated"', () => {
     // This is the whole of the trap, and it now lives in one function instead of being spelled inline at
     // each reader. Asserted by calling it: a regex over the call site could only ever check one caller.
     assert.equal(recordSuppression({ suppressEmbeddings: false }), undefined,
       'if this becomes a plain read, the docs saying `false` cannot un-suppress stop being true');
-    assert.equal(recordSuppression({ excludeFromVectorSearch: false }), undefined);
     assert.equal(recordSuppression({ suppressEmbeddings: true }), true);
     assert.equal(recordSuppression({}), undefined);
     assert.equal(recordSuppression(undefined), undefined);
@@ -164,14 +163,6 @@ describe('the record tier, now that it has one name', () => {
       'a string must be a refusal on both doors');
   });
 
-  it('and the old spelling is no longer an input alias', () => {
-    // Not a duplicate of the removal gate: that one reads SOURCES, this one exercises the parser. A
-    // caller sending the retired name must get nothing back, not a silently accepted value.
-    assert.deepEqual(parseRecordSuppression({ excludeFromVectorSearch: true }),
-      { ok: true, value: undefined },
-      'the retired spelling is still read as input, so a caller is told 201 for a field nothing applies');
-  });
-
   it('the not-suppressed filter is a $ne, and names one key', () => {
     /*
      * `$ne` rather than `$exists`, because a record that has never carried the field must COUNT as not
@@ -193,9 +184,7 @@ describe('both doors name the one tier name', () => {
     const d = DESC();
     assert.match(d, /suppressEmbeddings/, 'the name every tier uses');
     assert.match(d, /record\s*>\s*schema\s*>\s*space/, 'and the resolution order');
-    assert.doesNotMatch(d, /excludeFromVectorSearch/,
-      'the old spelling is an input alias, not a name to offer — a description is what an agent constructs '
-      + 'arguments from, so naming both there rebuilds the defect the rename removed');
+    // That it does not name the retired spelling is asserted in the removal gate named above.
   });
 
   it('and it still states the traversal answer the owner asked for', () => {

@@ -12,7 +12,6 @@
  * pattern in api/files.ts.
  */
 
-import path from 'node:path';
 import { toDocId } from '../util/paths.js';
 import { escapeRegex } from '../util/redos.js';
 import { authorRef } from '../config/author.js';
@@ -20,11 +19,9 @@ import { col, asFilter, asDoc, asUpdate } from '../db/mongo.js';
 import { reconcileLinks, removeLinksFrom, assertDesiredLinks } from '../brain/links.js';
 import { linksStartingFrom } from '../brain/link-adjacency.js';
 import { nextSeq } from '../util/seq.js';
-import { isStrictLinkage } from '../spaces/proxy.js';
 import { expiryForCreate } from '../brain/ttl.js';
 import { enqueueEmbedJob } from '../brain/embed-queue.js';
 import { mergePropertiesOrKeep } from '../brain/merge-fields.js';
-import { LINK_CLASSES } from '../brain/link-adjacency.js';
 
 /**
  * The optional fields a `deleteFields` path may clear on a file's metadata record.
@@ -46,8 +43,7 @@ export const DELETABLE_FILE_META_FIELDS: readonly string[] = [
   'description', 'excerpt', 'tags', 'properties',
 ];
 import { applyDeleteFields } from '../brain/delete-fields.js';
-import { getConfig } from '../config/loader.js';
-import type { FileMetaDoc, AuthorRef, EntityDoc } from '../config/types.js';
+import type { FileMetaDoc, EntityDoc } from '../config/types.js';
 import { spaceCollection } from '../db/space-collection.js';
 
 

@@ -55,7 +55,6 @@ export async function storeChunk(
   filePath: string,
   data: Buffer,
   start: number,
-  end: number,
   total: number,
 ): Promise<{ received: number; complete: boolean }> {
   const id = uploadId(spaceId, filePath, total);

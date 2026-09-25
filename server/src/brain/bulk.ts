@@ -37,7 +37,6 @@ import type { EntityDoc, ChronoType, ChronoStatus } from '../config/types.js';
 export const BULK_MAX_PER_TYPE = 500;
 
 import { UUID_V4_RE, edgeEndpointKind, isWellFormedRef } from './entity-refs.js';
-import { storedEdgeKind } from './entity-refs.js';
 import { REF_KINDS } from '../config/types-knowledge.js';
 import type { RefKind } from '../config/types-knowledge.js';
 import { NEVER_RETURNED_PROJECTION } from './read-projection.js';

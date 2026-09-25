@@ -133,7 +133,7 @@ export const network_syncTool: ToolHandler = {
         + 'set from the error count.',
   mutating: true,
   admin: true,
-  inputSchema: (s: ToolSchemas) => ({
+  inputSchema: (_s: ToolSchemas) => ({
           type: 'object',
           properties: {
             peerId: {

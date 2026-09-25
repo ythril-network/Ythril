@@ -60,10 +60,9 @@ function tokenRecordBlock() {
   return block;
 }
 
-let isInstanceAdmin, migrateToken;
+let isInstanceAdmin;
 before(async () => {
   ({ isInstanceAdmin } = await import('../../server/dist/auth/middleware.js'));
-  ({ migrateToken } = await import('../../server/dist/auth/rights-migration.js'));
 });
 
 describe('the field is gone from the record and the plumbing', () => {
@@ -204,23 +203,10 @@ describe('what still answers the question', () => {
   });
 });
 
-describe('a pre-matrix token keeps everything the flag gave it', () => {
-  it('migrateToken still turns admin into instanceAdmin', () => {
-    assert.equal(migrateToken({ admin: true }).instanceAdmin, true);
-    assert.equal(migrateToken({}).instanceAdmin, false);
-  });
-
-  it('and into createSpaces, which is easy to forget', () => {
-    // The migration derives TWO instance-level flags from the one boolean. A deletion that preserved only
-    // the first would quietly remove space-creation from every legacy admin.
-    assert.equal(migrateToken({ admin: true }).createSpaces, true);
-    assert.equal(migrateToken({}).createSpaces, false);
-  });
-
-  it('and still gives it the admin rung, not merely the flags', () => {
-    const r = migrateToken({ admin: true, spaces: ['qa'] });
-    for (const area of ['knowledge', 'files', 'schema', 'dataQuality']) {
-      assert.equal(r.perSpace.qa[area], 'admin', `${area} must come back as admin`);
-    }
-  });
-});
+/*
+ * ── A PRE-MATRIX TOKEN KEEPS EVERYTHING THE FLAG GAVE IT ─────────────────────────────────────
+ *
+ * That `migrateToken` still turns `admin` into `instanceAdmin` AND `createSpaces`, and into the admin rung
+ * on every area, is asserted per shape in `rights-migration-never-widens.test.js` — the one home of the
+ * legacy-field mapping (`Q-45.4`). Three cases restating it stood here.
+ */

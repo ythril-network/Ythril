@@ -3,16 +3,16 @@
  *
  * Covers:
  *  - Upload file (JSON body, raw bytes)
- *  - Download file (GET â†’ raw bytes)
- *  - List directory (GET â†’ JSON)
+ *  - Download file (GET → raw bytes)
+ *  - List directory (GET → JSON)
  *  - Delete file (204), delete file missing (404)
  *  - Delete directory requires { confirm: true } (422 without, 204 with)
  *  - Move/rename file (PATCH)
  *  - mkdir (POST /mkdir)
  *  - Path traversal blocked (400)
- *  - Non-existent path â†’ 404
- *  - Non-existent space â†’ 404
- *  - No auth â†’ 401
+ *  - Non-existent path → 404
+ *  - Non-existent space → 404
+ *  - No auth → 401
  *
  * Run: node --test testing/integration/files.test.js
  */

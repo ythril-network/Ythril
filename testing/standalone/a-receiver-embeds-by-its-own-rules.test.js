@@ -190,8 +190,8 @@ describe('the record tier of suppression reaches the receiver', () => {
       assert.ok(Object.prototype.hasOwnProperty.call(shape, 'suppressEmbeddings'),
         `${name} does not declare 'suppressEmbeddings', so it is stripped on push and the receiver embeds `
         + 'a record its author marked never-embed');
-      assert.ok(!Object.prototype.hasOwnProperty.call(shape, 'excludeFromVectorSearch'),
-        `${name} still declares the pre-3.1.0 spelling, removed in 4.0 — it would be accepted and never read`);
+      // That no schema still declares the pre-3.1.0 spelling is asserted in
+      // `the-legacy-suppression-spelling-is-gone.test.js`, the one home of that rule (`Q-45.4`).
     }
   });
 

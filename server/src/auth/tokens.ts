@@ -16,7 +16,6 @@ function toBase62(bytes: Buffer): string {
   let num = BigInt('0x' + bytes.toString('hex'));
   if (num === 0n) return '0';
   let out = '';
-  const base = BigInt(64); // use 64 slots but only 62 chars — safe due to distribution
   while (num > 0n) {
     out = (BASE62[Number(num % BigInt(62))] ?? '0') + out;
     num = num / BigInt(62);

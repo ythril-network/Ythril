@@ -1834,6 +1834,8 @@
   "mediaProcessing.render.purpose": "Rendert Dokumentseiten zu Bildern, damit das Bildmodell sie lesen kann. Er erzeugt Bilder von Seiten, niemals Text — das Extrahieren von Text ist Aufgabe des Dokumentkonverters.",
   "mediaProcessing.office.title": "Office-Renderer",
   "mediaProcessing.office.purpose": "Rendert Word-, Excel- und PowerPoint-Seiten zu Bildern. Getrennt vom Seiten-Renderer, weil Office-Formate eine andere Engine benötigen.",
+  "mediaProcessing.nlp.title": "NLP (Gesprächsextraktion)",
+  "mediaProcessing.nlp.purpose": "Findet die Personen, Orte und Dinge, die ein Gespräch erwähnt, damit ein Ingest-Lauf daraus Einträge machen kann. Ohne ihn lassen sich Gespräche nicht einlesen.",
   "mediaProcessing.converter.title": "Dokumentkonverter",
   "mediaProcessing.converter.purpose": "Extrahiert Text und Tabellen aus PDFs, Word-Dokumenten und EPUBs. Er liest die Struktur der Datei direkt und rendert niemals Seiten zu Bildern — das ist Aufgabe des Seiten-Renderers.",
   "mediaProcessing.docVlm.title": "Dokument-VLM",

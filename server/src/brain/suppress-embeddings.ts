@@ -1,7 +1,7 @@
 import { TYPE_FIELD } from './ttl.js';
 import type { KnowledgeType, BrainEmbedRecordType } from '../config/types.js';
 import { getSpaceMeta } from '../spaces/schema-validation.js';
-import { RECORD_SUPPRESS_FIELD, parseRecordFlag, recordFlagTypeError } from './record-flag.js';
+import { RECORD_SUPPRESS_FIELD, parseRecordFlag } from './record-flag.js';
 
 /**
  * Should this record be embedded at all?

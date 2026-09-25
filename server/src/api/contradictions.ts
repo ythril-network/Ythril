@@ -18,10 +18,9 @@ import type { TokenRights, Rung } from '../config/rights-shape.js';
  * leaves the records themselves to the normal edit paths.
  */
 import { Router } from 'express';
-import { requireAuth, requireAdminMfa, denyReadOnly, requireAuthMfa } from '../auth/middleware.js';
+import { requireAuth, denyReadOnly, requireAuthMfa } from '../auth/middleware.js';
 import { globalRateLimit } from '../rate-limit/middleware.js';
 import { col, asFilter, asUpdate } from '../db/mongo.js';
-import { getConfig } from '../config/loader.js';
 import { log } from '../util/log.js';
 import { pairContentHash } from '../brain/dupe-scanner.js';
 import { scanSpace } from '../brain/contradiction-scanner.js';

@@ -77,8 +77,10 @@ describe('the directive cap', () => {
     // The disagreement itself, asserted rather than assumed away: both sides now read one identifier, so
     // this fails if either is given its own literal again.
     const mcp = strip(readFileSync('server/src/mcp/tools/spaces.ts', 'utf8'));
-    const rest = strip(readFileSync('server/src/api/spaces.ts', 'utf8'));
-    for (const [name, src] of [['mcp/tools/spaces.ts', mcp], ['api/spaces.ts', rest]]) {
+    // The REST body schema lives in spaces/body-schemas.ts. This read api/spaces.ts, and passed on an
+    // import nothing used after the schema moved.
+    const rest = strip(readFileSync('server/src/spaces/body-schemas.ts', 'utf8'));
+    for (const [name, src] of [['mcp/tools/spaces.ts', mcp], ['spaces/body-schemas.ts', rest]]) {
       assert.match(src, /SPACE_PURPOSE_MAX/, `${name} must use the shared constant`);
       assert.ok(!/maxLength: 2000|max\(2000\)|> 2000/.test(src), `${name} still carries the old 2000 bound`);
     }

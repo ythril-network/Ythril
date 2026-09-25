@@ -1,5 +1,5 @@
 import { TestBed } from '@angular/core/testing';
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { Component } from '@angular/core';
 import { getTranslocoModule } from '../testing/transloco-testing';
 import { ErrorStateComponent } from './error-state.component';

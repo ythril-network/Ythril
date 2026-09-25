@@ -22,7 +22,6 @@ const PORT = envInt('PORT', 3200);
 // ANSI helpers — no-op when stdout is not a TTY (e.g. piped logs)
 const isTTY = process.stdout.isTTY;
 const BOLD   = isTTY ? '\x1b[1m'           : '';
-const ORANGE = isTTY ? '\x1b[38;5;208m'    : '';
 const GREEN  = isTTY ? '\x1b[32m'          : '';
 const YELLOW = isTTY ? '\x1b[33m'          : '';
 const RESET  = isTTY ? '\x1b[0m'           : '';

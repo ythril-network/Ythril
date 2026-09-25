@@ -90,6 +90,9 @@ describe('different relationships derive different ids', () => {
     // `(a)-[knows]->(b)` and `(b)-[knows]->(a)` are two rows under the unique index, so they must be two ids.
     // Sorting the endpoints to make the key order-insensitive would silently merge them.
     assert.notEqual(edgeIdFor('a', 'b', 'knows'), edgeIdFor('b', 'a', 'knows'));
+    // And with the endpoint kinds swapped along with the ends: reversing an entity->file edge is not the same
+    // relationship as the file->entity one it mirrors.
+    assert.notEqual(edgeIdFor('a', 'b', 'knows', 'entity', 'file'), edgeIdFor('b', 'a', 'knows', 'file', 'entity'));
   });
 
   it('the separator cannot be forged out of the parts', () => {
@@ -97,9 +100,13 @@ describe('different relationships derive different ids', () => {
      * `${from}|${to}|${label}` is ambiguous if an id or label may contain the separator: ('a|b', 'c', 'd') and
      * ('a', 'b|c', 'd') would produce one key for two different edges. Entity ids are UUIDs today, but a label
      * is operator-supplied text and nothing stops it containing a pipe.
+     *
+     * The reason every part is LENGTH-PREFIXED, and the last case is the one only a prefix defeats: a label
+     * spelled like an encoded kind must not collide with an empty label carrying that kind.
      */
     assert.notEqual(edgeIdFor('a|b', 'c', 'd'), edgeIdFor('a', 'b|c', 'd'));
     assert.notEqual(edgeIdFor('a', 'b', 'c|d'), edgeIdFor('a', 'b|c', 'd'));
+    assert.notEqual(edgeIdFor('a', 'b', '4:file'), edgeIdFor('a', 'b', '', 'entity', 'file'));
   });
 });
 

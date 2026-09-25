@@ -1,6 +1,6 @@
 import type { TokenRights } from '../config/rights-shape.js';
 import { canWriteAnywhere } from '../auth/write-anywhere.js';
-import { spaceAdminSpacesFor, administersAnySpace } from '../auth/editor-scope.js';
+import { administersAnySpace } from '../auth/editor-scope.js';
 
 /** The shape this needs off a tool — the two flags that decide whether it is reachable at all. */
 export interface VisibilityFlags {

@@ -10,7 +10,7 @@ import { PhIconComponent } from '../../shared/ph-icon.component';
 import { BrandLogoComponent } from '../../shared/brand-logo.component';
 import { HelpLinkComponent } from '../../shared/help-link.component';
 import { helpTargetFor } from '../../shared/help-anchors';
-import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
+import { TranslocoPipe } from '@jsverse/transloco';
 
 @Component({
   selector: 'app-shell',
@@ -335,7 +335,6 @@ export class ShellComponent implements OnInit, OnDestroy {
   private auth = inject(AuthService);
   private router = inject(Router);
   private filesApi = inject(FilesApi);
-  private transloco = inject(TranslocoService);
   /** Public — the template reads embed.embedded() to hide the topbar. */
   protected embed = inject(EmbedService);
 

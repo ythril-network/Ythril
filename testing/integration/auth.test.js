@@ -171,14 +171,14 @@ describe('Token lifecycle', () => {
   });
 });
 
-// â”€â”€ Startup migration â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Startup migration ──────────────────────────────────────────────────────
 // Validates that tokens lacking the `prefix` field (created before the field
 // was introduced) are automatically evicted when the config is reloaded, and
 // that the eviction does not affect tokens that do have a prefix.
 //
 // Uses POST /api/admin/reload-config instead of docker restart so this test
 // does not kill the container while other test files run concurrently.
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ──────────────────────────────────────────────────────────────────────────
 describe('Legacy (prefix-less) tokens self-heal instead of being evicted', () => {
   it('a prefix-less token still authenticates after reload and its prefix is backfilled', async () => {
     // 1. Create a fresh token — it has a prefix field set by createToken().

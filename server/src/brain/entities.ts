@@ -27,7 +27,7 @@ import { checkDuplicates, type SimilarMatch } from './recall.js';
 import type { DupeCheckOpts } from './write-options.js';
 import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';
 import { log } from '../util/log.js';
-import type { EntityDoc, EdgeDoc, FactDoc, ChronoEntry, TombstoneDoc, FileMetaDoc } from '../config/types.js';
+import type { EntityDoc, EdgeDoc, TombstoneDoc, FileMetaDoc } from '../config/types.js';
 import { PROPERTIES_SCAN_MAX_MS, textContains } from './tag-filter.js';
 import { spaceCollection } from '../db/space-collection.js';
 

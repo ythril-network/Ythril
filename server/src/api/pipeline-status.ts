@@ -9,7 +9,7 @@
  *
  * What it reports, and why each one is here rather than inferred from config:
  *
- *   - **sidecars** — reachability of the conversion / page-render / office-render services. Config can
+ *   - **sidecars** — reachability of the conversion, page-render, office-render and NLP services. Config can
  *     only say what URL was configured; it cannot say whether anything is listening on it.
  *   - **models** — per stage: which model is configured, and whether its endpoint both responds AND
  *     lists that model. "Configured", "reachable" and "serving that model" are three different
@@ -33,7 +33,7 @@ import {
   allowPrivateForSlot, EGRESS_SLOTS, isLocalModelEndpoint, type EgressSlot,
 } from '../config/model-egress-policy.js';
 import { probeModelEndpoint, type ProbeVerdict } from './media-config.js';
-import { resolveVlmEndpoint, type VlmWire } from '../files/converters/vlm-endpoint.js';
+import { resolveVlmEndpoint } from '../files/converters/vlm-endpoint.js';
 import { getDb } from '../db/mongo.js';
 import { faceRecognitionAllowed } from '../files/converters/media-level.js';
 import { VECTOR_INDEXED_COLLECTIONS } from '../spaces/vector-index.js';
@@ -125,11 +125,15 @@ type AssistWhich = 'primary' | 'fallback' | null;
 
 // ── Sidecars ──────────────────────────────────────────────────────────────────
 
-/** The HTTP services the document pipeline calls out to, with the health path each one exposes. */
-const SIDECARS: Array<{ key: string; label: string; envVar: string; fallback: string; healthPath: string }> = [
+/**
+ * The first-party HTTP services the pipeline calls out to, with the health path each one exposes. Exported so
+ * the Models-screen gate can check every sidecar the deployment wires has a card.
+ */
+export const SIDECARS: Array<{ key: string; label: string; envVar: string; fallback: string; healthPath: string }> = [
   { key: 'unstructured', label: 'Document converter', envVar: 'CONVERSION_SIDECAR_URL', fallback: 'http://localhost:8000', healthPath: '/healthcheck' },
   { key: 'doc-render', label: 'Page renderer', envVar: 'RENDER_SIDECAR_URL', fallback: 'http://localhost:8100', healthPath: '/health' },
   { key: 'doc-office', label: 'Office renderer', envVar: 'RENDER_OFFICE_SIDECAR_URL', fallback: 'http://localhost:8101', healthPath: '/health' },
+  { key: 'doc-nlp', label: 'NLP (conversation extraction)', envVar: 'NLP_SIDECAR_URL', fallback: 'http://localhost:8102', healthPath: '/health' },
 ];
 
 async function probeSidecar(s: (typeof SIDECARS)[number]): Promise<SidecarStatus> {

@@ -1834,6 +1834,8 @@
   "mediaProcessing.render.purpose": "Renders document pages to images for the vision model to read. It produces pictures of pages, never text — extracting text is the document converter's job.",
   "mediaProcessing.office.title": "Office renderer",
   "mediaProcessing.office.purpose": "Renders Word, Excel and PowerPoint pages to images. Separate from the page renderer because office formats need a different engine.",
+  "mediaProcessing.nlp.title": "NLP (conversation extraction)",
+  "mediaProcessing.nlp.purpose": "Finds the people, places and things a conversation mentions, so an ingest run can turn them into records. Without it, conversations cannot be ingested.",
   "mediaProcessing.converter.title": "Document converter",
   "mediaProcessing.converter.purpose": "Extracts text and tables from PDFs, Word documents and EPUBs. It reads a file's structure directly; it never renders pages to images, which is the page renderer's job.",
   "mediaProcessing.docVlm.title": "Document VLM",

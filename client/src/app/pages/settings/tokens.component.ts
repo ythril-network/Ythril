@@ -12,7 +12,6 @@ import { computed } from '@angular/core';
 import { PhIconComponent } from '../../shared/ph-icon.component';
 import { ModalDirective } from '../../shared/modal.directive';
 import { SummaryStripComponent, SummaryItem } from '../../shared/summary-strip.component';
-import type { TokenRights } from './rights-glyph.component';
 import { TokenCreateDialogComponent } from './token-create-dialog.component';
 import { TokenRightsDialogComponent } from './token-rights-dialog.component';
 import { OwnTokenRightsComponent } from './own-token-rights.component';

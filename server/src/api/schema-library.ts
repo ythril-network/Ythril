@@ -34,7 +34,6 @@ import { boundedJson } from '../util/bounded-read.js';
 import { requireAuth, requireAdminMfa, acceptSchemaLibraryToken } from '../auth/middleware.js';
 import { globalRateLimit } from '../rate-limit/middleware.js';
 import { getSchemaLibrary, saveSchemaLibrary, getConfig, getSchemaCatalogs, saveSchemaCatalogs } from '../config/loader.js';
-import { updateSpace } from '../spaces/spaces.js';
 import { isSsrfSafeUrl, ssrfSafeFetch } from '../util/ssrf.js';
 import { z } from 'zod';
 import { PropertySchemaZ } from '../spaces/body-schemas.js';

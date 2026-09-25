@@ -118,7 +118,7 @@ describe('M11 — assembleChunks verifies coverage and hashes correctly', () => 
   async function seedChunks(space, parts) {
     // parts: array of { start, buf }
     for (const p of parts) {
-      await storeChunk(space, filePath, p.buf, p.start, p.start + p.buf.length - 1, TOTAL);
+      await storeChunk(space, filePath, p.buf, p.start, TOTAL);
     }
   }
   const A = Buffer.alloc(1000, 0x41);

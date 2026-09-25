@@ -333,7 +333,7 @@ describe('FileManagerComponent — the extract tab (characterization for G-3)', 
     let call = 0;
     const api = {
       ...makeApi(),
-      getFileExtract: (_s: string, _p: string, _limit: number, skip: number) => {
+      getFileExtract: (_s: string, _p: string, _limit: number, _skip: number) => {
         call += 1;
         return of(pages[Math.min(call - 1, pages.length - 1)]);
       },

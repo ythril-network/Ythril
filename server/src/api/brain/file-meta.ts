@@ -10,23 +10,21 @@
  * Split out of the api/brain.ts monolith (A17.3); handlers are unchanged.
  */
 import { Router } from 'express';
-import { requestActor } from '../../auth/request-actor.js';
 import { toDocId } from '../../util/paths.js';
 import { requireSpaceAuth, denyReadOnly, requireAdmin } from '../../auth/middleware.js';
 import { listTokens } from '../../auth/tokens.js';
 import { globalRateLimit } from '../../rate-limit/middleware.js';
-import { updateFileMeta, deleteFileMeta, getFileMeta } from '../../files/file-meta.js';
-import { assertRefsResolve } from '../../brain/entity-refs.js';
+import { updateFileMeta, getFileMeta } from '../../files/file-meta.js';
 import { validateDeleteFields } from '../../brain/delete-fields.js';
 import { linkInputError, linkFieldsFrom } from '../../brain/write-connections.js';
 import { readEditAudit } from '../../brain/edit-audit.js';
 import { primitivePropertyError } from '../../brain/property-values.js';
-import { fileExists, readFile } from '../../files/files.js';
+import { readFile } from '../../files/files.js';
 import { log } from '../../util/log.js';
 import { getConfig } from '../../config/loader.js';
 import { col, asFilter } from '../../db/mongo.js';
 import { parseLimit, parseSkip } from '../../util/pagination.js';
-import { resolveMemberSpaces, resolveWriteTarget, findFirstAcrossMembers, collectAcrossMembers, isStrictLinkage } from '../../spaces/proxy.js';
+import { resolveWriteTarget, findFirstAcrossMembers, isStrictLinkage } from '../../spaces/proxy.js';
 import { memberSpacesForRequest } from '../../spaces/proxy-scoped.js';
 import type { FileMetaDoc } from '../../config/types.js';
 import { getMediaJobCounts, FAILED_SAMPLE_LIMIT, FAILED_REASON_LIMIT, type MediaJobCounts } from '../../files/media/job-queue.js';

@@ -19,9 +19,9 @@ import { getEmbeddingConfig } from '../config/loader.js';
 import { needsReindex } from '../spaces/_shared.js';
 // The pure half — merge, rank and the text projections. Moved out to pay back part of this file's
 // god-file ratchet raise; see recall-shape.ts for why the type import back here is not a cycle.
-import { mergeRecallResults, rankOf, byIdAsc, byRankThenId, rerankTextOf, summariseRecall } from './recall-shape.js';
+import { mergeRecallResults, byIdAsc, byRankThenId, summariseRecall } from './recall-shape.js';
 import { vectorFilterFieldsFor } from '../spaces/vector-index.js';
-import { FilterExpression, buildMongoFilter, toNativeVectorFilter, rawToNativeVectorFilter } from './filter.js';
+import { buildMongoFilter, toNativeVectorFilter, rawToNativeVectorFilter } from './filter.js';
 import { isRawFilter, recallPredicate, type RecallFilter } from './recall-filter.js';
 import { observeRecallPath, type RecallPathObservation } from './recall-path.js';
 export { observeRecallPath, type RecallPathObservation };

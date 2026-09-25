@@ -6,7 +6,7 @@
  *      the underlying request cancelled) — this is how the UI cancels an upload.
  */
 import { TestBed } from '@angular/core/testing';
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { FilesApi } from './files-api.service';

@@ -202,7 +202,7 @@ export interface PageDecorationAsks {
 
 export async function decoratePage<T extends object>(
   collection: string,
-  spaceId: string,
+  _spaceId: string,
   rows: readonly T[],
   readAcrossMembers: (read: (memberId: string) => Promise<Record<string, unknown>[]>) => Promise<Record<string, unknown>[]>,
   asks: PageDecorationAsks = {},
@@ -216,7 +216,6 @@ export async function decoratePage<T extends object>(
   // The cast is the shape `withEndpointNames` needs and the rows already have: an edge row carries
   // `from`/`to`, and the optional kinds decide which collection holds each endpoint's name.
   return await withEndpointNames(
-    spaceId,
     rows as unknown as Array<{ from: string; to: string }>,
     readAcrossMembers,
   ) as unknown as T[];

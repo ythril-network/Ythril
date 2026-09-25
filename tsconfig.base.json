@@ -9,6 +9,11 @@
     // reviewer, the tests and `tsc` all walked past, because the default for this flag only greys the code out
     // in an editor. There is no legitimate use for a statement that cannot run.
     "allowUnreachableCode": false,
+    // Unused locals and parameters are ERRORS. A binding nobody reads is either dead code or a value somebody
+    // meant to use and did not, and until 5.3 there were 250 of them. An intentionally unused parameter is
+    // spelled with a leading underscore.
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
     "allowUnusedLabels": false,
     "esModuleInterop": true,
     "skipLibCheck": true,

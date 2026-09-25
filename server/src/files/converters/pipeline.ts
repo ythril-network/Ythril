@@ -28,7 +28,7 @@ import { col, asFilter, asDoc } from '../../db/mongo.js';
 import { embed } from '../../brain/embedding.js';
 import { getConfig, getDocumentProcessingConfig, getEmbeddingConfig } from '../../config/loader.js';
 import { vlmExtractDocument } from './vlm-extract.js';
-import type { FileMetaDoc, AuthorRef, DocExtractionMode, TextLevel } from '../../config/types.js';
+import type { FileMetaDoc, DocExtractionMode, TextLevel } from '../../config/types.js';
 import type { StepProgress } from './types.js';
 import { log } from '../../util/log.js';
 import { enqueueMediaJob } from '../media/job-queue.js';

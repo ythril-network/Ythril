@@ -723,9 +723,6 @@ export class MediaProcessingStateService {
 
   // ── unsaved-changes guard ──
 
-  /** What a save would send, as a string. Also what dirtiness is measured against. */
-  private snapshot(): string { return JSON.stringify(this.payload()); }
-
   /**
    * True when there is something a save would actually change.
    *
