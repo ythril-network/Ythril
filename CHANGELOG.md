@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **The integration guide and user guide describe only what exists, as it works now** (`Q-45.1`, `Q-45.2`). Examples
+  and references to tools, routes and types that are gone now name their replacements (`save_fact`, `filter`,
+  `POST /api/filter`, `FactDoc`). Nine pages that told the history of a behaviour — what it used to do, which
+  release fixed it — now state the rule, keeping a version note only where an older client has to change
+  something. Several statements that no longer matched the server were corrected on the way: for example, a
+  supplied unknown id is ignored and the server mints one, an entity's `type` is required, and `filter`'s default
+  `limit` is 200.
+
 ## [5.2.0] — 2026-09-25
 
 **Networks become a whole feature on both doors, a space's schema travels with its records, and a conversation can
