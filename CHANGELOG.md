@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A space's schema flows down its network with the records** (`F-39.1`). On a pub/sub network or a tree, each
+  instance now takes a shared space's type schemas, purpose, usage notes and the rest of its governed meta from the
+  instance above it every cycle (`GET /api/sync/meta`), so a space created by a join is no longer bare. The merge only
+  adds: new types are added, a type both sides hold keeps its local properties and gains the network's, and an exact
+  type-and-property match takes the network's definition. Nothing local is removed, nothing flows up, operational
+  settings stay local, and a schema that cannot be merged is skipped without stopping the records.
+
 - **A space can be added to an existing network** (`F-38.3`). Until now a network carried the spaces it was created
   with and nothing more. The publisher of a pub/sub network, or the root of a tree, now adds one from the network card,
   `POST /api/networks/:id/spaces` or MCP `network_add_space` — same parameters, rights and refusals on all three. The

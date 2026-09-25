@@ -179,6 +179,7 @@ Base path: `/api/sync` — used by the sync engine between peers. All endpoints 
 | `/api/sync/file-tombstones` | GET | List file deletion tombstones |
 | `/api/sync/file-tombstones` | POST | Apply file deletion tombstones |
 | `/api/sync/merkle` | GET | Compute Merkle root |
+| `/api/sync/meta` | GET | A space's governed meta (schemas, purpose, notes) for a downstream peer to merge — `?spaceId=&networkId=` |
 | `/api/sync/networks/:networkId/members` | GET | Pull gossip member view |
 | `/api/sync/networks/:networkId/members` | POST | Push gossip member updates |
 | `/api/sync/networks/:networkId/votes` | GET | Pull open governance rounds |
@@ -482,7 +483,8 @@ else is hashed, and everything else crosses the wire — a field in neither cate
 ### Gossip Endpoints
 
 - `GET /api/sync/networks/:networkId/members` returns current member view (sensitive fields stripped).
-- `POST /api/sync/networks/:networkId/members` accepts member updates for gossip propagation. The `self` record carries the sender's `signingPublicKey`, which the receiver pins trust-on-first-use for verifying that member's signed votes.
+- `POST /api/sync/networks/:networkId/members` accepts member updates for gossip propagation. The `self` record carries the sender's `signingPublicKey`, which the receiver pins trust-on-first-use for verifying that member's signed votes, and `spaces`, the network's spaces, which the receiver adopts only from its upstream (publisher, tree parent) — see [Sync Protocol → Gossip phase](../sync-protocol.md#gossip-phase).
+- `GET /api/sync/meta?spaceId=&networkId=` returns `{ meta }` — what the network governs of the space, never the server's own counters — under the same admission as the space's records. A downstream instance merges it additively each cycle; see [Sync Protocol → Schema phase](../sync-protocol.md#schema-phase-pubsub-and-braintree).
 - `GET /api/sync/networks/:networkId/votes` returns open rounds.
 - `POST /api/sync/networks/:networkId/votes/:roundId` relays `{ vote: "yes" | "veto", instanceId, sig?, castAt? }`. A cast bearing a valid `sig` (Ed25519 over `ythril-vote:v1|network|round|subject|voter|vote`) is accepted from any relaying peer; an unsigned cast is accepted only directly from its own voter. Returns `403` if the cast is rejected. See [Sync Protocol → Signed vote casts](../sync-protocol.md).
 
