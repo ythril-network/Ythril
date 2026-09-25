@@ -11,6 +11,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 A patch: a token granted only space administration can write again.
 
+**Who is affected.** Only tokens whose rights are a space-administration grant and nothing else — no floor and no
+per-space rungs. That shape has been possible since 5.0, when space administration became a grant of its own. Such a token could read its
+spaces and was refused every write with *"This token has read-only access"*, although it administers them. A token
+that also holds any written `write` rung was never affected.
+
+**What to do.** Nothing, beyond rolling the image. There is no config change and no migration: the grant was always
+stored correctly, and it is only the check that now reads it.
+
 ### Fixed
 
 - **A token granted only space administration was refused as read-only.** Since 5.0 space administration can be
