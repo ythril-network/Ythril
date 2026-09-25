@@ -227,6 +227,23 @@ export function assistHopMs(legMs: number | undefined, hasFallback: boolean): nu
   return legMs === undefined ? undefined : hasFallback ? legMs * 2 : legMs;
 }
 
+/**
+ * The endpoint the Models card's Verify probes: the primary, or its fallback — as configured, not as the resolver
+ * would pick it now, because Verify is asked about a specific endpoint whether or not it would answer this minute.
+ * The primary is always external; a fallback is external unless it is a local sidecar.
+ */
+export function assistProbeTarget(fallback: boolean): { baseUrl?: string; model?: string; apiKey?: string; wire: AssistApi; external: boolean } {
+  const a = getDocumentProcessingConfig().assistModel;
+  const slot = fallback ? a?.fallback : a;
+  const apiKey = fallback ? getDocAssistFallbackApiKey() : getDocAssistApiKey();
+  return {
+    ...(slot?.baseUrl ? { baseUrl: slot.baseUrl } : {}), ...(slot?.model ? { model: slot.model } : {}),
+    ...(apiKey ? { apiKey } : {}),
+    wire: slot?.api ?? 'openai',
+    external: fallback ? !!slot?.baseUrl && !isLocalModelEndpoint(slot.baseUrl) : true,
+  };
+}
+
 /** For the pipeline status: what the window has spent, and whether the primary is being passed over. */
 export function assistBudgetStatus(now = Date.now()): { spent: number; budget?: AssistBudget; primaryCoolingDown: boolean } {
   const budget = getDocumentProcessingConfig().assistModel?.budget;

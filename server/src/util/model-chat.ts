@@ -56,6 +56,21 @@ export interface ChatTransport {
 /** The Messages API version this module speaks. */
 const ANTHROPIC_VERSION = '2023-06-01';
 
+/** Where the Claude API lives under an operator's base URL, with or without the `/v1` they typed. */
+const claudeBase = (baseUrl: string) => baseUrl.replace(/\/+$/, '').replace(/\/v1$/, '');
+
+/**
+ * How to list a Claude endpoint's models — for the probe, so it reaches the same host with the same credential
+ * shape inference uses. A Bearer token is not how the Claude API takes a key, so the OpenAI-style probe would
+ * report a working endpoint as refusing its credential. The reply is `{ data: [{ id }] }`, the OpenAI list shape.
+ */
+export function claudeListRequest(baseUrl: string, apiKey: string | undefined): { url: string; headers: Record<string, string> } {
+  return {
+    url: `${claudeBase(baseUrl)}/v1/models`,
+    headers: { 'anthropic-version': ANTHROPIC_VERSION, ...(apiKey ? { 'x-api-key': apiKey } : {}) },
+  };
+}
+
 export async function chatOnce(
   endpoint: ChatEndpoint,
   req: ChatRequest,
@@ -111,7 +126,7 @@ export async function chatOnce(
 async function claude(endpoint: ChatEndpoint, req: ChatRequest, transport: ChatTransport, fail: (m: string, s?: number) => Error): Promise<ChatReply> {
   const client = new Anthropic({
     apiKey: endpoint.apiKey ?? null,
-    baseURL: endpoint.baseUrl.replace(/\/+$/, '').replace(/\/v1$/, ''),
+    baseURL: claudeBase(endpoint.baseUrl),
     maxRetries: 0,
     // The SDK's own init, re-spelled into the shape every transport here takes: plain header record, string body.
     fetch: ((url: string | URL | Request, init?: RequestInit) => transport.post(String(url), {
