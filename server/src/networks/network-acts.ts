@@ -19,8 +19,11 @@
 import { v4 as uuidv4 } from 'uuid';
 import { z } from 'zod';
 import {
-  networkAddSpaceRefusal, networkCreateRefusal, networkLeaveRefusal, networkSettingsRefusal, visibleNetworks,
+  networkAddSpaceRefusal, networkCreateRefusal, networkInviteRefusal, networkLeaveRefusal, networkSettingsRefusal, visibleNetworks,
 } from '../auth/network-rights.js';
+import { randomBytes } from 'node:crypto';
+import bcrypt from 'bcrypt';
+import { BCRYPT_ROUNDS } from '../api/networks/_shared.js';
 import { recordOrigin } from '../auth/network-membership.js';
 import { revokePeerCredentialsIfOrphaned } from '../auth/tokens.js';
 import { getConfig, saveConfig, getSecrets } from '../config/loader.js';
@@ -282,4 +285,76 @@ export async function leaveNetworkAct(caller: Caller, id: string): Promise<Netwo
       .catch(err => log.error(`peer credential revocation for ${member.instanceId}: ${err}`));
   }
   return warnings.length ? { status: 200, body: { ok: true, warnings } } : { status: 204 };
+}
+
+// ── F-36 slice 3: an invite key, and a fork. ──────────────────────────────────────────────────────────────────
+
+/**
+ * Mint a fresh invite key for a network — reusable on pub/sub, single-use otherwise — and store only its hash.
+ * Same rights as the handshake invite: instance admin, or administering every space the network carries (`F-37`).
+ * A network the caller may not see is `404`.
+ */
+export async function inviteKeyAct(caller: Caller, id: string): Promise<NetworkActResult> {
+  const cfg = getConfig();
+  const net = visibleNetworks(caller, cfg.networks).find(n => n.id === id);
+  if (!net) return notFound;
+  const refusal = networkInviteRefusal(caller, net);
+  if (refusal) return { status: 403, error: refusal };
+  const key = `ythril_invite_${randomBytes(32).toString('base64url')}`;
+  const inviteKeyHash = await bcrypt.hash(key, BCRYPT_ROUNDS);
+  const fresh = getConfig();
+  const freshNet = fresh.networks.find(n => n.id === id);
+  if (!freshNet) return notFound;
+  freshNet.inviteKeyHash = inviteKeyHash;
+  saveConfig(fresh);
+  log.info(`Generated new invite key for network ${freshNet.id}${net.type === 'pubsub' ? ' (reusable)' : ' (shown once)'}`);
+  return {
+    status: 200,
+    body: {
+      inviteKey: key,
+      networkId: net.id,
+      ...(net.type === 'pubsub'
+        ? { reusable: true, note: 'This key is reusable — safe to publish in docs, QR codes, or share openly. Regenerating a new key revokes this one.' }
+        : { reusable: false, note: 'Store this key securely — it is single-use and will not be shown again' }),
+    },
+  };
+}
+
+export const ForkNetworkBody = z.object({
+  label: z.string().min(1).max(200),
+  type: z.enum(['closed', 'club']).default('closed'),
+  votingDeadlineHours: z.number().int().min(1).max(72).optional(),
+  spaces: z.array(z.string().min(1)).optional(),
+});
+
+/**
+ * Found a new network from an existing one — or from one this instance was ejected from, naming the spaces — with
+ * no members yet. Instance-admin at both doors.
+ */
+export function forkNetworkAct(sourceId: string, input: unknown): NetworkActResult {
+  const parsed = ForkNetworkBody.safeParse(input);
+  if (!parsed.success) return { status: 400, error: parsed.error.message };
+  const cfg = getConfig();
+  const sourceNet = cfg.networks.find(n => n.id === sourceId);
+  const isEjected = cfg.ejectedFromNetworks?.includes(sourceId) ?? false;
+  if (!sourceNet && !isEjected) return notFound;
+  const spaces = parsed.data.spaces ?? sourceNet?.spaces;
+  if (!spaces || spaces.length === 0) return { status: 400, error: 'spaces is required when the source network is no longer locally available' };
+  const unknownSpaces = spaces.filter(s => !cfg.spaces.some(cs => cs.id === s));
+  if (unknownSpaces.length > 0) return { status: 400, error: `Unknown spaces: ${unknownSpaces.join(', ')}` };
+  const forkedNet: NetworkConfig = {
+    id: uuidv4(),
+    label: parsed.data.label,
+    type: parsed.data.type,
+    spaces,
+    votingDeadlineHours: parsed.data.votingDeadlineHours ?? sourceNet?.votingDeadlineHours ?? 24,
+    members: [],
+    pendingRounds: [],
+    createdAt: new Date().toISOString(),
+    origin: 'created',  // a fork is a new network this instance founded
+  };
+  cfg.networks.push(forkedNet);
+  saveConfig(cfg);
+  log.info(`Forked network ${sourceId} → new network ${forkedNet.id} ('${forkedNet.label}')`);
+  return { status: 201, body: forkedNet as unknown as Record<string, unknown> };
 }

@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **An agent can mint an invite key and fork a network over MCP** (`F-36`, slice 3). `network_invite` and
+  `network_fork` are the same acts as `POST /api/networks/:id/invite` and `/fork` — same parameters, answers and
+  refusals on both doors.
+
 - **See and settle a schema clash between networks** (`F-39.3`). A space in several schema-sending networks
   shows, on its Schema tab, each network's layer in the order it applies and every clash between them, with the
   network that currently applies marked; the order can be changed there. `GET /api/spaces/:id/schema-layers` and
@@ -221,6 +225,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the tool names are checked against the registry.
 
 ### Fixed
+
+- **An unchanged network schema no longer rewrites the config every sync cycle** (`F-39.2` follow-up). Storing what
+  an upstream sent, and rebuilding the space's schema from it, saved the whole config file for every space on every
+  cycle even when nothing had changed. An identical layer is now nothing to do, and a rebuild writes only when
+  something it holds changed.
 
 - **An edit made through MCP is audited with what it changed** (`Q-50`). The REST door recorded each edit's
   before and after as the audit entry's `changes`; the same edit through an MCP tool left the operation alone, and
