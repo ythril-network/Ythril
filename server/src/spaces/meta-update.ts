@@ -37,6 +37,7 @@ import { ensureTtlIndex } from '../brain/ttl.js';
 import { peerSafeFetch } from '../sync/peer-fetch.js';
 import { proposedMetaFields } from '../sync/meta-round-merge.js';
 import { concludeRoundIfReady } from '../sync/governance.js';
+import { makeSignedOwnCast } from '../util/signing.js';
 import { log } from '../util/log.js';
 import { v4 as uuidv4 } from 'uuid';
 import { capDocExtractionMode } from '../files/converters/extraction-level.js';
@@ -355,6 +356,8 @@ export async function applySpaceMetaUpdate(plan: MetaUpdatePlan): Promise<MetaUp
          * either way, concluded or not, so peers learn of it exactly as before.
          */
         const opened = net.pendingRounds[net.pendingRounds.length - 1]!;
+        // The proposer's yes is required of it (S-7), so it is SIGNED: a bare cast is taken only from the voter itself.
+        opened.votes = [makeSignedOwnCast(net.id, opened, cfg.instanceId, 'yes')];
         if (!concludeRoundIfReady(net, opened)) rounds.push({ networkId: net.id, networkLabel: net.label, roundId });
       }
 

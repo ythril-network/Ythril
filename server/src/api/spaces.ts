@@ -11,6 +11,7 @@ import { getConfig, saveConfig, getSecrets, getSchemaLibrary, getDocumentProcess
 import { capDocExtractionMode } from '../files/converters/extraction-level.js';
 import { slugify, SPACE_PURPOSE_MAX, needsReindex } from '../spaces/_shared.js';
 import { createSpace, removeSpace } from '../spaces/lifecycle.js';
+import { makeSignedOwnCast } from '../util/signing.js';
 import { renameSpace } from '../spaces/rename.js';
 import { updateSpace, reorderSpaces } from '../spaces/spaces.js';
 import { checkMetaPrecondition, preconditionErrorBody } from '../spaces/meta-precondition.js';
@@ -861,6 +862,8 @@ spacesRouter.delete('/:id', globalRateLimit, requireAdminMfaScoped('id'), async 
       votes: [{ instanceId: cfg.instanceId, vote: 'yes', castAt: now }],
       spaceId: id,
     });
+    // The proposer's yes is required of it (S-7), so it is SIGNED: a bare cast is taken only from the voter itself.
+    const opened = net.pendingRounds[net.pendingRounds.length - 1]!; opened.votes = [makeSignedOwnCast(net.id, opened, cfg.instanceId, 'yes')];
     rounds.push({ networkId: net.id, networkLabel: net.label, roundId });
   }
   saveConfig(cfg);

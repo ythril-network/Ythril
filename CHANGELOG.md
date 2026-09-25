@@ -10,7 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [5.1.7] — 2026-09-25
 
 A security patch for networks: a deletion or wipe vote can only act on a space its network carries, and only once it
-has passed. Please roll it onto every instance that is in a network.
+has passed, and a member can no longer be named as a round's proposer to have its vote ignored. Please roll it onto
+every instance that is in a network.
 
 **Who is affected.** Every instance in a network. A `space_deletion` or `space_wipe` round was applied whenever it had
 concluded with no veto — so a proposal that EXPIRED without enough yes deleted or emptied the space as if it had
@@ -26,6 +27,10 @@ on a networked instance and nobody voted for it, it is gone; restore it from a b
 - **A deletion or wipe vote acts only on a round that passed, only on a space its network carries, and once**
   (security). An expired round deletes nothing, a round naming a space the network does not share is ignored, and a
   concluded round is applied here at most once.
+- **A member cannot be named as another round's proposer to drop its vote** (security). A round's subject was left
+  out of its voters on every round type, so a peer could name any member as the proposer of a deletion or schema
+  change and that member's vote was no longer needed on the other members. The subject is now left out only on a
+  join or a removal; the real proposer's yes is cast, signed, when it opens the round.
 
 ## [5.1.6] — 2026-09-25
 
