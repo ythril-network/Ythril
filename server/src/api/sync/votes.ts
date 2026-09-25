@@ -27,11 +27,11 @@ syncVotesRouter.get('/networks/:networkId/votes', syncRateLimit, requireAuth, as
     const net = cfg.networks.find(n => n.id === req.params['networkId']);
     if (!net) { res.status(404).json({ error: 'Network not found' }); return; }
 
-    // Open rounds, and PASSED space_addition rounds (F-38.4): on a club the organiser's own yes concludes one the moment
-    // it opens, so a member would never see it otherwise. The receiver re-decides it from the casts under its own rule
+    // Open rounds, and PASSED space_addition and meta_change rounds (F-38.4, F-39.4): on a club the organiser's own
+    // yes concludes one the moment it opens, so a member would never see it otherwise. The receiver re-decides it from the casts under its own rule
     // — it adopts the round as open and never takes "passed" on a peer's word.
     const open = net.pendingRounds
-      .filter(r => !r.concluded || (r.passed && r.type === 'space_addition'))
+      .filter(r => !r.concluded || (r.passed && (r.type === 'space_addition' || r.type === 'meta_change')))
       .map(r => {
         // Strip sensitive key material before sending to a peer instance
         const { inviteKeyHash: _ikh, ...safeRound } = r;

@@ -29,6 +29,7 @@
  * the real conflict on their second attempt instead of their first. And a rejected write must change NOTHING,
  * which is why the audit snapshot is returned in the plan rather than taken as we go.
  */
+import { localToRemote } from '../sync/space-map.js';
 import { replicatedMetaOf } from '../sync/replicated-meta.js';
 import type { SpaceConfig, SpaceMeta, KnowledgeType, TypeSchema, DocExtractionMode } from '../config/types.js';
 import { normalizeDocExtractionMode } from '../config/types.js';
@@ -338,7 +339,8 @@ export async function applySpaceMetaUpdate(plan: MetaUpdatePlan): Promise<MetaUp
           deadline,
           openedAt: now,
           votes: [{ instanceId: cfg.instanceId, vote: 'yes', castAt: now }],
-          spaceId: id,
+          // The network's id for the space, so each member resolves it to its own local id (F-39.4).
+          spaceId: localToRemote(net, id),
           pendingMeta: mergedMeta,
           // Provenance, so conclusion can apply just this patch rather than this whole snapshot. Rounds stay open
           // for `votingDeadlineHours`, so a second proposal landing before the first concludes is ordinary, and
