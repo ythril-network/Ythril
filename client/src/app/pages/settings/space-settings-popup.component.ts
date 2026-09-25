@@ -34,6 +34,7 @@
  * route guard need it. Two copies of "are you sure you want to lose these edits" is two places for the answer
  * to drift.
  */
+import { SpaceSchemaLayersComponent } from './space-schema-layers.component';
 import { ChangeDetectionStrategy, Component, computed, inject, output } from '@angular/core';
 import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
 import { PhIconComponent } from '../../shared/ph-icon.component';
@@ -54,6 +55,7 @@ import { SPACE_DIALOG_STYLES } from './space-dialog.styles';
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
+    SpaceSchemaLayersComponent,
     TranslocoPipe, PhIconComponent, ModalDirective, StatusPillComponent,
     SpaceSettingsTabComponent, SpaceSchemaTabComponent, SpaceDuplicatesTabComponent, SpaceDangerTabComponent,
   ],
@@ -99,6 +101,7 @@ import { SPACE_DIALOG_STYLES } from './space-dialog.styles';
 
             <!-- SCHEMA TAB -->
             @if (state.settingsTab() === 'schema') {
+              <app-space-schema-layers [spaceId]="state.settingsSpace()!.id" />
               <app-space-schema-tab />
             }
 

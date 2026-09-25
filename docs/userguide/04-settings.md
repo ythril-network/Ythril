@@ -83,6 +83,12 @@ Click the gear icon on any space row to open its settings panel. Changes save an
 
   **Off means documents are stored but never read.** No text is extracted, so nothing inside them can be found by search — those uploads are marked *skipped* rather than sitting in the processing queue. This override is local to your instance — it is never synced to connected peers.
 
+**Network schema layers.** When the space is in networks that send schema, the Schema tab opens with a **Network
+schema layers** panel: each network in the order it applies, the arrows to change that order, and every **clash**
+— a type or property two networks define differently — with the network that currently applies marked. The one
+higher in the list wins; both keep syncing their records either way. **Save order** rebuilds the space's schema.
+Reordering needs the Schema right at admin. The panel is not shown for a space that no network sends schema to.
+
 **Schema tab:** Define what data this space accepts. A **Schema validation** bar at the very top holds the space-wide **Validation mode** and **Strict linkage** controls — these govern *every* type in the space, not the collection you happen to be viewing. Below it, the entity / edge / fact / chrono collections each list their types on the left; click one to edit its rules in a stable panel on the right (you don't lose your place editing a type or property, and several property editors can be open at once).
 
 - **Validation mode** — `off` means anything goes; `warn` lets writes through but flags violations; `strict` blocks invalid writes entirely.

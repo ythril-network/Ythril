@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **See and settle a schema clash between networks** (`F-39.3`). A space in several schema-sending networks
+  shows, on its Schema tab, each network's layer in the order it applies and every clash between them, with the
+  network that currently applies marked; the order can be changed there. `GET /api/spaces/:id/schema-layers` and
+  `PUT /api/spaces/:id/network-precedence`, and MCP `space_schema_layers` / `space_set_network_precedence`, with the
+  same parameters and answers.
+
 - **A space in two networks keeps each network's schema apart** (`F-39.2`). What each network sends is kept as
   its own layer beside this instance's own definitions, and the space runs on own ⊕ layers in precedence: the network
   joined first wins where two define the same property differently, and both keep syncing their records. Each

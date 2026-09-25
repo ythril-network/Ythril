@@ -197,6 +197,8 @@ export const ROUTE_RIGHTS: readonly RouteRight[] = [
    */
   { route: '/api/spaces/:id/schema', method: 'PUT', area: 'schema', needs: 'admin', scope: 'path' },
   { route: '/api/spaces/:id/meta', method: 'GET', area: 'schema', needs: 'read', scope: 'path' },
+  { route: '/api/spaces/:id/schema-layers', method: 'GET', area: 'schema', needs: 'read', scope: 'path' },
+  { route: '/api/spaces/:id/network-precedence', method: 'PUT', area: 'schema', needs: 'admin', scope: 'path' },
   // `PATCH /api/spaces/:id` and `DELETE /api/spaces/:id` used to sit here as `schema` rows. They are not
   // views of one area's data, so they moved to `NOT_AREA_SCOPED` below with their reasons.
   // All three verbs on the type-schema path, not just the one somebody needed at the time. Read is `read`;
@@ -343,6 +345,8 @@ export const TOOL_RIGHTS: readonly ToolRight[] = [
   { tool: 'update_file_meta', area: 'files', needs: 'write' },
   { tool: 'space_meta', area: 'schema', needs: 'read' },
   { tool: 'schema_update', area: 'schema', needs: 'admin' },
+  { tool: 'space_schema_layers', area: 'schema', needs: 'read' },
+  { tool: 'space_set_network_precedence', area: 'schema', needs: 'admin' },
   // Governed by a rung from the moment it stopped being an instance-admin tool. `admin: true` exempts a tool
   // from this inventory because an instance-level capability has no space to scope to; `spaceAdmin: true` is
   // the opposite claim — the space IS the subject — so the area check applies like any other space-scoped

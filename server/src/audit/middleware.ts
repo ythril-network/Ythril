@@ -170,6 +170,7 @@ export const ROUTE_RULES: RouteRule[] = [
   // ── Network / governance operations ──────────────────────────────────────
   // NONE of this was audited. It is the most security-sensitive surface in the product:
   // adding or removing a member changes who can read the brain, and votes decide it.
+  { method: 'PUT',    pattern: /^\/api\/spaces\/([^/]+)\/network-precedence$/, operation: 'space.precedence.update', spaceGroup: 1 },
   { method: 'POST',   pattern: /^\/api\/networks$/,                                 operation: 'network.create' },
   { method: 'POST',   pattern: /^\/api\/networks\/join-remote$/,                    operation: 'network.join_remote' },
   { method: 'PATCH',  pattern: /^\/api\/networks\/([^/]+)$/,                        operation: 'network.update' },

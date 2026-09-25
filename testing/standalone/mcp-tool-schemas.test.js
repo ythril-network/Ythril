@@ -95,7 +95,8 @@ describe('MCP tool schemas — universal invariants', () => {
     // and their four `mcp/parity.ts` rows deleted.
     // 51 -> 52: `network_add_space` (`F-38.3`), a door onto `addNetworkSpaceAct` like the four above; audit-map row
     // `network.space.add`, the route's own operation.
-    assert.equal(ALL_TOOLS.length, 52);
+    // +2: `space_schema_layers`, `space_set_network_precedence` (`F-39.3`), doors onto `spaces/schema-layers-acts.ts`.
+    assert.equal(ALL_TOOLS.length, 54);
   });
 
   it('every tool advertises a closed object schema (type:object, additionalProperties:false)', () => {
