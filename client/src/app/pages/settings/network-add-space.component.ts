@@ -24,6 +24,7 @@ import { ToastService } from '../../core/toast.service';
     @if (governs() && candidates().length) {
       <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap; margin-top:8px;">
         <select class="input" style="max-width:220px;" [(ngModel)]="picked" [attr.aria-label]="'networks.network.spaces.addLabel' | transloco">
+          <option value="" disabled>{{ 'networks.network.spaces.addLabel' | transloco }}</option>
           @for (s of candidates(); track s.id) { <option [value]="s.id">{{ s.label || s.id }}</option> }
         </select>
         <button class="btn-secondary btn btn-sm" [disabled]="!picked || adding()" (click)="add()">
