@@ -14,8 +14,9 @@ before(async () => {
   ({ pickGenerationBackend, generate, GenerationError, GenerationUnavailableError } = await import('../../server/dist/extractor/generate.js'));
 });
 
-// Consented for CONVERSATIONS: the claim writer sends turns, and a documents consent does not cover that (F-35).
-const assist = { baseUrl: 'https://llm.example.com/v1', model: 'big', acknowledgedHostForConversations: 'llm.example.com', apiKey: 'k' };
+// The endpoint as `assistBackend('conversations')` hands it over: its CONVERSATIONS consent (F-35), budget and fallback
+// are the resolver's rules now (F-33, `the-assist-model-falls-back-and-keeps-a-budget.test.js`). No `which`: unaccounted.
+const assist = { baseUrl: 'https://llm.example.com/v1', model: 'big', apiKey: 'k' };
 const transport = (...replies) => {
   const calls = [];
   return { calls, sleep: async () => {}, post: async (url, init) => {
@@ -27,14 +28,10 @@ const transport = (...replies) => {
 const reply = (content) => ({ body: { model: 'big-2', choices: [{ message: { content } }], usage: { prompt_tokens: 5, completion_tokens: 3 } } });
 
 describe('which model writes', () => {
-  it('the assist model, once its host is consented to — and nothing otherwise', () => {
+  it('the endpoint the resolver chose — and nothing when it chose none', () => {
     assert.equal(pickGenerationBackend(assist)?.model, 'big');
-    assert.equal(pickGenerationBackend({ ...assist, acknowledgedHostForConversations: 'x' }), null);
-    assert.equal(pickGenerationBackend(undefined), null);
-  });
-  it('a consent given for DOCUMENTS does not send conversations', () => {
-    const documentsOnly = { baseUrl: assist.baseUrl, model: assist.model, acknowledgedHost: 'llm.example.com' };
-    assert.equal(pickGenerationBackend(documentsOnly), null);
+    assert.equal(pickGenerationBackend({ ...assist, which: 'fallback' })?.which, 'fallback');
+    assert.equal(pickGenerationBackend(null), null);
   });
   it('refusing names the setting', () => {
     assert.match(new GenerationUnavailableError().message, /documentProcessing\.assistModel/);

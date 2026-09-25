@@ -38,6 +38,7 @@ import { bodyOf, enclosingBlockAround, statementUpTo } from './_structural-windo
 
 const ENDPOINT_SRC = 'server/src/files/converters/vlm-endpoint.ts';
 const CLIENT_SRC = 'server/src/files/converters/vlm-client.ts';
+const CHAT_SRC = 'server/src/util/model-chat.ts';
 const STATUS_SRC = 'server/src/api/pipeline-status.ts';
 
 const ep = await (async () => {
@@ -138,7 +139,10 @@ describe('egress is guarded whenever the endpoint is not the bundled model', () 
     // separate egress decisions — the document VLM sitting on the cluster is not a reason to let the assist
     // model, the one path that sends content off-instance, reach a private address.
     assert.match(client, /allowPrivate: allowPrivateForSlot\(endpoint\.slot\)/);
-    assert.match(client, /allowPrivate: allowPrivateForSlot\('assist'\)/);
+    // The assist path reaches its endpoint through `modelFetch` under the 'assist' slot (F-33), which applies the
+    // slot's private-address policy to anything that is not a local sidecar.
+    assert.match(client, /modelFetch\(url, \{[^}]*\}, 'assist'\)/);
+    assert.match(strip(readFileSync('server/src/util/model-fetch.ts', 'utf8')), /allowPrivate: allowPrivateForSlot\(slot\)/);
   });
 
   it('each entry point falls back to its own slot when the caller names none', () => {
@@ -168,8 +172,12 @@ describe('egress is guarded whenever the endpoint is not the bundled model', () 
   });
 
   it('no call site hardcodes a wire path any more', () => {
-    assert.doesNotMatch(client, /\$\{baseUrl[^}]*\}\/api\/chat/);
-    assert.match(client, /chatUrlFor\(endpoint\.wire, endpoint\.baseUrl\)/);
+    // The request is built in ONE module now (`util/model-chat.ts`, F-33.1), so that is where the derivation lives;
+    // the client must not build a wire path of its own beside it.
+    const chat = strip(readFileSync(CHAT_SRC, 'utf8'));
+    for (const src of [client, chat]) assert.doesNotMatch(src, /\$\{baseUrl[^}]*\}\/api\/chat/);
+    assert.match(chat, /chatUrlFor\(endpoint\.wire, endpoint\.baseUrl\)/);
+    assert.match(client, /chatOnce\(/, 'the client builds its requests through the one call module');
   });
 });
 

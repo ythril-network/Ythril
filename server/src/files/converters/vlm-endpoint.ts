@@ -96,6 +96,17 @@ export function chatUrlFor(wire: VlmWire, baseUrl: string): string {
     : `${normalizeOpenAiBase(baseUrl)}/chat/completions`;
 }
 
+/**
+ * The Claude API's URLs under an operator's base, with or without the `/v1` they typed (`F-33.1`). Here with every
+ * other model URL so a probe and an inference call cannot derive the path two different ways.
+ */
+export function claudeBaseFor(baseUrl: string): string {
+  return baseUrl.replace(/\/+$/, '').replace(/\/v1$/, '');
+}
+export function claudeModelsUrlFor(baseUrl: string): string {
+  return `${claudeBaseFor(baseUrl)}/v1/models`;
+}
+
 /** The model-list URL for each wire — the same derivation the inference call uses, so a probe cannot
  *  disagree with the thing it is probing. */
 export function listUrlFor(wire: VlmWire, baseUrl: string): string {

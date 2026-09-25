@@ -11,10 +11,13 @@
 import { Router } from 'express';
 import { boundedJson } from '../util/bounded-read.js';
 import { z } from 'zod';
-import { getConfig, saveConfig, getMediaEmbeddingConfig, getSecrets, saveSecrets, getDocAssistApiKey, getNliApiKey, getEmbeddingConfig, getEmbeddingApiKey, getRerankApiKey, getModelSlots } from '../config/loader.js';
+import { getConfig, saveConfig, getMediaEmbeddingConfig, getSecrets, saveSecrets, getDocAssistApiKey, getDocAssistFallbackApiKey, getNliApiKey, getEmbeddingConfig, getEmbeddingApiKey, getRerankApiKey, getModelSlots } from '../config/loader.js';
 import { DOC_EXTRACTION_MODES_IN, IMAGE_LEVELS, AUDIO_LEVELS, VIDEO_LEVELS, TEXT_LEVELS, normalizeDocExtractionMode } from '../config/types.js';
 import type { MediaLevelCeilings } from '../config/types.js';
 import { requireAdmin, requireAdminMfa } from '../auth/middleware.js';
+import { claudeListRequest, type ChatWire } from '../util/model-chat.js';
+import { assistProbeTarget } from '../config/assist-backend.js';
+import { AssistApiPatch, AssistBudgetPatch, AssistFallbackPatch, refuseAssistFallback, assistFallbackKeyChange, mergeAssistExtras } from '../config/assist-model-patch.js';
 import { globalRateLimit } from '../rate-limit/middleware.js';
 import { isSsrfSafeUrl, ssrfSafeFetch } from '../util/ssrf.js';
 import {
@@ -126,6 +129,10 @@ const AssistModelPatchSchema = z.object({
   acknowledgedHost: z.string().max(255).optional(),
   // `F-35`: the conversations consent, set by its own dialog; `null` withdraws it.
   acknowledgedHostForConversations: z.string().max(255).optional().nullable(),
+  // `F-33`: absent keeps, `null` removes — see config/assist-model-patch.ts for why these two differ.
+  api: AssistApiPatch,
+  budget: AssistBudgetPatch,
+  fallback: AssistFallbackPatch,
 }).strict();
 
 const DocumentProcessingPatchSchema = z.object({
@@ -639,6 +646,9 @@ mediaConfigRouter.patch('/', requireAdminMfa, (req, res) => {
       effBaseUrl, effAck, reachableAfterThisPatch, causedByThisPatch,
     });
     if (refusal) { res.status(refusal.status).json(refusal.body); return; }
+
+    const fbRefusal = refuseAssistFallback(assistPatch?.fallback, repairRunsAt(effMode));
+    if (fbRefusal) { res.status(fbRefusal.status).json(fbRefusal.body); return; }
   }
 
   // F-31 — the extractors' decision model: env lock, SSRF, egress consent (config/decision-model.ts).
@@ -659,6 +669,7 @@ mediaConfigRouter.patch('/', requireAdminMfa, (req, res) => {
     const assistApiKeyChange = (assistPatch && 'apiKey' in assistPatch)
       ? assistPatch.apiKey ?? null
       : undefined;
+    const assistFallbackApiKeyChange = assistFallbackKeyChange(assistPatch);
     // External face model's key → secrets.mediaEmbedding.faceApiKey.
     const faceApiKeyChange = (facePatch && 'apiKey' in facePatch)
       ? facePatch.apiKey ?? null
@@ -676,7 +687,7 @@ mediaConfigRouter.patch('/', requireAdminMfa, (req, res) => {
       ? nliPatch.apiKey ?? null
       : undefined;
 
-    if (visionApiKeyChange !== undefined || sttApiKeyChange !== undefined || assistApiKeyChange !== undefined || embApiKeyChange !== undefined || faceApiKeyChange !== undefined || rerankApiKeyChange !== undefined || nliApiKeyChange !== undefined) {
+    if (visionApiKeyChange !== undefined || sttApiKeyChange !== undefined || assistApiKeyChange !== undefined || assistFallbackApiKeyChange !== undefined || embApiKeyChange !== undefined || faceApiKeyChange !== undefined || rerankApiKeyChange !== undefined || nliApiKeyChange !== undefined) {
       const secrets = getSecrets();
       const sAny = secrets as any;
       sAny.mediaEmbedding = sAny.mediaEmbedding ?? {};
@@ -691,6 +702,10 @@ mediaConfigRouter.patch('/', requireAdminMfa, (req, res) => {
       if (assistApiKeyChange !== undefined) {
         if (assistApiKeyChange === null || assistApiKeyChange === '') delete sAny.mediaEmbedding.docAssistApiKey;
         else sAny.mediaEmbedding.docAssistApiKey = assistApiKeyChange;
+      }
+      if (assistFallbackApiKeyChange !== undefined) {
+        if (assistFallbackApiKeyChange === null || assistFallbackApiKeyChange === '') delete sAny.mediaEmbedding.docAssistFallbackApiKey;
+        else sAny.mediaEmbedding.docAssistFallbackApiKey = assistFallbackApiKeyChange;
       }
       if (faceApiKeyChange !== undefined) {
         if (faceApiKeyChange === null || faceApiKeyChange === '') delete sAny.mediaEmbedding.faceApiKey;
@@ -778,6 +793,7 @@ mediaConfigRouter.patch('/', requireAdminMfa, (req, res) => {
         // `F-35`: `null` withdraws the conversations consent. The block is replaced WHOLE, so a client that
         // omits the field withdraws it too — which is why the Models tab always sends it.
         if (a['acknowledgedHostForConversations'] == null) delete a['acknowledgedHostForConversations'];
+        mergeAssistExtras(a, (existing.documentProcessing as { assistModel?: Record<string, unknown> } | undefined)?.assistModel);
         dpMerged['assistModel'] = a;
       }
       merged['documentProcessing'] = dpMerged;
@@ -820,6 +836,8 @@ mediaConfigRouter.patch('/', requireAdminMfa, (req, res) => {
 
 const TestConnectionSchema = z.object({
   target: z.enum(['vision', 'stt', 'assist', 'embedding', 'nli', 'rerank']),
+  // `F-33`: on the assist target, test its fallback instead of the primary.
+  fallback: z.boolean().optional(),
 }).strict();
 
 mediaConfigRouter.post('/test-connection', requireAdminMfa, async (req, res) => {
@@ -835,6 +853,7 @@ mediaConfigRouter.post('/test-connection', requireAdminMfa, async (req, res) => 
   let model: string | undefined;
   let apiKey: string | undefined;
   let external: boolean;
+  let wire: ChatWire | undefined;
   if (target === 'vision') {
     baseUrl = cfg.vision?.baseUrl; model = cfg.vision?.model; apiKey = cfg.vision?.apiKey;
     external = cfg.visionProvider === 'external';
@@ -856,9 +875,8 @@ mediaConfigRouter.post('/test-connection', requireAdminMfa, async (req, res) => 
     baseUrl = e.baseUrl; model = e.model; apiKey = getEmbeddingApiKey();
     external = e.provider === 'external';
   } else {
-    const a = cfg.documentProcessing?.assistModel;
-    baseUrl = a?.baseUrl; model = a?.model; apiKey = getDocAssistApiKey();
-    external = true; // the assist model is always external
+    // The primary, or its fallback (`F-33`) — each over the API it speaks, the Claude API included (`F-33.1`).
+    ({ baseUrl, model, apiKey, wire, external } = assistProbeTarget(!!parsed.data.fallback));
   }
 
   if (!baseUrl) {
@@ -873,7 +891,7 @@ mediaConfigRouter.post('/test-connection', requireAdminMfa, async (req, res) => 
     return;
   }
 
-  const result = await probeModelEndpoint({ baseUrl, model, apiKey, external, slot: target })
+  const result = await probeModelEndpoint({ baseUrl, model, apiKey, external, slot: target, ...(wire ? { wire } : {}) })
     .catch(err => ({ ok: false, reachable: false, verdict: 'unreachable' as const, detail: err instanceof Error ? err.message : String(err), latencyMs: 0 }));
   res.json({ target, external, model: model ?? null, ...result });
 });
@@ -1029,11 +1047,13 @@ interface ProbeResult {
  * Exported for unit testing.
  */
 export async function probeModelEndpoint(
-  opts: { baseUrl: string; model?: string; apiKey?: string; external: boolean; wire?: VlmWire; slot: EgressSlot },
+  opts: { baseUrl: string; model?: string; apiKey?: string; external: boolean; wire?: ChatWire; slot: EgressSlot },
 ): Promise<ProbeResult> {
   const started = Date.now();
   const base = opts.baseUrl.replace(/\/$/, '');
-  const headers: Record<string, string> = opts.apiKey ? { Authorization: `Bearer ${opts.apiKey}` } : {};
+  // The Claude API takes its key as `x-api-key` with a version header (`F-33.1`); everything else as a Bearer token.
+  const claude = opts.wire === 'anthropic' ? claudeListRequest(base, opts.apiKey) : null;
+  const headers: Record<string, string> = claude ? claude.headers : opts.apiKey ? { Authorization: `Bearer ${opts.apiKey}` } : {};
   // The opt-in must be passed HERE, not merely checked by the caller. `ssrfSafeFetch` defaults
   // `allowPrivate` to false, so omitting the third argument silently reimposes the exact rejection the
   // operator turned off. `probeModelStages` already gate-checks the URL with `allowPrivateModelEndpoints()`
@@ -1053,12 +1073,13 @@ export async function probeModelEndpoint(
 
   // The wire this endpoint is configured to speak comes first; the other is tried only so a failure can
   // explain itself. `wire` defaults to `openai` — every target except a local Ollama speaks it.
-  const wire: VlmWire = opts.wire ?? 'openai';
-  const attempts: Array<{ url: string; wire: VlmWire; parse: (j: unknown) => string[] }> = [
-    { url: listUrlFor(wire, base), wire, parse: wire === 'ollama' ? parseOllama : parseOpenAi },
-  ];
+  const wire: ChatWire = opts.wire ?? 'openai';
+  // A Claude endpoint lists in the OpenAI shape at its own path, and has no "other wire" worth trying.
+  const attempts: Array<{ url: string; wire: ChatWire; parse: (j: unknown) => string[] }> = claude
+    ? [{ url: claude.url, wire, parse: parseOpenAi }]
+    : [{ url: listUrlFor(wire as VlmWire, base), wire, parse: wire === 'ollama' ? parseOllama : parseOpenAi }];
   const otherWire: VlmWire = wire === 'ollama' ? 'openai' : 'ollama';
-  attempts.push({ url: listUrlFor(otherWire, base), wire: otherWire, parse: otherWire === 'ollama' ? parseOllama : parseOpenAi });
+  if (!claude) attempts.push({ url: listUrlFor(otherWire, base), wire: otherWire, parse: otherWire === 'ollama' ? parseOllama : parseOpenAi });
 
   let lastErr = '';
   /** Every HTTP status the attempts came back with. The ladder below reads these, not just the last one. */
@@ -1139,7 +1160,7 @@ export async function probeModelEndpoint(
   // to tell a wrong base path from a dead endpoint, and the two need opposite fixes.
   return {
     ok: false, reachable: false, verdict: 'unreachable',
-    detail: lastErr || `no model list at ${listUrlFor(wire, base)}`, latencyMs,
+    detail: lastErr || `no model list at ${attempts[0]!.url}`, latencyMs,
   };
 }
 
@@ -1159,7 +1180,8 @@ function maskSecrets(cfg: ReturnType<typeof getMediaEmbeddingConfig>): unknown {
     nli: cfg.nli ? { ...cfg.nli, apiKey: mask(cfg.nli.apiKey) } : cfg.nli,
     rerank: cfg.rerank ? { ...cfg.rerank, apiKey: mask(cfg.rerank.apiKey) } : cfg.rerank,
     documentProcessing: dp?.assistModel
-      ? { ...dp, assistModel: { ...dp.assistModel, apiKey: mask(getDocAssistApiKey()) } }
+      ? { ...dp, assistModel: { ...dp.assistModel, apiKey: mask(getDocAssistApiKey()),
+          ...(dp.assistModel.fallback ? { fallback: { ...dp.assistModel.fallback, apiKey: mask(getDocAssistFallbackApiKey()) } } : {}) } }
       : dp,
   };
 }

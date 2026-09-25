@@ -21,6 +21,7 @@ import {
   TestResult, TestTarget, VerifyResult, VerifyTarget, FaceRecognitionCfg, MODE_STAGES, FaceExternalCfg, RerankCfg, NliCfg,
   CARD_SLOT, type SlotTuningCfg, type DecisionModelCfg,
 } from './media-processing.types';
+import { assistExtrasPatch, fallbackNeedsAck, hostOf } from './assist-extras';
 
 /**
  * The Models tab's cards that own editable config and therefore get their own Save button.
@@ -91,6 +92,9 @@ export class MediaProcessingStateService {
   visionApiKeyInput = '';
   sttApiKeyInput = '';
   assistApiKeyInput = '';
+  /** `F-33`: the fallback's key, typed; and whether the server holds one (the GET returns only a mask). */
+  assistFallbackApiKeyInput = '';
+  assistFallbackKeySet = false;
   decisionApiKeyInput = '';
   embeddingApiKeyInput = '';
 
@@ -277,7 +281,9 @@ export class MediaProcessingStateService {
   testOf(t: TestTarget): { loading?: boolean; res?: TestResult } | undefined { return this.testState()[t]; }
   testConnection(t: TestTarget): void {
     this.testState.update(s => ({ ...s, [t]: { loading: true } }));
-    this.http.post<TestResult>('/api/admin/media-config/test-connection', { target: t }).subscribe({
+    // `assist-fallback` is the assist target's fallback (`F-33`), one server target with a flag.
+    const body = t === 'assist-fallback' ? { target: 'assist', fallback: true } : { target: t };
+    this.http.post<TestResult>('/api/admin/media-config/test-connection', body).subscribe({
       next: res => this.testState.update(s => ({ ...s, [t]: { res } })),
       error: err => this.testState.update(s => ({ ...s, [t]: { res: {
         ok: false, reachable: false, verdict: 'unreachable' as const,
@@ -299,7 +305,8 @@ export class MediaProcessingStateService {
   verifyOf(t: VerifyTarget): { loading?: boolean; res?: VerifyResult } | undefined { return this.verifyState()[t]; }
   verifyModel(t: VerifyTarget): void {
     this.verifyState.update(s => ({ ...s, [t]: { loading: true } }));
-    this.http.post<VerifyResult>('/api/admin/media-config/verify', { target: t }).subscribe({
+    const body = t === 'assist-fallback' ? { target: 'assist', fallback: true } : { target: t };
+    this.http.post<VerifyResult>('/api/admin/media-config/verify', body).subscribe({
       next: res => this.verifyState.update(s => ({ ...s, [t]: { res } })),
       error: err => this.verifyState.update(s => ({ ...s, [t]: { res: {
         target: t, outcome: 'failed' as const,
@@ -437,6 +444,10 @@ export class MediaProcessingStateService {
         // F11-b — the masked apiKey stays
         // only so the UI can show "key set" — it is never sent back (assistApiKeyInput carries changes).
         dp.assistModel = { ...cfg.documentProcessing?.assistModel };
+        // `F-33`: the fallback's masked key must not sit in the form, one save away from being echoed back.
+        this.assistFallbackKeySet = !!dp.assistModel.fallback?.apiKey;
+        if (dp.assistModel.fallback) dp.assistModel.fallback = { ...dp.assistModel.fallback, apiKey: undefined };
+        this.assistFallbackApiKeyInput = '';
         this.form = { vision: {}, stt: {}, ...cfg, documentProcessing: dp, decisionModel };
         this.decisionLoaded = JSON.stringify(this.decisionEndpoint());
         this.decisionApiKeyInput = '';
@@ -513,6 +524,8 @@ export class MediaProcessingStateService {
           baseUrl: a.baseUrl || undefined, model: a.model || undefined, acknowledgedHost: a.acknowledgedHost,
           // Always sent: the server replaces this block whole, so leaving it out would withdraw the consent.
           acknowledgedHostForConversations: a.acknowledgedHostForConversations ?? null,
+          // `F-33`/`F-33.1`: always sent too, `null` when cleared (see assist-extras.ts).
+          ...assistExtrasPatch(a, this.assistFallbackApiKeyInput),
         } } });
       }
       // The three document cards own their SLOT and nothing else — the model and the endpoint really are
@@ -891,6 +904,19 @@ export class MediaProcessingStateService {
       if (!ok) return;
       this.assist.acknowledgedHost = host;
     }
+    // `F-33`: an external fallback is egress like the primary, consented for its own host.
+    if (card === 'assist' && !this.assistLocked() && fallbackNeedsAck(this.assist, this.repairReachable())) {
+      const host = hostOf(this.assist.fallback?.baseUrl);
+      const ok = await this.confirmDialog.confirm({
+        title: this.transloco.translate('mediaProcessing.confirm.egressTitle'),
+        message: this.transloco.translate('mediaProcessing.confirm.egressMessage', { host }),
+        confirmLabel: this.transloco.translate('mediaProcessing.confirm.egressConfirm'),
+        cancelLabel: this.transloco.translate('common.cancel'),
+        danger: true,
+      });
+      if (!ok) return;
+      this.assist.fallback = { ...this.assist.fallback, acknowledgedHost: host };
+    }
     if (card === 'face' && !this.faceExternalLocked() && this.faceExternalNeedsAck()) {
       const host = this.faceExternalHost();
       const ok = await this.confirmDialog.confirm({
@@ -955,7 +981,11 @@ export class MediaProcessingStateService {
         this.saveOk.set(this.transloco.translate('mediaProcessing.saved'));
         if (card === 'vision') this.visionApiKeyInput = '';
         else if (card === 'stt') this.sttApiKeyInput = '';
-        else if (card === 'assist') this.assistApiKeyInput = '';
+        else if (card === 'assist') {
+          this.assistApiKeyInput = '';
+          if (this.assistFallbackApiKeyInput) this.assistFallbackKeySet = true;
+          this.assistFallbackApiKeyInput = '';
+        }
         else if (card === 'embedding') { this.embeddingApiKeyInput = ''; this.embeddingReindexBaseline = this.reindexKey(); }
         else if (card === 'rerank') { this.rerankApiKeyInput = ''; }
         else if (card === 'nli') { this.nliApiKeyInput = ''; }

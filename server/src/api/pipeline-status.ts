@@ -25,7 +25,7 @@
  */
 
 import { Router } from 'express';
-import { getConfig, getMediaEmbeddingConfig, getEmbeddingConfig, getEmbeddingApiKey, getDocumentProcessingConfig, getDocAssistApiKey, getFaceRecognitionConfig, getRerankApiKey, getNliApiKey } from '../config/loader.js';
+import { getConfig, getMediaEmbeddingConfig, getEmbeddingConfig, getEmbeddingApiKey, getDocumentProcessingConfig, getDocAssistApiKey, getDocAssistFallbackApiKey, getFaceRecognitionConfig, getRerankApiKey, getNliApiKey } from '../config/loader.js';
 import { requireAdmin } from '../auth/middleware.js';
 import { globalRateLimit } from '../rate-limit/middleware.js';
 import { isSsrfSafeUrl } from '../util/ssrf.js';
@@ -38,6 +38,8 @@ import { getDb } from '../db/mongo.js';
 import { faceRecognitionAllowed } from '../files/converters/media-level.js';
 import { VECTOR_INDEXED_COLLECTIONS } from '../spaces/vector-index.js';
 import { log } from '../util/log.js';
+import { assistBackend, assistBudgetStatus, type AssistBudget } from '../config/assist-backend.js';
+import type { ChatWire } from '../util/model-chat.js';
 
 export const pipelineStatusRouter = Router();
 
@@ -115,7 +117,11 @@ export interface PipelineStatus {
   models: ModelStageStatus[];
   index: { spaces: SpaceIndexStatus[]; unavailable?: string };
   faceRecognition: { state: HealthState };
+  /** The assist model's budget and who answers each use now (`F-33`); absent with no assist model configured. */
+  assist?: { answeredBy: { repair: AssistWhich; conversations: AssistWhich }; spent: number; budget?: AssistBudget; primaryCoolingDown: boolean };
 }
+
+type AssistWhich = 'primary' | 'fallback' | null;
 
 // ── Sidecars ──────────────────────────────────────────────────────────────────
 
@@ -153,7 +159,7 @@ export interface StageSpec {
    * Only a *local* vision provider speaks Ollama's; everything else is OpenAI-compatible. Absent means
    * `openai`, which is the safe default — it is what self-hosted inference servers overwhelmingly serve.
    */
-  wire?: VlmWire;
+  wire?: ChatWire;
   model?: string;
   baseUrl?: string;
   /** Never appears in the response — it exists only to authenticate the probe. */
@@ -229,7 +235,13 @@ function modelStages(): StageSpec[] {
       };
     }),
     // The assist model is external by definition — it is the one path that sends content off-instance.
-    { key: 'assist', label: 'Assist model', model: doc.assistModel?.model, baseUrl: doc.assistModel?.baseUrl, apiKey: getDocAssistApiKey(), external: true },
+    { key: 'assist', label: 'Assist model', model: doc.assistModel?.model, baseUrl: doc.assistModel?.baseUrl, apiKey: getDocAssistApiKey(), external: true,
+      wire: doc.assistModel?.api ?? 'openai' },
+    // Its fallback (`F-33`), on the board for the reason the primary is: when it is down, a spent budget or a
+    // failing primary has nowhere to go, and the calls fail back to whatever ran before there was an assist model.
+    { key: 'assist-fallback', label: 'Assist model fallback', model: doc.assistModel?.fallback?.model, baseUrl: doc.assistModel?.fallback?.baseUrl,
+      apiKey: getDocAssistFallbackApiKey(), external: !!doc.assistModel?.fallback?.baseUrl && !isLocalModelEndpoint(doc.assistModel.fallback.baseUrl),
+      wire: doc.assistModel?.fallback?.api ?? 'openai' },
     // The reranker is a RETRIEVAL stage, not an ingestion one, but it belongs on the same board: it is
     // model-backed, optional, and when it is unreachable searches quietly get worse rather than fail —
     // which is precisely the condition this endpoint exists to make visible.
@@ -548,11 +560,16 @@ async function collect(): Promise<PipelineStatus> {
     probeModelStages(),
     indexStatus(),
   ]);
+  const assistConfigured = !!getDocumentProcessingConfig().assistModel?.baseUrl;
   return {
     checkedAt: new Date().toISOString(),
     sidecars,
     models,
     index,
+    ...(assistConfigured ? { assist: {
+      answeredBy: { repair: assistBackend('repair')?.which ?? null, conversations: assistBackend('conversations')?.which ?? null },
+      ...assistBudgetStatus(),
+    } } : {}),
     // Face recognition runs in-process (BlazeFace + FaceRes), so there is no endpoint to probe —
     // enabled or not is the whole of its health.
     // 'ok' only when the infra pin allows it AND at least one space actually sits at the recognition rung
