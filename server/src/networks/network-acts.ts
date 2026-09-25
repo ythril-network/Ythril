@@ -37,6 +37,7 @@ import { widenPeerTokens } from './network-spaces.js';
 import { concludeRoundIfReady } from '../sync/governance.js';
 import { localToRemote } from '../sync/space-map.js';
 import { makeSignedOwnCast } from '../util/signing.js';
+import { openRoundHere } from './round-local-state.js';
 
 type Caller = Parameters<typeof visibleNetworks>[0] & { id?: string };
 
@@ -231,7 +232,7 @@ export function addNetworkSpaceAct(caller: Caller, id: string, input: unknown): 
       deadline: new Date(Date.now() + net.votingDeadlineHours * 3_600_000).toISOString(), openedAt: now, votes: [],
     };
     round.votes.push(makeSignedOwnCast(net.id, round, cfg.instanceId, 'yes'));
-    net.pendingRounds.push(round);
+    openRoundHere(net, round);
     // Evaluated now: on a club, and on a network with no other member, the proposer's yes already carries it (Q-49).
     if (!concludeRoundIfReady(net, round)) {
       saveConfig(cfg);

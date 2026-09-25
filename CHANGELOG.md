@@ -247,6 +247,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A peer can no longer name another member as a round's proposer** (security, `S-7`, unreleased). A round
+  arriving from a peer kept the member it named as subject, and that was read as "who proposed it": naming a member
+  made that member treat a space addition as its own (joining a private space of the same name to the network) and a
+  passed schema change as an edit of its own definitions, and on every other member it dropped that member's vote from
+  the quorum. Now an instance records which rounds it opened itself and never takes that from a peer, and a proposer is
+  a voter like any member, whose yes is cast automatically — and signed — when it opens the round.
 - **A deletion or wipe vote acts only on a round that passed, and only on a space its network carries** (security,
   `S-9`). A `space_deletion` or `space_wipe` round was applied whenever it had concluded with no veto — so one that
   expired without enough yes deleted too — to the space id exactly as the round named it, never checked against the

@@ -643,6 +643,9 @@ When a vote is open (e.g. a member wants to leave), expand the network card and 
 lapses and the space is kept on every member. A member acts on such a vote only for a space its network actually
 carries, and only once — a vote cannot reach a space the network does not share.
 
+**Proposing counts as your yes.** When you delete, empty, add or change a networked space, your instance opens the
+vote and its yes is already in the tally; the other members' votes decide it.
+
 **Signed votes:** a network can set `requireSignedVotes` so every vote cast must carry a valid Ed25519 signature from the voting member (verified against its pinned signing key). Enable it once all members have published a signing key; if a member rotates its signing key, the new key is accepted with a rotation proof that references the previous one.
 
 ### Leaving a network

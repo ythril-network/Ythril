@@ -250,6 +250,10 @@ that expired is concluded but not passed, and deletes nothing — and only on th
 member and carried by the round's own network. Each member applies it once; gossip re-delivering the round does not
 re-apply it.
 
+The instance that opens a round other than a join or a removal is one of its voters: its signed `yes` is in `votes`
+from the moment the round opens, and the round's `subjectInstanceId` is informational on those types. A peer cannot
+make another member the proposer by naming it there.
+
 ---
 
 ### List Open Vote Rounds

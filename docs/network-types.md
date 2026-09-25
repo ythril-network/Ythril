@@ -525,6 +525,11 @@ Regardless of network type:
   enough yes deletes nothing, a round naming a space the network does not share is ignored however it arrives, and
   each member acts on a concluded round once.
 
+  **A proposer votes like any member.** The instance that opens a deletion, wipe, space addition or schema change is
+  counted among the voters, and its yes is cast — signed — the moment it opens the round. Which instance proposed a
+  round is something each instance records for the rounds it opened itself; a round arriving from a peer cannot claim
+  that another member proposed it.
+
   **Read your network type before relying on that.** On `club` and `pubsub` a round passes on a single
   yes with no veto, so one member can empty or delete the space everywhere. On `closed` and `braintree`
   every listed member has to agree, and on `democratic` it is a majority.

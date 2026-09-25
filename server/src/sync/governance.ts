@@ -12,7 +12,7 @@ import { getConfig, getSecrets } from '../config/loader.js';
 import { revokePeerCredentialsIfOrphaned } from '../auth/tokens.js';
 import { log } from '../util/log.js';
 import { commitOwnMetaEdit, storeNetworkLayer } from '../spaces/effective-meta.js';
-import { remoteToLocal } from './space-map.js';
+import { carriedLocalId } from './space-map.js';
 import { peerSafeFetch } from './peer-fetch.js';
 import { buildBraintreeAncestors } from '../util/braintree.js';
 import { applyMetaRound, type MetaRoundProposal } from './meta-round-merge.js';
@@ -47,7 +47,12 @@ export function concludeRoundIfReady(
   net: import('../config/types.js').NetworkConfig,
   round: import('../config/types.js').VoteRound,
 ): boolean {
-  const voters = net.members.filter(m => !round.subjectInstanceId || m.instanceId !== round.subjectInstanceId);
+  // The subject is left out only where it is the member voted ON — a join or a removal. On every other round it is
+  // the PROPOSER, a voter like any member, whose yes is cast for it when the round opens (S-7; owner, 2026-09-25:
+  // "of course a proposer votes yes ... require the yes but set it automatically"). Dropping it there let a peer name
+  // any member as proposer and so drop that member's vote from the quorum.
+  const subjectIsVotedOn = round.type === 'join' || round.type === 'remove';
+  const voters = net.members.filter(m => !subjectIsVotedOn || m.instanceId !== round.subjectInstanceId);
   const vetoCount = round.votes.filter(v => v.vote === 'veto').length;
   const pastDeadline = new Date(round.deadline) < new Date();
 
@@ -152,12 +157,14 @@ export function concludeRoundIfReady(
     // Not `{ meta: round.pendingMeta }`. That snapshot was computed when the round opened, and rounds stay
     // open for `votingDeadlineHours` — so writing it wholesale reverts every field another round changed
     // in the meantime, with no error and a correctly-recorded carried vote to hide it.
-    if (round.type === 'meta_change' && round.spaceId && round.pendingMeta) {
-      // The round names the space by the NETWORK's id; this instance may carry it under another (F-39.4).
-      const localSpace = remoteToLocal(net, round.spaceId);
+    // The round names the space by the NETWORK's id; this instance may carry it under another (F-39.4) — and acts
+    // only on a space this network carries here (S-7).
+    const localSpace = round.type === 'meta_change' ? carriedLocalId(net, round.spaceId) : null;
+    if (round.type === 'meta_change' && localSpace && round.pendingMeta) {
       const currentMeta = getConfig().spaces.find(s => s.id === localSpace)?.meta;
       let applied = applyMetaRound(currentMeta, round as MetaRoundProposal);
-      if (round.subjectInstanceId === getConfig().instanceId && !round.proposesLayer) {
+      // Who proposed it is what THIS instance recorded when it opened the round — never `subjectInstanceId` (S-7).
+      if (round.proposedHere && !round.proposesLayer) {
         // The proposer's own edit, through its own definitions (F-39.2) so a layered space keeps it. A proposal TO a
         // network (F-39.5) is not one: it was that network's definition all along, so it takes the branch below.
         commitOwnMetaEdit(localSpace, base => (applied = applyMetaRound(base, round as MetaRoundProposal)).meta as SpaceMeta);

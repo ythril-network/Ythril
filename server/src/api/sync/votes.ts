@@ -11,6 +11,7 @@ import { peerRelayCaller, PEER_RELAY_REFUSAL } from '../../auth/peer-relay.js';
 import { log } from '../../util/log.js';
 import { reportServerFailure } from '../../util/report-failure.js';
 import { applyConcludedSpaceRounds } from '../../spaces/apply-wipe-round.js';
+import { roundForPeer } from '../../networks/round-local-state.js';
 import { acceptVoteCast } from '../../util/signing.js';
 import { concludeRoundIfReady, sendMemberRemovedNotify } from '../../sync/governance.js';
 
@@ -34,8 +35,8 @@ syncVotesRouter.get('/networks/:networkId/votes', syncRateLimit, requireAuth, as
       .filter(r => !r.concluded || (r.passed && (r.type === 'space_addition' || r.type === 'meta_change')))
       .map(r => {
         // Strip sensitive key material before sending to a peer instance
-        // Local-only state never leaves: `appliedHere` says what THIS instance did (S-9).
-        const { inviteKeyHash: _ikh, appliedHere: _ah, ...safeRound } = r;
+        // This instance's own state never leaves (S-7, S-9).
+        const { inviteKeyHash: _ikh, ...safeRound } = roundForPeer(r);
         if (safeRound.pendingMember) {
           const { tokenHash: _th, ...safeMember } = safeRound.pendingMember;
           safeRound.pendingMember = safeMember as typeof safeRound.pendingMember;

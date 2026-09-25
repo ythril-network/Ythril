@@ -22,6 +22,7 @@ import { log } from '../util/log.js';
 import type { NetworkMember, VoteRound } from '../config/types.js';
 import { BCRYPT_ROUNDS, SSRF_SAFE_URL, safeMemberList } from '../api/networks/_shared.js';
 import type { NetworkActResult } from './network-acts.js';
+import { openRoundHere } from './round-local-state.js';
 
 export const AddMemberBody = z.object({
   instanceId: z.string().min(1),
@@ -79,7 +80,7 @@ export async function addMemberAct(networkId: string, input: unknown): Promise<N
 
   if (freshNet.type === 'closed' || freshNet.type === 'democratic') {
     const round = joinRound();
-    freshNet.pendingRounds.push(round);
+    openRoundHere(freshNet, round);
     storePeerToken(instanceId, token);
     saveConfig(freshCfg);
     log.info(`Opened join vote round ${round.roundId} for ${label} in network ${freshNet.id}`);
@@ -101,7 +102,7 @@ export async function addMemberAct(networkId: string, input: unknown): Promise<N
   // Braintree: requiredVoters = ancestry path from self to root, and the proposer auto-votes yes. If the path is
   // only [self] (root case), concludeRoundIfReady passes immediately and the member is added at once → 201.
   const round = joinRound(buildBraintreeAncestors(freshNet, freshCfg.instanceId, freshCfg.instanceId));
-  freshNet.pendingRounds.push(round);
+  openRoundHere(freshNet, round);
   round.votes.push(makeSignedOwnCast(freshNet.id, round, freshCfg.instanceId, 'yes'));
   storePeerToken(instanceId, token);
   if (concludeRoundIfReady(freshNet, round)) {
@@ -138,7 +139,7 @@ export function removeMemberAct(networkId: string, instanceId: string): NetworkA
 
   if (net.type === 'closed' || net.type === 'democratic') {
     const round = removeRound();
-    net.pendingRounds.push(round);
+    openRoundHere(net, round);
     saveConfig(cfg);
     log.info(`Opened remove vote round ${round.roundId} for ${subject.label} in network ${net.id}`);
     return { status: 202, body: { status: 'vote_pending', roundId: round.roundId } };
@@ -157,7 +158,7 @@ export function removeMemberAct(networkId: string, instanceId: string): NetworkA
   // child of self, buildBraintreeAncestors(startId=self) includes self and self's own ancestors.
   const requiredVoters = buildBraintreeAncestors(net, cfg.instanceId, subject.parentInstanceId ?? cfg.instanceId);
   const round = removeRound(requiredVoters);
-  net.pendingRounds.push(round);
+  openRoundHere(net, round);
   if (requiredVoters.includes(cfg.instanceId)) round.votes.push(makeSignedOwnCast(net.id, round, cfg.instanceId, 'yes'));
   if (concludeRoundIfReady(net, round)) {
     // Ancestor path is only [self] → removed at once (concludeRoundIfReady spliced the member)
@@ -265,7 +266,7 @@ export async function admitByInviteKeyAct(networkId: string, input: unknown): Pr
       pendingMember: member,             // held here until the vote passes
       inviteKeyHash: net.inviteKeyHash,  // preserve the original validated hash in the round record
     };
-    freshNet.pendingRounds.push(round);
+    openRoundHere(freshNet, round);
     // Revoke invite key after use to prevent replay
     freshNet.inviteKeyHash = undefined;
     // Save the plaintext peer token so the sync engine can use it once the vote passes
@@ -298,7 +299,7 @@ export async function admitByInviteKeyAct(networkId: string, input: unknown): Pr
       requiredVoters,
       inviteKeyHash: net.inviteKeyHash,  // preserve the validated hash so the joiner can poll
     };
-    freshNet.pendingRounds.push(round);
+    openRoundHere(freshNet, round);
     // The inviting node's approval is implicit — it generated the invite key.
     round.votes.push(makeSignedOwnCast(freshNet.id, round, freshCfg.instanceId, 'yes'));
     // Consume the key (single-use) and store the peer token for post-admission sync.

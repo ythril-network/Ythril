@@ -59,6 +59,7 @@ import { makeSignedOwnCast } from '../util/signing.js';
 import { log } from '../util/log.js';
 import { SSRF_SAFE_URL } from './networks/_shared.js';
 import type { NetworkMember, VoteRound } from '../config/types.js';
+import { openRoundHere } from '../networks/round-local-state.js';
 
 export const inviteRouter = Router();
 
@@ -554,7 +555,7 @@ inviteRouter.post('/finalize', authRateLimit, async (req, res) => {
           ? { requiredVoters: buildBraintreeAncestors(net, cfg.instanceId, cfg.instanceId) }
           : {}),
       };
-      net.pendingRounds.push(round);
+      openRoundHere(net, round);
       round.votes.push(makeSignedOwnCast(net.id, round, cfg.instanceId, 'yes'));
       if (concludeRoundIfReady(net, round)) {
         // Sole-voter case (braintree root / no other members): admit immediately.

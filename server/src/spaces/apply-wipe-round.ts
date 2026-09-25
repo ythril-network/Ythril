@@ -28,7 +28,7 @@
 import { log } from '../util/log.js';
 import type { NetworkConfig, VoteRound } from '../config/types.js';
 import type { WipeCollectionType } from './lifecycle.js';
-import { remoteToLocal } from '../sync/space-map.js';
+import { carriedLocalId } from '../sync/space-map.js';
 
 /** What a concluded space round does here, if anything. */
 export type SpaceRoundAction =
@@ -44,8 +44,8 @@ export function spaceRoundAction(
   if (!round.concluded || !round.passed || round.appliedHere || !round.spaceId) return null;
   // A single veto stops it.
   if (round.votes.some(v => v.vote === 'veto')) return null;
-  const localId = remoteToLocal(net as NetworkConfig, round.spaceId);
-  if (!net.spaces.includes(localId)) return null;
+  const localId = carriedLocalId(net, round.spaceId);
+  if (!localId) return null;
   if (round.type === 'space_deletion') return { kind: 'delete', localId };
   // The types the members VOTED for, never a fresh default. A round approved for `files` must not conclude
   // by emptying the knowledge graph, which is what resolving this at conclusion time would risk.

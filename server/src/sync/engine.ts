@@ -35,6 +35,7 @@ import { adoptAnnouncedSpaces, announcedSpaces } from '../networks/network-space
 import { pullSpaceMetaFromUpstream } from './space-meta-pull.js';
 import { peerSafeFetch, isPeerUrlAllowed, transferInit, PEER_TRANSFER_TIMEOUT_MS } from './peer-fetch.js';
 import { concludeRoundIfReady, sendMemberRemovedNotify } from './governance.js';
+import { adoptPeerRound } from '../networks/round-local-state.js';
 import { enqueueMediaJob } from '../files/media/job-queue.js';
 import { resolveInputFormat } from '../files/converters/pipeline.js';
 import { mimeTypeForPath } from '../files/mime.js';
@@ -736,14 +737,8 @@ async function propagateVotesWithPeer(
       let local = freshNet.pendingRounds.find(r => r.roundId === peerRound.roundId);
       if (!local) {
         // Round is new to us — adopt it (GET only returns open/non-concluded rounds)
-        const newRound: VoteRound = {
-          ...(peerRound as VoteRound),
-          votes: [],        // votes are merged below
-          concluded: false,
-          appliedHere: false,  // local state, never a peer's (S-9)
-        };
-        freshNet.pendingRounds.push(newRound);
-        local = newRound;
+        // Nothing local is taken from it (S-7, S-9); votes are merged below, one cast at a time.
+        local = adoptPeerRound(freshNet, peerRound as VoteRound);
         changed = true;
         log.info(`Vote gossip: adopted round ${peerRound.roundId} (${peerRound.type}) from ${member.label}`);
       }

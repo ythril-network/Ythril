@@ -41,8 +41,12 @@ describe('a member that already has a local space of that name', () => {
 });
 
 describe('the proposer', () => {
-  it('carries its own space', () => {
-    assert.deepEqual(spaceAdditionTarget(net(), round({ subjectInstanceId: 'me' }), 'me', ['notes']), { localId: 'notes' });
+  it('carries its own space — the instance that opened the round here', () => {
+    assert.deepEqual(spaceAdditionTarget(net(), round({ proposedHere: true }), 'me', ['notes']), { localId: 'notes' });
+  });
+  it('is not whoever the round names as subject — a peer sets that (S-7)', () => {
+    const r = spaceAdditionTarget(net(), round({ subjectInstanceId: 'me' }), 'me', ['notes']);
+    assert.ok(r && 'skip' in r, `a round naming this instance as subject was treated as its own: ${JSON.stringify(r)}`);
   });
 });
 
