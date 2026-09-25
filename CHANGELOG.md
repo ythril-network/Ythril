@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.2.0] — 2026-09-25
+
+**Networks become a whole feature on both doors, a space's schema travels with its records, and a conversation can
+be ingested into records.** Every network act now has its MCP tool, a token below instance admin can govern the
+networks of the spaces it holds, a space can join an existing network later, and a space in two networks keeps each
+network's schema as its own layer — the clashes shown, the order the operator's to change, and a combined
+definition proposed to one network by vote. `ingest` turns a raw conversation into entities, claims, edges and a
+timeline.
+
+| | |
+|---|---|
+| new | MCP tools for every network act (invite, fork, join, members, votes, topology); a Networks column in token rights; a space added to an existing network; schema replicated with the records, per network, with clash view, reorder and propose; `ingest`; `graph_traverse` bodies via `projection`; a batch answers with its `refs` |
+| now voted | a schema write on a NETWORKED space through `PUT /schema`, the single-type upsert and delete, and the library's apply answers `202 vote_pending` instead of `200`, and changes only when the round passes — as `PATCH` already did |
+| consent | the External assist model is consented to per use: an instance that ingested conversations through it must **Allow conversations** once, or ingest refuses and says so |
+| memory | the compose install caps `ythril` and `ythril-mongo` at 4 GB each by default (`YTHRIL_MEM_LIMIT`, `YTHRIL_MONGO_MEM_LIMIT`); raise them in `.env` for very large spaces |
+| security | a round from a peer can no longer pass itself off as this instance's own; starting ingest runs is rate limited on REST as on MCP |
+| what to do | upgrade. A script that writes a networked space's schema should expect `202`; an instance using an external assist model for conversations allows conversations once on Settings → Models |
+
+**Documents that changed**, for anyone who keeps a copy: `README.md`, `docs/dependencies.md`, `docs/integration-guide.md`, `docs/integration-guide/02-hosting.md`, `docs/integration-guide/04-brain-api.md`, `docs/integration-guide/04a-recall-api.md`, `docs/integration-guide/04b-graph-api.md`, `docs/integration-guide/04d-brain-ops-api.md`, `docs/integration-guide/04i-ingest-api.md`, `docs/integration-guide/05a-conversion-pipeline.md`, `docs/integration-guide/05b-media-embedding.md`, `docs/integration-guide/06-spaces-api.md`, `docs/integration-guide/06a-schema-api.md`, `docs/integration-guide/06b-schema-library-api.md`, `docs/integration-guide/07-tokens-api.md`, `docs/integration-guide/08-networks-api.md`, `docs/integration-guide/09-sync-api.md`, `docs/integration-guide/13-audit-log-api.md`, `docs/integration-guide/16-mcp.md`, `docs/network-types.md`, `docs/sync-protocol.md`, `docs/userguide.md`, `docs/userguide/02-brain.md`, `docs/userguide/03-files-and-schemas.md`, `docs/userguide/04-settings.md`, `docs/userguide/04a-media-and-embedding.md`.
+
 ### Added
 
 - **The assist model gets a token budget and a fallback, and can be a Claude model** (`F-33`, `F-33.1`). A budget
@@ -254,34 +274,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **A peer can no longer name another member as a round's proposer** (security, `S-7`, unreleased). A round
-  arriving from a peer kept the member it named as subject, and that was read as "who proposed it": naming a member
-  made that member treat a space addition as its own (joining a private space of the same name to the network) and a
-  passed schema change as an edit of its own definitions, and on every other member it dropped that member's vote from
-  the quorum. Now an instance records which rounds it opened itself and never takes that from a peer, and a proposer is
-  a voter like any member, whose yes is cast automatically — and signed — when it opens the round.
-- **A deletion or wipe vote acts only on a round that passed, and only on a space its network carries** (security,
-  `S-9`). A `space_deletion` or `space_wipe` round was applied whenever it had concluded with no veto — so one that
-  expired without enough yes deleted too — to the space id exactly as the round named it, never checked against the
-  spaces the network shares, and gossip re-applied old rounds on every change. Any member of any network could delete
-  or empty any space on another member, including one no network carries. Now: passed rounds only, the space mapped
-  to this instance's id and carried by that network, applied once.
-- **Starting ingest runs is rate limited on REST as it already was on MCP** (security, `S-8`, unreleased). The MCP
+- **A round arriving from a peer can no longer pass itself off as this instance's own** (security, `S-7`). An
+  instance read "I proposed this" off the round's subject, which a peer sets — so a peer could make a member
+  treat a space addition as its own, joining a private space of the same name to the network, and a passed schema
+  change as an edit of its own definitions. Each instance now records which rounds it opened itself and never takes
+  that from a peer. (The same fix's voter rule shipped in 5.1.7.)
+- **Starting ingest runs is rate limited on REST as it already was on MCP** (security, `S-8`). The MCP
   `ingest` tool was held to the heavy-call limit while `POST /api/brain/spaces/:spaceId/ingest` had only the global
   limiter, so a token allowed to write knowledge could start runs without bound over REST and exhaust the model
   backends. The limit now sits in the one module both doors call, the two doors share a single count per token, and
   only a run that actually starts is counted.
-- **An invite cannot be applied under another peer's instance id** (security, `S-6`). Since 5.1.2 the token an invite
-  handshake mints reaches every network the two instances already share, and the joining side's instance id was taken
-  on its word — so anyone handed an invite bundle for one network could apply as a peer the inviter already syncs with
-  and reach every space the inviter shares with that peer. An id that is already a peer must now present a token the
-  inviter issued to it, which a genuine peer's own join does; and a joiner refuses an inviter claiming a known peer's id
-  from another address. An instance joining for the first time is unaffected.
 
-- **Two networks joined from the same peer at once both keep syncing** (`Q-53`). Each side keeps one token per peer,
-  and each handshake's token was scoped to the networks the pair shared at that moment, so two handshakes whose
-  steps interleaved left the kept token without one network, which then answered 403 until the next handshake. Once a
-  join is registered, every token either side keeps for the other now reaches that network's spaces too.
 
 - **A network card counts one member in the singular** (`Q-54`). The role badge read "1 peers", "1 subscribers";
   one member now takes its own string in English, German and Polish.
@@ -588,6 +591,72 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`F-19` leaves the manual-verify exemption map.** Its exploration finished — no demand signal for a rules
   engine, and the cheap parts already exist — so it became an owner decision rather than open work, and a
   stale exemption fails `todo:check`. The map stays, empty, for the next item whose evidence cannot be a count.
+
+## [5.1.7] — 2026-09-25
+
+A security patch for networks: a deletion or wipe vote can only act on a space its network carries, and only once it
+has passed, and a member can no longer be named as a round's proposer to have its vote ignored. Please roll it onto
+every instance that is in a network.
+
+**Who is affected.** Every instance in a network. A `space_deletion` or `space_wipe` round was applied whenever it had
+concluded with no veto — so a proposal that EXPIRED without enough yes deleted or emptied the space as if it had
+passed — and it acted on the space id exactly as the round named it, without checking that the network shares that
+space. Any member of any network could therefore delete or empty any space on another member, including a private
+one no network carries, and an old deletion round re-applied to a space later re-created under the same name.
+
+**What to do.** Roll the image. There is no config change and no migration. If a space disappeared or was emptied
+on a networked instance and nobody voted for it, it is gone; restore it from a backup.
+
+### Fixed
+
+- **A deletion or wipe vote acts only on a round that passed, only on a space its network carries, and once**
+  (security). An expired round deletes nothing, a round naming a space the network does not share is ignored, and a
+  concluded round is applied here at most once.
+- **A member cannot be named as another round's proposer to drop its vote** (security). A round's subject was left
+  out of its voters on every round type, so a peer could name any member as the proposer of a deletion or schema
+  change and that member's vote was no longer needed on the other members. The subject is now left out only on a
+  join or a removal; the real proposer's yes is cast, signed, when it opens the round.
+
+## [5.1.6] — 2026-09-25
+
+A security patch for networks: an invite can no longer be applied under another peer's instance id. Please roll it onto
+every instance that is in a network.
+
+**Who is affected.** Every instance in two or more networks with the same peer. Since 5.1.2 the token an invite
+handshake mints reaches every network the two instances already share, and the joining side's instance id was taken
+on its word. So anyone handed an invite bundle for one network — including, since 5.1.x, one minted by a space
+administrator — could apply under the id of a peer the inviter already syncs with, and read every space the inviter
+shares with that peer. The joining side trusted the inviter's claimed id the same way.
+
+**What to do.** Roll the image. There is no config change and no migration. An instance joining a network for the
+first time is unaffected; a peer that is already connected and joins a SECOND network proves itself automatically once
+it runs 5.1.6 too — an older joiner is refused (`403`, naming the reason) by a patched inviter until it is upgraded.
+
+### Fixed
+
+- **An invite cannot be applied under another peer's instance id** (security). An id that is already a peer must now
+  present a token the inviter issued to it, which a genuine peer's own join does, and a joiner refuses an inviter that
+  claims a known peer's id from another address. A refused apply mints nothing and is logged.
+
+## [5.1.5] — 2026-09-25
+
+A patch for networks: two networks joined from the same peer at the same moment both keep syncing.
+
+**Who is affected.** An operator who joins two networks from the same instance within seconds of each other — or
+whose two instances join each other into two networks at once. Each instance keeps one token per peer, and each
+handshake hands over a new one scoped to the networks the pair shared at that moment. When the two handshakes'
+steps interleaved, the token that was kept lacked one of the two networks, and that network answered every sync with
+`403` until another handshake happened. Joins made one after the other were never affected (fixed in 5.1.2).
+
+**What to do.** Roll the image. A pair already caught by it recovers on its next handshake, or by leaving and
+rejoining the network that answers `403`. There is no config change and no migration.
+
+### Fixed
+
+- **Two networks joined from the same peer at once both keep syncing.** Once a join is registered, every token
+  either side keeps for the other now also reaches that network's spaces — at finalize on the inviter, and after
+  registration on the joiner — so whichever token a racing second handshake leaves in place reaches both. A wider
+  token is not wider access: a peer is still admitted only to the spaces of networks it is a member of.
 
 ## [5.1.4] — 2026-09-25
 
