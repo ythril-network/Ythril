@@ -28,6 +28,7 @@ import type { NetworkConfig } from '../config/types.js';
 import { peerSafeFetch } from '../sync/peer-fetch.js';
 import { BCRYPT_ROUNDS, SSRF_SAFE_URL } from '../api/networks/_shared.js';
 import type { NetworkActResult } from './network-acts.js';
+import { widenPeerTokensOf } from './network-spaces.js';
 
 type Caller = Parameters<typeof networkJoinRefusal>[0] & { id?: string };
 
@@ -275,6 +276,9 @@ export async function joinRemoteAct(caller: Caller, input: unknown): Promise<Net
     });
   }
 
+  // Q-53, the joiner's half: every token kept for the inviter reaches this network's spaces, so a second handshake
+  // with the same inviter racing this one cannot leave the token the inviter keeps without them.
+  widenPeerTokensOf(freshCfg, [applyData.instanceId], allNetworkSpaces);
   saveConfig(freshCfg);
   log.info(`join-remote: joined '${applyData.networkLabel}' (${networkId}) via RSA handshake`);
 

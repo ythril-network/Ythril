@@ -27,6 +27,11 @@ export class SchemaApi {
     return this.http.put<SchemaLayersView>(`/api/spaces/${encodeURIComponent(spaceId)}/network-precedence`, { networks });
   }
 
+  /** Propose `meta` to ONE network as its definition (F-39.5): a vote there, landing in its layer once passed. */
+  proposeToNetwork(spaceId: string, targetNetwork: string, meta: Record<string, unknown>): Observable<unknown> {
+    return this.http.patch(`/api/spaces/${encodeURIComponent(spaceId)}`, { targetNetwork, meta });
+  }
+
   // ── Schema Library ─────────────────────────────────────────────────────────
 
   listSchemaLibrary(): Observable<{ entries: SchemaLibraryEntry[] }> {

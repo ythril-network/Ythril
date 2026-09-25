@@ -349,6 +349,7 @@ that space.
 | `faceDescriptorDims` | `files` **admin** — changing the width invalidates every stored face descriptor |
 | `documentExtraction`, `imageAnalysis`, `audioAnalysis`, `videoAnalysis`, `textAnalysis` | `files` write |
 | `meta.typeSchemas`, `typeSchemasMode`, `meta.whenDuePasses` | `schema` write |
+| `targetNetwork` | `networks` write — it proposes the meta to one network as that network's definition; see [Network Schema Layers](06a-schema-api.md#settling-a-clash-propose-a-definition-to-one-network) |
 | `meta.validationMode`, `meta.strictLinkage` | `schema` **admin** — enforcement: flipping either makes writes that used to succeed start failing |
 | `meta.suppressEmbeddings` | `knowledge` **admin** — recall silently stops finding anything written afterwards |
 | `recordTtlDays` | `knowledge` **admin** — it deletes records on a clock |

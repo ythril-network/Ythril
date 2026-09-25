@@ -148,6 +148,12 @@ export interface VoteRound {
    * field-merge, because the changed-field list it never recorded would merge nothing at all.
    */
   baseMetaVersion?: number;
+  /**
+   * A proposal for ONE network's layer rather than an edit of the proposer's own definitions (meta_change rounds,
+   * `F-39.5`). Passed, it lands in that network's layer on every member — the proposer included, which is the only
+   * instance it changes anything for: everyone else stores a passed meta_change as the network's layer anyway.
+   */
+  proposesLayer?: boolean;
   requiredVoters?: string[];     // braintree only: instanceIds that must ALL vote yes
 }
 

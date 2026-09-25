@@ -339,7 +339,9 @@ describe('NetworksComponent (characterization)', () => {
       const c = make();
       const n = net({ type: 'club', members: [m('a')], myRole: { role: 'organiser', members: ['a'] } } as Partial<Network>);
       expect(titles(c.memberGroups(n))).toEqual(['networks.network.members.peers']);
-      expect(c.roleCountKey(n.myRole!)).toBe('networks.role.count.peers');
+      // Q-54: one member is counted in the singular, two in the plural.
+      expect(c.roleCountKey(n.myRole!)).toBe('networks.role.count.peersOne');
+      expect(c.roleCountKey({ role: 'organiser', members: ['a', 'b'] })).toBe('networks.role.count.peers');
     });
     it('a tree node sees the path to the root and what is below it', () => {
       const c = make();

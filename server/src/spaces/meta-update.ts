@@ -139,6 +139,8 @@ export type MetaUpdatePlan = {
   hasRecordTtl: boolean;
   /** The audit change-list snapshot, taken before anything is applied. */
   audit: { before: Record<string, unknown>; after: Record<string, unknown> };
+  /** The one network this proposes to, as its layer (`F-39.5`); absent, the edit is this instance's own. */
+  targetNetwork?: string;
 };
 
 export type MetaUpdateDecision =
@@ -238,12 +240,33 @@ export function planSpaceMetaUpdate(input: {
         return capDocExtractionMode(getDocumentProcessingConfig().mode ?? 'auto', requested);
       })();
 
+  // F-39.5: a proposal to one network is merged over THAT NETWORK's layer, not the space's effective meta — it is
+  // the network's definition being changed. Only the meta may travel with it: a label, a quota or a TTL is this
+  // instance's, and applying them beside a vote is the partial save a refusal exists to prevent.
+  const targetNetwork = parsed.data.targetNetwork;
+  let base: Partial<SpaceMeta> = space.meta ?? {};
+  if (targetNetwork !== undefined) {
+    const extra = Object.keys(parsed.data).filter(k => !['meta', 'typeSchemasMode', 'targetNetwork'].includes(k)
+      && (parsed.data as Record<string, unknown>)[k] !== undefined);
+    if (extra.length) {
+      return { ok: false, refusal: { status: 400, body: { error: `targetNetwork proposes that network's schema only: send meta (and typeSchemasMode), not ${extra.join(', ')}` } } };
+    }
+    if (parsed.data.meta === undefined) {
+      return { ok: false, refusal: { status: 400, body: { error: 'targetNetwork needs a meta to propose' } } };
+    }
+    const net = getConfig().networks.find(n => n.id === targetNetwork && n.spaces.includes(spaceId));
+    if (!net) {
+      return { ok: false, refusal: { status: 400, body: { error: `Network '${targetNetwork}' does not carry space '${spaceId}'` } } };
+    }
+    base = net.schemaLayers?.[spaceId] ?? {};
+  }
+
   // Merge the incoming meta with the existing meta so that PATCH has true RFC-7396 semantics: scalar fields
   // overwrite, typeSchemas entries are added/updated, and types *not* mentioned in the body are preserved.
   // `typeSchemasMode: 'replace'` opts out of that last clause so a deletion can be expressed at all.
   const mergedMeta: SpaceMeta | undefined =
     parsed.data.meta !== undefined
-      ? mergeSpaceMeta(space.meta ?? {}, parsed.data.meta, parsed.data.typeSchemasMode ?? 'merge') as SpaceMeta
+      ? mergeSpaceMeta(base, parsed.data.meta, parsed.data.typeSchemasMode ?? 'merge') as SpaceMeta
       : undefined;
 
   return {
@@ -258,6 +281,7 @@ export function planSpaceMetaUpdate(input: {
       recordTtlDays,
       hasRecordTtl,
       audit,
+      ...(targetNetwork !== undefined ? { targetNetwork } : {}),
     },
   };
 }
@@ -322,7 +346,8 @@ export async function applySpaceMetaUpdate(plan: MetaUpdatePlan): Promise<MetaUp
 
   // Network voting: a networked space PROPOSES a meta change rather than applying it.
   if (mergedMeta !== undefined) {
-    const networkedIn = cfg.networks.filter(n => n.spaces.includes(id));
+    // F-39.5: a proposal to one network opens its round there alone; any other edit, on every network carrying it.
+    const networkedIn = cfg.networks.filter(n => n.spaces.includes(id) && (plan.targetNetwork === undefined || n.id === plan.targetNetwork));
     if (networkedIn.length > 0) {
       const now = new Date().toISOString();
       const rounds: { networkId: string; networkLabel: string; roundId: string }[] = [];
@@ -348,6 +373,7 @@ export async function applySpaceMetaUpdate(plan: MetaUpdatePlan): Promise<MetaUp
           // sync/meta-round-merge.ts.
           metaChangedFields: proposedMetaFields(patchData.meta ?? {}),
           baseMetaVersion: space.meta?.version ?? 0,
+          ...(plan.targetNetwork !== undefined ? { proposesLayer: true } : {}),
         });
         /*
          * Evaluated now, because the proposer's yes above may already be enough (`Q-49`).

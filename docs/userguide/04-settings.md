@@ -88,6 +88,9 @@ schema layers** panel: each network in the order it applies, the arrows to chang
 — a type or property two networks define differently — with the network that currently applies marked. The one
 higher in the list wins; both keep syncing their records either way. **Save order** rebuilds the space's schema.
 Reordering needs the Schema right at admin. The panel is not shown for a space that no network sends schema to.
+To settle a clash for good, **Propose** beside a network that holds the other definition offers it the one that
+applies here: that network's members vote, and once it passes it becomes that network's definition on every
+member. Your own definitions are not changed. It needs the Networks right at write.
 
 **Schema tab:** Define what data this space accepts. A **Schema validation** bar at the very top holds the space-wide **Validation mode** and **Strict linkage** controls — these govern *every* type in the space, not the collection you happen to be viewing. Below it, the entity / edge / fact / chrono collections each list their types on the left; click one to edit its rules in a stable panel on the right (you don't lose your place editing a type or property, and several property editors can be open at once).
 

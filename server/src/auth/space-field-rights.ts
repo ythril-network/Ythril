@@ -89,6 +89,9 @@ export const SPACE_FIELD_RIGHTS: Readonly<Record<string, FieldRight>> = {
   // Changing the shape records must take. `replace` deletes types, but it deletes them from a payload the
   // caller wrote — the destructive act is authoring the map, which is the same `write` either way.
   typeSchemasMode: area('schema', 'write'),
+  // Sending a definition to a network is sharing with it — the Networks column's `write`, as creating a network
+  // with the space is. The definition itself is still priced by its own `meta.*` rows.
+  targetNetwork: area('networks', 'write'),
   'meta.typeSchemas': area('schema', 'write'),
   'meta.whenDuePasses': area('schema', 'write'),
 

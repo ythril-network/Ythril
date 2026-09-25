@@ -85,7 +85,21 @@ export function spacesToAdopt(
  * already reaches a space is left as it is — widening must never narrow a row somebody set by hand.
  */
 export function widenPeerTokens(cfg: Config, net: NetworkConfig, localIds: readonly string[]): void {
-  const peers = new Set(net.members.map(m => m.instanceId));
+  widenPeerTokensOf(cfg, net.members.map(m => m.instanceId), localIds);
+}
+
+/**
+ * The same, for named peers rather than a network's members — what a handshake needs, because its peer is not a
+ * member yet when a vote holds the join, and its token must still reach the spaces for when the vote passes.
+ *
+ * Why a handshake needs it at all (`Q-53`): each side keeps ONE token per peer and each handshake replaces it, minted
+ * at apply as the networks the pair shared then. Two handshakes between the same pair whose applies both land before
+ * either finalize each mint a token without the other network, and whichever is kept leaves that network at 403.
+ * Widening EVERY token of the peer once its join is registered makes the one kept reach both, in either order.
+ * Wider tokens are not wider access: `spaceAllowed` admits a peer only to the spaces of networks it is a member of.
+ */
+export function widenPeerTokensOf(cfg: Config, peerIds: readonly string[], localIds: readonly string[]): void {
+  const peers = new Set(peerIds);
   for (const tok of cfg.tokens) {
     if (!tok.peerInstanceId || !peers.has(tok.peerInstanceId) || !tok.rights) continue;
     for (const id of localIds) {

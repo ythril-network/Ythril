@@ -3,6 +3,25 @@ import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
 import { SchemaApi, type SchemaLayersView } from '../../core/schema-api.service';
 import { ToastService } from '../../core/toast.service';
 
+type Clash = SchemaLayersView['clashes'][number];
+const obj = (v: unknown): Record<string, unknown> => (v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : {});
+
+/**
+ * The meta patch that gives `target` the definition that applies now — the clash's first value (F-39.5).
+ *
+ * A named type is replaced WHOLE by a schema merge, so the patch carries the target layer's own definition of the
+ * type with the one clashing part swapped in. Sending the part alone would drop the rest of that network's type.
+ */
+export function proposalFor(c: Clash, targetLayer: Record<string, unknown>): Record<string, unknown> {
+  const winning = c.values[0]?.value;
+  if (c.field) return { [c.field]: winning };
+  const own = obj(obj(obj(targetLayer['typeSchemas'])[c.kind!])[c.type!]);
+  const def = c.property
+    ? { ...own, propertySchemas: { ...obj(own['propertySchemas']), [c.property]: winning } }
+    : { ...own, [c.typeField!]: winning };
+  return { typeSchemas: { [c.kind!]: { [c.type!]: def } } };
+}
+
 /**
  * Where a space's schema comes from once networks send it (`F-39.3`): each network's layer in the order it applies,
  * the clashes between them, and up/down to change which network wins.
@@ -10,7 +29,8 @@ import { ToastService } from '../../core/toast.service';
  * Shown only when the space HAS a network layer — a space in no schema-sending network has nothing to show, and an
  * empty panel would suggest something is missing. Its own component because the schema tab is on the god-file
  * ratchet. The rule it presents is F-39.2's: the network first in the list wins a clash, and a clash never stops
- * either network's records.
+ * either network's records. A clash can be settled by proposing the winning definition to a network that holds
+ * another (F-39.5) — a vote on that network, never a direct write.
  */
 @Component({
   selector: 'app-space-schema-layers',
@@ -43,6 +63,11 @@ import { ToastService } from '../../core/toast.service';
                   <span style="margin-left:8px;" [style.color]="first ? 'var(--text)' : 'var(--text-muted)'">
                     {{ labelOf(val.networkId) }}@if (first) { <strong> · {{ 'spaces.schema.layers.applies' | transloco }}</strong> }
                   </span>
+                  @if (!first) {
+                    <button class="btn-ghost btn btn-sm" style="margin-left:4px;" [disabled]="proposing()"
+                      [title]="'spaces.schema.layers.proposeHint' | transloco: { network: labelOf(val.networkId) }"
+                      (click)="propose(c, val.networkId)">{{ 'spaces.schema.layers.propose' | transloco }}</button>
+                  }
                 }
               </div>
             }
@@ -62,6 +87,7 @@ export class SpaceSchemaLayersComponent {
   order = signal<string[]>([]);
   dirty = signal(false);
   saving = signal(false);
+  proposing = signal(false);
 
   constructor() {
     effect(() => {
@@ -88,6 +114,20 @@ export class SpaceSchemaLayersComponent {
     const next = [...this.order()];
     [next[i], next[i + by]] = [next[i + by]!, next[i]!];
     this.order.set(next); this.dirty.set(true);
+  }
+
+  /** Offer the definition that applies here to a network that holds another, as a vote on that network (F-39.5). */
+  propose(c: Clash, networkId: string): void {
+    const layer = this.view()?.layers.find(l => l.networkId === networkId)?.meta ?? {};
+    this.proposing.set(true);
+    this.api.proposeToNetwork(this.spaceId(), networkId, proposalFor(c, layer)).subscribe({
+      next: () => {
+        this.proposing.set(false);
+        this.toast.success(this.transloco.translate('spaces.schema.layers.proposed', { network: this.labelOf(networkId) }));
+        this.api.getSchemaLayers(this.spaceId()).subscribe({ next: v => this.show(v) });
+      },
+      error: err => { this.proposing.set(false); this.toast.error(err.error?.error ?? this.transloco.translate('spaces.schema.layers.proposeFailed')); },
+    });
   }
 
   save(): void {
