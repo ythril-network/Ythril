@@ -13,6 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `network_fork` are the same acts as `POST /api/networks/:id/invite` and `/fork` — same parameters, answers and
   refusals on both doors.
 
+- **An agent can join a remote network and manage its members over MCP** (`F-36`, slice 4). `network_join_remote`,
+  `network_member_add` and `network_member_remove` are the same acts as `POST /api/networks/join-remote`,
+  `POST /api/networks/:id/members` and `DELETE /api/networks/:id/members/:instanceId`: the same handshake and Networks
+  rung, the same vote-or-direct answer per network type, and an inviter's refusal relayed with its own sentence.
+
 - **A passed space-settings vote reaches every member** (`F-39.4`). On a club the organiser's own yes passed a
   meta change before any member could see the round, and a member that joined later never saw it either, so the
   change stayed on the instance that proposed it. The passed round is now served to peers, each member re-decides it

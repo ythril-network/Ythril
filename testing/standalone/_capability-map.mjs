@@ -133,6 +133,9 @@ export const CAPABILITIES = [
   ['Networks', 'network_sync_history', 'GET /api/networks/:id/sync-history'],
   ['Networks', 'network_invite', 'POST /api/networks/:id/invite'],
   ['Networks', 'network_fork', 'POST /api/networks/:id/fork'],
+  ['Networks', 'network_join_remote', 'POST /api/networks/join-remote'],
+  ['Networks', 'network_member_add', 'POST /api/networks/:id/members'],
+  ['Networks', 'network_member_remove', 'DELETE /api/networks/:id/members/:instanceId'],
   ['Networks', 'network_sync', 'POST /api/networks/:id/sync'],
   ['Networks', 'network_sync', 'POST /api/networks/peers/:peerId/sync'],
 ];

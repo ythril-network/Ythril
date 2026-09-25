@@ -139,7 +139,7 @@ are the shapes this door replaces, and they are documented on their own pages.
 
 ### Read-Only Tokens
 
-When connecting with a `readOnly` token, mutating tools (`save_fact`, `update_fact`, `delete_fact`, `save_entity`, `update_entity`, `delete_entity`, `graph_merge`, `save_edge`, `update_edge`, `delete_edge`, `save_link`, `delete_link`, `save_chrono`, `update_chrono`, `delete_chrono`, `save_bulk`, `ingest`, `write_file`, `delete_file`, `create_dir`, `move_file`, `retry_embed_file`, `retry_embed_record`, `retry_embed_media`, `update_file_meta`, `network_sync`, `network_create`, `network_update`, `network_leave`, `network_add_space`, `network_vote`, `network_invite`, `network_fork`, `space_set_network_precedence`, `update_space`, `schema_update`, `save_space`, `space_reindex`, `space_reembed`, `delete_space_data`) are **hidden** from `tools/list` and rejected with an error if called directly. Read-only tools (`help`, `recall`, `similar`, `query`, `space_stats`, `space_meta`, `list_spaces`, `read_file`, `list_dir`, `traverse`, `list_embed_jobs`, `delete_entity_preview`, `ingest_status`, `network_peers`, `network_get`, `network_votes`, `network_sync_history`, `space_schema_layers`) work normally. `list_tokens` is read-only but **admin-gated** — see the admin-only note below. `network_peers` and `network_get` show only the networks the token may see.
+When connecting with a `readOnly` token, mutating tools (`save_fact`, `update_fact`, `delete_fact`, `save_entity`, `update_entity`, `delete_entity`, `graph_merge`, `save_edge`, `update_edge`, `delete_edge`, `save_link`, `delete_link`, `save_chrono`, `update_chrono`, `delete_chrono`, `save_bulk`, `ingest`, `write_file`, `delete_file`, `create_dir`, `move_file`, `retry_embed_file`, `retry_embed_record`, `retry_embed_media`, `update_file_meta`, `network_sync`, `network_create`, `network_update`, `network_leave`, `network_add_space`, `network_vote`, `network_invite`, `network_fork`, `network_join_remote`, `network_member_add`, `network_member_remove`, `space_set_network_precedence`, `update_space`, `schema_update`, `save_space`, `space_reindex`, `space_reembed`, `delete_space_data`) are **hidden** from `tools/list` and rejected with an error if called directly. Read-only tools (`help`, `recall`, `similar`, `query`, `space_stats`, `space_meta`, `list_spaces`, `read_file`, `list_dir`, `traverse`, `list_embed_jobs`, `delete_entity_preview`, `ingest_status`, `network_peers`, `network_get`, `network_votes`, `network_sync_history`, `space_schema_layers`) work normally. `list_tokens` is read-only but **admin-gated** — see the admin-only note below. `network_peers` and `network_get` show only the networks the token may see.
 
 ### Connecting
 
@@ -356,6 +356,9 @@ row survives its own tool being built, so the list cannot keep advertising a gap
 | `network_sync_history` | A network's recent sync cycles, newest first. Instance-admin. Same as `GET /api/networks/:id/sync-history` |
 | `network_invite` | Mint a fresh invite key — reusable on pub/sub, single-use elsewhere; revokes the previous one. Instance admin or administering every space. Same as `POST /api/networks/:id/invite` |
 | `network_fork` | Found a new, empty network from an existing one. Instance-admin. Same as `POST /api/networks/:id/fork` |
+| `network_join_remote` | Join a network another instance invited this one into: runs the invite handshake and registers the network here. `networks: write` on every space it maps to. Same as `POST /api/networks/join-remote` |
+| `network_member_add` | Add a peer as a member by hand: the member, or `vote_pending` where the type votes. Instance-admin. Same as `POST /api/networks/:id/members` |
+| `network_member_remove` | Remove a member: at once, or `vote_pending` where the type votes. Instance-admin. Same as `DELETE /api/networks/:id/members/:instanceId` |
 | `space_schema_layers` | A space's own schema, each network's layer in precedence, and the clashes between them. `schema: read`. Same as `GET /api/spaces/:id/schema-layers` |
 | `space_set_network_precedence` | Reorder which network wins a schema clash, highest first; rebuilds the space's schema. `schema: admin`. Same as `PUT /api/spaces/:id/network-precedence` |
 | `network_sync` | Trigger immediate sync (all networks, or one peer via `peerId`) (admin only). The REST doors are `POST /api/networks/:id/sync` and `POST /api/networks/peers/:peerId/sync` |
@@ -699,6 +702,9 @@ only shape and the two are identical by construction.
 | | `network_sync_history` | `GET /api/networks/:id/sync-history` | instance admin |
 | | `network_invite` | `POST /api/networks/:id/invite` | instance admin · administers every space |
 | | `network_fork` | `POST /api/networks/:id/fork` | instance admin |
+| | `network_join_remote` | `POST /api/networks/join-remote` | `networks: write` on every space it maps to · `createSpaces` for a space it creates |
+| | `network_member_add` | `POST /api/networks/:id/members` | instance admin |
+| | `network_member_remove` | `DELETE /api/networks/:id/members/:instanceId` | instance admin |
 | | `space_schema_layers` | `GET /api/spaces/:id/schema-layers` | read `schema` |
 | | `space_set_network_precedence` | `PUT /api/spaces/:id/network-precedence` | admin `schema` |
 | | `network_sync` | `POST /api/networks/:id/sync` | admin (MCP) · instance-level |

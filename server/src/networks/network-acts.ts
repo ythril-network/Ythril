@@ -44,7 +44,12 @@ type Caller = Parameters<typeof visibleNetworks>[0] & { id?: string };
 export type NetworkActResult =
   | { status: 200 | 201 | 202; body: Record<string, unknown> }
   | { status: 204; body?: undefined }
-  | { status: 400 | 403 | 404 | 409; error: string };
+  | { status: 400 | 403 | 404 | 409 | 500 | 502; error: string }
+  /**
+   * What ANOTHER instance answered, relayed as it came: a join's apply or finalize refused by the inviter. REST
+   * sends `upstream` verbatim, as it always has; MCP reads `error` — the inviter's own sentence when it gave one.
+   */
+  | { status: number; error: string; upstream: unknown };
 
 export const CreateNetworkBody = z.object({
   id: z.string().uuid().optional(),  // optional pre-specified ID for cross-instance registration

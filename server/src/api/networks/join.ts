@@ -1,311 +1,35 @@
 /**
  * Joining a network — invite, join, join-remote, and fork.
  *
- * Split out of the api/networks.ts monolith (A17.5); handlers are unchanged.
+ * Split out of the api/networks.ts monolith (A17.5). join-remote, invite and fork are acts in `networks/`, shared
+ * with their MCP tools (F-36); the peer-protocol `/:id/join` stays here.
  */
 import { ForkNetworkBody, forkNetworkAct, inviteKeyAct } from '../../networks/network-acts.js';
+import { joinRemoteAct } from '../../networks/join-remote-act.js';
 import { sendAct } from './_shared.js';
 import { Router } from 'express';
-import { boundedJson } from '../../util/bounded-read.js';
 import { v4 as uuidv4 } from 'uuid';
 import bcrypt from 'bcrypt';
 import { z } from 'zod';
 import { requireAdmin, requireAuth, denyReadOnly } from '../../auth/middleware.js';
 import { globalRateLimit } from '../../rate-limit/middleware.js';
-import { networkJoinRefusal, networkInviteRefusal, visibleNetworks } from '../../auth/network-rights.js';
-import { recordOrigin } from '../../auth/network-membership.js';
 import { getConfig, saveConfig, getSecrets, saveSecrets } from '../../config/loader.js';
-import { createToken, revokeToken } from '../../auth/tokens.js';
-import { peerTokenSpaces } from '../../auth/peer-token-scope.js';
-import { createSpace } from '../../spaces/lifecycle.js';
 import { concludeRoundIfReady } from '../../sync/governance.js';
 import { buildBraintreeAncestors } from '../../util/braintree.js';
 import { makeSignedOwnCast } from '../../util/signing.js';
 import { log } from '../../util/log.js';
-import type { NetworkConfig, NetworkMember, VoteRound } from '../../config/types.js';
-import { peerSafeFetch } from '../../sync/peer-fetch.js';
+import type { NetworkMember, VoteRound } from '../../config/types.js';
 import { BCRYPT_ROUNDS, SSRF_SAFE_URL, safeMemberList } from './_shared.js';
 
 export const joinRouter = Router();
 
-const JoinRemoteBody = z.object({
-  /** handshakeId returned by Brain A's POST /api/invite/generate */
-  handshakeId: z.string().uuid(),
-  /**
-   * inviteUrl returned by Brain A's POST /api/invite/generate (= Brain A's /api/invite/apply URL).
-   *
-   * `SSRF_SAFE_URL`, not a local chain. It had its own — parse + SSRF, no SCHEME check — which meant an
-   * instance with `allowInsecurePeers` off would still open a plaintext handshake to an `http://` inviter,
-   * against a setting documented as *"peer URLs must be `https://`, regardless of address"*. The token comes
-   * back RSA-wrapped, so nothing secret crossed in the clear, but the instance ids, labels, network id and
-   * public key did — and the operator heard about it from a once-per-host log line after the fact instead of
-   * a refusal before it.
-   */
-  inviteUrl: SSRF_SAFE_URL,
-  /** RSA public key PEM returned by Brain A's POST /api/invite/generate */
-  rsaPublicKeyPem: z.string().min(100),
-  /** Network ID from Brain A's invite bundle */
-  networkId: z.string().uuid(),
-  /**
-   * This brain's externally reachable base URL (e.g. https://brain-b.example.com).
-   *
-   * Also `SSRF_SAFE_URL`. It used to be a bare `.url()` — no SSRF check and no scheme check — and the
-   * inviter validates it with the full chain, so a plaintext or loopback value surfaced as a remote `400`
-   * where a local one belonged.
-   */
-  myUrl: SSRF_SAFE_URL,
-  /** expiresAt from invite bundle — informational only */
-  expiresAt: z.string().optional(),
-  /** Optional space aliasing: maps remote space IDs to desired local space IDs.
-   *  When the UI detects a collision, the user can choose a different local ID.
-   *  Any remote IDs not present in this map will keep their original ID. */
-  spaceMap: z.record(z.string(), z.string().min(1).max(40).regex(/^[a-z0-9-]+$/)).optional(),
-});
-
-
 // ── POST /api/networks/join-remote ─────────────────────────────────────────
-// Called by the JOINING brain's UI. Executes the full RSA invite handshake
-// server-side so the browser never handles raw crypto or plaintext tokens.
-//
-// Flow:
-//   1. Brain A admin clicks "Generate invite" → calls POST /api/invite/generate
-//      → gets { handshakeId, inviteUrl, rsaPublicKeyPem, networkId, expiresAt }
-//   2. Brain A admin sends that bundle to Brain B admin (out-of-band)
-//   3. Brain B admin pastes bundle + enters their own URL in Brain B's UI
-//   4. Brain B's UI calls this endpoint
-//   5. This endpoint executes the RSA handshake against Brain A on behalf of Brain B
-//   6. Both sides end up with tokens for each other; network registered locally on Brain B.
-
-// F-34.1: the Networks column, checked between apply and finalize — the only point the space list is known and
-// nothing is yet written. `denyReadOnly` because this was `requireAdmin`, which a read-only token never passed.
+// Called by the JOINING brain's UI; the handshake is `networks/join-remote-act.ts`, which MCP `network_join_remote`
+// calls too (F-36). F-34.1: the Networks column, checked between apply and finalize. `denyReadOnly` because this was
+// `requireAdmin`, which a read-only token never passed.
 joinRouter.post('/join-remote', globalRateLimit, requireAuth, denyReadOnly, async (req, res) => {
   try {
-    const parsed = JoinRemoteBody.safeParse(req.body);
-    if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
-
-    // `rsaPublicKeyPem` is validated by JoinRemoteBody but not needed here — Brain A's key is read
-    // back from the apply response below, so it is deliberately not destructured.
-    const { handshakeId, inviteUrl, networkId, myUrl, spaceMap: requestedSpaceMap } = parsed.data;
-    const cfg = getConfig();
-
-    // ── Step A: apply — call Brain A's /api/invite/apply ──────────────────────
-    const { generateKeyPairSync, privateDecrypt, publicEncrypt, constants: C } =
-      await import('node:crypto');
-
-    const { privateKey: bPrivKeyPem, publicKey: bPubKeyPem } = generateKeyPairSync('rsa', {
-      modulusLength: 4096,
-      publicKeyEncoding: { type: 'spki', format: 'pem' },
-      privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
-    });
-
-    let applyRes: Response;
-    try {
-      applyRes = await peerSafeFetch(inviteUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          handshakeId,
-          networkId,
-          instanceId: cfg.instanceId,
-          instanceLabel: cfg.instanceLabel,
-          instanceUrl: myUrl,
-          rsaPublicKeyPem: bPubKeyPem,
-        }),
-        signal: AbortSignal.timeout(15_000),
-      });
-    } catch (err) {
-      log.warn(`join-remote: could not reach ${inviteUrl}: ${err}`);
-      res.status(502).json({ error: `Could not reach inviting brain: ${err}` });
-      return;
-    }
-
-    if (!applyRes.ok) {
-      const errBody = await boundedJson<unknown>(applyRes, 'network peer').catch(() => ({}));
-      res.status(applyRes.status).json(errBody);
-      return;
-    }
-
-    const applyData = await boundedJson<{
-      encryptedTokenForB: string;
-      rsaPublicKeyPem: string;
-      instanceId: string;
-      instanceLabel: string;
-      networkId: string;
-      networkLabel: string;
-      networkType: string;
-      spaces: string[];
-    }>(applyRes, 'network peer');
-
-    // Decrypt tokenForB — the PAT Brain A created on its own server for Brain B to use
-    let tokenForB: string;
-    try {
-      tokenForB = privateDecrypt(
-        { key: bPrivKeyPem, padding: C.RSA_PKCS1_OAEP_PADDING, oaepHash: 'sha256' },
-        Buffer.from(applyData.encryptedTokenForB, 'base64'),
-      ).toString('utf8');
-    } catch {
-      res.status(400).json({ error: 'Failed to decrypt token from inviting brain' });
-      return;
-    }
-    if (!tokenForB.startsWith('ythril_')) {
-      res.status(400).json({ error: 'Decrypted token has unexpected format' });
-      return;
-    }
-
-    // Create a PAT in this brain's token store scoped to network spaces.
-    // Brain A will present this token when calling THIS brain's sync endpoints.
-    const remoteSpaceIds: string[] = applyData.spaces ?? [];
-    const existingSpaces: string[] = [];
-    const createdSpaces: string[] = [];
-    const spaceMap: Record<string, string> = {};
-
-    // F-34.1: which local spaces this join would touch — before ANY local write. Refused here, nothing was created
-    // and finalize is never called, so the inviter's token for us expires with the handshake.
-    const localOf = (remoteId: string) => requestedSpaceMap?.[remoteId] ?? remoteId;
-    const joinRefusal = networkJoinRefusal(req.authToken as Parameters<typeof networkJoinRefusal>[0], {
-      existing: remoteSpaceIds.map(localOf).filter(id => cfg.spaces.some(cs => cs.id === id)),
-      toCreate: remoteSpaceIds.map(localOf).filter(id => !cfg.spaces.some(cs => cs.id === id)),
-    });
-    if (joinRefusal) { res.status(403).json({ error: joinRefusal }); return; }
-
-    for (const remoteId of remoteSpaceIds) {
-      // Check if the user chose a different local ID for this remote space
-      const localId = requestedSpaceMap?.[remoteId] ?? remoteId;
-
-      if (localId !== remoteId) {
-        // Record the alias — sync engine will use this to translate peer space IDs
-        spaceMap[remoteId] = localId;
-      }
-
-      if (cfg.spaces.some(cs => cs.id === localId)) {
-        existingSpaces.push(localId);
-      } else {
-        // Auto-create missing spaces so sync has valid targets.
-        // Label is capitalised version of the slug (e.g. "test" → "Test").
-        try {
-          await createSpace({ id: localId, label: localId.charAt(0).toUpperCase() + localId.slice(1) });
-          createdSpaces.push(localId);
-          log.info(`join-remote: auto-created space '${localId}'${localId !== remoteId ? ` (alias for remote '${remoteId}')` : ''} for network ${networkId}`);
-        } catch (err) {
-          res.status(500).json({ error: `Failed to create space '${localId}': ${err}` });
-          return;
-        }
-      }
-    }
-
-    // All remote spaces now have local counterparts — scope token to local IDs.
-    const allNetworkSpaces = [...existingSpaces, ...createdSpaces];
-    const { record: tokenForARecord, plaintext: tokenForAPlaintext } = await createToken({
-      name: `peer:${applyData.instanceLabel ?? 'remote'}`,
-      expiresAt: null,
-      // Every network the pair shares, not this one alone: the inviter keeps one token for us and this one replaces it.
-      spaces: peerTokenSpaces(applyData.instanceId, allNetworkSpaces),
-      peerInstanceId: applyData.instanceId, // link this PAT to the peer that will present it
-    });
-
-    // ── Step B: finalize — send Brain A an encrypted token for it to call us ──
-    const encryptedTokenForA = publicEncrypt(
-      { key: applyData.rsaPublicKeyPem, padding: C.RSA_PKCS1_OAEP_PADDING, oaepHash: 'sha256' },
-      Buffer.from(tokenForAPlaintext, 'utf8'),
-    ).toString('base64');
-
-    const finalizeUrl = inviteUrl.replace(/\/apply$/, '/finalize');
-    let finalizeRes: Response;
-    try {
-      finalizeRes = await peerSafeFetch(finalizeUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ handshakeId, encryptedTokenForA }),
-        signal: AbortSignal.timeout(15_000),
-      });
-    } catch (err) {
-      await revokeToken(tokenForARecord.id);
-      res.status(502).json({ error: `Could not finalize with inviting brain: ${err}` });
-      return;
-    }
-
-    if (!finalizeRes.ok) {
-      await revokeToken(tokenForARecord.id);
-      const errBody = await boundedJson<unknown>(finalizeRes, 'network peer').catch(() => ({}));
-      res.status(finalizeRes.status).json(errBody);
-      return;
-    }
-
-    const finalizeData = await boundedJson<{ status: string }>(finalizeRes, 'network peer');
-
-    // ── Register network and peer locally ────────────────────────────────────
-    // Store tokenForB so this brain can call Brain A's sync endpoints.
-    const secrets = getSecrets();
-    secrets.peerTokens[applyData.instanceId] = tokenForB;
-    saveSecrets(secrets);
-
-    // Hashed BEFORE the network is looked up, and that order is the point.
-    //
-    // It used to happen inside the `if` below, between binding `net` out of `freshCfg.networks` and pushing
-    // the member onto it. `getConfig()` survives a reload — the loader mutates the top-level object in
-    // place — but a NESTED reference does not: the arrays are replaced wholesale, so `net` would be left
-    // pointing at the previous array's object. The push would land on that detached object and
-    // `saveConfig(freshCfg)` would write the CURRENT config, which does not contain it.
-    //
-    // The result was a join that answered success while the peer was never recorded as a member. The window
-    // is a bcrypt hash, and two sync routes a peer can call (`/sync/members`, `/sync/votes`) reload the
-    // config on every request — so a peer casting a vote during another peer's join could erase it.
-    //
-    // No mutateConfig here on purpose: the branch below may CREATE the network and push it onto `freshCfg`,
-    // and a re-read would discard that. Removing the await from the window is the smaller, safer fix.
-    const tokenForAHash = await bcrypt.hash(tokenForAPlaintext, BCRYPT_ROUNDS);
-
-    // Reload config to get fresh state (apply may have taken a few seconds)
-    const freshCfg = getConfig();
-    let net = freshCfg.networks.find(n => n.id === networkId);
-    if (!net) {
-      net = {
-        id: networkId,
-        label: applyData.networkLabel ?? 'Remote network',
-        type: (applyData.networkType as NetworkConfig['type']) ?? 'closed',
-        spaces: allNetworkSpaces,
-        ...(Object.keys(spaceMap).length > 0 ? { spaceMap } : {}),
-        votingDeadlineHours: 24,
-        members: [],
-        pendingRounds: [],
-        createdAt: new Date().toISOString(),
-        myParentInstanceId: applyData.networkType === 'braintree' ? applyData.instanceId : undefined,
-        origin: 'joined',
-      };
-      freshCfg.networks.push(net);
-    }
-    // Who established each membership, so the leave rule can tell this token's own from another's.
-    const joiner = (req.authToken as { id?: string } | undefined)?.id;
-    if (joiner) for (const s of allNetworkSpaces) if (!net.spaceOrigins?.[s]) net.spaceOrigins = recordOrigin(net.spaceOrigins, s, joiner);
-
-    if (!net.members.some(m => m.instanceId === applyData.instanceId)) {
-      net.members.push({
-        instanceId: applyData.instanceId,
-        label: applyData.instanceLabel ?? 'remote',
-        url: new URL(inviteUrl).origin,
-        tokenHash: tokenForAHash,
-        direction: applyData.networkType === 'pubsub' ? 'pull'
-                 : applyData.networkType === 'braintree' ? 'pull'
-                 : 'both',
-        lastSeqReceived: {},
-      });
-    }
-
-    saveConfig(freshCfg);
-    log.info(`join-remote: joined '${applyData.networkLabel}' (${networkId}) via RSA handshake`);
-
-    res.json({
-      status: finalizeData.status ?? 'joined',
-      networkId,
-      networkLabel: applyData.networkLabel,
-      networkType: applyData.networkType,
-      spaces: allNetworkSpaces,
-      existingSpaces,
-      createdSpaces,
-      ...(Object.keys(spaceMap).length > 0 ? { spaceMap } : {}),
-      instanceId: applyData.instanceId,
-      instanceLabel: applyData.instanceLabel,
-    });
+    sendAct(res, await joinRemoteAct(req.authToken as Parameters<typeof joinRemoteAct>[0], req.body));
   } catch (err) {
     log.error(`POST /api/networks/join-remote: ${err}`);
     res.status(500).json({ error: 'Internal error' });

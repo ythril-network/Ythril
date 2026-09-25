@@ -112,6 +112,9 @@ export const MCP_TOOL_OPERATIONS: Record<string, string | string[] | null> = {
   network_sync_history: null,
   network_invite: 'network.invite',
   network_fork: 'network.fork',
+  network_join_remote: 'network.join_remote',
+  network_member_add: 'network.member.add',
+  network_member_remove: 'network.member.remove',
 
   // ── Reads. Recorded only when `logReads` is on, exactly as the REST reads are. ──────────────────
   filter: 'brain.filter',
