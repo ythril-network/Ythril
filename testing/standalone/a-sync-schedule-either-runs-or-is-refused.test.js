@@ -157,7 +157,8 @@ describe('both network routes ask before they save', () => {
   // that NEITHER door is the weaker one: this repo's most common defect is one rule with two
   // implementations, and a create that validates beside an update that does not is that defect exactly.
   it('the create and the update both call the refusal', () => {
-    const crud = src('server/src/api/networks/crud.ts');
+    // The create and the update ARE the acts both doors call (F-36), so the refusal is read where it lives.
+    const crud = src('server/src/networks/network-acts.ts');
     assert.equal((crud.match(/syncScheduleRefusal\(/g) ?? []).length, 2,
       'both POST /api/networks and PATCH /api/networks/:id must refuse an unrunnable schedule — a schedule '
       + 'accepted on one door and refused on the other makes the behaviour depend on which the caller used');
@@ -178,16 +179,17 @@ describe('both network routes ask before they save', () => {
       'the schedule save must show the server message and fall back to its own only when there is none');
   });
 
-  it('and there is no MCP door to keep in step', () => {
+  it('and the MCP door reaches the same refusal, because it calls the same acts', () => {
     /*
-     * Stated rather than assumed, because "MCP and REST are one API with two doors" is the rule this repo
-     * breaks most expensively. Networks are REST-only: no tool creates or updates one, and the two
-     * network-adjacent tools (`network_peers`, `network_sync`) neither read nor write a schedule. So there is
-     * nothing to keep in parity here — and if a network tool ever arrives, this case is what fails.
+     * Networks gained MCP tools in F-36, and this case used to assert there were none. What keeps the two doors
+     * in step now is that `network_create` and `network_update` call the very acts the routes call — so the
+     * refusal and its message are one — and that no tool handles a schedule itself.
      */
-    const tools = src('server/src/mcp/tools/index.ts') + SHORTHANDS.length;
-    assert.doesNotMatch(tools, /syncSchedule/,
-      'a tool now touches syncSchedule — it needs the same refusal, with the same message');
+    const tools = src('server/src/mcp/tools/networks.ts');
+    assert.match(tools, /createNetworkAct\(/, 'network_create must call the act the route calls');
+    assert.match(tools, /updateNetworkAct\(/, 'network_update must call the act the route calls');
+    assert.doesNotMatch(tools, /syncScheduleRefusal\(/,
+      'a tool validates the schedule itself — a second copy of the refusal, which is how the doors drift');
   });
 });
 

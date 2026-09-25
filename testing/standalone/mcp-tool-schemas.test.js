@@ -88,7 +88,12 @@ describe('MCP tool schemas — universal invariants', () => {
     // pre-flight tool went with it for the same reason.
     // 45 -> 47: `ingest` + `ingest_status` (`F-31`), with their REST twins `POST /api/brain/spaces/:spaceId/ingest`
     // and `GET …/ingest/:runId` in the same commit; `TOOL_RIGHTS` and `audit-map.ts` rows beside them.
-    assert.equal(ALL_TOOLS.length, 47);
+    // 47 -> 51: `network_get`, `network_create`, `network_update`, `network_leave` (`F-36` slice 1), each a door onto
+    // the same act its REST route calls (`networks/network-acts.ts`). Prerequisites done for all four: audit-map
+    // entries under their routes' own operations (`network_get` a read, `null`), the three writers `mutating: true`
+    // and listed among the tools a readOnly token cannot see, `16-mcp.md` rows in the tool table and the REST map,
+    // and their four `mcp/parity.ts` rows deleted.
+    assert.equal(ALL_TOOLS.length, 51);
   });
 
   it('every tool advertises a closed object schema (type:object, additionalProperties:false)', () => {

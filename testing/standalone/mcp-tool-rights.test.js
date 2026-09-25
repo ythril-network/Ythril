@@ -42,6 +42,11 @@ const capabilityMap = () => CAPABILITIES;
 /** Tools whose route scopes by ITERATING spaces, priced by the one filter both doors call. */
 const ITERATES_IN_HANDLER = {
   network_peers: { filter: 'visibleNetworks', tool: 'server/src/mcp/tools/sync.ts', route: 'server/src/api/networks/crud.ts' },
+  // F-36: priced by the ACT both doors call, which applies the network rights itself — one rule, one implementation.
+  network_get: { filter: 'readNetworkAct', tool: 'server/src/mcp/tools/networks.ts', route: 'server/src/api/networks/crud.ts' },
+  network_create: { filter: 'createNetworkAct', tool: 'server/src/mcp/tools/networks.ts', route: 'server/src/api/networks/crud.ts' },
+  network_update: { filter: 'updateNetworkAct', tool: 'server/src/mcp/tools/networks.ts', route: 'server/src/api/networks/crud.ts' },
+  network_leave: { filter: 'leaveNetworkAct', tool: 'server/src/mcp/tools/networks.ts', route: 'server/src/api/networks/crud.ts' },
 };
 
 before(async () => {

@@ -100,6 +100,10 @@ export const MCP_TOOL_OPERATIONS: Record<string, string | string[] | null> = {
   // peer across every network it belongs to. A peer-scoped call is still RECORDED under the first name —
   // the map is keyed by tool alone, so it cannot see the arguments — and that residue is `Q-28`.
   network_sync: ['network.sync_trigger', 'peer.sync_trigger'],
+  // F-36: the same operations their routes record, so an operator filtering the audit log sees both doors.
+  network_create: 'network.create',
+  network_update: 'network.update',
+  network_leave: 'network.delete',
 
   // ── Reads. Recorded only when `logReads` is on, exactly as the REST reads are. ──────────────────
   filter: 'brain.filter',
@@ -139,6 +143,8 @@ export const MCP_TOOL_OPERATIONS: Record<string, string | string[] | null> = {
   // Lists configured peers from local config. There is no `network.list` operation on the REST side
   // either — peer topology is read from `/api/networks`, which is itself unaudited as a read.
   network_peers: null,
+  // A read, like `GET /api/networks/:id`, which has no audit rule.
+  network_get: null,
   // Reads the token inventory from local config. `GET /api/tokens` is not audited either — it is a
   // read, and the acts worth an entry are the mint, the edit and the revoke, all of which are.
   list_tokens: null,

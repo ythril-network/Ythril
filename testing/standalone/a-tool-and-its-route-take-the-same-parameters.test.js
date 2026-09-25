@@ -36,6 +36,8 @@ const { MCP_TOOL_OPERATIONS } = await import('../../server/dist/mcp/audit-map.js
 const { ALL_TOOLS } = await import('../../server/dist/mcp/tools/index.js');
 const query = await import('../../server/dist/brain/query.js');
 const bodySchemas = await import('../../server/dist/spaces/body-schemas.js');
+// The network acts' bodies (F-36): the routes parse with them, and so do the tools through the same acts.
+const networkActs = await import('../../server/dist/networks/network-acts.js');
 
 /** Schemas the parser cannot see from inside a route file: supplied, never guessed. */
 function exportedSets() {
@@ -44,7 +46,7 @@ function exportedSets() {
     TRAVERSE_BODY_FIELDS: query.TRAVERSE_BODY_FIELDS,
     FIND_SIMILAR_BODY_FIELDS: query.FIND_SIMILAR_BODY_FIELDS,
   };
-  for (const [name, v] of Object.entries(bodySchemas)) {
+  for (const [name, v] of [...Object.entries(bodySchemas), ...Object.entries(networkActs)]) {
     const shape = v?.shape ?? v?._def?.schema?.shape;
     if (shape) sets[name] = Object.keys(shape);
   }

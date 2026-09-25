@@ -125,7 +125,7 @@ describe('audit changes — every allowlist is actually reachable', () => {
   it('network.update names exactly the three fields its PATCH can change', () => {
     // Same check for slice 3. The route assigns `label`, `syncSchedule` and `requireSignedVotes` and
     // nothing else; an allowlist naming a fourth would be silent forever rather than wrong-and-loud.
-    const src = read('server/src/api/networks/crud.ts');
+    const src = read('server/src/networks/network-acts.ts');  // the PATCH's act, shared with MCP (F-36)
     for (const f of AUDIT_CHANGE_FIELDS['network.update']) {
       assert.ok(src.includes(`net.${f} =`) || src.includes(`net.${f},`),
         `network.update allowlists "${f}", which the PATCH route never assigns`);
