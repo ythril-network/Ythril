@@ -838,6 +838,8 @@
   "networks.network.spaces.addLabel": "Space to add",
   "networks.network.spaces.addButton": "Add space",
   "networks.network.spaces.addHint": "Every instance below this one gets the space on its next sync. It only adds: a space they already have is merged into, and nothing there is overwritten or deleted.",
+  "networks.network.spaces.addHintVote": "Members vote on it first; once the vote passes, each member gets the space on its next sync. A member that already has a space of that name keeps it out of the network unless it voted yes.",
+  "networks.network.spaces.voteOpened": "Vote opened — the space is added when the network agrees",
   "networks.error.addSpaceFailed": "Could not add the space",
   "networks.network.members.subscribers": "Subscribers",
   "networks.network.members.publisher": "Publisher",

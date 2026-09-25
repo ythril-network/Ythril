@@ -838,6 +838,8 @@
   "networks.network.spaces.addLabel": "Hinzuzufügender Space",
   "networks.network.spaces.addButton": "Space hinzufügen",
   "networks.network.spaces.addHint": "Jede Instanz unterhalb dieser erhält den Space bei ihrer nächsten Synchronisierung. Es wird nur hinzugefügt: in einen vorhandenen Space wird zusammengeführt, dort wird nichts überschrieben oder gelöscht.",
+  "networks.network.spaces.addHintVote": "Die Mitglieder stimmen zuerst ab; ist die Abstimmung angenommen, erhält jedes Mitglied den Space bei seiner nächsten Synchronisierung. Ein Mitglied mit einem gleichnamigen Space hält ihn aus dem Netzwerk heraus, sofern es nicht zugestimmt hat.",
+  "networks.network.spaces.voteOpened": "Abstimmung eröffnet — der Space wird hinzugefügt, wenn das Netzwerk zustimmt",
   "networks.error.addSpaceFailed": "Space konnte nicht hinzugefügt werden",
   "networks.network.members.subscribers": "Abonnenten",
   "networks.network.members.publisher": "Herausgeber",

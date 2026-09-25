@@ -8,9 +8,9 @@ import { ToastService } from '../../core/toast.service';
 /**
  * "Add a space" on a network card (`F-38.3`): pick one of this instance's spaces the network does not carry yet.
  *
- * Shown only where this instance governs the network — the publisher of a pub/sub network, the root of a tree —
- * because that is the only position the server accepts it from; offering it elsewhere would be a button that
- * always fails. Its own component because `networks.component.ts` is on the god-file ratchet.
+ * Shown only where the server accepts it: the publisher of a pub/sub network, the root of a tree, a club's organiser,
+ * and any member of a closed or democratic network — where it opens a vote rather than adding at once (`F-38.4`).
+ * Offering it anywhere else would be a button that always fails. Its own component because `networks.component.ts` is on the god-file ratchet.
  *
  * The hint says the change is ADDITIVE on the receiving side, which is the question an operator asks before
  * pressing it: the instances below get the space created, or merged into one they already have, and nothing
@@ -32,7 +32,7 @@ import { ToastService } from '../../core/toast.service';
           {{ 'networks.network.spaces.addButton' | transloco }}
         </button>
       </div>
-      <p style="font-size:12px; color:var(--text-muted); margin:6px 0 0;">{{ 'networks.network.spaces.addHint' | transloco }}</p>
+      <p style="font-size:12px; color:var(--text-muted); margin:6px 0 0;">{{ (voted() ? 'networks.network.spaces.addHintVote' : 'networks.network.spaces.addHint') | transloco }}</p>
     }
   `,
 })
@@ -49,14 +49,20 @@ export class NetworkAddSpaceComponent {
   picked = '';
 
   /** The server accepts the add only from these positions; see `ADD_SPACE_POSITION` in `network-acts.ts`. */
-  governs = computed(() => ['publisher', 'root'].includes(this.network().myRole?.role ?? ''));
+  governs = computed(() => ['publisher', 'root', 'organiser'].includes(this.network().myRole?.role ?? '') || this.voted());
+  /** Closed and democratic networks decide an added space by vote, so the add opens a round (F-38.4). */
+  voted = computed(() => ['closed', 'democratic'].includes(this.network().type));
   candidates = computed(() => this.spaces().filter(s => !this.network().spaces.includes(s.id)));
 
   add(): void {
     if (!this.picked) return;
     this.adding.set(true);
     this.networksApi.addNetworkSpace(this.network().id, this.picked).subscribe({
-      next: (net) => { this.adding.set(false); this.picked = ''; this.added.emit(net); },
+      next: (res) => {
+        this.adding.set(false); this.picked = '';
+        if ('status' in res && res.status === 'vote_pending') this.toast.success(this.transloco.translate('networks.network.spaces.voteOpened'));
+        this.added.emit(this.network());
+      },
       error: (err) => {
         this.adding.set(false);
         this.toast.error(err.error?.error ?? this.transloco.translate('networks.error.addSpaceFailed'));

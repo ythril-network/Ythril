@@ -242,7 +242,7 @@ tombstone rather than a brain one, so the metadata page carries no tombstones of
 
 | Parameter | Description |
 |---|---|
-| `spaceId` | Required on space-scoped sync routes |
+| `spaceId` | Required on space-scoped sync routes. With `networkId`, give the NETWORK's id for the space: an instance that mapped it under another name at join translates it (Q-51) |
 | `networkId` | Optional on many pulls, used for policy checks and directional sync |
 | `sinceSeq` | Start sequence for incremental pulls |
 | `cursor` | Encoded continuation cursor for paged pulls |

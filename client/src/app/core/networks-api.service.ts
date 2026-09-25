@@ -1,6 +1,7 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { Observable } from 'rxjs';
+import { Observable, map } from 'rxjs';
+import { voteRoundFromServer, type ServerVoteRound } from './vote-round-view';
 import type {
   Network, InviteBundle, VoteRound, SyncHistoryRecord,
   LocalAgentStatus, LocalAgentBootstrapResult, LocalAgentEnableNetworksResult,
@@ -60,9 +61,9 @@ export class NetworksApi {
     return this.http.delete<void>(`/api/networks/${networkId}/members/${instanceId}`);
   }
 
-  /** Add one of this instance's spaces to a network it governs (F-38.3). Answers the network as it now is. */
-  addNetworkSpace(networkId: string, spaceId: string): Observable<Network> {
-    return this.http.post<Network>(`/api/networks/${networkId}/spaces`, { spaceId });
+  /** Add one of this instance's spaces to a network (F-38.3, F-38.4): the network as it now is, or the vote it opened. */
+  addNetworkSpace(networkId: string, spaceId: string): Observable<Network | { status: 'vote_pending'; round: unknown }> {
+    return this.http.post<Network | { status: 'vote_pending'; round: unknown }>(`/api/networks/${networkId}/spaces`, { spaceId });
   }
 
   updateNetworkSchedule(networkId: string, syncSchedule: string): Observable<any> {
@@ -77,8 +78,11 @@ export class NetworksApi {
     return this.http.post<void>(`/api/networks/${networkId}/votes/${roundId}`, { vote });
   }
 
+  /** The rounds in the pages' shape — see `vote-round-view.ts` for why the translation cannot live anywhere else. */
   listVotes(networkId: string): Observable<{ rounds: VoteRound[] }> {
-    return this.http.get<any>(`/api/networks/${networkId}/votes`);
+    return this.http.get<{ rounds: ServerVoteRound[] }>(`/api/networks/${networkId}/votes`).pipe(
+      map(({ rounds }) => ({ rounds: (rounds ?? []).map(r => voteRoundFromServer(networkId, r)) })),
+    );
   }
 
   // ── Local agent ─────────────────────────────────────────────────────────
