@@ -11,6 +11,7 @@
     "local-connector:start": "node dist/local-agent-connector/index.js"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.128.0",
     "@huggingface/transformers": "^3.8.1",
     "@modelcontextprotocol/sdk": "^1.28.0",
     "@mozilla/readability": "^0.6.0",

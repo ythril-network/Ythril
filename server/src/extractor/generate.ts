@@ -12,13 +12,12 @@
 import { assistBackend, viaAssist, type AssistEndpoint } from '../config/assist-backend.js';
 import { slotTimeoutMs } from '../config/model-slots.js';
 import { getModelSlots } from '../config/loader.js';
-import { chatUrlFor } from '../files/converters/vlm-endpoint.js';
 import { modelFetch } from '../util/model-fetch.js';
-import { boundedJson } from '../util/bounded-read.js';
-import { postWithBackoff, type ModelTransport } from './model-post.js';
+import { chatOnce } from '../util/model-chat.js';
+import { type ModelTransport } from './model-post.js';
 
 /** `which` says whether this is the assist model's primary or its fallback — the budget and cooldown follow it. */
-export interface GenerationBackend { baseUrl: string; model: string; apiKey?: string; which?: AssistEndpoint['which'] }
+export interface GenerationBackend { baseUrl: string; model: string; apiKey?: string; which?: AssistEndpoint['which']; api?: AssistEndpoint['api'] }
 
 export class GenerationUnavailableError extends Error {
   constructor() {
@@ -42,7 +41,7 @@ export class GenerationError extends Error {
  */
 export function pickGenerationBackend(assist: AssistEndpoint | null): GenerationBackend | null {
   if (!assist) return null;
-  return { baseUrl: assist.baseUrl, model: assist.model, which: assist.which, ...(assist.apiKey ? { apiKey: assist.apiKey } : {}) };
+  return { baseUrl: assist.baseUrl, model: assist.model, which: assist.which, api: assist.api, ...(assist.apiKey ? { apiKey: assist.apiKey } : {}) };
 }
 
 /** The writer this instance would use now, or `GenerationUnavailableError`. */
@@ -70,7 +69,7 @@ export async function generate(
 ): Promise<Generation> {
   if (!backend.which) return generateOnce(backend, prompt, transport);
   const sent = prompt.system.length + prompt.user.length;
-  return viaAssist('conversations', { ...backend, which: backend.which }, async ep => {
+  return viaAssist('conversations', { ...backend, which: backend.which, api: backend.api ?? 'openai' }, async ep => {
     const g = await generateOnce({ ...backend, ...ep }, prompt, transport);
     return { value: g, ...(g.usage ? { usage: g.usage as Record<string, unknown> } : {}), chars: sent + g.text.length };
   });
@@ -84,19 +83,14 @@ async function generateOnce(
   const post = transport.post ?? ((url, init) => modelFetch(url,
     { ...init, signal: AbortSignal.timeout(slotTimeoutMs('assist', getModelSlots())) }, 'assist'));
   const sleep = transport.sleep ?? ((ms: number) => new Promise<void>(r => setTimeout(r, ms)));
-  const res = await postWithBackoff({ post, sleep }, chatUrlFor('openai', backend.baseUrl), {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...(backend.apiKey ? { Authorization: `Bearer ${backend.apiKey}` } : {}) },
-    body: JSON.stringify({
-      model: backend.model,
-      temperature: 0,
-      max_tokens: prompt.maxTokens ?? 400,
-      messages: [{ role: 'system', content: prompt.system }, { role: 'user', content: prompt.user }],
-    }),
-  }, (message, status) => new GenerationError(`Generation backend ${message}`, status));
-  const body = await boundedJson<{ model?: string; choices?: { message?: { content?: unknown } }[]; usage?: Generation['usage'] }>(res, 'Generation');
-  const content = body.choices?.[0]?.message?.content;
-  const text = typeof content === 'string' ? content.trim() : '';
+  // One call module for every wire, the Claude API included (`util/model-chat.ts`, F-33.1).
+  const r = await chatOnce(
+    { wire: backend.api ?? 'openai', baseUrl: backend.baseUrl, model: backend.model, ...(backend.apiKey ? { apiKey: backend.apiKey } : {}) },
+    { system: prompt.system, turns: [{ role: 'user', content: prompt.user }], maxTokens: prompt.maxTokens ?? 400 },
+    { post, sleep },
+    (message, status) => new GenerationError(`Generation backend ${message}`, status),
+  );
+  const text = r.text.trim();
   if (!text) throw new GenerationError('Generation backend returned an empty answer');
-  return { text, model: body.model ?? backend.model, ...(body.usage ? { usage: body.usage } : {}) };
+  return { text, model: r.model ?? backend.model, ...(r.usage ? { usage: r.usage as Generation['usage'] } : {}) };
 }

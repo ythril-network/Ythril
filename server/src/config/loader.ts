@@ -1258,7 +1258,7 @@ export function getDocumentProcessingConfig(): Required<DocumentProcessingConfig
       acknowledgedHost: base.assistModel?.acknowledgedHost,
       acknowledgedHostForConversations: base.assistModel?.acknowledgedHostForConversations,
       // F-33: carried through, or the resolver never sees a budget or a fallback the operator set.
-      ...(base.assistModel?.budget ? { budget: base.assistModel.budget } : {}), ...(base.assistModel?.fallback ? { fallback: base.assistModel.fallback } : {}),
+      ...(base.assistModel?.budget ? { budget: base.assistModel.budget } : {}), ...(base.assistModel?.fallback ? { fallback: base.assistModel.fallback } : {}), ...(base.assistModel?.api ? { api: base.assistModel.api } : {}),
     },
   };
 }

@@ -26,8 +26,12 @@ export const AssistBudgetPatch = z.object({
   perHours: z.number().min(1).max(720),
 }).strict().optional().nullable();
 
+/** Which API an assist endpoint speaks (`F-33.1`); absent is OpenAI-compatible. */
+export const AssistApiPatch = z.enum(['openai', 'anthropic']).optional();
+
 /** The endpoint that answers when the primary may not; `null` removes it. */
 export const AssistFallbackPatch = z.object({
+  api: AssistApiPatch,
   baseUrl: z.string().url().optional(),
   model: z.string().max(128).optional(),
   apiKey: z.string().max(512).optional().nullable(),

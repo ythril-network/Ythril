@@ -236,7 +236,7 @@ export async function vlmExtractDocument(
         const r = assist
           ? await viaAssist('repair', assist, async ep => {
               const out = await repairMarkdownExternal({
-                baseUrl: ep.baseUrl, model: ep.model, ...(ep.apiKey ? { apiKey: ep.apiKey } : {}),
+                baseUrl: ep.baseUrl, model: ep.model, api: ep.api, ...(ep.apiKey ? { apiKey: ep.apiKey } : {}),
                 draft: markdown, evidence, issues: v.issues, defaultTimeoutMs: cfg.pageTimeoutMs,
               });
               return { value: out, ...(out.usage ? { usage: out.usage } : {}), chars: markdown.length + evidence.length + out.text.length };

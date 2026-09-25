@@ -13,6 +13,7 @@
  */
 import { ssrfSafeFetch } from '../../util/ssrf.js';
 import { modelFetch } from '../../util/model-fetch.js';
+import { chatOnce, type ChatWire } from '../../util/model-chat.js';
 import { boundedJson, boundedErrorText } from '../../util/bounded-read.js';
 import { allowPrivateForSlot, type EgressSlot } from '../../config/model-egress-policy.js';
 import { chatUrlFor, type VlmWire } from './vlm-endpoint.js';
@@ -59,77 +60,34 @@ interface ChatTurn { role: 'user'; content: string; images?: string[] }
  * deployment, whose model sits on a private cluster address.
  */
 async function postChat(
-  endpoint: { baseUrl: string; model: string; wire: VlmWire; external: boolean; apiKey?: string; slot: EgressSlot },
+  endpoint: { baseUrl: string; model: string; wire: ChatWire; external: boolean; apiKey?: string; slot: EgressSlot },
   turns: ChatTurn[],
   timeoutMs: number,
 ): Promise<VlmTranscription> {
-  const url = chatUrlFor(endpoint.wire, endpoint.baseUrl);
-  const body = endpoint.wire === 'ollama'
-    ? {
-      model: endpoint.model,
-      stream: false,
-      options: { temperature: 0, num_predict: MAX_OUTPUT_TOKENS },
-      messages: turns.map(t => (t.images ? { role: t.role, content: t.content, images: t.images } : { role: t.role, content: t.content })),
-    }
-    : {
-      model: endpoint.model,
-      temperature: 0,
-      max_tokens: MAX_OUTPUT_TOKENS,
-      // Only when the operator set one for this slot: absent sends no field at all, because a model never
-      // trained for it ignores the parameter at best and fails the request at worst.
-      ...reasoningEffortBody(endpoint.slot, getModelSlots()),
-      // OpenAI carries images as data URIs in a content array. `image/png` because the render sidecar
-      // emits PNG; a wrong type here is what broke external vision in 2.0.0 (see files/mime.ts).
-      messages: turns.map(t => (t.images
-        ? {
-          role: t.role,
-          content: [
-            { type: 'text', text: t.content },
-            ...t.images.map(b64 => ({ type: 'image_url', image_url: { url: `data:image/png;base64,${b64}` } })),
-          ],
-        }
-        : { role: t.role, content: t.content })),
-    };
-
-  const init: RequestInit = {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(endpoint.apiKey ? { Authorization: `Bearer ${endpoint.apiKey}` } : {}),
-    },
-    body: JSON.stringify(body),
-    signal: AbortSignal.timeout(timeoutMs),
-  };
-
-  let res: Response;
-  try {
-    res = endpoint.external
-      // Guard on: DNS-resolve, IP-pin, redirect re-validation, crown-jewel ranges blocked. `allowPrivate`
-      // only lifts the private-address rejection, so a self-hosted model on a cluster address still works.
-      // Resolved for THIS slot: transcription and repair can sit on different hosts, and the document VLM
-      // being on-cluster is no reason to let the assist model reach a private address.
+  // Guard on for an endpoint that is not ours: DNS-resolve, IP-pin, redirect re-validation, crown-jewel ranges
+  // blocked. `allowPrivate` only lifts the private-address rejection, so a self-hosted model on a cluster address
+  // still works. Resolved for THIS slot: transcription and repair can sit on different hosts, and the document VLM
+  // being on-cluster is no reason to let the assist model reach a private address. The request and the reply are
+  // `util/model-chat.ts`'s, the same for every wire — the Claude API included (`F-33.1`).
+  const post = async (url: string, request: RequestInit) => {
+    const init = { ...request, signal: AbortSignal.timeout(timeoutMs) };
+    return endpoint.external
       ? await ssrfSafeFetch(url, init, { allowPrivate: allowPrivateForSlot(endpoint.slot) })
       : await fetch(url, init);
-  } catch (err) {
-    throw new Error(`VLM unreachable (${url}): ${err instanceof Error ? err.message : String(err)}`);
-  }
-  if (!res.ok) {
-    const body2 = await boundedErrorText(res);
-    throw httpError(`VLM HTTP ${res.status}: ${body2}`, res.status);
-  }
-
-  if (endpoint.wire === 'ollama') {
-    const json = await boundedJson<{ message?: { content?: string }; done_reason?: string; error?: string }>(
-      res, 'VLM');
-    if (json.error) throw new Error(`VLM error: ${json.error}`);
-    return { text: json.message?.content ?? '', truncated: json.done_reason === 'length' };
-  }
-  const json = await boundedJson<{
-    choices?: Array<{ message?: { content?: string }; finish_reason?: string }>; error?: unknown; usage?: Record<string, unknown>;
-  }>(res, 'VLM');
-  if (json.error) throw new Error(`VLM error: ${typeof json.error === 'string' ? json.error : JSON.stringify(json.error).slice(0, 200)}`);
-  const choice = json.choices?.[0];
-  return { text: choice?.message?.content ?? '', truncated: choice?.finish_reason === 'length', ...(json.usage ? { usage: json.usage } : {}) };
+  };
+  const r = await chatOnce(
+    { wire: endpoint.wire, baseUrl: endpoint.baseUrl, model: endpoint.model, ...(endpoint.apiKey ? { apiKey: endpoint.apiKey } : {}) },
+    {
+      turns: turns.map(t => ({ role: t.role, content: t.content, ...(t.images ? { images: t.images } : {}) })),
+      maxTokens: MAX_OUTPUT_TOKENS,
+      // Only when the operator set one for this slot: absent sends no field at all, because a model never trained
+      // for it ignores the parameter at best and fails the request at worst.
+      openAiExtras: reasoningEffortBody(endpoint.slot, getModelSlots()),
+    },
+    { post },
+    (message, status) => (status !== undefined ? httpError(`VLM ${message}`, status) : new Error(`VLM ${message}`)),
+  );
+  return { text: r.text, truncated: r.truncated, ...(r.usage ? { usage: r.usage } : {}) };
 }
 
 /**
@@ -142,7 +100,7 @@ async function postChat(
 export interface VlmTarget {
   baseUrl: string;
   model: string;
-  wire?: VlmWire;
+  wire?: ChatWire;
   external?: boolean;
   apiKey?: string;
   /**
@@ -199,7 +157,7 @@ const budgetFor = (slot: EgressSlot, opts: { hardTimeoutMs?: number; defaultTime
 const asEndpoint = (t: VlmTarget, slot: EgressSlot) => ({
   baseUrl: t.baseUrl,
   model: t.model,
-  wire: t.wire ?? 'ollama' as VlmWire,
+  wire: t.wire ?? 'ollama' as ChatWire,
   external: t.external ?? false,
   apiKey: t.apiKey,
   slot,
@@ -309,45 +267,24 @@ function repairContent(draft: string, evidence: string, issues?: string[]): stri
  * Throws on unreachable/HTTP error so the caller falls back to the local repair, then OCR.
  */
 export async function repairMarkdownExternal(
-  opts: { baseUrl: string; model: string; apiKey?: string; draft: string; evidence: string; issues?: string[];
+  opts: { baseUrl: string; model: string; apiKey?: string; api?: 'openai' | 'anthropic'; draft: string; evidence: string; issues?: string[];
     /** See `VlmTarget.defaultTimeoutMs` — used only when the operator set no `assist` budget. */
     defaultTimeoutMs?: number;
     /** See `VlmTarget.hardTimeoutMs` — a deadline this caller owns whatever the operator set. */
     hardTimeoutMs?: number },
 ): Promise<VlmTranscription> {
-  // The same builder the local path uses. This function is the one `normalizeOpenAiBase` was written for —
-  // its comment names it — and it went on appending `/v1/chat/completions` itself, so the assist slot
-  // required a base WITHOUT `/v1` while vision required one WITH it. Both accept either now.
-  const url = chatUrlFor('openai', opts.baseUrl);
-  let res: Response;
-  try {
-    res = await modelFetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(opts.apiKey ? { Authorization: `Bearer ${opts.apiKey}` } : {}),
-      },
-      body: JSON.stringify({
-        model: opts.model,
-        temperature: 0,
-        max_tokens: MAX_OUTPUT_TOKENS,
-        ...reasoningEffortBody('assist', getModelSlots()),
-        messages: [{ role: 'user', content: repairContent(opts.draft, opts.evidence, opts.issues) }],
-      }),
-      signal: AbortSignal.timeout(budgetFor('assist', opts)),
-      // An external endpoint gets the assist slot's private-address policy under the SSRF guard; a local one — the
-      // assist model's fallback on a sidecar, typically (`F-33`) — is reached directly (`util/model-fetch.ts`).
-    }, 'assist');
-  } catch (err) {
-    throw new Error(`assist model unreachable (${url}): ${err instanceof Error ? err.message : String(err)}`);
-  }
-  if (!res.ok) {
-    const body = await boundedErrorText(res);
-    throw httpError(`assist model HTTP ${res.status}: ${body}`, res.status);
-  }
-  const json = await boundedJson<{ choices?: Array<{ message?: { content?: string }; finish_reason?: string }>; error?: unknown; usage?: Record<string, unknown> }>(
-    res, 'assist model');
-  if (json.error) throw new Error(`assist model error: ${typeof json.error === 'string' ? json.error : JSON.stringify(json.error).slice(0, 200)}`);
-  const choice = json.choices?.[0];
-  return { text: choice?.message?.content ?? '', truncated: choice?.finish_reason === 'length', ...(json.usage ? { usage: json.usage } : {}) };
+  // An external endpoint gets the assist slot's private-address policy under the SSRF guard; a local one — the assist
+  // model's fallback on a sidecar, typically (`F-33`) — is reached directly (`util/model-fetch.ts`). The request and
+  // the reply are `util/model-chat.ts`'s, so the assist model can be a Claude model (`F-33.1`).
+  const r = await chatOnce(
+    { wire: opts.api ?? 'openai', baseUrl: opts.baseUrl, model: opts.model, ...(opts.apiKey ? { apiKey: opts.apiKey } : {}) },
+    {
+      turns: [{ role: 'user', content: repairContent(opts.draft, opts.evidence, opts.issues) }],
+      maxTokens: MAX_OUTPUT_TOKENS,
+      openAiExtras: reasoningEffortBody('assist', getModelSlots()),
+    },
+    { post: (url, init) => modelFetch(url, { ...init, signal: AbortSignal.timeout(budgetFor('assist', opts)) }, 'assist') },
+    (message, status) => (status !== undefined ? httpError(`assist model ${message}`, status) : new Error(`assist model ${message}`)),
+  );
+  return { text: r.text, truncated: r.truncated, ...(r.usage ? { usage: r.usage } : {}) };
 }

@@ -15,7 +15,7 @@ import { getConfig, saveConfig, getMediaEmbeddingConfig, getSecrets, saveSecrets
 import { DOC_EXTRACTION_MODES_IN, IMAGE_LEVELS, AUDIO_LEVELS, VIDEO_LEVELS, TEXT_LEVELS, normalizeDocExtractionMode } from '../config/types.js';
 import type { MediaLevelCeilings } from '../config/types.js';
 import { requireAdmin, requireAdminMfa } from '../auth/middleware.js';
-import { AssistBudgetPatch, AssistFallbackPatch, refuseAssistFallback, assistFallbackKeyChange, mergeAssistExtras } from '../config/assist-model-patch.js';
+import { AssistApiPatch, AssistBudgetPatch, AssistFallbackPatch, refuseAssistFallback, assistFallbackKeyChange, mergeAssistExtras } from '../config/assist-model-patch.js';
 import { globalRateLimit } from '../rate-limit/middleware.js';
 import { isSsrfSafeUrl, ssrfSafeFetch } from '../util/ssrf.js';
 import {
@@ -128,6 +128,7 @@ const AssistModelPatchSchema = z.object({
   // `F-35`: the conversations consent, set by its own dialog; `null` withdraws it.
   acknowledgedHostForConversations: z.string().max(255).optional().nullable(),
   // `F-33`: absent keeps, `null` removes — see config/assist-model-patch.ts for why these two differ.
+  api: AssistApiPatch,
   budget: AssistBudgetPatch,
   fallback: AssistFallbackPatch,
 }).strict();

@@ -41,6 +41,7 @@ import { getModelSlots } from '../config/loader.js';
 import { getDecisionModelConfig, getDecisionApiKey } from '../config/decision-model.js';
 import { chatUrlFor, systemOneUrlFor } from '../files/converters/vlm-endpoint.js';
 import { modelFetch } from '../util/model-fetch.js';
+import { chatOnce } from '../util/model-chat.js';
 import { boundedJson } from '../util/bounded-read.js';
 import { postWithBackoff, type ModelTransport } from './model-post.js';
 
@@ -75,6 +76,8 @@ export interface DecisionBackend {
   apiKey?: string;
   /** On the assist kind: its primary or its fallback (`F-33`) — the budget and cooldown follow it. */
   which?: AssistEndpoint['which'];
+  /** On the assist kind: the API its endpoint speaks (`F-33.1`). */
+  api?: AssistEndpoint['api'];
 }
 
 /**
@@ -114,7 +117,7 @@ export function pickDecisionBackend(slots: { decision?: SlotInput; assist?: Assi
     return { kind: 'jev', baseUrl: decision.baseUrl, model: decision.model, ...(decision.apiKey ? { apiKey: decision.apiKey } : {}) };
   }
   if (assist) {
-    return { kind: 'assist', baseUrl: assist.baseUrl, model: assist.model, which: assist.which, ...(assist.apiKey ? { apiKey: assist.apiKey } : {}) };
+    return { kind: 'assist', baseUrl: assist.baseUrl, model: assist.model, which: assist.which, api: assist.api, ...(assist.apiKey ? { apiKey: assist.apiKey } : {}) };
   }
   return null;
 }
@@ -148,7 +151,7 @@ export async function decide(
   // The assist model is charged to its budget and, when its primary cannot answer now, asked again on the fallback.
   if (backend.kind !== 'assist' || !backend.which) return decideOnce(backend, state, questions, transport);
   const sent = JSON.stringify(state).length + JSON.stringify(questions).length;
-  return viaAssist('conversations', { ...backend, which: backend.which }, async ep => {
+  return viaAssist('conversations', { ...backend, which: backend.which, api: backend.api ?? 'openai' }, async ep => {
     const d = await decideOnce({ ...backend, ...ep, kind: 'assist' }, state, questions, transport);
     return { value: d, ...(d.usage ? { usage: d.usage as Record<string, unknown> } : {}), chars: sent + JSON.stringify(d.answers).length };
   });
@@ -165,27 +168,41 @@ async function decideOnce(
     { ...init, signal: AbortSignal.timeout(slotTimeoutMs(slot, getModelSlots())) }, slot));
   const sleep = transport.sleep ?? ((ms: number) => new Promise<void>(r => setTimeout(r, ms)));
 
-  const request = backend.kind === 'jev'
-    ? { url: systemOneUrlFor(backend.baseUrl), body: { model: backend.model, state, questions } }
-    : { url: chatUrlFor('openai', backend.baseUrl), body: assistRequest(backend.model, state, questions) };
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    ...(backend.apiKey ? { Authorization: `Bearer ${backend.apiKey}` } : {}),
-  };
-
-  const res = await postWithBackoff({ post, sleep }, request.url, { method: 'POST', headers, body: JSON.stringify(request.body) },
-    (message, status) => new DecisionError(`Decision backend ${message}`, status));
-  const reply = await boundedJson<Record<string, unknown>>(res, `Decision (${backend.kind})`)
-    .catch((e: unknown) => { throw new DecisionError(`Decision (${backend.kind}): unreadable reply — ${e instanceof Error ? e.message : String(e)}`); });
-
-  const raw = backend.kind === 'jev' ? jevAnswers(reply) : assistAnswers(reply);
+  const fail = (message: string, status?: number) => new DecisionError(`Decision backend ${message}`, status);
+  let raw: Record<string, unknown>;
+  let reportedModel: unknown;
+  let usage: unknown;
+  if (backend.kind === 'assist') {
+    // Every wire the assist slot can speak, the Claude API included, through one call module (`F-33.1`).
+    const r = await chatOnce(
+      { wire: backend.api ?? 'openai', baseUrl: backend.baseUrl, model: backend.model, ...(backend.apiKey ? { apiKey: backend.apiKey } : {}) },
+      { system: ASSIST_INSTRUCTIONS, turns: [{ role: 'user', content: JSON.stringify({ state, questions }) }], maxTokens: ASSIST_MAX_TOKENS,
+        jsonSchema: { name: 'answers', schema: answersSchema(questions) } },
+      { post, sleep }, fail,
+    );
+    raw = assistAnswers(r.text);
+    reportedModel = r.model;
+    usage = r.usage;
+  } else {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      ...(backend.apiKey ? { Authorization: `Bearer ${backend.apiKey}` } : {}),
+    };
+    const res = await postWithBackoff({ post, sleep }, systemOneUrlFor(backend.baseUrl),
+      { method: 'POST', headers, body: JSON.stringify({ model: backend.model, state, questions }) }, fail);
+    const reply = await boundedJson<Record<string, unknown>>(res, `Decision (${backend.kind})`)
+      .catch((e: unknown) => { throw new DecisionError(`Decision (${backend.kind}): unreadable reply — ${e instanceof Error ? e.message : String(e)}`); });
+    raw = jevAnswers(reply);
+    reportedModel = reply['model'];
+    usage = reply['usage'];
+  }
   const answers: Record<string, Answer> = {};
   for (const [id, q] of Object.entries(questions)) answers[id] = govern(q, raw[id], backend.kind);
   return {
     backend: backend.kind,
-    model: typeof reply['model'] === 'string' ? reply['model'] : backend.model,
+    model: typeof reportedModel === 'string' ? reportedModel : backend.model,
     answers,
-    ...(reply['usage'] && typeof reply['usage'] === 'object' ? { usage: reply['usage'] as Decision['usage'] } : {}),
+    ...(usage && typeof usage === 'object' ? { usage: usage as Decision['usage'] } : {}),
   };
 }
 
@@ -217,46 +234,29 @@ const ASSIST_INSTRUCTIONS = [
   'Reply with JSON only: {"answers": {"<id>": <value>, ...}}.',
 ].join('\n');
 
-/** The same questions, as an OpenAI chat request whose schema admits only well-formed answers. */
-function assistRequest(model: string, state: unknown, questions: Record<string, Question>) {
+/** Room for the answers object; the decision's own output is small, and a thinking model spends from this too. */
+const ASSIST_MAX_TOKENS = 4_096;
+
+/**
+ * The schema that admits only well-formed answers — asked for as structured output where the server supports it.
+ * Where it does not, the instructions ask for the same shape, and `govern` refuses whatever does not fit either way:
+ * the schema is a help to the model, never the check.
+ */
+function answersSchema(questions: Record<string, Question>): Record<string, unknown> {
   const properties: Record<string, unknown> = {};
   for (const [id, q] of Object.entries(questions)) {
     properties[id] = q.type === 'choice' ? { type: 'string', enum: Object.keys(q.criteria) }
       : q.type === 'noul' ? { type: 'number', minimum: 0, maximum: 1 }
         : { type: 'integer', minimum: 0, maximum: q.criteria.length - 1 };
   }
-  const ids = Object.keys(questions);
   return {
-    model,
-    temperature: 0,
-    messages: [
-      { role: 'system', content: ASSIST_INSTRUCTIONS },
-      { role: 'user', content: JSON.stringify({ state, questions }) },
-    ],
-    // Strict structured output where the server supports it. Where it does not, the instructions above ask
-    // for the same shape, and `govern` refuses whatever does not fit either way — the schema is a help to
-    // the model, never the check.
-    response_format: {
-      type: 'json_schema',
-      json_schema: {
-        name: 'answers',
-        strict: true,
-        schema: {
-          type: 'object', additionalProperties: false, required: ['answers'],
-          properties: { answers: { type: 'object', additionalProperties: false, required: ids, properties } },
-        },
-      },
-    },
+    type: 'object', additionalProperties: false, required: ['answers'],
+    properties: { answers: { type: 'object', additionalProperties: false, required: Object.keys(questions), properties } },
   };
 }
 
-/** The assist model's `{answers: {id: value}}`, lifted into Jev's per-type answer objects. */
-function assistAnswers(reply: Record<string, unknown>): Record<string, unknown> {
-  const choices = reply['choices'];
-  const content = Array.isArray(choices)
-    ? (choices[0] as { message?: { content?: unknown } } | undefined)?.message?.content
-    : undefined;
-  if (typeof content !== 'string') return {};
+function assistAnswers(content: string): Record<string, unknown> {
+  if (!content.trim()) return {};
   // A model that ignored response_format often wraps the JSON in a fence; read through it rather than fail.
   const text = content.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
   let parsed: unknown;

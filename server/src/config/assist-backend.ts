@@ -41,7 +41,12 @@ export interface AssistSlotConfig {
   model?: string;
   acknowledgedHost?: string;
   acknowledgedHostForConversations?: string;
+  /** Which API the endpoint speaks (`F-33.1`): OpenAI-compatible (the default) or the Claude API. */
+  api?: AssistApi;
 }
+
+/** The wire an assist endpoint speaks. `anthropic` is the Claude API, with an API key (`util/model-chat.ts`). */
+export type AssistApi = 'openai' | 'anthropic';
 
 /** `tokens` over a rolling `perHours`. */
 export interface AssistBudget { tokens: number; perHours: number }
@@ -53,10 +58,10 @@ export interface UsageEntry { at: number; tokens: number }
  * primary only. `fallback`: the endpoint that answers when the primary may not — usually a local LLM, which needs no
  * consent; an external one is consented per use like the primary. Its key lives in secrets as `docAssistFallbackApiKey`.
  */
-export interface AssistModelExtras { budget?: AssistBudget; fallback?: AssistSlotConfig }
+export interface AssistModelExtras { budget?: AssistBudget; fallback?: AssistSlotConfig; api?: AssistApi }
 
 /** The endpoint a call goes to, and which of the two it is — reported beside the model on every result. */
-export interface AssistEndpoint { which: 'primary' | 'fallback'; baseUrl: string; model: string; apiKey?: string }
+export interface AssistEndpoint { which: 'primary' | 'fallback'; baseUrl: string; model: string; api: AssistApi; apiKey?: string }
 
 /** How long a primary that failed is passed over before it is tried again. */
 export const PRIMARY_COOLDOWN_MS = 60_000;
@@ -96,10 +101,10 @@ export function pickAssistBackend(input: {
   const { primary, fallback, budget, usage, primaryDownUntil, now, use } = input;
   const overBudget = !!budget && budget.tokens > 0 && spentInWindow(usage, now, budget.perHours) >= budget.tokens;
   if (configured(primary) && assistConsented(primary, use) && !(primaryDownUntil !== undefined && primaryDownUntil > now) && !overBudget) {
-    return { which: 'primary', baseUrl: primary.baseUrl, model: primary.model };
+    return { which: 'primary', baseUrl: primary.baseUrl, model: primary.model, api: primary.api ?? 'openai' };
   }
   if (configured(fallback) && (isLocalModelEndpoint(fallback.baseUrl) || assistConsented(fallback, use))) {
-    return { which: 'fallback', baseUrl: fallback.baseUrl, model: fallback.model };
+    return { which: 'fallback', baseUrl: fallback.baseUrl, model: fallback.model, api: fallback.api ?? 'openai' };
   }
   return null;
 }
@@ -201,11 +206,14 @@ export async function viaAssist<T>(
   } catch (err) {
     const raw = (err as { status?: unknown } | null)?.status;
     const status = typeof raw === 'number' ? raw : undefined;
-    recordAssistOutcome(first, { ok: false, ...(status !== undefined ? { status } : {}) });
-    if (first.which !== 'primary' || !unavailable(status)) throw err;
+    // A refusal (`F-33.1`) is the primary declining THIS content, not being down: the fallback answers, and the
+    // primary is not cooled down for it.
+    const refused = (err as { refused?: unknown } | null)?.refused === true;
+    if (!refused) recordAssistOutcome(first, { ok: false, ...(status !== undefined ? { status } : {}) });
+    if (first.which !== 'primary' || !(refused || unavailable(status))) throw err;
     const next = assistBackend(use);
     if (!next || next.which !== 'fallback') throw err;
-    log.info(`assist model: answering on the fallback ${next.model} after the primary failed`);
+    log.info(`assist model: answering on the fallback ${next.model} after the primary ${refused ? 'declined' : 'failed'}`);
     return (await run(next)).value;
   }
 }

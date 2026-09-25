@@ -126,12 +126,12 @@ export function sanitiseDescription(raw: string): string | undefined {
  * Exported because "which host, and was it acknowledged" is the whole security-relevant decision here, and
  * it is worth testing on its own rather than only through a call that needs a live model.
  */
-export function describeTarget(): { baseUrl: string; model: string; wire?: 'ollama' | 'openai'; external?: boolean; apiKey?: string; slot: 'docRepair' | 'assist'; which?: AssistEndpoint['which'] } | null {
+export function describeTarget(): { baseUrl: string; model: string; wire?: 'ollama' | 'openai' | 'anthropic'; external?: boolean; apiKey?: string; slot: 'docRepair' | 'assist'; which?: AssistEndpoint['which'] } | null {
   // The assist model as `assistBackend('repair')` resolves it (`F-33`): its DOCUMENTS consent re-checked here rather
   // than trusted from save time — config.json could have been hand-edited — and its budget and fallback applied.
   const assist = assistBackend('repair');
   if (assist) {
-    return { baseUrl: assist.baseUrl, model: assist.model, wire: 'openai', external: !isLocalModelEndpoint(assist.baseUrl),
+    return { baseUrl: assist.baseUrl, model: assist.model, wire: assist.api, external: !isLocalModelEndpoint(assist.baseUrl),
       ...(assist.apiKey ? { apiKey: assist.apiKey } : {}), slot: 'assist', which: assist.which };
   }
   const local = resolveVlmEndpoint('repair');
@@ -174,9 +174,9 @@ export async function describeDocument(
     });
     // On the assist model: charged to its budget, and written by the fallback when the primary cannot answer now.
     const r = target.slot === 'assist' && target.which
-      ? await viaAssist('repair', { which: target.which, baseUrl: target.baseUrl, model: target.model, ...(target.apiKey ? { apiKey: target.apiKey } : {}) },
+      ? await viaAssist('repair', { which: target.which, baseUrl: target.baseUrl, model: target.model, api: target.wire === 'anthropic' ? 'anthropic' : 'openai', ...(target.apiKey ? { apiKey: target.apiKey } : {}) },
           async ep => {
-            const v = await once({ ...target, ...ep, external: !isLocalModelEndpoint(ep.baseUrl) });
+            const v = await once({ ...target, ...ep, wire: ep.api, external: !isLocalModelEndpoint(ep.baseUrl) });
             return { value: v, ...(v.usage ? { usage: v.usage } : {}), chars: text.length + v.text.length };
           })
       : await once(target);
