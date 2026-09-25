@@ -211,6 +211,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **An edit made through MCP is audited with what it changed** (`Q-50`). The REST door recorded each edit's
+  before and after as the audit entry's `changes`; the same edit through an MCP tool left the operation alone, and
+  no record id. Ten tools now record both — the record edits, the entity merge, the network settings and space
+  additions, and the space and schema updates — and a gate derives the set from the routes that record changes, so a
+  new pair cannot miss it.
+
 - **A space mapped under another name at join answers its peers** (`Q-51`). When a join maps a network's space onto
   a local space of a different name, this instance translated the name on its own requests but not on its peers':
   they asked for the network's name and were refused with `403`, so every sync cycle a peer ran for that space

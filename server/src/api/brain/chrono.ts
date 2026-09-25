@@ -25,7 +25,8 @@ import {
   parseRecordSuppression, RECORD_SUPPRESS_FIELD,
 } from '../../brain/suppress-embeddings.js';
 import { parseRecordSuperseded } from '../../brain/record-flag.js';
-import { connectionInputError, assertConnections, applyConnections, CONNECTION_BODY_KEYS, linkAuditSnapshots } from '../../brain/write-connections.js';
+import { connectionInputError, assertConnections, applyConnections, CONNECTION_BODY_KEYS } from '../../brain/write-connections.js';
+import { readEditAudit } from '../../brain/edit-audit.js';
 
 export const chronoRouter = Router();
 
@@ -309,16 +310,9 @@ chronoRouter.patch('/spaces/:spaceId/chrono/:id', globalRateLimit, requireSpaceA
   // `updateChrono` returns only the new document.
   // The member space holding this entry, captured while looking for it: the link sets below are read per
   // space, and an id belongs to the space that owns it.
-  let homeSpace: string | undefined;
-  const prior = await findFirstAcrossMembers(wt.target, async mid => {
-    const found = await getChronoById(mid, id);
-    if (found) homeSpace = mid;
-    return found;
-  });
-  // The link sets BEFORE this write, for the audit entry — see `linkAuditSnapshots`.
-  const linkAudit = homeSpace
-    ? await linkAuditSnapshots(homeSpace, id, req.body)
-    : { before: {}, after: {} };
+  // The before and the link sets, from whichever member holds the entry — one read shared with the MCP tool (Q-50).
+  const editAudit = await readEditAudit(wt.target, mid => getChronoById(mid, id), id, req.body);
+  const prior = editAudit.prior;
 
   // Validate the entry AS IT WILL BE. This path had NO property validation at all — the `type` allowlist
   // above was the whole of it — so a patch could write a property the same space rejects at create time.
@@ -351,7 +345,7 @@ chronoRouter.patch('/spaces/:spaceId/chrono/:id', globalRateLimit, requireSpaceA
     throw err;
   }
   if (updated) {
-    req.auditSnapshots = { before: { ...(prior ?? {}), ...linkAudit.before }, after: { ...updated, ...linkAudit.after } };
+    req.auditSnapshots = editAudit.snapshots(updated);
     // The `warnings` array an update response did not have — see the facts route, where the
     // reasoning is written out. A warn-mode space reported on a create and said nothing on an edit.
     /*
