@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.1.3] — 2026-09-25
+
+A patch: a token granted only space administration can write again.
+
+### Fixed
+
+- **A token granted only space administration was refused as read-only.** Since 5.0 space administration can be
+  granted on its own, and it means `admin` in every data area of those spaces — but the read-only check counted
+  only written rungs, so a token holding just the grant was turned away with *"This token has read-only access"* by
+  every route that refuses read-only tokens, before that route's own check ran. It now counts the grant.
+
 ## [5.1.2] — 2026-09-25
 
 A patch for networks: two instances that share more than one network keep syncing all of them, a sync that
