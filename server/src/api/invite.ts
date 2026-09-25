@@ -44,7 +44,9 @@ import bcrypt from 'bcrypt';
 import crypto from 'node:crypto';
 import { encodeInviteCode } from './invite-code.js';
 import { z } from 'zod';
-import { requireAdmin } from '../auth/middleware.js';
+import { requireAuth, denyReadOnly } from '../auth/middleware.js';
+import { networkInviteRefusal, visibleNetworks } from '../auth/network-rights.js';
+import { isInstanceAdmin } from '../auth/instance-admin.js';
 import { authRateLimit, globalRateLimit } from '../rate-limit/middleware.js';
 import { getConfig, saveConfig, getSecrets, saveSecrets } from '../config/loader.js';
 import { createToken, setTokenExpiry } from '../auth/tokens.js';
@@ -174,14 +176,23 @@ async function findSession(handshakeId: string): Promise<[string, HandshakeSessi
 // Restricted to admin tokens: generating an invite auto-creates a full-access
 // peer PAT for the joining instance (scoped to the network's spaces). Allowing
 // non-admin or read-only tokens to trigger this would be a privilege escalation.
-inviteRouter.post('/generate', globalRateLimit, requireAdmin, async (req, res) => {
+// `denyReadOnly` because this was `requireAdmin`, which a read-only token never passed (`F-37`).
+inviteRouter.post('/generate', globalRateLimit, requireAuth, denyReadOnly, async (req, res) => {
   const parsed = GenerateBody.safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
 
   const { networkId, reparentInstanceId, expectedInstanceId } = parsed.data;
   const cfg = getConfig();
+  const caller = req.authToken as Parameters<typeof networkInviteRefusal>[0];
   const net = cfg.networks.find(n => n.id === networkId);
-  if (!net) { res.status(404).json({ error: 'Network not found' }); return; }
+  // A network this token may not see is a 404, never a 403: a refusal would confirm it exists.
+  if (!net || !visibleNetworks(caller, [net]).length) { res.status(404).json({ error: 'Network not found' }); return; }
+  const refusal = networkInviteRefusal(caller, net);
+  if (refusal) { res.status(403).json({ error: refusal }); return; }
+  // Re-parenting moves an existing member within a braintree — topology, which stays instance-admin.
+  if (reparentInstanceId && !isInstanceAdmin(caller)) {
+    res.status(403).json({ error: 'A reparent invite changes the network topology, which needs instance admin.' }); return;
+  }
 
   if (reparentInstanceId) {
     if (net.type !== 'braintree') {

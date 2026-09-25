@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A space admin creates, joins and invites into networks with the spaces it administers** (`F-37`). A token
+  administering every space an act touches may create a network carrying them, join a network mapped onto them —
+  onto a new space too, when it may also create spaces — see that network, and generate its invite, with no
+  Networks column. A space it does not administer still needs the column and is named in the refusal; a network
+  carrying one stays invisible to it. Peers, votes, topology and sync are unchanged and instance-admin.
+
 - **Joining a remote network goes by the Networks column too** (`F-34.1`, `POST /api/networks/join-remote`). A
   token below instance admin may join with `networks: write` on every local space the join maps to; a space the
   join would create also needs `createSpaces` and a floor of `write`. The check runs after the handshake's apply

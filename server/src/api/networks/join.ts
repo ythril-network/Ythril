@@ -10,7 +10,7 @@ import bcrypt from 'bcrypt';
 import { z } from 'zod';
 import { requireAdmin, requireAuth, denyReadOnly } from '../../auth/middleware.js';
 import { globalRateLimit } from '../../rate-limit/middleware.js';
-import { networkJoinRefusal } from '../../auth/network-rights.js';
+import { networkJoinRefusal, networkInviteRefusal, visibleNetworks } from '../../auth/network-rights.js';
 import { recordOrigin } from '../../auth/network-membership.js';
 import { getConfig, saveConfig, getSecrets, saveSecrets } from '../../config/loader.js';
 import { createToken, revokeToken } from '../../auth/tokens.js';
@@ -312,11 +312,15 @@ joinRouter.post('/join-remote', globalRateLimit, requireAuth, denyReadOnly, asyn
 
 // ── POST /api/networks/:id/invite — generate invite key ───────────────────
 
-joinRouter.post('/:id/invite', globalRateLimit, requireAdmin, async (req, res) => {
+// `denyReadOnly` because this was `requireAdmin`, which a read-only token never passed (`F-37`).
+joinRouter.post('/:id/invite', globalRateLimit, requireAuth, denyReadOnly, async (req, res) => {
   try {
     const cfg = getConfig();
+    const caller = req.authToken as Parameters<typeof networkInviteRefusal>[0];
     const net = cfg.networks.find(n => n.id === req.params['id']);
-    if (!net) { res.status(404).json({ error: 'Network not found' }); return; }
+    if (!net || !visibleNetworks(caller, [net]).length) { res.status(404).json({ error: 'Network not found' }); return; }
+    const refusal = networkInviteRefusal(caller, net);
+    if (refusal) { res.status(403).json({ error: refusal }); return; }
 
     const { randomBytes } = await import('crypto');
     const key = `ythril_invite_${randomBytes(32).toString('base64url')}`;

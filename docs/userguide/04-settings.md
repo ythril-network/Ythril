@@ -278,8 +278,8 @@ Knowledge are different permissions:
 
 **Networks is different from the other four in two ways.** A network carries several spaces, so a token needs the
 rung on **every** space in it — one space short and the action is refused, naming that space. And it is **not
-part of administering a space**: a space admin runs the space's data, tokens and settings, while sharing it with
-another instance is its own decision, so the Space admin column leaves the Networks cell as it is. Tokens
+part of administering a space**: the Space admin column leaves the Networks cell as it is. A space admin can
+still share **its own** spaces without it: create a network with them, join one onto them, and invite others. Tokens
 created before this column existed hold `none` there.
 
 > **This page named three of them and never mentioned Data quality**, while a paragraph further down told
@@ -473,7 +473,9 @@ Networks sync selected spaces between multiple Ythril instances over the interne
 on a space (Settings → Tokens) can create a network with that space, see it, and leave a membership it created;
 at **admin** it can also change a network's settings and leave any membership. **Joining** a network from an
 invite needs the Networks right at write on each of your spaces it will share — and, if it brings spaces you do not
-have yet, the right to create spaces too. Inviting others, peers, votes and sync stay with the instance administrator.
+have yet, the right to create spaces too. **A space admin needs none of that for its own spaces**: it can create a
+network with any of the spaces it administers, join a network onto them (or onto new spaces, if it may create
+spaces), and generate the invite. Peers, votes and sync stay with the instance administrator.
 
 ### Network types
 
