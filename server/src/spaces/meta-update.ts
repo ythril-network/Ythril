@@ -29,6 +29,7 @@
  * the real conflict on their second attempt instead of their first. And a rejected write must change NOTHING,
  * which is why the audit snapshot is returned in the plan rather than taken as we go.
  */
+import { replicatedMetaOf } from '../sync/replicated-meta.js';
 import type { SpaceConfig, SpaceMeta, KnowledgeType, TypeSchema, DocExtractionMode } from '../config/types.js';
 import { normalizeDocExtractionMode } from '../config/types.js';
 import { getConfig, saveConfig, getSecrets, getDocumentProcessingConfig } from '../config/loader.js';
@@ -409,6 +410,10 @@ export async function applySpaceMetaUpdate(plan: MetaUpdatePlan): Promise<MetaUp
   // four buckets it did not mention, and an all-cleared write stored five explicit nulls instead of nothing. Both
   // returned 200 and looked like they had worked; found by driving the UI.
   const { documentExtraction: _rawMode, recordTtlDays: _rawTtl, ...restPatch } = patchData;
+  // F-39.2: a space in no network has no layer, so its own definitions ARE the edited meta — kept in step, or a stale
+  // `ownMeta` would come back the next time a network sends this space a layer.
+  const held = getConfig().spaces.find(s => s.id === id);
+  if (held?.ownMeta && mergedMeta !== undefined) held.ownMeta = replicatedMetaOf(mergedMeta) as SpaceMeta;
   const updated = updateSpace(id, {
     ...restPatch,
     meta: mergedMeta,

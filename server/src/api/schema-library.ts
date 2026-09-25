@@ -27,6 +27,7 @@
  *   GET    /api/schema-library/public/:name           — a single published entry
  */
 
+import { commitOwnMetaEdit } from '../spaces/effective-meta.js';
 import { Router } from 'express';
 import { boundedJson } from '../util/bounded-read.js';
 import { requireAuth, requireAdminMfa, acceptSchemaLibraryToken } from '../auth/middleware.js';
@@ -425,8 +426,12 @@ schemaLibraryRouter.post('/groups/:group/apply', globalRateLimit, requireAdminMf
     applied.push({ knowledgeType: kt, typeName: entry.typeName, entryName: entry.name });
   }
 
-  const updated = updateSpace(spaceId, {
-    meta: { ...existingMeta, typeSchemas },
+  // Through the own definitions (F-39.2): the group's references land in what this instance defines, so a space
+  // whose meta is rebuilt from network layers keeps them.
+  const updated = commitOwnMetaEdit(spaceId, base => {
+    const own = { ...base.typeSchemas };
+    for (const a of applied) own[a.knowledgeType as keyof typeof own] = { ...(own[a.knowledgeType as keyof typeof own] ?? {}), [a.typeName]: { $ref: `library:${a.entryName}` } };
+    return { ...base, typeSchemas: own };
   });
 
   if (!updated) {

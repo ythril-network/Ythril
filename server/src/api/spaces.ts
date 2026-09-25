@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { commitOwnMetaEdit, withType, withoutType } from '../spaces/effective-meta.js';
 import { registerReembedRoute } from './spaces-reembed.js';
 import { registerActivityResetRoute } from './spaces-activity.js';
 import {
@@ -412,13 +413,9 @@ spacesRouter.put('/:id/schema', globalRateLimit, requireSpaceAuthMfaScoped('id')
     return;
   }
 
-  // Replace the entire typeSchemas (full-replace semantics)
-  const newMeta: SpaceMeta = {
-    ...(freshSpace.meta ?? {}),
-    typeSchemas: parsed.data.typeSchemas as SpaceMeta['typeSchemas'],
-  };
-
-  const updated = updateSpace(id, { meta: newMeta });
+  // Replace the entire typeSchemas (full-replace semantics), through the own definitions (F-39.2) so a space whose
+  // meta is rebuilt from network layers keeps the edit.
+  const updated = commitOwnMetaEdit(id, base => ({ ...base, typeSchemas: parsed.data.typeSchemas as SpaceMeta['typeSchemas'] }));
   if (!updated) {
     res.status(404).json({ error: `Space '${id}' not found` });
     return;
@@ -428,7 +425,7 @@ spacesRouter.put('/:id/schema', globalRateLimit, requireSpaceAuthMfaScoped('id')
   // nothing was the whole gap here.
   req.auditSnapshots = {
     before: { typeSchemas: previousTypeSchemas ?? {} },
-    after: { typeSchemas: newMeta.typeSchemas ?? {} },
+    after: { typeSchemas: updated.meta?.typeSchemas ?? {} },
   };
   res.json({ space: updated });
 });
@@ -620,18 +617,8 @@ spacesRouter.put('/:id/meta/typeSchemas/:knowledgeType/:typeName', globalRateLim
     return;
   }
 
-  // Merge the new type definition into the existing map
-  existingKtMap[typeName] = parsed.data;
-
-  const updatedMeta: SpaceMeta = {
-    ...existingMeta,
-    typeSchemas: {
-      ...existingMeta.typeSchemas,
-      [kt]: existingKtMap,
-    },
-  };
-
-  const updated = updateSpace(id, { meta: updatedMeta });
+  // Merge the new type definition in, through the own definitions (F-39.2) so a layered space keeps the edit.
+  const updated = commitOwnMetaEdit(id, base => withType(base, kt, typeName, parsed.data));
   if (!updated) {
     res.status(404).json({ error: `Space '${id}' not found` });
     return;
@@ -642,7 +629,7 @@ spacesRouter.put('/:id/meta/typeSchemas/:knowledgeType/:typeName', globalRateLim
   // uses — was the silent half of an already-silent pair.
   req.auditSnapshots = {
     before: { typeSchemas: existingMeta.typeSchemas ?? {} },
-    after: { typeSchemas: updatedMeta.typeSchemas ?? {} },
+    after: { typeSchemas: updated.meta?.typeSchemas ?? {} },
   };
 
   res.json({ knowledgeType: kt, typeName, schema: parsed.data });
@@ -680,20 +667,9 @@ spacesRouter.delete('/:id/meta/typeSchemas/:knowledgeType/:typeName', globalRate
     return;
   }
 
-  // Build updated map without the deleted type
-  const updatedKtMap: Record<string, import('../config/types.js').TypeSchema> = {};
-  for (const [k, v] of Object.entries(existingKtMap)) {
-    if (k !== typeName) updatedKtMap[k] = v;
-  }
-
-  const updatedTypeSchemas = { ...existingMeta.typeSchemas, [kt]: updatedKtMap };
-
-  const updatedMeta: SpaceMeta = {
-    ...existingMeta,
-    typeSchemas: updatedTypeSchemas,
-  };
-
-  const updated = updateSpace(id, { meta: updatedMeta });
+  // Through the own definitions (F-39.2). A type a network layer defines comes back at the next recompute: a
+  // replicated schema is additive, so only the network can take its own type away.
+  const updated = commitOwnMetaEdit(id, base => withoutType(base, kt, typeName));
   if (!updated) {
     res.status(404).json({ error: `Space '${id}' not found` });
     return;
@@ -703,7 +679,7 @@ spacesRouter.delete('/:id/meta/typeSchemas/:knowledgeType/:typeName', globalRate
   // accepts from then on, and the definition it removed is not recoverable from the entry alone.
   req.auditSnapshots = {
     before: { typeSchemas: existingMeta.typeSchemas ?? {} },
-    after: { typeSchemas: updatedTypeSchemas },
+    after: { typeSchemas: updated.meta?.typeSchemas ?? {} },
   };
 
   res.status(204).end();
