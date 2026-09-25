@@ -357,23 +357,23 @@ The same header, in the same spellings, is honoured on space-meta writes against
 ### What a read never sends, and what you can drop
 
 **The embedding vector is never returned — by any endpoint, on either door, and there is no parameter that
-asks for it.** `POST /query` merges a mandatory exclusion into whatever projection you send and strips an
+asks for it.** `POST /api/filter` merges a mandatory exclusion into whatever projection you send and strips an
 explicit `"embedding": 1` out of it, so the vector cannot be opted back in; every read of a record collection
 projects it out before the document leaves the database. If you have been hunting for a flag to switch it off,
 this is why you could not find one.
 
 > **This was FALSE for the list routes in 3.1.0 and every version before it.** A `?limit=500` read of the
-> entities list returned every record's vector: an integrator measured **11.19 MB** where `POST /query`
+> entities list returned every record's vector: an integrator measured **11.19 MB** where `POST /api/filter`
 > answered the same 100 records in **0.145 MB**. They found it by running out of memory rather than by
 > reading a response — because this paragraph told them the field could not be there, which is why the
-> correction is here and not only in the changelog. **On 3.1.0 or earlier, use `POST /query` with a
+> correction is here and not only in the changelog. **On 3.1.0 or earlier, use `POST /api/filter` with a
 > projection for any bulk read.**
 
 What you *can* control:
 
 | lever | where | what it drops |
 |---|---|---|
-| `projection` | `POST /query`, **and recall / find-similar** | any field you do not name. On recall it applies recursively, so a `traverse` answer's `_graph` is projected at every depth |
+| `projection` | `POST /api/filter`, **and recall / find-similar** | any field you do not name. On recall it applies recursively, so a `traverse` answer's `_graph` is projected at every depth |
 | `includeFileContent: false` | recall, find-similar | file-passage **bodies**, keeping path, heading, chunk index, tags and properties |
 | `includeDiagnostics: false` *(the default)* | recall, find-similar | `matchedText`, `embeddingModel` and `seq` — **recursively**, so a `traverse` answer's `_graph` follows it at every depth. **NOT the per-stage scores** — see below |
 | `includeDiagnostics` *(body field, default off)* | `POST /filter` | `matchedText` and `embeddingModel`. **`seq` is NOT dropped here**, unlike on recall: it is the `If-Match` value, and withholding it would take away conditional writes. Send `includeDiagnostics: true` to get the two fields back. It was a query string on the per-collection list routes until 5.0, when those routes went |

@@ -412,7 +412,7 @@ Content-Type: application/json
 reasoning, and the `$in` form for a set of ids, are in
 [Read one entity, or a set of them, by id](04b-graph-api.md).
 
-**Response** `200`: `results` holds the full `MemoryDoc` (same shape as the write response).
+**Response** `200`: `results` holds the full `FactDoc` (same shape as the write response).
 
 > **What a stored record carries beyond the fields you wrote.** A read by id and the list routes below
 > return the document as stored, minus the embedding vector — which, as everywhere else, is never returned
@@ -436,7 +436,7 @@ reasoning, and the `$in` form for a set of ids, are in
 > *different* set by one field, on purpose — asked for by name by the integrator who wanted the other two gone.
 >
 > The list routes still have no `projection`; the structured
-> [`POST /query`](04d-brain-ops-api.md#structured-query-read-only) route accepts one and remains the way to
+> [`POST /api/filter`](04d-brain-ops-api.md#structured-query-read-only) route accepts one and remains the way to
 > bound a read to named fields.
 
 ---

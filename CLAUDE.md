@@ -100,7 +100,8 @@ goes wrong; this says what to do BEFORE it does.
 
 1. **Is there a module for this?** Not "do I remember one" — grep for the BEHAVIOUR, because a module named
    for its first caller is invisible to everyone after it. `mergePropertiesOrKeep`, `edgeEndpointKind`,
-   `wipeSpaceCollection` and `page-across-members.ts` were all written twice before they were written once.
+   `wipeSpaceCollection` (now `wipeSpace` in `spaces/lifecycle.ts`) and `page-across-members.ts` were all written
+   twice before they were written once.
 2. **If not, should there be?** The threshold is the SECOND site, not the third. By the third the two have
    already diverged and the extraction is a merge rather than a move.
 3. **Will the module be worth reaching for?** A shared thing nobody reaches for is worse than a copy: it
@@ -121,7 +122,7 @@ caller's needs.
 
 **A difference that small is exactly what argues for keeping copies** — and is usually wrong.
 `bulkDelete{Edges,Entities,Memories,Chrono}` were four functions differing in two real ways; the two became
-parameters and the four became `wipeSpaceCollection`. The instinct to say *"but mine is slightly different"*
+parameters and the four became one wipe (today `wipeSpace` in `spaces/lifecycle.ts`). The instinct to say *"but mine is slightly different"*
 is the instinct that produced the four.
 
 **Name it for the QUESTION, not for the first caller.** A name that describes where it came from is a name
@@ -154,8 +155,8 @@ each correct while every endpoint was an entity, and each about to be wrong in a
 is the copy that RECORDS rather than refuses: sync's would have logged two link violations per legitimate edge, which an
 operator reads as real damage.
 
-**`bulkDelete{Edges,Entities,Memories,Chrono}` was the same rule four times and is now `wipeSpaceCollection` in
-`brain/bulk-wipe.ts` (`R-4`, shipped).** Kept here because the SHAPE is what recurs and the extraction is the model for
+**`bulkDelete{Edges,Entities,Memories,Chrono}` was the same rule four times, and became one (`R-4`) — today
+`wipeSpace` in `spaces/lifecycle.ts`, which carries the face-label cascade itself.** Kept here because the SHAPE is what recurs and the extraction is the model for
 it: the four were not identical, and the two real differences became parameters rather than reasons to leave them
 apart — entities run an `afterDelete` for the face-label cascade, memories need a `sort`. **A difference that small is
 exactly what argues for four copies and against extracting them**, which is why the count keeps climbing.
@@ -253,7 +254,7 @@ agreeing they match, for ever, with nothing to contradict. A file field must be 
   entry had a description and no longer has it. They replicate and they are hashed — excluded, a redacted entry
   would hash identically to one that still has its detail, which is real divergence going unreported.
 - **Deriving the rule is what found the fields nobody had reported.** A hand-written list of exemptions named
-  none of `MemoryDoc.type` (it selects the memory's type schema, so a pushed memory was validated against
+  none of `FactDoc.type` (then `MemoryDoc.type`; it selects the memory's type schema, so a pushed memory was validated against
   nothing on the receiver) or the two chrono redaction marks. A reason once written is never re-read; a rule
   read out of the code that governs the behaviour cannot go stale the same way.
 

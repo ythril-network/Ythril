@@ -200,7 +200,7 @@ If the peer has never been synced (`lastSeqPushed` = 0), the full history is sen
 
 ### `POST /batch-upsert`
 
-Accepts `{ facts?: MemoryDoc[], entities?: EntityDoc[], edges?: EdgeDoc[], chrono?: ChronoEntry[], links?: LinkDoc[], filemeta?: FileMetaDoc[] }` in a single request. **An array the receiver does not read is dropped with a `200`**, so a peer built without `filemeta` loses every file description, tag and link array at the boundary — and nothing says so at either end. Up to 500 documents per type per request. The server applies the same conflict rules as the individual `POST /facts`, `POST /entities`, `POST /edges`, `POST /chrono` endpoints:
+Accepts `{ facts?: FactDoc[], entities?: EntityDoc[], edges?: EdgeDoc[], chrono?: ChronoEntry[], links?: LinkDoc[], filemeta?: FileMetaDoc[] }` in a single request. **An array the receiver does not read is dropped with a `200`**, so a peer built without `filemeta` loses every file description, tag and link array at the boundary — and nothing says so at either end. Up to 500 documents per type per request. The server applies the same conflict rules as the individual `POST /facts`, `POST /entities`, `POST /edges`, `POST /chrono` endpoints:
 
 | Type | Rule |
 |------|------|
@@ -385,7 +385,7 @@ The two **governance relays** — `POST /networks/:networkId/members` and `POST 
 | Method | Path | Key params | Returns |
 |--------|------|------------|---------|
 | `GET` | `/api/sync/facts` | `spaceId`, `networkId`, `sinceSeq`, `limit`, `cursor`, `full` | `{ items[], nextCursor }` |
-| `GET` | `/api/sync/facts/:id` | `spaceId`, `networkId` | Full `MemoryDoc` |
+| `GET` | `/api/sync/facts/:id` | `spaceId`, `networkId` | Full `FactDoc` |
 | `GET` | `/api/sync/entities` | same as facts | `{ items[], nextCursor }` |
 | `GET` | `/api/sync/entities/:id` | `spaceId`, `networkId` | Full `EntityDoc` |
 | `GET` | `/api/sync/edges` | same as facts | `{ items[], nextCursor }` |
@@ -412,7 +412,7 @@ There is no dedicated identity endpoint — a peer that needs the instance's ide
 
 | Method | Path | Body | Returns |
 |--------|------|------|---------|
-| `POST` | `/api/sync/facts` | `MemoryDoc` | `200 { status: 'inserted'\|'updated'\|'forked'\|'skipped'\|'tombstoned' }` — the `'forked'` case also returns `forkId` (the new fork document's `_id`) |
+| `POST` | `/api/sync/facts` | `FactDoc` | `200 { status: 'inserted'\|'updated'\|'forked'\|'skipped'\|'tombstoned' }` — the `'forked'` case also returns `forkId` (the new fork document's `_id`) |
 | `POST` | `/api/sync/entities` | `EntityDoc` | `200 { status:'ok' }` (or `'tombstoned'`) |
 | `POST` | `/api/sync/edges` | `EdgeDoc` | `200 { status:'ok' }`, `'tombstoned'`, or **`'duplicate'`** when the unique `(from, fromKind, to, toKind)` index rejects the insert |
 | `POST` | `/api/sync/chrono` | `ChronoEntry` | `200 { status:'ok' }` (or `'tombstoned'`) |
