@@ -22,7 +22,7 @@ export interface TestResult {
 }
 
 /** Targets that can be verified with a real request. Fewer than `TestTarget`: each needs a payload. */
-export type VerifyTarget = 'vision' | 'stt' | 'embedding' | 'assist';
+export type VerifyTarget = 'vision' | 'stt' | 'embedding' | 'assist' | 'assist-fallback';
 
 /**
  * The result of one real request against a configured model.
@@ -39,7 +39,7 @@ export interface VerifyResult {
   detail?: string;
 }
 
-export type TestTarget = 'vision' | 'stt' | 'assist' | 'embedding' | 'rerank' | 'nli';
+export type TestTarget = 'vision' | 'stt' | 'assist' | 'assist-fallback' | 'embedding' | 'rerank' | 'nli';
 
 /** Text-embedding config (top-level `config.embedding`, surfaced on this page). Changing
  *  model/dimensions/similarity/prefixScheme re-indexes every vector — the save gates those behind a
@@ -76,6 +76,19 @@ export type DocMode = 'off' | 'ocr' | 'vlm' | 'repair' | 'auto';
 export interface DocAssistCfg {
   baseUrl?: string; model?: string; apiKey?: string; acknowledgedHost?: string;
   acknowledgedHostForConversations?: string | null;
+  /** `F-33.1`: the API the endpoint speaks — OpenAI-compatible (the default) or the Claude API, with an API key. */
+  api?: AssistApi;
+  /** `F-33`: `tokens` over a rolling `perHours`; spent, calls go to the fallback. */
+  budget?: AssistBudgetCfg | null;
+  /** `F-33`: the endpoint that answers when the primary may not — usually a local LLM. */
+  fallback?: AssistFallbackCfg | null;
+}
+
+export type AssistApi = 'openai' | 'anthropic';
+export interface AssistBudgetCfg { tokens: number; perHours: number }
+export interface AssistFallbackCfg {
+  api?: AssistApi; baseUrl?: string; model?: string; apiKey?: string;
+  acknowledgedHost?: string; acknowledgedHostForConversations?: string;
 }
 
 /**
@@ -293,4 +306,9 @@ export interface PipelineStatus {
   models: ModelStageStatus[];
   index: { spaces: SpaceIndexStatus[]; unavailable?: string };
   faceRecognition: { state: HealthState };
+  /** `F-33`: who answers each assist use now, and what the budget has spent; absent with no assist model. */
+  assist?: {
+    answeredBy: { repair: 'primary' | 'fallback' | null; conversations: 'primary' | 'fallback' | null };
+    spent: number; budget?: AssistBudgetCfg; primaryCoolingDown: boolean;
+  };
 }
