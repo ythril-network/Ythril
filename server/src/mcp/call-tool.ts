@@ -47,6 +47,9 @@ import { toolSchemasFor } from './tool-schema.js';
 import { consumeHeavyToolCall } from '../rate-limit/heavy-tool.js';
 import { logAuditEntry } from '../audit/audit.js';
 import { auditChanges } from '../audit/audit-changes.js';
+
+/** What a tool hands the audit entry through `recordChanges` (Q-50) — the pair a REST route sets as `req.auditSnapshots`. */
+type AuditSnapshots = { before: Record<string, unknown>; after: Record<string, unknown> };
 import { mcpAuditOperation, isMcpReadOperation } from './audit-map.js';
 import { toolCallsTotal } from '../metrics/registry.js';
 /** Who is calling, for the rung checks and the audit trail. Snapshotted by the door at its own edge. */
@@ -258,7 +261,7 @@ export async function callTool(req: ToolCallRequest): Promise<ToolCallOutcome> {
       return refuse(429, `Error: tool '${name}' is rate limited — too many destructive calls, try again shortly`, callSpace);
     }
     const startedAt = Date.now();
-    let snapshots: { before: Record<string, unknown>; after: Record<string, unknown> } | undefined;
+    let snapshots: AuditSnapshots | undefined;
     const result = await tool.handle({
       args: a,
       callSpace,
@@ -332,7 +335,7 @@ export async function callTool(req: ToolCallRequest): Promise<ToolCallOutcome> {
  * that was forgotten is an unaudited mutation.
  */
 function recordToolCall(caller: ToolCaller, toolName: string, spaceId: string, status: number,
-  durationMs: number, args: unknown, snapshots?: { before: Record<string, unknown>; after: Record<string, unknown> }): void {
+  durationMs: number, args: unknown, snapshots?: AuditSnapshots): void {
   // The ARGUMENTS, because a capability with two subjects is audited under the subject of the call:
   // `network_sync` with a `peerId` records what the per-peer route records (`Q-37`).
   const operation = mcpAuditOperation(toolName, args);
