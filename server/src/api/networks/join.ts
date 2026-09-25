@@ -3,6 +3,8 @@
  *
  * Split out of the api/networks.ts monolith (A17.5); handlers are unchanged.
  */
+import { ForkNetworkBody, forkNetworkAct, inviteKeyAct } from '../../networks/network-acts.js';
+import { sendAct } from './_shared.js';
 import { Router } from 'express';
 import { boundedJson } from '../../util/bounded-read.js';
 import { v4 as uuidv4 } from 'uuid';
@@ -314,33 +316,10 @@ joinRouter.post('/join-remote', globalRateLimit, requireAuth, denyReadOnly, asyn
 // ── POST /api/networks/:id/invite — generate invite key ───────────────────
 
 // `denyReadOnly` because this was `requireAdmin`, which a read-only token never passed (`F-37`).
+// The act is shared with MCP `network_invite` (F-36 slice 3).
 joinRouter.post('/:id/invite', globalRateLimit, requireAuth, denyReadOnly, async (req, res) => {
   try {
-    const cfg = getConfig();
-    const caller = req.authToken as Parameters<typeof networkInviteRefusal>[0];
-    const net = cfg.networks.find(n => n.id === req.params['id']);
-    if (!net || !visibleNetworks(caller, [net]).length) { res.status(404).json({ error: 'Network not found' }); return; }
-    const refusal = networkInviteRefusal(caller, net);
-    if (refusal) { res.status(403).json({ error: refusal }); return; }
-
-    const { randomBytes } = await import('crypto');
-    const key = `ythril_invite_${randomBytes(32).toString('base64url')}`;
-    const inviteKeyHash = await bcrypt.hash(key, BCRYPT_ROUNDS);
-    // Re-fetch config after async bcrypt to avoid clobbering concurrent writes.
-    const freshCfg = getConfig();
-    const freshNet = freshCfg.networks.find(n => n.id === req.params['id']);
-    if (!freshNet) { res.status(404).json({ error: 'Network not found' }); return; }
-    freshNet.inviteKeyHash = inviteKeyHash;
-    saveConfig(freshCfg);
-
-    log.info(`Generated new invite key for network ${freshNet.id}${net.type === 'pubsub' ? ' (reusable)' : ' (shown once)'}`);
-    res.json({
-      inviteKey: key,
-      networkId: net.id,
-      ...(net.type === 'pubsub'
-        ? { reusable: true, note: 'This key is reusable — safe to publish in docs, QR codes, or share openly. Regenerating a new key revokes this one.' }
-        : { reusable: false, note: 'Store this key securely — it is single-use and will not be shown again' }),
-    });
+    sendAct(res, await inviteKeyAct(req.authToken as Parameters<typeof inviteKeyAct>[0], req.params['id'] as string));
   } catch (err) {
     log.error(`POST /api/networks/:id/invite: ${err}`);
     res.status(500).json({ error: 'Internal error' });
@@ -534,64 +513,13 @@ joinRouter.post('/:id/join', globalRateLimit, requireAdmin, async (req, res) => 
 //
 // The source network is never modified. ejectedFromNetworks is never cleared.
 
-const ForkNetworkBody = z.object({
-  label: z.string().min(1).max(200),
-  type: z.enum(['closed', 'club']).default('closed'),
-  votingDeadlineHours: z.number().int().min(1).max(72).optional(),
-  spaces: z.array(z.string().min(1)).optional(),
-});
-
+// The act is shared with MCP `network_fork` (F-36 slice 3).
 joinRouter.post('/:id/fork', globalRateLimit, requireAdmin, (req, res) => {
   try {
+    // Parsed here as well as in the act: the same-parameters gate reads a route's accepted keys off this call.
     const parsed = ForkNetworkBody.safeParse(req.body);
-    if (!parsed.success) {
-      res.status(400).json({ error: parsed.error.message });
-      return;
-    }
-
-    const cfg = getConfig();
-    const sourceId = String(req.params['id'] ?? '');
-    const sourceNet = cfg.networks.find(n => n.id === sourceId);
-    const isEjected = cfg.ejectedFromNetworks?.includes(sourceId) ?? false;
-
-    if (!sourceNet && !isEjected) {
-      res.status(404).json({ error: 'Network not found' });
-      return;
-    }
-
-    // Spaces: body override takes precedence; otherwise inherited from source.
-    const spaces = parsed.data.spaces ?? sourceNet?.spaces;
-
-    if (!spaces || spaces.length === 0) {
-      res.status(400).json({
-        error: 'spaces is required when the source network is no longer locally available',
-      });
-      return;
-    }
-
-    // All requested spaces must be locally known.
-    const unknownSpaces = spaces.filter(s => !cfg.spaces.some(cs => cs.id === s));
-    if (unknownSpaces.length > 0) {
-      res.status(400).json({ error: `Unknown spaces: ${unknownSpaces.join(', ')}` });
-      return;
-    }
-
-    const forkedNet: NetworkConfig = {
-      id: uuidv4(),
-      label: parsed.data.label,
-      type: parsed.data.type,
-      spaces,
-      votingDeadlineHours: parsed.data.votingDeadlineHours ?? sourceNet?.votingDeadlineHours ?? 24,
-      members: [],
-      pendingRounds: [],
-      createdAt: new Date().toISOString(),
-      origin: 'created',  // a fork is a new network this instance founded
-    };
-
-    cfg.networks.push(forkedNet);
-    saveConfig(cfg);
-    log.info(`Forked network ${sourceId} → new network ${forkedNet.id} ('${forkedNet.label}')`);
-    res.status(201).json(forkedNet);
+    if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
+    sendAct(res, forkNetworkAct(String(req.params['id'] ?? ''), parsed.data));
   } catch (err) {
     log.error(`POST /api/networks/:id/fork: ${err}`);
     res.status(500).json({ error: 'Internal error' });

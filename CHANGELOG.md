@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **An agent can mint an invite key and fork a network over MCP** (`F-36`, slice 3). `network_invite` and
+  `network_fork` are the same acts as `POST /api/networks/:id/invite` and `/fork` — same parameters, answers and
+  refusals on both doors.
+
 - **A passed space-settings vote reaches every member** (`F-39.4`). On a club the organiser's own yes passed a
   meta change before any member could see the round, and a member that joined later never saw it either, so the
   change stayed on the instance that proposed it. The passed round is now served to peers, each member re-decides it
@@ -227,10 +231,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **An unchanged network schema no longer rewrites the config every sync cycle** (`F-39.2` follow-up). Storing what
+  an upstream sent, and rebuilding the space's schema from it, saved the whole config file for every space on every
+  cycle even when nothing had changed. An identical layer is now nothing to do, and a rebuild writes only when
+  something it holds changed.
+
 - **A networked space's schema is changed by the network's vote on every door** (`Q-52`). `PATCH` and MCP
   `schema_update` turned a schema edit on a networked space into a vote; `PUT /schema`, the single-type upsert and
   delete, and the schema library's apply wrote it at once. They now open the same `meta_change` round and answer
   `202 vote_pending`. A space in no network is unchanged.
+  **For an integrator:** a script that writes a networked space's schema through those routes now gets `202`
+  rather than `200`, and the schema changes only when the round passes.
 
 - **An edit made through MCP is audited with what it changed** (`Q-50`). The REST door recorded each edit's
   before and after as the audit entry's `changes`; the same edit through an MCP tool left the operation alone, and

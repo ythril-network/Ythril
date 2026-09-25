@@ -40,8 +40,14 @@ export function layersFor(cfg: Config, spaceId: string): MetaLayer[] {
     .map(({ n }) => ({ networkId: n.id, meta: n.schemaLayers![spaceId] }));
 }
 
-/** Rebuild `space.meta` from `ownMeta` and the layers; writes only when it changed. @returns whether it did. */
-export function recomputeEffectiveMeta(spaceId: string): boolean {
+/**
+ * Rebuild `space.meta` from `ownMeta` and the layers; writes only when it changed. @returns whether it did.
+ *
+ * `persist` says the CALLER changed stored state (a layer, the own definitions) that must be saved even when the
+ * effective meta comes out the same. Without it an unchanged recompute writes nothing — this runs for every space
+ * on every sync cycle, and a full config rewrite per call is the write loop this repo has been bitten by before.
+ */
+export function recomputeEffectiveMeta(spaceId: string, persist = false): boolean {
   const cfg = getConfig();
   const space = cfg.spaces.find(s => s.id === spaceId);
   if (!space) return false;
@@ -49,9 +55,13 @@ export function recomputeEffectiveMeta(spaceId: string): boolean {
   if (!layers.length && !space.ownMeta) return false;
   // The first layer is when the space's own definitions are set apart: until then `meta` is all its own.
   // Without the server's own counters: the version and history belong to `meta`, which `updateSpace` keeps.
-  if (!space.ownMeta) space.ownMeta = replicatedMetaOf(space.meta) as SpaceMeta;
-  const next = effectiveMeta(space.ownMeta, layers);
-  if (isDeepStrictEqual(replicatedMetaOf(next), replicatedMetaOf(space.meta))) { saveConfig(cfg); return false; }
+  const setApart = !space.ownMeta;
+  if (setApart) space.ownMeta = replicatedMetaOf(space.meta) as SpaceMeta;
+  const next = effectiveMeta(space.ownMeta!, layers);
+  if (isDeepStrictEqual(replicatedMetaOf(next), replicatedMetaOf(space.meta))) {
+    if (setApart || persist) saveConfig(cfg);
+    return false;
+  }
   updateSpace(spaceId, { meta: next });
   return true;
 }
@@ -60,8 +70,10 @@ export function recomputeEffectiveMeta(spaceId: string): boolean {
 export function storeNetworkLayer(networkId: string, spaceId: string, meta: SpaceMeta): boolean {
   const net = getConfig().networks.find(n => n.id === networkId);
   if (!net) return false;
+  // The same layer again — every cycle, for a network whose schema did not change — is nothing to do and nothing to write.
+  if (isDeepStrictEqual(net.schemaLayers?.[spaceId], meta)) return false;
   (net.schemaLayers ??= {})[spaceId] = meta;
-  return recomputeEffectiveMeta(spaceId);
+  return recomputeEffectiveMeta(spaceId, true);
 }
 
 /**
@@ -73,7 +85,7 @@ export function commitOwnMetaEdit(spaceId: string, edit: (base: SpaceMeta) => Sp
   if (!space) return null;
   if (!space.ownMeta) return updateSpace(spaceId, { meta: edit(space.meta ?? {}) });
   space.ownMeta = replicatedMetaOf(edit(space.ownMeta)) as SpaceMeta;
-  recomputeEffectiveMeta(spaceId);
+  recomputeEffectiveMeta(spaceId, true);
   return getConfig().spaces.find(s => s.id === spaceId) ?? null;
 }
 

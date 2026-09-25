@@ -13,6 +13,7 @@ import {
   readNetworkAct, createNetworkAct, updateNetworkAct, leaveNetworkAct, addNetworkSpaceAct, type NetworkActResult,
 } from '../../networks/network-acts.js';
 import { castVoteAct, listOpenVotesAct, syncHistoryAct } from '../../networks/vote-acts.js';
+import { forkNetworkAct, inviteKeyAct } from '../../networks/network-acts.js';
 
 /** The caller an act sees: this connection's matrix, and the token id memberships are recorded against. */
 const callerOf = (ctx: ToolContext) => ({ ...(ctx.rights ? { rights: ctx.rights } : {}), ...(ctx.actor?.tokenId ? { id: ctx.actor.tokenId } : {}) });
@@ -206,5 +207,49 @@ export const network_sync_historyTool: ToolHandler = {
   }),
   async handle(ctx: ToolContext): Promise<ToolResult> {
     return toResult(await syncHistoryAct(String(ctx.args['id']), ctx.args['limit']), '');
+  },
+};
+
+// ── F-36 slice 3: an invite key and a fork. ──────────────────────────────────────────────────────────────────
+
+export const network_inviteTool: ToolHandler = {
+  name: 'network_invite',
+  description: 'Mint a fresh invite key for a network. Same answer as `POST /api/networks/:id/invite`: '
+    + '`{ inviteKey, networkId, reusable, note }`. On a pub/sub network the key is reusable and safe to publish; on '
+    + 'every other type it is single-use and shown only this once. Minting a new key revokes the previous one.\n\n'
+    + 'WHO MAY: instance admin, or a token that administers EVERY space the network carries. A network you may not see '
+    + 'is "not found".',
+  mutating: true,
+  inputSchema: (_s: ToolSchemas) => ({
+    type: 'object', properties: { id: networkIdSchema }, required: ['id'], additionalProperties: false,
+  }),
+  async handle(ctx: ToolContext): Promise<ToolResult> {
+    return toResult(await inviteKeyAct(callerOf(ctx), String(ctx.args['id'])), '');
+  },
+};
+
+export const network_forkTool: ToolHandler = {
+  name: 'network_fork',
+  description: 'Found a new network from an existing one — or from one this instance was ejected from, naming the '
+    + 'spaces — with no members yet. Same parameters and answer as `POST /api/networks/:id/fork`. Requires '
+    + 'instance-admin rights.\n\n'
+    + 'THE FORK STARTS EMPTY: invite members into it as into any new network.',
+  admin: true,
+  mutating: true,
+  inputSchema: (_s: ToolSchemas) => ({
+    type: 'object',
+    properties: {
+      id: networkIdSchema,
+      label: { type: 'string', minLength: 1, maxLength: 200, description: 'A display name for the new network, 1-200 characters.' },
+      type: { type: 'string', enum: ['closed', 'club'], default: 'closed', description: 'The new network\'s governance: closed (unanimous) or club (the organiser decides). Default closed.' },
+      votingDeadlineHours: { type: 'integer', minimum: 1, maximum: 72, description: 'Hours a vote stays open, 1-72; omitted, the source network\'s value, or 24.' },
+      spaces: { type: 'array', items: { type: 'string', minLength: 1 }, description: 'Local space ids it carries; omitted, the source network\'s. Required when the source is no longer here.' },
+    },
+    required: ['id', 'label'],
+    additionalProperties: false,
+  }),
+  async handle(ctx: ToolContext): Promise<ToolResult> {
+    const { id, ...body } = ctx.args;
+    return toResult(forkNetworkAct(String(id), body), '');
   },
 };
