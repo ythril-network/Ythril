@@ -8,7 +8,8 @@ import { requireAdmin, requireAuth, denyReadOnly } from '../../auth/middleware.j
 import { visibleNetworks } from '../../auth/network-rights.js';
 import { globalRateLimit } from '../../rate-limit/middleware.js';
 import { getConfig } from '../../config/loader.js';
-import { getSyncHistory } from '../../sync/history.js';
+import { syncHistoryAct } from '../../networks/vote-acts.js';
+import { sendAct } from './_shared.js';
 import { unknownPeerRefusal } from '../../sync/peer-target.js';
 import { triggerNetworkSync, triggerPeerSync, syncTimeoutMs } from '../../sync/trigger.js';
 import { log } from '../../util/log.js';
@@ -34,21 +35,16 @@ crudRouter.get('/', globalRateLimit, requireAuth, (req, res) => {
 
 // F-34: readable with `networks: read` on every space it carries; otherwise a 404, because a 403 says it exists.
 crudRouter.get('/:id', globalRateLimit, requireAuth, (req, res) => {
-  send(res, readNetworkAct(req.authToken as Parameters<typeof readNetworkAct>[0], req.params['id'] as string));
+  sendAct(res, readNetworkAct(req.authToken as Parameters<typeof readNetworkAct>[0], req.params['id'] as string));
 });
 
 
 // ── GET /api/networks/:id/sync-history ─────────────────────────────────────
 
+// The act is shared with MCP `network_sync_history` (F-36 slice 2).
 crudRouter.get('/:id/sync-history', globalRateLimit, requireAdmin, async (req, res) => {
   try {
-    const cfg = getConfig();
-    const net = cfg.networks.find(n => n.id === req.params['id']);
-    if (!net) { res.status(404).json({ error: 'Network not found' }); return; }
-
-    const limit = Math.min(parseInt(req.query['limit'] as string, 10) || 20, 100);
-    const history = await getSyncHistory(net.id, limit);
-    res.json({ history });
+    sendAct(res, await syncHistoryAct(req.params['id'] as string, req.query['limit']));
   } catch (err) {
     log.error(`GET /api/networks/:id/sync-history: ${err}`);
     res.status(500).json({ error: 'Internal error' });
@@ -103,7 +99,7 @@ crudRouter.post('/', globalRateLimit, requireAuth, denyReadOnly, (req, res) => {
   // Parsed here as well as in the act: the same-parameters gate reads a route's accepted keys off this call.
   const parsed = CreateNetworkBody.safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
-  send(res, createNetworkAct(req.authToken as Parameters<typeof createNetworkAct>[0], parsed.data));
+  sendAct(res, createNetworkAct(req.authToken as Parameters<typeof createNetworkAct>[0], parsed.data));
 });
 
 
@@ -112,7 +108,7 @@ crudRouter.post('/', globalRateLimit, requireAuth, denyReadOnly, (req, res) => {
 // F-34: leaving takes each of the network's spaces out of it, so each membership is decided by the leave rule —
 // its own at `networks: write`, anyone's at `admin`, an unknown establisher only at `admin`.
 crudRouter.delete('/:id', globalRateLimit, requireAuth, denyReadOnly, async (req, res) => {
-  send(res, await leaveNetworkAct(req.authToken as Parameters<typeof leaveNetworkAct>[0], req.params['id'] as string));
+  sendAct(res, await leaveNetworkAct(req.authToken as Parameters<typeof leaveNetworkAct>[0], req.params['id'] as string));
 });
 
 
@@ -125,7 +121,7 @@ crudRouter.patch('/:id', globalRateLimit, requireAuth, denyReadOnly, (req, res) 
   const r = updateNetworkAct(req.authToken as Parameters<typeof updateNetworkAct>[0], req.params['id'] as string, parsed.data);
   // The three fields this act can change, never the record: it also holds invite and member token hashes.
   if (r.audit) req.auditSnapshots = r.audit;
-  send(res, r);
+  sendAct(res, r);
 });
 
 // ── POST /api/networks/:id/spaces — add a space to a network this instance governs (F-38.3) ──
@@ -136,12 +132,6 @@ crudRouter.post('/:id/spaces', globalRateLimit, requireAuth, denyReadOnly, (req,
   if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
   const r = addNetworkSpaceAct(req.authToken as Parameters<typeof addNetworkSpaceAct>[0], req.params['id'] as string, parsed.data);
   if (r.audit) req.auditSnapshots = r.audit;
-  send(res, r);
+  sendAct(res, r);
 });
 
-/** An act's answer, on the wire. The status is the act's own; this door only translates it. */
-function send(res: import('express').Response, r: NetworkActResult): void {
-  if (r.status === 204) { res.status(204).end(); return; }
-  if ('error' in r) { res.status(r.status).json({ error: r.error }); return; }
-  res.status(r.status).json(r.body);
-}

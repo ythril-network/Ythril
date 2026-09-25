@@ -30,3 +30,13 @@ export function safeMemberList(net: NetworkConfig, excludeInstanceId: string) {
     .filter(m => m.instanceId !== excludeInstanceId)
     .map(({ tokenHash: _th, skipTlsVerify: _sv, ...m }) => m);
 }
+
+/**
+ * A network act's answer on the wire (`networks/network-acts.ts`, `networks/vote-acts.ts`). The status is the act's
+ * own; a router only translates it — one copy, because the MCP door translates the same result the same way.
+ */
+export function sendAct(res: import('express').Response, r: import('../../networks/network-acts.js').NetworkActResult): void {
+  if (r.status === 204) { res.status(204).end(); return; }
+  if ('error' in r) { res.status(r.status).json({ error: r.error }); return; }
+  res.status(r.status).json(r.body);
+}

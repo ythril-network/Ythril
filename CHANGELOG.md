@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **An agent can see and cast network votes over MCP** (`F-36`, slice 2). `network_votes`, `network_vote` and
+  `network_sync_history` are the same acts as the votes and sync-history routes — same parameters, answers and
+  refusals, instance-admin on both doors. A vote is how a networked space approves a destructive act, and until now
+  an agent could be a member of a governance process it could not take part in.
+
 - **A space can be added to a club, closed or democratic network too** (`F-38.4`). There it is a `space_addition`
   vote: a club organiser's own yes carries it at once, a closed network needs every member, a democratic one a
   majority with no veto. Same route, tool and picker as the pub/sub and braintree case; a vote answers `202`. Each
