@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { voteOnSchemaEditIfNetworked } from '../spaces/meta-update.js';
 import { commitOwnMetaEdit, withType, withoutType } from '../spaces/effective-meta.js';
 import { registerReembedRoute } from './spaces-reembed.js';
 import { registerActivityResetRoute } from './spaces-activity.js';
@@ -391,6 +392,9 @@ spacesRouter.put('/:id/schema', globalRateLimit, requireSpaceAuthMfaScoped('id')
   }
 
   // Write a backup of the previous schema before replacing it
+  // Q-52: a networked space's schema is the network's to decide, as on PATCH — this answers 202 with the round.
+  const voted = await voteOnSchemaEditIfNetworked(id, parsed.data.typeSchemas, 'replace');
+  if (voted) { res.status(voted.status).json(voted.body); return; }
   const previousTypeSchemas = space.meta?.typeSchemas;
   if (previousTypeSchemas && Object.keys(previousTypeSchemas).length > 0) {
     try {
@@ -567,7 +571,7 @@ spacesRouter.get('/:id/meta/typeSchemas/:knowledgeType/:typeName', globalRateLim
 });
 
 // PUT /api/spaces/:id/meta/typeSchemas/:knowledgeType/:typeName — upsert a single type definition
-spacesRouter.put('/:id/meta/typeSchemas/:knowledgeType/:typeName', globalRateLimit, requireSpaceAuthMfaScoped('id'), denyReadOnly, (req, res) => {
+spacesRouter.put('/:id/meta/typeSchemas/:knowledgeType/:typeName', globalRateLimit, requireSpaceAuthMfaScoped('id'), denyReadOnly, async (req, res) => {
   const { id, knowledgeType, typeName } = req.params as { id: string; knowledgeType: string; typeName: string };
 
   if (!VALID_KNOWLEDGE_TYPES.has(knowledgeType)) {
@@ -617,6 +621,9 @@ spacesRouter.put('/:id/meta/typeSchemas/:knowledgeType/:typeName', globalRateLim
     return;
   }
 
+  // Q-52: a networked space's schema is the network's to decide, as on PATCH — this answers 202 with the round.
+  const voted = await voteOnSchemaEditIfNetworked(id, { [kt]: { [typeName]: parsed.data } }, 'merge');
+  if (voted) { res.status(voted.status).json(voted.body); return; }
   // Merge the new type definition in, through the own definitions (F-39.2) so a layered space keeps the edit.
   const updated = commitOwnMetaEdit(id, base => withType(base, kt, typeName, parsed.data));
   if (!updated) {
@@ -636,7 +643,7 @@ spacesRouter.put('/:id/meta/typeSchemas/:knowledgeType/:typeName', globalRateLim
 });
 
 // DELETE /api/spaces/:id/meta/typeSchemas/:knowledgeType/:typeName — remove a single type definition
-spacesRouter.delete('/:id/meta/typeSchemas/:knowledgeType/:typeName', globalRateLimit, requireSpaceAuthMfaScoped('id'), denyReadOnly, (req, res) => {
+spacesRouter.delete('/:id/meta/typeSchemas/:knowledgeType/:typeName', globalRateLimit, requireSpaceAuthMfaScoped('id'), denyReadOnly, async (req, res) => {
   const { id, knowledgeType, typeName } = req.params as { id: string; knowledgeType: string; typeName: string };
 
   if (!VALID_KNOWLEDGE_TYPES.has(knowledgeType)) {
@@ -667,6 +674,9 @@ spacesRouter.delete('/:id/meta/typeSchemas/:knowledgeType/:typeName', globalRate
     return;
   }
 
+  // Q-52: a networked space's schema is the network's to decide, as on PATCH — this answers 202 with the round.
+  const voted = await voteOnSchemaEditIfNetworked(id, withoutType(existingMeta, kt, typeName).typeSchemas, 'replace');
+  if (voted) { res.status(voted.status).json(voted.body); return; }
   // Through the own definitions (F-39.2). A type a network layer defines comes back at the next recompute: a
   // replicated schema is additive, so only the network can take its own type away.
   const updated = commitOwnMetaEdit(id, base => withoutType(base, kt, typeName));
