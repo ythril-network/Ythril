@@ -16,16 +16,16 @@ import { castVoteAct, listOpenVotesAct, syncHistoryAct } from '../../networks/vo
 import { forkNetworkAct, inviteKeyAct } from '../../networks/network-acts.js';
 
 /** The caller an act sees: this connection's matrix, and the token id memberships are recorded against. */
-const callerOf = (ctx: ToolContext) => ({ ...(ctx.rights ? { rights: ctx.rights } : {}), ...(ctx.actor?.tokenId ? { id: ctx.actor.tokenId } : {}) });
+export const callerOf = (ctx: ToolContext) => ({ ...(ctx.rights ? { rights: ctx.rights } : {}), ...(ctx.actor?.tokenId ? { id: ctx.actor.tokenId } : {}) });
 
 /** An act's answer as a tool result: the status travels in the text, as on every other tool that mirrors a route. */
-function toResult(r: NetworkActResult, done: string): ToolResult {
+export function toResult(r: NetworkActResult, done: string): ToolResult {
   if ('error' in r) return { content: [{ type: 'text' as const, text: `Error (${r.status}): ${r.error}` }], isError: true };
   if (r.status === 204) return { content: [{ type: 'text' as const, text: done }], structuredContent: { ok: true } };
   return { content: [{ type: 'text' as const, text: JSON.stringify(r.body) }], structuredContent: r.body };
 }
 
-const networkIdSchema = uuidSchema('The network\'s id — `networkId` on a `network_peers` row, `id` everywhere else, as in `/api/networks/:id`.');
+export const networkIdSchema = uuidSchema('The network\'s id — `networkId` on a `network_peers` row, `id` everywhere else, as in `/api/networks/:id`.');
 
 export const network_getTool: ToolHandler = {
   name: 'network_get',
