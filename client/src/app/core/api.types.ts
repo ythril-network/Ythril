@@ -808,18 +808,8 @@ export interface Network {
   votingDeadlineHours?: number;
   syncSchedule?: string;
   merkle?: boolean;
-  /** What THIS instance is in the network, and which members that role acts on — ids into `members` (F-38.1). */
-  myRole?: NetworkRole;
-}
-
-export type NetworkRoleName = 'publisher' | 'subscriber' | 'organiser' | 'member' | 'root' | 'node' | 'leaf';
-
-export interface NetworkRole {
-  role: NetworkRoleName;
-  members: string[];
-  publisher?: string;
-  pathToRoot?: string[];
-  subtree?: string[];
+  /** What THIS instance is in the network, and which members that role acts on (F-38.1). */
+  myRole?: import('./network-role.types').NetworkRole;
 }
 
 export interface NetworkMember {

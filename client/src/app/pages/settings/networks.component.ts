@@ -1,7 +1,8 @@
 import { Component, inject, signal, computed, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { Network, NetworkMember, NetworkRole, Space, SyncHistoryRecord, VoteRound } from '../../core/api.types';
+import { Network, Space, SyncHistoryRecord, VoteRound } from '../../core/api.types';
+import { roleCountKey, remoteOf, memberGroups } from './network-role-view';
 import { NetworksApi } from '../../core/networks-api.service';
 import { NetworkInvitePanelComponent } from './network-invite-panel.component';
 import { SpacesApi } from '../../core/spaces-api.service';
@@ -658,40 +659,10 @@ export class NetworksComponent implements OnInit {
     });
   }
 
-  /** The count the header shows for this role, or null when the role shows none (a subscriber, a lone root). */
-  roleCountKey(r: NetworkRole): string | null {
-    if (r.role === 'publisher') return 'networks.role.count.subscribers';
-    if (r.role === 'subscriber') return null;
-    if (r.role === 'root' || r.role === 'node' || r.role === 'leaf') return r.members.length ? 'networks.role.count.below' : null;
-    return 'networks.role.count.peers';
-  }
-
-  /** The network space a local space was mapped from on join, when it differs from the local id. */
-  remoteOf(net: Network, local: string): string | null {
-    const hit = Object.entries(net.spaceMap ?? {}).find(([remote, l]) => l === local && remote !== local);
-    return hit ? hit[0] : null;
-  }
-
-  /**
-   * The member lists this instance's role acts on (F-38.1). A publisher sees its subscribers, a subscriber only its
-   * publisher, a club or voted network its peers, a tree node the path to the root and what is below it. Without a
-   * role (an older server) it falls back to every member, as before.
-   */
-  memberGroups(net: Network): { titleKey: string; members: NetworkMember[]; emptyKey?: string }[] {
-    const r = net.myRole;
-    const pick = (ids: string[] | undefined) =>
-      (ids ?? []).map(id => net.members.find(m => m.instanceId === id)).filter((m): m is NetworkMember => !!m);
-    if (!r) return [{ titleKey: 'networks.network.members.title', members: net.members }];
-    switch (r.role) {
-      case 'publisher': return [{ titleKey: 'networks.network.members.subscribers', members: pick(r.members), emptyKey: 'networks.network.members.noSubscribers' }];
-      case 'subscriber': return [{ titleKey: 'networks.network.members.publisher', members: pick(r.publisher ? [r.publisher] : []) }];
-      case 'root': case 'node': case 'leaf': return [
-        { titleKey: 'networks.network.members.pathToRoot', members: pick(r.pathToRoot), emptyKey: 'networks.network.members.isRoot' },
-        { titleKey: 'networks.network.members.subtree', members: pick(r.subtree), emptyKey: 'networks.network.members.noneBelow' },
-      ];
-      default: return [{ titleKey: 'networks.network.members.peers', members: pick(r.members) }];
-    }
-  }
+  // The role's presentation (F-38.1) lives in network-role-view.ts; the template calls it through these.
+  readonly roleCountKey = roleCountKey;
+  readonly remoteOf = remoteOf;
+  readonly memberGroups = memberGroups;
 
   typeBadge(type: string): string {
     const map: Record<string, string> = {
