@@ -141,9 +141,10 @@ describe('outbound calls carry a deadline', () => {
     'api/media-config.ts',           // probe helper builds `init` above the call
     'sync/peer-fetch.ts',            // composes `{ ...init, signal }`
     'api/local-agent.ts',            // wrapper that injects AbortSignal.timeout itself
+    'util/model-fetch.ts',           // passes its caller's `init` through; every caller builds it with a timeout
   ];
 
-  it('every ssrfSafeFetch call site passes a signal, or is a named pass-through wrapper', () => {
+  it('every ssrfSafeFetch and modelFetch call site passes a signal, or is a named pass-through wrapper', () => {
     const offenders = [];
     const walk = (dir) => {
       for (const e of readdirSync(dir, { withFileTypes: true })) {
@@ -162,10 +163,12 @@ describe('outbound calls carry a deadline', () => {
          * argument list longer than 700 characters, or one that does not end on the guessed
          * `\n  })` / `\n  );` shape. A single-line call with a long URL expression matched nothing and passed.
          */
-        for (const m of src.matchAll(/ssrfSafeFetch\(/g)) {
-          const argsList = balancedFrom(src, src.indexOf('(', m.index), `${rel}: the ssrfSafeFetch arguments`);
+        // `modelFetch` too (F-33): it is a pass-through wrapper, so ITS callers are where the deadline has to be.
+        for (const m of src.matchAll(/\b(ssrfSafeFetch|modelFetch)\(/g)) {
+          if (/export function\s*$/.test(src.slice(Math.max(0, m.index - 20), m.index))) continue;
+          const argsList = balancedFrom(src, src.indexOf('(', m.index), `${rel}: the ${m[1]} arguments`);
           if (!/signal\s*:/.test(argsList)) {
-            offenders.push(`${rel}: ssrfSafeFetch with no signal`);
+            offenders.push(`${rel}: ${m[1]} with no signal`);
           }
         }
       }
