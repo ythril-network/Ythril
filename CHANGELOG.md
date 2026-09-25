@@ -158,6 +158,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A token granted only space administration was refused as read-only.** Since 5.0 space administration can be
+  granted on its own, and it means `admin` in every data area of those spaces — but the read-only check counted
+  only written rungs, so a token holding just the grant was turned away with *"This token has read-only access"* by
+  every route that refuses read-only tokens, before that route's own check ran. It now counts the grant.
+
 - **A stored rights matrix missing an area read as reaching the space** (`reachesSpace`). The check compared each
   area's rung to `none`, and a missing area is `undefined`, which is not `none` — so a matrix without an area
   reached every space it had a row or floor for. Latent until an area was added; a missing area is now `none`.

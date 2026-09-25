@@ -39,6 +39,9 @@ export function canWriteAnywhere(rights: TokenRights | undefined): boolean {
   if (!rights) return false;
 
   if (rights.instanceAdmin) return true;
+  // Administering a space IS `admin` in every data area of it (`grantedRung`), with no rung written anywhere, so a
+  // token holding only the grant read as read-only here and every `denyReadOnly` route refused it.
+  if (rights.spaceAdmin && (rights.spaceAdmin.floor || rights.spaceAdmin.spaces.length > 0)) return true;
 
   const floor = rights.floor;
   if (floor && SPACE_AREAS.some(a => satisfies(floor[a], 'write'))) return true;
