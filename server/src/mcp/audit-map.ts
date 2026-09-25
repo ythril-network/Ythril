@@ -104,6 +104,7 @@ export const MCP_TOOL_OPERATIONS: Record<string, string | string[] | null> = {
   network_create: 'network.create',
   network_update: 'network.update',
   network_leave: 'network.delete',
+  network_add_space: 'network.space.add',
 
   // ── Reads. Recorded only when `logReads` is on, exactly as the REST reads are. ──────────────────
   filter: 'brain.filter',

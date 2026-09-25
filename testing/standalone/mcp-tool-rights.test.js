@@ -47,6 +47,7 @@ const ITERATES_IN_HANDLER = {
   network_create: { filter: 'createNetworkAct', tool: 'server/src/mcp/tools/networks.ts', route: 'server/src/api/networks/crud.ts' },
   network_update: { filter: 'updateNetworkAct', tool: 'server/src/mcp/tools/networks.ts', route: 'server/src/api/networks/crud.ts' },
   network_leave: { filter: 'leaveNetworkAct', tool: 'server/src/mcp/tools/networks.ts', route: 'server/src/api/networks/crud.ts' },
+  network_add_space: { filter: 'addNetworkSpaceAct', tool: 'server/src/mcp/tools/networks.ts', route: 'server/src/api/networks/crud.ts' },
 };
 
 before(async () => {

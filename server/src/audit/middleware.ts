@@ -174,6 +174,7 @@ export const ROUTE_RULES: RouteRule[] = [
   { method: 'POST',   pattern: /^\/api\/networks\/join-remote$/,                    operation: 'network.join_remote' },
   { method: 'PATCH',  pattern: /^\/api\/networks\/([^/]+)$/,                        operation: 'network.update' },
   { method: 'DELETE', pattern: /^\/api\/networks\/([^/]+)$/,                        operation: 'network.delete' },
+  { method: 'POST',   pattern: /^\/api\/networks\/([^/]+)\/spaces$/,                operation: 'network.space.add' },
   { method: 'POST',   pattern: /^\/api\/networks\/([^/]+)\/members$/,               operation: 'network.member.add' },
   { method: 'DELETE', pattern: /^\/api\/networks\/([^/]+)\/members\/([^/]+)$/,      operation: 'network.member.remove' },
 

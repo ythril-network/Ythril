@@ -1,5 +1,5 @@
 /**
- * Network CRUD + sync trigger/history (`GET /`, `GET|PATCH|DELETE /:id`, `POST /`, `POST /:id/sync`, `GET /:id/sync-history`).
+ * Network CRUD + sync trigger/history (`GET /`, `GET|PATCH|DELETE /:id`, `POST /`, `POST /:id/spaces`, `POST /:id/sync`, `GET /:id/sync-history`).
  *
  * Split out of the api/networks.ts monolith (A17.5); handlers are unchanged.
  */
@@ -13,8 +13,8 @@ import { unknownPeerRefusal } from '../../sync/peer-target.js';
 import { triggerNetworkSync, triggerPeerSync, syncTimeoutMs } from '../../sync/trigger.js';
 import { log } from '../../util/log.js';
 import {
-  networkView, readNetworkAct, createNetworkAct, updateNetworkAct, leaveNetworkAct, type NetworkActResult,
-  CreateNetworkBody, UpdateNetworkBody,
+  networkView, readNetworkAct, createNetworkAct, updateNetworkAct, leaveNetworkAct, addNetworkSpaceAct, type NetworkActResult,
+  CreateNetworkBody, UpdateNetworkBody, AddNetworkSpaceBody,
 } from '../../networks/network-acts.js';
 
 export const crudRouter = Router();
@@ -124,6 +124,17 @@ crudRouter.patch('/:id', globalRateLimit, requireAuth, denyReadOnly, (req, res) 
   if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
   const r = updateNetworkAct(req.authToken as Parameters<typeof updateNetworkAct>[0], req.params['id'] as string, parsed.data);
   // The three fields this act can change, never the record: it also holds invite and member token hashes.
+  if (r.audit) req.auditSnapshots = r.audit;
+  send(res, r);
+});
+
+// ── POST /api/networks/:id/spaces — add a space to a network this instance governs (F-38.3) ──
+
+// The publisher of a pub/sub network or the root of a braintree; the rights are the act's (`networkAddSpaceRefusal`).
+crudRouter.post('/:id/spaces', globalRateLimit, requireAuth, denyReadOnly, (req, res) => {
+  const parsed = AddNetworkSpaceBody.safeParse(req.body);
+  if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
+  const r = addNetworkSpaceAct(req.authToken as Parameters<typeof addNetworkSpaceAct>[0], req.params['id'] as string, parsed.data);
   if (r.audit) req.auditSnapshots = r.audit;
   send(res, r);
 });

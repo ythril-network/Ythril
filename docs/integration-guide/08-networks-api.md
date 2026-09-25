@@ -13,13 +13,14 @@ Since F-34 a token below instance admin acts on a network through the **`network
 | `POST /api/networks` | `write` — the membership is recorded as yours |
 | `PATCH /api/networks/:id` | `admin` — the settings are shared by every space |
 | `DELETE /api/networks/:id` | `write` for a membership you established, `admin` for anyone's (or one with no recorded establisher) |
+| `POST /api/networks/:id/spaces` | `admin` on every space it already carries, and `write` on the space being added — or administering each of them |
 | `POST /api/networks/join-remote` | `write` on every existing local space the join maps to; a space it would create needs `createSpaces` and a floor of `write` too. Checked after the handshake's apply and before finalize — refused, nothing is written and the handshake expires |
 
 **A space admin needs no Networks column for its own spaces** (F-37). A token that administers every space an act touches may create a network carrying them, join one mapped onto them (onto a NEW space too, when it also holds `createSpaces`), see the network, and generate its invite (`POST /api/invite/generate`, `POST /api/networks/:id/invite`) — which is what makes a network it created joinable. A space it does not administer still needs the column, and the refusal names it.
 
 Everything else on this router — members, signing keys, topology (including a reparent invite), votes, sync and sync history — acts on the network as a whole and stays **instance-admin**. Invites do too, except for the space admin above. MCP `network_peers` lists the peers of the networks you may see, through the same filter as `GET /api/networks`.
 
-**On MCP** (F-36): `network_get`, `network_create`, `network_update` and `network_leave` are the same acts as `GET /api/networks/:id`, `POST /api/networks`, `PATCH /api/networks/:id` and `DELETE /api/networks/:id` — same parameters (the network is `id`), the same rights, the same refusal sentences and the same body. Joining, invites, members, votes, topology and sync history are not on MCP yet.
+**On MCP** (F-36): `network_get`, `network_create`, `network_update`, `network_leave` and `network_add_space` are the same acts as `GET /api/networks/:id`, `POST /api/networks`, `PATCH /api/networks/:id`, `DELETE /api/networks/:id` and `POST /api/networks/:id/spaces` — same parameters (the network is `id`), the same rights, the same refusal sentences and the same body. Joining, invites, members, votes, topology and sync history are not on MCP yet.
 
 ## Networks API
 
@@ -136,6 +137,35 @@ PATCH /api/networks/:id
 ```json
 { "syncSchedule": "*/10 * * * *", "label": "Renamed", "requireSignedVotes": true }
 ```
+
+---
+
+### Add a Space to a Network
+
+```http
+POST /api/networks/:id/spaces
+```
+
+```json
+{ "spaceId": "research" }
+```
+
+Adds one of this instance's spaces to a network it governs, and answers `200` with the network as `GET /api/networks/:id` shows it. MCP: `network_add_space` with `{ "id", "spaceId" }`.
+
+**Who governs:** the publisher of a `pubsub` network and the root of a `braintree`. Anyone else gets `409` naming the position. A `club`, `closed` or `democratic` network answers `409` too: every member would have to agree to the change, and that vote does not exist yet — create a second network for the space instead.
+
+**What follows, without another call:**
+
+- The tokens this instance issued to the network's members reach the new space at once, so their sync of it is not refused.
+- Every sync cycle's member exchange now names the space. An instance adopts a space only from its **upstream** — a subscriber from its publisher, a tree node from its parent — and ignores the same announcement from anyone else, so a subscriber cannot push a space into its publisher.
+- Adopting is **additive**. A space the downstream instance lacks is created with the same id; a space it already has is merged into, and nothing in it is overwritten or deleted. A space never leaves a network this way.
+
+| status | when |
+|---|---|
+| `400` | `spaceId` missing, or no such space on this instance |
+| `403` | the token is short on a right above; the refusal names what |
+| `404` | no network with this id that the token may see |
+| `409` | the network already carries the space, this instance is not its publisher or root, or its type needs a vote |
 
 ---
 

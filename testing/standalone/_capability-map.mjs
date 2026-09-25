@@ -125,6 +125,7 @@ export const CAPABILITIES = [
   ['Networks', 'network_create', 'POST /api/networks'],
   ['Networks', 'network_update', 'PATCH /api/networks/:id'],
   ['Networks', 'network_leave', 'DELETE /api/networks/:id'],
+  ['Networks', 'network_add_space', 'POST /api/networks/:id/spaces'],
   ['Networks', 'network_sync', 'POST /api/networks/:id/sync'],
   ['Networks', 'network_sync', 'POST /api/networks/peers/:peerId/sync'],
 ];
