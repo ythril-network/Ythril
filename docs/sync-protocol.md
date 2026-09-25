@@ -91,6 +91,8 @@ The sync engine uses two helpers to translate between remote and local space IDs
 
 **Local storage** (collection names, file paths) uses the **local** space ID so documents land in the aliased collection.
 
+**Inbound requests are translated too** (Q-51). A peer names the space by the network's id, so every `/api/sync/*` request that carries a `networkId` has its `spaceId` translated through that network's `spaceMap` before any route admits, reads or writes by it. It only renames: the translated id is admitted by the same rule as the local one. Before this, a peer's own request for an aliased space answered `403`, so its cycle for that space failed every time while this instance's own cycle still moved the data.
+
 Spaces without an entry in `spaceMap` pass through unchanged (identity mapping). The `spaceMap` is also updated automatically when a local space is renamed — `renameSpace()` adds or updates the reverse mapping on every network that references the old space ID.
 
 ---
