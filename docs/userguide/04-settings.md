@@ -510,6 +510,8 @@ merged (for instance, one using a schema-library entry you do not have) is skipp
 still sync. A space shared through two networks keeps each network's schema apart: where they define the same
 property differently, the network you joined first wins, both keep syncing their records, and each network is only
 ever sent your own definitions plus its own, never the other network's. Your own edits stay yours across updates.
+A change the network voted on reaches every member, also one that joined later or never saw the vote open, and it
+applies as the network's definition, next to yours rather than in place of it.
 
 ### Network types
 
