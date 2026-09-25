@@ -22,7 +22,6 @@ import { boundedJson } from '../util/bounded-read.js';
 import { reportPushRefusals } from './push-refusals.js';
 import { toSafeRelPath } from '../util/paths.js';
 import { col, asFilter, asDoc, asBulk } from '../db/mongo.js';
-import { applyRemoteTombstone, listTombstones } from '../brain/tombstones.js';
 import { recordFileTombstoneAck, ackedPositionFrom } from './file-tombstone-ack.js';
 import { recordSyncResult, type SyncCounts } from './history.js';
 import { buildFileManifest } from '../files/manifest.js';
@@ -39,10 +38,7 @@ import { adoptPeerRound } from '../networks/round-local-state.js';
 import { enqueueMediaJob } from '../files/media/job-queue.js';
 import { resolveInputFormat } from '../files/converters/pipeline.js';
 import { mimeTypeForPath } from '../files/mime.js';
-import { schedule as cronSchedule, type ScheduledTask } from 'node-cron';
-import { resolveSyncCron } from './schedule.js';
 import { createCoalescingRunner } from './coalescing-runner.js';
-import { remoteToLocal, localToRemote } from './space-map.js';
 import { retagToLocalSpace, planSeqUpserts } from './upsert-plan.js';
 import { decideFilePull, conflictCopyPath } from './file-conflict.js';
 import {
@@ -58,7 +54,6 @@ import type {
   EntityDoc,
   EdgeDoc,
   ChronoEntry,
-  TombstoneDoc,
   FileTombstoneDoc,
   ConflictDoc,
   VoteRound,
@@ -73,7 +68,6 @@ import { deleteFileMeta, upsertFileMeta } from '../files/file-meta.js';
 import type { FileMetaDoc } from '../config/types.js';
 import { acceptVoteCast, getSigningPublicKey, getSigningKeyRotation, pinMemberSigningKey } from '../util/signing.js';
 import { v4 as uuidv4 } from 'uuid';
-import { armedSchedules } from '../util/armed-schedule.js';
 import { assertPeerAtFloor } from './peer-floor.js';
 import { REPLICATED_FAMILIES, type PayloadKey } from './replicated-families.js';
 import { SERVER_VERSION } from '../util/server-version.js';
@@ -389,7 +383,6 @@ async function runSyncForMember(
     return { pulled, pushed, incomplete: ['no peer token for this member'] };
   }
 
-  const cfg = getConfig();
   const headers: Record<string, string> = {
     'Authorization': `Bearer ${peerToken}`,
     'Content-Type': 'application/json',
@@ -407,7 +400,6 @@ async function runSyncForMember(
   // The peer's POST /api/sync/warm returns only once everything is ready.
   // In parallel, warm our own local MongoDB collections.
   {
-    const _tw = Date.now();
     const peerWarm = peerSafeFetch(`${member.url}/api/sync/warm`, {
       ...fetchOpts(),
       method: 'POST',
@@ -450,8 +442,8 @@ async function runSyncForMember(
   // internally best-effort (they catch their own errors); the extra guard here
   // keeps a data-plane failure below from ever masking governance progress.
   try {
-    await gossipWithPeer(net, member, headers, fetchOpts);
-    await propagateVotesWithPeer(net, member, headers, fetchOpts);
+    await gossipWithPeer(net, member, fetchOpts);
+    await propagateVotesWithPeer(net, member, fetchOpts);
   } catch (err) {
     log.warn(`Governance gossip with ${member.label} (${member.instanceId}): ${err}`);
   }
@@ -493,12 +485,12 @@ async function runSyncForMember(
 
     if (shouldPull) {
       await pullSpaceMetaFromUpstream(net, member, spaceId, remoteSpaceId, fetchOpts); // F-39.1: only from upstream, never throws
-      const pc = await pullFromPeer(member, spaceId, remoteSpaceId, net.id, headers, fetchOpts, batchFetchOpts);
+      const pc = await pullFromPeer(member, spaceId, remoteSpaceId, net.id, fetchOpts, batchFetchOpts);
       pulled.facts += pc.facts; pulled.entities += pc.entities; pulled.edges += pc.edges; pulled.chrono += pc.chrono;
       if (pc.stoppedEarly.length > 0) incomplete.push(`space '${spaceId}' receive: ${pc.stoppedEarly.join(', ')} stopped early`);
     }
     if (shouldPush) {
-      const pc = await pushToPeer(member, spaceId, remoteSpaceId, net.id, headers, fetchOpts, batchFetchOpts);
+      const pc = await pushToPeer(member, spaceId, remoteSpaceId, net.id, fetchOpts, batchFetchOpts);
       pushed.facts += pc.facts; pushed.entities += pc.entities; pushed.edges += pc.edges; pushed.chrono += pc.chrono;
       if (pc.stoppedEarly.length > 0) incomplete.push(`space '${spaceId}' push: ${pc.stoppedEarly.join(', ')} stopped early`);
     }
@@ -553,7 +545,6 @@ async function runSyncForMember(
 async function gossipWithPeer(
   net: NetworkConfig,
   member: NetworkMember,
-  headers: Record<string, string>,
   opts: () => RequestInit,
 ): Promise<void> {
   const cfg = getConfig();
@@ -705,7 +696,6 @@ async function gossipWithPeer(
 async function propagateVotesWithPeer(
   net: NetworkConfig,
   member: NetworkMember,
-  headers: Record<string, string>,
   opts: () => RequestInit,
 ): Promise<void> {
   const base = `${member.url}/api/sync/networks/${encodeURIComponent(net.id)}`;
@@ -854,7 +844,6 @@ async function pullFromPeer(
   spaceId: string,
   remoteSpaceId: string,
   networkId: string,
-  headers: Record<string, string>,
   opts: () => RequestInit,
   batchOpts: () => RequestInit,
 ): Promise<{ facts: number; entities: number; edges: number; chrono: number; links: number; stoppedEarly: string[] }> {
@@ -1040,7 +1029,6 @@ async function pushToPeer(
   spaceId: string,
   remoteSpaceId: string,
   networkId: string,
-  headers: Record<string, string>,
   opts: () => RequestInit,
   batchOpts: () => RequestInit,
 ): Promise<{ facts: number; entities: number; edges: number; chrono: number; links: number; stoppedEarly: string[] }> {

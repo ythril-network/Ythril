@@ -19,10 +19,9 @@ import type { TokenRights } from '../../config/rights-shape.js';
 import { log } from '../../util/log.js';
 import { isSeqImplausible, MAX_INGEST_SEQ } from '../../util/seq.js';
 import { isStrictLinkage } from '../../spaces/proxy.js';
-import { LINK_CLASSES } from '../../brain/link-adjacency.js';
 import type { FileMetaDoc } from '../../config/types.js';
 import { emitWebhookEvent } from '../../webhooks/dispatcher.js';
-import type { FactDoc, EntityDoc, EdgeDoc, LinkViolationDoc, BrainEmbedRecordType } from '../../config/types.js';
+import type { FactDoc, EdgeDoc, LinkViolationDoc, BrainEmbedRecordType } from '../../config/types.js';
 
 export const UUID_V4_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -849,7 +848,6 @@ export function violationsAgainstLocalSchema(
   const meta = getSpaceMeta(spaceId);
   if (!meta) return [];
   const properties = doc['properties'] as Record<string, unknown> | undefined;
-  const tags = Array.isArray(doc['tags']) ? doc['tags'] as string[] : undefined;
   const type = typeof doc['type'] === 'string' ? doc['type'] : undefined;
   switch (kind) {
     case 'entity':

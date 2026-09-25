@@ -12,7 +12,6 @@ import { of } from 'rxjs';
 import { BrainApi } from '../../core/brain-api.service';
 import { getTranslocoModule } from '../../testing/transloco-testing';
 import { OverviewTabComponent } from './overview-tab.component';
-import { COLLECTION_TABS } from './brain-tabs';
 import { ConfirmDialogService } from '../../core/confirm-dialog.service';
 import type { Space, SpaceStats , SpaceActivity } from '../../core/api.types';
 

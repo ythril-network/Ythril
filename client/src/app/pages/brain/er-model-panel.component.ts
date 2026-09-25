@@ -255,7 +255,7 @@ export class ErModelPanelComponent {
    * which the layout treats as absent — exactly the behaviour before this change, so those specs assert the
    * same geometry they always did.
    */
-  private readonly measureStage = effect(onCleanup => {
+  protected readonly measureStage = effect(onCleanup => {
     const el = this.stage()?.nativeElement;
     if (!el) return;
     // `clientWidth` minus the stage's own 16px padding each side. Laying out into the padded width clips the

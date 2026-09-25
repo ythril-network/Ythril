@@ -14,7 +14,7 @@
  */
 import { log } from '../../util/log.js';
 import { assistConsented } from '../../config/egress-consent.js';
-import { getDocumentProcessingConfig, getMediaEmbeddingConfig, getDocAssistApiKey } from '../../config/loader.js';
+import { getDocumentProcessingConfig, getDocAssistApiKey } from '../../config/loader.js';
 import type { DocExtractionMode } from '../../config/types.js';
 import { UnstructuredConverter, type UnstructuredResult } from './unstructured.js';
 import { renderDocumentPages, isRenderAvailableFor } from './renderer.js';
@@ -104,7 +104,6 @@ export async function vlmExtractDocument(
   }
 
   // ── VLM path ────────────────────────────────────────────────────────────────
-  const baseUrl = vlmEp.baseUrl;
   try {
     // ── Segmented render + transcribe ─────────────────────────────────────────────────────────────
     //

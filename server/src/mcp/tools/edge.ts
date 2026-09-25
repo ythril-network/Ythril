@@ -1,18 +1,17 @@
 import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.js';
 import { shapeError } from '../../brain/write-shape.js';
-import { UUID_V4_RE, TTL_DAYS_SCHEMA, SUPPRESS_EMBEDDINGS_SCHEMA, SUPERSEDED_SCHEMA, ttlDaysFromArgs, unitScoreSchema } from './shared.js';
-import { validateDeleteFields, applyDeleteFields as applyDeleteFieldsPaths } from '../../brain/delete-fields.js';
+import { TTL_DAYS_SCHEMA, SUPPRESS_EMBEDDINGS_SCHEMA, SUPERSEDED_SCHEMA, ttlDaysFromArgs, unitScoreSchema } from './shared.js';
+import { validateDeleteFields } from '../../brain/delete-fields.js';
 import { deleteEdge, getEdgeById, traverseGraph, updateEdgeById, upsertEdge, EdgeSchemaViolation } from '../../brain/edges.js';
 import { readEditAudit } from '../../brain/edit-audit.js';
 // The shared write gate, imported rather than reimplemented — see the note in memory.ts.
 import { type UpdateValidation } from '../../brain/write-validation.js';
 import { getConfig } from '../../config/loader.js';
-import { isStrictLinkage, resolveMemberSpaces, resolveWriteTarget, findFirstAcrossMembers } from '../../spaces/proxy.js';
+import { isStrictLinkage, resolveWriteTarget, findFirstAcrossMembers } from '../../spaces/proxy.js';
 import { memberSpacesWithin } from '../../spaces/proxy-scoped.js';
 import { assertRefsResolve, edgeEndpointKind, edgeEndpointKindSchema, isWellFormedRef } from '../../brain/entity-refs.js';
 import type { RefKind } from '../../config/types-knowledge.js';
-import { resolveMetaRefs, validateEdge } from '../../spaces/schema-validation.js';
-import { mergePropertiesOrKeep } from '../../brain/merge-fields.js';
+import { resolveMetaRefs } from '../../spaces/schema-validation.js';
 import { parseRecordSuppression } from '../../brain/suppress-embeddings.js';
 import { parseRecordSuperseded } from '../../brain/record-flag.js';
 import { withTraverseBodies } from '../../brain/traverse-bodies.js';
@@ -73,7 +72,7 @@ export const save_edgeTool: ToolHandler = {
           additionalProperties: false,
         }),
   async handle(ctx: ToolContext): Promise<ToolResult> {
-    const { args: a, callSpace, name } = ctx;
+    const { args: a, callSpace } = ctx;
     const from = String(a['from'] ?? '');
     const to = String(a['to'] ?? '');
     const label = String(a['label'] ?? '');

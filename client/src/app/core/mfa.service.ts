@@ -62,7 +62,7 @@ export class MfaService {
   }
 
   /** Called by the prompt component when the user submits or cancels */
-  respond(code: string | null): void {
+  respond(_code: string | null): void {
     this.prompting.set(false);
     // The Subject already delivered the resolve fn to the interceptor;
     // that fn is called directly by MfaPromptComponent — nothing to do here.

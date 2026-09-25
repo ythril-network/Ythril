@@ -27,7 +27,7 @@ import { validateEdge } from '../spaces/schema-validation.js';
 import type { ResolvedEdgeEnds } from '../spaces/schema-validation.js';
 import { validateEntity, getSpaceMeta, applyValidation, type SchemaViolation } from '../spaces/schema-validation.js';
 import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';
-import type { EntityDoc, EdgeDoc, FactDoc, ChronoEntry, FileMetaDoc, LinkDoc, TombstoneDoc, SpaceMeta, PropertySchema } from '../config/types.js';
+import type { EntityDoc, EdgeDoc, FileMetaDoc, LinkDoc, TombstoneDoc, PropertySchema } from '../config/types.js';
 import { spaceCollection } from '../db/space-collection.js';
 
 // ── Public types ───────────────────────────────────────────────────────────
@@ -398,7 +398,7 @@ function isSafeKey(key: string): boolean {
  */
 export function applyResolutions(
   survivorProps: Record<string, string | number | boolean>,
-  absorbedProps: Record<string, string | number | boolean>,
+  _absorbedProps: Record<string, string | number | boolean>,
   conflicts: PropertyConflict[],
   absorbedOnly: AbsorbedOnlyProperty[],
 ): Record<string, string | number | boolean> {
@@ -448,25 +448,8 @@ export function applyResolutions(
 // ── Merge execution ────────────────────────────────────────────────────────
 
 /**
- * Compare two edge documents ignoring `_id`, `seq`, `updatedAt` — returns true
- * when every other field is identical (i.e. one is a true duplicate of the other
- * after relinking).
- */
-function edgesIdentical(a: EdgeDoc, b: EdgeDoc): boolean {
-  return a.from === b.from
-    && a.to === b.to
-    && a.label === b.label
-    && a.spaceId === b.spaceId
-    && a.type === b.type
-    && a.weight === b.weight
-    && a.description === b.description
-    && JSON.stringify(a.properties ?? {}) === JSON.stringify(b.properties ?? {})
-    && JSON.stringify(a.tags ?? []) === JSON.stringify(b.tags ?? []);
-}
-
-/**
  * Execute the merge inside a MongoDB transaction: relink edges/facts/chronos,
- * auto-delete duplicate edges (when 100% identical except _id), apply resolved
+ * delete an absorbed edge whose relinked id collides with a survivor edge, apply resolved
  * properties to survivor, delete absorbed entity + write tombstone.
  *
  * Precondition: all property conflicts must be resolved before calling this.

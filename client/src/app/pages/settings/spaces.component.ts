@@ -1,30 +1,21 @@
-﻿import { ChangeDetectionStrategy, Component, HostListener, inject, signal, computed, OnInit, ElementRef, ViewChild } from '@angular/core';
+﻿import { ChangeDetectionStrategy, Component, HostListener, inject, signal, computed, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ProxySpaceBadgeComponent } from '../../shared/proxy-space-badge.component';
 import { FormsModule } from '@angular/forms';
-import { finalize, timeout, TimeoutError } from 'rxjs';
 import {
-  Network, Space, SpaceMeta, SpaceStats,
-  KnowledgeType, PropertySchema, TypeSchema, ValidationMode, SchemaLibraryEntry,
-  DupeActionRule, SpaceActivity,
+  Space,
+  SpaceActivity,
 } from '../../core/api.types';
-import { NetworksApi } from '../../core/networks-api.service';
-import { SchemaApi } from '../../core/schema-api.service';
 import { SpacesApi } from '../../core/spaces-api.service';
 import { TranslocoPipe } from '@jsverse/transloco';
 import { TranslocoService } from '@jsverse/transloco';
-import { ToastService } from '../../core/toast.service';
-import { ConfirmDialogService } from '../../core/confirm-dialog.service';
-import { CdkDragDrop, DragDropModule, moveItemInArray } from '@angular/cdk/drag-drop';
+import { DragDropModule } from '@angular/cdk/drag-drop';
 import { PhIconComponent } from '../../shared/ph-icon.component';
 import { SummaryStripComponent, type SummaryItem } from '../../shared/summary-strip.component';
-import { SpaceSettingsState, type TypeSchemaState } from './space-settings-state.service';
+import { SpaceSettingsState } from './space-settings-state.service';
 import { SpacesStore } from './spaces-store.service';
 import { SPACE_DIALOG_STYLES } from './space-dialog.styles';
 import { SpaceSettingsPopupComponent } from './space-settings-popup.component';
-import { SpaceDuplicatesTabComponent } from './space-duplicates-tab.component';
-import { SpaceDangerTabComponent } from './space-danger-tab.component';
-import { SpaceSchemaTabComponent } from './space-schema-tab.component';
 import { ModalDirective } from '../../shared/modal.directive';
 import { SpaceCreateDialogComponent } from './space-create-dialog.component';
 import { HscrollTopDirective } from '../../shared/hscroll-top.directive';
@@ -182,12 +173,8 @@ import { StatusPillComponent } from '../../shared/status-pill.component';
   `,
 })
 export class SpacesComponent implements OnInit {
-  private networksApi = inject(NetworksApi);
-  private schemaApi   = inject(SchemaApi);
   private spacesApi   = inject(SpacesApi);
   private transloco = inject(TranslocoService);
-  private toast = inject(ToastService);
-  private confirmDialog = inject(ConfirmDialogService);
   /** Settings-dialog state, shared with the tabs. Public: the template binds to it. */
   readonly state = inject(SpaceSettingsState);
   /** Server data for the page (space list + networks). Public: the template binds to it. */

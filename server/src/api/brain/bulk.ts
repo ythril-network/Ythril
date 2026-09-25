@@ -4,7 +4,6 @@
  * Split out of the api/brain.ts monolith (A17.3); handlers are unchanged.
  */
 import { Router } from 'express';
-import { requestActor } from '../../auth/request-actor.js';
 import { requireSpaceAuth, denyReadOnly } from '../../auth/middleware.js';
 import { globalRateLimit } from '../../rate-limit/middleware.js';
 import { bulkWrite, bulkWriteTotal, BULK_BODY_KEYS, type BulkInput } from '../../brain/bulk.js';

@@ -26,7 +26,6 @@
  * malformed snapshot records nothing rather than guessing, exactly as `scalarOrDrop` does.
  */
 import type { AuditChange } from './audit-changes.js';
-import type { KnowledgeType } from '../config/types.js';
 import { KNOWLEDGE_TYPES } from '../config/types.js';
 
 /** The four knowledge collections a space's `typeSchemas` can describe. */

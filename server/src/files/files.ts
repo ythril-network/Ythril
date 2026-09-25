@@ -2,7 +2,6 @@ import fs from 'fs/promises';
 import path from 'path';
 import { createHash } from 'crypto';
 import { resolveSafePathChecked, spaceRoot } from './sandbox.js';
-import { getConfig, getDataRoot, getStorageConfig } from '../config/loader.js';
 import { FILE_MODE, harden, hardenPath, mkdirPrivate } from '../util/fs-modes.js';
 
 export interface FileEntry {

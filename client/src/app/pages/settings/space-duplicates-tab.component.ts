@@ -16,7 +16,6 @@ import { SpacesApi } from '../../core/spaces-api.service';
 import { ConfirmDialogService } from '../../core/confirm-dialog.service';
 import { SpacesStore } from './spaces-store.service';
 import type { DupeActionRule } from '../../core/api.types';
-import { ToastService } from '../../core/toast.service';
 import { TranslocoService } from '@jsverse/transloco';
 
 @Component({
@@ -103,7 +102,6 @@ import { TranslocoService } from '@jsverse/transloco';
 export class SpaceDuplicatesTabComponent {
   readonly state = inject(SpaceSettingsState);
   private spacesApi = inject(SpacesApi);
-  private toast = inject(ToastService);
   private transloco = inject(TranslocoService);
   private confirmDialog = inject(ConfirmDialogService);
   readonly store = inject(SpacesStore);

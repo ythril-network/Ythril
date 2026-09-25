@@ -111,7 +111,7 @@ export function registerUploadRoute(router: Router): void {
 
         try {
           const { received, complete } = await storeChunk(
-            targetSpace, filePath, req.body, range.start, range.end, range.total,
+            targetSpace, filePath, req.body, range.start, range.total,
           );
 
           if (complete) {

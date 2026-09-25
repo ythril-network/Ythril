@@ -30,8 +30,6 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { mcpAuthRouter } from '@modelcontextprotocol/sdk/server/auth/router.js';
 import {
   InvalidGrantError,
-  InvalidRequestError,
-  InvalidClientError,
 } from '@modelcontextprotocol/sdk/server/auth/errors.js';
 import type { OAuthServerProvider, AuthorizationParams } from '@modelcontextprotocol/sdk/server/auth/provider.js';
 import type { OAuthRegisteredClientsStore } from '@modelcontextprotocol/sdk/server/auth/clients.js';

@@ -20,7 +20,6 @@
  * `from` of the synthetic edge. Folding the emit in too would have produced a function with a mode flag,
  * which is two functions wearing one name.
  */
-import { col, asFilter } from '../db/mongo.js';
 import {
   LINK_CLASSES, assertLinkRecords, linksPointingAt, linksStartingFrom, docsFromCollection,
   type LinkClass, type LinkEnd,

@@ -12,6 +12,11 @@
     // and by default tsc only greys it out in an editor. The client does not extend the base config, so the
     // flag has to be set in both places or half the codebase keeps the old behaviour.
     "allowUnreachableCode": false,
+    // Unused locals and parameters are ERRORS. A binding nobody reads is either dead code or a value somebody
+    // meant to use and did not, and until 5.3 there were 250 of them. An intentionally unused parameter is
+    // spelled with a leading underscore.
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
     "allowUnusedLabels": false,
     "skipLibCheck": true,
     "isolatedModules": true,

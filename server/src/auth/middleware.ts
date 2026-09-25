@@ -6,7 +6,7 @@ import { consumeSseTicket } from './sse-ticket.js';
 import { isMfaEnabled, verifyMfaCode } from './totp.js';
 import { validateOidcJwt, getOidcConfig } from './oidc.js';
 import type { TokenRecord } from '../config/types.js';
-import { spaceAdminSpacesFor, isSpaceAdminFor, administersAnySpace } from './editor-scope.js';
+import { isSpaceAdminFor, administersAnySpace } from './editor-scope.js';
 import type { OidcTokenRecord } from './oidc.js';
 import { resolveMemberSpaces } from '../spaces/proxy.js';
 import { reachesSpace, reachableSpaceIds } from './space-reach.js';

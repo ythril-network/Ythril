@@ -179,7 +179,6 @@ export interface EdgeEndpoints {
  * and forget the other.
  */
 export async function withEndpointNames<T extends EdgeEndpoints>(
-  spaceId: string,
   edges: readonly T[],
   /** Reads one member's collection — injected because a proxy space resolves across its members. */
   readAcrossMembers: (read: (memberId: string) => Promise<Record<string, unknown>[]>) => Promise<Record<string, unknown>[]>,

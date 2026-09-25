@@ -72,8 +72,6 @@ export interface LegacyToken {
 const rungs = (r: Rung): AreaRungs =>
   ({ knowledge: r, files: r, schema: r, dataQuality: r, networks: r === 'admin' ? 'admin' : 'none' });
 
-const NONE = (): AreaRungs => rungs('none');
-
 /**
  * Map one legacy token to its rights.
  *

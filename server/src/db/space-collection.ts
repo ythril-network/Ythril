@@ -51,7 +51,6 @@
  * — `col()` in `mongo.ts` does that, and folding the two would make every caller of a name depend on a
  * database handle.
  */
-import { RECORD_COLLECTION } from '../config/types-knowledge.js';
 
 /**
  * Every collection a space owns, keyed by what it holds.

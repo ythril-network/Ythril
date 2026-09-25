@@ -364,14 +364,6 @@ app.post('/v1/actions/enable-networks', requireConnectorAuth, async (req, res) =
   const overwriteDns = parsed.data.overwriteDns;
   const localOrigin = parsed.data.localOrigin;
 
-  const plannedSteps = [
-    'Ensure cloudflared is installed',
-    'Ensure Cloudflare login is completed',
-    `Ensure tunnel '${DEFAULT_TUNNEL_NAME}' exists`,
-    `Route DNS hostname '${hostname}' to tunnel${overwriteDns ? ' (overwrite enabled)' : ''}`,
-    'Write ~/.cloudflared/config.yml',
-    autostart ? 'Install/start cloudflared service (if allowed) or fall back to user-mode runtime' : 'Start cloudflared user-mode runtime',
-  ];
 
   try {
     await ensureCloudflaredAvailable();

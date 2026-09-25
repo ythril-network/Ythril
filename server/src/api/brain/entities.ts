@@ -13,14 +13,13 @@ import { deleteEntity, upsertEntity, getEntityById, updateEntityById } from '../
 import { entityDeleteBlockers } from '../../brain/entity-delete-guard.js';
 import { deleteEntityCascade, previewEntityCascade } from '../../brain/entity-delete-cascade.js';
 import { computeMergePlan, applyResolutions, executeMerge, validateResolution, type PropertyResolution } from '../../brain/merge.js';
-import { validateDeleteFields, applyDeleteFields as applyDeleteFieldsPaths } from '../../brain/delete-fields.js';
+import { validateDeleteFields } from '../../brain/delete-fields.js';
 import { primitivePropertyError } from '../../brain/property-values.js';
 import { getConfig } from '../../config/loader.js';
 import { resolveMemberSpaces, resolveWriteTarget, isProxySpace, isStrictLinkage } from '../../spaces/proxy.js';
 import { memberSpacesForRequest } from '../../spaces/proxy-scoped.js';
-import { UUID_V4_RE, webhookToken, getSpaceMeta, ttlDaysFromBody, ttlDaysError, dupeCheckOptsFromBody, ifMatchFromRequest, preconditionFailedBody } from './_shared.js';
+import { UUID_V4_RE, webhookToken, ttlDaysFromBody, ttlDaysError, dupeCheckOptsFromBody, ifMatchFromRequest, preconditionFailedBody } from './_shared.js';
 import { SchemaViolationError, type UpdateValidation } from '../../brain/write-validation.js';
-import { mergePropertiesOrKeep, mergeTagsOrKeep } from '../../brain/merge-fields.js';
 import { parseRecordSuppression } from '../../brain/suppress-embeddings.js';
 import { parseRecordSuperseded } from '../../brain/record-flag.js';
 import { connectionInputError, assertConnections, applyConnections, CONNECTION_BODY_KEYS, desiredLinksFrom, edgeInputsFrom } from '../../brain/write-connections.js';

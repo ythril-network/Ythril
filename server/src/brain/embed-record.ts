@@ -20,8 +20,6 @@ import { embed } from './embedding.js';
 import { factEmbedText, entityEmbedText, edgeEmbedText, chronoEmbedText, fileEmbedText } from './embed-text.js';
 import { resolveEdgeEndpointNames } from './edge-endpoint-names.js';
 import { embeddingSuppressedFor } from './suppress-embeddings.js';
-import { getSpaceMeta } from '../spaces/schema-validation.js';
-import type { KnowledgeType } from '../config/types-knowledge.js';
 import { getEmbeddingConfig } from '../config/loader.js';
 import type {
   BrainEmbedRecordType, FactDoc, EntityDoc, EdgeDoc, ChronoEntry, FileMetaDoc,

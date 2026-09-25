@@ -18,11 +18,10 @@
  *     than silently discarding — the tabs look like navigation, and navigation that eats edits is a
  *     data-loss bug regardless of how small the edit was.
  */
-import { ChangeDetectionStrategy, Component, OnInit, computed, effect, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, OnInit, effect, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
 import { PhIconComponent } from '../../../shared/ph-icon.component';
-import { StatusPillComponent } from '../../../shared/status-pill.component';
 import { ConfirmDialogService } from '../../../core/confirm-dialog.service';
 import { MediaProcessingStateService } from './media-processing-state.service';
 import { PipelineStatusService } from './pipeline-status.service';
@@ -180,7 +179,7 @@ export class MediaProcessingPageComponent implements OnInit {
    * The signal is cleared inside `focusModelCard` (in a later task), so writing it there is not a
    * write-during-effect.
    */
-  private readonly focusReaction = effect(() => {
+  protected readonly focusReaction = effect(() => {
     const cardId = this.s.focusCard();
     if (cardId) this.focusModelCard(cardId);
   });

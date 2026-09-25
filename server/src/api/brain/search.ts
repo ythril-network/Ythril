@@ -16,21 +16,16 @@ import { countFacts } from '../../brain/fact.js';
 import { getEmbedJobCounts } from '../../brain/embed-queue.js';
 import { TRAVERSE_BODY_FIELDS, FIND_SIMILAR_BODY_FIELDS, unknownBodyFields } from '../../brain/query.js';
 import { findSimilar, type RecallKnowledgeType, type RecallResult } from '../../brain/recall.js';
-import { type FilterExpression } from '../../brain/filter.js';
 import { traverseGraph } from '../../brain/edges.js';
 import { MAX_RECALL_TRAVERSE } from '../../brain/recall-seed-traversal.js';
 import { buildGraphWithSpill, spillResultSet, countGraphNodes } from '../../brain/graph-spill.js';
 import { parseTraverseOption } from '../../brain/traverse-option.js';
-import { embed } from '../../brain/embedding.js';
 import { getConfig } from '../../config/loader.js';
-import { col, asFilter } from '../../db/mongo.js';
+import { col } from '../../db/mongo.js';
 import { needsReindex } from '../../spaces/_shared.js';
 import { planReindex, startReindex } from '../../brain/reindex.js';
-import { log } from '../../util/log.js';
 import { memberSpacesForRequest } from '../../spaces/proxy-scoped.js';
-import type { FactDoc, EntityDoc, EdgeDoc, ChronoEntry, FileMetaDoc } from '../../config/types.js';
 import { RECORD_TYPES } from '../../config/types.js';
-import { reindexInProgress } from '../../metrics/registry.js';
 import { UUID_V4_RE } from './_shared.js';
 import {
   withoutDiagnostics, RECALL_ENVELOPE_KEYS, rankOf,
@@ -53,9 +48,6 @@ import { spaceCollection } from '../../db/space-collection.js';
 const MAX_GRAPH_NODES = 5000;
 
 export const searchRouter = Router();
-
-/** Guard so only one reindex job runs at a time per process. */
-let reindexJobRunning = false;
 
 
 // GET /api/brain/spaces/:spaceId/stats

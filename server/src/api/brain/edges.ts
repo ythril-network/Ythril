@@ -13,19 +13,16 @@ import { unknownFieldWarnings } from './unknown-fields.js';
 import { globalRateLimit } from '../../rate-limit/middleware.js';
 import { deleteEdge, upsertEdge, getEdgeById, updateEdgeById, EdgeSchemaViolation } from '../../brain/edges.js';
 import { EdgeIdentityTaken } from '../../brain/edge-rekey.js';
-import { validateDeleteFields, applyDeleteFields as applyDeleteFieldsPaths } from '../../brain/delete-fields.js';
+import { validateDeleteFields } from '../../brain/delete-fields.js';
 import { getConfig } from '../../config/loader.js';
-import { col, asFilter } from '../../db/mongo.js';
 import {
   resolveMemberSpaces,
   resolveWriteTarget,
   isStrictLinkage,
   findFirstAcrossMembers,
 } from '../../spaces/proxy.js';
-import { validateEdge } from '../../spaces/schema-validation.js';
-import { UUID_V4_RE, webhookToken, getSpaceMeta, ttlDaysFromBody, ttlDaysError, ifMatchFromRequest, preconditionFailedBody } from './_shared.js';
+import { webhookToken, ttlDaysFromBody, ttlDaysError, ifMatchFromRequest, preconditionFailedBody } from './_shared.js';
 import { SchemaViolationError, type UpdateValidation } from '../../brain/write-validation.js';
-import { mergePropertiesOrKeep } from '../../brain/merge-fields.js';
 import { parseRecordSuppression } from '../../brain/suppress-embeddings.js';
 import { parseRecordSuperseded } from '../../brain/record-flag.js';
 

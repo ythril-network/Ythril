@@ -1,4 +1,4 @@
-import { col, asFilter, asDoc, asUpdate } from '../db/mongo.js';
+import { col, asFilter, asUpdate } from '../db/mongo.js';
 import { TOMBSTONE_COLLECTION } from '../config/types.js';
 import { log } from '../util/log.js';
 import type { TombstoneDoc } from '../config/types.js';

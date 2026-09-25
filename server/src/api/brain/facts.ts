@@ -4,17 +4,14 @@
  * Split out of the api/brain.ts monolith (A17.3); handlers are unchanged.
  */
 import { Router } from 'express';
-import { requestActor } from '../../auth/request-actor.js';
 import { shapeError } from '../../brain/write-shape.js';
 import { entityDeleteBlockers } from '../../brain/entity-delete-guard.js';
 import { connectionInputError, assertConnections, applyConnections, CONNECTION_BODY_KEYS, desiredLinksFrom, edgeInputsFrom, linkAuditSnapshots } from '../../brain/write-connections.js';
-import { WIPE_COLLECTION_TYPES, type WipeCollectionType, wipeSpace } from '../../spaces/lifecycle.js';
-import { assertRefsResolve } from '../../brain/entity-refs.js';
-import { requireSpaceAuth, requireBodyScopedSpace, denyReadOnly } from '../../auth/middleware.js';
+import { requireSpaceAuth, denyReadOnly } from '../../auth/middleware.js';
 import { unknownFieldWarnings } from './unknown-fields.js';
 import { globalRateLimit } from '../../rate-limit/middleware.js';
 import { listFacts, deleteFact, saveFact, updateFact } from '../../brain/fact.js';
-import { validateDeleteFields, applyDeleteFields as applyDeleteFieldsPaths } from '../../brain/delete-fields.js';
+import { validateDeleteFields } from '../../brain/delete-fields.js';
 import { getConfig } from '../../config/loader.js';
 import { memberSpacesForRequest } from '../../spaces/proxy-scoped.js';
 import { checkQuota, QuotaError } from '../../quota/quota.js';
@@ -32,7 +29,6 @@ import {
   preconditionFailedBody,
 } from './_shared.js';
 import { SchemaViolationError, type UpdateValidation } from '../../brain/write-validation.js';
-import { mergePropertiesOrKeep } from '../../brain/merge-fields.js';
 import { parseRecordSuppression } from '../../brain/suppress-embeddings.js';
 import { parseRecordSuperseded } from '../../brain/record-flag.js';
 

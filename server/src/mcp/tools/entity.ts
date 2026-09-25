@@ -1,8 +1,8 @@
 import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.js';
 import { shapeError } from '../../brain/write-shape.js';
 import { UUID_V4_RE, TTL_DAYS_SCHEMA, SUPPRESS_EMBEDDINGS_SCHEMA, SUPERSEDED_SCHEMA, ttlDaysFromArgs, uuidSchema, unitScoreSchema } from './shared.js';
-import { validateDeleteFields, applyDeleteFields as applyDeleteFieldsPaths } from '../../brain/delete-fields.js';
-import { deleteEntity, findEntitiesByName, getEntityById, updateEntityById, upsertEntity } from '../../brain/entities.js';
+import { validateDeleteFields } from '../../brain/delete-fields.js';
+import { deleteEntity, getEntityById, updateEntityById, upsertEntity } from '../../brain/entities.js';
 import { readEditAudit } from '../../brain/edit-audit.js';
 import { entityDeleteBlockers } from '../../brain/entity-delete-guard.js';
 import { deleteEntityCascade } from '../../brain/entity-delete-cascade.js';
@@ -10,9 +10,8 @@ import { deleteEntityCascade } from '../../brain/entity-delete-cascade.js';
 import { SchemaViolationError, type UpdateValidation } from '../../brain/write-validation.js';
 import { type PropertyResolution, type EndpointRuleWarning, applyResolutions, computeMergePlan, executeMerge, validateResolution } from '../../brain/merge.js';
 import { getConfig } from '../../config/loader.js';
-import { isProxySpace, isStrictLinkage, resolveMemberSpaces, resolveWriteTarget, findFirstAcrossMembers, collectAcrossMembers } from '../../spaces/proxy.js';
-import { resolveMetaRefs, validateEntity } from '../../spaces/schema-validation.js';
-import { mergePropertiesOrKeep, mergeTagsOrKeep } from '../../brain/merge-fields.js';
+import { isProxySpace, resolveMemberSpaces, resolveWriteTarget, findFirstAcrossMembers } from '../../spaces/proxy.js';
+import { resolveMetaRefs } from '../../spaces/schema-validation.js';
 import { parseRecordSuppression } from '../../brain/suppress-embeddings.js';
 import { parseRecordSuperseded } from '../../brain/record-flag.js';
 import { connectionSchemas, applyConnections, assertConnections, desiredLinksFrom, edgeInputsFrom } from '../../brain/write-connections.js';
@@ -66,7 +65,7 @@ export const save_entityTool: ToolHandler = {
           additionalProperties: false,
         }),
   async handle(ctx: ToolContext): Promise<ToolResult> {
-    const { args: a, callSpace, name } = ctx;
+    const { args: a, callSpace } = ctx;
     const eName = String(a['name'] ?? '');
     const eType = String(a['type'] ?? '');
     if (!eName.trim()) throw new Error('name must not be empty');
@@ -255,7 +254,7 @@ export const update_entityTool: ToolHandler = {
           required: ['space', 'id'],
         }),
   async handle(ctx: ToolContext): Promise<ToolResult> {
-    const { args: a, callSpace, name } = ctx;
+    const { args: a, callSpace } = ctx;
     const id = String(a['id'] ?? '').trim();
     if (!id) throw new Error('id must not be empty');
     const wt = resolveWriteTarget(callSpace, a['targetSpace'] as string | undefined);

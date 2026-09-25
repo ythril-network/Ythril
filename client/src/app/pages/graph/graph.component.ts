@@ -17,7 +17,7 @@ import { ProxySpaceBadgeComponent } from '../../shared/proxy-space-badge.compone
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute } from '@angular/router';
 import { Subscription, forkJoin, of } from 'rxjs';
-import { catchError, map } from 'rxjs/operators';
+import { catchError } from 'rxjs/operators';
 import { PhIconComponent } from '../../shared/ph-icon.component';
 import { ErrorStateComponent } from '../../shared/error-state.component';
 import { httpErrorReason } from '../../core/http-error';
@@ -29,7 +29,6 @@ import {
   Edge,
   TraverseNode,
   TraverseEdge,
-  TraverseResult,
   KnowledgeType,
 } from '../../core/api.types';
 import { SpacesApi } from '../../core/spaces-api.service';

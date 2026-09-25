@@ -172,7 +172,7 @@ export class OverviewDataService {
 
   /** Fetch OPEN governance votes across the space's networks (Overview Governance panel). One listVotes
    *  per network the space belongs to; only stores the result while that space is still active. */
-  loadOverviewVotes(spaceId: string, isActive: () => boolean, networks: SpaceNetworkRef[]): void {
+  loadOverviewVotes(isActive: () => boolean, networks: SpaceNetworkRef[]): void {
     const nets = networks;
     if (nets.length === 0) { this.overviewVotes.set([]); return; }
     forkJoin(nets.map(n => this.networksApi.listVotes(n.id).pipe(
@@ -205,7 +205,7 @@ export class OverviewDataService {
   /** Every Overview loader for one space, in one call — so a caller cannot start four of the five. */
   loadAll(spaceId: string, isActive: () => boolean, networks: SpaceNetworkRef[]): void {
     this.loadEmbeddingQueue(spaceId, isActive);
-    this.loadOverviewVotes(spaceId, isActive, networks);
+    this.loadOverviewVotes(isActive, networks);
     this.loadTokenAccess(spaceId, isActive);
     this.loadCompleteness(spaceId, isActive);
     this.loadSpaceActivity(spaceId, isActive);

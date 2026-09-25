@@ -11,7 +11,7 @@
  * component fixtures. That is a side benefit of the extraction, not a change in what is covered.
  */
 import { TestBed } from '@angular/core/testing';
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { of, throwError } from 'rxjs';
 import { SpacesApi } from '../../core/spaces-api.service';
 import type { Space } from '../../core/api.types';

@@ -17,9 +17,8 @@
  * POST   /api/files/:spaceId/mkdir?path={path}  Create directory.
  */
 
-import express, { Router } from 'express';
+import { Router } from 'express';
 import { toDocId } from '../util/paths.js';
-import type { Request, Response, NextFunction } from 'express';
 import fs from 'fs/promises';
 import path from 'path';
 import { requireSpaceAuth, denyReadOnly } from '../auth/middleware.js';
@@ -28,7 +27,6 @@ import { getConfig } from '../config/loader.js';
 import { log } from '../util/log.js';
 import {
   readFileBytes,
-  writeFileBytes,
   listDir,
   createDir,
   moveFile,
@@ -37,29 +35,24 @@ import {
 } from '../files/files.js';
 import { fetchJobProgress } from '../files/media/job-queue.js';
 import {
-  parseContentRange,
-  storeChunk,
-  assembleChunks,
   getUploadReceived,
 } from '../files/chunks.js';
-import { checkQuota, QuotaError, invalidateUsageCache } from '../quota/quota.js';
+import { invalidateUsageCache } from '../quota/quota.js';
 import { resolveSafePath, assertNoSymlinkEscape, spaceRoot } from '../files/sandbox.js';
-import { col, asFilter, asDoc } from '../db/mongo.js';
+import { col, asFilter } from '../db/mongo.js';
 import type { FileMetaDoc } from '../config/types.js';
-import { upsertFileMeta, deleteFileMeta, deleteFileMetaByPrefix, renameFileMeta, renameFileMetaByPrefix, markFileMetaDeleted, markFileMetaDeletedByPrefix } from '../files/file-meta.js';
+import { deleteFileMeta, deleteFileMetaByPrefix, renameFileMeta, renameFileMetaByPrefix, markFileMetaDeletedByPrefix } from '../files/file-meta.js';
 import { writeFileTombstones } from '../files/tombstones.js';
 import { deleteFileCascade } from '../files/delete-cascade.js';
 import { resolveWriteTarget } from '../spaces/proxy.js';
 import { memberSpacesForRequest } from '../spaces/proxy-scoped.js';
 import { emitWebhookEvent } from '../webhooks/dispatcher.js';
-import { deleteConversionArtifacts, deleteConversionArtifactsByPrefix, isMediaFormat } from '../files/converters/pipeline.js';
-import type { InputFormat } from '../files/converters/pipeline.js';
+import { deleteConversionArtifactsByPrefix } from '../files/converters/pipeline.js';
 import { cancelMediaJobsByPrefix } from '../files/media/job-queue.js';
-import { dispatchFileProcessing } from '../files/dispatch.js';
 import { contentTypeForDownload } from '../files/mime.js';
 import { hideDerivedTrees } from '../files/derived-trees.js';
 import { registerUploadRoute } from './files-upload.js';
-import { webhookToken, parseTtlDaysQuery, requireQueryPath, enforceSizeLimit } from './files-request.js';
+import { webhookToken, requireQueryPath } from './files-request.js';
 import { spaceCollection } from '../db/space-collection.js';
 
 export const fileStoreRouter = Router();
@@ -254,7 +247,6 @@ fileStoreRouter.get('/:spaceId', globalRateLimit, requireSpaceAuth, async (req, 
   // Directory listing — aggregate across all member spaces
   // Try to find the first member where the path resolves successfully
   let foundMid: string | null = null;
-  let absPath = '';
   let stat: Awaited<ReturnType<typeof fs.stat>> | null = null;
 
   for (const mid of memberIds) {
@@ -262,7 +254,6 @@ fileStoreRouter.get('/:spaceId', globalRateLimit, requireSpaceAuth, async (req, 
       const p = resolveSafePath(mid, normalised);
       const s = await fs.stat(p);
       foundMid = mid;
-      absPath = p;
       stat = s;
       break;
     } catch {

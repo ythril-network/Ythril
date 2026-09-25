@@ -548,7 +548,7 @@ export const find_similarTool: ToolHandler = {
           additionalProperties: false,
         }),
   async handle(ctx: ToolContext): Promise<ToolResult> {
-    const { args: a, callSpace, accessibleSpaceIds } = ctx;
+    const { args: a, accessibleSpaceIds } = ctx;
     const entryId = String(a['entryId'] ?? '').trim();
     if (!entryId) throw new Error('entryId must not be empty');
     if (!UUID_V4_RE.test(entryId)) throw new Error('entryId must be a valid UUID v4');

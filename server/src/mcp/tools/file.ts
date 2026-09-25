@@ -1,5 +1,4 @@
 import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.js';
-import { recall } from '../../brain/recall.js';
 import { TTL_DAYS_SCHEMA, filePathSchema, ttlDaysFromArgs } from './shared.js';
 import { type InputFormat } from '../../files/converters/pipeline.js';
 import { renameFileMeta, renameFileMetaByPrefix } from '../../files/file-meta.js';
@@ -9,7 +8,7 @@ import { CONTENT_ENCODINGS, decodeContent } from '../../files/content-encoding.j
 import { storeFile, type StoreFileMeta } from '../../files/store-file.js';
 import { writeFileTombstones } from '../../files/tombstones.js';
 import { deleteFileCascade } from '../../files/delete-cascade.js';
-import { resolveMemberSpaces, resolveWriteTarget } from '../../spaces/proxy.js';
+import { resolveWriteTarget } from '../../spaces/proxy.js';
 import { memberSpacesWithin } from '../../spaces/proxy-scoped.js';
 import { emitWebhookEvent } from '../../webhooks/dispatcher.js';
 import { log } from '../../util/log.js';
@@ -184,7 +183,7 @@ export const list_dirTool: ToolHandler = {
           additionalProperties: false,
         }),
   async handle(ctx: ToolContext): Promise<ToolResult> {
-    const { args: a, callSpace, name , accessibleSpaceIds } = ctx;
+    const { args: a, callSpace, accessibleSpaceIds } = ctx;
     const dirPath = String(a['path'] ?? '');
     const memberIds = memberSpacesWithin(callSpace, accessibleSpaceIds);
     const seen = new Set<string>();

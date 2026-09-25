@@ -38,7 +38,6 @@
  * the same rule is the same escalation by a shorter path — mint is guarded, edit was not — and two surfaces with one
  * rule expressed twice is how they come to disagree. This function is the single expression; both routes call it.
  */
-import type { TokenRecord } from '../config/types.js';
 import { SPACE_AREAS } from '../config/rights-shape.js';
 import type { TokenRights } from '../config/rights-shape.js';
 import { effectiveRung, administers } from './mint-cap.js';

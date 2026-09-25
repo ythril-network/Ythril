@@ -1,5 +1,5 @@
 import { Injectable, inject } from '@angular/core';
-import { HttpClient, HttpParams } from '@angular/common/http';
+import { HttpClient } from '@angular/common/http';
 import { Observable, of } from 'rxjs';
 import { map, switchMap } from 'rxjs/operators';
 import { filterCall } from './filter-call';
@@ -258,10 +258,6 @@ export class BrainApi {
    */
   private sortBody(sort?: ListSort): Record<string, unknown> {
     return sort ? { sort: sort.field, dir: sort.dir } : {};
-  }
-
-  private withSort(params: HttpParams, sort?: ListSort): HttpParams {
-    return sort ? params.set('sort', sort.field).set('dir', sort.dir) : params;
   }
 
   /** Mint a single-use ticket to open the live-change SSE stream. EventSource can't send an

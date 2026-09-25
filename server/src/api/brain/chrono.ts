@@ -4,7 +4,6 @@
  * Split out of the api/brain.ts monolith (A17.3); handlers are unchanged.
  */
 import { Router } from 'express';
-import { requestActor } from '../../auth/request-actor.js';
 import { shapeError } from '../../brain/write-shape.js';
 import { requireSpaceAuth, denyReadOnly } from '../../auth/middleware.js';
 import { unknownFieldWarnings } from './unknown-fields.js';
@@ -14,13 +13,12 @@ import { getConfig } from '../../config/loader.js';
 import { memberSpacesForRequest } from '../../spaces/proxy-scoped.js';
 import { entityDeleteBlockers } from '../../brain/entity-delete-guard.js';
 import { resolveWriteTarget, isStrictLinkage, findFirstAcrossMembers } from '../../spaces/proxy.js';
-import { validateChrono, getAllowedChronoTypes } from '../../spaces/schema-validation.js';
+import { getAllowedChronoTypes } from '../../spaces/schema-validation.js';
 import { validateDeleteFields } from '../../brain/delete-fields.js';
 import { CHRONO_STATUSES } from '../../config/types.js';
 import type { ChronoStatus } from '../../config/types.js';
-import { UUID_V4_RE, webhookToken, getSpaceMeta, applyValidation, ttlDaysFromBody, ttlDaysError, dupeCheckOptsFromBody, ifMatchFromRequest, preconditionFailedBody } from './_shared.js';
+import { UUID_V4_RE, webhookToken, getSpaceMeta, ttlDaysFromBody, ttlDaysError, dupeCheckOptsFromBody, ifMatchFromRequest, preconditionFailedBody } from './_shared.js';
 import { SchemaViolationError, type UpdateValidation } from '../../brain/write-validation.js';
-import { mergePropertiesOrKeep } from '../../brain/merge-fields.js';
 import {
   parseRecordSuppression, RECORD_SUPPRESS_FIELD,
 } from '../../brain/suppress-embeddings.js';

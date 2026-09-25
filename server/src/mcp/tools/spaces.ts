@@ -3,14 +3,11 @@ import { refusalsForSpaceUpdate, describeFieldRequirement } from '../../auth/spa
 import { BRAIN_COLLECTIONS } from '../../config/types.js';
 import { getConfig } from '../../config/loader.js';
 import { col } from '../../db/mongo.js';
-import { resolveMemberSpaces } from '../../spaces/proxy.js';
 import { canWriteAnywhere } from '../../auth/write-anywhere.js';
 import type { TokenRights } from '../../config/rights-shape.js';
 import { memberSpacesWithin } from '../../spaces/proxy-scoped.js';
-import { WIPE_COLLECTION_TYPES, type WipeCollectionType, wipeSpace } from '../../spaces/lifecycle.js';
-import { planSpaceWipe, notifyPeersOfWipe } from '../../spaces/wipe-vote.js';
 import { deleteSpaceData, wipeTypesLabel } from '../../spaces/delete-space-data.js';
-import { updateSpace, spacePurpose } from '../../spaces/spaces.js';
+import { spacePurpose } from '../../spaces/spaces.js';
 import { SPACE_PURPOSE_MAX, needsReindex } from '../../spaces/_shared.js';
 import { measureSpaceUsage } from '../../spaces/space-usage.js';
 import { spaceCollection } from '../../db/space-collection.js';

@@ -8,21 +8,17 @@
 import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.js';
 import { shapeError } from '../../brain/write-shape.js';
 import { validateDeleteFields } from '../../brain/delete-fields.js';
-import { findEntitiesByIds } from '../../brain/entities.js';
-import { assertRefsResolve, UUID_V4_PATTERN } from '../../brain/entity-refs.js';
 import { deleteFact, listFacts, saveFact, updateFact } from '../../brain/fact.js';
 import { readEditAudit } from '../../brain/edit-audit.js';
-import { applyDeleteFields as applyDeleteFieldsPaths } from '../../brain/delete-fields.js';
 // The API layer's write gate, imported rather than reimplemented: `update_chrono` once shipped without
 // the allowlist `save_chrono` enforced, and two copies of a validation rule is how that happens.
 import { getConfig } from '../../config/loader.js';
 import { checkQuota } from '../../quota/quota.js';
-import { resolveWriteTarget, findFirstAcrossMembers, isStrictLinkage } from '../../spaces/proxy.js';
+import { resolveWriteTarget, findFirstAcrossMembers } from '../../spaces/proxy.js';
 import { entityDeleteBlockers } from '../../brain/entity-delete-guard.js';
 import { resolveMetaRefs } from '../../spaces/schema-validation.js';
 import { type UpdateValidation } from '../../brain/write-validation.js';
 import { TTL_DAYS_SCHEMA, SUPPRESS_EMBEDDINGS_SCHEMA, SUPERSEDED_SCHEMA, ttlDaysFromArgs, unitScoreSchema, uuidSchema } from './shared.js';
-import { mergePropertiesOrKeep } from '../../brain/merge-fields.js';
 import { parseRecordSuppression } from '../../brain/suppress-embeddings.js';
 import { parseRecordSuperseded } from '../../brain/record-flag.js';
 import { connectionSchemas, applyConnections, assertConnections, desiredLinksFrom, edgeInputsFrom } from '../../brain/write-connections.js';

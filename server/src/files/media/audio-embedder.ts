@@ -13,14 +13,12 @@
 
 import { spawn } from 'child_process';
 import { authorRef } from '../../config/author.js';
-import { randomUUID } from 'crypto';
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
 import { col, asDoc, asFilter } from '../../db/mongo.js';
 import { embed } from '../../brain/embedding.js';
-import { getConfig } from '../../config/loader.js';
-import type { FileMetaDoc, AuthorRef } from '../../config/types.js';
+import type { FileMetaDoc } from '../../config/types.js';
 import type { SttProvider, SttSegment } from './providers.js';
 import { extForMimeType } from '../mime.js';
 import { log } from '../../util/log.js';
@@ -254,7 +252,7 @@ export async function embedAudio(
           + 'rather than competing with the run that recovered this job');
         break;
       }
-      const { startMs, endMs, overlapMs: chunkOverlapMs } = chunks[i]!;
+      const { startMs, endMs } = chunks[i]!;
       const startS = startMs / 1000;
       const endS = endMs / 1000;
       const segPath = path.join(tmpDir, `seg${i}.wav`);
