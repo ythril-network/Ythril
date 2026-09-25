@@ -40,7 +40,7 @@ graph TD
 
 - `recall("antitrust risk")` on the proxy → semantic search fans out across all three deal spaces in parallel, returns ranked results with `spaceId` attribution. One query, three deals, zero data mixing.
 - Each space syncs with its own closed network — Acme's advisor sees only Acme's space, Globex's advisor sees only Globex. The proxy never syncs externally — it's a local read-only aggregation layer.
-- `query(entities, {type: "risk"})` on the proxy → entities from all three deals. `query(edges, {label: "mitigated_by"})` → which risks have mitigation plans across all targets.
+- `filter(entities, {type: "risk"})` on the proxy → entities from all three deals. `filter(edges, {label: "mitigated_by"})` → which risks have mitigation plans across all targets.
 - Write operations on the proxy require `?targetSpace=acme` — the proxy enforces explicit targeting. No accidental cross-contamination between deal rooms.
 - Kill a deal? Remove the space from `proxyFor`. The data stays isolated in its own space, the proxy just stops including it.
 
@@ -84,8 +84,8 @@ graph TD
 
 **Wow factor:**
 
-- The CTO publishes `remember("All services must implement mTLS by Q3 2026", tags: ["mandate", "security"])` → braintree pushes it to Platform, Mobile, and Data. The platform team's space now contains it alongside their own ADRs and runbooks.
-- Platform SRE writes `remember("mTLS rollout blocked by legacy proxy — need sidecar approach", entities: ["mTLS", "legacy-proxy"], tags: ["blocker"])` → democratic sync shares it with the architect and lead. The CTO's braintree does **not** pull this up (push-only direction). Operational detail stays at the team level.
+- The CTO publishes `save_fact("All services must implement mTLS by Q3 2026", tags: ["mandate", "security"])` → braintree pushes it to Platform, Mobile, and Data. The platform team's space now contains it alongside their own ADRs and runbooks.
+- Platform SRE writes `save_fact("mTLS rollout blocked by legacy proxy — need sidecar approach", entities: ["mTLS", "legacy-proxy"], tags: ["blocker"])` → democratic sync shares it with the architect and lead. The CTO's braintree does **not** pull this up (push-only direction). Operational detail stays at the team level.
 - `recall("mTLS")` on the platform instance → returns both the CTO mandate AND the team-level blocker, ranked by relevance. Full picture without crossing governance boundaries.
 - The same space, two different sync cadences: braintree might sync hourly (policy pushes), democratic every 5 minutes (fast team collaboration). Each network has its own schedule.
 
@@ -140,7 +140,7 @@ graph TD
 - Partner asks: `recall("cloud migration cost overrun")` on the proxy → gets results from internal templates AND both client engagements, ranked by relevance, with `spaceId` showing which client each result came from.
 - Consultant on-site with Client Alpha has two spaces syncing to their laptop: `internal-kb` (club) and `client-alpha` (closed). Their LLM uses `recall` with `space` omitted to search both. They get the firm's methodology templates alongside Alpha-specific context in one query.
 - Client Alpha's external instance syncs only `client-alpha` — they never see `internal-kb` or `client-beta`. Token-scoped, network-scoped, zero crossover.
-- `query(entities, {type: "deliverable", properties.status: "overdue"})` on the proxy → overdue deliverables across all clients. `list_chrono({status: "upcoming", type: "deadline"})` → upcoming deadlines across all engagements.
+- `filter(entities, {type: "deliverable", properties.status: "overdue"})` on the proxy → overdue deliverables across all clients. `filter(chrono, {status: "upcoming", type: "deadline"})` → upcoming deadlines across all engagements.
 - New client onboarded? Create space, create closed network, add to `proxyFor` on `partner-view`. The proxy starts including it immediately — no data migration, no restructuring.
 
 ---
@@ -187,9 +187,9 @@ graph TD
 
 **Three networks, three patterns, one hospital:**
 
-1. **`protocols` braintree** — Medical director pushes updated clinical protocols. Departments receive but cannot modify the authoritative source. `create_chrono({type: "milestone", title: "Sepsis protocol v3 effective", startsAt: "2026-04-01"})` → every department's LLM knows when the new protocol takes effect.
+1. **`protocols` braintree** — Medical director pushes updated clinical protocols. Departments receive but cannot modify the authoritative source. `save_chrono({type: "milestone", title: "Sepsis protocol v3 effective", startsAt: "2026-04-01"})` → every department's LLM knows when the new protocol takes effect.
 
-2. **`knowledge` democratic** — Department heads share clinical learnings peer-to-peer. ED learns that a specific drug interaction is common → `remember(...)` → cardiology and radiology receive it on next sync. Majority+veto governance prevents a single department from pushing contested clinical claims.
+2. **`knowledge` democratic** — Department heads share clinical learnings peer-to-peer. ED learns that a specific drug interaction is common → `save_fact(...)` → cardiology and radiology receive it on next sync. Majority+veto governance prevents a single department from pushing contested clinical claims.
 
 3. **`clinical-search` proxy** — On a dedicated search instance. `recall("drug interaction with warfarin in elderly patients")` → searches ED, cardiology, and radiology knowledge spaces in parallel. Results come back with `spaceId` attribution — the clinician sees which department reported each finding.
 
@@ -197,7 +197,7 @@ graph TD
 
 - Each department runs its own Ythril instance with two spaces: `protocols` (receive-only from braintree) and their own knowledge space (democratic peer-to-peer). Two different governance models on the same instance, zero conflict.
 - The proxy search hub has read-only tokens — it can query but never write. Even if compromised, clinical data integrity is preserved.
-- `query(entities, {type: "drug"})` on the proxy → every drug entity across all departments. `query(edges, {from: "warfarin", label: "interacts_with"})` → cross-department interaction graph built from real clinical observations.
+- `filter(entities, {type: "drug"})` on the proxy → every drug entity across all departments. `filter(edges, {from: "warfarin", label: "interacts_with"})` → cross-department interaction graph built from real clinical observations.
 - A new department joins? Add their knowledge space to the proxy's `proxyFor` and add them to the democratic network. Two config changes, instant integration.
 - Protocols push is one-way and authoritative. Knowledge sharing is peer-to-peer and democratic. Clinical search is read-only and aggregated. Three completely different trust models, cleanly separated by network type.
 
@@ -233,12 +233,12 @@ graph LR
 
 **Wow factor:**
 
-- `remember("Sold 50 NVDA at $180, bought 100 AMD at $165. Thesis: AMD catching up on inference chips.", entities: ["NVDA", "AMD"], tags: ["trade", "semiconductor"])` into `trading` space.
-- `remember("Roof repair $12k on rental property. Insurance claim filed ref #4821.", entities: ["rental-oak-st", "insurance"], tags: ["expense", "maintenance"])` into `property` space.
+- `save_fact("Sold 50 NVDA at $180, bought 100 AMD at $165. Thesis: AMD catching up on inference chips.", entities: ["NVDA", "AMD"], tags: ["trade", "semiconductor"])` into `trading` space.
+- `save_fact("Roof repair $12k on rental property. Insurance claim filed ref #4821.", entities: ["rental-oak-st", "insurance"], tags: ["expense", "maintenance"])` into `property` space.
 - `recall("semiconductor exposure")` on the proxy → pulls trade history from `trading`, any related notes from `savings` (maybe a semiconductor ETF in your 401k), all ranked by relevance with `spaceId` attribution.
-- `query(entities, {type: "stock"})` on the proxy → every position across all accounts. `query(edges, {label: "thesis_for"})` → your investment thesis graph. "Why did I buy AMD again?" — instant recall.
-- `create_chrono({type: "event", title: "NVDA earnings Q1 2026", startsAt: "2026-05-28", linkEntities: ["<id of NVDA>"]})` → `list_chrono({status: "upcoming"})` → your LLM reminds you of catalysts tied to positions you actually hold.
-- `create_chrono({type: "prediction", title: "AMD will outperform NVDA in inference workloads by Q4", confidence: 0.6, linkEntities: ["<id of AMD>", "<id of NVDA>"]})` → track your own predictions. `query(chrono, {type: "prediction", status: "completed"})` → "How good were my calls?"
+- `filter(entities, {type: "stock"})` on the proxy → every position across all accounts. `filter(edges, {label: "thesis_for"})` → your investment thesis graph. "Why did I buy AMD again?" — instant recall.
+- `save_chrono({type: "event", title: "NVDA earnings Q1 2026", startsAt: "2026-05-28", linkEntities: ["<id of NVDA>"]})` → `filter(chrono, {status: "upcoming"})` → your LLM reminds you of catalysts tied to positions you actually hold.
+- `save_chrono({type: "prediction", title: "AMD will outperform NVDA in inference workloads by Q4", confidence: 0.6, linkEntities: ["<id of AMD>", "<id of NVDA>"]})` → track your own predictions. `filter(chrono, {type: "prediction", status: "completed"})` → "How good were my calls?"
 - Everything stays on your hardware. Your brokerage data, trade theses, and spending patterns never touch a third-party API. Closed network sync to your laptop = offline access.
 
 ---
@@ -277,10 +277,10 @@ graph TD
 
 **Wow factor:**
 
-- FX analyst: `remember("EUR/USD broke 1.12 support on weak PMI. Next support at 1.095. ECB likely dovish June.", entities: ["EUR/USD", "ECB"], tags: ["technical", "macro"])`. Macro analyst: `remember("US PMI miss — manufacturing at 48.2, services at 51.1. Dollar weakening thesis intact.", entities: ["US-PMI", "USD"], tags: ["data", "leading-indicator"])`.
+- FX analyst: `save_fact("EUR/USD broke 1.12 support on weak PMI. Next support at 1.095. ECB likely dovish June.", entities: ["EUR/USD", "ECB"], tags: ["technical", "macro"])`. Macro analyst: `save_fact("US PMI miss — manufacturing at 48.2, services at 51.1. Dollar weakening thesis intact.", entities: ["US-PMI", "USD"], tags: ["data", "leading-indicator"])`.
 - Desk head on the proxy: `recall("dollar weakening")` → gets the FX technical AND the macro data backing it, cross-correlated by semantic relevance. Two analysts, two spaces, one coherent picture.
-- `upsert_edge("EUR/USD", "ECB", "driven_by")` + `upsert_edge("ECB", "US-PMI", "reacts_to")` → the knowledge graph connects the causal chain across desks. `query(edges, {from: "ECB"})` → every factor the team has linked to ECB decisions.
-- `create_chrono({type: "prediction", title: "EUR/USD hits 1.15 by August", confidence: 0.65, linkEntities: ["<id of EUR/USD>"]})` → desk tracks analyst predictions over time. `query(chrono, {type: "prediction", linkEntities: "EUR/USD"})` → full prediction history with confidence scores.
+- `upsert_edge("EUR/USD", "ECB", "driven_by")` + `upsert_edge("ECB", "US-PMI", "reacts_to")` → the knowledge graph connects the causal chain across desks. `filter(edges, {from: "ECB"})` → every factor the team has linked to ECB decisions.
+- `save_chrono({type: "prediction", title: "EUR/USD hits 1.15 by August", confidence: 0.65, linkEntities: ["<id of EUR/USD>"]})` → desk tracks analyst predictions over time. `filter(chrono, {type: "prediction", linkEntities: "EUR/USD"})` → full prediction history with confidence scores.
 - Each desk is its own democratic network — analyst departure doesn't nuke the knowledge base. New analyst joins, syncs, instant full context.
 
 ---
@@ -322,9 +322,9 @@ graph TD
 
 **Wow factor:**
 
-- HUMINT: `remember("Source JADE reports facility X expanded production capacity — 3 new buildings observed.", entities: ["facility-X", "JADE"], tags: ["humint", "production"])`. SIGINT: `remember("Intercept confirms increased shipments from facility X to port Y.", entities: ["facility-X", "port-Y"], tags: ["sigint", "logistics"])`. OSINT: `remember("Satellite imagery shows construction at facility X coordinates 34.05N 118.25W.", entities: ["facility-X"], tags: ["osint", "imagery"])`.
+- HUMINT: `save_fact("Source JADE reports facility X expanded production capacity — 3 new buildings observed.", entities: ["facility-X", "JADE"], tags: ["humint", "production"])`. SIGINT: `save_fact("Intercept confirms increased shipments from facility X to port Y.", entities: ["facility-X", "port-Y"], tags: ["sigint", "logistics"])`. OSINT: `save_fact("Satellite imagery shows construction at facility X coordinates 34.05N 118.25W.", entities: ["facility-X"], tags: ["osint", "imagery"])`.
 - Fusion analyst: `recall("facility X activity")` on the proxy → all three sources, correlated by semantic similarity, attributed by `spaceId` (source discipline). The analyst sees HUMINT, SIGINT, and OSINT concur — without any single source team seeing the other disciplines.
-- `query(entities, {name: "facility-X"})` on the proxy → entity exists in all three spaces. `query(edges, {from: "facility-X"})` → relationships mapped by each discipline independently.
+- `filter(entities, {name: "facility-X"})` on the proxy → entity exists in all three spaces. `filter(edges, {from: "facility-X"})` → relationships mapped by each discipline independently.
 - Different `proxyFor` lists per clearance level: one proxy for all-source, another for OSINT+HUMINT only. Token-scoped access — the proxy itself enforces the compartmentation.
 - Each closed network syncs independently. SIGINT station goes dark? OSINT and HUMINT continue unaffected. No single point of failure.
 
@@ -366,9 +366,9 @@ graph LR
 
 **Wow factor:**
 
-- Parent A: `remember("Boiler annual service due in October. Last serviced by PlumbCo, invoice #8812.", entities: ["boiler", "PlumbCo"], tags: ["maintenance"])` → syncs to everyone. Next year, any family member's LLM: `recall("boiler service")` → full history.
-- `create_chrono({type: "deadline", title: "Kid soccer tournament registration closes", startsAt: "2026-04-15", linkEntities: ["<id of soccer>"]})` → `list_chrono({status: "upcoming"})` → the household LLM surfaces it to whoever asks.
-- `upsert_entity("family-van", "vehicle", ["maintenance"], {mileage: 82000, nextService: "85000km"})` → `query(entities, {type: "vehicle"})` → "When is the van due for service?" Structured, not buried in a note.
+- Parent A: `save_fact("Boiler annual service due in October. Last serviced by PlumbCo, invoice #8812.", entities: ["boiler", "PlumbCo"], tags: ["maintenance"])` → syncs to everyone. Next year, any family member's LLM: `recall("boiler service")` → full history.
+- `save_chrono({type: "deadline", title: "Kid soccer tournament registration closes", startsAt: "2026-04-15", linkEntities: ["<id of soccer>"]})` → `filter(chrono, {status: "upcoming"})` → the household LLM surfaces it to whoever asks.
+- `save_entity("family-van", "vehicle", ["maintenance"], {mileage: 82000, nextService: "85000km"})` → `filter(entities, {type: "vehicle"})` → "When is the van due for service?" Structured, not buried in a note.
 - Parent A's `private-a` space is **not in any network** — it never leaves the phone. Medical notes, financial planning, personal journal — truly private. The LLM on that phone can still `recall` with `space` omitted across both `household` and `private-a` locally.
 - Kid's tablet has a space-scoped token for `household` (read/write) and `kids-school` (read/write). No access to parent private spaces — not by policy, by architecture.
 - Democratic governance on `household` means the kid's tablet has equal vote weight. Conflict? Fork-on-conflict preserves both versions — no silent data loss.
@@ -410,12 +410,12 @@ graph TD
 
 **Wow factor:**
 
-- `remember("HVAC compressor failed 2026-03-15. Error code E-48. Tech replaced capacitor, $180.", entities: ["hvac-main", "E-48"], tags: ["failure", "repair"])` in `devices`. `remember("Energy spike 2026-03-14: 38 kWh consumed (vs 22 kWh avg). HVAC ran continuously.", entities: ["hvac-main"], tags: ["anomaly", "consumption"])` in `energy`.
+- `save_fact("HVAC compressor failed 2026-03-15. Error code E-48. Tech replaced capacitor, $180.", entities: ["hvac-main", "E-48"], tags: ["failure", "repair"])` in `devices`. `save_fact("Energy spike 2026-03-14: 38 kWh consumed (vs 22 kWh avg). HVAC ran continuously.", entities: ["hvac-main"], tags: ["anomaly", "consumption"])` in `energy`.
 - `recall("why was energy high last week")` on the proxy → correlates the energy anomaly with the HVAC failure across two different spaces. Your LLM connects the dots: "The HVAC compressor was failing, causing it to run continuously the day before it died."
-- `upsert_entity("hvac-main", "device", ["climate"], {model: "Daikin RXB35", installed: "2022-06", warrantyEnd: "2027-06"})` → `query(entities, {type: "device", properties.warrantyEnd: {$lte: "2026-12"}})` → "Which devices have warranties expiring this year?"
-- `create_chrono({type: "event", title: "Solar panels cleaned", startsAt: "2026-03-20", linkEntities: ["<id of solar-array>"]})` + production data in `energy` space → correlate cleaning dates with production improvements over time.
-- `remember("Set automation: if solar production > 4kW and battery > 80%, start dishwasher. Reason: minimize grid draw during peak tariff.", tags: ["automation", "solar", "tariff"])` in `automations` → six months later, `recall("why does the dishwasher run midday")` → instant answer with the original reasoning.
-- `query(edges, {label: "controls"})` → which automations control which devices. `query(edges, {from: "hvac-main"})` → everything linked to the HVAC: energy readings, failure history, automations, warranty info — across all three spaces via the proxy.
+- `save_entity("hvac-main", "device", ["climate"], {model: "Daikin RXB35", installed: "2022-06", warrantyEnd: "2027-06"})` → `filter(entities, {type: "device", properties.warrantyEnd: {$lte: "2026-12"}})` → "Which devices have warranties expiring this year?"
+- `save_chrono({type: "event", title: "Solar panels cleaned", startsAt: "2026-03-20", linkEntities: ["<id of solar-array>"]})` + production data in `energy` space → correlate cleaning dates with production improvements over time.
+- `save_fact("Set automation: if solar production > 4kW and battery > 80%, start dishwasher. Reason: minimize grid draw during peak tariff.", tags: ["automation", "solar", "tariff"])` in `automations` → six months later, `recall("why does the dishwasher run midday")` → instant answer with the original reasoning.
+- `filter(edges, {label: "controls"})` → which automations control which devices. `filter(edges, {from: "hvac-main"})` → everything linked to the HVAC: energy readings, failure history, automations, warranty info — across all three spaces via the proxy.
 - Phone sync means you can check energy production and device status from anywhere. Closed network = your smart home data never touches a cloud.
 
 ---
@@ -455,10 +455,10 @@ graph TD
 
 **Wow factor:**
 
-- Ingest React docs into `react-docs`: `remember("useEffect cleanup runs before re-execution and on unmount. Return a function from the effect callback.", entities: ["useEffect"], tags: ["hooks", "lifecycle"])`. Do the same for Prisma: `remember("Prisma $transaction sequential mode runs queries in order; interactive mode gives you a tx client.", entities: ["$transaction"], tags: ["orm", "transactions"])`.
+- Ingest React docs into `react-docs`: `save_fact("useEffect cleanup runs before re-execution and on unmount. Return a function from the effect callback.", entities: ["useEffect"], tags: ["hooks", "lifecycle"])`. Do the same for Prisma: `save_fact("Prisma $transaction sequential mode runs queries in order; interactive mode gives you a tx client.", entities: ["$transaction"], tags: ["orm", "transactions"])`.
 - You're coding and ask: `recall("how to handle cleanup in effects")` on the proxy → React docs hit. `recall("nested writes with transactions")` → Prisma docs hit. **Your LLM gets library-specific answers without hallucinating** — the docs are right there in the brain, semantically indexed.
-- `upsert_entity("useEffect", "hook", ["react"], {since: "16.8"})` + `upsert_edge("useEffect", "useState", "commonly_used_with")` → build a relationship graph of the API surface. `query(edges, {from: "useEffect"})` → "What's commonly used with useEffect?"
-- `remember("Gotcha: Prisma $transaction has a 5s default timeout. Hit this in the bulk import job — set timeout: 30000.", entities: ["$transaction"], tags: ["gotcha", "timeout"])` in `my-project` → next time anyone on the team hits a transaction timeout, `recall("prisma transaction timeout")` returns the gotcha from your project space AND the official docs from `prisma-docs`.
+- `save_entity("useEffect", "hook", ["react"], {since: "16.8"})` + `upsert_edge("useEffect", "useState", "commonly_used_with")` → build a relationship graph of the API surface. `filter(edges, {from: "useEffect"})` → "What's commonly used with useEffect?"
+- `save_fact("Gotcha: Prisma $transaction has a 5s default timeout. Hit this in the bulk import job — set timeout: 30000.", entities: ["$transaction"], tags: ["gotcha", "timeout"])` in `my-project` → next time anyone on the team hits a transaction timeout, `recall("prisma transaction timeout")` returns the gotcha from your project space AND the official docs from `prisma-docs`.
 - Swap projects? Create a new proxy with different `proxyFor`: `["new-project", "vue-docs", "drizzle-docs", "tailwind-docs"]`. Reuse `tailwind-docs` across both — it's just a space reference.
 - Version upgrade? Wipe `react-docs` space, re-ingest React 20 docs. Project notes with your real-world gotchas in `my-project` stay untouched — they're in a separate space.
 - `write_file` for full markdown pages (migration guides, changelog summaries), `save_fact` for atomic facts, `save_entity`/`save_edge` for API structure. Three ingestion modes, one unified brain.
@@ -494,7 +494,7 @@ graph TD
 
 **Wow factor:**
 
-- Publisher writes: `remember("Breaking change in v3: auth middleware now requires explicit scope parameter", entities: ["auth-middleware", "v3"], tags: ["breaking", "migration"])` → every subscriber's LLM has it on next sync. No "check the changelog" — it's in their brain, semantically searchable.
+- Publisher writes: `save_fact("Breaking change in v3: auth middleware now requires explicit scope parameter", entities: ["auth-middleware", "v3"], tags: ["breaking", "migration"])` → every subscriber's LLM has it on next sync. No "check the changelog" — it's in their brain, semantically searchable.
 - `write_file("migration-guide-v3.md", ...)` → full migration doc lands on every subscriber's instance automatically.
 - Subscribers run `recall("how does auth work in v3")` locally — zero API calls to the publisher, fully offline once synced.
 - Publisher removes a subscriber? Unilateral — no vote round, instant effect. Subscriber leaves? Just as instant.

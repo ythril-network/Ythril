@@ -26,13 +26,13 @@ graph LR
     OnCall3 <-->|democratic| SRE
 ```
 
-**Source:** Every on-call engineer documents incidents via their LLM client → `remember("At 3am, payment-service OOMed due to unbounded cache. Fix: set maxItems=10000", entities: ["payment-service", "OOM"], tags: ["incident", "cache"])`.
+**Source:** Every on-call engineer documents incidents via their LLM client → `save_fact("At 3am, payment-service OOMed due to unbounded cache. Fix: set maxItems=10000", entities: ["payment-service", "OOM"], tags: ["incident", "cache"])`.
 **Consumers:** The next person on-call. Their LLM runs `recall("payment-service is down")` and gets back every past incident contextually ranked.
 
 **Wow factor:**
 
 - The knowledge graph connects **services → failure modes → fixes**: `upsert_edge("payment-service", "OOM", "fails_with")`, `upsert_edge("OOM", "maxItems=10000", "fixed_by")`. Next incident, the LLM walks the graph: "What has fixed OOM before?" — instant answer without digging through a wiki.
-- Chrono entries with `type: "event"` timestamp every incident. `query(chrono, {entityName: "payment-service", type: "event"})` → "payment-service has had 4 incidents this quarter" — pattern detection for free.
+- Chrono entries with `type: "event"` timestamp every incident. `filter(chrono, {entityName: "payment-service", type: "event"})` → "payment-service has had 4 incidents this quarter" — pattern detection for free.
 - This syncs across the team. Engineer 1's 3am fix is in Engineer 2's brain by morning.
 
 ---
@@ -61,10 +61,10 @@ graph TD
 
 **Wow factor:**
 
-- `list_chrono({status: "overdue"})` — lists every obligation whose due moment (its `endsAt`, or `startsAt` when it has none) has passed and that isn't `completed`/`cancelled`. `overdue` is **derived on read**, so a passed deadline surfaces automatically — you don't have to mark it.
-- `create_chrono({type: "deadline", title: "DORA ICT risk assessment due", startsAt: "2026-06-30", linkEntities: ["<id of DORA>", "<id of ICT-risk>"]})` → departments' LLMs can ask "What compliance deadlines do we have this quarter?" and get structured answers, not just documents.
+- `filter(chrono, {status: "overdue"}, deriveStatus: true)` — lists every obligation whose due moment (its `endsAt`, or `startsAt` when it has none) has passed and that isn't `completed`/`cancelled`. `overdue` is **derived on read**, so a passed deadline surfaces automatically — you don't have to mark it.
+- `save_chrono({type: "deadline", title: "DORA ICT risk assessment due", startsAt: "2026-06-30", linkEntities: ["<id of DORA>", "<id of ICT-risk>"]})` → departments' LLMs can ask "What compliance deadlines do we have this quarter?" and get structured answers, not just documents.
 - Braintree pushes mean the legal team publishes once and all departments receive. Departments **cannot** alter the authoritative deadline — temporal integrity by architecture.
-- `query(chrono, {type: "prediction", confidence: {$gte: 0.5}})` → the legal team can even log risk predictions ("60% chance of regulatory change in Q3") and track them.
+- `filter(chrono, {type: "prediction", confidence: {$gte: 0.5}})` → the legal team can even log risk predictions ("60% chance of regulatory change in Q3") and track them.
 
 ---
 
@@ -112,15 +112,15 @@ graph LR
     end
 ```
 
-**Source:** After every meeting, call, or event: `remember("Met Sarah Chen at KubeCon. She's VP of Platform at Acme Corp. Interested in our sync protocol. Follows up in June.", entities: ["Sarah Chen", "Acme Corp", "KubeCon"], tags: ["contact", "follow-up"])`.
+**Source:** After every meeting, call, or event: `save_fact("Met Sarah Chen at KubeCon. She's VP of Platform at Acme Corp. Interested in our sync protocol. Follows up in June.", entities: ["Sarah Chen", "Acme Corp", "KubeCon"], tags: ["contact", "follow-up"])`.
 **Consumers:** Future you, before the next meeting with Sarah.
 
 **Wow factor:**
 
 - `recall("Sarah Chen")` → every interaction, semantically ranked. Not a flat contact list — full conversational context.
-- `upsert_entity("Sarah Chen", "person", ["contact"], {company: "Acme Corp", role: "VP Platform"})` → structured data queryable with `query(entities, {properties.company: "Acme Corp"})` — "Who do I know at Acme Corp?"
+- `save_entity("Sarah Chen", "person", ["contact"], {company: "Acme Corp", role: "VP Platform"})` → structured data queryable with `filter(entities, {properties.company: "Acme Corp"})` — "Who do I know at Acme Corp?"
 - `upsert_edge("Sarah Chen", "Acme Corp", "works_at")` + `upsert_edge("Sarah Chen", "KubeCon 2026", "met_at")` → graph traversal: "Who did I meet at KubeCon?" → follow edges → full context per person.
-- `create_chrono({type: "deadline", title: "Follow up with Sarah Chen re: sync protocol", startsAt: "2026-06-01", linkEntities: ["<id of Sarah Chen>"]})` → `list_chrono({status: "upcoming"})` → your LLM reminds you before the deadline.
+- `save_chrono({type: "deadline", title: "Follow up with Sarah Chen re: sync protocol", startsAt: "2026-06-01", linkEntities: ["<id of Sarah Chen>"]})` → `filter(chrono, {status: "upcoming"})` → your LLM reminds you before the deadline.
 - Sync this space to your phone (closed network) and you have full context before every meeting, offline.
 
 ---
@@ -152,10 +152,10 @@ graph LR
 
 **Wow factor:**
 
-- Sales rep after a call: `remember("Acme Corp switched from Competitor X to Competitor Y because of pricing. Deal was $50k ARR.", entities: ["Acme Corp", "Competitor X", "Competitor Y"], tags: ["churn", "pricing"])`.
+- Sales rep after a call: `save_fact("Acme Corp switched from Competitor X to Competitor Y because of pricing. Deal was $50k ARR.", entities: ["Acme Corp", "Competitor X", "Competitor Y"], tags: ["churn", "pricing"])`.
 - Product manager asks: `recall("Why are customers leaving Competitor X?")` → semantic search surfaces every relevant sales field note — no CRM required.
-- `query(edges, {to: "Competitor X", label: "churned_from"})` → structured view: who left Competitor X and why.
-- `create_chrono({type: "event", title: "Competitor Y launched enterprise tier", startsAt: "2026-03-15", linkEntities: ["<id of Competitor Y>"]})` → strategy team later queries: `query(chrono, {entityName: "Competitor Y"})` → full competitor timeline. Fork-on-conflict preserves conflicting intelligence from different sources.
+- `filter(edges, {to: "Competitor X", label: "churned_from"})` → structured view: who left Competitor X and why.
+- `save_chrono({type: "event", title: "Competitor Y launched enterprise tier", startsAt: "2026-03-15", linkEntities: ["<id of Competitor Y>"]})` → strategy team later queries: `filter(chrono, {entityName: "Competitor Y"})` → full competitor timeline. Fork-on-conflict preserves conflicting intelligence from different sources.
 
 ---
 
@@ -184,9 +184,9 @@ graph LR
 
 - New hire connects MCP client to Ythril → club organiser approves → full sync completes in seconds.
 - New hire's LLM: `recall("how does authentication work in this project")` → gets back ADRs, implementation notes, gotchas, all semantically ranked. No "go read the wiki" that's 6 months stale.
-- `query(edges, {label: "depends_on"})` → complete service dependency map. `query(entities, {type: "service"})` → all services with their properties (port, repo, team owner).
+- `filter(edges, {label: "depends_on"})` → complete service dependency map. `filter(entities, {type: "service"})` → all services with their properties (port, repo, team owner).
 - Files sync too — deploy scripts, config templates, architecture diagrams land on the new hire's instance.
-- The new hire's questions and learnings (`remember("Gotcha: auth service needs Redis running locally...")`) flow back to the team — onboarding friction improves the knowledge base for the next hire.
+- The new hire's questions and learnings (`save_fact("Gotcha: auth service needs Redis running locally...")`) flow back to the team — onboarding friction improves the knowledge base for the next hire.
 
 ---
 
@@ -208,10 +208,10 @@ graph LR
 
 **Wow factor:**
 
-- Read a paper → `remember("Smith et al. 2025 show that transformer attention degrades above 128k context. Tested on 3 benchmarks.", entities: ["Smith2025", "transformer-attention", "context-window"], tags: ["paper", "limitation"])` + `upsert_edge("Smith2025", "transformer-attention", "studies")` + `upsert_edge("Smith2025", "Jones2024", "contradicts")`.
+- Read a paper → `save_fact("Smith et al. 2025 show that transformer attention degrades above 128k context. Tested on 3 benchmarks.", entities: ["Smith2025", "transformer-attention", "context-window"], tags: ["paper", "limitation"])` + `upsert_edge("Smith2025", "transformer-attention", "studies")` + `upsert_edge("Smith2025", "Jones2024", "contradicts")`.
 - Writing a paragraph → `recall("evidence for context window limitations")` → semantically ranked citations with full notes. Ask the LLM: "What papers support this claim?" — it walks the graph for `contradicts`, `supports`, `extends` edges.
-- `query(edges, {label: "contradicts"})` → instant map of all contradictions in your literature. `query(entities, {type: "paper", tags: {$in: ["unread"]}})` → reading backlog.
-- `create_chrono({type: "deadline", title: "Submit to NeurIPS", startsAt: "2026-05-15"})` → time-aware research planning.
+- `filter(edges, {label: "contradicts"})` → instant map of all contradictions in your literature. `filter(entities, {type: "paper", tags: {$in: ["unread"]}})` → reading backlog.
+- `save_chrono({type: "deadline", title: "Submit to NeurIPS", startsAt: "2026-05-15"})` → time-aware research planning.
 - Sync to a co-author via closed network → both researchers' graphs merge. Fork-on-conflict handles disagreements on interpretation — both views preserved.
 
 ---

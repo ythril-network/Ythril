@@ -6,8 +6,8 @@ How a brain record behaves when you write it, update it and read it back: expiry
 `PATCH` does to `tags` and `properties`, optimistic concurrency, what a read never sends, retiring a record
 from semantic search, and partial updates with `deleteFields`.
 
-**These rules are not about facts.** They apply to entities, edges and chrono entries the same way — they
-were documented on the fact page because facts were written up first. The endpoints themselves are in
+**These rules are not about facts.** They apply to entities, edges and chrono entries the same way. The
+endpoints themselves are in
 [Brain API](04-brain-api.md), [Entities, Edges & Graph](04b-graph-api.md) and [Chrono](04c-chrono-api.md).
 
 ---
@@ -38,7 +38,7 @@ Two ways to set it, both usable together:
 { "fact": "Temporary scratch note", "ttlDays": 7 }
 ```
 
-The expiry surfaces as `_expireAt` (an ISO timestamp) on the record — **not `expiresAt`**, which is a different field on different things (a token, a recall graph download, a file-meta thumbnail) and is never present on a brain record. Reading back the wrong one returns nothing whether the expiry was set or not, which is how a working `ttlDays` gets measured as broken: it was, across 120 records, and reported as a bug on 2026-08-30. The sweep runs periodically on every
+The expiry surfaces as `_expireAt` (an ISO timestamp) on the record — **not `expiresAt`**, which is a different field on different things (a token, a recall graph download, a file-meta thumbnail) and is never present on a brain record. Reading back the wrong one returns nothing whether the expiry was set or not, so a working `ttlDays` looks broken. The sweep runs periodically on every
 instance; expiry is eventual (granularity is days), not to-the-second. A `ttlDays`-only update (no other
 fields) is a valid write — use it to set, extend, or clear an existing record's expiry.
 
@@ -87,9 +87,8 @@ per-type rule and that is where the per-type rules already are:
 }
 ```
 
-> **A previous release documented a `chronoRetention` map on the space object.** That shape was replaced before
-> it was ever in a tagged release, and it no longer exists — a per-type window on the space object would have
-> been a second place to configure one rule. Use `typeSchemas.<collection>.<type>.retention`.
+> **There is no per-type retention map on the space object** (no `chronoRetention`): a per-type window is
+> configured in one place. Use `typeSchemas.<collection>.<type>.retention`.
 
 #### The space tier is five windows
 
@@ -201,9 +200,6 @@ In the space's `meta`, so `PATCH /api/spaces/:id` and `schema_update` already wr
 | `warnMinutes` | `40` | Warn beyond this much disagreement. **`0` disables the check** — it does *not* mean "warn on any difference", because a caller's stamp and the server's clock never agree to the millisecond |
 | `properties` | `["stampedAt", "postedAt"]` | Which properties to check, in order. The **first one that parses** decides; naming your own **replaces** the defaults rather than adding to them |
 
-The 40-minute default is not arbitrary: it is the clock tolerance the board protocol that prompted this already assumed
-between two parties.
-
 ---
 
 ### What a `PATCH` does to `tags` and `properties`
@@ -221,7 +217,7 @@ follows, so there is one thing to know across facts, entities, edges and chrono 
 | `PATCH .../facts/:id`, `update_fact` | merge | **replaces** the stored tags |
 | `PATCH .../chrono/:id`, `update_chrono` | merge | **replaces** the stored tags |
 
-**A `PATCH` can change a record's CONNECTIONS too, since 5.0.** `linkEntities`, `linkFacts`, `linkChronos`,
+**A `PATCH` can change a record's CONNECTIONS too.** `linkEntities`, `linkFacts`, `linkChronos`,
 `linkFiles` and `edges` are accepted on the update verb of every door that accepts them on create —
 `facts`, `chrono` and `entities`, on both surfaces — and they mean exactly what they mean on a create:
 
@@ -230,15 +226,8 @@ follows, so there is one thing to know across facts, entities, edges and chrono 
 | `linkEntities` and its siblings | **REPLACES** the links of that kind. `[]` detaches them all; a kind you do not name is untouched |
 | `edges` | **UPSERTS** each one. An edge you do not name is left alone; there is no list here that removes one |
 
-A body carrying only a connection field is a valid patch — it used to answer
-`400 "At least one field must be provided"`, because the field was not in the update allowlist and so was
-not seen at all rather than rejected.
-
-> **Before 5.0 a record's relationships were settled when it was created.** The 4.x arrays were the only
-> way to change them afterwards, and a converted space refused those outright — so on a converted space
-> there was no way to change a record's links at all, by either door. If you worked around this by
-> deleting and re-creating a record, you no longer need to, and that workaround cost you the record's id
-> and its history.
+A body carrying only a connection field is a valid patch. Change a record's links this way rather than by
+deleting and re-creating it, which costs the record its id and its history.
 
 **Removing a key is `deleteFields`' job, never an absence.** Omitting a property does not delete it, and sending
 an empty `properties: {}` is a no-op rather than a wipe. If you need a key gone, name it:
@@ -256,16 +245,11 @@ one phase; storing each phase as a record with scalar properties, linked to what
 the phase. The second shape is also the one `graph_traverse`, `space_meta`'s `actualSchema` and the
 backlink scans can see at all.
 
-> **Fixed in 4.0.** `PATCH .../entities/:id` checked that `properties` was an object and never looked inside it, so
-> a nested value was refused on create and **stored** on update — same field, same record, same space, two
-> answers. Reported by an integrator who had written one through `PATCH`, read it back intact, and reasonably
-> concluded nested properties were supported. If you have records carrying one, they are still there: nothing
-> rewrites stored data, and `deleteFields: ["properties.theKey"]` removes it.
+> **Stored data is not rewritten.** A nested property value already on a record stays there until you remove
+> it with `deleteFields: ["properties.theKey"]`.
 >
-> **Changed in 2.4.1.** `PATCH .../facts/:id` and chrono updates previously **replaced** the whole
-> `properties` map, so a patch naming one key silently dropped the rest — while `update_fact`'s own schema
-> described the field as "properties to merge". If you were relying on the replace to clear keys, switch to
-> `deleteFields`.
+> **Changed in 2.4.1:** fact and chrono `PATCH`es merge `properties` instead of replacing the map — if you
+> relied on the replace to clear keys, switch to `deleteFields`.
 
 ### Updating by id: use PATCH
 
@@ -277,27 +261,21 @@ backlink scans can see at all.
 | fact | `PATCH .../facts/:id` | **no** (404) |
 | entity | `PATCH .../entities/:id` | no — but a collection POST with a matching `id` upserts |
 | edge | `PATCH .../edges/:id` | no — a collection POST upserts on `(from, to, label)` |
-| chrono | `PATCH .../chrono/:id` | **no** (404) — **removed in 3.0**, see below |
+| chrono | `PATCH .../chrono/:id` | **no** (404) — see below |
 
-**`POST .../chrono/:id` was removed in 3.0.** It was the only POST-that-updates in the brain API, it
-predated the retry-safety design and duplicated it, and it was documented as legacy and listed for removal
-at the next major. **Send `PATCH .../chrono/:id` instead** — the body is the same shape.
+**Removed in 3.0: `POST .../chrono/:id`** — send `PATCH .../chrono/:id` instead; the body is the same shape.
 
-If you make creates idempotent by retrying, that is unchanged and was never this route's job: a
-client-supplied UUID v4 in the **collection** POST body converges on the same record, for every type (see
-[Retry Safety](04-brain-api.md#retry-safety)).
+To make creates idempotent by retrying, send a client-supplied UUID v4 in the **collection** POST body: it
+converges on the same record, for every type (see [Retry Safety](04-brain-api.md#retry-safety)).
 
-**Two reasons it went rather than stayed**, both of which were true of it the whole time and are the reason
-an integrator with nine flows on it asked for them to be written down here:
+**What moving a flow onto `PATCH` changes:**
 
 | | the removed `POST .../chrono/:id` | `PATCH .../chrono/:id` |
 |---|---|---|
-| property validation | **none** — the `type` allowlist was the whole of it, so under strict validation it could write a record the same space rejects at create time | full, the same as every other type |
+| property validation | **none** — the `type` allowlist was the whole of it | full, the same as every other type |
 | audit snapshot | **none** | stores before **and** after, so the change appears in the audit trail |
 
-So a flow moved onto `PATCH` gains validation and an audit trail it did not have. If a record it used to
-write is now refused, that record was always outside the space's schema — the legacy verb simply never
-checked.
+If a `PATCH` refuses a record the removed route accepted, that record is outside the space's schema.
 
 ### Optimistic concurrency (`If-Match`)
 
@@ -328,8 +306,7 @@ the record was deleted rather than changed — the message says so.
 
 Notes:
 
-- **The header is optional.** Omit it and the write proceeds unconditionally, exactly as before. Every
-  existing client and script is unaffected.
+- **The header is optional.** Omit it and the write proceeds unconditionally.
 - **All four record types**, on the `PATCH` route: `facts`, `entities`, `edges`, `chrono`.
 - **`seq` is on every record** and is returned by every read. Treat it as an **opaque token**: it is a
   per-space counter, not a per-record version, so consecutive writes to one record will not give you
@@ -340,8 +317,6 @@ Notes:
   unparseable precondition would leave you believing your write was protected when it was not.
 - **The check is part of the write**, not a read before it. There is no window between the two in which
   another writer can land.
-- **The removed `POST .../chrono/:id` used to refuse the header with a `400`** rather than ignore it, for the same
-  reason it refuses `suppressEmbeddings` — see the table above. Use `PATCH`.
 - **MCP has no equivalent**, and this is a property of the transport rather than an oversight: MCP tools
   take arguments, not headers, so there is nothing for an `If-Match` to travel in. Agents that need a
   conditional write should use the REST route.
@@ -357,44 +332,37 @@ The same header, in the same spellings, is honoured on space-meta writes against
 ### What a read never sends, and what you can drop
 
 **The embedding vector is never returned — by any endpoint, on either door, and there is no parameter that
-asks for it.** `POST /query` merges a mandatory exclusion into whatever projection you send and strips an
+asks for it.** `POST /api/filter` merges a mandatory exclusion into whatever projection you send and strips an
 explicit `"embedding": 1` out of it, so the vector cannot be opted back in; every read of a record collection
 projects it out before the document leaves the database. If you have been hunting for a flag to switch it off,
 this is why you could not find one.
 
-> **This was FALSE for the list routes in 3.1.0 and every version before it.** A `?limit=500` read of the
-> entities list returned every record's vector: an integrator measured **11.19 MB** where `POST /query`
-> answered the same 100 records in **0.145 MB**. They found it by running out of memory rather than by
-> reading a response — because this paragraph told them the field could not be there, which is why the
-> correction is here and not only in the changelog. **On 3.1.0 or earlier, use `POST /query` with a
-> projection for any bulk read.**
+> **On 3.1.0 or earlier** the per-collection list routes returned every record's vector — use
+> `POST /api/filter` with a projection for any bulk read there.
 
 What you *can* control:
 
 | lever | where | what it drops |
 |---|---|---|
-| `projection` | `POST /query`, **and recall / find-similar** | any field you do not name. On recall it applies recursively, so a `traverse` answer's `_graph` is projected at every depth |
+| `projection` | `POST /api/filter`, **and recall / find-similar** | any field you do not name. On recall it applies recursively, so a `traverse` answer's `_graph` is projected at every depth |
 | `includeFileContent: false` | recall, find-similar | file-passage **bodies**, keeping path, heading, chunk index, tags and properties |
 | `includeDiagnostics: false` *(the default)* | recall, find-similar | `matchedText`, `embeddingModel` and `seq` — **recursively**, so a `traverse` answer's `_graph` follows it at every depth. **NOT the per-stage scores** — see below |
-| `includeDiagnostics` *(body field, default off)* | `POST /filter` | `matchedText` and `embeddingModel`. **`seq` is NOT dropped here**, unlike on recall: it is the `If-Match` value, and withholding it would take away conditional writes. Send `includeDiagnostics: true` to get the two fields back. It was a query string on the per-collection list routes until 5.0, when those routes went |
+| `includeDiagnostics` *(body field, default off)* | `POST /filter` | `matchedText` and `embeddingModel`. **`seq` is NOT dropped here**, unlike on recall: it is the `If-Match` value, and withholding it would take away conditional writes. Send `includeDiagnostics: true` to get the two fields back |
 
 A projection is worth reaching for rather than skipping: a bare query over a dozen records with full
 descriptions and properties is the cheapest way to overrun a token budget, and naming the four fields you
 actually branch on turns that into a page you can read.
 
 **The per-stage scores always come back on both doors and no parameter removes them — they are the ORDERING.** See [the recall API page](04a-recall-api.md#the-per-stage-scores-are-the-ordering).
-**REST and MCP return the same recall content.** Until 3.1.0 they did not: REST sent all six unconditionally
-while MCP sent none. Now the three RECORD fields are off by default on both (`includeDiagnostics: true`
-restores them) and the three SCORES are on by default on both — which MCP had never sent at all.
+**REST and MCP return the same recall content.** The three RECORD fields are off by default on both
+(`includeDiagnostics: true` restores them) and the three SCORES are on by default on both.
 
 What still differs is the **shape**, deliberately, because each is natural to its transport: a REST result is
 flat — record fields beside `score` — while an MCP result nests them under `record`. The *field set* a caller
 can read is identical, at the result level and at every depth of `_graph`, and a gate compares the two.
 
-**The asymmetry this paragraph used to describe is gone.** It said the per-collection list routes had no
-field selection and were the only read that did not — true until 5.0 deleted them. Listing a collection is
-`POST /filter` now, which takes `projection` like every other read, so there is one answer for every read on
-this surface rather than one exception.
+**Every read takes a projection.** Listing a collection is `POST /filter`, which takes `projection` like every
+other read, so there is one answer for every read on this surface.
 
 ### Retiring a record from semantic search
 
@@ -406,20 +374,7 @@ PATCH /api/brain/spaces/:spaceId/chrono/:id
 { "suppressEmbeddings": true }
 ```
 
-> **Renamed in 3.1.0, and the old spelling was REMOVED in 4.0.** This field was
-> `excludeFromVectorSearch` up to and including 3.0.1. Until 4.0 that name was still accepted on both
-> doors and still written into the stored record, so a peer on an older build kept honouring it.
->
-> **Both halves went at once.** Sending it is now a refusal rather than a silent acceptance, and it is no
-> longer stored. Send `suppressEmbeddings`.
->
-> What made the removal safe is the peer version floor: a 4.x instance refuses every 3.x peer, so no peer
-> that fails to understand the current name can be on the network. Nothing needs migrating — every write
-> since 3.1.0 has set the current name.
->
-> The name changed because the old one described the wrong thing. "Excluded from vector search" reads as
-> *removed from search*, which would include traversal — and it never did (see the table below). The two
-> tiers underneath were already called `suppressEmbeddings`, so there is now one name to look for.
+> **Removed in 4.0: `excludeFromVectorSearch`** — it is refused and not stored; send `suppressEmbeddings`.
 
 It **may be the only field in the request** — retiring a record is a complete edit, not a modifier on some
 other change.
@@ -462,18 +417,13 @@ uses — and `brain/suppress-embeddings.ts` is the one place that resolves them:
 | type | `typeSchemas.<kind>.<type>` on the space meta | `suppressEmbeddings` |
 | space | space meta (the Danger Zone in the UI) | `suppressEmbeddings` |
 
-**A create can state it, from 3.7.** Until then the field was accepted on update and silently dropped on
-create, on all four record types — so a record that was never meant to be searchable had to be written twice:
-once embedded, once to remove the vector, with a window between them where it WAS searchable. Reported from
-outside on 2026-08-30 by an integrator writing a dedupe marker on every inbound message. Setting it on the
-create now stores the flag, skips the vector, and **queues no embed job** — a queued job would have stored
-what the flag forbids a few seconds later, with nothing to come back and remove it.
+**A create can state it**, on all four record types. Setting it on the create stores the flag, skips the
+vector, and **queues no embed job** — so a record that is never meant to be searchable is never searchable,
+not even for the moment between a create and an update.
 
-Both spellings are accepted on create, as they are on update.
+Only `suppressEmbeddings` is read, on create and on update; the old name `excludeFromVectorSearch` is not.
 
-Until 3.1.0 the record tier was spelled differently, so nothing in its name suggested the other two existed.
-One name is the fix, and the consequence still holds: **a record with no vector and no `suppressEmbeddings`
-of its own is not a bug** — read `GET /api/spaces/:id/meta` before treating it as one, because a tier below
+**A record with no vector and no `suppressEmbeddings` of its own is not a bug** — read `GET /api/spaces/:id/meta` before treating it as one, because a tier below
 is answering. Files have no type and therefore skip the middle tier entirely: a file is governed by the
 record flag or the space setting.
 
@@ -547,32 +497,20 @@ PATCH /api/brain/spaces/:spaceId/chrono/:id
 PATCH /api/brain/spaces/:spaceId/files?path=…
 ```
 
-> **`properties` MERGE on all five as of 3.1, and file metadata is the one that CHANGED.** Until 3.1 the file
-> route replaced the whole `properties` object, so patching a single key destroyed the rest — the same defect
-> that had already been fixed on the other four. It now merges, and `deleteFields` arrived with it in the
-> same release, because merging alone would have removed the only way to clear a file property.
+> **`properties` MERGE on all five, file metadata included**, and `deleteFields` is how a file property is
+> cleared. A caller that resends the whole object gets the same result; one that patches a single key keeps
+> what it did not name.
 >
-> **A caller that resends the whole object is unaffected** — until 3.1 that was the only thing that worked.
-> A caller that patches a single key now keeps what it did not name, instead of losing it.
->
-> **The lists still replace on every type**: `tags`, `linkEntities`, `linkFacts` and `linkChronos` are
+> **The lists replace on every type**: `tags`, `linkEntities`, `linkFacts` and `linkChronos` are
 > overwritten by what you send. Only `properties` merge. And **patching an edge's `label` changes its `_id`** — see the graph API page, which owns edge identity.
 >
-> **Also fixed in 4.0: `update_file_meta`'s published SCHEMA said the opposite of all of this.** Its
-> `properties` description read *"REPLACES the whole properties object — keys you do not send are DELETED"*,
-> which had not been true since 3.1. The tool's own prose said merge, the implementation merged, and only
-> the schema — the thing an agent reads while constructing its arguments — disagreed.
->
-> **And a file's property VALUES are now checked on all four of its doors.** `write_file` always refused a
-> nested object or an array; `update_file_meta`, `PATCH .../files` and the upload did not — the upload
-> silently discarded a malformed bag and answered `2xx`, so the file stored and its properties did not.
+> **A file's property VALUES are checked on all four of its doors** — `write_file`, `update_file_meta`,
+> `PATCH .../files` and the upload all refuse a nested object or an array.
 
 <!-- markdownlint-disable-next-line MD028 -->
 
-> **Chrono gained this in 3.1, and until then nothing could be removed from a chrono entry at all.** Its
-> `properties` merge and an absent field means "leave alone", so with no `deleteFields` there was no request
-> that unset anything — a key written once was permanent. Entries created before 3.1 are unaffected; the
-> paths simply work now.
+> **On a chrono entry `deleteFields` is the only way to unset anything**: its `properties` merge and an
+> absent field means "leave alone".
 >
 > Chrono's **required** fields — `title`, `startsAt`, `status` — are refused by name, alongside the
 > server-owned `id` / `type` / `spaceId` / `createdAt` / `updatedAt`. A path that cannot be honoured answers
@@ -607,13 +545,13 @@ PATCH /api/brain/spaces/:spaceId/files?path=…
 **Rules:**
 
 - `deleteFields` is applied **after** the normal merge — so you can add new properties and delete stale ones in the same request.
-- **Naming the same field in both halves is allowed, and the deletion wins.** `{"tags": ["a"], "deleteFields": ["tags"]}` stores no tags, because the delete is the later instruction. This follows from the rule above rather than being a separate one, but it is the case worth stating: it used to be rejected.
+- **Naming the same field in both halves is allowed, and the deletion wins.** `{"tags": ["a"], "deleteFields": ["tags"]}` stores no tags, because the delete is the later instruction. This follows from the rule above rather than being a separate one.
 - Paths targeting non-existent keys are silently ignored (no error).
 - System fields (`id`, `_id`, `name`, `type`, `spaceId`, `createdAt`, `updatedAt`) **cannot** be deleted. Attempting to do so returns `400`.
 - Paths with empty segments (e.g. `"properties..key"`) are rejected with `400`.
 - If the result after `deleteFields` + merge violates a `required: true` property schema in `typeSchemas` (with `validationMode: "strict"`), the request is rejected with `422` listing the missing required keys. No partial mutation occurs.
 - `deleteFields` can be the **only** parameter in the request body (no other updates needed).
-- Omitting `deleteFields` retains the existing merge behaviour — no breaking change for existing clients.
+- Omitting `deleteFields` leaves the ordinary merge behaviour.
 - **Re-embedding:** deleting any content field (`properties`, `description`, `tags`, `fact`) triggers re-embedding of the affected document. Bulk `deleteFields` updates may incur embedding service latency.
 
 **Response** — same shape as a normal `PATCH` update (`200` with the updated document).
@@ -628,5 +566,4 @@ PATCH /api/brain/spaces/:spaceId/files?path=…
 > **⚠️ Warning:** Fields deleted via `deleteFields` are **permanently removed**. Recovery requires audit logs or a backup. The explicit path list design is intentional — accidental data loss requires consciously naming each field to remove.
 
 **MCP tools:** all five — `update_fact`, `update_entity`, `update_edge`, `update_chrono` and
-`update_file_meta` — accept a `deleteFields` array with the same semantics. This named three, which read
-as a deliberate parity gap against the five REST endpoints listed below. There is none.
+`update_file_meta` — accept a `deleteFields` array with the same semantics.

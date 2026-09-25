@@ -23,15 +23,15 @@ POST /api/brain/spaces/:spaceId/entities
 
 **Response** `201`: Full entity doc.
 
-> **`type` IS REQUIRED, and this is a BREAKING change in 4.0.** It used to default to the empty string on
-> this endpoint alone: `save_entity`, the batch importer and `save_bulk` have always demanded it. `type`
-> is what selects the per-type property schema, so an entity without one is an entity nothing can validate
-> — and this was the door producing them. A create that omits it now answers `400`.
+> **`type` IS REQUIRED**, on this endpoint as on `save_entity`, the batch importer and `save_bulk`: a
+> create that omits it answers `400`. `type` is what selects the per-type property schema, so an entity
+> without one is an entity nothing can validate. *Changed in 4.0* — a client that relied on the empty-string
+> default must now send a `type`.
 >
 > There is no vocabulary to pick from in a space that declares no entity types, and none is needed: any
 > non-empty string is accepted. Name the kind of thing it is.
 
-**Identity model**: If `id` is supplied (must be a valid UUID v4), the entity with that `_id` is updated; if no entity with that ID exists, a new one is created with that ID. If `id` is omitted, a new entity is always inserted with a freshly generated UUID v4. Name is a non-unique searchable label, not a primary key. Multiple entities with the same name and type can coexist in a space (e.g. several "Lisa" entities of type "person").
+**Identity model**: If `id` is supplied (must be a valid UUID v4), the entity with that `_id` is updated; if no entity with that ID exists, the id is ignored and a new one is created with a server-minted id — see [Retry Safety](04-brain-api.md#identity-is-server-generated). If `id` is omitted, a new entity is always inserted with a freshly generated UUID v4. Name is a non-unique searchable label, not a primary key. Multiple entities with the same name and type can coexist in a space (e.g. several "Lisa" entities of type "person").
 
 **Duplicate warning**: When inserting without `id` and entities with the same `name` + `type` already exist, the response includes a `warning` field:
 
@@ -46,14 +46,14 @@ POST /api/brain/spaces/:spaceId/entities
 
 Tags are merged (deduplicated union), properties are shallow-merged (new keys added, existing keys overwritten).
 
-**Constraints**: `name` required string; `type` optional string (defaults to empty); `id` optional UUID v4 (400 if invalid); `tags` optional array of strings; `description` optional string (included in embedding text); `properties` optional object where each value must be a string, number, or boolean.
+**Constraints**: `name` required string; `type` required non-empty string (`400` if omitted); `id` optional UUID v4 (400 if invalid); `tags` optional array of strings; `description` optional string (included in embedding text); `properties` optional object where each value must be a string, number, or boolean.
 
 ---
 
 ### Read one entity, or a set of them, by id
 
-There is no `GET .../entities/:id`, and there has not been since 5.0. One record is a predicate over one
-collection, so it is `filter` — the same call, the same envelope and the same refusals as a page of them:
+There is no `GET .../entities/:id` (removed in 5.0 — port reads to `filter`). One record is a predicate over
+one collection, so it is `filter` — the same call, the same envelope and the same refusals as a page of them:
 
 ```http
 POST /api/filter
@@ -65,16 +65,16 @@ Content-Type: application/json
 **A record that is not there is `200` with `results: []`, not `404`.** A predicate matching nothing and a
 record not existing are the same event to a filter. Branch on `results.length`, not on the status.
 
-A SET of ids is `{"_id": {"$in": [...]}}`, which is what `entities/by-ids` did — unknown ids are absent
-from `results`, as before. Keep your own cap; the route stopped at 100 and that is still a sensible number.
+A SET of ids is `{"_id": {"$in": [...]}}`, the port for the removed `entities/by-ids` — unknown ids are
+absent from `results`. Keep your own cap; 100 is a sensible number.
 Matching a NAME is a predicate too: `{"name": "Kubernetes"}` is exact, and the sibling argument
 `{"search": "kuber"}` is the case-insensitive substring across the searchable fields.
 
 **A CHRONO entry is the exception, and it is the one that costs you if you miss it.** Its `status` is
 DERIVED on read — an entry past its due moment is `overdue` whatever it was stored as, unless its type says
-a passed date means nothing. The deleted route did that for you; `filter` returns the STORED value unless
-asked, because a predicate has to be able to match what is on disk. Send `deriveStatus: true` for what the
-old route gave you — it is refused on any other collection rather than ignored:
+a passed date means nothing. `filter` returns the STORED value unless asked, because a predicate has to be
+able to match what is on disk. Send `deriveStatus: true` for the derived status — it is refused on any other
+collection rather than ignored:
 
 ```json
 { "space": "work", "collection": "chrono", "filter": { "_id": "8f3c…" }, "limit": 1, "deriveStatus": true }
@@ -84,8 +84,8 @@ old route gave you — it is refused on any other collection rather than ignored
 
 ### List entities
 
-There is no `GET .../entities`, and there has not been since 5.0 — listing a collection is one shape for
-all of them:
+There is no `GET .../entities` (removed in 5.0 — port lists to `filter`). Listing a collection is one shape
+for all of them:
 
 ```http
 POST /api/filter
@@ -94,10 +94,10 @@ Content-Type: application/json
 { "space": "work", "collection": "entities", "limit": 50, "sort": "name", "dir": "asc" }
 ```
 
-The answer is `{ results, count, total, limit, skip, truncated }` — `results` where the route said
+The answer is `{ results, count, total, limit, skip, truncated }` — `results` where the removed route said
 `entities`, and `total` so a pager can tell a short page from the end of the match set.
 
-`limit` defaults to 200 and has no maximum; the route's 50/500 are gone. Every narrowing parameter and
+`limit` defaults to 200 and has no maximum. Every narrowing parameter and
 what each refuses is documented once in [the filter body](04d-brain-ops-api.md).
 
 ---
@@ -112,9 +112,7 @@ DELETE /api/brain/spaces/:spaceId/entities/:id
 
 **Response** `409 Conflict` while anything still references it (the default; a space that opted out with `strictLinkage: false` deletes regardless). Delete or relink those items first — **or cascade**, which is `?cascadeToken=` and is documented under [Preview and Cascade a Delete](#preview-and-cascade-a-delete) below. The refusal body carries the preview route and the parameter name, so the next call is discoverable from the error itself.
 
-> This paragraph used to read *"**There is no cascade** — no query parameter deletes an entity together with its references … so probing for a spelling that works will not find one"*, thirty lines above the section that documents exactly that. It was true until 4.0, and it is the reason the integrator who asked for the capability tried `?cascade=true`, `?force=true`, `?deleteEdges=true` and `?withEdges=true` before writing clear-then-delete by hand.
-
-**BOTH ENDS OF AN EDGE COUNT, and the refusal used to say "inbound".** An edge pointing FROM this entity blocks the delete exactly as one pointing at it does, because either would be left dangling. The old message named a direction the check has never had, so a caller filtered on `to`, found nothing, and could not clear the block. It no longer names one, and each edge row carries the end that matched instead — `from`, `to`, or `both` for a self-loop.
+**BOTH ENDS OF AN EDGE COUNT.** An edge pointing FROM this entity blocks the delete exactly as one pointing at it does, because either would be left dangling. The refusal names no direction; each edge row carries the end that matched instead — `from`, `to`, or `both` for a self-loop.
 
 Everything that can reference an entity is checked: **edges** on either endpoint, and the LINKS from **facts**, **chrono entries** and **files**. Only an edge has ends, so `end` is absent on the other three — a link says one record is about another rather than terminating at it, and labelling them would send you looking for an edge that does not exist.
 
@@ -146,14 +144,14 @@ Response body:
 }
 ```
 
-The MCP `delete_entity` tool refuses with the **same sentence**, from the same check. It used to word it differently and return no rows at all, so which client you used decided whether you could see what to clear.
+The MCP `delete_entity` tool refuses with the **same sentence**, from the same check.
 
 ---
 
 ### Preview and Cascade a Delete
 
 A `DELETE` on an entity is refused with `409` while anything still references it, in a space with
-`strictLinkage` on. **From 4.0 there is a second way out**, and the refusal now names it: preview exactly
+`strictLinkage` on. **There is a second way out**, and the refusal names it: preview exactly
 what a cascade would remove, then repeat the delete quoting the token the preview returns.
 
 ```http
@@ -345,9 +343,7 @@ Upserts on `(spaceId, from, to, label)`.
 
 #### An endpoint is an entity unless the edge says otherwise (3.7)
 
-An edge used to join two entities and nothing else, so `from` and `to` were bare entity ids and every reader
-knew where to look them up. From 3.7 an endpoint can be **any** of the four kinds of record, and the edge says
-which:
+An endpoint can be **any** of the four kinds of record, and the edge says which:
 
 ```json
 {
@@ -366,9 +362,8 @@ two records in different collections may share an id and the answer would then d
 happened to try them.
 
 **Omitting the field is the correct thing to do for an entity, and is not the same as sending `"entity"`.** An
-omitted kind is stored as nothing at all, and every reader treats an absent kind as `entity` — so every edge
-written before 3.7, and every ordinary entity-to-entity edge written after it, is byte-identical. Nothing was
-migrated and nothing needs to be.
+omitted kind is stored as nothing at all, and every reader treats an absent kind as `entity`, so an ordinary
+entity-to-entity edge carries no kind field. Nothing needs migrating.
 
 | | `entity` | `fact` | `chrono` | `file` |
 |---|---|---|---|---|
@@ -376,8 +371,8 @@ migrated and nothing needs to be.
 | **`400` on** | not a UUID | not a UUID | not a UUID | leading `/`, a `..` segment, or a backslash |
 | **looked up in** | entities | facts | chrono | file meta |
 
-A path is checked for shape on every write, and for existence only under `strictLinkage` — the same rule the
-UUID kinds have always had.
+A path is checked for shape on every write, and for existence only under `strictLinkage` — the same rule as
+the UUID kinds.
 
 **A stated kind that is wrong is refused, not stored.** Under `strictLinkage` the endpoint is looked up in the
 collection its kind names, so `"toKind": "chrono"` with an entity's id is a `400` rather than a dead link. A
@@ -392,30 +387,27 @@ the endpoint then resolves in the right collection.
 **What the edge embeds changes with the kind.** An edge's vector is built from `from label to` with the
 endpoints resolved to names: an entity's `name`, a chrono entry's `title`, a fact's `fact` (capped at 200
 characters, so a long fact cannot crowd out the relationship itself), and for a file the path, which is
-already its name. An endpoint that resolves to nothing falls back to the raw id, as it always has.
+already its name. An endpoint that resolves to nothing falls back to the raw id.
 
 **Both kinds cross the wire.** They are declared on the sync ingest schema, so a peer receives the edge
-meaning what its author meant. A field on a replicated document that the ingest schema does not declare is
-kept on pull and deleted on push — same version, one direction, silently — which is why this is worth stating.
+meaning what its author meant.
 
 #### An edge's `_id` is DERIVED from the relationship, and moves when the relationship does
 
-Since 3.6 an edge's `_id` is `uuidv5` over `(from, to, label)`, each part length-prefixed so no part can forge
-the separator — and since 3.7 over the endpoint KINDS as well, because each collection assigns its own UUIDs
-and a fact may hold the same id as an entity. `(X) -[mentions]-> (Y as entity)` and the same triplet with Y a
-fact are two relationships, so they must be two ids.
+An edge's `_id` is `uuidv5` over `(from, to, label)`, each part length-prefixed so no part can forge the
+separator — and over the endpoint KINDS as well, because each collection assigns its own UUIDs and a fact may
+hold the same id as an entity. `(X) -[mentions]-> (Y as entity)` and the same triplet with Y a fact are two
+relationships, so they must be two ids.
 
-**An entity-to-entity edge derives exactly the id it did before**, and that is a requirement rather than a
-courtesy: a peer on an older build derives without the kinds, so appending them unconditionally would give the
-two peers different ids for the same ordinary edge. They are appended only when at least one endpoint is not an
-entity — a combination that could not exist before 3.7 and therefore has no older peer to disagree with. If you
-derive ids yourself, omit the kinds for an entity-to-entity edge; do not send `"entity"`.
+**The kinds are appended only when at least one endpoint is not an entity**, so every peer derives the same
+id for an ordinary entity-to-entity edge. If you derive ids yourself, omit the kinds for an entity-to-entity
+edge; do not send `"entity"`.
 
-The unique index moved with it, to `(from, to, label, fromKind, toKind)`. An entity endpoint stores nothing —
-`"entity"` is normalised to absent — so every edge written before 3.7 keys identically to a new ordinary one. Two peers creating the same relationship therefore arrive at the same id **without talking**,
+The unique index is `(from, to, label, fromKind, toKind)`. An entity endpoint stores nothing — `"entity"` is
+normalised to absent. Two peers creating the same relationship therefore arrive at the same id **without talking**,
 and the sync collision is an idempotent no-op instead of a duplicate key on every cycle. `spaceId` is
 deliberately not part of the key: space aliasing lets one logical space carry a different local id on each
-peer, so including it would derive differently on the two sides — which is the defect this removes.
+peer, so including it would derive differently on the two sides.
 
 **This is a contract about ids, not only an implementation detail, because identity can change.** Mongo's
 `_id` is immutable, so an edge whose identity changes is deleted and re-inserted under the id it now derives.
@@ -443,18 +435,17 @@ edge in the way, rather than surfaced as an index violation.
 **One case does not move: an edge this instance did not author.** Deleting the old id on a peer requires a
 tombstone issued by the document's own author — that rule is what stops one instance deleting another's
 content, and it applies here too. So an edge that arrived from a peer keeps its original id when its identity
-changes, exactly as every edge did before 3.6. It is one row, it converges, and the only cost is that a third
-peer creating the same relationship derives a different id and hits the unique index, which is the behaviour
-this feature narrows rather than removes.
+changes. It is one row, it converges, and the only cost is that a third peer creating the same relationship
+derives a different id and hits the unique index.
 
-Edges created before 3.6 keep their original random ids. There is no migration and none is needed: a derived
-id only has to be agreed on by peers creating an edge from now on.
+Edges created before 3.6 keep their original random ids, so not every stored `_id` is derived. There is no
+migration and none is needed: a derived id only has to be agreed on by peers creating the same edge.
 
 ---
 
 ### List edges
 
-Same shape, different collection — and the same since 5.0:
+Same shape, different collection:
 
 ```http
 POST /api/filter
@@ -509,7 +500,7 @@ POST /api/brain/spaces/:spaceId/traverse
 | `direction` | — | `"outbound"` | `"outbound"` follows edges from the node, `"inbound"` follows edges to it, `"both"` follows in either direction. **Stored edges only** — it does not narrow links; see below |
 | `edgeLabels` | — | all labels | Filter traversal to specific edge labels only |
 | `maxDepth` | — | `3` | Maximum hops from `startId`; hard-capped at `10` |
-| `limit` | — | `100` | Maximum total nodes returned, **clamped to 1–1000 on both doors** — `limit: 5000` silently becomes 1000. The neighbouring `maxDepth` row states its ceiling and this one did not |
+| `limit` | — | `100` | Maximum total nodes returned, **clamped to 1–1000 on both doors** — `limit: 5000` silently becomes 1000 |
 | `includeChrono` | — | `true` | Also reach chrono entries LINKED to a traversed node. Set `false` for entity-only results. A non-boolean is a `400`, never coerced |
 | `includeMemories` | — | `false` | Also reach facts LINKED to a traversed node, marked `kind: "fact"`. **Opt-in, unlike `includeChrono`** — see the note below. A non-boolean is a `400`. **This door's `false` is a real default**, so an unsaid flag brings no facts: recall's expansion differs and brings ATTRIBUTED claims when the flag is unsaid, because its caller asked a question rather than asked to explore — see [the recall page](04a-recall-api.md) |
 | `includeFiles` | — | `false` | Also reach files LINKED to a traversed node, marked `kind: "file"` and carrying **file meta only**. Opt-in. A non-boolean is a `400` |
@@ -531,17 +522,13 @@ POST /api/brain/spaces/:spaceId/traverse
 > **On THIS door it is a plain `false`** and an unsaid flag brings no facts at all: a caller here is
 > exploring a graph and says what it wants, where a recall asked a question and is owed the context.
 
-**`truncated: true` has three causes, and one of them is new in 3.7.** The node cap filled; a link scan spent
-its budget; or **a hop's EDGE read spent its budget**. The third used to be impossible to report because the
-read was unbounded — one hub entity pulled its entire edge set into fact per hop, and the node cap could not
-prevent it, because that cap counts nodes EMITTED and a neighbour already visited or of a non-entity kind is
-skipped without spending any of it.
+**`truncated: true` has three causes.** The node cap filled; a link scan spent its budget; or **a hop's EDGE
+read spent its budget**. The edge read is bounded separately because the node cap counts nodes EMITTED, and a
+neighbour already visited or of a non-entity kind is skipped without spending any of it — so a walk through a
+hub entity can answer `truncated: true` with the node cap unfilled. Treat the flag as *"there was more graph
+than this answer contains"* rather than as *"the node cap filled"*.
 
-So a walk through a hub now answers `truncated: true` where it previously answered a complete-looking result it
-had paid a very large read for. Treat the flag as *"there was more graph than this answer contains"* rather
-than as *"the node cap filled"* — the two were the same thing until this release and are not any more.
-
-**`direction` narrows stored edges and never links.** A link is a **record** with a `from` and a `to` since 4.0 — but which way it runs is fixed by the
+**`direction` narrows stored edges and never links.** A link is a **record** with a `from` and a `to` — but which way it runs is fixed by the
 KINDS at its ends rather than by the data. A fact names entities and an entity names nothing, so asking for
 a fact's outbound links and its inbound links is not a choice between two answers; for an entity one of the
 two is always empty. There is nothing for `direction` to select between, so it selects nothing.
@@ -575,18 +562,13 @@ disagreeing about one parameter is worse than either reading of it.
   The start node counts against `limit` like any other, so `limit: 1` answers the start alone, which is
   also the cheapest way to ask whether an id exists.
 
-  > *Changed in 5.0:* the start node was excluded, so an isolated record and a bad id both answered
-  > `nodes: []`. The tool's schema described the depth-0 node throughout — this makes the description
-  > true rather than correcting it, because the distinction it promises is the reason it was written.
+  > *Changed in 5.0:* `nodes` includes the start node at depth 0 — skip it if you want neighbours only.
 - `edges` — **every** edge among the records in `nodes`, including a **self-loop** and including a second
   edge between a pair already joined once. An edge to a record that is not in `nodes` is not listed: a
   relationship to something the answer does not contain says nothing a caller can use.
 
-  > *Changed in 5.0:* this listed one edge per node reached — the one that got there first. So a
-  > self-loop was never returned (its far end is always already visited) and the second of two
-  > differently-labelled edges between one pair silently disappeared, with `truncated: false`, which
-  > means *nothing was cut for size*. If you read `edges` as the relationships in a neighbourhood, it
-  > now is.
+  > *Changed in 5.0:* `edges` lists every edge among the nodes, self-loops and parallel edges included,
+  > rather than one edge per node reached — a client that assumed one edge per node must not.
 - `truncated: true` if `limit` was reached before exhausting the graph
 
 Server-side cycle detection ensures each record is visited at most once, so cyclic graphs are handled safely.
@@ -599,10 +581,8 @@ edge, and traversal follows it like any other. The node carries the `kind` of th
 
 **A walk can therefore START from a fact or a chrono entry**, not only an entity.
 
-> *Changed in 5.0:* the walk used to resolve every neighbour against the entities collection alone and drop
-> whatever was not there — no flag, no `truncated`, no error. An edge the write had accepted was stored and
-> reached by nothing, which is the *"stored, returned, and points at nothing traversable"* report arriving by
-> a different route. If you avoided non-entity endpoints because they seemed inert, they were.
+> *Changed in 5.0:* an edge to a non-entity record is followed; earlier versions dropped it silently. Read
+> each node's `kind` before following its `_id`.
 
 **No include flag gates this, and the asymmetry with the flags below is deliberate.** `includeMemories` and
 `includeFiles` are opt-in because they follow IMPLICIT links — a record that happens to name this one — of
@@ -613,10 +593,10 @@ as many as were meant.
 
 A chrono-to-entity link is what joins a timeline to the graph, and traversal follows it — a chrono entry
 that references a traversed node is returned as though joined by an **inbound** edge, which is what that
-field is. No schema change was needed; the link already existed and simply had no reader here.
+field is.
 
-- **A chrono node carries `kind: "chrono"`. An entity node carries no `kind` at all**, so every response you
-  were already parsing is unchanged. Read `kind` before following an `_id`: the two live in different
+- **A chrono node carries `kind: "chrono"`. An entity node carries no `kind` at all.** Read `kind` before
+  following an `_id`: the two live in different
   collections, and `type` cannot tell you which (a chrono's is `event`/`deadline`/…, an entity's is whatever
   the space calls it).
 - **The synthetic edge is labelled `chrono.entityIds`** — a frozen token naming the 4.x field this link
@@ -627,14 +607,13 @@ field is. No schema change was needed; the link already existed and simply had n
   Because the label is real, `edgeLabels` filters it like any other: an explicit filter that does not name it
   **excludes** chrono entries.
 
-  > *Changed:* this id used to be the chrono's own `_id`, on the stated rationale that looking it up would
-  > resolve to the chrono. It never did — the edge lookup is collection-scoped — and sharing an id between a
-  > node and an edge made graph libraries drop the edge, since they keep one id namespace for both.
-- **A chrono reached through its LINK is a leaf.** Traversal does not expand outward from one — a chrono's
-  a chrono entry links to entities, not to other chrono entries, so expanding would only walk back to entities
+  > *Changed:* this id was the chrono's own `_id`. A client that used it to look up the chrono must take the
+  > id from the NODE; an edge id never shares a node's id.
+- **A chrono reached through its LINK is a leaf.** Traversal does not expand outward from one — a chrono
+  entry links to entities, not to other chrono entries, so expanding would only walk back to entities
   already visited. **A chrono reached through an explicit EDGE is not a leaf**: an edge chains, and stopping
   there would answer one hop of a chain and call it the neighbourhood.
-- Set `includeChrono: false` for the previous entity-only behaviour.
+- Set `includeChrono: false` for entity-only results.
 
 #### Facts are nodes too, on request
 
@@ -678,9 +657,8 @@ If you need fewer edges *followed*, that is `edgeLabels`, which genuinely narrow
 #### Bodies in one call: `projection`
 
 A walk returns nodes as `_id`, `name`, `type`, `depth` (and `kind`), and edges as `_id`, `from`, `to`, `label`.
-That is what makes it cheap, and it is also why reading a subgraph's CONTENT used to take the walk plus a
-`query` per collection over the ids it returned. Send a `projection` and each reached record comes back with
-its body instead — the same grammar `query` and `recall` take, applied to every node and every stored edge:
+That is what makes it cheap. To read a subgraph's CONTENT in the same call, send a `projection`: each reached
+record comes back with its body, rather than needing a `query` per collection over the ids — the same grammar `query` and `recall` take, applied to every node and every stored edge:
 
 ```json
 { "startId": "cd2c0dc6-e7b0-4759-a3a9-bd537e4f2d64", "maxDepth": 10, "limit": 1000,
@@ -697,12 +675,7 @@ its body instead — the same grammar `query` and `recall` take, applied to ever
 - It costs one read per collection per member space, bounded by the ids the walk already returned — the
   walk's own `limit` bounds it.
 
-Same parameters on MCP `graph_traverse`. Added in `F-32`, after the owner, shown a three-call recipe for this,
-asked: *"is that not just an includes flag?"*
-
-This closes a gap an integrator measured: reconstructing a 33-day hardware-RMA timeline took four `query()`
-calls plus two repository greps, and the first pass still missed the carrier ticket — it had to be found by a
-name regex instead of by traversal from the incident.
+Same parameters on MCP `graph_traverse`.
 
 ---
 
@@ -715,7 +688,7 @@ GET /api/spaces/:spaceId/meta
 The space's entity-relationship model, derived from the schema **and** from what is stored. Read-only,
 nothing cached, every number a real count of records.
 
-> **Folded into the space meta at 5.0.** The `er-model` route and the `er_model` tool are both gone; the same answer arrives as `actualSchema` on the space meta, beside the DECLARED schema. Both halves answer "what is this space like before I write to it", and having them together is what lets a type the space really holds be promoted into its declared schema. Same proxy rule (members reported separately),
+> **It arrives as `actualSchema` on the space meta**, beside the DECLARED schema. *Changed in 5.0:* the `er-model` route and the `er_model` tool are gone — read `actualSchema` instead. Both halves answer "what is this space like before I write to it", and having them together is what lets a type the space really holds be promoted into its declared schema. Same proxy rule (members reported separately),
 > and available to every token including read-only ones. It answers what a space *contains*, where
 > `space_meta` answers what its schema *permits*; an agent deciding how to write into an unfamiliar
 > space usually wants both.

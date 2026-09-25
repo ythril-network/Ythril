@@ -30,7 +30,7 @@ That last one is a diagnosis rather than a sort: a space near the top is one peo
 
 ### What the columns mean
 
-The table has never been described here, and two of its columns are not self-explanatory.
+Two of the table's columns are not self-explanatory.
 
 | Column | What it shows |
 |---|---|
@@ -54,7 +54,7 @@ Click **Create New Space**. Fill in:
 - **Validation mode** — the schema-validation posture for the new space: `off`, `warn`, or `strict`.
 - **Strict linkage** — a tickbox, on by default. While it is on, the space refuses to delete a record that another record still points at, and refuses a link to something that is not there. Untick it to allow both. This is the seventh field and the note below is about it as much as about validation.
 
-> **New spaces start strict.** A freshly created space now defaults to **`strict` validation** *and*
+> **New spaces start strict.** A freshly created space defaults to **`strict` validation** *and*
 > **strict linkage** — it enforces its schema and referential integrity from day one. You can relax
 > either from the space's **Schema tab** at any time. (Until you define per-type schemas there's nothing
 > to violate, so a brand-new empty space still accepts anything.) Spaces created by joining a federation
@@ -95,17 +95,15 @@ member. Your own definitions are not changed. It needs the Networks right at wri
 **Schema tab:** Define what data this space accepts. A **Schema validation** bar at the very top holds the space-wide **Validation mode** and **Strict linkage** controls — these govern *every* type in the space, not the collection you happen to be viewing. Below it, the entity / edge / fact / chrono collections each list their types on the left; click one to edit its rules in a stable panel on the right (you don't lose your place editing a type or property, and several property editors can be open at once).
 
 - **Validation mode** — `off` means anything goes; `warn` lets writes through but flags violations; `strict` blocks invalid writes entirely.
-  > **Editing is checked too, as of 2.2.** Previously only *creating* a record was validated; an edit
-  > could save a value the same space would have rejected on create. Now the record **as it will be** —
-  > yours plus the existing fields — is checked before it saves.
+  > **Editing is checked too.** The record **as it will be** — yours plus the existing fields — is checked
+  > before it saves, so an edit cannot save a value the same space would reject on create.
   >
   > **`strict` refuses what your edit breaks, not what was already broken.** A record can be invalid before
   > you touch it — written before you tightened the schema, imported, or synced from another brain. That is
   > reported, not refused: the problem is already saved, so blocking your edit would not fix it, it would
-  > only stop you maintaining the record. Until 3.1 it did block, which meant tightening a schema quietly
-  > froze every record that no longer fitted.
+  > only stop you maintaining the record.
   >
-  > The message still says which is which — *"the change violates…"* versus *"this record was already
+  > The message says which is which — *"the change violates…"* versus *"this record was already
   > non-compliant before your change…"* — so you are not sent looking at the wrong field. Validation is of
   > the result, so fixing the named field in any later save repairs the record.
 - **Strict linkage** — when on, references between items must be valid IDs and deletion of referenced items is blocked.
@@ -128,10 +126,9 @@ member. Your own definitions are not changed. It needs the Networks right at wri
 - **From File** — import a schema from a previously exported JSON file.
 - **Save to Lib** — save the current type schema to the Schema Library for reuse in other spaces.
 
-The toolbar at the top of the tab has **four** whole-space actions, and this guide listed three. **Export JSON** / **Import JSON** download or load the entire space's type schemas as one file. **Import library** pulls type definitions in from the instance's Schema Library — the reverse of the button beside it, and the one that was missing here. **Export to library** copies the *whole* space schema into the Schema Library in one step — one reusable entry per type, grouped under a name you choose (defaulting to the space's), so you can later apply the whole set to another space. Types already linked to the library (`From Lib`) are skipped. Save any pending edits first — it exports the last saved version.
+The toolbar at the top of the tab has **four** whole-space actions. **Export JSON** / **Import JSON** download or load the entire space's type schemas as one file. **Import library** pulls type definitions in from the instance's Schema Library — the reverse of the button beside it. **Export to library** copies the *whole* space schema into the Schema Library in one step — one reusable entry per type, grouped under a name you choose (defaulting to the space's), so you can later apply the whole set to another space. Types already linked to the library (`From Lib`) are skipped. Save any pending edits first — it exports the last saved version.
 
-**Duplicates tab:** The fourth tab, and the one this guide has never mentioned. It decides what this
-space does when the background scanner finds two records that look like the same thing.
+**Duplicates tab:** The fourth tab. It decides what this space does when the background scanner finds two records that look like the same thing.
 
 With no rules, a likely duplicate is simply **flagged for review** and waits for you on the Duplicates
 page. A rule raises that: give it a **minimum score** and an **action**, and any pair scoring at or above
@@ -159,19 +156,17 @@ never put to a network vote.
 
 **Retention** is the space-wide default: **Delete records after (days)**, as **five fields** — Entities, Facts, Edges, Chrono, Files — each applying to records of that kind with no TTL of their own and no window on their type. Five, not one, because a `tickets` space keeps ticket entities for a year and their status-change chrono entries for a month; **Files** gets its own because uploads share this setting and have no type for the Schema tab to reach.
 
-A space that set a single number before this split keeps working exactly as it did: it shows on all five fields, which is what it always meant.
-
 > **These numbers are yours alone, and a peer's are not.** In a space that syncs, every instance applies **its own** windows to every record it holds — including records that arrived from somebody else. An instance keeping tickets for a year does not start deleting them after a week because the peer it syncs with keeps them for a week. The expiry is worked out here, from the fields above, and is recomputed on this instance whenever the record is next written.
 >
-> **Before 4.0 that was true of records pushed to you and not of records you pulled**, so an instance doing the pulling could inherit the sender's expiry and delete data early — with nothing logged, and nothing to tell it apart from your own policy working. Nothing is restored by upgrading: what a peer's window already deleted is gone, and a stamp that came from a peer is replaced by your own the next time that record is written.
+> Upgrading from before 4.0: records a peer's window already deleted are not restored, and a stamp that came from a peer is replaced by your own the next time that record is written.
 
 Below the fields, any type that *does* have its own window is listed read-only — that list is where you see what actually overrides these numbers, and it is edited on the type, in the **Schema** tab.
 
-**Rebuild search indexes** is the repair for *search returns nothing and nothing says why* — a space whose vector indexes are missing or were destroyed (restoring a backup used to do this). It re-creates them from your existing content; search stays empty until it finishes, and nothing is deleted. Reindexing is not a substitute: it re-embeds content against the current model and cannot recreate a missing index. Requires an admin token (and TOTP when MFA is on). The same rebuild is also available per space directly from the **vector-index table** under Settings → Media Processing → Tools — the one place the drift (recorded *ready* vs. a database with no index) is actually visible — behind the same confirmation.
+**Rebuild search indexes** is the repair for *search returns nothing and nothing says why* — a space whose vector indexes are missing or were destroyed. It re-creates them from your existing content; search stays empty until it finishes, and nothing is deleted. Reindexing is not a substitute: it re-embeds content against the current model and cannot recreate a missing index. Requires an admin token (and TOTP when MFA is on). The same rebuild is also available per space directly from the **vector-index table** under Settings → Media Processing → Tools — the one place the drift (recorded *ready* vs. a database with no index) is actually visible — behind the same confirmation.
 
-> **Optional indexes do not count towards those states.** The face gallery is built when face recognition is enabled and is not part of what search needs, so a space with every search index in place reads as *Ready* even when the gallery is absent. Before 3.2.0 it did count, and the result was that turning face recognition on without giving it a model — no external model configured, no model files placed — made every space report *Missing* here, *Failed* on its own Indexing panel, and the whole Tools tab *down*, permanently, on an instance whose search was working. A red state that is always red is one you learn to stop reading. A missing gallery is still reported; it just no longer reports it as the space failing.
+> **Optional indexes do not count towards those states.** The face gallery is built when face recognition is enabled and is not part of what search needs, so a space with every search index in place reads as *Ready* even when the gallery is absent — including when face recognition is on with no model configured. A missing gallery is still reported, but not as the space failing.
 
-The other three are guarded: because renaming changes the space ID (which breaks existing token and MCP references to it), **Rename** — like Wipe and Delete — now asks you to type the current space ID to confirm.
+The other three are guarded: because renaming changes the space ID (which breaks existing token and MCP references to it), **Rename** — like Wipe and Delete — asks you to type the current space ID to confirm.
 
 Each space row carries only a gear/configure (⚙) button — there is no pencil icon. Rebuilding indexes, renaming, wiping, and deleting all live inside the space's settings panel, on the **Danger** tab.
 
@@ -242,34 +237,25 @@ Click **Create Token**. The dialog asks for:
 
 Then **Create token** — the value is shown **once**. Copy it immediately.
 
-> **The two instance-level checkboxes were documented on no page at all, and they are the widest thing
-> this dialog can grant.** **Instance administrator** and **May create new spaces** are not rungs on a
-> space: the dialog says so itself — *"these apply to the whole instance. A space-restricted administrator
-> cannot grant them."* An operator ticking one from a paragraph that described three fields had no way to
-> know what they were reading.
+> **The two instance-level checkboxes are the widest thing this dialog can grant.** **Instance
+> administrator** and **May create new spaces** are not rungs on a space: the dialog says so itself —
+> *"these apply to the whole instance. A space-restricted administrator cannot grant them."*
 
-The matrix is the whole permission model. Earlier versions also offered a spaces checkbox list and a
-three-way Read-only / Standard / Admin choice; those described the same access in an older vocabulary, and
-the server refuses a request that uses both at once. The matrix says everything they said and things they
-could not — such as **admin on Files in one space and nothing anywhere else**.
+The matrix is the whole permission model. A spaces list and a three-way Read-only / Standard / Admin level
+describe the same access in an older vocabulary, and the server refuses a request that uses both those and
+the matrix at once. The matrix says everything they say and things they cannot — such as **admin on Files in
+one space and nothing anywhere else**.
 
 The tokens list shows each token's scope at any time. The **Permission** column draws a small **bar chart**,
 one bar per rights area, each bar's height being the highest rung that area reaches, with a red line marking
 the floor that applies to every space. So a glance separates a token that is admin everywhere from one that
 is admin on Files in a single space — which a single colour could not.
 
-> This described a **pill colour-coded by privilege** — *"admin is red, standard is green, read-only is
-> yellow"* — and there is no such pill. Those three colour labels exist in the translation file and are
-> referenced by nothing; the bar chart replaced them when the matrix did, because a token with four areas
-> and a per-space override has no single privilege to colour. An operator told to scan for red pills was
-> looking for something that had not been there for a release.
-
 This dialog has no "Library Access" toggle. Library Access tokens (for sharing your schema library with other instances) are created separately, from the **Schema Library** page's own **Create token** dialog — see [Schema Library](03-files-and-schemas.md#schema-library).
 
 **Editing a token.** Each row has **two** pencils, and they do different things. The one beside the label
 renames in place and saves on its own. The one in the **Permission** column opens the rights editor. So a
-rename and a scope change are two edits, not one — this paragraph said they were saved together in a single
-request, which is the opposite of what it warns about. The secret is untouched by either; use **Rotate** for
+rename and a scope change are two edits, not one. The secret is untouched by either; use **Rotate** for
 that.
 
 #### The areas
@@ -291,10 +277,6 @@ part of administering a space**: the Space admin column leaves the Networks cell
 still share **its own** spaces without it: create a network with them, join one onto them, and invite others. Tokens
 created before this column existed hold `none` there.
 
-> **This page named three of them and never mentioned Data quality**, while a paragraph further down told
-> you to *"set all four cells"*. So the instruction counted an area the guide had not introduced, and an
-> operator granting rights had no idea what the fourth column governed.
-
 #### Hover a rung to see what it grants
 
 Each of the four segments in a cell carries a tooltip, and it leads with what that level actually allows —
@@ -305,13 +287,11 @@ down one.
 
 #### Administering one space, without administering the instance
 
-**A space administrator holds `admin` in all four areas of one space — and since 5.0 you grant it in one
+**A space administrator holds `admin` in all four areas of one space — and you grant it in one
 press**, with the **Space admin** column at the right-hand end of the matrix.
 
-The difference shows the day after. When that column wrote four rungs, four rungs were all that got saved:
-your intention was gone, and changing any single cell later took the role away with nothing saying so. The
-grant is now stored as itself, so it survives an edit to a neighbouring cell. A token set up the old way
-still administers its space and needs no attention.
+The grant is stored as itself, so it survives an edit to a neighbouring cell. A token given admin in all four
+cells by hand also administers its space and needs no attention.
 
 What it means in practice: that token can manage **that space's own tokens** — list, mint and edit them — and
 **that space's own settings**, schema and index rebuilds. Nothing wider.
@@ -341,8 +321,7 @@ behind a permission nobody picked. This is why the Schema cell can show **read**
 shows `none` — both are correct, and the grid is showing you what the token can actually do.
 
 > **A matrix stored in an obsolete shape is repaired when the instance starts.** If a token's stored rights
-> name an area the server no longer knows, or leave one of the four out, the editor could open it and never
-> save it — the server refused the very shape it had handed over. Startup now normalizes such a matrix and
+> name an area the server no longer knows, or leave one of the four out, startup normalizes the matrix and
 > writes it down: an unknown area is dropped, a missing one comes back at **none**, and every rung the server
 > can still read is kept exactly as it was. The repair only ever narrows, so re-check the token's matrix after
 > upgrading if you see one change; it never restores access from the pre-3.0 `admin` / `read-only` / spaces
@@ -355,10 +334,9 @@ column reads the state too: a row shows **A** whether you granted it here, set t
 reached it through **All spaces**. Two positions and not four, because administering a space is not a
 level — anything in between is still said with the four area cells.
 
-**What changed at 5.0:** pressing **A** records *"this token administers this space"* rather than setting
-four cells and saving only those, which let the next edit remove the role unannounced. Taking it back also
-clears a row set the old way, so the column and the server cannot disagree about who administers what. It can then do
-two things it could not before:
+Pressing **A** records *"this token administers this space"* as a grant of its own, so the next edit to a
+cell does not remove the role. Taking it back also clears a row set to four admins by hand, so the column and
+the server cannot disagree about who administers what. The token can then do two things:
 
 - **Manage that space's tokens** — create them, edit their rights, rotate and revoke them. It only ever sees
   and edits tokens whose own reach sits inside the spaces it administers.
@@ -367,17 +345,17 @@ two things it could not before:
 - **Change that space's settings** — its name, its schema and types, and a re-index of its own search
   indexes.
 
-**Since 4.4 almost none of that needs all four areas.** Each setting answers to its own area — media levels
+**Almost none of that needs all four areas.** Each setting answers to its own area — media levels
 to `Files`, duplicate rules to `Data quality`, the record lifetime and embedding switch to `Knowledge` admin,
-types to `Schema`. A space administrator holds all of them, so nothing they could do is gone; a token needing
-only one can now be given only that one. A save touching something the token may not change is refused
+types to `Schema`. A space administrator holds all of them; a token needing only one can be given only that
+one. A save touching something the token may not change is refused
 WHOLE, naming each field, so nothing is half-applied.
 
 All four areas, deliberately. Admin on **Files** alone would be enough to mint tokens if any single area
 counted, which is a bigger grant than the cell appears to make.
 
 **Administering one space grants nothing in another.** The check is against the space being edited, so an
-administrator of *Research* who opens *Finance* is refused exactly as before.
+administrator of *Research* who opens *Finance* is refused.
 
 **Two things stay with the instance owner**, and both refuse with a message saying so:
 
@@ -397,9 +375,8 @@ Open the **?** beside `Space admin` and, under what it grants, there is a short 
 grid does **not** decide — renaming a space, reading which tokens reach it, and its usage counters — each with
 the reason. They are read from the server, so the list cannot fall out of step with what is enforced.
 
-**Why it is worth a line.** A grid of four areas looks complete, and nothing used to say that three
-space-scoped actions sat outside all four. If you were checking whether a token can rename a space, no cell in
-the matrix answered and none said it would not.
+**Why it is worth a line.** A grid of four areas looks complete, but these space-scoped actions sit outside
+all four: if you are checking whether a token can rename a space, no cell in the matrix answers it.
 
 It does **not** mean those actions are unguarded. A token that cannot reach the space cannot call them at all,
 and each one still needs admin or space-admin. What the list says is only which mechanism decides.
@@ -535,9 +512,8 @@ The first time you open **Settings → Networks**, networking is off. Click **En
 Click **Create Network**. The dialog asks for a **label**, a **type**, the **spaces** to include, and a
 **Voting deadline (hours)** — how long a vote round stays open before it lapses, 1 to 72.
 
-> **There is no schedule field in this dialog.** This step said to set one here *"(cron expression)"*,
-> and the cron box is on the network card afterwards — see [Sync schedule](#sync-schedule) below, which
-> describes it correctly. The voting deadline, which IS in the dialog, was not mentioned at all.
+> **There is no schedule field in this dialog.** The cron box is on the network card afterwards — see
+> [Sync schedule](#sync-schedule) below.
 
 ### Inviting another brain
 
@@ -548,7 +524,7 @@ Click **Create Network**. The dialog asks for a **label**, a **type**, the **spa
    is safe. It is encoded, not encrypted. It expires after 1 hour and works only once. (An instance that has
    not been upgraded still produces the older JSON blob, which keeps working.)
 
-**Both ends are recorded in the audit log.** Generating an invite appears as `network.invite.generate`, and the moment the other brain actually becomes a member — or is held for a join vote — appears as `network.member.join`. Until 2026-08-28 neither did: the whole invite path was exempt from auditing as "peer-facing", which was true about who calls it and beside the point about what it changes.
+**Both ends are recorded in the audit log.** Generating an invite appears as `network.invite.generate`, and the moment the other brain actually becomes a member — or is held for a join vote — appears as `network.member.join`.
 
 ### Joining a network
 
@@ -566,9 +542,9 @@ Click **Create Network**. The dialog asks for a **label**, a **type**, the **spa
 
 Enter a cron expression on the network card (e.g. `*/5 * * * *` for every 5 minutes). Click **Sync now** to trigger an immediate sync without waiting. Leave the field empty for manual-sync only — that is a real setting, not an omission.
 
-**A value the scheduler cannot run is refused, and the message tells you what to send instead.** It used to be accepted: the field saved, the card looked right, and the network never synced again — the only sign was a line in the server log. If you have been using one of the old short forms (`every 5m`, `*/2 hours`), the refusal names the cron expression it always meant, so the fix is a copy and paste. Anything already saved was converted on upgrade, so an existing network keeps its schedule.
+**A value the scheduler cannot run is refused, and the message tells you what to send instead.** A short form such as `every 5m` or `*/2 hours` is refused with the cron expression it means, so the fix is a copy and paste. Short forms already saved are converted on upgrade, so an existing network keeps its schedule.
 
-One case is worth checking after upgrading: a short form outside cron's range, such as `every 90m`, never worked at all, so a network holding one has been syncing only when you pressed **Sync now**. Those are listed by name in the server log at startup, and are left as they are rather than rounded to something you did not choose.
+Upgrading: a saved short form outside cron's range, such as `every 90m`, cannot be converted, so that network syncs only when you press **Sync now**. Each one is listed by name in the server log at startup and left as it is rather than rounded to something you did not choose.
 
 ### Sync history
 
@@ -588,8 +564,8 @@ what a brand-new member looks like. See *The version a peer has to be running* b
 
 ### The version a peer has to be running
 
-Every brain on a network has to be recent enough for the others to trust what it sends. From 4.0.0 each
-one tells the others what version it runs, and a brain that is too old is not sent data and is not
+Every brain on a network has to be recent enough for the others to trust what it sends. Each one
+tells the others what version it runs, and a brain that is too old is not sent data and is not
 accepted from — its member row shows a red **Version too old** badge, and hovering it gives the two
 numbers: what that peer runs, and what is required.
 
@@ -613,7 +589,7 @@ probably fine — the check would let through every brain it exists to stop.
 
 **A brain you have never exchanged with is a different case, and it is not refused.** Until the two
 have talked once, there is nothing to judge — so the badge stays off and an unreachable peer shows up
-the way it always has, as **Failing (N)**. This matters for real setups rather than being a technical
+as **Failing (N)**. This matters for real setups rather than being a technical
 nicety: a network where only one side holds the configuration, or where you added a peer by hand, may
 never complete the exchange that reports a version, and refusing those would stop them syncing for good
 with nothing to show why.

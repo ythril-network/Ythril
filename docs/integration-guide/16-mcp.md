@@ -420,18 +420,17 @@ row survives its own tool being built, so the list cannot keep advertising a gap
 > `maxGiB` is not settable from either tool. It is the space's share of the host's disk, so it needs
 > instance-admin rights and the REST route.
 
-### Example: remember
+### Example: save_fact
 
 ```json
 {
   "method": "tools/call",
   "params": {
-    "name": "remember",
+    "name": "save_fact",
     "arguments": {
       "space": "general",
       "fact": "Traefik v3 requires CRD patches for allowSlashesInPath",
-      "tags": ["traefik", "gotcha"],
-      "entities": ["Traefik"]
+      "tags": ["traefik", "gotcha"]
     }
   }
 }
@@ -804,13 +803,13 @@ Response:
 
 Works with any valid token (including read-only). For proxy spaces, returns aggregated counts across all member spaces.
 
-### Example: query
+### Example: filter
 
 ```json
 {
   "method": "tools/call",
   "params": {
-    "name": "query",
+    "name": "filter",
     "arguments": {
       "space": "general",
       "collection": "facts",
