@@ -12,7 +12,7 @@ import { getConfig, saveConfig } from '../../config/loader.js';
 import { concludeRoundIfReady, sendMemberRemovedNotify } from '../../sync/governance.js';
 import { makeSignedOwnCast } from '../../util/signing.js';
 import { log } from '../../util/log.js';
-import { applyWipeRoundIfPassed } from '../../spaces/apply-wipe-round.js';
+import { applyConcludedSpaceRounds } from '../../spaces/apply-wipe-round.js';
 
 export const votesRouter = Router();
 
@@ -66,19 +66,8 @@ votesRouter.post('/:id/votes/:roundId', globalRateLimit, requireAdmin, (req, res
       }
     }
 
-    // If space_deletion round concluded and passed, remove the space on this instance
-    if (round.concluded && round.type === 'space_deletion') {
-      const vetoCount = round.votes.filter(v => v.vote === 'veto').length;
-      if (vetoCount === 0 && round.spaceId) {
-        import('../../spaces/lifecycle.js').then(({ removeSpace }) => {
-          removeSpace(round.spaceId!).catch(err => log.error(`space_deletion vote side-effect: ${err}`));
-        }).catch(err => log.error(`space_deletion import: ${err}`));
-      }
-    }
-
-    // X-5: a concluded space_wipe empties the space here. One shared function, called from all three
-    // conclusion sites, rather than a third copy of the side-effect.
-    applyWipeRoundIfPassed(round, 'local vote');
+    // S-9: deletion and wipe through one decision — a round that passed, on a space this network carries, once.
+    applyConcludedSpaceRounds(net, [round], 'local vote');
 
     // If remove round concluded and passed, notify the ejected member
     if (round.concluded && round.passed && round.type === 'remove') {

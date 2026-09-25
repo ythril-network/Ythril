@@ -10,7 +10,7 @@ import { requireAuth, denyReadOnly } from '../../auth/middleware.js';
 import { peerRelayCaller, PEER_RELAY_REFUSAL } from '../../auth/peer-relay.js';
 import { log } from '../../util/log.js';
 import { reportServerFailure } from '../../util/report-failure.js';
-import { applyWipeRoundIfPassed } from '../../spaces/apply-wipe-round.js';
+import { applyConcludedSpaceRounds } from '../../spaces/apply-wipe-round.js';
 import { acceptVoteCast } from '../../util/signing.js';
 import { concludeRoundIfReady, sendMemberRemovedNotify } from '../../sync/governance.js';
 
@@ -31,7 +31,8 @@ syncVotesRouter.get('/networks/:networkId/votes', syncRateLimit, requireAuth, as
       .filter(r => !r.concluded)
       .map(r => {
         // Strip sensitive key material before sending to a peer instance
-        const { inviteKeyHash: _ikh, ...safeRound } = r;
+        // Local-only state never leaves: `appliedHere` says what THIS instance did (S-9).
+        const { inviteKeyHash: _ikh, appliedHere: _ah, ...safeRound } = r;
         if (safeRound.pendingMember) {
           const { tokenHash: _th, ...safeMember } = safeRound.pendingMember;
           safeRound.pendingMember = safeMember as typeof safeRound.pendingMember;
@@ -115,19 +116,8 @@ syncVotesRouter.post('/networks/:networkId/votes/:roundId', syncRateLimit, requi
     // Check if the round should auto-conclude
     concludeRoundIfReady(net, round);
 
-    // If a space_deletion round just passed, remove the space on this instance
-    if (round.concluded && round.type === 'space_deletion') {
-      const vetoCount = round.votes.filter(v => v.vote === 'veto').length;
-      if (vetoCount === 0 && round.spaceId) {
-        import('../../spaces/lifecycle.js').then(({ removeSpace }) => {
-          removeSpace(round.spaceId!).catch(err => log.error(`space_deletion gossip side-effect: ${err}`));
-        }).catch(err => log.error(`space_deletion import: ${err}`));
-      }
-    }
-
-    // X-5: same shared side-effect as the local-vote path. A peer's yes can be the one that carries the
-    // round, so this instance must wipe on THIS path too — that is the half a per-site copy tends to miss.
-    applyWipeRoundIfPassed(round, 'peer vote');
+    // S-9: deletion and wipe through one decision — a round that passed, on a space this network carries, once.
+    applyConcludedSpaceRounds(net, [round], 'peer vote');
 
     // If a remove round just passed, notify the ejected member
     if (round.concluded && round.passed && round.type === 'remove') {
