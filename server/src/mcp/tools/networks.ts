@@ -12,6 +12,7 @@ import { uuidSchema } from './shared.js';
 import {
   readNetworkAct, createNetworkAct, updateNetworkAct, leaveNetworkAct, addNetworkSpaceAct, type NetworkActResult,
 } from '../../networks/network-acts.js';
+import { castVoteAct, listOpenVotesAct, syncHistoryAct } from '../../networks/vote-acts.js';
 
 /** The caller an act sees: this connection's matrix, and the token id memberships are recorded against. */
 const callerOf = (ctx: ToolContext) => ({ ...(ctx.rights ? { rights: ctx.rights } : {}), ...(ctx.actor?.tokenId ? { id: ctx.actor.tokenId } : {}) });
@@ -139,5 +140,71 @@ export const network_leaveTool: ToolHandler = {
   }),
   async handle(ctx: ToolContext): Promise<ToolResult> {
     return toResult(await leaveNetworkAct(callerOf(ctx), String(ctx.args['id'])), 'Left the network.');
+  },
+};
+
+// ── F-36 slice 2: votes and sync history. Instance-admin, like their routes: they act on the network as a whole. ──
+
+export const network_votesTool: ToolHandler = {
+  name: 'network_votes',
+  description: 'List the vote rounds still open on a network: joins, removals, space deletions and wipes, space '
+    + 'additions and meta changes, each with its deadline and the casts so far. Same answer as '
+    + '`GET /api/networks/:id/votes`. Requires instance-admin rights.\n\n'
+    + 'A ROUND IS HOW A NETWORK APPROVES A CHANGE. Cast on one with `network_vote`; a round nobody concludes by its '
+    + 'deadline fails.',
+  admin: true,
+  inputSchema: (_s: ToolSchemas) => ({
+    type: 'object', properties: { id: networkIdSchema }, required: ['id'], additionalProperties: false,
+  }),
+  async handle(ctx: ToolContext): Promise<ToolResult> {
+    return toResult(listOpenVotesAct(String(ctx.args['id'])), '');
+  },
+};
+
+export const network_voteTool: ToolHandler = {
+  name: 'network_vote',
+  description: 'Cast this instance\'s vote on an open round — `yes` or `veto` — signed with the instance key. Same '
+    + 'parameters and answer as `POST /api/networks/:id/votes/:roundId`: `{ concluded, round }`. Requires '
+    + 'instance-admin rights.\n\n'
+    + 'A CAST CAN CONCLUDE THE ROUND, and a concluded round takes effect here at once: a passed join admits the '
+    + 'member, a passed removal ejects one, a passed space deletion or wipe empties the space on this instance, a '
+    + 'passed space addition adds it. A single veto stops a deletion or wipe. Voting again replaces your earlier cast.',
+  admin: true,
+  mutating: true,
+  inputSchema: (_s: ToolSchemas) => ({
+    type: 'object',
+    properties: {
+      id: networkIdSchema,
+      roundId: uuidSchema('The round to vote on — `roundId` from `network_votes`. A round already concluded is refused (404).'),
+      vote: { type: 'string', enum: ['yes', 'veto'], description: 'Your vote: `yes` carries the change as the network type decides, `veto` stops it.' },
+    },
+    required: ['id', 'roundId', 'vote'],
+    additionalProperties: false,
+  }),
+  async handle(ctx: ToolContext): Promise<ToolResult> {
+    const { id, roundId, ...body } = ctx.args;
+    return toResult(castVoteAct(String(id), String(roundId), body), '');
+  },
+};
+
+export const network_sync_historyTool: ToolHandler = {
+  name: 'network_sync_history',
+  description: 'Read a network\'s recent sync cycles, newest first: when each ran, whether it succeeded, how many '
+    + 'records moved each way, and what stopped. Same answer as `GET /api/networks/:id/sync-history`. Requires '
+    + 'instance-admin rights.\n\n'
+    + 'A CYCLE THAT FAILED says which space and direction did not complete; a network that fails every cycle is not '
+    + 'syncing at all.',
+  admin: true,
+  inputSchema: (_s: ToolSchemas) => ({
+    type: 'object',
+    properties: {
+      id: networkIdSchema,
+      limit: { type: 'integer', minimum: 1, maximum: 100, default: 20, description: 'How many cycles to return, newest first: 1-100, default 20.' },
+    },
+    required: ['id'],
+    additionalProperties: false,
+  }),
+  async handle(ctx: ToolContext): Promise<ToolResult> {
+    return toResult(await syncHistoryAct(String(ctx.args['id']), ctx.args['limit']), '');
   },
 };

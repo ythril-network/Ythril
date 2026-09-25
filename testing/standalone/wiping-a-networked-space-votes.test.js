@@ -131,7 +131,7 @@ describe('all three conclusion sites apply it, through one function', () => {
   // it did not vote on — both through `applyConcludedSpaceRounds`, which also carries `space_deletion` and
   // `space_addition`, so no conclusion site holds a copy of any of the three side-effects.
   for (const [file, where, call] of [
-    ['server/src/api/networks/votes.ts', 'an operator voting locally', /applyConcludedSpaceRounds\(net, \[round\], /],
+    ['server/src/networks/vote-acts.ts', 'an operator voting locally', /applyConcludedSpaceRounds\(net, \[round\], /],
     ['server/src/api/sync/votes.ts', "a peer's vote arriving", /applyConcludedSpaceRounds\(net, \[round\], /],
     ['server/src/sync/engine.ts', 'the gossip pass', /applyConcludedSpaceRounds\(/],
   ]) {
@@ -144,7 +144,7 @@ describe('all three conclusion sites apply it, through one function', () => {
   it('and the side-effect is not written out three times', () => {
     // `space_deletion` IS written out three times, which is the shape this avoids: a change that reaches two
     // sites and silently misses the third.
-    for (const f of ['server/src/api/networks/votes.ts', 'server/src/api/sync/votes.ts', 'server/src/sync/engine.ts']) {
+    for (const f of ['server/src/networks/vote-acts.ts', 'server/src/api/sync/votes.ts', 'server/src/sync/engine.ts']) {
       assert.doesNotMatch(src(f), /wipeSpace\(/, `${f} must call the shared function, not wipe directly`);
     }
   });

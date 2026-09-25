@@ -15,6 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `PUT /api/spaces/:id/network-precedence`, and MCP `space_schema_layers` / `space_set_network_precedence`, with the
   same parameters and answers.
 
+- **An agent can see and cast network votes over MCP** (`F-36`, slice 2). `network_votes`, `network_vote` and
+  `network_sync_history` are the same acts as the votes and sync-history routes — same parameters, answers and
+  refusals, instance-admin on both doors. A vote is how a networked space approves a destructive act, and until now
+  an agent could be a member of a governance process it could not take part in.
+
 - **A space in two networks keeps each network's schema apart** (`F-39.2`). What each network sends is kept as
   its own layer beside this instance's own definitions, and the space runs on own ⊕ layers in precedence: the network
   joined first wins where two define the same property differently, and both keep syncing their records. Each
