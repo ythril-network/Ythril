@@ -170,6 +170,28 @@ network carrying the space is `400`, naming it. Rights: `schema: read` to see, `
 `space_schema_layers` and `space_set_network_precedence`, same parameters and answers. Audited as
 `space.precedence.update`.
 
+#### Settling a clash: propose a definition to one network
+
+```http
+PATCH /api/spaces/:id
+```
+
+```json
+{ "targetNetwork": "…", "meta": { "typeSchemas": { "entity": { "person": { "propertySchemas": { "tier": { "type": "number" } } } } } } }
+```
+
+`targetNetwork` proposes `meta` to ONE network carrying the space as **that network's** definition, instead of
+editing this instance's own (F-39.5). It merges over the network's layer — a named type is replaced whole, so send
+the network's full definition of the type with your change in it — opens a `meta_change` round on that network
+alone, and once passed lands in its layer on every member, the proposer included. Your own definitions are not
+touched. The answer is the ordinary one: `202 vote_pending` naming the round, or `200` where this instance's own
+yes carries it (a club organiser, a publisher).
+
+Refused with `400`: a network that does not carry the space, a body without `meta`, and a body with anything but
+`meta` and `typeSchemasMode` — a label, a quota or a TTL is this instance's, not the network's to vote on. Rights:
+`networks: write` for `targetNetwork`, beside what each `meta` field needs. MCP: `targetNetwork` on
+`schema_update`, same parameter and refusals.
+
 ### Validate Schema (Dry Run)
 
 ```http
