@@ -39,13 +39,16 @@ after(async () => {
   await del(INSTANCES.a, admin, `/api/spaces/${SECOND_SPACE}`).catch(() => {});
 });
 
-/** Run the whole handshake as the joiner would, and return the token the inviter handed it. */
-async function join(networkId) {
+/**
+ * Run the whole handshake as the joiner would, and return the token the inviter handed it. A joiner that is already A's
+ * peer proves it by presenting the token A issued to it (`S-6`), which is what `join-remote` does for a second network.
+ */
+async function join(networkId, proof) {
   const gen = await post(INSTANCES.a, admin, '/api/invite/generate', { networkId });
   assert.equal(gen.status, 201, JSON.stringify(gen.body));
   const b = generateKeyPairSync('rsa', { modulusLength: 4096,
     publicKeyEncoding: { type: 'spki', format: 'pem' }, privateKeyEncoding: { type: 'pkcs8', format: 'pem' } });
-  const apply = await post(INSTANCES.a, '', '/api/invite/apply', {
+  const apply = await post(INSTANCES.a, proof ?? '', '/api/invite/apply', {
     handshakeId: gen.body.handshakeId, networkId, instanceId: JOINER, instanceLabel: 'q47 joiner',
     instanceUrl: 'http://ythril-b:3200', rsaPublicKeyPem: b.publicKey,
   });
@@ -63,8 +66,8 @@ const syncRead = (token, n) => get(INSTANCES.a, token, `/api/sync/entities?space
 
 describe('two networks between the same pair', () => {
   it('the token from the LATEST handshake still reaches every network the pair shares', async () => {
-    await join(networks[0].id);
-    latest = await join(networks[1].id);
+    const first = await join(networks[0].id);
+    latest = await join(networks[1].id, first);
     for (const n of networks) {
       const r = await syncRead(latest, n);
       assert.equal(r.status, 200, `the peer can no longer sync network '${n.space}': ${r.status} ${JSON.stringify(r.body)}`);
