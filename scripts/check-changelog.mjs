@@ -29,6 +29,7 @@
  */
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
+import { linesUnderUnshippedSections } from './_changelog-sections.mjs';
 
 const base = process.argv[2] ?? 'origin/main';
 
@@ -129,7 +130,9 @@ if (!range) {
   process.exit(1);
 }
 
-const added = addedChangelogLines().filter(n => n > range.start && n <= range.end);
+// Under [Unreleased], or under a version section this change adds — a patch PR into a release branch writes its
+// entry under its own new `## [X.Y.Z]` (Q-56). A section that already existed is released and never counts.
+const added = linesUnderUnshippedSections(readFileSync('CHANGELOG.md', 'utf8').split(/\r?\n/), addedChangelogLines());
 
 if (added.length === 0) {
   console.error('check-changelog: FAILED\n');
