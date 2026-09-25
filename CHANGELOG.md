@@ -158,28 +158,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **A space-settings change that your own vote already passes is applied at once** (`Q-49`). On a club or pub/sub
-  network one yes passes a vote, and the proposer's yes was recorded when the vote opened — but nothing counted it,
-  so the change answered `202 vote_pending` and did nothing until somebody cast the same yes again or the vote
-  expired a day later. It now concludes when it opens if the proposer's vote is enough, and answers `200` with the
-  updated space; a change that needs other members still waits for them.
-
-- **Joining a second network with the same peer no longer cuts off the first** (`Q-47`). Each instance keeps one
-  token per peer, and every handshake replaced it with a token that reached only the network being joined — so the
-  moment two instances shared a second network, every push and pull on the first answered `403`, in both
-  directions, with nothing logged as an error. A peer token now reaches every network the two instances share; each
-  request is still admitted only to the spaces of networks the peer is a member of, so leaving one network still
-  withdraws its spaces. The joining side also no longer hands over an all-spaces token when the network carries no
-  spaces — it reaches none.
-
-- **A sync cycle whose transfers were refused is no longer recorded as a success** (`Q-48`). A refused or
-  cut-short transfer held its watermark and logged a warning, and the cycle still counted the member as synced —
-  so a network answering `403` on every request showed `success` in its history, `1 ok, 0 errors` in the log and
-  a healthy page, while nothing had transferred since it was created. Such a member now fails the cycle
-  (`partial` or `failed`), the history's `errors` names the space, direction and transfers that stopped, and the
-  member's consecutive-failure count rises, so a peer that stays refused reaches the unreachable warning. A member
-  with no peer token is reported the same way instead of being skipped silently.
-
 - **A stored rights matrix missing an area read as reaching the space** (`reachesSpace`). The check compared each
   area's rung to `none`, and a missing area is `undefined`, which is not `none` — so a matrix without an area
   reached every space it had a row or floor for. Latent until an area was added; a missing area is now `none`.
@@ -434,6 +412,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`F-19` leaves the manual-verify exemption map.** Its exploration finished — no demand signal for a rules
   engine, and the cheap parts already exist — so it became an owner decision rather than open work, and a
   stale exemption fails `todo:check`. The map stays, empty, for the next item whose evidence cannot be a count.
+
+## [5.1.2] — 2026-09-25
+
+A patch for networks: two instances that share more than one network keep syncing all of them, a sync that
+transferred nothing no longer reports success, and a space-settings change your own vote passes applies at once.
+
+### Fixed
+
+- **Joining a second network with the same peer no longer cuts off the first.** Each instance keeps one token per
+  peer, and every handshake replaced it with a token that reached only the network being joined — so the moment
+  two instances shared a second network, every push and pull on the first answered `403`, in both directions, with
+  nothing logged as an error. A peer token now reaches every network the two instances share; each request is still
+  admitted only to the spaces of networks the peer is a member of, so leaving one network still withdraws its
+  spaces. The joining side also no longer hands over an all-spaces token when the network carries no spaces — it
+  reaches none. **After upgrading, re-join any second network created between the same two instances**, so both
+  sides hold a token that reaches all of them.
+
+- **A sync cycle whose transfers were refused is no longer recorded as a success.** A refused or cut-short
+  transfer held its watermark and logged a warning, and the cycle still counted the member as synced — so a network
+  answering `403` on every request showed `success` in its history while nothing transferred. Such a member now
+  fails the cycle (`partial` or `failed`), the history's `errors` names the space, direction and transfers that
+  stopped, and the member's consecutive-failure count rises. A member with no peer token is reported the same way.
+
+- **A space-settings change your own vote already passes is applied at once.** On a club or pub/sub network one
+  yes passes a vote, and the proposer's yes was recorded when the vote opened, but nothing counted it — so the
+  change answered `202 vote_pending` and did nothing until somebody cast the same yes again or the vote expired a
+  day later. It now concludes when it opens if the proposer's vote is enough, and answers `200`.
 
 ## [5.1.1] — 2026-09-24
 
