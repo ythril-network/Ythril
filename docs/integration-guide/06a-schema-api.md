@@ -4,6 +4,12 @@
 
 ## Space Schemas & Validation
 
+> **On a space in a network, every schema write is a vote** (Q-52). `PUT /schema`, the single-type upsert and
+> delete below, and the schema library's apply open a `meta_change` round exactly as `PATCH /api/spaces/:id` does
+> and answer `202 { "status": "vote_pending", "rounds": [...] }`; nothing is written until the round passes. Where
+> this instance's own yes already carries it (a club organiser, a publisher, a network with no other member) the
+> answer is `200 { "space": … }`. A space in no network is written at once, as before.
+
 ### Get Single Type Definition
 
 ```http

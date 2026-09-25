@@ -216,6 +216,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A networked space's schema is changed by the network's vote on every door** (`Q-52`). `PATCH` and MCP
+  `schema_update` turned a schema edit on a networked space into a vote; `PUT /schema`, the single-type upsert and
+  delete, and the schema library's apply wrote it at once. They now open the same `meta_change` round and answer
+  `202 vote_pending`. A space in no network is unchanged.
+
 - **An edit made through MCP is audited with what it changed** (`Q-50`). The REST door recorded each edit's
   before and after as the audit entry's `changes`; the same edit through an MCP tool left the operation alone, and
   no record id. Ten tools now record both — the record edits, the entity merge, the network settings and space

@@ -27,6 +27,7 @@
  *   GET    /api/schema-library/public/:name           — a single published entry
  */
 
+import { voteOnSchemaEditIfNetworked } from '../spaces/meta-update.js';
 import { commitOwnMetaEdit } from '../spaces/effective-meta.js';
 import { Router } from 'express';
 import { boundedJson } from '../util/bounded-read.js';
@@ -390,7 +391,7 @@ const ApplyGroupBodyZ = z.object({
   spaceId: z.string().min(1).max(200),
 });
 
-schemaLibraryRouter.post('/groups/:group/apply', globalRateLimit, requireAdminMfa, (req, res) => {
+schemaLibraryRouter.post('/groups/:group/apply', globalRateLimit, requireAdminMfa, async (req, res) => {
   const group = req.params['group'] as string;
   const parsed = ApplyGroupBodyZ.safeParse(req.body ?? {});
   if (!parsed.success) {
@@ -428,6 +429,9 @@ schemaLibraryRouter.post('/groups/:group/apply', globalRateLimit, requireAdminMf
 
   // Through the own definitions (F-39.2): the group's references land in what this instance defines, so a space
   // whose meta is rebuilt from network layers keeps them.
+  // Q-52: a networked space's schema is the network's to decide, as on PATCH — this answers 202 with the round.
+  const voted = await voteOnSchemaEditIfNetworked(spaceId, typeSchemas, 'replace');
+  if (voted) { res.status(voted.status).json(voted.body); return; }
   const updated = commitOwnMetaEdit(spaceId, base => {
     const own = { ...base.typeSchemas };
     for (const a of applied) own[a.knowledgeType as keyof typeof own] = { ...(own[a.knowledgeType as keyof typeof own] ?? {}), [a.typeName]: { $ref: `library:${a.entryName}` } };
