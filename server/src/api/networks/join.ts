@@ -12,7 +12,7 @@ import { requireAdmin } from '../../auth/middleware.js';
 import { globalRateLimit } from '../../rate-limit/middleware.js';
 import { getConfig, saveConfig, getSecrets, saveSecrets } from '../../config/loader.js';
 import { createToken, revokeToken } from '../../auth/tokens.js';
-import { peerTokenSpaces } from '../../auth/peer-token-scope.js';
+import { peerTokenSpaces, widenPeerTokensOf } from '../../auth/peer-token-scope.js';
 import { createSpace } from '../../spaces/lifecycle.js';
 import { concludeRoundIfReady } from '../../sync/governance.js';
 import { buildBraintreeAncestors } from '../../util/braintree.js';
@@ -272,6 +272,9 @@ joinRouter.post('/join-remote', globalRateLimit, requireAdmin, async (req, res) 
       });
     }
 
+    // Q-53, the joiner's half: every token kept for the inviter reaches this network's spaces, so a second handshake
+    // with the same inviter racing this one cannot leave the token the inviter keeps without them.
+    widenPeerTokensOf(freshCfg, [applyData.instanceId], allNetworkSpaces);
     saveConfig(freshCfg);
     log.info(`join-remote: joined '${applyData.networkLabel}' (${networkId}) via RSA handshake`);
 

@@ -48,7 +48,7 @@ import { requireAdmin } from '../auth/middleware.js';
 import { authRateLimit, globalRateLimit } from '../rate-limit/middleware.js';
 import { getConfig, saveConfig, getSecrets, saveSecrets } from '../config/loader.js';
 import { createToken, setTokenExpiry } from '../auth/tokens.js';
-import { peerTokenSpaces } from '../auth/peer-token-scope.js';
+import { peerTokenSpaces, widenPeerTokensOf } from '../auth/peer-token-scope.js';
 import { concludeRoundIfReady } from '../sync/governance.js';
 import { buildBraintreeAncestors } from '../util/braintree.js';
 import { makeSignedOwnCast } from '../util/signing.js';
@@ -546,6 +546,9 @@ inviteRouter.post('/finalize', authRateLimit, async (req, res) => {
     }
   }
 
+  // Q-53: every token this instance keeps for the joiner reaches this network too — including one minted by another
+  // handshake with the same peer whose apply landed before this finalize, and which may be the one the joiner keeps.
+  widenPeerTokensOf(cfg, [instanceId], net.spaces);
   saveConfig(cfg);
   // The membership is real now, so the handshake's token lives with it rather than with the handshake.
   setTokenExpiry(session.tokenForPeerId, null);
