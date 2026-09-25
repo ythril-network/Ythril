@@ -1257,6 +1257,8 @@ export function getDocumentProcessingConfig(): Required<DocumentProcessingConfig
       model: process.env['DOC_ASSIST_MODEL'] ?? base.assistModel?.model,
       acknowledgedHost: base.assistModel?.acknowledgedHost,
       acknowledgedHostForConversations: base.assistModel?.acknowledgedHostForConversations,
+      // F-33: carried through, or the resolver never sees a budget or a fallback the operator set.
+      ...(base.assistModel?.budget ? { budget: base.assistModel.budget } : {}), ...(base.assistModel?.fallback ? { fallback: base.assistModel.fallback } : {}), ...(base.assistModel?.api ? { api: base.assistModel.api } : {}),
     },
   };
 }
@@ -1280,6 +1282,13 @@ export function getNliApiKey(): string | undefined {
 export function getDocAssistApiKey(): string | undefined {
   if (process.env['DOC_ASSIST_API_KEY']) return process.env['DOC_ASSIST_API_KEY'];
   try { return (getSecrets().mediaEmbedding as { docAssistApiKey?: string } | undefined)?.docAssistApiKey; }
+  catch { return undefined; }
+}
+
+/** The assist model's FALLBACK endpoint key (`F-33`) — env first, then secrets, like the primary's. */
+export function getDocAssistFallbackApiKey(): string | undefined {
+  if (process.env['DOC_ASSIST_FALLBACK_API_KEY']) return process.env['DOC_ASSIST_FALLBACK_API_KEY'];
+  try { return (getSecrets().mediaEmbedding as { docAssistFallbackApiKey?: string } | undefined)?.docAssistFallbackApiKey; }
   catch { return undefined; }
 }
 

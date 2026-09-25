@@ -143,24 +143,27 @@ describe('provenance is recorded, not assumed', () => {
     // The ACK is re-checked at call time rather than trusted from save time — the same rule the repair
     // path applies, because config.json can be hand-edited.
     const describeSrc = src('server/src/files/converters/describe.ts');
-    // The DOCUMENTS consent, by name (`F-35`): the assist model's conversations consent must never gate this path.
-    assert.match(describeSrc, /assistConsented\(assist, 'repair'\)/, 'the consent rule every egressing slot shares (config/egress-consent.ts)');
     /*
-     * And the fall-through has to be the LOCAL model, not "send it anyway".
-     *
-     * A WINDOW, converted, and the conversion changes what is claimed. `if (acknowledged) … 400 characters …
-     * resolveVlmEndpoint('repair')` says the two are NEAR each other, which is true whether the local model is
-     * reached by falling out of the branch or by sitting inside it. Only one of those is the security property:
-     * the local endpoint must be what runs when the host was NOT acknowledged. So the branch is bounded by its
-     * own brace, and the claim is stated on both sides of it.
+     * Since F-33 the consent is decided in ONE place for every assist caller — `pickAssistBackend` — so the gate reads
+     * it there: an endpoint is chosen for the 'repair' use only when `assistConsented` holds for that use. The
+     * DOCUMENTS consent, by name (`F-35`): the conversations consent must never gate this path.
      */
-    const ackAt = describeSrc.indexOf("if (assistConsented(assist, 'repair')) {");
-    assert.ok(ackAt > -1, 'the acknowledged branch is gone — re-anchor this gate');
-    const branch = blockAfter(describeSrc, ackAt, 'the acknowledged branch');
+    assert.match(describeSrc, /assistBackend\('repair'\)/, 'the description asks the resolver, for the documents use');
+    const resolver = src('server/src/config/assist-backend.ts');
+    assert.match(resolver, /assistConsented\(primary, use\)/, 'the primary is chosen only when consented for the use');
+    assert.match(resolver, /isLocalModelEndpoint\(fallback\.baseUrl\) \|\| assistConsented\(fallback, use\)/,
+      'an external fallback is consented for the use like the primary');
+    /*
+     * And the fall-through has to be the LOCAL model, not "send it anyway": the branch that has an assist endpoint
+     * does not reach the local model, and what runs after it — when the resolver found none — is the local model.
+     */
+    const ackAt = describeSrc.indexOf('if (assist) {');
+    assert.ok(ackAt > -1, 'the assist branch is gone — re-anchor this gate');
+    const branch = blockAfter(describeSrc, ackAt, 'the assist branch');
     assert.doesNotMatch(branch, /resolveVlmEndpoint\('repair'\)/,
-      'the local model inside the acknowledged branch means an unacknowledged host reaches neither');
+      'the local model inside the assist branch means an unconsented host reaches neither');
     assert.match(describeSrc.slice(ackAt + branch.length), /resolveVlmEndpoint\('repair'\)/,
-      'an unacknowledged host must fall through to the local document model');
+      'an unconsented host must fall through to the local document model');
   });
 
   it('a description a person writes drops the provenance rather than inheriting it', () => {

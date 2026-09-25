@@ -17,7 +17,7 @@ import { PhIconComponent } from '../../../shared/ph-icon.component';
 import { StatusPillComponent } from '../../../shared/status-pill.component';
 import { ModelProviderCardComponent } from './model-provider-card.component';
 import { CardSaveComponent } from './card-save.component';
-import { AssistEgressConsentComponent } from './assist-egress-consent.component';
+import { AssistEgressConsentComponent } from './assist-egress-consent.component'; import { AssistExtrasComponent } from './assist-extras.component';
 import { DecisionModelCardComponent } from './decision-model-card.component';
 import { MediaProcessingStateService } from './media-processing-state.service';
 import { PipelineStatusService } from './pipeline-status.service';
@@ -28,7 +28,7 @@ import { TestTarget } from './media-processing.types';
   selector: 'app-models-tab',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule, TranslocoPipe, PhIconComponent, StatusPillComponent, ModelProviderCardComponent, CardSaveComponent, DecisionModelCardComponent, AssistEgressConsentComponent],
+  imports: [FormsModule, TranslocoPipe, PhIconComponent, StatusPillComponent, ModelProviderCardComponent, CardSaveComponent, DecisionModelCardComponent, AssistEgressConsentComponent, AssistExtrasComponent],
   styles: [`
     :host { display: block; }
     /* align-items: stretch is what pins every footer to a shared baseline (owner's point 4). */
@@ -445,7 +445,7 @@ import { TestTarget } from './media-processing.types';
         <!-- Documents: the extraction rung is the switch — raise Document extraction to repair (or auto) and
              the documents acknowledgement is demanded. Conversations are consented below, on their own (F-35). -->
         <div class="hint" style="margin-bottom:10px;">{{ 'mediaProcessing.assist.gatedByPipeline' | transloco }}</div>
-        <app-assist-egress-consent />
+        <app-assist-egress-consent /><app-assist-extras />
 
         <div footer class="testrow">
           <button class="btn btn-sm btn-secondary" type="button" (click)="s.testConnection('assist')"

@@ -51,14 +51,16 @@ describe('every egress path of the assist slot asks through it', () => {
       .filter(f => /egressConsented\(\s*(assist\b|[\w.?]*assistModel\b|s\b)/.test(strip(readFileSync(f, 'utf8'))));
     assert.deepEqual(offenders, [], 'these read the assist model\'s consent without saying which use it is for');
   });
+  // Asking is `assistConsented(…, use)` or, since F-33, `assistBackend(use)` — the resolver checks that use's consent
+  // on the primary and on the fallback, so naming the use there is naming the consent.
   it('the conversation paths ask for conversations', () => {
     for (const f of ['server/src/extractor/generate.ts', 'server/src/extractor/decide.ts']) {
-      assert.match(strip(readFileSync(f, 'utf8')), /assistConsented\([^)]*'conversations'\)/, `${f} does not ask for the conversations consent`);
+      assert.match(strip(readFileSync(f, 'utf8')), /(assistConsented\([^)]*|assistBackend\(\s*)'conversations'\)/, `${f} does not ask for the conversations consent`);
     }
   });
   it('the document paths ask for repair', () => {
     for (const f of ['server/src/files/converters/describe.ts', 'server/src/files/converters/vlm-extract.ts']) {
-      assert.match(strip(readFileSync(f, 'utf8')), /assistConsented\([^)]*'repair'\)/, `${f} does not ask for the documents consent`);
+      assert.match(strip(readFileSync(f, 'utf8')), /(assistConsented\([^)]*|assistBackend\(\s*)'repair'\)/, `${f} does not ask for the documents consent`);
     }
   });
 });

@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **The assist model gets a token budget and a fallback, and can be a Claude model** (`F-33`, `F-33.1`). A budget
+  caps what the assist endpoint spends — so many tokens in any rolling so many hours — and a fallback answers when it
+  cannot: unreachable, rate-limited, over budget, or declining a request. A local fallback (a model on this instance)
+  sends nothing off it and needs no consent; a hosted one is consented per use like the main endpoint. The assist
+  endpoint and its fallback can each speak the Claude API with an API key from the Claude Console, besides any
+  OpenAI-compatible server. The Models card shows which endpoint is answering documents and conversations now, what
+  the budget has spent, and when the main one is paused after a failure; Test and Verify check the fallback too.
+
 ### Changed
 
 - **The integration guide and user guide describe only what exists, as it works now** (`Q-45.1`, `Q-45.2`). Examples

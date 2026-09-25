@@ -20,8 +20,7 @@
 import { getMediaEmbeddingConfig, getModelSlots } from '../config/loader.js';
 import { slotTimeoutMs } from '../config/model-slots.js';
 import { boundedJson } from '../util/bounded-read.js';
-import { allowPrivateForSlot, isLocalModelEndpoint } from '../config/model-egress-policy.js';
-import { ssrfSafeFetch } from '../util/ssrf.js';
+import { modelFetch } from '../util/model-fetch.js';
 import { log } from '../util/log.js';
 
 /**
@@ -224,9 +223,7 @@ export async function rerank(
       body: JSON.stringify(buildBody(dialect, cfg.model!, query, slice)),
       signal,
     };
-    const res = isLocalModelEndpoint(cfg.baseUrl!)
-      ? await fetch(url, init)
-      : await ssrfSafeFetch(url, init, { allowPrivate: allowPrivateForSlot('rerank') });
+    const res = await modelFetch(url, init, 'rerank');
     if (!res.ok) {
       log.warn(`Rerank: HTTP ${res.status} from the reranker — keeping the vector order`);
       return null;
