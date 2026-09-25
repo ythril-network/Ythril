@@ -34,7 +34,8 @@ syncVotesRouter.get('/networks/:networkId/votes', syncRateLimit, requireAuth, as
       .filter(r => !r.concluded || (r.passed && (r.type === 'space_addition' || r.type === 'meta_change')))
       .map(r => {
         // Strip sensitive key material before sending to a peer instance
-        const { inviteKeyHash: _ikh, ...safeRound } = r;
+        // Local-only state never leaves: `appliedHere` says what THIS instance did (S-9).
+        const { inviteKeyHash: _ikh, appliedHere: _ah, ...safeRound } = r;
         if (safeRound.pendingMember) {
           const { tokenHash: _th, ...safeMember } = safeRound.pendingMember;
           safeRound.pendingMember = safeMember as typeof safeRound.pendingMember;

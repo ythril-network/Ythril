@@ -247,6 +247,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A deletion or wipe vote acts only on a round that passed, and only on a space its network carries** (security,
+  `S-9`). A `space_deletion` or `space_wipe` round was applied whenever it had concluded with no veto — so one that
+  expired without enough yes deleted too — to the space id exactly as the round named it, never checked against the
+  spaces the network shares, and gossip re-applied old rounds on every change. Any member of any network could delete
+  or empty any space on another member, including one no network carries. Now: passed rounds only, the space mapped
+  to this instance's id and carried by that network, applied once.
+
 - **Two networks joined from the same peer at once both keep syncing** (`Q-53`). Each side keeps one token per peer,
   and each handshake's token was scoped to the networks the pair shared at that moment, so two handshakes whose
   steps interleaved left the kept token without one network, which then answered 403 until the next handshake. Once a

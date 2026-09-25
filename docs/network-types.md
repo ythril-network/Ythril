@@ -521,6 +521,10 @@ Regardless of network type:
   applies it to its own copy. So the boundary is not "nobody can touch your data" — it is that the
   decision is governed by the network's own rules.
 
+  **It acts only on a round that passed, and only on a space that network carries.** A round that expires without
+  enough yes deletes nothing, a round naming a space the network does not share is ignored however it arrives, and
+  each member acts on a concluded round once.
+
   **Read your network type before relying on that.** On `club` and `pubsub` a round passes on a single
   yes with no veto, so one member can empty or delete the space everywhere. On `closed` and `braintree`
   every listed member has to agree, and on `democratic` it is a majority.

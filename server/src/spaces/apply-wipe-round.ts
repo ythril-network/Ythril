@@ -15,38 +15,42 @@
  *
  * A single veto stops it. That is deliberately stricter than a majority: a member that does not want its
  * copy of a space emptied is not outvoted, because the wipe is irreversible on their instance too.
+ *
+ * ## Which space, and when — `spaceRoundAction` (`S-9`)
+ *
+ * A deletion or wipe acts only on a round that PASSED — `concluded` alone includes a round that expired without
+ * enough yes — on the space the round names mapped to this instance's id AND carried by the network the round
+ * belongs to, and once. Each was missing: the id was used as the round carried it, so any member of any network
+ * could name any space here, including one no network shares; an expired proposal deleted like a passed one; and
+ * gossip hands this every round the network ever held, so an old deletion re-applied to a space re-created under
+ * the same name. `appliedHere` is local state — adopting or serving a round strips it.
  */
 import { log } from '../util/log.js';
 import type { NetworkConfig, VoteRound } from '../config/types.js';
 import type { WipeCollectionType } from './lifecycle.js';
+import { remoteToLocal } from '../sync/space-map.js';
 
-/**
- * Apply a concluded round if — and only if — it is a `space_wipe` that carried.
- *
- * Returns whether the wipe was started, so a caller can log or test the decision without waiting on the
- * write. Fire-and-forget beyond that: a wipe that fails must not abort the vote handling that produced it,
- * for the same reason `space_deletion`'s does not.
- */
-export function applyWipeRoundIfPassed(round: VoteRound, where: string): boolean {
-  if (!round.concluded || round.type !== 'space_wipe') return false;
-  if (!round.spaceId) return false;
-  // A single veto stops it, exactly as for space_deletion.
-  if (round.votes.some(v => v.vote === 'veto')) return false;
+/** What a concluded space round does here, if anything. */
+export type SpaceRoundAction =
+  | { kind: 'delete'; localId: string }
+  | { kind: 'wipe'; localId: string; types?: WipeCollectionType[] };
 
+/** The decision, pure: a passed, unvetoed, not-yet-applied deletion or wipe of a space this network carries. */
+export function spaceRoundAction(
+  net: Pick<NetworkConfig, 'spaces' | 'spaceMap'>,
+  round: Pick<VoteRound, 'type' | 'spaceId' | 'concluded' | 'passed' | 'votes' | 'wipeTypes'> & { appliedHere?: boolean },
+): SpaceRoundAction | null {
+  if (round.type !== 'space_deletion' && round.type !== 'space_wipe') return null;
+  if (!round.concluded || !round.passed || round.appliedHere || !round.spaceId) return null;
+  // A single veto stops it.
+  if (round.votes.some(v => v.vote === 'veto')) return null;
+  const localId = remoteToLocal(net as NetworkConfig, round.spaceId);
+  if (!net.spaces.includes(localId)) return null;
+  if (round.type === 'space_deletion') return { kind: 'delete', localId };
   // The types the members VOTED for, never a fresh default. A round approved for `files` must not conclude
   // by emptying the knowledge graph, which is what resolving this at conclusion time would risk.
   const types = round.wipeTypes as WipeCollectionType[] | undefined;
-
-  void import('./lifecycle.js').then(({ wipeSpace }) =>
-    wipeSpace(round.spaceId!, types)
-      .then(r => log.info(
-        `space_wipe round ${round.roundId} passed (${where}): emptied '${round.spaceId}' — `
-        + `${r.facts} facts, ${r.entities} entities, ${r.edges} edges, ${r.chrono} chrono, ${r.files} files`,
-      ))
-      .catch((err: unknown) => log.error(`space_wipe side-effect (${where}): ${err}`)),
-  ).catch((err: unknown) => log.error(`space_wipe import (${where}): ${err}`));
-
-  return true;
+  return { kind: 'wipe', localId, ...(types ? { types } : {}) };
 }
 
 /**
@@ -58,7 +62,7 @@ export function applyWipeRoundIfPassed(round: VoteRound, where: string): boolean
  *
  * So the loop moved here. `no-new-god-files.test.js` is what forced it, and it was right — engine.ts is one
  * of the largest files in the tree, and the reason it is large is that every change lands where the code
- * already is.
+ * already is. A round acted on is marked `appliedHere` at once; the caller saves the config it came from.
  */
 export function applyConcludedSpaceRounds(net: NetworkConfig, rounds: readonly VoteRound[], where: string): void {
   for (const round of rounds) {
@@ -69,14 +73,23 @@ export function applyConcludedSpaceRounds(net: NetworkConfig, rounds: readonly V
         .then(({ applySpaceAdditionRound }) => applySpaceAdditionRound(net, round, where))
         .catch((err: unknown) => log.error(`space_addition side-effect (${where}): ${err}`));
     }
-    if (round.concluded && round.type === 'space_deletion') {
-      // Unchanged: zero vetoes, and a space id to act on. Moved, not rewritten.
-      if (!round.votes.some(v => v.vote === 'veto') && round.spaceId) {
-        void import('./lifecycle.js')
-          .then(({ removeSpace }) => removeSpace(round.spaceId!))
-          .catch((err: unknown) => log.error(`space_deletion side-effect (${where}): ${err}`));
-      }
+    const action = spaceRoundAction(net, round);
+    if (!action) continue;
+    (round as VoteRound & { appliedHere?: boolean }).appliedHere = true;
+    if (action.kind === 'delete') {
+      void import('./lifecycle.js')
+        .then(({ removeSpace }) => removeSpace(action.localId))
+        .then(() => log.info(`space_deletion round ${round.roundId} passed (${where}): removed '${action.localId}'`))
+        .catch((err: unknown) => log.error(`space_deletion side-effect (${where}): ${err}`));
+    } else {
+      void import('./lifecycle.js').then(({ wipeSpace }) =>
+        wipeSpace(action.localId, action.types)
+          .then(r => log.info(
+            `space_wipe round ${round.roundId} passed (${where}): emptied '${action.localId}' — `
+            + `${r.facts} facts, ${r.entities} entities, ${r.edges} edges, ${r.chrono} chrono, ${r.files} files`,
+          ))
+          .catch((err: unknown) => log.error(`space_wipe side-effect (${where}): ${err}`)),
+      ).catch((err: unknown) => log.error(`space_wipe import (${where}): ${err}`));
     }
-    applyWipeRoundIfPassed(round, where);
   }
 }
