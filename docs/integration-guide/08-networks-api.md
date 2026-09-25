@@ -323,12 +323,17 @@ GET /api/networks/:id/sync-history?limit=20
       "completedAt": "2026-03-26T12:00:02.500Z",
       "status": "success",
       "pulled": { "facts": 5, "entities": 2, "edges": 1, "files": 0 },
-      "pushed": { "facts": 3, "entities": 0, "edges": 0, "files": 1 },
-      "errors": []
+      "pushed": { "facts": 3, "entities": 0, "edges": 0, "files": 1 }
     }
   ]
 }
 ```
+
+**`status` says whether every member's transfers completed.** `success` means each member was reached and every
+transfer finished; `partial` means some members did not; `failed` means none did. A member counts as not
+completed when any of its transfers was refused or cut short (a `403`, a failed batch, no peer token), and
+`errors` then names the member, the space, the direction and the transfers that stopped. `errors` is present
+only when something failed.
 
 `limit` defaults to 20, max 100. Ordered most-recent-first. The last 100 records per network are retained; older entries are pruned automatically.
 
@@ -542,6 +547,11 @@ handshake expires (see `expiresAt`) and is consumed when it is applied.
 Finalize within the window, or that token stops authenticating and the join has to start again with a new
 invite. A token for a membership that never completed used to live for ever, belonging to no member — so an
 instance also revokes, at start, any peer token whose instance shares no network with it.
+
+**One token per peer, reaching every network the two share.** An instance stores one token per peer, so the token a
+handshake hands over replaces the previous one for every network the pair shares. It is therefore scoped to the
+spaces of all of those networks, not only the one being joined. That is not wider access: each sync request is
+admitted only to the spaces of networks the peer is currently a member of.
 
 **Why the whole bundle travels rather than a short URL to fetch it from.** `rsaPublicKeyPem` is what pins
 the handshake to the intended instance. If the joiner fetched it instead, whoever controls that fetch could

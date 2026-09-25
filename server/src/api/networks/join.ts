@@ -14,6 +14,7 @@ import { networkJoinRefusal } from '../../auth/network-rights.js';
 import { recordOrigin } from '../../auth/network-membership.js';
 import { getConfig, saveConfig, getSecrets, saveSecrets } from '../../config/loader.js';
 import { createToken, revokeToken } from '../../auth/tokens.js';
+import { peerTokenSpaces } from '../../auth/peer-token-scope.js';
 import { createSpace } from '../../spaces/lifecycle.js';
 import { concludeRoundIfReady } from '../../sync/governance.js';
 import { buildBraintreeAncestors } from '../../util/braintree.js';
@@ -195,7 +196,8 @@ joinRouter.post('/join-remote', globalRateLimit, requireAuth, denyReadOnly, asyn
     const { record: tokenForARecord, plaintext: tokenForAPlaintext } = await createToken({
       name: `peer:${applyData.instanceLabel ?? 'remote'}`,
       expiresAt: null,
-      spaces: allNetworkSpaces.length > 0 ? allNetworkSpaces : undefined,
+      // Every network the pair shares, not this one alone: the inviter keeps one token for us and this one replaces it.
+      spaces: peerTokenSpaces(applyData.instanceId, allNetworkSpaces),
       peerInstanceId: applyData.instanceId, // link this PAT to the peer that will present it
     });
 

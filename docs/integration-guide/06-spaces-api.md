@@ -535,7 +535,10 @@ so nothing was checked`, which points at the schema instead.
 
 **Response** `200`: the updated space object.
 
-If the space participates in a network and `meta` is included, the update triggers a governance vote and returns `202`:
+If the space participates in a network and `meta` is included, the update opens a governance vote in every network
+carrying the space. **When this instance's own vote already passes a round, it concludes at once** — a club
+organiser, a pub/sub publisher, or the only member of a closed network — and the answer is the ordinary `200` with
+the updated space. Otherwise the change waits for the other voters and the answer is `202`:
 
 ```json
 { "status": "vote_pending", "rounds": [...], "message": "Meta change requires network vote" }
