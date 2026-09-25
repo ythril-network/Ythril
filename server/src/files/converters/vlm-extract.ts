@@ -13,8 +13,8 @@
  * (with ssrfSafeFetch) are later phases.
  */
 import { log } from '../../util/log.js';
-import { assistConsented } from '../../config/egress-consent.js';
-import { getDocumentProcessingConfig, getDocAssistApiKey } from '../../config/loader.js';
+import { assistBackend, viaAssist } from '../../config/assist-backend.js';
+import { getDocumentProcessingConfig } from '../../config/loader.js';
 import type { DocExtractionMode } from '../../config/types.js';
 import { UnstructuredConverter, type UnstructuredResult } from './unstructured.js';
 import { renderDocumentPages, isRenderAvailableFor } from './renderer.js';
@@ -226,19 +226,19 @@ export async function vlmExtractDocument(
       // content never leaves the instance without recorded consent even if config.json were hand-edited.
       // (There used to be a separate `uses: ['repair']` tick as well. It was a second switch for the only
       // thing an assist model does, so it went; the consent record is the meaningful gate.)
-      const assist = cfg.assistModel;
-      let useExternal = false;
-      if (assist?.baseUrl && assist.model) {
-        useExternal = assistConsented(assist, 'repair');
-        if (!useExternal) log.warn('VLM extract: an external assist model is configured but its egress host is not acknowledged — using local repair');
-      }
-      const repairModel = useExternal ? assist!.model! : (cfg.repairModel || cfg.vlmModel);
+      // F-33: which assist endpoint, if any — its DOCUMENTS consent, its budget and its fallback — is
+      // `assistBackend('repair')`'s decision; none means the local repair model, as before there was one.
+      const assist = assistBackend('repair');
+      const repairModel = assist ? assist.model : (cfg.repairModel || cfg.vlmModel);
       try {
-        log.info(`VLM extract: validation failed (${v.issues.join('; ')}) — repairing with ${useExternal ? 'external ' : ''}${repairModel}`);
-        const r = useExternal
-          ? await repairMarkdownExternal({
-              baseUrl: assist!.baseUrl!, model: assist!.model!, apiKey: getDocAssistApiKey(),
-              draft: markdown, evidence, issues: v.issues, defaultTimeoutMs: cfg.pageTimeoutMs,
+        log.info(`VLM extract: validation failed (${v.issues.join('; ')}) — repairing with ${assist ? `the assist model's ${assist.which} ` : ''}${repairModel}`);
+        const r = assist
+          ? await viaAssist('repair', assist, async ep => {
+              const out = await repairMarkdownExternal({
+                baseUrl: ep.baseUrl, model: ep.model, api: ep.api, ...(ep.apiKey ? { apiKey: ep.apiKey } : {}),
+                draft: markdown, evidence, issues: v.issues, defaultTimeoutMs: cfg.pageTimeoutMs,
+              });
+              return { value: out, ...(out.usage ? { usage: out.usage } : {}), chars: markdown.length + evidence.length + out.text.length };
             })
           : await repairMarkdown({
               ...repairEp, model: repairModel, draft: markdown, evidence, issues: v.issues,

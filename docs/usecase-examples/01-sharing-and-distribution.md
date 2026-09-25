@@ -273,6 +273,6 @@ graph LR
 
 - The LLM builds a knowledge graph *about you* over time — entities for your projects, edges for relationships, chrono entries for deadlines — and any future conversation can traverse it.
 - `recall` with the `space` parameter omitted searches across *all* your accessible spaces at once: "What do I know about Kubernetes across my work KB, personal notes, and homelab docs?"
-- `create_chrono(type: "prediction", confidence: 0.7)` → the LLM can track its own predictions and score itself over time.
+- `save_chrono(type: "prediction", confidence: 0.7)` → the LLM can track its own predictions and score itself over time.
 
 ---

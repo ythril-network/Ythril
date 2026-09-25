@@ -92,7 +92,7 @@ fact. See [Retry Safety](04-brain-api.md#retry-safety).
   corrects itself. On a `"nothing"` type the filter returns only the stored ones, which is the same rule
   read consistently rather than a second behaviour.
 
-  The derivation applies to the chrono read paths only: `POST /query` reads documents as stored, so a
+  The derivation applies to the chrono read paths only: `POST /api/filter` reads documents as stored, so a
   deriving entry is `upcoming` there and `overdue` in `GET /chrono`. Sync sees the stored value too.
 - `endsAt` — optional ISO 8601. When present it **replaces `startsAt` as the due moment**, so an entry that
   began last month and ends next year is not overdue. **Nothing validates the order**: an `endsAt` earlier

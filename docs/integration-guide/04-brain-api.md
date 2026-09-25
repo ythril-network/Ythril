@@ -16,7 +16,7 @@ Every fact endpoint lives under the `/spaces/:spaceId/` prefix — the same pref
 POST /api/brain/spaces/general/facts
 ```
 
-> **Breaking change (2.0):** the old two-segment shape `/api/brain/:spaceId/facts` (e.g. `/api/brain/general/facts`) has been **removed**. It previously duplicated these handlers under a second URL; it now returns `404`. Update any client still using it to the `/spaces/:spaceId/` prefix.
+> **Removed in 2.0:** the two-segment shape `/api/brain/:spaceId/facts` (e.g. `/api/brain/general/facts`) answers `404`. Port any client still using it to the `/spaces/:spaceId/` prefix.
 
 ## Retry Safety
 
@@ -36,11 +36,10 @@ anything an agent writes is retried.
 **You cannot choose a record's id.** `id` on a create names an **existing** record to update; an id that matches
 nothing is ignored and the record is created with a fresh, server-minted UUID.
 
-This changed deliberately. Adopting a caller's id made the caller a co-author of the primary key, and that has a
+This is deliberate. Adopting a caller's id would make the caller a co-author of the primary key, and that has a
 sharp edge across a network: the natural way to produce a stable id is to derive it from a stable key, so two
-instances following the same convention collide **by design** — and sync resolves a collision by `seq` alone,
-so one version silently replaces the other with every reference still resolving to the survivor. Nothing dangles,
-so nothing reports it.
+instances following the same convention would collide **by design** — and sync resolves a collision by `seq`
+alone, so one version would silently replace the other with every reference still resolving to the survivor.
 
 If you need to carry your own reference into Ythril, put it in **`name`**, **`description`**, or a property. Those
 fields are for describing a record. `id` identifies one.
@@ -80,9 +79,9 @@ When `id` names a record that exists, the write lands on it:
 
 - `id` must be a **UUID v4**. Anything else is a `400` — it becomes the record's identity across
   every peer in every network the space belongs to, so it is held to a shape.
-- **Omitting `id` is unchanged**: every call creates a new record. Existing clients are unaffected.
-- An id that names nothing yet simply becomes the new record's id, so your *first* attempt does not need to know
-  whether it is the first.
+- **Omitting `id`** creates a new record on every call.
+- An id that names nothing is ignored and the record is created with a server-minted id — see
+  [Identity is server-generated](#identity-is-server-generated).
 - The MCP tools `save_fact` and `save_chrono` take the same optional `id`, with the same
   meaning.
 
@@ -108,7 +107,7 @@ POST /api/brain/spaces/:spaceId/facts
 #### A record and its relationships in ONE call
 
 Every write door — `facts`, `chrono`, `entities`, and their MCP twins — takes the relationships the
-record needs alongside the record itself, **on the update verb as well as the create since 5.0**.
+record needs alongside the record itself, **on the update verb as well as the create**.
 Two fields, and they behave differently on purpose. What a `PATCH` does with them is in
 [Write & Read Semantics](04f-write-semantics.md#what-a-patch-does-to-tags-and-properties).
 
@@ -116,17 +115,12 @@ Two fields, and they behave differently on purpose. What a `PATCH` does with the
 way it runs follows from the kinds at its ends, so a bare id is the whole thing. `linkFiles` takes
 space-relative paths; the other three take UUIDs.
 
-> **These fields REPLACED the 4.x arrays in 5.0.** A record used to carry the ids it linked to in
-> `entityIds`, `memoryIds` and `chronoIds`. Those are gone: a connection is a record in the space's
-> `links` collection and nothing else, so an ordinary edit of a fact can no longer drop a link somebody
-> else made.
+> **Changed in 5.0:** `entityIds`, `memoryIds` and `chronoIds` are refused — port them to `linkEntities`,
+> `linkFacts` and `linkChronos`, ids unchanged.
 >
-> **A body still carrying one is REFUSED**, with the new field named in the message and the ids
-> unchanged. The whole call is refused rather than partly applied, so a record never lands without the
-> connections it asked for — which is what would have happened if the field were simply ignored.
->
-> The ids do not change and neither does anything else about the request: `entityIds` becomes
-> `linkEntities`, `memoryIds` becomes `linkFacts`, `chronoIds` becomes `linkChronos`.
+> A connection is a record in the space's `links` collection and nothing else, so an ordinary edit of a fact
+> cannot drop a link somebody else made. **A body carrying one of the old fields is REFUSED** whole, with the
+> new field named in the message, so a record never lands without the connections it asked for.
 
 ```json
 {
@@ -177,8 +171,8 @@ existence check instead, which is why that check is not optional.
 #### A batch that connects what it creates
 
 `POST /api/brain/spaces/:spaceId/bulk` and `save_bulk` take facts, entities, chrono entries and edges in
-one payload. Until now they could not be joined up: identities are minted server-side, so an id you invent
-for a record in the payload is not the id it gets, and an edge naming it points at nothing.
+one payload. Identities are minted server-side, so an id you invent for a record in the payload is not the id
+it gets, and an edge naming it would point at nothing.
 
 Put `"$ref"` on an item and name it later in the same call:
 
@@ -218,9 +212,8 @@ refused here as it is everywhere else. A resolved `$ref` always exists, so this 
 #### An item carries its own relationships
 
 Every single-record write takes the link classes its kind can hold plus an `edges` array, so attaching a
-record to three things is one call. **A batch item takes the same fields, through the same code.** Until 5.1
-it did not: a bulk item could name two link classes and could not carry `edges` at all, so the door where
-the arithmetic is worst — hundreds of records in one request — was the one that still needed a second pass.
+record to three things is one call. **A batch item takes the same fields, through the same code**, so a
+batch of hundreds of records needs no second pass to connect them.
 
 ```json
 {
@@ -283,10 +276,8 @@ anyway. `{"fact": "...", "totallyMadeUpField": "xyzzy"}` returns `201` with:
 ```
 
 **It is a warning, never a refusal.** A `400` would break every forward-compatible client the day a field is
-removed, and the point is not to reject the write — it is that until 3.7 a caller could not tell *"this
-parameter is not implemented"* from *"this parameter was applied"*, because both were a `201` and an id. That
-is not hypothetical: it is how a caller sending `suppressEmbeddings` on a create believed it worked for two
-weeks while the field was being dropped.
+removed. The point is not to reject the write — it is that a caller can tell *"this parameter is not
+implemented"* from *"this parameter was applied"*, which a bare `201` and an id cannot say.
 
 The rows share the `warnings` array with schema violations in a `warn` space, and the same
 `{field, value, reason}` shape. An object or array value is named by its type rather than reflected back, and a
@@ -298,11 +289,9 @@ any handler runs. An MCP schema is published to its caller and a REST body shape
 afford to refuse and the open one has to explain. **Test through one and deploy through the other and you will
 get two different answers to the same mistake** — which is worth knowing before it surprises you.
 
-**The UPDATE routes answer both questions too, and getting there fixed a second thing.** They had no
-`warnings` array at all — so a `warn`-mode space was told about a schema violation when a record was CREATED
-and told nothing when the same record was edited. The writers had been computing the classification and
-handing it back the whole time; the routes never took it. An update response now carries `warnings` when
-there is something to say, with the schema violations and the unknown-field rows in the same array.
+**The UPDATE routes answer both questions too.** An update response carries `warnings` when there is
+something to say, with the schema violations (in a `warn`-mode space) and the unknown-field rows in the same
+array — an edit is told about a schema violation exactly as a create is.
 
 Their accepted-field lists differ from the creates', which is worth knowing before you copy one:
 `deleteFields` is an update field, and `id` is a path parameter rather than a body key.
@@ -322,8 +311,8 @@ A write can tell you it looks like something you already have, before you have t
   "similar": [ { "_id": "…", "type": "fact", "score": 0.94, "summary": "Deploys freeze Friday 14:00 UTC" } ] }
 ```
 
-Available on `POST …/facts`, `POST …/entities` and `POST …/chrono`, with the same meaning the MCP tools
-have always had.
+Available on `POST …/facts`, `POST …/entities` and `POST …/chrono`, with the same meaning as on the MCP
+tools.
 
 | field | default on REST | effect |
 |---|---|---|
@@ -335,13 +324,11 @@ have always had.
   correcting an outdated fact must be able to contradict the record it supersedes — the point is that it is
   told, not that it is stopped.
 - **`checkDuplicates` is opt-in here and defaults ON over MCP; `checkContradictions` defaults OFF on
-  BOTH doors.** This said *"the flags"*, plural, of a difference that applies to one of them. The
-  asymmetry that does exist is deliberate: the check implies
-  `waitForEmbedding`, because it needs the vector before the insert so the new record cannot match itself. On
-  REST — which is also how a fleet imports thousands of records — defaulting it on would make every existing
-  integration pay the embedding model synchronously without asking. A REST write that sends none of these
-  behaves exactly as it did before.
-- **`recall` is not a substitute**, and an integrator measured why: the same pair scores **0.94** on this
+  BOTH doors.** The asymmetry is deliberate: the check implies `waitForEmbedding`, because it needs the vector
+  before the insert so the new record cannot match itself. On REST — which is also how a fleet imports
+  thousands of records — defaulting it on would make every integration pay the embedding model synchronously
+  without asking.
+- **`recall` is not a substitute**, and the scores show why: the same pair can score **0.94** on this
   check and **0.896** on recall, while unrelated topical neighbours sit at 0.845. No recall threshold
   separates the true near-duplicate from the coincidences, and the two scales are not interchangeable.
 - `GET /api/duplicates` is the background scanner's review queue, not an on-demand similarity search — it
@@ -353,7 +340,7 @@ a hygiene check that silently turns itself off is worse than one that was never 
 #### When does a fact become searchable? (`waitForEmbedding`)
 
 **By default, a moment after the write returns.** The write stores the record and hands the embedding to a
-background queue, so it no longer pays the model's latency. A worker embeds it immediately afterwards, and a
+background queue, so the write does not pay the model's latency. A worker embeds it immediately afterwards, and a
 failure retries with backoff rather than being final.
 
 Until that lands, the record **is not returned by `recall`** — not ranked lower, absent. Both retrieval
@@ -398,8 +385,8 @@ brain record, not only to facts.
 
 ### Read one fact by id
 
-There is no `GET .../facts/:id`, and there has not been since 5.0. One record is a predicate over one
-collection, so it is `filter`:
+There is no `GET .../facts/:id` (removed in 5.0 — port reads to `filter`). One record is a predicate over
+one collection, so it is `filter`:
 
 ```http
 POST /api/filter
@@ -412,10 +399,10 @@ Content-Type: application/json
 reasoning, and the `$in` form for a set of ids, are in
 [Read one entity, or a set of them, by id](04b-graph-api.md).
 
-**Response** `200`: `results` holds the full `MemoryDoc` (same shape as the write response).
+**Response** `200`: `results` holds the full `FactDoc` (same shape as the write response).
 
-> **What a stored record carries beyond the fields you wrote.** A read by id and the list routes below
-> return the document as stored, minus the embedding vector — which, as everywhere else, is never returned
+> **What a stored record carries beyond the fields you wrote.** A read by id or a list returns the
+> document as stored, minus the embedding vector — which, as everywhere else, is never returned
 > and cannot be requested. Three of the remaining fields are the system's rather than yours:
 >
 > | field | what it is |
@@ -424,27 +411,24 @@ reasoning, and the `$in` form for a set of ids, are in
 > | `matchedText` | The exact text this record's vector was built from. Derived from the fields above it, and for a file chunk it is the heading plus the passage — so the passage a SECOND time |
 > | `embeddingModel` | Which model produced the vector. Identical for every record in a space |
 >
-> **`matchedText` and `embeddingModel` are now withheld by DEFAULT here** — the paragraph above used
-> to say all three came back unconditionally, invited anyone it cost to say so, and an integrator did:
-> *"matchedText is the passage a second time, and a list route is the call most likely to be made in bulk."*
-> Send `includeDiagnostics: true` to get them back — the same name `recall` uses, and a body field on
-> `filter` where the list routes take it as `?includeDiagnostics=true`.
+> **`matchedText` and `embeddingModel` are withheld by DEFAULT here** — `matchedText` is the passage a
+> second time, on the read most likely to be made in bulk. Send `includeDiagnostics: true` to get them
+> back — the same name `recall` uses, as a body field on `filter`.
 >
-> **`seq` still comes back, always, and that is deliberate rather than an oversight.** It was withheld on
-> `recall` along with the other two, but on a list route it is the `If-Match` value: dropping it would remove
-> the conditional-write path, which costs more than the bytes are worth. So the two doors withhold a
-> *different* set by one field, on purpose — asked for by name by the integrator who wanted the other two gone.
+> **`seq` comes back, always, and that is deliberate rather than an oversight.** `recall` withholds it along
+> with the other two, but here it is the `If-Match` value: dropping it would remove the conditional-write
+> path, which costs more than the bytes are worth. So the two doors withhold a *different* set by one field,
+> on purpose.
 >
-> The list routes still have no `projection`; the structured
-> [`POST /query`](04d-brain-ops-api.md#structured-query-read-only) route accepts one and remains the way to
-> bound a read to named fields.
+> The structured [`POST /api/filter`](04d-brain-ops-api.md#structured-query-read-only) route accepts a
+> `projection`, which is the way to bound a read to named fields.
 
 ---
 
 ### List facts
 
-There is no `GET .../facts`, and there has not been since 5.0. Listing a collection is one shape for all of
-them — a predicate, a page, and the same envelope whichever collection you name:
+There is no `GET .../facts` (removed in 5.0 — port lists to `filter`). Listing a collection is one shape for
+all of them — a predicate, a page, and the same envelope whichever collection you name:
 
 ```http
 POST /api/filter
@@ -453,24 +437,18 @@ Content-Type: application/json
 { "space": "work", "collection": "facts", "limit": 100, "skip": 0 }
 ```
 
-Every parameter the old route took, it takes: `tag`, `type`, `description`, `properties`, `search`,
+Every parameter the removed list route took, `filter` takes: `tag`, `type`, `description`, `properties`, `search`,
 `entityName`, `sort`, `dir`, `limit`, `skip`. They are documented once, with what each refuses, in
 [the filter body](04d-brain-ops-api.md). Two differences worth knowing before you port a caller:
 
 | | the route | `filter` |
 |---|---|---|
-| a fact linked to an entity ID | `?entity=<id>` | a `filter` over `links` — `{ "to": "<id>", "fromKind": "fact" }` — whose `from` ids are the facts. A connection is its own record since 5.0, so it is not a predicate over the fact. When a NAME will do, `entityName` still answers in one call |
+| a fact linked to an entity ID | `?entity=<id>` | a `filter` over `links` — `{ "to": "<id>", "fromKind": "fact" }` — whose `from` ids are the facts. A connection is its own record, so it is not a predicate over the fact. When a NAME will do, `entityName` still answers in one call |
 | the page size | default 100, hard max 500 | `limit`, default 200 and no maximum |
 
-**Compare your running sum against `total` and stop.** That is what `total` is for, and it is the one piece
-of this section that is not about the route. The fleet integrator paged the old endpoint with `offset`,
-which was not a parameter we had: it was accepted and ignored, every page was the same newest-300, and 67
-identical pages summed to 10,184 matching records in a space holding 300 with 152 matches. They were about
-to delete records on that number, and what caught it was a *different* endpoint disagreeing — not anything
-the paging response said.
-
-Both halves are fixed and both survive the move: `total` is in the envelope, and `filter`'s body is strictly
-allowlisted, so `offset` is a `400` that names `skip` rather than a silently ignored key.
+**Compare your running sum against `total` and stop.** That is what `total` is for. Page with `skip`:
+`filter`'s body is strictly allowlisted, so `offset` is a `400` that names `skip` rather than a silently
+ignored key.
 
 On a **proxy space** the page is computed over the merged set of member spaces, not per member, so `skip`
 means the same thing it does on a plain space. `skip + limit` is bounded there — a deep page needs that many
@@ -478,9 +456,8 @@ rows from every member — and exceeding the bound is a `400` naming the ceiling
 
 ---
 
-> **A malformed optional field is REFUSED, not dropped (4.0).** Sending `"description": 12345` or
-> `"properties": "not-an-object"` to a create used to answer `201` with the field silently discarded, while
-> the same body on a `PATCH` answered `400`. Both answer `400` now. The `warnings` array still reports only
+> **A malformed optional field is REFUSED, not dropped.** Sending `"description": 12345` or
+> `"properties": "not-an-object"` answers `400`, on a create as on a `PATCH`. The `warnings` array still reports only
 > keys the server does not recognise — a known key with a wrong value is an error, not a warning.
 >
 > **`PATCH` enforces every value rule its `POST` enforces.** The 50 000-character limit on `fact`, the
@@ -498,10 +475,8 @@ DELETE /api/brain/spaces/:spaceId/facts/:id
 `strictLinkage` on. The body carries `error`, `blocking` (what refused it) and
 `references` (everything pointing at it). A chrono entry or a file LINKED to this fact blocks the delete; clear the link first (`linkFacts: []` on the referring record, or `DELETE .../links/:id`).
 
-> **This changed in 4.0 and a running script can hit it.** The same delete always succeeded before, because
-> those link fields had no reader anywhere in the server — the reference was stored and replicated and
-> nothing could see it, so the referring record was quietly left pointing at a fact that no longer
-> existed. With `strictLinkage` off it still always succeeds.
+> **Changed in 4.0:** a linked chrono entry or file blocks this delete, so a script that deleted such a fact
+> on an older version now gets `409` — clear the link first. With `strictLinkage` off it always succeeds.
 
 ---
 
@@ -531,11 +506,8 @@ member when a round passes — one veto stops it. The reply is still `200`, with
 `data.status: "vote_pending"` and the open rounds. **That is the success case** — do not retry it, and do
 not read the absence of counts as a failure. Branch on `data.status`, which is the same field MCP returns.
 
-> **This was FIVE routes until 5.0** — a `DELETE` on each per-collection path, one for facts and one for
-> entities, edges, chrono and files. Each hard-coded a collection and answered `{ deleted: <count> }`,
-> while the MCP tool took `types[]` and answered per-collection counts. One capability, two grammars, and
-> which one you got depended on the door you came through. The tool is `delete_space_data` and the route
-> is now named after it, takes its arguments, and calls what it calls.
+> **Changed in 5.0:** the per-collection bulk `DELETE` routes, which answered `{ deleted: <count> }`, are
+> gone — port to this route with `types[]`. It is the `delete_space_data` tool: same arguments, same answer.
 
 ---
 
@@ -579,31 +551,30 @@ es.onmessage = (e) => { const { event, id } = JSON.parse(e.data); /* refresh the
 
 ### Sorting (all brain list endpoints)
 
-`GET` list endpoints — entities, edges, facts, chrono, and files — accept an optional
-`?sort=<field>&dir=asc|desc`. The sort is applied server-side **before** pagination, so it orders the
-entire result set across every page, not just the rows on the page you fetch. `dir` defaults to `desc`
-(newest-first) when omitted.
+There are no `GET` list endpoints: a collection is read with
+[`POST /api/filter`](04d-brain-ops-api.md#structured-query-read-only), and that is where sorting lives. It
+takes `sort` and `dir` (`asc` / `desc`, default `desc`). The sort is applied server-side **before** paging,
+so it orders the whole result, not only the page you fetch.
 
-The sortable field per collection is whitelisted; an unrecognized field is a `400`, never a silent
-fall-back to the default order:
+The sortable fields are fixed per collection; an unrecognized field is a `400` naming the allowed ones,
+never a silent fall-back to the default order:
 
 | Collection | Sortable fields |
 |------------|-----------------|
 | entities | `createdAt`, `name`, `type` |
-| edges | `createdAt`, `label`, `from`, `to`, `type` |
+| edges | `createdAt`, `label`, `from`, `to`, `type`, `weight` |
 | facts | `createdAt`, `type` |
-| chrono | `createdAt`, `title`, `startsAt`, `type` |
+| chrono | `createdAt`, `title`, `startsAt`, `endsAt`, `status`, `type` |
 | files | `createdAt`, `updatedAt`, `path` |
 
-With no `sort` the endpoint keeps its existing default order (entities: insertion order; the others:
-`createdAt` desc; files: `updatedAt` desc).
+With no `sort`, results are newest first.
 
 ### Freetext search (`?search=`)
 
-The entities, edges, facts, chrono and file-meta list endpoints accept an optional `?search=<text>`
-that matches a **case-insensitive substring** of the record's text fields, applied server-side before
-pagination (so it spans the whole set, like sort). The value is treated as a **literal** — regex
-metacharacters are escaped, so `a.b` matches the three characters `a.b`, not "a, any char, b".
+`filter` takes a `search` argument that matches a **case-insensitive substring** of the record's text
+fields, applied server-side before paging (so it spans the whole set, like sort). The value is a
+**literal** — regex metacharacters are escaped, so `a.b` matches the three characters `a.b`, not "a, any
+char, b". It is refused on `links`, which has no text of its own.
 
 | Collection | Searched fields |
 |------------|-----------------|
@@ -613,10 +584,8 @@ metacharacters are escaped, so `a.b` matches the three characters `a.b`, not "a,
 | chrono | `title`, `description` |
 | files | `path`, `description` |
 
-(Files also keep their exact `?path=` filter — distinct from this substring `?search=` — and `filter`
-takes the same thing as a `path` ARGUMENT, normalised the same way: see
-[the filter body](04d-brain-ops-api.md). Entities keep the exact `?name=` filter; the predicate for it
-is `filter: { name: ... }`.)
+For an exact match use a predicate instead: `filter: { name: ... }` for an entity, or the `path` argument
+for a file, normalised the same way (see [the filter body](04d-brain-ops-api.md)).
 
 ---
 

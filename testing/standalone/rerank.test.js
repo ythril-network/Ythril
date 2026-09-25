@@ -192,12 +192,15 @@ describe('the source keeps its contracts', () => {
 
   it('guards a non-local endpoint with ssrfSafeFetch', () => {
     // The URL is admin-settable; a plain fetch would follow a redirect into link-local metadata.
-    assert.ok(src.includes('ssrfSafeFetch('), 'must call ssrfSafeFetch');
-    // Scoped to the reranker's own slot: a widened embedding endpoint says nothing about where the
-    // reranker may point, and vice versa.
-    assert.ok(src.includes("allowPrivate: allowPrivateForSlot('rerank')"),
+    // Since F-33 the local/remote split and the guard are ONE module, `util/model-fetch.ts`, shared with the assist
+    // model — so the reranker must reach its endpoint through it, under its OWN slot: a widened embedding endpoint
+    // says nothing about where the reranker may point, and vice versa.
+    assert.match(src, /modelFetch\([^)]*'rerank'\)/, 'must fetch through modelFetch under the rerank slot');
+    const shared = readFileSync(new URL('../../server/src/util/model-fetch.ts', import.meta.url), 'utf8');
+    assert.ok(shared.includes('ssrfSafeFetch('), 'modelFetch must guard a non-local endpoint with ssrfSafeFetch');
+    assert.ok(shared.includes('allowPrivate: allowPrivateForSlot(slot)'),
       'the operator private-endpoint policy must reach the fetch, or a self-hosted reranker on a cluster address silently never works');
-    assert.ok(src.includes('isLocalModelEndpoint('), 'the local/remote split must use the shared predicate');
+    assert.ok(shared.includes('isLocalModelEndpoint('), 'the local/remote split must use the shared predicate');
   });
 
   it('never throws out of rerank() — every path returns null', () => {

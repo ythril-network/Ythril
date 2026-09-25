@@ -21,7 +21,7 @@ Available as both — REST `POST /api/brain/recall`, MCP tool `recall`:
 |-------|----------|---------|-------------|
 | `space` | — | every space you can read | Which space to search. **One name**, **a LIST of names**, or omitted. A list searches exactly those spaces; omitting it runs across every space this token holds `knowledge: read` in, ranked together. The two are not the same, and the difference is paid in the byte budget: a list of three does not spend it on the other nine. **A space you NAMED and cannot read refuses the whole call** — filtering would answer with fewer results, and a caller cannot tell a filtered answer from a small one. A space you did not name and cannot read is simply not searched. An empty list `[]` is refused rather than read as "all". |
 | `query` | ✅ | — | Natural-language search text (non-empty string) |
-| `topK` | — | `10` | Max returned results, minimum 1 and **no ceiling** — the same on both doors since 4.0, where REST clamped to 100 silently. What comes back is bounded by the byte budget instead: every record whole, `truncated` on every response, `nextSkip` when it bit |
+| `topK` | — | `10` | Max returned results, minimum 1 and **no ceiling** — the same on both doors. What comes back is bounded by the byte budget instead: every record whole, `truncated` on every response, `nextSkip` when it bit |
 | `types` | — | all types | Restrict result knowledge types |
 | `minScore` | — | none | Filter out low-similarity matches |
 | `filter` | — | none | Property equality/comparison filter (see below) |
@@ -32,18 +32,18 @@ Available as both — REST `POST /api/brain/recall`, MCP tool `recall`:
 | `traverse` | — | `0` | Graph expansion: an integer depth `0`–`5`, **or an object `{depth, edgeLabels, direction}`** — a `traverse` call without its start node, because the matches *are* the start nodes. `0` = classic recall. See [Graph-Augmented Recall](04h-graph-augmented-recall.md#graph-augmented-recall-traverse-parameter) |
 | `includeFileContent` | — | `true` | Whether file-chunk results carry `content` — the passage body. `false` returns locations and metadata only (path, heading, chunk index, tags, properties). **File chunks ONLY** — it does nothing on a search returning entities, facts, edges or chrono entries; use `projection` to trim those. A non-boolean is a `400`, never coerced |
 | `includeRecordMeta` | — | `false` | Add back the fields that describe where a record SITS rather than what it says: `createdAt`, `updatedAt` and the link-id arrays. Measured on a real corpus only **30%** of a recall answer was content and most of the rest was this, which at a tight `maxChars` is evidence you paid for and did not get. `createdAt` is the one to be careful of — it is when the RECORD was written, not when the remembered thing happened, which lives in the record's own properties. **Applies recursively**, so a `traverse` answer's `_graph` follows it at every depth. MCP takes the same parameter with the same default. A non-boolean is a `400`, never coerced |
-| `includeDiagnostics` | — | `false` | Add back the three fields a result carries for the SYSTEM rather than for you: `matchedText` (the exact pre-embedding source string — for a file chunk, the passage a SECOND time), `embeddingModel` and `seq`. **Applies recursively**, so a `traverse` answer's `_graph` nodes and edges follow it at every depth. Off by default since 3.1.0 — before then this door sent them unconditionally while MCP sent none. **It does NOT gate the per-stage scores.** `lexicalScore`, `fusedScore` and `rerankScore` are returned unconditionally on both doors, because the one that decided a result's position must not be the one you cannot read — and three floats are not a cost worth a flag. The embedding VECTOR is not among them and is never returned by anything. A non-boolean is a `400`, never coerced |
-| `projection` | — | none | Fields to include (1) or exclude (0), the same grammar `POST /query` takes, applied to each result's record. Dotted paths work: `{"name": 1, "properties.status": 1}`. **Applies recursively** — a `traverse` answer's `_graph` nodes and edges are projected at every depth, which is where a large answer's size actually comes from. Inclusion and exclusion cannot be mixed (the non-`_id` fields decide which you meant); `_id` survives an inclusion projection unless you send `_id: 0`; and the embedding VECTOR can never be projected back in — an explicit `embedding: 1` is dropped rather than honoured. The ranking envelope (`score`, `spaceId`, `type`, `_graph`) always survives, so a projection cannot lose the score you searched for |
-| `maxChars` | — | `50000` REST / `25000` MCP | Ceiling on the serialised response body, in **characters**, and the ceiling that carries the defaults. **The default differs by DOOR: 50000 over REST, 25000 over MCP.** Both doors accept this parameter identically — same floor, same ceiling, same refusal — and only the number applied when you send nothing differs, because an MCP tool result meets a hard per-result ceiling inside the client that the caller cannot raise while a REST body lands in a buffer its caller allocated. Measured: a correct, in-budget 98356-character answer was refused outright by an MCP client. Raise it if yours can take more. **This is the parameter that used to be called `maxBytes`**: that name always counted characters, which equal bytes only for ASCII. **The answer is a PREFIX of the ranked results and every record in it is WHOLE** — full body, full properties, complete `_graph`, byte-identical to that record from an unbudgeted call. Truncation is atomic at the match: the first match whose subtree would not fit is omitted and so is everything after it, so no answer has a gap and none carries a record with half its graph. **That is what the guarantee costs** — the budgeted unit is a match TOGETHER WITH its subtree, so a deeper or wider `traverse` means fewer matches fit, and the ones that do not are absent rather than shortened. `returned`, `count`, `truncated`, `budgetChars`, `budgetBytes`, `charsReturned` and `bytesReturned` are on EVERY response, so absence never has to be interpreted; a truncated one adds `nextSkip`, which you send back as `skip` |
-| `maxBytes` | — | **none** | Ceiling on the serialised response body, in **real UTF-8 bytes**. **BREAKING IN 3.7: this used to bound characters** while its name, its refusal message, its response field and this table all said bytes — true for ASCII and wrong for everything else. `Grüße aus Köln — ąćę` counts 31 characters against 39 bytes; three emoji count 17 against 23. A transport or client limit IS in bytes, so a German or Polish space was overrunning its stated budget by about a quarter. If you set this before and want the old behaviour, send the same number as `maxChars`. **It has no default**, deliberately: bytes are always ≥ characters, so a byte default equal to the character one would silently become the binding constraint on every non-ASCII answer. **When you set both, both apply** — the answer stops at whichever ceiling it reaches first |
-| `maxTokens` | — | none | A convenience onto **`maxChars`**, converted at a fixed 3.5 characters per token — the conversion produces characters, which is what it was always compared against. The ratio was a `charsPerToken` parameter until 5.0; it did nothing unless `maxTokens` was also set, and a caller who needs the ceiling exact should state `maxChars`. If both are sent the **smaller** resulting character figure applies. It is an approximation — the server does not know your tokeniser |
+| `includeDiagnostics` | — | `false` | Add back the three fields a result carries for the SYSTEM rather than for you: `matchedText` (the exact pre-embedding source string — for a file chunk, the passage a SECOND time), `embeddingModel` and `seq`. **Applies recursively**, so a `traverse` answer's `_graph` nodes and edges follow it at every depth. Off by default on both doors. **It does NOT gate the per-stage scores.** `lexicalScore`, `fusedScore` and `rerankScore` are returned unconditionally on both doors, because the one that decided a result's position must not be the one you cannot read — and three floats are not a cost worth a flag. The embedding VECTOR is not among them and is never returned by anything. A non-boolean is a `400`, never coerced |
+| `projection` | — | none | Fields to include (1) or exclude (0), the same grammar `POST /api/filter` takes, applied to each result's record. Dotted paths work: `{"name": 1, "properties.status": 1}`. **Applies recursively** — a `traverse` answer's `_graph` nodes and edges are projected at every depth, which is where a large answer's size actually comes from. Inclusion and exclusion cannot be mixed (the non-`_id` fields decide which you meant); `_id` survives an inclusion projection unless you send `_id: 0`; and the embedding VECTOR can never be projected back in — an explicit `embedding: 1` is dropped rather than honoured. The ranking envelope (`score`, `spaceId`, `type`, `_graph`) always survives, so a projection cannot lose the score you searched for |
+| `maxChars` | — | `50000` REST / `25000` MCP | Ceiling on the serialised response body, in **characters**, and the ceiling that carries the defaults. **The default differs by DOOR: 50000 over REST, 25000 over MCP.** Both doors accept this parameter identically — same floor, same ceiling, same refusal — and only the number applied when you send nothing differs, because an MCP tool result meets a hard per-result ceiling inside the client that the caller cannot raise while a REST body lands in a buffer its caller allocated. Raise it if yours can take more. Characters equal bytes only for ASCII; for a byte ceiling use `maxBytes`. **The answer is a PREFIX of the ranked results and every record in it is WHOLE** — full body, full properties, complete `_graph`, byte-identical to that record from an unbudgeted call. Truncation is atomic at the match: the first match whose subtree would not fit is omitted and so is everything after it, so no answer has a gap and none carries a record with half its graph. **That is what the guarantee costs** — the budgeted unit is a match TOGETHER WITH its subtree, so a deeper or wider `traverse` means fewer matches fit, and the ones that do not are absent rather than shortened. `returned`, `count`, `truncated`, `budgetChars`, `budgetBytes`, `charsReturned` and `bytesReturned` are on EVERY response, so absence never has to be interpreted; a truncated one adds `nextSkip`, which you send back as `skip` |
+| `maxBytes` | — | **none** | Ceiling on the serialised response body, in **real UTF-8 bytes**. `Grüße aus Köln — ąćę` counts 31 characters against 39 bytes; three emoji count 17 against 23. A transport or client limit IS in bytes. **Before 3.7 this bounded characters** — to keep that behaviour, send the same number as `maxChars`. **It has no default**, deliberately: bytes are always ≥ characters, so a byte default equal to the character one would silently become the binding constraint on every non-ASCII answer. **When you set both, both apply** — the answer stops at whichever ceiling it reaches first |
+| `maxTokens` | — | none | A convenience onto **`maxChars`**, converted at a fixed 3.5 characters per token. The ratio is not configurable (`charsPerToken` was removed in 5.0); a caller who needs the ceiling exact should state `maxChars`. If both are sent the **smaller** resulting character figure applies. It is an approximation — the server does not know your tokeniser |
 | `skip` | — | `0` | How many of the ranked matches to skip before filling the byte budget. **This is how you read a truncated answer**: a response with `truncated: true` carries `nextSkip`, and sending it back gets you the next prefix — no match repeated, none missed. The ranking is recomputed per call, so it is a continuation over one ordered answer rather than a cursor over a snapshot |
 | `remainderDump` | — | `false` | Also write the matches that did not fit to the space as JSON and report it as `remainder`. Only meaningful when the answer truncates. Off by default because it is a write on a read path that counts against space storage — page with `skip` to reach the same records without one |
 
-**Response** `200`. **BREAKING IN 5.0: a hit is `{score, spaceId, type, record}`** — this door returned one
-flat object before, the MCP tool always nested, and the two became one shape. **Read `hit.record.<field>`
-where you read `hit.<field>`**; `score`, `spaceId`, `type`, `_graph` and the per-stage scores are unmoved, and
-`_graph` neighbours are unchanged. `POST /api/brain/similar` is still flat until it collapses too.
+**A hit is `{score, spaceId, type, record}` on both doors.** The record's own fields are under `hit.record`;
+`score`, `spaceId`, `type`, `_graph` and the per-stage scores sit on the hit itself. A REST client written
+before 5.0 must read `hit.record.<field>` where it read `hit.<field>`. `POST /api/brain/similar` returns flat
+hits.
 
 **Response** `200`:
 
@@ -167,14 +167,13 @@ unavailable, and **none of them can fail a search** — a stage that cannot answ
 
    **When the budget expires the request still SUCCEEDS**: the stage logs `keeping the vector order` and a
    reasonable-looking answer comes back without the precision this stage exists to add. Raise
-   `modelSlots.rerank.timeoutMs`, but not past whatever proxy sits in front of the API — the run above that
-   did not finish was cut off by their gateway's own twenty seconds, not by ours. Read `rerankScore` to tell
+   `modelSlots.rerank.timeoutMs`, but not past whatever proxy sits in front of the API — a gateway timeout
+   below it cuts the request off first. Read `rerankScore` to tell
    the cases apart: no field means the stage had no opinion.
 
    **Both keys are documented in [05b — media embedding](05b-media-embedding.md)**, the model-slot table for
-   `modelSlots.<slot>.timeoutMs` and the reranker rows for the rest. Said explicitly because an operator
-   searching the guide for the concrete spelling `modelSlots.rerank.timeoutMs` finds only this sentence —
-   the table writes the key generically — and concluded from that the key did not exist.
+   `modelSlots.<slot>.timeoutMs` and the reranker rows for the rest. The table writes the key generically;
+   `modelSlots.rerank.timeoutMs` is its row with `rerank` as the slot.
 
    **A permanently degraded reranker is not always the budget.** A server that refuses a large request
    body answers in milliseconds rather than at the deadline, and reaches you as the same
@@ -192,16 +191,13 @@ doors, each present only when that stage actually ran. **No parameter removes th
 
 **Read the highest one present to know why a result placed where it did.** Precedence is
 `rerankScore > fusedScore > score`, so on an instance with a cross-encoder configured, `score` — plain vector
-similarity — is *not* the number that ordered the answer. Combined with the section below, where `minScore`
-filters on `score` alone, a caller could previously threshold on one number while a different one decided the
-positions, and could not read the second.
+similarity — is *not* the number that ordered the answer — and `minScore` (below) filters on `score` alone, so a
+threshold and the ordering can be different numbers.
 
-They sat behind `includeDiagnostics` until now. That flag exists to remove COST, and three floats per result
-are not a cost — `matchedText` is, which is why it stayed behind the flag and these did not. MCP had never
-sent them at all, so that door gained them rather than merely un-gating them.
+`includeDiagnostics` exists to remove COST, and three floats per result are not a cost — `matchedText` is,
+which is why it is behind the flag and these are not.
 
 An absent score means that stage did not run: no reranker configured, no lexical channel for that query.
-That was always the contract; what changed is that you no longer have to ask.
 
 #### `minScore` always filters on `score`
 
@@ -234,10 +230,6 @@ did:
 
 **Both doors return the per-stage scores.** The MCP tool spreads the same ranking fields on both its
 branches, so an agent sees `lexicalScore`, `fusedScore` and `rerankScore` exactly as a REST caller does.
-
-> This paragraph said *"the MCP `recall` tool returns `score` only … deliberately omitted there"*, and
-> the same page says the opposite forty lines above — that they are on every recall, on both doors. An
-> agent reading this one would not read the number that ordered its own answer.
 
 #### A request using every capability
 
@@ -381,9 +373,7 @@ shortened:
   `count`, `truncated`, `budgetChars`, `budgetBytes`, `charsReturned`, `bytesReturned` — with
   `budgetBytes` `null` unless you asked for a byte ceiling. A field that appeared only when it bit would
   be one whose absence has to be interpreted, and the caller who most needs it is the one who does not
-  know to look. **This said five, omitting both CHARACTER figures**, which are the ones the default
-  ceiling is expressed in — the same confusion that had `maxBytes` named as the defaulting parameter
-  elsewhere in this guide.
+  know to look. The default ceiling is expressed in the CHARACTER figures.
 - **`count` is the real total**, never what was sent, and it stays the total on every page rather than shrinking
   as you advance. `returned` is what was sent, and it is `results.length` — read `returned` and you never have
   to count.
@@ -410,9 +400,7 @@ so a write landing between two pages can shift what falls where — the same cav
 a set that must be internally consistent, ask for the remainder as a file instead.
 
 **The ranking itself is deterministic, though**, which is what makes paging usable in the ordinary case: results
-on the same score are ordered by `_id` ascending, so an unchanged corpus always produces the same order. Before
-3.2.0 it did not — equally-scored matches came back in whatever order the database gave, so two identical recalls
-could be permuted.
+on the same score are ordered by `_id` ascending, so an unchanged corpus always produces the same order.
 
 ##### `remainderDump`: the whole remainder as one file (opt-in)
 
@@ -431,12 +419,11 @@ reachable through an authenticated download, and reported as `remainder`:
 }
 ```
 
-- **It defaults to off, and until 3.2.0 it was unconditional.** Writing a file is a write on a read path: it
+- **It defaults to off.** Writing a file is a write on a read path: it
   counts against space storage and shows up in an operator's usage figures. The common caller wants the next
   page, not an artifact, and now says so by omission.
 - **`remainder` holds ONLY what did not fit.** It is a continuation, not a copy: the records already in
-  `results` are not repeated in it. The pre-3.2 shape dumped the whole set including the part already sent,
-  which is most of why it cost a caller more than it saved.
+  `results` are not repeated in it.
 - **`remainder.matches` and `remainder.records` describe the FILE** — matches in it, and matches plus their
   traversed nodes. Both are counted from what was actually written, so neither can disagree with the download.
 - **`nextSkip` is still there when you ask for the file**, so wanting the artifact never costs you the ability
@@ -445,12 +432,6 @@ reachable through an authenticated download, and reported as `remainder`:
 - **No embedding vectors are written**, at any depth — a result set serialised verbatim is the one place they
   would otherwise land in a file an operator opens.
 - Same authenticated download and same **one-day** expiry as the graph spill below.
-
-> **This replaced a record cap, and the reason is worth one line.** Past 25 records the answer used to collapse
-> to **three** inline matches plus a download of everything. That did not reduce what a caller had to read — it
-> roughly doubled it, because `read_file` takes no offset or limit, so the file had to be read whole and it
-> contained the three records already sent. A budget with a prefix and a remainder gives the caller the same
-> ceiling without the duplication.
 
 #### Recall without passage bodies (`includeFileContent`)
 
@@ -463,24 +444,22 @@ passage you want: path, heading, chunk index, tags, properties.
 ```
 
 That turns one expensive call into a cheap two-phase flow — recall to find **where** something is, then read
-only the chunk you chose (`GET /api/files/:spaceId/…`). MCP `recall` and `similar` have taken the same
-flag with the same meaning since they shipped; REST had no way to ask, which an integrator pointed out.
+only the chunk you chose (`GET /api/files/:spaceId/…`). MCP `recall` and `similar` take the same
+flag with the same meaning.
 
 It drops `content` and nothing else, on file results and nothing else — the flag is about the passage body,
-not about thinning a result. The default is `true`, so no existing caller changes.
+not about thinning a result. The default is `true`.
 
 #### Searching for something you just wrote (no parameter — it is automatic)
 
 `$vectorSearch` reads an index, and that index lags behind the collection: the vector is on the document the
-moment it is written, but recall does not see it until mongot has ingested it. **An integrator measured a
-fact still invisible to recall 150 seconds after writing it.** So every recall **also scans the newest
+moment it is written, but recall does not see it until mongot has ingested it, and that lag has been
+measured past 150 seconds. So every recall **also scans the newest
 records straight from each collection** — write a fact and search for it in the next breath and you find it.
 
-- **It was the `includeFreshWrites` flag until 5.0. If you send it, delete it** — unknown field, `400`.
-  Measured before removing it: a plain recall answered `count: 0` for three seconds after a write, and
-  always scanning costs 159–167 ms against 91–101 ms on a space with 220 records inside the window, and
-  nothing at all on a quiet one. A flag whose only function was to let a caller opt into a blind spot is not
-  a performance feature.
+- **`includeFreshWrites` was removed in 5.0; if you send it, delete it** — unknown field, `400`.
+- **Its cost:** 159–167 ms against 91–101 ms without the scan on a space with 220 records inside the
+  window, and nothing at all on a quiet one.
 - **A fresh hit is indistinguishable from an indexed one** — same shape, same `score`, same fields — and it
   honours `filter` and `tags` like the rest of the search.
 - **Bounded, which is why it can be unconditional**: the newest 200 records of the last 180 seconds, per
@@ -495,12 +474,12 @@ records straight from each collection** — write a fact and search for it in th
 
 Use `filter` to restrict results to records where specific properties match a condition.
 
-**Two grammars are accepted.** The operator-object form below is unchanged: one operator object per key, AND-ed across
+**Two grammars are accepted.** The operator-object form below takes one operator object per key, AND-ed across
 keys. **Raw MongoDB is also accepted** — the same operators `query` takes (`$or`, `$and`, `$not`, `$nor`, `$in`, `$regex`,
 `$elemMatch`, the comparisons), nested to depth 8, validated by the same parser with the same refusals.
 
-That exists because the operator-object form cannot express an OR at any length, so a caller who wanted meaning-ranking
-*and* a real predicate had to run `query` first and feed ids into something else:
+The operator-object form cannot express an OR at any length; the raw grammar gives meaning-ranking *and* a real
+predicate in one call:
 
 ```json
 {
@@ -516,27 +495,19 @@ That exists because the operator-object form cannot express an OR at any length,
 }
 ```
 
-> **AND ON BOTH DOORS, which it was not until now.** REST accepted the raw grammar from the day it shipped;
-> the MCP `recall` tool's `inputSchema` still declared the operator-object form only, so the dispatcher —
-> which validates arguments *before* the handler runs — refused a raw filter that REST answered `200` for.
-> Measured on one instance, one space, the same instant, with a filter an integrator had reported:
-> `{type: 'message', 'properties.readBy': {$not: {$regex: 'ythril'}}}` → REST `200`, MCP
-> `/filter/type: must be object; /filter/properties.readBy: unexpected property '$not'`.
->
-> Both doors now accept and refuse the same filters, including the refusals: an out-of-allowlist key and a
-> MIXED filter fail identically on each. `recall-filter-parity-both-doors.test.js` drives both and compares.
+**Both doors accept and refuse the same filters**, including the refusals: an out-of-allowlist key and a MIXED
+filter fail identically on REST and on the MCP `recall` tool.
 
 Three rules apply to both grammars:
 
 - **A filter that MIXES them is a `400`** naming the offending keys, rather than one half quietly winning.
 - **The key allowlist still applies**, recursively — including inside `$or`. Keys must start with `properties.`, `tags`,
-  `type`, `name`, `status` or `label`. Widening the grammar did not widen the keys, because a recall filter that could name
+  `type`, `name`, `status` or `label`. The raw grammar does not widen the keys, because a recall filter that could name
   any field would be a way to filter a vector search on fields the index cannot serve.
 - **A raw filter takes the exhaustive path.** `$or` and `$regex` cannot be pushed into `$vectorSearch` as a native
   pre-filter, so the whole space is scored and then filtered — slower, same records, and still nothing dropped by `topK`.
 
-The operator-object form keeps the native pre-filter path where the fields are declared, so existing callers lose no
-performance.
+The operator-object form keeps the native pre-filter path where the fields are declared.
 
 ```json
 {
@@ -600,10 +571,8 @@ Multiple operators on the same key are AND-ed (range queries):
 
 > **Note — `properties` in the embedding text.** `properties` are embedded as `key value`
 > pairs (both the key *and* the value), so a phrase living only in `properties.outcome` is
-> findable via `recall`. `edge` and `chrono` did **not** embed `properties` in releases up to
-> 1.4.4 — if you are upgrading, existing records keep their old embedding until they are
-> re-embedded. Reindex a space to pick up the change:
-> `POST /api/brain/spaces/:spaceId/reindex`.
+> findable via `recall`. An `edge` or `chrono` record embedded by 1.4.4 or earlier lacks its
+> `properties` until re-embedded — reindex the space: `POST /api/brain/spaces/:spaceId/reindex`.
 
 ---
 
@@ -617,7 +586,7 @@ Given an existing entry's `_id`, find other entries with high vector similarity.
 
 > **Also available as MCP tool:** `similar` — note the MCP tool makes `space` optional (omit it to search all accessible spaces, like `recall`); its `crossSpace` flag is deprecated in favour of omitting `space`. This REST endpoint keeps `spaceId` in the path and the `crossSpace` body flag. Every other parameter, including `traverse`, `includeFileContent` and `includeDiagnostics`, is identical on both doors.
 >
-> **The MCP tool returned plain TEXT at `traverse: 0` until 3.1.0**, and JSON only above it. It is now JSON at every depth, with the same per-result shape `recall` uses plus a `source` naming the entry you asked about. This REST endpoint has always returned JSON at every depth and is unchanged by that.
+> **The MCP tool returns JSON at every depth**, with the same per-result shape `recall` uses plus a `source` naming the entry you asked about. This REST endpoint returns JSON at every depth too.
 
 **Request body:**
 
@@ -644,11 +613,11 @@ Given an existing entry's `_id`, find other entries with high vector similarity.
 | `traverse` | — | `0` | Graph-expansion depth (0–5). With `traverse > 0` each match is expanded along edges and the connected entities come back alongside it — see the response shape below |
 | `includeFileContent` | — | `true` | Whether file-chunk results carry their passage `content`. `false` returns locations and metadata only, exactly as on `recall` |
 | `includeRecordMeta` | — | `false` | Add back the fields that describe where a record SITS rather than what it says: `createdAt`, `updatedAt` and the link-id arrays. Measured on a real corpus only **30%** of a recall answer was content and most of the rest was this, which at a tight `maxChars` is evidence you paid for and did not get. `createdAt` is the one to be careful of — it is when the RECORD was written, not when the remembered thing happened, which lives in the record's own properties. **Applies recursively**, so a `traverse` answer's `_graph` follows it at every depth. MCP takes the same parameter with the same default. A non-boolean is a `400`, never coerced |
-| `includeDiagnostics` | — | `false` | Add back the three fields a result carries for the SYSTEM rather than for you: `matchedText` (the exact pre-embedding source string — for a file chunk, the passage a SECOND time), `embeddingModel` and `seq`. **Applies recursively**, so a `traverse` answer's `_graph` nodes and edges follow it at every depth. Off by default since 3.1.0 — before then this door sent them unconditionally while MCP sent none. **It does NOT gate the per-stage scores.** `lexicalScore`, `fusedScore` and `rerankScore` are returned unconditionally on both doors, because the one that decided a result's position must not be the one you cannot read — and three floats are not a cost worth a flag. The embedding VECTOR is not among them and is never returned by anything. A non-boolean is a `400`, never coerced |
-| `projection` | — | none | Fields to include (1) or exclude (0), the same grammar `POST /query` takes, applied to each result's record. Dotted paths work: `{"name": 1, "properties.status": 1}`. **Applies recursively** — a `traverse` answer's `_graph` nodes and edges are projected at every depth, which is where a large answer's size actually comes from. Inclusion and exclusion cannot be mixed (the non-`_id` fields decide which you meant); `_id` survives an inclusion projection unless you send `_id: 0`; and the embedding VECTOR can never be projected back in — an explicit `embedding: 1` is dropped rather than honoured. The ranking envelope (`score`, `spaceId`, `type`, `_graph`) always survives, so a projection cannot lose the score you searched for |
-| `maxChars` | — | `50000` REST / `25000` MCP | Ceiling on the serialised response body, in **characters**, and the ceiling that carries the defaults. **The default differs by DOOR: 50000 over REST, 25000 over MCP.** Both doors accept this parameter identically — same floor, same ceiling, same refusal — and only the number applied when you send nothing differs, because an MCP tool result meets a hard per-result ceiling inside the client that the caller cannot raise while a REST body lands in a buffer its caller allocated. Measured: a correct, in-budget 98356-character answer was refused outright by an MCP client. Raise it if yours can take more. **This is the parameter that used to be called `maxBytes`**: that name always counted characters, which equal bytes only for ASCII. **The answer is a PREFIX of the ranked results and every record in it is WHOLE** — full body, full properties, complete `_graph`, byte-identical to that record from an unbudgeted call. Truncation is atomic at the match: the first match whose subtree would not fit is omitted and so is everything after it, so no answer has a gap and none carries a record with half its graph. **That is what the guarantee costs** — the budgeted unit is a match TOGETHER WITH its subtree, so a deeper or wider `traverse` means fewer matches fit, and the ones that do not are absent rather than shortened. `returned`, `count`, `truncated`, `budgetChars`, `budgetBytes`, `charsReturned` and `bytesReturned` are on EVERY response, so absence never has to be interpreted; a truncated one adds `nextSkip`, which you send back as `skip` |
-| `maxBytes` | — | **none** | Ceiling on the serialised response body, in **real UTF-8 bytes**. **BREAKING IN 3.7: this used to bound characters** while its name, its refusal message, its response field and this table all said bytes — true for ASCII and wrong for everything else. `Grüße aus Köln — ąćę` counts 31 characters against 39 bytes; three emoji count 17 against 23. A transport or client limit IS in bytes, so a German or Polish space was overrunning its stated budget by about a quarter. If you set this before and want the old behaviour, send the same number as `maxChars`. **It has no default**, deliberately: bytes are always ≥ characters, so a byte default equal to the character one would silently become the binding constraint on every non-ASCII answer. **When you set both, both apply** — the answer stops at whichever ceiling it reaches first |
-| `maxTokens` | — | none | A convenience onto **`maxChars`**, converted at a fixed 3.5 characters per token — the conversion produces characters, which is what it was always compared against. The ratio was a `charsPerToken` parameter until 5.0; it did nothing unless `maxTokens` was also set, and a caller who needs the ceiling exact should state `maxChars`. If both are sent the **smaller** resulting character figure applies. It is an approximation — the server does not know your tokeniser |
+| `includeDiagnostics` | — | `false` | Add back the three fields a result carries for the SYSTEM rather than for you: `matchedText` (the exact pre-embedding source string — for a file chunk, the passage a SECOND time), `embeddingModel` and `seq`. **Applies recursively**, so a `traverse` answer's `_graph` nodes and edges follow it at every depth. Off by default on both doors. **It does NOT gate the per-stage scores.** `lexicalScore`, `fusedScore` and `rerankScore` are returned unconditionally on both doors, because the one that decided a result's position must not be the one you cannot read — and three floats are not a cost worth a flag. The embedding VECTOR is not among them and is never returned by anything. A non-boolean is a `400`, never coerced |
+| `projection` | — | none | Fields to include (1) or exclude (0), the same grammar `POST /api/filter` takes, applied to each result's record. Dotted paths work: `{"name": 1, "properties.status": 1}`. **Applies recursively** — a `traverse` answer's `_graph` nodes and edges are projected at every depth, which is where a large answer's size actually comes from. Inclusion and exclusion cannot be mixed (the non-`_id` fields decide which you meant); `_id` survives an inclusion projection unless you send `_id: 0`; and the embedding VECTOR can never be projected back in — an explicit `embedding: 1` is dropped rather than honoured. The ranking envelope (`score`, `spaceId`, `type`, `_graph`) always survives, so a projection cannot lose the score you searched for |
+| `maxChars` | — | `50000` REST / `25000` MCP | Ceiling on the serialised response body, in **characters**, and the ceiling that carries the defaults. **The default differs by DOOR: 50000 over REST, 25000 over MCP.** Both doors accept this parameter identically — same floor, same ceiling, same refusal — and only the number applied when you send nothing differs, because an MCP tool result meets a hard per-result ceiling inside the client that the caller cannot raise while a REST body lands in a buffer its caller allocated. Raise it if yours can take more. Characters equal bytes only for ASCII; for a byte ceiling use `maxBytes`. **The answer is a PREFIX of the ranked results and every record in it is WHOLE** — full body, full properties, complete `_graph`, byte-identical to that record from an unbudgeted call. Truncation is atomic at the match: the first match whose subtree would not fit is omitted and so is everything after it, so no answer has a gap and none carries a record with half its graph. **That is what the guarantee costs** — the budgeted unit is a match TOGETHER WITH its subtree, so a deeper or wider `traverse` means fewer matches fit, and the ones that do not are absent rather than shortened. `returned`, `count`, `truncated`, `budgetChars`, `budgetBytes`, `charsReturned` and `bytesReturned` are on EVERY response, so absence never has to be interpreted; a truncated one adds `nextSkip`, which you send back as `skip` |
+| `maxBytes` | — | **none** | Ceiling on the serialised response body, in **real UTF-8 bytes**. `Grüße aus Köln — ąćę` counts 31 characters against 39 bytes; three emoji count 17 against 23. A transport or client limit IS in bytes. **Before 3.7 this bounded characters** — to keep that behaviour, send the same number as `maxChars`. **It has no default**, deliberately: bytes are always ≥ characters, so a byte default equal to the character one would silently become the binding constraint on every non-ASCII answer. **When you set both, both apply** — the answer stops at whichever ceiling it reaches first |
+| `maxTokens` | — | none | A convenience onto **`maxChars`**, converted at a fixed 3.5 characters per token. The ratio is not configurable (`charsPerToken` was removed in 5.0); a caller who needs the ceiling exact should state `maxChars`. If both are sent the **smaller** resulting character figure applies. It is an approximation — the server does not know your tokeniser |
 | `skip` | — | `0` | How many of the ranked matches to skip before filling the byte budget. **This is how you read a truncated answer**: a response with `truncated: true` carries `nextSkip`, and sending it back gets you the next prefix — no match repeated, none missed. The ranking is recomputed per call, so it is a continuation over one ordered answer rather than a cursor over a snapshot |
 | `remainderDump` | — | `false` | Also write the matches that did not fit to the space as JSON and report it as `remainder`. Only meaningful when the answer truncates. Off by default because it is a write on a read path that counts against space storage — page with `skip` to reach the same records without one |
 | `crossSpace` | — | `false` | If `true`, search across all spaces the token can access |

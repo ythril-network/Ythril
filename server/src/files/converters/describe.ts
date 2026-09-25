@@ -32,9 +32,10 @@
  * receive document text on the repair path; this adds no new egress surface.
  */
 
-import { getDocumentProcessingConfig, getDocAssistApiKey } from '../../config/loader.js';
+import { getDocumentProcessingConfig } from '../../config/loader.js';
 import { log } from '../../util/log.js';
-import { assistConsented } from '../../config/egress-consent.js';
+import { assistBackend, viaAssist, type AssistEndpoint } from '../../config/assist-backend.js';
+import { isLocalModelEndpoint } from '../../config/model-egress-policy.js';
 import { describeDocumentText } from './vlm-client.js';
 import { resolveVlmEndpoint, vlmSlotUsable } from './vlm-endpoint.js';
 import { summariseMarkdown } from './summarise.js';
@@ -125,16 +126,13 @@ export function sanitiseDescription(raw: string): string | undefined {
  * Exported because "which host, and was it acknowledged" is the whole security-relevant decision here, and
  * it is worth testing on its own rather than only through a call that needs a live model.
  */
-export function describeTarget(): { baseUrl: string; model: string; wire?: 'ollama' | 'openai'; external?: boolean; apiKey?: string; slot: 'docRepair' | 'assist' } | null {
-  const cfg = getDocumentProcessingConfig();
-  const assist = cfg.assistModel;
-  if (assist?.baseUrl && assist.model) {
-    // The ACK is the gate, re-checked here rather than trusted from save time — the same rule the repair
-    // path applies, for the same reason: config.json could have been hand-edited.
-    if (assistConsented(assist, 'repair')) {
-      return { baseUrl: assist.baseUrl, model: assist.model, wire: 'openai', external: true, apiKey: getDocAssistApiKey(), slot: 'assist' };
-    }
-    log.debug('Describe: an assist model is configured but its egress host is not acknowledged — using the local document model');
+export function describeTarget(): { baseUrl: string; model: string; wire?: 'ollama' | 'openai' | 'anthropic'; external?: boolean; apiKey?: string; slot: 'docRepair' | 'assist'; which?: AssistEndpoint['which'] } | null {
+  // The assist model as `assistBackend('repair')` resolves it (`F-33`): its DOCUMENTS consent re-checked here rather
+  // than trusted from save time — config.json could have been hand-edited — and its budget and fallback applied.
+  const assist = assistBackend('repair');
+  if (assist) {
+    return { baseUrl: assist.baseUrl, model: assist.model, wire: assist.api, external: !isLocalModelEndpoint(assist.baseUrl),
+      ...(assist.apiKey ? { apiKey: assist.apiKey } : {}), slot: 'assist', which: assist.which };
   }
   const local = resolveVlmEndpoint('repair');
   if (!vlmSlotUsable(local)) return null;
@@ -164,17 +162,26 @@ export async function describeDocument(
   }
 
   try {
-    const r = await describeDocumentText({
-      ...target,
-      text: body.slice(0, MAX_INPUT_CHARS),
+    const text = body.slice(0, MAX_INPUT_CHARS);
+    const once = (t: typeof target) => describeDocumentText({
+      ...t,
+      text,
       // HARD, not a default: this budget is deliberately tight because a description is a nicety on the
       // ingest path with an extractive fallback always available, and it is settable in its own right
       // through config, env and the admin API. Falling back to the repair slot's budget would hand a
       // one-paragraph summary the deadline of a job that reconciles a whole document.
       hardTimeoutMs: describeTimeoutMs(getDocumentProcessingConfig()),
     });
-    const text = sanitiseDescription(r.text);
-    if (text) return { text, source: 'generated', excerpt };
+    // On the assist model: charged to its budget, and written by the fallback when the primary cannot answer now.
+    const r = target.slot === 'assist' && target.which
+      ? await viaAssist('repair', { which: target.which, baseUrl: target.baseUrl, model: target.model, api: target.wire === 'anthropic' ? 'anthropic' : 'openai', ...(target.apiKey ? { apiKey: target.apiKey } : {}) },
+          async ep => {
+            const v = await once({ ...target, ...ep, wire: ep.api, external: !isLocalModelEndpoint(ep.baseUrl) });
+            return { value: v, ...(v.usage ? { usage: v.usage } : {}), chars: text.length + v.text.length };
+          })
+      : await once(target);
+    const described = sanitiseDescription(r.text);
+    if (described) return { text: described, source: 'generated', excerpt };
     log.debug('Describe: the model returned nothing usable — keeping the document\'s own opening text');
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

@@ -20,7 +20,7 @@ A sync cycle for a single member consists of these phases in order:
 | **File sync** | us ↔ peer | Exchange file tombstones, download files we lack, push files the peer lacks |
 | **Merkle check** | us ↔ peer | Opt-in (`network.merkle: true`): compare per-space Merkle roots after sync and log a `MERKLE_DIVERGENCE` warning on mismatch |
 
-Governance (gossip + vote propagation) runs **before** the data phases, deliberately: vote rounds are deadline-sensitive and their messages are small, so they must converge promptly and independently of the data plane. It used to run last, which meant any failure in the per-space data loop (a timed-out pull, a slow file transfer) skipped governance for the whole cycle — a saturated peer could starve vote propagation indefinitely.
+Governance (gossip + vote propagation) runs **before** the data phases, deliberately: vote rounds are deadline-sensitive and their messages are small, so they must converge promptly and independently of the data plane. A failure in the per-space data loop (a timed-out pull, a slow file transfer) never skips governance for the cycle.
 
 Pull and push are gated by [watermarks](#watermarks) so only new or changed documents travel over the wire. File sync is manifest-based and equally incremental.
 
@@ -40,10 +40,10 @@ For non-directional networks (`closed`, `democratic`, `club`), pull and push alw
 
 Sync can be triggered two ways:
 
-- **Scheduled** — `syncSchedule` on the network config starts a node-cron task per network at startup. A standard cron expression only (e.g. `"*/5 * * * *"`, `"0 * * * *"`), refused with a `400` if the scheduler could not run it. The legacy shorthands `"*/N minutes|hours"` and `"every Nm|Nh"` were removed in 4.0: a stored one is rewritten to its cron form at boot, and sending one is refused with the expression it used to mean.
-- **Manual** — `POST /api/networks/:id/sync` starts the cycle and returns `{ ok: true, status: 'triggered', networkId }` immediately; `POST /api/networks/peers/:peerId/sync` does the same for one peer across every network it belongs to. Add `?wait=true` to get the outcome instead of the acknowledgement. Results surface in the per-network sync history and logs. (The `/api/notify/trigger` route did this until 5.0 removed it.)
+- **Scheduled** — `syncSchedule` on the network config starts a node-cron task per network at startup. A standard cron expression only (e.g. `"*/5 * * * *"`, `"0 * * * *"`), refused with a `400` if the scheduler could not run it. The shorthands `"*/N minutes|hours"` and `"every Nm|Nh"` are not accepted: a stored one is rewritten to its cron form at boot, and sending one is refused with the cron expression it corresponds to.
+- **Manual** — `POST /api/networks/:id/sync` starts the cycle and returns `{ ok: true, status: 'triggered', networkId }` immediately; `POST /api/networks/peers/:peerId/sync` does the same for one peer across every network it belongs to. Add `?wait=true` to get the outcome instead of the acknowledgement. Results surface in the per-network sync history and logs. A client calling `/api/notify/trigger` must move to these routes; it was removed in 5.0.
 
-  **`?wait=true` makes it synchronous instead**, answering `{ status: 'completed', networkId, synced, errors }` when the cycle finishes — bounded by `?timeoutMs` (default 30 000, clamped 1 000–120 000), which answers `504 { status: 'timeout', networkId, timeoutMs }` if the bound is reached. A cycle can run for minutes, so the default is still fire-and-forget; this paragraph used to say the response *"never waits on it"*, full stop, which left the one mode a caller reaches for when scripting a sync undocumented.
+  **`?wait=true` makes it synchronous instead**, answering `{ status: 'completed', networkId, synced, errors }` when the cycle finishes — bounded by `?timeoutMs` (default 30 000, clamped 1 000–120 000), which answers `504 { status: 'timeout', networkId, timeoutMs }` if the bound is reached. A cycle can run for minutes, so the default is fire-and-forget.
 
 ---
 
@@ -62,7 +62,7 @@ All four are stored per member in the config file. After a successful sync they 
 
 **One watermark, seven transfers, and that is what "the last safe point" has to mean.** A cycle runs seven independent transfers under each watermark — tombstones plus facts, entities, edges, chrono, links and FILE METADATA — and any one of them can stop early: a non-`2xx` from the peer, or its page cap. **The watermark advances only as far as EVERY transfer in the cycle is complete through.** A transfer that finished places no limit; one that stopped early limits the advance to the last position it actually delivered, and the lowest such limit wins.
 
-Before 3.2.0 both watermarks were set to the *maximum* across the transfers, which is only correct when all of them finished. A facts push that failed at seq 300, in a cycle where the entities push succeeded to seq 500, moved the watermark to 500 — and the fact at seq 400 was behind it permanently, re-sent by nothing, while every later cycle reported success. A held-back cycle now says so in the log, naming which transfers stopped, because a watermark quietly staying put reads exactly like a cycle with nothing to do.
+The watermark is never the *maximum* across the transfers: a facts push that failed at seq 300, in a cycle where the entities push succeeded to seq 500, leaves it no further than the facts push delivered, so the fact at seq 400 is re-sent next cycle. A held-back cycle says so in the log, naming which transfers stopped, because a watermark quietly staying put reads exactly like a cycle with nothing to do.
 
 ---
 
@@ -91,7 +91,7 @@ The sync engine uses two helpers to translate between remote and local space IDs
 
 **Local storage** (collection names, file paths) uses the **local** space ID so documents land in the aliased collection.
 
-**Inbound requests are translated too** (Q-51). A peer names the space by the network's id, so every `/api/sync/*` request that carries a `networkId` has its `spaceId` translated through that network's `spaceMap` before any route admits, reads or writes by it. It only renames: the translated id is admitted by the same rule as the local one. Before this, a peer's own request for an aliased space answered `403`, so its cycle for that space failed every time while this instance's own cycle still moved the data.
+**Inbound requests are translated too.** A peer names the space by the network's id, so every `/api/sync/*` request that carries a `networkId` has its `spaceId` translated through that network's `spaceMap` before any route admits, reads or writes by it. It only renames: the translated id is admitted by the same rule as the local one.
 
 Spaces without an entry in `spaceMap` pass through unchanged (identity mapping). The `spaceMap` is also updated automatically when a local space is renamed — `renameSpace()` adds or updates the reverse mapping on every network that references the old space ID.
 
@@ -121,7 +121,7 @@ Hitting that cap counts as a transfer stopping early (see [watermarks](#watermar
 
 **Impact at 100 ms WAN latency:**
 
-| Documents changed | Before | After |
+| Documents changed | Per-document fetch | `?full=true` |
 |---|---|---|
 | 10,000 | ~10,001 requests, ~17 min | ~51 requests, ~5 s |
 | 1,000  | ~1,001 requests, ~1.7 min | ~6 requests, ~600 ms |
@@ -174,7 +174,7 @@ File tombstones carry no `seq` (they are keyed by `deletedAt`) and their pull is
 
 - **The position comes from the array that was sent**, never from a fresh query — a file deleted between building the body and reading the reply was not in the payload.
 - **Only a 200 counts.** A 403 (direction-blocked peer) or a timeout leaves the position unknown, which blocks pruning.
-- **`applied` is not a count of what CHANGED, and `applied: 0` is not proof of receipt.** The receiver increments it for every element that passes a shape check (`_id` present, `path` a string) and a path-traversal guard, whether or not the upsert inserted anything — so an already-held tombstone still counts. What it does NOT count is an element it rejected, and it rejects them **silently**. So `applied` short of the number you sent means that many were thrown away, and `applied: 0` on a non-empty push means **every** element was. This paragraph used to say the opposite — that zero was the legitimate answer from a peer that already had them — and then told you to prune on it.
+- **`applied` is not a count of what CHANGED, and `applied: 0` is not proof of receipt.** The receiver increments it for every element that passes a shape check (`_id` present, `path` a string) and a path-traversal guard, whether or not the upsert inserted anything — so an already-held tombstone still counts. What it does NOT count is an element it rejected, and it rejects them **silently**. So `applied` short of the number you sent means that many were thrown away, and `applied: 0` on a non-empty push means **every** element was. Never prune on it.
 - **Timestamps are compared only in the fixed-width `…Z` form**, which sorts lexically. An offset form (`+02:00`) sorts later while being earlier in real time, so anything else is treated as unknown rather than compared.
 
 **The file-tombstone pull is deliberately NOT filtered by `since`.** A file tombstone carries its original `deletedAt` and can reach a peer long after that timestamp — a third instance's old deletion relayed onward, or a peer back from a week offline. `deletedAt > since` would skip exactly those, and the file they should delete would stay. The payload concern such a filter would address is answered by the prune instead: once every peer's copy is bounded, the full set is small.
@@ -200,7 +200,7 @@ If the peer has never been synced (`lastSeqPushed` = 0), the full history is sen
 
 ### `POST /batch-upsert`
 
-Accepts `{ facts?: MemoryDoc[], entities?: EntityDoc[], edges?: EdgeDoc[], chrono?: ChronoEntry[], links?: LinkDoc[], filemeta?: FileMetaDoc[] }` in a single request. **An array the receiver does not read is dropped with a `200`**, so a peer built without `filemeta` loses every file description, tag and link array at the boundary — and nothing says so at either end. Up to 500 documents per type per request. The server applies the same conflict rules as the individual `POST /facts`, `POST /entities`, `POST /edges`, `POST /chrono` endpoints:
+Accepts `{ facts?: FactDoc[], entities?: EntityDoc[], edges?: EdgeDoc[], chrono?: ChronoEntry[], links?: LinkDoc[], filemeta?: FileMetaDoc[] }` in a single request. **An array the receiver does not read is dropped with a `200`**, so a peer built without `filemeta` loses every file description, tag and link array at the boundary — and nothing says so at either end. Up to 500 documents per type per request. The server applies the same conflict rules as the individual `POST /facts`, `POST /entities`, `POST /edges`, `POST /chrono` endpoints:
 
 | Type | Rule |
 |------|------|
@@ -209,11 +209,11 @@ Accepts `{ facts?: MemoryDoc[], entities?: EntityDoc[], edges?: EdgeDoc[], chron
 | Edges | same as entities |
 | Chrono | same as entities |
 
-Response: `{ status: 'ok', facts: {inserted,updated,forked,skipped,forkDepthRefused,tombstoned,schemaViolations}, entities: {upserted,skipped,tombstoned,schemaViolations}, edges: {upserted,skipped,tombstoned,schemaViolations,duplicateTriplets}, chrono: {upserted,skipped,tombstoned,schemaViolations,unknownType}, links: {upserted,skipped,tombstoned} }`
+Response: `{ status: 'ok', facts: {inserted,updated,forked,skipped,forkDepthRefused,tombstoned,schemaViolations}, entities: {upserted,skipped,tombstoned,schemaViolations}, edges: {upserted,skipped,tombstoned,schemaViolations,duplicateTriplets}, chrono: {upserted,skipped,tombstoned,schemaViolations,unknownType}, links: {upserted,skipped,tombstoned}, filemeta: {upserted,skipped} }`
 
-**Four of those counters were undocumented, and one of them is the sender's only report of a PERMANENT loss.** `skipped` means the peer was already current, which is benign. `forkDepthRefused` means a record was DROPPED and will not be retried — the push path reads exactly that field to report a refusal, so a receiver that does not emit it makes the loss silent at both ends. `schemaViolations` counts documents stored despite failing the RECEIVER's schema (validated, counted and let in — see the ingest rule below); `duplicateTriplets` counts edges the unique index rejected; `unknownType` counts the case below.
+**One of those counters is the sender's only report of a PERMANENT loss.** `skipped` means the peer was already current, which is benign. `forkDepthRefused` means a record was DROPPED and will not be retried — the push path reads exactly that field to report a refusal, so a receiver that does not emit it makes the loss silent at both ends. `schemaViolations` counts documents stored despite failing the RECEIVER's schema (validated, counted and let in — see the ingest rule below); `duplicateTriplets` counts edges the unique index rejected; `unknownType` counts the case below.
 
-**`filemeta` reports its counters like every other family.** Six arrays in, six sets of counters out. Until 4.0 the response carried five: file metadata was accepted, applied, counted internally and only logged, so a sender had no way to tell whether it landed.
+**`filemeta` reports its counters like every other family.** Six arrays in, six sets of counters out. A peer older than 4.0 returns no `filemeta` counters.
 
 **A link has no fork counter, and that is a property of the record rather than an omission.** A fork exists
 because two peers can write different CONTENT under one id at one `seq`. A link record is two endpoints and
@@ -323,7 +323,7 @@ After document sync, the engine performs a manifest-based file sync. It is bidir
 
 Manifest requests use the 10 s timeout and batch-style transfers the 60 s one. A whole file body gets the ten-minute transfer budget, because a 10 s ceiling on a multi-megabyte upload aborts it on any ordinary link.
 
-**A download gets it too, and until 4.0 it did not.** The call passed the transfer budget alongside a request that already carried the 10 s control-plane signal, and `init.signal ?? …` means the signal won — so any file whose body took longer than ten seconds aborted, logged, and was retried identically on every cycle, for ever. Large files simply never replicated. The control-plane signal is stripped before the transfer call now, so one budget reaches the fetch.
+**A download gets the same budget.** The 10 s control-plane signal is stripped before the transfer call, so only the transfer budget reaches the fetch.
 
 ---
 
@@ -349,20 +349,20 @@ At the **start** of each cycle — before any data sync, see [Overview](#overvie
 
 3. **Pull member view** — `GET /api/sync/networks/:networkId/members` fetches the peer's full member list. Any record whose `instanceId` is already known locally (but is not our own `instanceId`) has its `url`, `label`, and `children` merged in if they differ.
 
-**Both self-records also carry `spaces`** — the network's spaces as the sender carries them, in the network's ids (F-38.3). An instance adopts from it only when the sender is its **upstream**: a pub/sub subscriber from its publisher, a braintree node from its parent. A space it lacks is created under that id and added to the network, and the tokens it issued to the network's members are widened to it. The announcement only adds; a space missing from it is never removed. From anyone else — a subscriber announcing to its publisher, a club peer — it is ignored.
+**Both self-records also carry `spaces`** — the network's spaces as the sender carries them, in the network's ids. An instance adopts from it only when the sender is its **upstream**: a pub/sub subscriber from its publisher, a braintree node from its parent. A space it lacks is created under that id and added to the network, and the tokens it issued to the network's members are widened to it. The announcement only adds; a space missing from it is never removed. From anyone else — a subscriber announcing to its publisher, a club peer — it is ignored.
 
 ## Schema phase (pub/sub and braintree)
 
-Before pulling a space's records from its upstream, the engine pulls the space's meta — `GET /api/sync/meta?spaceId=&networkId=` — and merges it into the local meta (F-39.1). Only from the upstream, so a schema flows down a pub/sub network or a tree and never up.
+Before pulling a space's records from its upstream, the engine pulls the space's meta — `GET /api/sync/meta?spaceId=&networkId=` — and merges it into the local meta. Only from the upstream, so a schema flows down a pub/sub network or a tree and never up.
 
 - **What travels** is everything a network governs: type schemas, purpose, usage notes, validation mode, strict linkage and the other `meta` fields. Never what the server owns (`version`, history, reindex flags), and never the space's operational settings (duplicate rules, record retention, document extraction), which are not in `meta`.
 - **The merge only adds.** A type the receiver lacks is added. A type both hold keeps every local property and gains the network's; a property both hold takes the network's definition, as does a type's own field (a naming pattern, an edge's endpoints) where the network sets one. A schema-library reference is one unit and is replaced whole. Nothing local is removed.
 - **Refused whole, never in part.** A meta the local API would reject, or one that references schema-library entries this instance lacks, is logged and nothing is merged.
 - **It never stops data.** A schema that cannot be fetched or merged leaves the record sync to run as it would have.
-- **A space in two networks keeps each network's schema apart** (F-39.2). What a network sends is stored as that network's *layer* for the space, next to the instance's own definitions, and the meta the space runs on is rebuilt from them: own definitions, then the layers in precedence, so the network joined first wins where two define the same thing differently (`networkPrecedence` on the space reorders it). A clash never stops either network's records.
+- **A space in two networks keeps each network's schema apart**. What a network sends is stored as that network's *layer* for the space, next to the instance's own definitions, and the meta the space runs on is rebuilt from them: own definitions, then the layers in precedence, so the network joined first wins where two define the same thing differently (`networkPrecedence` on the space reorders it). A clash never stops either network's records.
 - **Nothing mixed is sent on.** `GET /api/sync/meta?networkId=` answers with the instance's own definitions plus *that* network's layer — never another network's, never the combined result — so one network's definition cannot leak into the other.
 - **An operator's edit lands in the own definitions**, so it survives the next layer arriving; a type a network defines cannot be removed locally, because the replicated schema is additive.
-- **A passed `meta_change` reaches every member** (F-39.4). The proposer keeps serving the passed round on `GET /api/sync/networks/:id/votes`, so a member that never saw it open — a club member, a late joiner — adopts it and re-decides it from the casts. The proposer applies it to its own definitions; every other member applies it into that network's layer, so replaying an old round can refresh the layer but never overwrite what the member defined itself. A round names the space by the network's id, and each member resolves it to its own.
+- **A passed `meta_change` reaches every member**. The proposer keeps serving the passed round on `GET /api/sync/networks/:id/votes`, so a member that never saw it open — a club member, a late joiner — adopts it and re-decides it from the casts. The proposer applies it to its own definitions; every other member applies it into that network's layer, so replaying an old round can refresh the layer but never overwrite what the member defined itself. A round names the space by the network's id, and each member resolves it to its own.
 
 ### Gossip poisoning protection
 
@@ -378,14 +378,14 @@ All endpoints are under `/api/sync` and require a `Bearer` token. In normal oper
 
 The two **governance relays** — `POST /networks/:networkId/members` and `POST /networks/:networkId/votes/:roundId` — accept **a peer token speaking for its own instance, or an instance administrator relaying on a peer's behalf**, and refuse anything else with `403`. The authorisation runs before the network and round are looked up, so an unauthorised caller cannot learn which rounds are open from the status code.
 
-> This paragraph used to say token space-scope and network membership were *"enforced before any read or write"*. That was not true of the two governance relays, which carried authentication only: any write-capable token could rewrite a member record, or cast a vote attributed to any instance on any round — including a `space_wipe`. Fixed 2026-09-04. The seven **data-write endpoints accept only peer or admin tokens** — see [Direction enforcement on inbound endpoints](#direction-enforcement-on-inbound-endpoints). Rate-limited per IP.
+The seven **data-write endpoints accept only peer or admin tokens** — see [Direction enforcement on inbound endpoints](#direction-enforcement-on-inbound-endpoints). Rate-limited per IP.
 
 ### Read endpoints (called during pull)
 
 | Method | Path | Key params | Returns |
 |--------|------|------------|---------|
 | `GET` | `/api/sync/facts` | `spaceId`, `networkId`, `sinceSeq`, `limit`, `cursor`, `full` | `{ items[], nextCursor }` |
-| `GET` | `/api/sync/facts/:id` | `spaceId`, `networkId` | Full `MemoryDoc` |
+| `GET` | `/api/sync/facts/:id` | `spaceId`, `networkId` | Full `FactDoc` |
 | `GET` | `/api/sync/entities` | same as facts | `{ items[], nextCursor }` |
 | `GET` | `/api/sync/entities/:id` | `spaceId`, `networkId` | Full `EntityDoc` |
 | `GET` | `/api/sync/edges` | same as facts | `{ items[], nextCursor }` |
@@ -406,24 +406,24 @@ There is no dedicated identity endpoint — a peer that needs the instance's ide
 
 `?full=true` on the list endpoints returns complete documents instead of `{_id,seq}` stubs. Maximum `limit` is 500. Tombstone stubs (items with `deletedAt`) are always appended to list responses regardless of `full` mode.
 
-**`links` and `filemeta` had no rows in this table until 2026-09-04, and `tombstones` was missing its `links[]` key.** Both are consequences of one thing: file metadata became the sixth replicated family and links the fifth, and the places that enumerate the families were not derived from anything. A peer built from the old table serves neither, drops both on the way in, and never propagates a link deletion — and because `merkle` hashes all six collections, its root then diverges permanently on data that is not actually different. The advisory nature of that check is what makes it worse: nothing contradicts the warning, so an operator learns to ignore the one signal that means data really is missing.
+**A peer must serve all six families, and `tombstones` must carry `links[]`.** A peer that serves neither `links` nor `filemeta` drops both on the way in and never propagates a link deletion — and because `merkle` hashes all six collections, its root then diverges permanently on data that is not actually different. The check is advisory, so nothing contradicts the warning, and an operator learns to ignore the one signal that means data really is missing.
 
 ### Write endpoints (called during push)
 
 | Method | Path | Body | Returns |
 |--------|------|------|---------|
-| `POST` | `/api/sync/facts` | `MemoryDoc` | `200 { status: 'inserted'\|'updated'\|'forked'\|'skipped'\|'tombstoned' }` — the `'forked'` case also returns `forkId` (the new fork document's `_id`) |
+| `POST` | `/api/sync/facts` | `FactDoc` | `200 { status: 'inserted'\|'updated'\|'forked'\|'skipped'\|'tombstoned' }` — the `'forked'` case also returns `forkId` (the new fork document's `_id`) |
 | `POST` | `/api/sync/entities` | `EntityDoc` | `200 { status:'ok' }` (or `'tombstoned'`) |
 | `POST` | `/api/sync/edges` | `EdgeDoc` | `200 { status:'ok' }`, `'tombstoned'`, or **`'duplicate'`** when the unique `(from, fromKind, to, toKind)` index rejects the insert |
 | `POST` | `/api/sync/chrono` | `ChronoEntry` | `200 { status:'ok' }` (or `'tombstoned'`) |
-| `POST` | `/api/sync/batch-upsert` | `{ facts?, entities?, edges?, chrono?, links?, filemeta? }` | `200 { status:'ok', facts:{…}, entities:{…}, edges:{…}, chrono:{…}, links:{…} }` — six arrays in, five sets of counters out |
+| `POST` | `/api/sync/batch-upsert` | `{ facts?, entities?, edges?, chrono?, links?, filemeta? }` | `200 { status:'ok', facts:{…}, entities:{…}, edges:{…}, chrono:{…}, links:{…}, filemeta:{…} }` — six arrays in, six sets of counters out |
 | `POST` | `/api/sync/tombstones` | `{ tombstones[] }` | `200 { applied: N }` |
 | `POST` | `/api/sync/file-tombstones` | **`{ spaceId, tombstones[] }`** — `spaceId` in the BODY, not the query; absent it answers `400 { error: 'spaceId required' }` | `200 { applied: N }` |
 | `POST` | `/api/sync/warm` | `{ networkId, spaces[] }` | `200` once the embedding model, token cache and collection handles are warm. It touches `facts`, `entities`, `edges` and `chrono` only, and results are discarded |
 
-**Direction is enforced on `braintree` and `pubsub` networks only**, and this paragraph used to state it of every write endpoint on every network. A peer whose `member.direction === 'push'` — we push to them, so they should not be writing to us — is refused with a `403` on those two types. On any other type carrying the space the write is allowed, which is deliberate: direction is a topology property of a tree and a publisher, and a `closed` or `club` network has no upstream to protect. See [Direction enforcement on inbound endpoints](#direction-enforcement-on-inbound-endpoints).
+**Direction is enforced on `braintree` and `pubsub` networks only.** A peer whose `member.direction === 'push'` — we push to them, so they should not be writing to us — is refused with a `403` on those two types. On any other type carrying the space the write is allowed, which is deliberate: direction is a topology property of a tree and a publisher, and a `closed` or `club` network has no upstream to protect. See [Direction enforcement on inbound endpoints](#direction-enforcement-on-inbound-endpoints).
 
-**And two of these endpoints enforce less than the sentence above implied.** `POST /api/sync/warm` sits behind authentication and nothing else — no peer gate, no direction, no space scope — which costs nothing because it discards its results, but it is not what "all write endpoints" said. Direction is also read from the CALLER's peer identity, so a token with no `peerInstanceId` is not direction-checked at all; the peer-or-admin requirement is what stands in front of that.
+**`POST /api/sync/warm` enforces less than the other write endpoints.** It sits behind authentication and nothing else — no peer gate, no direction, no space scope — which costs nothing because it discards its results. Direction is also read from the CALLER's peer identity, so a token with no `peerInstanceId` is not direction-checked at all; the peer-or-admin requirement is what stands in front of that.
 
 **There is no single-document route for `links` or `filemeta`.** Both arrive only through `batch-upsert`, so a peer implementation that only wires the per-type `POST` endpoints replicates neither.
 
@@ -491,8 +491,7 @@ signal, and it is the reason that counter is in the documented response shape ab
 Directly after the gossip (member identity) exchange — still ahead of the data phases — the engine runs a vote propagation pass with each peer:
 
 **Pull before push, and the order is load-bearing.** Adopting the peer's rounds first means a cast this
-instance is about to relay has a round to land on. This list used to run the other way round, which is the
-silently-skipped `404` in step 2: a cast pushed for a round the peer has not yet adopted.
+instance is about to relay has a round to land on.
 
 1. **Pull rounds** — `GET /api/sync/networks/:networkId/votes` fetches the peer's open rounds. For each round:
    - **New round**: if the round does not exist locally, it is adopted into `pendingRounds` (with an empty `votes` array); votes are then merged in the same pass.
@@ -501,7 +500,7 @@ silently-skipped `404` in step 2: a cast pushed for a round the peer has not yet
 2. **Push casts** — for each local vote round — including already-concluded ones, so that a round-concluding cast still reaches peers that have not concluded yet — each known vote cast is relayed to the peer via `POST /api/sync/networks/:networkId/votes/:roundId { vote, instanceId, sig, castAt }`, forwarding the voter's signature so the peer can verify and relay it onward. If the peer does not yet have the round (404), the push is silently skipped — the round will arrive on the peer's next pull cycle.
 3. **Round conclusion** — after all merges, `concludeRoundIfReady` is evaluated for every open local round. Unanimous-type networks (closed, braintree) require every listed remote member to have individually cast `yes`; a single outstanding member prevents conclusion. For **braintree** rounds the required-voter set (ancestor path) is recomputed from the local topology at conclusion, never trusted from the adopted round, so a peer cannot shrink it. Democratic networks use a simple majority count. Club networks conclude on the first `yes`.
 
-4. **Side effects** — if a `space_deletion` round concludes with zero vetoes, the space is removed from the local instance asynchronously. A `space_wipe` round behaves the same way but EMPTIES the space instead of removing it, wiping exactly the collections named on the round (**all six** when it names none — facts, entities, edges, chrono, files and links; this said five, and `links` was the one it left out). Both are applied through one function called from all three conclusion paths — an operator's own vote, a peer's vote arriving, and the gossip pass.
+4. **Side effects** — if a `space_deletion` round concludes with zero vetoes, the space is removed from the local instance asynchronously. A `space_wipe` round behaves the same way but EMPTIES the space instead of removing it, wiping exactly the collections named on the round (**all six** when it names none — facts, entities, edges, chrono, files and links). Both are applied through one function called from all three conclusion paths — an operator's own vote, a peer's vote arriving, and the gossip pass.
 
 This means a vote cast on any peer propagates to all other peers within one gossip cycle per hop, and a round concludes independently on each instance as soon as it has received enough votes to satisfy its network's pass condition.
 
@@ -520,7 +519,7 @@ On the **receiving** end of a `member_departed` event:
 
 - The sender is removed from `net.members` for all network types.
 - The event is **idempotent** — if the sender is no longer in the member list (already processed), the call returns `204` rather than `403`. This handles duplicate delivery and race conditions gracefully.
-- N-7 braintree auto-adopt logic runs as before (orphaned children are re-parented to the closest surviving ancestor).
+- Braintree auto-adopt logic runs (orphaned children are re-parented to the closest surviving ancestor).
 
 ### Forced removal (remove vote)
 

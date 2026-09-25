@@ -6,9 +6,9 @@
 
 ## Brain
 
-The Brain is where all your knowledge lives. It has nine tabs: **Overview**, **Query**, **Graph**, **Review**, **Entities**, **Edges**, **Facts**, **Chrono** and **Files**. This said eight and left out **Review**, which has its own section further down this page.
+The Brain is where all your knowledge lives. It has nine tabs: **Overview**, **Query**, **Graph**, **Review**, **Entities**, **Edges**, **Facts**, **Chrono** and **Files**. **Review** has its own section further down this page.
 
-**Overview** is the **default landing tab** — opening a space lands here first. It is a per-space dashboard assembled from what the Brain already knows: a **Storage** panel (storage used against the space's quota — and when the instance could not read part of that space's file directory the figure is prefixed **≥** with a **partly unreadable** warning beside it, because a number that is silently short reads as a quota nowhere near its limit), an **Indexing** panel (the vector index's state, plus a **Reindex** button — behind a confirmation — when embeddings have gone stale), an **Embedding queue** panel (pending / processing / failed background-embedding job counts, with the file + reason for any failures, and a **Retry all failed** button — behind a confirmation — that re-queues every failed job in the space at once), a **Networks** panel (the networks this space syncs with and its aggregate sync status, or a note when it belongs to none), a **Governance** panel (open votes in this space's networks — subject, deadline, and tally — shown only when there are any), a **Data model** panel (the space’s entity types drawn as a diagram, with each type’s declared properties, how many records it actually holds, and the relationships between types — inferred from the schema AND from the records, so a type that has records but was never declared shows up rather than being silently left out; a record count is a link that opens that type in the Entities tab, and admins get a pencil on each type that opens the schema editor without leaving the page. **Facts, chrono entries and files appear as boxes too** — one per kind, carrying that kind’s total, joined to each entity type they link to with the per-type count on the join. They are drawn dashed and unfilled because they have no schema of their own, and a kind with no links anywhere gets no box rather than an empty one; their counts open the matching tab; **the boxes are drawn at one of three heights and a row of them shares a top and bottom edge**, and **the types that participate in no relationship are laid out along the bottom across the full width of the card** rather than wrapping after four however much room there is — a height per property count meant no horizontal line anywhere in the picture, which is most of what made a diagram of twenty types hard to follow), a **Usage** panel (how often this space was called over the last seven days, how many of those calls were recall, and what share of them actually answered — demand without the answer rate is not usefulness; admins get a **Reset usage** button there, which deletes the recorded history for this space behind a confirmation and is irreversible), and — **for admins only** — a **Token access** panel (which API tokens can reach this space and at what level: admin, read/write, or read-only, with network-peer and all-spaces tokens flagged and any expiry shown).
+**Overview** is the **default landing tab** — opening a space lands here first. It is a per-space dashboard assembled from what the Brain already knows: a **Storage** panel (storage used against the space's quota — and when the instance could not read part of that space's file directory the figure is prefixed **≥** with a **partly unreadable** warning beside it, because a number that is silently short reads as a quota nowhere near its limit), an **Indexing** panel (the vector index's state, plus a **Reindex** button — behind a confirmation — when embeddings have gone stale), an **Embedding queue** panel (pending / processing / failed background-embedding job counts, with the file + reason for any failures, and a **Retry all failed** button — behind a confirmation — that re-queues every failed job in the space at once), a **Networks** panel (the networks this space syncs with and its aggregate sync status, or a note when it belongs to none), a **Governance** panel (open votes in this space's networks — subject, deadline, and tally — shown only when there are any), a **Data model** panel (the space’s entity types drawn as a diagram, with each type’s declared properties, how many records it actually holds, and the relationships between types — inferred from the schema AND from the records, so a type that has records but was never declared shows up rather than being silently left out; a record count is a link that opens that type in the Entities tab, and admins get a pencil on each type that opens the schema editor without leaving the page. **Facts, chrono entries and files appear as boxes too** — one per kind, carrying that kind’s total, joined to each entity type they link to with the per-type count on the join. They are drawn dashed and unfilled because they have no schema of their own, and a kind with no links anywhere gets no box rather than an empty one; their counts open the matching tab; **the boxes are drawn at one of three heights and a row of them shares a top and bottom edge**, and **the types that participate in no relationship are laid out along the bottom across the full width of the card**, so a diagram of twenty types keeps straight horizontal lines), a **Usage** panel (how often this space was called over the last seven days, how many of those calls were recall, and what share of them actually answered — demand without the answer rate is not usefulness; admins get a **Reset usage** button there, which deletes the recorded history for this space behind a confirmation and is irreversible), and — **for admins only** — a **Token access** panel (which API tokens can reach this space and at what level: admin, read/write, or read-only, with network-peer and all-spaces tokens flagged and any expiry shown).
 
 At the top of the page a row of **space chips** lets you switch space; each chip shows the space's total record count. The tab buttons themselves carry small count badges for the collection they open.
 
@@ -17,13 +17,13 @@ looking at — the same editor as **Settings → Spaces**, with its Settings, Sc
 tabs. It is not a tenth tab: it opens a dialog over the page, so nothing you were reading is lost, and closing
 it returns you to the tab you were on. The cog is greyed out until a space is selected.
 
-The admin list at **Settings → Spaces** is unchanged and remains the place to create, reorder and compare
+The admin list at **Settings → Spaces** is the place to create, reorder and compare
 spaces; the cog is the shortcut for the one you are working in.
 
 The same state is on both APIs as `needsReindex` on a space's meta, so an agent can check it without watching
 the screen.
 
-If the search index needs rebuilding (for example after the embedding model changes), a banner appears reading *"Embeddings are stale — a reindex is recommended."* Click **Reindex** to rebuild it. (Both quotations here were longer than what the screen says.)
+If the search index needs rebuilding (for example after the embedding model changes), a banner appears reading *"Embeddings are stale — a reindex is recommended."* Click **Reindex** to rebuild it.
 
 > **Reindex and rebuild are different repairs.** *Reindex* re-embeds your content against the current model. It does **not** help when the search index itself is missing or broken — the symptom there is search quietly returning nothing at all, with no error. That one needs **Rebuild search indexes** on the space's **Danger** tab (see below).
 
@@ -43,7 +43,7 @@ Facts are the core knowledge unit — plain-language statements you want to reme
 
 Click **Save**. The fact is indexed immediately and available for search.
 
-**Searching:** The top search bar is **Semantic** (meaning-based) — type and it returns a ranked, non-paginated set. Plain-text (substring) search moved into the column headers: use the **freetext box under the Fact column** (see Filtering). Clearing the top bar restores the normal paginated list.
+**Searching:** The top search bar is **Semantic** (meaning-based) — type and it returns a ranked, non-paginated set. Plain-text (substring) search is in the column headers: use the **freetext box under the Fact column** (see Filtering). Clearing the top bar restores the normal paginated list.
 
 **Filtering:** Each column that can be filtered has its control docked directly under the column header — a **freetext box** under the main text column (Name / Relation / Fact) that matches a substring of the row's text, a type/kind dropdown under the **Type**/**Kind** column, and a tag box under the **Tags** column. Clicking a tag or entity badge on a row still fills the matching filter (the active entity filter shows as a chip above the table, with **×** to clear). Filtering happens on the server across the whole list, and clears back to everything when you empty the control.
 
@@ -66,9 +66,8 @@ Entities are named concepts — people, services, projects, tools, anything you 
 Each entity has a **name**, a **type** (e.g. `person`, `service`), optional **tags**, an optional
 **description**, and optional **properties** (key-value pairs like `{ "version": "3.0", "active": true }`).
 
-> **The type is required from 4.0, and it used to be optional here.** It is what tells Ythril which set of
-> properties this kind of thing has, so an entity without one is an entity none of the space's rules can
-> check — and this form was the only way to make one. If the space has declared its entity types you pick
+> **The type is required.** It is what tells Ythril which set of properties this kind of thing has, so an
+> entity without one is an entity none of the space's rules can check. If the space has declared its entity types you pick
 > from them; if it has not, type whatever the thing is.
 
 **A property value has to be plain — a word, a number, or true/false.** You cannot nest one property inside
@@ -108,18 +107,15 @@ every one of them pointing at a record that no longer exists.
 
 For a **link**, the message also says which end of it this entity is, `from` or `to`, because that is what
 tells you where to look. **Both ends count.** A link that runs out of this entity blocks the delete exactly as
-one that runs into it does — either would be left half-attached — and the message used to say "inbound", which
-sent people looking at the wrong side of their own links.
+one that runs into it does — either would be left half-attached.
 
 **Faces do not block.** A photo where this person was recognised is listed, so you can see the labels that
 are about to come off, but it never stops the delete — the labels are removed with the entity.
 
-**And you can now delete it together with what points at it, in one action.** This paragraph used to say
-there was deliberately no such button, because *"the pause is what stops a hub record taking a hundred
-relationships with it"*. The pause is still there and it is now worth something: the refusal opens a
-confirmation that tells you **how many** records would go, counted by kind, so the hub case announces
-itself as *"127 relationships"* rather than being prevented by the absence of a button. Clearing them by
-hand first is still perfectly good, and is what to do when you only meant to remove some of them.
+**You can also delete it together with what points at it, in one action.** The refusal opens a
+confirmation that tells you **how many** records would go, counted by kind, so a hub record announces
+itself as *"127 relationships"* before anything is removed. Clearing them by hand first is still perfectly
+good, and is what to do when you only meant to remove some of them.
 
 **Nothing at the other end is deleted.** A link that runs from this entity to another is removed; the
 record it pointed at stays exactly as it is. That is the whole of what the cascade does — it clears what
@@ -142,13 +138,13 @@ Edges connect two records and describe the relationship between them (e.g. *serv
 
 Each edge has a **from** record, a **to** record, a **label** (the relationship name), and optional **type**, **weight**, **tags**, **description**, and **properties**.
 
-**From 3.7 an endpoint does not have to be an entity.** Either end can be an entity, a fact, a chrono entry
+**An endpoint does not have to be an entity.** Either end can be an entity, a fact, a chrono entry
 or a file, and the edge records which kind it is. Think of a photo taken at a party: the photo can point at
 the people in it (entities), at the party itself (a chrono event), and at what happened there (a fact) —
 three different kinds of record, from one file.
 
 > **The Edges tab still creates entity-to-entity edges only.** The pickers offer entities, and an edge you
-> create here has no kind recorded, which means entity — exactly what it meant before 3.7. Edges with other
+> create here has no kind recorded, which means entity. Edges with other
 > kinds of endpoint are written through the API or by an agent. They **display** properly in this table: a
 > fact endpoint shows its fact, a chrono endpoint its title, a file endpoint its path. Pickers for the other
 > three kinds are not in this release.
@@ -161,7 +157,7 @@ When a **label** is selected and the space has a schema defined for that label, 
 
 **Editing / Deleting:** Same as entities — ⊙ view-details drawer or inline ✕ confirm.
 
-> **Deleting an entity that other things point at (4.0).** In a space with the strict reference setting on,
+> **Deleting an entity that other things point at.** In a space with the strict reference setting on,
 > deleting an entity is refused while edges still connect it to something — the message lists them. There
 > are two ways forward: delete those edges yourself, or use the API to **preview** exactly what would go and
 > then repeat the delete quoting the token the preview gives back.
@@ -178,18 +174,14 @@ An edge says **how** two things relate. A link says only that one record **is ab
 a different thing you already use every day: the entities you attach to a fact, the entities and facts
 you attach to a chrono entry, the three lists on a file. Those attachments are links.
 
-They have always existed as lists on the record. From 4.0 each one is also a record of its own, so that
-everything asking *"what is connected to this?"* — the graph, search, the ER model — looks in one place
-instead of each following a different part of the lists.
+Each one is a record of its own, so that everything asking *"what is connected to this?"* — the graph,
+search, the ER model — looks in one place.
 
-**Nothing you do changes — but you will see MORE.** Attach an entity to a fact the way you always have and
-the link is made for you. Remove it and the link goes. There is no new box to tick and no new step.
+**Attaching a record is what makes the link.** Attach an entity to a fact and the link is made for you.
+Remove it and the link goes. There is no separate box to tick and no extra step.
 
-What is new is that three kinds of connection you could already record are finally followed: a timeline
-entry pointing at a **fact**, and a file pointing at a **fact** or at a **timeline entry**. Those
-attachments have been saved and shown on the record since 3.x, and nothing that walked the graph looked at
-them — so a graph from a fact did not reach the timeline entry about it. It does now, on every space,
-with nothing to run.
+Every kind of attachment is followed, including a timeline entry pointing at a **fact**, and a file pointing
+at a **fact** or at a **timeline entry** — so a graph from a fact reaches the timeline entry about it.
 
 **Where to see them:** the **Query** tab, Advanced mode, with the collection picker set to **links** — one
 row per connection, showing which record it hangs off and which record it names.
@@ -204,18 +196,17 @@ because the ordinary way to make a link is to attach the record, which the tabs 
 
 ### Two things changed in 5.0, and the conversion runs itself
 
-A connection used to be a list of ids kept on the record. It is a small record of its own now, converted on
-the first 5.0 start with nothing for you to run — and two things follow.
+Upgrading from 4.x: connections stored as lists of ids on the record are converted to link records on the
+first 5.0 start, with nothing for you to run. Two rules follow.
 
 **1. Deleting a record that something still points at is refused** — but only in a space with the strict
 reference setting on. Delete a fact that a timeline entry refers to and you get a message naming what refers
-to it, instead of the delete going through. This is a **change**: it always went through before, and the
-timeline entry was quietly left pointing at a fact that was no longer there.
+to it, instead of the delete going through and leaving the timeline entry pointing at a fact that no longer
+exists.
 
-**2. Writing the old connection lists through the API is refused**, with the error naming the field to send
-instead — the same ids, a different name. Nothing you have stored is lost: the conversion turned every list
-into links before the lists were removed. The tabs are unaffected, and attaching a record still works exactly
-as it did.
+**2. Writing a connection as a list of ids on the record through the API is refused**, with the error naming
+the field to send instead — the same ids, a different name. The conversion turns every stored list into links
+before the lists are removed, so nothing stored is lost. Attaching a record in the tabs works as usual.
 
 **A space whose conversion failed says so** rather than answering that it has no connections, and names
 itself in the message. That is the one case where you have to do something, and the server log says what
@@ -229,9 +220,8 @@ Chrono stores time-anchored entries: events, deadlines, plans, predictions, and 
 
 **Creating an entry:** Click **+ Add entry**. Required fields are **title**, **type**, and **starts at** (date and time). You can also add a description, tags, status, linked **entities**, linked **facts**, and **properties** — the fact field is a searchable picker (type to find a fact by its fact and click to link it; linked facts show as chips), and the properties editor lets you fill in any fields the chrono type's schema defines (switching the type reseeds its property fields). The same pickers and properties editor are available when editing an entry in its detail drawer.
 
-> **Clearing a property on a chrono entry works from 3.1.** Properties are *merged* when you save — the ones
-> you do not touch are kept — so before 3.1 an API caller had no way to remove one at all and a stale key
-> stayed for ever. Removing a property in the editor now removes it. The entry's **title**, **type** and
+> **Clearing a property on a chrono entry removes it.** Properties are *merged* when you save — the ones
+> you do not touch are kept — and removing a property in the editor removes it from the entry. The entry's **title**, **type** and
 > **starts at** cannot be cleared, because an entry without them could not be shown; change them instead, or
 > delete the entry.
 
@@ -248,15 +238,14 @@ Chrono stores time-anchored entries: events, deadlines, plans, predictions, and 
 > run, an alert episode — then a date in the past is the normal condition and does not mean late. For those,
 > set **`whenDuePasses` to `nothing`** on that type in the space's schema, or on the space itself to cover
 > every type that does not say otherwise, and those entries keep the status you gave them. Leave it alone and
-> nothing changes. *New in 4.3.*
+> nothing changes.
 >
 > **What you see here is WORKED OUT; what is stored can differ, and that matters the moment you look
 > somewhere else.** This page shows *overdue* for an entry that is stored as *upcoming* or *active* —
 > the clock decides, on every read. A backup, an export, or anything reading the space through the API
 > sees what was STORED, so an entry this page calls overdue reads as active there. Neither is wrong;
-> they answer different questions, and nothing is out of step. One operator spent a while confirming a
-> suspicion against the stored value, got a clean answer every time, and had to find out from us why.
-> Anyone reading over the API can now ask for either.
+> they answer different questions, and nothing is out of step. Anyone reading over the API can ask for
+> either.
 >
 > The status dropdown does offer **overdue**, and filtering by it finds those entries too. You rarely want
 > it: an entry marked overdue by hand stays overdue after you move its dates forward, where one left as
@@ -353,14 +342,11 @@ Two options sit next to the query box:
 - **topK** — how many results to return. **There is no upper limit**, and asking for more than exists is
   not an error — you get what there is. What bounds a large request is the SIZE of the answer, described
   under *When the answer itself does not fit* below: a result is returned whole or not at all, and the
-  answer always tells you when something was left out. Before 4.0.0 this box silently reduced anything
-  over 100 to 100 — silently being the problem, because you were then looking at the top 100 believing
-  it was the top 500.
+  answer always tells you when something was left out.
 - **minScore** — drop results below this similarity score (0–1). This is always the **meaning** score, even
   when word-matching or reranking has changed the order — so a threshold you set once keeps meaning the
   same thing. **The threshold is applied before topK, not after**, so a topK of 10 with a threshold set
-  gives you ten results that clear it rather than however many of the top ten happened to. That is a
-  4.0.0 fix; earlier versions chose the ten first and then thinned them, which could return three.
+  gives you ten results that clear it rather than however many of the top ten happened to.
 
 **Nothing is hidden behind a disclosure.** The form is laid out in five groups — **the question**, **ranking**,
 **the graph**, **the answer** and **Size and paging** — side by side across the width of the page, because a control you cannot see
@@ -416,9 +402,7 @@ the same answer. Two uses, and the second is the reason it is there:
   the ones that do not fit are absent, not shortened. A search for a hundred matches that comes back with
   eleven has usually not found eleven things: it has found a hundred and spent the room on the relationships
   around the first eleven. Turn the expansion down, or raise **Max response size**, and the rest appear. And **the page tells you when it happened** — a notice above the results says
-  how many of how many came back, states both guarantees, and says what to do about it. Until 3.2.0 it did not:
-  a shortened answer looked exactly like a complete one, so a hundred-match search could show a handful of
-  records with nothing anywhere explaining why.
+  how many of how many came back, states both guarantees, and says what to do about it.
   - **Max response size**, under **the answer**, is the ceiling itself — the API calls it `maxChars`, and it
     is counted in CHARACTERS. Raise it
     to get more of a shortened answer in one go; leave it empty for the default. **The default here is the
@@ -429,39 +413,34 @@ the same answer. Two uses, and the second is the reason it is there:
     - **The ceiling is one number in four currencies, and all four are on the form.** Bytes and characters
       sit under **the answer** and **size and paging**; tokens is there too, with **characters per token**
       appearing beside it once a token ceiling is set. **Set more than one and the smallest wins** — which
-      is the rule that makes offering all four safe, and the reason this page used to say there was
-      deliberately one control. Four is the honest number: the units are not interchangeable outside plain
+      is the rule that makes offering all four safe. Four is the honest number: the units are not interchangeable outside plain
       English, and tokens is the one an agent's budget is actually written in.
-    - **A note on the word bytes, which used to be wrong here.** The API called this ceiling `maxBytes` until
-      3.7 and counted characters — the same thing for English, and not for German, Polish or anything with an
-      emoji in it, where a character can take two or three bytes. A space working in those languages was
-      quietly going about a quarter over the limit it had been given. The counting was renamed to what it
-      always did, and a real byte ceiling now exists for callers whose limit genuinely is in bytes. Nothing
-      changes for this page: the control still sets the same thing it always set.
+    - **Characters and bytes are not the same ceiling.** `maxChars` counts characters and `maxBytes` counts
+      real bytes — the same thing for English, and not for German, Polish or anything with an emoji in it,
+      where a character can take two or three bytes. Use the byte ceiling when your limit genuinely is in
+      bytes. Upgrading a script from before 3.7: `maxBytes` counted characters there, so send `maxChars` to
+      keep a character ceiling.
   - Narrowing the search — fewer results, fewer graph hops, a tighter filter — does the same job from the other
     end, and a search that comes back shortened is usually a sign the question was broader than intended.
   - **Getting the whole tail as one file is a request you make, not something that happens to you.** An API
     caller can add `remainderDump` to have everything that did not fit written to a downloadable file in the
-    space, valid for a day. Until 3.2.0 that file was written on *every* shortened search whether anyone wanted
-    it or not, which quietly grew the space's storage and slowed the usage figures an operator reads. Now
-    nothing is written unless it was asked for.
+    space, valid for a day. Nothing is written unless it was asked for.
 - **maxTimeMS** — a time limit for this one search. It can only make the search stricter than the instance's own budget, never looser. When the limit is reached you get a **partial** answer rather than an error or a hang: whatever finished is returned, and the result says it was cut short.
-- **Something you wrote seconds ago is findable, and there is no longer a box for it.** Meaning-matching
+- **Something you wrote seconds ago is findable, with nothing to switch on.** Meaning-matching
   reads an index, and that index takes a few seconds to catch up after a write — measured here at about
-  three. Every search now also scans the newest records directly, so the gap is covered without you doing
-  anything. This used to be an **Include fresh writes** checkbox, off by default; it was removed because
-  the only thing turning it off bought was a search that confidently found nothing. One limit worth
+  three. Every search also scans the newest records directly, so the gap is covered without you doing
+  anything. One limit worth
   knowing: a record still WAITING to be processed for meaning-matching has nothing to match against yet,
   and the Embedding queue on this page is where you see whether that queue is behind.
 - **Include passage text** — on by default. Turn it off to get passage *locations* without their text: useful when you want to find which document holds something and read only that part, since passage bodies are the largest thing a result carries.
 - **Include diagnostic fields** — off by default, and off is right for ordinary searching. Turn it on to see *why* a result ranked where it did: the exact text that was embedded, the embedding model, the sync counter, and the score from each ranking stage separately. It follows graph hops too, at every depth, so a search with **Graph hops** set shows the same detail on the connected records. The embedding vector itself is never returned and there is no option that asks for it.
-- **Include storage bookkeeping** — off by default, and off is what you want almost always. A result normally tells you what was remembered; this adds back where it is filed: when the record was written and when it was last changed. (It used to add the ids of everything the record was linked to; those are their own records now, and the graph view is how you follow them.) Those fields are large and repeat on every result — measured on a real space, only about a third of an answer was the remembered content and most of the rest was this — so leaving it off gets you more actual fact inside the same size limit. One trap worth knowing: the creation date is when the RECORD was written, not when the thing you are remembering happened. That date lives in the record’s own properties, put there by whoever stored it.
+- **Include storage bookkeeping** — off by default, and off is what you want almost always. A result normally tells you what was remembered; this adds back where it is filed: when the record was written and when it was last changed. (The ids of linked records are not part of it: links are their own records, and the graph view is how you follow them.) Those fields are large and repeat on every result — measured on a real space, only about a third of an answer was the remembered content and most of the rest was this — so leaving it off gets you more actual fact inside the same size limit. One trap worth knowing: the creation date is when the RECORD was written, not when the thing you are remembering happened. That date lives in the record’s own properties, put there by whoever stored it.
 
 **If a search fails, read whether it says it can be retried.** Some failures are the question — a filter the
 system cannot parse, a value out of range — and those will fail the same way however many times you try. But a
 search can also fail because the part of the database that does meaning-matching was momentarily unavailable:
 most often for a while after the server restarts, while it rebuilds its search indexes. **That kind of failure
-is not your search and is not your data, and the message now says so in as many words.** Try it again; it
+is not your search and is not your data, and the message says so in as many words.** Try it again; it
 clears on its own, in seconds after a blip and in longer after a big rebuild. Nothing is lost while it lasts,
 and word-matching searches and the structured Query tab keep working throughout, because they do not use the
 same index.
@@ -499,9 +478,8 @@ these three levels before treating it as a fault.
 > Turning suppression off does not go back and embed what was written while it was on. Use the space's
 > **Reindex** control on the Overview tab, or re-save an individual record.
 >
-> The per-record setting is API-only today — there is no checkbox for it in the UI. It was called
-> `excludeFromVectorSearch` before version 3.1.0, and 4.0 removed that old name: a script still
-> sending it is now refused rather than quietly accepted, so nothing is left half-working.
+> The per-record setting is API-only today — there is no checkbox for it in the UI. Upgrading a script
+> from before 3.1: the old name `excludeFromVectorSearch` is refused, so send `suppressEmbeddings`.
 
 **A record can also be marked as no longer TRUE, which is a different thing entirely.** A fact you stored
 last year may simply have stopped being the case — somebody changed job, a service moved host, a policy was
@@ -526,8 +504,7 @@ replacement would make it unsayable.
 
 **The Review tab writes both for you.** When you settle a contradiction by picking a winner
 (**Review → Contradictions → Resolve**), the losing record is marked superseded and the supersedes link is
-drawn — for facts, entities, chrono entries and edges alike. Before version 5.0 the decision was stored only
-against the review item, so resolving a contradiction changed nothing about what the next search returned.
+drawn — for facts, entities, chrono entries and edges alike — so the next search returns the loser labelled.
 
 **A marked record is labelled everywhere it is listed** — an amber **superseded** pill beside it in search
 results and in the Facts, Entities, Edges and Chrono tabs. Hover it for the one-line reminder that the
@@ -537,16 +514,14 @@ record is kept and still searchable.
 > it is the only way: there is no checkbox for it on a record's form, as with the per-record suppression
 > above. Whoever writes to the API can set it directly.
 
-**In a network, each instance searches with its own model, and from 3.7 that is explicit.** A record that
+**In a network, each instance searches with its own model.** A record that
 arrives from another instance is prepared for search **here**, using this instance's own model — the sending
 instance's version is never used, because two instances configured with different models produce numbers that
 cannot be compared, and the result would be a search that looks fine and ranks wrongly.
 
 The three levels above are read **here** as well, so this instance decides what its own search contains. The
 one part that travels with the record is the per-record setting: if the author of a record marked it *"keep this
-out of semantic search"*, that mark arrives with it and is respected. Before 3.7 the mark was silently dropped
-in one direction — so a record its author had deliberately retired from search would quietly re-enter it on
-every other instance, the next time anybody rebuilt that space's search index.
+out of semantic search"*, that mark arrives with it and is respected on every other instance.
 
 #### Advanced Query
 
@@ -576,7 +551,7 @@ Example — find facts tagged `infra`:
 
 ### File metadata (merged into Files)
 
-There is no longer a separate **File Meta** tab. The metadata Ythril keeps for each uploaded file — the searchable side of a file (its caption/extracted text, tags, and links to entities, facts, and chrono entries) as distinct from the raw bytes — lives in the **[Files](03-files-and-schemas.md#files)** tab, so files and their metadata are one explorer-style view. Each file row shows its **embedding status** (or a live stage bar while it is being processed) and its **tags** inline, and opening a file docks a detail pane beside the preview with the full metadata record — description, tags, entity/fact/chrono links. See [Files](03-files-and-schemas.md#files).
+File metadata has no tab of its own. The metadata Ythril keeps for each uploaded file — the searchable side of a file (its caption/extracted text, tags, and links to entities, facts, and chrono entries) as distinct from the raw bytes — lives in the **[Files](03-files-and-schemas.md#files)** tab, so files and their metadata are one explorer-style view. Each file row shows its **embedding status** (or a live stage bar while it is being processed) and its **tags** inline, and opening a file docks a detail pane beside the preview with the full metadata record — description, tags, entity/fact/chrono links. See [Files](03-files-and-schemas.md#files).
 
 ---
 
@@ -600,22 +575,19 @@ edge itself is always on the canvas.
 
 The Facts, Chrono and Files tables have no such button, because the search bar here finds entities.
 Those records are reachable *within* a graph — turn on the matching toggle and a walk brings back the facts,
-timeline entries and files that MENTION what it passes through, and from 4.0 the ones that mention each other
-as well. Use the **Entities** column in those tables to find the entity you want, then open the graph from
+timeline entries and files that MENTION what it passes through, and the ones that mention each other as
+well. Use the **Entities** column in those tables to find the entity you want, then open the graph from
 there.
 
 **A record you drew an EDGE to appears whether or not its toggle is on, and that is the difference between
 the two.** A toggle governs mentions — a fact that happens to name an entity — and those are numerous enough
 that showing them all by default would bury the entities you came to look at. An edge is something you drew
-on purpose, so there are only as many as you meant, and the graph shows them. Before 5.0 it did not: an edge
-you drew from one fact to another was saved, listed on the Edges table, and never appeared on the canvas.
+on purpose, so there are only as many as you meant, and the graph shows them — including an edge you drew
+from one fact to another.
 
-**Two more kinds of relationship appear here that used to be invisible, also since 5.0.** A record joined
-to ITSELF — a status that routes on its own state, a task that blocks itself — now draws as a small loop
-at that node; before, it was stored and shown nowhere. And where you drew **two different edges between
-the same pair**, both are drawn side by side instead of one standing in for both. If a graph you know
-well suddenly has more lines in it, nothing was added: those relationships were always in the Edges
-table and the canvas was only showing one per pair.
+**Two more kinds of relationship are drawn.** A record joined to ITSELF — a status that routes on its own
+state, a task that blocks itself — draws as a small loop at that node. And where you drew **two different
+edges between the same pair**, both are drawn side by side instead of one standing in for both.
 
 **Toolbar controls:**
 
@@ -624,7 +596,7 @@ table and the canvas was only showing one per pair.
 | **Search** | Find and load an entity as the root node |
 | **Depth** | How many hops out from the root to show (1–10) |
 | **Direction** | Show outbound edges, inbound edges, or both. It applies to the edges you drew between entities — not to the facts, timeline entries and files that merely MENTION an entity. A mention runs one way, from the record to the entity, so there is no second direction to choose and those are always reached the same way |
-| **Labels** | Toggle edge labels. The pill is lit when labels are SHOWN, so switching it off hides them — this row called the control *Hide labels*, which is what it does rather than what it says. By default a label is shown only on the edges of the node you have selected, and on an edge you hover — labelling every edge at once is unreadable on a dense graph, because the labels overlap each other and the nodes |
+| **Labels** | Toggle edge labels. The pill is lit when labels are SHOWN, so switching it off hides them. By default a label is shown only on the edges of the node you have selected, and on an edge you hover — labelling every edge at once is unreadable on a dense graph, because the labels overlap each other and the nodes |
 | **Fit** | Zoom to fit the whole graph in view |
 | **Reset** | Clear the graph |
 
@@ -640,8 +612,8 @@ The detail panel below the canvas shows all facts and chrono entries linked to t
 **For an assistant or a script, one call brings the whole neighbourhood with its content.** The graph API
 normally returns just the names and connections it walked; ask it for a `projection` (for example
 `{"description": 1, "properties": 1}`) and every node and every connection comes back with those fields too,
-so reading a whole subgraph no longer needs a second lookup per record. The Graph tab itself is unchanged: it
-loads a record's details when you click it. See the integration guide's graph page, *Bodies in one call*.
+so reading a whole subgraph needs no second lookup per record. The Graph tab itself loads a record's details
+when you click it. See the integration guide's graph page, *Bodies in one call*.
 
 **Editing from the graph:** click any fact or chrono row in that panel to open the same editable detail drawer used on the Brain tabs — including tag suggestions, the entity and fact pickers, and the property fields defined by the record type's schema. Saving updates the row in the panel behind it.
 
@@ -655,14 +627,13 @@ loads a record's details when you click it. See the integration guide's graph pa
 > times with a growing pause — about twelve minutes in total — and then marked failed and left alone, which
 > is right for one bad record and wrong for an outage. If the embedding model is unreachable for longer than
 > that (during an upgrade, say), every queued job in every space is marked failed at once and nothing runs
-> again until somebody presses **Retry all failed**. So starting a **new version** now re-queues everything
+> again until somebody presses **Retry all failed**. So starting a **new version** re-queues everything
 > that failed under the old one, once, and says how many in the log. Restarting the same version re-queues
 > nothing — a record that genuinely cannot be embedded must not be retried on every boot for ever.
 > **Reindex tells you it STARTED, not what it found.** The button schedules the work and returns at once —
 > a whole-space re-embed is far too long to hold a request open — so there is no count to report yet, and
 > the notification says the job is running in the background. The **Indexing** panel is where progress and
-> completion show up. It used to print *"Reindexed 0 documents"* in green at the moment the job began, which
-> was the acknowledgement being read as the result.
+> completion show up.
 >
 > **A proxy space has no Reindex button at all.** It holds no records of its own — its members do — so it has
 > no index to rebuild, and the panel says to reindex the member spaces instead.
@@ -673,8 +644,7 @@ under **Settings → Media Processing**; until the scanner has run, the tab expl
 
 **Suggestions** is the space's completeness report, worked as a queue. A space is "set up" long before
 it is *usable* — schemas declare types nothing instantiates and properties nothing fills, entities pile
-up with no edges between them, files land that recall cannot see. None of that produces an error, so
-none of it was visible anywhere. Overview shows the score and its three heaviest deductions; this is
+up with no edges between them, files land that recall cannot see. None of that produces an error. Overview shows the score and its three heaviest deductions; this is
 where you fix them.
 
 Each failing check is a card: what it found ("6 of 12 entities have no edges"), **why it costs points**,
@@ -706,10 +676,6 @@ decided, marks the losing record itself as superseded, and draws the `supersedes
 **Nothing is deleted.** The superseded record stays exactly where it was and still turns up in search, now
 labelled, because it was true once and that history is often the reason you were looking.
 
-Both halves changed in version 5.0. The link used to be drawn for two entities only, and the decision used to
-be stored against the review item rather than on the record — so settling a contradiction changed nothing
-about what the next search returned.
-
 Before deciding, use **Show both in full** on the card: the two lines you see are summaries, which is enough
 to triage a pair and rarely enough to judge one.
 
@@ -738,11 +704,11 @@ Both lists return at most **500 findings per space**. When that cap is reached t
 filter applied to a capped list can only mean "among the first 500" — clear the filter or resolve some
 findings to see the rest.
 
-**Duplicates** surfaces near-duplicate records found by the background semantic-duplicate scanner, **for that space**. It used to be a global page at `/settings/duplicates`; a duplicate pair only ever means something *inside* one space, so it now lives beside that space's data. (The old `/settings/duplicates` link still works — it redirects to the Brain.)
+**Duplicates** surfaces near-duplicate records found by the background semantic-duplicate scanner, **for that space**. A duplicate pair only ever means something *inside* one space, so it lives beside that space's data. (The `/settings/duplicates` link redirects to the Brain.)
 
 A summary row at the top shows how many pairs are **open**, the **average match confidence**, and how many are **shown**, alongside a **search box**, a status filter (**open / dismissed / all**) and a **Scan now** button. The search box narrows the list by record summary, type, or space — handy once a **dismissed** pile has grown. Each duplicate pair is a **comparison card**: the space and record type, a **confidence meter** (the similarity as a coloured percentage), when it was detected, and record **A** shown side-by-side with record **B**. For an entity pair you can **Merge** the two records (the older one is kept); any open pair can be **Dismiss**ed — dismissing asks for confirmation first, since it removes the pair from the open list.
 
-**Dismissed pairs stay dismissed** — a routine re-embed, a peer re-sync, or an index rebuild no longer drags them back onto the list the way they used to. A dismissed pair **only resurfaces on its own when its content materially changes** (a real edit to one of the records); a re-write that leaves the content the same keeps it dismissed. To bring one back for review sooner, switch the filter to **dismissed** (or **all**) and use **Re-rate** on the card.
+**Dismissed pairs stay dismissed** — a routine re-embed, a peer re-sync, or an index rebuild does not drag them back onto the list. A dismissed pair **only resurfaces on its own when its content materially changes** (a real edit to one of the records); a re-write that leaves the content the same keeps it dismissed. To bring one back for review sooner, switch the filter to **dismissed** (or **all**) and use **Re-rate** on the card.
 
 The scanner sweeps **facts, entities and chrono entries** by default — logging the same event twice is one of the commonest ways a knowledge base goes redundant.
 

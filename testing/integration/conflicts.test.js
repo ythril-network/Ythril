@@ -29,6 +29,24 @@ const CONFIGS = path.join(__dirname, '..', 'sync', 'configs');
 
 let tokenA;
 
+/**
+ * Sync A until a conflict for `filePath` appears, and return its id (or undefined).
+ *
+ * Each attempt WAITS for a whole cycle rather than sleeping a fixed two seconds. A cycle over a busy
+ * `general` space can outlast a fixed window, and a trigger that lands during a running cycle joins it —
+ * a cycle that may have read B's manifest before B wrote the file. Waiting makes attempt two a cycle that
+ * started after the write, however long cycles take on the runner.
+ */
+async function syncUntilConflict(networkId, filePath) {
+  for (let attempt = 0; attempt < 4; attempt++) {
+    await post(INSTANCES.a, tokenA, `/api/networks/${networkId}/sync?wait=true&timeoutMs=60000`, {});
+    const check = await get(INSTANCES.a, tokenA, '/api/conflicts');
+    const seeded = (check.body?.conflicts ?? []).filter(c => c.originalPath === filePath || c.conflictPath?.startsWith(filePath.replace('.txt', '')));
+    if (seeded.length > 0) return seeded[0].id;
+  }
+  return undefined;
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────
 
 /**
@@ -182,20 +200,8 @@ describe('Conflicts API — seeded via file sync hash mismatch', () => {
     const rB = await fetch(uploadB, putOpts(tokenB, `version-B-${RUN}`));
     assert.ok([201, 202].includes(rB.status), `Write file on B: ${rB.status}`);
 
-    // Trigger sync on A so the engine pulls from B and detects the hash mismatch.
-    // The peer token B gave to A must be registered in A's secrets config for the
-    // engine to use; in the test stack setup.js seeds this automatically.
-    // We retry a couple of times to let gossip propagate.
-    for (let attempt = 0; attempt < 6; attempt++) {
-      await post(INSTANCES.a, tokenA, `/api/networks/${networkId2}/sync`, {});
-      await new Promise(r => setTimeout(r, 2000));
-      const check = await get(INSTANCES.a, tokenA, '/api/conflicts');
-      const seeded = (check.body?.conflicts ?? []).filter(c => c.originalPath === filePath || c.conflictPath?.startsWith(filePath.replace('.txt', '')));
-      if (seeded.length > 0) {
-        conflictId = seeded[0].id;
-        break;
-      }
-    }
+    // Sync A so the engine pulls from B and detects the hash mismatch.
+    conflictId = await syncUntilConflict(networkId2, filePath);
   });
 
   after(async () => {
@@ -203,7 +209,7 @@ describe('Conflicts API — seeded via file sync hash mismatch', () => {
   });
 
   it('conflict document was created by file hash mismatch detection', async () => {
-    // Verified against the live 4-instance stack: the retry loop above (6 x 2s) reliably produces a
+    // Verified against the live 4-instance stack: the sync loop above (`syncUntilConflict`) reliably produces a
     // conflict, landing in roughly two attempts. This asserts rather than skips, because a run where
     // no conflict appears means either sync regressed or the harness stopped wiring peer file sync —
     // both of which are things CI must go red for, not report as green.
@@ -261,14 +267,7 @@ describe('Conflicts API — seeded via file sync hash mismatch', () => {
     const rB = await fetch(uploadB, putOpts(tokenB, `del-version-B-${RUN}`));
     assert.ok([201, 202].includes(rB.status), `write competing file (rB): ${rB.status}`);
 
-    let delConflictId;
-    for (let attempt = 0; attempt < 6; attempt++) {
-      await post(INSTANCES.a, tokenA, `/api/networks/${networkId2}/sync`, {});
-      await new Promise(r => setTimeout(r, 2000));
-      const check = await get(INSTANCES.a, tokenA, '/api/conflicts');
-      const seeded = (check.body?.conflicts ?? []).filter(c => c.originalPath === path2 || c.conflictPath?.startsWith(path2.replace('.txt', '')));
-      if (seeded.length > 0) { delConflictId = seeded[0].id; break; }
-    }
+    const delConflictId = await syncUntilConflict(networkId2, path2);
     assert.ok(delConflictId, 'second conflict was not seeded for the DELETE test');
 
     const r = await del(INSTANCES.a, tokenA, `/api/conflicts/${delConflictId}`);

@@ -150,6 +150,21 @@ The **External assist model** card lets you point a bigger, hosted model at the 
 
 This is the one document setting that sends content off your instance: the model receives OCR-extracted text and draft transcriptions (and, for future image tasks, rendered page images). Because of that, configuring a host pops an **acknowledgment dialog** naming exactly what data goes where — you must confirm before it is used, and Ythril records that consent against the host and re-checks it at run time, so content is never sent somewhere you did not acknowledge. Endpoints are checked to be public addresses, and the API key is stored in the encrypted secrets file. Leave it unconfigured — or keep **Document extraction** below **Repair** — to keep document processing fully local.
 
+**A budget, a fallback, and Claude.** Under the endpoint fields the card has three more controls:
+
+- **API** — *OpenAI-compatible* for most hosted and self-hosted servers, or *Claude API (Anthropic)* to use a
+  Claude model such as `claude-sonnet-5` with an API key from the Claude Console. A Claude.ai or Claude Code
+  subscription cannot be used here.
+- **Token budget** — at most so many tokens every so many hours. Once they are spent, calls go to the fallback
+  until the window rolls on. Leave both empty for no budget.
+- **Fallback** — the model that answers when the main one cannot: it is unreachable, rate-limited, over budget,
+  or declines a request. Usually a local model (for example `http://ollama:11434/v1`), which sends nothing off
+  your instance and needs no acknowledgement; a hosted fallback is acknowledged for its own host, like the main
+  one. **Test** and **Verify** under it check the fallback on its own.
+
+The card says which one is answering documents and conversations right now, how much of the budget is spent,
+and when the main model is paused after a failure.
+
 ### Decision model (extractors)
 
 The **Decision model** card sets the model Ythril's extractors ask their judgement questions: who *"she"* is
