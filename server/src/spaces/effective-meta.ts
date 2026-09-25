@@ -76,3 +76,16 @@ export function commitOwnMetaEdit(spaceId: string, edit: (base: SpaceMeta) => Sp
   recomputeEffectiveMeta(spaceId);
   return getConfig().spaces.find(s => s.id === spaceId) ?? null;
 }
+
+/** `meta` with type `name` of kind `kind` set to `def` — the single-type upsert, as an own-definitions edit. */
+export function withType(meta: SpaceMeta, kind: string, name: string, def: unknown): SpaceMeta {
+  const types = meta.typeSchemas as Record<string, Record<string, unknown>> | undefined;
+  return { ...meta, typeSchemas: { ...types, [kind]: { ...(types?.[kind] ?? {}), [name]: def } } as SpaceMeta['typeSchemas'] };
+}
+
+/** `meta` without type `name` of kind `kind`. A type a network layer defines returns at the next recompute. */
+export function withoutType(meta: SpaceMeta, kind: string, name: string): SpaceMeta {
+  const types = meta.typeSchemas as Record<string, Record<string, unknown>> | undefined;
+  const { [name]: _gone, ...kept } = types?.[kind] ?? {};
+  return { ...meta, typeSchemas: { ...types, [kind]: kept } as SpaceMeta['typeSchemas'] };
+}
