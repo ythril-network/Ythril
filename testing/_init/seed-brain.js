@@ -11,8 +11,8 @@
  * Usage:
  *   node testing/_init/seed-brain.js [port] [token]
  *
- *   port   â€” defaults to 3200
- *   token  â€” defaults to content of testing/sync/configs/a/token.txt
+ *   port   — defaults to 3200
+ *   token  — defaults to content of testing/sync/configs/a/token.txt
  *
  * Examples:
  *   node testing/_init/seed-brain.js 3200 yt_mytoken123
@@ -48,12 +48,12 @@ async function api(method, path_, body) {
   });
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(`${method} ${path_} â†’ ${res.status}: ${text}`);
+    throw new Error(`${method} ${path_} → ${res.status}: ${text}`);
   }
   return res.status === 204 ? null : res.json();
 }
 
-// â”€â”€ Spaces â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Spaces ────────────────────────────────────────────────────────────────
 
 const EXTRA_SPACES = [
   { id: 'work',     label: 'Work' },
@@ -75,7 +75,7 @@ async function ensureSpaces() {
   }
 }
 
-// â”€â”€ Memories â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Memories ──────────────────────────────────────────────────────────────
 
 const MEMORIES = [
   // general
@@ -94,8 +94,8 @@ const MEMORIES = [
   { space: 'work', fact: 'Sprint velocity has stabilised at 42 story points per two-week cycle.', tags: ['agile', 'metrics'] },
   { space: 'work', fact: 'The API latency SLO is p99 < 200 ms. Current p99 is 47 ms.', tags: ['slo', 'performance'] },
   { space: 'work', fact: 'Security audit report delivered. Three medium findings, zero criticals.', tags: ['security', 'audit'] },
-  { space: 'work', fact: 'Annual penetration test booked for June 3â€“7.', tags: ['security', 'pentest'] },
-  { space: 'work', fact: 'On-call rotation: Alice (Monâ€“Wed), Bob (Thuâ€“Fri), Carol (weekend).', tags: ['oncall', 'team'] },
+  { space: 'work', fact: 'Annual penetration test booked for June 3–7.', tags: ['security', 'pentest'] },
+  { space: 'work', fact: 'On-call rotation: Alice (Mon–Wed), Bob (Thu–Fri), Carol (weekend).', tags: ['oncall', 'team'] },
   { space: 'work', fact: 'Customer A reported latency spikes on file upload. Traced to disk IOPS saturation.', tags: ['incident', 'files'] },
   { space: 'work', fact: 'The Kubernetes node was upgraded to 1.30.2 without downtime.', tags: ['kubernetes', 'ops'] },
   { space: 'work', fact: 'Data retention policy: logs kept 90 days, backups kept 1 year.', tags: ['policy', 'data'] },
@@ -107,7 +107,7 @@ const MEMORIES = [
   { space: 'work', fact: 'Budget approval for additional node required before end of quarter.', tags: ['budget', 'infrastructure'] },
   // personal
   { space: 'personal', fact: 'Started reading "Designing Data-Intensive Applications" by Kleppmann.', tags: ['books', 'learning'] },
-  { space: 'personal', fact: 'Gym goal: 3Ã— per week. Currently averaging 2.3Ã—.', tags: ['health', 'goals'] },
+  { space: 'personal', fact: 'Gym goal: 3× per week. Currently averaging 2.3×.', tags: ['health', 'goals'] },
   { space: 'personal', fact: 'Passport renewal due in 4 months. Book appointment online.', tags: ['admin', 'todo'] },
   { space: 'personal', fact: 'Flight booked to Amsterdam for the distributed systems conference.', tags: ['travel', 'conference'] },
   { space: 'personal', fact: 'Favourite coffee: single-origin Ethiopian, light roast, filter method.', tags: ['coffee', 'preferences'] },
@@ -147,7 +147,7 @@ async function seedMemories() {
   console.log(`  Created ${count} memories`);
 }
 
-// â”€â”€ Entities â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Entities ──────────────────────────────────────────────────────────────
 
 const ENTITIES = [
   { space: 'general',  name: 'Ythril',        type: 'product' },
@@ -184,7 +184,7 @@ async function seedEntities() {
   console.log(`  Created ${count} entities`);
 }
 
-// â”€â”€ Edges â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Edges ─────────────────────────────────────────────────────────────────
 
 const EDGES = [
   { from: 'Ythril',          to: 'MongoDB',         label: 'stores data in',   space: 'general' },
@@ -210,7 +210,7 @@ async function seedEdges() {
     const fromId = _entityIds[from]?.id;
     const toId   = _entityIds[to]?.id;
     if (!fromId || !toId) {
-      console.warn(`  Skipping edge "${from} â†’ ${to}": entity not found`);
+      console.warn(`  Skipping edge "${from} → ${to}": entity not found`);
       continue;
     }
     await api('POST', `/api/brain/spaces/${space}/edges`, { from: fromId, to: toId, label });
@@ -219,7 +219,7 @@ async function seedEdges() {
   console.log(`  Created ${count} edges`);
 }
 
-// â”€â”€ Main â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Main ──────────────────────────────────────────────────────────────────
 
 async function main() {
   console.log(`Seeding brain at ${BASE}`);
@@ -252,9 +252,9 @@ async function main() {
     console.log('\nSeeding edges...');
     await seedEdges();
 
-    console.log('\nâœ“ Seed complete');
+    console.log('\n✓ Seed complete');
   } catch (err) {
-    console.error('\nâœ— Seed failed:', err.message);
+    console.error('\n✗ Seed failed:', err.message);
     process.exit(1);
   }
 }

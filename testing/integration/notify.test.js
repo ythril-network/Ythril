@@ -32,7 +32,7 @@ describe('Notify channel', () => {
   before(async () => {
     token = fs.readFileSync(TOKEN_FILE, 'utf8').trim();
 
-    // Create a braintree network â€” braintree uses direct member add (no vote round)
+    // Create a braintree network — braintree uses direct member add (no vote round)
     // so the member is immediately queryable.
     const netR = await post(INSTANCES.a, token, '/api/networks', {
       label: `Notify Test Network ${Date.now()}`,
@@ -60,7 +60,7 @@ describe('Notify channel', () => {
     }
   });
 
-  // â”€â”€ POST /api/notify â€” event ingestion â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── POST /api/notify — event ingestion ─────────────────────────────────────
 
   it('ping event returns 204', async () => {
     const r = await post(INSTANCES.a, token, '/api/notify', {
@@ -224,7 +224,7 @@ describe('Notify channel', () => {
       `Error must mention authorisation: ${JSON.stringify(r.body)}`,
     );
   });
-  // â”€â”€ GET /api/notify â€” event log â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── GET /api/notify — event log ─────────────────────────────────────────────
 
   it('GET /api/notify returns event log with events array', async () => {
     // Submit a ping first so there is at least one event to find

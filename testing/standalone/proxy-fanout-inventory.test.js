@@ -21,15 +21,10 @@
  *  - **A read fan-out** — anything else. The argument is the request's space, which may be a proxy. These are the
  *    ones Q-6 must narrow, and they are listed below with their file.
  *
- * ## What this asserts today
+ * ## What this asserts
  *
- * That the inventory MATCHES the source exactly — no site missing from the list, and no stale entry left in it. It
- * does not yet assert that each site narrows, because none of them do: the rule shipped in #780 with nothing wired
- * to it, deliberately, because allowing a token through the guard without narrowing is the leak above.
- *
- * When the second half lands, each entry moves from `PENDING` to `NARROWED` and this test tightens to check the
- * call actually consults the token. Until then its job is to make the set unforgettable and to refuse a new
- * unclassified fan-out.
+ * Every read fan-out outside the GUARDS is narrowed, and every file in NARROWED really calls the narrowing helper.
+ * A new un-narrowed fan-out fails here until it is narrowed.
  *
  * Run: node --test testing/standalone/proxy-fanout-inventory.test.js
  */
@@ -40,23 +35,12 @@ import { readFileSync } from 'node:fs';
 import { enclosingBlocksMatching } from './_structural-window.mjs';
 
 /**
- * Read fan-outs, by file, with the count in that file.
- *
- * A count rather than a line number on purpose: line numbers churn on every unrelated edit above them, and a gate
- * that fails for an edit three functions away gets ignored. The count still catches a NEW fan-out appearing in a
- * file that already had some, which a bare file list would not.
- */
-/**
  * GUARDS — the sites that decide whether a caller may use the proxy at all.
  *
  * A third class, found by reading them rather than by their argument, and the reason it matters: a guard must NOT be
  * narrowed. It flips, once, at the end — from "reaches every member" to "reaches at least one". Narrowing a guard
  * would make it check the caller against a list already filtered by that same caller, which is a tautology that
  * always passes.
- *
- * They were classified as read fan-outs on the first pass, purely because the argument is the request's space like
- * every fan-out's is. That would have made "PENDING is empty" the wrong definition of done — waiting to narrow three
- * sites that should be flipped, and flipping nothing.
  *
  *  - `auth/middleware.ts` — `spaceTargets` (feeds the area check) and `enforceSpaceScope` itself.
  *  - `mcp/router.ts` — the MCP equivalent of `enforceSpaceScope`, refusing when any member is unreachable.
@@ -99,8 +83,7 @@ const RECLASSIFIED = 1;
 /**
  * 30 -> 31: `api/brain/embed-jobs.ts`, the brain-record half of the embedding queue, added with `memberSpacesForRequest`
  * from its first line rather than converted later. A new fan-out RAISES the total — the invariant is that a site is
- * accounted for, not that the number never moves. Lowering it, or leaving it at 30 and letting the new site sit in
- * PENDING, are the two ways this gate gets quietly defeated.
+ * accounted for, not that the number never moves.
  */
 /**
  * 31 -> 33: the two `/query` paths now name their narrowing EXPLICITLY.
@@ -247,9 +230,6 @@ const NARROWED = new Set([
   'server/src/api/files.ts',
 ]);
 
-const PENDING = {
-};
-
 // 28 read fan-outs across 13 files, plus 5 write-target sites. Those numbers came out of this gate, and the first
 // version of this list was WRONG in both directions: it said "17 files", which was a `grep -c` count that included
 // import lines, and it missed `mcp/tools/search.ts` and `mcp/tools/spaces.ts` entirely because the shell output
@@ -341,29 +321,18 @@ describe('the inventory matches the source', () => {
     assert.ok(sites.length + done.length >= 25, `only found ${sites.length + done.length} — the sweep is broken`);
   });
 
-  it('every un-narrowed read fan-out is a listed PENDING file', () => {
-    const unlisted = sites
-      .filter(s => !isWriteTarget(s.arg) && !(s.file in PENDING) && !(s.file in GUARDS))
+  it('every read fan-out outside the GUARDS is narrowed', () => {
+    const unnarrowed = sites
+      .filter(s => !isWriteTarget(s.arg) && !(s.file in GUARDS))
       .map(s => `${s.file} → resolveMemberSpaces(${s.arg})`);
-    assert.deepEqual(unlisted, [],
-      'a read fan-out in a file the inventory does not list. Narrow it with memberSpacesForRequest '
-      + '(spaces/proxy-scoped.ts) and move the file to NARROWED, or add it to PENDING with its count.');
+    assert.deepEqual(unnarrowed, [],
+      'an un-narrowed read fan-out. Narrow it with memberSpacesForRequest (spaces/proxy-scoped.ts) and add the '
+      + 'file to NARROWED.');
   });
 
-  it('PENDING counts match, so a NEW fan-out in a known file is caught', () => {
-    const actual = {};
-    for (const s of sites) {
-      if (isWriteTarget(s.arg)) continue;
-      if (s.file in GUARDS) continue;
-      actual[s.file] = (actual[s.file] ?? 0) + 1;
-    }
-    assert.deepEqual(actual, PENDING);
-  });
-
-  it('no PENDING entry is stale', () => {
-    // A list that outlives its code starts describing the past — the same reason a tracker checkbox is not evidence.
+  it('no GUARDS entry is stale', () => {
+    // A list that outlives its code starts describing the past.
     const seen = new Set(sites.filter(s => !isWriteTarget(s.arg)).map(s => s.file));
-    assert.deepEqual(Object.keys(PENDING).filter(f => !seen.has(f)), []);
     assert.deepEqual(Object.keys(GUARDS).filter(f => !seen.has(f)), []);
   });
 });
@@ -385,27 +354,14 @@ describe('a NARROWED file is really narrowed', () => {
   });
 });
 
-describe('the narrowing half is COMPLETE', () => {
-  it('PENDING is empty — every read fan-out is narrowed', () => {
-    // The definition of done for Q-6's expensive half, and now a regression guard: a new un-narrowed fan-out puts a
-    // file back into PENDING and fails here as well as in the classification test.
-    //
-    // What is left is NOT a fan-out. The three GUARDS still require a token to reach every member of a proxy, which
-    // is why all of this has been a provable no-op so far. Flipping them to accept a non-empty intersection is the
-    // one behaviour change, and it is now a small diff against fully-narrowed read paths instead of a leap of faith.
-    assert.deepEqual(PENDING, {});
-  });
-});
-
 describe('the total is conserved', () => {
-  it('narrowed + still pending accounts for every read fan-out', () => {
+  it('guards + narrowed accounts for every read fan-out', () => {
     // The invariant that makes progress checkable: converting a site must MOVE it, never drop it. A conversion that
     // quietly deleted a fan-out would otherwise look like progress.
-    const pending = Object.values(PENDING).reduce((a, b) => a + b, 0);
     const guards = Object.values(GUARDS).reduce((a, b) => a + b, 0);
     const narrowed = narrowedCalls().length;
-    assert.equal(pending + guards + narrowed + RECLASSIFIED + REMOVED, TOTAL,
-      `expected ${TOTAL}, got ${pending} pending + ${guards} guards + ${narrowed} narrowed + `
+    assert.equal(guards + narrowed + RECLASSIFIED + REMOVED, TOTAL,
+      `expected ${TOTAL}, got ${guards} guards + ${narrowed} narrowed + `
       + `${RECLASSIFIED} reclassified + ${REMOVED} removed`);
   });
 });

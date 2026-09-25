@@ -44,7 +44,7 @@ let token;
 const openMcpSession = () => openSharedMcpSession(token);
 const postMcpHttp = async (body) => (await openSharedMcpSession(token)).postJsonRpc(body);
 
-// â”€â”€ Tests â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Tests ──────────────────────────────────────────────────────────────────
 
 
 
@@ -94,7 +94,7 @@ describe('MCP tools', () => {
     });
   });
 
-  describe('list_peers â€” no networks', () => {
+  describe('list_peers — no networks', () => {
     let session;
     before(async () => { session = await openMcpSession(); });
     after(() => session?.close());
@@ -114,7 +114,7 @@ describe('MCP tools', () => {
     });
   });
 
-  describe('list_peers â€” with a peer', () => {
+  describe('list_peers — with a peer', () => {
     let session;
     let networkId;
     const PEER_ID = `list-peers-test-${Date.now()}`;
@@ -179,7 +179,7 @@ describe('MCP tools', () => {
     });
   });
 
-  describe('sync_now â€” no networks configured', () => {
+  describe('sync_now — no networks configured', () => {
     let session;
     before(async () => { session = await openMcpSession(); });
     after(() => session?.close());
@@ -195,7 +195,7 @@ describe('MCP tools', () => {
     });
   });
 
-  describe('sync_now â€” SSRF guard', () => {
+  describe('sync_now — SSRF guard', () => {
     let session;
     before(async () => { session = await openMcpSession(); });
     after(() => session?.close());
@@ -211,7 +211,7 @@ describe('MCP tools', () => {
     });
   });
 
-  describe('sync_now â€” with a real peer', () => {
+  describe('sync_now — with a real peer', () => {
     let session;
     let networkId;
     let peerTokenId;
@@ -221,7 +221,7 @@ describe('MCP tools', () => {
       session = await openMcpSession();
 
       // Create a minimal braintree network with a fake peer so sync_now has a
-      // valid peerId to target.  The peer URL is unreachable â€” the test only
+      // valid peerId to target.  The peer URL is unreachable — the test only
       // checks that the call is attempted and returns a result (error is fine).
       const ptRes = await post(INSTANCES.a, token, '/api/tokens', { name: `mcp-peer-${Date.now()}` });
       assert.equal(ptRes.status, 201);

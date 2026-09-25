@@ -2,14 +2,14 @@
  * Integration tests: Conflicts API  (/api/conflicts)
  *
  * Covers:
- *  - GET /api/conflicts â€” empty initially, returns array shape
+ *  - GET /api/conflicts — empty initially, returns array shape
  *  - Seed a conflict document directly via sync POST (hash mismatch scenario)
- *  - GET /api/conflicts â€” returns seeded conflict with correct fields
- *  - GET /api/conflicts/:id â€” single record lookup
- *  - GET /api/conflicts/:id â€” 404 for unknown id
- *  - DELETE /api/conflicts/:id â€” dismiss returns 204 and record is gone
- *  - DELETE /api/conflicts/:id â€” 404 for already-dismissed
- *  - POST /api/conflicts/:id/resolve â€” returns 200 {status:'resolved'} and deletes
+ *  - GET /api/conflicts — returns seeded conflict with correct fields
+ *  - GET /api/conflicts/:id — single record lookup
+ *  - GET /api/conflicts/:id — 404 for unknown id
+ *  - DELETE /api/conflicts/:id — dismiss returns 204 and record is gone
+ *  - DELETE /api/conflicts/:id — 404 for already-dismissed
+ *  - POST /api/conflicts/:id/resolve — returns 200 {status:'resolved'} and deletes
  *  - Authorization: unauthenticated request returns 401
  *
  * Run: node --test testing/integration/conflicts.test.js
@@ -29,7 +29,7 @@ const CONFIGS = path.join(__dirname, '..', 'sync', 'configs');
 
 let tokenA;
 
-// â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Helpers ───────────────────────────────────────────────────────────────
 
 /**
  * Seed a real conflict by making two instances disagree about one file, then syncing.
@@ -64,7 +64,7 @@ const RUN = Date.now();
 let networkId;
 let tokenB;
 
-describe('Conflicts API â€” CRUD', () => {
+describe('Conflicts API — CRUD', () => {
   before(async () => {
     tokenA = fs.readFileSync(path.join(CONFIGS, 'a', 'token.txt'), 'utf8').trim();
     tokenB = fs.readFileSync(path.join(CONFIGS, 'b', 'token.txt'), 'utf8').trim();
@@ -85,7 +85,7 @@ describe('Conflicts API â€” CRUD', () => {
     const ptA = await post(INSTANCES.a, tokenA, '/api/tokens', { name: `conflict-peer-${RUN}` });
     assert.equal(ptA.status, 201);
 
-    // Add B as a member on A (club auto-approves direct add; closed may vote â€” handle both)
+    // Add B as a member on A (club auto-approves direct add; closed may vote — handle both)
     const addB = await post(INSTANCES.a, tokenA, `/api/networks/${networkId}/members`, {
       instanceId: 'conflict-instance-b',
       label: 'Conflict B',
@@ -131,7 +131,7 @@ describe('Conflicts API â€” CRUD', () => {
   });
 });
 
-describe('Conflicts API â€” seeded via file sync hash mismatch', () => {
+describe('Conflicts API — seeded via file sync hash mismatch', () => {
   let networkId2;
   let conflictId;
   const filePath = `conflict-test-${RUN}.txt`;

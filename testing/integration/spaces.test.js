@@ -137,7 +137,7 @@ describe('Space management', () => {
     assert.ok(ids.includes(`explicit-test-space-${RUN_ID}`));
   });
 
-  it('Space data is isolated â€” writes to one space not visible in another', async () => {
+  it('Space data is isolated — writes to one space not visible in another', async () => {
     // Use the explicit-test-space created in this run
     const isolationSpace = `explicit-test-space-${RUN_ID}`;
     // Write a memory to the explicit-test-space (it was created above and pushed to createdSpaceIds)
@@ -163,7 +163,7 @@ describe('Space management', () => {
 
   it('Delete built-in general space is rejected', async () => {
     const r = await del(INSTANCES.a, tokenA, '/api/spaces/general');
-    // Either 400 or 403 â€” must not succeed
+    // Either 400 or 403 — must not succeed
     assert.ok(r.status >= 400, `Deleting general space should fail, got ${r.status}`);
   });
 
@@ -186,11 +186,11 @@ describe('Space management', () => {
     );
   });
 
-  it('Delete solo space with { confirm: true } succeeds immediately â€” 204', async () => {
+  it('Delete solo space with { confirm: true } succeeds immediately — 204', async () => {
     const created = await post(INSTANCES.a, tokenA, '/api/spaces', { label: `Gov Solo Confirm-Del ${RUN_ID}` });
     assert.equal(created.status, 201);
     const spaceId = created.body.space?.id;
-    // Don't push to createdSpaceIds â€” we're deleting it in this test
+    // Don't push to createdSpaceIds — we're deleting it in this test
 
     const r = await delWithBody(INSTANCES.a, tokenA, `/api/spaces/${spaceId}`, { confirm: true });
     assert.equal(r.status, 204, `Expected 204, got ${r.status}`);
