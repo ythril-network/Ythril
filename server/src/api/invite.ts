@@ -49,6 +49,7 @@ import { authRateLimit, globalRateLimit } from '../rate-limit/middleware.js';
 import { getConfig, saveConfig, getSecrets, saveSecrets } from '../config/loader.js';
 import { createToken, setTokenExpiry } from '../auth/tokens.js';
 import { peerTokenSpaces, widenPeerTokensOf } from '../auth/peer-token-scope.js';
+import { claimedPeerIsProven } from '../auth/peer-identity.js';
 import { concludeRoundIfReady } from '../sync/governance.js';
 import { buildBraintreeAncestors } from '../util/braintree.js';
 import { makeSignedOwnCast } from '../util/signing.js';
@@ -317,6 +318,16 @@ inviteRouter.post('/apply', authRateLimit, async (req, res) => {
   // can join in place of the intended peer.
   if (session.expectedInstanceId && instanceId !== session.expectedInstanceId) {
     res.status(403).json({ error: 'This invite is pinned to a different instanceId' });
+    return;
+  }
+
+  // S-6: an id that is already a peer here must prove it IS that peer, before anything is minted. The token below
+  // reaches every network this instance shares with the claimed id, so an unproven claim would hand a bundle holder
+  // the real peer's networks. A reparent is exempt: its session is already bound to one member, and the grandchild
+  // holds no token of ours to present.
+  if (!session.reparentInstanceId && !(await claimedPeerIsProven(cfg, instanceId, req.get('authorization')))) {
+    log.warn(`Invite apply refused: '${instanceLabel}' claimed the id of an existing peer (${instanceId}) without proof, for network ${networkId}`);
+    res.status(403).json({ error: 'This instance id is already a peer here: apply with the token this instance issued to it, to prove it is that peer' });
     return;
   }
 
