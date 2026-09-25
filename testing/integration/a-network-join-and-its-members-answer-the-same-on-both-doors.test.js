@@ -77,7 +77,7 @@ async function invite() {
 describe('joining a remote network through MCP and through REST', () => {
   it('network_join_remote joins as POST /join-remote does, and records the membership as the token\'s', async () => {
     const writer = await mintOnB('f364-writer', { ...FOUR('none'), networks: 'write' });
-    const mcpB = await openMcpSession(writer.token);
+    const mcpB = await openMcpSession(writer.token, INSTANCES.b);
     sessions.push(mcpB);
 
     const restBundle = await invite();
@@ -99,7 +99,7 @@ describe('joining a remote network through MCP and through REST', () => {
 
   it('a token short on the space is refused with the same sentence on both doors, and nothing is registered', async () => {
     const reader = await mintOnB('f364-reader', { ...FOUR('write'), networks: 'read' });
-    const mcpB = await openMcpSession(reader.token);
+    const mcpB = await openMcpSession(reader.token, INSTANCES.b);
     sessions.push(mcpB);
 
     const restBundle = await invite();
