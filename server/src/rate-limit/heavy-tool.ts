@@ -18,8 +18,12 @@
  * for a rail whose job is to turn "emptied every space" into "emptied one and then got told no".
  */
 
-/** Five a minute, matching the express limiter this replaces on the REST side. */
-const MAX_CALLS = 5;
+/**
+ * Calls per window, matching the express limiter this replaces on the REST side. Exported so a refusal or a schema
+ * description that states the limit reads it from here instead of writing a second copy of the number.
+ */
+export const HEAVY_CALLS_PER_WINDOW = 5;
+const MAX_CALLS = HEAVY_CALLS_PER_WINDOW;
 const WINDOW_MS = 60_000;
 
 /** Call timestamps per key, newest last. Pruned on read, so an idle key costs nothing after its window. */

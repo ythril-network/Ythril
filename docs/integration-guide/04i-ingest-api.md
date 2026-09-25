@@ -71,6 +71,13 @@ Everything that would make the run fail is checked first, and the answer lists e
 
 `400` is a malformed body (with every problem the loader found); `404` a space that does not exist.
 
+## Rate limited — `429`
+
+Starting runs is limited per token, at the same rate as the other heavy calls (five a minute), and the REST route
+and the MCP tool share one count — a token that used its starts over REST is refused over MCP too, in the same
+words. Only a run that actually starts counts: a start refused with `400`, `404` or `409` costs nothing, and is
+still answered with that refusal while the token is limited. Reading a run back is never limited this way.
+
 ## What it writes, and under which rules
 
 Every record goes through the same door as [`POST /bulk`](04d-brain-ops-api.md#bulk-write), so the space's schema,

@@ -9,6 +9,7 @@
 import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.js';
 import { beginIngest, ingestStatus } from '../../extractor/ingest-door.js';
 import { INGEST_KINDS } from '../../extractor/ingest.js';
+import { HEAVY_CALLS_PER_WINDOW } from '../../rate-limit/heavy-tool.js';
 
 const text = (t: string, isError = false): ToolResult => ({ content: [{ type: 'text' as const, text: t }], isError });
 
@@ -19,6 +20,8 @@ export const ingestTool: ToolHandler = {
     + '`sessions` is a raw conversation — `[{ date: "YYYY-MM-DD", time?, key?, turns: [{ speaker, text, role? }] }]` — '
     + 'and runs every phase: minutes of model calls. `extraction` is one already made, in the committed extraction '
     + 'format, and is only validated and written: no model is asked.\n\n'
+    + `AT MOST ${HEAVY_CALLS_PER_WINDOW} RUNS A MINUTE PER TOKEN, counted with the REST route: a start over the limit is refused, `
+    + 'and a start refused for its space or its models (below) costs no slot.\n\n'
     + 'IT RETURNS AT ONCE WITH A `runId`; the work runs in the background. Read it with `ingest_status` until `phase` '
     + 'is `done` or `failed`. Runs are held in memory, so a restart forgets the run — never the records it wrote.\n\n'
     + 'REFUSED BEFORE ANYTHING IS PAID FOR, naming what to change: a space that does not declare every type of the '
@@ -29,7 +32,8 @@ export const ingestTool: ToolHandler = {
     + 'required when `space` is a proxy.',
   mutating: true,
   spaceRequired: true,
-  heavy: true,
+  // Not `heavy`: the rail is inside `beginIngest`, which both doors call (S-8). Declared here as well, the dispatcher
+  // would count every MCP start twice and a refused start once.
   skipSchemaValidation: true,
   inputSchema: (s: ToolSchemas) => ({
     type: 'object',
@@ -55,7 +59,7 @@ export const ingestTool: ToolHandler = {
   }),
   async handle(ctx: ToolContext): Promise<ToolResult> {
     const { space: _space, targetSpace, ...body } = ctx.args;
-    const r = await beginIngest(ctx.callSpace, targetSpace as string | undefined, body, ctx.rights);
+    const r = await beginIngest(ctx.callSpace, targetSpace as string | undefined, body, ctx.rights, ctx.rateKey);
     if (r.status !== 202) return text(r.error, true);
     return {
       ...text(`ingest started — runId: ${r.run.runId}, conversationId: ${r.run.conversationId}. Read it with ingest_status.`),
