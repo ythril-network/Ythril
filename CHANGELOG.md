@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.1.7] — 2026-09-25
+
+A security patch for networks: a deletion or wipe vote can only act on a space its network carries, and only once it
+has passed. Please roll it onto every instance that is in a network.
+
+**Who is affected.** Every instance in a network. A `space_deletion` or `space_wipe` round was applied whenever it had
+concluded with no veto — so a proposal that EXPIRED without enough yes deleted or emptied the space as if it had
+passed — and it acted on the space id exactly as the round named it, without checking that the network shares that
+space. Any member of any network could therefore delete or empty any space on another member, including a private
+one no network carries, and an old deletion round re-applied to a space later re-created under the same name.
+
+**What to do.** Roll the image. There is no config change and no migration. If a space disappeared or was emptied
+on a networked instance and nobody voted for it, it is gone; restore it from a backup.
+
+### Fixed
+
+- **A deletion or wipe vote acts only on a round that passed, only on a space its network carries, and once**
+  (security). An expired round deletes nothing, a round naming a space the network does not share is ignored, and a
+  concluded round is applied here at most once.
+
 ## [5.1.6] — 2026-09-25
 
 A security patch for networks: an invite can no longer be applied under another peer's instance id. Please roll it onto
