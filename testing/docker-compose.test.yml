@@ -34,7 +34,12 @@ services:
     container_name: ythril-a
     # Ceilings, not reservations: eight instances and a sidecar would otherwise grow into whatever
     # the Docker VM holds, and on a dev machine that is shared with everything else (2026-09-24).
-    mem_limit: 3g
+    # CPU too, and the SUM is the rule (Q-57, 2026-09-25): nine memory ceilings of 3 GB added up to more than the
+    # 24 GB VM, no CPU ceiling let a sync run take 602%, and the owner's editor was killed. The defaults total
+    # 8.5 CPUs and 15 GB — about half the VM — and every one is raised by its env var on a bigger runner
+    # (YTHRIL_TEST_{APP,MONGO,DOCRENDER}_{CPUS,MEM}). Held by `the-test-stack-leaves-the-machine-room.test.js`.
+    cpus: "${YTHRIL_TEST_APP_CPUS:-1.0}"
+    mem_limit: "${YTHRIL_TEST_APP_MEM:-2g}"
     ports:
       - "3200:3200"
     volumes:
@@ -105,7 +110,8 @@ services:
   ythril-mongo-a:
     image: mongodb/mongodb-atlas-local:latest@sha256:1cd040bb201bb7f910c7c6ab7f6cb8ab9dd79331f6a213f37025adc6804e96aa
     container_name: ythril-mongo-a
-    mem_limit: 3g
+    cpus: "${YTHRIL_TEST_MONGO_CPUS:-1.0}"
+    mem_limit: "${YTHRIL_TEST_MONGO_MEM:-1536m}"
     # Published so standalone tests can assert database-LEVEL behaviour — that MongoDB actually agrees
     # with a query rule, not merely that a JS matcher does. Until this existed, rules like
     # `stalledJobFilter` were only ever checked against hand-built document fixtures, which cannot see
@@ -139,7 +145,8 @@ services:
   ythril-b:
     image: ythril-test:latest  # built by ythril-a (and by CI); reused here, never rebuilt
     container_name: ythril-b
-    mem_limit: 3g
+    cpus: "${YTHRIL_TEST_APP_CPUS:-1.0}"
+    mem_limit: "${YTHRIL_TEST_APP_MEM:-2g}"
     ports:
       - "3201:3200"
     volumes:
@@ -184,7 +191,8 @@ services:
   ythril-mongo-b:
     image: mongodb/mongodb-atlas-local:latest@sha256:1cd040bb201bb7f910c7c6ab7f6cb8ab9dd79331f6a213f37025adc6804e96aa
     container_name: ythril-mongo-b
-    mem_limit: 3g
+    cpus: "${YTHRIL_TEST_MONGO_CPUS:-1.0}"
+    mem_limit: "${YTHRIL_TEST_MONGO_MEM:-1536m}"
     volumes:
       - ythril-mongo-b-data:/data/db
       - ythril-mongo-b-configdb:/data/configdb
@@ -208,7 +216,8 @@ services:
   ythril-c:
     image: ythril-test:latest  # built by ythril-a (and by CI); reused here, never rebuilt
     container_name: ythril-c
-    mem_limit: 3g
+    cpus: "${YTHRIL_TEST_APP_CPUS:-1.0}"
+    mem_limit: "${YTHRIL_TEST_APP_MEM:-2g}"
     ports:
       - "3202:3200"
     volumes:
@@ -238,7 +247,8 @@ services:
   ythril-mongo-c:
     image: mongodb/mongodb-atlas-local:latest@sha256:1cd040bb201bb7f910c7c6ab7f6cb8ab9dd79331f6a213f37025adc6804e96aa
     container_name: ythril-mongo-c
-    mem_limit: 3g
+    cpus: "${YTHRIL_TEST_MONGO_CPUS:-1.0}"
+    mem_limit: "${YTHRIL_TEST_MONGO_MEM:-1536m}"
     volumes:
       - ythril-mongo-c-data:/data/db
       - ythril-mongo-c-configdb:/data/configdb
@@ -264,7 +274,8 @@ services:
   ythril-d:
     image: ythril-test:latest  # built by ythril-a (and by CI); reused here, never rebuilt
     container_name: ythril-d
-    mem_limit: 3g
+    cpus: "${YTHRIL_TEST_APP_CPUS:-1.0}"
+    mem_limit: "${YTHRIL_TEST_APP_MEM:-2g}"
     ports:
       - "3203:3200"
     volumes:
@@ -299,7 +310,8 @@ services:
   ythril-mongo-d:
     image: mongodb/mongodb-atlas-local:latest@sha256:1cd040bb201bb7f910c7c6ab7f6cb8ab9dd79331f6a213f37025adc6804e96aa
     container_name: ythril-mongo-d
-    mem_limit: 3g
+    cpus: "${YTHRIL_TEST_MONGO_CPUS:-1.0}"
+    mem_limit: "${YTHRIL_TEST_MONGO_MEM:-1536m}"
     volumes:
       - ythril-mongo-d-data:/data/db
       - ythril-mongo-d-configdb:/data/configdb
@@ -323,7 +335,8 @@ services:
     build: ../sidecars/doc-render
     image: ythril-doc-render:0.1.0
     container_name: ythril-doc-render-test
-    mem_limit: 1g
+    cpus: "${YTHRIL_TEST_DOCRENDER_CPUS:-0.5}"
+    mem_limit: "${YTHRIL_TEST_DOCRENDER_MEM:-1g}"
     restart: unless-stopped
     # Published to the host in the TEST stack only, so the render-sidecar integration test (which runs on
     # the host, not through ythril) can hit it directly. The workstation compose keeps it internal-only.

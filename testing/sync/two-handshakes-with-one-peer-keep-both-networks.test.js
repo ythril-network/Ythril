@@ -60,7 +60,10 @@ async function shortTokens(base, tok, peer) {
   const r = await get(base, tok, '/api/tokens');
   assert.equal(r.status, 200, JSON.stringify(r.body));
   const all = Array.isArray(r.body) ? r.body : r.body.tokens;
-  const mine = all.filter(t => t.peerInstanceId === peer);
+  // The tokens a HANDSHAKE minted for the peer — `peer:<label>` on both sides — because those are what a side hands
+  // over and keeps. A token another suite minted by hand for the same peer (`join-governance` mints `s9-peer-*`) is
+  // not one this rule is about, and counting it made this file fail whenever that suite ran first.
+  const mine = all.filter(t => t.peerInstanceId === peer && /^peer:/.test(t.name));
   assert.ok(mine.length > 0, `no peer token for ${peer} on ${base}`);
   return mine
     .map(t => ({ name: t.name, missing: SPACES.filter(s => !t.rights?.perSpace?.[s]) }))

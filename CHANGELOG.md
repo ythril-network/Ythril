@@ -339,6 +339,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Internal
 
+- **The test stack leaves the machine room to work** (`Q-57`). Every test service now has a CPU ceiling as well as a
+  memory one, and the defaults together come to 8.5 CPUs and 15 GB — about half the Docker VM — where nine memory
+  ceilings had added up to more than the VM and nothing bounded CPU. Each is raised by
+  `YTHRIL_TEST_{APP,MONGO,DOCRENDER}_{CPUS,MEM}` on a bigger runner.
+
 - **Build & Test runs on pull requests into a release branch** (`Q-56`). A patch is bumped through a PR into
   `release/X.Y.x`, and the changelog check counts an entry under a version section that same change adds, as it
   counts one under `[Unreleased]` — a section that already existed still does not.
