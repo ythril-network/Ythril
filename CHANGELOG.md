@@ -325,6 +325,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Internal
 
+- **Which endpoint each assist-model caller uses is pinned before it changes** (`F-33`, characterization).
+  `which-assist-endpoint-each-caller-uses.test.js` states, through a loaded config, when the describe step, the
+  extractor's writer and its decision fallback use the assist model, so the resolver `F-33` moves them to is held to
+  the same answers.
+
 - **A merge its dates contradict can be seen as one** (`F-31`, 4.7). The entity judge now sees each turn's resolved
   dates beside every candidate's description, and the merge question says a card whose dates contradict them is
   not it — judged where both halves are visible, rather than guessed by a code rule.
