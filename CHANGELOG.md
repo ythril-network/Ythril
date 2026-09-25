@@ -43,6 +43,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   from there that conversation ingest has what it needs. The sidecar cards are now one shared component, and the
   gate that checks every sidecar has a card reads the list from the compose file instead of a hand-written one.
 
+- **A file deleted while it was being processed no longer leaves records behind.** A text file's chunk records
+  are written at the end of its processing job, so deleting the file or its folder during the job left those
+  records behind as orphans that still appeared in file metadata. The job now checks that its file still exists
+  after writing, and removes what it wrote if not.
+
 ## [5.2.0] — 2026-09-25
 
 **Networks become a whole feature on both doors, a space's schema travels with its records, and a conversation can

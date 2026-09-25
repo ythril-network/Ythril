@@ -590,6 +590,16 @@ async function processJob(
         throw new Error(`Unknown mediaType: ${String(mediaType)}`);
     }
 
+    // The source can be deleted while the embedder runs, and the embedder's own writes (the chunk records a text
+    // conversion inserts at the end) then land AFTER the delete removed the file's metadata, as orphans. Checked
+    // after those writes and not before, so either the delete's removal of the blob comes first and this
+    // reconciles, or it comes after and the delete's own metadata cleanup follows it.
+    if (!(await fs.stat(absolutePath).then(() => true, () => false))) {
+      await reconcileDeletedSource(spaceId, fileId);
+      log.info(`Media worker: source file ${spaceId}/${fileId} was deleted during its job — removed what the job wrote`);
+      return;
+    }
+
     // Write the derived description to the parent file meta if the user has not set one.
     // This also re-embeds the parent file meta so the description is searchable on the file itself.
     if (derivedDescription || derivedExcerpt) {
