@@ -170,7 +170,9 @@ describe('If-Match — both meta-writing routes check it, and check it FIRST', (
     // `updateSpace(..., { meta })` call is a meta write, and each must sit in a handler that checked
     // the precondition first.
     const planner = readFileSync(new URL('../../server/src/spaces/meta-update.ts', import.meta.url), 'utf8');
-    const writeSites = [...src.matchAll(/updateSpace\([^)]*\{\s*[^}]*\bmeta\b/g)].map(m => m.index);
+    // A meta write is `updateSpace(…, { meta })` or, since F-39.2, `commitOwnMetaEdit(` — the edit that survives
+    // the network layers. Both must sit behind the precondition.
+    const writeSites = [...src.matchAll(/updateSpace\([^)]*\{\s*[^}]*\bmeta\b|commitOwnMetaEdit\(id,/g)].map(m => m.index);
     const plannerWrites = [...planner.matchAll(/updateSpace\([^)]*\{[\s\S]{0,120}?\bmeta\b/g)].map(m => m.index);
 
     // The floor spans BOTH files, because one of the four writes moved. `PATCH /:id` no longer writes meta itself —
