@@ -18,6 +18,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `POST /api/networks/:id/members` and `DELETE /api/networks/:id/members/:instanceId`: the same handshake and Networks
   rung, the same vote-or-direct answer per network type, and an inviter's refusal relayed with its own sentence.
 
+- **Every network route now has its MCP tool** (`F-36`, slice 5, closing it). `network_member_admit` (the inviter's
+  half of a join by invite key), `network_member_signing_key`, and the braintree topology acts `network_reparent_self`,
+  `network_member_adopt` and `network_member_revert_parent` are the same acts as their routes, instance-admin on both
+  doors. `mcp/parity.ts` no longer declares any network capability REST-only.
+
 - **A passed space-settings vote reaches every member** (`F-39.4`). On a club the organiser's own yes passed a
   meta change before any member could see the round, and a member that joined later never saw it either, so the
   change stayed on the instance that proposed it. The passed round is now served to peers, each member re-decides it

@@ -136,6 +136,11 @@ export const CAPABILITIES = [
   ['Networks', 'network_join_remote', 'POST /api/networks/join-remote'],
   ['Networks', 'network_member_add', 'POST /api/networks/:id/members'],
   ['Networks', 'network_member_remove', 'DELETE /api/networks/:id/members/:instanceId'],
+  ['Networks', 'network_member_admit', 'POST /api/networks/:id/join'],
+  ['Networks', 'network_member_signing_key', 'PUT /api/networks/:id/members/:instanceId/signing-key'],
+  ['Networks', 'network_reparent_self', 'POST /api/networks/:id/reparent-self'],
+  ['Networks', 'network_member_adopt', 'POST /api/networks/:id/members/:instanceId/adopt'],
+  ['Networks', 'network_member_revert_parent', 'POST /api/networks/:id/members/:instanceId/revert-parent'],
   ['Networks', 'network_sync', 'POST /api/networks/:id/sync'],
   ['Networks', 'network_sync', 'POST /api/networks/peers/:peerId/sync'],
 ];

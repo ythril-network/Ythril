@@ -1,5 +1,5 @@
 /**
- * Joining a remote network and managing its members answer the same through MCP as through REST (`F-36`, slice 4).
+ * Joining a remote network and managing its members answer the same through MCP as through REST (`F-36`, slices 4-5).
  *
  * The tools call the acts the routes call (`networks/join-remote-act.ts`, `networks/member-acts.ts`), so this checks
  * the outcome both ways: a join over MCP registers the network on B with the membership recorded as that token's,
@@ -14,7 +14,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post, get, del, delWithBody } from '../sync/helpers.js';
+import { INSTANCES, post, put, get, del, delWithBody } from '../sync/helpers.js';
 import { openMcpSession } from '../sync/mcp-session.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -153,5 +153,66 @@ describe('a network\'s members through MCP and through REST', () => {
     const rest = await del(INSTANCES.a, adminA, `/api/networks/${club}/members/nobody-${RUN}`);
     assert.equal(rest.status, 404, JSON.stringify(rest.body));
     assert.equal((await tool(mcpA, 'network_member_remove', { id: club, instanceId: `nobody-${RUN}` })).text, `Error (404): ${rest.body.error}`);
+  });
+});
+
+describe('admitting by invite key, a signing key and the topology acts through MCP and through REST', () => {
+  const joiner = (tag, inviteKey) => ({ inviteKey, instanceId: `f365-${tag}-${RUN}`, label: `f365 ${tag}`,
+    url: 'https://peer.example.com', token: `ythril_f365_${tag}_${RUN}` });
+  const mint = async (id) => {
+    const r = await post(INSTANCES.a, adminA, `/api/networks/${id}/invite`, {});
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    return r.body.inviteKey;
+  };
+
+  it('network_member_admit admits as POST /:id/join does, and a wrong key is refused alike', async () => {
+    const pubsub = await network('pubsub');
+    const key = await mint(pubsub);   // reusable on pub/sub, so both doors present the same key
+    const rest = await post(INSTANCES.a, adminA, `/api/networks/${pubsub}/join`, joiner('arest', key));
+    const viaMcp = await tool(mcpA, 'network_member_admit', { id: pubsub, ...joiner('amcp', key) });
+    assert.equal(rest.status, 200, JSON.stringify(rest.body));
+    assert.equal(viaMcp.isError, false, viaMcp.text);
+    assert.deepEqual(Object.keys(viaMcp.body).sort(), Object.keys(rest.body).sort());
+    assert.equal(viaMcp.body.status, 'joined');
+    assert.ok(!JSON.stringify(viaMcp.body).includes('tokenHash'), 'a member credential leaked');
+
+    const bad = await post(INSTANCES.a, adminA, `/api/networks/${pubsub}/join`, joiner('brest', 'ythril_invite_wrong'));
+    assert.equal(bad.status, 403, JSON.stringify(bad.body));
+    assert.equal((await tool(mcpA, 'network_member_admit', { id: pubsub, ...joiner('bmcp', 'ythril_invite_wrong') })).text,
+      `Error (403): ${bad.body.error}`);
+  });
+
+  it('network_member_signing_key pins as PUT /signing-key does, and an unknown member answers alike', async () => {
+    const club = await network('club');
+    const m = { instanceId: `f365-key-${RUN}`, label: 'f365 key', url: 'https://peer.example.com', token: `ythril_f365_key_${RUN}` };
+    assert.equal((await post(INSTANCES.a, adminA, `/api/networks/${club}/members`, m)).status, 201);
+    const pem = `-----BEGIN PUBLIC KEY-----\n${'A'.repeat(120)}\n-----END PUBLIC KEY-----`;
+    const rest = await put(INSTANCES.a, adminA, `/api/networks/${club}/members/${m.instanceId}/signing-key`, { signingPublicKey: pem });
+    const viaMcp = await tool(mcpA, 'network_member_signing_key', { id: club, instanceId: m.instanceId, signingPublicKey: pem });
+    assert.equal(rest.status, 200, JSON.stringify(rest.body));
+    assert.deepEqual(viaMcp.body, rest.body);
+
+    const none = await put(INSTANCES.a, adminA, `/api/networks/${club}/members/nobody-${RUN}/signing-key`, { signingPublicKey: pem });
+    assert.equal(none.status, 404, JSON.stringify(none.body));
+    assert.equal((await tool(mcpA, 'network_member_signing_key', { id: club, instanceId: `nobody-${RUN}`, signingPublicKey: pem })).text,
+      `Error (404): ${none.body.error}`);
+  });
+
+  it('the topology acts refuse alike: reparenting off a braintree, and adopting or reverting a member that never moved', async () => {
+    const club = await network('club');
+    const m = { instanceId: `f365-top-${RUN}`, label: 'f365 top', url: 'https://peer.example.com', token: `ythril_f365_top_${RUN}` };
+    assert.equal((await post(INSTANCES.a, adminA, `/api/networks/${club}/members`, m)).status, 201);
+
+    const reparent = { newParentInstanceId: '11111111-1111-4111-8111-111111111111', newParentLabel: 'gp',
+      newParentUrl: 'https://peer.example.com', tokenForNewParent: 'ythril_x', originalParentInstanceId: '22222222-2222-4222-8222-222222222222' };
+    const r1 = await post(INSTANCES.a, adminA, `/api/networks/${club}/reparent-self`, reparent);
+    assert.equal(r1.status, 400, JSON.stringify(r1.body));
+    assert.equal((await tool(mcpA, 'network_reparent_self', { id: club, ...reparent })).text, `Error (400): ${r1.body.error}`);
+
+    for (const [route, name] of [['adopt', 'network_member_adopt'], ['revert-parent', 'network_member_revert_parent']]) {
+      const rest = await post(INSTANCES.a, adminA, `/api/networks/${club}/members/${m.instanceId}/${route}`, {});
+      assert.equal(rest.status, 409, JSON.stringify(rest.body));
+      assert.equal((await tool(mcpA, name, { id: club, instanceId: m.instanceId })).text, `Error (409): ${rest.body.error}`);
+    }
   });
 });

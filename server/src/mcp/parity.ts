@@ -105,41 +105,6 @@ export const REST_ONLY_CAPABILITIES: readonly RestOnlyCapability[] = [
     wouldBeTool: 'schema_type_update',
     why: 'MCP can only replace the WHOLE schema map, through `schema_update`. That needs `schema: admin` where this route needs `schema: write`, and it is a read-modify-write, so two agents editing different types can lose one of the edits. The narrow write has no tool.',
   },
-  {
-    capability: 'join a network',
-    restEndpoint: '/api/networks/:id/join',
-    method: 'POST',
-    wouldBeTool: 'network_join',
-    why: 'governing a network is partly on MCP: an agent can read, create, update and leave one, add a space to it, see and cast its votes, read its sync history, invite, fork, join a remote network and add or remove members (`network_get`, `network_create`, `network_update`, `network_leave`, `network_add_space`, `network_votes`, `network_vote`, `network_sync_history`, `network_invite`, `network_fork`, `network_join_remote`, `network_member_add`, `network_member_remove`), see peers and trigger a sync — and cannot yet admit a joiner by its invite key, change a braintree\'s topology or pin a member\'s signing key.',
-  },
-  {
-    capability: 'adopt a member',
-    restEndpoint: '/api/networks/:id/members/:instanceId/adopt',
-    method: 'POST',
-    wouldBeTool: 'network_member_adopt',
-    why: 'governing a network is partly on MCP: an agent can read, create, update and leave one, add a space to it, see and cast its votes, read its sync history, invite, fork, join a remote network and add or remove members (`network_get`, `network_create`, `network_update`, `network_leave`, `network_add_space`, `network_votes`, `network_vote`, `network_sync_history`, `network_invite`, `network_fork`, `network_join_remote`, `network_member_add`, `network_member_remove`), see peers and trigger a sync — and cannot yet admit a joiner by its invite key, change a braintree\'s topology or pin a member\'s signing key.',
-  },
-  {
-    capability: "revert a member's parent",
-    restEndpoint: '/api/networks/:id/members/:instanceId/revert-parent',
-    method: 'POST',
-    wouldBeTool: 'network_member_revert_parent',
-    why: 'governing a network is partly on MCP: an agent can read, create, update and leave one, add a space to it, see and cast its votes, read its sync history, invite, fork, join a remote network and add or remove members (`network_get`, `network_create`, `network_update`, `network_leave`, `network_add_space`, `network_votes`, `network_vote`, `network_sync_history`, `network_invite`, `network_fork`, `network_join_remote`, `network_member_add`, `network_member_remove`), see peers and trigger a sync — and cannot yet admit a joiner by its invite key, change a braintree\'s topology or pin a member\'s signing key.',
-  },
-  {
-    capability: 'reparent this instance',
-    restEndpoint: '/api/networks/:id/reparent-self',
-    method: 'POST',
-    wouldBeTool: 'network_reparent_self',
-    why: 'governing a network is partly on MCP: an agent can read, create, update and leave one, add a space to it, see and cast its votes, read its sync history, invite, fork, join a remote network and add or remove members (`network_get`, `network_create`, `network_update`, `network_leave`, `network_add_space`, `network_votes`, `network_vote`, `network_sync_history`, `network_invite`, `network_fork`, `network_join_remote`, `network_member_add`, `network_member_remove`), see peers and trigger a sync — and cannot yet admit a joiner by its invite key, change a braintree\'s topology or pin a member\'s signing key.',
-  },
-  {
-    capability: "set a member's signing key",
-    restEndpoint: '/api/networks/:id/members/:instanceId/signing-key',
-    method: 'PUT',
-    wouldBeTool: 'network_signing_key',
-    why: 'governing a network is partly on MCP: an agent can read, create, update and leave one, add a space to it, see and cast its votes, read its sync history, invite, fork, join a remote network and add or remove members (`network_get`, `network_create`, `network_update`, `network_leave`, `network_add_space`, `network_votes`, `network_vote`, `network_sync_history`, `network_invite`, `network_fork`, `network_join_remote`, `network_member_add`, `network_member_remove`), see peers and trigger a sync — and cannot yet admit a joiner by its invite key, change a braintree\'s topology or pin a member\'s signing key.',
-  },
 ] as const;
 
 /**

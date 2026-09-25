@@ -5,13 +5,10 @@
  * `network_member_add` / `network_member_remove` (F-36).
  */
 import { Router } from 'express';
-import { z } from 'zod';
 import { requireAdmin } from '../../auth/middleware.js';
 import { globalRateLimit } from '../../rate-limit/middleware.js';
-import { getConfig, saveConfig } from '../../config/loader.js';
-import { forceSetMemberSigningKey } from '../../util/signing.js';
 import { log } from '../../util/log.js';
-import { AddMemberBody, addMemberAct, removeMemberAct } from '../../networks/member-acts.js';
+import { AddMemberBody, SigningKeyBody, addMemberAct, removeMemberAct, setSigningKeyAct } from '../../networks/member-acts.js';
 import { sendAct } from './_shared.js';
 
 export const membersRouter = Router();
@@ -21,19 +18,10 @@ export const membersRouter = Router();
 // proof. Use when a peer lost its old private key (so it cannot produce a
 // continuity proof) and must re-establish trust. Normal rotations propagate
 // automatically via a signed proof over gossip.
-const SigningKeyBody = z.object({ signingPublicKey: z.string().min(100).max(4000) });
-
 membersRouter.put('/:id/members/:instanceId/signing-key', globalRateLimit, requireAdmin, (req, res) => {
   const parsed = SigningKeyBody.safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
-  const cfg = getConfig();
-  const net = cfg.networks.find(n => n.id === req.params['id']);
-  if (!net) { res.status(404).json({ error: 'Network not found' }); return; }
-  const member = net.members.find(m => m.instanceId === req.params['instanceId']);
-  if (!member) { res.status(404).json({ error: 'Member not found' }); return; }
-  forceSetMemberSigningKey(member, parsed.data.signingPublicKey);
-  saveConfig(cfg);
-  res.json({ ok: true, instanceId: member.instanceId });
+  sendAct(res, setSigningKeyAct(String(req.params['id']), String(req.params['instanceId']), parsed.data));
 });
 
 
