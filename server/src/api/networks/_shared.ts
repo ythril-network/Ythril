@@ -37,6 +37,7 @@ export function safeMemberList(net: NetworkConfig, excludeInstanceId: string) {
  */
 export function sendAct(res: import('express').Response, r: import('../../networks/network-acts.js').NetworkActResult): void {
   if (r.status === 204) { res.status(204).end(); return; }
+  if ('upstream' in r) { res.status(r.status).json(r.upstream); return; }
   if ('error' in r) { res.status(r.status).json({ error: r.error }); return; }
   res.status(r.status).json(r.body);
 }

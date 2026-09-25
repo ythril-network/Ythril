@@ -57,7 +57,9 @@ import { trackedSources } from './_sources.mjs';
 function peerSurfaceFiles() {
   // A glob and one named file, so the floor is 2 rather than the default 100 — a floor above what a scan
   // can ever return fails on correct code, which is how a guard gets deleted instead of corrected.
-  return trackedSources(['server/src/api/networks/*.ts', 'server/src/api/invite.ts'], { floor: 2 });
+  // `server/src/networks/` too: the join and member bodies moved there when they became acts both doors call
+  // (`F-36`), and a surface that stopped at `api/` would have concluded about peer URLs it no longer read.
+  return trackedSources(['server/src/api/networks/*.ts', 'server/src/api/invite.ts', 'server/src/networks/*.ts'], { floor: 2 });
 }
 
 const THE_DECLARATION = 'server/src/api/networks/_shared.ts';
