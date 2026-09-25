@@ -21,6 +21,7 @@ import { syncMembersRouter } from './members.js';
 import { syncVotesRouter } from './votes.js';
 import { syncWarmRouter } from './warm.js';
 import { syncMetaRouter } from './meta.js';
+import { resolveNetworkSpaceAlias } from './space-alias.js';
 
 export const syncRouter = Router();
 
@@ -93,6 +94,9 @@ syncRouter.use((req, res, next) => {
    */
   next();
 });
+
+// Q-51: a peer's network space id becomes this instance's local one before any route admits or reads by it.
+syncRouter.use(resolveNetworkSpaceAlias);
 
 syncRouter.use(syncDocsRouter);
 syncRouter.use(syncTombstonesRouter);
