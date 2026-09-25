@@ -493,6 +493,14 @@ into a space they already have under that name — it only adds, and nothing the
 closed and democratic networks do not offer it yet, because every member would have to agree; create a second
 network for the space instead.
 
+**The schema comes with the space.** On a pub/sub network or a tree, each instance takes a shared space's type
+schemas, purpose and usage notes from the instance above it on every sync, so a space created by a join is not bare.
+It only adds: types you do not have are added, a type you both have keeps your properties and gains the network's, and
+where you both define the same property the network's definition is used. Nothing of yours is removed, and your own
+settings — duplicate rules, retention, document extraction — stay yours. Nothing flows back up. A schema that cannot be
+merged (for instance, one using a schema-library entry you do not have) is skipped and noted in the log; the records
+still sync.
+
 ### Network types
 
 | Type | Who approves joins and leaves |

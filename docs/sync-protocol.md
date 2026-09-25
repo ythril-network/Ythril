@@ -347,6 +347,17 @@ At the **start** of each cycle — before any data sync, see [Overview](#overvie
 
 3. **Pull member view** — `GET /api/sync/networks/:networkId/members` fetches the peer's full member list. Any record whose `instanceId` is already known locally (but is not our own `instanceId`) has its `url`, `label`, and `children` merged in if they differ.
 
+**Both self-records also carry `spaces`** — the network's spaces as the sender carries them, in the network's ids (F-38.3). An instance adopts from it only when the sender is its **upstream**: a pub/sub subscriber from its publisher, a braintree node from its parent. A space it lacks is created under that id and added to the network, and the tokens it issued to the network's members are widened to it. The announcement only adds; a space missing from it is never removed. From anyone else — a subscriber announcing to its publisher, a club peer — it is ignored.
+
+## Schema phase (pub/sub and braintree)
+
+Before pulling a space's records from its upstream, the engine pulls the space's meta — `GET /api/sync/meta?spaceId=&networkId=` — and merges it into the local meta (F-39.1). Only from the upstream, so a schema flows down a pub/sub network or a tree and never up.
+
+- **What travels** is everything a network governs: type schemas, purpose, usage notes, validation mode, strict linkage and the other `meta` fields. Never what the server owns (`version`, history, reindex flags), and never the space's operational settings (duplicate rules, record retention, document extraction), which are not in `meta`.
+- **The merge only adds.** A type the receiver lacks is added. A type both hold keeps every local property and gains the network's; a property both hold takes the network's definition, as does a type's own field (a naming pattern, an edge's endpoints) where the network sets one. A schema-library reference is one unit and is replaced whole. Nothing local is removed.
+- **Refused whole, never in part.** A meta the local API would reject, or one that references schema-library entries this instance lacks, is logged and nothing is merged.
+- **It never stops data.** A schema that cannot be fetched or merged leaves the record sync to run as it would have.
+
 ### Gossip poisoning protection
 
 On the receiving side, the `POST /api/sync/networks/:networkId/members` endpoint only updates the record for the exact `instanceId` in the request body. It will not update any other member's record — so a compromise peer cannot overwrite other members' identity details. Unknown `instanceId` values (not already in the member list) are silently acknowledged as `{ status: 'unknown_member' }` and never auto-added.
