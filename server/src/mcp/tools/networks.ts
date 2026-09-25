@@ -7,6 +7,7 @@
  * administration), exactly as on REST.
  */
 import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.js';
+import { uuidSchema } from './shared.js';
 import {
   readNetworkAct, createNetworkAct, updateNetworkAct, leaveNetworkAct, type NetworkActResult,
 } from '../../networks/network-acts.js';
@@ -21,7 +22,7 @@ function toResult(r: NetworkActResult, done: string): ToolResult {
   return { content: [{ type: 'text' as const, text: JSON.stringify(r.body) }], structuredContent: r.body };
 }
 
-const networkIdSchema = { type: 'string', description: 'The network\'s id — `networkId` on a `network_peers` row, `id` everywhere else, as in `/api/networks/:id`.' };
+const networkIdSchema = uuidSchema('The network\'s id — `networkId` on a `network_peers` row, `id` everywhere else, as in `/api/networks/:id`.');
 
 export const network_getTool: ToolHandler = {
   name: 'network_get',
@@ -59,7 +60,7 @@ export const network_createTool: ToolHandler = {
       merkle: { type: 'boolean', description: 'Compare a Merkle root with each peer every cycle and warn on divergence.' },
       requireSignedVotes: { type: 'boolean', description: 'Refuse any unsigned governance vote. Turn it on only once every member has synced once, or their votes are refused.' },
       myParentInstanceId: { type: 'string', description: 'braintree only: this instance\'s parent in the tree; omit to be the root.' },
-      id: { type: 'string', description: 'A pre-chosen UUID for the network, for registering the same network on several instances.' },
+      id: uuidSchema('A pre-chosen UUID for the network, for registering the same network on several instances; one already in use is refused (409).'),
     },
     required: ['label', 'type', 'spaces'],
     additionalProperties: false,
