@@ -362,6 +362,7 @@ Before pulling a space's records from its upstream, the engine pulls the space's
 - **A space in two networks keeps each network's schema apart** (F-39.2). What a network sends is stored as that network's *layer* for the space, next to the instance's own definitions, and the meta the space runs on is rebuilt from them: own definitions, then the layers in precedence, so the network joined first wins where two define the same thing differently (`networkPrecedence` on the space reorders it). A clash never stops either network's records.
 - **Nothing mixed is sent on.** `GET /api/sync/meta?networkId=` answers with the instance's own definitions plus *that* network's layer — never another network's, never the combined result — so one network's definition cannot leak into the other.
 - **An operator's edit lands in the own definitions**, so it survives the next layer arriving; a type a network defines cannot be removed locally, because the replicated schema is additive.
+- **A passed `meta_change` reaches every member** (F-39.4). The proposer keeps serving the passed round on `GET /api/sync/networks/:id/votes`, so a member that never saw it open — a club member, a late joiner — adopts it and re-decides it from the casts. The proposer applies it to its own definitions; every other member applies it into that network's layer, so replaying an old round can refresh the layer but never overwrite what the member defined itself. A round names the space by the network's id, and each member resolves it to its own.
 
 ### Gossip poisoning protection
 

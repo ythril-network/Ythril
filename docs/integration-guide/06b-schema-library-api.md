@@ -213,6 +213,8 @@ Content-Type: application/json
 
 Injects a `$ref` into the target space's `typeSchemas` for every library entry in `:group`, wiring the space to the shared definitions. **Response** `200` with the applied entries; `404` if the group has no entries or the space does not exist. Requires an admin token (and MFA when enabled).
 
+On a space in a network the apply is a vote, as every schema write there is: it answers `202 { "status": "vote_pending", "rounds" }` and the references land when the round passes (Q-52).
+
 #### Using `$ref` in space typeSchemas
 
 A space type definition can reference a library entry instead of embedding the schema inline:

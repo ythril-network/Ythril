@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A passed space-settings vote reaches every member** (`F-39.4`). On a club the organiser's own yes passed a
+  meta change before any member could see the round, and a member that joined later never saw it either, so the
+  change stayed on the instance that proposed it. The passed round is now served to peers, each member re-decides it
+  from the casts, and applies it as that network's definition — beside its own, never over it.
+
 - **See and settle a schema clash between networks** (`F-39.3`). A space in several schema-sending networks
   shows, on its Schema tab, each network's layer in the order it applies and every clash between them, with the
   network that currently applies marked; the order can be changed there. `GET /api/spaces/:id/schema-layers` and
@@ -221,6 +226,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the tool names are checked against the registry.
 
 ### Fixed
+
+- **A networked space's schema is changed by the network's vote on every door** (`Q-52`). `PATCH` and MCP
+  `schema_update` turned a schema edit on a networked space into a vote; `PUT /schema`, the single-type upsert and
+  delete, and the schema library's apply wrote it at once. They now open the same `meta_change` round and answer
+  `202 vote_pending`. A space in no network is unchanged.
 
 - **An edit made through MCP is audited with what it changed** (`Q-50`). The REST door recorded each edit's
   before and after as the audit entry's `changes`; the same edit through an MCP tool left the operation alone, and

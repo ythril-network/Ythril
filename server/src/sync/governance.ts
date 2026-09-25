@@ -11,7 +11,8 @@
 import { getConfig, getSecrets } from '../config/loader.js';
 import { revokePeerCredentialsIfOrphaned } from '../auth/tokens.js';
 import { log } from '../util/log.js';
-import { commitOwnMetaEdit } from '../spaces/effective-meta.js';
+import { commitOwnMetaEdit, storeNetworkLayer } from '../spaces/effective-meta.js';
+import { remoteToLocal } from './space-map.js';
 import { peerSafeFetch } from './peer-fetch.js';
 import { buildBraintreeAncestors } from '../util/braintree.js';
 import { applyMetaRound, type MetaRoundProposal } from './meta-round-merge.js';
@@ -152,11 +153,19 @@ export function concludeRoundIfReady(
     // open for `votingDeadlineHours` — so writing it wholesale reverts every field another round changed
     // in the meantime, with no error and a correctly-recorded carried vote to hide it.
     if (round.type === 'meta_change' && round.spaceId && round.pendingMeta) {
-      const currentMeta = getConfig().spaces.find(s => s.id === round.spaceId)?.meta;
-      // Through the own definitions (F-39.2): a space whose meta is rebuilt from layers would lose a direct write
-      // at the next recompute. Before any layer exists this is the same plain write as before.
+      // The round names the space by the NETWORK's id; this instance may carry it under another (F-39.4).
+      const localSpace = remoteToLocal(net, round.spaceId);
+      const currentMeta = getConfig().spaces.find(s => s.id === localSpace)?.meta;
       let applied = applyMetaRound(currentMeta, round as MetaRoundProposal);
-      commitOwnMetaEdit(round.spaceId, base => (applied = applyMetaRound(base, round as MetaRoundProposal)).meta as SpaceMeta);
+      if (round.subjectInstanceId === getConfig().instanceId) {
+        // The proposer's own edit, through its own definitions (F-39.2) so a layered space keeps it.
+        commitOwnMetaEdit(localSpace, base => (applied = applyMetaRound(base, round as MetaRoundProposal)).meta as SpaceMeta);
+      } else {
+        // Anyone else: the NETWORK decided it, so it lands in that network's layer (F-39.4). Replaying an old round
+        // on a late joiner can then only refresh the layer, never overwrite what this instance defined itself.
+        applied = applyMetaRound(net.schemaLayers?.[localSpace] ?? {}, round as MetaRoundProposal);
+        storeNetworkLayer(net.id, localSpace, applied.meta as SpaceMeta);
+      }
       if (applied.conflicts.length > 0) {
         // The vote wins — the network decided this value — but the operator whose edit it superseded has
         // to be able to find out, and the only place that can say so is here.

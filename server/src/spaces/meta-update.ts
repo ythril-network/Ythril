@@ -29,6 +29,7 @@
  * the real conflict on their second attempt instead of their first. And a rejected write must change NOTHING,
  * which is why the audit snapshot is returned in the plan rather than taken as we go.
  */
+import { localToRemote } from '../sync/space-map.js';
 import { replicatedMetaOf } from '../sync/replicated-meta.js';
 import type { SpaceConfig, SpaceMeta, KnowledgeType, TypeSchema, DocExtractionMode } from '../config/types.js';
 import { normalizeDocExtractionMode } from '../config/types.js';
@@ -338,7 +339,8 @@ export async function applySpaceMetaUpdate(plan: MetaUpdatePlan): Promise<MetaUp
           deadline,
           openedAt: now,
           votes: [{ instanceId: cfg.instanceId, vote: 'yes', castAt: now }],
-          spaceId: id,
+          // The network's id for the space, so each member resolves it to its own local id (F-39.4).
+          spaceId: localToRemote(net, id),
           pendingMeta: mergedMeta,
           // Provenance, so conclusion can apply just this patch rather than this whole snapshot. Rounds stay open
           // for `votingDeadlineHours`, so a second proposal landing before the first concludes is ordinary, and
@@ -432,4 +434,33 @@ export async function applySpaceMetaUpdate(plan: MetaUpdatePlan): Promise<MetaUp
       .catch(err => log.warn(`Suppression sweep failed for ${id}: ${err instanceof Error ? err.message : String(err)}`));
   }
   return updated ? { outcome: 'applied', space: updated } : { outcome: 'not_found' };
+}
+
+/**
+ * A schema route's edit of a NETWORKED space, voted on as `PATCH /api/spaces/:id` votes on it (`Q-52`).
+ *
+ * `PUT /schema`, the per-type upsert and delete, and the schema library's apply wrote a networked space's schema at
+ * once, while `PATCH` and MCP `schema_update` turned the same edit into a `meta_change` round — one edit, voted on
+ * one door and not the others, and a way to change a shared space's schema without the network. This hands the
+ * edit to the same planner. Returns `null` for a space in no network, where the route writes as before.
+ *
+ * @param typeSchemas the map the route would write — whole (`replace`) or the types it touches (`merge`)
+ */
+export async function voteOnSchemaEditIfNetworked(
+  spaceId: string,
+  typeSchemas: unknown,
+  mode: 'merge' | 'replace',
+): Promise<{ status: 202; body: Record<string, unknown> } | { status: number; body: Record<string, unknown> } | null> {
+  const cfg = getConfig();
+  if (!cfg.networks.some(n => n.spaces.includes(spaceId))) return null;
+  const space = cfg.spaces.find(s => s.id === spaceId);
+  const decision = planSpaceMetaUpdate({ spaceId, space, body: { meta: { typeSchemas }, typeSchemasMode: mode }, ifMatch: undefined });
+  if (!decision.ok) return { status: decision.refusal.status, body: decision.refusal.body as Record<string, unknown> };
+  const result = await applySpaceMetaUpdate(decision.plan);
+  if (result.outcome === 'vote_pending') {
+    return { status: 202, body: { status: 'vote_pending', rounds: result.rounds, message: 'Meta change requires network vote' } };
+  }
+  if (result.outcome === 'not_found') return { status: 404, body: { error: `Space '${spaceId}' not found` } };
+  // Every round passed on this instance's own yes (a club organiser, a publisher, a lone member): applied already.
+  return { status: 200, body: { space: result.space } };
 }
