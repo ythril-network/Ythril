@@ -32,6 +32,7 @@ import { pullTombstones, pushTombstones } from './tombstone-transfer.js';
 import { applyConcludedSpaceRounds } from '../spaces/apply-wipe-round.js';
 import { bumpSeq, isSeqImplausible } from '../util/seq.js';
 import { adoptAnnouncedSpaces, announcedSpaces } from '../networks/network-spaces.js';
+import { pullSpaceMetaFromUpstream } from './space-meta-pull.js';
 import { peerSafeFetch, isPeerUrlAllowed, transferInit, PEER_TRANSFER_TIMEOUT_MS } from './peer-fetch.js';
 import { concludeRoundIfReady, sendMemberRemovedNotify } from './governance.js';
 import { enqueueMediaJob } from '../files/media/job-queue.js';
@@ -490,6 +491,7 @@ async function runSyncForMember(
     const shouldPush = !isDirectional || member.direction === 'both' || member.direction === 'push';
 
     if (shouldPull) {
+      await pullSpaceMetaFromUpstream(net, member, spaceId, remoteSpaceId, fetchOpts); // F-39.1: only from upstream, never throws
       const pc = await pullFromPeer(member, spaceId, remoteSpaceId, net.id, headers, fetchOpts, batchFetchOpts);
       pulled.facts += pc.facts; pulled.entities += pc.entities; pulled.edges += pc.edges; pulled.chrono += pc.chrono;
       if (pc.stoppedEarly.length > 0) incomplete.push(`space '${spaceId}' receive: ${pc.stoppedEarly.join(', ')} stopped early`);
