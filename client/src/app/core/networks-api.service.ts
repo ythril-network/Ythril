@@ -1,6 +1,7 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { Observable } from 'rxjs';
+import { Observable, map } from 'rxjs';
+import { voteRoundFromServer, type ServerVoteRound } from './vote-round-view';
 import type {
   Network, InviteBundle, VoteRound, SyncHistoryRecord,
   LocalAgentStatus, LocalAgentBootstrapResult, LocalAgentEnableNetworksResult,
@@ -72,8 +73,11 @@ export class NetworksApi {
     return this.http.post<void>(`/api/networks/${networkId}/votes/${roundId}`, { vote });
   }
 
+  /** The rounds in the pages' shape — see `vote-round-view.ts` for why the translation cannot live anywhere else. */
   listVotes(networkId: string): Observable<{ rounds: VoteRound[] }> {
-    return this.http.get<any>(`/api/networks/${networkId}/votes`);
+    return this.http.get<{ rounds: ServerVoteRound[] }>(`/api/networks/${networkId}/votes`).pipe(
+      map(({ rounds }) => ({ rounds: (rounds ?? []).map(r => voteRoundFromServer(networkId, r)) })),
+    );
   }
 
   // ── Local agent ─────────────────────────────────────────────────────────

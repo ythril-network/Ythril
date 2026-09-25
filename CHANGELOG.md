@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.1.4] — 2026-09-25
+
+A patch for the web interface: network votes can be seen and cast from the Networks page again.
+
+**Who is affected.** Every operator who governs a network from the web interface. Since the vote list was written,
+the page read a vote round in a shape the server never sent, so it listed no open round at all — on the Networks page
+and on the Brain overview's Governance panel — and showed nothing to vote on. Votes cast through the API or MCP, and
+votes that peers cast, were never affected: the server always held and decided the rounds correctly, and a round
+nobody could see from the page simply ran to its deadline. A network whose join, removal or space-settings change
+seemed stuck for that reason can now be decided from the page.
+
+**What to do.** Roll the image, open Settings → Networks, and look under **Open votes** on each network. There is no
+config change and no migration.
+
+### Fixed
+
+- **The Networks page lists open votes, and Yes and Veto reach the round.** The page read `id`, `subject` and
+  `status` where the server sends `roundId`, `subjectLabel` and `concluded`, so every round was filtered out as not
+  open, and a cast would have gone to `/votes/undefined`. The rounds are now translated in one place, where both the
+  Networks page and the Governance panel read them.
+
 ## [5.1.3] — 2026-09-25
 
 A patch: a token granted only space administration can write again.
