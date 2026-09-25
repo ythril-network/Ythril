@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A schema clash between two networks can be settled by proposing a definition to one of them** (`F-39.5`,
+  closing `F-39`). `targetNetwork` on `PATCH /api/spaces/:id` and MCP `schema_update` proposes the meta to that
+  network alone, as its definition: a vote there, landing in its layer on every member once passed, with this
+  instance's own definitions untouched. The Schema tab's clash list has a **Propose** action beside each network
+  that holds the other definition.
+
 - **An agent can mint an invite key and fork a network over MCP** (`F-36`, slice 3). `network_invite` and
   `network_fork` are the same acts as `POST /api/networks/:id/invite` and `/fork` — same parameters, answers and
   refusals on both doors.

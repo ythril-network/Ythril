@@ -157,8 +157,9 @@ export function concludeRoundIfReady(
       const localSpace = remoteToLocal(net, round.spaceId);
       const currentMeta = getConfig().spaces.find(s => s.id === localSpace)?.meta;
       let applied = applyMetaRound(currentMeta, round as MetaRoundProposal);
-      if (round.subjectInstanceId === getConfig().instanceId) {
-        // The proposer's own edit, through its own definitions (F-39.2) so a layered space keeps it.
+      if (round.subjectInstanceId === getConfig().instanceId && !round.proposesLayer) {
+        // The proposer's own edit, through its own definitions (F-39.2) so a layered space keeps it. A proposal TO a
+        // network (F-39.5) is not one: it was that network's definition all along, so it takes the branch below.
         commitOwnMetaEdit(localSpace, base => (applied = applyMetaRound(base, round as MetaRoundProposal)).meta as SpaceMeta);
       } else {
         // Anyone else: the NETWORK decided it, so it lands in that network's layer (F-39.4). Replaying an old round

@@ -523,6 +523,14 @@ export const UpdateSpaceBody = z.object({
    * consensus bypass.
    */
   typeSchemasMode: z.enum(['merge', 'replace']).optional(),
+  /**
+   * Propose `meta` to ONE network carrying the space, as that network's definition (`F-39.5`), instead of editing
+   * this instance's own. The owner's rule for a space in two networks is that a clash never stops data and a
+   * combined definition is proposed by hand, by vote: this is that proposal. It merges over the network's layer,
+   * opens a round on that network alone, and a body carrying anything but `meta` and `typeSchemasMode` is refused,
+   * because nothing else about a space is the network's to vote on.
+   */
+  targetNetwork: z.string().uuid().optional(),
   dupeRules: z.array(DupeActionRuleBody).max(20).optional(),
   dupeMergeSurvivor: z.enum(['older', 'newer']).optional(),
   dupeRulesOnInsert: z.boolean().optional(),

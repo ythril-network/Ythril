@@ -401,7 +401,7 @@ async function runSpaceMetaUpdate(
  * derivation rather than a list, and the omission it replaces cannot recur: a field added to the schema is
  * forwarded by the same commit.
  */
-const NOT_META = new Set(['space', 'typeSchemasMode']);
+const NOT_META = new Set(['space', 'typeSchemasMode', 'targetNetwork']);
 
 /**
  * `save_space` declares `purpose`, which the create body still calls `description` — so it is translated
@@ -466,6 +466,13 @@ export const schema_updateTool: ToolHandler = {
           + 'types and preserves the rest; `replace` makes the payload authoritative, so types absent from it are '
           + 'REMOVED. Use `replace` to delete a type.',
       },
+      targetNetwork: {
+        type: 'string', pattern: '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$',
+        description: 'Propose this edit to ONE network carrying the space, as that network\'s definition, instead of '
+          + 'editing this instance\'s own — how a clash between two networks is settled (`space_schema_layers` lists '
+          + 'them). It merges over that network\'s layer, opens a vote there alone, and lands in its layer on every '
+          + 'member once passed. Same as `targetNetwork` on `PATCH /api/spaces/:id`.',
+      },
       validationMode: {
         type: 'string', enum: ['off', 'warn', 'strict'],
         description: 'Whether records are validated against the schemas: not at all, warn on violation, or refuse '
@@ -512,6 +519,7 @@ export const schema_updateTool: ToolHandler = {
 
     const body: Record<string, unknown> = { meta };
     if (a['typeSchemasMode'] !== undefined) body['typeSchemasMode'] = a['typeSchemasMode'];
+    if (a['targetNetwork'] !== undefined) body['targetNetwork'] = a['targetNetwork'];
 
     const wrote = Object.keys(meta).join(', ');
     return await runSpaceMetaUpdate(callSpace, body, `Space '${callSpace}' schema updated (${wrote}).`, ctx.rights, ctx.recordChanges);
