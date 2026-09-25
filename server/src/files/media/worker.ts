@@ -71,6 +71,7 @@ import { worstRenderWindowMs } from '../converters/render-budget.js';
 import { providerHopMs } from './providers.js';
 import { slotTimeoutMs } from '../../config/model-slots.js';
 import { getModelSlots } from '../../config/loader.js';
+import { assistHopMs } from '../../config/assist-backend.js';
 import { AUDIO_STEPS, VIDEO_STEPS } from './progress.js';
 import { spaceCollection } from '../../db/space-collection.js';
 
@@ -97,6 +98,7 @@ function hopBudgets(): Record<string, number | undefined> {
   const visionType = media.visionProvider ?? 'local';
   const sttType = media.sttProvider ?? 'local';
   const fallback = media.fallbackToExternal ?? false;
+  const hasAssistFallback = !!doc.assistModel?.fallback?.baseUrl?.trim();
   /*
    * Resolved through the same function the call sites use, never from the constants they used to carry.
    *
@@ -129,12 +131,13 @@ function hopBudgets(): Record<string, number | undefined> {
     docVlmMs: slotTimeoutMs('docVlm', cfg),
     docRepairMs: slotTimeoutMs('docRepair', cfg),
     docVerifyMs: slotTimeoutMs('docVerify', cfg),
-    assistMs: slotTimeoutMs('assist', cfg),
+    // One assist step can try the primary and then the fallback, so it costs both legs when a fallback is set (F-33).
+    assistMs: assistHopMs(slotTimeoutMs('assist', cfg), hasAssistFallback),
   };
   return {
     pageTimeoutMs: doc.pageTimeoutMs,
     ocrTimeoutMs: doc.ocrTimeoutMs,
-    describeTimeoutMs: doc.describeTimeoutMs,
+    describeTimeoutMs: assistHopMs(doc.describeTimeoutMs, hasAssistFallback),
     // The longest step of all, and it was missing — because it is not a config KEY. The render of a page
     // window is `pageTimeoutMs x min(maxPages, 20)`, which at the defaults is 1 200 000 ms against a
     // 300 000 ms stall timeout: four times over, with nothing configured. A list of names could not contain a

@@ -25,7 +25,9 @@ before(async () => {
 });
 
 const jevSlot = { baseUrl: 'https://api.typesafe.ai', model: 'jev-latest', acknowledgedHost: 'api.typesafe.ai', apiKey: 'k1' };
-const assistSlot = { baseUrl: 'https://llm.example.com/v1', model: 'big-model', acknowledgedHostForConversations: 'llm.example.com', apiKey: 'k2' };
+// The assist endpoint as `assistBackend('conversations')` hands it over — consent, budget and fallback already decided
+// there (F-33, `the-assist-model-falls-back-and-keeps-a-budget.test.js`). No `which`, so these calls are not accounted.
+const assistSlot = { baseUrl: 'https://llm.example.com/v1', model: 'big-model', apiKey: 'k2' };
 
 /** A transport that records every call and answers from a queue. */
 function transport(...replies) {
@@ -73,10 +75,10 @@ describe('which backend answers', () => {
   });
   it('the assist model, when there is no decision slot at all', () =>
     assert.equal(pickDecisionBackend({ assist: assistSlot })?.kind, 'assist'));
-  it('nobody, when neither is consented to — never an unconsented host', () =>
-    assert.equal(pickDecisionBackend({ decision: { ...jevSlot, acknowledgedHost: 'x' }, assist: { ...assistSlot, acknowledgedHostForConversations: 'y' } }), null));
-  it('the assist fallback needs its CONVERSATIONS consent — a documents consent is not one (F-35)', () =>
-    assert.equal(pickDecisionBackend({ assist: { baseUrl: assistSlot.baseUrl, model: assistSlot.model, acknowledgedHost: 'llm.example.com' } }), null));
+  it('nobody, when the decision slot is not consented to and the resolver hands over no assist endpoint', () =>
+    assert.equal(pickDecisionBackend({ decision: { ...jevSlot, acknowledgedHost: 'x' }, assist: null }), null));
+  // Whether the assist endpoint may take conversations at all — its CONVERSATIONS consent, not the documents one
+  // (F-35) — is the resolver's rule now, checked in `the-assist-model-falls-back-and-keeps-a-budget.test.js`.
   it('refusing names both settings, so the operator knows what to set', () => {
     const e = new DecisionUnavailableError();
     assert.match(e.message, /decisionModel/);

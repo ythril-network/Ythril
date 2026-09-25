@@ -11,10 +11,11 @@
 import { Router } from 'express';
 import { boundedJson } from '../util/bounded-read.js';
 import { z } from 'zod';
-import { getConfig, saveConfig, getMediaEmbeddingConfig, getSecrets, saveSecrets, getDocAssistApiKey, getNliApiKey, getEmbeddingConfig, getEmbeddingApiKey, getRerankApiKey, getModelSlots } from '../config/loader.js';
+import { getConfig, saveConfig, getMediaEmbeddingConfig, getSecrets, saveSecrets, getDocAssistApiKey, getDocAssistFallbackApiKey, getNliApiKey, getEmbeddingConfig, getEmbeddingApiKey, getRerankApiKey, getModelSlots } from '../config/loader.js';
 import { DOC_EXTRACTION_MODES_IN, IMAGE_LEVELS, AUDIO_LEVELS, VIDEO_LEVELS, TEXT_LEVELS, normalizeDocExtractionMode } from '../config/types.js';
 import type { MediaLevelCeilings } from '../config/types.js';
 import { requireAdmin, requireAdminMfa } from '../auth/middleware.js';
+import { AssistBudgetPatch, AssistFallbackPatch, refuseAssistFallback, assistFallbackKeyChange, mergeAssistExtras } from '../config/assist-model-patch.js';
 import { globalRateLimit } from '../rate-limit/middleware.js';
 import { isSsrfSafeUrl, ssrfSafeFetch } from '../util/ssrf.js';
 import {
@@ -126,6 +127,9 @@ const AssistModelPatchSchema = z.object({
   acknowledgedHost: z.string().max(255).optional(),
   // `F-35`: the conversations consent, set by its own dialog; `null` withdraws it.
   acknowledgedHostForConversations: z.string().max(255).optional().nullable(),
+  // `F-33`: absent keeps, `null` removes — see config/assist-model-patch.ts for why these two differ.
+  budget: AssistBudgetPatch,
+  fallback: AssistFallbackPatch,
 }).strict();
 
 const DocumentProcessingPatchSchema = z.object({
@@ -639,6 +643,9 @@ mediaConfigRouter.patch('/', requireAdminMfa, (req, res) => {
       effBaseUrl, effAck, reachableAfterThisPatch, causedByThisPatch,
     });
     if (refusal) { res.status(refusal.status).json(refusal.body); return; }
+
+    const fbRefusal = refuseAssistFallback(assistPatch?.fallback, repairRunsAt(effMode));
+    if (fbRefusal) { res.status(fbRefusal.status).json(fbRefusal.body); return; }
   }
 
   // F-31 — the extractors' decision model: env lock, SSRF, egress consent (config/decision-model.ts).
@@ -659,6 +666,7 @@ mediaConfigRouter.patch('/', requireAdminMfa, (req, res) => {
     const assistApiKeyChange = (assistPatch && 'apiKey' in assistPatch)
       ? assistPatch.apiKey ?? null
       : undefined;
+    const assistFallbackApiKeyChange = assistFallbackKeyChange(assistPatch);
     // External face model's key → secrets.mediaEmbedding.faceApiKey.
     const faceApiKeyChange = (facePatch && 'apiKey' in facePatch)
       ? facePatch.apiKey ?? null
@@ -676,7 +684,7 @@ mediaConfigRouter.patch('/', requireAdminMfa, (req, res) => {
       ? nliPatch.apiKey ?? null
       : undefined;
 
-    if (visionApiKeyChange !== undefined || sttApiKeyChange !== undefined || assistApiKeyChange !== undefined || embApiKeyChange !== undefined || faceApiKeyChange !== undefined || rerankApiKeyChange !== undefined || nliApiKeyChange !== undefined) {
+    if (visionApiKeyChange !== undefined || sttApiKeyChange !== undefined || assistApiKeyChange !== undefined || assistFallbackApiKeyChange !== undefined || embApiKeyChange !== undefined || faceApiKeyChange !== undefined || rerankApiKeyChange !== undefined || nliApiKeyChange !== undefined) {
       const secrets = getSecrets();
       const sAny = secrets as any;
       sAny.mediaEmbedding = sAny.mediaEmbedding ?? {};
@@ -691,6 +699,10 @@ mediaConfigRouter.patch('/', requireAdminMfa, (req, res) => {
       if (assistApiKeyChange !== undefined) {
         if (assistApiKeyChange === null || assistApiKeyChange === '') delete sAny.mediaEmbedding.docAssistApiKey;
         else sAny.mediaEmbedding.docAssistApiKey = assistApiKeyChange;
+      }
+      if (assistFallbackApiKeyChange !== undefined) {
+        if (assistFallbackApiKeyChange === null || assistFallbackApiKeyChange === '') delete sAny.mediaEmbedding.docAssistFallbackApiKey;
+        else sAny.mediaEmbedding.docAssistFallbackApiKey = assistFallbackApiKeyChange;
       }
       if (faceApiKeyChange !== undefined) {
         if (faceApiKeyChange === null || faceApiKeyChange === '') delete sAny.mediaEmbedding.faceApiKey;
@@ -778,6 +790,7 @@ mediaConfigRouter.patch('/', requireAdminMfa, (req, res) => {
         // `F-35`: `null` withdraws the conversations consent. The block is replaced WHOLE, so a client that
         // omits the field withdraws it too — which is why the Models tab always sends it.
         if (a['acknowledgedHostForConversations'] == null) delete a['acknowledgedHostForConversations'];
+        mergeAssistExtras(a, (existing.documentProcessing as { assistModel?: Record<string, unknown> } | undefined)?.assistModel);
         dpMerged['assistModel'] = a;
       }
       merged['documentProcessing'] = dpMerged;
@@ -1159,7 +1172,8 @@ function maskSecrets(cfg: ReturnType<typeof getMediaEmbeddingConfig>): unknown {
     nli: cfg.nli ? { ...cfg.nli, apiKey: mask(cfg.nli.apiKey) } : cfg.nli,
     rerank: cfg.rerank ? { ...cfg.rerank, apiKey: mask(cfg.rerank.apiKey) } : cfg.rerank,
     documentProcessing: dp?.assistModel
-      ? { ...dp, assistModel: { ...dp.assistModel, apiKey: mask(getDocAssistApiKey()) } }
+      ? { ...dp, assistModel: { ...dp.assistModel, apiKey: mask(getDocAssistApiKey()),
+          ...(dp.assistModel.fallback ? { fallback: { ...dp.assistModel.fallback, apiKey: mask(getDocAssistFallbackApiKey()) } } : {}) } }
       : dp,
   };
 }

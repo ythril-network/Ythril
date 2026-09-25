@@ -33,13 +33,14 @@
  * it is sent — a question with no way to say "none of these" forces a wrong pick, which is the failure the
  * decomposition's own gate exists to stop.
  */
-import { egressConsented, assistConsented } from '../config/egress-consent.js';
-import { allowPrivateForSlot, type EgressSlot } from '../config/model-egress-policy.js';
+import { egressConsented } from '../config/egress-consent.js';
+import { assistBackend, viaAssist, type AssistEndpoint } from '../config/assist-backend.js';
+import type { EgressSlot } from '../config/model-egress-policy.js';
 import { slotTimeoutMs } from '../config/model-slots.js';
-import { getDocumentProcessingConfig, getDocAssistApiKey, getModelSlots } from '../config/loader.js';
+import { getModelSlots } from '../config/loader.js';
 import { getDecisionModelConfig, getDecisionApiKey } from '../config/decision-model.js';
 import { chatUrlFor, systemOneUrlFor } from '../files/converters/vlm-endpoint.js';
-import { ssrfSafeFetch } from '../util/ssrf.js';
+import { modelFetch } from '../util/model-fetch.js';
 import { boundedJson } from '../util/bounded-read.js';
 import { postWithBackoff, type ModelTransport } from './model-post.js';
 
@@ -72,6 +73,8 @@ export interface DecisionBackend {
   baseUrl: string;
   model: string;
   apiKey?: string;
+  /** On the assist kind: its primary or its fallback (`F-33`) — the budget and cooldown follow it. */
+  which?: AssistEndpoint['which'];
 }
 
 /**
@@ -98,30 +101,29 @@ export class DecisionError extends Error {
   }
 }
 
-type SlotInput = { baseUrl?: string; model?: string; acknowledgedHost?: string; acknowledgedHostForConversations?: string; apiKey?: string } | undefined;
+type SlotInput = { baseUrl?: string; model?: string; acknowledgedHost?: string; apiKey?: string } | undefined;
 
 /**
- * Which backend answers, from the two slots as configured. Pure, so the choice is testable without a config.
- * The decision slot first; the assist model only when the decision slot is not consented to.
+ * Which backend answers: the decision slot as configured, else the assist endpoint `assistBackend('conversations')`
+ * chose — already checked for its CONVERSATIONS consent (the questions carry conversation turns), its budget and its
+ * cooldown (`F-33`). Pure, so the choice is testable without a config.
  */
-export function pickDecisionBackend(slots: { decision?: SlotInput; assist?: SlotInput }): DecisionBackend | null {
+export function pickDecisionBackend(slots: { decision?: SlotInput; assist?: AssistEndpoint | null }): DecisionBackend | null {
   const { decision, assist } = slots;
   if (decision?.baseUrl && decision.model && egressConsented(decision)) {
     return { kind: 'jev', baseUrl: decision.baseUrl, model: decision.model, ...(decision.apiKey ? { apiKey: decision.apiKey } : {}) };
   }
-  // The assist model answers only under its CONVERSATIONS consent: the questions carry conversation turns.
-  if (assist?.baseUrl && assist.model && assistConsented(assist, 'conversations')) {
-    return { kind: 'assist', baseUrl: assist.baseUrl, model: assist.model, ...(assist.apiKey ? { apiKey: assist.apiKey } : {}) };
+  if (assist) {
+    return { kind: 'assist', baseUrl: assist.baseUrl, model: assist.model, which: assist.which, ...(assist.apiKey ? { apiKey: assist.apiKey } : {}) };
   }
   return null;
 }
 
 /** The backend this instance would use now, or `DecisionUnavailableError`. */
 export function decisionBackend(): DecisionBackend {
-  const assist = getDocumentProcessingConfig().assistModel;
   const b = pickDecisionBackend({
     decision: { ...getDecisionModelConfig(), apiKey: getDecisionApiKey() },
-    assist: assist && { ...assist, apiKey: getDocAssistApiKey() },
+    assist: assistBackend('conversations'),
   });
   if (!b) throw new DecisionUnavailableError();
   return b;
@@ -143,10 +145,24 @@ export async function decide(
   transport: DecideTransport = {},
 ): Promise<Decision> {
   refuseQuestionsWithoutNoMatch(questions);
+  // The assist model is charged to its budget and, when its primary cannot answer now, asked again on the fallback.
+  if (backend.kind !== 'assist' || !backend.which) return decideOnce(backend, state, questions, transport);
+  const sent = JSON.stringify(state).length + JSON.stringify(questions).length;
+  return viaAssist('conversations', { ...backend, which: backend.which }, async ep => {
+    const d = await decideOnce({ ...backend, ...ep, kind: 'assist' }, state, questions, transport);
+    return { value: d, ...(d.usage ? { usage: d.usage as Record<string, unknown> } : {}), chars: sent + JSON.stringify(d.answers).length };
+  });
+}
+
+async function decideOnce(
+  backend: DecisionBackend,
+  state: unknown,
+  questions: Record<string, Question>,
+  transport: DecideTransport,
+): Promise<Decision> {
   const slot: EgressSlot = backend.kind === 'jev' ? 'decision' : 'assist';
-  const post = transport.post ?? ((url, init) => ssrfSafeFetch(url,
-    { ...init, signal: AbortSignal.timeout(slotTimeoutMs(slot, getModelSlots())) },
-    { allowPrivate: allowPrivateForSlot(slot) }));
+  const post = transport.post ?? ((url, init) => modelFetch(url,
+    { ...init, signal: AbortSignal.timeout(slotTimeoutMs(slot, getModelSlots())) }, slot));
   const sleep = transport.sleep ?? ((ms: number) => new Promise<void>(r => setTimeout(r, ms)));
 
   const request = backend.kind === 'jev'

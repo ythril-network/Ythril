@@ -1,5 +1,6 @@
 import type { TokenRights } from './rights-shape.js';
 import type { ModelSlot, ModelSlotsConfig } from './model-slots.js';
+import type { AssistModelExtras } from './assist-backend.js';
 export interface TokenRecord {
   id: string;
   name: string;
@@ -681,7 +682,8 @@ export interface DecisionModelConfig {
 }
 
 /** F11-b — external assist-model configuration. OpenAI-compatible endpoint reached via `ssrfSafeFetch`. */
-export interface DocAssistModelConfig {
+/** `budget` and `fallback` (`F-33`) are declared beside their only reader, `config/assist-backend.ts`. */
+export interface DocAssistModelConfig extends AssistModelExtras {
   /** External OpenAI-compatible base URL (e.g. `https://api.example.com`). SSRF-validated on save. */
   baseUrl?: string;
   /** Model tag to request (e.g. `gpt-4o`, a hosted Llama, …). */

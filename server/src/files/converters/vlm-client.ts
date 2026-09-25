@@ -12,6 +12,7 @@
  * acknowledgment (enforced at config-save time).
  */
 import { ssrfSafeFetch } from '../../util/ssrf.js';
+import { modelFetch } from '../../util/model-fetch.js';
 import { boundedJson, boundedErrorText } from '../../util/bounded-read.js';
 import { allowPrivateForSlot, type EgressSlot } from '../../config/model-egress-policy.js';
 import { chatUrlFor, type VlmWire } from './vlm-endpoint.js';
@@ -22,7 +23,12 @@ export interface VlmTranscription {
   text: string;
   /** True when the model hit its output cap (Ollama `done_reason === 'length'`) — signals truncation. */
   truncated: boolean;
+  /** The reply's reported token usage, when an OpenAI-wire endpoint sent one — what the assist budget is charged (`F-33`). */
+  usage?: Record<string, unknown>;
 }
+
+/** A model's HTTP refusal, with the status — what `viaAssist` reads to tell "not now" from "not this" (`F-33`). */
+const httpError = (message: string, status: number) => Object.assign(new Error(message), { status });
 
 const MAX_OUTPUT_TOKENS = 4096; // bound per-page output so a hostile page can't drive unbounded generation
 
@@ -109,7 +115,7 @@ async function postChat(
   }
   if (!res.ok) {
     const body2 = await boundedErrorText(res);
-    throw new Error(`VLM HTTP ${res.status}: ${body2}`);
+    throw httpError(`VLM HTTP ${res.status}: ${body2}`, res.status);
   }
 
   if (endpoint.wire === 'ollama') {
@@ -119,11 +125,11 @@ async function postChat(
     return { text: json.message?.content ?? '', truncated: json.done_reason === 'length' };
   }
   const json = await boundedJson<{
-    choices?: Array<{ message?: { content?: string }; finish_reason?: string }>; error?: unknown;
+    choices?: Array<{ message?: { content?: string }; finish_reason?: string }>; error?: unknown; usage?: Record<string, unknown>;
   }>(res, 'VLM');
   if (json.error) throw new Error(`VLM error: ${typeof json.error === 'string' ? json.error : JSON.stringify(json.error).slice(0, 200)}`);
   const choice = json.choices?.[0];
-  return { text: choice?.message?.content ?? '', truncated: choice?.finish_reason === 'length' };
+  return { text: choice?.message?.content ?? '', truncated: choice?.finish_reason === 'length', ...(json.usage ? { usage: json.usage } : {}) };
 }
 
 /**
@@ -315,7 +321,7 @@ export async function repairMarkdownExternal(
   const url = chatUrlFor('openai', opts.baseUrl);
   let res: Response;
   try {
-    res = await ssrfSafeFetch(url, {
+    res = await modelFetch(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -329,22 +335,19 @@ export async function repairMarkdownExternal(
         messages: [{ role: 'user', content: repairContent(opts.draft, opts.evidence, opts.issues) }],
       }),
       signal: AbortSignal.timeout(budgetFor('assist', opts)),
-    }, {
-      // Lets a self-hosted OpenAI-compatible assist model live on a private cluster address. The guard
-      // itself stays on: DNS-resolve, IP-pin and redirect re-validation all still apply — only the
-      // private-address rejection lifts, and crown-jewel ranges remain blocked.
-      allowPrivate: allowPrivateForSlot('assist'),
-    });
+      // An external endpoint gets the assist slot's private-address policy under the SSRF guard; a local one — the
+      // assist model's fallback on a sidecar, typically (`F-33`) — is reached directly (`util/model-fetch.ts`).
+    }, 'assist');
   } catch (err) {
     throw new Error(`assist model unreachable (${url}): ${err instanceof Error ? err.message : String(err)}`);
   }
   if (!res.ok) {
     const body = await boundedErrorText(res);
-    throw new Error(`assist model HTTP ${res.status}: ${body}`);
+    throw httpError(`assist model HTTP ${res.status}: ${body}`, res.status);
   }
-  const json = await boundedJson<{ choices?: Array<{ message?: { content?: string }; finish_reason?: string }>; error?: unknown }>(
+  const json = await boundedJson<{ choices?: Array<{ message?: { content?: string }; finish_reason?: string }>; error?: unknown; usage?: Record<string, unknown> }>(
     res, 'assist model');
   if (json.error) throw new Error(`assist model error: ${typeof json.error === 'string' ? json.error : JSON.stringify(json.error).slice(0, 200)}`);
   const choice = json.choices?.[0];
-  return { text: choice?.message?.content ?? '', truncated: choice?.finish_reason === 'length' };
+  return { text: choice?.message?.content ?? '', truncated: choice?.finish_reason === 'length', ...(json.usage ? { usage: json.usage } : {}) };
 }
