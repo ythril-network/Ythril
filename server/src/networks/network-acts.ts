@@ -24,19 +24,22 @@ import {
 import { recordOrigin } from '../auth/network-membership.js';
 import { revokePeerCredentialsIfOrphaned } from '../auth/tokens.js';
 import { getConfig, saveConfig, getSecrets } from '../config/loader.js';
-import type { NetworkConfig } from '../config/types.js';
+import type { NetworkConfig, VoteRound } from '../config/types.js';
 import { syncScheduleRefusal } from '../sync/schedule.js';
 import { MIN_PEER_VERSION, peerFloorRefusal } from '../sync/peer-floor.js';
 import { peerSafeFetch } from '../sync/peer-fetch.js';
 import { log } from '../util/log.js';
 import { networkRole } from './network-role.js';
 import { widenPeerTokens } from './network-spaces.js';
+import { concludeRoundIfReady } from '../sync/governance.js';
+import { localToRemote } from '../sync/space-map.js';
+import { makeSignedOwnCast } from '../util/signing.js';
 
 type Caller = Parameters<typeof visibleNetworks>[0] & { id?: string };
 
 /** What an act answers: the HTTP status IS the contract, so both doors carry it. */
 export type NetworkActResult =
-  | { status: 200 | 201; body: Record<string, unknown> }
+  | { status: 200 | 201 | 202; body: Record<string, unknown> }
   | { status: 204; body?: undefined }
   | { status: 400 | 403 | 404 | 409; error: string };
 
@@ -168,17 +171,25 @@ export function updateNetworkAct(caller: Caller, id: string, input: unknown): Ne
 
 export const AddNetworkSpaceBody = z.object({ spaceId: z.string().min(1) });
 
-/** Who may add a space to each network type, and why the others may not yet — the sentence both doors answer. */
-const ADD_SPACE_POSITION: Record<NetworkConfig['type'], string | null> = {
-  pubsub: 'publisher',
-  braintree: 'root',
-  club: null, closed: null, democratic: null,
+/**
+ * Who adds a space to each network type (`F-38.3`, `F-38.4`). pub/sub and braintree have one governing position and
+ * an upstream to announce through, so that position adds directly. The other three share every space both ways, so
+ * the addition is a `space_addition` round the network's own rule decides: on a club the organiser's yes carries it,
+ * on a closed network every member's, on a democratic one a majority with no veto.
+ */
+const ADD_SPACE_POSITION: Record<NetworkConfig['type'], { direct: boolean; position: string | null }> = {
+  pubsub: { direct: true, position: 'publisher' },
+  braintree: { direct: true, position: 'root' },
+  club: { direct: false, position: 'organiser' },
+  closed: { direct: false, position: null },
+  democratic: { direct: false, position: null },
 };
 
 /**
- * Add one of this instance's spaces to a network it governs (`F-38.3`). The members' tokens are widened to it here,
- * and the instances below learn it from the member exchange (`networks/network-spaces.ts`). `audit` carries the
- * space list before and after.
+ * Add one of this instance's spaces to a network (`F-38.3`, `F-38.4`). Answers `200` with the network when the space
+ * is carried now, or `202` with the open round when the network still has to agree. The members' tokens are widened
+ * here when it is carried; the other members add it from the announcement or from the passed round
+ * (`networks/network-spaces.ts`). `audit` carries the space list before and after.
  */
 export function addNetworkSpaceAct(caller: Caller, id: string, input: unknown): NetworkActResult & {
   audit?: { before: Record<string, unknown>; after: Record<string, unknown> };
@@ -192,18 +203,34 @@ export function addNetworkSpaceAct(caller: Caller, id: string, input: unknown): 
   const refusal = networkAddSpaceRefusal(caller, net, spaceId);
   if (refusal) return { status: 403, error: refusal };
 
-  const position = ADD_SPACE_POSITION[net.type];
-  if (!position) {
-    return { status: 409, error: `A space cannot yet be added to a ${net.type} network: every member has to agree to it, `
-      + 'and that vote does not exist yet. Create a second network for the space instead.' };
-  }
-  if (networkRole(net).role !== position) {
-    return { status: 409, error: `Only the ${position} of a ${net.type} network adds a space to it, and this instance is not the ${position}.` };
+  const rule = ADD_SPACE_POSITION[net.type];
+  if (rule.position && networkRole(net).role !== rule.position) {
+    return { status: 409, error: `Only the ${rule.position} of a ${net.type} network adds a space to it, and this instance is not the ${rule.position}.` };
   }
   if (!cfg.spaces.some(s => s.id === spaceId)) return { status: 400, error: `Unknown space: ${spaceId}` };
   if (net.spaces.includes(spaceId)) return { status: 409, error: `The network already carries '${spaceId}'.` };
+  const networkSpaceId = localToRemote(net, spaceId);
+  if (net.pendingRounds.some(r => r.type === 'space_addition' && !r.concluded && r.spaceId === networkSpaceId)) {
+    return { status: 409, error: `A vote to add '${spaceId}' to this network is already open.` };
+  }
 
   const before = { spaces: [...net.spaces] };
+  if (!rule.direct) {
+    const now = new Date().toISOString();
+    const round: VoteRound = {
+      roundId: uuidv4(), type: 'space_addition', spaceId: networkSpaceId,
+      subjectInstanceId: cfg.instanceId, subjectLabel: cfg.instanceLabel, subjectUrl: '',
+      deadline: new Date(Date.now() + net.votingDeadlineHours * 3_600_000).toISOString(), openedAt: now, votes: [],
+    };
+    round.votes.push(makeSignedOwnCast(net.id, round, cfg.instanceId, 'yes'));
+    net.pendingRounds.push(round);
+    // Evaluated now: on a club, and on a network with no other member, the proposer's yes already carries it (Q-49).
+    if (!concludeRoundIfReady(net, round)) {
+      saveConfig(cfg);
+      log.info(`Network ${net.id}: opened space_addition round ${round.roundId} for '${spaceId}'`);
+      return { status: 202, body: { status: 'vote_pending', round } };
+    }
+  }
   net.spaces.push(spaceId);
   if (caller.id) net.spaceOrigins = recordOrigin(net.spaceOrigins ?? {}, spaceId, caller.id);
   widenPeerTokens(cfg, net, [spaceId]);

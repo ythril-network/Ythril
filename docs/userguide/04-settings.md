@@ -485,13 +485,15 @@ card also lists the spaces the network carries, and for a space you mapped under
 network's name for it. A subscriber sees no invite and cannot remove its publisher: on pub/sub only the publisher
 invites and removes; a subscriber that wants out leaves the network.
 
-**Adding a space to a network.** On a network this instance governs — as the publisher of a pub/sub network or the
-root of a tree — the card's Spaces list has an **Add space** picker offering your spaces the network does not carry
-yet. It needs the Networks right at admin on every space already in the network and at write on the one you add
-(or administering all of them). The instances below get the space on their next sync: it is created there, or merged
-into a space they already have under that name — it only adds, and nothing there is overwritten or deleted. Club,
-closed and democratic networks do not offer it yet, because every member would have to agree; create a second
-network for the space instead.
+**Adding a space to a network.** The card's Spaces list has an **Add space** picker offering your spaces the
+network does not carry yet, where your position allows it: the publisher of a pub/sub network, the root of a tree or
+a club's organiser, which all add it at once, or any member of a closed or democratic network, where it opens a vote
+that appears under **Open votes** for every member. It needs the Networks right at admin on every space already in
+the network and at write on the one you add (or administering all of them). Every other member gets the space on its
+next sync, created if it has none. It only adds: nothing there is overwritten or deleted. One exception protects your
+own data: on a club, closed or democratic network, a space of yours with the same name that is not in the network
+stays out of it unless you voted yes, because those networks sync both ways and joining it would send your records to
+every member.
 
 ### Network types
 

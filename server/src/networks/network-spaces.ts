@@ -28,7 +28,7 @@
  * in both directions. So `widenPeerTokens` runs inside both the add and the adoption rather than beside them.
  */
 import { getConfig, saveConfig } from '../config/loader.js';
-import type { Config, NetworkConfig } from '../config/types.js';
+import type { Config, NetworkConfig, VoteRound } from '../config/types.js';
 import { migrateToken } from '../auth/rights-migration.js';
 import { reachesSpace } from '../auth/space-reach.js';
 import { createSpace } from '../spaces/lifecycle.js';
@@ -97,33 +97,91 @@ export function widenPeerTokens(cfg: Config, net: NetworkConfig, localIds: reado
 }
 
 /**
- * Adopt what `fromInstanceId` announced for network `networkId`: create each missing space, add it to the network,
- * and widen the members' tokens to it. Returns the local ids added. Never throws — it runs inside the member
- * exchange, whose other halves (versions, keys, labels) must not be lost to a failure here.
+ * Add `entries` to network `networkId` here: create each local space that does not exist, add it to the network,
+ * and widen the members' tokens to it. Returns the local ids added. The ONE place a network gains a space after
+ * create, whichever mechanism decided it — an upstream's announcement or a passed `space_addition` round — so the
+ * token half cannot be left out of one of them.
+ *
+ * Never throws: both callers run inside a sync exchange or a vote, whose other work must not be lost to this.
  */
-export async function adoptAnnouncedSpaces(networkId: string, fromInstanceId: string, announced: unknown): Promise<string[]> {
+export async function addSpacesToNetwork(
+  networkId: string,
+  entries: readonly { networkId: string; localId: string }[],
+  why: string,
+): Promise<string[]> {
   try {
-    const net = getConfig().networks.find(n => n.id === networkId);
-    if (!net) return [];
-    const adopt = spacesToAdopt(net, fromInstanceId, announced);
-    if (!adopt.length) return [];
-    for (const { localId } of adopt) {
+    for (const { localId } of entries) {
       if (getConfig().spaces.some(s => s.id === localId)) continue;
       await createSpace({ id: localId, label: localId.charAt(0).toUpperCase() + localId.slice(1) });
     }
     // Re-read after the awaits: `createSpace` saved the config, and a stale copy would write that away.
     const cfg = getConfig();
-    const fresh = cfg.networks.find(n => n.id === networkId);
-    if (!fresh) return [];
-    const added = spacesToAdopt(fresh, fromInstanceId, announced).map(a => a.localId);
+    const net = cfg.networks.find(n => n.id === networkId);
+    if (!net) return [];
+    const added = entries.map(e => e.localId).filter((id, i, all) => !net.spaces.includes(id) && all.indexOf(id) === i);
     if (!added.length) return [];
-    fresh.spaces.push(...added);
-    widenPeerTokens(cfg, fresh, added);
+    for (const e of entries) if (e.localId !== e.networkId && added.includes(e.localId)) (net.spaceMap ??= {})[e.networkId] = e.localId;
+    net.spaces.push(...added);
+    widenPeerTokens(cfg, net, added);
     saveConfig(cfg);
-    log.info(`Network ${networkId}: adopted space(s) ${added.join(', ')} announced by upstream ${fromInstanceId}`);
+    log.info(`Network ${networkId}: added space(s) ${added.join(', ')} (${why})`);
     return added;
   } catch (err) {
-    log.warn(`Network ${networkId}: could not adopt the spaces ${fromInstanceId} announced: ${err}`);
+    log.warn(`Network ${networkId}: could not add space(s) (${why}): ${err}`);
     return [];
   }
+}
+
+/**
+ * Adopt what `fromInstanceId` announced for network `networkId` — only from the upstream, only what is missing.
+ * Returns the local ids added.
+ */
+export async function adoptAnnouncedSpaces(networkId: string, fromInstanceId: string, announced: unknown): Promise<string[]> {
+  const net = getConfig().networks.find(n => n.id === networkId);
+  if (!net) return [];
+  const adopt = spacesToAdopt(net, fromInstanceId, announced);
+  return adopt.length ? addSpacesToNetwork(networkId, adopt, `announced by upstream ${fromInstanceId}`) : [];
+}
+
+/**
+ * Where a passed `space_addition` round puts the space on THIS instance, or why it does not (`F-38.4`).
+ *
+ * The proposer carries its own space. Anyone else carries the network's id for it — creating the space when it has
+ * none. **A local space that already has that id and is not in the network is left alone unless this instance voted
+ * yes.** Club, closed and democratic networks sync both ways, so joining a same-named local space to the network
+ * would start sending its records to every member; a member's own yes on the round is consent to that, and nothing
+ * else is — on a club no member votes, and on a democratic network a majority can pass a round this member never
+ * saw.
+ */
+export function spaceAdditionTarget(
+  net: NetworkConfig,
+  round: { spaceId?: string; subjectInstanceId: string; votes: { instanceId: string; vote: string }[] },
+  selfId: string,
+  localSpaceIds: readonly string[],
+): { localId: string } | { skip: string } | null {
+  if (!round.spaceId || !SPACE_ID.test(round.spaceId)) return null;
+  const localId = remoteToLocal(net, round.spaceId);
+  if (net.spaces.includes(localId)) return null;
+  if (round.subjectInstanceId === selfId) return { localId };
+  const exists = localSpaceIds.includes(localId);
+  const votedYes = round.votes.some(v => v.instanceId === selfId && v.vote === 'yes');
+  if (exists && !votedYes) {
+    return { skip: `a local space '${localId}' already exists and is not in the network; it is not shared without this instance voting yes` };
+  }
+  return { localId };
+}
+
+/** Apply a concluded `space_addition` round here, if it passed. Deferred a tick: the caller's config write runs first. */
+export function applySpaceAdditionRound(net: NetworkConfig, round: VoteRound, where: string): boolean {
+  if (!round.concluded || !round.passed || round.type !== 'space_addition') return false;
+  const cfg = getConfig();
+  const target = spaceAdditionTarget(net, round, cfg.instanceId, cfg.spaces.map(s => s.id));
+  if (!target) return false;
+  if ('skip' in target) {
+    log.warn(`space_addition round ${round.roundId} on network ${net.id} passed (${where}) but was not applied: ${target.skip}`);
+    return false;
+  }
+  const entry = { networkId: round.spaceId!, localId: target.localId };
+  setImmediate(() => { void addSpacesToNetwork(net.id, [entry], `space_addition round ${round.roundId}, ${where}`); });
+  return true;
 }

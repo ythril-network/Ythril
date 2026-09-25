@@ -96,11 +96,13 @@ export const network_updateTool: ToolHandler = {
 
 export const network_add_spaceTool: ToolHandler = {
   name: 'network_add_space',
-  description: 'Add one of your spaces to a network this instance governs. Same parameters and refusals as '
+  description: 'Add one of your spaces to a network. Same parameters and refusals as '
     + '`POST /api/networks/:id/spaces`. The members\' tokens reach it at once, and the instances below learn it on '
     + 'their next sync — a subscriber creates the space if it has none, and merges into it if it has.\n\n'
-    + 'WHO GOVERNS: the publisher of a pub/sub network, the root of a braintree. A club, closed or democratic network '
-    + 'refuses it, because every member would have to agree and that vote does not exist yet.\n\n'
+    + 'WHO DECIDES: the publisher of a pub/sub network and the root of a braintree add it at once; so does a club\'s '
+    + 'organiser, whose own yes carries the vote. On a closed or democratic network it opens a vote and answers '
+    + '`status: "vote_pending"` with the round; the space is added when the vote passes. A member that already has a '
+    + 'space of that name keeps it out of the network unless it voted yes.\n\n'
     + 'WHO MAY: sharing the space (`networks: write` on it, or administering it) AND `networks: admin` on, or '
     + 'administering, every space the network already carries.',
   mutating: true,

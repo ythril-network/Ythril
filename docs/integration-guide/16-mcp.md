@@ -350,7 +350,7 @@ row survives its own tool being built, so the list cannot keep advertising a gap
 | `network_create` | Create a network carrying one or more of your spaces — `networks: write`, or administering, on every one. Same parameters and refusals as `POST /api/networks` |
 | `network_update` | Change a network's label, schedule or signed-vote mode — `networks: admin` on every space it carries. Same as `PATCH /api/networks/:id` |
 | `network_leave` | Leave a network: peers are told, credentials of peers you no longer share a network with are revoked. Same rule and answer as `DELETE /api/networks/:id` |
-| `network_add_space` | Add one of your spaces to a network this instance governs (a pub/sub publisher, a braintree root); the instances below adopt it on their next sync, additively. Same as `POST /api/networks/:id/spaces` |
+| `network_add_space` | Add one of your spaces to a network: at once from a pub/sub publisher, braintree root or club organiser; as a vote on a closed or democratic network. Members add it on their next sync, additively. Same as `POST /api/networks/:id/spaces` |
 | `network_sync` | Trigger immediate sync (all networks, or one peer via `peerId`) (admin only). The REST doors are `POST /api/networks/:id/sync` and `POST /api/networks/peers/:peerId/sync` |
 
 > **Instance-admin tools.** `network_sync`, `save_space` and `space_reindex` require
