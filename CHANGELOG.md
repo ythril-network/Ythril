@@ -247,6 +247,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A deletion or wipe vote acts only on a round that passed, and only on a space its network carries** (security,
+  `S-9`). A `space_deletion` or `space_wipe` round was applied whenever it had concluded with no veto — so one that
+  expired without enough yes deleted too — to the space id exactly as the round named it, never checked against the
+  spaces the network shares, and gossip re-applied old rounds on every change. Any member of any network could delete
+  or empty any space on another member, including one no network carries. Now: passed rounds only, the space mapped
+  to this instance's id and carried by that network, applied once.
 - **An invite cannot be applied under another peer's instance id** (security, `S-6`). Since 5.1.2 the token an invite
   handshake mints reaches every network the two instances already share, and the joining side's instance id was taken
   on its word — so anyone handed an invite bundle for one network could apply as a peer the inviter already syncs with

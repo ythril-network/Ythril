@@ -740,6 +740,7 @@ async function propagateVotesWithPeer(
           ...(peerRound as VoteRound),
           votes: [],        // votes are merged below
           concluded: false,
+          appliedHere: false,  // local state, never a peer's (S-9)
         };
         freshNet.pendingRounds.push(newRound);
         local = newRound;

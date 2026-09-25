@@ -154,6 +154,11 @@ export interface VoteRound {
    * instance it changes anything for: everyone else stores a passed meta_change as the network's layer anyway.
    */
   proposesLayer?: boolean;
+  /**
+   * LOCAL: this instance has already applied this concluded space round (`S-9`), so gossip handing it the same round
+   * again does nothing. Never taken from a peer: adopting a round and serving one both strip it.
+   */
+  appliedHere?: boolean;
   requiredVoters?: string[];     // braintree only: instanceIds that must ALL vote yes
 }
 
