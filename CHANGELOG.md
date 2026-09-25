@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **The assist model gets a token budget and a fallback, and can be a Claude model** (`F-33`, `F-33.1`). A budget
+  caps what the assist endpoint spends — so many tokens in any rolling so many hours — and a fallback answers when it
+  cannot: unreachable, rate-limited, over budget, or declining a request. A local fallback (a model on this instance)
+  sends nothing off it and needs no consent; a hosted one is consented per use like the main endpoint. The assist
+  endpoint and its fallback can each speak the Claude API with an API key from the Claude Console, besides any
+  OpenAI-compatible server. The Models card shows which endpoint is answering documents and conversations now, what
+  the budget has spent, and when the main one is paused after a failure; Test and Verify check the fallback too.
+
 ## [5.2.0] — 2026-09-25
 
 **Networks become a whole feature on both doors, a space's schema travels with its records, and a conversation can
@@ -29,13 +39,6 @@ timeline.
 
 ### Added
 
-- **The assist model gets a token budget and a fallback, and can be a Claude model** (`F-33`, `F-33.1`). A budget
-  caps what the assist endpoint spends — so many tokens in any rolling so many hours — and a fallback answers when it
-  cannot: unreachable, rate-limited, over budget, or declining a request. A local fallback (a model on this instance)
-  sends nothing off it and needs no consent; a hosted one is consented per use like the main endpoint. The assist
-  endpoint and its fallback can each speak the Claude API with an API key from the Claude Console, besides any
-  OpenAI-compatible server. The Models card shows which endpoint is answering documents and conversations now, what
-  the budget has spent, and when the main one is paused after a failure; Test and Verify check the fallback too.
 - **A schema clash between two networks can be settled by proposing a definition to one of them** (`F-39.5`,
   closing `F-39`). `targetNetwork` on `PATCH /api/spaces/:id` and MCP `schema_update` proposes the meta to that
   network alone, as its definition: a vote there, landing in its layer on every member once passed, with this
