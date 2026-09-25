@@ -237,6 +237,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Two networks joined from the same peer at once both keep syncing** (`Q-53`). Each side keeps one token per peer,
+  and each handshake's token was scoped to the networks the pair shared at that moment, so two handshakes whose
+  steps interleaved left the kept token without one network, which then answered 403 until the next handshake. Once a
+  join is registered, every token either side keeps for the other now reaches that network's spaces too.
+
 - **A network card counts one member in the singular** (`Q-54`). The role badge read "1 peers", "1 subscribers";
   one member now takes its own string in English, German and Polish.
 

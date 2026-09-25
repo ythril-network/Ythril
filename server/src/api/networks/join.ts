@@ -17,6 +17,7 @@ import { recordOrigin } from '../../auth/network-membership.js';
 import { getConfig, saveConfig, getSecrets, saveSecrets } from '../../config/loader.js';
 import { createToken, revokeToken } from '../../auth/tokens.js';
 import { peerTokenSpaces } from '../../auth/peer-token-scope.js';
+import { widenPeerTokensOf } from '../../networks/network-spaces.js';
 import { createSpace } from '../../spaces/lifecycle.js';
 import { concludeRoundIfReady } from '../../sync/governance.js';
 import { buildBraintreeAncestors } from '../../util/braintree.js';
@@ -291,6 +292,9 @@ joinRouter.post('/join-remote', globalRateLimit, requireAuth, denyReadOnly, asyn
       });
     }
 
+    // Q-53, the joiner's half: every token kept for the inviter reaches this network's spaces, so a second handshake
+    // with the same inviter racing this one cannot leave the token the inviter keeps without them.
+    widenPeerTokensOf(freshCfg, [applyData.instanceId], allNetworkSpaces);
     saveConfig(freshCfg);
     log.info(`join-remote: joined '${applyData.networkLabel}' (${networkId}) via RSA handshake`);
 
