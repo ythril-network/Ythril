@@ -145,13 +145,13 @@ PATCH /api/networks/:id
 A space an upstream announced and this instance did not add on its own. `GET /api/networks/:id` lists them as
 `pendingSpaces`, each `{ networkId, localId, why, from, at }`.
 
-**Why a space waits.** The token that joined the network here decides what the network may add later, by the rule
+**Why a space waits.** The token that joined or created the network here decides what the network may add later, by the rule
 the join itself ran: an existing local space needs `networks: write` on it or administering it, a new one needs
 `createSpaces` (and a `write` floor on `networks`, unless the token is a space administrator). A space waits when:
 
 - the joining token could not have joined it;
 - a local space already has its id: joining it would start syncing a space that only shares a name;
-- the network has no recorded joining token (it was joined before 5.4), or that token no longer exists.
+- the network has no recorded joining token (it was joined or created before 5.4), or that token no longer exists.
 
 ```http
 POST /api/networks/:id/pending-spaces

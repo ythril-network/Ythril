@@ -25,7 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   records its token, and a later announced space is added only if that token could have joined it. A same-named
   local space is never joined this way. Anything else waits on the network card as a pending space with its
   reason, and the operator accepts or dismisses it: `POST /api/networks/:id/pending-spaces`, MCP
-  `network_pending_space`. **Networks joined before this version have no recorded joining token, so every space
+  `network_pending_space`. **Networks joined or created before this version have no recorded joining token, so every space
   they announce from now on waits for an accept.**
 - **A config reload never drops a space silently** (`S-10`). A space the running instance had and a reloaded
   `config.json` no longer listed simply left the configuration, with its data orphaned and nothing logged beyond

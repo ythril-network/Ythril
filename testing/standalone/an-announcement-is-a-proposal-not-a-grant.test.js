@@ -93,7 +93,8 @@ describe('the adoption path goes through the decision', () => {
     assert.match(body, /networkJoinRefusal\(caller,/, 'an accept must be priced like the join it completes');
   });
 
-  it('the join records who established the membership', () => {
+  it('the join and the create record who established the membership', () => {
+    assert.match(stripComments(readFileSync('server/src/networks/network-acts.ts', 'utf8')), /joinedBy: caller\.id/, 'createNetworkAct must store the creating token id');
     const join = stripComments(readFileSync('server/src/networks/join-remote-act.ts', 'utf8'));
     assert.match(join, /joinedBy/, 'joinRemoteAct must store the joining token id on the network');
   });

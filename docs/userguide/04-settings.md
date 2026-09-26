@@ -554,7 +554,7 @@ parent adds a space, your instance adds it here only if the token you joined wit
 write access on Networks for a space you have, or the right to create spaces for a new one. Otherwise, and always
 when you already have a space of that name, it appears on the network card under **Announced, waiting for you**,
 with the reason. Press **Accept** to add it, optionally typing a local id to carry it under, or **Dismiss** to
-forget it. Networks joined before 5.4 have no record of the joining token, so everything they announce waits here.
+forget it. Networks joined or created before 5.4 have no record of the joining token, so everything they announce waits here.
 
 ### Sync schedule
 

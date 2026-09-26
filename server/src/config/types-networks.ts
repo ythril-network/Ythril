@@ -197,7 +197,7 @@ export interface NetworkConfig {
    */
   spaceOrigins?: Record<string, string>;
   /**
-   * The id of the token that joined this network here (S-9). It is the authority for what the network may add later:
+   * The id of the token that joined or created this network here (S-9). It is the authority for what the network may add later:
    * an upstream's announcement of a new space is adopted only if this token could have joined it. Local, never sent
    * to a peer. Absent on a network joined before it was recorded, which then adopts nothing without the operator.
    */

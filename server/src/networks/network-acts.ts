@@ -134,6 +134,9 @@ export function createNetworkAct(caller: Caller, input: unknown): NetworkActResu
     // Who established each membership, so the leave rule can tell a token's own from another's. Recorded for an
     // instance admin too: the record is about the membership, not about whether its maker needed permission.
     ...(caller.id ? { spaceOrigins: spaces.reduce<Record<string, string>>((o, s) => recordOrigin(o, s, caller.id!), {}) } : {}),
+    // And who established the network here (S-9): the authority for what a later announcement may add, exactly as
+    // for a network this instance joined.
+    ...(caller.id ? { joinedBy: caller.id } : {}),
   };
   cfg.networks.push(network);
   saveConfig(cfg);
