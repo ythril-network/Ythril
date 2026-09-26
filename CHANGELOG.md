@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.4.0] — 2026-09-26
+
+**A network now asks before it adds a space, and a pub/sub can be joined by pasting its key.** A space a publisher,
+a tree parent or a passed vote adds is created here only if the token that joined the network could have joined
+it; everything else waits on the network card for you to accept or dismiss. A config reload no longer drops a
+space the file forgot, and a published pub/sub key is enough to join, with no step on the publisher.
+
+| | |
+|---|---|
+| added | **Join network** takes a publisher URL and its published key; nobody on the publisher has to admit you |
+| security | spaces a network proposes wait unless the joining token could have joined them; a same-named local space always waits; a reload keeps a space it no longer lists unless `removeSpaces` names it |
+| what changes on upgrade | networks joined or created before 5.4.0 have no recorded joining token, so every space they announce from now on waits for an accept on the network card |
+| what to do | upgrade; then check each network card for **Announced, waiting for you** after its next sync. If you remove spaces by editing `config.json`, list them in `removeSpaces` |
+
+**Documents that changed**, for anyone who keeps a copy: `docs/integration-guide/08-networks-api.md`, `docs/integration-guide/09-sync-api.md`, `docs/integration-guide/12-admin-api.md`, `docs/integration-guide/13-audit-log-api.md`, `docs/integration-guide/16-mcp.md`, `docs/network-types.md`, `docs/sync-protocol.md`, `docs/userguide/04-settings.md`.
+
 ### Added
 
 - **Join a pub/sub network by pasting its published key** (`F-41`). The docs always said a pub/sub key is
