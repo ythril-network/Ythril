@@ -23,7 +23,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
 import { INSTANCES, post, get, del, delWithBody } from '../sync/helpers.js';
-import { legacyRights } from '../_shared/legacy-token-rights.mjs';
+import { legacyRights } from '../_shared/legacy-token-rights.mjs';
+import { spaceAdminRights } from '../_shared/space-admin-rights.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, '..', 'sync', 'configs');
@@ -100,7 +101,7 @@ describe('H3 — space-restricted admin cannot mint a broader token', () => {
 
   before(async () => {
     // A space-restricted admin token (admin over 'general' only).
-    const t = await post(INSTANCES.a, adminToken, '/api/tokens', { name: `esc-restricted-admin-${RUN}`, rights: legacyRights({ admin: true, spaces: ['general'] })});
+    const t = await post(INSTANCES.a, adminToken, '/api/tokens', { name: `esc-restricted-admin-${RUN}`, rights: spaceAdminRights(['general'])});
     assert.equal(t.status, 201, JSON.stringify(t.body));
     restrictedAdmin = t.body.plaintext; tokenIds.push(t.body.token.id);
   });

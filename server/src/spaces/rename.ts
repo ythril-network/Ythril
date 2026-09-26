@@ -241,6 +241,12 @@ export function applySpaceRenameToConfig(cfg: Config, space: SpaceConfig, oldId:
       perSpace[newId] = perSpace[oldId]!;
       delete perSpace[oldId];
     }
+    // The space-admin list names spaces too (Q-58): left on the old id, the renamed space silently lost its
+    // named administrators. Rewritten in place, never duplicated when the new id is already listed.
+    const sa = tok.rights?.spaceAdmin;
+    if (sa?.spaces.includes(oldId)) {
+      sa.spaces = sa.spaces.includes(newId) ? sa.spaces.filter(s => s !== oldId) : sa.spaces.map(s => (s === oldId ? newId : s));
+    }
   }
 
   // Update proxy space references

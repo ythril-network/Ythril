@@ -124,3 +124,28 @@ describe('the legacy half went with the field', () => {
     assert.match(src, /perSpace\[newId\] = perSpace\[oldId\]/, 'the matrix re-key is the whole of it now');
   });
 });
+
+describe('every place a token names the space follows the rename (Q-58)', () => {
+  // Found renaming `flows` to `y-flows`: `perSpace` moved, `spaceAdmin.spaces` stayed on the old id, and the
+  // renamed space silently lost its named administrators. The rule is asserted over the whole rights object,
+  // not per field, so a space-keyed field added later is covered without anybody remembering this file.
+  const everywhere = () => ({
+    instanceAdmin: false, createSpaces: false, floor: null,
+    perSpace: { old: ALL('read'), other: ALL('write') },
+    spaceAdmin: { floor: false, spaces: ['old', 'other'] },
+  });
+
+  it('a space administered by name is still administered under its new id', () => {
+    const cfg = cfgWith([{ id: 't1', rights: everywhere() }]);
+    applySpaceRenameToConfig(cfg, space(cfg), 'old', 'new');
+    assert.deepEqual(cfg.tokens[0].rights.spaceAdmin, { floor: false, spaces: ['new', 'other'] });
+  });
+
+  it('no field of the rights still names the old id, and the other space is untouched', () => {
+    const cfg = cfgWith([{ id: 't1', rights: everywhere() }]);
+    applySpaceRenameToConfig(cfg, space(cfg), 'old', 'new');
+    const json = JSON.stringify(cfg.tokens[0].rights);
+    assert.doesNotMatch(json, /"old"/, `a field still names the old space id: ${json}`);
+    assert.equal(json.match(/"other"/g)?.length, 2, 'the space that was not renamed must keep both its mentions');
+  });
+});

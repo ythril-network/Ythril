@@ -18,7 +18,8 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { INSTANCES, post, get, del, delWithBody, patch, put, readCollection } from '../sync/helpers.js';
-import { legacyRights } from '../_shared/legacy-token-rights.mjs';
+import { legacyRights } from '../_shared/legacy-token-rights.mjs';
+import { spaceAdminRights } from '../_shared/space-admin-rights.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, '..', 'sync', 'configs');
@@ -444,7 +445,7 @@ describe('Space management', () => {
     // Create an admin token scoped to that space
     const tokenRes = await post(INSTANCES.a, tokenA, '/api/tokens', {
       name: `scoped-own-${RUN_ID}`,
-      rights: legacyRights({ admin: true, spaces: [targetId] })
+      rights: spaceAdminRights([targetId])
     });
     assert.equal(tokenRes.status, 201, `Create scoped token: ${JSON.stringify(tokenRes.body)}`);
     const scopedToken = tokenRes.body.plaintext;
@@ -477,7 +478,7 @@ describe('Space management', () => {
     // Create an admin token scoped to allowedId only
     const tokenRes = await post(INSTANCES.a, tokenA, '/api/tokens', {
       name: `scoped-restricted-${RUN_ID}`,
-      rights: legacyRights({ admin: true, spaces: [allowedId] })
+      rights: spaceAdminRights([allowedId])
     });
     assert.equal(tokenRes.status, 201, `Create scoped token: ${JSON.stringify(tokenRes.body)}`);
     const scopedToken = tokenRes.body.plaintext;
@@ -507,7 +508,7 @@ describe('Space management', () => {
 
     const tokenRes = await post(INSTANCES.a, tokenA, '/api/tokens', {
       name: `scoped-ts-${RUN_ID}`,
-      rights: legacyRights({ admin: true, spaces: [allowedId] })
+      rights: spaceAdminRights([allowedId])
     });
     assert.equal(tokenRes.status, 201);
     const scopedToken = tokenRes.body.plaintext;
