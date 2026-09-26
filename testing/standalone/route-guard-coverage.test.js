@@ -172,6 +172,8 @@ const EXEMPT_ROUTE = new Map([
   ['POST /apply', 'the joining leg of the invite handshake. Authenticated by the invite KEY in the body — '
     + 'the caller has no token on this instance yet, which is what the handshake is for.'],
   ['POST /finalize', 'the completing leg of the same handshake, authenticated by the same key.'],
+  ['POST /redeem', 'a pub/sub\'s published invite key opening a handshake (F-41). The key IS the credential — the '
+    + 'caller has no token here, which is the point — and the route answers only for a network this instance publishes.'],
   ['POST /mcp-oauth/consent', 'the OAuth consent form POST. It carries no bearer header by design — the '
     + 'token arrives in the form body, and `handleConsent` validates it itself with `findMatchingToken` and '
     + 'answers 401 when it does not match. Middleware could not read it from there.'],

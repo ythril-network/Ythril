@@ -48,6 +48,7 @@ import { globalRateLimit, ipFloodBackstop } from './rate-limit/middleware.js';
 import { configExists, reloadConfig, getConfig, loadSecrets, saveConfig, startConfigWatcher } from './config/loader.js';
 import { reloadSpaceDiff } from './config/reload-space-diff.js';
 import { logAuditEntry } from './audit/audit.js';
+import { CONFIG_RELOAD_OPERATIONS } from './audit/middleware.js';
 import { requireAdminMfa, requireAdminMfaScoped } from './auth/middleware.js';
 import { clearTokenCache } from './auth/tokens.js';
 import { clearOidcCache } from './auth/oidc.js';
@@ -546,9 +547,9 @@ export function createApp() {
         tokenId: actor.tokenId ?? null, tokenLabel: actor.tokenLabel ?? null, ip: actor.ip,
         method: actor.method, path: actor.path, spaceId, operation, status, durationMs: 0,
       });
-      for (const id of diff.added) audit('space.reload_added', id, 200);
-      for (const id of diff.removed) audit('space.reload_removed', id, 200);
-      for (const s of diff.kept) audit('space.reload_kept', s.id, 409);
+      for (const id of diff.added) audit(CONFIG_RELOAD_OPERATIONS.added, id, 200);
+      for (const id of diff.removed) audit(CONFIG_RELOAD_OPERATIONS.removed, id, 200);
+      for (const s of diff.kept) audit(CONFIG_RELOAD_OPERATIONS.kept, s.id, 409);
     }
     loadSecrets(); // Also reload secrets.json (peer tokens injected by tests/scripts)
     // Prefix-less (legacy) tokens are NOT stripped — findMatchingToken()

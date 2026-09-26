@@ -66,6 +66,6 @@ describe('the reload goes through the diff and audits it', () => {
     assert.match(body, /reloadSpaceDiff\(/);
   });
   it('and writes an audit entry per space added, removed or kept', () => {
-    for (const op of ['space.reload_added', 'space.reload_removed', 'space.reload_kept']) assert.ok(body.includes(op) || app.includes(`'${op}'`), `${op} is never audited`);
+    for (const k of ['added', 'removed', 'kept']) assert.match(body, new RegExp(`CONFIG_RELOAD_OPERATIONS\\.${k}\\b`), `the reload never audits what it ${k}`);
   });
 });

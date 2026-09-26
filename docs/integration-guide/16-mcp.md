@@ -139,7 +139,7 @@ are the shapes this door replaces, and they are documented on their own pages.
 
 ### Read-Only Tokens
 
-When connecting with a `readOnly` token, mutating tools (`save_fact`, `update_fact`, `delete_fact`, `save_entity`, `update_entity`, `delete_entity`, `graph_merge`, `save_edge`, `update_edge`, `delete_edge`, `save_link`, `delete_link`, `save_chrono`, `update_chrono`, `delete_chrono`, `save_bulk`, `ingest`, `write_file`, `delete_file`, `create_dir`, `move_file`, `retry_embed_file`, `retry_embed_record`, `retry_embed_media`, `update_file_meta`, `network_sync`, `network_create`, `network_update`, `network_leave`, `network_add_space`, `network_vote`, `network_invite`, `network_fork`, `network_join_remote`, `network_member_add`, `network_member_remove`, `network_member_admit`, `network_member_signing_key`, `network_reparent_self`, `network_member_adopt`, `network_member_revert_parent`, `space_set_network_precedence`, `update_space`, `schema_update`, `save_space`, `space_reindex`, `space_reembed`, `delete_space_data`) are **hidden** from `tools/list` and rejected with an error if called directly. Read-only tools (`help`, `recall`, `similar`, `query`, `space_stats`, `space_meta`, `list_spaces`, `read_file`, `list_dir`, `traverse`, `list_embed_jobs`, `delete_entity_preview`, `ingest_status`, `network_peers`, `network_get`, `network_votes`, `network_sync_history`, `space_schema_layers`) work normally. `list_tokens` is read-only but **admin-gated** — see the admin-only note below. `network_peers` and `network_get` show only the networks the token may see.
+When connecting with a `readOnly` token, mutating tools (`save_fact`, `update_fact`, `delete_fact`, `save_entity`, `update_entity`, `delete_entity`, `graph_merge`, `save_edge`, `update_edge`, `delete_edge`, `save_link`, `delete_link`, `save_chrono`, `update_chrono`, `delete_chrono`, `save_bulk`, `ingest`, `write_file`, `delete_file`, `create_dir`, `move_file`, `retry_embed_file`, `retry_embed_record`, `retry_embed_media`, `update_file_meta`, `network_sync`, `network_create`, `network_update`, `network_leave`, `network_add_space`, `network_pending_space`, `network_vote`, `network_invite`, `network_fork`, `network_join_remote`, `network_join_by_key`, `network_member_add`, `network_member_remove`, `network_member_admit`, `network_member_signing_key`, `network_reparent_self`, `network_member_adopt`, `network_member_revert_parent`, `space_set_network_precedence`, `update_space`, `schema_update`, `save_space`, `space_reindex`, `space_reembed`, `delete_space_data`) are **hidden** from `tools/list` and rejected with an error if called directly. Read-only tools (`help`, `recall`, `similar`, `query`, `space_stats`, `space_meta`, `list_spaces`, `read_file`, `list_dir`, `traverse`, `list_embed_jobs`, `delete_entity_preview`, `ingest_status`, `network_peers`, `network_get`, `network_votes`, `network_sync_history`, `space_schema_layers`) work normally. `list_tokens` is read-only but **admin-gated** — see the admin-only note below. `network_peers` and `network_get` show only the networks the token may see.
 
 ### Connecting
 
@@ -351,12 +351,14 @@ row survives its own tool being built, so the list cannot keep advertising a gap
 | `network_update` | Change a network's label, schedule or signed-vote mode — `networks: admin` on every space it carries. Same as `PATCH /api/networks/:id` |
 | `network_leave` | Leave a network: peers are told, credentials of peers you no longer share a network with are revoked. Same rule and answer as `DELETE /api/networks/:id` |
 | `network_add_space` | Add one of your spaces to a network: at once from a pub/sub publisher, braintree root or club organiser; as a vote on a closed or democratic network. Members add it on their next sync, additively. Same as `POST /api/networks/:id/spaces` |
+| `network_pending_space` | Accept or dismiss a space an upstream announced and this instance held as pending; accepting runs the join rule over your token. Same as `POST /api/networks/:id/pending-spaces` |
 | `network_votes` | The rounds still open on a network, with deadlines and casts. Instance-admin. Same as `GET /api/networks/:id/votes` |
 | `network_vote` | Cast `yes` or `veto` on an open round, signed; a cast that concludes the round takes effect at once. Instance-admin. Same as `POST /api/networks/:id/votes/:roundId` |
 | `network_sync_history` | A network's recent sync cycles, newest first. Instance-admin. Same as `GET /api/networks/:id/sync-history` |
 | `network_invite` | Mint a fresh invite key — reusable on pub/sub, single-use elsewhere; revokes the previous one. Instance admin or administering every space. Same as `POST /api/networks/:id/invite` |
 | `network_fork` | Found a new, empty network from an existing one. Instance-admin. Same as `POST /api/networks/:id/fork` |
 | `network_join_remote` | Join a network another instance invited this one into: runs the invite handshake and registers the network here. `networks: write` on every space it maps to. Same as `POST /api/networks/join-remote` |
+| `network_join_by_key` | Join a pub/sub network with its publisher's URL and published invite key, no admission: redeems the key at the publisher and runs the same handshake. `networks: write` on every space it maps to. Same as `POST /api/networks/join-by-key` |
 | `network_member_add` | Add a peer as a member by hand: the member, or `vote_pending` where the type votes. Instance-admin. Same as `POST /api/networks/:id/members` |
 | `network_member_remove` | Remove a member: at once, or `vote_pending` where the type votes. Instance-admin. Same as `DELETE /api/networks/:id/members/:instanceId` |
 | `network_member_admit` | Admit an instance presenting the invite key — the inviter's half of a join; `vote_pending` where the type votes. Instance-admin. Same as `POST /api/networks/:id/join` |
@@ -701,12 +703,14 @@ only shape and the two are identical by construction.
 | | `network_update` | `PATCH /api/networks/:id` | admin `networks` on every space |
 | | `network_leave` | `DELETE /api/networks/:id` | write `networks` (own membership) · admin (anyone's) |
 | | `network_add_space` | `POST /api/networks/:id/spaces` | admin `networks` on every space it carries · write on the added one |
+| | `network_pending_space` | `POST /api/networks/:id/pending-spaces` | accept: `networks: write` on an existing space, `createSpaces` for a new one · dismiss: `networks: admin` on every space the network carries |
 | | `network_votes` | `GET /api/networks/:id/votes` | instance admin |
 | | `network_vote` | `POST /api/networks/:id/votes/:roundId` | instance admin |
 | | `network_sync_history` | `GET /api/networks/:id/sync-history` | instance admin |
 | | `network_invite` | `POST /api/networks/:id/invite` | instance admin · administers every space |
 | | `network_fork` | `POST /api/networks/:id/fork` | instance admin |
 | | `network_join_remote` | `POST /api/networks/join-remote` | `networks: write` on every space it maps to · `createSpaces` for a space it creates |
+| | `network_join_by_key` | `POST /api/networks/join-by-key` | `networks: write` on every space it maps to · `createSpaces` for a space it creates |
 | | `network_member_add` | `POST /api/networks/:id/members` | instance admin |
 | | `network_member_remove` | `DELETE /api/networks/:id/members/:instanceId` | instance admin |
 | | `network_member_admit` | `POST /api/networks/:id/join` | instance admin |

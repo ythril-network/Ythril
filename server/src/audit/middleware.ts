@@ -463,6 +463,17 @@ export function auditMiddleware(req: Request, res: Response, next: NextFunction)
  */
 export const AUTH_FAILED_OPERATION = 'auth.failed';
 
+/**
+ * What a config reload does to each space (S-10), written by `applyConfigFromDisk` for the watcher and for
+ * `POST /api/admin/reload-config` alike — outside the route rules, like `auth.failed`, so named here for the same
+ * reason: the documentation gate derives the operations it checks from this module.
+ */
+export const CONFIG_RELOAD_OPERATIONS = {
+  added: 'space.reload_added',
+  removed: 'space.reload_removed',
+  kept: 'space.reload_kept',
+} as const;
+
 /** Log a failed auth attempt — called explicitly from auth middleware when needed. */
 export function logAuthFailure(req: Request): void {
   const fullPath = (req.originalUrl || req.url).split('?')[0];

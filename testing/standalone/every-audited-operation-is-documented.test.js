@@ -59,7 +59,7 @@ import { readFileSync } from 'node:fs';
 const GUIDE = 'docs/integration-guide/13-audit-log-api.md';
 const HEADING = '### Tracked operations';
 
-let ROUTE_RULES, AUTH_FAILED_OPERATION, MCP_TOOL_OPERATIONS;
+let ROUTE_RULES, AUTH_FAILED_OPERATION, CONFIG_RELOAD_OPERATIONS, MCP_TOOL_OPERATIONS;
 
 /**
  * The rows of the operations table, as one string.
@@ -87,6 +87,7 @@ function auditedOperations() {
   const ops = new Set();
   for (const rule of ROUTE_RULES) if (rule.operation) ops.add(rule.operation);
   ops.add(AUTH_FAILED_OPERATION);
+  for (const op of Object.values(CONFIG_RELOAD_OPERATIONS)) ops.add(op);
   for (const value of Object.values(MCP_TOOL_OPERATIONS)) {
     if (!value) continue;                  // `null` is "deliberately not an audited operation"
     for (const op of (Array.isArray(value) ? value : [value])) ops.add(op);
@@ -96,7 +97,7 @@ function auditedOperations() {
 
 describe('every audited operation is documented', () => {
   before(async () => {
-    ({ ROUTE_RULES, AUTH_FAILED_OPERATION } = await import('../../server/dist/audit/middleware.js'));
+    ({ ROUTE_RULES, AUTH_FAILED_OPERATION, CONFIG_RELOAD_OPERATIONS } = await import('../../server/dist/audit/middleware.js'));
     ({ MCP_TOOL_OPERATIONS } = await import('../../server/dist/mcp/audit-map.js'));
   });
 
