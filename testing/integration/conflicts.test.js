@@ -132,6 +132,15 @@ describe('Conflicts API — CRUD', () => {
     assert.equal(r.status, 401);
   });
 
+  it('GET /api/conflicts?spaceId= narrows to that space, and refuses a space the token cannot reach', async () => {
+    // Documented in 10-mfa-and-conflicts.md and read nowhere until Q-72: every space's conflicts came back.
+    const r = await get(INSTANCES.a, tokenA, '/api/conflicts?spaceId=general');
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.ok((r.body.conflicts ?? []).every(c => c.spaceId === 'general'), 'a conflict of another space was returned');
+    const refused = await get(INSTANCES.a, tokenA, `/api/conflicts?spaceId=no-such-space-${Date.now()}`);
+    assert.equal(refused.status, 403, JSON.stringify(refused.body));
+  });
+
   it('GET /api/conflicts/:id returns 404 for unknown id', async () => {
     const r = await get(INSTANCES.a, tokenA, '/api/conflicts/nonexistent-conflict-id');
     assert.equal(r.status, 404);

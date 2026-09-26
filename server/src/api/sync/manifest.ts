@@ -8,6 +8,7 @@ import { syncRateLimit } from '../../rate-limit/middleware.js';
 import { requireAuth } from '../../auth/middleware.js';
 import { log } from '../../util/log.js';
 import { buildFileManifest } from '../../files/manifest.js';
+import { isInstanceLocalFile } from '../../sync/file-conflict.js';
 import { computeMerkleRoot } from '../../brain/merkle.js';
 import { spaceAllowed } from './_shared.js';
 
@@ -30,7 +31,8 @@ syncManifestRouter.get('/manifest', syncRateLimit, requireAuth, async (req, res)
     if (!spaceAllowed(spaceId, networkId, req.authToken as Record<string, unknown>)) { res.status(403).json({ error: 'Forbidden' }); return; }
 
     const sinceDate = since ? new Date(since) : undefined;
-    const manifest = await buildFileManifest(spaceId, sinceDate);
+    // A conflict copy or schema snapshot is this instance's own and is never offered (Q-66, sync/file-conflict.ts).
+    const manifest = (await buildFileManifest(spaceId, sinceDate)).filter(e => !isInstanceLocalFile(e.path));
     // `spaceId` is the LOCAL id this request resolved to (the alias middleware translated the network's id), so a
     // peer addresses the plain file routes by it (Q-68, `sync/space-map.ts` peerFileSpaceId).
     res.json({ manifest, spaceId });

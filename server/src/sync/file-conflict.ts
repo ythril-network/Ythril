@@ -37,11 +37,38 @@ export interface ManifestEntry {
  * last-writer-wins by `seq`, but a file has no seq — there is no way to tell which side is newer, so
  * silently taking the peer's bytes would destroy local work with nothing to recover from.
  */
-export type FilePullAction = 'skip' | 'write' | 'conflict-copy';
+export type FilePullAction = 'skip' | 'write' | 'replace' | 'conflict-copy';
 
-export function decideFilePull(local: ManifestEntry | undefined, remote: ManifestEntry): FilePullAction {
+/**
+ * What to do with a peer's file. `base` is the hash this instance and that peer last both held (`syncBase` on the
+ * local file's metadata): when ours still IS that version, only the peer changed it and theirs replaces ours (`Q-66`).
+ * Without a base — nothing agreed yet — a difference cannot be told from an edit on both sides, so it stays a conflict.
+ * Owner, 2026-09-27: auto-accept the incoming copy when the local one was not touched since.
+ */
+export function decideFilePull(local: ManifestEntry | undefined, remote: ManifestEntry, base?: string): FilePullAction {
   if (!local) return 'write';
-  return local.sha256 === remote.sha256 ? 'skip' : 'conflict-copy';
+  if (local.sha256 === remote.sha256) return 'skip';
+  if (base !== undefined && local.sha256 === base) return 'replace';   // only the peer changed it
+  if (base !== undefined && remote.sha256 === base) return 'skip';     // only WE changed it: our push carries it
+  return 'conflict-copy';
+}
+
+/**
+ * Whether to push our file over the peer's: the same question as `decideFilePull`, asked from the other side. With a
+ * base, only when the PEER's copy is still the agreed version — otherwise the peer edited it too, and its own pull
+ * raises the conflict instead of our push erasing its edit. The push decided by modification time alone, so which of
+ * two edits survived depended on whose clock was later. Without a base (nothing agreed yet, e.g. data from before
+ * this rule) the old newer-wins order stands, so an upgrade does not turn every existing file into a conflict.
+ */
+export function decideFilePush(
+  local: ManifestEntry & { modifiedAt: string },
+  peer: (ManifestEntry & { modifiedAt: string }) | undefined,
+  base?: string,
+): 'push' | 'skip' {
+  if (!peer) return 'push';
+  if (local.sha256 === peer.sha256) return 'skip';
+  if (base !== undefined) return peer.sha256 === base ? 'push' : 'skip';
+  return local.modifiedAt > peer.modifiedAt ? 'push' : 'skip';
 }
 
 /**
@@ -50,6 +77,20 @@ export function decideFilePull(local: ManifestEntry | undefined, remote: Manifes
  * Allowlist, not denylist. Capped at 20 characters so a long label cannot push the whole filename past
  * a filesystem's limit, which would turn a conflict copy into a write error.
  */
+/**
+ * Files an instance derives for ITSELF, which never travel in either direction (`Q-66`):
+ * - a CONFLICT COPY, named by `conflictCopyPath` (`<base>_<ISO time>_<peer label><ext>`): it is this instance's half of
+ *   an open conflict, and replicated it landed on the peer as a copy of the peer's own conflict;
+ * - a SCHEMA SNAPSHOT, `schemas/<space>_<entity|fact|edge|chrono>_<type>.json` (`spaces/_shared.ts` syncSchemaFiles):
+ *   each instance writes it from its OWN effective meta, so every schema change conflicted on every member.
+ * Matched by name, so a copy an older peer still offers is refused on pull as well.
+ */
+const CONFLICT_COPY = /_\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z_[A-Za-z0-9_-]{1,20}(\.[^/]*)?$/;
+const SCHEMA_SNAPSHOT = /^schemas\/[a-z0-9][a-z0-9-]*_(entity|fact|edge|chrono)_[A-Za-z0-9_-]+\.json$/;
+export function isInstanceLocalFile(relPath: string): boolean {
+  return CONFLICT_COPY.test(relPath) || SCHEMA_SNAPSHOT.test(relPath);
+}
+
 export function safePeerLabel(label: string): string {
   return label.replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 20);
 }

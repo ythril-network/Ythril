@@ -39,6 +39,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the cycle as **partial**, naming the family and the count, so a cycle whose records all bounced no longer reads
   `success`. A peer that refused records answered, so its failure count does not rise. The watermark still
   advances, as before. Links are now counted in the cycle's totals too.
+- **A file changed on one side only is no longer a conflict** (`Q-66`). Each end now remembers, per file and per
+  peer, the version both last held. A copy nobody touched locally takes the other side's edit; our own edit is
+  carried by the push instead of raising a conflict on our next pull; only edits on both sides still make a
+  conflict, and then nothing is overwritten (the push no longer overwrites a peer's edit because its file is
+  older). Conflict copies and each instance's `schemas/` snapshots no longer replicate, so a schema change stops
+  raising a conflict on every member.
 - **The files of a space renamed on both ends of a network sync again** (`Q-68`). A rename keeps the network's id
   for the space and maps it to the new local one, and the sync routes translate that id, but a file travels through
   the plain file routes, which do not: every file push and pull was refused `403` while the space's records synced.
@@ -50,16 +56,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   write only the fields the sync schema declares, so the receiver also no longer takes the sender's size and hash.
 - **`GET /api/conflicts?spaceId=` narrows to that space**, as documented, and answers `403` for a space the token
   cannot reach. It read the parameter nowhere and returned every accessible space's conflicts.
-- **Conflicts no longer offer Dismiss.** It closed the conflict and left the incoming copy in the space under its
-  conflict name, where it replicated to every member: a keep-both without the rename, shown as if it deferred the
-  choice. Choose keep local, keep incoming, keep both or save to space. **Removed:** `DELETE /api/conflicts/:id`,
-  the route behind it; a call answers `404` and leaves the conflict open. Resolve with `POST /api/conflicts/:id/resolve`.
 - **`?embedded=1` survives a sign-in inside the frame.** The flag was read from the URL only, so after the identity
   provider's redirect, a new document whose query is `code` and `state`, the topbar and Sign out came back in a
   framed brain. It is now kept for the tab in `sessionStorage`; another tab is unaffected and `?embedded=0` clears it.
 - **The conflict page's action selects look editable on every theme.** They were styled with a theme token no
   stylesheet defines, so their border and background were dropped; five other reads of undefined tokens are fixed
   and a gate now holds every `var()` the client reads to a defined token.
+
+### Removed
+
+- **Dismiss on a file conflict, and `DELETE /api/conflicts/:id` behind it.** It closed the conflict and left the
+  incoming copy in the space under its conflict name, where it replicated to every member: a keep-both without the
+  rename, shown as if it deferred the choice. A call now answers `404` and leaves the conflict open; resolve with
+  `POST /api/conflicts/:id/resolve` (keep local, keep incoming, keep both, save to space).
 
 ## [5.4.1] — 2026-09-26
 

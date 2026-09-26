@@ -10,8 +10,8 @@ import fs from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { v4 as uuidv4 } from 'uuid';
 import { getDataRoot } from '../config/loader.js';
-import type { NetworkMember, FileTombstoneDoc, ConflictDoc } from '../config/types.js';
-import { col, asFilter, asDoc } from '../db/mongo.js';
+import type { NetworkMember, FileTombstoneDoc, ConflictDoc, FileMetaDoc } from '../config/types.js';
+import { col, asFilter, asDoc, asUpdate } from '../db/mongo.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { boundedJson } from '../util/bounded-read.js';
 import { toSafeRelPath } from '../util/paths.js';
@@ -20,7 +20,7 @@ import { buildFileManifest } from '../files/manifest.js';
 import { deleteFileMeta, upsertFileMeta } from '../files/file-meta.js';
 import { peerSafeFetch, transferInit, PEER_TRANSFER_TIMEOUT_MS } from './peer-fetch.js';
 import { recordFileTombstoneAck, ackedPositionFrom } from './file-tombstone-ack.js';
-import { decideFilePull, conflictCopyPath } from './file-conflict.js';
+import { decideFilePull, decideFilePush, conflictCopyPath, isInstanceLocalFile } from './file-conflict.js';
 import { peerFileSpaceId } from './space-map.js';
 
 export async function syncFiles(
@@ -111,16 +111,22 @@ export async function syncFiles(
     // Build our manifest for comparison
     const ours = await buildFileManifest(spaceId);
     const oursMap = new Map(ours.map(e => [e.path, e]));
+    const bases = await syncBasesFor(spaceId, member.instanceId);
 
     const dataRoot = getDataRoot();
     const spaceRoot = path.resolve(dataRoot, 'files', spaceId);
 
     if (doPull) for (const remote of manifest) {
+      if (isInstanceLocalFile(remote.path)) continue; // a peer's conflict copy or schema snapshot is the peer's own
       const local = oursMap.get(remote.path);
-      // See ./file-conflict.ts — a file has no `seq`, so a differing hash cannot be resolved by
-      // last-writer-wins the way records are. Ours is kept and theirs lands beside it.
-      const action = decideFilePull(local, remote);
-      if (action === 'skip') continue;
+      // See ./file-conflict.ts — a file has no `seq`, so a differing hash cannot be resolved by last-writer-wins the way
+      // records are. When ours is still the version this peer and we last agreed on, theirs replaces it (Q-66);
+      // otherwise ours is kept and theirs lands beside it as a conflict copy.
+      const action = decideFilePull(local, remote, bases.get(remote.path));
+      if (action === 'skip') {
+        if (bases.get(remote.path) !== remote.sha256) await recordSyncBase(spaceId, remote.path, member.instanceId, remote.sha256);
+        continue;
+      }
 
       try {
         /*
@@ -149,12 +155,14 @@ export async function syncFiles(
         if (sha !== remote.sha256) { log.warn(`SHA mismatch for ${remote.path} from ${member.label}`); continue; }
 
         pulledFiles++;
-        if (!local) {
-          // File is new locally — write directly to the original path
+        if (!local || action === 'replace') {
+          // New here, or changed only on the peer since we last agreed: write it over the original path.
           const absPath = path.join(spaceRoot, remote.path);
           await fs.mkdir(path.dirname(absPath), { recursive: true });
           await fs.writeFile(absPath, buf);
           await upsertFileMeta(spaceId, remote.path, buf.length).catch(() => { /* best-effort */ });
+          await recordSyncBase(spaceId, remote.path, member.instanceId, remote.sha256);
+          if (action === 'replace') log.info(`FILE_REPLACED: '${remote.path}' changed only on peer '${member.label}' since the last agreed version; took theirs.`);
           pulledPaths.push(remote.path);
         } else {
           // File exists locally with a different hash — keep local, save incoming
@@ -188,19 +196,16 @@ export async function syncFiles(
       }
     }
 
-    // ── 3. Push our files that the peer doesn't have or that we have updated ─
-    // • Peer doesn't have the file at all → push new
-    // • Peer has an older version (our modifiedAt > peer modifiedAt) → push update
-    // • Peer is at same version or newer → skip (pull step handled that)
+    // ── 3. Push our files the peer does not have, or holds only in the version we last agreed on ─
+    // decideFilePush (./file-conflict.ts): a peer copy changed since that agreement is left for the peer's own pull to
+    // raise as a conflict; with no agreement recorded yet, the newer file wins as before.
     if (doPush) {
     const peerManifestMap = new Map(manifest.map(e => [e.path, e]));
     for (const [localPath, localEntry] of oursMap) {
-      const peerEntry = peerManifestMap.get(localPath);
-      if (peerEntry) {
-        if (localEntry.sha256 === peerEntry.sha256) continue; // already in sync
-        if (localEntry.modifiedAt <= peerEntry.modifiedAt) continue; // peer is same age or newer
-        // fall through — our version is newer, push the update
-      }
+      // Taken from this peer a moment ago: `localEntry` predates that write, so pushing it would undo it (Q-66).
+      if (pulledPaths.includes(localPath) || isInstanceLocalFile(localPath)) continue;
+      // Push only over a copy the peer has not changed since we last agreed; see decideFilePush.
+      if (decideFilePush(localEntry, peerManifestMap.get(localPath), bases.get(localPath)) === 'skip') continue;
       try {
         const absPath = path.join(spaceRoot, localPath);
         const bytes = await fs.readFile(absPath);
@@ -224,6 +229,7 @@ export async function syncFiles(
           log.warn(`Push file '${localPath}' to ${member.label}: HTTP ${pushResp.status}`);
         } else {
           pushedFiles++;
+          await recordSyncBase(spaceId, localPath, member.instanceId, localEntry.sha256);
         }
       } catch (err) {
         log.warn(`Push file '${localPath}' to ${member.label}: ${err}`);
@@ -234,4 +240,25 @@ export async function syncFiles(
     log.warn(`syncFiles for ${member.label} space ${spaceId}: ${err}`);
   }
   return { pulledFiles, pushedFiles, pulledPaths };
+}
+
+/**
+ * The hash of each file this instance and `peerId` last both held, by path (`Q-66`). Kept on the local file's metadata
+ * as `syncBase.<peer instance id>`: LOCAL state, never replicated (the ingest schema does not declare it, so
+ * `fileMetaForWire` drops it) and never hashed (`FILE_HASH_PROJECTION` is an inclusion list).
+ */
+type SyncedFileMeta = FileMetaDoc & { syncBase?: Record<string, string> };
+
+async function syncBasesFor(spaceId: string, peerId: string): Promise<Map<string, string>> {
+  const key = `syncBase.${peerId}`;
+  const docs = await col<SyncedFileMeta>(spaceCollection(spaceId, 'files'))
+    .find(asFilter<SyncedFileMeta>({ [key]: { $exists: true } }), { projection: { _id: 1, [key]: 1 } }).toArray();
+  return new Map(docs.map(d => [String(d._id), String(d.syncBase?.[peerId] ?? '')]));
+}
+
+/** Record that this instance and `peerId` now both hold `sha256` for the file at `filePath`. */
+async function recordSyncBase(spaceId: string, filePath: string, peerId: string, sha256: string): Promise<void> {
+  await col<SyncedFileMeta>(spaceCollection(spaceId, 'files'))
+    .updateOne(asFilter<SyncedFileMeta>({ _id: filePath }), asUpdate<SyncedFileMeta>({ $set: { [`syncBase.${peerId}`]: sha256 } }))
+    .catch(err => log.warn(`recordSyncBase ${filePath}: ${err}`));
 }

@@ -31,6 +31,9 @@
 export const LOCAL_ONLY_FIELDS: ReadonlySet<string> = new Set([
   'embedding', 'embeddingModel', 'matchedText',
   '_expireAt', '_contentExpireAt',
+  // Per peer, the file hash this instance and that peer last both held (`sync/file-sync.ts`, Q-66): what THIS
+  // instance agreed with whom, so it is served to no peer and hashed nowhere.
+  'syncBase',
 ]);
 
 /**
