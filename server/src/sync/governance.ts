@@ -168,6 +168,11 @@ export function concludeRoundIfReady(
         // The proposer's own edit, through its own definitions (F-39.2) so a layered space keeps it. A proposal TO a
         // network (F-39.5) is not one: it was that network's definition all along, so it takes the branch below.
         commitOwnMetaEdit(localSpace, base => (applied = applyMetaRound(base, round as MetaRoundProposal)).meta as SpaceMeta);
+        // Q-60: and the network's layer, where this instance holds one. Every other member keeps the passed round in
+        // that layer, and a layer outranks own definitions — so a proposer that wrote only its own kept the layer's
+        // OLD value in front of its own edit, and was the one instance on which its change could not be seen.
+        const layer = net.schemaLayers?.[localSpace];
+        if (layer) storeNetworkLayer(net.id, localSpace, applyMetaRound(layer, round as MetaRoundProposal).meta as SpaceMeta);
       } else {
         // Anyone else: the NETWORK decided it, so it lands in that network's layer (F-39.4). Replaying an old round
         // on a late joiner can then only refresh the layer, never overwrite what this instance defined itself.

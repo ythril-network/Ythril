@@ -19,7 +19,8 @@ import { getConfig, saveConfig, saveConfigSoon, getSecrets, getFaceRecognitionCo
 import { BRAIN_COLLECTIONS, type LinkDoc } from '../config/types.js';
 import { applyFileMetaPage } from '../api/sync/_shared.js';
 import { boundedJson } from '../util/bounded-read.js';
-import { reportPushRefusals } from './push-refusals.js';
+import { reportPushRefusals, refusedTransfers } from './push-refusals.js';
+import { deliverChangeNotes } from './change-notes.js';
 import { toSafeRelPath } from '../util/paths.js';
 import { col, asFilter, asDoc, asBulk } from '../db/mongo.js';
 import { recordFileTombstoneAck, ackedPositionFrom } from './file-tombstone-ack.js';
@@ -196,16 +197,8 @@ async function _runSyncForNetworkImpl(networkId: string): Promise<{ synced: numb
   for (const member of net.members) {
     try {
       const counts = await runSyncForMember(net, member);
-      pulled.facts += counts.pulled.facts;
-      pulled.entities += counts.pulled.entities;
-      pulled.edges += counts.pulled.edges;
-      pulled.files += counts.pulled.files;
-      pulled.chrono += counts.pulled.chrono;
-      pushed.facts += counts.pushed.facts;
-      pushed.entities += counts.pushed.entities;
-      pushed.edges += counts.pushed.edges;
-      pushed.files += counts.pushed.files;
-      pushed.chrono += counts.pushed.chrono;
+      // Every family, links included: a hand-written list of five here never summed links into the cycle (Q-59).
+      for (const k of Object.keys(pulled) as (keyof SyncCounts)[]) { pulled[k] += counts.pulled[k]; pushed[k] += counts.pushed[k]; }
       // A member whose transfers were refused or cut short moved nothing it was asked to move. Counting it as
       // synced recorded `success` for a network that had transferred nothing since it was created (`Q-48`), so
       // it takes the failure path below: an error for the cycle, a reason in the history, a failure counted.
@@ -444,6 +437,7 @@ async function runSyncForMember(
   try {
     await gossipWithPeer(net, member, fetchOpts);
     await propagateVotesWithPeer(net, member, fetchOpts);
+    await deliverChangeNotes(net, member, fetchOpts); // F-42: only to a member below us; never throws, undelivered stays queued
   } catch (err) {
     log.warn(`Governance gossip with ${member.label} (${member.instanceId}): ${err}`);
   }
@@ -1075,8 +1069,8 @@ async function pushToPeer(
     collName: string,
     payloadKey: PayloadKey,
     extraFilter: Record<string, unknown> = {},
-  ): Promise<{ pushed: number; maxSeq: number } & TransferOutcome> {
-    let pushed = 0;
+  ): Promise<{ pushed: number; maxSeq: number; refused: number } & TransferOutcome> {
+    let pushed = 0; let refused = 0;
     let localMaxSeq = lastSeqPushed;
     let seqCursor = lastSeqPushed;
     let truncated = false;
@@ -1112,8 +1106,8 @@ async function pushToPeer(
       // A 200 does not mean every record landed: the peer can discard a fact whose fork chain is at its
       // cap and still answer 200. `sync/push-refusals.ts` says what that costs and why the watermark still
       // advances anyway.
-      await reportPushRefusals(resp, payloadKey, member.label ?? member.instanceId, spaceId);
-      pushed += batch.length;
+      const r = await reportPushRefusals(resp, payloadKey, member.label ?? member.instanceId, spaceId, batch.length);
+      pushed += batch.length - r; refused += r; // Q-59: what the peer refused was not pushed
       for (const doc of batch) {
         const d = doc as FactDoc;
         if (d.author?.instanceId === cfg.instanceId && d.seq > localMaxSeq) localMaxSeq = d.seq;
@@ -1126,12 +1120,12 @@ async function pushToPeer(
     // `seqCursor` is how far this transfer got at all. Capping with the author-guarded number would let the
     // watermark advance past a foreign doc that was never accepted, which on a pubsub or braintree network
     // (where `ownedFilter` is empty and we relay everything) is a record only we were going to send.
-    return { pushed, maxSeq: localMaxSeq, deliveredThrough: seqCursor, truncated };
+    return { pushed, maxSeq: localMaxSeq, deliveredThrough: seqCursor, truncated, refused };
   }
 
   // Sequential for the same reason as the pull, and the parents-only filter comes from the row rather
   // than from a special case here — see `REPLICATED_FAMILIES`.
-  const pushed = {} as Record<PayloadKey, { pushed: number; maxSeq: number } & TransferOutcome>;
+  const pushed = {} as Record<PayloadKey, { pushed: number; maxSeq: number; refused: number } & TransferOutcome>;
   for (const family of REPLICATED_FAMILIES) {
     pushed[family.payloadKey] = await pushCollection(
       `${spaceId}_${family.collection}`, family.payloadKey, family.pushFilter ?? {});
@@ -1161,6 +1155,7 @@ async function pushToPeer(
     seqOf: (t) => t.maxSeq,
     warn: log.warn,
   });
+  stoppedEarly.push(...refusedTransfers(pushed)); // Q-59: a refused record makes the cycle incomplete, with the count
 
   /*
    * The other half of the X-20 instrumentation: what the cycle DECIDED, beside what it found.

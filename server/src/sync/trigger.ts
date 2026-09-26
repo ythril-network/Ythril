@@ -57,14 +57,17 @@ export function syncTimeoutMs(raw: unknown): number {
  * against `timeoutMs` and answers `completed`, `timeout` (504, still running) or `error` (500).
  */
 export async function triggerNetworkSync(
-  res: Response, networkId: string, opts: { wait: boolean; timeoutMs: number },
+  res: Response, networkId: string, opts: { wait: boolean; timeoutMs: number; noteId?: string },
 ): Promise<void> {
   const { runSyncForNetwork } = await import('./engine.js');
+  // F-42: every answer names the change note this sync carries, whatever became of the cycle — the note is queued
+  // either way and travels with the next cycle that reaches each member.
+  const note = opts.noteId ? { noteId: opts.noteId } : {};
 
   if (!opts.wait) {
     void runSyncForNetwork(networkId)
       .catch(err => log.error(`Triggered sync for network ${networkId} failed: ${err}`));
-    res.json({ ok: true, status: 'triggered', networkId });
+    res.json({ ok: true, status: 'triggered', networkId, ...note });
     return;
   }
 
@@ -74,15 +77,15 @@ export async function triggerNetworkSync(
   });
   try {
     const r = await Promise.race([runSyncForNetwork(networkId), timeout]);
-    res.json({ ok: true, status: 'completed', networkId, synced: r.synced, errors: r.errors });
+    res.json({ ok: true, status: 'completed', networkId, synced: r.synced, errors: r.errors, ...note });
   } catch (err) {
     if (err === TIMEOUT) {
       // 504 and NOT an error: the cycle is still running, and saying "failed" would send an operator
       // looking for a fault that does not exist.
-      res.status(504).json({ ok: false, status: 'timeout', networkId, timeoutMs: opts.timeoutMs });
+      res.status(504).json({ ok: false, status: 'timeout', networkId, timeoutMs: opts.timeoutMs, ...note });
     } else {
       log.error(`Synchronous trigger for network ${networkId} failed: ${err}`);
-      res.status(500).json({ ok: false, status: 'error', networkId, error: err instanceof Error ? err.message : String(err) });
+      res.status(500).json({ ok: false, status: 'error', networkId, error: err instanceof Error ? err.message : String(err), ...note });
     }
   } finally {
     clearTimeout(timer);

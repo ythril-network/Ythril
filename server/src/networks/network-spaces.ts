@@ -288,7 +288,12 @@ export function applySpaceAdditionRound(net: NetworkConfig, round: VoteRound, wh
         }
       }
     }
-    void addSpacesToNetwork(net.id, [entry], `space_addition round ${round.roundId}, ${where}`);
+    void addSpacesToNetwork(net.id, [entry], `space_addition round ${round.roundId}, ${where}`).then(async added => {
+      // Q-60: the round carries the space's schema, since a voted network has no meta pull — kept as the layer.
+      if (!added.includes(entry.localId) || !round.pendingMeta || round.proposedHere) return;
+      const { acceptNetworkLayer } = await import('../sync/space-meta-pull.js');
+      acceptNetworkLayer(net.id, entry.localId, round.pendingMeta, `space_addition round ${round.roundId}`);
+    });
   });
   return true;
 }

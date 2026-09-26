@@ -457,6 +457,24 @@ Notes:
 
 ---
 
+### Change Notes
+
+A change note travels with a downward sync — a publisher to its subscribers, a tree node to its children —
+attached with the `{ note, spaces }` body of `POST /api/networks/:id/sync` (see
+[Sync API → A sync can carry a change note](09-sync-api.md#a-sync-can-carry-a-change-note)).
+
+```http
+GET /api/networks/:id/change-notes?direction=in&limit=50
+```
+
+Instance-admin, like the sync door. Answers `{ networkId, direction, notes }`, newest first: `in` (default) what
+arrived here from the instance above, `out` what was written here with `pendingFor`, the members it has not
+reached. A note the network drafted itself (a schema update it carried, a space added) has `generated: true`.
+`400` for a `direction` other than `in`/`out` or a `limit` outside 1–200; `404` for an unknown network. MCP:
+`network_change_notes`.
+
+---
+
 ### Sync History
 
 ```http

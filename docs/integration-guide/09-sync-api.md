@@ -60,6 +60,35 @@ become the address this instance connects to.
 A peer lives on the networks COLLECTION rather than under one network's id on purpose: a peer can be a
 member of several, and the cycle walks all of them.
 
+#### A sync can carry a change note
+
+The network door takes an optional JSON body, so the members BELOW this instance are told what changed:
+
+```json
+{ "note": "The Task type gained a `due` date; set it on open tasks.", "spaces": ["projects"] }
+```
+
+`note` is markdown, at most 10000 characters; `spaces` names the network's spaces it concerns, by this
+instance's ids (omit it for a note about the whole network). A note goes only DOWN — a pub/sub publisher to
+its subscribers, a braintree node to its children — so on any other network type, or on an instance with
+nobody below it (a subscriber, a leaf), it is refused with **`409`** and the sync does not run. A malformed
+body, an undeclared key, or `spaces` without `note` is **`400`**. The answer names the queued note as
+`noteId`, whatever became of the cycle.
+
+The note is queued per member and delivered in each member's next exchange, so a member that is offline gets it
+when it is back. The network itself drafts a note (`generated: true`) for a schema update it carries and for a
+space added to it. MCP: `network_sync` with `networkId`, `note` and `spaces`.
+
+```http
+GET /api/networks/:id/change-notes?direction=in&limit=50
+```
+
+Instance-admin. `direction` `in` (default) is what arrived here, each with `from` (the sending instance),
+`receivedAt` and the local `spaces`; `out` is what was written here, with `pendingFor` naming the members it has
+not reached yet. `limit` 1–200, default 50. A bad value is `400`. MCP: `network_change_notes`. Each arrival fires
+the `change_note.received` webhook, once per space it concerns (per space the network carries here, for a note
+about the whole network) — see [Webhooks](14-duplicates-and-webhooks.md).
+
 > **The `/api/notify/trigger` route is GONE in 5.0.** It took `networkId` or `peerId` in the body and
 > delegated to the same code as the two routes above. Move to whichever of them names your subject: the
 > body goes into the path, and `?wait=true` and `?timeoutMs` behave exactly as they did. A sync trigger on
@@ -284,10 +313,10 @@ Each array is capped at 500 items. Response includes per-type counters:
 
 ```json
 { "status": "ok",
-  "facts": { "inserted": 3, "updated": 1, "forked": 0, "skipped": 12, "forkDepthRefused": 0, "tombstoned": 0 },
-  "entities": { "upserted": 5, "skipped": 2, "tombstoned": 0 },
-  "edges":    { "upserted": 0, "skipped": 0, "tombstoned": 0 },
-  "chrono":   { "upserted": 0, "skipped": 0, "tombstoned": 0 } }
+  "facts": { "inserted": 3, "updated": 1, "forked": 0, "skipped": 12, "forkDepthRefused": 0, "tombstoned": 0, "rejected": 0 },
+  "entities": { "upserted": 5, "skipped": 2, "tombstoned": 0, "rejected": 0 },
+  "edges":    { "upserted": 0, "skipped": 0, "tombstoned": 0, "rejected": 0 },
+  "chrono":   { "upserted": 0, "skipped": 0, "tombstoned": 0, "unknownType": 0, "rejected": 0 } }
 ```
 
 **`skipped` is benign and `forkDepthRefused` is not — read the second one.** They were one counter until now,
@@ -297,14 +326,20 @@ which is the whole reason this paragraph exists.
 |---|---|---|
 | `skipped` | the receiver already holds that record at the same `seq` or newer | **nothing was lost** — this is ordinary conflict resolution and is by far the common case |
 | `forkDepthRefused` | facts only: content diverged at an identical `seq` and the record's fork chain is already at its cap, so the incoming version was **discarded** | **no — the record is gone** |
+| `rejected` | every family: the records of this request the receiver refused for any reason (schema, seq, fork cap, undeclared chrono type) | **no** — subtract it from what you count as delivered |
 
-**A `200` therefore does not mean every record was applied.** If you push, read `forkDepthRefused`: a non-zero
-value means those records did not land, and our own sync engine will **not** offer them again — it advances its
-watermark regardless, because the receiver would refuse the identical record on every future cycle and holding
-the watermark back would stall the space instead. Both ends log it; the receiver's log names the record ids.
+**A `200` therefore does not mean every record was applied — read `rejected`.** Every family carries it since
+5.5: the records of that family in your request that the receiver neither stored nor already held. That is a
+document its `Incoming*` schema refused, an implausible `seq`, a fact whose fork chain is at its cap
+(`forkDepthRefused`, which `rejected` includes), and a chrono entry of a type the space does not declare
+(`unknownType`, likewise included). Our own sync engine subtracts it from what it reports as pushed and records
+the cycle as incomplete, naming the family and the count — so a push the receiver refused is never shown as
+`success`. It does **not** offer those records again: it advances its watermark regardless, because the receiver
+would refuse the identical record on every future cycle and holding the watermark back would stall the space
+instead. Both ends log it; the receiver's log names the record ids.
 
-A peer on an older build omits `forkDepthRefused` entirely, so treat a missing field as zero rather than as an
-error.
+A peer on an older build sends no `rejected`; read `forkDepthRefused` then, and treat a missing field as zero
+rather than as an error.
 
 ### A duplicate relationship is reported, not an error
 

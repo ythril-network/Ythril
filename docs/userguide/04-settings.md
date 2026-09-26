@@ -566,6 +566,23 @@ Enter a cron expression on the network card (e.g. `*/5 * * * *` for every 5 minu
 
 Upgrading: a saved short form outside cron's range, such as `every 90m`, cannot be converted, so that network syncs only when you press **Sync now**. Each one is listed by name in the server log at startup and left as it is rather than rounded to something you did not choose.
 
+### Change notes
+
+A network that sends downward — a pub/sub you publish, a braintree node with children — can tell its members
+what changed. Expand the network card, open **Change notes**, write the note, tick the spaces it concerns if the
+network carries more than one, and press **Sync with this note**. The sync runs now, and each member gets the
+note in its next exchange, so a member that is offline gets it when it is back. The network also writes a note
+by itself when it carries a schema update or a space is added to it.
+
+On every network the same section lists the notes **received from above**, with who wrote them and when; where you
+send, it also lists what you **sent** and how many members have not received it yet. A subscriber has nobody below
+it, so it sees the received list only. To react to a note automatically, subscribe a webhook to
+**change_note.received** (Settings → Webhooks, group **Other**).
+
+**A schema update in a network adds and changes, it never removes.** Saving a space's schema without a type the
+network carries keeps that type, here and on every member, and the answer says which types were kept; the
+members' note says so too, and each can retire the type locally.
+
 ### Sync history
 
 Expand a network card and click **Sync History** to see a log of every sync cycle — timestamp, status, items pulled and pushed, and any errors.

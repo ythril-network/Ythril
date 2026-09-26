@@ -21,6 +21,7 @@ import { syncMembersRouter } from './members.js';
 import { syncVotesRouter } from './votes.js';
 import { syncWarmRouter } from './warm.js';
 import { syncMetaRouter } from './meta.js';
+import { syncChangeNotesRouter } from './change-notes.js';
 import { resolveNetworkSpaceAlias } from './space-alias.js';
 
 export const syncRouter = Router();
@@ -105,3 +106,4 @@ syncRouter.use(syncMembersRouter);
 syncRouter.use(syncVotesRouter);
 syncRouter.use(syncWarmRouter);
 syncRouter.use(syncMetaRouter);
+syncRouter.use(syncChangeNotesRouter);

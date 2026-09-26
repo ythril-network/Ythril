@@ -27,7 +27,9 @@ import { BCRYPT_ROUNDS } from '../api/networks/_shared.js';
 import { recordOrigin } from '../auth/network-membership.js';
 import { revokePeerCredentialsIfOrphaned } from '../auth/tokens.js';
 import { getConfig, saveConfig, getSecrets } from '../config/loader.js';
-import type { NetworkConfig, VoteRound } from '../config/types.js';
+import type { NetworkConfig, SpaceMeta, VoteRound } from '../config/types.js';
+import { replicatedMetaOf } from '../sync/replicated-meta.js';
+import { queueGeneratedNote } from '../sync/change-notes.js';
 import { syncScheduleRefusal } from '../sync/schedule.js';
 import { MIN_PEER_VERSION, peerFloorRefusal } from '../sync/peer-floor.js';
 import { peerSafeFetch } from '../sync/peer-fetch.js';
@@ -227,12 +229,19 @@ export function addNetworkSpaceAct(caller: Caller, id: string, input: unknown): 
   }
 
   const before = { spaces: [...net.spaces] };
+  // Q-60: the space's schema as the network will carry it. A voted network has no meta pull, so the round carries it
+  // and each member keeps it as the network's layer when the round passes; a pub/sub or tree member pulls it from
+  // this instance (`GET /api/sync/meta`) in the cycle that adopts the space. Without it a member created the space
+  // empty — no types, no validation posture — until an unrelated schema change opened a round.
+  const added = cfg.spaces.find(s => s.id === spaceId)!;
+  const layerOnAdd = replicatedMetaOf(added.ownMeta ?? added.meta) as SpaceMeta;
   if (!rule.direct) {
     const now = new Date().toISOString();
     const round: VoteRound = {
       roundId: uuidv4(), type: 'space_addition', spaceId: networkSpaceId,
       subjectInstanceId: cfg.instanceId, subjectLabel: cfg.instanceLabel, subjectUrl: '',
       deadline: new Date(Date.now() + net.votingDeadlineHours * 3_600_000).toISOString(), openedAt: now, votes: [],
+      ...(Object.keys(layerOnAdd).length ? { pendingMeta: layerOnAdd } : {}),
     };
     round.votes.push(makeSignedOwnCast(net.id, round, cfg.instanceId, 'yes'));
     openRoundHere(net, round);
@@ -248,6 +257,8 @@ export function addNetworkSpaceAct(caller: Caller, id: string, input: unknown): 
   widenPeerTokens(cfg, net, [spaceId]);
   saveConfig(cfg);
   log.info(`Network ${net.id}: added space '${spaceId}'`);
+  // F-42: a structural change drafts its own note for the members below (a no-op where nobody is below).
+  void queueGeneratedNote(net.id, `${cfg.instanceLabel} added the space '${spaceId}' to '${net.label}'. It is adopted with its schema${layerOnAdd.validationMode ? ` and its ${layerOnAdd.validationMode} validation` : ''} where the token that joined the network may create spaces; otherwise it waits under "Announced, waiting for you".`, [spaceId]);
   return { status: 200, body: networkView(net), audit: { before, after: { spaces: [...net.spaces] } } };
 }
 

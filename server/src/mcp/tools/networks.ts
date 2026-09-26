@@ -13,6 +13,7 @@ import {
   readNetworkAct, createNetworkAct, updateNetworkAct, leaveNetworkAct, addNetworkSpaceAct, resolvePendingSpaceAct, type NetworkActResult,
 } from '../../networks/network-acts.js';
 import { castVoteAct, listOpenVotesAct, syncHistoryAct } from '../../networks/vote-acts.js';
+import { changeNotesAct } from '../../sync/change-notes.js';
 import { forkNetworkAct, inviteKeyAct } from '../../networks/network-acts.js';
 
 /** The caller an act sees: this connection's matrix, and the token id memberships are recorded against. */
@@ -240,6 +241,32 @@ export const network_sync_historyTool: ToolHandler = {
   }),
   async handle(ctx: ToolContext): Promise<ToolResult> {
     return toResult(await syncHistoryAct(String(ctx.args['id']), ctx.args['limit']), '');
+  },
+};
+
+export const network_change_notesTool: ToolHandler = {
+  name: 'network_change_notes',
+  description: 'Read a network\'s change notes, newest first (F-42). A change note is markdown that travels with a '
+    + 'DOWNWARD sync — a pub/sub publisher to its subscribers, a braintree node to its children — written by whoever '
+    + 'triggered that sync (`network_sync` with `note`), or drafted by the network itself for a structural change '
+    + '(`generated: true`). Same answer as `GET /api/networks/:id/change-notes`. Requires instance-admin rights.\n\n'
+    + '`direction` `in` (the default) lists what arrived here, each with `from` (the sending instance), `receivedAt` '
+    + 'and the local `spaces` it concerns (empty = the whole network). `out` lists what was written here, and '
+    + '`pendingFor` names the members it has not reached yet. Each arrival also fires the `change_note.received` '
+    + 'webhook, per space.',
+  admin: true,
+  inputSchema: (_s: ToolSchemas) => ({
+    type: 'object',
+    properties: {
+      id: networkIdSchema,
+      direction: { type: 'string', enum: ['in', 'out'], default: 'in', description: '`in`: notes that arrived here (default). `out`: notes written here.' },
+      limit: { type: 'integer', minimum: 1, maximum: 200, default: 50, description: 'How many notes, newest first: 1-200, default 50.' },
+    },
+    required: ['id'],
+    additionalProperties: false,
+  }),
+  async handle(ctx: ToolContext): Promise<ToolResult> {
+    return toResult(await changeNotesAct(String(ctx.args['id']), ctx.args['direction'], ctx.args['limit']), '');
   },
 };
 

@@ -1063,7 +1063,7 @@ export type WebhookEventType =
   | 'file.created' | 'file.updated' | 'file.deleted'
   | 'bulk.write'
   | 'link_violation.created'
-  | 'duplicate.detected';
+  | 'duplicate.detected' | 'change_note.received';
 
 /**
  * Selectable webhook events, grouped by domain for the picker. `test.ping` is deliberately excluded —
@@ -1075,7 +1075,7 @@ export const WEBHOOK_EVENT_GROUPS: { group: string; events: WebhookEventType[] }
   { group: 'edge', events: ['edge.created', 'edge.updated', 'edge.deleted'] },
   { group: 'chrono', events: ['chrono.created', 'chrono.updated', 'chrono.deleted'] },
   { group: 'file', events: ['file.created', 'file.updated', 'file.deleted'] },
-  { group: 'other', events: ['bulk.write', 'link_violation.created', 'duplicate.detected'] },
+  { group: 'other', events: ['bulk.write', 'link_violation.created', 'duplicate.detected', 'change_note.received'] },
 ];
 
 /** A webhook subscription as returned by the API — the shared HMAC secret is never included. */

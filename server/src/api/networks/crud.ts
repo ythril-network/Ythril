@@ -13,6 +13,7 @@ import { sendAct } from './_shared.js';
 import { unknownPeerRefusal } from '../../sync/peer-target.js';
 import { triggerNetworkSync, triggerPeerSync, syncTimeoutMs } from '../../sync/trigger.js';
 import { log } from '../../util/log.js';
+import { attachSyncNote, changeNotesAct } from '../../sync/change-notes.js';
 import {
   networkView, readNetworkAct, createNetworkAct, updateNetworkAct, leaveNetworkAct, addNetworkSpaceAct, 
   CreateNetworkBody, UpdateNetworkBody, AddNetworkSpaceBody, ResolvePendingSpaceBody, resolvePendingSpaceAct,
@@ -69,7 +70,23 @@ crudRouter.post('/:id/sync', globalRateLimit, requireAdmin, async (req, res) => 
   const net = getConfig().networks.find(n => n.id === req.params['id']);
   if (!net) { res.status(404).json({ error: 'Network not found' }); return; }
   const wait = req.query['wait'] === 'true' || req.query['wait'] === '1';
-  await triggerNetworkSync(res, net.id, { wait, timeoutMs: syncTimeoutMs(req.query['timeoutMs']) });
+  // F-42: an optional `{ note, spaces }` body rides this sync to the members below. Queued BEFORE the cycle starts,
+  // so this cycle carries it; a note that cannot travel is refused and the sync does not run, rather than running
+  // without the note the caller asked for.
+  const attached = await attachSyncNote(net, req.body && Object.keys(req.body).length ? req.body : undefined, String(req.authToken?.name ?? 'an instance admin'));
+  if (attached && 'error' in attached) { res.status(attached.status).json({ error: attached.error }); return; }
+  await triggerNetworkSync(res, net.id, { wait, timeoutMs: syncTimeoutMs(req.query['timeoutMs']), ...(attached ? { noteId: attached.queued._id } : {}) });
+});
+
+// ── GET /api/networks/:id/change-notes — notes that arrived here (`in`) or were written here (`out`) ───
+// F-42. The act is shared with MCP `network_change_notes`.
+crudRouter.get('/:id/change-notes', globalRateLimit, requireAdmin, async (req, res) => {
+  try {
+    sendAct(res, await changeNotesAct(req.params['id'] as string, req.query['direction'], req.query['limit']));
+  } catch (err) {
+    log.error(`GET /api/networks/:id/change-notes: ${err}`);
+    res.status(500).json({ error: 'Internal error' });
+  }
 });
 
 /*
