@@ -44,60 +44,15 @@
  *   - **rule 2 re-implemented `openItems`** with its own two patterns, so it saw neither a dotted sub-id nor
  *     an item marked `[~]` in progress. Its copy also accepted a sub-id as indexed whenever the PARENT's id
  *     appeared in the queue, which is a false green on the rule that decides whether the queue is complete.
- *   - **the working-order plan row** read `G-3.2` as `G-3` and then refused the job, because the queue held
- *     the sub-rows and not the parent. Loud rather than silent, which is the only reason it was found.
+ *   - **a plan row** read `G-3.2` as `G-3` and then refused the job, because the queue held the sub-rows
+ *     and not the parent. Loud rather than silent, which is the only reason it was found.
  *
  * The trailing dot of the older `- [ ] **A-1.**` shape is punctuation rather than a sub-number, and the two
  * are told apart by what follows: a digit continues the id, anything else ends it.
  */
 const ID = String.raw`[A-Z]+-[A-Z0-9-]+(?:\.\d+)*`;
 
-/**
- * One TICKED row of `_WORKING-ORDER.md`, found by its NAME, with the body it attests — or `null`.
- *
- * ## Why not by number, which is how it worked until 2026-09-03
- *
- * The three rules that read this checklist located their rows with a literal `2`, `6` and `7`. Write it
- * with nine rows — the natural thing when a job has more than seven things worth attesting — and `7 full
- * suite` lands where the guides check looks, while whatever happens to be row 2 lands where the tests check
- * looks. Two of the three checks then read the wrong row and say nothing about it.
- *
- * That was found by writing a nine-row checklist, and only because two of the three complained AT ONCE. A
- * numbering that lined up differently would have passed with rows unread. The rows are the attestation this
- * gate exists for, so losing them quietly is the gate reporting on something it never looked at.
- *
- * Matching the name also removes the reason to keep the checklist at exactly seven rows, which was a
- * constraint on the writing rather than on the work.
- *
- * ## What it takes and what it returns
- *
- * `name` is the row's own label — `plan`, `tests first`, `CHANGELOG`, `guides`. **`tests first` rather
- * than `tests`**: row 4 says "those tests pass" and attests something else entirely.
- *
- * An UNTICKED row answers `null`: it exists but nothing is claimed, so there is nothing to read. `[~]`
- * counts as ticked, because marking a row in progress while its PR is in flight is the honest thing to do
- * and must not remove it from view — the same blind spot `openItems` had.
- *
- * The body runs to the next row or a blank line, so a reason that wraps across lines survives. The guides
- * row's reason usually does.
- *
- * @param {string} src   the whole of `_WORKING-ORDER.md`
- * @param {string} name  the row's label, e.g. `guides`
- * @returns {string|null}
- */
-export function workingOrderRow(src, name) {
-  const lit = name.replace(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`);
-  const re = new RegExp(
-    // `(?![\s\S])` and not `$`: with the `m` flag `$` matches at every LINE end, so the lazy body would
-    // stop at the first one and a wrapped reason would lose everything after line 1. The guides row's
-    // reason usually wraps, which is exactly the row whose reason has to be read.
-    String.raw`^[ \t]*[-*][ \t]*\[[x~]\][^\n]*?\b${lit}\b[^\n]*?[\u2014:-][ \t]*([\s\S]*?)(?=\n[ \t]*[-*][ \t]*\[|\n[ \t]*\n|(?![\s\S]))`,
-    'im',
-  );
-  return re.exec(src)?.[1]?.trim() ?? null;
-}
-
-/** The first item id in a line of prose, or `null`. What the working-order plan row is read with. */
+/** The first item id in a line of prose, or `null`. */
 export function itemIdIn(text) {
   return new RegExp(String.raw`\b(${ID})\b`).exec(text)?.[1] ?? null;
 }

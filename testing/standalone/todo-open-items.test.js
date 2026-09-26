@@ -28,7 +28,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { openItems, orderedHomeRows, itemIdIn, isNamedIn, workingOrderRow } from '../../scripts/todo-open-items.mjs';
+import { openItems, orderedHomeRows, itemIdIn, isNamedIn } from '../../scripts/todo-open-items.mjs';
 
 /** Both styles in one file, because a tracker may legitimately mix them as it grows. */
 const MIXED = `# A tracker
@@ -307,7 +307,7 @@ describe('a numbered sub-id is an id', () => {
  *    while its PR was in flight removed it from "every open item is indexed" — the honest bookkeeping act
  *    made the check cover less. And its id pattern had no sub-id, so `G-3.1` read as `G-3` and was then
  *    satisfied by the PARENT's row in the queue: a false green on the rule the release cadence hangs on.
- *  - **the working-order plan row** read `G-3.2` as `G-3` and refused the job, because the queue held the
+ *  - **a plan row** read `G-3.2` as `G-3` and refused the job, because the queue held the
  *    sub-rows rather than the parent. Loud, which is the only reason it was found at all.
  *
  * `isNamedIn` also escapes the id before it becomes a pattern, which sub-ids made load-bearing: interpolated
@@ -333,106 +333,5 @@ describe('one definition of an item id, shared', () => {
     // The dot is escaped: without it, `G-3.1` is a pattern that matches `G-3x1`.
     assert.equal(isNamedIn('G-3.1', '| G-3x1 | not this row | X.md | open | — |'), false);
     assert.equal(isNamedIn('G-3.1', '| G-3.1 | this row | X.md | open | — |'), true);
-  });
-});
-
-/**
- * The working-order rows are found by NAME, because finding them by number loses checks in silence.
- *
- * `todo-consistency.mjs` located the tests row with a literal `2`, the CHANGELOG row with `6` and the guides
- * row with `7`. A checklist written with nine rows — the natural thing to do when a job has more than seven
- * things worth attesting — then puts `7 full suite` where the guides check looks, and whatever happens to be
- * row 2 where the tests check looks.
- *
- * **Found 2026-09-03 by writing one.** It was caught only because two of the three complained at once; a
- * numbering that lined up differently would have passed with rows unread and nothing said. The rows ARE the
- * attestation this gate exists for, so losing two of them quietly is the gate reporting on something it did
- * not look at.
- *
- * Matching on the name also removes the reason to keep the checklist at exactly seven rows, which was a
- * constraint on the writing rather than on the work.
- */
-describe('a working-order row is found by its name', () => {
-  const SEVEN = [
-    '- [x] **1 plan** — `owner-directed`, a thing that arrived by message',
-    '- [x] **2 tests first — NO NEW BEHAVIOUR: `spec/a.spec.ts`** already covers it',
-    '- [x] **3 implement** — what moved',
-    '- [x] **4 those tests pass** — 40 green, four mutants dead',
-    '- [x] **5 full suite** — `npm run preflight`',
-    '- [x] **6 CHANGELOG** — an `### Added` entry',
-    '- [x] **7 the guides** — NO GUIDE READER AFFECTED — an internal refactor',
-  ].join(String.fromCharCode(10));
-
-  const NINE = [
-    '- [x] **1 plan** — `owner-directed`, a thing that arrived by message',
-    '- [x] **2 tests first — NO NEW BEHAVIOUR: `spec/a.spec.ts`** already covers it',
-    '- [x] **3 what moved** — the group',
-    '- [x] **4 what stayed** — the wiring',
-    '- [x] **5 one behaviour tightened** — a duplicate toast removed',
-    '- [x] **6 one type not duplicated** — it lives with its editor',
-    '- [x] **7 full suite** — `npm run preflight`',
-    '- [x] **8 CHANGELOG** — a `### Changed` entry',
-    '- [x] **9 the guides** — NO GUIDE READER AFFECTED — a pure extraction',
-  ].join(String.fromCharCode(10));
-
-  it('finds every row in a seven-row checklist', () => {
-    assert.match(workingOrderRow(SEVEN, 'plan'), /owner-directed/);
-    assert.match(workingOrderRow(SEVEN, 'tests first'), /NO NEW BEHAVIOUR/);
-    assert.match(workingOrderRow(SEVEN, 'CHANGELOG'), /Added/);
-    assert.match(workingOrderRow(SEVEN, 'guides'), /NO GUIDE READER AFFECTED/);
-  });
-
-  it('finds the SAME rows when the checklist has nine, which is the whole point', () => {
-    // By number, `guides` here reads `9` — the check looked at row 7 and found "full suite", which carries
-    // no `NO GUIDE READER AFFECTED` and no docs path, so it either failed for the wrong reason or passed
-    // for one. `CHANGELOG` read row 6, "one type not duplicated".
-    assert.match(workingOrderRow(NINE, 'plan'), /owner-directed/);
-    assert.match(workingOrderRow(NINE, 'tests first'), /NO NEW BEHAVIOUR/);
-    assert.match(workingOrderRow(NINE, 'CHANGELOG'), /Changed/);
-    assert.match(workingOrderRow(NINE, 'guides'), /NO GUIDE READER AFFECTED/);
-  });
-
-  it('does not confuse "tests first" with "those tests pass"', () => {
-    // Both rows say "tests". The tests row is the one that must carry the failure the test gave before the
-    // code existed, and row 4 attests something else entirely.
-    assert.match(workingOrderRow(SEVEN, 'tests first'), /NO NEW BEHAVIOUR/);
-    assert.doesNotMatch(workingOrderRow(SEVEN, 'tests first'), /mutants dead/);
-  });
-
-  it('an UNTICKED row is not a row that was done', () => {
-    // The row exists but is not attested, so there is nothing to read out of it. `[~]` counts, because
-    // marking a row in progress while its PR is in flight is the honest thing to do.
-    const half = [
-      '- [ ] **1 plan** — not started',
-      '- [~] **2 tests first — NO NEW BEHAVIOUR: `spec/a.spec.ts`** in flight',
-    ].join(String.fromCharCode(10));
-    assert.equal(workingOrderRow(half, 'plan'), null);
-    assert.match(workingOrderRow(half, 'tests first'), /in flight/);
-  });
-
-  it('a MISSING row answers null rather than the row beside it', () => {
-    const four = [
-      '- [x] **1 plan** — a thing',
-      '- [x] **2 tests first** — the failure',
-      '- [x] **3 implement** — done',
-      '- [x] **4 full suite** — green',
-    ].join(String.fromCharCode(10));
-    // No CHANGELOG row and no guides row. Answering `null` is what lets the caller say "this checklist is
-    // incomplete" instead of reading row 4 and believing it.
-    assert.equal(workingOrderRow(four, 'CHANGELOG'), null);
-    assert.equal(workingOrderRow(four, 'guides'), null);
-  });
-
-  it('the guides row keeps its continuation lines, because its reason is usually a sentence', () => {
-    const wrapped = [
-      '- [x] **7 the guides** — NO GUIDE READER AFFECTED — a pure extraction of client-side state.',
-      '      No route, no parameter, no config key.',
-      '',
-      '- [x] **8 something else** — not part of it',
-    ].join(String.fromCharCode(10));
-    const row = workingOrderRow(wrapped, 'guides');
-    assert.match(row, /pure extraction/);
-    assert.match(row, /no config key/);
-    assert.doesNotMatch(row, /something else/);
   });
 });

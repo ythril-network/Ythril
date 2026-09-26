@@ -301,6 +301,12 @@ What it means in practice: that token can manage **that space's own tokens** —
 that reach any space it does not administer — those tokens do not appear in its list at all. So handing
 somebody administration of one space does not quietly hand them a way to widen it.
 
+**An instance administrator administers every space.** Ticking **Instance administrator** also turns on the
+**Space admin** switch in the **All spaces** row, which covers every space including ones created later, and
+that switch stays locked on while the box is ticked. Unticking the box leaves the switch on; turn it off
+yourself if the token should lose it. Instance-admin tokens created by 5.0 to 5.3 without the switch get it back
+when the instance starts, and the log names each token it changed.
+
 **To check whether a token has it:** set all four cells in that space's row to admin, or read the row — four
 admins is the state. An agent can ask `help` and its space list marks the spaces the calling token
 administers.

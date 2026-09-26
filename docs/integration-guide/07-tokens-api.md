@@ -127,7 +127,7 @@ Three properties worth building against:
   "createSpaces": false,
   "floor": null,
   "perSpace": {},
-  "spaceAdmin": ["work"]
+  "spaceAdmin": { "floor": false, "spaces": ["work"] }
 }
 ```
 
@@ -141,9 +141,20 @@ Those rules are red-teamed, not aspirational.
 into `admin` in every area of the named space before any check runs, so no code compares the two and neither
 can disagree with the other. Send whichever you have; read both.
 
-**What it does NOT touch is the floor.** `spaceAdmin` names spaces. A floor reaches every space including
-ones created later, so it stays its own field — granting a space administrator the floor would be granting
-them the instance.
+**Two forms: by name, and on the floor.** `spaceAdmin.spaces` administers the named spaces and nothing else.
+`spaceAdmin.floor: true` administers EVERY space, including ones created later, so it is priced like any other
+floor: a minter can grant it only while holding `admin` on the floor in each area it resolves to, and a space
+administrator by name can never grant a floor at all. A token holding the space-admin floor can delegate an
+`admin` floor in each of those areas, because that is what it holds everywhere. The `networks` area is its own
+column in both forms: administering a space does not grant membership of its networks.
+
+**An instance administrator holds the space-admin floor, stored on the token.** Granting `instanceAdmin: true`
+through any door — `POST /api/tokens`, the MCP mint, the OAuth connector mint, or a rights edit — writes
+`spaceAdmin.floor: true` into the stored matrix, so the token holds every right on every space, present and
+future, and `GET /api/tokens` shows it. Clearing `instanceAdmin` afterwards leaves the floor in place; clear it
+explicitly if the token should lose it. An instance-admin token stored without it (written by 5.0–5.3) is
+repaired at startup, and the log names each token changed: *"Restored the space-admin floor on N instance-admin
+token(s) stored without it"*.
 
 To show it in your own UI: read `derivedRungs`, then compare a token's effective rung per area (after
 `implications`) against `requires`.

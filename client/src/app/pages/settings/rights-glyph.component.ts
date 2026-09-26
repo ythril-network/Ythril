@@ -98,9 +98,13 @@ export class RightsGlyphComponent {
       if (r.instanceAdmin) {
         return { area, h: 'hx', f: 'f3', label: `${area}: instance administrator` };
       }
-      const floor: Rung = r.floor?.[area] ?? 'none';
+      // Space admin resolves to admin in every area but networks, which is its own column (the server's
+      // SPACE_ADMIN_AREAS): on the floor it is admin everywhere, by name it is admin somewhere.
+      const coversArea = area !== 'networks';
+      const floor: Rung = coversArea && r.spaceAdmin?.floor ? 'admin' : (r.floor?.[area] ?? 'none');
+      const byName: Rung = coversArea && (r.spaceAdmin?.spaces.length ?? 0) > 0 ? 'admin' : 'none';
       const ceiling = Object.values(r.perSpace).reduce<Rung>(
-        (hi, row) => (RANK[row[area] ?? 'none'] > RANK[hi] ? (row[area] as Rung) : hi), floor,
+        (hi, row) => (RANK[row[area] ?? 'none'] > RANK[hi] ? (row[area] as Rung) : hi), RANK[byName] > RANK[floor] ? byName : floor,
       );
       return {
         area,

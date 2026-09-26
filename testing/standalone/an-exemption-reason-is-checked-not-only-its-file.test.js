@@ -15,9 +15,8 @@
  * existed the whole time. So the check watched the half that cannot hurt anyone and looked away from the half
  * that already had.
  *
- * And the same shape was sitting in the list while this was written: the reason for `_WORKING-ORDER.md` said
- * *"the current job's SIX steps"*. It has seven boxes, and `_THE_LOOP.md` says seven. Nothing could see it,
- * because a reason was never read.
+ * And the same shape was sitting in the list while this was written: one reason said its file held SIX steps
+ * while the file had seven boxes. Nothing could see it, because a reason was never read.
  *
  * ## A number in a reason is a claim, so it is derivable
  *

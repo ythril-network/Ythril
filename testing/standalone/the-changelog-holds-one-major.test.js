@@ -12,8 +12,8 @@
  * cut the split simply did not happen, and every release after it made the file longer without making the
  * claim any truer. The owner noticed by opening the file.
  *
- * A documented convention with no gate holds exactly as well as remembering it does — the same lesson as the
- * working-order checklist, and the reason this is a test rather than a note in the release runbook.
+ * A documented convention with no gate holds exactly as well as remembering it does — the reason
+ * this is a test rather than a note in the release runbook.
  *
  * ## What it checks
  *

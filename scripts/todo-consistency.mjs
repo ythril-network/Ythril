@@ -32,7 +32,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { matchIndexReference } from './todo-index-match.mjs';
 import {
-  openItems, orderedHomeRows, itemIdIn, itemIdsIn, isNamedIn, workingOrderRow,
+  openItems, orderedHomeRows, itemIdIn, itemIdsIn, isNamedIn,
   statedStructureCount, checklistBoxCount,
 } from './todo-open-items.mjs';
 import { verifyLineOf, parseVerifyLine, evaluateClause } from './verify-line.mjs';
@@ -56,16 +56,10 @@ const ORDERED = '_TODO-ORDERED.md';
 /**
  * Files that are reference material rather than queues, so an unindexed heading in them is not an orphan.
  *
- * Each carries its reason. `_REFERENCE.md` is where resolved rationale goes *by* the rules above, and
- * `_AUDIT-LENSES.md` is a catalogue of methods, not of work.
+ * Each carries its reason. `_REFERENCE.md` is where resolved rationale goes *by* the rules above.
  */
 const NOT_A_QUEUE = new Map([
   ['_REFERENCE.md', 'resolved rationale — where closed work is supposed to end up'],
-  ['_AUDIT-LENSES.md', 'a catalogue of review methods, not a list of work'],
-  // The loop itself moved into the `flows` space as a graph (owner, 2026-09-23). These two stay as the record
-  // of where it came from and how it was translated — history, so nothing in them is a queue item.
-  ['_THE_LOOP.md', 'history: the process description the flows graph was translated from'],
-  ['_LOOP-DECOMPOSED.md', 'history: the letter-by-letter record of translating _THE_LOOP.md into the flows graph'],
   ['_CRYPTO-INVENTORY.md', 'a fact sheet kept for reference; its subject is closed'],
   // Exempt from the QUEUE rules — its items are decisions, not work, so they have no verify line and are not in
   // the ordered index. It is NOT unchecked: rule 5 holds it to open-decisions-only.
@@ -77,10 +71,6 @@ const NOT_A_QUEUE = new Map([
   ['_PARKED-DECISIONS.md', 'owner DECISIONS, not work — no verify line, not in the ordered index (see rule 5)'],
   ['_DEPRECATIONS.md', 'a removal checklist keyed to a future major, not the current queue'],
   ['_CLA-BOT-SETUP.md', 'setup instructions'],
-  // Its boxes are the steps of the CURRENT job, not work in the queue. Reading them as items would demand a
-  // verify line on "implement" and an index entry for "full suite" — and would make the ordered queue grow a
-  // row every time a job started. Its own rule holds it instead: the branch must match and every box ticked.
-  ['_WORKING-ORDER.md', 'the current job\'s own steps, not a queue — see the working-order rule'],
   ['_NEXT-PR-PLAN.md', 'the working plan for the PR in flight; cleared on push'],
 ]);
 
@@ -518,8 +508,7 @@ console.log(`\n${YELLOW}todo/ consistency${R}  ${DIM}(owner rules 2026-08-02 and
    * the queue still holds?** Not *"are any of its ids closed"* — a plan legitimately cites finished work as
    * evidence, and `itemIdsIn` over-matches anything shaped like an id, so a rule about closed ids would be
    * wrong twice over. One OPEN id is the floor, and `owner-directed` is the escape for work that arrived by
-   * message and has not been filed yet — the same escape the working-order plan row already has, for the same
-   * reason.
+   * message and has not been filed yet.
    */
   const PLAN = '_NEXT-PR-PLAN.md';
   if (files.includes(PLAN)) {
@@ -724,188 +713,6 @@ console.log(`\n${YELLOW}todo/ consistency${R}  ${DIM}(owner rules 2026-08-02 and
   }
 }
 
-// ── the working order must be checked off for THIS branch
-//
-// THE COMPLAINT THIS EXISTS FOR, owner 2026-08-30: *"how can i make sure you follow such rules? ... same with
-// the rule on 'plan, write tests, implement, execute tests, <optional:iterate>, full test suite,
-// documentation work, push pr'"*, and 2026-08-31: *"can we make the flow i described a checklist and gate if
-// the checklist is checked and reset it for the next job on pushing the pr?"*
-//
-// THE RESET IS DERIVED, NOT PERFORMED. The obvious build is a pre-push hook that blanks the boxes. This repo
-// has no hooks, a hook is not committed, and a reset that has to FIRE is a second thing that can fail to fire
-// — leaving a ticked list in front of the next job, which is the worst of the three states. So the checklist
-// names the branch it belongs to, and one naming another branch counts as fully unchecked. Pushing and
-// branching for the next item resets it because the name no longer matches. Two commits on ONE branch keep
-// their ticks, which is right: a CI fix is not a new plan.
-//
-// TWO ROWS ARE EVIDENCE RATHER THAN ATTESTATION, because a checklist you tick yourself is advice with boxes
-// on it. The plan row names an id the ordered queue must actually hold; the documentation row requires
-// CHANGELOG.md to differ from main. The rest are attested, and this gate removes "I forgot the order exists"
-// rather than dishonesty — the same trade the mtime rule above makes.
-{
-  const WORKING = '_WORKING-ORDER.md';
-  let branch = null;
-  try {
-    branch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: ROOT, stdio: ['ignore', 'pipe', 'ignore'] })
-      .toString().trim();
-  } catch { /* no git — nothing to check the checklist against */ }
-
-  // On main there is no job in progress: a release cut, a hotfix straight to trunk, or a fresh clone.
-  if (branch && branch !== 'main' && branch !== 'HEAD') {
-    const path = join(TODO, WORKING);
-    if (!existsSync(path)) {
-      /*
-       * The rows are ENUMERATED and there is no count, because this message had one and it was wrong: it
-       * said "the six rows" and listed six, of which the missing one was `the guides`. Four of the rows are
-       * checked against something outside the file, and a row that is ABSENT is not checked at all — so
-       * rebuilding the file from that list produced a checklist with the guides check silently switched
-       * off, which is the one row the loop calls out as failing quietly.
-       */
-      fail(`${WORKING} is missing, so nothing records that this change followed the working order.\n\n`
-        + `      Copy the template from docs/, or write the rows: plan, tests first, implement, those tests `
-        + `pass,\n`
-        + `      full suite, CHANGELOG, the guides. Name the branch at the top.\n\n`
-        + `      Write all of them. \`CHANGELOG\` and \`the guides\` are checked against the diff, and a row `
-        + `that is\n      absent is not checked — a short checklist reads as compliant.`);
-    } else {
-      const src = readFileSync(path, 'utf8');
-      const claimed = src.match(/^\s*(?:\*\*)?BRANCH:?(?:\*\*)?\s*`?([^`\s]+)`?\s*$/m)?.[1];
-
-      if (claimed !== branch) {
-        fail(`${WORKING} belongs to \`${claimed ?? '(no BRANCH line)'}\`, and you are on \`${branch}\`.\n\n`
-          + `      That is the reset: a checklist from the last job says nothing about this one, so every box `
-          + `counts as\n`
-          + `      unticked. Put this branch at the top and work the rows down.`);
-      } else {
-        const unticked = src.split('\n').filter(l => /^\s*[-*]\s*\[ \]/.test(l));
-        if (unticked.length) {
-          fail(`${WORKING} has ${unticked.length} step(s) not done yet:\n\n`
-            + unticked.map(l => `      ${l.trim()}`).join('\n')
-            + `\n\n      The order is the point — tests are written and seen to FAIL before the code exists, `
-            + `or they are\n      only a description of what the code already does.`);
-        }
-
-        // The plan row must name work the queue actually holds. `owner-directed` is the escape hatch for work
-        // that arrives by message rather than through the queue, and it is a real category — most of tonight's
-        // did. Without it the honest move and the bypass would be the same keystroke.
-        //
-        // `closed by this change` is the third form, and it is the convention rather than a loophole. A fix
-        // sitting in the working tree already fails the verify-line rule — "still open while grep returns 0"
-        // stops being true the moment the code lands — so an item is closed in the same change that ships it,
-        // and has left the queue by the time this runs. Found the first time this checklist was used on a bug
-        // fix, which was the change immediately after the one that added it. The CHANGELOG row still applies,
-        // so the claim is not free.
-        const plan = workingOrderRow(src, 'plan');
-        if (plan && !/owner-directed/i.test(plan) && !/closed by this change/i.test(plan)) {
-          const id = itemIdIn(plan);
-          const known = id && orderedHomeRows(readFileSync(join(TODO, ORDERED), 'utf8')).some(r => r.id === id);
-          if (!known) {
-            fail(`${WORKING}'s plan row names ${id ? `\`${id}\`` : 'no item id'}, which ${ORDERED} does not `
-              + `hold.\n\n      File it in a tracker and index it, say \`owner-directed\` if it came by `
-              + `message, or\n      \`closed by this change\` if this is the change that ships it.`);
-          }
-        }
-
-        // EVERY NAMED ROW MUST EXIST. Until 2026-09-03 each of these rules answered `undefined` for a row
-        // it could not find and then skipped itself, so a checklist that simply omitted the guides row
-        // passed the guides check. Reading a row by name makes "absent" distinguishable from "empty", and
-        // absent is the case that used to be invisible.
-        const missing = ['plan', 'tests first', 'CHANGELOG', 'guides'].filter(r => workingOrderRow(src, r) === null);
-        if (missing.length) {
-          fail(`${WORKING} has no ticked row for: ${missing.join(', ')}.\n\n`
-            + '      The rows ARE the attestation. A checklist missing one is a checklist that claims\n'
-            + '      nothing about it, and every rule that reads it then has nothing to check.');
-        }
-
-        // The tests row has to SAY something. Either the failure the test gave before the code existed — the
-        // whole point of writing it first — or `NO NEW BEHAVIOUR:` naming the spec that already covers this,
-        // which a pure extraction genuinely needs. A gate that cannot say "no new test was owed here" teaches
-        // its own bypass, and the bypass then gets used for the cases that DID owe one.
-        const tests = workingOrderRow(src, 'tests first');
-        /*
-         * `!== null`, and it was `!== undefined`, which made this CRASH instead of failing.
-         *
-         * `workingOrderRow` returns `null` for a row that is absent or unticked — never `undefined` — so the
-         * guard never fired and `.match` ran on `null`. It only reaches here when a row is unticked, which
-         * is exactly when the checker has something to say: the `missing` check above had already recorded
-         * the failure, and the crash then killed the process before anything was printed. So an honest
-         * mid-job run reported a stack trace and no findings, while a fully-ticked one looked fine.
-         *
-         * One rule, two spellings of "nothing", and the weaker one in the caller.
-         */
-        if (tests !== null) {
-          const exempt = tests.match(/NO NEW BEHAVIOUR:\s*`?([^`\s,]+)`?/);
-          if (exempt && !existsSync(join(ROOT, exempt[1]))) {
-            fail(`${WORKING}'s tests row claims \`${exempt[1]}\` already covers this, and that file does not `
-              + `exist.`);
-          } else if (!exempt && tests.length < 20) {
-            fail(`${WORKING}'s tests row says nothing: it must carry the failure the test gave BEFORE the `
-              + `implementation\n      existed, or \`NO NEW BEHAVIOUR: <spec path>\` naming what already `
-              + `covers it.\n\n      A test written afterwards is a description of the code, not a check on `
-              + `it.`);
-          }
-        }
-
-        /*
-         * The CHANGELOG and guides rows, both checked against the diff. Compared against the working tree
-         * rather than HEAD, because preflight runs before the commit as often as after it.
-         *
-         * **`origin/main` FIRST, because the local ref is whatever it was last fetched at.** This read
-         * `main`, and a branch cut while that ref was behind diffs against an older tree — so files the
-         * branch never touched appear as changes and both rows below pass on somebody else's commits. Three
-         * pull requests shipped with no `[Unreleased]` entry that way, each ticking the CHANGELOG row, each
-         * green (`Q-6`, 2026-09-07). The local ref stays as the fallback for a checkout with no remote.
-         */
-        let changed = '';
-        for (const base of ['origin/main', 'main']) {
-          try {
-            changed = execFileSync('git', ['diff', '--name-only', base], { cwd: ROOT, stdio: ['ignore', 'pipe', 'ignore'] }).toString();
-            break;
-          } catch { /* try the next base */ }
-        }
-
-        // The CHANGELOG row: the one surface every change owes, without exception.
-        if (changed && workingOrderRow(src, 'CHANGELOG') !== null && !/^CHANGELOG\.md$/m.test(changed)) {
-          fail(`${WORKING} ticks the CHANGELOG row, but CHANGELOG.md does not differ from main.\n\n`
-            + `      Every change owes an [Unreleased] entry — it is the surface the owner reads to know `
-            + `what shipped.`);
-        }
-
-        // THE GUIDES ROW, owner-directed 2026-08-31. `docs/integration-guide/` and `docs/userguide/` are two
-        // of the five places CLAUDE.md says a capability lives, and they are the two that fail SILENTLY: each
-        // is somebody's authoritative source, and the one that is wrong is invisible to whoever reads it.
-        // The fleet integrator designed around a stale sentence in a schema; an operator could not find an env
-        // var documented on the wrong page. A CHANGELOG entry does not reach either reader.
-        //
-        // So the row is checked the same way row 6 is — a guide path must differ from main — with an explicit
-        // way to say the change reaches no reader of either guide. `_THE_LOOP.md` already narrows that door:
-        // a new parameter, a schema description, a UI control, a config key or anything an integrator could
-        // build against does NOT fit through it, whatever the size of the diff.
-        const guides = workingOrderRow(src, 'guides');
-        if (changed && guides !== null) {
-          const exempt = guides.match(/NO GUIDE READER AFFECTED\s*[—:-]\s*(.+)/s)?.[1]?.trim();
-          if (exempt) {
-            if (exempt.length < 25) {
-              fail(`${WORKING}'s guides row claims no guide reader is affected without saying why.\n\n`
-                + `      Name what the change is — internal refactor, test-only, a comment — because silence `
-                + `and\n      forgetting look identical, and the docs gates cannot tell them apart either.`);
-            }
-          } else if (!/^docs\/.*guide.*$/mi.test(changed)) {
-            fail(`${WORKING} ticks the guides row, but no docs/*guide* path differs from main.\n\n`
-              + `      \`docs/integration-guide/\` is the integrator's reference and \`docs/userguide/\` is `
-              + `what an operator\n      reads in the product. A parameter that exists on both APIs and on `
-              + `neither page is a capability\n      nobody using it can discover.\n\n`
-              + `      If it genuinely reaches neither reader, say `
-              + `\`NO GUIDE READER AFFECTED — <what this is>\`.`);
-          }
-        }
-
-        if (!failures.length) console.log(`${GREEN}  ✓${R} the working order is checked off for ${branch}`);
-      }
-    }
-  }
-}
-
 /*
  * ── the exemption REASON is checked, not only the file it names
  *
@@ -921,8 +728,8 @@ console.log(`\n${YELLOW}todo/ consistency${R}  ${DIM}(owner rules 2026-08-02 and
  * and found seven settled items filed as open. The file existed the whole time.
  *
  * "Is this reason still true?" has no `grep -c`. A COUNT in it does, and the list had one that was wrong:
- * `_WORKING-ORDER.md` was exempted as "the current job's SIX steps" while it has seven boxes and
- * `_THE_LOOP.md` says seven. One entry is subject to this rule today, and it was the one that was wrong.
+ * an exemption once described its file as holding SIX steps while the file had seven boxes. A count in a reason
+ * is checked against the file for that reason.
  *
  * And the absent-file case now fails rather than logs — not because it became harmful, but because this
  * file's own note says a stale entry must fail rather than warn, and then left this one warning. A yellow

@@ -20,13 +20,14 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
 
-let withInstanceAdminGrants, migrateInstanceAdminFloor, reachesSpace, effectiveRung, AREAS;
+let withInstanceAdminGrants, migrateInstanceAdminFloor, reachesSpace, effectiveRung, capRights, AREAS, SPACE_ADMIN_AREAS;
 before(async () => {
   ({ withInstanceAdminGrants } = await import('../../server/dist/auth/instance-admin-grants.js'));
   ({ migrateInstanceAdminFloor } = await import('../../server/dist/config/migrate-instance-admin-floor.js'));
   ({ reachesSpace } = await import('../../server/dist/auth/space-reach.js'));
   ({ AREAS } = await import('../../server/dist/auth/rights-migration.js'));
-  ({ effectiveRung } = await import('../../server/dist/auth/mint-cap.js'));
+  ({ effectiveRung, capRights } = await import('../../server/dist/auth/mint-cap.js'));
+  ({ SPACE_ADMIN_AREAS } = await import('../../server/dist/config/rights-shape.js'));
 });
 
 const rows = (rung) => Object.fromEntries(AREAS.map(a => [a, rung]));
@@ -89,5 +90,30 @@ describe('a space admin reaches the spaces it administers', () => {
     const r = { instanceAdmin: false, createSpaces: false, floor: null, perSpace: {}, spaceAdmin: { floor: false, spaces: ['qa'] } };
     assert.equal(reachesSpace(r, 'qa'), true);
     assert.equal(reachesSpace(r, 'other'), false);
+  });
+});
+
+describe('a space-admin floor can delegate the floor rungs it resolves to', () => {
+  // Seen on ythril-home after the owner set the floor: the token could not grant an area FLOOR — "floor.knowledge:
+  // asked admin, you hold none" — because minting read the area floor alone and never the space-admin floor, while
+  // enforcement already resolved that floor to admin in every space. Enforcement grants it, minting refused it.
+  const floorAdmin = () => ({ instanceAdmin: false, createSpaces: false, floor: null, perSpace: {}, spaceAdmin: { floor: true, spaces: [] } });
+
+  it('grants an admin floor in every area space admin covers', () => {
+    const want = { instanceAdmin: false, createSpaces: false, floor: Object.fromEntries(SPACE_ADMIN_AREAS.map(a => [a, 'admin'])), perSpace: {} };
+    assert.deepEqual(capRights(floorAdmin(), want), []);
+  });
+
+  it('and still not in an area space admin does not cover', () => {
+    const outside = AREAS.filter(a => !SPACE_ADMIN_AREAS.includes(a));
+    assert.ok(outside.length > 0, 'no area outside space admin to check — the rule below would assert nothing');
+    const want = { instanceAdmin: false, createSpaces: false, floor: Object.fromEntries(AREAS.map(a => [a, outside.includes(a) ? 'read' : 'none'])), perSpace: {} };
+    assert.deepEqual(capRights(floorAdmin(), want).map(e => e.area).sort(), [...outside].sort());
+  });
+
+  it('a space admin by NAME still cannot grant a floor', () => {
+    const named = { ...floorAdmin(), spaceAdmin: { floor: false, spaces: ['qa'] } };
+    const want = { instanceAdmin: false, createSpaces: false, floor: { ...rows('none'), knowledge: 'read' }, perSpace: {} };
+    assert.equal(capRights(named, want).length, 1, 'one space administered is not every space');
   });
 });
