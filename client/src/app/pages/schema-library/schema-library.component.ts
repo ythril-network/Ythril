@@ -612,7 +612,7 @@ export function entriesFromTypeSchemas(
     <!-- Delete warning dialog -->
     @if (deleteDialog(); as dd) {
       <div style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:320;display:flex;align-items:center;justify-content:center;">
-        <div style="background:var(--surface);border-radius:8px;padding:24px;max-width:480px;width:90%;display:flex;flex-direction:column;gap:16px;" [appModal]="'schemaLib.delete.title' | transloco" appModalCloseOnBackdrop (dismiss)="closeDeleteDialog()" (click)="$event.stopPropagation()">
+        <div style="background:var(--bg-elevated);border-radius:8px;padding:24px;max-width:480px;width:90%;display:flex;flex-direction:column;gap:16px;" [appModal]="'schemaLib.delete.title' | transloco" appModalCloseOnBackdrop (dismiss)="closeDeleteDialog()" (click)="$event.stopPropagation()">
           <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
             <h3 style="margin:0;font-size:15px;">{{ 'schemaLib.delete.title' | transloco }}</h3>
             <button class="icon-btn" type="button" [attr.aria-label]="'common.close' | transloco" (click)="closeDeleteDialog()"><ph-icon name="x" [size]="18"/></button>

@@ -40,7 +40,7 @@ import { REASONING_EFFORTS, type SlotTuningCfg, type ReasoningEffort } from './m
     .field:last-child { margin-bottom: 0; }
     .field > label { display: block; font-size: 12px; color: var(--text-secondary);
       margin-bottom: 5px; font-weight: 500; }
-    .hint { font-size: 11px; color: var(--text-tertiary); margin-top: 4px; }
+    .hint { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
     .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   `],
   template: `

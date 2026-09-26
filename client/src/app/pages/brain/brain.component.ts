@@ -172,7 +172,7 @@ interface SpaceView {
       position: absolute;
       top: 0; left: 0; right: 0;
       z-index: 5;
-      background: color-mix(in srgb, var(--bg) 72%, transparent);
+      background: color-mix(in srgb, var(--bg-primary) 72%, transparent);
       border-radius: 8px;
     }
 

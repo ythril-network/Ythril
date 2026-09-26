@@ -139,7 +139,7 @@ export interface RecallTypeOpt {
        column, so the fields line up down the group instead of each sizing to its own placeholder. */
     .rf-field { margin:0 0 8px; min-width:0; }
     .rf-field:last-child { margin-bottom:0; }
-    .rf-field > label { display:block; font-size:11px; color:var(--text-dim); margin-bottom:3px; }
+    .rf-field > label { display:block; font-size:11px; color:var(--text-muted); margin-bottom:3px; }
     .rf-field input[type=text], .rf-field input[type=number], .rf-field select, .rf-field textarea { width:100%; }
     /* flex-start, not center: three of these labels wrap to two lines in a narrow column, and a checkbox
        centred against two lines of text sits between them rather than beside the first word. */
@@ -427,7 +427,7 @@ export interface RecallTypeOpt {
       <span class="rf-hint" [attr.title]="'brain.query.remainderDump.tooltip' | transloco"><ph-icon name="info" [size]="11"/></span>
     </label>
     @if (form().remainderDump) {
-      <div class="sch-msg" style="font-size:11px; color:var(--text-dim); margin-top:4px;">
+      <div class="sch-msg" style="font-size:11px; color:var(--text-muted); margin-top:4px;">
         {{ 'brain.query.remainderDump.writes' | transloco }}
       </div>
     }

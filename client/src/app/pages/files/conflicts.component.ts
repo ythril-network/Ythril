@@ -55,7 +55,7 @@ type ResolveAction = 'keep-local' | 'keep-incoming' | 'keep-both' | 'save-to-spa
           </label>
           <span style="flex:1"></span>
           @if (selectedIds().length > 0) {
-            <select [(ngModel)]="bulkAction" [attr.aria-label]="'conflicts.bulkActionAriaLabel' | transloco" style="font-size:13px; padding:4px 8px; border:1px solid var(--border-color); border-radius:4px; background:var(--bg-primary);">
+            <select [(ngModel)]="bulkAction" [attr.aria-label]="'conflicts.bulkActionAriaLabel' | transloco" style="width:auto;">
               <option value="keep-local">{{ 'conflicts.action.keepLocal' | transloco }}</option>
               <option value="keep-incoming">{{ 'conflicts.action.keepIncoming' | transloco }}</option>
               <option value="keep-both">{{ 'conflicts.action.keepBoth' | transloco }}</option>
@@ -103,7 +103,7 @@ type ResolveAction = 'keep-local' | 'keep-incoming' | 'keep-both' | 'save-to-spa
                 <td>
                   <select [(ngModel)]="conflictActions[c.id]"
                           [attr.aria-label]="'conflicts.resolveActionAriaLabel' | transloco"
-                          style="font-size:12px; padding:2px 6px; border:1px solid var(--border-color); border-radius:4px; background:var(--bg-primary);">
+                          style="width:auto;">
                     <option value="keep-local">{{ 'conflicts.action.keepLocal' | transloco }}</option>
                     <option value="keep-incoming">{{ 'conflicts.action.keepIncoming' | transloco }}</option>
                     <option value="keep-both">{{ 'conflicts.action.keepBoth' | transloco }}</option>
@@ -112,7 +112,7 @@ type ResolveAction = 'keep-local' | 'keep-incoming' | 'keep-both' | 'save-to-spa
                   @if (conflictActions[c.id] === 'save-to-space') {
                     <select [(ngModel)]="conflictTargetSpace[c.id]"
                             [attr.aria-label]="'conflicts.targetSpaceAriaLabel' | transloco"
-                            style="margin-left:4px; font-size:12px; padding:2px 6px; border:1px solid var(--border-color); border-radius:4px; background:var(--bg-primary);">
+                            style="width:auto; margin-left:4px;">
                       @for (s of spaces(); track s.id) {
                         @if (s.id !== c.spaceId) {
                           <option [value]="s.id">{{ s.label || s.id }}</option>
