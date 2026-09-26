@@ -188,9 +188,10 @@ describe('invite generate — the RESPONSE is built from fresh config, not the e
     // milliseconds stale by the time the response is assembled, so an admin correcting `publicUrl`
     // in that window would have the invite hand out the OLD url anyway. No lost write, but a wrong
     // answer that looks authoritative.
-    const hashAt = handler.indexOf('bcrypt.hash(');
+    // The hash lives in `openSession` (api/invite-sessions.ts) since the store moved; awaiting it is the slow step.
+    const hashAt = handler.indexOf('await openSession(');
     const refreshAt = handler.indexOf('const fresh = getConfig();');
-    assert.ok(hashAt > 0, 'expected the bcrypt hash to still be in this handler');
+    assert.ok(hashAt > 0, 'expected the awaited session open (which bcrypt-hashes the id) to still be in this handler');
     assert.ok(refreshAt > hashAt, 'config must be re-read AFTER the slow awaits, not before');
   });
 
@@ -211,7 +212,7 @@ describe('invite generate — the RESPONSE is built from fresh config, not the e
   it('drops the session when the network vanished during the window', () => {
     // A live invite pointing at a network that no longer exists is worse than no invite: the
     // handshake would be accepted right up until apply, then fail with nothing to explain it.
-    assert.match(handler, /_sessions\.delete\(sessionKey\)/,
+    assert.match(handler, /dropSession\(sessionKey\)/,
       'a network deleted mid-handshake must invalidate the session it created');
   });
 });
