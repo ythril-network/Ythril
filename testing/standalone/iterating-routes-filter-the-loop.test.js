@@ -64,7 +64,7 @@ describe('the shared filter', () => {
      * Asserted against the OIDC source rather than restated here, because the claim is about that file.
      */
     const oidc = stripComments(readFileSync('server/src/auth/oidc.ts', 'utf8'));
-    assert.match(oidc, /rights:\s*migrateToken\(/,
+    assert.match(oidc, /rights:\s*(withInstanceAdminGrants\()?migrateToken\(/,
       'the OIDC record must still derive a matrix — it is what makes failing closed safe everywhere else');
   });
 });

@@ -89,7 +89,8 @@ describe('a record cannot reach a handler without a matrix', () => {
     // on the no-matrix branch.
     assert.match(s, /rights: TokenRights;/,
       'OidcTokenRecord no longer requires a matrix, so an OIDC session can arrive with none');
-    assert.match(s, /rights:\s*migrateToken\(/,
+    // Optionally through `withInstanceAdminGrants` (S-11), which applies the instance-admin floor to the derivation.
+    assert.match(s, /rights:\s*(withInstanceAdminGrants\()?migrateToken\(/,
       'the OIDC record must derive its matrix through migrateToken — hand-rolling it is what granted whole '
       + 'instances when it was got wrong before');
   });
