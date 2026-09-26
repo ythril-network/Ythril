@@ -17,6 +17,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reason, and the operator accepts or dismisses it: `POST /api/networks/:id/pending-spaces`, MCP
   `network_pending_space`. **Networks joined before this version have no recorded joining token, so every space
   they announce from now on waits for an accept.**
+- **A config reload never drops a space silently** (`S-10`). A space the running instance had and a reloaded
+  `config.json` no longer listed simply left the configuration, with its data orphaned and nothing logged beyond
+  "reloading". Whoever wrote the file (a deploy step, a restore, a second replica, a hand edit) removed spaces.
+  Now such a space is kept and the log says so. To remove one by editing the file, list its id in a top-level
+  `removeSpaces`. Every space a reload adds, removes or keeps is audited (`space.reload_added`,
+  `space.reload_removed`, `space.reload_kept`), whether the watcher or `POST /api/admin/reload-config` ran it.
 
 ### Fixed
 

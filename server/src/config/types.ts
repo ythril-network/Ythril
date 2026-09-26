@@ -1338,6 +1338,12 @@ export interface Config {
    *  commits, so a crash mid-operation is detected on the next boot and completed
    *  idempotently (see reconcilePendingSpaceOp in spaces.ts). Not hand-edited. */
   pendingSpaceOp?: PendingSpaceOp;
+  /**
+   * Space ids an operator REMOVES by editing `config.json` (S-10). A reload keeps a space that is merely missing
+   * from the file; listing it here is how a hand edit says the removal is meant. Consumed by the reload that reads
+   * it and cleared, so it never removes a space created later under the same id.
+   */
+  removeSpaces?: string[];
 }
 
 /** Records an in-flight space rename/delete so it survives a crash. See the

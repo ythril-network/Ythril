@@ -164,7 +164,7 @@ Audit entries are recorded for all write operations and (when `logReads` is enab
 | Bulk | `bulk.write` — one entry for the whole call, not one per record |
 | Ingest | `brain.ingest` — one entry for the start of a run; `brain.ingest.status` (a read, recorded only with `logReads`) |
 | File | `file.create`, `file.update`, `file.delete`, `file.read`, `file.list`, `file.mkdir`, `file.meta.update`, `file.retry_embedding`, `file.retry_embedding_all` |
-| Space | `space.create`, `space.update`, `space.delete`, `space.wipe`, `space.list`, `space.rename`, `space.reorder`, `space.reindex`, `space.indexes.rebuild`, `space.embeddings.reembed`, `space.activity.reset`, `space.schema.update`, `space.schema.delete`, `space.schema.validate` |
+| Space | `space.create`, `space.update`, `space.delete`, `space.wipe`, `space.reload_added` / `space.reload_removed` / `space.reload_kept` (a config reload, by the watcher or `POST /api/admin/reload-config`, that added a space, removed one the file listed in `removeSpaces`, or kept one the file no longer lists), `space.list`, `space.rename`, `space.reorder`, `space.reindex`, `space.indexes.rebuild`, `space.embeddings.reembed`, `space.activity.reset`, `space.schema.update`, `space.schema.delete`, `space.schema.validate` |
 | Token | `token.create`, `token.update`, `token.regenerate`, `token.delete` |
 | MFA | `mfa.enable`, `mfa.disable` |
 | Webhook | `webhook.create`, `webhook.update`, `webhook.delete`, `webhook.test` |

@@ -45,7 +45,9 @@ import { pipelineStatusRouter } from './api/pipeline-status.js';
 import { spaceActivityRouter } from './api/space-activity.js';
 import { maintenanceMiddleware } from './maintenance.js';
 import { globalRateLimit, ipFloodBackstop } from './rate-limit/middleware.js';
-import { configExists, reloadConfig, getConfig, loadSecrets, startConfigWatcher } from './config/loader.js';
+import { configExists, reloadConfig, getConfig, loadSecrets, saveConfig, startConfigWatcher } from './config/loader.js';
+import { reloadSpaceDiff } from './config/reload-space-diff.js';
+import { logAuditEntry } from './audit/audit.js';
 import { requireAdminMfa, requireAdminMfaScoped } from './auth/middleware.js';
 import { clearTokenCache } from './auth/tokens.js';
 import { clearOidcCache } from './auth/oidc.js';
@@ -515,9 +517,39 @@ export function createApp() {
   // reloading is only half the job — a space added by hand still needs initialising.
   // Both paths therefore go through this one function rather than the watcher doing
   // a bare re-parse.
-  async function applyConfigFromDisk(): Promise<void> {
-    const oldSpaceIds = new Set(getConfig().spaces.map(s => s.id));
+  /** Who asked for the reload, for the audit entries it writes: a request, or the file watcher. */
+  type ReloadActor = { tokenId?: string | null; tokenLabel?: string | null; ip: string; method: string; path: string };
+  const WATCHER: ReloadActor = { tokenLabel: 'config watcher', ip: '-', method: 'WATCH', path: 'config.json' };
+
+  async function applyConfigFromDisk(actor: ReloadActor = WATCHER): Promise<void> {
+    const beforeSpaces = structuredClone(getConfig().spaces);
+    const oldSpaceIds = new Set(beforeSpaces.map(s => s.id));
     reloadConfig();
+    /*
+     * A reload never drops a space silently (S-10). A space missing from the file is put back unless the file names
+     * it in `removeSpaces` or an in-flight rename/delete takes it; `removeSpaces` is consumed here. Every space the
+     * reload adds, removes or keeps is audited by id, whoever triggered it.
+     */
+    {
+      const cfg = getConfig();
+      const diff = reloadSpaceDiff(beforeSpaces, cfg);
+      if (diff.kept.length) {
+        cfg.spaces.push(...diff.kept);
+        log.warn(`config.json no longer lists space(s) ${diff.kept.map(s => s.id).join(', ')}; kept them. `
+          + 'To remove a space by editing the file, list its id in "removeSpaces".');
+      }
+      if (diff.kept.length || cfg.removeSpaces) {
+        delete cfg.removeSpaces;
+        saveConfig(cfg);
+      }
+      const audit = (operation: string, spaceId: string, status: number) => logAuditEntry({
+        tokenId: actor.tokenId ?? null, tokenLabel: actor.tokenLabel ?? null, ip: actor.ip,
+        method: actor.method, path: actor.path, spaceId, operation, status, durationMs: 0,
+      });
+      for (const id of diff.added) audit('space.reload_added', id, 200);
+      for (const id of diff.removed) audit('space.reload_removed', id, 200);
+      for (const s of diff.kept) audit('space.reload_kept', s.id, 409);
+    }
     loadSecrets(); // Also reload secrets.json (peer tokens injected by tests/scripts)
     // Prefix-less (legacy) tokens are NOT stripped — findMatchingToken()
     // verifies them via a fallback scan and backfills the prefix on first use.
@@ -566,9 +598,9 @@ export function createApp() {
     configReloadFailedTotal.inc();
     configReloadPending.set(1);
   });
-  app.post('/api/admin/reload-config', globalRateLimit, requireAdminMfa, async (_req, res) => {
+  app.post('/api/admin/reload-config', globalRateLimit, requireAdminMfa, async (req, res) => {
     try {
-      await applyConfigFromDisk();
+      await applyConfigFromDisk({ tokenId: req.authToken?.id ?? null, tokenLabel: req.authToken?.name ?? null, ip: req.ip ?? '-', method: 'POST', path: '/api/admin/reload-config' });
       res.json({ ok: true });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
