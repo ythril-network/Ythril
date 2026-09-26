@@ -31,7 +31,9 @@ syncManifestRouter.get('/manifest', syncRateLimit, requireAuth, async (req, res)
 
     const sinceDate = since ? new Date(since) : undefined;
     const manifest = await buildFileManifest(spaceId, sinceDate);
-    res.json({ manifest });
+    // `spaceId` is the LOCAL id this request resolved to (the alias middleware translated the network's id), so a
+    // peer addresses the plain file routes by it (Q-68, `sync/space-map.ts` peerFileSpaceId).
+    res.json({ manifest, spaceId });
   } catch (err) {
     log.error(`sync GET manifest: ${err}`);
     res.status(500).json({ error: 'Internal error' });

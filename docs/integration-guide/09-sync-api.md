@@ -441,7 +441,7 @@ reader rather than merely non-conforming, and nothing else in the pipeline would
 
 ### File Sync Artifacts
 
-- `GET /api/sync/manifest?spaceId=general` returns file digest metadata for delta detection.
+- `GET /api/sync/manifest?spaceId=general` returns file digest metadata for delta detection. The answer also names `spaceId`, the local id the responder resolved the request to, which a peer uses for the file transfers that follow.
 - `GET /api/sync/file-tombstones?spaceId=general&since=<ISO>` returns file delete tombstones. **The sync engine
   deliberately omits `since`**: a file tombstone carries its original `deletedAt` and can be relayed onward long
   afterwards, so filtering by it would skip an older deletion arriving late and the file would stay. Use it only

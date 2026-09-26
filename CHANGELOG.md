@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The files of a space renamed on both ends of a network sync again** (`Q-68`). A rename keeps the network's id
+  for the space and maps it to the new local one, and the sync routes translate that id, but a file travels through
+  the plain file routes, which do not: every file push and pull was refused `403` while the space's records synced.
+  The peer's file manifest now names its local id for the space (`spaceId` in `GET /api/sync/manifest`), and the
+  transfers use it. A peer on an older build is addressed as before.
+
 ## [5.4.1] — 2026-09-26
 
 **Subscribing a webhook to fact events works from Settings → Webhooks again.** Since 5.0 the page offered event

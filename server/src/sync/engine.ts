@@ -41,6 +41,7 @@ import { mimeTypeForPath } from '../files/mime.js';
 import { createCoalescingRunner } from './coalescing-runner.js';
 import { retagToLocalSpace, planSeqUpserts } from './upsert-plan.js';
 import { decideFilePull, conflictCopyPath } from './file-conflict.js';
+import { peerFileSpaceId } from './space-map.js';
 import {
   syncCyclesTotal,
   syncItemsPulledTotal,
@@ -1278,7 +1279,8 @@ async function syncFiles(
     if (!doPull && !doPush) return { pulledFiles, pushedFiles, pulledPaths };
     const resp = await peerSafeFetch(`${member.url}/api/sync/manifest?spaceId=${encodeURIComponent(remoteSpaceId)}&networkId=${encodeURIComponent(networkId)}`, opts());
     if (!resp.ok) { log.warn(`File manifest from ${member.label}: ${resp.status}`); return { pulledFiles, pushedFiles, pulledPaths }; }
-    const { manifest } = await boundedJson<{ manifest: { path: string; sha256: string; size: number; modifiedAt: string }[] }>(resp, 'sync peer');
+    const { manifest, spaceId: peerSpaceId } = await boundedJson<{ manifest: { path: string; sha256: string; size: number; modifiedAt: string }[]; spaceId?: string }>(resp, 'sync peer');
+    const fileSpaceId = peerFileSpaceId(peerSpaceId, remoteSpaceId); // Q-68: the plain file routes know only the peer's local id
 
     // Build our manifest for comparison
     const ours = await buildFileManifest(spaceId);
@@ -1311,7 +1313,7 @@ async function syncFiles(
          * decision that was wrong the first time.
          */
         const dl = await peerSafeFetch(
-          `${member.url}/api/files/${encodeURIComponent(remoteSpaceId)}?path=${encodeURIComponent(remote.path)}`,
+          `${member.url}/api/files/${encodeURIComponent(fileSpaceId)}?path=${encodeURIComponent(remote.path)}`,
           transferInit(opts()),
           { timeoutMs: PEER_TRANSFER_TIMEOUT_MS },
         );
@@ -1377,7 +1379,7 @@ async function syncFiles(
         const absPath = path.join(spaceRoot, localPath);
         const bytes = await fs.readFile(absPath);
         const pushResp = await peerSafeFetch(
-          `${member.url}/api/files/${encodeURIComponent(remoteSpaceId)}?path=${encodeURIComponent(localPath)}`,
+          `${member.url}/api/files/${encodeURIComponent(fileSpaceId)}?path=${encodeURIComponent(localPath)}`,
           {
             method: 'POST',
             headers: {
