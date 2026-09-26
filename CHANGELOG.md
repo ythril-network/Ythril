@@ -39,6 +39,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the cycle as **partial**, naming the family and the count, so a cycle whose records all bounced no longer reads
   `success`. A peer that refused records answered, so its failure count does not rise. The watermark still
   advances, as before. Links are now counted in the cycle's totals too.
+- **Subscribing a webhook to fact events works from Settings → Webhooks again** (`Q-65`). Since 5.0 renamed the
+  knowledge type `memory` to `fact`, the server's events are `fact.created`, `fact.updated` and `fact.deleted`, but
+  the page went on offering `memory.created`, `memory.updated` and `memory.deleted`, and the server refused any
+  subscription that ticked one with "Invalid event type". The page now offers the server's names. A gate reads both
+  lists, so an event added on one side and not the other fails the build. Subscriptions made through the API were not
+  affected.
 
 ## [5.4.0] — 2026-09-26
 

@@ -1056,7 +1056,7 @@ export interface BackupConfigData {
 // ── Webhooks (C1) ─────────────────────────────────────────────────────────────
 
 export type WebhookEventType =
-  | 'memory.created' | 'memory.updated' | 'memory.deleted'
+  | 'fact.created' | 'fact.updated' | 'fact.deleted'
   | 'entity.created' | 'entity.updated' | 'entity.deleted' | 'entity.merged'
   | 'edge.created' | 'edge.updated' | 'edge.deleted'
   | 'chrono.created' | 'chrono.updated' | 'chrono.deleted'
@@ -1070,7 +1070,7 @@ export type WebhookEventType =
  * it is the test-button's internal event, not a real domain event a user would subscribe to.
  */
 export const WEBHOOK_EVENT_GROUPS: { group: string; events: WebhookEventType[] }[] = [
-  { group: 'fact', events: ['memory.created', 'memory.updated', 'memory.deleted'] },
+  { group: 'fact', events: ['fact.created', 'fact.updated', 'fact.deleted'] },
   { group: 'entity', events: ['entity.created', 'entity.updated', 'entity.deleted', 'entity.merged'] },
   { group: 'edge', events: ['edge.created', 'edge.updated', 'edge.deleted'] },
   { group: 'chrono', events: ['chrono.created', 'chrono.updated', 'chrono.deleted'] },

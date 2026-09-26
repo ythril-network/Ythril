@@ -69,11 +69,11 @@ describe('WebhooksComponent — payload shaping (C1)', () => {
     f.url = 'https://hook.example.com/x';
     f.secret = 'longenough';
     f.allEvents = false;
-    cmp.toggleEvent(f, 'memory.created');
+    cmp.toggleEvent(f, 'fact.created');
     cmp.toggleEvent(f, 'entity.deleted');
     cmp.save(f);
     const body = admin.createWebhook.mock.calls[0][0];
-    expect(body.events.sort()).toEqual(['entity.deleted', 'memory.created']);
+    expect(body.events.sort()).toEqual(['entity.deleted', 'fact.created']);
   });
 
   it('edit with a blank secret does NOT send a secret (keeps existing)', () => {
