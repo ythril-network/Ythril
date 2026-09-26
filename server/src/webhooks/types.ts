@@ -16,6 +16,7 @@ export type WebhookEventType =
   | 'bulk.write'
   | 'link_violation.created'
   | 'duplicate.detected'
+  | 'change_note.received'
   | 'test.ping';
 
 export const ALL_WEBHOOK_EVENTS: ReadonlySet<string> = new Set<WebhookEventType>([
@@ -27,6 +28,7 @@ export const ALL_WEBHOOK_EVENTS: ReadonlySet<string> = new Set<WebhookEventType>
   'bulk.write',
   'link_violation.created',
   'duplicate.detected',
+  'change_note.received',
   'test.ping',
 ]);
 

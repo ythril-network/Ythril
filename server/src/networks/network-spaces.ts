@@ -28,7 +28,7 @@
  * in both directions. So `widenPeerTokens` runs inside both the add and the adoption rather than beside them.
  */
 import { getConfig, saveConfig } from '../config/loader.js';
-import type { Config, NetworkConfig, VoteRound } from '../config/types.js';
+import type { Config, NetworkConfig, SpaceMeta, VoteRound } from '../config/types.js';
 import { migrateToken } from '../auth/rights-migration.js';
 import { reachesSpace } from '../auth/space-reach.js';
 import { networkJoinRefusal } from '../auth/network-rights.js';
@@ -202,7 +202,7 @@ export function adoptionDecision(
 function holdAsPending(
   cfg: Config,
   net: NetworkConfig,
-  pending: readonly { networkId: string; localId: string; why: string }[],
+  pending: readonly { networkId: string; localId: string; why: string; meta?: SpaceMeta }[],
   from: string,
   what: string,
 ): void {
@@ -283,12 +283,19 @@ export function applySpaceAdditionRound(net: NetworkConfig, round: VoteRound, wh
       if (!localIds.includes(entry.localId)) {
         const { adopt, pending } = adoptionDecision(liveNet, now.tokens, localIds, [entry]);
         if (!adopt.length) {
-          holdAsPending(now, liveNet, pending, round.subjectInstanceId ?? 'a passed round', `space_addition round ${round.roundId} passed (${where}) for`);
+          // Q-60: the schema the round carries waits with it, so an accept later adopts the space WITH its schema.
+          const withMeta = round.pendingMeta ? pending.map(p => ({ ...p, meta: round.pendingMeta })) : pending;
+          holdAsPending(now, liveNet, withMeta, round.subjectInstanceId ?? 'a passed round', `space_addition round ${round.roundId} passed (${where}) for`);
           return;
         }
       }
     }
-    void addSpacesToNetwork(net.id, [entry], `space_addition round ${round.roundId}, ${where}`);
+    void addSpacesToNetwork(net.id, [entry], `space_addition round ${round.roundId}, ${where}`).then(async added => {
+      // Q-60: the round carries the space's schema, since a voted network has no meta pull — kept as the layer.
+      if (!added.includes(entry.localId) || !round.pendingMeta || round.proposedHere) return;
+      const { acceptNetworkLayer } = await import('../sync/space-meta-pull.js');
+      acceptNetworkLayer(net.id, entry.localId, round.pendingMeta, `space_addition round ${round.roundId}`);
+    });
   });
   return true;
 }

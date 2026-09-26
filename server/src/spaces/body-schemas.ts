@@ -313,6 +313,31 @@ export function findBrokenLibraryRefs(typeSchemas: z.infer<typeof TypeSchemasZ> 
   return broken;
 }
 
+/**
+ * `typeSchemas` without the types whose `$ref` names a library entry this instance lacks, and those types as
+ * `kind:Type` (`Q-60`). For schema ARRIVING from a network: refusing it whole for one missing entry left a member
+ * with no schema at all for a space whose other types were fine, and the space's posture with it.
+ */
+export function withoutBrokenLibraryRefs<T extends Record<string, Record<string, unknown> | undefined>>(
+  typeSchemas: T | undefined,
+): { typeSchemas: T | undefined; dropped: string[] } {
+  if (!typeSchemas) return { typeSchemas, dropped: [] };
+  const names = new Set(getSchemaLibrary().map(e => e.name));
+  const dropped: string[] = [];
+  const out: Record<string, Record<string, unknown>> = {};
+  for (const [kt, ktMap] of Object.entries(typeSchemas)) {
+    if (!ktMap) continue;
+    out[kt] = {};
+    for (const [type, schema] of Object.entries(ktMap)) {
+      const ref = typeof schema === 'object' && schema !== null && '$ref' in schema ? String((schema as { $ref: unknown }).$ref) : null;
+      const name = ref?.startsWith('library:') ? ref.slice('library:'.length) : ref;
+      if (name !== null && !names.has(name)) { dropped.push(`${kt}:${type}`); continue; }
+      out[kt]![type] = schema;
+    }
+  }
+  return { typeSchemas: out as T, dropped };
+}
+
 /** The 422 body for a broken `$ref`, naming what is missing — "invalid schema" sends the caller to the wrong file. */
 export function brokenRefsError(brokenRefs: string[]): string {
   return `Schema library ${brokenRefs.length === 1 ? 'entry' : 'entries'} not found: ${brokenRefs.join(', ')}. `

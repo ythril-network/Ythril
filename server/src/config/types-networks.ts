@@ -141,6 +141,14 @@ export interface VoteRound {
    */
   metaChangedFields?: string[];
   /**
+   * `kind:Type` the proposal adds or changes, and those a `replace` left out and the network keeps (meta_change,
+   * `Q-61`). Recorded when the round opens, against the definition it was computed from, so the change note the
+   * proposer sends when the round passes says what changed — a replace re-sends every type, and listing them all
+   * as "changed" would bury the one that did.
+   */
+  changedTypes?: string[];
+  keptTypes?: string[];
+  /**
    * The space's `meta.version` the proposal was computed against (meta_change rounds).
    *
    * Rounds gossip, so this is absent on any round proposed by a peer predating field-merge — and that
@@ -206,7 +214,7 @@ export interface NetworkConfig {
    * Spaces an upstream announced that were NOT adopted, each with why (S-9): the joining token could not have joined
    * it, the joiner is unknown, or a local space already has that id. The operator accepts or maps one explicitly.
    */
-  pendingSpaces?: { networkId: string; localId: string; why: string; from: string; at: string }[];
+  pendingSpaces?: { networkId: string; localId: string; why: string; from: string; at: string; meta?: import('./types.js').SpaceMeta }[];
   /**
    * Network space ids the operator dismissed from `pendingSpaces`. An announcement or a passed round never proposes
    * one again — dismissing is an answer, not a snooze — and accepting one later is still possible by its id.

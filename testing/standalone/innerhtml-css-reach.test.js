@@ -52,6 +52,8 @@ const RENDERED_SURFACES = new Map([
   ['client/src/app/pages/settings/media-processing/media-processing-page.component.ts', null],
   ['client/src/app/pages/settings/media-processing/models-tab.component.ts', null],
   ['client/src/app/pages/settings/space-schema-tab.component.ts', null],
+  // A change note's markdown body, sanitised; only its first and last child margins are styled.
+  ['client/src/app/pages/settings/network-change-notes.component.ts', '.md'],
 ]);
 
 function sources(dir = ROOT, out = []) {

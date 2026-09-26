@@ -132,6 +132,7 @@ export const CAPABILITIES = [
   ['Networks', 'network_votes', 'GET /api/networks/:id/votes'],
   ['Networks', 'network_vote', 'POST /api/networks/:id/votes/:roundId'],
   ['Networks', 'network_sync_history', 'GET /api/networks/:id/sync-history'],
+  ['Networks', 'network_change_notes', 'GET /api/networks/:id/change-notes'],
   ['Networks', 'network_invite', 'POST /api/networks/:id/invite'],
   ['Networks', 'network_fork', 'POST /api/networks/:id/fork'],
   ['Networks', 'network_join_remote', 'POST /api/networks/join-remote'],

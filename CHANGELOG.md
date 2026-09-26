@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **A sync can carry a change note to the members below** (`F-42`). A pub/sub publisher or a braintree node
+  can attach a note (markdown, and the spaces it concerns) to a sync, on every door: the `{ note, spaces }` body
+  of `POST /api/networks/:id/sync`, `note` and `spaces` on MCP `network_sync` (which also gains `networkId`), and
+  **Sync with this note** on the network card. The note is queued per member and delivered in that member's next
+  exchange, so a member that is offline gets it when it is back. A note that cannot travel — no member below this
+  instance, or a network type that syncs both ways — is refused with `409` and the sync does not run. The network
+  drafts its own for a schema update it carries and for a space added to it. Each member lists what arrived
+  (`GET /api/networks/:id/change-notes`, MCP `network_change_notes`, the card's **Change notes**), and each arrival
+  fires the new webhook event `change_note.received`.
+
+### Fixed
+
+- **A schema replace on a networked space says it kept what it did not remove** (`Q-61`). A network round is
+  applied as a merge on every member and on the proposer, so a replace that left a type out removed nothing, and
+  every schema door answered `200` as if it had. The answer now carries `appliedAsMerge`, `keptTypes` and a
+  sentence, on REST and MCP alike, and the members are sent a change note naming the kept types. Removing a type
+  from a network stays impossible on purpose: it could break a member's customisation, its reuse of the type, or
+  another network the space is in.
+- **A space added to a network reaches its members with its schema** (`Q-60`). A schema-library reference now
+  travels resolved, where it was sent as a name the member's library did not have and the member refused the
+  whole schema. A type whose reference neither side can resolve is left out on its own. A space added to a club,
+  closed or democratic network carries its schema on the vote. And the proposer of a club schema change now
+  updates the network's layer as well as its own definitions: before, the stale layer outranked its own edit, so
+  the one instance that made the change could not see it.
+- **A push the receiver refused is no longer reported as pushed** (`Q-59`). `batch-upsert` answers a `rejected`
+  count per family, covering every record it neither stored nor already held: schema-invalid, an implausible
+  `seq`, a fork chain at its cap, or a chrono type the space does not declare. The sender subtracts it and records
+  the cycle as **partial**, naming the family and the count, so a cycle whose records all bounced no longer reads
+  `success`. A peer that refused records answered, so its failure count does not rise. The watermark still
+  advances, as before. Links are now counted in the cycle's totals too.
+
 ## [5.4.1] — 2026-09-26
 
 **Subscribing a webhook to fact events works from Settings → Webhooks again.** Since 5.0 the page offered event
