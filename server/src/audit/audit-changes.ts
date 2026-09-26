@@ -75,8 +75,8 @@ export const AUDIT_CHANGE_FIELDS: Readonly<Record<string, readonly string[]>> = 
   'network.update': ['label', 'syncSchedule', 'requireSignedVotes'],
   // The space list before and after `POST /api/networks/:id/spaces` — ids only; the act hands over nothing wider.
   'network.space.add': ['spaces'],
-  // Accepting or dismissing a space an upstream announced (S-9): what the network carries, and what still waits.
-  'network.space.pending': ['spaces', 'pendingSpaces'],
+  // Accepting or dismissing a space the network proposed (S-9): what it carries, what still waits, what was declined.
+  'network.space.pending': ['spaces', 'pendingSpaces', 'dismissedSpaces'],
   // Backup schedule and retention. `offsite.destPath` is a container filesystem path (mounted volume),
   // not a URL, so it cannot carry credentials in userinfo the way a webhook target can.
   'data.backup_config.update': ['schedule', 'retention.keepLocal', 'offsite.destPath', 'offsite.retention.keepCount'],

@@ -35,7 +35,7 @@ import { log } from '../util/log.js';
 import { networkRole } from './network-role.js';
 import { addSpacesToNetwork, widenPeerTokens } from './network-spaces.js';
 import { concludeRoundIfReady } from '../sync/governance.js';
-import { localToRemote } from '../sync/space-map.js';
+import { localToRemote, remoteToLocal } from '../sync/space-map.js';
 import { makeSignedOwnCast } from '../util/signing.js';
 import { openRoundHere } from './round-local-state.js';
 
@@ -257,6 +257,13 @@ export const ResolvePendingSpaceBody = z.object({
   mapTo: z.string().regex(/^[a-z0-9-]{1,40}$/).optional(),
 }).strict();
 
+/** What a pending-space answer changes, ids only, for its audit row: carried, still waiting, and dismissed. */
+const pendingSnapshot = (n: NetworkConfig) => ({
+  spaces: [...n.spaces],
+  pendingSpaces: (n.pendingSpaces ?? []).map(p => p.networkId),
+  dismissedSpaces: [...(n.dismissedSpaces ?? [])],
+});
+
 /**
  * Accept or dismiss a space an upstream announced and this instance held as pending (S-9).
  *
@@ -275,18 +282,27 @@ export async function resolvePendingSpaceAct(caller: Caller, id: string, input: 
   const cfg = getConfig();
   const net = visibleNetworks(caller, cfg.networks).find(n => n.id === id);
   if (!net) return notFound;
-  const entry = (net.pendingSpaces ?? []).find(p => p.networkId === spaceId);
+  // A dismissed space can still be accepted by its id: dismissing stops the network re-proposing it, not the operator.
+  const wasDismissed = net.dismissedSpaces?.includes(spaceId) ?? false;
+  const entry = (net.pendingSpaces ?? []).find(p => p.networkId === spaceId)
+    ?? (wasDismissed && action === 'accept' ? { networkId: spaceId, localId: remoteToLocal(net, spaceId), why: 'dismissed earlier', from: 'operator', at: new Date().toISOString() } : undefined);
   if (!entry) return { status: 404, error: `The network has no pending space '${spaceId}'.` };
-  const before = { spaces: [...net.spaces], pendingSpaces: (net.pendingSpaces ?? []).map(p => p.networkId) };
-  const dropPending = () => { net.pendingSpaces = (net.pendingSpaces ?? []).filter(p => p.networkId !== spaceId); };
+  const before = pendingSnapshot(net);
+  const dropPending = () => {
+    net.pendingSpaces = (net.pendingSpaces ?? []).filter(p => p.networkId !== spaceId);
+    if (wasDismissed) net.dismissedSpaces = net.dismissedSpaces!.filter(d => d !== spaceId);
+  };
 
   if (action === 'dismiss') {
     const refusal = networkSettingsRefusal(caller, net);
     if (refusal) return { status: 403, error: refusal };
     dropPending();
+    // Recorded, so the next announcement or passed round does not propose it again (a forgotten dismissal returned
+    // on the next sync cycle, which made dismissing a snooze).
+    net.dismissedSpaces = [...(net.dismissedSpaces ?? []), spaceId];
     saveConfig(cfg);
     log.info(`Network ${net.id}: dismissed pending space '${spaceId}'`);
-    return { status: 200, body: networkView(net), audit: { before, after: { spaces: [...net.spaces], pendingSpaces: (net.pendingSpaces ?? []).map(p => p.networkId) } } };
+    return { status: 200, body: networkView(net), audit: { before, after: pendingSnapshot(net) } };
   }
 
   const localId = mapTo ?? entry.localId;
@@ -306,7 +322,7 @@ export async function resolvePendingSpaceAct(caller: Caller, id: string, input: 
   }
   if (caller.id) netAfter.spaceOrigins = recordOrigin(netAfter.spaceOrigins ?? {}, localId, caller.id);
   saveConfig(after);
-  return { status: 200, body: networkView(netAfter), audit: { before, after: { spaces: [...netAfter.spaces], pendingSpaces: (netAfter.pendingSpaces ?? []).map(p => p.networkId) } } };
+  return { status: 200, body: networkView(netAfter), audit: { before, after: pendingSnapshot(netAfter) } };
 }
 
 /**

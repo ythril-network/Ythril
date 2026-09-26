@@ -207,6 +207,11 @@ export interface NetworkConfig {
    * it, the joiner is unknown, or a local space already has that id. The operator accepts or maps one explicitly.
    */
   pendingSpaces?: { networkId: string; localId: string; why: string; from: string; at: string }[];
+  /**
+   * Network space ids the operator dismissed from `pendingSpaces`. An announcement or a passed round never proposes
+   * one again — dismissing is an answer, not a snooze — and accepting one later is still possible by its id.
+   */
+  dismissedSpaces?: string[];
   /** Maps remote (peer-side) space IDs to local space IDs.
    *  Used when a local space was renamed after joining, or when the joiner chose
    *  a different local ID to avoid a collision.  The sync engine uses this to

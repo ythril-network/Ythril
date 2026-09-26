@@ -549,12 +549,14 @@ generated for you, follow these steps:
    deleted, and a peer can never delete a record your instance wrote.
 5. Click **Confirm and join**.
 
-**Spaces the network adds later wait for you unless your token could have joined them.** When a publisher or a
-parent adds a space, your instance adds it here only if the token you joined with could have joined that space:
-write access on Networks for a space you have, or the right to create spaces for a new one. Otherwise, and always
-when you already have a space of that name, it appears on the network card under **Announced, waiting for you**,
-with the reason. Press **Accept** to add it, optionally typing a local id to carry it under, or **Dismiss** to
-forget it. Networks joined or created before 5.4 have no record of the joining token, so everything they announce waits here.
+**Spaces the network adds later wait for you unless your token could have joined them.** When a publisher, a
+parent or a passed vote adds a space you do not have, your instance creates it here only if the token you joined
+with could have: the right to create spaces, and that token still valid (not deleted, not expired). A space whose
+name you already have **always** waits, whoever joined — the network never starts syncing a space that only shares
+its name. Waiting spaces appear on the network card under **Announced, waiting for you**, with the reason. Press
+**Accept** to add it, optionally typing a local id to carry it under, or **Dismiss** to say no: a dismissed space is
+not proposed again (to change your mind, accept it by its id through the API or the `network_pending_space` tool). Networks joined or created before 5.4 have no record
+of the joining token, so everything they announce waits here.
 
 ### Sync schedule
 

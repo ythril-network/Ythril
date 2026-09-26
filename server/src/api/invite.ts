@@ -29,10 +29,10 @@
  * Security properties
  * ───────────────────
  * - RSA-4096-OAEP-SHA256: token payload is ~44 bytes, well within RSA-OAEP limits.
- * - Private keys are held in-memory only for ≤ 1 hour and discarded immediately after finalize.
+ * - Private keys are held in-memory only for ≤ 1 hour (10 minutes for a key-redeemed session) and discarded after finalize.
  * - handshakeId is a random UUID; stored bcrypt-hashed to prevent timing attacks.
  * - Rate-limited to 5 req/min on apply/finalize (invite key validation attempts).
- * - A handshake session expires after 1 hour; any attempt after expiry is rejected.
+ * - A handshake session expires after 1 hour (redeemed: 10 minutes, and at once if the invite key is regenerated).
  * - The PAT A creates for B is a standard scoped token — it can be revoked at any time.
  *
  * Route prefix: /api/invite
@@ -61,55 +61,19 @@ import { SSRF_SAFE_URL } from './networks/_shared.js';
 import type { NetworkMember, VoteRound } from '../config/types.js';
 import { openRoundHere } from '../networks/round-local-state.js';
 import { networkRole } from '../networks/network-role.js';
+import { openSession, findSession, updateSession, dropSession, redeemedOpen } from './invite-sessions.js';
 
 export const inviteRouter = Router();
 
 const BCRYPT_ROUNDS = 12;
-const HANDSHAKE_TTL_MS = 60 * 60 * 1000; // 1 hour
 
-// ── In-memory handshake store ────────────────────────────────────────────────
-// Sessions are ephemeral: private keys must never be persisted to disk.
+// ── Handshake sessions ──────────────────────────────────────────────────────
+// In memory only, in `./invite-sessions.ts`: one bcrypt compare per lookup, a short life for a session a
+// published key opened, and no session that outlives the key it was redeemed with.
 
-interface HandshakeSession {
-  /** bcrypt hash of the plaintext handshakeId */
-  idHash: string;
-  networkId: string;
-  /** A's ephemeral RSA private key (PEM) — held only for finalize step */
-  privateKeyPem: string;
-  /** A's ephemeral RSA public key (PEM) — sent to B in the apply response */
-  publicKeyPem: string;
-  /** Opened by `POST /api/invite/redeem` (F-41) rather than by an admin: counted against its per-network cap. */
-  redeemed?: boolean;
-  /** B's RSA public key — received during apply, used to encrypt the token for B */
-  peerPublicKeyPem?: string;
-  /** The PAT id A created for B — needed to link pending token to member record */
-  tokenForPeerId?: string;
-  /** B's instance info — stored at apply time, committed to config at finalize */
-  pendingMember?: {
-    instanceId: string;
-    instanceLabel: string;
-    instanceUrl: string;
-  };
-  expiresAt: number; // epoch ms
-  /** When set, this session is a braintree reparent, not a new join.
-   *  The instanceId of the grandchild being temporarily re-parented. */
-  reparentInstanceId?: string;
-  /** When set, only this instanceId may apply the invite (optional pinning). */
-  expectedInstanceId?: string;
-}
-
-const _sessions = new Map<string, HandshakeSession>();
-
-/** Purge expired sessions (run periodically) */
-function purgeExpired(): void {
-  const now = Date.now();
-  for (const [key, session] of _sessions) {
-    if (session.expiresAt < now) {
-      _sessions.delete(key);
-    }
-  }
-}
-setInterval(purgeExpired, 5 * 60 * 1000).unref();
+/** The network's CURRENT invite-key hash: a redeemed session opened under another one is no longer valid. */
+const liveInviteKeyHash = (networkId: string): string | undefined =>
+  getConfig().networks.find(n => n.id === networkId)?.inviteKeyHash;
 
 // ── Schemas ──────────────────────────────────────────────────────────────────
 
@@ -166,16 +130,6 @@ function rsaDecrypt(cipherBase64: string, privateKeyPem: string): string {
   return decrypted.toString('utf8');
 }
 
-/** Look up a session by plaintext handshakeId (constant-time bcrypt compare) */
-async function findSession(handshakeId: string): Promise<[string, HandshakeSession] | null> {
-  for (const [key, session] of _sessions) {
-    if (session.expiresAt < Date.now()) continue;
-    const match = await bcrypt.compare(handshakeId, session.idHash);
-    if (match) return [key, session];
-  }
-  return null;
-}
-
 // ── POST /api/invite/generate ─────────────────────────────────────────────────
 // Authenticated members generate an invite handshake session for a network.
 
@@ -230,7 +184,7 @@ inviteRouter.post('/generate', globalRateLimit, requireAuth, denyReadOnly, async
  */
 async function openHandshakeSession(
   networkId: string,
-  opts: { reparentInstanceId?: string; expectedInstanceId?: string; redeemed?: boolean },
+  opts: { reparentInstanceId?: string; expectedInstanceId?: string; redeemed?: { under: string; by: string } },
   req: { protocol: string; get(name: string): string | undefined },
 ): Promise<Record<string, unknown> | null> {
   const { reparentInstanceId, expectedInstanceId } = opts;
@@ -242,19 +196,13 @@ async function openHandshakeSession(
   });
 
   const handshakeId = uuidv4();
-  const idHash = await bcrypt.hash(handshakeId, BCRYPT_ROUNDS);
-  const sessionKey = uuidv4(); // internal map key
-  const expiresAt = Date.now() + HANDSHAKE_TTL_MS;
-
-  _sessions.set(sessionKey, {
-    idHash,
+  const { sessionKey, expiresAt } = await openSession(handshakeId, {
     networkId,
     privateKeyPem: privateKey as string,
     publicKeyPem: publicKey as string,
-    expiresAt,
     reparentInstanceId,
     expectedInstanceId,
-    ...(opts.redeemed ? { redeemed: true } : {}),
+    ...(opts.redeemed ? { redeemed: opts.redeemed } : {}),
   });
 
   log.info(`Invite handshake ${opts.redeemed ? 'redeemed by key' : 'generated'} for network ${networkId} (session ${sessionKey})${
@@ -272,7 +220,7 @@ async function openHandshakeSession(
   if (!freshNet) {
     // The network was deleted while this handshake was being prepared. The session is now useless —
     // drop it rather than leaving a live invite pointing at nothing.
-    _sessions.delete(sessionKey);
+    dropSession(sessionKey);
     return null;
   }
 
@@ -302,10 +250,11 @@ async function openHandshakeSession(
 // (`docs/network-types.md`: "embedded in documentation pages, QR codes, or shared openly").
 //
 // Bounded because it is anonymous and every call costs a bcrypt compare per pub/sub network and an RSA-4096 key
-// pair: `authRateLimit` per caller, and at most MAX_REDEEMED_OPEN live redeemed sessions per network, so the
-// session scan in `findSession` stays small. Only a network this instance PUBLISHES answers; a club, closed or
+// pair: `authRateLimit` per caller, at most MAX_REDEEMED_OPEN live redeemed sessions per network and
+// MAX_REDEEMED_PER_CALLER per caller address, each living ten minutes (`invite-sessions.ts`). Only a network this instance PUBLISHES answers; a club, closed or
 // braintree key never matches here, whatever it is.
 const MAX_REDEEMED_OPEN = 25;
+const MAX_REDEEMED_PER_CALLER = 3;
 const RedeemBody = z.object({ inviteKey: z.string().min(20).max(200) }).strict();
 
 inviteRouter.post('/redeem', authRateLimit, async (req, res) => {
@@ -319,11 +268,12 @@ inviteRouter.post('/redeem', authRateLimit, async (req, res) => {
   }
   // One answer for every miss: an unknown key must not tell a caller which networks exist.
   if (!net) { res.status(403).json({ error: 'This invite key does not open a pub/sub network on this instance.' }); return; }
-  const open = [..._sessions.values()].filter(x => x.networkId === net!.id && x.redeemed && x.expiresAt > Date.now()).length;
-  if (open >= MAX_REDEEMED_OPEN) {
-    res.status(429).json({ error: `Too many joins by key are open for this network; try again within the hour.` }); return;
+  const by = req.ip ?? 'unknown';
+  const open = redeemedOpen(net.id, by);
+  if (open.network >= MAX_REDEEMED_OPEN || open.caller >= MAX_REDEEMED_PER_CALLER) {
+    res.status(429).json({ error: 'Too many joins by key are open for this network; try again in a few minutes.' }); return;
   }
-  const opened = await openHandshakeSession(net.id, { redeemed: true }, req);
+  const opened = await openHandshakeSession(net.id, { redeemed: { under: net.inviteKeyHash!, by } }, req);
   if (!opened) { res.status(404).json({ error: 'Network not found' }); return; }
   res.status(201).json(opened);
 });
@@ -337,7 +287,7 @@ inviteRouter.post('/apply', authRateLimit, async (req, res) => {
 
   const { handshakeId, networkId, instanceId, instanceLabel, instanceUrl, rsaPublicKeyPem } = parsed.data;
 
-  const found = await findSession(handshakeId);
+  const found = await findSession(handshakeId, liveInviteKeyHash);
   if (!found) { res.status(401).json({ error: 'Invalid or expired handshake ID' }); return; }
   const [sessionKey, session] = found;
 
@@ -429,7 +379,7 @@ inviteRouter.post('/apply', authRateLimit, async (req, res) => {
   session.peerPublicKeyPem = rsaPublicKeyPem;
   session.tokenForPeerId = record.id;
   session.pendingMember = { instanceId, instanceLabel, instanceUrl };
-  _sessions.set(sessionKey, session);
+  updateSession(sessionKey, session);
 
   log.info(`Invite apply from ${instanceLabel} (${instanceId}) for network ${networkId}`);
 
@@ -454,7 +404,7 @@ inviteRouter.post('/finalize', authRateLimit, async (req, res) => {
 
   const { handshakeId, encryptedTokenForA } = parsed.data;
 
-  const found = await findSession(handshakeId);
+  const found = await findSession(handshakeId, liveInviteKeyHash);
   if (!found) { res.status(401).json({ error: 'Invalid or expired handshake ID' }); return; }
   const [sessionKey, session] = found;
 
@@ -631,7 +581,7 @@ inviteRouter.post('/finalize', authRateLimit, async (req, res) => {
   setTokenExpiry(session.tokenForPeerId, null);
 
   // Discard the session — private key is no longer needed
-  _sessions.delete(sessionKey);
+  dropSession(sessionKey);
 
   res.json({
     status: responseStatus,
@@ -652,7 +602,7 @@ inviteRouter.get('/status/:handshakeId', authRateLimit, async (req, res) => {
     return;
   }
 
-  const found = await findSession(handshakeId);
+  const found = await findSession(handshakeId, liveInviteKeyHash);
   if (!found) {
     // Could be expired, completed (deleted), or never existed — all map to 404
     res.status(404).json({ status: 'not_found' });
