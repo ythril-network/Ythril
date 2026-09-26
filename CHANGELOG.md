@@ -54,6 +54,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   conflict name, where it replicated to every member: a keep-both without the rename, shown as if it deferred the
   choice. Choose keep local, keep incoming, keep both or save to space. **Removed:** `DELETE /api/conflicts/:id`,
   the route behind it; a call answers `404` and leaves the conflict open. Resolve with `POST /api/conflicts/:id/resolve`.
+- **`?embedded=1` survives a sign-in inside the frame.** The flag was read from the URL only, so after the identity
+  provider's redirect, a new document whose query is `code` and `state`, the topbar and Sign out came back in a
+  framed brain. It is now kept for the tab in `sessionStorage`; another tab is unaffected and `?embedded=0` clears it.
+- **The conflict page's action selects look editable on every theme.** They were styled with a theme token no
+  stylesheet defines, so their border and background were dropped; five other reads of undefined tokens are fixed
+  and a gate now holds every `var()` the client reads to a defined token.
 
 ## [5.4.1] — 2026-09-26
 

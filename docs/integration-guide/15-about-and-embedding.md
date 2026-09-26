@@ -292,7 +292,7 @@ Load the app with `?embedded=1` to hide the shell topbar:
 <iframe src="https://your-ythril-host/brain?embedded=1"></iframe>
 ```
 
-Navigation is unaffected — it lives in the sidebar, not the topbar. The flag is read once at startup and persists across in-app navigation (Angular drops unknown query params on route changes, so it is cached rather than re-read).
+Navigation is unaffected — it lives in the sidebar, not the topbar. The flag is read once at startup and persists across in-app navigation (Angular drops unknown query params on route changes, so it is cached rather than re-read). **It also survives a sign-in inside the frame**: the identity provider's callback is a new document without the parameter, so the flag is kept in the tab's `sessionStorage` and read from there. That storage is per tab and per origin, so a direct visit in another tab shows the full shell; `?embedded=0` clears it.
 
 Accepted values: `1`, `true`, `yes`. Anything else (or an absent param) renders the normal shell.
 
