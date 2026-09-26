@@ -796,8 +796,6 @@
   "conflicts.bulkActionAriaLabel": "Bulk action",
   "conflicts.resolveActionAriaLabel": "Resolve action",
   "conflicts.targetSpaceAriaLabel": "Target space",
-  "conflicts.dismissTitle": "Dismiss without file changes",
-  "conflicts.dismissAriaLabel": "Dismiss conflict",
   "conflicts.action.keepLocal": "Keep local",
   "conflicts.action.keepIncoming": "Keep incoming",
   "conflicts.action.keepBoth": "Keep both",

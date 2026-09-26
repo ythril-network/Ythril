@@ -233,8 +233,4 @@ export class FilesApi {
   bulkResolveConflicts(ids: string[], action: string, opts?: { rename?: string; targetSpaceId?: string }): Observable<{ resolved: number; failed: { id: string; error: string }[] }> {
     return this.http.post<any>('/api/conflicts/bulk-resolve', { ids, action, ...opts });
   }
-
-  dismissConflict(id: string): Observable<void> {
-    return this.http.delete<void>(`/api/conflicts/${id}`);
-  }
 }

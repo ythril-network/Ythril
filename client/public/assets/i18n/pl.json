@@ -796,8 +796,6 @@
   "conflicts.bulkActionAriaLabel": "Akcja zbiorcza",
   "conflicts.resolveActionAriaLabel": "Akcja rozwiązania",
   "conflicts.targetSpaceAriaLabel": "Przestrzeń docelowa",
-  "conflicts.dismissTitle": "Odrzuć bez zmian w plikach",
-  "conflicts.dismissAriaLabel": "Odrzuć konflikt",
   "conflicts.action.keepLocal": "Zachowaj lokalne",
   "conflicts.action.keepIncoming": "Zachowaj przychodzące",
   "conflicts.action.keepBoth": "Zachowaj oba",

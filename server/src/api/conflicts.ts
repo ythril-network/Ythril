@@ -241,24 +241,9 @@ conflictsRouter.get('/:id', globalRateLimit, requireAuth, async (req, res) => {
   }
 });
 
-// DELETE /api/conflicts/:id — dismiss (resolve) a conflict record
-conflictsRouter.delete('/:id', globalRateLimit, requireAuth, denyReadOnly, async (req, res) => {
-  try {
-    const spaces = accessibleSpaces(req, 'write');
-    for (const spaceId of spaces) {
-      const result = await col<ConflictDoc>(spaceCollection(spaceId, 'conflicts'))
-        .deleteOne(asFilter<ConflictDoc>({ _id: req.params['id'] }));
-      if (result.deletedCount > 0) {
-        res.status(204).end();
-        return;
-      }
-    }
-    res.status(404).json({ error: 'Conflict not found' });
-  } catch (err) {
-    log.error(`DELETE /api/conflicts/:id: ${err}`);
-    res.status(500).json({ error: 'Internal error' });
-  }
-});
+// There is no DELETE /api/conflicts/:id. It closed the record and left the incoming copy in the space under its
+// conflict name, where it replicated to every member — a keep-both without the rename (removed 2026-09-27). A
+// conflict closes only through a resolution.
 
 // POST /api/conflicts/bulk-resolve — resolve multiple conflicts at once
 conflictsRouter.post('/bulk-resolve', globalRateLimit, requireAuth, denyReadOnly, async (req, res) => {

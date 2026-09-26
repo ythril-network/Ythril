@@ -149,7 +149,7 @@ Open **Conflicts** from the sidebar to see them. For each conflict choose what t
 | **Keep both** | Both versions are kept (you can rename the incoming copy) |
 | **Save to space** | The incoming version is copied to a different space, then the conflict is removed |
 
-**Dismiss** (✕) removes the conflict record without changing any files.
+Every conflict ends in one of these four. There is no dismiss: a conflict closes only by one of these, so an incoming copy is never left behind under its conflict name.
 
 **You do not have to do them one at a time.** Tick the conflicts you want — or use **Select all** — pick
 an action, and **Resolve N selected** applies it to every one. You are asked to confirm, with the count

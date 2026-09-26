@@ -50,6 +50,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   write only the fields the sync schema declares, so the receiver also no longer takes the sender's size and hash.
 - **`GET /api/conflicts?spaceId=` narrows to that space**, as documented, and answers `403` for a space the token
   cannot reach. It read the parameter nowhere and returned every accessible space's conflicts.
+- **Conflicts no longer offer Dismiss.** It closed the conflict and left the incoming copy in the space under its
+  conflict name, where it replicated to every member: a keep-both without the rename, shown as if it deferred the
+  choice. Choose keep local, keep incoming, keep both or save to space. **Removed:** `DELETE /api/conflicts/:id`,
+  the route behind it; a call answers `404` and leaves the conflict open. Resolve with `POST /api/conflicts/:id/resolve`.
 
 ## [5.4.1] — 2026-09-26
 

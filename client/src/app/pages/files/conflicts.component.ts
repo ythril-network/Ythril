@@ -126,9 +126,6 @@ type ResolveAction = 'keep-local' | 'keep-incoming' | 'keep-both' | 'save-to-spa
                           [disabled]="resolving() === c.id">
                     {{ resolving() === c.id ? ('conflicts.resolving' | transloco) : ('conflicts.resolveButton' | transloco) }}
                   </button>
-                  <button class="btn-secondary btn btn-sm" style="margin-left:4px"
-                          (click)="dismiss(c)" [disabled]="resolving() === c.id"
-                      [attr.title]="'conflicts.dismissTitle' | transloco" [attr.aria-label]="'conflicts.dismissAriaLabel' | transloco"><ph-icon name="x" [size]="16"/></button>
                 </td>
               </tr>
             }
@@ -219,18 +216,6 @@ export class ConflictsComponent implements OnInit {
     }
     this.resolving.set(c.id);
     this.filesApi.resolveConflict(c.id, action, opts).subscribe({
-      next: () => {
-        this.conflicts.update(list => list.filter(x => x.id !== c.id));
-        this.selectedIds.update(ids => ids.filter(x => x !== c.id));
-        this.resolving.set(null);
-      },
-      error: () => this.resolving.set(null),
-    });
-  }
-
-  dismiss(c: ConflictRecord): void {
-    this.resolving.set(c.id);
-    this.filesApi.dismissConflict(c.id).subscribe({
       next: () => {
         this.conflicts.update(list => list.filter(x => x.id !== c.id));
         this.selectedIds.update(ids => ids.filter(x => x !== c.id));
