@@ -85,6 +85,33 @@ export function resolveMetaRefs(meta: SpaceMeta): SpaceMeta {
   return { ...meta, typeSchemas: resolvedTypeSchemas };
 }
 
+/**
+ * The same meta with every `$ref` this instance CAN resolve written inline, and the rest left as they were — the form
+ * a meta takes when it leaves for a peer (`Q-60`).
+ *
+ * A schema-library entry is this instance's own and does not travel. So a `$ref` sent as-is reached a member whose
+ * library had no such entry, which refused the whole schema (the meta pull) or stored a reference to nothing (a
+ * passed round) — seen live: `library:cross-space-reference` reached ythril-home and resolved to nothing, and
+ * creating a space with the same schema there was refused 422 until the entry was copied by hand. Differs from
+ * `resolveMetaRefs` on purpose: that one is for VALIDATING here and stamps `_unresolvedRef`; this one is for SENDING,
+ * and a stamp this instance invented must not become part of another instance's schema.
+ */
+export function inlineResolvableRefs<M extends Partial<SpaceMeta>>(meta: M): M {
+  if (!meta?.typeSchemas) return meta;
+  let changed = false;
+  const out: Partial<Record<KnowledgeType, Record<string, TypeSchema>>> = {};
+  for (const [kt, ktMap] of Object.entries(meta.typeSchemas) as [KnowledgeType, Record<string, TypeSchema> | undefined][]) {
+    if (!ktMap) continue;
+    out[kt] = {};
+    for (const [typeName, schema] of Object.entries(ktMap)) {
+      const resolved = schema?.$ref ? resolveTypeSchema(schema) : undefined;
+      if (resolved) changed = true;
+      out[kt]![typeName] = resolved ?? schema;
+    }
+  }
+  return changed ? { ...meta, typeSchemas: out } : meta;
+}
+
 // ── Public API ─────────────────────────────────────────────────────────────
 
 /**

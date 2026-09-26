@@ -49,6 +49,7 @@ import { normaliseRecordTtl } from './record-ttl.js';
 import { UpdateSpaceBody, findBrokenLibraryRefs, brokenRefsError, stripServerOwnedMeta, stripServerOwnedSpace } from './body-schemas.js';
 import type { TypeSchemasZ } from './body-schemas.js';
 import type { z } from 'zod';
+import { isDeepStrictEqual } from 'node:util';
 import { sweepSuppressedVectors } from '../brain/suppression-sweep.js';
 
 /**
@@ -107,6 +108,50 @@ export function mergeSpaceMeta(
 }
 
 /**
+ * The types a `replace` would delete — `kind:Type` for each type in `base` that `incoming` leaves out — or none for a
+ * merge. On a networked space those are exactly the types the edit does NOT remove (`Q-61`): a network round is
+ * applied as a merge on every member and on the proposer (`applyMetaRound`), because deleting a type in a network can
+ * break a member's customisation, its reuse of the type, or another network the space is in. Owner, 2026-09-26:
+ * *"updates should be non-destructive"*. What was wrong was answering 200 as if the replace had happened.
+ */
+export function typesAReplaceWouldDrop(
+  base: Partial<SpaceMeta>, incoming: Partial<SpaceMeta> | undefined, mode: 'merge' | 'replace',
+): string[] {
+  if (mode !== 'replace' || !incoming?.typeSchemas) return [];
+  const out: string[] = [];
+  for (const [kt, types] of Object.entries(base.typeSchemas ?? {}) as [string, Record<string, unknown> | undefined][]) {
+    const keep = (incoming.typeSchemas as Record<string, Record<string, unknown> | undefined>)[kt] ?? {};
+    for (const t of Object.keys(types ?? {})) if (!(t in keep)) out.push(`${kt}:${t}`);
+  }
+  return out.sort();
+}
+
+/** `kind:Type` in `incoming` whose definition differs from `base`'s — what an edit actually adds or changes. */
+export function typesAnEditChanges(base: Partial<SpaceMeta>, incoming: Partial<SpaceMeta> | undefined): string[] {
+  const out: string[] = [];
+  for (const [kt, types] of Object.entries(incoming?.typeSchemas ?? {}) as [string, Record<string, unknown> | undefined][]) {
+    const had = (base.typeSchemas as Record<string, Record<string, unknown> | undefined> | undefined)?.[kt] ?? {};
+    for (const [t, def] of Object.entries(types ?? {})) if (!isDeepStrictEqual(had[t], def)) out.push(`${kt}:${t}`);
+  }
+  return out.sort();
+}
+
+/**
+ * What both doors add to the answer when a networked edit was applied as a merge (`Q-61`): the flag, the kept types,
+ * and one sentence. Spread into the REST body and the MCP structured content alike, so the two cannot word it apart.
+ */
+export function networkMergeNotice(outcome: MetaUpdateOutcome): Record<string, unknown> {
+  if (outcome.outcome === 'not_found' || !outcome.keptTypes?.length) return {};
+  return {
+    appliedAsMerge: true,
+    keptTypes: outcome.keptTypes,
+    mergeNote: `This space is in a network, where a schema update is applied as a merge on every member and here: `
+      + `${outcome.keptTypes.join(', ')} ${outcome.keptTypes.length === 1 ? 'was' : 'were'} left out of the replacement and ${outcome.keptTypes.length === 1 ? 'is' : 'are'} kept. `
+      + `Where this instance has members below it in the network, the note it sends them when the round passes names the kept types; each member can retire a type locally.`,
+  };
+}
+
+/**
  * A refusal, carrying the HTTP status.
  *
  * The status is part of the contract rather than something each surface re-derives: five distinct numbers, and a
@@ -143,6 +188,10 @@ export type MetaUpdatePlan = {
   audit: { before: Record<string, unknown>; after: Record<string, unknown> };
   /** The one network this proposes to, as its layer (`F-39.5`); absent, the edit is this instance's own. */
   targetNetwork?: string;
+  /** `kind:Type` a `replace` leaves out of the base (`typesAReplaceWouldDrop`); kept if the space is networked. */
+  droppedTypes: string[];
+  /** `kind:Type` the edit adds or changes against the base (`typesAnEditChanges`). */
+  changedTypes: string[];
 };
 
 export type MetaUpdateDecision =
@@ -284,6 +333,8 @@ export function planSpaceMetaUpdate(input: {
       hasRecordTtl,
       audit,
       ...(targetNetwork !== undefined ? { targetNetwork } : {}),
+      droppedTypes: typesAReplaceWouldDrop(base, parsed.data.meta as Partial<SpaceMeta> | undefined, parsed.data.typeSchemasMode ?? 'merge'),
+      changedTypes: typesAnEditChanges(base, parsed.data.meta as Partial<SpaceMeta> | undefined),
     },
   };
 }
@@ -296,8 +347,8 @@ export function planSpaceMetaUpdate(input: {
  * into "ok" would tell an agent its schema was written when it was not.
  */
 export type MetaUpdateOutcome =
-  | { outcome: 'applied'; space: SpaceConfig }
-  | { outcome: 'vote_pending'; rounds: { networkId: string; networkLabel: string; roundId: string }[] }
+  | { outcome: 'applied'; space: SpaceConfig; keptTypes?: string[] }
+  | { outcome: 'vote_pending'; rounds: { networkId: string; networkLabel: string; roundId: string }[]; keptTypes?: string[] }
   | { outcome: 'not_found' };
 
 /**
@@ -376,6 +427,9 @@ export async function applySpaceMetaUpdate(plan: MetaUpdatePlan): Promise<MetaUp
           metaChangedFields: proposedMetaFields(patchData.meta ?? {}),
           baseMetaVersion: space.meta?.version ?? 0,
           ...(plan.targetNetwork !== undefined ? { proposesLayer: true } : {}),
+          // Q-61: what the change note says when the round passes (`sync/governance.ts`).
+          ...(plan.changedTypes.length ? { changedTypes: plan.changedTypes } : {}),
+          ...(plan.droppedTypes.length ? { keptTypes: plan.droppedTypes } : {}),
         });
         // The proposer is a voter like any member (S-7), so its yes is required — and cast for it here, SIGNED, because
         // a bare cast is taken only from the voter itself and a relayed copy of it would be dropped.
@@ -390,6 +444,7 @@ export async function applySpaceMetaUpdate(plan: MetaUpdatePlan): Promise<MetaUp
          */
         if (!concludeRoundIfReady(net, opened)) rounds.push({ networkId: net.id, networkLabel: net.label, roundId });
       }
+      const kept = plan.droppedTypes.length ? { keptTypes: plan.droppedTypes } : {};
 
       // Non-meta updates apply immediately (label, maxGiB). `description` is not among them: the planner rewrote it
       // into `meta.purpose`, so it travels with the rest of the meta and is voted on.
@@ -426,14 +481,14 @@ export async function applySpaceMetaUpdate(plan: MetaUpdatePlan): Promise<MetaUp
         }
       }
 
-      if (rounds.length > 0) return { outcome: 'vote_pending', rounds };
+      if (rounds.length > 0) return { outcome: 'vote_pending', rounds, ...kept };
 
       // Every round passed on the proposer's own vote, so the meta is already written by the conclusion.
       const applied = getConfig().spaces.find(s => s.id === id);
       if (!applied) return { outcome: 'not_found' };
       void sweepSuppressedVectors(id, applied.meta as SpaceMeta)
         .catch(err => log.warn(`Suppression sweep failed for ${id}: ${err instanceof Error ? err.message : String(err)}`));
-      return { outcome: 'applied', space: applied };
+      return { outcome: 'applied', space: applied, ...kept };
     }
   }
 
@@ -488,9 +543,9 @@ export async function voteOnSchemaEditIfNetworked(
   if (!decision.ok) return { status: decision.refusal.status, body: decision.refusal.body as Record<string, unknown> };
   const result = await applySpaceMetaUpdate(decision.plan);
   if (result.outcome === 'vote_pending') {
-    return { status: 202, body: { status: 'vote_pending', rounds: result.rounds, message: 'Meta change requires network vote' } };
+    return { status: 202, body: { status: 'vote_pending', rounds: result.rounds, message: 'Meta change requires network vote', ...networkMergeNotice(result) } };
   }
   if (result.outcome === 'not_found') return { status: 404, body: { error: `Space '${spaceId}' not found` } };
   // Every round passed on this instance's own yes (a club organiser, a publisher, a lone member): applied already.
-  return { status: 200, body: { space: result.space } };
+  return { status: 200, body: { space: result.space, ...networkMergeNotice(result) } };
 }

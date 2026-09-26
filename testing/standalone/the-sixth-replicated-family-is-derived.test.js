@@ -192,7 +192,7 @@ describe('the ingest response reports every family it accepted', () => {
     // Six arrays in and five sets of counters out: a sender had no way to tell whether its file metadata
     // landed, and the receiver counted it internally and only logged it.
     const src = code(DOCS);
-    assert.match(src, /filemeta:\s*fileMetaStats/,
+    assert.match(src, /filemeta:\s*(?:\{\s*\.\.\.)?fileMetaStats/,
       'the response omits the file-metadata counters, so a push of them reports nothing');
   });
 });

@@ -115,7 +115,10 @@ describe('the sender reads the body instead of trusting the status', () => {
     // succeeded, so the cost of being wrong here is a missing log line.
     assert.match(refusals, /\?\?\s*0/, 'a missing field must read as zero, not as undefined arithmetic');
     assert.match(refusals, /catch\s*\{/, 'and a parse failure must not fail the push');
-    assert.match(refusals, /Promise<void>/, 'it returns nothing, so no caller can be made to branch on it');
+    // It returns the refused count since Q-59, so the sender can stop counting refused records as pushed. A
+    // failure to read answers 0, so the diagnostic can only ever lower `pushed` by what the peer itself claimed.
+    assert.match(refusals, /Promise<number>/, 'it returns the refused count for the caller to subtract');
+    assert.match(refusals, /catch \{ return 0;/, 'and a body that will not parse counts nothing refused');
   });
 
   it('still advances the watermark — the fix is visibility, not delivery', () => {

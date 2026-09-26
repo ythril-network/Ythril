@@ -318,7 +318,12 @@ async function runSpaceMetaUpdate(
   rights: TokenRights | undefined,
   recordChanges?: ToolContext['recordChanges'],
 ): Promise<ToolResult> {
-  const { planSpaceMetaUpdate, applySpaceMetaUpdate } = await import('../../spaces/meta-update.js');
+  const { planSpaceMetaUpdate, applySpaceMetaUpdate, networkMergeNotice } = await import('../../spaces/meta-update.js');
+  // Q-61: a networked replace is applied as a merge; the text says which types it kept, as the structured half does.
+  const mergeLine = (r: Parameters<typeof networkMergeNotice>[0]): string => {
+    const note = networkMergeNotice(r)['mergeNote'];
+    return typeof note === 'string' ? `\n\n${note}` : '';
+  };
   const space = getConfig().spaces.find(s => s.id === spaceId);
 
   /*
@@ -364,11 +369,11 @@ async function runSpaceMetaUpdate(
       content: [{ type: 'text' as const, text:
         `Proposed, NOT yet applied: '${spaceId}' belongs to ${result.rounds.length === 1 ? 'a network' : 'networks'} `
         + `that votes on meta changes (${nets}), so this opened a vote round instead of writing. The change takes `
-        + `effect if and when the round concludes in favour.` }],
-      structuredContent: { outcome: 'vote_pending', rounds: result.rounds },
+        + `effect if and when the round concludes in favour.` + mergeLine(result) }],
+      structuredContent: { outcome: 'vote_pending', rounds: result.rounds, ...networkMergeNotice(result) },
     };
   }
-  return { content: [{ type: 'text' as const, text: okText }], structuredContent: { outcome: 'applied' } };
+  return { content: [{ type: 'text' as const, text: okText + mergeLine(result) }], structuredContent: { outcome: 'applied', ...networkMergeNotice(result) } };
 }
 
 /**

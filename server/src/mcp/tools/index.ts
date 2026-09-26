@@ -15,7 +15,7 @@ import { read_fileTool, write_fileTool, update_file_metaTool, list_dirTool, dele
 import { network_peersTool, network_syncTool } from './sync.js';
 import { network_member_admitTool, network_member_signing_keyTool, network_reparent_selfTool, network_member_adoptTool, network_member_revert_parentTool } from './network-topology.js';
 import { network_join_remoteTool, network_join_by_keyTool, network_member_addTool, network_member_removeTool } from './network-join.js';
-import { network_getTool, network_createTool, network_updateTool, network_leaveTool, network_add_spaceTool, network_pending_spaceTool, network_votesTool, network_voteTool, network_sync_historyTool, network_inviteTool, network_forkTool } from './networks.js';
+import { network_getTool, network_createTool, network_updateTool, network_leaveTool, network_add_spaceTool, network_pending_spaceTool, network_votesTool, network_voteTool, network_sync_historyTool, network_change_notesTool, network_inviteTool, network_forkTool } from './networks.js';
 import { helpTool } from './help.js';
 import { list_embed_jobsTool, retry_embed_recordTool, retry_embed_mediaTool, space_reindexTool, space_reembedTool } from './embed.js';
 
@@ -86,6 +86,7 @@ export const ALL_TOOLS: ToolHandler[] = [
   network_votesTool,
   network_voteTool,
   network_sync_historyTool,
+  network_change_notesTool,
   network_inviteTool,
   network_forkTool,
   network_join_remoteTool,

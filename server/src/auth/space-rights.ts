@@ -417,6 +417,7 @@ export const NOT_AREA_SCOPED: readonly { route: string; why: string }[] = [
   { route: '/api/networks/:id/sync', why: 'starting a sync cycle is instance operations (it spends the instance\'s bandwidth and every peer\'s), not a view of a space — instance-admin, like MCP network_sync' },
   { route: '/api/networks/peers/:peerId/sync', why: 'syncing with one peer: instance operations — instance-admin' },
   { route: '/api/networks/:id/sync-history', why: 'the instance\'s sync telemetry for a network, not a view of any space\'s data — instance-admin' },
+  { route: '/api/networks/:id/change-notes', why: 'notes an operator sent down a network or received from above: the network\'s correspondence, not a view of any space\'s data — instance-admin, like MCP network_change_notes' },
 
   /*
    * THE TOOL DOOR, and this row is the one most worth reading before deciding it looks like a hole.

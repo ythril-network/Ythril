@@ -57,6 +57,15 @@ Before the new schema is written, the previous `typeSchemas` is automatically ba
 
 `$ref` values inside any property schema are validated against the instance's schema library — unknown refs return `422` with the list of missing entries.
 
+**On a space in a network, a replace removes nothing, and the answer says so.** A networked space's schema is
+the network's: the edit opens a `meta_change` round (`202`, or `200` where this instance's own yes passes it), and
+a passed round is applied as a **merge** on every member and here — deleting a type across a network could break a
+member's customisation, its reuse of the type, or another network the space is in. So a type the replacement
+leaves out is kept, and the answer (`PUT /:id/schema`, `DELETE /:id/meta/typeSchemas/:kt/:type`, `PATCH /:id` with
+`typeSchemasMode: "replace"`, the schema library's apply, and MCP `schema_update`) carries
+`"appliedAsMerge": true`, `"keptTypes": ["entity:Profile"]` and a `mergeNote` sentence. Members are sent a change
+note saying which types were kept, and each can retire a type locally.
+
 **Request body**:
 
 ```json

@@ -6,6 +6,7 @@ import type {
   Network, InviteBundle, VoteRound, SyncHistoryRecord,
   LocalAgentStatus, LocalAgentBootstrapResult, LocalAgentEnableNetworksResult,
 } from './api.types';
+import type { ChangeNote } from './change-note.types';
 
 /** Networks, sync scheduling/triggering, governance votes, invites, and the local agent. */
 @Injectable({ providedIn: 'root' })
@@ -82,6 +83,16 @@ export class NetworksApi {
 
   triggerSync(networkId: string): Observable<{ ok: boolean }> {
     return this.http.post<{ ok: boolean }>(`/api/networks/${networkId}/sync`, {});
+  }
+
+  /** Sync now, carrying a change note to the members below this instance (F-42). Refused 409 when nobody is below. */
+  syncWithNote(networkId: string, note: string, spaces: string[]): Observable<{ ok: boolean; noteId?: string }> {
+    return this.http.post<{ ok: boolean; noteId?: string }>(`/api/networks/${networkId}/sync`, { note, ...(spaces.length ? { spaces } : {}) });
+  }
+
+  /** Change notes on a network (F-42): `in` arrived here, `out` written here. Newest first. */
+  changeNotes(networkId: string, direction: 'in' | 'out', limit = 50): Observable<{ notes: ChangeNote[] }> {
+    return this.http.get<{ notes: ChangeNote[] }>(`/api/networks/${networkId}/change-notes?direction=${direction}&limit=${limit}`);
   }
 
   castVote(networkId: string, roundId: string, vote: 'yes' | 'veto'): Observable<void> {

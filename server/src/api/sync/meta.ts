@@ -12,6 +12,7 @@ import { getConfig } from '../../config/loader.js';
 import { reportServerFailure } from '../../util/report-failure.js';
 import { metaForNetwork, replicatedMetaOf } from '../../sync/replicated-meta.js';
 import { spaceAllowed } from './_shared.js';
+import { inlineResolvableRefs } from '../../spaces/schema-validation.js';
 
 export const syncMetaRouter = Router();
 
@@ -26,7 +27,8 @@ syncMetaRouter.get('/meta', syncRateLimit, requireAuth, (req, res) => {
     // Own definitions plus THIS network's layer only — never another network's, never the effective mix (F-39.2).
     const layer = getConfig().networks.find(n => n.id === networkId)?.schemaLayers?.[spaceId];
     const own = space.ownMeta ?? space.meta;
-    res.json({ meta: replicatedMetaOf(metaForNetwork(own, layer ? { networkId, meta: layer } : undefined)) });
+    // Q-60: library references written inline where this instance can resolve them — a peer's library is its own.
+    res.json({ meta: inlineResolvableRefs(replicatedMetaOf(metaForNetwork(own, layer ? { networkId, meta: layer } : undefined))) });
   } catch (err) {
     reportServerFailure('sync GET /meta', err);
     res.status(500).json({ error: 'Internal error' });

@@ -106,7 +106,10 @@ describe('MCP tool schemas — universal invariants', () => {
     // 67 -> 69: `network_pending_space` (S-9) and `network_join_by_key` (F-41). Prerequisites done for both: audit-map
     // entries under their routes' operations, `mutating: true` and listed among the tools a readOnly token cannot
     // see, and `16-mcp.md` rows in the tool table and the rights table.
-    assert.equal(ALL_TOOLS.length, 69);
+    // 69 -> 70: `network_change_notes` (`F-42`), a door onto `changeNotesAct` like `GET /api/networks/:id/change-notes`;
+    // read-only and instance-admin (`admin: true`) as the route is, listed among the read-only tools in `16-mcp.md`
+    // and in both of its tables.
+    assert.equal(ALL_TOOLS.length, 70);
   });
 
   it('every tool advertises a closed object schema (type:object, additionalProperties:false)', () => {

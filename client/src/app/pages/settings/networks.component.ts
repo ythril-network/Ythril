@@ -7,6 +7,7 @@ import { NetworksApi } from '../../core/networks-api.service';
 import { NetworkInvitePanelComponent } from './network-invite-panel.component';
 import { NetworkAddSpaceComponent } from './network-add-space.component';
 import { NetworkPendingSpacesComponent } from './network-pending-spaces.component';
+import { NetworkChangeNotesComponent } from './network-change-notes.component';
 import { SpacesApi } from '../../core/spaces-api.service';
 import { AdminApi } from '../../core/admin-api.service';
 import { TranslocoPipe } from '@jsverse/transloco';
@@ -26,7 +27,7 @@ import { NetworkEnableWizardComponent } from './network-enable-wizard.component'
 @Component({
   selector: 'app-networks',
   standalone: true,
-  imports: [CommonModule, FormsModule, TranslocoPipe, PhIconComponent, StatusPillComponent, SummaryStripComponent, RelativeTimeComponent, ErrorStateComponent, NetworkCreateDialogComponent, NetworkJoinDialogComponent, NetworkEnableWizardComponent, NetworkMemberRowComponent, NetworkInvitePanelComponent, NetworkAddSpaceComponent, NetworkPendingSpacesComponent],
+  imports: [CommonModule, FormsModule, TranslocoPipe, PhIconComponent, StatusPillComponent, SummaryStripComponent, RelativeTimeComponent, ErrorStateComponent, NetworkCreateDialogComponent, NetworkJoinDialogComponent, NetworkEnableWizardComponent, NetworkMemberRowComponent, NetworkInvitePanelComponent, NetworkAddSpaceComponent, NetworkPendingSpacesComponent, NetworkChangeNotesComponent],
   styles: [`
     .network-card {
       background: var(--bg-surface);
@@ -315,6 +316,7 @@ import { NetworkEnableWizardComponent } from './network-enable-wizard.component'
               }
 
               <app-network-pending-spaces [network]="net" (resolved)="replaceNetwork(net, $event)" />
+              <app-network-change-notes [network]="net" />
 
               <!-- Leave -->
               <div style="margin-top:16px; padding-top:12px; border-top:1px solid var(--border-muted);">

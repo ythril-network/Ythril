@@ -45,6 +45,7 @@ const DATA_VALUES = new Map([
   ['depends_on', 'an example edge label (save_edge: direction is part of the meaning)'],
   ['reports_to', 'an example edge label'],
   ['vote_pending', 'the status a network write returns while a vote round is open'],
+  ['change_note', 'the first half of the webhook event name change_note.received (F-42)'],
   // A former NAME, kept on purpose: an integrator whose call fails with "unknown tool" needs to find out what
   // it became (embed-job-tools-say-which-queue.test.js asserts it stays).
   ['retry_failed_embeddings', 'the name retry_embed_media had until 3.1'],

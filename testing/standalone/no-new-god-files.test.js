@@ -156,7 +156,18 @@ const FROZEN = {
   // `versionCheckedAt` stamp and its `changed` flag, written on the exchange whether or not a version
   // came back. That stamp is what separates 'answered and named none' from 'never exchanged with' —
   // conflating them refused every asymmetric network for ever, so this is the fix rather than growth.
-  'server/src/sync/engine.ts': 986,
+  //
+  // LOWERED 986 -> 962 with `F-42`/`Q-59` (sync-carries). The ten hand-written `+=` lines summing a member's counts
+  // became one loop over every family, which is also the fix for links never reaching the cycle totals; change-note
+  // delivery (one call in the governance step) and the push refusal count (`push-refusals.ts`) live beside it. The
+  // ceiling follows the file down, so the reclaimed lines are not room to regrow into.
+  //
+  // 962 -> 964 in the same PR, after review: a refused record went into the member's incomplete list, which is the
+  // FAILURE path — it raised the peer's failure count and, at the threshold, logged "PEER UNREACHABLE" for a peer
+  // that had answered 200. The two lines are the separate refusal channel (collected per member, counted per cycle
+  // into a partial status). NO DECOMPOSITION: the counting lives in `sync/push-refusals.ts`; what stays here is
+  // where in the cycle a refusal is recorded, which is a fact about the cycle.
+  'server/src/sync/engine.ts': 964,
   // 958 -> 684: the per-type editor body moved into `schema-type-editor.component` so the Brain Overview
   // could open the same editor. Lowered rather than left — a frozen number 274 lines above the real size
   // is 274 lines this file could regrow into without the gate saying a word.

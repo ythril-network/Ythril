@@ -38,7 +38,7 @@ import {
   DeleteSpaceBody, RenameSpaceBody, ReorderSpacesBody, PutSchemaBody,
 } from '../spaces/body-schemas.js';
 import { requireSettingsFields } from '../auth/require-settings-fields.js';
-import { planSpaceMetaUpdate, applySpaceMetaUpdate } from '../spaces/meta-update.js';
+import { planSpaceMetaUpdate, applySpaceMetaUpdate, networkMergeNotice } from '../spaces/meta-update.js';
 import { refuseFaceWidthChange } from '../spaces/face-width-change.js';
 import { planSpaceCreate, applySpaceCreate } from '../spaces/space-create.js';
 import { validateStoredEdges } from '../spaces/validate-stored-edges.js';
@@ -348,10 +348,10 @@ spacesRouter.patch('/:id', globalRateLimit, requireSpaceAuthMfaScoped('id'), den
     return;
   }
   if (result.outcome === 'vote_pending') {
-    res.status(202).json({ status: 'vote_pending', rounds: result.rounds, message: 'Meta change requires network vote' });
+    res.status(202).json({ status: 'vote_pending', rounds: result.rounds, message: 'Meta change requires network vote', ...networkMergeNotice(result) });
     return;
   }
-  res.json({ space: result.space });
+  res.json({ space: result.space, ...networkMergeNotice(result) });
 });
 
 // PUT /api/spaces/:id/schema — full replacement of the space's typeSchemas.

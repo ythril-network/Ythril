@@ -16,7 +16,8 @@
  * one strips whatever a peer sent, and serving one strips it on the way out. `a-round-proposer-is-a-local-fact.test.js`
  * refuses a push anywhere else.
  */
-import type { NetworkConfig, VoteRound } from '../config/types.js';
+import type { NetworkConfig, SpaceMeta, VoteRound } from '../config/types.js';
+import { inlineResolvableRefs } from '../spaces/schema-validation.js';
 
 /** The fields that describe this instance, never the network. A peer never sends them and never receives them. */
 export const LOCAL_ROUND_FIELDS = ['appliedHere', 'proposedHere'] as const;
@@ -50,7 +51,13 @@ export function adoptPeerRound(net: NetworkConfig, peerRound: VoteRound): VoteRo
   return stored;
 }
 
-/** A round as a peer may see it: without this instance's own state. */
-export function roundForPeer<T extends Partial<Record<LocalField, unknown>>>(round: T): Omit<T, LocalField> {
-  return withoutLocalState(round);
+/**
+ * A round as a peer may see it: without this instance's own state, and with the schema it carries written without
+ * library references this instance can resolve (`Q-60`) — a peer's library is its own, and a `$ref` it lacks
+ * would land in its layer pointing at nothing. The one door a round leaves by, so no sender can skip either half.
+ */
+export function roundForPeer<T extends Partial<Record<LocalField, unknown>> & { pendingMeta?: SpaceMeta }>(round: T): Omit<T, LocalField> {
+  const copy = withoutLocalState(round) as Omit<T, LocalField> & { pendingMeta?: SpaceMeta };
+  if (copy.pendingMeta) copy.pendingMeta = inlineResolvableRefs(copy.pendingMeta);
+  return copy;
 }

@@ -532,10 +532,15 @@ syncDocsRouter.post('/batch-upsert', syncRateLimit, requireAuth, denyReadOnly, a
      * and its `Incoming*` schema would otherwise lose records the same way and be just as invisible. Same
      * warning shape as the implausible-seq drop below — kind, id, space, peer — so both read alike in a log.
      */
+    // Q-59: every record this request carried and the handler neither stored nor already held, per kind — the
+    // count the sender subtracts from what it calls pushed. Filled by the two drops below and the in-loop refusals.
+    const dropped: Record<string, number> = {};
+    const drop = (kind: string) => { dropped[kind] = (dropped[kind] ?? 0) + 1; };
     const parsed = <T>(raw: unknown[], schema: { safeParse: (v: unknown) => { success: boolean; data?: unknown; error?: { issues: unknown[] } } }, kind: string): T[] =>
       raw.flatMap(d => {
         const r = schema.safeParse(d);
         if (r.success) return [r.data as T];
+        drop(kind);
         const id = (d as { _id?: unknown })?._id;
         log.warn(
           `batch-upsert: REJECTED ${kind} '${typeof id === 'string' ? id : '(no id)'}' for space '${spaceId}' `
@@ -570,6 +575,7 @@ syncDocsRouter.post('/batch-upsert', syncRateLimit, requireAuth, denyReadOnly, a
     const plausible = <T extends { seq: number; _id: string }>(docs: T[], kind: string): T[] =>
       docs.filter(d => {
         if (!isSeqImplausible(d.seq)) return true;
+        drop(kind);
         log.warn(
           `batch-upsert: dropped ${kind} '${d._id}' with implausible seq ${d.seq} ` +
           `for space '${spaceId}' (max ingest seq ${MAX_INGEST_SEQ}) from peer ` +
@@ -836,10 +842,21 @@ syncDocsRouter.post('/batch-upsert', syncRateLimit, requireAuth, denyReadOnly, a
      * counters off the response, so a family absent here is a family whose refusals are silent at both
      * ends.
      */
+    /*
+     * `rejected` per family (Q-59): what the sender must NOT count as delivered — schema-invalid, implausible seq,
+     * a fact whose fork chain is at its cap, a chrono entry of a type this space does not declare. Each was already
+     * counted or logged; none was in one number a sender could subtract, so a push this instance refused whole was
+     * reported by the sender as `pushed chrono: 50`, `status: success`.
+     */
+    const rejected = (kind: string, extra = 0) => (dropped[kind] ?? 0) + extra;
     res.status(200).json({
       status: 'ok',
-      facts: memStats, entities: entStats, edges: edgeStats, chrono: chronoStats, links: linkStats,
-      filemeta: fileMetaStats,
+      facts: { ...memStats, rejected: rejected('fact', memStats.forkDepthRefused) },
+      entities: { ...entStats, rejected: rejected('entity') },
+      edges: { ...edgeStats, rejected: rejected('edge') },
+      chrono: { ...chronoStats, rejected: rejected('chrono', chronoStats.unknownType) },
+      links: { ...linkStats, rejected: rejected('link') },
+      filemeta: { ...fileMetaStats, rejected: rejected('filemeta') },
     });
 
     // Bump the local seq counter so future local writes always get a seq higher

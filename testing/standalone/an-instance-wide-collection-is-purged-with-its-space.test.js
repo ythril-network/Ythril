@@ -71,6 +71,10 @@ const EXEMPT = {
     'the audit log is the record of what HAPPENED, including the deletion itself. Purging the entries of a '
     + 'deleted space would destroy the evidence that it ever existed -- the opposite of what this collection '
     + 'is for, and the more serious defect of the two.',
+  _change_notes:
+    'keyed by NETWORK, never by space: every read and the prune filter on networkId and direction, and a '
+    + 'note\'s `spaces` only labels what it is about. A deleted space leaves a note that names it, which is '
+    + 'the true record of what was sent, and a space recreated with the same id is served nothing from it.',
   _webhook_retry_queue:
     'a drain queue, never read BY SPACE: each job is deleted as it is attempted and abandoned after '
     + 'MAX_ATTEMPTS, so nothing outlives the space long enough to be served as another one answer. Its rows '

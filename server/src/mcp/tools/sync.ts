@@ -3,6 +3,7 @@ import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.
 import { getConfig } from '../../config/loader.js';
 import { MIN_PEER_VERSION, peerFloorRefusal } from '../../sync/peer-floor.js';
 import { unknownPeerRefusal } from '../../sync/peer-target.js';
+import { attachSyncNote } from '../../sync/change-notes.js';
 
 export const network_peersTool: ToolHandler = {
   name: 'network_peers',
@@ -122,8 +123,17 @@ export const network_syncTool: ToolHandler = {
         + 'scheduled one does no more work, it competes with it.\n\n'
         + 'PARAMETERS:\n'
         + '- `peerId` — an EXACT `instanceId` from `network_peers`. Never a URL and never a label. That one peer '
-        + 'is synced across every network it belongs to. Omit it to run a full cycle for every network, which '
-        + 'is the usual call.\n\n'
+        + 'is synced across every network it belongs to.\n'
+        + '- `networkId` — sync that one network, like `POST /api/networks/:id/sync`. Send at most one of `peerId` '
+        + 'and `networkId`; omit both to run a full cycle for every network, which is the usual call.\n'
+        + '- `note` — a CHANGE NOTE (markdown, at most 10000 characters) that travels with this sync to the members '
+        + 'BELOW this instance: a pub/sub publisher\'s subscribers, a braintree node\'s children. Needs `networkId`. '
+        + 'Refused, and the sync not run, when the network has nobody below this instance (a club, closed or '
+        + 'democratic network, or a subscriber). Queued per member and delivered in each member\'s next exchange, so '
+        + 'a member that is offline gets it when it is back; each arrival fires the `change_note.received` webhook '
+        + 'there. Same as the `{ note, spaces }` body of `POST /api/networks/:id/sync`.\n'
+        + '- `spaces` — the network\'s spaces the note concerns, by this instance\'s ids. Only with `note`; omit it '
+        + 'for a note about the whole network.\n\n'
         + 'RESPONSE: what the cycle did — per network when you omit `peerId`, with a total. A peer that is '
         + 'unreachable is COUNTED as an error and the call comes back with `isError` set, so a clean reply is '
         + 'real evidence the peers answered. It also raises `consecutiveFailures` on that peer, which is where '
@@ -140,6 +150,9 @@ export const network_syncTool: ToolHandler = {
               type: 'string',
               description: 'Exact instanceId of the peer to sync (must be a known member instanceId — never a URL). Omit to sync all networks.',
             },
+            networkId: { type: 'string', description: 'Sync this one network. Not with `peerId`. Required for `note`.' },
+            note: { type: 'string', maxLength: 10000, description: 'A change note that travels with this sync to the members below this instance. Needs `networkId`.' },
+            spaces: { type: 'array', items: { type: 'string' }, maxItems: 100, description: 'The network\'s spaces (this instance\'s ids) the note concerns. Only with `note`.' },
           },
           required: [],
           additionalProperties: false,
@@ -147,8 +160,31 @@ export const network_syncTool: ToolHandler = {
   async handle(ctx: ToolContext): Promise<ToolResult> {
     const { args: a } = ctx;
     const peerId = a['peerId'] != null ? String(a['peerId']).trim() : null;
+    const networkId = a['networkId'] != null ? String(a['networkId']).trim() : null;
     const { runSyncForPeer, runSyncForNetwork } = await import('../../sync/engine.js');
     const syncCfg = getConfig();
+    const fail = (status: number, error: string): ToolResult => ({ content: [{ type: 'text' as const, text: `Error (${status}): ${error}` }], isError: true });
+
+    if (peerId && networkId) return fail(400, 'Send `peerId` or `networkId`, not both: a sync has one subject.');
+    if (!networkId && (a['note'] !== undefined || a['spaces'] !== undefined)) {
+      return fail(400, 'A change note belongs to one network: send `networkId` with `note`.');
+    }
+
+    if (networkId) {
+      // The same door as `POST /api/networks/:id/sync`, and the note goes through the same parser and refusal.
+      const net = syncCfg.networks.find(n => n.id === networkId);
+      if (!net) return fail(404, 'Network not found');
+      const noteInput = a['note'] !== undefined || a['spaces'] !== undefined ? { note: a['note'], spaces: a['spaces'] } : undefined;
+      const attached = await attachSyncNote(net, noteInput, ctx.actor?.tokenLabel ?? 'an instance admin');
+      if (attached && 'error' in attached) return fail(attached.status, attached.error);
+      const r = await runSyncForNetwork(net.id);
+      const noteId = attached ? attached.queued._id : undefined;
+      return {
+        content: [{ type: 'text' as const, text: `${net.label}: ${r.synced} ok, ${r.errors} error(s).${noteId ? ` Change note ${noteId} queued for the members below.` : ''}` }],
+        structuredContent: { networkId: net.id, synced: r.synced, errors: r.errors, ...(noteId ? { noteId } : {}) },
+        isError: r.errors > 0,
+      };
+    }
 
     if (peerId) {
       // SEC-16, through the shared check. `POST /api/networks/peers/:peerId/sync` names the same subject,

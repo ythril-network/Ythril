@@ -37,6 +37,7 @@ describe('Webhook event types (real ALL_WEBHOOK_EVENTS from the compiled build)'
       'bulk.write',
       'link_violation.created',
       'duplicate.detected',
+      'change_note.received',
       'test.ping',
     ];
     for (const e of expected) {

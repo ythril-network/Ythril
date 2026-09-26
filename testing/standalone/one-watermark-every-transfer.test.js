@@ -209,7 +209,7 @@ describe('every transfer under a shared watermark is passed to the rule', () => 
     // `localMaxSeq` answers "how far did our own records reach"; `seqCursor` answers "how far did this transfer
     // get at all". On pubsub and braintree networks `ownedFilter` is empty and we relay foreign docs, so
     // capping with the author-guarded number would advance past a relayed doc the peer never accepted.
-    assert.match(src, /deliveredThrough: seqCursor, truncated \}/,
+    assert.match(src, /deliveredThrough: seqCursor, truncated[ ,}]/,
       'the push ceiling must be the last accepted seq');
     assert.doesNotMatch(src, /deliveredThrough: localMaxSeq/,
       'the author-guarded max answers a different question and would leave relayed docs strandable');
