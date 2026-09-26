@@ -167,7 +167,9 @@ const FROZEN = {
   // that had answered 200. The two lines are the separate refusal channel (collected per member, counted per cycle
   // into a partial status). NO DECOMPOSITION: the counting lives in `sync/push-refusals.ts`; what stays here is
   // where in the cycle a refusal is recorded, which is a fact about the cycle.
-  'server/src/sync/engine.ts': 964,
+  // 964 -> 802: file sync (tombstones, manifest, bytes) moved whole into `sync/file-sync.ts` (Q-68), which the
+  // fix for a renamed space's files and the last-agreed-hash conflict rule both change.
+  'server/src/sync/engine.ts': 802,
   // 958 -> 684: the per-type editor body moved into `schema-type-editor.component` so the Brain Overview
   // could open the same editor. Lowered rather than left — a frozen number 274 lines above the real size
   // is 274 lines this file could regrow into without the gate saying a word.

@@ -174,10 +174,10 @@ describe('what a push actually proves', () => {
   });
 });
 
-describe('the engine is wired to ack only a 200', () => {
+describe('file sync is wired to ack only a 200', () => {
   // Named file, so a move throws rather than passing. Two claims are asserted, and both are the difference
   // between safe and lossy — a source read is the cheapest place to pin them.
-  const src = readFileSync(join(ROOT, 'server/src/sync/engine.ts'), 'utf8');
+  const src = readFileSync(join(ROOT, 'server/src/sync/file-sync.ts'), 'utf8'); // file sync left the engine (Q-68)
 
   it('records the ack from the pushed array, guarded by response.ok', () => {
     assert.match(src, /if \(ackResp\.ok\)\s*\{\s*\n\s*recordFileTombstoneAck\(member\.instanceId, spaceId, ackedPositionFrom\(ourTombstones\)\)/,
