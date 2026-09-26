@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Subscribing a webhook to fact events works from Settings → Webhooks again** (`Q-65`). Since 5.0 renamed the
+  knowledge type `memory` to `fact`, the server's events are `fact.created`, `fact.updated` and `fact.deleted`, but
+  the page went on offering `memory.created`, `memory.updated` and `memory.deleted`, and the server refused any
+  subscription that ticked one with "Invalid event type". The page now offers the server's names. A gate reads both
+  lists, so an event added on one side and not the other fails the build. Subscriptions made through the API were not
+  affected.
+
 ## [5.4.0] — 2026-09-26
 
 **A network now asks before it adds a space, and a pub/sub can be joined by pasting its key.** A space a publisher,
