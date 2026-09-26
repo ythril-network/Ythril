@@ -36,6 +36,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'url';
 import { INSTANCES, post, get, patch, del, delWithBody } from '../sync/helpers.js';
 import { legacyRights } from '../_shared/legacy-token-rights.mjs';
+import { spaceAdminRights } from '../_shared/space-admin-rights.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, '..', 'sync', 'configs');
@@ -45,7 +46,7 @@ const MINE = `sa-mine-${RUN}`;      // the space the space-admin holds
 const THEIRS = `sa-theirs-${RUN}`;  // a space it does not
 
 let adminToken;                 // unrestricted instance admin
-let spaceAdmin;                 // admin: true, spaces: [MINE]
+let spaceAdmin;                 // administers MINE and nothing else
 let spaceAdminId;
 let insideId;                   // a token scoped to MINE
 let outsideId;                  // a token scoped to THEIRS
@@ -74,7 +75,7 @@ before(async () => {
     const r = await post(INSTANCES.a, adminToken, '/api/spaces', { id, label: id });
     assert.equal(r.status, 201, `space create failed: ${JSON.stringify(r.body)}`);
   }
-  const sa = await mint({ name: `sa-admin-${RUN}`, rights: legacyRights({ admin: true, spaces: [MINE] }) });
+  const sa = await mint({ name: `sa-admin-${RUN}`, rights: spaceAdminRights([MINE]) });
   spaceAdmin = sa.plaintext;
   spaceAdminId = sa.token.id;
   insideId = (await mint({ name: `sa-inside-${RUN}`, rights: legacyRights({ spaces: [MINE] }) })).token.id;

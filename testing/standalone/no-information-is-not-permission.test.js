@@ -82,7 +82,8 @@ describe('no authenticated token is handed to it', () => {
      * gets wrong most, so they share the constant rather than each spelling out a narrow default.
      */
     const src = code(TOKENS_API);
-    const guards = (src.match(/req\.authToken \? migrateToken\(req\.authToken\) : NO_RIGHTS/g) ?? []).length;
+    // Optionally through `withInstanceAdminGrants` (S-11): the guard is the `? … : NO_RIGHTS`, not the wrapper.
+    const guards = (src.match(/req\.authToken \? (withInstanceAdminGrants\()?migrateToken\(req\.authToken\)\)? : NO_RIGHTS/g) ?? []).length;
     assert.equal(guards, 2, `expected both call sites to guard, found ${guards}`);
     assert.match(src, /const NO_RIGHTS = \{[^}]*floor: null/,
       'NO_RIGHTS must have no floor — a floor is every space, including spaces created later');

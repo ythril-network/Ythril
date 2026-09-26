@@ -201,7 +201,8 @@ The rename atomically:
 - Moves all MongoDB collections (facts, entities, edges, chrono, tombstones, files, etc.) to the new prefix.
 - Moves the file directory from `/data/files/{old}` to `/data/files/{new}`.
 - Updates all network `spaces[]` arrays and adds a `spaceMap` entry so peers continue syncing.
-- Updates all token `spaces[]` scopes that referenced the old ID.
+- Moves every token's rights for the space to the new ID: its `rights.perSpace` row, and its entry in
+  `rights.spaceAdmin.spaces` when the token administers the space by name.
 
 **Response** `200`:
 

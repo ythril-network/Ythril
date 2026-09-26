@@ -5,6 +5,7 @@ import { getConfig, saveConfig, mutateConfig, getSecrets, saveSecrets } from '..
 import { log } from '../util/log.js';
 import type { TokenRecord, Config } from '../config/types.js';
 import { migrateToken } from './rights-migration.js';
+import { withInstanceAdminGrants } from './instance-admin-grants.js';
 import { resolveLimitFor } from '../rate-limit/per-token.js';
 
 const BCRYPT_ROUNDS = 12;
@@ -226,6 +227,8 @@ export async function createToken(opts: {
       ...(opts.schemaLibrary ? { schemaLibrary: true } : {}),
     }) as unknown as TokenRecord['rights']),
   };
+  // An instance admin is stored with space admin on the floor (S-11): one statement, every minting path.
+  record.rights = withInstanceAdminGrants(record.rights);
   const config = getConfig();
   config.tokens.push(record);
   saveConfig(config);
@@ -281,6 +284,7 @@ export async function createOAuthToken(opts: {
       spaces: opts.spaces,
     }) as unknown as TokenRecord['rights']),
   };
+  record.rights = withInstanceAdminGrants(record.rights);
   const config = getConfig();
   const removedIds: string[] = [];
   // Rotate: drop any prior token for this client.
@@ -339,7 +343,7 @@ export function setTokenRights(id: string, rights: TokenRecord['rights']): boole
   const config = getConfig();
   const idx = config.tokens.findIndex(t => t.id === id);
   if (idx < 0) return false;
-  config.tokens[idx]!.rights = rights;
+  config.tokens[idx]!.rights = withInstanceAdminGrants(rights);
   saveConfig(config);
   return true;
 }

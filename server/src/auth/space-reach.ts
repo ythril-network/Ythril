@@ -23,6 +23,7 @@ import type { TokenRights } from '../config/rights-shape.js';
 // token may touch a space at all — so a fifth area would have been invisible to the reach check while every
 // other reader saw it (`Q-6`, 2026-09-07).
 import { SPACE_AREAS as AREAS } from '../config/rights-shape.js';
+import { administers } from './mint-cap.js';
 
 /**
  * True when the token holds ANY rung above `none` in this space — via its floor or its explicit row.
@@ -31,6 +32,10 @@ import { SPACE_AREAS as AREAS } from '../config/rights-shape.js';
  * represented, and a row can raise a space above the floor.
  */
 export function reachesSpace(rights: TokenRights, spaceId: string): boolean {
+  // A space admin reaches the spaces it administers, by floor or by name, with or without area rows: the grant
+  // resolves to every rung there (`grantedRung`). Reading only rows and the area floor made a space admin with
+  // no rows reach nothing — including an instance admin, whose grant is the space-admin floor (S-11).
+  if (administers(rights, spaceId)) return true;
   const row = rights.perSpace[spaceId];
   // `?? 'none'`: a key the stored row does not carry is NO rung. Compared bare, `undefined !== 'none'` read a missing
   // area as reach — which is what adding an area (F-34) did to every matrix stored before it, until repaired.

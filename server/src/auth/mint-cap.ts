@@ -71,9 +71,9 @@ function grantedRung(rights: TokenRights, space: string, area: SpaceArea): Rung 
    * could disagree with them; a flag that IS one of the inputs they resolve from cannot — `isSpaceAdminFor`
    * asks `effectiveRung` four times and gets four `admin`s without knowing the flag exists.
    *
-   * It is deliberately in `grantedRung` and not in `floorRung`: the floor reaches every space including
-   * ones created later, and a per-space grant reaching it would make one space's administrator the
-   * instance's.
+   * A space administered by NAME is deliberately here and not in `floorRung`: the floor reaches every space
+   * including ones created later, and a per-space grant reaching it would make one space's administrator the
+   * instance's. The space-admin FLOOR is the other case and is in both — see `grantedFloorRung`.
    */
   // `SPACE_ADMIN_AREAS`, not every area: a network membership is its own column even for a space's administrator.
   if (administers(rights, space) && (SPACE_ADMIN_AREAS as readonly SpaceArea[]).includes(area)) return 'admin';
@@ -120,7 +120,20 @@ export function effectiveRung(rights: TokenRights, space: string, area: SpaceAre
  * enforcement grants the implied rung, minting refuses to delegate it.
  */
 export function floorRung(rights: TokenRights, area: SpaceArea): Rung {
-  return withImplications(area, rights.floor?.[area] ?? 'none', a => rights.floor?.[a] ?? 'none');
+  return withImplications(area, grantedFloorRung(rights, area), a => grantedFloorRung(rights, a));
+}
+
+/**
+ * What was WRITTEN for an area on the floor: the area floor, or `admin` where the token administers every space.
+ *
+ * The space-admin FLOOR belongs here as surely as a named space admin belongs in `grantedRung`: it reaches every
+ * space including ones created later, which is exactly the floor's scope. Left out, enforcement resolved it to
+ * `admin` in every space while minting read `none` for the same floor and refused to delegate it (S-11) — the
+ * rule-with-two-implementations shape. A space admin by NAME stays out, because one space is not every space.
+ */
+function grantedFloorRung(rights: TokenRights, area: SpaceArea): Rung {
+  if (rights.spaceAdmin?.floor && (SPACE_ADMIN_AREAS as readonly SpaceArea[]).includes(area)) return 'admin';
+  return rights.floor?.[area] ?? 'none';
 }
 
 /**

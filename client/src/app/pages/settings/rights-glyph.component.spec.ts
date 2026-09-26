@@ -40,6 +40,24 @@ describe('RightsGlyphComponent', () => {
     expect(el.querySelector('.bar')!.className).toContain('h2');
   });
 
+  it('a space-admin FLOOR shows admin everywhere in the areas it covers, and not in networks', () => {
+    // The server resolves it to admin in every space (S-11); reading the area floor alone drew such a token
+    // as holding nothing at all.
+    const el = render(rights({ spaceAdmin: { floor: true, spaces: [] } }));
+    const bars = [...el.querySelectorAll('.bar')];
+    RIGHT_AREAS.forEach((area, i) => {
+      if (area === 'networks') { expect(bars[i].className).toContain('h0'); expect(bars[i].querySelector('.floor')).toBeNull(); }
+      else { expect(bars[i].className).toContain('h3'); expect(bars[i].querySelector('.floor')!.className).toContain('f3'); }
+    });
+  });
+
+  it('a space admin by NAME raises the ceiling, not the floor', () => {
+    const el = render(rights({ spaceAdmin: { floor: false, spaces: ['qa'] } }));
+    const first = el.querySelector('.bar')!;
+    expect(first.className).toContain('h3');
+    expect(first.querySelector('.floor')).toBeNull();
+  });
+
   it('marks the floor, and only when there IS one', () => {
     // A line at the baseline would read as "a floor of zero" rather than "no floor", and those are
     // different facts: one reaches every future space at `none`, the other reaches none of them at all.

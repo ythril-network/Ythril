@@ -20,6 +20,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'url';
 import { INSTANCES, post, get, del, delWithBody, reqJson } from '../sync/helpers.js';
 import { legacyRights } from '../_shared/legacy-token-rights.mjs';
+import { spaceAdminRights } from '../_shared/space-admin-rights.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const TOKEN_FILE = path.join(__dirname, '..', 'sync', 'configs', 'a', 'token.txt');
@@ -166,16 +167,20 @@ describe('Space wipe — full wipe', () => {
 
     const t = await post(INSTANCES.a, adminToken, '/api/tokens', {
       name: `scoped-admin-${RUN_ID}`,
-      rights: legacyRights({ admin: true, spaces: [inScope] })
+      rights: spaceAdminRights([inScope])
     });
     assert.equal(t.status, 201, JSON.stringify(t.body));
     const scopedAdmin = t.body.plaintext;
 
     try {
-      // Positive control: the in-scope space IS operable (proves the token is a working admin,
-      // so the 403s below are the SCOPE check, not a broken token).
-      const okWipe = await post(INSTANCES.a, scopedAdmin, `/api/admin/spaces/${inScope}/wipe`, { confirm: true });
-      assert.equal(okWipe.status, 200, `in-scope wipe should succeed: ${okWipe.status} ${JSON.stringify(okWipe.body)}`);
+      // Positive control: the in-scope space IS operable (proves the token is a working space admin,
+      // so the 403s below are the SCOPE check, not a broken token). A schema write, because wiping is an
+      // instance-admin act even on a space one administers (P-8); the fixture used to be an instance admin
+      // with rows for one space, which S-11 made an instance admin everywhere.
+      const okSchema = await reqJson(INSTANCES.a, scopedAdmin, `/api/spaces/${inScope}/schema`, {
+        method: 'PUT', body: JSON.stringify({ typeSchemas: {} }),
+      });
+      assert.equal(okSchema.status, 200, `in-scope schema write should succeed: ${okSchema.status} ${JSON.stringify(okSchema.body)}`);
 
       // The actual assertions: every space-targeting admin op on the OUT-of-scope space is 403.
       const wipe = await post(INSTANCES.a, scopedAdmin, `/api/admin/spaces/${outScope}/wipe`, { confirm: true });

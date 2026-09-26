@@ -20,6 +20,7 @@ import { log } from '../util/log.js';
 import { isSsrfSafeUrl, ssrfSafeFetch, SsrfBlockedError } from '../util/ssrf.js';
 import type { OidcConfig, OidcClaimRule, OidcClaimMapping } from '../config/types.js';
 import { migrateToken } from './rights-migration.js';
+import { withInstanceAdminGrants } from './instance-admin-grants.js';
 import type { TokenRights } from '../config/rights-shape.js';
 
 /**
@@ -437,11 +438,13 @@ export async function validateOidcJwt(bearer: string): Promise<OidcTokenRecord |
       // Derived, never hand-rolled. `migrateToken` already encodes the decisions this mapping needs —
       // `spaces` ABSENT means every space (a floor) while `spaces: []` reaches nothing, and that
       // distinction is the one that granted whole instances when it was got wrong before.
-      rights: migrateToken({
+      // Through `withInstanceAdminGrants` like every stored token (S-11): an identity mapped to instance admin
+      // holds the space-admin floor, so it reaches every space rather than only the ones its claim named.
+      rights: withInstanceAdminGrants(migrateToken({
         admin: perms.admin,
         readOnly: perms.readOnly ?? false,
         ...(perms.spaces ? { spaces: perms.spaces } : {}),
-      }) as unknown as TokenRights,
+      }) as unknown as TokenRights),
       source: 'oidc',
     };
   } catch (err) {

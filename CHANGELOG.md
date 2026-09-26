@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **An instance administrator holds every right on every space again** (`S-11`). Before 5.0, space admin was
+  worked out from holding all four admin rungs, so an instance admin had it everywhere. The 5.0 grant migration
+  kept that only for tokens whose all-spaces floor was admin in every area, so an instance admin stored with rows
+  for one space lost space admin everywhere else. It was refused (403) on spaces it did not name, including
+  spaces a network had just created, and it could not widen itself. Granting instance admin now also sets
+  **Space admin** on the all-spaces floor, through every door that writes a token's rights, so it covers spaces
+  created later. Instance-admin tokens stored without it are repaired at startup, and the log names each one.
+  Three readers that ignored space admin now respect it:
+  - a space administrator reaches the spaces it administers even with no area rows;
+  - a space-admin floor can delegate the admin floor rungs it holds;
+  - the token list's rights glyph draws a space administrator at admin instead of at nothing.
+
+  An OIDC identity mapped to instance admin gets the same floor. The audit entry for a rights edit now records
+  the rights as stored. The tokens guides said four admin cells make a token its space's administrator; they
+  do not (only the **Space admin** grant does), and both guides now say so.
+- **Renaming a space keeps its named administrators** (`Q-58`). A rename moved each token's per-space rights to the
+  new id but left the space-admin list on the old one, so a token that administered the space by name silently
+  stopped administering it.
+
+### Internal
+
+- **`todo:check` no longer reads a working-order checklist.** Its checks were written for a hand-ticked file,
+  and that ordering is now enforced by the flow's own gates, so the rule, its helper and its tests are gone.
+  The exemption list also loses the three loop write-ups deleted from `todo/`.
+
 ## [5.3.0] — 2026-09-25
 
 **The assist model can keep to a budget, fall back when it cannot answer, and be a Claude model.** A token budget

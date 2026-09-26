@@ -127,7 +127,7 @@ Three properties worth building against:
   "createSpaces": false,
   "floor": null,
   "perSpace": {},
-  "spaceAdmin": ["work"]
+  "spaceAdmin": { "floor": false, "spaces": ["work"] }
 }
 ```
 
@@ -137,22 +137,32 @@ instance-wide.** It cannot grant `instanceAdmin` or `createSpaces`, cannot set a
 cannot reach, mint for or edit tokens for any space it does not administer — it does not even list them.
 Those rules are red-teamed, not aspirational.
 
-**The four rungs work too.** A token whose four areas are all at `admin` for a space administers it. The two spellings are one right: the server resolves `spaceAdmin`
-into `admin` in every area of the named space before any check runs, so no code compares the two and neither
-can disagree with the other. Send whichever you have; read both.
+**The four rungs are not the grant.** `spaceAdmin` resolves to `admin` in every area it covers, so a space
+administrator holds all four; the reverse does not hold. A token whose four areas are all at `admin` for a space
+has full access to its data and does not administer it: it cannot manage the space's tokens or change its
+settings. Grant `spaceAdmin` when that is what you mean.
 
-**What it does NOT touch is the floor.** `spaceAdmin` names spaces. A floor reaches every space including
-ones created later, so it stays its own field — granting a space administrator the floor would be granting
-them the instance.
+**Two forms: by name, and on the floor.** `spaceAdmin.spaces` administers the named spaces and nothing else.
+`spaceAdmin.floor: true` administers EVERY space, including ones created later, so it is priced like any other
+floor: a minter can grant it only while holding `admin` on the floor in each area it resolves to, and a space
+administrator by name can never grant a floor at all. A token holding the space-admin floor can delegate an
+`admin` floor in each of those areas, because that is what it holds everywhere. The `networks` area is its own
+column in both forms: administering a space does not grant membership of its networks.
 
-To show it in your own UI: read `derivedRungs`, then compare a token's effective rung per area (after
-`implications`) against `requires`.
+**An instance administrator holds the space-admin floor, stored on the token.** Granting `instanceAdmin: true`
+through any door — `POST /api/tokens`, the MCP mint, the OAuth connector mint, or a rights edit — writes
+`spaceAdmin.floor: true` into the stored matrix, so the token holds every right on every space, present and
+future, and `GET /api/tokens` shows it. Clearing `instanceAdmin` afterwards leaves the floor in place; clear it
+explicitly if the token should lose it. An instance-admin token stored without it (written by 5.0–5.3) is
+repaired at startup, and the log names each token changed: *"Restored the space-admin floor on N instance-admin
+token(s) stored without it"*.
 
-**That is what Ythril's own matrix does**: the `Space admin` column is computed from the four displayed rungs, and setting
-it writes all four areas in ONE update rather than four. Compare against the DISPLAYED rung, not the stored one —
-a row that reaches admin through the floor is administered, and a column reading the stored matrix would
-contradict the cells beside it. Write the whole row at once for the same reason a patch is whole: four sequential
-updates let a reader observe three intermediate states that nobody asked for.
+To show it in your own UI: read `rights.spaceAdmin` — `floor: true`, or the space listed in `spaces`. `requires`
+says what the grant resolves to; it is not a test for holding it.
+
+**That is what Ythril's own matrix does**: the `Space admin` column reads the grant, and setting it writes
+`spaceAdmin` in ONE update of the whole rights object. Write it whole for the same reason a patch is whole:
+several sequential updates let a reader observe intermediate states that nobody asked for.
 
 The stored matrix is *not* rewritten — `GET /api/tokens` returns what was set. Resolve the effective rung by
 applying this table on read; do not persist the result, or a rung that exists only while `knowledge` is
