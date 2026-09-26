@@ -6,6 +6,7 @@ import { roleCountKey, remoteOf, memberGroups } from './network-role-view';
 import { NetworksApi } from '../../core/networks-api.service';
 import { NetworkInvitePanelComponent } from './network-invite-panel.component';
 import { NetworkAddSpaceComponent } from './network-add-space.component';
+import { NetworkPendingSpacesComponent } from './network-pending-spaces.component';
 import { SpacesApi } from '../../core/spaces-api.service';
 import { AdminApi } from '../../core/admin-api.service';
 import { TranslocoPipe } from '@jsverse/transloco';
@@ -25,7 +26,7 @@ import { NetworkEnableWizardComponent } from './network-enable-wizard.component'
 @Component({
   selector: 'app-networks',
   standalone: true,
-  imports: [CommonModule, FormsModule, TranslocoPipe, PhIconComponent, StatusPillComponent, SummaryStripComponent, RelativeTimeComponent, ErrorStateComponent, NetworkCreateDialogComponent, NetworkJoinDialogComponent, NetworkEnableWizardComponent, NetworkMemberRowComponent, NetworkInvitePanelComponent, NetworkAddSpaceComponent],
+  imports: [CommonModule, FormsModule, TranslocoPipe, PhIconComponent, StatusPillComponent, SummaryStripComponent, RelativeTimeComponent, ErrorStateComponent, NetworkCreateDialogComponent, NetworkJoinDialogComponent, NetworkEnableWizardComponent, NetworkMemberRowComponent, NetworkInvitePanelComponent, NetworkAddSpaceComponent, NetworkPendingSpacesComponent],
   styles: [`
     .network-card {
       background: var(--bg-surface);
@@ -312,6 +313,8 @@ import { NetworkEnableWizardComponent } from './network-enable-wizard.component'
                   }
                 </div>
               }
+
+              <app-network-pending-spaces [network]="net" (resolved)="replaceNetwork(net, $event)" />
 
               <!-- Leave -->
               <div style="margin-top:16px; padding-top:12px; border-top:1px solid var(--border-muted);">
@@ -638,6 +641,9 @@ export class NetworksComponent implements OnInit {
   openVotes(networkId: string): VoteRound[] {
     return this.votesByNetwork[networkId] ?? [];
   }
+
+  /** Put the server's answer in place of the page's copy of a network (a resolved pending space, S-9). */
+  replaceNetwork(net: Network, updated: Network): void { Object.assign(net, updated); }
 
   async castVote(networkId: string, roundId: string, vote: 'yes' | 'veto'): Promise<void> {
     // A veto is destructive — it blocks a pending join/governance round — so confirm it first. A "yes"

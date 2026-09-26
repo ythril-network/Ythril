@@ -253,13 +253,15 @@ sequenceDiagram
     participant S as Subscriber (new)
     participant P as Publisher
 
-    S->>P: POST /api/networks/:id/join (invite key)
+    S->>P: POST /api/invite/redeem (the published key, no token)
+    P-->>S: a handshake bundle
+    S->>P: apply + finalize (the invite handshake)
     P->>P: auto-accept — no vote round
     P-->>S: member list + sync starts
     Note over P,S: publisher stores subscriber direction=push<br/>subscriber stores publisher direction=pull<br/>content flows publisher → subscriber only
 ```
 
-No vote round opens. No other members are consulted. The invite key is **reusable** — unlike other network types where the key is consumed after a single join, pubsub keys persist until the publisher generates a new one (which revokes the old). This allows the key to be embedded in documentation pages, QR codes, or shared openly.
+The subscriber runs all of it itself: `POST /api/networks/join-by-key` on its own instance, with the publisher's URL and the key (the **Join network** dialog takes the same two). No vote round opens. No other members are consulted, and nobody on the publisher has to act. The invite key is **reusable** — unlike other network types where the key is consumed after a single join, pubsub keys persist until the publisher generates a new one (which revokes the old). This allows the key to be embedded in documentation pages, QR codes, or shared openly.
 
 **Subscriber-local data safety:**
 

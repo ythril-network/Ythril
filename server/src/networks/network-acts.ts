@@ -19,7 +19,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import { z } from 'zod';
 import {
-  networkAddSpaceRefusal, networkCreateRefusal, networkInviteRefusal, networkLeaveRefusal, networkSettingsRefusal, visibleNetworks,
+  networkAddSpaceRefusal, networkCreateRefusal, networkInviteRefusal, networkJoinRefusal, networkLeaveRefusal, networkSettingsRefusal, visibleNetworks,
 } from '../auth/network-rights.js';
 import { randomBytes } from 'node:crypto';
 import bcrypt from 'bcrypt';
@@ -33,7 +33,7 @@ import { MIN_PEER_VERSION, peerFloorRefusal } from '../sync/peer-floor.js';
 import { peerSafeFetch } from '../sync/peer-fetch.js';
 import { log } from '../util/log.js';
 import { networkRole } from './network-role.js';
-import { widenPeerTokens } from './network-spaces.js';
+import { addSpacesToNetwork, widenPeerTokens } from './network-spaces.js';
 import { concludeRoundIfReady } from '../sync/governance.js';
 import { localToRemote } from '../sync/space-map.js';
 import { makeSignedOwnCast } from '../util/signing.js';
@@ -134,6 +134,9 @@ export function createNetworkAct(caller: Caller, input: unknown): NetworkActResu
     // Who established each membership, so the leave rule can tell a token's own from another's. Recorded for an
     // instance admin too: the record is about the membership, not about whether its maker needed permission.
     ...(caller.id ? { spaceOrigins: spaces.reduce<Record<string, string>>((o, s) => recordOrigin(o, s, caller.id!), {}) } : {}),
+    // And who established the network here (S-9): the authority for what a later announcement may add, exactly as
+    // for a network this instance joined.
+    ...(caller.id ? { joinedBy: caller.id } : {}),
   };
   cfg.networks.push(network);
   saveConfig(cfg);
@@ -246,6 +249,64 @@ export function addNetworkSpaceAct(caller: Caller, id: string, input: unknown): 
   saveConfig(cfg);
   log.info(`Network ${net.id}: added space '${spaceId}'`);
   return { status: 200, body: networkView(net), audit: { before, after: { spaces: [...net.spaces] } } };
+}
+
+export const ResolvePendingSpaceBody = z.object({
+  spaceId: z.string().min(1),
+  action: z.enum(['accept', 'dismiss']),
+  mapTo: z.string().regex(/^[a-z0-9-]{1,40}$/).optional(),
+}).strict();
+
+/**
+ * Accept or dismiss a space an upstream announced and this instance held as pending (S-9).
+ *
+ * An announcement is a proposal; this is the operator's answer. Accepting is judged by the rule a join runs,
+ * over the ACCEPTING token (`networkJoinRefusal`): an existing local space needs `networks: write` on it or
+ * administering it, a new one needs `createSpaces`. `mapTo` carries the network's space under a different local id —
+ * the explicit mapping a same-id local space needs. Dismissing forgets the proposal and needs the network's settings
+ * right, since it changes what the network carries here only by keeping a space out. `audit` carries before and after.
+ */
+export async function resolvePendingSpaceAct(caller: Caller, id: string, input: unknown): Promise<NetworkActResult & {
+  audit?: { before: Record<string, unknown>; after: Record<string, unknown> };
+}> {
+  const parsed = ResolvePendingSpaceBody.safeParse(input);
+  if (!parsed.success) return { status: 400, error: parsed.error.message };
+  const { spaceId, action, mapTo } = parsed.data;
+  const cfg = getConfig();
+  const net = visibleNetworks(caller, cfg.networks).find(n => n.id === id);
+  if (!net) return notFound;
+  const entry = (net.pendingSpaces ?? []).find(p => p.networkId === spaceId);
+  if (!entry) return { status: 404, error: `The network has no pending space '${spaceId}'.` };
+  const before = { spaces: [...net.spaces], pendingSpaces: (net.pendingSpaces ?? []).map(p => p.networkId) };
+  const dropPending = () => { net.pendingSpaces = (net.pendingSpaces ?? []).filter(p => p.networkId !== spaceId); };
+
+  if (action === 'dismiss') {
+    const refusal = networkSettingsRefusal(caller, net);
+    if (refusal) return { status: 403, error: refusal };
+    dropPending();
+    saveConfig(cfg);
+    log.info(`Network ${net.id}: dismissed pending space '${spaceId}'`);
+    return { status: 200, body: networkView(net), audit: { before, after: { spaces: [...net.spaces], pendingSpaces: (net.pendingSpaces ?? []).map(p => p.networkId) } } };
+  }
+
+  const localId = mapTo ?? entry.localId;
+  if (net.spaces.includes(localId)) return { status: 409, error: `The network already carries '${localId}' here.` };
+  const exists = cfg.spaces.some(s => s.id === localId);
+  const refusal = networkJoinRefusal(caller, exists ? { existing: [localId], toCreate: [] } : { existing: [], toCreate: [localId] });
+  if (refusal) return { status: 403, error: refusal };
+  dropPending();
+  saveConfig(cfg);
+  const added = await addSpacesToNetwork(net.id, [{ networkId: spaceId, localId }], `pending space accepted by ${caller.id ?? 'an instance admin'}`);
+  const after = getConfig();
+  const netAfter = after.networks.find(n => n.id === id);
+  if (!netAfter || !added.includes(localId)) {
+    // Put the proposal back: an accept that did not add must not silently lose it.
+    if (netAfter && !(netAfter.pendingSpaces ?? []).some(p => p.networkId === spaceId)) { (netAfter.pendingSpaces ??= []).push(entry); saveConfig(after); }
+    return { status: 500, error: `Could not add '${localId}' to the network; the pending entry is kept.` };
+  }
+  if (caller.id) netAfter.spaceOrigins = recordOrigin(netAfter.spaceOrigins ?? {}, localId, caller.id);
+  saveConfig(after);
+  return { status: 200, body: networkView(netAfter), audit: { before, after: { spaces: [...netAfter.spaces], pendingSpaces: (netAfter.pendingSpaces ?? []).map(p => p.networkId) } } };
 }
 
 /**

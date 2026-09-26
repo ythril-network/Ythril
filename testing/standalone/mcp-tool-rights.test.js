@@ -48,8 +48,10 @@ const ITERATES_IN_HANDLER = {
   network_update: { filter: 'updateNetworkAct', tool: 'server/src/mcp/tools/networks.ts', route: 'server/src/api/networks/crud.ts' },
   network_leave: { filter: 'leaveNetworkAct', tool: 'server/src/mcp/tools/networks.ts', route: 'server/src/api/networks/crud.ts' },
   network_add_space: { filter: 'addNetworkSpaceAct', tool: 'server/src/mcp/tools/networks.ts', route: 'server/src/api/networks/crud.ts' },
+  network_pending_space: { filter: 'resolvePendingSpaceAct', tool: 'server/src/mcp/tools/networks.ts', route: 'server/src/api/networks/crud.ts' },
   network_invite: { filter: 'inviteKeyAct', tool: 'server/src/mcp/tools/networks.ts', route: 'server/src/api/networks/join.ts' },
   network_join_remote: { filter: 'joinRemoteAct', tool: 'server/src/mcp/tools/network-join.ts', route: 'server/src/api/networks/join.ts' },
+  network_join_by_key: { filter: 'joinByInviteKeyAct', tool: 'server/src/mcp/tools/network-join.ts', route: 'server/src/api/networks/join.ts' },
 };
 
 before(async () => {

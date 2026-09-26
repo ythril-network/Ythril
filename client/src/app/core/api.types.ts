@@ -810,6 +810,8 @@ export interface Network {
   merkle?: boolean;
   /** What THIS instance is in the network, and which members that role acts on (F-38.1). */
   myRole?: import('./network-role.types').NetworkRole;
+  /** Spaces an upstream announced that were not adopted here, each with why (S-9); the operator accepts or dismisses them. */
+  pendingSpaces?: { networkId: string; localId: string; why: string; from: string; at: string }[];
 }
 
 export interface NetworkMember {

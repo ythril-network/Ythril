@@ -274,6 +274,8 @@ export async function joinRemoteAct(caller: Caller, input: unknown): Promise<Net
   // Who established each membership, so the leave rule can tell this token's own from another's.
   const joiner = caller.id;
   if (joiner) for (const s of allNetworkSpaces) if (!net.spaceOrigins?.[s]) net.spaceOrigins = recordOrigin(net.spaceOrigins, s, joiner);
+  // And who joined the network itself (S-9): the authority for what a later announcement may add here.
+  if (joiner) net.joinedBy ??= joiner;
 
   if (!net.members.some(m => m.instanceId === applyData.instanceId)) {
     net.members.push({
@@ -306,4 +308,50 @@ export async function joinRemoteAct(caller: Caller, input: unknown): Promise<Net
     instanceId: applyData.instanceId,
     instanceLabel: applyData.instanceLabel,
   } };
+}
+
+export const JoinByKeyBody = z.object({
+  /** The publisher's base URL, as the invite gives it (e.g. `https://ythril.example.com`). */
+  publisherUrl: SSRF_SAFE_URL,
+  /** The pub/sub network's published invite key (`ythril_invite_…`). */
+  inviteKey: z.string().min(20).max(200),
+  /** This brain's externally reachable base URL, as for `join-remote`. */
+  myUrl: SSRF_SAFE_URL,
+  /** Optional space aliasing, as for `join-remote`. */
+  spaceMap: z.record(z.string(), z.string().min(1).max(40).regex(/^[a-z0-9-]+$/)).optional(),
+}).strict();
+
+/**
+ * Join a pub/sub network with nothing but its publisher's URL and its published invite key (F-41).
+ *
+ * Owner, 2026-09-26: *"the invite by the publisher must be there ready to paste in join network. no admission in
+ * pubsub necessary."* The publisher's `POST /api/invite/redeem` turns the key into a handshake session, and the rest
+ * is `joinRemoteAct` — so the joining token's rights decide which spaces the join maps or creates (S-9), exactly as
+ * for an invite an admin generated.
+ */
+export async function joinByInviteKeyAct(caller: Caller, input: unknown): Promise<NetworkActResult> {
+  const parsed = JoinByKeyBody.safeParse(input);
+  if (!parsed.success) return { status: 400, error: parsed.error.message };
+  const { publisherUrl, inviteKey, myUrl, spaceMap } = parsed.data;
+  const redeemUrl = `${new URL(publisherUrl).origin}/api/invite/redeem`;
+  let r: Response;
+  try {
+    r = await peerSafeFetch(redeemUrl, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ inviteKey }), signal: AbortSignal.timeout(30_000),
+    });
+  } catch (err) {
+    log.warn(`join-by-key: could not reach ${redeemUrl}: ${err}`);
+    return { status: 502, error: `Could not reach the publisher: ${err}` };
+  }
+  if (!r.ok) return relay(r);
+  const bundle = await boundedJson<{ handshakeId?: string; inviteUrl?: string; rsaPublicKeyPem?: string; networkId?: string }>(r, 'invite redeem')
+    .catch(() => ({} as Record<string, never>));
+  if (!bundle.handshakeId || !bundle.inviteUrl || !bundle.rsaPublicKeyPem || !bundle.networkId) {
+    return { status: 502, error: 'The publisher answered the key without a usable handshake.' };
+  }
+  return joinRemoteAct(caller, {
+    handshakeId: bundle.handshakeId, inviteUrl: bundle.inviteUrl, rsaPublicKeyPem: bundle.rsaPublicKeyPem,
+    networkId: bundle.networkId, myUrl, ...(spaceMap ? { spaceMap } : {}),
+  });
 }

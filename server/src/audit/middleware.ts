@@ -173,9 +173,11 @@ export const ROUTE_RULES: RouteRule[] = [
   { method: 'PUT',    pattern: /^\/api\/spaces\/([^/]+)\/network-precedence$/, operation: 'space.precedence.update', spaceGroup: 1 },
   { method: 'POST',   pattern: /^\/api\/networks$/,                                 operation: 'network.create' },
   { method: 'POST',   pattern: /^\/api\/networks\/join-remote$/,                    operation: 'network.join_remote' },
+  { method: 'POST',   pattern: /^\/api\/networks\/join-by-key$/,                    operation: 'network.join_by_key' },
   { method: 'PATCH',  pattern: /^\/api\/networks\/([^/]+)$/,                        operation: 'network.update' },
   { method: 'DELETE', pattern: /^\/api\/networks\/([^/]+)$/,                        operation: 'network.delete' },
   { method: 'POST',   pattern: /^\/api\/networks\/([^/]+)\/spaces$/,                operation: 'network.space.add' },
+  { method: 'POST',   pattern: /^\/api\/networks\/([^/]+)\/pending-spaces$/,        operation: 'network.space.pending' },
   { method: 'POST',   pattern: /^\/api\/networks\/([^/]+)\/members$/,               operation: 'network.member.add' },
   { method: 'DELETE', pattern: /^\/api\/networks\/([^/]+)\/members\/([^/]+)$/,      operation: 'network.member.remove' },
 
@@ -460,6 +462,17 @@ export function auditMiddleware(req: Request, res: Response, next: NextFunction)
  * and not two.
  */
 export const AUTH_FAILED_OPERATION = 'auth.failed';
+
+/**
+ * What a config reload does to each space (S-10), written by `applyConfigFromDisk` for the watcher and for
+ * `POST /api/admin/reload-config` alike — outside the route rules, like `auth.failed`, so named here for the same
+ * reason: the documentation gate derives the operations it checks from this module.
+ */
+export const CONFIG_RELOAD_OPERATIONS = {
+  added: 'space.reload_added',
+  removed: 'space.reload_removed',
+  kept: 'space.reload_kept',
+} as const;
 
 /** Log a failed auth attempt — called explicitly from auth middleware when needed. */
 export function logAuthFailure(req: Request): void {

@@ -10,7 +10,7 @@
 import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.js';
 import { uuidSchema } from './shared.js';
 import {
-  readNetworkAct, createNetworkAct, updateNetworkAct, leaveNetworkAct, addNetworkSpaceAct, type NetworkActResult,
+  readNetworkAct, createNetworkAct, updateNetworkAct, leaveNetworkAct, addNetworkSpaceAct, resolvePendingSpaceAct, type NetworkActResult,
 } from '../../networks/network-acts.js';
 import { castVoteAct, listOpenVotesAct, syncHistoryAct } from '../../networks/vote-acts.js';
 import { forkNetworkAct, inviteKeyAct } from '../../networks/network-acts.js';
@@ -122,6 +122,37 @@ export const network_add_spaceTool: ToolHandler = {
   async handle(ctx: ToolContext): Promise<ToolResult> {
     const { id, ...body } = ctx.args;
     const r = addNetworkSpaceAct(callerOf(ctx), String(id), body);
+    if (r.audit) ctx.recordChanges?.(r.audit.before, r.audit.after);  // Q-50: the entry the route writes
+    return toResult(r, '');
+  },
+};
+
+export const network_pending_spaceTool: ToolHandler = {
+  name: 'network_pending_space',
+  description: 'Accept or dismiss a space an upstream announced that this instance did not adopt on its own. Same '
+    + 'parameters and refusals as `POST /api/networks/:id/pending-spaces`. `network_get` lists the pending spaces, '
+    + 'each with why it waits.\n\n'
+    + 'WHY A SPACE WAITS: an upstream\'s announcement is a proposal. A space is added on its own only when the token '
+    + 'that joined the network could have joined it; a local space that already has the id, a joiner that lacked the '
+    + 'right, and a network with no recorded joiner all wait here.\n\n'
+    + 'WHO MAY: accepting runs the join rule over YOUR token — an existing local space needs `networks: write` on it '
+    + 'or administering it, a new one needs `createSpaces`. `mapTo` carries the network\'s space under a different '
+    + 'local id. Dismissing needs `networks: admin` on every space the network carries.',
+  mutating: true,
+  inputSchema: (_s: ToolSchemas) => ({
+    type: 'object',
+    properties: {
+      id: networkIdSchema,
+      spaceId: { type: 'string', minLength: 1, description: 'The network\'s id for the pending space, as `network_get` lists it (404 when nothing is pending under it).' },
+      action: { type: 'string', enum: ['accept', 'dismiss'], description: '`accept` adds it to the network here (creating the local space if it has none); `dismiss` forgets the proposal.' },
+      mapTo: { type: 'string', pattern: '^[a-z0-9-]{1,40}$', description: 'Accept only: the local space id to carry it under, when it should not use the network\'s id. An existing local space is joined to the network.' },
+    },
+    required: ['id', 'spaceId', 'action'],
+    additionalProperties: false,
+  }),
+  async handle(ctx: ToolContext): Promise<ToolResult> {
+    const { id, ...body } = ctx.args;
+    const r = await resolvePendingSpaceAct(callerOf(ctx), String(id), body);
     if (r.audit) ctx.recordChanges?.(r.audit.before, r.audit.after);  // Q-50: the entry the route writes
     return toResult(r, '');
   },

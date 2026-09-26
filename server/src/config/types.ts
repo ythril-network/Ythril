@@ -1338,6 +1338,7 @@ export interface Config {
    *  commits, so a crash mid-operation is detected on the next boot and completed
    *  idempotently (see reconcilePendingSpaceOp in spaces.ts). Not hand-edited. */
   pendingSpaceOp?: PendingSpaceOp;
+  // `removeSpaces` (S-10) is declared beside its only reader, in `reload-space-diff.ts`.
 }
 
 /** Records an in-flight space rename/delete so it survives a crash. See the

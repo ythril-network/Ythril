@@ -98,6 +98,9 @@ const EXEMPT = new Map([
    * `network.member.join` in the rule map. Only the session registration stays exempt.
    */
   ['/api/invite/apply', 'registers an in-memory handshake session — writes nothing, and the handshakeId is the credential'],
+  // F-41: a published pub/sub key opening a session. It writes nothing either; the membership it can lead to is
+  // audited where it happens, at finalize (`network.member.join`).
+  ['/api/invite/redeem', 'opens an in-memory handshake session for a published pub/sub key — writes nothing; the join it leads to is audited at finalize'],
   ['/api/local-agent', 'workstation connector handshake — not a brain mutation'],
   /*
    * `/api/theme` is GONE from this list: it exposes a single GET and no mutating verb, so it never matched the

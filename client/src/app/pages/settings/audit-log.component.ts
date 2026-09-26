@@ -501,6 +501,7 @@ export class AuditLogComponent implements OnInit, OnDestroy {
     'chrono.create', 'chrono.update', 'chrono.delete',
     'file.create', 'file.update', 'file.delete',
     'space.create', 'space.update', 'space.delete', 'space.wipe',
+    'space.reload_added', 'space.reload_removed', 'space.reload_kept',
     'token.create', 'token.delete',
     'webhook.create', 'webhook.update', 'webhook.delete',
     'config.reload',

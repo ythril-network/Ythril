@@ -534,6 +534,11 @@ Click **Create Network**. The dialog asks for a **label**, a **type**, the **spa
 
 ### Joining a network
 
+**A pub/sub network's published key joins on its own.** Paste the key (it starts `ythril_invite_`) into
+**Join Network**, enter the publisher's URL and your brain's URL, and join. Nobody on the publisher has to accept
+you. The spaces you join with are the ones your token may hold. For any other network, or an invite the other side
+generated for you, follow these steps:
+
 1. Click **Join Network**.
 2. Paste the invite code — the line starting `ythril1_`. (An older brain may have sent you the earlier JSON
    form; paste that instead and it works the same.)
@@ -543,6 +548,13 @@ Click **Create Network**. The dialog asks for a **label**, a **type**, the **spa
    Joining only adds — the network's records are added next to what a space holds, nothing is overwritten or
    deleted, and a peer can never delete a record your instance wrote.
 5. Click **Confirm and join**.
+
+**Spaces the network adds later wait for you unless your token could have joined them.** When a publisher or a
+parent adds a space, your instance adds it here only if the token you joined with could have joined that space:
+write access on Networks for a space you have, or the right to create spaces for a new one. Otherwise, and always
+when you already have a space of that name, it appears on the network card under **Announced, waiting for you**,
+with the reason. Press **Accept** to add it, optionally typing a local id to carry it under, or **Dismiss** to
+forget it. Networks joined or created before 5.4 have no record of the joining token, so everything they announce waits here.
 
 ### Sync schedule
 

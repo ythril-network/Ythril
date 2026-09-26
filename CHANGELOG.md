@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Join a pub/sub network by pasting its published key** (`F-41`). The docs always said a pub/sub key is
+  reusable so it can be published, and that a subscriber's join is accepted without a vote. But the only route that
+  took the key demanded an admin token on the publisher, so a stranger holding the key could not use it. Now the
+  publisher answers `POST /api/invite/redeem` with a handshake for the key alone. The joiner's
+  `POST /api/networks/join-by-key` (MCP `network_join_by_key`) runs the whole join from the publisher's URL and the
+  key, and the **Join network** dialog takes both. Redeem is rate-limited, capped at 25 open handshakes per
+  network, and answers only for a pub/sub network the instance publishes.
+
+### Security
+
+- **A network's announcement is a proposal: the token that joined it decides what it may add** (`S-9`). A
+  publisher or tree parent that added a space made every subscriber or child create it, join a same-named local
+  space to the network, and widen the peer tokens to it, whatever the joining token was allowed. Now the join
+  records its token, and a later announced space is added only if that token could have joined it. A same-named
+  local space is never joined this way. Anything else waits on the network card as a pending space with its
+  reason, and the operator accepts or dismisses it: `POST /api/networks/:id/pending-spaces`, MCP
+  `network_pending_space`. **Networks joined or created before this version have no recorded joining token, so every space
+  they announce from now on waits for an accept.**
+- **A config reload never drops a space silently** (`S-10`). A space the running instance had and a reloaded
+  `config.json` no longer listed simply left the configuration, with its data orphaned and nothing logged beyond
+  "reloading". Whoever wrote the file (a deploy step, a restore, a second replica, a hand edit) removed spaces.
+  Now such a space is kept and the log says so. To remove one by editing the file, list its id in a top-level
+  `removeSpaces`. Every space a reload adds, removes or keeps is audited (`space.reload_added`,
+  `space.reload_removed`, `space.reload_kept`), whether the watcher or `POST /api/admin/reload-config` ran it.
+
 ## [5.3.1] — 2026-09-26
 
 **An instance administrator holds every right on every space again.** Since 5.0 an instance-admin token stored

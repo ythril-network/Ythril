@@ -284,14 +284,23 @@ describe('POST /api/admin/reload-config — space config changes take effect', (
       `Expected 201 writing to new space after reload, got ${r.status}: ${JSON.stringify(r.body)}`);
   });
 
-  it('removing a space via reload makes it return 404 immediately', async () => {
-    // NEW_SPACE_ID is still in config from the previous test (after runs sequentially);
-    // restore to original which doesn't contain it.
+  it('a reload keeps a space the file merely leaves out (S-10)', async () => {
+    // NEW_SPACE_ID is still in config from the previous test. A file that simply lacks it used to remove it with no
+    // trace; now the running instance keeps it, and only an explicit removal takes it out.
     await applyConfig(originalConfig);
+    await new Promise(resolve => setTimeout(resolve, 400));
+    const check = await fetch(`${INSTANCES.a}/api/spaces`, { headers: { Authorization: `Bearer ${token}` } });
+    const data = await check.json();
+    assert.ok(data.spaces?.find(s => s.id === NEW_SPACE_ID), `'${NEW_SPACE_ID}' must survive a reload that only leaves it out`);
+  });
+
+  it('removing a space via reload needs removeSpaces, and then it returns 404 immediately', async () => {
+    const removal = { ...originalConfig, removeSpaces: [NEW_SPACE_ID] };
+    await applyConfig(removal);
 
     // On Docker Desktop (Windows/macOS), bind-mount writes from the host may propagate
     // to the container with a brief delay.  If reloadConfig() read the stale file it will
-    // have written config_with_space back via saveConfig's atomic rename — re-trigger
+    // have written the kept space back via saveConfig's atomic rename — re-trigger
     // reload until the space is actually gone from the live /api/spaces list (max 3 s).
     let spaceGone = false;
     for (let attempt = 0; attempt < 20 && !spaceGone; attempt++) {
@@ -303,14 +312,12 @@ describe('POST /api/admin/reload-config — space config changes take effect', (
         spaceGone = true;
         break;
       }
-      // Space still visible — re-write config (in case saveConfig() overwrote it),
-      // wait for bind-mount propagation, then re-trigger reload.
-      writeConfig(originalConfig);
+      writeConfig(removal);
       await new Promise(resolve => setTimeout(resolve, 600));
       await post(INSTANCES.a, token, '/api/admin/reload-config', {});
       await new Promise(resolve => setTimeout(resolve, 400));
     }
-    assert.ok(spaceGone, `Space '${NEW_SPACE_ID}' should be gone from /api/spaces after reload`);
+    assert.ok(spaceGone, `Space '${NEW_SPACE_ID}' should be gone from /api/spaces after a reload that lists it in removeSpaces`);
 
     const r = await post(INSTANCES.a, token, `/api/brain/spaces/${NEW_SPACE_ID}/facts`, {
       fact: 'should be rejected',

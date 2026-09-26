@@ -73,6 +73,16 @@ import { ModalDirective } from '../../shared/modal.directive';
             style="font-family:var(--font-mono); font-size:12px; resize:vertical;"
           ></textarea>
         </div>
+        @if (isPublishedKey()) {
+          <!-- F-41: a pub/sub's published key joins with the publisher's URL alone, no admission. -->
+          <div class="field">
+            <label>{{ 'networks.dialog.join.publisherUrlLabel' | transloco }}</label>
+            <input type="url" [(ngModel)]="publisherUrl" name="publisherUrl"
+                   [placeholder]="'networks.dialog.join.publisherUrlPlaceholder' | transloco"
+                   [attr.aria-label]="'networks.dialog.join.publisherUrlLabel' | transloco" />
+            <p style="font-size:12px; color:var(--text-muted); margin:4px 0 0;">{{ 'networks.dialog.join.publishedKeyHint' | transloco }}</p>
+          </div>
+        }
 
         @if (joinMapSpaces().length > 0) {
           <div style="margin:0 0 12px; padding:12px; border:1px solid var(--border); border-radius:var(--radius-sm); background:var(--bg-elevated);">
@@ -129,7 +139,7 @@ import { ModalDirective } from '../../shared/modal.directive';
           <button
             class="btn-primary btn"
             (click)="joinMapSpaces().length > 0 ? confirmJoin() : joinNetwork()"
-            [disabled]="joining() || !joinBundle.trim() || !myUrl().trim()"
+            [disabled]="joining() || !joinBundle.trim() || !myUrl().trim() || (isPublishedKey() && !publisherUrl.trim())"
           >
             @if (joining()) { <span class="spinner" style="width:12px;height:12px;border-width:2px;"></span> }
             {{ joinMapSpaces().length > 0 ? ('networks.dialog.join.confirmJoinButton' | transloco) : ('networks.dialog.join.submitButton' | transloco) }}
@@ -165,11 +175,22 @@ export class NetworkJoinDialogComponent {
   joinSpaceAliases: Record<string, string> = {};
   joinSpaceTargets: Record<string, string> = {};
   private joinParsedBundle: any = null;
+  /** The publisher's base URL, asked for when a pub/sub's published invite key is pasted (F-41). */
+  publisherUrl = '';
+  /** A published pub/sub key rather than a handshake invite: it joins by key, with no mapping step. */
+  isPublishedKey(): boolean { return this.joinBundle.trim().startsWith('ythril_invite_'); }
 
   joinNetwork(): void {
     this.joinError.set('');
     this.joinSuccess.set('');
     this.joinMapSpaces.set([]);
+    if (this.isPublishedKey()) {
+      if (!this.myUrl().trim()) { this.joinError.set(this.transloco.translate('networks.dialog.join.error.missingMyUrl')); return; }
+      this.joining.set(true);
+      this.networksApi.joinByKey({ publisherUrl: this.publisherUrl.trim(), inviteKey: this.joinBundle.trim(), myUrl: this.myUrl().trim() })
+        .subscribe({ next: (result) => this.onJoined(result), error: (err) => this.onJoinFailed(err) });
+      return;
+    }
     /*
      * TWO input shapes, and which one it is decided by what the text STARTS with rather than by trying
      * both and seeing what sticks.
@@ -287,37 +308,40 @@ export class NetworkJoinDialogComponent {
       myUrl:       this.myUrl().trim(),
       expiresAt:   bundle.expiresAt,
       ...(Object.keys(spaceMap).length > 0 ? { spaceMap } : {}),
-    }).subscribe({
-      next: (result) => {
-        this.joining.set(false);
-        // Vote-governed networks hold the join in a vote round on the inviter's
-        // side; sync begins once the members/ancestors approve.
-        const successKey = result.status === 'vote_pending'
-          ? 'networks.dialog.join.success.votePending'
-          : 'networks.dialog.join.success.joined';
-        let msg = this.transloco.translate(successKey, { networkLabel: result.networkLabel });
-        if (result.createdSpaces?.length) {
-          msg += ` ${this.transloco.translate('networks.dialog.join.success.createdSpaces', { spaces: result.createdSpaces.join(', ') })}`;
-        }
-        if (result.existingSpaces?.length) {
-          msg += ` ${this.transloco.translate('networks.dialog.join.success.existingSpaces', { spaces: result.existingSpaces.join(', ') })}`;
-        }
-        if (result.spaceMap && Object.keys(result.spaceMap).length > 0) {
-          const aliases = Object.entries(result.spaceMap).map(([r, l]) => `${r} → ${l}`).join(', ');
-          msg += ` ${this.transloco.translate('networks.dialog.join.success.aliases', { aliases })}`;
-        }
-        this.joinSuccess.set(msg);
-        this.joinBundle = '';
-        this.joinParsedBundle = null;
-        this.joinMapSpaces.set([]);
-        this.joinSpaceActions = {};
-        this.joinSpaceAliases = {};
-        this.joined.emit(); // host reloads networks + refreshes spaces (a join can create local spaces)
-      },
-      error: (err) => {
-        this.joining.set(false);
-        this.joinError.set(err.error?.error ?? this.transloco.translate('networks.error.joinFailed'));
-      },
-    });
+    }).subscribe({ next: (result) => this.onJoined(result), error: (err) => this.onJoinFailed(err) });
+  }
+
+  /** One outcome for both joins, by handshake invite and by published key. */
+  private onJoined(result: { status: string; networkLabel: string; createdSpaces?: string[]; existingSpaces?: string[]; spaceMap?: Record<string, string> }): void {
+    this.joining.set(false);
+    // Vote-governed networks hold the join in a vote round on the inviter's
+    // side; sync begins once the members/ancestors approve.
+    const successKey = result.status === 'vote_pending'
+      ? 'networks.dialog.join.success.votePending'
+      : 'networks.dialog.join.success.joined';
+    let msg = this.transloco.translate(successKey, { networkLabel: result.networkLabel });
+    if (result.createdSpaces?.length) {
+      msg += ` ${this.transloco.translate('networks.dialog.join.success.createdSpaces', { spaces: result.createdSpaces.join(', ') })}`;
+    }
+    if (result.existingSpaces?.length) {
+      msg += ` ${this.transloco.translate('networks.dialog.join.success.existingSpaces', { spaces: result.existingSpaces.join(', ') })}`;
+    }
+    if (result.spaceMap && Object.keys(result.spaceMap).length > 0) {
+      const aliases = Object.entries(result.spaceMap).map(([r, l]) => `${r} → ${l}`).join(', ');
+      msg += ` ${this.transloco.translate('networks.dialog.join.success.aliases', { aliases })}`;
+    }
+    this.joinSuccess.set(msg);
+    this.joinBundle = '';
+    this.joinParsedBundle = null;
+    this.joinMapSpaces.set([]);
+    this.joinSpaceActions = {};
+    this.joinSpaceAliases = {};
+    this.publisherUrl = '';
+    this.joined.emit(); // host reloads networks + refreshes spaces (a join can create local spaces)
+  }
+
+  private onJoinFailed(err: { error?: { error?: string } }): void {
+    this.joining.set(false);
+    this.joinError.set(err.error?.error ?? this.transloco.translate('networks.error.joinFailed'));
   }
 }

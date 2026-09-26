@@ -43,6 +43,13 @@ X-TOTP-Code: <code>   # required when MFA is enabled
 
 **Requires admin token** (and TOTP code when MFA is enabled). Re-reads `config.json` from disk. Useful after manual edits. Any spaces added to the config since the last load are automatically initialized (MongoDB collections, indexes, vector search index, and file directories created). The built-in `general` space is ensured to exist.
 
+**A reload never drops a space silently.** A space the running instance has and the file no longer lists is
+KEPT, and the log says so. To remove a space by editing the file, list its id in a top-level `"removeSpaces": ["id"]`;
+the reload removes it from the configuration (its data stays until you delete the space) and clears the list. A
+rename or delete interrupted by a crash completes as before. Every space a reload adds, removes or keeps is
+written to the audit log as `space.reload_added`, `space.reload_removed` or `space.reload_kept`, by the watcher
+as well as by this endpoint.
+
 > **Manual edits are picked up automatically.** The server watches `config.json` and reloads within about two seconds of the file changing, running the same work this endpoint does — including initialising any space you added by hand. You do not have to call it after an edit; it remains available for scripts that want the reload to be synchronous, and for reloading `secrets.json` at a moment of your choosing.
 >
 > **One caveat:** the server holds the config in memory and writes the whole file back whenever anything changes it. An edit made in the ~2-second window *before* the watcher notices can still be overwritten by a config write that lands in between (creating a space, saving settings). If you are editing by hand on a busy instance, call this endpoint straight after saving to close that window, or stop the server, edit, and start it again — which is always safe.
