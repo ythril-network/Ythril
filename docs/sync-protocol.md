@@ -349,7 +349,7 @@ At the **start** of each cycle — before any data sync, see [Overview](#overvie
 
 3. **Pull member view** — `GET /api/sync/networks/:networkId/members` fetches the peer's full member list. Any record whose `instanceId` is already known locally (but is not our own `instanceId`) has its `url`, `label`, and `children` merged in if they differ.
 
-**Both self-records also carry `spaces`** — the network's spaces as the sender carries them, in the network's ids. An instance adopts from it only when the sender is its **upstream**: a pub/sub subscriber from its publisher, a braintree node from its parent. A space it lacks is created under that id and added to the network, and the tokens it issued to the network's members are widened to it. The announcement only adds; a space missing from it is never removed. From anyone else — a subscriber announcing to its publisher, a club peer — it is ignored.
+**Both self-records also carry `spaces`** — the network's spaces as the sender carries them, in the network's ids. An instance adopts from it only when the sender is its **upstream**: a pub/sub subscriber from its publisher, a braintree node from its parent. What it adds is decided by the token that joined the network there: a space that token could have joined is created under that id and added to the network, and the tokens it issued to the network's members are widened to it. Anything else, including a same-named local space, is held as a pending space for the operator (`POST /api/networks/:id/pending-spaces`). The announcement only adds; a space missing from it is never removed. From anyone else — a subscriber announcing to its publisher, a club peer — it is ignored.
 
 ## Schema phase (pub/sub and braintree)
 

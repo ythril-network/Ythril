@@ -15,7 +15,7 @@ import { triggerNetworkSync, triggerPeerSync, syncTimeoutMs } from '../../sync/t
 import { log } from '../../util/log.js';
 import {
   networkView, readNetworkAct, createNetworkAct, updateNetworkAct, leaveNetworkAct, addNetworkSpaceAct, 
-  CreateNetworkBody, UpdateNetworkBody, AddNetworkSpaceBody,
+  CreateNetworkBody, UpdateNetworkBody, AddNetworkSpaceBody, ResolvePendingSpaceBody, resolvePendingSpaceAct,
 } from '../../networks/network-acts.js';
 
 export const crudRouter = Router();
@@ -120,6 +120,17 @@ crudRouter.patch('/:id', globalRateLimit, requireAuth, denyReadOnly, (req, res) 
   if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
   const r = updateNetworkAct(req.authToken as Parameters<typeof updateNetworkAct>[0], req.params['id'] as string, parsed.data);
   // The three fields this act can change, never the record: it also holds invite and member token hashes.
+  if (r.audit) req.auditSnapshots = r.audit;
+  sendAct(res, r);
+});
+
+// ── POST /api/networks/:id/pending-spaces — accept or dismiss a space an upstream announced (S-9) ──
+
+// The rights are the act's: accepting runs the join rule over the accepting token, dismissing needs the settings right.
+crudRouter.post('/:id/pending-spaces', globalRateLimit, requireAuth, denyReadOnly, async (req, res) => {
+  const parsed = ResolvePendingSpaceBody.safeParse(req.body);
+  if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
+  const r = await resolvePendingSpaceAct(req.authToken as Parameters<typeof resolvePendingSpaceAct>[0], req.params['id'] as string, parsed.data);
   if (r.audit) req.auditSnapshots = r.audit;
   sendAct(res, r);
 });

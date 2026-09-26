@@ -57,6 +57,11 @@ export class NetworksApi {
     return this.http.post<any>('/api/networks/join-remote', body);
   }
 
+  /** Accept or dismiss a space an upstream announced (S-9). `mapTo` carries it under a different local id. */
+  resolvePendingSpace(networkId: string, body: { spaceId: string; action: 'accept' | 'dismiss'; mapTo?: string }): Observable<Network> {
+    return this.http.post<Network>(`/api/networks/${networkId}/pending-spaces`, body);
+  }
+
   removeMember(networkId: string, instanceId: string): Observable<void> {
     return this.http.delete<void>(`/api/networks/${networkId}/members/${instanceId}`);
   }

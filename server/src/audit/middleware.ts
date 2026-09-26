@@ -176,6 +176,7 @@ export const ROUTE_RULES: RouteRule[] = [
   { method: 'PATCH',  pattern: /^\/api\/networks\/([^/]+)$/,                        operation: 'network.update' },
   { method: 'DELETE', pattern: /^\/api\/networks\/([^/]+)$/,                        operation: 'network.delete' },
   { method: 'POST',   pattern: /^\/api\/networks\/([^/]+)\/spaces$/,                operation: 'network.space.add' },
+  { method: 'POST',   pattern: /^\/api\/networks\/([^/]+)\/pending-spaces$/,        operation: 'network.space.pending' },
   { method: 'POST',   pattern: /^\/api\/networks\/([^/]+)\/members$/,               operation: 'network.member.add' },
   { method: 'DELETE', pattern: /^\/api\/networks\/([^/]+)\/members\/([^/]+)$/,      operation: 'network.member.remove' },
 

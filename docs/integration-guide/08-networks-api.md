@@ -140,6 +140,40 @@ PATCH /api/networks/:id
 
 ---
 
+### Pending Spaces
+
+A space an upstream announced and this instance did not add on its own. `GET /api/networks/:id` lists them as
+`pendingSpaces`, each `{ networkId, localId, why, from, at }`.
+
+**Why a space waits.** The token that joined the network here decides what the network may add later, by the rule
+the join itself ran: an existing local space needs `networks: write` on it or administering it, a new one needs
+`createSpaces` (and a `write` floor on `networks`, unless the token is a space administrator). A space waits when:
+
+- the joining token could not have joined it;
+- a local space already has its id: joining it would start syncing a space that only shares a name;
+- the network has no recorded joining token (it was joined before 5.4), or that token no longer exists.
+
+```http
+POST /api/networks/:id/pending-spaces
+```
+
+```json
+{ "spaceId": "research", "action": "accept", "mapTo": "team-research" }
+```
+
+`action` is `accept` or `dismiss`. `mapTo`, accept only, carries the network's space under a different local id; an
+existing local space named there is joined to the network. Accepting is priced like a join, over YOUR token:
+`networks: write` on an existing space (or administering it), `createSpaces` for a new one. Dismissing forgets the
+proposal and needs `networks: admin` on every space the network carries. Answers `200` with the network. MCP:
+`network_pending_space` with `{ "id", "spaceId", "action", "mapTo"? }`.
+
+| status | when |
+|---|---|
+| `400` | a malformed body, or a `mapTo` that is not a space id |
+| `403` | the token is short on the right the action needs; the refusal names what |
+| `404` | no such network, or nothing pending under `spaceId` |
+| `409` | the network already carries the local id |
+
 ### Add a Space to a Network
 
 ```http
@@ -165,9 +199,9 @@ Adds one of this instance's spaces to a network. Answers `200` with the network 
 **What follows, without another call:**
 
 - The tokens this instance issued to the network's members reach the new space as soon as it is carried, so their sync of it is not refused.
-- On `pubsub` and `braintree` the member exchange names the space, and an instance adopts it only from its **upstream** (a subscriber from its publisher, a tree node from its parent), never from anyone else.
+- On `pubsub` and `braintree` the member exchange names the space, and an instance considers it only from its **upstream** (a subscriber from its publisher, a tree node from its parent), never from anyone else. **The announcement is a proposal, not a grant**: the space is added only if the token that joined the network here could have joined it (see [Pending Spaces](#pending-spaces)); otherwise it waits for the operator.
 - On `club`, `closed` and `democratic` every member applies the passed round itself, re-deciding it from the casts under its own rule. The proposer keeps serving the passed round on `GET /api/sync/networks/:id/votes`, so a member that never saw it open still learns it.
-- The receiving side only adds. A space it lacks is created with the network's id. **On the three voted types, a member that already has a local space of that name keeps it out of the network unless it voted yes**: those networks sync both ways, so joining it would send its records to every member. The skip is logged. On `pubsub` and `braintree` the space only flows down, so it merges into a same-named space, and nothing there is overwritten or deleted.
+- The receiving side only adds. A space it lacks is created with the network's id. **On the three voted types, a member that already has a local space of that name keeps it out of the network unless it voted yes**: those networks sync both ways, so joining it would send its records to every member. The skip is logged. On `pubsub` and `braintree` a same-named local space is never joined by an announcement: it waits as pending until the operator maps it or accepts it under another id.
 
 | status | when |
 |---|---|

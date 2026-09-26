@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **A network's announcement is a proposal: the token that joined it decides what it may add** (`S-9`). A
+  publisher or tree parent that added a space made every subscriber or child create it, join a same-named local
+  space to the network, and widen the peer tokens to it, whatever the joining token was allowed. Now the join
+  records its token, and a later announced space is added only if that token could have joined it. A same-named
+  local space is never joined this way. Anything else waits on the network card as a pending space with its
+  reason, and the operator accepts or dismisses it: `POST /api/networks/:id/pending-spaces`, MCP
+  `network_pending_space`. **Networks joined before this version have no recorded joining token, so every space
+  they announce from now on waits for an accept.**
+
 ### Fixed
 
 - **An instance administrator holds every right on every space again** (`S-11`). Before 5.0, space admin was

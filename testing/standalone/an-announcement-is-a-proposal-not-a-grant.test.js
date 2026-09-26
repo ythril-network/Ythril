@@ -85,6 +85,14 @@ describe('the adoption path goes through the decision', () => {
     assert.match(body, /adoptionDecision\(/, 'the announcement path must be judged by the joining token');
     assert.doesNotMatch(body, /addSpacesToNetwork\(networkId, adopt,/, 'the raw announced list must never reach addSpacesToNetwork');
   });
+  it('accepting a pending space runs the join rule over the ACCEPTING token', () => {
+    const acts = stripComments(readFileSync('server/src/networks/network-acts.ts', 'utf8'));
+    const at = acts.indexOf('export async function resolvePendingSpaceAct(');
+    assert.ok(at > -1, 'resolvePendingSpaceAct is gone — re-anchor this gate');
+    const body = acts.slice(at, acts.indexOf('\nexport ', at + 10));
+    assert.match(body, /networkJoinRefusal\(caller,/, 'an accept must be priced like the join it completes');
+  });
+
   it('the join records who established the membership', () => {
     const join = stripComments(readFileSync('server/src/networks/join-remote-act.ts', 'utf8'));
     assert.match(join, /joinedBy/, 'joinRemoteAct must store the joining token id on the network');

@@ -313,6 +313,31 @@ import { NetworkEnableWizardComponent } from './network-enable-wizard.component'
                 </div>
               }
 
+              <!-- Spaces an upstream announced and this instance did not adopt on its own (S-9) -->
+              @if (net.pendingSpaces?.length) {
+                <div style="margin-top:16px;">
+                  <div class="section-title">{{ 'networks.network.pending.title' | transloco }}</div>
+                  <p style="font-size:12px; color:var(--text-muted); margin:4px 0 8px;">{{ 'networks.network.pending.hint' | transloco }}</p>
+                  @for (p of net.pendingSpaces; track p.networkId) {
+                    <div class="vote-row">
+                      <span style="flex:1; min-width:0;">
+                        <strong>{{ p.networkId }}</strong>
+                        <span style="display:block; font-size:11px; color:var(--text-muted);">{{ p.why }}</span>
+                      </span>
+                      <input class="input" style="width:140px;" [placeholder]="'networks.network.pending.mapTo' | transloco"
+                             [attr.aria-label]="'networks.network.pending.mapTo' | transloco"
+                             [value]="pendingMapTo[net.id + '/' + p.networkId] ?? ''"
+                             (input)="pendingMapTo[net.id + '/' + p.networkId] = $any($event.target).value" />
+                      <button class="btn-primary btn btn-sm" [disabled]="resolvingPending[net.id + '/' + p.networkId]" (click)="resolvePending(net, p.networkId, 'accept')">
+                        @if (resolvingPending[net.id + '/' + p.networkId]) { <span class="spinner" style="width:11px;height:11px;border-width:2px;"></span> }
+                        {{ 'networks.network.pending.accept' | transloco }}
+                      </button>
+                      <button class="btn btn-sm" [disabled]="resolvingPending[net.id + '/' + p.networkId]" (click)="resolvePending(net, p.networkId, 'dismiss')">{{ 'networks.network.pending.dismiss' | transloco }}</button>
+                    </div>
+                  }
+                </div>
+              }
+
               <!-- Leave -->
               <div style="margin-top:16px; padding-top:12px; border-top:1px solid var(--border-muted);">
                 <button class="btn-danger btn btn-sm" (click)="leaveNetwork(net)">{{ 'networks.network.leaveButton' | transloco }}</button>
@@ -637,6 +662,29 @@ export class NetworksComponent implements OnInit {
 
   openVotes(networkId: string): VoteRound[] {
     return this.votesByNetwork[networkId] ?? [];
+  }
+
+  /** In-flight accept/dismiss per `networkId/spaceId`, and the optional local id typed for an accept. */
+  resolvingPending: Record<string, boolean> = {};
+  pendingMapTo: Record<string, string> = {};
+
+  /** Accept or dismiss a space an upstream announced (S-9). The server answers with the network, which replaces ours. */
+  resolvePending(net: Network, spaceId: string, action: 'accept' | 'dismiss'): void {
+    const key = `${net.id}/${spaceId}`;
+    const mapTo = action === 'accept' ? (this.pendingMapTo[key] ?? '').trim() : '';
+    this.resolvingPending[key] = true;
+    this.networksApi.resolvePendingSpace(net.id, { spaceId, action, ...(mapTo ? { mapTo } : {}) }).subscribe({
+      next: (updated) => {
+        delete this.resolvingPending[key];
+        delete this.pendingMapTo[key];
+        Object.assign(net, updated);
+        this.toast.success(this.transloco.translate(action === 'accept' ? 'networks.network.pending.accepted' : 'networks.network.pending.dismissed', { space: spaceId }));
+      },
+      error: (err) => {
+        delete this.resolvingPending[key];
+        this.toast.error(err.error?.error ?? this.transloco.translate('networks.error.pendingFailed'));
+      },
+    });
   }
 
   async castVote(networkId: string, roundId: string, vote: 'yes' | 'veto'): Promise<void> {
