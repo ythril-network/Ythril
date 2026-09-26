@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.4.1] — 2026-09-26
+
+**Subscribing a webhook to fact events works from Settings → Webhooks again.** Since 5.0 the page offered event
+names the server no longer accepts, so any subscription that ticked a fact event was refused.
+
+| | |
+|---|---|
+| fixed | the Webhooks page offers `fact.created`, `fact.updated` and `fact.deleted`, the names the server emits |
+| what to do | upgrade; a subscription that failed to save from the page can be saved again. Subscriptions made through the API were never affected |
+
+**Documents that changed**: none.
+
 ### Fixed
 
 - **Subscribing a webhook to fact events works from Settings → Webhooks again** (`Q-65`). Since 5.0 renamed the
