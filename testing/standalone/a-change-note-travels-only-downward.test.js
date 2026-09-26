@@ -35,6 +35,8 @@ describe('who is below this instance', () => {
   it('a braintree node sends to its children, never to its parent', () => {
     const tree = net({ type: 'braintree', myParentInstanceId: 'parent', members: [
       member('parent', { direction: 'pull' }), member('child', { parentInstanceId: SELF, direction: 'both' }), member('cousin', { parentInstanceId: 'parent' }),
+      // A temporary reparent stores the NEW parent with `push`; it is above this node, never below it.
+      member('new-parent', { direction: 'push' }),
     ] });
     assert.deepEqual(M.downwardMembers(tree, SELF).map(m => m.instanceId), ['child']);
   });
@@ -84,6 +86,12 @@ describe('the doors go through the one parser', () => {
       const run = src.search(/triggerNetworkSync\(|runSyncForNetwork\(net\.id\)/);
       assert.ok(run > at, `${name} must queue the note BEFORE the cycle, so this cycle carries it`);
     }
+  });
+  it('one malformed note cannot hold the queue behind it: a 400 falls back to one by one and drops only that note', () => {
+    const src = stripComments(readFileSync('server/src/sync/change-notes.ts', 'utf8'));
+    assert.match(src, /if \(status !== 400\)/);
+    assert.match(src, /for \(const n of due\) \{\s*const one = await send\(\[n\]\)/);
+    assert.match(src, /\$addToSet: \{ refusedBy: member\.instanceId \}/);
   });
   it('the engine delivers in the member exchange', () => {
     assert.match(stripComments(readFileSync('server/src/sync/engine.ts', 'utf8')), /await deliverChangeNotes\(net, member, fetchOpts\)/);

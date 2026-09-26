@@ -17,8 +17,11 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
 
-let M;
-before(async () => { M = await import('../../server/dist/spaces/meta-update.js'); });
+let M, N;
+before(async () => {
+  M = await import('../../server/dist/spaces/meta-update.js');
+  N = await import('../../server/dist/sync/change-notes.js');
+});
 
 const base = { typeSchemas: { entity: { Profile: {}, Project: {} }, chrono: { Work: {} } } };
 
@@ -33,12 +36,20 @@ describe('which types a replace leaves out', () => {
   });
 });
 
+describe('which types an edit changes', () => {
+  it('only the types whose definition differs — a replace re-sends every type and most are unchanged', () => {
+    const incoming = { typeSchemas: { entity: { Profile: {}, Project: { namingPattern: 'x' } }, chrono: { Work: {} } } };
+    assert.deepEqual(M.typesAnEditChanges(base, incoming), ['entity:Project']);
+  });
+});
+
 describe('what both doors add to the answer', () => {
   it('a networked outcome with kept types carries the flag, the list and one sentence', () => {
     const n = M.networkMergeNotice({ outcome: 'applied', space: {}, keptTypes: ['entity:Profile'] });
     assert.equal(n.appliedAsMerge, true);
     assert.deepEqual(n.keptTypes, ['entity:Profile']);
     assert.match(n.mergeNote, /entity:Profile was left out/);
+    assert.match(n.mergeNote, /Where this instance has members below it/, 'never promises a note a club member will not get');
   });
   it('nothing kept, nothing added', () => {
     assert.deepEqual(M.networkMergeNotice({ outcome: 'applied', space: {} }), {});
@@ -48,7 +59,7 @@ describe('what both doors add to the answer', () => {
 
 describe('the change note a network update sends down', () => {
   it('says who changed what, and that the left-out types are kept', () => {
-    const text = M.metaChangeNote('ythril-dev', 'ythril dev net', 'y-flows', { typeSchemas: { entity: { Project: {} } }, usageNotes: 'n' }, ['entity:Profile']);
+    const text = N.metaChangeNote('ythril-dev', 'ythril dev net', 'y-flows', { fields: ['typeSchemas', 'usageNotes'], changedTypes: ['entity:Project'], keptTypes: ['entity:Profile'] });
     assert.match(text, /ythril-dev updated the schema of 'y-flows' in 'ythril dev net'/);
     assert.match(text, /Types added or changed: entity:Project/);
     assert.match(text, /Also changed: usageNotes/);
@@ -66,6 +77,11 @@ describe('every door reports it', () => {
     const src = read('server/src/mcp/tools/spaces.ts');
     assert.equal((src.match(/\.\.\.networkMergeNotice\(result\)/g) ?? []).length, 2);
     assert.equal((src.match(/mergeLine\(result\)/g) ?? []).length, 2);
+  });
+  it('the note is queued where a round PASSES on the proposer, so a round that passes later sends one too', () => {
+    const gov = read('server/src/sync/governance.ts');
+    assert.match(gov, /if \(round\.proposedHere\) \{\s*void queueGeneratedNote\(net\.id, metaChangeNote\(/);
+    assert.doesNotMatch(read('server/src/spaces/meta-update.ts'), /queueGeneratedNote\(/, 'a second queueing site would send the note twice');
   });
   it('the Verify marker the ticket names is present', () => {
     assert.match(read('server/src/spaces/meta-update.ts'), /appliedAsMerge/);

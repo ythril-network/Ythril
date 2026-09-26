@@ -1,4 +1,5 @@
 import { Component, inject, input, signal } from '@angular/core';
+import { DomSanitizer, type SafeHtml } from '@angular/platform-browser';
 import { DatePipe } from '@angular/common';
 import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
 import { Network } from '../../core/api.types';
@@ -6,6 +7,7 @@ import type { ChangeNote } from '../../core/change-note.types';
 import { NetworksApi } from '../../core/networks-api.service';
 import { ToastService } from '../../core/toast.service';
 import { PhIconComponent } from '../../shared/ph-icon.component';
+import { MarkdownRenderService } from '../../shared/markdown-render.service';
 
 /** Roles with members BELOW them, so a note written here reaches somebody: a publisher, a tree root or inner node. */
 const SENDING_ROLES = new Set(['publisher', 'root', 'node']);
@@ -28,6 +30,9 @@ const SENDING_ROLES = new Set(['publisher', 'root', 'node']);
     .note { padding: 8px 10px; background: var(--bg-elevated); border-radius: var(--radius-sm); margin-bottom: 8px; font-size: 13px; }
     .note-meta { display: block; font-size: 11px; color: var(--text-muted); margin-bottom: 4px; }
     .note-body { white-space: pre-wrap; overflow-wrap: anywhere; }
+    .note-body.md { white-space: normal; }
+    .note-body.md :first-child { margin-top: 0; }
+    .note-body.md :last-child { margin-bottom: 0; }
     .space-pick { display: inline-flex; align-items: center; gap: 4px; margin-right: 10px; font-size: 12px; }
     textarea { width: 100%; min-height: 72px; box-sizing: border-box; }
   `],
@@ -63,7 +68,7 @@ const SENDING_ROLES = new Set(['publisher', 'root', 'node']);
         @for (n of received(); track n._id) {
           <div class="note">
             <span class="note-meta">{{ n.receivedAt | date:'medium' }} · {{ (n.generated ? 'networks.network.changeNotes.generated' : 'networks.network.changeNotes.by') | transloco: { author: n.author } }}{{ n.spaces.length ? ' · ' + n.spaces.join(', ') : '' }}</span>
-            <span class="note-body">{{ n.note }}</span>
+            @if (html()[n._id]; as h) { <div class="note-body md" [innerHTML]="h"></div> } @else { <span class="note-body">{{ n.note }}</span> }
           </div>
         } @empty {
           <div style="font-size:12px; color:var(--text-muted); margin-bottom:8px;">{{ 'networks.network.changeNotes.noneReceived' | transloco }}</div>
@@ -73,7 +78,7 @@ const SENDING_ROLES = new Set(['publisher', 'root', 'node']);
           @for (n of sent(); track n._id) {
             <div class="note">
               <span class="note-meta">{{ n.createdAt | date:'medium' }} · {{ n.pendingFor?.length ? ('networks.network.changeNotes.pending' | transloco: { count: n.pendingFor!.length }) : ('networks.network.changeNotes.delivered' | transloco) }}{{ n.spaces.length ? ' · ' + n.spaces.join(', ') : '' }}</span>
-              <span class="note-body">{{ n.note }}</span>
+              @if (html()[n._id]; as h) { <div class="note-body md" [innerHTML]="h"></div> } @else { <span class="note-body">{{ n.note }}</span> }
             </div>
           } @empty {
             <div style="font-size:12px; color:var(--text-muted);">{{ 'networks.network.changeNotes.noneSent' | transloco }}</div>
@@ -87,8 +92,15 @@ export class NetworkChangeNotesComponent {
   private networksApi = inject(NetworksApi);
   private toast = inject(ToastService);
   private transloco = inject(TranslocoService);
+  private markdown = inject(MarkdownRenderService);
+  private sanitizer = inject(DomSanitizer);
 
   network = input.required<Network>();
+  /**
+   * Each note rendered as markdown, by id — through the app's ONE markdown pipeline, which sanitises (a note is
+   * text another instance's operator wrote). Until it renders, or if it cannot, the note shows as plain text.
+   */
+  html = signal<Record<string, SafeHtml>>({});
 
   open = signal(false);
   loading = signal(false);
@@ -137,7 +149,16 @@ export class NetworkChangeNotesComponent {
     let pending = this.canSend() ? 2 : 1;
     const done = () => { if (--pending === 0) this.loading.set(false); };
     const fail = (err: { error?: { error?: string } }) => { this.toast.error(err.error?.error ?? this.transloco.translate('networks.network.changeNotes.loadFailed')); done(); };
-    this.networksApi.changeNotes(id, 'in').subscribe({ next: r => { this.received.set(r.notes); done(); }, error: fail });
-    if (this.canSend()) this.networksApi.changeNotes(id, 'out').subscribe({ next: r => { this.sent.set(r.notes); done(); }, error: fail });
+    this.networksApi.changeNotes(id, 'in').subscribe({ next: r => { this.received.set(r.notes); this.renderAll(r.notes); done(); }, error: fail });
+    if (this.canSend()) this.networksApi.changeNotes(id, 'out').subscribe({ next: r => { this.sent.set(r.notes); this.renderAll(r.notes); done(); }, error: fail });
+  }
+
+  private renderAll(notes: ChangeNote[]): void {
+    for (const n of notes) {
+      if (this.html()[n._id]) continue;
+      this.markdown.render(n.note)
+        .then(h => this.html.update(m => ({ ...m, [n._id]: this.sanitizer.bypassSecurityTrustHtml(h) })))
+        .catch(() => { /* stays plain text */ });
+    }
   }
 }

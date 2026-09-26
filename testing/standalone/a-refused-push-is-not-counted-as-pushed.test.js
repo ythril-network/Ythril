@@ -46,9 +46,11 @@ describe('both ends are wired', () => {
     assert.ok(families.length >= 6, `parsed ${families.length} families — the gate would pass on too few`);
     for (const f of families) assert.match(body, new RegExp(`${f}: \\{[^}]*rejected:`), `${f} answers without a rejected count`);
   });
-  it('the engine subtracts the refused count and reports it as incomplete', () => {
+  it('the engine subtracts the refused count and makes the cycle partial — without failing the member', () => {
     const src = stripComments(readFileSync('server/src/sync/engine.ts', 'utf8'));
     assert.match(src, /pushed \+= batch\.length - r;/);
-    assert.match(src, /stoppedEarly\.push\(\.\.\.refusedTransfers\(pushed\)\)/);
+    assert.match(src, /const refused = refusedTransfers\(pushed\)/);
+    assert.doesNotMatch(src, /stoppedEarly\.push\(\.\.\.refusedTransfers/, 'a refusal in the incomplete list fails the member and raises its failure count');
+    assert.match(src, /errors === 0 && refusals === 0 \? 'success'/);
   });
 });

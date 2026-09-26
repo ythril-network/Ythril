@@ -17,6 +17,7 @@ import { peerSafeFetch } from './peer-fetch.js';
 import { buildBraintreeAncestors } from '../util/braintree.js';
 import { applyMetaRound, type MetaRoundProposal } from './meta-round-merge.js';
 import type { SpaceMeta } from '../config/types.js';
+import { metaChangeNote, queueGeneratedNote } from './change-notes.js';
 
 /**
  * Recompute the braintree ancestor voter set for a round from this instance's
@@ -178,6 +179,12 @@ export function concludeRoundIfReady(
         // on a late joiner can then only refresh the layer, never overwrite what this instance defined itself.
         applied = applyMetaRound(net.schemaLayers?.[localSpace] ?? {}, round as MetaRoundProposal);
         storeNetworkLayer(net.id, localSpace, applied.meta as SpaceMeta);
+      }
+      // F-42 / Q-61: the proposer tells the members below what the network just changed — on every path a round
+      // passes by, at once or later. A no-op on a network with nobody below this instance.
+      if (round.proposedHere) {
+        void queueGeneratedNote(net.id, metaChangeNote(getConfig().instanceLabel, net.label, localSpace,
+          { fields: round.metaChangedFields, changedTypes: round.changedTypes, keptTypes: round.keptTypes }), [localSpace]);
       }
       if (applied.conflicts.length > 0) {
         // The vote wins — the network decided this value — but the operator whose edit it superseded has

@@ -333,6 +333,11 @@ export async function resolvePendingSpaceAct(caller: Caller, id: string, input: 
   }
   if (caller.id) netAfter.spaceOrigins = recordOrigin(netAfter.spaceOrigins ?? {}, localId, caller.id);
   saveConfig(after);
+  // Q-60: a space proposed by a passed round waited with the schema that round carried; it arrives with it.
+  if (entry.meta) {
+    const { acceptNetworkLayer } = await import('../sync/space-meta-pull.js');
+    acceptNetworkLayer(netAfter.id, localId, entry.meta, `accepted pending space '${spaceId}'`);
+  }
   return { status: 200, body: networkView(netAfter), audit: { before, after: pendingSnapshot(netAfter) } };
 }
 

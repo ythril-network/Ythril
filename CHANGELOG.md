@@ -36,8 +36,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A push the receiver refused is no longer reported as pushed** (`Q-59`). `batch-upsert` answers a `rejected`
   count per family, covering every record it neither stored nor already held: schema-invalid, an implausible
   `seq`, a fork chain at its cap, or a chrono type the space does not declare. The sender subtracts it and records
-  the cycle as incomplete with the count, so a cycle whose records all bounced no longer reads `success`. The
-  watermark still advances, as before. Links are now counted in the cycle's totals too.
+  the cycle as **partial**, naming the family and the count, so a cycle whose records all bounced no longer reads
+  `success`. A peer that refused records answered, so its failure count does not rise. The watermark still
+  advances, as before. Links are now counted in the cycle's totals too.
 
 ## [5.4.0] — 2026-09-26
 

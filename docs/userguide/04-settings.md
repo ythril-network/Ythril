@@ -587,7 +587,7 @@ members' note says so too, and each can retire the type locally.
 
 Expand a network card and click **Sync History** to see a log of every sync cycle — timestamp, status, items pulled and pushed, and any errors.
 
-A cycle shows **success** only when every member's transfers completed. If a peer refused a transfer or a transfer
+A cycle shows **success** only when every member's transfers completed and nothing sent was refused; a member that refused records shows the cycle as **partial**, with the kind and count, without being treated as unreachable. If a peer refused a transfer or a transfer
 was cut short, the cycle shows **partial** (some members completed) or **failed** (none did), and its errors name
 the space, the direction and what stopped. A network that shows **failed** on every cycle is not syncing at all,
 even though it looks connected.

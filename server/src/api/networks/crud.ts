@@ -73,7 +73,11 @@ crudRouter.post('/:id/sync', globalRateLimit, requireAdmin, async (req, res) => 
   // F-42: an optional `{ note, spaces }` body rides this sync to the members below. Queued BEFORE the cycle starts,
   // so this cycle carries it; a note that cannot travel is refused and the sync does not run, rather than running
   // without the note the caller asked for.
-  const attached = await attachSyncNote(net, req.body && Object.keys(req.body).length ? req.body : undefined, String(req.authToken?.name ?? 'an instance admin'));
+  // Only `note` and `spaces` are read, as MCP reads them: this door took no body before, and a key an integrator
+  // already sends must stay ignored rather than start refusing the sync.
+  const b = (req.body ?? {}) as Record<string, unknown>;
+  const noteInput = b['note'] !== undefined || b['spaces'] !== undefined ? { note: b['note'], spaces: b['spaces'] } : undefined;
+  const attached = await attachSyncNote(net, noteInput, String(req.authToken?.name ?? 'an instance admin'));
   if (attached && 'error' in attached) { res.status(attached.status).json({ error: attached.error }); return; }
   await triggerNetworkSync(res, net.id, { wait, timeoutMs: syncTimeoutMs(req.query['timeoutMs']), ...(attached ? { noteId: attached.queued._id } : {}) });
 });

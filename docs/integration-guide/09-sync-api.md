@@ -333,8 +333,8 @@ which is the whole reason this paragraph exists.
 document its `Incoming*` schema refused, an implausible `seq`, a fact whose fork chain is at its cap
 (`forkDepthRefused`, which `rejected` includes), and a chrono entry of a type the space does not declare
 (`unknownType`, likewise included). Our own sync engine subtracts it from what it reports as pushed and records
-the cycle as incomplete, naming the family and the count — so a push the receiver refused is never shown as
-`success`. It does **not** offer those records again: it advances its watermark regardless, because the receiver
+the cycle as `partial`, naming the family and the count — so a push the receiver refused is never shown as
+`success`. The peer answered, so this does not count as a failed sync with it and never raises its failure count. It does **not** offer those records again: it advances its watermark regardless, because the receiver
 would refuse the identical record on every future cycle and holding the watermark back would stall the space
 instead. Both ends log it; the receiver's log names the record ids.
 

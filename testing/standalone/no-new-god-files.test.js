@@ -161,7 +161,13 @@ const FROZEN = {
   // became one loop over every family, which is also the fix for links never reaching the cycle totals; change-note
   // delivery (one call in the governance step) and the push refusal count (`push-refusals.ts`) live beside it. The
   // ceiling follows the file down, so the reclaimed lines are not room to regrow into.
-  'server/src/sync/engine.ts': 962,
+  //
+  // 962 -> 964 in the same PR, after review: a refused record went into the member's incomplete list, which is the
+  // FAILURE path — it raised the peer's failure count and, at the threshold, logged "PEER UNREACHABLE" for a peer
+  // that had answered 200. The two lines are the separate refusal channel (collected per member, counted per cycle
+  // into a partial status). NO DECOMPOSITION: the counting lives in `sync/push-refusals.ts`; what stays here is
+  // where in the cycle a refusal is recorded, which is a fact about the cycle.
+  'server/src/sync/engine.ts': 964,
   // 958 -> 684: the per-type editor body moved into `schema-type-editor.component` so the Brain Overview
   // could open the same editor. Lowered rather than left — a frozen number 274 lines above the real size
   // is 274 lines this file could regrow into without the gate saying a word.

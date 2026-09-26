@@ -191,7 +191,7 @@ async function _runSyncForNetworkImpl(networkId: string): Promise<{ synced: numb
   const errorMessages: string[] = [];
 
   log.info(`Starting sync cycle for network '${net.label}' (${net.members.length} members)`);
-  let synced = 0; let errors = 0;
+  let synced = 0; let errors = 0; let refusals = 0;
   const syncTimer = syncDurationSeconds.startTimer({ network: networkId });
 
   for (const member of net.members) {
@@ -203,6 +203,9 @@ async function _runSyncForNetworkImpl(networkId: string): Promise<{ synced: numb
       // synced recorded `success` for a network that had transferred nothing since it was created (`Q-48`), so
       // it takes the failure path below: an error for the cycle, a reason in the history, a failure counted.
       if (counts.incomplete.length > 0) throw new Error(`transfer did not complete — ${counts.incomplete.join('; ')}`);
+      // Q-59: records the peer answered for and refused make the cycle PARTIAL with the reason, not a failure of the
+      // member — it answered, so its failure counter (and the "unreachable" alarm read from it) must not move.
+      if (counts.refused.length > 0) { refusals++; errorMessages.push(`${member.label} refused records: ${counts.refused.join('; ')}`); }
       synced++;
       // Reset failure counter on success
       _setFailureCount(net.id, member.instanceId, 0);
@@ -247,7 +250,7 @@ async function _runSyncForNetworkImpl(networkId: string): Promise<{ synced: numb
 
   // Calculate status once and share between Prometheus and sync history
   const status: 'success' | 'partial' | 'failed' =
-    errors === 0 ? 'success' : synced === 0 && net.members.length > 0 ? 'failed' : 'partial';
+    errors === 0 && refusals === 0 ? 'success' : synced === 0 && net.members.length > 0 ? 'failed' : 'partial';
 
   // Record Prometheus metrics
   syncCyclesTotal.inc({ network: networkId, status });
@@ -363,17 +366,17 @@ export async function runSyncForPeer(
 async function runSyncForMember(
   net: NetworkConfig,
   member: NetworkMember,
-): Promise<{ pulled: SyncCounts; pushed: SyncCounts; incomplete: string[] }> {
+): Promise<{ pulled: SyncCounts; pushed: SyncCounts; incomplete: string[]; refused: string[] }> {
   const pulled: SyncCounts = { facts: 0, entities: 0, edges: 0, files: 0, chrono: 0, links: 0 };
   const pushed: SyncCounts = { facts: 0, entities: 0, edges: 0, files: 0, chrono: 0, links: 0 };
   // What did not complete this cycle, one entry per space and direction. Non-empty makes the member's sync a
   // failure in the cycle's accounting (`Q-48`) — the watermarks were held correctly; what was missing was saying so.
-  const incomplete: string[] = [];
+  const incomplete: string[] = []; const refused: string[] = [];
   const secrets = getSecrets();
   const peerToken = secrets.peerTokens[member.instanceId];
   if (!peerToken) {
     log.warn(`No peer token for ${member.label} (${member.instanceId}) — skipping sync`);
-    return { pulled, pushed, incomplete: ['no peer token for this member'] };
+    return { pulled, pushed, incomplete: ['no peer token for this member'], refused };
   }
 
   const headers: Record<string, string> = {
@@ -480,13 +483,14 @@ async function runSyncForMember(
     if (shouldPull) {
       await pullSpaceMetaFromUpstream(net, member, spaceId, remoteSpaceId, fetchOpts); // F-39.1: only from upstream, never throws
       const pc = await pullFromPeer(member, spaceId, remoteSpaceId, net.id, fetchOpts, batchFetchOpts);
-      pulled.facts += pc.facts; pulled.entities += pc.entities; pulled.edges += pc.edges; pulled.chrono += pc.chrono;
+      pulled.facts += pc.facts; pulled.entities += pc.entities; pulled.edges += pc.edges; pulled.chrono += pc.chrono; pulled.links += pc.links;
       if (pc.stoppedEarly.length > 0) incomplete.push(`space '${spaceId}' receive: ${pc.stoppedEarly.join(', ')} stopped early`);
     }
     if (shouldPush) {
       const pc = await pushToPeer(member, spaceId, remoteSpaceId, net.id, fetchOpts, batchFetchOpts);
-      pushed.facts += pc.facts; pushed.entities += pc.entities; pushed.edges += pc.edges; pushed.chrono += pc.chrono;
+      pushed.facts += pc.facts; pushed.entities += pc.entities; pushed.edges += pc.edges; pushed.chrono += pc.chrono; pushed.links += pc.links;
       if (pc.stoppedEarly.length > 0) incomplete.push(`space '${spaceId}' push: ${pc.stoppedEarly.join(', ')} stopped early`);
+      if (pc.refused.length > 0) refused.push(`space '${spaceId}' push: ${pc.refused.join(', ')}`);
     }
 
     // Sync file manifest — respect direction guards like pull/push above
@@ -526,7 +530,7 @@ async function runSyncForMember(
   // Hot-path bookkeeping: a cosmetic timestamp written every member every cycle.
   if (m) { m.lastSyncAt = new Date().toISOString(); saveConfigSoon(freshCfg); }
 
-  return { pulled, pushed, incomplete };
+  return { pulled, pushed, incomplete, refused };
 }
 
 // ── Gossip: member list exchange ────────────────────────────────────────────
@@ -1025,7 +1029,7 @@ async function pushToPeer(
   networkId: string,
   opts: () => RequestInit,
   batchOpts: () => RequestInit,
-): Promise<{ facts: number; entities: number; edges: number; chrono: number; links: number; stoppedEarly: string[] }> {
+): Promise<{ facts: number; entities: number; edges: number; chrono: number; links: number; stoppedEarly: string[]; refused: string[] }> {
   let pushedMemories = 0, pushedEntities = 0, pushedEdges = 0, pushedChrono = 0, pushedLinks = 0;
   const cfg = getConfig();
   const freshNet = cfg.networks.find(n => n.id === networkId);
@@ -1155,7 +1159,7 @@ async function pushToPeer(
     seqOf: (t) => t.maxSeq,
     warn: log.warn,
   });
-  stoppedEarly.push(...refusedTransfers(pushed)); // Q-59: a refused record makes the cycle incomplete, with the count
+  const refused = refusedTransfers(pushed); // Q-59: the peer answered, so this is not a failure — see runSyncForNetwork
 
   /*
    * The other half of the X-20 instrumentation: what the cycle DECIDED, beside what it found.
@@ -1185,7 +1189,7 @@ async function pushToPeer(
 
   return {
     facts: pushedMemories, entities: pushedEntities, edges: pushedEdges, chrono: pushedChrono,
-    links: pushedLinks, stoppedEarly,
+    links: pushedLinks, stoppedEarly, refused,
   };
 }
 

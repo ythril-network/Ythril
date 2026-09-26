@@ -58,6 +58,8 @@ export interface ChangeNote {
   createdAt: string;
   /** out: the members it has not reached yet. */
   pendingFor?: string[];
+  /** out: the members that refused it as malformed (400) — taken off `pendingFor` so it cannot block the queue. */
+  refusedBy?: string[];
   /** in: the instance that sent it, and when it arrived. */
   from?: string;
   receivedAt?: string;
@@ -82,9 +84,11 @@ export const IncomingChangeNotes = z.object({
 export function downwardMembers(net: NetworkConfig, selfId?: string): NetworkMember[] {
   if (net.type === 'pubsub') return net.members.filter(m => m.direction === 'push');
   // Only the tree needs this instance's own id, so only the tree reads config for it (as `networkRole` does).
+  // Children only, by parent — NOT by `direction`: a temporary reparent stores the NEW PARENT with `push`, and
+  // counting it as below sent this node's notes UP to it, where they were refused every cycle.
   if (net.type === 'braintree') {
     const self = selfId ?? getConfig().instanceId;
-    return net.members.filter(m => m.parentInstanceId === self || m.direction === 'push');
+    return net.members.filter(m => m.parentInstanceId === self);
   }
   return [];
 }
@@ -155,6 +159,23 @@ export async function attachSyncNote(
 }
 
 /**
+ * The note a schema update carried by a network sends down when its round passes (`F-42`, `Q-61`): who changed
+ * which space, which types it added or changed, which other fields, and which types it left out that members KEEP.
+ * Plain sentences: an operator reads it, and a webhook forwards it.
+ */
+export function metaChangeNote(
+  proposer: string, networkLabel: string, spaceId: string,
+  change: { fields?: readonly string[]; changedTypes?: readonly string[]; keptTypes?: readonly string[] },
+): string {
+  const lines = [`${proposer} updated the schema of '${spaceId}' in '${networkLabel}'.`];
+  if (change.changedTypes?.length) lines.push(`Types added or changed: ${change.changedTypes.join(', ')}.`);
+  const others = (change.fields ?? []).filter(f => f !== 'typeSchemas');
+  if (others.length) lines.push(`Also changed: ${others.join(', ')}.`);
+  if (change.keptTypes?.length) lines.push(`Left out of the new definition, and KEPT on every member (nothing is removed by a network update): ${change.keptTypes.join(', ')}. Retire them locally if you no longer use them.`);
+  return lines.join('\n');
+}
+
+/**
  * Queue a note a structural change drafted, when this instance has anyone below it; otherwise nothing. Never
  * throws: its callers are a vote conclusion and a network edit, whose own work must not be lost to a note.
  */
@@ -175,24 +196,42 @@ export async function queueGeneratedNote(networkId: string, note: string, spaces
  */
 export async function deliverChangeNotes(net: NetworkConfig, member: NetworkMember, opts: () => RequestInit): Promise<void> {
   try {
-    if (!downwardMembers(net).some(m => m.instanceId === member.instanceId)) return;
+    const below = downwardMembers(net).map(m => m.instanceId);
     const coll = col<ChangeNote>(COLLECTION);
+    // A member that left, or is no longer below, is owed nothing: without this its notes read "waiting for N" for ever.
+    await coll.updateMany(asFilter<ChangeNote>({ networkId: net.id, direction: 'out', pendingFor: { $elemMatch: { $nin: below } } }),
+      { $pull: { pendingFor: { $nin: below } } } as never);
+    if (!below.includes(member.instanceId)) return;
     const due = await coll.find(asFilter<ChangeNote>({ networkId: net.id, direction: 'out', pendingFor: member.instanceId }))
       .sort({ createdAt: 1 }).limit(MAX_PER_DELIVERY).toArray() as ChangeNote[];
     if (!due.length) return;
-    const body = {
-      notes: due.map(n => ({
-        id: n._id, note: n.note, spaces: n.spaces.map(s => localToRemote(net, s)), author: n.author,
-        generated: n.generated, createdAt: n.createdAt,
-      })),
+    const url = `${member.url}/api/sync/networks/${encodeURIComponent(net.id)}/change-notes`;
+    const send = async (batch: ChangeNote[]): Promise<number> => {
+      const resp = await peerSafeFetch(url, { ...opts(), method: 'POST', body: JSON.stringify({
+        notes: batch.map(n => ({ id: n._id, note: n.note, spaces: n.spaces.map(s => localToRemote(net, s)), author: n.author, generated: n.generated, createdAt: n.createdAt })),
+      }) });
+      await resp.body?.cancel().catch(() => {});
+      return resp.status;
     };
-    const resp = await peerSafeFetch(`${member.url}/api/sync/networks/${encodeURIComponent(net.id)}/change-notes`, {
-      ...opts(), method: 'POST', body: JSON.stringify(body),
-    });
-    await resp.body?.cancel().catch(() => {});
-    if (!resp.ok) { log.warn(`Change notes to ${member.label} (${member.instanceId}) on '${net.label}': ${resp.status}; kept for the next cycle`); return; }
-    await coll.updateMany(asFilter<ChangeNote>({ _id: { $in: due.map(n => n._id) } }), { $pull: { pendingFor: member.instanceId } } as never);
-    log.info(`Delivered ${due.length} change note(s) to ${member.label} on '${net.label}'`);
+    const delivered = (ids: string[]) => coll.updateMany(asFilter<ChangeNote>({ _id: { $in: ids } }), { $pull: { pendingFor: member.instanceId } } as never);
+    const status = await send(due);
+    if (status >= 200 && status < 300) {
+      await delivered(due.map(n => n._id));
+      log.info(`Delivered ${due.length} change note(s) to ${member.label} on '${net.label}'`);
+      return;
+    }
+    // A 400 says the BODY is wrong, and the receiver validates a batch whole — so one bad note would hold every note
+    // behind it back for ever. Send them one by one instead: a note refused on its own is taken out of this member's
+    // queue and recorded in `refusedBy`, and the rest go through. Any other status (an older peer with no route, a
+    // 403, a 5xx) is about the member rather than a note, so everything stays queued for the next cycle.
+    if (status !== 400) { log.warn(`Change notes to ${member.label} (${member.instanceId}) on '${net.label}': ${status}; kept for the next cycle`); return; }
+    for (const n of due) {
+      const one = await send([n]);
+      if (one >= 200 && one < 300) { await delivered([n._id]); continue; }
+      if (one !== 400) { log.warn(`Change notes to ${member.label} on '${net.label}': ${one}; the rest kept for the next cycle`); return; }
+      await coll.updateOne(asFilter<ChangeNote>({ _id: n._id }), { $pull: { pendingFor: member.instanceId }, $addToSet: { refusedBy: member.instanceId } } as never);
+      log.warn(`Change note ${n._id} on '${net.label}' was refused by ${member.label} (400) and will not be offered to it again`);
+    }
   } catch (err) {
     log.warn(`Change notes to ${member.label} (${member.instanceId}) on '${net.label}': ${err}; kept for the next cycle`);
   }

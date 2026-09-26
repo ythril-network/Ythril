@@ -52,6 +52,14 @@ describe('a voted network carries the schema on the round', () => {
   });
 });
 
+describe('a space that waits as pending keeps the schema its round carried', () => {
+  it('the round path holds the schema on the pending entry, and an accept applies it', () => {
+    assert.match(body(read('server/src/networks/network-spaces.ts'), 'export function applySpaceAdditionRound'), /meta: round\.pendingMeta/);
+    const accept = body(read('server/src/networks/network-acts.ts'), 'export async function resolvePendingSpaceAct');
+    assert.match(accept, /acceptNetworkLayer\(netAfter\.id, localId, entry\.meta/);
+  });
+});
+
 describe('the proposer sees its own passed change', () => {
   it('a proposer holding a layer for the network updates it too', () => {
     const gov = read('server/src/sync/governance.ts');

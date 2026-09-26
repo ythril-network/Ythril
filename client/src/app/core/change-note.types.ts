@@ -13,6 +13,8 @@ export interface ChangeNote {
   generated: boolean;
   createdAt: string;
   pendingFor?: string[];
+  /** Members that refused it as malformed; it is not offered to them again. */
+  refusedBy?: string[];
   from?: string;
   receivedAt?: string;
 }
