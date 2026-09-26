@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.3.1] — 2026-09-26
+
+**An instance administrator holds every right on every space again.** Since 5.0 an instance-admin token stored
+with rows for only some spaces was refused on every other space, including spaces a network had just created,
+and could not widen itself. Granting instance admin now also grants space admin on the all-spaces floor, so it
+covers spaces created later, and instance-admin tokens stored without it are repaired when the instance starts.
+Renaming a space also keeps its named administrators.
+
+| | |
+|---|---|
+| fixed | instance admins reach every space, present and future; a renamed space keeps its space admins; an OIDC login mapped to instance admin gets the same floor |
+| what changes on upgrade | at startup, each instance-admin token without the space-admin floor gets it, and the log names every token changed |
+| docs | the tokens guides no longer say four admin cells make a space administrator; only the **Space admin** grant does |
+| what to do | upgrade. Nothing to configure |
+
+**Documents that changed**, for anyone who keeps a copy: `docs/integration-guide/06-spaces-api.md`, `docs/integration-guide/07-tokens-api.md`, `docs/userguide/04-settings.md`.
+
 ### Fixed
 
 - **An instance administrator holds every right on every space again** (`S-11`). Before 5.0, space admin was
