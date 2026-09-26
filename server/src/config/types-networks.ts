@@ -196,6 +196,17 @@ export interface NetworkConfig {
    * does it silently. See `mayLeaveNetwork` in `auth/network-membership.ts`.
    */
   spaceOrigins?: Record<string, string>;
+  /**
+   * The id of the token that joined this network here (S-9). It is the authority for what the network may add later:
+   * an upstream's announcement of a new space is adopted only if this token could have joined it. Local, never sent
+   * to a peer. Absent on a network joined before it was recorded, which then adopts nothing without the operator.
+   */
+  joinedBy?: string;
+  /**
+   * Spaces an upstream announced that were NOT adopted, each with why (S-9): the joining token could not have joined
+   * it, the joiner is unknown, or a local space already has that id. The operator accepts or maps one explicitly.
+   */
+  pendingSpaces?: { networkId: string; localId: string; why: string; from: string; at: string }[];
   /** Maps remote (peer-side) space IDs to local space IDs.
    *  Used when a local space was renamed after joining, or when the joiner chose
    *  a different local ID to avoid a collision.  The sync engine uses this to

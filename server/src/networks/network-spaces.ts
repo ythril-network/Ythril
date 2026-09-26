@@ -31,6 +31,9 @@ import { getConfig, saveConfig } from '../config/loader.js';
 import type { Config, NetworkConfig, VoteRound } from '../config/types.js';
 import { migrateToken } from '../auth/rights-migration.js';
 import { reachesSpace } from '../auth/space-reach.js';
+import { networkJoinRefusal } from '../auth/network-rights.js';
+import { withInstanceAdminGrants } from '../auth/instance-admin-grants.js';
+import type { TokenRights } from '../config/rights-shape.js';
 import { createSpace } from '../spaces/lifecycle.js';
 import { localToRemote, remoteToLocal } from '../sync/space-map.js';
 import { log } from '../util/log.js';
@@ -147,14 +150,61 @@ export async function addSpacesToNetwork(
 }
 
 /**
- * Adopt what `fromInstanceId` announced for network `networkId` — only from the upstream, only what is missing.
+ * Which announced spaces may be added here, judged by the token that JOINED the network (S-9).
+ *
+ * Owner, 2026-09-26: *"on joining a network the space definition must come from the token that joins the network,
+ * not from the peers."* An announcement is a proposal: each space is adopted only if `net.joinedBy` could have joined
+ * it — the same `networkJoinRefusal` the join itself runs — and everything else waits in `pending` with the reason.
+ * A local space that already has the id is never adopted this way, whoever joined: joining it would start syncing a
+ * space that only shares a name, and only an explicit mapping by the operator may do that. No recorded joiner (a
+ * network joined before this existed) or a revoked one adopts nothing.
+ */
+export function adoptionDecision(
+  net: Pick<NetworkConfig, 'joinedBy'>,
+  tokens: readonly { id: string; rights?: TokenRights | null; instanceAdmin?: boolean }[],
+  localSpaceIds: readonly string[],
+  entries: readonly { networkId: string; localId: string }[],
+): { adopt: { networkId: string; localId: string }[]; pending: { networkId: string; localId: string; why: string }[] } {
+  const joiner = net.joinedBy ? tokens.find(t => t.id === net.joinedBy) : undefined;
+  const adopt: { networkId: string; localId: string }[] = [];
+  const pending: { networkId: string; localId: string; why: string }[] = [];
+  for (const e of entries) {
+    if (localSpaceIds.includes(e.localId)) {
+      pending.push({ ...e, why: `a local space '${e.localId}' already exists; it joins the network only by an explicit mapping` });
+      continue;
+    }
+    if (!joiner) {
+      pending.push({ ...e, why: net.joinedBy ? 'the token that joined this network no longer exists' : 'this network has no recorded joining token (joined before it was recorded)' });
+      continue;
+    }
+    const caller = { ...joiner, rights: withInstanceAdminGrants(joiner.rights ?? undefined) };
+    const refusal = networkJoinRefusal(caller as never, { existing: [], toCreate: [e.localId] });
+    if (refusal) pending.push({ ...e, why: refusal });
+    else adopt.push(e);
+  }
+  return { adopt, pending };
+}
+
+/**
+ * Adopt what `fromInstanceId` announced for network `networkId` — only from the upstream, only what is missing, and
+ * only what the joining token could have joined (`adoptionDecision`). The rest is recorded as pending.
  * Returns the local ids added.
  */
 export async function adoptAnnouncedSpaces(networkId: string, fromInstanceId: string, announced: unknown): Promise<string[]> {
-  const net = getConfig().networks.find(n => n.id === networkId);
+  const cfg = getConfig();
+  const net = cfg.networks.find(n => n.id === networkId);
   if (!net) return [];
-  const adopt = spacesToAdopt(net, fromInstanceId, announced);
-  return adopt.length ? addSpacesToNetwork(networkId, adopt, `announced by upstream ${fromInstanceId}`) : [];
+  const proposed = spacesToAdopt(net, fromInstanceId, announced);
+  if (!proposed.length) return [];
+  const { adopt: allowed, pending } = adoptionDecision(net, cfg.tokens, cfg.spaces.map(s => s.id), proposed);
+  const fresh = pending.filter(p => !(net.pendingSpaces ?? []).some(q => q.networkId === p.networkId));
+  if (fresh.length) {
+    const at = new Date().toISOString();
+    net.pendingSpaces = [...(net.pendingSpaces ?? []), ...fresh.map(p => ({ ...p, from: fromInstanceId, at }))];
+    saveConfig(cfg);
+    log.warn(`Network ${networkId}: upstream ${fromInstanceId} announced ${fresh.map(p => p.networkId).join(', ')}; held as pending, not adopted (${fresh[0]!.why})`);
+  }
+  return allowed.length ? addSpacesToNetwork(networkId, allowed, `announced by upstream ${fromInstanceId}, joined by ${net.joinedBy}`) : [];
 }
 
 /**

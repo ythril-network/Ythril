@@ -274,6 +274,8 @@ export async function joinRemoteAct(caller: Caller, input: unknown): Promise<Net
   // Who established each membership, so the leave rule can tell this token's own from another's.
   const joiner = caller.id;
   if (joiner) for (const s of allNetworkSpaces) if (!net.spaceOrigins?.[s]) net.spaceOrigins = recordOrigin(net.spaceOrigins, s, joiner);
+  // And who joined the network itself (S-9): the authority for what a later announcement may add here.
+  if (joiner) net.joinedBy ??= joiner;
 
   if (!net.members.some(m => m.instanceId === applyData.instanceId)) {
     net.members.push({
