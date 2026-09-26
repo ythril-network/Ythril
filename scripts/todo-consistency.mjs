@@ -39,7 +39,8 @@ import { verifyLineOf, parseVerifyLine, evaluateClause } from './verify-line.mjs
 import { resolvedHeadings, decidedButStillFiled, rulingsLeftOnThePage } from './parked-decisions-rules.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const TODO = join(ROOT, 'todo');
+// `TODO_CHECK_DIR` points the check at another folder; its tests use it, nothing else sets it.
+const TODO = process.env.TODO_CHECK_DIR ?? join(ROOT, 'todo');
 const R = '\x1b[0m';
 const RED = '\x1b[31m';
 const GREEN = '\x1b[32m';
@@ -108,9 +109,21 @@ const failures = [];
 const fail = (why) => failures.push(why);
 
 const files = readdirSync(TODO).filter(f => f.endsWith('.md'));
+/*
+ * No queue file: the project keeps its queue somewhere else (owner, 2026-09-26: tickets in a y-tickets space,
+ * checked by the flows' own tracker check). That is only true while `todo/` holds no open work — an index gone
+ * while a tracker file still holds open items is the original failure, work nothing will reach, and still fails.
+ */
 if (!files.includes(ORDERED)) {
-  console.log(`${RED}${ORDERED} is missing — there is no index.${R}`);
-  process.exit(1);
+  // Reference pages hold item-shaped headings by design (NOT_A_QUEUE), so only the other files can strand work.
+  const stranded = files.filter(f => !NOT_A_QUEUE.has(f)).flatMap(f => openItems(readFileSync(join(TODO, f), 'utf8')).map(i => `${f}: ${i.id ?? i.title ?? 'an open item'}`));
+  if (stranded.length) {
+    console.log(`${RED}${ORDERED} is missing, and todo/ still holds open work nothing indexes:${R}`);
+    for (const s of stranded) console.log(`  · ${s}`);
+    process.exit(1);
+  }
+  console.log(`${DIM}todo/ has no queue file and no open items — the queue is kept elsewhere; nothing to check here.${R}`);
+  process.exit(0);
 }
 
 const ordered = readFileSync(join(TODO, ORDERED), 'utf8');

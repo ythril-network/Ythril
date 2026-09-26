@@ -50,6 +50,9 @@ Renaming a space also keeps its named administrators.
 - **`todo:check` no longer reads a working-order checklist.** Its checks were written for a hand-ticked file,
   and that ordering is now enforced by the flow's own gates, so the rule, its helper and its tests are gone.
   The exemption list also loses the three loop write-ups deleted from `todo/`.
+- **`todo:check` passes a `todo/` with no queue file and no open work.** A project whose queue is kept elsewhere
+  (tickets, checked by the flows' own tracker check) failed every local preflight on the missing index. Open items
+  left in a tracker file with no index still fail, and name each one.
 
 ## [5.3.0] — 2026-09-25
 
