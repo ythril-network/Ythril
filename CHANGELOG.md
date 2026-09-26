@@ -34,6 +34,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `removeSpaces`. Every space a reload adds, removes or keeps is audited (`space.reload_added`,
   `space.reload_removed`, `space.reload_kept`), whether the watcher or `POST /api/admin/reload-config` ran it.
 
+## [5.3.1] — 2026-09-26
+
+**An instance administrator holds every right on every space again.** Since 5.0 an instance-admin token stored
+with rows for only some spaces was refused on every other space, including spaces a network had just created,
+and could not widen itself. Granting instance admin now also grants space admin on the all-spaces floor, so it
+covers spaces created later, and instance-admin tokens stored without it are repaired when the instance starts.
+Renaming a space also keeps its named administrators.
+
+| | |
+|---|---|
+| fixed | instance admins reach every space, present and future; a renamed space keeps its space admins; an OIDC login mapped to instance admin gets the same floor |
+| what changes on upgrade | at startup, each instance-admin token without the space-admin floor gets it, and the log names every token changed |
+| docs | the tokens guides no longer say four admin cells make a space administrator; only the **Space admin** grant does |
+| what to do | upgrade. Nothing to configure |
+
+**Documents that changed**, for anyone who keeps a copy: `docs/integration-guide/06-spaces-api.md`, `docs/integration-guide/07-tokens-api.md`, `docs/userguide/04-settings.md`.
+
 ### Fixed
 
 - **An instance administrator holds every right on every space again** (`S-11`). Before 5.0, space admin was
@@ -60,6 +77,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`todo:check` no longer reads a working-order checklist.** Its checks were written for a hand-ticked file,
   and that ordering is now enforced by the flow's own gates, so the rule, its helper and its tests are gone.
   The exemption list also loses the three loop write-ups deleted from `todo/`.
+- **`todo:check` passes a `todo/` with no queue file and no open work.** A project whose queue is kept elsewhere
+  (tickets, checked by the flows' own tracker check) failed every local preflight on the missing index. Open items
+  left in a tracker file with no index still fail, and name each one.
 
 ## [5.3.0] — 2026-09-25
 
