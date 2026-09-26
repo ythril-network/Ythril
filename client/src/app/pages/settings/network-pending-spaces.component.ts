@@ -17,18 +17,24 @@ import { ToastService } from '../../core/toast.service';
   selector: 'app-network-pending-spaces',
   standalone: true,
   imports: [TranslocoPipe],
+  // Its own copy of the page's row rule: a component's styles are encapsulated, so the page's `.vote-row` does not
+  // reach in here.
+  styles: [`
+    .pending-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 8px 10px;
+      background: var(--bg-elevated); border-radius: var(--radius-sm); margin-bottom: 8px; font-size: 13px; }
+  `],
   template: `
     @if (network().pendingSpaces?.length) {
       <div style="margin-top:16px;">
         <div class="section-title">{{ 'networks.network.pending.title' | transloco }}</div>
         <p style="font-size:12px; color:var(--text-muted); margin:4px 0 8px;">{{ 'networks.network.pending.hint' | transloco }}</p>
         @for (p of network().pendingSpaces; track p.networkId) {
-          <div class="vote-row">
+          <div class="pending-row">
             <span style="flex:1; min-width:0;">
               <strong>{{ p.networkId }}</strong>
               <span style="display:block; font-size:11px; color:var(--text-muted);">{{ p.why }}</span>
             </span>
-            <input class="input" style="width:140px;" [placeholder]="'networks.network.pending.mapTo' | transloco"
+            <input type="text" style="width:160px;" [placeholder]="'networks.network.pending.mapTo' | transloco"
                    [attr.aria-label]="'networks.network.pending.mapTo' | transloco"
                    [value]="mapTo[p.networkId] ?? ''"
                    (input)="mapTo[p.networkId] = $any($event.target).value" />
