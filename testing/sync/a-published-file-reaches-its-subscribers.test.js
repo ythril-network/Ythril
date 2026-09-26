@@ -90,6 +90,22 @@ describe('a published file reaches the subscriber', () => {
     assert.deepEqual(((await c.json()).conflicts ?? []).map(x => x.originalPath), [], 'an upstream-only change is not a conflict');
   });
 
+  it('the file\'s description and tags reach the subscriber too (Q-69)', async () => {
+    // The metadata is its own replicated family. The push sent the whole stored record, local-only keys and all,
+    // and the receiver's strict schema refused it whole — so the bytes arrived and the description never did.
+    const r = await fetch(`${INSTANCES.b}/api/brain/spaces/${SPACE}/files?path=${encodeURIComponent(FILE)}`, {
+      method: 'PATCH', headers: { Authorization: `Bearer ${tokenB}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ description: `described ${RUN}`, tags: ['onboarding'] }),
+    });
+    assert.ok(r.status < 300, `meta edit answered ${r.status}`);
+    await syncUntil(async () => {
+      const q = await post(INSTANCES.a, tokenA, '/api/filter', { space: SPACE, collection: 'files', filter: { path: FILE }, limit: 1 });
+      const rows = q.body?.results ?? (typeof q.body?.text === 'string' ? JSON.parse(q.body.text) : []);
+      const doc = rows[0];
+      return doc?.description === `described ${RUN}` && (doc.tags ?? []).includes('onboarding');
+    }, 'the description and tags never reached the subscriber');
+  });
+
   it('a delete on the publisher removes the subscriber\'s copy', async () => {
     const r = await fetch(`${INSTANCES.b}/api/files/${SPACE}?path=${encodeURIComponent(FILE)}`, { method: 'DELETE', headers: { Authorization: `Bearer ${tokenB}` } });
     assert.ok(r.status < 300, `delete answered ${r.status}`);

@@ -111,7 +111,12 @@ const MAX_TOTAL = 2000;
 // GET /api/conflicts — list unresolved conflicts for all accessible spaces
 conflictsRouter.get('/', globalRateLimit, requireAuth, async (req, res) => {
   try {
-    const spaces = accessibleSpaces(req, 'read');
+    // `?spaceId=` narrows to one space, as 10-mfa-and-conflicts.md has always said; it was read nowhere, so a
+    // caller asking about one space got every space's conflicts and read them as that space's.
+    const requested = typeof req.query['spaceId'] === 'string' ? req.query['spaceId'] : undefined;
+    const reachable = accessibleSpaces(req, 'read');
+    if (requested && !reachable.includes(requested)) { res.status(403).json({ error: `Token does not have access to space '${requested}'` }); return; }
+    const spaces = requested ? [requested] : reachable;
     const results: ConflictDoc[] = [];
     let truncated = false;
     for (const spaceId of spaces) {

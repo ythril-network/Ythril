@@ -17,7 +17,7 @@
 
 import { getConfig, saveConfig, saveConfigSoon, getSecrets, getFaceRecognitionConfig } from '../config/loader.js';
 import { BRAIN_COLLECTIONS, type LinkDoc } from '../config/types.js';
-import { applyFileMetaPage } from '../api/sync/_shared.js';
+import { applyFileMetaPage, fileMetaForWire } from '../api/sync/_shared.js';
 import { boundedJson } from '../util/bounded-read.js';
 import { reportPushRefusals, refusedTransfers } from './push-refusals.js';
 import { deliverChangeNotes } from './change-notes.js';
@@ -1101,7 +1101,7 @@ async function pushToPeer(
       if (batch.length === 0) break;
       const resp = await peerSafeFetch(batchEndpoint, {
         ...batchOpts(), method: 'POST',
-        body: JSON.stringify({ [payloadKey]: batch }),
+        body: JSON.stringify({ [payloadKey]: payloadKey === 'filemeta' ? batch.map(fileMetaForWire) : batch }), // Q-69
       });
       if (!resp.ok) {
         truncated = true;

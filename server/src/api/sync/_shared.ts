@@ -278,7 +278,7 @@ export async function applyFileMetaPage(
 ): Promise<void> {
   for (const doc of docs) {
     if (doc.parentFileId !== undefined) continue;
-    await ingestFileMeta(spaceId, doc);
+    await ingestFileMeta(spaceId, fileMetaForWire(doc) as z.infer<typeof IncomingFileMetaDoc>);
   }
 }
 
@@ -654,4 +654,20 @@ export function withSchemaViolations<T extends Record<string, unknown>>(
   violations: SchemaViolation[],
 ): T & { schemaViolations?: SchemaViolation[] } {
   return violations.length > 0 ? { ...body, schemaViolations: violations } : body;
+}
+
+/**
+ * A file's metadata as it may travel: only the keys `IncomingFileMetaDoc` declares (`Q-69`).
+ *
+ * The stored record carries the local machinery too (`sizeBytes`, `sha256`, the vector and its model, `matchedText`,
+ * `embeddingStatus`, `chunkCount`, `excerpt`). The push sent it whole and the receiver's STRICT schema refused it
+ * whole, so a file's bytes replicated and its description and tags never did. The pull side handed the same record
+ * straight to `ingestFileMeta`, which `$set`s every key, publishing the sender's size and hash for bytes this instance
+ * derived itself. Both ends go through this one function, and the key list is read from the schema, so a key added to
+ * the schema travels and a key added to the document does not.
+ */
+const FILE_META_WIRE_KEYS = Object.keys(IncomingFileMetaDoc.shape);
+export function fileMetaForWire(doc: object): Record<string, unknown> {
+  const src = doc as Record<string, unknown>;
+  return Object.fromEntries(FILE_META_WIRE_KEYS.filter(k => src[k] !== undefined).map(k => [k, src[k]]));
 }

@@ -44,6 +44,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the plain file routes, which do not: every file push and pull was refused `403` while the space's records synced.
   The peer's file manifest now names its local id for the space (`spaceId` in `GET /api/sync/manifest`), and the
   transfers use it. A peer on an older build is addressed as before.
+- **A file's description and tags replicate** (`Q-69`). The push sent a file's whole stored metadata, including
+  what only the local instance derives (size, hash, vector, excerpt), and the receiver's strict schema refused
+  every one, so a file's bytes arrived on a peer and its description and tags never did. Both ends now send and
+  write only the fields the sync schema declares, so the receiver also no longer takes the sender's size and hash.
+- **`GET /api/conflicts?spaceId=` narrows to that space**, as documented, and answers `403` for a space the token
+  cannot reach. It read the parameter nowhere and returned every accessible space's conflicts.
 
 ## [5.4.1] — 2026-09-26
 
