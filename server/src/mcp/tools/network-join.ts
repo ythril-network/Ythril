@@ -8,7 +8,7 @@
  * instance-admin, as their routes are.
  */
 import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.js';
-import { joinRemoteAct } from '../../networks/join-remote-act.js';
+import { joinByInviteKeyAct, joinRemoteAct } from '../../networks/join-remote-act.js';
 import { addMemberAct, removeMemberAct } from '../../networks/member-acts.js';
 import { uuidSchema } from './shared.js';
 import { callerOf, networkIdSchema, toResult } from './networks.js';
@@ -42,6 +42,32 @@ export const network_join_remoteTool: ToolHandler = {
   }),
   async handle(ctx: ToolContext): Promise<ToolResult> {
     return toResult(await joinRemoteAct(callerOf(ctx), ctx.args), '');
+  },
+};
+
+export const network_join_by_keyTool: ToolHandler = {
+  name: 'network_join_by_key',
+  description: 'Join a pub/sub network with nothing but its publisher\'s URL and its published invite key. Same '
+    + 'parameters and answer as `POST /api/networks/join-by-key`. A pub/sub admits without a vote, so the key is the '
+    + 'publisher\'s standing permission: this redeems it at the publisher and runs the same handshake as '
+    + '`network_join_remote`. Only a network the instance at that URL publishes answers to its key.\n\n'
+    + 'WHO MAY: as for `network_join_remote` — `networks: write` (or administering the space) on every existing local '
+    + 'space the join maps to, and `createSpaces` for a space the join would create. Your token is then the one that '
+    + 'decides what the network may add here later.',
+  mutating: true,
+  inputSchema: (_s: ToolSchemas) => ({
+    type: 'object',
+    properties: {
+      publisherUrl: { type: 'string', minLength: 1, description: 'The publisher\'s base URL, as the invite gives it. Must be https unless this instance allows insecure peers.' },
+      inviteKey: { type: 'string', minLength: 20, maxLength: 200, description: 'The network\'s published invite key (`ythril_invite_…`).' },
+      myUrl: { type: 'string', minLength: 1, description: 'This instance\'s externally reachable base URL, which the publisher will sync with.' },
+      spaceMap: { type: 'object', additionalProperties: SPACE_ID, description: 'Optional: remote space id → the local space id to map it onto. A remote id not named keeps its own id.' },
+    },
+    required: ['publisherUrl', 'inviteKey', 'myUrl'],
+    additionalProperties: false,
+  }),
+  async handle(ctx: ToolContext): Promise<ToolResult> {
+    return toResult(await joinByInviteKeyAct(callerOf(ctx), ctx.args), '');
   },
 };
 

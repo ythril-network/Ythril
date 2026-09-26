@@ -60,6 +60,7 @@ import { log } from '../util/log.js';
 import { SSRF_SAFE_URL } from './networks/_shared.js';
 import type { NetworkMember, VoteRound } from '../config/types.js';
 import { openRoundHere } from '../networks/round-local-state.js';
+import { networkRole } from '../networks/network-role.js';
 
 export const inviteRouter = Router();
 
@@ -77,6 +78,8 @@ interface HandshakeSession {
   privateKeyPem: string;
   /** A's ephemeral RSA public key (PEM) — sent to B in the apply response */
   publicKeyPem: string;
+  /** Opened by `POST /api/invite/redeem` (F-41) rather than by an admin: counted against its per-network cap. */
+  redeemed?: boolean;
   /** B's RSA public key — received during apply, used to encrypt the token for B */
   peerPublicKeyPem?: string;
   /** The PAT id A created for B — needed to link pending token to member record */
@@ -213,6 +216,24 @@ inviteRouter.post('/generate', globalRateLimit, requireAuth, denyReadOnly, async
     }
   }
 
+  const opened = await openHandshakeSession(networkId, { reparentInstanceId, expectedInstanceId }, req);
+  if (!opened) { res.status(404).json({ error: 'Network not found' }); return; }
+  res.status(201).json(opened);
+});
+
+/**
+ * Open one handshake session for `networkId` and answer with its bundle, or `null` when the network is gone.
+ *
+ * The one place a session is opened: `POST /api/invite/generate` (an admin producing an invite) and
+ * `POST /api/invite/redeem` (a stranger presenting a pub/sub's published key, F-41) differ only in who may ask,
+ * so the key pair, the hashed handshake id, the TTL and the bundle cannot drift between them.
+ */
+async function openHandshakeSession(
+  networkId: string,
+  opts: { reparentInstanceId?: string; expectedInstanceId?: string; redeemed?: boolean },
+  req: { protocol: string; get(name: string): string | undefined },
+): Promise<Record<string, unknown> | null> {
+  const { reparentInstanceId, expectedInstanceId } = opts;
   // Generate ephemeral RSA-4096 key pair (OAEP safe for ~470-byte payloads; our PATs are ~44 bytes)
   const { privateKey, publicKey } = crypto.generateKeyPairSync('rsa', {
     modulusLength: 4096,
@@ -233,9 +254,10 @@ inviteRouter.post('/generate', globalRateLimit, requireAuth, denyReadOnly, async
     expiresAt,
     reparentInstanceId,
     expectedInstanceId,
+    ...(opts.redeemed ? { redeemed: true } : {}),
   });
 
-  log.info(`Invite handshake generated for network ${networkId} (session ${sessionKey})${
+  log.info(`Invite handshake ${opts.redeemed ? 'redeemed by key' : 'generated'} for network ${networkId} (session ${sessionKey})${
     reparentInstanceId ? ` [reparent target: ${reparentInstanceId}]` : ''
   }`);
 
@@ -251,8 +273,7 @@ inviteRouter.post('/generate', globalRateLimit, requireAuth, denyReadOnly, async
     // The network was deleted while this handshake was being prepared. The session is now useless —
     // drop it rather than leaving a live invite pointing at nothing.
     _sessions.delete(sessionKey);
-    res.status(404).json({ error: 'Network not found' });
-    return;
+    return null;
   }
 
   // Use the operator-configured publicUrl when available to prevent Host header
@@ -272,7 +293,39 @@ inviteRouter.post('/generate', globalRateLimit, requireAuth, denyReadOnly, async
    * Beside the fields rather than instead of them: an integrator may already read them, and operators have
    * blobs in flight. The old shape goes when it is deprecated on its own terms, not as a side effect.
    */
-  res.status(201).json({ ...bundle, inviteCode: encodeInviteCode(bundle) });
+  return { ...bundle, inviteCode: encodeInviteCode(bundle) };
+}
+
+// ── POST /api/invite/redeem ────────────────────────────────────────────────────
+// F-41: a stranger holding a pub/sub's published invite key opens a handshake itself. Not authenticated — the key
+// is the credential, and a pub/sub admits without a vote, so the key IS the publisher's standing permission
+// (`docs/network-types.md`: "embedded in documentation pages, QR codes, or shared openly").
+//
+// Bounded because it is anonymous and every call costs a bcrypt compare per pub/sub network and an RSA-4096 key
+// pair: `authRateLimit` per caller, and at most MAX_REDEEMED_OPEN live redeemed sessions per network, so the
+// session scan in `findSession` stays small. Only a network this instance PUBLISHES answers; a club, closed or
+// braintree key never matches here, whatever it is.
+const MAX_REDEEMED_OPEN = 25;
+const RedeemBody = z.object({ inviteKey: z.string().min(20).max(200) }).strict();
+
+inviteRouter.post('/redeem', authRateLimit, async (req, res) => {
+  const parsed = RedeemBody.safeParse(req.body);
+  if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
+  const cfg = getConfig();
+  let net: (typeof cfg.networks)[number] | undefined;
+  for (const n of cfg.networks) {
+    if (n.type !== 'pubsub' || !n.inviteKeyHash || networkRole(n).role !== 'publisher') continue;
+    if (await bcrypt.compare(parsed.data.inviteKey, n.inviteKeyHash)) { net = n; break; }
+  }
+  // One answer for every miss: an unknown key must not tell a caller which networks exist.
+  if (!net) { res.status(403).json({ error: 'This invite key does not open a pub/sub network on this instance.' }); return; }
+  const open = [..._sessions.values()].filter(x => x.networkId === net!.id && x.redeemed && x.expiresAt > Date.now()).length;
+  if (open >= MAX_REDEEMED_OPEN) {
+    res.status(429).json({ error: `Too many joins by key are open for this network; try again within the hour.` }); return;
+  }
+  const opened = await openHandshakeSession(net.id, { redeemed: true }, req);
+  if (!opened) { res.status(404).json({ error: 'Network not found' }); return; }
+  res.status(201).json(opened);
 });
 
 // ── POST /api/invite/apply ─────────────────────────────────────────────────────

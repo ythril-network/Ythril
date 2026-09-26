@@ -135,6 +135,7 @@ export const CAPABILITIES = [
   ['Networks', 'network_invite', 'POST /api/networks/:id/invite'],
   ['Networks', 'network_fork', 'POST /api/networks/:id/fork'],
   ['Networks', 'network_join_remote', 'POST /api/networks/join-remote'],
+  ['Networks', 'network_join_by_key', 'POST /api/networks/join-by-key'],
   ['Networks', 'network_member_add', 'POST /api/networks/:id/members'],
   ['Networks', 'network_member_remove', 'DELETE /api/networks/:id/members/:instanceId'],
   ['Networks', 'network_member_admit', 'POST /api/networks/:id/join'],

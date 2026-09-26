@@ -173,6 +173,7 @@ export const ROUTE_RULES: RouteRule[] = [
   { method: 'PUT',    pattern: /^\/api\/spaces\/([^/]+)\/network-precedence$/, operation: 'space.precedence.update', spaceGroup: 1 },
   { method: 'POST',   pattern: /^\/api\/networks$/,                                 operation: 'network.create' },
   { method: 'POST',   pattern: /^\/api\/networks\/join-remote$/,                    operation: 'network.join_remote' },
+  { method: 'POST',   pattern: /^\/api\/networks\/join-by-key$/,                    operation: 'network.join_by_key' },
   { method: 'PATCH',  pattern: /^\/api\/networks\/([^/]+)$/,                        operation: 'network.update' },
   { method: 'DELETE', pattern: /^\/api\/networks\/([^/]+)$/,                        operation: 'network.delete' },
   { method: 'POST',   pattern: /^\/api\/networks\/([^/]+)\/spaces$/,                operation: 'network.space.add' },

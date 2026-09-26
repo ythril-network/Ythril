@@ -245,6 +245,7 @@ export const ROUTE_RIGHTS: readonly RouteRight[] = [
   // Joining a REMOTE network (F-34.1): `write` on every existing space it maps to; creating one needs `createSpaces`
   // and a floor of `write` too. Checked between the handshake's apply and finalize, in `networkJoinRefusal`.
   { route: '/api/networks/join-remote', method: 'POST', area: 'networks', needs: 'write', scope: 'iterates' },
+  { route: '/api/networks/join-by-key', method: 'POST', area: 'networks', needs: 'write', scope: 'iterates' },
   { route: '/api/duplicates', method: 'GET', area: 'dataQuality', needs: 'read', scope: 'iterates' },
   { route: '/api/duplicates/scan', method: 'POST', area: 'dataQuality', needs: 'write', scope: 'iterates' },
   { route: '/api/duplicates/:id/merge', method: 'POST', area: 'dataQuality', needs: 'write', scope: 'iterates' },

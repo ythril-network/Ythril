@@ -316,6 +316,47 @@ Only non-concluded rounds are returned.
 
 ---
 
+### Join a Pub/Sub by Its Published Key
+
+```http
+POST /api/networks/join-by-key
+```
+
+```json
+{ "publisherUrl": "https://publisher.example.com", "inviteKey": "ythril_invite_...", "myUrl": "https://me.example.com" }
+```
+
+Called on the JOINING instance. Joins a pub/sub network with nothing but its publisher's URL and its published invite
+key: this instance redeems the key at the publisher (below), then runs the same handshake as
+[Join Remote](#join-remote-rsa-handshake), so the answer, the optional `spaceMap` and the rights are the same. `networks: write` (or
+administering the space) on every existing local space the join maps to, and `createSpaces` for any it creates; the
+joining token is also what later decides which announced spaces the network may add ([Pending Spaces](#pending-spaces)).
+MCP: `network_join_by_key` with the same fields.
+
+| status | when |
+|---|---|
+| `400` | a malformed body, or a URL that is not a safe peer URL |
+| `403` | the publisher does not recognise the key, or the token is short on a right the join needs |
+| `429` | too many joins by key are open for that network on the publisher |
+| `502` | the publisher could not be reached, or answered without a usable handshake |
+
+### Redeem an Invite Key (publisher side)
+
+```http
+POST /api/invite/redeem
+```
+
+```json
+{ "inviteKey": "ythril_invite_..." }
+```
+
+**Not authenticated: the key is the credential.** Answers `201` with a handshake bundle, the same shape
+`POST /api/invite/generate` returns, for a pub/sub network this instance PUBLISHES whose current key it is. Any other
+key, including a club, closed or braintree network's, answers `403` with one message whatever the reason, so a caller
+cannot learn which networks exist. Bounded because it is anonymous and each call generates a key pair: the
+authentication rate limit per caller, and at most 25 redeemed handshakes open per network at once (`429`).
+Regenerating the key revokes it for new joins; members who already joined stay until removed.
+
 ### Generate an Invite Key
 
 ```http

@@ -9,7 +9,7 @@ import { requireAdmin, requireAuth, denyReadOnly } from '../../auth/middleware.j
 import { globalRateLimit } from '../../rate-limit/middleware.js';
 import { log } from '../../util/log.js';
 import { ForkNetworkBody, forkNetworkAct, inviteKeyAct } from '../../networks/network-acts.js';
-import { JoinRemoteBody, joinRemoteAct } from '../../networks/join-remote-act.js';
+import { JoinRemoteBody, JoinByKeyBody, joinByInviteKeyAct, joinRemoteAct } from '../../networks/join-remote-act.js';
 import { JoinNetworkBody, admitByInviteKeyAct } from '../../networks/member-acts.js';
 import { sendAct } from './_shared.js';
 
@@ -26,6 +26,21 @@ joinRouter.post('/join-remote', globalRateLimit, requireAuth, denyReadOnly, asyn
     sendAct(res, await joinRemoteAct(req.authToken as Parameters<typeof joinRemoteAct>[0], parsed.data));
   } catch (err) {
     log.error(`POST /api/networks/join-remote: ${err}`);
+    res.status(500).json({ error: 'Internal error' });
+  }
+});
+
+
+// ── POST /api/networks/join-by-key ─────────────────────────────────────────
+// F-41: join a pub/sub with its publisher's URL and published key; the act redeems the key and runs the same
+// handshake as join-remote, so the rights are that act's. MCP `network_join_by_key` calls it too.
+joinRouter.post('/join-by-key', globalRateLimit, requireAuth, denyReadOnly, async (req, res) => {
+  try {
+    const parsed = JoinByKeyBody.safeParse(req.body);
+    if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
+    sendAct(res, await joinByInviteKeyAct(req.authToken as Parameters<typeof joinByInviteKeyAct>[0], parsed.data));
+  } catch (err) {
+    log.error(`POST /api/networks/join-by-key: ${err}`);
     res.status(500).json({ error: 'Internal error' });
   }
 });

@@ -114,6 +114,7 @@ export const MCP_TOOL_OPERATIONS: Record<string, string | string[] | null> = {
   network_invite: 'network.invite',
   network_fork: 'network.fork',
   network_join_remote: 'network.join_remote',
+  network_join_by_key: 'network.join_by_key',
   network_member_add: 'network.member.add',
   network_member_remove: 'network.member.remove',
   network_member_admit: 'network.join',

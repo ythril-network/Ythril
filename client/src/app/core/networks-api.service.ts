@@ -62,6 +62,11 @@ export class NetworksApi {
     return this.http.post<Network>(`/api/networks/${networkId}/pending-spaces`, body);
   }
 
+  /** Join a pub/sub with its publisher's URL and published invite key; no admission (F-41). */
+  joinByKey(body: { publisherUrl: string; inviteKey: string; myUrl: string; spaceMap?: Record<string, string> }): Observable<{ status: string; networkId: string; networkLabel: string; networkType: string; spaces: string[]; existingSpaces?: string[]; createdSpaces?: string[]; spaceMap?: Record<string, string> }> {
+    return this.http.post<any>('/api/networks/join-by-key', body);
+  }
+
   removeMember(networkId: string, instanceId: string): Observable<void> {
     return this.http.delete<void>(`/api/networks/${networkId}/members/${instanceId}`);
   }

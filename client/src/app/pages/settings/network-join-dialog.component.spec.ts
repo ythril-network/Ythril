@@ -13,10 +13,10 @@ import { getTranslocoModule } from '../../testing/transloco-testing';
 import { NetworkJoinDialogComponent } from './network-join-dialog.component';
 
 describe('NetworkJoinDialogComponent (characterization)', () => {
-  let api: { joinRemote: ReturnType<typeof vi.fn> };
+  let api: { joinRemote: ReturnType<typeof vi.fn>; joinByKey: ReturnType<typeof vi.fn> };
 
   function make(myUrl = 'https://me.example') {
-    api = { joinRemote: vi.fn(() => of({ status: 'joined', networkLabel: 'X' })) };
+    api = { joinRemote: vi.fn(() => of({ status: 'joined', networkLabel: 'X' })), joinByKey: vi.fn(() => of({ status: 'joined', networkLabel: 'P' })) };
     TestBed.resetTestingModule();
     TestBed.configureTestingModule({
       imports: [NetworkJoinDialogComponent, getTranslocoModule()],
@@ -58,6 +58,25 @@ describe('NetworkJoinDialogComponent (characterization)', () => {
     c.joinNetwork();
     expect(c.joinMapSpaces()).toEqual(['general', 'remote-only']);
     expect(api.joinRemote).not.toHaveBeenCalled();
+  });
+
+  it('a pasted pub/sub key joins by key with the publisher URL, with no mapping step (F-41)', () => {
+    const f = make();
+    const c = f.componentInstance;
+    const joined = vi.fn();
+    c.joined.subscribe(joined);
+    c.joinBundle = '  ythril_invite_abcdefghijklmnopqrstuvwxyz0123456789  ';
+    expect(c.isPublishedKey()).toBe(true);
+    c.publisherUrl = ' https://publisher.example ';
+    c.joinNetwork();
+    expect(api.joinRemote).not.toHaveBeenCalled();
+    expect(api.joinByKey).toHaveBeenCalledWith({ publisherUrl: 'https://publisher.example', inviteKey: 'ythril_invite_abcdefghijklmnopqrstuvwxyz0123456789', myUrl: 'https://me.example' });
+    expect(joined).toHaveBeenCalled();
+  });
+
+  it('an invite code or bundle is not mistaken for a published key', () => {
+    const c = make().componentInstance;
+    for (const text of ['ythril1_abc', '{"handshakeId":"h"}', '']) { c.joinBundle = text; expect(c.isPublishedKey()).toBe(false); }
   });
 
   it('keeping every name joins with no map, and emits "joined" on success', () => {

@@ -534,6 +534,11 @@ Click **Create Network**. The dialog asks for a **label**, a **type**, the **spa
 
 ### Joining a network
 
+**A pub/sub network's published key joins on its own.** Paste the key (it starts `ythril_invite_`) into
+**Join Network**, enter the publisher's URL and your brain's URL, and join. Nobody on the publisher has to accept
+you. The spaces you join with are the ones your token may hold. For any other network, or an invite the other side
+generated for you, follow these steps:
+
 1. Click **Join Network**.
 2. Paste the invite code — the line starting `ythril1_`. (An older brain may have sent you the earlier JSON
    form; paste that instead and it works the same.)

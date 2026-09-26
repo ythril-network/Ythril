@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Join a pub/sub network by pasting its published key** (`F-41`). The docs always said a pub/sub key is
+  reusable so it can be published, and that a subscriber's join is accepted without a vote. But the only route that
+  took the key demanded an admin token on the publisher, so a stranger holding the key could not use it. Now the
+  publisher answers `POST /api/invite/redeem` with a handshake for the key alone. The joiner's
+  `POST /api/networks/join-by-key` (MCP `network_join_by_key`) runs the whole join from the publisher's URL and the
+  key, and the **Join network** dialog takes both. Redeem is rate-limited, capped at 25 open handshakes per
+  network, and answers only for a pub/sub network the instance publishes.
+
 ### Security
 
 - **A network's announcement is a proposal: the token that joined it decides what it may add** (`S-9`). A
