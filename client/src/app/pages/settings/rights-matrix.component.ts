@@ -300,11 +300,10 @@ export class RightsMatrixComponent implements OnInit {
   }
 
   /**
-   * Is this space administered — every area at its top rung?
+   * Is this space administered: granted by name, or by the space-admin floor?
    *
-   * Reads the SHOWN value, not the stored one, so a row whose areas are all at admin because the floor put them
-   * there reads as administered. That is what the server enforces, and a column that disagreed with the four
-   * cells beside it would be worse than no column.
+   * The grant and only the grant, as the server decides it (`isSpaceAdminFor`): four admin rungs are full access
+   * to the space's data and not its administration, so a row of four admins does not read as administered.
    */
   isSpaceAdmin = (space: string): boolean => {
     const sa = this.rights().spaceAdmin;
@@ -329,8 +328,7 @@ export class RightsMatrixComponent implements OnInit {
    * One emit, whole object — a loop would let a listener observe three inconsistent intermediate states,
    * and the parent form persists on change.
    *
-   * The four rungs stay written as they were: a token granted the old way keeps working, and the column
-   * reads either spelling, so nothing has to be migrated.
+   * The four rungs stay written as they were, so withdrawing the grant leaves the area cells untouched.
    */
   setSpaceAdmin(space: string, on: boolean): void {
     const r = this.rights();

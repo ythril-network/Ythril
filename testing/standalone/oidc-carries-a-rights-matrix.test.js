@@ -78,8 +78,9 @@ describe('the record actually carries it', () => {
   it('OidcTokenRecord declares rights, and the builder populates it from migrateToken', () => {
     const src = strip(readFileSync('server/src/auth/oidc.ts', 'utf8'));
     assert.match(src, /rights: TokenRights;/, 'the record type must carry the matrix');
-    assert.match(src, /rights: migrateToken\(\{/,
-      'and it must be DERIVED — a hand-rolled second mapping is the thing this avoids');
+    // Wrapped in `withInstanceAdminGrants` (S-11): an OIDC instance admin holds the space-admin floor like any other.
+    assert.match(src, /rights: withInstanceAdminGrants\(migrateToken\(\{/,
+      'and it must be DERIVED — a hand-rolled second mapping is the thing this avoids — and carry the instance-admin grant');
     /*
      * A WINDOW, converted, and it was pointing at the wrong object. `admin: perms.admin` appears TWICE — once on
      * the record itself and once inside the `migrateToken({ … })` call the assertion is actually about — so the
@@ -87,7 +88,7 @@ describe('the record actually carries it', () => {
      * satisfying one claim about a single object is how a hand-rolled second mapping would have passed here, which
      * is precisely what the assertion exists to refuse. The bound is the CALL's argument list.
      */
-    const derivedAt = src.indexOf('rights: migrateToken(');
+    const derivedAt = src.indexOf('migrateToken(', src.indexOf('rights: withInstanceAdminGrants('));
     assert.ok(derivedAt > -1, 'the derived rights call is gone — re-anchor this gate');
     const derived = balancedFrom(src, src.indexOf('(', derivedAt), 'the migrateToken argument');
     assert.match(derived, /admin: perms\.admin/, 'derived from the mapped claims, not from the raw payload');

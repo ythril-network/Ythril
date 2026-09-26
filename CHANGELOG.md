@@ -20,6 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - a space administrator reaches the spaces it administers even with no area rows;
   - a space-admin floor can delegate the admin floor rungs it holds;
   - the token list's rights glyph draws a space administrator at admin instead of at nothing.
+
+  An OIDC identity mapped to instance admin gets the same floor. The audit entry for a rights edit now records
+  the rights as stored. The tokens guides said four admin cells make a token its space's administrator; they
+  do not (only the **Space admin** grant does), and both guides now say so.
 - **Renaming a space keeps its named administrators** (`Q-58`). A rename moved each token's per-space rights to the
   new id but left the space-admin list on the old one, so a token that administered the space by name silently
   stopped administering it.

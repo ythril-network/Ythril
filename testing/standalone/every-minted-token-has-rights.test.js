@@ -22,6 +22,8 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+const require_ = createRequire(import.meta.url);
 
 const strip = s => s.replace(/(^|[^:])\/\/.*/gm, '$1').replace(/\/\*[\s\S]*?\*\//g, '');
 const SRC = strip(readFileSync('server/src/auth/tokens.ts', 'utf8'));
@@ -86,6 +88,45 @@ describe('every write of a token\'s rights applies the instance-admin grant', ()
     assert.ok(at >= 0, 'setTokenRights not found');
     const body = SRC.slice(at, SRC.indexOf('\nexport ', at + 10));
     assert.match(body, /withInstanceAdminGrants\(/, 'editing a token to instance admin would store it without the floor');
+  });
+});
+
+describe('every rights value DERIVED from legacy fields applies the instance-admin grant too', () => {
+  // The minting paths above are not the only doors that produce a token's rights. An OIDC identity's rights are
+  // derived per request by `migrateToken`, and so is the minter's own matrix when its record has none; both
+  // skipped the grant, so an OIDC instance admin reached only the spaces its claim named — the S-11 symptom,
+  // found by the pre-ship lens sweep. The derivation sites are found from the source, not listed.
+  const { execFileSync } = require_('node:child_process');
+  const files = execFileSync('git', ['grep', '-l', 'migrateToken(', '--', 'server/src'], { encoding: 'utf8' })
+    .split('\n').map(s => s.trim().replace(/\\/g, '/')).filter(Boolean)
+    // A comment naming the function is not a call.
+    .filter(f => /migrateToken\(/.test(strip(readFileSync(f, 'utf8'))));
+  // Each exemption carries its reason; a file that stops calling migrateToken fails below rather than lingering.
+  const EXEMPT = new Map([
+    ['server/src/auth/rights-migration.ts', 'defines migrateToken'],
+    ['server/src/auth/backfill-token-rights.ts', 'runs in loadConfig; the instance-admin floor migration runs after it on the same tokens'],
+    ['server/src/networks/network-spaces.ts', 'reads one perSpace row of a non-admin derivation; no identity carries it'],
+  ]);
+
+  it('found the derivation sites at all', () => {
+    assert.ok(files.length >= 4, `git grep found only ${files.length} files calling migrateToken`);
+  });
+
+  it('every exemption still names a file that calls migrateToken', () => {
+    for (const f of EXEMPT.keys()) assert.ok(files.includes(f), `${f} is exempt but no longer calls migrateToken`);
+  });
+
+  it('a rights edit is audited as stored, grant included', () => {
+    const src = strip(readFileSync('server/src/api/tokens.ts', 'utf8'));
+    const at = src.indexOf('req.auditSnapshots = {');
+    assert.ok(at > -1, 'the token edit no longer records an audit snapshot — re-anchor this gate');
+    assert.match(src.slice(at, src.indexOf('};', at)), /rights: rights \? withInstanceAdminGrants\(/,
+      'the audit entry must show the rights as stored, not as submitted');
+  });
+
+  it('every other file that derives rights applies withInstanceAdminGrants', () => {
+    const missing = files.filter(f => !EXEMPT.has(f)).filter(f => !/withInstanceAdminGrants\(/.test(strip(readFileSync(f, 'utf8'))));
+    assert.deepEqual(missing, [], 'these derive a token\'s rights and store or use an instance admin without its space-admin floor');
   });
 });
 

@@ -290,8 +290,8 @@ down one.
 **A space administrator holds `admin` in all four areas of one space — and you grant it in one
 press**, with the **Space admin** column at the right-hand end of the matrix.
 
-The grant is stored as itself, so it survives an edit to a neighbouring cell. A token given admin in all four
-cells by hand also administers its space and needs no attention.
+The grant is stored as itself, so it survives an edit to a neighbouring cell. Four admin cells set by hand are
+not the same thing: they give full access to the space's data, but not to its tokens or its settings.
 
 What it means in practice: that token can manage **that space's own tokens** — list, mint and edit them — and
 **that space's own settings**, schema and index rebuilds. Nothing wider.
@@ -307,8 +307,8 @@ that switch stays locked on while the box is ticked. Unticking the box leaves th
 yourself if the token should lose it. Instance-admin tokens created by 5.0 to 5.3 without the switch get it back
 when the instance starts, and the log names each token it changed.
 
-**To check whether a token has it:** set all four cells in that space's row to admin, or read the row — four
-admins is the state. An agent can ask `help` and its space list marks the spaces the calling token
+**To check whether a token has it:** read the **Space admin** column. **A** means the token administers that
+space, by name or through the **All spaces** row; four admin cells alone do not. An agent can ask `help` and its space list marks the spaces the calling token
 administers.
 
 #### Some cells hold each other up
@@ -336,13 +336,13 @@ shows `none` — both are correct, and the grid is showing you what the token ca
 #### The Space admin column
 
 **Press A on a space's row to make that token the space's administrator; press – to take it back.** The
-column reads the state too: a row shows **A** whether you granted it here, set the four cells by hand, or
-reached it through **All spaces**. Two positions and not four, because administering a space is not a
+column reads the state too: a row shows **A** when the token administers the space, granted on that row or
+through **All spaces**. Four admin cells set by hand do not show **A**, because they do not make the token the
+space's administrator. Two positions and not four, because administering a space is not a
 level — anything in between is still said with the four area cells.
 
 Pressing **A** records *"this token administers this space"* as a grant of its own, so the next edit to a
-cell does not remove the role. Taking it back also clears a row set to four admins by hand, so the column and
-the server cannot disagree about who administers what. The token can then do two things:
+cell does not remove the role. Pressing **–** withdraws the grant and leaves the area cells as they are. The token can then do two things:
 
 - **Manage that space's tokens** — create them, edit their rights, rotate and revoke them. It only ever sees
   and edits tokens whose own reach sits inside the spaces it administers.

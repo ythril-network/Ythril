@@ -137,9 +137,10 @@ instance-wide.** It cannot grant `instanceAdmin` or `createSpaces`, cannot set a
 cannot reach, mint for or edit tokens for any space it does not administer — it does not even list them.
 Those rules are red-teamed, not aspirational.
 
-**The four rungs work too.** A token whose four areas are all at `admin` for a space administers it. The two spellings are one right: the server resolves `spaceAdmin`
-into `admin` in every area of the named space before any check runs, so no code compares the two and neither
-can disagree with the other. Send whichever you have; read both.
+**The four rungs are not the grant.** `spaceAdmin` resolves to `admin` in every area it covers, so a space
+administrator holds all four; the reverse does not hold. A token whose four areas are all at `admin` for a space
+has full access to its data and does not administer it: it cannot manage the space's tokens or change its
+settings. Grant `spaceAdmin` when that is what you mean.
 
 **Two forms: by name, and on the floor.** `spaceAdmin.spaces` administers the named spaces and nothing else.
 `spaceAdmin.floor: true` administers EVERY space, including ones created later, so it is priced like any other
@@ -156,14 +157,12 @@ explicitly if the token should lose it. An instance-admin token stored without i
 repaired at startup, and the log names each token changed: *"Restored the space-admin floor on N instance-admin
 token(s) stored without it"*.
 
-To show it in your own UI: read `derivedRungs`, then compare a token's effective rung per area (after
-`implications`) against `requires`.
+To show it in your own UI: read `rights.spaceAdmin` — `floor: true`, or the space listed in `spaces`. `requires`
+says what the grant resolves to; it is not a test for holding it.
 
-**That is what Ythril's own matrix does**: the `Space admin` column is computed from the four displayed rungs, and setting
-it writes all four areas in ONE update rather than four. Compare against the DISPLAYED rung, not the stored one —
-a row that reaches admin through the floor is administered, and a column reading the stored matrix would
-contradict the cells beside it. Write the whole row at once for the same reason a patch is whole: four sequential
-updates let a reader observe three intermediate states that nobody asked for.
+**That is what Ythril's own matrix does**: the `Space admin` column reads the grant, and setting it writes
+`spaceAdmin` in ONE update of the whole rights object. Write it whole for the same reason a patch is whole:
+several sequential updates let a reader observe intermediate states that nobody asked for.
 
 The stored matrix is *not* rewritten — `GET /api/tokens` returns what was set. Resolve the effective rung by
 applying this table on read; do not persist the result, or a rung that exists only while `knowledge` is

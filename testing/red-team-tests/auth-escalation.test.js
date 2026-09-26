@@ -23,7 +23,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
 import { INSTANCES, post, get, del, delWithBody } from '../sync/helpers.js';
-import { legacyRights } from '../_shared/legacy-token-rights.mjs';
+import { legacyRights } from '../_shared/legacy-token-rights.mjs';
 import { spaceAdminRights } from '../_shared/space-admin-rights.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));

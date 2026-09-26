@@ -18,7 +18,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { INSTANCES, post, get, del, delWithBody, patch, put, readCollection } from '../sync/helpers.js';
-import { legacyRights } from '../_shared/legacy-token-rights.mjs';
+import { legacyRights } from '../_shared/legacy-token-rights.mjs';
 import { spaceAdminRights } from '../_shared/space-admin-rights.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));

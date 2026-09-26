@@ -13,6 +13,7 @@ import { capRights, describeExcess } from '../auth/mint-cap.js';
 import { reportServerFailure } from '../util/report-failure.js';
 import { refuseSelfFloorRaise } from '../auth/floor-guard.js';
 import { migrateToken } from '../auth/rights-migration.js';
+import { withInstanceAdminGrants } from '../auth/instance-admin-grants.js';
 /**
  * What a request with NO authenticated token holds. Every field at its narrowest.
  *
@@ -377,7 +378,7 @@ tokensRouter.post('/', authRateLimit, requireAdminOrSpaceAdminMfa, async (req, r
      * answers for an empty one would change what a genuine old token gets on upgrade, and
      * `rights-reach-matches-legacy.test.js` holds it to the old semantics on purpose.
      */
-    const minter = held ?? (req.authToken ? migrateToken(req.authToken) : NO_RIGHTS);
+    const minter = held ?? (req.authToken ? withInstanceAdminGrants(migrateToken(req.authToken)) : NO_RIGHTS);
     const excess = capRights(minter as never, rights as never);
     if (excess.length > 0) {
       res.status(403).json({
@@ -635,7 +636,7 @@ tokensRouter.patch('/:id', requireAdminOrSpaceAdminMfa, (req, res) => {
     // Same rule and the same fail-closed default as the mint route above — see the note there for why the
     // fix is at the call site rather than in `migrateToken`.
     const editorRights = (req.authToken as { rights?: unknown } | undefined)?.rights
-      ?? (req.authToken ? migrateToken(req.authToken) : NO_RIGHTS);
+      ?? (req.authToken ? withInstanceAdminGrants(migrateToken(req.authToken)) : NO_RIGHTS);
     const excess = capRights(editorRights as never, rights as never);
     if (excess.length > 0) {
       res.status(403).json({ error: `A token cannot grant rights it does not hold — ${describeExcess(excess)}` });
@@ -666,7 +667,9 @@ tokensRouter.patch('/:id', requireAdminOrSpaceAdminMfa, (req, res) => {
     before: { name: previous.name, rights: previous.rights, mfa: previous.mfa ?? 'inherit' },
     after: {
       name: name?.trim() ?? previous.name,
-      rights: rights ?? previous.rights,
+      // What `setTokenRights` STORES, grant applied, not what was sent: an audit entry for a token made instance
+      // admin must show the space-admin floor it now holds.
+      rights: rights ? withInstanceAdminGrants(rights as never) : previous.rights,
       mfa: mfa ?? previous.mfa ?? 'inherit',
     },
   };
