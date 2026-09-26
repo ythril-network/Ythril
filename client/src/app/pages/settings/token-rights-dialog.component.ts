@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component, inject, input, output, signal } from '@angular/core';
+import { withInstanceFlag } from '../../core/token-capability';
 import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
 import { PhIconComponent } from '../../shared/ph-icon.component';
 import { ModalDirective } from '../../shared/modal.directive';
@@ -183,7 +184,7 @@ export class TokenRightsDialogComponent {
    * this control offers what the caller may actually do and the server remains the authority.
    */
   setFlag(key: 'instanceAdmin' | 'createSpaces', on: boolean): void {
-    this.draft.update(d => ({ ...d, [key]: on }));
+    this.draft.update(d => withInstanceFlag(d, key, on));
   }
 
   /**

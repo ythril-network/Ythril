@@ -72,3 +72,19 @@ export function rightsRank(rights: TokenRights | undefined | null): number {
     areas ? Math.max(0, ...AREAS.map(a => RUNGS.indexOf((areas[a] ?? 'none') as (typeof RUNGS)[number]))) : 0;
   return Math.max(held(rights.floor as never), ...Object.values(rights.perSpace ?? {}).map(a => held(a as never)));
 }
+
+
+/**
+ * Tick or untick an instance-level flag on a rights draft. Granting instance admin also sets space admin on the
+ * FLOOR — what the server stores for every instance admin (`auth/instance-admin-grants.ts`, S-11) — so the matrix
+ * shows the grant the token will hold instead of a floor the server fills in on save. Unticking it leaves the
+ * floor alone: that is its own grant, edited in the matrix. Shared by the create and the rights dialogs so the
+ * two cannot disagree about what ticking the box means.
+ */
+export function withInstanceFlag(rights: TokenRights, key: 'instanceAdmin' | 'createSpaces', on: boolean): TokenRights {
+  const next = { ...rights, [key]: on } as TokenRights;
+  if (key === 'instanceAdmin' && on) {
+    next.spaceAdmin = { floor: true, spaces: [...(rights.spaceAdmin?.spaces ?? [])] };
+  }
+  return next;
+}

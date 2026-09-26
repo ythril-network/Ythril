@@ -75,6 +75,13 @@ async function main(): Promise<void> {
       const granted = migrateSpaceAdminGrant(getConfig().tokens);
       if (granted.granted.length > 0) flushConfig();
     }
+
+    // And instance admins stored without their space-admin floor (S-11): without it they reach only the spaces they
+    // have rows for.
+    {
+      const { migrateInstanceAdminFloor } = await import('./config/migrate-instance-admin-floor.js');
+      if (migrateInstanceAdminFloor(getConfig().tokens).granted.length > 0) flushConfig();
+    }
     loadSecrets();
     loadSchemaLibrary();
 

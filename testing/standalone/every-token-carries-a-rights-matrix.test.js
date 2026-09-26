@@ -123,7 +123,9 @@ describe('nothing edits the legacy fields after mint', () => {
   it('rights are replaced wholesale, never merged', () => {
     // A merge would let a caller widen one area while believing they had described the whole token.
     const src = read(TOKENS);
-    assert.match(src, /config\.tokens\[idx\]!\.rights = rights;/,
+    // Through `withInstanceAdminGrants` (S-11): it returns the whole rights object with the instance-admin grant
+    // applied, so the assignment is still wholesale.
+    assert.match(src, /config\.tokens\[idx\]!\.rights = (withInstanceAdminGrants\(rights\)|rights);/,
       'setTokenRights must assign, not merge');
   });
 });

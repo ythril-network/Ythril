@@ -71,6 +71,24 @@ describe('no minting path can store a token without a matrix', () => {
   });
 });
 
+describe('every write of a token\'s rights applies the instance-admin grant', () => {
+  // Owner, 2026-09-26: granting instance admin SETS space admin on the floor. Stored, so every door that writes
+  // rights must pass through the one function that states it — a minting path that skipped it would store an
+  // instance admin that reaches nothing, which is exactly what was seen on ythril-home.
+  it('every minting path stores withInstanceAdminGrants(...) as the record\'s rights', () => {
+    for (const m of mintedRecords()) {
+      assert.match(m.body, /withInstanceAdminGrants\(/, `${m.name} stores rights without the instance-admin grant`);
+    }
+  });
+
+  it('setTokenRights applies it too', () => {
+    const at = SRC.indexOf('export function setTokenRights(');
+    assert.ok(at >= 0, 'setTokenRights not found');
+    const body = SRC.slice(at, SRC.indexOf('\nexport ', at + 10));
+    assert.match(body, /withInstanceAdminGrants\(/, 'editing a token to instance admin would store it without the floor');
+  });
+});
+
 describe('the OAuth flow inherits the matrix rather than re-deriving it', () => {
   const OAUTH = strip(readFileSync('server/src/mcp/oauth.ts', 'utf8'));
 

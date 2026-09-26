@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component, computed, inject, input, output, signal } from '@angular/core';
+import { withInstanceFlag } from '../../core/token-capability';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
@@ -198,7 +199,7 @@ export class TokenCreateDialogComponent {
    * update is how the two forms drift apart again, and this defect IS that drift.
    */
   setFlag(key: 'instanceAdmin' | 'createSpaces', on: boolean): void {
-    this.draftRights.update(d => ({ ...d, [key]: on }));
+    this.draftRights.update(d => withInstanceFlag(d, key, on));
   }
 
   createToken(): void {

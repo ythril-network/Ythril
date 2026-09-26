@@ -111,7 +111,7 @@ const EMPTY = (): WireRungs => Object.fromEntries(RIGHT_AREAS.map(a => [a, 'none
             </td>
           }
           <td class="admincol">
-            <app-space-admin-toggle [on]="floorIsAdmin()" [readonlyView]="readonlyView()"
+            <app-space-admin-toggle [on]="floorIsAdmin()" [readonlyView]="readonlyView() || !!rights().instanceAdmin"
                                     (changed)="setFloorAdmin($event)"/>
           </td>
         </tr>
