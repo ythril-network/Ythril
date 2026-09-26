@@ -62,7 +62,7 @@ export async function reportPushRefusals(
     // Clamped: a peer's number is a claim, and one larger than the batch must not make `pushed` negative.
     const refused = Math.min(Math.max(0, Number(stats?.rejected ?? stats?.forkDepthRefused ?? 0) || 0), batchSize);
     if (refused > 0) {
-      log.warn(`Batch push ${payloadKey} to ${peerLabel}: ${refused} of ${batchSize} record(s) REFUSED by the peer `
+      log.warn(`Batch push ${payloadKey} to ${peerLabel}: ${refused} of ${batchSize} record(s) DROPPED, refused by the peer `
         + `in space '${spaceId}' (invalid for its schema, an undeclared type, an implausible seq, or a fork chain at `
         + 'its cap). They are not counted as pushed and will not be offered again — the log on the peer names the records.');
     }

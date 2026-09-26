@@ -68,7 +68,11 @@ const TRANSPORT = new Set(['space', 'targetSpace']);
  * Pairs that legitimately differ, each with its reason. Never a bare name — an exemption with no `why` is
  * indistinguishable from an omission, which is the rule `NOT_AREA_SCOPED` is written to.
  */
-const DIFFER_ON_PURPOSE = new Map();
+const DIFFER_ON_PURPOSE = new Map([
+  ['network_sync:networkId',
+    'the same network under two spellings: the tool names it `networkId` beside `peerId`, and REST puts it in the '
+    + 'path as `/networks/:id/sync`. The parser matches path parameters by name, and `id` is the path\'s generic name.'],
+]);
 
 /**
  * Real gaps, not yet closed. **This list may only shrink**, and it is kept apart from the one above on

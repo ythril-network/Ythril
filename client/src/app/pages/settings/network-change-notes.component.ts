@@ -7,6 +7,8 @@ import type { ChangeNote } from '../../core/change-note.types';
 import { NetworksApi } from '../../core/networks-api.service';
 import { ToastService } from '../../core/toast.service';
 import { PhIconComponent } from '../../shared/ph-icon.component';
+import { ErrorStateComponent } from '../../shared/error-state.component';
+import { httpErrorReason } from '../../core/http-error';
 import { MarkdownRenderService } from '../../shared/markdown-render.service';
 
 /** Roles with members BELOW them, so a note written here reaches somebody: a publisher, a tree root or inner node. */
@@ -24,15 +26,15 @@ const SENDING_ROLES = new Set(['publisher', 'root', 'node']);
 @Component({
   selector: 'app-network-change-notes',
   standalone: true,
-  imports: [TranslocoPipe, DatePipe, PhIconComponent],
+  imports: [TranslocoPipe, DatePipe, PhIconComponent, ErrorStateComponent],
   styles: [`
     :host { display: block; margin-top: 16px; }
     .note { padding: 8px 10px; background: var(--bg-elevated); border-radius: var(--radius-sm); margin-bottom: 8px; font-size: 13px; }
     .note-meta { display: block; font-size: 11px; color: var(--text-muted); margin-bottom: 4px; }
     .note-body { white-space: pre-wrap; overflow-wrap: anywhere; }
     .note-body.md { white-space: normal; }
-    .note-body.md :first-child { margin-top: 0; }
-    .note-body.md :last-child { margin-bottom: 0; }
+    .note-body.md ::ng-deep :first-child { margin-top: 0; }
+    .note-body.md ::ng-deep :last-child { margin-bottom: 0; }
     .space-pick { display: inline-flex; align-items: center; gap: 4px; margin-right: 10px; font-size: 12px; }
     textarea { width: 100%; min-height: 72px; box-sizing: border-box; }
   `],
@@ -63,6 +65,8 @@ const SENDING_ROLES = new Set(['publisher', 'root', 'node']);
       }
       @if (loading()) {
         <div style="font-size:12px; color:var(--text-muted);">{{ 'networks.network.changeNotes.loading' | transloco }}</div>
+      } @else if (loadError(); as e) {
+        <app-error-state [message]="'networks.network.changeNotes.loadFailed' | transloco" [reason]="e" [icon]="24" (retry)="load()" />
       } @else {
         <div class="section-title" style="font-size:12px; margin-top:4px;">{{ 'networks.network.changeNotes.received' | transloco }}</div>
         @for (n of received(); track n._id) {
@@ -104,6 +108,8 @@ export class NetworkChangeNotesComponent {
 
   open = signal(false);
   loading = signal(false);
+  /** Why the lists could not be read; set, it replaces both lists, so a failure never reads as "no notes". */
+  loadError = signal<string | null>(null);
   sending = signal(false);
   draft = signal('');
   picked = signal(new Set<string>());
@@ -143,12 +149,13 @@ export class NetworkChangeNotesComponent {
     });
   }
 
-  private load(): void {
+  load(): void {
     const id = this.network().id;
     this.loading.set(true);
+    this.loadError.set(null);
     let pending = this.canSend() ? 2 : 1;
     const done = () => { if (--pending === 0) this.loading.set(false); };
-    const fail = (err: { error?: { error?: string } }) => { this.toast.error(err.error?.error ?? this.transloco.translate('networks.network.changeNotes.loadFailed')); done(); };
+    const fail = (err: unknown) => { this.loadError.set(httpErrorReason(err)); done(); };
     this.networksApi.changeNotes(id, 'in').subscribe({ next: r => { this.received.set(r.notes); this.renderAll(r.notes); done(); }, error: fail });
     if (this.canSend()) this.networksApi.changeNotes(id, 'out').subscribe({ next: r => { this.sent.set(r.notes); this.renderAll(r.notes); done(); }, error: fail });
   }
