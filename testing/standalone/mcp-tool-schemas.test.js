@@ -103,7 +103,10 @@ describe('MCP tool schemas — universal invariants', () => {
     // `networks/join-remote-act.ts` and `networks/member-acts.ts` like their routes.
     // 62 -> 67: `network_member_admit`, `network_member_signing_key`, `network_reparent_self`, `network_member_adopt`,
     // `network_member_revert_parent` (`F-36` slice 5), doors onto `networks/member-acts.ts` and `networks/topology-acts.ts`.
-    assert.equal(ALL_TOOLS.length, 67);
+    // 67 -> 69: `network_pending_space` (S-9) and `network_join_by_key` (F-41). Prerequisites done for both: audit-map
+    // entries under their routes' operations, `mutating: true` and listed among the tools a readOnly token cannot
+    // see, and `16-mcp.md` rows in the tool table and the rights table.
+    assert.equal(ALL_TOOLS.length, 69);
   });
 
   it('every tool advertises a closed object schema (type:object, additionalProperties:false)', () => {

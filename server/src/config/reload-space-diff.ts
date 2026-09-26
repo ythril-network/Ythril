@@ -12,6 +12,18 @@
  */
 import type { PendingSpaceOp, SpaceConfig } from './types.js';
 
+declare module './types.js' {
+  interface Config {
+    /**
+     * Space ids an operator REMOVES by editing `config.json`. A reload keeps a space that is merely missing from
+     * the file; listing it here is how a hand edit says the removal is meant. Consumed by the reload that reads
+     * it and cleared, so it never removes a space created later under the same id. Declared here, beside its only
+     * reader, rather than in the frozen `types.ts`.
+     */
+    removeSpaces?: string[];
+  }
+}
+
 export interface ReloadSpaceDiff {
   /** Ids the file adds. */
   added: string[];
