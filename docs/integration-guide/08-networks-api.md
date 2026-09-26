@@ -142,8 +142,10 @@ PATCH /api/networks/:id
 
 ### Pending Spaces
 
-A space an upstream announced and this instance did not add on its own. `GET /api/networks/:id` lists them as
-`pendingSpaces`, each `{ networkId, localId, why, from, at }`.
+A space the network proposed and this instance did not add on its own: announced by an upstream, or carried by a
+passed `space_addition` round this instance did not propose. **A space whose id already exists here always waits**,
+whoever joined. `GET /api/networks/:id` lists them as `pendingSpaces`, each `{ networkId, localId, why, from, at }`,
+and the ones the operator dismissed as `dismissedSpaces`.
 
 **Why a space waits.** The token that joined or created the network here decides what the network may add later, by the rule
 the join itself ran: an existing local space needs `networks: write` on it or administering it, a new one needs
@@ -151,7 +153,8 @@ the join itself ran: an existing local space needs `networks: write` on it or ad
 
 - the joining token could not have joined it;
 - a local space already has its id: joining it would start syncing a space that only shares a name;
-- the network has no recorded joining token (it was joined or created before 5.4), or that token no longer exists.
+- the network has no recorded joining token (it was joined or created before 5.4), or that token no longer exists
+  or has expired.
 
 ```http
 POST /api/networks/:id/pending-spaces
@@ -163,8 +166,9 @@ POST /api/networks/:id/pending-spaces
 
 `action` is `accept` or `dismiss`. `mapTo`, accept only, carries the network's space under a different local id; an
 existing local space named there is joined to the network. Accepting is priced like a join, over YOUR token:
-`networks: write` on an existing space (or administering it), `createSpaces` for a new one. Dismissing forgets the
-proposal and needs `networks: admin` on every space the network carries. Answers `200` with the network. MCP:
+`networks: write` on an existing space (or administering it), `createSpaces` for a new one. Dismissing records the
+answer in `dismissedSpaces`, so neither an announcement nor a passed round proposes that space again, and needs
+`networks: admin` on every space the network carries. A dismissed space can still be accepted by its id. Answers `200` with the network. MCP:
 `network_pending_space` with `{ "id", "spaceId", "action", "mapTo"? }`.
 
 | status | when |
@@ -173,6 +177,7 @@ proposal and needs `networks: admin` on every space the network carries. Answers
 | `403` | the token is short on the right the action needs; the refusal names what |
 | `404` | no such network, or nothing pending under `spaceId` |
 | `409` | the network already carries the local id |
+| `500` | the space could not be added; the pending entry is kept, so the accept can be retried |
 
 ### Add a Space to a Network
 
@@ -240,6 +245,10 @@ In `pubsub` networks the subscriber is added immediately with `direction` forced
 ```http
 POST /api/networks/:id/join
 ```
+
+**The inviter's half, called on the inviting instance by the joining peer** (MCP `network_member_admit`): an
+instance-admin route of the peer protocol, not a way for a stranger to join. To join a pub/sub from its published key
+with nothing but that key, use [Join a Pub/Sub by Its Published Key](#join-a-pubsub-by-its-published-key) on your own instance.
 
 ```json
 {
@@ -354,8 +363,10 @@ POST /api/invite/redeem
 `POST /api/invite/generate` returns, for a pub/sub network this instance PUBLISHES whose current key it is. Any other
 key, including a club, closed or braintree network's, answers `403` with one message whatever the reason, so a caller
 cannot learn which networks exist. Bounded because it is anonymous and each call generates a key pair: the
-authentication rate limit per caller, and at most 25 redeemed handshakes open per network at once (`429`).
-Regenerating the key revokes it for new joins; members who already joined stay until removed.
+authentication rate limit per caller, at most 25 redeemed handshakes open per network and 3 per caller address
+(`429`), and a redeemed handshake expires after 10 minutes rather than the hour an admin's invite lives.
+**Regenerating the key revokes it for new joins and closes every handshake it already opened**; members who already
+joined stay until removed.
 
 ### Generate an Invite Key
 

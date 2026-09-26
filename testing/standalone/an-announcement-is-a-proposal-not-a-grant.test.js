@@ -22,8 +22,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
 
-let adoptionDecision;
-before(async () => { ({ adoptionDecision } = await import('../../server/dist/networks/network-spaces.js')); });
+let adoptionDecision, spacesToAdopt;
+before(async () => { ({ adoptionDecision, spacesToAdopt } = await import('../../server/dist/networks/network-spaces.js')); });
 
 const AREAS = ['knowledge', 'files', 'schema', 'dataQuality', 'networks'];
 const floor = (rung) => Object.fromEntries(AREAS.map(a => [a, rung]));
@@ -68,6 +68,21 @@ describe('who joined decides what an announcement may add', () => {
     }
   });
 
+  it('an EXPIRED joining token adopts nothing: it can no longer authenticate, so it cannot authorise', () => {
+    const t = { ...token('tok-joiner', { ...joiner(), instanceAdmin: true }), expiresAt: '2026-01-01T00:00:00Z' };
+    const d = adoptionDecision(net(), [t], ['mine'], [entry('new-one')], Date.parse('2026-09-26T00:00:00Z'));
+    assert.deepEqual(d.adopt, []);
+    assert.match(d.pending[0].why, /expired/i);
+    const live = adoptionDecision(net(), [t], ['mine'], [entry('new-one')], Date.parse('2025-12-31T00:00:00Z'));
+    assert.deepEqual(live.adopt.map(e => e.localId), ['new-one'], 'before its expiry the same token still adopts');
+  });
+
+  it('a space the operator dismissed is never proposed again by an announcement', () => {
+    const n = net({ members: [{ instanceId: 'pub', direction: 'pull' }], dismissedSpaces: ['gone'] });
+    const proposed = spacesToAdopt(n, 'pub', ['gone', 'fresh']);
+    assert.deepEqual(proposed.map(p => p.networkId), ['fresh'], 'dismissing is an answer, not a snooze');
+  });
+
   it('each announced space is judged on its own', () => {
     const t = token('tok-joiner', joiner({ createSpaces: true, floor: floor('write') }));
     const d = adoptionDecision(net(), [t], ['mine', 'taken'], [entry('fresh'), entry('taken')]);
@@ -84,6 +99,20 @@ describe('the adoption path goes through the decision', () => {
     const body = src.slice(at, src.indexOf('\nexport ', at + 10));
     assert.match(body, /adoptionDecision\(/, 'the announcement path must be judged by the joining token');
     assert.doesNotMatch(body, /addSpacesToNetwork\(networkId, adopt,/, 'the raw announced list must never reach addSpacesToNetwork');
+  });
+  it('a passed round that would CREATE a space here is judged by the joining token too', () => {
+    const at = src.indexOf('export function applySpaceAdditionRound(');
+    assert.ok(at > -1, 'applySpaceAdditionRound is gone — re-anchor this gate');
+    const body = src.slice(at, src.indexOf('\nexport ', at + 10));
+    assert.match(body, /adoptionDecision\(/, 'the round path must not create a space on the word of the network alone');
+    assert.match(body, /holdAsPending\(/, 'what the joiner could not have joined waits for the operator');
+  });
+  it('adding a space clears its pending entry, and dismissing records the answer', () => {
+    const at = src.indexOf('export async function addSpacesToNetwork(');
+    const body = src.slice(at, src.indexOf('\nexport ', at + 10));
+    assert.match(body, /pendingSpaces = net\.pendingSpaces\.filter/, 'an adopted space must not stay offered as pending');
+    const acts = stripComments(readFileSync('server/src/networks/network-acts.ts', 'utf8'));
+    assert.match(acts, /dismissedSpaces = \[\.\.\.\(net\.dismissedSpaces \?\? \[\]\), spaceId\]/, 'a dismissal must be remembered');
   });
   it('accepting a pending space runs the join rule over the ACCEPTING token', () => {
     const acts = stripComments(readFileSync('server/src/networks/network-acts.ts', 'utf8'));

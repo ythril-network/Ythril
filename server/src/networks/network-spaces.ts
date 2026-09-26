@@ -75,6 +75,7 @@ export function spacesToAdopt(
   const out: { networkId: string; localId: string }[] = [];
   for (const id of announced) {
     if (typeof id !== 'string' || !SPACE_ID.test(id)) continue;
+    if (net.dismissedSpaces?.includes(id)) continue;   // the operator answered it: dismissing is not a snooze
     const localId = remoteToLocal(net, id);
     if (net.spaces.includes(localId) || out.some(o => o.localId === localId)) continue;
     out.push({ networkId: id, localId });
@@ -139,6 +140,9 @@ export async function addSpacesToNetwork(
     if (!added.length) return [];
     for (const e of entries) if (e.localId !== e.networkId && added.includes(e.localId)) (net.spaceMap ??= {})[e.networkId] = e.localId;
     net.spaces.push(...added);
+    // An added space is no longer a proposal: a pending entry left behind would offer to add it a second time.
+    const addedIds = new Set(entries.filter(e => added.includes(e.localId)).map(e => e.networkId));
+    if (net.pendingSpaces?.some(p => addedIds.has(p.networkId))) net.pendingSpaces = net.pendingSpaces.filter(p => !addedIds.has(p.networkId));
     widenPeerTokens(cfg, net, added);
     saveConfig(cfg);
     log.info(`Network ${networkId}: added space(s) ${added.join(', ')} (${why})`);
@@ -157,13 +161,14 @@ export async function addSpacesToNetwork(
  * it — the same `networkJoinRefusal` the join itself runs — and everything else waits in `pending` with the reason.
  * A local space that already has the id is never adopted this way, whoever joined: joining it would start syncing a
  * space that only shares a name, and only an explicit mapping by the operator may do that. No recorded joiner (a
- * network joined before this existed) or a revoked one adopts nothing.
+ * network joined before this existed), a revoked one or an expired one adopts nothing.
  */
 export function adoptionDecision(
   net: Pick<NetworkConfig, 'joinedBy'>,
-  tokens: readonly { id: string; rights?: TokenRights | null; instanceAdmin?: boolean }[],
+  tokens: readonly { id: string; rights?: TokenRights | null; instanceAdmin?: boolean; expiresAt?: string | null }[],
   localSpaceIds: readonly string[],
   entries: readonly { networkId: string; localId: string }[],
+  now = Date.now(),
 ): { adopt: { networkId: string; localId: string }[]; pending: { networkId: string; localId: string; why: string }[] } {
   const joiner = net.joinedBy ? tokens.find(t => t.id === net.joinedBy) : undefined;
   const adopt: { networkId: string; localId: string }[] = [];
@@ -177,12 +182,36 @@ export function adoptionDecision(
       pending.push({ ...e, why: net.joinedBy ? 'the token that joined this network no longer exists' : 'this network has no recorded joining token (joined before it was recorded)' });
       continue;
     }
+    // Expired is revoked on a schedule: the token can no longer authenticate, so it can no longer authorise.
+    if (joiner.expiresAt && Date.parse(joiner.expiresAt) <= now) {
+      pending.push({ ...e, why: 'the token that joined this network has expired' });
+      continue;
+    }
     const caller = { ...joiner, rights: withInstanceAdminGrants(joiner.rights ?? undefined) };
     const refusal = networkJoinRefusal(caller as never, { existing: [], toCreate: [e.localId] });
     if (refusal) pending.push({ ...e, why: refusal });
     else adopt.push(e);
   }
   return { adopt, pending };
+}
+
+/**
+ * Record `pending` on `net` for the operator, and save. The one place a proposal becomes pending — an announcement
+ * and a passed round both land here — so neither can re-offer a space already pending or one the operator dismissed.
+ */
+function holdAsPending(
+  cfg: Config,
+  net: NetworkConfig,
+  pending: readonly { networkId: string; localId: string; why: string }[],
+  from: string,
+  what: string,
+): void {
+  const fresh = pending.filter(p => !net.dismissedSpaces?.includes(p.networkId) && !(net.pendingSpaces ?? []).some(q => q.networkId === p.networkId));
+  if (!fresh.length) return;
+  const at = new Date().toISOString();
+  net.pendingSpaces = [...(net.pendingSpaces ?? []), ...fresh.map(p => ({ ...p, from, at }))];
+  saveConfig(cfg);
+  log.warn(`Network ${net.id}: ${what} ${fresh.map(p => p.networkId).join(', ')}; held as pending, not adopted (${fresh[0]!.why})`);
 }
 
 /**
@@ -197,13 +226,7 @@ export async function adoptAnnouncedSpaces(networkId: string, fromInstanceId: st
   const proposed = spacesToAdopt(net, fromInstanceId, announced);
   if (!proposed.length) return [];
   const { adopt: allowed, pending } = adoptionDecision(net, cfg.tokens, cfg.spaces.map(s => s.id), proposed);
-  const fresh = pending.filter(p => !(net.pendingSpaces ?? []).some(q => q.networkId === p.networkId));
-  if (fresh.length) {
-    const at = new Date().toISOString();
-    net.pendingSpaces = [...(net.pendingSpaces ?? []), ...fresh.map(p => ({ ...p, from: fromInstanceId, at }))];
-    saveConfig(cfg);
-    log.warn(`Network ${networkId}: upstream ${fromInstanceId} announced ${fresh.map(p => p.networkId).join(', ')}; held as pending, not adopted (${fresh[0]!.why})`);
-  }
+  holdAsPending(cfg, net, pending, fromInstanceId, `upstream ${fromInstanceId} announced`);
   return allowed.length ? addSpacesToNetwork(networkId, allowed, `announced by upstream ${fromInstanceId}, joined by ${net.joinedBy}`) : [];
 }
 
@@ -247,6 +270,25 @@ export function applySpaceAdditionRound(net: NetworkConfig, round: VoteRound, wh
     return false;
   }
   const entry = { networkId: round.spaceId!, localId: target.localId };
-  setImmediate(() => { void addSpacesToNetwork(net.id, [entry], `space_addition round ${round.roundId}, ${where}`); });
+  // S-9 on the round path: a round this instance did not propose, for a space it does not have, would CREATE one on
+  // the network's word. The same rule as an announcement decides — the joining token — and what it could not have
+  // joined waits for the operator. A same-id local space got here only by this instance voting yes, which is consent.
+  // Decided inside the deferred tick, on the config as it is then, so the caller's own write cannot overwrite it.
+  setImmediate(() => {
+    if (!round.proposedHere) {
+      const now = getConfig();
+      const liveNet = now.networks.find(n => n.id === net.id);
+      if (!liveNet) return;
+      const localIds = now.spaces.map(s => s.id);
+      if (!localIds.includes(entry.localId)) {
+        const { adopt, pending } = adoptionDecision(liveNet, now.tokens, localIds, [entry]);
+        if (!adopt.length) {
+          holdAsPending(now, liveNet, pending, round.subjectInstanceId ?? 'a passed round', `space_addition round ${round.roundId} passed (${where}) for`);
+          return;
+        }
+      }
+    }
+    void addSpacesToNetwork(net.id, [entry], `space_addition round ${round.roundId}, ${where}`);
+  });
   return true;
 }

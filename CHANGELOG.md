@@ -14,8 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   took the key demanded an admin token on the publisher, so a stranger holding the key could not use it. Now the
   publisher answers `POST /api/invite/redeem` with a handshake for the key alone. The joiner's
   `POST /api/networks/join-by-key` (MCP `network_join_by_key`) runs the whole join from the publisher's URL and the
-  key, and the **Join network** dialog takes both. Redeem is rate-limited, capped at 25 open handshakes per
-  network, and answers only for a pub/sub network the instance publishes.
+  key, and the **Join network** dialog takes both. Redeem answers only for a pub/sub network the instance
+  publishes, and is bounded because anyone may call it: rate-limited, at most 25 open handshakes per network and 3
+  per caller, each living 10 minutes. Regenerating the key closes every handshake it already opened, and looking a
+  handshake up costs one password-hash comparison however many are open.
 
 ### Security
 
@@ -23,9 +25,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   publisher or tree parent that added a space made every subscriber or child create it, join a same-named local
   space to the network, and widen the peer tokens to it, whatever the joining token was allowed. Now the join
   records its token, and a later announced space is added only if that token could have joined it. A same-named
-  local space is never joined this way. Anything else waits on the network card as a pending space with its
-  reason, and the operator accepts or dismisses it: `POST /api/networks/:id/pending-spaces`, MCP
-  `network_pending_space`. **Networks joined or created before this version have no recorded joining token, so every space
+  local space is never joined this way. The same rule governs a passed vote that would create a space here, and a
+  joining token that was deleted or has expired adds nothing. Anything else waits on the network card as a pending
+  space with its reason, and the operator accepts or dismisses it: `POST /api/networks/:id/pending-spaces`, MCP
+  `network_pending_space`. A dismissal is remembered, so the network does not propose that space again. **Networks joined or created before this version have no recorded joining token, so every space
   they announce from now on waits for an accept.**
 - **A config reload never drops a space silently** (`S-10`). A space the running instance had and a reloaded
   `config.json` no longer listed simply left the configuration, with its data orphaned and nothing logged beyond
