@@ -21,6 +21,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A space update that carries no schema no longer logs "Suppression sweep failed"** (`Q-74`). Changing only a
+  setting such as the text level ran the embedding-suppression sweep without a schema to read, so it failed and
+  warned on every such write. It now runs only when the write carried one.
 - **A schema replace on a networked space says it kept what it did not remove** (`Q-61`). A network round is
   applied as a merge on every member and on the proposer, so a replace that left a type out removed nothing, and
   every schema door answered `200` as if it had. The answer now carries `appliedAsMerge`, `keptTypes` and a
