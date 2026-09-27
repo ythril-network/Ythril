@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A network never deletes a member's space** (`Q-70`). Deleting a networked space opens a vote as before, but
+  when it passes the space now leaves the network on every member instead of being deleted there: each member
+  keeps its copy and data as a local space and can add it to a network again. Only the instance that asked for the
+  delete removes its own copy. On a club or pub/sub network one yes used to delete the space on every member.
+  Emptying a space by vote is unchanged. *Docs changed:* `docs/network-types.md`, `docs/sync-protocol.md`,
+  `docs/integration-guide/08-networks-api.md`, `docs/userguide/04-settings.md`.
+
+## [5.5.0] — 2026-09-27
+
+**Files sync between members again, a file edited on one side is no longer a conflict, and a sync can carry a
+change note to the members below.** It also carries everything in 5.4.2 and 5.4.3.
+
+| what changed | what to do |
+|---|---|
+| `DELETE /api/conflicts/:id` and the Dismiss button are gone | resolve with `POST /api/conflicts/:id/resolve` (keep local, keep incoming, keep both, save to space) |
+| idle connections stay open 95 s | a proxy that holds idle upstream connections longer than 95 s should be lowered below it (*Hosting → TLS Termination*) |
+
+*Docs changed:* `docs/network-types.md`, `docs/sync-protocol.md`, and in `docs/integration-guide/`
+`02-hosting`, `06a-schema-api`, `08-networks-api`, `09-sync-api`, `10-mfa-and-conflicts`, `13-audit-log-api`,
+`14-duplicates-and-webhooks`, `15-about-and-embedding`, `16-mcp`; in `docs/userguide/` `03-files-and-schemas`
+and `04-settings`.
+
 ### Added
 
 - **A sync can carry a change note to the members below** (`F-42`). A pub/sub publisher or a braintree node
@@ -28,38 +52,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **A network never deletes a member's space** (`Q-70`). Deleting a networked space opens a vote as before, but
-  when it passes the space now leaves the network on every member instead of being deleted there: each member
-  keeps its copy and data as a local space and can add it to a network again. Only the instance that asked for the
-  delete removes its own copy. On a club or pub/sub network one yes used to delete the space on every member.
-  Emptying a space by vote is unchanged. *Docs changed:* `docs/network-types.md`, `docs/sync-protocol.md`,
-  `docs/integration-guide/08-networks-api.md`, `docs/userguide/04-settings.md`.
-- **A request is no longer dropped after the server was busy** (`Q-73`). An idle connection was closed after
-  Node's default 5 seconds, checked before the server read what had arrived on it. So after a few seconds of heavy
-  work, a request a client or proxy had already sent on a pooled connection failed with "other side closed", and
-  nothing was logged. Idle connections now stay open for 95 seconds, above the common proxy defaults; see
-  *Hosting → TLS Termination*.
-- **A space update that carries no schema no longer logs "Suppression sweep failed"** (`Q-74`). Changing only a
-  setting such as the text level ran the embedding-suppression sweep without a schema to read, so it failed and
-  warned on every such write. It now runs only when the write carried one.
-- **A schema replace on a networked space says it kept what it did not remove** (`Q-61`). A network round is
-  applied as a merge on every member and on the proposer, so a replace that left a type out removed nothing, and
-  every schema door answered `200` as if it had. The answer now carries `appliedAsMerge`, `keptTypes` and a
-  sentence, on REST and MCP alike, and the members are sent a change note naming the kept types. Removing a type
-  from a network stays impossible on purpose: it could break a member's customisation, its reuse of the type, or
-  another network the space is in.
-- **A space added to a network reaches its members with its schema** (`Q-60`). A schema-library reference now
-  travels resolved, where it was sent as a name the member's library did not have and the member refused the
-  whole schema. A type whose reference neither side can resolve is left out on its own. A space added to a club,
-  closed or democratic network carries its schema on the vote. And the proposer of a club schema change now
-  updates the network's layer as well as its own definitions: before, the stale layer outranked its own edit, so
-  the one instance that made the change could not see it.
-- **A push the receiver refused is no longer reported as pushed** (`Q-59`). `batch-upsert` answers a `rejected`
-  count per family, covering every record it neither stored nor already held: schema-invalid, an implausible
-  `seq`, a fork chain at its cap, or a chrono type the space does not declare. The sender subtracts it and records
-  the cycle as **partial**, naming the family and the count, so a cycle whose records all bounced no longer reads
-  `success`. A peer that refused records answered, so its failure count does not rise. The watermark still
-  advances, as before. Links are now counted in the cycle's totals too.
+**File sync**
+
 - **A file changed on one side only is no longer a conflict** (`Q-66`). Each end now remembers, per file and per
   peer, the version both last held. A copy nobody touched locally takes the other side's edit; our own edit is
   carried by the push instead of raising a conflict on our next pull; only edits on both sides still make a
@@ -77,12 +71,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   write only the fields the sync schema declares, so the receiver also no longer takes the sender's size and hash.
 - **`GET /api/conflicts?spaceId=` narrows to that space**, as documented, and answers `403` for a space the token
   cannot reach. It read the parameter nowhere and returned every accessible space's conflicts.
-- **`?embedded=1` survives a sign-in inside the frame.** The flag was read from the URL only, so after the identity
-  provider's redirect, a new document whose query is `code` and `state`, the topbar and Sign out came back in a
-  framed brain. It is now kept for the tab in `sessionStorage`; another tab is unaffected and `?embedded=0` clears it.
 - **The conflict page's action selects look editable on every theme.** They were styled with a theme token no
   stylesheet defines, so their border and background were dropped; five other reads of undefined tokens are fixed
   and a gate now holds every `var()` the client reads to a defined token.
+
+**Networks and schemas**
+
+- **A push the receiver refused is no longer reported as pushed** (`Q-59`). `batch-upsert` answers a `rejected`
+  count per family, covering every record it neither stored nor already held: schema-invalid, an implausible
+  `seq`, a fork chain at its cap, or a chrono type the space does not declare. The sender subtracts it and records
+  the cycle as **partial**, naming the family and the count, so a cycle whose records all bounced no longer reads
+  `success`. A peer that refused records answered, so its failure count does not rise. The watermark still
+  advances, as before. Links are now counted in the cycle's totals too.
+- **A space added to a network reaches its members with its schema** (`Q-60`). A schema-library reference now
+  travels resolved, where it was sent as a name the member's library did not have and the member refused the
+  whole schema. A type whose reference neither side can resolve is left out on its own. A space added to a club,
+  closed or democratic network carries its schema on the vote. And the proposer of a club schema change now
+  updates the network's layer as well as its own definitions: before, the stale layer outranked its own edit, so
+  the one instance that made the change could not see it.
+- **A schema replace on a networked space says it kept what it did not remove** (`Q-61`). A network round is
+  applied as a merge on every member and on the proposer, so a replace that left a type out removed nothing, and
+  every schema door answered `200` as if it had. The answer now carries `appliedAsMerge`, `keptTypes` and a
+  sentence, on REST and MCP alike, and the members are sent a change note naming the kept types. Removing a type
+  from a network stays impossible on purpose: it could break a member's customisation, its reuse of the type, or
+  another network the space is in.
+
+**Server**
+
+- **A request is no longer dropped after the server was busy** (`Q-73`). An idle connection was closed after
+  Node's default 5 seconds, checked before the server read what had arrived on it. So after a few seconds of heavy
+  work, a request a client or proxy had already sent on a pooled connection failed with "other side closed", and
+  nothing was logged. Idle connections now stay open for 95 seconds, above the common proxy defaults; see
+  *Hosting → TLS Termination*.
+- **A space update that carries no schema no longer logs "Suppression sweep failed"** (`Q-74`). Changing only a
+  setting such as the text level ran the embedding-suppression sweep without a schema to read, so it failed and
+  warned on every such write. It now runs only when the write carried one.
+
+**Embedding in a frame**
+
+- **`?embedded=1` survives a sign-in inside the frame.** The flag was read from the URL only, so after the identity
+  provider's redirect, a new document whose query is `code` and `state`, the topbar and Sign out came back in a
+  framed brain. It is now kept for the tab in `sessionStorage`; another tab is unaffected and `?embedded=0` clears it.
+
 
 ## [5.4.3] — 2026-09-27
 
