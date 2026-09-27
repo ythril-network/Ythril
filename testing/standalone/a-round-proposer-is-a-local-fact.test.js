@@ -112,8 +112,26 @@ describe('an honest proposal still passes', () => {
     assert.equal(r.passed, true);
   });
   it('democratic: the proposer and a majority said yes', () => {
+    // Four members — the three listed and this one — so a majority is three.
+    const r = round({ subjectInstanceId: PEER, votes: [yes(PEER), yes(OTHER), yes(SELF)] });
+    concludeRoundIfReady(net('democratic', [PEER, OTHER, VICTIM]), r);
+    assert.equal(r.passed, true);
+  });
+  it('democratic: half of four members is not a majority (Q-77)', () => {
+    // The count compared yes against HALF THE OTHER members, and the electorate is every member — so on an even
+    // number, exactly half passed a round.
     const r = round({ subjectInstanceId: PEER, votes: [yes(PEER), yes(OTHER)] });
     concludeRoundIfReady(net('democratic', [PEER, OTHER, VICTIM]), r);
+    assert.notEqual(r.passed, true);
+  });
+  it('democratic: on two members the proposer alone does not decide for the other (Q-77)', () => {
+    const r = round({ subjectInstanceId: PEER, votes: [yes(PEER)] });
+    concludeRoundIfReady(net('democratic', [PEER]), r);
+    assert.notEqual(r.passed, true);
+  });
+  it('democratic: two of three members is a majority', () => {
+    const r = round({ subjectInstanceId: PEER, votes: [yes(PEER), yes(OTHER)] });
+    concludeRoundIfReady(net('democratic', [PEER, OTHER]), r);
     assert.equal(r.passed, true);
   });
   it('a join round is decided about its subject, who does not vote on it', () => {

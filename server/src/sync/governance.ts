@@ -131,9 +131,17 @@ export function concludeRoundIfReady(
       }
       break;
     }
-    case 'democratic':
-      passed = (voters.length === 0 && yesCount > 0) || (yesCount > voters.length / 2 && vetoCount === 0);
+    case 'democratic': {
+      // A majority of EVERY member, this one included unless the round is about it (`Q-77`). The count compared the
+      // yeses against half the OTHER members, so on an even-sized network exactly half passed — on two members the
+      // proposer's own automatic yes decided for both. Only a member's yes counts.
+      const electorate = voters.length + (localIsVotedOn ? 0 : 1);
+      const memberYes = round.votes.filter(v => v.vote === 'yes' && (
+        (v.instanceId === localInstanceId && !localIsVotedOn) || voters.some(m => m.instanceId === v.instanceId)
+      )).length;
+      passed = memberYes > electorate / 2;
       break;
+    }
     case 'club':
     case 'pubsub':
       // For Club/Pubsub: only the inviter/publisher (first yes voter) decides

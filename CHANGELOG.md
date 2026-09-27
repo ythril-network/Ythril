@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.4.3] — 2026-09-27
+
+**A security patch for democratic networks: a round needs a real majority of the members.** Upgrade every
+instance that is a member of a democratic network.
+
+### Fixed
+
+- **A democratic network needs a majority of its members, not half** (`Q-77`, security). The yes votes were
+  compared against half of the OTHER members, so on an even-sized network exactly half passed a round, and on two
+  members the proposer's own yes decided for both. A round now passes on more than half of all members, and only a
+  member's yes counts. No documentation changed: the docs always said majority.
+
 ## [5.4.2] — 2026-09-27
 
 **A security patch for closed networks: no member's space can be deleted, wiped or changed without that member's
