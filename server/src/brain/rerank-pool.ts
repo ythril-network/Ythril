@@ -36,6 +36,14 @@ export async function rerankPool(
    */
   noteDegraded: (reason: string) => void,
   score: RerankScorer = rerank,
+  /**
+   * Which key picks the candidates the cap keeps, and only the CALLER can say. `fused` when one fusion ranked
+   * the whole pool — a single space whose lexical channel ran — so a record the lexical channel rescued from a
+   * low vector score is scored rather than cut. `vector` otherwise, and always across spaces: RRF is
+   * rank-based, so every space's rank 1 fuses to the same value, while vector scores compare across spaces
+   * (one model, one query vector).
+   */
+  opts: { order?: 'fused' | 'vector' } = {},
 ): Promise<void> {
   // One entry per distinct record, holding every reference to it so a single score updates all of them.
   const byId = new Map<string, RecallResult[]>();
@@ -43,11 +51,26 @@ export async function rerankPool(
     const refs = byId.get(r._id);
     if (refs) refs.push(r); else byId.set(r._id, [r]);
   }
-  // Highest vector score first, so the absolute cap drops the least plausible candidates rather than an
-  // arbitrary slice — the cap is a cost ceiling, not a sampling strategy. Across spaces the vector scores
-  // are comparable: one embedding model, one query vector.
+  /*
+   * What the cap keeps: floor results first, then the pool by the caller's key, then `_id`.
+   *
+   * The cap is a cost ceiling, not a sampling strategy, so it drops the least plausible candidates — and a
+   * scored result now outranks every unscored one (`byRankThenId`), so a candidate the cap cuts cannot reach
+   * the top. A floor result is in the answer whatever its score, so it is always scored; ordering it by vector
+   * score would cut exactly the low-scoring record the floor exists to keep (`Q-79`). The key is read from the
+   * POOL copy of a record, because a floor copy has not been through fusion.
+   */
+  const floorIds = new Set(guaranteed.map(r => r._id));
+  const poolCopy = new Map<string, RecallResult>();
+  for (const r of allResults) if (!poolCopy.has(r._id)) poolCopy.set(r._id, r);
+  // Computed once per record, not per comparison: a pool reaches thousands of candidates.
+  const key = new Map<string, number>();
+  for (const [id, refs] of byId) {
+    const r = poolCopy.get(id) ?? refs[0]!;
+    key.set(id, (opts.order === 'fused' ? r.fusedScore ?? r.score : r.score) ?? 0);
+  }
   const ids = [...byId.keys()]
-    .sort((a, b) => ((byId.get(b)![0].score ?? 0) - (byId.get(a)![0].score ?? 0)) || (a < b ? -1 : a > b ? 1 : 0))
+    .sort((a, b) => Number(floorIds.has(b)) - Number(floorIds.has(a)) || key.get(b)! - key.get(a)! || (a < b ? -1 : a > b ? 1 : 0))
     .slice(0, MAX_CANDIDATES);
   if (ids.length === 0) return;
 

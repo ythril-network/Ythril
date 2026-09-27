@@ -1,11 +1,20 @@
 import { getConfig } from '../config/loader.js';
 import type { SpaceConfig } from '../config/types.js';
 
+/**
+ * Whether a space RECORD is a proxy: it names at least one member. A proxy holds no records of its own.
+ *
+ * Takes the record rather than an id so a caller already holding one (a loop over the configured spaces)
+ * asks the same question without a second lookup, and so the rule can be exercised without a config. An
+ * empty member list is a real space, which only a hand-edited config can produce — the API refuses one.
+ */
+export function isProxy(space: { proxyFor?: string[] } | undefined): boolean {
+  return !!(space?.proxyFor && space.proxyFor.length > 0);
+}
+
 /** Returns true if the space is a proxy space (has proxyFor member list). */
 export function isProxySpace(spaceId: string): boolean {
-  const cfg = getConfig();
-  const space = cfg.spaces.find(s => s.id === spaceId);
-  return !!(space?.proxyFor && space.proxyFor.length > 0);
+  return isProxy(getConfig().spaces.find(s => s.id === spaceId));
 }
 
 /** Get the SpaceConfig for a given id, or undefined. */

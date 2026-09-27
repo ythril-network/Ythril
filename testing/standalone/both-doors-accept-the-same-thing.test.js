@@ -101,9 +101,11 @@ describe('the cross-space branch forwards every option the space-scoped one does
   };
 
   it('both recall calls in the tool pass the same options', () => {
+    // Both branches — named spaces, and no space — now call `recallGlobal` (`Q-81`); the space-scoped branch
+    // used to fan `recall(mid, …)` out by hand. The rule is unchanged: the two calls forward the same options.
     const src = code(MCP_SEARCH);
-    const scoped = src.indexOf('recall(mid,');
-    const global = src.indexOf('recallGlobal(');
+    const scoped = src.indexOf('recallGlobal(memberIds,');
+    const global = src.indexOf('recallGlobal(accessibleSpaceIds,');
     assert.ok(scoped > 0 && global > 0, 'one of the two recall calls is gone — re-point this gate');
     const a = optionKeys(src.slice(scoped, src.indexOf(');', scoped) + 2));
     const b = optionKeys(src.slice(global, src.indexOf(');', global) + 2));

@@ -263,12 +263,19 @@ describe('introduction is gated on evidence', () => {
   it('introduced records join the pool BEFORE the fusion ranking is computed', () => {
     // Introducing after `vectorRanked` is built would add records that fusion never ranked, which is
     // how an introduced record would end up with no fusedScore and sort below everything.
-    const fuse = src.indexOf('const vectorRanked');
-    const intro = src.indexOf('introduceLexicalOnly(', src.indexOf('async function applyLexicalFusion'));
+    // The ranking moved into `stampFusion` (`Q-79`, so the floor results are ranked with the pool); the
+    // order that matters is the call to it, inside `applyLexicalFusion`.
+    const at = src.indexOf('async function applyLexicalFusion');
+    const intro = src.indexOf('introduceLexicalOnly(', at);
+    const fuse = src.indexOf('stampFusion(', at);
     assert.ok(intro > 0 && fuse > intro, 'introduction must precede the vector ranking');
   });
 
   it('the whole path stays behind the hybrid kill switch', () => {
-    assert.match(src, /if \(hybridSearchEnabled\(\)\) \{/);
+    // Every call of the fusion step is guarded by the switch, in either spelling of the guard.
+    const calls = [...src.matchAll(/applyLexicalFusion\(/g)].length - 1; // minus the declaration
+    const guarded = [...src.matchAll(/hybridSearchEnabled\(\)\s*(?:&&\s*await\s+|\)\s*\{\s*await\s+)applyLexicalFusion\(/g)].length;
+    assert.ok(calls >= 1, 'the fusion step is never called — re-point this gate');
+    assert.equal(guarded, calls, 'a fusion call runs without the hybrid kill switch');
   });
 });

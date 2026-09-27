@@ -26,15 +26,13 @@ import { parseTraverseOption, traverseOptionSchema, echoTraverse } from '../../b
 import { type FilterExpression } from '../../brain/filter.js';
 import { resolveRecallFilter, type RawMongoFilter } from '../../brain/recall-filter.js';
 import { observeRecallPath } from '../../brain/recall.js';
-import { type RecallKnowledgeType, type RecallResult, findSimilar, recall, recallGlobal } from '../../brain/recall.js';
+import { type RecallKnowledgeType, type RecallResult, findSimilar, recallGlobal } from '../../brain/recall.js';
 import { memberSpacesWithin } from '../../spaces/proxy-scoped.js';
 import { NotFoundError } from '../../util/errors.js';
 // The SAME resolver the nine per-collection list routes use — not a second name lookup with its own cap
 // and its own idea of what 'contains' means. Two spellings of one join is how the doors start
 // disagreeing about which records a name matches.
-import {
-  byRankThenId, mergeRecallResults, rankingFields,
-} from '../../brain/recall-shape.js';
+import { rankingFields } from '../../brain/recall-shape.js';
 
 /**
  * Space scope for find_similar — mirrors recall's omit-space idiom (F1 consistency).
@@ -167,7 +165,7 @@ export const recallTool: ToolHandler = {
             includeDiagnostics: {
               type: 'boolean',
               default: false,
-              description: 'Add back the three RECORD fields a result carries for the SYSTEM rather than for you (default false, and false is what you want almost always): `matchedText` — the exact pre-embedding source string, which for a file chunk is the heading plus the passage, so the passage a SECOND time; `embeddingModel`, identical for every record in a space; and `seq`, a sync counter that is not an input to any tool. Turn it on to see WHICH TEXT was embedded, then turn it off — `matchedText` especially is multiplied by `topK` and paid for in your context. REST takes the same parameter with the same default. **THIS NO LONGER GOVERNS THE PER-STAGE SCORES.** `lexicalScore`, `fusedScore` and `rerankScore` come back on EVERY recall, on both doors, each present only if that stage ran — because they are the ORDERING, not payload. `score` is vector similarity, and precedence in a fused recall is `rerankScore > fusedScore > score`, so on an instance with a reranker the number that decided a result’s position was previously the one you could not see. Three floats are not a cost, so they do not belong behind a flag whose purpose is removing cost.',
+              description: 'Add back the three RECORD fields a result carries for the SYSTEM rather than for you (default false, and false is what you want almost always): `matchedText` — the exact pre-embedding source string, which for a file chunk is the heading plus the passage, so the passage a SECOND time; `embeddingModel`, identical for every record in a space; and `seq`, a sync counter that is not an input to any tool. Turn it on to see WHICH TEXT was embedded, then turn it off — `matchedText` especially is multiplied by `topK` and paid for in your context. REST takes the same parameter with the same default. **THIS NO LONGER GOVERNS THE PER-STAGE SCORES.** `lexicalScore`, `fusedScore` and `rerankScore` come back on EVERY recall, on both doors, each present only if that stage ran — because they are the ORDERING, not payload. `score` is vector similarity, and precedence in a fused recall is `rerankScore > fusedScore > score`, and a result carrying a `rerankScore` ranks above every result without one (the cross-encoder scores the top 100 candidates), so on an instance with a reranker the number that decided a result’s position was previously the one you could not see. Three floats are not a cost, so they do not belong behind a flag whose purpose is removing cost.',
             },
             projection: {
               type: 'object',
@@ -334,14 +332,15 @@ export const recallTool: ToolHandler = {
       // EVERY named space, deduplicated: a caller may name a proxy and one of its members, and reading a
       // space twice doubles every match it contributes to the merged ranking.
       const memberIds = [...new Set(ctx.callSpaces.flatMap(sp => memberSpacesWithin(sp, accessibleSpaceIds)))];
-      const all = (await Promise.all(memberIds.map(mid => recall(mid, query, topK, tags, types, minPerType, minScore, filter, { maxPerType, maxTimeMS: recallMaxTimeMS, degraded, observePath })))).flat();
-      // Same rule as everywhere else: rankOf, not `.score`. See the note on the REST recall route.
-      all.sort(byRankThenId);
-      // And the ceiling is re-applied to the merged set for the same reason it is on the REST route: each
-      // member honoured it alone, so N members would multiply it.
-      seeds = maxPerType
-        ? mergeRecallResults([], all, topK, undefined, maxPerType)
-        : all.slice(0, topK);
+      /*
+       * THE SAME MERGE as the no-space branch, not a copy of it (`Q-81`). This was a hand-written fan-out —
+       * `recall` per member, then a sort and a slice here — which skipped the ONE query embedding and the ONE
+       * rerank pass `recallGlobal` makes: after P-35 fixed the no-space branch, a recall on a proxy of thirteen
+       * members still sent thirteen rerank requests. `recallGlobal` also re-applies `maxPerType` to the merged
+       * set, which this branch did by hand.
+       */
+      seeds = await recallGlobal(memberIds, query, topK, tags, types, minPerType, minScore, filter,
+        { maxPerType, maxTimeMS: recallMaxTimeMS, degraded, observePath });
       traverseSpaces = memberIds;
     } else {
       /*
@@ -503,7 +502,7 @@ export const find_similarTool: ToolHandler = {
             includeDiagnostics: {
               type: 'boolean',
               default: false,
-              description: 'Add back the three RECORD fields a result carries for the SYSTEM rather than for you (default false, and false is what you want almost always): `matchedText` — the exact pre-embedding source string, which for a file chunk is the heading plus the passage, so the passage a SECOND time; `embeddingModel`, identical for every record in a space; and `seq`, a sync counter that is not an input to any tool. Turn it on to see WHICH TEXT was embedded, then turn it off — `matchedText` especially is multiplied by `topK` and paid for in your context. REST takes the same parameter with the same default. **THIS NO LONGER GOVERNS THE PER-STAGE SCORES.** `lexicalScore`, `fusedScore` and `rerankScore` come back on EVERY recall, on both doors, each present only if that stage ran — because they are the ORDERING, not payload. `score` is vector similarity, and precedence in a fused recall is `rerankScore > fusedScore > score`, so on an instance with a reranker the number that decided a result’s position was previously the one you could not see. Three floats are not a cost, so they do not belong behind a flag whose purpose is removing cost.',
+              description: 'Add back the three RECORD fields a result carries for the SYSTEM rather than for you (default false, and false is what you want almost always): `matchedText` — the exact pre-embedding source string, which for a file chunk is the heading plus the passage, so the passage a SECOND time; `embeddingModel`, identical for every record in a space; and `seq`, a sync counter that is not an input to any tool. Turn it on to see WHICH TEXT was embedded, then turn it off — `matchedText` especially is multiplied by `topK` and paid for in your context. REST takes the same parameter with the same default. **THIS NO LONGER GOVERNS THE PER-STAGE SCORES.** `lexicalScore`, `fusedScore` and `rerankScore` come back on EVERY recall, on both doors, each present only if that stage ran — because they are the ORDERING, not payload. `score` is vector similarity, and precedence in a fused recall is `rerankScore > fusedScore > score`, and a result carrying a `rerankScore` ranks above every result without one (the cross-encoder scores the top 100 candidates), so on an instance with a reranker the number that decided a result’s position was previously the one you could not see. Three floats are not a cost, so they do not belong behind a flag whose purpose is removing cost.',
             },
             projection: {
               type: 'object',

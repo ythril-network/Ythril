@@ -100,7 +100,10 @@ describe('what it does to a space, and what it refuses to do', () => {
   it('skips a proxy, which holds no documents of its own', () => {
     // A proxy aggregates its members. Walking one finds nothing and would then mark it complete on the
     // strength of that — the marker is the dangerous half, not the walk.
-    assert.match(mod, /proxyFor/,
+    // Matched on the CALL in the pending filter, not on a mention of `proxyFor`: the rule has one home
+    // (`linkConversionConcerns`, Q-78), and a gate on the field name would pass on a comment or go red on
+    // the refactor that moved the rule there.
+    assert.match(mod, /spaces\.filter\([^;]*linkConversionConcerns\(/,
       'a proxy space would be walked and marked complete on an empty result');
   });
 

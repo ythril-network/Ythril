@@ -123,7 +123,9 @@ THE PER-STAGE SCORES ARE NOT BEHIND THAT FLAG, and this is worth knowing before
 you try to switch them on. lexicalScore, fusedScore and rerankScore come back on
 EVERY recall, on both doors, each present only when that stage ran. They are the
 ORDERING: score is vector similarity, precedence in a fused recall is
-rerankScore > fusedScore > score, and minScore filters on score ALONE -- so on an
+rerankScore > fusedScore > score, a result carrying a rerankScore ranks above
+every result without one (the cross-encoder scores the top 100 candidates), and
+minScore filters on score ALONE -- so on an
 instance with a reranker configured, the number that decided a result's position
 is rerankScore and the number you can threshold on is a different one. Read the
 highest of the three that is present to know why something placed where it did.

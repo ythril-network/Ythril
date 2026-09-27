@@ -60,7 +60,8 @@ export const RECALL_RECORD_DIAGNOSTICS = ['matchedText', 'embeddingModel', 'seq'
  *
  * ## And `score` is not the number that ranked the result
  *
- * Precedence in a fused recall is `rerankScore > fusedScore > score`. So on any instance with a cross-encoder,
+ * Precedence in a fused recall is `rerankScore > fusedScore > score`, and a result carrying a `rerankScore`
+ * ranks above every result without one (`byRankThenId`). So on any instance with a cross-encoder,
  * the value in the response did not decide the position in the response, and the value that did was
  * unavailable. Their reranker has been live since 2026-08-03, which makes `rerankScore` the operative number
  * on every recall they make.
@@ -69,11 +70,12 @@ export const RECALL_RECORD_DIAGNOSTICS = ['matchedText', 'embeddingModel', 'seq'
  * rerank ordering. A caller could threshold on a number that did not order the results while being unable to
  * see the one that did. Either half alone is survivable.
  *
- * ## Absent still means "that stage did not run"
+ * ## Absent means "that stage did not score this result"
  *
  * These are emitted only when present, so an instance with no reranker returns no `rerankScore` and a
- * lexical-free query returns no `lexicalScore`. That was already the contract and it is unchanged — what
- * changed is that a caller no longer has to ask.
+ * lexical-free query returns no `lexicalScore`. A result can also lack a `rerankScore` when the stage DID
+ * run: the pass scores at most `MAX_CANDIDATES`, and a provider may drop a passage. Such a result ranks below
+ * every scored one — see `byRankThenId`.
  *
  * Beside `score`, never inside `record`: a score describes how the result RANKED, not what the record is.
  */
@@ -264,22 +266,12 @@ export function mergeRecallResults(
   }
 
   const final = [...guaranteed, ...fill];
-  // Order by the cross-encoder when it answered, otherwise by vector similarity. `??` rather than a
-  // separate branch so a partial rerank — a provider that scored some passages and not others — still
-  // orders sensibly instead of collapsing the unscored ones to the bottom.
+  // One ranking rule for the whole answer — see `byRankThenId`, and why a scored result outranks an unscored one.
   final.sort(byRankThenId);
   // The threshold was applied to the candidates at the top, so nothing here can be below it.
   return final;
 }
 
-/**
- * Sort key, most-precise signal first.
- *
- * Cross-encoder > RRF fusion > raw vector similarity. The order is the order of how much each one
- * actually knows: the reranker read the query and the passage together, fusion only saw two rankings,
- * and the vector score saw one. `??` rather than branches so a partial signal — some records reranked,
- * some not — still orders sensibly instead of collapsing the unscored ones to the bottom.
- */
 /**
  * The tie-break every ranking sort in recall ends with: `_id` ascending.
  *
@@ -327,7 +319,25 @@ export interface RankedLike {
  * they live in `api/brain/search.ts` and `mcp/tools/search.ts` rather than anywhere named after ranking.
  */
 export function byRankThenId(a: RecallResult, b: RecallResult): number {
-  return rankOf(b) - rankOf(a) || byIdAsc(a, b);
+  return rerankedFirst(a, b) || rankOf(b) - rankOf(a) || byIdAsc(a, b);
+}
+
+/**
+ * A result the cross-encoder scored outranks one it did not, whatever the two numbers are.
+ *
+ * `rankOf` falls back from `rerankScore` to `fusedScore` to `score`, and those are unrelated scales: a
+ * cross-encoder's relevance is often below 0.1 where a cosine similarity sits between 0.3 and 0.9. Compared
+ * directly, every unscored result outranked every scored one — and a pass scores at most `MAX_CANDIDATES`, so
+ * an unfiltered recall over five types left a tail that took the whole answer: vector order, no `degraded`,
+ * every batch answered 200 (`Q-79`, from the platform canary).
+ *
+ * Only this tier, not fused-over-vector as well: a fused score's presence depends on whether that space's
+ * lexical channel found anything for THIS query, so tiering on it would rank whole spaces as blocks. Within
+ * one pass the reranker saw every candidate that could win — floor results and the pool's head, see
+ * `rerankPool` — so an unscored result is the cap's tail or a passage the provider dropped.
+ */
+function rerankedFirst(a: RankedLike, b: RankedLike): number {
+  return Number(b.rerankScore !== undefined) - Number(a.rerankScore !== undefined);
 }
 
 export function rankOf(r: RankedLike): number {

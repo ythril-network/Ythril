@@ -39,7 +39,9 @@ export { MIN_CANDIDATE_MULTIPLIER, MAX_CANDIDATE_MULTIPLIER };
 export const DEFAULT_CANDIDATE_MULTIPLIER = 4;
 
 /**
- * Absolute ceiling on candidates sent in one rerank call, independent of `topK` × multiplier.
+ * Absolute ceiling on candidates scored in one rerank PASS (sent in batches of `maxPassagesPerRequest`),
+ * independent of `topK` × multiplier. Candidates past it are not scored, and rank below every one that is
+ * (`byRankThenId`); which ones it keeps is `rerankPool`'s decision.
  *
  * A cross-encoder is a forward pass PER PASSAGE — cost is linear in the candidate count, not amortised
  * like an ANN lookup. Without this, `topK=200` would quietly turn one search into an 800-passage batch.

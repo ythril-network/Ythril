@@ -47,6 +47,7 @@
 import { getDb } from './mongo.js';
 import { getConfig } from '../config/loader.js';
 import { log } from '../util/log.js';
+import { linkConversionConcerns } from '../brain/links-conversion.js';
 
 /** The six, written out: they no longer exist anywhere to derive them from. That is the point of this file. */
 const ARRAYS_BY_SUFFIX: Record<string, readonly string[]> = {
@@ -74,6 +75,9 @@ export async function dropLinkArrays(): Promise<LinkArrayDropOutcome> {
   const db = getDb();
 
   for (const space of getConfig().spaces) {
+    // A proxy holds no records and is never marked, so asking only "is it marked?" would report it
+    // unconverted on every boot, naming a remedy that never walks it (`Q-78`).
+    if (!linkConversionConcerns(space)) continue;
     if (space.completeLinkage !== true) {
       // The arrays ARE this space's links until the conversion has walked it. See the note above.
       out.unconverted.push(space.id);
@@ -97,8 +101,9 @@ export async function dropLinkArrays(): Promise<LinkArrayDropOutcome> {
   if (total > 0) log.info(`drop-link-arrays: cleared the retired link arrays off ${total} record(s)`);
   if (out.unconverted.length > 0) {
     log.warn(`drop-link-arrays: ${out.unconverted.length} space(s) still hold their links as arrays and were `
-      + `left alone — ${out.unconverted.join(', ')}. Their link reads are refused until \`npm run links:convert\` `
-      + 'has walked them cleanly; that refusal names the space.');
+      + `left alone — ${out.unconverted.join(', ')}. Their link reads are refused until the conversion has `
+      + 'walked them cleanly; that refusal names the space. Every start retries it, and the Link conversion '
+      + 'ERROR line above says why it failed; from a source checkout, `npm run links:convert` walks it on demand.');
   }
   return out;
 }
