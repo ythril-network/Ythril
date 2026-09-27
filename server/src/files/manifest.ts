@@ -18,6 +18,9 @@ import { createHash } from 'crypto';
 import { getDataRoot } from '../config/loader.js';
 import { col, asFilter, asBulk } from '../db/mongo.js';
 import { spaceCollection } from '../db/space-collection.js';
+import { openStoredRead, StoredFileUnreadable } from './stored-bytes.js';
+import { log } from '../util/log.js';
+import { noteUnreadable, clearUnreadable } from './unreadable-files.js';
 
 export interface ManifestEntry {
   path: string;        // relative to space files root, e.g. "notes/2024.md"
@@ -29,19 +32,30 @@ export interface ManifestEntry {
 /** Cached hash for one file, invalidated when size or mtime changes. */
 interface HashCacheDoc {
   _id: string;      // path relative to the space files root
+  /** The file's size ON DISK, which is what the cache is keyed on. */
   size: number;
   mtimeMs: number;
   sha256: string;
+  /**
+   * The PLAINTEXT size, which the manifest publishes. It differs from `size` when the file is encrypted at rest
+   * (F-43); absent on a record written before that, where the file was plaintext and the two are equal.
+   */
+  plainSize?: number;
 }
 
 function spaceFilesRoot(spaceId: string): string {
   return path.resolve(getDataRoot(), 'files', spaceId);
 }
 
-async function hashFile(absPath: string): Promise<string> {
-  const data = await fs.readFile(absPath);
-  // Buffer.from() needed to satisfy createHash type in newer @types/node
-  return createHash('sha256').update(Buffer.from(data)).digest('hex');
+/**
+ * The sha256 and size of a file's PLAINTEXT, streamed. Peers compare what users stored, not what this instance
+ * happens to keep on disk, so the hash is the same whether or not either side encrypts at rest (F-43).
+ */
+async function hashFile(absPath: string): Promise<{ sha256: string; size: number }> {
+  const hash = createHash('sha256');
+  let size = 0;
+  for await (const chunk of await openStoredRead(absPath)) { hash.update(chunk as Buffer); size += (chunk as Buffer).length; }
+  return { sha256: hash.digest('hex'), size };
 }
 
 /**
@@ -89,16 +103,33 @@ export async function buildFileManifest(
         seen.add(relPath);
         const cached = cache.get(relPath);
         let sha256: string;
+        let plainSize: number;
         if (cached && cached.size === stat.size && cached.mtimeMs === stat.mtimeMs) {
           sha256 = cached.sha256; // unchanged — reuse the cached hash
+          plainSize = cached.plainSize ?? stat.size;
         } else {
-          sha256 = await hashFile(abs);
-          updates.push({ _id: relPath, size: stat.size, mtimeMs: stat.mtimeMs, sha256 });
+          try {
+            ({ sha256, size: plainSize } = await hashFile(abs));
+          } catch (err) {
+            /*
+             * ONE unreadable file is left out, never the manifest. A file under a foreign key or with altered
+             * bytes throwing out of here would fail the manifest route, file sync and the Merkle root for the
+             * whole space on every cycle — a whole space stopped over one file. It is logged, and the refusal
+             * reaches anyone who reads the file itself.
+             */
+            if (err instanceof StoredFileUnreadable) {
+              if (noteUnreadable(spaceId, relPath, `${stat.size}:${stat.mtimeMs}`)) log.warn(`manifest: skipped '${relPath}' in ${spaceId}: ${err.message}`);
+              continue;
+            }
+            throw err;
+          }
+          clearUnreadable(spaceId, relPath);
+          updates.push({ _id: relPath, size: stat.size, mtimeMs: stat.mtimeMs, sha256, plainSize });
         }
         results.push({
           path: relPath,
           sha256,
-          size: stat.size,
+          size: plainSize,
           modifiedAt: stat.mtime.toISOString(),
         });
       }
@@ -123,4 +154,16 @@ export async function buildFileManifest(
   }
 
   return results;
+}
+
+/**
+ * Record a hash this process already knows, so the next manifest does not re-read the file to learn it. The
+ * migration computes the plaintext hash while it encrypts; without this every migrated file — which has a new
+ * size on disk — would be streamed and decrypted a second time on the next sync cycle.
+ */
+export async function seedFileHash(
+  spaceId: string, relPath: string, entry: { size: number; mtimeMs: number; sha256: string; plainSize: number },
+): Promise<void> {
+  await col<HashCacheDoc>(spaceCollection(spaceId, 'fileHashes')).replaceOne(
+    asFilter<HashCacheDoc>({ _id: relPath }), { ...entry }, { upsert: true });
 }

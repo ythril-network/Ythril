@@ -49,8 +49,11 @@ function rawMkdirsIn(src) {
 const WRITERS = [
   ['server/src/db/dump.ts', 'a decrypted NDJSON copy of the whole database'],
   ['server/src/db/offsite.ts', 'the same dump, plus every uploaded file verbatim'],
-  ['server/src/files/files.ts', 'every uploaded document, verbatim'],
-  ['server/src/files/chunks.ts', 'the same documents, mid-upload'],
+  // The one door every uploaded document's bytes go through, whole or mid-upload (F-43). `files.ts` and `chunks.ts`
+  // stay listed for the directories they create; the bytes themselves are written only by the door.
+  ['server/src/files/stored-bytes.ts', 'every uploaded document, whole or mid-upload'],
+  ['server/src/files/files.ts', 'the directories uploaded documents live in'],
+  ['server/src/files/chunks.ts', 'the directories uploads are staged in'],
 ];
 
 describe('one definition of "as tight as the state files"', () => {
@@ -130,10 +133,10 @@ describe('nothing that holds user data is written with default permissions', () 
   it('an overwrite is tightened too, not only a creation', () => {
     // A resumed upload and an edited file both OVERWRITE, and `mode:` does nothing then. Each writer of a
     // potentially-existing file has to chmod as well — this is what makes the change self-healing on upgrade.
-    for (const file of ['server/src/files/files.ts', 'server/src/files/chunks.ts']) {
-      assert.match(read(file), /harden\(/,
-        `${file} sets a mode on creation but never chmods, so files that predate this stay 0644 forever`);
-    }
+    // The door renames a temp file into place, and a rename carries the TEMP file's mode — so the chmod after the
+    // rename is what tightens an overwrite, and it has to be in the function every write finishes through.
+    assert.match(bodyOf(read('server/src/files/stored-bytes.ts'), 'finishWrite'), /harden\(abs, FILE_MODE\)/,
+      'the file door renames without chmodding, so files that predate hardening stay 0644 forever');
   });
 });
 
@@ -158,13 +161,18 @@ describe('the docs admit what encryption at rest does not cover', () => {
   it('the Encryption at Rest section scopes itself', () => {
     // The section was accurate and its TITLE was broader than its content. A reader who stops at the heading is the
     // one this is for.
-    const doc = read('docs/integration-guide/02-hosting.md');
-    const at = doc.indexOf('### Encryption at Rest');
-    assert.ok(at > 0, 'the Encryption at Rest section is gone');
-    const section = doc.slice(at, doc.indexOf('\n### ', at + 10));
+    // Its own page since the section outgrew the hosting page (F-43), so the section is the whole page.
+    const doc = read('docs/integration-guide/02a-encryption-at-rest.md');
+    const at = doc.indexOf('## Encryption at Rest');
+    assert.ok(at > 0, 'the Encryption at Rest page lost its heading');
+    const section = doc.slice(at);
     assert.match(section, /does NOT cover/,
-      'the section must state what it does not cover — uploads, backups, and brain data in MongoDB');
-    assert.match(section, /backups/i, 'backups must be named among the exclusions');
-    assert.match(section, /files/i, 'uploaded files must be named among the exclusions');
+      'the section must state what it does not cover — database backups and brain data in MongoDB');
+    const notCovered = section.slice(section.indexOf('does NOT cover'));
+    assert.match(notCovered, /backups/i, 'backups must be named among the exclusions');
+    assert.match(notCovered, /MongoDB/, 'brain data in MongoDB must be named among the exclusions');
+    // Uploaded files moved from the exclusions to the coverage in F-43, and saying so is the half a reader relies on.
+    assert.match(section.slice(0, section.indexOf('does NOT cover')), /uploaded files/i,
+      'the section must say uploaded files ARE covered');
   });
 });

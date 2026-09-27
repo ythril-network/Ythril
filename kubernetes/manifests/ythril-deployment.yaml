@@ -16,6 +16,11 @@ metadata:
     app: ythril
 spec:
   replicas: 1
+  # Recreate, not the default RollingUpdate: a rollout otherwise runs the old and the new pod over the same data
+  # volume at once, and each process's file locks guard only its own writes. The new pod's background pass
+  # encrypting files in place (F-43) could then rename a stale copy over a write the old pod had just made.
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: ythril

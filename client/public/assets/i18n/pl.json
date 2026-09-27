@@ -696,6 +696,7 @@
   "files.extract.noCaption": "Brak opisu obrazu.",
   "files.extract.converted": "Przekonwertowany markdown",
   "files.extract.truncated": "Pokazano do 256 KB. Pobierz przekonwertowany plik, aby zobaczyć resztę.",
+  "files.extract.unreadable": "Przekonwertowany plik istnieje, ale nie można go odszyfrować: {{reason}}",
   "files.extract.more": "Pokaż więcej fragmentów",
   "files.detail.description": "Opis",
   "files.detail.descriptionSource.generated": "wygenerowany",

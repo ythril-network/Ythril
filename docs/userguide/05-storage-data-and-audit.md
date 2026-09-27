@@ -96,12 +96,35 @@ Three things to know before enabling it:
 Enabling it without a master secret configured fails the backup **before writing anything**, rather than leaving a
 half-plaintext directory that looks like a valid backup.
 
+### Uploaded files are encrypted at rest
+
+When the instance has a master secret (`YTHRIL_MASTER_KEY` or `YTHRIL_MASTER_PASSPHRASE`, set by whoever runs the
+server), every file uploaded to a space is stored **encrypted on disk**. Nothing changes in the app: files upload,
+download, preview, sync and get indexed exactly as before, and their sizes and checksums are the ones you uploaded.
+There is no setting in the UI — the secret is the switch.
+
+- **Files uploaded before the secret was set** are encrypted in the background after the server starts, one at a
+  time. They keep working normally while they wait.
+- **A file that cannot be decrypted says so.** Its download fails with a message naming the file, and its indexing
+  is marked failed rather than retried. This happens when a file was written under a different secret, was altered
+  on disk, or when the secret has been removed from an instance that encrypted its files. Restoring the secret it
+  was written with makes it readable again.
+- **Syncing to another instance sends the file itself**, and that instance stores it by its own setting — two
+  instances in one network do not need the same secret.
+- **What stays readable on disk:** file and folder names, and roughly how large each file is.
+
+The server's security report (`GET /api/about/security`, and the boot log) shows the state as `atRest.files`. The
+full operator reference, including rollback and Kubernetes notes, is
+[Encryption at Rest](../integration-guide/02a-encryption-at-rest.md#uploaded-files).
+
 > **The two retention settings default in opposite directions.** Local backups are kept forever until you set `keepLocal`; offsite sets are pruned to the 14 most recent unless you set `keepCount`. If you rely on the offsite copy as a long-term archive, set `keepCount` to the number of sets you actually want — otherwise older ones are removed on the next run.
 
 Each backup set at the offsite destination contains:
 
 - `<backupId>/` — MongoDB NDJSON dump (same format as local backups)
-- `<backupId>-files/` — copy of `<data-root>/files/` (user-uploaded files), if present
+- `<backupId>-files/` — copy of `<data-root>/files/` (user-uploaded files), if present. It is a copy of what is on
+  disk, so on an instance with a master secret it holds the files **encrypted**, and restoring it needs the same
+  secret — see [Uploaded files are encrypted at rest](#uploaded-files-are-encrypted-at-rest).
 
 All fields are optional. Omit `offsite` to disable offsite copying; omit `schedule` to disable automatic scheduling — which also takes effect on save, so clearing it stops the next run rather than the next boot.
 

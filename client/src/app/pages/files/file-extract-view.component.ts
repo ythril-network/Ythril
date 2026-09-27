@@ -98,6 +98,9 @@ import { msRange } from './file-format';
           @if (conv.truncated) {
             <div class="muted">{{ 'files.extract.truncated' | transloco }}</div>
           }
+          @if (conv.unreadable) {
+            <div class="muted">{{ 'files.extract.unreadable' | transloco: { reason: conv.unreadable } }}</div>
+          }
           <pre class="xtr-md">{{ conv.markdown }}</pre>
         </section>
       }

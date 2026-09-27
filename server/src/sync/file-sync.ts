@@ -6,7 +6,6 @@
  * routes) and the conflict rule that follows it both belong here, beside the transfer they change.
  */
 import path from 'node:path';
-import fs from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { v4 as uuidv4 } from 'uuid';
 import { getDataRoot } from '../config/loader.js';
@@ -17,6 +16,8 @@ import { boundedJson } from '../util/bounded-read.js';
 import { toSafeRelPath } from '../util/paths.js';
 import { log } from '../util/log.js';
 import { buildFileManifest } from '../files/manifest.js';
+import { readStored, writeStored, deleteStored } from '../files/stored-bytes.js';
+import { resolveSafePathChecked } from '../files/sandbox.js';
 import { deleteFileMeta, upsertFileMeta } from '../files/file-meta.js';
 import { peerSafeFetch, transferInit, PEER_TRANSFER_TIMEOUT_MS } from './peer-fetch.js';
 import { recordFileTombstoneAck, ackedPositionFrom } from './file-tombstone-ack.js';
@@ -54,7 +55,7 @@ export async function syncFiles(
             const rel = toSafeRelPath(ts.path);
             const abs = path.join(spaceFiles, rel);
             if (!abs.startsWith(spaceFiles + path.sep) && abs !== spaceFiles) continue;
-            await fs.unlink(abs).catch(() => { /* already gone — ignore */ });
+            await deleteStored(abs).catch(() => { /* already gone — ignore */ });
             await deleteFileMeta(spaceId, rel).catch(() => { /* best-effort */ });
           } catch { /* ignore per-file errors */ }
         }
@@ -157,9 +158,12 @@ export async function syncFiles(
         pulledFiles++;
         if (!local || action === 'replace') {
           // New here, or changed only on the peer since we last agreed: write it over the original path.
-          const absPath = path.join(spaceRoot, remote.path);
-          await fs.mkdir(path.dirname(absPath), { recursive: true });
-          await fs.writeFile(absPath, buf);
+          // The PEER's path, so it is resolved through the sandbox: a plain join let a manifest entry such as
+          // `../../other-space/x` write outside this space (the tombstone branch above always checked; this did not).
+          const absPath = await resolveSafePathChecked(spaceId, remote.path);
+          // The bytes on the wire are plaintext; the receiver stores them by its OWN rules — encrypted at rest
+          // when it has a master secret — under the path lock the migration job also takes (F-43).
+          await writeStored(absPath, buf);
           await upsertFileMeta(spaceId, remote.path, buf.length).catch(() => { /* best-effort */ });
           await recordSyncBase(spaceId, remote.path, member.instanceId, remote.sha256);
           if (action === 'replace') log.info(`FILE_REPLACED: '${remote.path}' changed only on peer '${member.label}' since the last agreed version; took theirs.`);
@@ -170,9 +174,8 @@ export async function syncFiles(
           // The peer's label reaches a filesystem path, so it is sanitised there — see
           // ./file-conflict.ts for why that is an allowlist rather than a strip-list.
           const conflictRelPath = conflictCopyPath(remote.path, member.label, new Date());
-          const absConflictPath = path.join(spaceRoot, conflictRelPath);
-          await fs.mkdir(path.dirname(absConflictPath), { recursive: true });
-          await fs.writeFile(absConflictPath, buf);
+          const absConflictPath = await resolveSafePathChecked(spaceId, conflictRelPath);
+          await writeStored(absConflictPath, buf);
 
           // Persist a conflict record so the UI can surface it to the user
           const conflictDoc: ConflictDoc = {
@@ -208,7 +211,8 @@ export async function syncFiles(
       if (decideFilePush(localEntry, peerManifestMap.get(localPath), bases.get(localPath)) === 'skip') continue;
       try {
         const absPath = path.join(spaceRoot, localPath);
-        const bytes = await fs.readFile(absPath);
+        // Plaintext on the wire, whatever this instance keeps at rest: the peer applies its own rules (F-43).
+        const bytes = await readStored(absPath);
         const pushResp = await peerSafeFetch(
           `${member.url}/api/files/${encodeURIComponent(fileSpaceId)}?path=${encodeURIComponent(localPath)}`,
           {

@@ -13,6 +13,8 @@ import { allowPrivateModelEndpoints, egressSlotOverrides } from './model-egress-
 import { allowPrivateOidcIssuer } from './oidc-egress-policy.js';
 import { modelEndpointExposure, formatExposure, classifyEndpoint } from './model-egress-exposure.js';
 import { publicBaseUrlIsFallback } from './public-url.js';
+import { atRestMigrationState } from '../files/at-rest-migration.js';
+import { unreadableCount } from '../files/unreadable-files.js';
 
 export { POSTURE_LEVELS, type PostureLevel } from './posture-levels.js';
 import type { PostureLevel } from './posture-levels.js';
@@ -238,7 +240,10 @@ export function computeSecurityPosture(): SecurityPosture {
   const atRest = atRestEncryptionActive();
   checks.push(atRest
     ? { id: 'atRest.encryption', level: 'pass', message: 'State files are encrypted at rest (master secret configured).' }
-    : { id: 'atRest.encryption', level: 'warn', message: 'State files are NOT encrypted at rest — set YTHRIL_MASTER_KEY or YTHRIL_MASTER_PASSPHRASE.' });
+    : { id: 'atRest.encryption', level: 'warn', message: 'State files and uploaded files are NOT encrypted at rest — set YTHRIL_MASTER_KEY or YTHRIL_MASTER_PASSPHRASE.' });
+
+  const files = storedFilesCheck(atRest);
+  if (files) checks.push(files);
 
   const wantAtRest = process.env['YTHRIL_REQUIRE_ENCRYPTED_AT_REST'] === 'true' || cfg?.requireEncryptedAtRest === true;
   if (wantAtRest && !atRest) {
@@ -252,6 +257,33 @@ export function computeSecurityPosture(): SecurityPosture {
 
   const worst = checks.reduce<PostureLevel>((w, c) => (RANK[c.level] > RANK[w] ? c.level : w), 'pass');
   return { checks, worst };
+}
+
+/**
+ * The stored-files line (F-43). It never FAILS: every state it reports is either transient (the background pass has
+ * not reached a file yet) or already refusing loudly where it matters (an unreadable file refuses its download),
+ * and a fail would stop a strict instance booting over files it could otherwise go on serving. Absent on a keyless
+ * instance with nothing encrypted, where `atRest.encryption` already says everything there is to say.
+ */
+function storedFilesCheck(keyed: boolean): PostureCheck | null {
+  const m = atRestMigrationState();
+  const unreadable = unreadableCount();
+  const id = 'atRest.files';
+  if (!keyed) {
+    return m.encryptedWithoutSecret > 0
+      ? { id, level: 'warn', message: `${m.encryptedWithoutSecret} stored file(s) are encrypted and no master secret is set, so they cannot be read. Restore the secret they were written with.` }
+      : null;
+  }
+  if (unreadable > 0) {
+    return { id, level: 'warn', message: `${unreadable} stored file(s) cannot be decrypted with this master secret (written under another, or altered on disk). Their downloads refuse.` };
+  }
+  if (m.phase === 'not-started' || m.phase === 'running') {
+    return { id, level: 'pass', message: 'Uploaded files are encrypted at rest; files stored before the master secret was set are being checked in the background.' };
+  }
+  if (m.phase === 'stopped' || m.plaintextLeft > 0) {
+    return { id, level: 'warn', message: `${m.plaintextLeft} stored file(s) are still plaintext on disk${m.stoppedBecause ? ` (the background pass stopped: ${m.stoppedBecause})` : ''}. They are encrypted on the next start.` };
+  }
+  return { id, level: 'pass', message: 'Uploaded files are encrypted at rest.' };
 }
 
 /** Format the posture as human-readable lines for the boot log. */

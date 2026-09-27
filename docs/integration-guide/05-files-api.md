@@ -120,6 +120,14 @@ GET /api/files/:spaceId?path=reports/q1.pdf
 
 Returns raw file bytes. Works with any file type — PDFs, images, archives, source code, etc. If `path` is a directory, returns a JSON listing.
 
+The bytes are the file **as uploaded**, whether or not the instance encrypts files at rest
+([Encryption at Rest](02a-encryption-at-rest.md#uploaded-files)); `Content-Length`, the listing's `size` and every hash are the
+plaintext's. A stored file this instance cannot decrypt — written under another master secret, altered on disk, or
+encrypted on an instance that no longer has a secret — answers **`500`** with `{ "error": "<file> cannot be read:
+<reason>" }` rather than serving ciphertext. A file altered partway through is detected chunk by chunk, so that case
+can surface as an aborted transfer after the headers were sent; the client sees a failed download, never a short
+file that looks complete.
+
 Active-content types that can execute script when rendered in the browser (`.html`, `.htm`, `.svg`, `.xml`, `.xhtml`) are served with `Content-Disposition: attachment` and a `sandbox` Content-Security-Policy (stored-XSS guard). Passive types — images, PDF, plain text — are served `inline` and preview normally.
 
 ---

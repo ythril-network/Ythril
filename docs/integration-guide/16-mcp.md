@@ -327,7 +327,7 @@ row survives its own tool being built, so the list cannot keep advertising a gap
 | `save_bulk` | Batch-upsert facts, entities, edges, and/or chrono entries in a single call (schema-validated) |
 | `ingest` | Turn a conversation into records — entities, claims, dated events, edges and transcripts. Answers at once with a `runId`; see [Ingest API](04i-ingest-api.md) |
 | `ingest_status` | Read an ingest run: its phase, what it wrote, what it dropped and why |
-| `read_file` | Read a text file from the space file store |
+| `read_file` | Read a text file from the space file store. Encryption at rest is invisible to it; a stored file this instance cannot decrypt is an error naming the file and the reason — the same refusal the REST download gives — never "not found" and never ciphertext |
 | `write_file` | Write a file to the space file store, as text or as bytes. `content` is UTF-8 text by default; set `encoding: "base64"` for an image, a PDF or anything else that is not text, and base64 that is not base64 is refused rather than decoded as far as it goes. **The ceiling is the request, not the file store:** a tool call arrives as one JSON body capped at 10 MB and base64 costs a third more than the bytes it carries, so about 7 MB of file fits — larger goes through [`POST /api/files/:spaceId`](05-files-api.md), which takes a raw body and supports chunked upload. Optional `description` and `tags` are stored as metadata |
 | `list_dir` | List directory contents |
 | `delete_file` | Delete a file |

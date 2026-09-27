@@ -227,6 +227,13 @@ GET /api/sync/filemeta?spaceId=&networkId=&sinceSeq=&limit=&full=true
 GET /api/sync/filemeta/:id
 ```
 
+**File bytes cross the wire as plaintext, and each receiver stores them by its own rule.** An instance that
+encrypts files at rest ([Encryption at Rest](02a-encryption-at-rest.md#uploaded-files)) decrypts before it sends and
+encrypts what it receives; one that does not stores what arrives as it is. The manifest's `size` and `sha256` are
+always the plaintext's, so a keyed and a keyless peer compare equal for the same file and never see a change that
+is only the encryption. Members of one network need not share a master secret, or have one. A path in a peer's
+manifest is resolved inside the receiving space's own directory; one that would leave it is skipped.
+
 The bytes have always moved through the manifest and `/api/files`. From 4.0 the file's **metadata record**
 moves too — its description, tags and properties. Its LINKS travel as link records of their own, on the
 same channel.

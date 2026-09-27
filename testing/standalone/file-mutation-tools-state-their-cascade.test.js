@@ -36,6 +36,9 @@ import { stripComments } from './_strip-comments.mjs';
 const FILE_TOOLS = readFileSync('server/src/mcp/tools/file.ts', 'utf8');
 const CASCADE = stripComments(readFileSync('server/src/files/delete-cascade.ts', 'utf8'));
 const FILES = stripComments(readFileSync('server/src/files/files.ts', 'utf8'));
+// The file door (F-43): the rename and the parent-creation that `files.ts` used to do inline now happen here.
+const DOOR = stripComments(readFileSync('server/src/files/stored-bytes.ts', 'utf8'));
+const doorFn = (name) => { const at = DOOR.indexOf(`export async function ${name}`); return DOOR.slice(at, DOOR.indexOf('\nexport ', at + 10)); };
 const FS_MODES = stripComments(readFileSync('server/src/util/fs-modes.ts', 'utf8'));
 
 const description = (name) => {
@@ -107,9 +110,13 @@ describe('move_file explains the tombstone and the directory case', () => {
   it('and that really is the case — moveFile renames with no existence check', () => {
     const at = FILES.indexOf('export async function moveFile');
     const body = FILES.slice(at, FILES.indexOf('\nexport ', at + 10));
-    assert.match(body, /fs\.rename\(srcAbs, dstAbs\)/, 'it is a bare rename');
-    assert.doesNotMatch(body, /fileExists|already exists/,
-      'a destination check appeared — delete the warning rather than leaving it wrong');
+    assert.match(body, /moveStored\(srcAbs, dstAbs\)/, 'moveFile no longer moves through the file door');
+    const door = doorFn('moveStored');
+    assert.match(door, /fsp\.rename\(srcAbs, dstAbs\)/, 'the door\'s move is no longer a bare rename');
+    for (const b of [body, door]) {
+      assert.doesNotMatch(b, /fileExists|already exists|\.stat\(dstAbs/,
+        'a destination check appeared — delete the warning rather than leaving it wrong');
+    }
   });
 
   it('says the content is not re-read, so a failed extraction stays failed', () => {
@@ -123,11 +130,16 @@ describe('create_dir says when you do not need it', () => {
   });
 
   it('and they really do', () => {
-    for (const fn of ['writeFile', 'moveFile']) {
-      const at = FILES.indexOf(`export async function ${fn}`);
-      const body = FILES.slice(at, FILES.indexOf('\nexport ', at + 10));
-      assert.match(body, /mkdirPrivate\(path\.dirname\(/, `${fn} no longer creates its parents`);
-    }
+    const bodyOfFile = (fn) => { const at = FILES.indexOf(`export async function ${fn}`); return FILES.slice(at, FILES.indexOf('\nexport ', at + 10)); };
+    assert.match(bodyOfFile('moveFile'), /mkdirPrivate\(path\.dirname\(/, 'moveFile no longer creates its parents');
+    // writeFile hands its parents to the door, whose every write creates them unless the caller opts out.
+    const write = bodyOfFile('writeFile');
+    assert.match(write, /writeStored\(abs, content\)/, 'writeFile no longer writes through the file door');
+    assert.doesNotMatch(write, /noMkdir/, 'writeFile opted out of creating its parents');
+    const at = DOOR.indexOf('async function finishWrite');
+    const finish = DOOR.slice(at, DOOR.indexOf('\n}', at));
+    assert.match(finish, /if \(!opts\.noMkdir\) await mkdirPrivate\(path\.dirname\(abs\)\)/,
+      'the file door no longer creates a write\'s parents');
   });
 
   it('says creating an existing directory succeeds', () => {

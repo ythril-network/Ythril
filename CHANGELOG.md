@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Uploaded files are encrypted at rest when the instance has a master secret** (F-43). The same
+  `YTHRIL_MASTER_KEY` / `YTHRIL_MASTER_PASSPHRASE` that already encrypts the state files now covers every file under
+  `<data-root>/files/` and the resumable-upload staging area, in a chunked AES-256-GCM format that streams a file of
+  any size. Nothing changes for a caller: downloads, `read_file`, sync and indexing see the file as uploaded, and
+  sizes and hashes stay the plaintext's, so an encrypting peer and a plaintext one compare equal. Files stored before
+  the secret was set are encrypted in the background after each start, keeping their modification times. A file that
+  cannot be decrypted is refused by name (`500` on download, an error on `read_file`, a failed indexing job) instead of
+  being served as ciphertext, and so is an encrypted file on an instance whose secret was removed. The security
+  report gains `atRest.files`. See [Encryption at Rest](docs/integration-guide/02a-encryption-at-rest.md#uploaded-files) for what
+  stays readable on disk, rolling back, and the temporary plaintext copy `ffmpeg` needs while it indexes media.
+
+### Changed
+
+- **The shipped Kubernetes Deployment uses `strategy: Recreate`**, so an old and a new pod never write the same
+  data volume at once during a rollout.
+
+### Fixed
+
+- **A file arriving by sync is written inside its own space, whatever path the peer names.** The pull path joined
+  the peer's manifest path onto the space directory without the sandbox check every other write gets, so a path
+  climbing out of the space would have been written outside it.
+
 ## [5.5.2] — 2026-09-27
 
 **A patch: recall ranks reranked results first again, a proxy recall reranks once, and a proxy is no longer

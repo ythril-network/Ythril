@@ -729,7 +729,8 @@ export interface FileExtract {
   descriptionSource?: 'generated' | 'extracted' | null;
   excerpt?: string | null;
   /** The `_converted/<id>.md` sidecar. Absent for formats that need no conversion (.md/.txt). */
-  converted?: { path: string; markdown: string; truncated: boolean; sizeBytes: number } | null;
+  /** `unreadable` carries the reason when the sidecar exists but cannot be decrypted (F-43). */
+  converted?: { path: string; markdown: string; truncated: boolean; sizeBytes: number; unreadable?: string } | null;
   chunks: Array<{
     id: string;
     index: number | null;

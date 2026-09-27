@@ -119,6 +119,24 @@ export async function startConfiguredInstanceServices(): Promise<void> {
   const { cleanupStaleChunks } = await import('./files/chunks.js');
   cleanupStaleChunks().catch(err => log.error(`Stale chunk cleanup failed: ${err}`));
 
+  // Stored files (F-43). Orphaned temp files first — nothing has written yet, so any that exist were left by a
+  // crash — then the one check that makes every file write fail if it is wrong, then the background pass that
+  // encrypts what was stored before a master secret was set.
+  try {
+    const { sweepStoredTmp, storedTmpSharesFilesystem } = await import('./files/stored-bytes.js');
+    const swept = await sweepStoredTmp();
+    if (swept > 0) log.info(`Files at rest: removed ${swept} temporary file(s) left by an interrupted write`);
+    if (!(await storedTmpSharesFilesystem())) {
+      log.error('Files at rest: <DATA_ROOT>/.stored-tmp and <DATA_ROOT>/files are on different filesystems, so every file '
+        + 'write will fail (a rename cannot cross them). Mount the data root as one volume, or mount files/ and '
+        + '.stored-tmp/ from the same one.');
+    }
+  } catch (err) {
+    log.error(`Files at rest: the boot checks failed: ${err}`);
+  }
+  const { startAtRestMigration } = await import('./files/at-rest-migration.js');
+  startAtRestMigration();
+
   const { startMediaEmbeddingWorker } = await import('./files/media/worker.js');
   startMediaEmbeddingWorker();
 
