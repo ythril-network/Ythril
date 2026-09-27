@@ -16,7 +16,7 @@ import assert from 'node:assert/strict';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post, get, del, getInstanceId, waitFor } from './helpers.js';
+import { INSTANCES, post, get, del, getInstanceId, waitFor, createTestSpace } from './helpers.js';
 import { legacyRights } from '../_shared/legacy-token-rights.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -24,6 +24,8 @@ const CONFIGS = path.join(__dirname, 'configs');
 
 let tokenA, tokenB, networkId, instanceIdA, instanceIdB;
 const SPACE = `q48-refused-${Date.now()}`;
+// The space B's peer token for A reaches instead — one of the test's own, so nothing touches the shared `general`.
+let OTHER, removeOther;
 
 before(async () => {
   tokenA = fs.readFileSync(path.join(CONFIGS, 'a', 'token.txt'), 'utf8').trim();
@@ -38,7 +40,8 @@ before(async () => {
   assert.equal(w.status, 201, JSON.stringify(w.body));
 
   // A real peer token for A on B, scoped to a space the network does not carry — so B refuses the network's space.
-  const t = await post(INSTANCES.b, tokenB, '/api/tokens', { name: 'q48-wrong-scope', peerInstanceId: instanceIdA, rights: legacyRights({ spaces: ['general'] }) });
+  ({ id: OTHER, remove: removeOther } = await createTestSpace('q48-other', [[INSTANCES.b, tokenB]]));
+  const t = await post(INSTANCES.b, tokenB, '/api/tokens', { name: 'q48-wrong-scope', peerInstanceId: instanceIdA, rights: legacyRights({ spaces: [OTHER] }) });
   assert.equal(t.status, 201, JSON.stringify(t.body));
 
   const n = await post(INSTANCES.a, tokenA, '/api/networks', { label: 'q48', type: 'club', spaces: [SPACE] });
@@ -54,6 +57,7 @@ after(async () => {
   if (networkId) await del(INSTANCES.a, tokenA, `/api/networks/${networkId}`).catch(() => {});
   await del(INSTANCES.a, tokenA, `/api/spaces/${SPACE}`).catch(() => {});
   await del(INSTANCES.b, tokenB, `/api/spaces/${SPACE}`).catch(() => {});
+  await removeOther?.();
 });
 
 describe('a sync cycle every transfer of which was refused', () => {

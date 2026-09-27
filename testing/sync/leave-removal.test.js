@@ -20,10 +20,14 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
-import { dockerExec, INSTANCES, post, get, del, reqJson, waitFor } from './helpers.js';
+import { dockerExec, INSTANCES, post, get, del, reqJson, waitFor, createTestSpace } from './helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, 'configs');
+
+/** The space these tests' networks carry — their own, never `general` (`Q-75`). */
+let SPACE;
+let testSpace;
 
 let tokenA, tokenB;
 let peerTokenForA;   // token B issued → A uses it to authenticate TO B
@@ -111,7 +115,7 @@ async function setupClubNetwork() {
   const netR = await post(INSTANCES.a, tokenA, '/api/networks', {
     label: `Leave Test ${Date.now()}`,
     type: 'club',
-    spaces: ['general'],
+    spaces: [SPACE],
     votingDeadlineHours: 1,
   });
   assert.equal(netR.status, 201, `Create network: ${JSON.stringify(netR.body)}`);
@@ -131,7 +135,7 @@ async function setupClubNetwork() {
     id: nid,
     label: 'Leave Test',
     type: 'club',
-    spaces: ['general'],
+    spaces: [SPACE],
     votingDeadlineHours: 1,
   });
   assert.ok(netOnB.status === 201 || netOnB.status === 409, `Create net on B: ${JSON.stringify(netOnB.body)}`);
@@ -162,7 +166,7 @@ async function setupDemocraticNetwork() {
   const netR = await post(INSTANCES.a, tokenA, '/api/networks', {
     label: `Removal Test ${Date.now()}`,
     type: 'democratic',
-    spaces: ['general'],
+    spaces: [SPACE],
     votingDeadlineHours: 1,
   });
   assert.equal(netR.status, 201, `Create network: ${JSON.stringify(netR.body)}`);
@@ -189,7 +193,7 @@ async function setupDemocraticNetwork() {
     id: nid,
     label: 'Removal Test',
     type: 'democratic',
-    spaces: ['general'],
+    spaces: [SPACE],
     votingDeadlineHours: 1,
   });
   assert.ok(netOnB.status === 201 || netOnB.status === 409, `Create net on B: ${JSON.stringify(netOnB.body)}`);
@@ -227,6 +231,9 @@ describe('Leave and removal flows', () => {
     instanceIdA = getInstanceId('ythril-a');
     instanceIdB = getInstanceId('ythril-b');
 
+    testSpace = await createTestSpace('leave-removal', [[INSTANCES.a, tokenA], [INSTANCES.b, tokenB]]);
+    SPACE = testSpace.id;
+
     // Peer PATs (with peerInstanceId so the notify handler's identity
     // verification passes) are minted fresh by each setup*Network call —
     // see mintPeerTokens().
@@ -247,6 +254,7 @@ describe('Leave and removal flows', () => {
         headers: { Authorization: `Bearer ${tokenA}` },
       }).catch(() => {});
     }
+    await testSpace?.remove();
   });
 
   // ══════════════════════════════════════════════════════════════════════════

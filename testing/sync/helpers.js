@@ -152,6 +152,32 @@ export async function get(baseUrl, token, path) {
 }
 
 /**
+ * A space of the test's own, created on every instance it names, and the function that removes it again (`Q-75`).
+ *
+ * A sync test never syncs `general`: every suite writes into it, so a new network carrying it first pushes whatever
+ * ran before, and the test's verdict depends on suite order. `a-sync-test-syncs-a-space-of-its-own` holds every sync
+ * test to this. Creation is asserted — a space that failed to appear would make the test pass or fail for the wrong
+ * reason — and removal never throws, so it is safe in an `after`.
+ *
+ * @param {string} prefix  short name for the test; the id is `<prefix>-<timestamp>`
+ * @param {Array<[string, string]>} members  `[baseUrl, token]` for each instance that needs the space
+ * @returns {Promise<{ id: string, remove: () => Promise<void> }>}
+ */
+export async function createTestSpace(prefix, members) {
+  const id = `${prefix}-${Date.now()}`;
+  for (const [base, token] of members) {
+    const r = await post(base, token, '/api/spaces', { id, label: id });
+    if (r.status !== 201) throw new Error(`create space ${id} on ${base}: ${r.status} ${JSON.stringify(r.body)}`);
+  }
+  const remove = async () => {
+    for (const [base, token] of members) {
+      await delWithBody(base, token, `/api/spaces/${id}`, { confirm: true }).catch(() => {});
+    }
+  };
+  return { id, remove };
+}
+
+/**
  * Poll until condition() returns true or timeout (ms).
  *
  * `diagnose` (string or fn) is appended to the timeout message. Use it to explain WHY

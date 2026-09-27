@@ -13,13 +13,14 @@ import assert from 'node:assert/strict';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post, get, del, triggerSync, waitFor, readRecord } from './helpers.js';
+import { INSTANCES, post, get, del, triggerSync, waitFor, readRecord, createTestSpace } from './helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, 'configs');
 
 let tokenA, tokenB;
 let networkId;
+let SPACE, removeSpace;
 const injectedMemIds = [];
 
 describe('Conflict detection (concurrent writes)', () => {
@@ -27,10 +28,12 @@ describe('Conflict detection (concurrent writes)', () => {
     tokenA = fs.readFileSync(path.join(CONFIGS, 'a', 'token.txt'), 'utf8').trim();
     tokenB = fs.readFileSync(path.join(CONFIGS, 'b', 'token.txt'), 'utf8').trim();
 
+    ({ id: SPACE, remove: removeSpace } = await createTestSpace('conflict', [[INSTANCES.a, tokenA]]));
+
     const r = await post(INSTANCES.a, tokenA, '/api/networks', {
       label: 'Conflict Test Network',
       type: 'closed',
-      spaces: ['general'],
+      spaces: [SPACE],
       votingDeadlineHours: 24,
     });
     assert.equal(r.status, 201);
@@ -39,7 +42,7 @@ describe('Conflict detection (concurrent writes)', () => {
 
   it('Concurrent writes with same seq fork rather than overwrite', async () => {
     // Write a memory on A
-    const writeA = await post(INSTANCES.a, tokenA, '/api/brain/spaces/general/facts', {
+    const writeA = await post(INSTANCES.a, tokenA, `/api/brain/spaces/${SPACE}/facts`, {
       fact: 'Original fact — version A',
       tags: ['conflict-test'],
     });
@@ -52,7 +55,7 @@ describe('Conflict detection (concurrent writes)', () => {
     // Same _id, same seq, different fact — this should trigger a fork
     const conflictingDoc = {
       _id: memId,
-      spaceId: 'general',
+      spaceId: SPACE,
       fact: 'Conflicting fact — version B',
       embedding: Array(768).fill(0.1),
       tags: ['conflict-test'],
@@ -66,7 +69,7 @@ describe('Conflict detection (concurrent writes)', () => {
     const syncPush = await post(
       INSTANCES.a,
       tokenA,
-      '/api/sync/facts?spaceId=general',
+      `/api/sync/facts?spaceId=${SPACE}`,
       conflictingDoc,
     );
     console.log(`  Conflict push response: ${syncPush.status} ${JSON.stringify(syncPush.body)}`);
@@ -80,7 +83,7 @@ describe('Conflict detection (concurrent writes)', () => {
       console.log(`  Fork created: forkId=${syncPush.body.forkId} ✓`);
       if (syncPush.body.forkId) injectedMemIds.push(syncPush.body.forkId);
       // Verify the fork exists by direct ID lookup (avoids pagination limits)
-      const forkResp = await readRecord(INSTANCES.a, tokenA, 'general', 'facts', syncPush.body.forkId);
+      const forkResp = await readRecord(INSTANCES.a, tokenA, SPACE, 'facts', syncPush.body.forkId);
       assert.equal(forkResp.status, 200, `Fork memory not found: ${JSON.stringify(forkResp.body)}`);
       const fork = forkResp.body;
       assert.equal(fork.forkOf, memId);
@@ -93,7 +96,7 @@ describe('Conflict detection (concurrent writes)', () => {
 
   it('Higher seq incoming doc overwrites local doc', async () => {
     // Write a memory on A
-    const writeA = await post(INSTANCES.a, tokenA, '/api/brain/spaces/general/facts', {
+    const writeA = await post(INSTANCES.a, tokenA, `/api/brain/spaces/${SPACE}/facts`, {
       fact: 'To be overwritten',
       tags: ['overwrite-test'],
     });
@@ -104,7 +107,7 @@ describe('Conflict detection (concurrent writes)', () => {
     // Push a newer version (higher seq)
     const newerDoc = {
       _id: memId,
-      spaceId: 'general',
+      spaceId: SPACE,
       fact: 'Updated fact with higher seq',
       embedding: Array(768).fill(0.2),
       tags: ['overwrite-test', 'updated'],
@@ -116,20 +119,20 @@ describe('Conflict detection (concurrent writes)', () => {
     };
 
     injectedMemIds.push(memId);
-    const resp = await post(INSTANCES.a, tokenA, '/api/sync/facts?spaceId=general', newerDoc);
+    const resp = await post(INSTANCES.a, tokenA, `/api/sync/facts?spaceId=${SPACE}`, newerDoc);
     assert.equal(resp.status, 200);
     assert.equal(resp.body.status, 'updated', `Expected 'updated', got '${resp.body.status}'`);
     console.log(`  Higher-seq overwrite: status=${resp.body.status} ✓`);
 
     // Verify the local doc was updated
-    const mem = await readRecord(INSTANCES.a, tokenA, 'general', 'facts', memId);
+    const mem = await readRecord(INSTANCES.a, tokenA, SPACE, 'facts', memId);
     assert.equal(mem.body.fact, 'Updated fact with higher seq');
     console.log(`  Local doc updated to new version ✓`);
   });
 
   it('Tombstone prevents resurrection of deleted document', async () => {
     // Write and then delete a memory on A
-    const writeA = await post(INSTANCES.a, tokenA, '/api/brain/spaces/general/facts', {
+    const writeA = await post(INSTANCES.a, tokenA, `/api/brain/spaces/${SPACE}/facts`, {
       fact: 'To be deleted then resurrected',
       tags: ['tomb-test'],
     });
@@ -138,7 +141,7 @@ describe('Conflict detection (concurrent writes)', () => {
     const seqA = writeA.body.seq;
 
     // Delete it
-    const deleteR = await fetch(`${INSTANCES.a}/api/brain/spaces/general/facts/${memId}`, {
+    const deleteR = await fetch(`${INSTANCES.a}/api/brain/spaces/${SPACE}/facts/${memId}`, {
       method: 'DELETE',
       headers: { Authorization: `Bearer ${tokenA}` },
     });
@@ -148,7 +151,7 @@ describe('Conflict detection (concurrent writes)', () => {
     // Attempt to push the same doc back via sync (resurrection attempt)
     const resurrection = {
       _id: memId,
-      spaceId: 'general',
+      spaceId: SPACE,
       fact: 'Resurrection attempt',
       embedding: Array(768).fill(0.3),
       tags: ['tomb-test'],
@@ -159,23 +162,24 @@ describe('Conflict detection (concurrent writes)', () => {
       embeddingModel: 'text-embedding-nomic-embed-text-v1.5',
     };
 
-    const resp = await post(INSTANCES.a, tokenA, '/api/sync/facts?spaceId=general', resurrection);
+    const resp = await post(INSTANCES.a, tokenA, `/api/sync/facts?spaceId=${SPACE}`, resurrection);
     assert.equal(resp.status, 200);
     assert.equal(resp.body.status, 'tombstoned', `Expected 'tombstoned', got '${resp.body.status}'`);
     console.log(`  Resurrection correctly blocked by tombstone ✓`);
 
     // Verify the doc is still absent
-    const check = await readRecord(INSTANCES.a, tokenA, 'general', 'facts', memId);
+    const check = await readRecord(INSTANCES.a, tokenA, SPACE, 'facts', memId);
     assert.equal(check.status, 404);
     console.log(`  Memory correctly absent after resurrection attempt ✓`);
   });
 
   after(async () => {
     for (const id of injectedMemIds) {
-      await del(INSTANCES.a, tokenA, `/api/brain/spaces/general/facts/${id}`).catch(() => {});
+      await del(INSTANCES.a, tokenA, `/api/brain/spaces/${SPACE}/facts/${id}`).catch(() => {});
     }
     if (networkId) {
       await del(INSTANCES.a, tokenA, `/api/networks/${networkId}`).catch(() => {});
     }
+    await removeSpace?.();
   });
 });

@@ -22,10 +22,13 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
-import { dockerExec, INSTANCES, post, get, del } from './helpers.js';
+import { dockerExec, INSTANCES, post, get, del, createTestSpace } from './helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, 'configs');
+
+/** The space these tests put in their networks — their own, never `general` (`Q-75`). */
+let SPACE;
 
 // ── helpers ─────────────────────────────────────────────────────────────────
 
@@ -64,9 +67,16 @@ async function ejectSelf(instance, token, networkId, instanceId) {
 
 describe('Off-grid / fork', () => {
   let tokenA;
+  let testSpace;
 
-  before(() => {
+  before(async () => {
     tokenA = fs.readFileSync(path.join(CONFIGS, 'a', 'token.txt'), 'utf8').trim();
+    testSpace = await createTestSpace('fork', [[INSTANCES.a, tokenA]]);
+    SPACE = testSpace.id;
+  });
+
+  after(async () => {
+    await testSpace?.remove();
   });
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -79,7 +89,7 @@ describe('Off-grid / fork', () => {
       const r = await post(INSTANCES.a, tokenA, '/api/networks', {
         label: `ForkSource-${Date.now()}`,
         type: 'closed',
-        spaces: ['general'],
+        spaces: [SPACE],
         votingDeadlineHours: 2,
       });
       assert.equal(r.status, 201, `Create network failed: ${JSON.stringify(r.body)}`);
@@ -107,7 +117,7 @@ describe('Off-grid / fork', () => {
         label: 'Spaces fork',
       });
       assert.equal(r.status, 201);
-      assert.deepEqual(r.body.spaces, ['general']);
+      assert.deepEqual(r.body.spaces, [SPACE]);
       await del(INSTANCES.a, tokenA, `/api/networks/${r.body.id}`).catch(() => {});
     });
 
@@ -205,7 +215,7 @@ describe('Off-grid / fork', () => {
     it('deleted (non-ejected) network id returns 404 even with spaces in body', async () => {
       const r = await post(INSTANCES.a, tokenA, '/api/networks/00000000-dead-beef-0000-000000000000/fork', {
         label: 'Ghost fork',
-        spaces: ['general'],
+        spaces: [SPACE],
       });
       assert.equal(r.status, 404, `Expected 404, got ${r.status}: ${JSON.stringify(r.body)}`);
     });
@@ -230,7 +240,7 @@ describe('Off-grid / fork', () => {
       const r = await post(INSTANCES.a, tokenA, '/api/networks', {
         label: `EjectSource-${Date.now()}`,
         type: 'closed',
-        spaces: ['general'],
+        spaces: [SPACE],
         votingDeadlineHours: 1,
       });
       assert.equal(r.status, 201, `Create network failed: ${JSON.stringify(r.body)}`);
@@ -263,12 +273,12 @@ describe('Off-grid / fork', () => {
     it('POST /fork with spaces supplied returns 201', async () => {
       const r = await post(INSTANCES.a, tokenA, `/api/networks/${networkId}/fork`, {
         label: 'Post-ejection fork',
-        spaces: ['general'],
+        spaces: [SPACE],
       });
       assert.equal(r.status, 201, `Expected 201, got ${r.status}: ${JSON.stringify(r.body)}`);
       assert.ok(r.body.id);
       assert.notEqual(r.body.id, networkId);
-      assert.deepEqual(r.body.spaces, ['general']);
+      assert.deepEqual(r.body.spaces, [SPACE]);
       assert.deepEqual(r.body.members, []);
 
       // cleanup
@@ -278,7 +288,7 @@ describe('Off-grid / fork', () => {
     it('ejectedFromNetworks still contains original id after fork', async () => {
       const fork = await post(INSTANCES.a, tokenA, `/api/networks/${networkId}/fork`, {
         label: 'Ejection fork — check ejected list',
-        spaces: ['general'],
+        spaces: [SPACE],
       });
       assert.equal(fork.status, 201);
 
@@ -316,7 +326,7 @@ describe('Off-grid / fork', () => {
       const create = await post(INSTANCES.a, tokenA, '/api/networks', {
         label: `SpaceErr-${Date.now()}`,
         type: 'closed',
-        spaces: ['general'],
+        spaces: [SPACE],
         votingDeadlineHours: 1,
       });
       assert.equal(create.status, 201);
@@ -335,7 +345,7 @@ describe('Off-grid / fork', () => {
       const create = await post(INSTANCES.a, tokenA, '/api/networks', {
         label: `LabelErr-${Date.now()}`,
         type: 'closed',
-        spaces: ['general'],
+        spaces: [SPACE],
         votingDeadlineHours: 1,
       });
       assert.equal(create.status, 201);
