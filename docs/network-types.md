@@ -50,7 +50,7 @@ Regardless of type, every governance vote is **cryptographically signed**. Each 
 
 ## Closed network
 
-All members must vote yes for any join or removal. A single no blocks it. For a solo member (one device), every action is instant self-approval.
+All members must vote yes for any join or removal, and for every other round: a space deletion, a wipe, a schema change. That includes each member deciding for itself, so no member applies a round to its own data until it has voted yes itself. A single no blocks it. For a solo member (one device), every action is instant self-approval.
 
 ```mermaid
 graph LR
