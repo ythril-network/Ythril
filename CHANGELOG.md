@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.5.1] — 2026-09-27
+
+**A patch: a network no longer deletes a member's space.** Upgrade every instance that is a member of a network,
+since the change applies on each member when a deletion vote passes.
+
 ### Fixed
 
 - **A network never deletes a member's space** (`Q-70`). Deleting a networked space opens a vote as before, but
