@@ -656,6 +656,12 @@ When a vote is open (e.g. a member wants to leave), expand the network card and 
 lapses and the space is kept on every member. A member acts on such a vote only for a space its network actually
 carries, and only once — a vote cannot reach a space the network does not share.
 
+**Deleting a networked space takes it out of the network; it does not delete anyone else's copy.** When that vote
+passes, the space leaves the network on every member, and each member keeps its copy and everything in it as an
+ordinary local space, which it can add to a network again. Only your own copy is deleted, as you asked, once no
+other network still carries it. Emptying a space is different: a passed wipe vote empties the network's data on
+every member.
+
 **Proposing counts as your yes.** When you delete, empty, add or change a networked space, your instance opens the
 vote and its yes is already in the tally; the other members' votes decide it.
 
