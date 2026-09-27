@@ -675,6 +675,12 @@ release deletes, and the browser then requests JavaScript and gets HTML.
 
 Ythril listens on plain HTTP. Place a reverse proxy in front to terminate TLS.
 
+**Idle connections.** Ythril keeps an idle keep-alive connection open for 95 seconds, longer than the proxy
+defaults for idle upstream connections (Traefik 90 s, nginx 60 s), so the proxy is always the side that closes it.
+If your proxy holds idle upstream connections for longer than 95 seconds, lower that setting below 95 s. Otherwise,
+after a busy moment on the server, a request the proxy sends on a connection Ythril is just closing fails with a
+502 and leaves nothing in Ythril's log.
+
 #### Nginx
 
 ```nginx

@@ -1,6 +1,7 @@
 ﻿import { createServer } from 'http';
 import { configExists, getConfig, loadConfig, loadSecrets, loadSchemaLibrary, getMongoUri, flushConfig, migrateStateFilesAtRest, requireEncryptedAtRest, atRestEncryptionActive } from './config/loader.js';
 import { beginShutdown } from './lifecycle.js';
+import { configureConnections } from './http-connections.js';
 import { connectMongo, closeMongo, checkVectorSearchAvailability } from './db/mongo.js';
 import { createApp } from './app.js';
 import { startConfiguredInstanceServices } from './bootstrap.js';
@@ -226,6 +227,7 @@ async function main(): Promise<void> {
 
   const app = createApp();
   const server = createServer(app);
+  configureConnections(server);
 
   // Periodic stale-chunk cleanup (every hour)
   const chunkCleanupInterval = setInterval(

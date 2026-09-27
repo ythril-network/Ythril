@@ -486,8 +486,7 @@ export async function applySpaceMetaUpdate(plan: MetaUpdatePlan): Promise<MetaUp
       // Every round passed on the proposer's own vote, so the meta is already written by the conclusion.
       const applied = getConfig().spaces.find(s => s.id === id);
       if (!applied) return { outcome: 'not_found' };
-      void sweepSuppressedVectors(id, applied.meta as SpaceMeta)
-        .catch(err => log.warn(`Suppression sweep failed for ${id}: ${err instanceof Error ? err.message : String(err)}`));
+      sweepAfterMetaWrite(id, applied.meta);
       return { outcome: 'applied', space: applied, ...kept };
     }
   }
@@ -514,10 +513,7 @@ export async function applySpaceMetaUpdate(plan: MetaUpdatePlan): Promise<MetaUp
    * replicate — so a failure costs nothing beyond the next meta write repeating it, which is why a rejection
    * is logged rather than surfaced to the caller who was not asking about embeddings.
    */
-  if (updated) {
-    void sweepSuppressedVectors(id, mergedMeta as SpaceMeta)
-      .catch(err => log.warn(`Suppression sweep failed for ${id}: ${err instanceof Error ? err.message : String(err)}`));
-  }
+  if (updated) sweepAfterMetaWrite(id, mergedMeta);
   return updated ? { outcome: 'applied', space: updated } : { outcome: 'not_found' };
 }
 
@@ -548,4 +544,18 @@ export async function voteOnSchemaEditIfNetworked(
   if (result.outcome === 'not_found') return { status: 404, body: { error: `Space '${spaceId}' not found` } };
   // Every round passed on this instance's own yes (a club organiser, a publisher, a lone member): applied already.
   return { status: 200, body: { space: result.space, ...networkMergeNotice(result) } };
+}
+
+/**
+ * Sweep the vectors a meta write newly suppresses, without blocking the write on it; a failure is logged, since the
+ * sweep is idempotent and the next meta write repeats it.
+ *
+ * `meta` is undefined when the write carried no meta (a `textAnalysis`-only PATCH): suppression is read from meta
+ * alone, so there is nothing to sweep. Both callers cast it to `SpaceMeta` instead, and the sweep then failed on
+ * every such write with a warning that meant nothing (`Q-74`).
+ */
+function sweepAfterMetaWrite(id: string, meta: SpaceMeta | undefined): void {
+  if (meta === undefined) return;
+  void sweepSuppressedVectors(id, meta)
+    .catch(err => log.warn(`Suppression sweep failed for ${id}: ${err instanceof Error ? err.message : String(err)}`));
 }
