@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.5.2] — 2026-09-27
+
+**A patch: recall ranks reranked results first again, a proxy recall reranks once, and a proxy is no longer
+reported unconverted at every start.** Upgrade every instance with a reranker configured, and every instance
+that holds a proxy space made before 5.0. Nothing to change in configuration or calls.
+
 ### Fixed
 
 **Recall**
