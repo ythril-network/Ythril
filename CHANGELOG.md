@@ -19,6 +19,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`GET /api/networks/:id/change-notes`, MCP `network_change_notes`, the card's **Change notes**), and each arrival
   fires the new webhook event `change_note.received`.
 
+### Removed
+
+- **Dismiss on a file conflict, and `DELETE /api/conflicts/:id` behind it.** It closed the conflict and left the
+  incoming copy in the space under its conflict name, where it replicated to every member: a keep-both without the
+  rename, shown as if it deferred the choice. A call now answers `404` and leaves the conflict open; resolve with
+  `POST /api/conflicts/:id/resolve` (keep local, keep incoming, keep both, save to space).
+
 ### Fixed
 
 - **A schema replace on a networked space says it kept what it did not remove** (`Q-61`). A network round is
@@ -62,13 +69,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The conflict page's action selects look editable on every theme.** They were styled with a theme token no
   stylesheet defines, so their border and background were dropped; five other reads of undefined tokens are fixed
   and a gate now holds every `var()` the client reads to a defined token.
-
-### Removed
-
-- **Dismiss on a file conflict, and `DELETE /api/conflicts/:id` behind it.** It closed the conflict and left the
-  incoming copy in the space under its conflict name, where it replicated to every member: a keep-both without the
-  rename, shown as if it deferred the choice. A call now answers `404` and leaves the conflict open; resolve with
-  `POST /api/conflicts/:id/resolve` (keep local, keep incoming, keep both, save to space).
 
 ## [5.4.1] — 2026-09-26
 

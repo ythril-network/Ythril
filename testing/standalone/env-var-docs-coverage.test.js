@@ -77,6 +77,7 @@ const NOT_A_SETTING = new Map([
   ['FEATURE_DISABLED', 'API error code'],
   ['MFA_REQUIRED', 'API error code'],
   ['MERKLE_DIVERGENCE', 'sync conflict code'],
+  ['FILE_REPLACED', 'sync log code: a peer edit replaced an untouched local file'],
   ['REPARENT_REVERT_AVAILABLE', 'network notification code'],
   ['ERR_ERL_UNEXPECTED_X_FORWARDED_FOR', 'an express-rate-limit error code, quoted in a troubleshooting note'],
   // Source identifiers named in prose.
