@@ -195,18 +195,6 @@ Accepts the same `action`, `rename`, and `targetSpaceId` fields as single resolv
 
 ---
 
-### Dismiss a Conflict
-
-```http
-DELETE /api/conflicts/:id
-```
-
-Removes the conflict record without touching any files.
-
-**Response** `204`.
-
----
-
 ### List Link Violations
 
 ```http

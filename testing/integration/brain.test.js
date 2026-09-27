@@ -2554,10 +2554,6 @@ describe('Brain — read-only token blocked on REST write endpoints', () => {
     assert.equal(r.status, 403, `bulk-resolve must reject a read-only token, got ${r.status}`);
   });
 
-  it('DELETE /api/conflicts/:id is rejected for a read-only token', async () => {
-    const r = await del(INSTANCES.a, readOnlyToken, `/api/conflicts/does-not-exist-${RUN}`);
-    assert.equal(r.status, 403, `conflict delete must reject a read-only token, got ${r.status}`);
-  });
 });
 
 // ── Bulk write cap at 500 items per type ─────────────────────────────────────

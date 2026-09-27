@@ -316,10 +316,11 @@ Bidirectional network types (`closed`, `democratic`, `club`) always have `direct
 After document sync, the engine performs a manifest-based file sync. It is bidirectional and tombstone-aware:
 
 1. **File tombstones, both directions** — the engine pulls the peer's file tombstones (`GET /api/sync/file-tombstones`) and applies them (subject to the same [deletion authorisation](#tombstone-deletion-authorisation) rules as document tombstones), then pushes its own pending file tombstones (`POST /api/sync/file-tombstones`).
-2. **Manifest** — `GET /api/sync/manifest?spaceId=&networkId=` retrieves the peer's list of `{ path, sha256, size, modifiedAt }`. Manifests are served from a per-space file-hash cache (`<spaceId>_file_hashes`), so the peer does not re-hash its whole tree per request.
+2. **Manifest** — `GET /api/sync/manifest?spaceId=&networkId=` retrieves the peer's list of `{ path, sha256, size, modifiedAt }`, and `spaceId`: the peer's LOCAL id for the space it resolved the request to. The file transfers that follow use the plain file routes (`GET`/`POST /api/files/:spaceId`), which know only local ids, so they address the peer by that answer; a peer that predates the field is addressed by the network's id. Manifests are served from a per-space file-hash cache (`<spaceId>_file_hashes`), so the peer does not re-hash its whole tree per request.
 3. **Download** — files we lack entirely are downloaded via `GET /api/files/:spaceId?path=<relative path>` (the path travels as a query parameter). Downloaded bytes are SHA-256 verified before writing to disk; a mismatch is logged and the file discarded.
-4. **Divergence → conflict, never overwrite** — when a file exists on both sides with different hashes, the engine does **not** overwrite the local copy. It writes the peer's version as a conflict copy alongside and records a `ConflictDoc`, surfaced in **Workspace → Conflicts** for the user to resolve.
-5. **Push** — files the peer lacks (or holds an older `modifiedAt` for) are uploaded to it.
+4. **Divergence: who changed it decides** — each end remembers, per file and per peer, the hash both last held (`syncBase`, local to the instance, never replicated or hashed). When a file differs: if **our** copy is still that agreed version, only the peer changed it and theirs replaces ours (logged `FILE_REPLACED`); if the **peer's** is, only we changed it and our push carries it; otherwise both changed it and the peer's version is written as a conflict copy beside ours, with a `ConflictDoc` surfaced in **Workspace → Conflicts**. Nothing is overwritten on a real conflict. With no agreed version yet (data from before this rule), a difference is a conflict.
+5. **Push** — files the peer lacks, or holds only in the agreed version, are uploaded to it. With no agreed version yet, the newer `modifiedAt` wins as before.
+6. **Instance-local files never travel** — a conflict copy (`<name>_<time>_<peer>.<ext>`) and a schema snapshot (`schemas/<space>_<kind>_<type>.json`) are this instance's own: they are left out of the manifest it serves, never pushed, and refused when an older peer offers them.
 
 Manifest requests use the 10 s timeout and batch-style transfers the 60 s one. A whole file body gets the ten-minute transfer budget, because a 10 s ceiling on a multi-megabyte upload aborts it on any ordinary link.
 
@@ -405,7 +406,7 @@ The seven **data-write endpoints accept only peer or admin tokens** — see [Dir
 | `GET` | `/api/sync/filemeta/:id` | `spaceId`, `networkId` | Full `FileMetaDoc` |
 | `GET` | `/api/sync/tombstones` | `spaceId`, `networkId`, `sinceSeq`, `limit` (default 1000, max 5000) | `{ facts[], entities[], edges[], chrono[], links[] }` |
 | `GET` | `/api/sync/file-tombstones` | `spaceId`, `networkId`, `since` | `{ tombstones[] }` |
-| `GET` | `/api/sync/manifest` | `spaceId`, `networkId`, `since` | `{ manifest[{ path, sha256, size, modifiedAt }] }` |
+| `GET` | `/api/sync/manifest` | `spaceId`, `networkId`, `since` | `{ manifest[{ path, sha256, size, modifiedAt }], spaceId }` (`spaceId`: the responder's local id) |
 | `GET` | `/api/sync/merkle` | `spaceId`, `networkId` | `{ spaceId, root, leafCount, computedAt, networkId }` (only used when `network.merkle: true`) |
 | `GET` | `/api/sync/networks/:networkId/members` | `networkId` | `{ members[{ instanceId, label, url, direction, … }], updatedAt }` |
 

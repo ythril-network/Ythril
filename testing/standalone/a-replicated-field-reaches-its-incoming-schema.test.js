@@ -128,6 +128,9 @@ function merkleExcluded(src, docName, localOnlySrc) {
     return { fromSet, fromProjection: hashed, inclusive: true };
   }
 
+  // DERIVED from the one list since Q-66 (a hand-written copy missed `syncBase`): then the two statements are one
+  // by construction, which is the strongest form of the agreement asserted below.
+  if (/const DERIVED_PROJECTION = LOCAL_ONLY_EXCLUSION;/.test(src)) return { fromSet, fromProjection: fromSet, inclusive: false };
   const proj = src.match(/const DERIVED_PROJECTION = \{([^}]*)\}/);
   return { fromSet, fromProjection: names(proj?.[1]), inclusive: false };
 }

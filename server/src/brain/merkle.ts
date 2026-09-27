@@ -28,7 +28,7 @@ import { createHash } from 'node:crypto';
 import { col, asFilter } from '../db/mongo.js';
 import { buildFileManifest } from '../files/manifest.js';
 import { BRAIN_COLLECTIONS } from '../config/types-knowledge.js';
-import { LOCAL_ONLY_FIELDS } from '../sync/local-only-fields.js';
+import { LOCAL_ONLY_FIELDS, LOCAL_ONLY_EXCLUSION } from '../sync/local-only-fields.js';
 
 // ── Internal helpers ─────────────────────────────────────────────────────────
 
@@ -135,7 +135,8 @@ export function docLeaf(collType: string, doc: Record<string, unknown>): string 
   return sha256hex(`doc:${collType}:${String(doc['_id'])}:${String(doc['seq'])}:${canonicalDocHash(doc)}`);
 }
 
-const DERIVED_PROJECTION = { embedding: 0, embeddingModel: 0, matchedText: 0, _expireAt: 0, _contentExpireAt: 0 } as const;
+// Derived from the one list, like DERIVED_FIELDS: a hand-written copy here missed `syncBase` the day it was added (Q-66).
+const DERIVED_PROJECTION = LOCAL_ONLY_EXCLUSION;
 
 /**
  * What is INCLUDED from a file's metadata — and it is an inclusion projection, unlike every other collection.

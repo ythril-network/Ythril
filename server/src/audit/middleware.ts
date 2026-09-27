@@ -218,7 +218,6 @@ export const ROUTE_RULES: RouteRule[] = [
   { method: 'POST',   pattern: /^\/api\/conflicts\/seed$/,                          operation: 'conflict.seed' },
   { method: 'POST',   pattern: /^\/api\/conflicts\/([^/]+)\/resolve$/,              operation: 'conflict.resolve' },
   { method: 'DELETE', pattern: /^\/api\/conflicts\/link-violations\/?([^/]*)$/,     operation: 'conflict.link_violation.delete' },
-  { method: 'DELETE', pattern: /^\/api\/conflicts\/([^/]+)$/,                       operation: 'conflict.delete' },
 
   // ── Duplicate handling ───────────────────────────────────────────────────
   // A merge REWRITES brain records (and deletes the loser) — squarely a data mutation.

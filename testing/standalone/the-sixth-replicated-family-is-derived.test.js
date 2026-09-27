@@ -41,6 +41,7 @@ const { resolveWatermark } = await import('../../server/dist/sync/watermark.js')
 const { BRAIN_COLLECTIONS } = await import('../../server/dist/config/types-knowledge.js');
 
 const ENGINE = 'server/src/sync/engine.ts';
+const FILE_SYNC = 'server/src/sync/file-sync.ts';   // the file pull moved out of the engine
 const DOCS = 'server/src/api/sync/docs.ts';
 const WIPE = 'server/src/spaces/wipe-vote.ts';
 const code = (f) => stripComments(readFileSync(f, 'utf8'));
@@ -164,8 +165,9 @@ describe('a whole file body gets the transfer budget it is passed', () => {
      * Asserted on the SHAPE rather than on the numbers: the defect is passing two budgets, and it returns
      * the moment somebody hands `opts()` straight to a transfer call again.
      */
-    const src = code(ENGINE);
-    const at = src.indexOf('/api/files/${encodeURIComponent(remoteSpaceId)}');
+    const src = code(FILE_SYNC);
+    // Anchored on the DOWNLOAD's shape (a file route asking for the peer's path), not on a variable name.
+    const at = src.search(/\/api\/files\/\$\{encodeURIComponent\(\w+\)\}\?path=\$\{encodeURIComponent\(remote\.path\)\}/);
     assert.ok(at > 0, 'the file download call moved — this gate is looking in the wrong place');
     const call = src.slice(Math.max(0, src.lastIndexOf('peerSafeFetch', at)), at + 400);
     assert.match(call, /timeoutMs: PEER_TRANSFER_TIMEOUT_MS/, 'the transfer budget is no longer requested');

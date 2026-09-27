@@ -796,8 +796,6 @@
   "conflicts.bulkActionAriaLabel": "Sammelaktion",
   "conflicts.resolveActionAriaLabel": "Auflösungsaktion",
   "conflicts.targetSpaceAriaLabel": "Zielbereich",
-  "conflicts.dismissTitle": "Ohne Dateiänderungen verwerfen",
-  "conflicts.dismissAriaLabel": "Konflikt verwerfen",
   "conflicts.action.keepLocal": "Lokale Version behalten",
   "conflicts.action.keepIncoming": "Eingehende Version behalten",
   "conflicts.action.keepBoth": "Beide behalten",
