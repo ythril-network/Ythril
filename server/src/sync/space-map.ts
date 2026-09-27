@@ -54,3 +54,16 @@ export function localToRemote(net: NetworkConfig, localId: string): string {
   }
   return localId;
 }
+
+/**
+ * The id to address a peer's space by on its PLAIN file routes (`GET`/`POST /api/files/:spaceId`) — `Q-68`.
+ *
+ * A peer is named a space by the network's id, and the sync routes translate that to the peer's local id
+ * (`api/sync/space-alias.ts`). The file routes are not sync routes and translate nothing, so once a space was renamed
+ * on both ends — the network id stays `flows`, both locals are `y-flows` — every file push and pull was refused 403
+ * while records synced. The peer's manifest answer names the local id it resolved; this takes it when it is a space
+ * id and falls back to the network's id for a peer that predates the field.
+ */
+export function peerFileSpaceId(answered: unknown, remoteId: string): string {
+  return typeof answered === 'string' && /^[a-z0-9][a-z0-9-]{0,39}$/.test(answered) ? answered : remoteId;
+}

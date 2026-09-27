@@ -7,8 +7,7 @@
  *  - GET /api/conflicts — returns seeded conflict with correct fields
  *  - GET /api/conflicts/:id — single record lookup
  *  - GET /api/conflicts/:id — 404 for unknown id
- *  - DELETE /api/conflicts/:id — dismiss returns 204 and record is gone
- *  - DELETE /api/conflicts/:id — 404 for already-dismissed
+ *  - DELETE /api/conflicts/:id is gone: a conflict closes only through a resolution
  *  - POST /api/conflicts/:id/resolve — returns 200 {status:'resolved'} and deletes
  *  - Authorization: unauthenticated request returns 401
  *
@@ -133,13 +132,17 @@ describe('Conflicts API — CRUD', () => {
     assert.equal(r.status, 401);
   });
 
-  it('GET /api/conflicts/:id returns 404 for unknown id', async () => {
-    const r = await get(INSTANCES.a, tokenA, '/api/conflicts/nonexistent-conflict-id');
-    assert.equal(r.status, 404);
+  it('GET /api/conflicts?spaceId= narrows to that space, and refuses a space the token cannot reach', async () => {
+    // Documented in 10-mfa-and-conflicts.md and read nowhere until Q-72: every space's conflicts came back.
+    const r = await get(INSTANCES.a, tokenA, '/api/conflicts?spaceId=general');
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.ok((r.body.conflicts ?? []).every(c => c.spaceId === 'general'), 'a conflict of another space was returned');
+    const refused = await get(INSTANCES.a, tokenA, `/api/conflicts?spaceId=no-such-space-${Date.now()}`);
+    assert.equal(refused.status, 403, JSON.stringify(refused.body));
   });
 
-  it('DELETE /api/conflicts/:id returns 404 for unknown id', async () => {
-    const r = await del(INSTANCES.a, tokenA, '/api/conflicts/nonexistent-conflict-id');
+  it('GET /api/conflicts/:id returns 404 for unknown id', async () => {
+    const r = await get(INSTANCES.a, tokenA, '/api/conflicts/nonexistent-conflict-id');
     assert.equal(r.status, 404);
   });
 
@@ -251,7 +254,7 @@ describe('Conflicts API — seeded via file sync hash mismatch', () => {
     assert.equal(check.status, 404, 'Resolved conflict must return 404');
   });
 
-  it('DELETE /api/conflicts/:id returns 204 and record is gone', async () => {
+  it('there is no dismiss: DELETE leaves the conflict open, keep-local closes it and discards the copy', async () => {
     // Re-seed: write competing files again on a fresh path
     const path2 = `conflict-test-del-${RUN}.txt`;
     const uploadA = `${INSTANCES.a}/api/files/general?path=${encodeURIComponent(path2)}`;
@@ -270,10 +273,18 @@ describe('Conflicts API — seeded via file sync hash mismatch', () => {
     const delConflictId = await syncUntilConflict(networkId2, path2);
     assert.ok(delConflictId, 'second conflict was not seeded for the DELETE test');
 
-    const r = await del(INSTANCES.a, tokenA, `/api/conflicts/${delConflictId}`);
-    assert.equal(r.status, 204, JSON.stringify(r.body));
+    // Dismiss closed the record and left the incoming copy in the space under its conflict name, where it
+    // replicated to every member. It is removed (owner, 2026-09-27); the route must not quietly come back.
+    const gone = await del(INSTANCES.a, tokenA, `/api/conflicts/${delConflictId}`);
+    assert.equal(gone.status, 404, `DELETE /api/conflicts/:id must not exist, got ${gone.status}`);
+    const still = await get(INSTANCES.a, tokenA, `/api/conflicts/${delConflictId}`);
+    assert.equal(still.status, 200, 'the conflict is still open after the DELETE');
+    const copyPath = still.body.conflictPath;
 
-    const check = await get(INSTANCES.a, tokenA, `/api/conflicts/${delConflictId}`);
-    assert.equal(check.status, 404, 'Dismissed conflict must return 404');
+    const r = await post(INSTANCES.a, tokenA, `/api/conflicts/${delConflictId}/resolve`, { action: 'keep-local' });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.equal((await get(INSTANCES.a, tokenA, `/api/conflicts/${delConflictId}`)).status, 404, 'resolved conflict is gone');
+    const copy = await fetch(`${INSTANCES.a}/api/files/general?path=${encodeURIComponent(copyPath)}`, { headers: { Authorization: `Bearer ${tokenA}` } });
+    assert.equal(copy.status, 404, 'keep-local discards the incoming copy');
   });
 });

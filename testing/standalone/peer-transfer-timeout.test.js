@@ -30,7 +30,9 @@ before(async () => {
   ({ PEER_TIMEOUT_MS, PEER_TRANSFER_TIMEOUT_MS } = await import('../../server/dist/sync/peer-fetch.js'));
 });
 
-const engineSrc = () => readFileSync('server/src/sync/engine.ts', 'utf8');
+// File sync moved out of the engine into its own module (Q-68); the whole-file calls live there.
+const engineSrc = () => readFileSync('server/src/sync/file-sync.ts', 'utf8');
+const cycleSrc = () => readFileSync('server/src/sync/engine.ts', 'utf8'); // the cycle's own control-plane options
 
 describe('peer transfer budgets', () => {
   it('the transfer budget is much larger than the control-plane one', () => {
@@ -63,7 +65,7 @@ describe('peer transfer budgets', () => {
   it('control-plane calls are NOT given the transfer budget', () => {
     // The opposite mistake: a stuck members/votes call should fail in seconds, not sit for ten minutes
     // holding up the cycle. The shared options factories must stay on the short budgets.
-    const src = engineSrc();
+    const src = cycleSrc();
     const factories = src.slice(src.indexOf('const fetchOpts'), src.indexOf('// ── Presync warm-up'));
     assert.ok(factories.includes('FETCH_TIMEOUT_MS'), 'the control-plane factory lost its timeout');
     assert.ok(!factories.includes('PEER_TRANSFER_TIMEOUT_MS'),

@@ -96,7 +96,7 @@ export const SCHEMA_MD_STYLES = `
 .sch-msg { font-size:12px; margin-top:6px; }
 .sch-msg.err { color:var(--error); }
 .sch-msg.ok  { color:var(--success); }
-.sch-msg.info { color:var(--text-dim); }
+.sch-msg.info { color:var(--text-muted); }
 /* The two ends sit side by side like the retention windows, and for the same reason each column needs a
    basis: a flex column's intrinsic width is its widest child, and a long type name would otherwise claim
    the row. Wider than .ret-row's columns because these hold a list rather than one number. */
@@ -113,7 +113,7 @@ export const SCHEMA_MD_STYLES = `
 .ends-opt { display:flex; align-items:center; gap:6px; font-size:12px; font-weight:400; cursor:pointer;
   margin:0; text-transform:none; letter-spacing:normal; }
 .ends-opt .nm { font-family:var(--font-mono); color:var(--accent); }
-.ends-opt .any { color:var(--text-dim); font-style:italic; }
+.ends-opt .any { color:var(--text-muted); font-style:italic; }
 .ends-opt input { margin:0; }
 .ends-pairs { display:flex; flex-wrap:wrap; gap:3px; margin-top:4px; }
 .sch-type-badges .badge { font-size:9px; }

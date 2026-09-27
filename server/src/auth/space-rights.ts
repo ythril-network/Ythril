@@ -261,7 +261,6 @@ export const ROUTE_RIGHTS: readonly RouteRight[] = [
   { route: '/api/conflicts/:id/resolve', method: 'POST', area: 'dataQuality', needs: 'write', scope: 'iterates' },
   { route: '/api/conflicts/bulk-resolve', method: 'POST', area: 'dataQuality', needs: 'write', scope: 'iterates' },
   { route: '/api/conflicts/link-violations', method: 'GET', area: 'dataQuality', needs: 'read', scope: 'iterates' },
-  { route: '/api/conflicts/:id', method: 'DELETE', area: 'dataQuality', needs: 'write', scope: 'iterates' },
   { route: '/api/conflicts/link-violations', method: 'DELETE', area: 'dataQuality', needs: 'write', scope: 'iterates' },
   { route: '/api/conflicts/link-violations/:id', method: 'DELETE', area: 'dataQuality', needs: 'write', scope: 'iterates' },
   // `POST /api/conflicts/seed` used to sit here as `dataQuality` / `admin`. It moved to `NOT_AREA_SCOPED`

@@ -138,7 +138,7 @@ list that is perfectly good.
 
 ## Conflict resolution
 
-When two connected brains modify the same file before syncing, a conflict is created. A dedicated **Conflicts** item then appears in the sidebar's Workspace section, carrying a red count badge of how many are waiting.
+When two connected brains **both** modify the same file before syncing, a conflict is created. When only one of them changed it since they last agreed, the other simply takes the new version, with no conflict. Conflict copies and the `schemas/` snapshots each instance writes for itself stay on that instance and are never synced. A dedicated **Conflicts** item then appears in the sidebar's Workspace section, carrying a red count badge of how many are waiting.
 
 Open **Conflicts** from the sidebar to see them. For each conflict choose what to do:
 
@@ -149,7 +149,7 @@ Open **Conflicts** from the sidebar to see them. For each conflict choose what t
 | **Keep both** | Both versions are kept (you can rename the incoming copy) |
 | **Save to space** | The incoming version is copied to a different space, then the conflict is removed |
 
-**Dismiss** (✕) removes the conflict record without changing any files.
+Every conflict ends in one of these four. There is no dismiss: a conflict closes only by one of these, so an incoming copy is never left behind under its conflict name.
 
 **You do not have to do them one at a time.** Tick the conflicts you want — or use **Select all** — pick
 an action, and **Resolve N selected** applies it to every one. You are asked to confirm, with the count

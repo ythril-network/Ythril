@@ -111,7 +111,12 @@ const MAX_TOTAL = 2000;
 // GET /api/conflicts — list unresolved conflicts for all accessible spaces
 conflictsRouter.get('/', globalRateLimit, requireAuth, async (req, res) => {
   try {
-    const spaces = accessibleSpaces(req, 'read');
+    // `?spaceId=` narrows to one space, as 10-mfa-and-conflicts.md has always said; it was read nowhere, so a
+    // caller asking about one space got every space's conflicts and read them as that space's.
+    const requested = typeof req.query['spaceId'] === 'string' ? req.query['spaceId'] : undefined;
+    const reachable = accessibleSpaces(req, 'read');
+    if (requested && !reachable.includes(requested)) { res.status(403).json({ error: `Token does not have access to space '${requested}'` }); return; }
+    const spaces = requested ? [requested] : reachable;
     const results: ConflictDoc[] = [];
     let truncated = false;
     for (const spaceId of spaces) {
@@ -236,24 +241,9 @@ conflictsRouter.get('/:id', globalRateLimit, requireAuth, async (req, res) => {
   }
 });
 
-// DELETE /api/conflicts/:id — dismiss (resolve) a conflict record
-conflictsRouter.delete('/:id', globalRateLimit, requireAuth, denyReadOnly, async (req, res) => {
-  try {
-    const spaces = accessibleSpaces(req, 'write');
-    for (const spaceId of spaces) {
-      const result = await col<ConflictDoc>(spaceCollection(spaceId, 'conflicts'))
-        .deleteOne(asFilter<ConflictDoc>({ _id: req.params['id'] }));
-      if (result.deletedCount > 0) {
-        res.status(204).end();
-        return;
-      }
-    }
-    res.status(404).json({ error: 'Conflict not found' });
-  } catch (err) {
-    log.error(`DELETE /api/conflicts/:id: ${err}`);
-    res.status(500).json({ error: 'Internal error' });
-  }
-});
+// There is no DELETE /api/conflicts/:id. It closed the record and left the incoming copy in the space under its
+// conflict name, where it replicated to every member — a keep-both without the rename (removed 2026-09-27). A
+// conflict closes only through a resolution.
 
 // POST /api/conflicts/bulk-resolve — resolve multiple conflicts at once
 conflictsRouter.post('/bulk-resolve', globalRateLimit, requireAuth, denyReadOnly, async (req, res) => {
