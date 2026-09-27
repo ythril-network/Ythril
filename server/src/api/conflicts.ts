@@ -8,6 +8,7 @@ import { globalRateLimit } from '../rate-limit/middleware.js';
 import { col, asFilter, asDoc } from '../db/mongo.js';
 import { log } from '../util/log.js';
 import { resolveSafePath, spaceRoot } from '../files/sandbox.js';
+import { deleteStored, moveStored } from '../files/stored-bytes.js';
 import type { ConflictDoc, LinkViolationDoc } from '../config/types.js';
 import { spaceCollection } from '../db/space-collection.js';
 
@@ -56,7 +57,7 @@ async function executeResolve(
       // Delete the conflict copy, keep the original
       try {
         const abs = resolveSafePath(spaceId, doc.conflictPath);
-        await fs.unlink(abs);
+        await deleteStored(abs);
       } catch (err: unknown) {
         if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err; // already gone is fine
       }
@@ -67,8 +68,8 @@ async function executeResolve(
       const srcAbs = resolveSafePath(spaceId, doc.conflictPath);
       const dstAbs = resolveSafePath(spaceId, doc.originalPath);
       await fs.mkdir(path.dirname(dstAbs), { recursive: true });
-      await fs.copyFile(srcAbs, dstAbs);
-      await fs.unlink(srcAbs);
+      // A move, under both paths' locks: the stored bytes (ciphertext or not) are valid wherever they land (F-43).
+      await moveStored(srcAbs, dstAbs);
       break;
     }
     case 'keep-both': {
@@ -77,7 +78,7 @@ async function executeResolve(
         const srcAbs = resolveSafePath(spaceId, doc.conflictPath);
         const dstAbs = resolveSafePath(spaceId, rename);
         await fs.mkdir(path.dirname(dstAbs), { recursive: true });
-        await fs.rename(srcAbs, dstAbs);
+        await moveStored(srcAbs, dstAbs);
       }
       // Without rename, both files stay as-is — nothing to do.
       break;
@@ -90,8 +91,7 @@ async function executeResolve(
       await fs.mkdir(dstRoot, { recursive: true });
       const dstAbs = resolveSafePath(targetSpaceId!, destPath);
       await fs.mkdir(path.dirname(dstAbs), { recursive: true });
-      await fs.copyFile(srcAbs, dstAbs);
-      await fs.unlink(srcAbs);
+      await moveStored(srcAbs, dstAbs);
       break;
     }
   }

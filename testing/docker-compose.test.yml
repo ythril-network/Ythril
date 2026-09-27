@@ -298,6 +298,10 @@ services:
       SKIP_SYNC_RATE_LIMIT: "true"
       YTHRIL_DB_MIGRATION_ENABLED: "true"
       YTHRIL_MONGO_INFRA_MANAGED: "true"
+      # D is the one instance that encrypts at rest (F-43), so sync is exercised between a keyed and a keyless peer.
+      # A TEST value — the ASCII of "ythril-test-key-for-instance-d!!" — and never a key for anything real. On D
+      # and not on B, because suites read B's state files from the host and none read D's.
+      YTHRIL_MASTER_KEY: "eXRocmlsLXRlc3Qta2V5LWZvci1pbnN0YW5jZS1kISE="
     depends_on:
       ythril-mongo-d:
         condition: service_healthy

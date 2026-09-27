@@ -14,7 +14,7 @@ import { listTombstones, applyRemoteTombstone } from '../../brain/tombstones.js'
 import { requireAuth, denyReadOnly, isInstanceAdmin } from '../../auth/middleware.js';
 import { log } from '../../util/log.js';
 import { bumpSeq } from '../../util/seq.js';
-import fs from 'node:fs/promises';
+import { deleteStored } from '../../files/stored-bytes.js';
 import path from 'node:path';
 import type { TombstoneDoc, FileTombstoneDoc } from '../../config/types.js';
 
@@ -214,7 +214,7 @@ syncTombstonesRouter.post('/file-tombstones', syncRateLimit, requireAuth, denyRe
       if (!abs.startsWith(spaceFiles + path.sep) && abs !== spaceFiles) continue;
 
       // Delete the file (ignore if already gone).
-      await fs.unlink(abs).catch(() => {});
+      await deleteStored(abs).catch(() => {});   // under the path lock (F-43)
 
       // Record tombstone locally so we can propagate it to further peers.
       const doc: FileTombstoneDoc = {

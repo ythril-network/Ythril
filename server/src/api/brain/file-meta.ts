@@ -21,6 +21,7 @@ import { readEditAudit } from '../../brain/edit-audit.js';
 import { primitivePropertyError } from '../../brain/property-values.js';
 import { readFile } from '../../files/files.js';
 import { log } from '../../util/log.js';
+import { StoredFileUnreadable } from '../../files/stored-bytes.js';
 import { getConfig } from '../../config/loader.js';
 import { col, asFilter } from '../../db/mongo.js';
 import { parseLimit, parseSkip } from '../../util/pagination.js';
@@ -145,7 +146,7 @@ fileMetaRouter.get('/spaces/:spaceId/files/extract', globalRateLimit, requireSpa
   // (`.md`/`.txt` are already Markdown and produce no `_converted/` copy).
   const convertedRecord = derived.find(d => d.path.startsWith('_converted/'))
     ?? (parent.convertedFileId ? await getFileMeta(member, parent.convertedFileId) : null);
-  let converted: { path: string; markdown: string; truncated: boolean; sizeBytes: number } | null = null;
+  let converted: { path: string; markdown: string; truncated: boolean; sizeBytes: number; unreadable?: string } | null = null;
   if (convertedRecord) {
     try {
       const text = await readFile(member, convertedRecord.path);
@@ -160,7 +161,10 @@ fileMetaRouter.get('/spaces/:spaceId/files/extract', globalRateLimit, requireSpa
       // empty document: it means the sidecar was removed out from under the record, which is exactly
       // the kind of drift this view exists to make visible.
       log.warn(`extract: could not read ${member}/${convertedRecord.path}: ${err instanceof Error ? err.message : String(err)}`);
-      converted = { path: convertedRecord.path, markdown: '', truncated: false, sizeBytes: convertedRecord.sizeBytes };
+      // PRESENT but undecodable (a foreign key, altered bytes, no secret for an encrypted file) is a different
+      // drift from "removed", and the view says which — `unreadable` carries the reason (F-43).
+      converted = { path: convertedRecord.path, markdown: '', truncated: false, sizeBytes: convertedRecord.sizeBytes,
+        ...(err instanceof StoredFileUnreadable ? { unreadable: err.message } : {}) };
     }
   }
 

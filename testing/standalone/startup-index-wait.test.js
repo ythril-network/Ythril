@@ -82,7 +82,10 @@ describe('startup does not block on index readiness', () => {
     assert.match(LIFECYCLE, /FINALIZE_CONCURRENCY\s*=\s*\d+/);
     const conc = Number(/FINALIZE_CONCURRENCY\s*=\s*(\d+)/.exec(LIFECYCLE)?.[1]);
     assert.ok(conc >= 1 && conc <= 8, `concurrency should be a small bound, got ${conc}`);
-    assert.match(LIFECYCLE, /Math\.min\(FINALIZE_CONCURRENCY, queue\.length\)/,
+    // The pool is the shared bounded helper, which sizes itself by the smaller of the limit and the list —
+    // so the "never more workers than spaces" guarantee is asserted where it now lives, not re-derived here.
+    assert.match(LIFECYCLE, /mapLimit\(spaceIds, FINALIZE_CONCURRENCY,/, 'the confirmation no longer runs through the bounded pool');
+    assert.match(readFileSync('server/src/util/map-limit.ts', 'utf8'), /Math\.min\(limit, items\.length\)/,
       'never spawn more workers than there are spaces');
   });
 

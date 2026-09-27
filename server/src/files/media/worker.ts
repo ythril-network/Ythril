@@ -74,6 +74,7 @@ import { getModelSlots } from '../../config/loader.js';
 import { assistHopMs } from '../../config/assist-backend.js';
 import { AUDIO_STEPS, VIDEO_STEPS } from './progress.js';
 import { spaceCollection } from '../../db/space-collection.js';
+import { readStored, StoredFileUnreadable } from '../stored-bytes.js';
 
 let running = false;
 let stalledSweepTimer: NodeJS.Timeout | null = null;
@@ -436,8 +437,12 @@ async function processJob(
     const absolutePath = resolveFilePath(spaceId, filePath);
     let fileBytes: Buffer;
     try {
-      fileBytes = await fs.readFile(absolutePath);
+      // Through the file door: with a master secret the bytes on disk are ciphertext (F-43).
+      fileBytes = await readStored(absolutePath);
     } catch (err) {
+      // Present but undecodable — a foreign key, altered bytes, or no secret for an encrypted file. Rethrown as it
+      // is, so the failure path below can see it is TERMINAL: no retry reads different bytes.
+      if (err instanceof StoredFileUnreadable) throw err;
       if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
         // The source file is gone — it was deleted after this job was queued. Retrying can
         // never succeed, so this is TERMINAL, not a failure: reconcile to disk truth by
@@ -644,7 +649,9 @@ async function processJob(
     log.warn(`Media worker: job ${spaceId}/${fileId} failed: ${message}`);
     // An oversized document will never shrink — fail permanently instead of
     // burning the retry budget re-reading a file the pipeline refuses to convert.
-    const permanent = err instanceof ConversionUnavailableError && err.reason === 'too_large';
+    // A stored file that cannot be decoded is the same: retrying reads the same bytes under the same key (F-43).
+    const unreadable = err instanceof StoredFileUnreadable;
+    const permanent = unreadable || (err instanceof ConversionUnavailableError && err.reason === 'too_large');
     if (permanent) {
       // This write is what stops the file looking like work in progress. `mediaJobsFailedTotal` below is
       // incremented either way, so swallowing a failure here left the METRIC saying "permanently failed"
@@ -655,7 +662,8 @@ async function processJob(
       // permanently, and rethrowing would replace an honest terminal state with a retry loop.
       await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).updateOne(
         asFilter<FileMetaDoc>({ _id: fileId }),
-        { $set: { embeddingStatus: 'skipped' } },
+        // `failed` for an unreadable file, not `skipped`: nothing was declined, the bytes could not be read.
+        { $set: { embeddingStatus: unreadable ? 'failed' : 'skipped' } },
       ).catch((err: unknown) => {
         log.warn(`Media worker: ${spaceId}/${fileId} failed permanently but its status could not be written `
           + `— the record will read 'processing' while the failure counter has already moved: ${err}`);

@@ -36,6 +36,7 @@ import { embedConcurrency } from './embed-concurrency.js';
 import { JobLeaseLostError, shouldHeartbeat } from '../media/lease.js';
 import { embedChunksTotal } from '../../metrics/registry.js';
 import { spaceCollection } from '../../db/space-collection.js';
+import { mapLimit } from '../../util/map-limit.js';
 
 export type InputFormat = 'pdf' | 'docx' | 'epub' | 'html' | 'md' | 'txt' | 'text' | 'auto';
 
@@ -430,67 +431,59 @@ export async function storeConversionResults(
     opts.onProgress({ step: 'embed', steps: EMBED_STEPS, done: embedded, total: chunks.length });
   }
 
-  let cursor = 0;
-  async function embedWorker(): Promise<void> {
-    for (;;) {
-      const i = cursor++;
-      if (i >= chunks.length) return;
-      const chunk = chunks[i]!;
-      const chunkId = `${originalId}#chunk${chunk.chunkIndex}`;
-      const embedText = chunk.headingText
-        ? `${chunk.headingText} ${chunk.content}`
-        : chunk.content;
+  // EMBED_CONCURRENCY chunks in flight at a time, through the shared bounded pool; each result lands at its
+  // own index, so chunkDocs keeps the chunk order whatever order the embeds finish in.
+  await mapLimit(chunks, EMBED_CONCURRENCY, async (chunk, i) => {
+    const chunkId = `${originalId}#chunk${chunk.chunkIndex}`;
+    const embedText = chunk.headingText
+      ? `${chunk.headingText} ${chunk.content}`
+      : chunk.content;
 
-      let embeddingFields: { embedding?: number[]; embeddingModel?: string; matchedText?: string } = {};
-      try {
-        const embResult = await embed(embedText);
-        embeddingFields = {
-          embedding: embResult.vector,
-          embeddingModel: embResult.model,
-          matchedText: embedText,
-        };
-      } catch (err) {
-        embedFailures++;
-        log.warn(`Chunk embed failed for ${spaceId}/${chunkId}: ${err instanceof Error ? err.message : String(err)}`);
-      }
-
-      // Hand the event loop a turn between chunks.
-      //
-      // An in-process embed blocks it for ~200 ms (measured), and a large document is hundreds of them
-      // back to back. `await` on a promise that is already settled does NOT yield to the macrotask queue —
-      // it resumes in the same tick's microtask drain — so without this, pending I/O callbacks (the ones
-      // that answer /health) can sit behind the whole run. `setImmediate` puts this worker behind them
-      // instead. Cheap: one macrotask per chunk against ~200 ms of work.
-      await new Promise<void>(resolve => setImmediate(resolve));
-
-      // Say so, and check we are still the run that is allowed to. Both ride on the same tick: the
-      // heartbeat is throttled to one write per 2 s, and the lease answer it returns is what `shouldStop`
-      // reports here. A recovered job's old holder stops within a beat instead of embedding the same file
-      // alongside its replacement.
-      reportChunk();
-      if (opts.shouldStop?.()) throw new JobLeaseLostError(spaceId, originalId);
-
-      chunkDocs[i] = {
-        _id: chunkId,
-        spaceId,
-        path: chunkId,
-        tags: [],
-        createdAt: now,
-        updatedAt: now,
-        sizeBytes: Buffer.byteLength(chunk.content, 'utf8'),
-        author: authorRef(),
-        parentFileId: originalId,
-        chunkIndex: chunk.chunkIndex,
-        headingText: chunk.headingText,
-        content: chunk.content,
-        ...embeddingFields,
+    let embeddingFields: { embedding?: number[]; embeddingModel?: string; matchedText?: string } = {};
+    try {
+      const embResult = await embed(embedText);
+      embeddingFields = {
+        embedding: embResult.vector,
+        embeddingModel: embResult.model,
+        matchedText: embedText,
       };
+    } catch (err) {
+      embedFailures++;
+      log.warn(`Chunk embed failed for ${spaceId}/${chunkId}: ${err instanceof Error ? err.message : String(err)}`);
     }
-  }
 
-  await Promise.all(
-    Array.from({ length: Math.min(EMBED_CONCURRENCY, chunks.length) }, () => embedWorker()),
-  );
+    // Hand the event loop a turn between chunks.
+    //
+    // An in-process embed blocks it for ~200 ms (measured), and a large document is hundreds of them
+    // back to back. `await` on a promise that is already settled does NOT yield to the macrotask queue —
+    // it resumes in the same tick's microtask drain — so without this, pending I/O callbacks (the ones
+    // that answer /health) can sit behind the whole run. `setImmediate` puts this worker behind them
+    // instead. Cheap: one macrotask per chunk against ~200 ms of work.
+    await new Promise<void>(resolve => setImmediate(resolve));
+
+    // Say so, and check we are still the run that is allowed to. Both ride on the same tick: the
+    // heartbeat is throttled to one write per 2 s, and the lease answer it returns is what `shouldStop`
+    // reports here. A recovered job's old holder stops within a beat instead of embedding the same file
+    // alongside its replacement.
+    reportChunk();
+    if (opts.shouldStop?.()) throw new JobLeaseLostError(spaceId, originalId);
+
+    chunkDocs[i] = {
+      _id: chunkId,
+      spaceId,
+      path: chunkId,
+      tags: [],
+      createdAt: now,
+      updatedAt: now,
+      sizeBytes: Buffer.byteLength(chunk.content, 'utf8'),
+      author: authorRef(),
+      parentFileId: originalId,
+      chunkIndex: chunk.chunkIndex,
+      headingText: chunk.headingText,
+      content: chunk.content,
+      ...embeddingFields,
+    };
+  });
 
   for (let i = 0; i < chunkDocs.length; i += INSERT_BATCH) {
     const batch = chunkDocs.slice(i, i + INSERT_BATCH);

@@ -696,6 +696,7 @@
   "files.extract.noCaption": "No caption yet.",
   "files.extract.converted": "Converted markdown",
   "files.extract.truncated": "Shown up to 256 KB. Download the converted file for the rest.",
+  "files.extract.unreadable": "The converted file exists but cannot be decrypted: {{reason}}",
   "files.extract.more": "Show more chunks",
   "files.detail.description": "Description",
   "files.detail.descriptionSource.generated": "generated",

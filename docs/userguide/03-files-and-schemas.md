@@ -12,6 +12,10 @@ The file manager lets you upload, download, organise, and preview files within e
 
 **Uploading:** Click **↑ Upload** in the toolbar, or drag and drop files directly onto the file list. Large files are uploaded in chunks automatically.
 
+**Stored encrypted when the server has a master secret.** Nothing about uploading or downloading changes; a file
+that cannot be decrypted fails its download with a message naming it instead of opening as garbage. See
+[Uploaded files are encrypted at rest](05-storage-data-and-audit.md#uploaded-files-are-encrypted-at-rest).
+
 **Uploading over a file that already exists asks first.** *New in 2.2.* A file with the same name in the
 same folder is **replaced**, and everything derived from the old one is removed and rebuilt: conversion
 chunks, extracted images, and any description generated from them. The dialog names all of that, because

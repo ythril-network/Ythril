@@ -2,7 +2,8 @@ import fs from 'fs/promises';
 import path from 'path';
 import { createHash } from 'crypto';
 import { resolveSafePathChecked, spaceRoot } from './sandbox.js';
-import { FILE_MODE, harden, hardenPath, mkdirPrivate } from '../util/fs-modes.js';
+import { hardenPath, mkdirPrivate } from '../util/fs-modes.js';
+import { readStored, writeStored, statStored, deleteStored, moveStored } from './stored-bytes.js';
 
 export interface FileEntry {
   name: string;
@@ -34,24 +35,21 @@ export async function ensureSpaceFilesDir(spaceId: string): Promise<void> {
 /** Read a text file — rejects if it's a directory or doesn't exist */
 export async function readFile(spaceId: string, filePath: string): Promise<string> {
   const abs = await resolveSafePathChecked(spaceId, filePath);
-  const content = await fs.readFile(abs, 'utf8');
-  return content;
+  return (await readStored(abs)).toString('utf8');
 }
 
 /** Read a file as a Buffer (for binary files) */
 export async function readFileBytes(spaceId: string, filePath: string): Promise<Buffer> {
   const abs = await resolveSafePathChecked(spaceId, filePath);
-  return fs.readFile(abs);
+  return readStored(abs);
 }
 
 /** Write a text file, creating parent directories as needed */
 export async function writeFile(spaceId: string, filePath: string, content: string): Promise<{ sha256: string }> {
   const abs = await resolveSafePathChecked(spaceId, filePath);
-  await mkdirPrivate(path.dirname(abs));
-  await fs.writeFile(abs, content, { encoding: 'utf8', mode: FILE_MODE });
-  // `mode:` only applies when the file is CREATED, so an overwrite of a file that predates this leaves it `0644`.
-  // The chmod is what makes the tightening self-healing instead of needing a boot-time walk of the whole tree.
-  await harden(abs, FILE_MODE);
+  // Through the one door for stored bytes (F-43): encrypted at rest when a master secret is set, written to a
+  // temp file outside the tree and renamed, and hardened to owner-only whatever the file's history.
+  await writeStored(abs, content);
   const sha256 = createHash('sha256').update(content, 'utf8').digest('hex');
   return { sha256 };
 }
@@ -63,9 +61,7 @@ export async function writeFileBytes(
   data: Buffer,
 ): Promise<{ sha256: string }> {
   const abs = await resolveSafePathChecked(spaceId, filePath);
-  await mkdirPrivate(path.dirname(abs));
-  await fs.writeFile(abs, data, { mode: FILE_MODE });
-  await harden(abs, FILE_MODE);   // see the note in `writeFile` above
+  await writeStored(abs, data);   // see the note in `writeFile` above
   const sha256 = createHash('sha256').update(data).digest('hex');
   return { sha256 };
 }
@@ -82,7 +78,8 @@ export async function listDir(spaceId: string, dirPath: string): Promise<FileEnt
       let size: number | undefined;
       let modifiedAt: string | undefined;
       try {
-        const stat = await fs.stat(path.join(abs, e.name));
+        // The PLAINTEXT size: with a master secret a stored file is ciphertext on disk (F-43).
+        const stat = await statStored(path.join(abs, e.name));
         size = stat.size;
         modifiedAt = stat.mtime.toISOString();
       } catch { /* stat failed — omit metadata */ }
@@ -95,7 +92,7 @@ export async function listDir(spaceId: string, dirPath: string): Promise<FileEnt
 /** Delete a file (not a directory) */
 export async function deleteFile(spaceId: string, filePath: string): Promise<void> {
   const abs = await resolveSafePathChecked(spaceId, filePath);
-  await fs.unlink(abs);
+  await deleteStored(abs);   // under the path lock, so a rewrite in flight cannot bring it back (F-43)
 }
 
 /** True if a regular file exists at the given space-relative path. */
@@ -124,7 +121,7 @@ export async function moveFile(
   const srcAbs = await resolveSafePathChecked(spaceId, srcPath);
   const dstAbs = await resolveSafePathChecked(spaceId, dstPath);
   await mkdirPrivate(path.dirname(dstAbs));
-  await fs.rename(srcAbs, dstAbs);
+  await moveStored(srcAbs, dstAbs);   // under both paths' locks (F-43)
   // A rename carries the source's mode with it, so moving a file that predates this hardening would silently
   // reintroduce an 0644 file into a tightened tree.
   //

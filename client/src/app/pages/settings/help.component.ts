@@ -49,6 +49,7 @@ export const HELP_DOCS = [
     id: 'integration-guide', file: 'integration-guide.md',
     parts: [
       'integration-guide/01-getting-ythril.md', 'integration-guide/02-hosting.md',
+      'integration-guide/02a-encryption-at-rest.md',
       'integration-guide/03-auth-and-limits.md', 'integration-guide/04-brain-api.md',
       // The Brain API is SIX files: the base part carries the memory endpoints, the four `04a`-`04e` parts are
       // the resource families and the search comparison, and `04f` holds the write-and-read semantics that

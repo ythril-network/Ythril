@@ -25,8 +25,8 @@ import { requireSpaceAuth, denyReadOnly } from '../auth/middleware.js';
 import { globalRateLimit } from '../rate-limit/middleware.js';
 import { getConfig } from '../config/loader.js';
 import { log } from '../util/log.js';
+import { openStoredRead, statStored, StoredFileUnreadable } from '../files/stored-bytes.js';
 import {
-  readFileBytes,
   listDir,
   createDir,
   moveFile,
@@ -38,7 +38,7 @@ import {
   getUploadReceived,
 } from '../files/chunks.js';
 import { invalidateUsageCache } from '../quota/quota.js';
-import { resolveSafePath, assertNoSymlinkEscape, spaceRoot } from '../files/sandbox.js';
+import { resolveSafePath, resolveSafePathChecked, assertNoSymlinkEscape, spaceRoot } from '../files/sandbox.js';
 import { col, asFilter } from '../db/mongo.js';
 import type { FileMetaDoc } from '../config/types.js';
 import { deleteFileMeta, deleteFileMetaByPrefix, renameFileMeta, renameFileMetaByPrefix, markFileMetaDeletedByPrefix } from '../files/file-meta.js';
@@ -302,7 +302,11 @@ fileStoreRouter.get('/:spaceId', globalRateLimit, requireSpaceAuth, async (req, 
 
   // File download — serve from the first member that has it
   try {
-    const bytes = await readFileBytes(foundMid, normalised);
+    // STREAMED through the stored-bytes door (F-43): a file of any size, decrypted a chunk at a time when it is
+    // encrypted at rest. The length is the PLAINTEXT size, read from the ciphertext length without decrypting.
+    const abs = await resolveSafePathChecked(foundMid, normalised);
+    const { size } = await statStored(abs);
+    const body = await openStoredRead(abs);
     const ext = path.extname(normalised).toLowerCase();
     const contentType = contentTypeForDownload(normalised);
     // Stored XSS guard: user-uploaded HTML/SVG/XML rendered inline would run
@@ -315,15 +319,24 @@ fileStoreRouter.get('/:spaceId', globalRateLimit, requireSpaceAuth, async (req, 
     res
       .status(200)
       .setHeader('Content-Type', contentType)
-      .setHeader('Content-Length', bytes.length)
+      .setHeader('Content-Length', size)
       .setHeader('X-Content-Type-Options', 'nosniff')
       .setHeader('Content-Disposition', `${isActive ? 'attachment' : 'inline'}; filename="${filename}"`);
     if (isActive) {
       res.setHeader('Content-Security-Policy', "sandbox; default-src 'none'");
     }
-    res.send(bytes);
+    /*
+     * A chunk that fails its integrity check AFTER bytes were sent must ABORT the response. Ending it normally would
+     * hand the client a truncated file that looks complete; destroying it makes the client see a failed transfer.
+     */
+    body.on('error', err => {
+      log.warn(`download of ${foundMid}/${normalised} failed mid-stream: ${err instanceof Error ? err.message : String(err)}`);
+      res.destroy(err instanceof Error ? err : undefined);
+    });
+    body.pipe(res);
   } catch (err) {
     log.warn(`readFileBytes error for space ${foundMid}, path ${normalised}: ${err}`);
+    if (err instanceof StoredFileUnreadable) { res.status(500).json({ error: err.message }); return; }
     res.status(500).json({ error: 'Failed to read file' });
   }
 });

@@ -12,6 +12,7 @@ import { resolveWriteTarget } from '../../spaces/proxy.js';
 import { memberSpacesWithin } from '../../spaces/proxy-scoped.js';
 import { emitWebhookEvent } from '../../webhooks/dispatcher.js';
 import { log } from '../../util/log.js';
+import { StoredFileUnreadable } from '../../files/stored-bytes.js';
 import { linkInputSchemasFor, linkInputError, linkFieldsFrom } from '../../brain/write-connections.js';
 
 export const read_fileTool: ToolHandler = {
@@ -37,7 +38,11 @@ export const read_fileTool: ToolHandler = {
     const memberIds = memberSpacesWithin(callSpace, accessibleSpaceIds);
     let content: string | null = null;
     for (const mid of memberIds) {
-      try { content = await readFile(mid, filePath); break; } catch { /* try next */ }
+      try { content = await readFile(mid, filePath); break; } catch (err) {
+        // A file that EXISTS but cannot be decoded is not "not found": the same refusal the REST download gives,
+        // so the two doors agree on a foreign key or altered bytes (F-43). Anything else tries the next member.
+        if (err instanceof StoredFileUnreadable) throw new Error(err.message);
+      }
     }
     if (content === null) throw new Error(`File not found: ${filePath}`);
     return { content: [{ type: 'text' as const, text: content }],

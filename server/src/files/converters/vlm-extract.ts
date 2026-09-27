@@ -23,6 +23,7 @@ import { transcribePageImage, repairMarkdown, repairMarkdownExternal, reconcileC
 import type { StepProgress } from './types.js';
 import { decideRoute, validateExtraction, bestByEvidence } from './extraction-policy.js';
 import { resolveVlmEndpoint, vlmSlotUsable, type VlmEndpoint } from './vlm-endpoint.js';
+import { mapLimit } from '../../util/map-limit.js';
 
 /**
  * Say WHICH gate closed, and what was found there.
@@ -317,16 +318,3 @@ async function runConsensus(
   return { text: best.candidate.text, coverage: best.coverage };
 }
 
-/** Bounded-concurrency map — at most `limit` in flight, preserving order. */
-async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T, i: number) => Promise<R>): Promise<R[]> {
-  const results = new Array<R>(items.length);
-  let idx = 0;
-  const workers = Array.from({ length: Math.max(1, Math.min(limit, items.length)) }, async () => {
-    while (idx < items.length) {
-      const i = idx++;
-      results[i] = await fn(items[i]!, i);
-    }
-  });
-  await Promise.all(workers);
-  return results;
-}

@@ -1,17 +1,18 @@
 /**
  * Chunked upload support — Content-Range based.
  *
- * Chunks are stored under /data/.chunks/<spaceId>/<uploadId>/<start>.bin
+ * Chunks are stored under /data/.chunks/<spaceId>/<uploadId>/<start>-<length>.bin (a chunk from before F-43 is
+ * <start>.bin and still reads — see `chunkSpan`)
  * The uploadId is derived from (spaceId, path, total) for idempotent resume.
  * When the final chunk arrives, all parts are assembled into the target file.
  */
 
 import fs from 'fs/promises';
-import { createWriteStream } from 'fs';
 import path from 'path';
 import { createHash } from 'crypto';
 import { getDataRoot } from '../config/loader.js';
-import { FILE_MODE, harden, mkdirPrivate } from '../util/fs-modes.js';
+import { mkdirPrivate } from '../util/fs-modes.js';
+import { writeStored, readStored, statStored, pipeToStored } from './stored-bytes.js';
 import { log } from '../util/log.js';
 
 /** Deterministic upload ID from (spaceId, path, total). */
@@ -50,6 +51,35 @@ export function parseContentRange(
  * Store a chunk and return the total bytes received so far.
  * Duplicate ranges are silently overwritten (idempotent resume).
  */
+/**
+ * Where a staged chunk sits in the upload and how many PLAINTEXT bytes it holds, read from its NAME.
+ *
+ * The length is in the name because with a master secret a chunk is ciphertext on disk, and its plaintext size would
+ * otherwise cost a file open per chunk on every resume probe and every chunk stored — an upload of N chunks reading
+ * N² headers (F-43). A legacy `<start>.bin` has no length in its name and is stat'ed through the file door instead,
+ * which is the one place that knows how to size a stored file. `null` for anything that is not a chunk.
+ */
+async function chunkSpan(dir: string, name: string): Promise<{ start: number; size: number } | null> {
+  const m = /^(\d+)(?:-(\d+))?\.bin$/.exec(name);
+  if (!m) return null;
+  const start = Number(m[1]);
+  if (!Number.isSafeInteger(start)) return null;
+  if (m[2] !== undefined) {
+    const size = Number(m[2]);
+    return Number.isSafeInteger(size) ? { start, size } : null;
+  }
+  return { start, size: (await statStored(path.join(dir, name))).size };
+}
+
+/** Sum of the plaintext bytes staged in an upload directory. A chunk removed mid-count is skipped. */
+async function stagedBytes(dir: string): Promise<number> {
+  let received = 0;
+  for (const name of await fs.readdir(dir)) {
+    try { received += (await chunkSpan(dir, name))?.size ?? 0; } catch { /* removed by a concurrent cleanup */ }
+  }
+  return received;
+}
+
 export async function storeChunk(
   spaceId: string,
   filePath: string,
@@ -63,24 +93,19 @@ export async function storeChunk(
   // is not less confidential than a complete one.
   await mkdirPrivate(dir);
 
-  // Write chunk as <start>.bin
-  const chunkFile = path.join(dir, `${start}.bin`);
-  await fs.writeFile(chunkFile, data, { mode: FILE_MODE });
-  await harden(chunkFile, FILE_MODE);
-
-  // Calculate total received bytes from all chunk files
-  const entries = await fs.readdir(dir);
-  let received = 0;
-  for (const name of entries) {
-    if (!name.endsWith('.bin')) continue;
-    try {
-      const stat = await fs.stat(path.join(dir, name));
-      received += stat.size;
-    } catch {
-      // Chunk may have been removed by concurrent cleanup — skip it
+  // A re-sent chunk replaces the one at its offset. With the length in the name a resend of a DIFFERENT length would
+  // otherwise sit beside the first rather than over it, so any other chunk at this start goes first.
+  const name = `${start}-${data.length}.bin`;
+  for (const other of await fs.readdir(dir)) {
+    if (other !== name && (other === `${start}.bin` || other.startsWith(`${start}-`))) {
+      await fs.rm(path.join(dir, other), { force: true });
     }
   }
+  // Through the stored-bytes door, so a chunk is ciphertext at rest like the file it becomes (F-43).
+  await writeStored(path.join(dir, name), data);
 
+  // PLAINTEXT sizes, read from the names, or resume would count tags.
+  const received = await stagedBytes(dir);
   return { received, complete: received >= total };
 }
 
@@ -111,12 +136,12 @@ export async function assembleChunks(
   const dir = uploadDir(spaceId, id);
 
   // List and sort chunk files by their start offset.
-  const entries = await fs.readdir(dir);
-  const chunkFiles = entries
-    .filter(n => n.endsWith('.bin'))
-    .map(n => ({ name: n, start: parseInt(n.replace('.bin', ''), 10) }))
-    .filter(c => Number.isInteger(c.start) && c.start >= 0)
-    .sort((a, b) => a.start - b.start);
+  const chunkFiles: { name: string; start: number; size: number }[] = [];
+  for (const name of await fs.readdir(dir)) {
+    const span = await chunkSpan(dir, name);
+    if (span) chunkFiles.push({ name, ...span });
+  }
+  chunkFiles.sort((a, b) => a.start - b.start);
 
   // Verify the chunks tile [0, total) exactly before touching the target file.
   let expected = 0;
@@ -128,9 +153,8 @@ export async function assembleChunks(
         `found one at ${cf.start} (gap or overlap).`,
       );
     }
-    const st = await fs.stat(path.join(dir, cf.name));
-    sized.push({ name: cf.name, size: st.size });
-    expected += st.size;
+    sized.push({ name: cf.name, size: cf.size });
+    expected += cf.size;
   }
   if (expected !== total) {
     throw new RangeError(
@@ -139,29 +163,23 @@ export async function assembleChunks(
     );
   }
 
-  await mkdirPrivate(path.dirname(targetPath));
-
-  // Assemble sequentially: read each chunk, hash it, then write it. One chunk is
-  // held in memory at a time (chunk size is bounded by the upload body limit).
+  // Assemble sequentially: read each chunk, hash its PLAINTEXT, then stream it into the target. One chunk is
+  // held in memory at a time (chunk size is bounded by the upload body limit), and the target streams through
+  // the stored-bytes door, so a file of any size is encrypted at rest without ever being held whole (F-43).
   const hash = createHash('sha256');
-  const out = createWriteStream(targetPath, { mode: FILE_MODE });
-  try {
+  const plaintextChunks = async function* () {
     for (const cf of sized) {
-      const buf = await fs.readFile(path.join(dir, cf.name));
+      const buf = await readStored(path.join(dir, cf.name));
+      // The name promised this many bytes; a chunk that decodes to a different length would tile wrongly and
+      // assemble a corrupt file whose hash is nonetheless "correct".
+      if (buf.length !== cf.size) {
+        throw new RangeError(`Chunk ${cf.name} of '${filePath}' holds ${buf.length} bytes, not the ${cf.size} its name records.`);
+      }
       hash.update(buf);
-      await new Promise<void>((resolve, reject) => {
-        out.write(buf, err => (err ? reject(err) : resolve()));
-      });
+      yield buf;
     }
-    await new Promise<void>((resolve, reject) => {
-      out.end(() => resolve());
-      out.on('error', reject);
-    });
-  } catch (err) {
-    out.destroy();
-    throw err;
-  }
-  await harden(targetPath, FILE_MODE);   // a resumed upload OVERWRITES, and `mode:` only applies at creation
+  };
+  await pipeToStored(targetPath, plaintextChunks());
 
   const sha256 = hash.digest('hex');
 
@@ -181,14 +199,7 @@ export async function getUploadReceived(
   const dir = uploadDir(spaceId, id);
 
   try {
-    const entries = await fs.readdir(dir);
-    let received = 0;
-    for (const name of entries) {
-      if (!name.endsWith('.bin')) continue;
-      const stat = await fs.stat(path.join(dir, name));
-      received += stat.size;
-    }
-    return received;
+    return await stagedBytes(dir);
   } catch {
     return 0;
   }
