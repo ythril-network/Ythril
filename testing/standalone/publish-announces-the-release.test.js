@@ -66,9 +66,15 @@ describe('the section extraction is one implementation, and it is bounded struct
     const s = changelogSection(changelog, NEWEST);
     const body = releaseBody(s);
     assert.ok(!body.startsWith(`## [${NEWEST}]`), 'the heading is the Release title, not part of its notes');
-    assert.ok(body.length > 1000,
-      `the ${NEWEST} notes came out ${body.length} chars. A truncating extraction ships notes that read as `
-      + 'complete, which is the failure a character-bounded slice would produce and nobody would proof-read.');
+    // Nothing between the heading and the next one is lost. This asserted `body.length > 1000`, a proxy for "not
+    // truncated" that fails on a release whose notes are simply short — 5.4.3, one patch entry, is 585 characters.
+    // The rule is that every line of the section reaches the notes, and the last one closes them.
+    const lines = s.split('\n').slice(1).map(l => l.trim()).filter(Boolean);
+    assert.ok(lines.length > 0, `the ${NEWEST} section has no notes — this gate is measuring nothing`);
+    const lost = lines.filter(l => !body.includes(l));
+    assert.deepEqual(lost, [], `the ${NEWEST} notes dropped lines of their section. A truncating extraction ships `
+      + 'notes that read as complete, which is the failure a character-bounded slice would produce and nobody would proof-read.');
+    assert.ok(body.endsWith(lines[lines.length - 1]), 'the notes end where the section does');
   });
 
   it('a version with no dated heading returns null rather than a wrong section', () => {
