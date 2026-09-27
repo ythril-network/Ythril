@@ -32,8 +32,12 @@ import { buildSpaceVectorIndexes } from '../spaces/vector-index.js';
 import { testConnection } from '../db/conn-test.js';
 import { isSsrfSafeMongoUri } from '../util/ssrf.js';
 import { log } from '../util/log.js';
+import { mapLimit } from '../util/map-limit.js';
 
 export const dataRouter = Router();
+
+/** How many spaces a restore rebuilds vector indexes for at once; see the restore route. */
+const RESTORE_INDEX_CONCURRENCY = 6;
 
 // ── Shared middleware ─────────────────────────────────────────────────────────
 
@@ -391,17 +395,23 @@ dataRouter.post('/restore', requireAdminMfa, async (req, res) => {
     // Not awaiting READY (`waitForReady: false`): index builds take minutes on a large restore, and
     // holding the HTTP response open that long would time out. The build is reported so the operator
     // knows recall is still warming up rather than broken.
-    const rebuilt: string[] = [];
-    const failed: string[] = [];
-    for (const space of getConfig().spaces ?? []) {
+    //
+    // Several spaces at a time, never one after another. Each space's rebuild drops and recreates its
+    // indexes, seconds apiece, so a sequential loop grew this request by several seconds per space and
+    // timed out on an instance with a few dozen of them — reporting a failed restore that had succeeded.
+    // Bounded rather than all at once, so a large instance does not hand mongod every index build together.
+    const spaces = getConfig().spaces ?? [];
+    const outcomes = await mapLimit(spaces, RESTORE_INDEX_CONCURRENCY, async (space) => {
       try {
         await buildSpaceVectorIndexes(space.id, false, { force: true });
-        rebuilt.push(space.id);
+        return { id: space.id, ok: true as const };
       } catch (err) {
-        failed.push(space.id);
         log.error(`restore: failed to rebuild vector indexes for space '${space.id}': ${err}`);
+        return { id: space.id, ok: false as const };
       }
-    }
+    });
+    const rebuilt = outcomes.filter(o => o.ok).map(o => o.id);
+    const failed = outcomes.filter(o => !o.ok).map(o => o.id);
     if (failed.length > 0) {
       log.warn(`restore: ${failed.length} space(s) have no vector index — semantic recall will return empty for them until rebuilt`);
     }

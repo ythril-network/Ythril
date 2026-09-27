@@ -27,6 +27,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A restore answers in time however many spaces the instance holds.** After reloading the data, the restore
+  rebuilt every space's vector indexes one space after another before answering, so the request grew by several
+  seconds per space, and an instance with a few dozen spaces saw it time out — reporting a failed restore that had
+  in fact succeeded. The spaces are now rebuilt several at a time.
 - **A file arriving by sync is written inside its own space, whatever path the peer names.** The pull path joined
   the peer's manifest path onto the space directory without the sandbox check every other write gets, so a path
   climbing out of the space would have been written outside it.

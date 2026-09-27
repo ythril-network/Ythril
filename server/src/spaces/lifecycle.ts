@@ -23,6 +23,7 @@ import { ensureEmbedJobIndexes } from '../brain/embed-queue.js';
 import { LINK_INDEXES } from '../brain/link-adjacency.js';
 import { envInt } from '../config/env-num.js';
 import { spaceCollection } from '../db/space-collection.js';
+import { mapLimit } from '../util/map-limit.js';
 
 export async function initSpace(
   spaceId: string,
@@ -310,23 +311,17 @@ export async function initAllSpaces(): Promise<void> {
  * work is a status label.
  */
 async function confirmSpaceIndexesInBackground(spaceIds: readonly string[]): Promise<void> {
-  const queue = [...spaceIds];
   const failed: string[] = [];
-  const worker = async (): Promise<void> => {
-    for (;;) {
-      const spaceId = queue.shift();
-      if (!spaceId) return;
-      try {
-        if (!await finalizeSpaceIndexReady(spaceId, { timeoutMs: STARTUP_INDEX_READY_TIMEOUT_MS })) {
-          failed.push(spaceId);
-        }
-      } catch (err) {
+  await mapLimit(spaceIds, FINALIZE_CONCURRENCY, async (spaceId) => {
+    try {
+      if (!await finalizeSpaceIndexReady(spaceId, { timeoutMs: STARTUP_INDEX_READY_TIMEOUT_MS })) {
         failed.push(spaceId);
-        log.warn(`Space '${spaceId}': index readiness check failed: ${err instanceof Error ? err.message : String(err)}`);
       }
+    } catch (err) {
+      failed.push(spaceId);
+      log.warn(`Space '${spaceId}': index readiness check failed: ${err instanceof Error ? err.message : String(err)}`);
     }
-  };
-  await Promise.all(Array.from({ length: Math.min(FINALIZE_CONCURRENCY, queue.length) }, worker));
+  });
 
   // Say what happened, rather than announcing success unconditionally.
   //
