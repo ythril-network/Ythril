@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.4.2] — 2026-09-27
+
+**A security patch for closed networks: no member's space can be deleted, wiped or changed without that member's
+own vote.** Upgrade every instance that is a member of a closed or braintree network.
+
+### Fixed
+
+- **A closed network no longer passes a round on a member that has not voted** (`Q-76`, security). A member counted
+  only the OTHER members' yeses, so a round it learned from a peer passed as soon as they had all voted. On two
+  members, the proposer alone decided for the other, which then deleted, wiped or changed its own space without
+  having voted. Every member's own yes is now required, as the docs always said; braintree's every-member fallback
+  had the same gap and is fixed with it. *Docs changed:* `docs/network-types.md` (Closed network),
+  `docs/sync-protocol.md` (round conclusion).
+
 ## [5.4.1] — 2026-09-26
 
 **Subscribing a webhook to fact events works from Settings → Webhooks again.** Since 5.0 the page offered event

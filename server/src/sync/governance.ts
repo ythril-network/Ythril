@@ -95,13 +95,20 @@ export function concludeRoundIfReady(
     voters.length === 0
       ? localVotedYes
       : voters.every(v => round.votes.some(c => c.instanceId === v.instanceId && c.vote === 'yes'));
+  // Unanimous means EVERY member, and `net.members` lists every member but this one (`Q-76`). Counting only the
+  // remote yeses let a member that adopted a round by gossip pass it on the others' word alone — on two members, the
+  // proposer decided for the other, whose own data the round then deleted or wiped. The proposer's yes is cast when
+  // the round opens, so its own path is unchanged. The subject of a join or removal is not asked about itself, so
+  // when this instance IS that subject its own yes is not required here either.
+  const localIsVotedOn = subjectIsVotedOn && round.subjectInstanceId === localInstanceId;
+  const everyMemberVotedYes = allRemoteVotedYes && (localVotedYes || localIsVotedOn);
 
   const yesCount = round.votes.filter(v => v.vote === 'yes').length;
 
   let passed = false;
   switch (net.type) {
     case 'closed':
-      passed = allRemoteVotedYes;
+      passed = everyMemberVotedYes;
       break;
     case 'braintree': {
       // SECURITY: recompute the ancestor voter set from the LOCAL topology rather
@@ -119,8 +126,8 @@ export function concludeRoundIfReady(
       } else {
         // No locally-derivable ancestor set (e.g. space_deletion / meta_change, a
         // pre-requiredVoters round, or an incomplete local tree view): fall back to
-        // requiring EVERY current member to have voted yes — never fewer.
-        passed = allRemoteVotedYes;
+        // requiring EVERY current member to have voted yes — never fewer, this one included.
+        passed = everyMemberVotedYes;
       }
       break;
     }
