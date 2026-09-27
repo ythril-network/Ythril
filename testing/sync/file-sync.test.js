@@ -19,13 +19,15 @@ import assert from 'node:assert/strict';
 import { fileURLToPath } from 'url';
 import fs from 'node:fs';
 import path from 'node:path';
-import { INSTANCES, post, get, del, reqJson, waitFor, getInstanceId } from './helpers.js';
+import { INSTANCES, post, get, del, reqJson, waitFor, getInstanceId, createTestSpace } from './helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, 'configs');
 
 let tokenA, tokenB;
 let networkId;
+// Each describe below makes a space of its own in its `before` and removes it in its `after` (Q-75).
+let SPACE, removeSpace;
 const RUN = Date.now();
 
 // ── Helpers ───────────────────────────────────────────────────────────────
@@ -69,11 +71,13 @@ describe('File sync — cross-instance', () => {
     tokenA = fs.readFileSync(path.join(CONFIGS, 'a', 'token.txt'), 'utf8').trim();
     tokenB = fs.readFileSync(path.join(CONFIGS, 'b', 'token.txt'), 'utf8').trim();
 
+    ({ id: SPACE, remove: removeSpace } = await createTestSpace('file-sync', [[INSTANCES.a, tokenA], [INSTANCES.b, tokenB]]));
+
     // Create a closed network A<->B
     const netR = await post(INSTANCES.a, tokenA, '/api/networks', {
       label: `File Sync Test ${RUN}`,
       type: 'closed',
-      spaces: ['general'],
+      spaces: [SPACE],
       votingDeadlineHours: 1,
     });
     assert.equal(netR.status, 201, `Create network: ${JSON.stringify(netR.body)}`);
@@ -103,21 +107,22 @@ describe('File sync — cross-instance', () => {
 
   after(async () => {
     if (networkId) await del(INSTANCES.a, tokenA, `/api/networks/${networkId}`).catch(() => {});
+    await removeSpace?.();
   });
 
   it('file written on A syncs to B after trigger', async () => {
     const filePath = `sync-test-${RUN}-new.txt`;
     const content = `content-${RUN}-new`;
 
-    const upload = await uploadFile(INSTANCES.a, tokenA, 'general', filePath, content);
+    const upload = await uploadFile(INSTANCES.a, tokenA, SPACE, filePath, content);
     assert.ok([201, 202].includes(upload.status), `Upload on A: ${JSON.stringify(upload.body)}`);
 
     await triggerAndWait(networkId, tokenA, async () => {
-      const r = await downloadFile(INSTANCES.b, tokenB, 'general', filePath);
+      const r = await downloadFile(INSTANCES.b, tokenB, SPACE, filePath);
       return r.status === 200 && r.body === content;
     });
 
-    const check = await downloadFile(INSTANCES.b, tokenB, 'general', filePath);
+    const check = await downloadFile(INSTANCES.b, tokenB, SPACE, filePath);
     assert.equal(check.status, 200, `File must appear on B: ${JSON.stringify(check.body)}`);
     assert.equal(check.body, content, 'File content on B must match A');
   });
@@ -128,20 +133,20 @@ describe('File sync — cross-instance', () => {
     const updated = `updated-${RUN}`;
 
     // Write original and sync
-    await uploadFile(INSTANCES.a, tokenA, 'general', filePath, original);
+    await uploadFile(INSTANCES.a, tokenA, SPACE, filePath, original);
     await triggerAndWait(networkId, tokenA, async () => {
-      const r = await downloadFile(INSTANCES.b, tokenB, 'general', filePath);
+      const r = await downloadFile(INSTANCES.b, tokenB, SPACE, filePath);
       return r.status === 200 && r.body === original;
     });
 
     // Overwrite on A, sync again
-    await uploadFile(INSTANCES.a, tokenA, 'general', filePath, updated);
+    await uploadFile(INSTANCES.a, tokenA, SPACE, filePath, updated);
     await triggerAndWait(networkId, tokenA, async () => {
-      const r = await downloadFile(INSTANCES.b, tokenB, 'general', filePath);
+      const r = await downloadFile(INSTANCES.b, tokenB, SPACE, filePath);
       return r.status === 200 && r.body === updated;
     });
 
-    const check = await downloadFile(INSTANCES.b, tokenB, 'general', filePath);
+    const check = await downloadFile(INSTANCES.b, tokenB, SPACE, filePath);
     assert.equal(check.body, updated, 'Overwritten content must propagate to B');
   });
 
@@ -150,23 +155,23 @@ describe('File sync — cross-instance', () => {
     const content = `delete-me-${RUN}`;
 
     // Upload and sync
-    await uploadFile(INSTANCES.a, tokenA, 'general', filePath, content);
+    await uploadFile(INSTANCES.a, tokenA, SPACE, filePath, content);
     await triggerAndWait(networkId, tokenA, async () => {
-      const r = await downloadFile(INSTANCES.b, tokenB, 'general', filePath);
+      const r = await downloadFile(INSTANCES.b, tokenB, SPACE, filePath);
       return r.status === 200;
     });
 
     // Delete on A
-    const delR = await reqJson(INSTANCES.a, tokenA, `/api/files/general?path=${encodeURIComponent(filePath)}`, { method: 'DELETE' });
+    const delR = await reqJson(INSTANCES.a, tokenA, `/api/files/${SPACE}?path=${encodeURIComponent(filePath)}`, { method: 'DELETE' });
     assert.equal(delR.status, 204, `Delete on A: ${JSON.stringify(delR.body)}`);
 
     // Sync and verify B no longer has the file
     await triggerAndWait(networkId, tokenA, async () => {
-      const r = await downloadFile(INSTANCES.b, tokenB, 'general', filePath);
+      const r = await downloadFile(INSTANCES.b, tokenB, SPACE, filePath);
       return r.status === 404;
     });
 
-    const check = await downloadFile(INSTANCES.b, tokenB, 'general', filePath);
+    const check = await downloadFile(INSTANCES.b, tokenB, SPACE, filePath);
     assert.equal(check.status, 404, 'Deleted file must not exist on B after sync');
   });
 
@@ -176,17 +181,17 @@ describe('File sync — cross-instance', () => {
     const f2 = `${dir}/nested/two.txt`;
 
     // Upload two files under the folder and sync both to B.
-    await uploadFile(INSTANCES.a, tokenA, 'general', f1, `a-${RUN}`);
-    await uploadFile(INSTANCES.a, tokenA, 'general', f2, `b-${RUN}`);
+    await uploadFile(INSTANCES.a, tokenA, SPACE, f1, `a-${RUN}`);
+    await uploadFile(INSTANCES.a, tokenA, SPACE, f2, `b-${RUN}`);
     await triggerAndWait(networkId, tokenA, async () => {
-      const r1 = await downloadFile(INSTANCES.b, tokenB, 'general', f1);
-      const r2 = await downloadFile(INSTANCES.b, tokenB, 'general', f2);
+      const r1 = await downloadFile(INSTANCES.b, tokenB, SPACE, f1);
+      const r2 = await downloadFile(INSTANCES.b, tokenB, SPACE, f2);
       return r1.status === 200 && r2.status === 200;
     });
 
     // Delete the whole folder on A (requires confirm). Without per-file tombstones,
     // B's manifest would push these files straight back on the next sync.
-    const delR = await reqJson(INSTANCES.a, tokenA, `/api/files/general?path=${encodeURIComponent(dir)}`, {
+    const delR = await reqJson(INSTANCES.a, tokenA, `/api/files/${SPACE}?path=${encodeURIComponent(dir)}`, {
       method: 'DELETE',
       body: JSON.stringify({ confirm: true }),
     });
@@ -194,12 +199,12 @@ describe('File sync — cross-instance', () => {
 
     // After sync, BOTH files must be gone on B and must NOT resurrect.
     await triggerAndWait(networkId, tokenA, async () => {
-      const r1 = await downloadFile(INSTANCES.b, tokenB, 'general', f1);
-      const r2 = await downloadFile(INSTANCES.b, tokenB, 'general', f2);
+      const r1 = await downloadFile(INSTANCES.b, tokenB, SPACE, f1);
+      const r2 = await downloadFile(INSTANCES.b, tokenB, SPACE, f2);
       return r1.status === 404 && r2.status === 404;
     });
-    const c1 = await downloadFile(INSTANCES.b, tokenB, 'general', f1);
-    const c2 = await downloadFile(INSTANCES.b, tokenB, 'general', f2);
+    const c1 = await downloadFile(INSTANCES.b, tokenB, SPACE, f1);
+    const c2 = await downloadFile(INSTANCES.b, tokenB, SPACE, f2);
     assert.equal(c1.status, 404, 'Deleted folder file one.txt must not exist on B after sync');
     assert.equal(c2.status, 404, 'Deleted folder file nested/two.txt must not exist on B after sync');
   });
@@ -209,12 +214,12 @@ describe('File sync — cross-instance', () => {
     const dst = `sync-test-${RUN}-movedst.txt`;
     const content = `move-me-${RUN}`;
 
-    await uploadFile(INSTANCES.a, tokenA, 'general', src, content);
+    await uploadFile(INSTANCES.a, tokenA, SPACE, src, content);
     await triggerAndWait(networkId, tokenA, async () =>
-      (await downloadFile(INSTANCES.b, tokenB, 'general', src)).status === 200);
+      (await downloadFile(INSTANCES.b, tokenB, SPACE, src)).status === 200);
 
     // Move on A. Without an old-path tombstone, B's manifest would re-push `src` back.
-    const mvR = await reqJson(INSTANCES.a, tokenA, `/api/files/general?path=${encodeURIComponent(src)}`, {
+    const mvR = await reqJson(INSTANCES.a, tokenA, `/api/files/${SPACE}?path=${encodeURIComponent(src)}`, {
       method: 'PATCH',
       body: JSON.stringify({ destination: dst }),
     });
@@ -222,12 +227,12 @@ describe('File sync — cross-instance', () => {
 
     // After sync: B has the file at dst, and src is gone and stays gone.
     await triggerAndWait(networkId, tokenA, async () => {
-      const rd = await downloadFile(INSTANCES.b, tokenB, 'general', dst);
-      const rs = await downloadFile(INSTANCES.b, tokenB, 'general', src);
+      const rd = await downloadFile(INSTANCES.b, tokenB, SPACE, dst);
+      const rs = await downloadFile(INSTANCES.b, tokenB, SPACE, src);
       return rd.status === 200 && rs.status === 404;
     });
-    const cd = await downloadFile(INSTANCES.b, tokenB, 'general', dst);
-    const cs = await downloadFile(INSTANCES.b, tokenB, 'general', src);
+    const cd = await downloadFile(INSTANCES.b, tokenB, SPACE, dst);
+    const cs = await downloadFile(INSTANCES.b, tokenB, SPACE, src);
     assert.equal(cd.status, 200, 'Moved file must exist at destination on B');
     assert.equal(cd.body, content, 'Destination content must match');
     assert.equal(cs.status, 404, 'Old path must NOT resurrect on B after sync');
@@ -239,8 +244,8 @@ describe('File sync — cross-instance', () => {
     const contentB = `version-B-${RUN}`;
 
     // Write the SAME path with DIFFERENT content on both instances BEFORE syncing
-    const upA = await uploadFile(INSTANCES.a, tokenA, 'general', filePath, contentA);
-    const upB = await uploadFile(INSTANCES.b, tokenB, 'general', filePath, contentB);
+    const upA = await uploadFile(INSTANCES.a, tokenA, SPACE, filePath, contentA);
+    const upB = await uploadFile(INSTANCES.b, tokenB, SPACE, filePath, contentB);
     assert.ok([201, 202].includes(upA.status), `Upload on A: ${JSON.stringify(upA.body)}`);
     assert.ok([201, 202].includes(upB.status), `Upload on B: ${JSON.stringify(upB.body)}`);
 
@@ -267,7 +272,7 @@ describe('File sync — cross-instance', () => {
     }
 
     // The original file on A must still contain A's version (local is never overwritten)
-    const check = await downloadFile(INSTANCES.a, tokenA, 'general', filePath);
+    const check = await downloadFile(INSTANCES.a, tokenA, SPACE, filePath);
     assert.equal(check.status, 200, 'Original file must still exist on A');
     assert.equal(check.body, contentA, 'Original file on A must contain A version — local must never be overwritten');
 
@@ -287,8 +292,13 @@ describe('File sync — cross-instance', () => {
 describe('GET /api/sync/manifest', () => {
   let tokenA2;
 
-  before(() => {
+  before(async () => {
     tokenA2 = fs.readFileSync(path.join(CONFIGS, 'a', 'token.txt'), 'utf8').trim();
+    ({ id: SPACE, remove: removeSpace } = await createTestSpace('sync-manifest', [[INSTANCES.a, tokenA2]]));
+  });
+
+  after(async () => {
+    await removeSpace?.();
   });
 
   it('requires spaceId — returns 400 without it', async () => {
@@ -301,11 +311,11 @@ describe('GET /api/sync/manifest', () => {
     assert.equal(r.status, 403);
   });
 
-  it('returns 200 with a manifest array for the general space', async () => {
+  it('returns 200 with a manifest array for the test space', async () => {
     // Ensure at least one file exists first
-    await uploadFile(INSTANCES.a, tokenA2, 'general', `manifest-test-${RUN}.txt`, `content-${RUN}`);
+    await uploadFile(INSTANCES.a, tokenA2, SPACE, `manifest-test-${RUN}.txt`, `content-${RUN}`);
 
-    const r = await reqJson(INSTANCES.a, tokenA2, '/api/sync/manifest?spaceId=general');
+    const r = await reqJson(INSTANCES.a, tokenA2, `/api/sync/manifest?spaceId=${SPACE}`);
     assert.equal(r.status, 200, JSON.stringify(r.body));
     assert.ok(Array.isArray(r.body.manifest), `manifest must be an array, got: ${JSON.stringify(r.body)}`);
   });
@@ -313,9 +323,9 @@ describe('GET /api/sync/manifest', () => {
   it('manifest entries include path, sha256, size, modifiedAt', async () => {
     const filePath = `manifest-shape-${RUN}.txt`;
     const content = `manifest-content-${RUN}`;
-    await uploadFile(INSTANCES.a, tokenA2, 'general', filePath, content);
+    await uploadFile(INSTANCES.a, tokenA2, SPACE, filePath, content);
 
-    const r = await reqJson(INSTANCES.a, tokenA2, '/api/sync/manifest?spaceId=general');
+    const r = await reqJson(INSTANCES.a, tokenA2, `/api/sync/manifest?spaceId=${SPACE}`);
     assert.equal(r.status, 200);
     const entry = r.body.manifest.find(e => e.path === filePath);
     assert.ok(entry, `manifest must contain the uploaded file '${filePath}'`);
@@ -330,16 +340,16 @@ describe('GET /api/sync/manifest', () => {
     await new Promise(r => setTimeout(r, 100));  // ensure timestamp difference
 
     const newPath = `manifest-since-${RUN}.txt`;
-    await uploadFile(INSTANCES.a, tokenA2, 'general', newPath, `since-${RUN}`);
+    await uploadFile(INSTANCES.a, tokenA2, SPACE, newPath, `since-${RUN}`);
 
-    const r = await reqJson(INSTANCES.a, tokenA2, `/api/sync/manifest?spaceId=general&since=${encodeURIComponent(before)}`);
+    const r = await reqJson(INSTANCES.a, tokenA2, `/api/sync/manifest?spaceId=${SPACE}&since=${encodeURIComponent(before)}`);
     assert.equal(r.status, 200);
     const entry = r.body.manifest.find(e => e.path === newPath);
     assert.ok(entry, `File written after 'since' must appear in filtered manifest`);
   });
 
   it('returns 401 without auth', async () => {
-    const r = await reqJson(INSTANCES.a, null, '/api/sync/manifest?spaceId=general');
+    const r = await reqJson(INSTANCES.a, null, `/api/sync/manifest?spaceId=${SPACE}`);
     assert.equal(r.status, 401);
   });
 });
