@@ -648,9 +648,10 @@ describe('Join-path governance (S9) — invite key and RSA handshake respect vot
       assert.equal(r.status, 201);
       networkId = r.body.id;
 
-      // Seed two dummy members (each add opens a round; A's yes concludes it
-      // while it is still the only voter).
-      for (const n of [1, 2]) {
+      // Seed ONE dummy member: A's yes concludes that round while A is the only voter. A second seed cannot be added
+      // on A's yes alone any more — with A and one seed, that is 1 of 2, not a majority (Q-77) — and one seed is
+      // already enough for the joiner below to face a 1-of-2 vote.
+      for (const n of [1]) {
         const addR = await post(INSTANCES.a, tokenA, `/api/networks/${networkId}/members`, {
           instanceId: `s9-dem-seed-${n}-${Date.now()}`,
           label: `Seed ${n}`,
@@ -663,7 +664,7 @@ describe('Join-path governance (S9) — invite key and RSA handshake respect vot
       }
       const cfg = readContainerConfig('ythril-a');
       const net = cfg.networks.find(n => n.id === networkId);
-      assert.equal(net.members.length, 2, 'two seed members expected');
+      assert.equal(net.members.length, 1, 'one seed member expected');
     });
 
     after(async () => {

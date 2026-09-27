@@ -33,6 +33,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   members, the proposer alone decided for the other, which then deleted, wiped or changed its own space without
   having voted. Every member's own yes is now required, as the docs always said; braintree's every-member fallback
   had the same gap and is fixed with it.
+- **A democratic network needs a majority of its members, not half** (`Q-77`, security). The yeses were compared
+  against half of the OTHER members, so on an even-sized network exactly half passed a round, and on two members
+  the proposer's own yes decided for both. A round now passes on more than half of all members, and only a
+  member's yes counts.
 - **A request is no longer dropped after the server was busy** (`Q-73`). An idle connection was closed after
   Node's default 5 seconds, checked before the server read what had arrived on it. So after a few seconds of heavy
   work, a request a client or proxy had already sent on a pooled connection failed with "other side closed", and
