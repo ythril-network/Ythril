@@ -21,10 +21,13 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
-import { dockerExec, INSTANCES, post, get, del, waitFor, triggerSync } from './helpers.js';
+import { dockerExec, INSTANCES, post, get, del, waitFor, triggerSync, createTestSpace } from './helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, 'configs');
+
+/** The space sections 1, 2 and 4 read, write and put in a network — their own, never `general` (`Q-75`). */
+let SPACE;
 
 const HEX64 = /^[0-9a-f]{64}$/;
 
@@ -69,10 +72,17 @@ async function writeMemory(instance, token, spaceId, text) {
 
 describe('Merkle root', () => {
   let tokenA, tokenB;
+  let testSpace;
 
-  before(() => {
+  before(async () => {
     tokenA = fs.readFileSync(path.join(CONFIGS, 'a', 'token.txt'), 'utf8').trim();
     tokenB = fs.readFileSync(path.join(CONFIGS, 'b', 'token.txt'), 'utf8').trim();
+    testSpace = await createTestSpace('merkle', [[INSTANCES.a, tokenA]]);
+    SPACE = testSpace.id;
+  });
+
+  after(async () => {
+    await testSpace?.remove();
   });
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -89,27 +99,26 @@ describe('Merkle root', () => {
       assert.equal(r.status, 403, `Expected 403, got ${r.status}: ${JSON.stringify(r.body)}`);
     });
 
-    it('returns 200 with a 64-char hex root for the general space', async () => {
-      const r = await getMerkle(INSTANCES.a, tokenA, 'general');
+    it('returns 200 with a 64-char hex root for the test space', async () => {
+      const r = await getMerkle(INSTANCES.a, tokenA, SPACE);
       assert.equal(r.status, 200, `Expected 200, got ${r.status}: ${JSON.stringify(r.body)}`);
       assert.ok(r.body.root, 'Response must include root');
       assert.match(r.body.root, HEX64, `root should be a 64-char hex string, got: ${r.body.root}`);
     });
 
     it('response includes spaceId, leafCount, computedAt', async () => {
-      const r = await getMerkle(INSTANCES.a, tokenA, 'general');
+      const r = await getMerkle(INSTANCES.a, tokenA, SPACE);
       assert.equal(r.status, 200);
-      assert.equal(r.body.spaceId, 'general');
+      assert.equal(r.body.spaceId, SPACE);
       assert.ok(typeof r.body.leafCount === 'number', 'leafCount must be a number');
       assert.ok(r.body.computedAt, 'computedAt must be present');
     });
 
     it('empty space returns the SHA-256-of-empty-string sentinel root', async () => {
-      // Create a fresh network scoped space that has no data yet.
-      // We use the 'general' space which may already have data — so we just
+      // The test's own space, created in the suite's before() — so we just
       // verify the root is a valid hex, not the exact empty sentinel.
       // (The empty sentinel is e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855)
-      const r = await getMerkle(INSTANCES.a, tokenA, 'general');
+      const r = await getMerkle(INSTANCES.a, tokenA, SPACE);
       assert.equal(r.status, 200);
       assert.match(r.body.root, HEX64);
     });
@@ -120,20 +129,20 @@ describe('Merkle root', () => {
   // ══════════════════════════════════════════════════════════════════════════
   describe('Root reflects document state', () => {
     it('root changes after writing a document', async () => {
-      const before = await getMerkle(INSTANCES.a, tokenA, 'general');
+      const before = await getMerkle(INSTANCES.a, tokenA, SPACE);
       assert.equal(before.status, 200);
 
-      const write = await writeMemory(INSTANCES.a, tokenA, 'general', `merkle-sentinel-${Date.now()}`);
+      const write = await writeMemory(INSTANCES.a, tokenA, SPACE, `merkle-sentinel-${Date.now()}`);
       // write may return 200 or 201 depending on the brain API
       assert.ok(write.status === 200 || write.status === 201,
         `write returned ${write.status}: ${JSON.stringify(write.body)}`);
 
-      const after = await getMerkle(INSTANCES.a, tokenA, 'general');
+      const after = await getMerkle(INSTANCES.a, tokenA, SPACE);
       assert.equal(after.status, 200);
       assert.notEqual(after.body.root, before.body.root,
         'Root must change after writing a new document');
-      // Use >= rather than strict +1 because other tests may write to the shared
-      // 'general' space concurrently when the suite is run in parallel.
+      // Use >= rather than strict +1 so the assertion does not depend on this
+      // being the only write to the space.
       assert.ok(after.body.leafCount >= before.body.leafCount + 1,
         `leafCount must increase by at least 1 (before=${before.body.leafCount}, after=${after.body.leafCount})`);
     });
@@ -147,7 +156,7 @@ describe('Merkle root', () => {
     let instanceIdA, instanceIdB;
     let peerTokenForA, peerTokenForB;
     let peerTokenForAId, peerTokenForBId;
-    let testSpaceId;  // unique per test run to avoid cross-test contamination
+    let testSpaceId, removeTestSpace;  // unique per test run to avoid cross-test contamination
 
     before(async () => {
       instanceIdA = getInstanceId('ythril-a');
@@ -155,22 +164,7 @@ describe('Merkle root', () => {
 
       // Create a dedicated isolated space on both instances so concurrent tests
       // writing to 'general' cannot affect our Merkle root comparison.
-      testSpaceId = `merkle-test-${Date.now()}`;
-      const spaceLabel = `Merkle Test ${Date.now()}`;
-
-      const spaceA = await post(INSTANCES.a, tokenA, '/api/spaces', {
-        id: testSpaceId,
-        label: spaceLabel,
-        folders: [],
-      });
-      assert.equal(spaceA.status, 201, `Create space on A: ${JSON.stringify(spaceA.body)}`);
-
-      const spaceB = await post(INSTANCES.b, tokenB, '/api/spaces', {
-        id: testSpaceId,
-        label: spaceLabel,
-        folders: [],
-      });
-      assert.equal(spaceB.status, 201, `Create space on B: ${JSON.stringify(spaceB.body)}`);
+      ({ id: testSpaceId, remove: removeTestSpace } = await createTestSpace('merkle-conv', [[INSTANCES.a, tokenA], [INSTANCES.b, tokenB]]));
 
       const n = await post(INSTANCES.a, tokenA, '/api/networks', {
         label: `Merkle-Conv-${Date.now()}`,
@@ -243,8 +237,7 @@ describe('Merkle root', () => {
       await del(INSTANCES.b, tokenB, `/api/networks/${networkId}`).catch(() => {});
       // Best-effort space cleanup (requires confirm body in solo-space deletion)
       if (testSpaceId) {
-        await post(INSTANCES.a, tokenA, `/api/spaces/${testSpaceId}`, { confirm: true }).catch(() => {});
-        await post(INSTANCES.b, tokenB, `/api/spaces/${testSpaceId}`, { confirm: true }).catch(() => {});
+        await removeTestSpace();
       }
     });
 
@@ -286,7 +279,7 @@ describe('Merkle root', () => {
       const n = await post(INSTANCES.a, tokenA, '/api/networks', {
         label: `No-Merkle-${Date.now()}`,
         type: 'closed',
-        spaces: ['general'],
+        spaces: [SPACE],
         votingDeadlineHours: 1,
         // merkle: false — omitted
       });

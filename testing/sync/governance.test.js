@@ -23,12 +23,13 @@ import assert from 'node:assert/strict';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post, get, del, delWithBody, reqJson, waitFor } from './helpers.js';
+import { INSTANCES, post, get, del, delWithBody, reqJson, waitFor, createTestSpace } from './helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, 'configs');
 
 let tokenA;
+let SPACE, removeSpace;
 
 // ── Governed space deletion ───────────────────────────────────────────────────
 
@@ -215,12 +216,13 @@ describe('N-7 auto-adopt on member departure (braintree)', () => {
 
   before(async () => {
     tokenA = fs.readFileSync(path.join(CONFIGS, 'a', 'token.txt'), 'utf8').trim();
+    ({ id: SPACE, remove: removeSpace } = await createTestSpace('gov-n7', [[INSTANCES.a, tokenA]]));
 
     // Create a braintree network on A
     const r = await post(INSTANCES.a, tokenA, '/api/networks', {
       label: 'N7 Test Braintree',
       type: 'braintree',
-      spaces: ['general'],
+      spaces: [SPACE],
       votingDeadlineHours: 1,
     });
     assert.equal(r.status, 201, `Create N7 network: ${JSON.stringify(r.body)}`);
@@ -253,6 +255,7 @@ describe('N-7 auto-adopt on member departure (braintree)', () => {
   after(async () => {
     // Remove the test network; leave if not found
     await del(INSTANCES.a, tokenA, `/api/networks/${networkId}`).catch(() => {});
+    await removeSpace?.();
   });
 
   it('C is initially a child of B', async () => {
@@ -308,7 +311,7 @@ describe('N-7 auto-adopt on member departure (braintree)', () => {
     const createNet = await post(INSTANCES.a, tokenA, '/api/networks', {
       label: 'N7 Non-Braintree',
       type: 'democratic',
-      spaces: ['general'],
+      spaces: [SPACE],
       votingDeadlineHours: 1,
     });
     assert.equal(createNet.status, 201);

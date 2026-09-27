@@ -13,34 +13,40 @@
  * three had to move together for `file` to be a docType, so the assertion has to be made on the far side of
  * all three.
  *
- * `general` carries no `meta`, and `isStrictLinkage` reads `meta?.strictLinkage !== false` — so strict
- * linkage is ON for it by default and this file needs no space setup. Stated here because a reader looking
- * for the missing arrangement will otherwise assume it was forgotten.
+ * The space is the test's own (`createTestSpace`, `Q-75`), and a new space is seeded with `strictLinkage: true`
+ * — so strict linkage is ON for it without any further arrangement. Stated here because a reader looking for
+ * the missing arrangement will otherwise assume it was forgotten.
  */
 
-import { describe, it, before } from 'node:test';
+import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
 import { randomUUID } from 'node:crypto';
-import { INSTANCES, post, get, waitFor } from './helpers.js';
+import { INSTANCES, post, get, waitFor, createTestSpace } from './helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, 'configs');
 
 let token;
+let SPACE, removeSpace;
 const RUN = Date.now();
 
-before(() => {
+before(async () => {
   token = fs.readFileSync(path.join(CONFIGS, 'a', 'token.txt'), 'utf8').trim();
+  ({ id: SPACE, remove: removeSpace } = await createTestSpace('file-links', [[INSTANCES.a, token]]));
+});
+
+after(async () => {
+  await removeSpace?.();
 });
 
 /** One arriving link, shaped as `IncomingLinkDoc` requires. */
 function linkDoc({ from, fromKind, to, toKind }) {
   return {
     _id: randomUUID(),
-    spaceId: 'general',
+    spaceId: SPACE,
     from,
     fromKind,
     to,
@@ -75,7 +81,7 @@ describe('a link arriving FROM a file is checked like any other', () => {
     const filePath = `q39/${RUN}/absent-target.md`;
     const missingEntity = randomUUID();
 
-    const r = await post(INSTANCES.a, token, '/api/sync/batch-upsert?spaceId=general', {
+    const r = await post(INSTANCES.a, token, `/api/sync/batch-upsert?spaceId=${SPACE}`, {
       links: [linkDoc({ from: filePath, fromKind: 'file', to: missingEntity, toKind: 'entity' })],
     });
     assert.equal(r.status, 200, JSON.stringify(r.body));
@@ -91,8 +97,8 @@ describe('a link arriving FROM a file is checked like any other', () => {
     const filePath = `q39/${RUN}/present-target.md`;
 
     const entityId = randomUUID();
-    const e = await post(INSTANCES.a, token, '/api/sync/entities?spaceId=general', {
-      _id: entityId, spaceId: 'general', name: `q39-present-${RUN}`, type: 'concept',
+    const e = await post(INSTANCES.a, token, `/api/sync/entities?spaceId=${SPACE}`, {
+      _id: entityId, spaceId: SPACE, name: `q39-present-${RUN}`, type: 'concept',
       embedding: [], tags: [], properties: {},
       author: { instanceId: 'test', instanceLabel: 'Test' },
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
@@ -100,7 +106,7 @@ describe('a link arriving FROM a file is checked like any other', () => {
     });
     assert.equal(e.status, 200, JSON.stringify(e.body));
 
-    const r = await post(INSTANCES.a, token, '/api/sync/batch-upsert?spaceId=general', {
+    const r = await post(INSTANCES.a, token, `/api/sync/batch-upsert?spaceId=${SPACE}`, {
       links: [linkDoc({ from: filePath, fromKind: 'file', to: entityId, toKind: 'entity' })],
     });
     assert.equal(r.status, 200, JSON.stringify(r.body));
