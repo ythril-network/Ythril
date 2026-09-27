@@ -28,15 +28,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **A closed network no longer passes a round on a member that has not voted** (`Q-76`, security). A member counted
-  only the OTHER members' yeses, so a round it learned from a peer passed as soon as they had all voted — on two
-  members, the proposer alone decided for the other, which then deleted, wiped or changed its own space without
-  having voted. Every member's own yes is now required, as the docs always said; braintree's every-member fallback
-  had the same gap and is fixed with it.
-- **A democratic network needs a majority of its members, not half** (`Q-77`, security). The yeses were compared
-  against half of the OTHER members, so on an even-sized network exactly half passed a round, and on two members
-  the proposer's own yes decided for both. A round now passes on more than half of all members, and only a
-  member's yes counts.
 - **A request is no longer dropped after the server was busy** (`Q-73`). An idle connection was closed after
   Node's default 5 seconds, checked before the server read what had arrived on it. So after a few seconds of heavy
   work, a request a client or proxy had already sent on a pooled connection failed with "other side closed", and
@@ -86,6 +77,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The conflict page's action selects look editable on every theme.** They were styled with a theme token no
   stylesheet defines, so their border and background were dropped; five other reads of undefined tokens are fixed
   and a gate now holds every `var()` the client reads to a defined token.
+
+## [5.4.3] — 2026-09-27
+
+**A security patch for democratic networks: a round needs a real majority of the members.** Upgrade every
+instance that is a member of a democratic network.
+
+### Fixed
+
+- **A democratic network needs a majority of its members, not half** (`Q-77`, security). The yes votes were
+  compared against half of the OTHER members, so on an even-sized network exactly half passed a round, and on two
+  members the proposer's own yes decided for both. A round now passes on more than half of all members, and only a
+  member's yes counts. No documentation changed: the docs always said majority.
+
+## [5.4.2] — 2026-09-27
+
+**A security patch for closed networks: no member's space can be deleted, wiped or changed without that member's
+own vote.** Upgrade every instance that is a member of a closed or braintree network.
+
+### Fixed
+
+- **A closed network no longer passes a round on a member that has not voted** (`Q-76`, security). A member counted
+  only the OTHER members' yeses, so a round it learned from a peer passed as soon as they had all voted. On two
+  members, the proposer alone decided for the other, which then deleted, wiped or changed its own space without
+  having voted. Every member's own yes is now required, as the docs always said; braintree's every-member fallback
+  had the same gap and is fixed with it. *Docs changed:* `docs/network-types.md` (Closed network),
+  `docs/sync-protocol.md` (round conclusion).
 
 ## [5.4.1] — 2026-09-26
 
