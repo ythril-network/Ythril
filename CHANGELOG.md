@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+**Recall**
+
+- **A reranked result always ranks above one the reranker did not score** (`Q-79`). The cross-encoder scores
+  at most 100 candidates, and an unfiltered recall gathers more; the rest kept only their vector or fused score,
+  which sits on a higher scale than a cross-encoder's relevance, so they took the top of the answer. The recall
+  came back in vector order with no `degraded` and every batch answered 200. The 100 scored are now the
+  `minPerType` floor results first, then the pool's best by its fused order (by vector similarity across several
+  spaces), and the rest follow every scored result. Floor results are also fused with the pool now, so they
+  are ranked on the same scale as the results around them. *Docs changed:* `docs/integration-guide/04a-recall-api.md`,
+  `05b-media-embedding.md`, `02-hosting.md`; `docs/userguide/02-brain.md`.
+- **A recall on a proxy or on named spaces reranks once** (`Q-81`). It merged its members by hand and sent one
+  rerank request per member, the fan-out already fixed for a recall naming no space; it now takes the same path,
+  with one query embedding and one rerank pass.
+
+**Links**
+
+- **A proxy space is no longer reported unconverted on every start** (`Q-78`). The link conversion never walks a
+  proxy, because it holds no records, so a proxy made before 5.0 never carries the marker, and the array clean-up
+  that runs after the conversion listed it as still holding its links as arrays. Link reads through a proxy were
+  not affected: they are answered by its members. The warning and the link-read refusal now say that each start
+  retries the conversion, since `npm run links:convert` is not in the image; the script refuses a proxy by name.
+  *Docs changed:* `docs/integration-guide/04g-links-api.md`, `06-spaces-api.md`; `docs/userguide/02-brain.md`.
+
 ## [5.5.1] — 2026-09-27
 
 **A patch: a network no longer deletes a member's space.** Upgrade every instance that is a member of a network,

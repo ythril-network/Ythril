@@ -156,6 +156,14 @@ unavailable, and **none of them can fail a search** — a stage that cannot answ
    widens the pool it gets to choose from. Unreachable or unconfigured means no opinion, and the fused
    order stands. See the `mediaEmbedding.rerank.*` rows in [Configuration](05b-media-embedding.md#configuration).
 
+   **It scores at most 100 candidates, and a result it scored always ranks above one it did not.** The pool
+   is `topK x candidateMultiplier` per record type searched, plus lexical and not-yet-indexed hits, so an
+   unfiltered recall at `topK: 5` already gathers around 100 and a larger `topK` more. The 100 scored are the `minPerType` floor results first, then the pool's
+   best by its fused order (by vector similarity across several spaces). The rest stay in the answer, below
+   every scored result, in their fused or vector order — a cross-encoder's relevance and a cosine similarity
+   are unrelated scales, so comparing them directly would let the unscored tail take the whole answer. That
+   is not a degradation and sets no `degraded` reason: the cap is a cost ceiling, and nothing was skipped.
+
    **Budget for it: the cost tracks TEXT, not candidate count, and running out is silent.** The cross-encoder
    scores every candidate passage, so the budget must cover the total text of `topK x candidateMultiplier`
    candidates — on records of several kilobytes, **seconds per result**. Measured live, same query and space,
@@ -169,7 +177,8 @@ unavailable, and **none of them can fail a search** — a stage that cannot answ
    reasonable-looking answer comes back without the precision this stage exists to add. Raise
    `modelSlots.rerank.timeoutMs`, but not past whatever proxy sits in front of the API — a gateway timeout
    below it cuts the request off first. Read `rerankScore` to tell
-   the cases apart: no field means the stage had no opinion.
+   the cases apart: no field on ANY result means the stage had no opinion; no field on the tail of a long
+   answer means those results were past the 100 the stage scores.
 
    **Both keys are documented in [05b — media embedding](05b-media-embedding.md)**, the model-slot table for
    `modelSlots.<slot>.timeoutMs` and the reranker rows for the rest. The table writes the key generically;
@@ -181,7 +190,8 @@ unavailable, and **none of them can fail a search** — a stage that cannot answ
    `ythril_recall_degraded_total{reason}` counter is how you notice either has been true for a week.
 
 **Ordering precedence is `rerankScore` → `fusedScore` → `score`** — the order of how much each signal
-actually knows.
+actually knows — **and a result carrying a `rerankScore` ranks above every result without one**, whatever
+the numbers, because the three are on unrelated scales.
 
 #### The per-stage scores are the ORDERING
 
@@ -190,14 +200,17 @@ doors, each present only when that stage actually ran. **No parameter removes th
 `includeDiagnostics` does not govern them — that flag covers `matchedText`, `embeddingModel` and `seq`.
 
 **Read the highest one present to know why a result placed where it did.** Precedence is
-`rerankScore > fusedScore > score`, so on an instance with a cross-encoder configured, `score` — plain vector
+`rerankScore > fusedScore > score`, and every result with a `rerankScore` comes before every result without
+one — so merge two answers the same way, or the merged order will differ from the server's. On an instance
+with a cross-encoder configured, `score` — plain vector
 similarity — is *not* the number that ordered the answer — and `minScore` (below) filters on `score` alone, so a
 threshold and the ordering can be different numbers.
 
 `includeDiagnostics` exists to remove COST, and three floats per result are not a cost — `matchedText` is,
 which is why it is behind the flag and these are not.
 
-An absent score means that stage did not run: no reranker configured, no lexical channel for that query.
+An absent score means that stage did not score the result: no reranker configured, no lexical channel for
+that query — or, for `rerankScore`, a result past the 100 candidates the cross-encoder scores.
 
 #### `minScore` always filters on `score`
 
@@ -226,7 +239,7 @@ did:
 ```
 
 `lexicalScore` is absent when the record did not match lexically; `fusedScore` when hybrid is off;
-`rerankScore` when no reranker is configured or it did not answer.
+`rerankScore` when no reranker is configured, it did not answer, or the result was past the 100 it scores.
 
 **Both doors return the per-stage scores.** The MCP tool spreads the same ranking fields on both its
 branches, so an agent sees `lexicalScore`, `fusedScore` and `rerankScore` exactly as a REST caller does.

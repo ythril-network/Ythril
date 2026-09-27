@@ -22,6 +22,7 @@ import { col } from '../db/mongo.js';
 import { RECORD_COLLECTION as COLLECTION_SUFFIX } from '../config/types.js';
 import { log } from '../util/log.js';
 import type { RecallKnowledgeType } from './recall.js';
+import { byIdAsc } from './recall-shape.js';
 
 /** One document's lexical relevance, as MongoDB's `textScore`. */
 export interface LexicalHit {
@@ -128,4 +129,43 @@ export function rrfFuse(channels: Array<readonly string[]>, k: number = RRF_K): 
     }
   }
   return fused;
+}
+
+/** What fusion reads and writes on a candidate — structural, so this module needs nothing from recall. */
+export interface FusableResult {
+  _id: string;
+  score?: number;
+  fusedScore?: number;
+}
+
+/**
+ * Fuse the vector order of EVERY answer candidate with the lexical ranking, and stamp `fusedScore` on each
+ * copy. Returns whether anything was fused — `false` when the lexical channel found nothing, and then the
+ * candidates are left exactly as they were.
+ *
+ * **The floor results are candidates too, and that is why they are a parameter.** A `minPerType` floor comes
+ * from its own search, as separate objects, and fusion used to run over the pool alone: a floor copy kept
+ * only its cosine `score` while the pool around it carried RRF scores near 0.03, so the two were ranked
+ * against each other on unrelated scales (`Q-79`). Deduped by `_id`, so a record in both lists has one
+ * rank and every copy the same score.
+ */
+export function stampFusion(
+  pool: FusableResult[], floors: readonly FusableResult[], lexicalRanked: readonly string[],
+): boolean {
+  if (lexicalRanked.length === 0) return false;
+  const refsById = new Map<string, FusableResult[]>();
+  for (const r of [...pool, ...floors]) {
+    const refs = refsById.get(r._id);
+    if (refs) refs.push(r); else refsById.set(r._id, [r]);
+  }
+  const vectorRanked = [...refsById.values()].map(refs => refs[0]!)
+    .sort((a, b) => (b.score ?? 0) - (a.score ?? 0) || byIdAsc(a, b)).map(r => r._id);
+  // Ranks are the LEXICAL ranks, not re-numbered after dropping out-of-pool ids: a document that placed
+  // 5th lexically genuinely placed 5th, and compressing the ranks would overstate it.
+  const fused = rrfFuse([vectorRanked, lexicalRanked]);
+  for (const [id, refs] of refsById) {
+    const f = fused.get(id);
+    if (f !== undefined) for (const r of refs) r.fusedScore = f;
+  }
+  return true;
 }

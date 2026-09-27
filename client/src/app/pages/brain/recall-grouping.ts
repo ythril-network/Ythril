@@ -278,10 +278,11 @@ export interface Ordering {
  * `seq`. Three floats per result are not a cost, which is why they are always sent, and showing them costs
  * nothing either.
  *
- * ## Absent means the stage did not RUN
+ * ## Absent means the stage did not score THIS result
  *
- * No reranker configured, no lexical channel for that query. So a missing field is information rather than a
- * gap, and it is left out rather than rendered as zero — a zero would read as "the reranker scored this
+ * No reranker configured, no lexical channel for that query — or a result past the 100 candidates the
+ * reranker scores, which the server ranks below every scored one. So a missing field is information rather
+ * than a gap, and it is left out rather than rendered as zero — a zero would read as "the reranker scored this
  * nothing", which is the opposite of "the reranker never saw it".
  */
 export function orderingOf(hit: Record<string, unknown>): Ordering | null {

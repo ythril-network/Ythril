@@ -252,8 +252,11 @@ describe('every aggregation site orders by rankOf, not by raw score', () => {
   const mcp = readFileSync(new URL('../../server/src/mcp/tools/search.ts', import.meta.url), 'utf8');
   // Both halves of the recall implementation: recall.ts kept the database work, recall-shape.ts took the
   // pure merge/rank/text functions when the file was split. rankOf is in the second one now.
+  // And `lexical-search.ts`, which took the vector channel handed to RRF when fusion began ranking the
+  // floor results too (`stampFusion`, Q-79).
   const recall = readFileSync(new URL('../../server/src/brain/recall.ts', import.meta.url), 'utf8')
-    + readFileSync(new URL('../../server/src/brain/recall-shape.ts', import.meta.url), 'utf8');
+    + readFileSync(new URL('../../server/src/brain/recall-shape.ts', import.meta.url), 'utf8')
+    + readFileSync(new URL('../../server/src/brain/lexical-search.ts', import.meta.url), 'utf8');
 
   const sortsByRawScore = src =>
     (src.match(/\.sort\(\([^)]*\)\s*=>\s*\(?[a-z]\.score\s*\?\?\s*0\)?\s*-/g) ?? []).length;
@@ -279,8 +282,16 @@ describe('every aggregation site orders by rankOf, not by raw score', () => {
   });
 
   it('the MCP recall tool merges member spaces by rank, not raw score', () => {
-    assert.ok(/all\.sort\(byRankThenId\)/.test(mcp),
-      'the member merge must use the shared rank comparator');
+    /*
+     * The member merge no longer lives here either (`Q-81`): both branches hand their spaces to
+     * `recallGlobal`, whose merge sorts by `byRankThenId` and is asserted by
+     * `a-reranked-result-always-outranks-an-unscored-one.test.js`. A merge that grows back in this file must
+     * use the shared comparator, and nothing here may sort by raw score.
+     */
+    if (/all\.sort\(/.test(mcp)) {
+      assert.ok(/all\.sort\(byRankThenId\)/.test(mcp), 'the member merge must use the shared rank comparator');
+    }
+    assert.ok(/recallGlobal\(memberIds,/.test(mcp), 'the member branch merges by hand instead of through recallGlobal');
     assert.equal(sortsByRawScore(mcp), 0, 'no recall path in this file may sort by raw score');
   });
 

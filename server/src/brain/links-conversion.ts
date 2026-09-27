@@ -1,15 +1,13 @@
 /**
- * Turn a space's existing array entries into link records — the one-off an operator runs after upgrading.
+ * Turn a space's existing array entries into link records — at every start, and from the operator's script.
  *
- * ## Why it is a script and not a boot migration
+ * ## Where it runs
  *
- * Link records SYNC. A boot migration writing synced data means every instance in a network independently
- * decides to create the same records at whatever moment it happens to restart, which is a large write burst
- * nobody asked for and a divergence report for as long as the peers disagree. `_REFERENCE.md →
- * migration-strategy` states the rule: synced data migrates lazily or on demand, and only LOCAL state may
- * migrate at boot.
- *
- * On demand is what this is. The operator picks the moment.
+ * It was written as a script the operator ran, because link records SYNC and the rule for synced data is
+ * that it migrates lazily or on demand (`_REFERENCE.md → migration-strategy`). 5.0 removed the arrays, so
+ * the owner had it run at every start instead (`links-convert-on-boot.ts`, which carries that reasoning);
+ * the script (`npm run links:convert`, from a source checkout) is still the way to walk one space by name or
+ * preview what a walk would do.
  *
  * ## Running it twice is a no-op, and that is load-bearing
  *
@@ -38,6 +36,21 @@ import { reconcileLinksForDocument, LINK_BEARING_COLLECTIONS } from './links.js'
 import { LINK_CLASSES, legacyField } from './link-adjacency.js';
 import { log } from '../util/log.js';
 import { spaceCollection } from '../db/space-collection.js';
+import { isProxy } from '../spaces/proxy.js';
+
+/**
+ * Whether a space is a SUBJECT of the link conversion: walked, marked, and reported when it was left behind.
+ *
+ * A proxy is not. It holds no records of its own — its members do, and they convert in their own right — so
+ * walking one finds nothing and would then mark it complete on the strength of that, and it is never marked,
+ * so any site asking only *"is it marked?"* reports it unconverted for ever. The array clear did exactly
+ * that: every boot of an instance with a pre-5.0 proxy warned that the proxy still held its links as arrays
+ * (`Q-78`). One question, asked by every site that chooses spaces for link work, so the next one cannot
+ * answer it differently.
+ */
+export function linkConversionConcerns(space: NonNullable<Parameters<typeof isProxy>[0]>): boolean {
+  return !isProxy(space);
+}
 
 /** What one space's conversion did, per collection and in total. */
 export interface ConversionReport {
@@ -247,9 +260,7 @@ export async function convertSpaceLinks(spaceId: string): Promise<ConversionRepo
 export async function convertAllLinks(): Promise<ConversionReport[]> {
   const reports: ConversionReport[] = [];
   for (const space of getConfig().spaces) {
-    // A proxy space holds no documents of its own — it aggregates its members, which are converted in their
-    // own right. Walking it would find nothing and then mark it complete on the strength of that.
-    if (space.proxyFor && space.proxyFor.length > 0) continue;
+    if (!linkConversionConcerns(space)) continue;
     const report = await convertSpaceLinks(space.id);
     if (report.failed === 0) updateSpace(space.id, { completeLinkage: true });
     reports.push(report);

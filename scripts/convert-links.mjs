@@ -37,20 +37,36 @@ const dist = (p) => pathToFileURL(path.join(process.cwd(), 'server', 'dist', p))
 
 const { loadConfig } = await import(dist('config/loader.js'));
 const { connectMongo, closeMongo } = await import(dist('db/mongo.js'));
-const { convertSpaceLinks, convertAllLinks, previewSpaceLinks, stampFileMetaSeqs } = await import(dist('brain/links-conversion.js'));
+const { convertSpaceLinks, convertAllLinks, previewSpaceLinks, stampFileMetaSeqs, linkConversionConcerns } =
+  await import(dist('brain/links-conversion.js'));
+const { getConfig } = await import(dist('config/loader.js'));
 
 loadConfig();
-await connectMongo();
 
 const args = process.argv.slice(2);
 const preview = args.includes('--preview');
 const only = args.find(a => !a.startsWith('--'));
 
+/*
+ * A NAMED space is looked up, not trusted: a proxy holds no records, so walking one finds nothing — and the
+ * boot conversion and the array clear never treat one as a subject (`Q-78`). Refused by name, before any
+ * connection, and with a non-zero exit so a wrapper script does not read it as a clean run.
+ */
+if (only) {
+  const named = getConfig().spaces.find(s => s.id === only);
+  if (named && !linkConversionConcerns(named)) {
+    console.error(`'${only}' is a proxy space: it holds no records of its own, so it has no links to convert. `
+      + 'Name one of its members instead.');
+    process.exit(2);
+  }
+}
+
+await connectMongo();
+
 if (preview) {
   // Reads only. Deliberately the first branch and a separate exit: a preview that shares a line of the
   // conversion's control flow is a preview one edit away from writing.
-  const { getConfig } = await import(dist('config/loader.js'));
-  const spaces = only ? [{ id: only }] : getConfig().spaces.filter(s => !(s.proxyFor?.length > 0));
+  const spaces = only ? [{ id: only }] : getConfig().spaces.filter(linkConversionConcerns);
   try {
     for (const s of spaces) {
       const p = await previewSpaceLinks(s.id);

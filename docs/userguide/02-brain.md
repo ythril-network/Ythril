@@ -210,7 +210,8 @@ before the lists are removed, so nothing stored is lost. Attaching a record in t
 
 **A space whose conversion failed says so** rather than answering that it has no connections, and names
 itself in the message. That is the one case where you have to do something, and the server log says what
-went wrong.
+went wrong. A proxy space is never among them: it holds no records of its own, so there is nothing in it to
+convert, and its connections are its members'.
 
 ---
 
@@ -318,7 +319,9 @@ changed at the bottom of a long form does not send you back up to run it.
 Which one you see is which stage decided: if your administrator has configured a reranking model, that is
 the number the order came from and plain similarity is not. Any other stage that ran is shown beside it,
 dimmer. A stage that did not run is left out rather than shown as zero — no reranker configured is not the
-same as a reranker scoring nothing.
+same as a reranker scoring nothing. The reranking model scores the top 100 candidates; a longer answer lists
+the rest after them, labelled with the score that placed them, because a reranked result always ranks above
+one the model did not read.
 
 **If a graph walk stops short, the panel says so** and offers the whole graph as a download where the
 instance was able to write one. What is missing from a short graph are records the walk never read; the

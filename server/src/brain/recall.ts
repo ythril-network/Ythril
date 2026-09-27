@@ -30,7 +30,7 @@ import { datePassedPolicy } from './chrono-date-policy.js';
 import { getSpaceMeta } from '../spaces/schema-validation.js';
 import { rerankConfigured, candidateMultiplier } from './rerank-client.js';
 import { rerankPool } from './rerank-pool.js';
-import { lexicalSearch, rrfFuse, hybridSearchEnabled, LEXICAL_LIMIT_MULTIPLIER, type LexicalHit } from './lexical-search.js';
+import { lexicalSearch, stampFusion, hybridSearchEnabled, LEXICAL_LIMIT_MULTIPLIER, type LexicalHit } from './lexical-search.js';
 import { atlasVectorScore, scoresAgree } from './vector-score.js';
 import { matchFreshWrites, addFreshWrites } from './fresh-writes.js';
 import type { ChronoStatus, RecordType } from '../config/types.js';
@@ -396,9 +396,9 @@ export async function recall(
   // clause names — because an opaque identifier has no useful semantic neighbourhood. This gives those
   // queries a channel that can actually see them. Best-effort throughout: a space with no text index
   // contributes an empty channel and the vector order stands unchanged.
-  if (hybridSearchEnabled()) {
-    await applyLexicalFusion(spaceId, query, embResult.vector, activeTypes, perTypeK, allResults, tags, filter);
-  }
+  // `fused` says whether ONE fusion ranked this whole pool, which is what lets the rerank cap trust it.
+  const fused = hybridSearchEnabled()
+    && await applyLexicalFusion(spaceId, query, embResult.vector, activeTypes, perTypeK, allResults, guaranteed, tags, filter);
 
   // Phase 3: rerank the candidate pool, if a cross-encoder is configured. Best-effort by construction —
   // `rerankPool` leaves the fused order untouched when the reranker has no opinion.
@@ -411,7 +411,7 @@ export async function recall(
   // 5 s, or the parameter bounds nothing that matters. `RECALL_BUDGET_MS` remains the ceiling.
   if (reranking && !opts?.deferRerank) {
     const remaining = effectiveBudgetMs - (Date.now() - startedAt);
-    await rerankStage(query, guaranteed, allResults, remaining, effectiveBudgetMs, noteDegraded);
+    await rerankStage(query, guaranteed, allResults, remaining, effectiveBudgetMs, noteDegraded, fused ? 'fused' : 'vector');
   }
 
   // A deferred call hands back the whole pool for the caller's single pass; `minScore` still applies here,
@@ -456,10 +456,12 @@ async function applyLexicalFusion(
   activeTypes: RecallKnowledgeType[],
   perTypeK: number,
   pool: RecallResult[],
+  /** The floor results: answer candidates too, fused on the same ranking — see `stampFusion`. */
+  floors: readonly RecallResult[],
   tags?: string[],
   filter?: RecallFilter,
-): Promise<void> {
-  if (pool.length === 0) return;
+): Promise<boolean> {
+  if (pool.length === 0) return false;
 
   // Same two matches `recallByType`'s exhaustive path applies, so the two channels agree on eligibility.
   const eligibility: Record<string, unknown> = {};
@@ -474,7 +476,7 @@ async function applyLexicalFusion(
     activeTypes.map(t => lexicalSearch(spaceId, t, query, limit, match)),
   );
   const lexical = perType.flat().sort((a, b) => b.lexicalScore - a.lexicalScore || byIdAsc(a, b));
-  if (lexical.length === 0) return; // no text index, or nothing matched — vector order stands
+  if (lexical.length === 0) return false; // no text index, or nothing matched — vector order stands
 
   const inPool = new Map(pool.map(r => [r._id, r]));
   for (const hit of lexical) {
@@ -497,15 +499,7 @@ async function applyLexicalFusion(
     }
   }
 
-  const vectorRanked = [...pool].sort((a, b) => (b.score ?? 0) - (a.score ?? 0) || byIdAsc(a, b)).map(r => r._id);
-  // Ranks are the LEXICAL ranks, not re-numbered after dropping out-of-pool ids: a document that placed
-  // 5th lexically genuinely placed 5th, and compressing the ranks would overstate it.
-  const lexicalRanked = lexical.map(h => h._id);
-  const fused = rrfFuse([vectorRanked, lexicalRanked]);
-  for (const rec of pool) {
-    const f = fused.get(rec._id);
-    if (f !== undefined) rec.fusedScore = f;
-  }
+  return stampFusion(pool, floors, lexical.map(h => h._id));
 }
 
 /**
@@ -637,13 +631,15 @@ async function rerankStage(
   remaining: number,
   budgetMs: number,
   noteDegraded: (reason: string) => void,
+  /** Which key picks the candidates the cap keeps — see `rerankPool`. Required, so no caller inherits one. */
+  order: 'fused' | 'vector',
 ): Promise<void> {
   if (remaining < RERANK_MIN_BUDGET_MS) {
     noteDegraded('rerank_skipped_budget');
     log.warn(`Recall: ${remaining}ms of the ${budgetMs}ms budget left — skipping the reranker and returning the fused order`);
     return;
   }
-  await rerankPool(query, guaranteed, pool, remaining, noteDegraded);
+  await rerankPool(query, guaranteed, pool, remaining, noteDegraded, undefined, { order });
 }
 
 // ── Insert-time duplicate detection ──────────────────────────────────────────
@@ -1127,7 +1123,7 @@ export async function recallGlobal(
   const flat = results.flat();
   if (deferRerank) {
     const budgetMs = effectiveBudgetFor(opts?.maxTimeMS);
-    await rerankStage(query, [], flat, budgetMs - (Date.now() - startedAt), budgetMs, degradedNoter(opts?.degraded));
+    await rerankStage(query, [], flat, budgetMs - (Date.now() - startedAt), budgetMs, degradedNoter(opts?.degraded), 'vector');
   }
   // Sort by score descending, deduplicate by _id
   const seen = new Set<string>();

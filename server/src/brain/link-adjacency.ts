@@ -240,8 +240,9 @@ export function linkConversionRefusal(space: { id: string; completeLinkage?: boo
   return `space '${space.id}' has no converted link records, so its connections cannot be read. The boot `
     + 'conversion runs for every space and does not stop the instance when one space fails, so this space '
     + 'was left behind by a failure that IS in the startup log. Answering with no links would be a lie '
-    + 'every reader believes. Run `npm run links:convert` — a full run walks every space and marks the '
-    + 'ones that finish cleanly — and read what it reports about this one.';
+    + 'every reader believes. Every start retries the conversion, and its ERROR line names why this space '
+    + 'failed; from a source checkout, `npm run links:convert` walks every space on demand and marks the ones '
+    + 'that finish cleanly.';
 }
 
 /**

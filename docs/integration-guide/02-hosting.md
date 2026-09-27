@@ -473,7 +473,8 @@ Six things worth reading twice:
   the reranking mechanism — a cross-encoder can only reorder what the vector search already found. **One
   call however many spaces it searches:** a recall across several spaces merges their candidates and reranks
   them once. Builds up to 5.1.0 sent one call per space, so a broad recall on an instance reaching 15 spaces
-  put 13 concurrent requests on the reranker at once — size a reranker's concurrency for your recall rate,
+  put 13 concurrent requests on the reranker at once, and builds up to 5.5.1 still sent one call per member
+  for a recall on a proxy or on named spaces — size a reranker's concurrency for your recall rate,
   not for your space count.
   `text-embeddings-inference` caps a client batch at **32** unless you start it with
   `--max-client-batch-size 512`, and Ythril's request comes back `413`. The search still answers, ordered by

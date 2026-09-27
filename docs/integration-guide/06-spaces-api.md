@@ -354,7 +354,7 @@ that space.
 | `meta.validationMode`, `meta.strictLinkage` | `schema` **admin** — enforcement: flipping either makes writes that used to succeed start failing |
 | `meta.suppressEmbeddings` | `knowledge` **admin** — recall silently stops finding anything written afterwards |
 | `recordTtlDays` | `knowledge` **admin** — it deletes records on a clock |
-| `completeLinkage` | **nobody**, an instance administrator included. It is set by the link conversion and by space creation; with the 4.x link arrays gone there is no other shape for a space to be read through, so turning it off would leave it unable to answer about connections at all |
+| `completeLinkage` | **nobody**, an instance administrator included. It is set by the link conversion and by space creation — except on a proxy made before 5.0, which the conversion never walks because it holds no records, so it never carries the marker and needs none; with the 4.x link arrays gone there is no other shape for a space to be read through, so turning it off would leave it unable to answer about connections at all |
 | `dupeRules`, `dupeMergeSurvivor` | `dataQuality` write |
 | `dupeRulesOnInsert` | `dataQuality` **admin** — merges then happen ON WRITE, without anyone looking |
 

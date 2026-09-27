@@ -166,21 +166,31 @@ describe('no ranking sort is written by hand', () => {
           + 'that decides the order a caller sees must end in one, or `skip` can repeat a record.');
       }
       // Counted rather than listed, the same way `hybrid-retrieval.test.js` counts its raw-score sorts: a NEW
-      // inline comparator has to come here and justify itself. Five survive in `recall.ts`, and the candidate
-      // cap (5 below) moved to `rerank-pool.ts` with the rerank step (`P-35`). Each has a reason it cannot
-      // take the shared one —
-      //   1-3. the pre-fusion sort, the vector channel handed to RRF, and `findSimilar`, all of which must
+      // inline comparator has to come here and justify itself. Four survive in `recall.ts`; the candidate
+      // cap (5 below) moved to `rerank-pool.ts` with the rerank step (`P-35`), and the vector channel handed
+      // to RRF moved to `stampFusion` in `lexical-search.ts` when fusion began ranking the floor results too
+      // (`Q-79`). Each has a reason it cannot take the shared one —
+      //   1-3. the pre-fusion sorts, the vector channel handed to RRF, and `findSimilar`, all of which must
       //        order by RAW score rather than by `rankOf` (see `hybrid-retrieval.test.js`, which counts them);
       //     4. the lexical channel, ordered by `lexicalScore`;
       //     5. the candidate cap in `rerank-pool.ts`, which sorts a list of ID STRINGS through a lookup, so
       //        there is no object to hand a comparator;
       //     6. the duplicate-match map, whose `score` is non-optional and not a `RecallResult`.
       // Everything that CAN take `byRankThenId` does, which is why the other three files have none.
-      const expected = f.endsWith('brain/recall.ts') ? 5 : 0;
+      const expected = f.endsWith('brain/recall.ts') ? 4 : 0;
       assert.equal(inline.length, expected,
         `${f} has ${inline.length} inline comparators, expected ${expected} — a new one needs a reason it `
         + 'cannot use byRankThenId, written down here');
     }
+  });
+
+  it('the vector channel handed to RRF ends in a tie-break, in its own module', () => {
+    // Comparator 2 above, moved with `stampFusion` (`Q-79`). A tie left to input order here gives two
+    // records a different RRF rank on two identical calls, which reorders a fused answer between pages.
+    const code = stripComments(readFileSync('server/src/brain/lexical-search.ts', 'utf8'));
+    const inline = [...code.matchAll(/\.sort\(\((?:a, b|a,b)\) => ([^\n]*)\)/g)];
+    assert.equal(inline.length, 1, `lexical-search.ts has ${inline.length} inline comparators, expected 1`);
+    assert.match(inline[0][1], /\|\|/, 'the vector channel sort must end in a tie-break');
   });
 
   it('the rerank candidate cap still ends in a tie-break, in its own module', () => {
