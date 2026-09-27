@@ -9,24 +9,28 @@ import assert from 'node:assert/strict';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post, postRetry429, get, del, waitFor } from './helpers.js';
+import { INSTANCES, post, postRetry429, get, del, waitFor, createTestSpace } from './helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, 'configs');
 
 let tokenA, tokenB, tokenC;
 let networkId;
+let SPACE, removeSpace;
 
 describe('Democratic network (3-member voting)', () => {
   before(async () => {
     tokenA = fs.readFileSync(path.join(CONFIGS, 'a', 'token.txt'), 'utf8').trim();
     tokenB = fs.readFileSync(path.join(CONFIGS, 'b', 'token.txt'), 'utf8').trim();
     tokenC = fs.readFileSync(path.join(CONFIGS, 'c', 'token.txt'), 'utf8').trim();
+    ({ id: SPACE, remove: removeSpace } = await createTestSpace('dem', [
+      [INSTANCES.a, tokenA], [INSTANCES.b, tokenB], [INSTANCES.c, tokenC],
+    ]));
 
     const r = await post(INSTANCES.a, tokenA, '/api/networks', {
       label: 'Test Democratic',
       type: 'democratic',
-      spaces: ['general'],
+      spaces: [SPACE],
       votingDeadlineHours: 24,
     });
     assert.equal(r.status, 201);
@@ -141,5 +145,6 @@ describe('Democratic network (3-member voting)', () => {
       await del(INSTANCES.b, tokenB, `/api/networks/${networkId}`).catch(() => {});
       await del(INSTANCES.c, tokenC, `/api/networks/${networkId}`).catch(() => {});
     }
+    await removeSpace?.();
   });
 });

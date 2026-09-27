@@ -21,13 +21,15 @@ import { fileURLToPath } from 'url';
 import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { INSTANCES, post, get, del, reqJson, waitFor, triggerSync, getInstanceId } from './helpers.js';
+import { INSTANCES, post, get, del, reqJson, waitFor, triggerSync, getInstanceId, createTestSpace } from './helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, 'configs');
 
 let tokenA, tokenB;
 let networkId;
+// Each describe below makes a space of its own in its `before` and removes it in its `after` (Q-75).
+let SPACE, removeSpace;
 const RUN = Date.now();
 
 // ── Setup ─────────────────────────────────────────────────────────────────
@@ -37,10 +39,12 @@ describe('Entity/edge sync — cross-instance (A→B)', () => {
     tokenA = fs.readFileSync(path.join(CONFIGS, 'a', 'token.txt'), 'utf8').trim();
     tokenB = fs.readFileSync(path.join(CONFIGS, 'b', 'token.txt'), 'utf8').trim();
 
+    ({ id: SPACE, remove: removeSpace } = await createTestSpace('entity-sync', [[INSTANCES.a, tokenA], [INSTANCES.b, tokenB]]));
+
     const netR = await post(INSTANCES.a, tokenA, '/api/networks', {
       label: `Entity Sync Test ${RUN}`,
       type: 'closed',
-      spaces: ['general'],
+      spaces: [SPACE],
       votingDeadlineHours: 1,
     });
     assert.equal(netR.status, 201, `Create network: ${JSON.stringify(netR.body)}`);
@@ -70,6 +74,7 @@ describe('Entity/edge sync — cross-instance (A→B)', () => {
 
   after(async () => {
     if (networkId) await del(INSTANCES.a, tokenA, `/api/networks/${networkId}`).catch(() => {});
+    await removeSpace?.();
   });
 
   it('entity created on A syncs to B', async () => {
@@ -78,7 +83,7 @@ describe('Entity/edge sync — cross-instance (A→B)', () => {
     // Create via brain API — this sets author.instanceId to A's real instanceId,
     // which is required for pushToPeer() to include it (non-braintree networks
     // only push docs authored by this instance).
-    const r = await post(INSTANCES.a, tokenA, '/api/brain/spaces/general/entities', {
+    const r = await post(INSTANCES.a, tokenA, `/api/brain/spaces/${SPACE}/entities`, {
       name: entityName, type: 'concept', tags: ['sync-test'],
     });
     assert.equal(r.status, 201, `Create entity on A: ${JSON.stringify(r.body)}`);
@@ -95,13 +100,13 @@ describe('Entity/edge sync — cross-instance (A→B)', () => {
     // below is the real safety net, and a first attempt that never gives up would never reach it.
     await post(INSTANCES.a, tokenA, `/api/networks/${networkId}/sync`, {});
     await waitFor(async () => {
-      const r2 = await reqJson(INSTANCES.b, tokenB, `/api/sync/entities/${entityId}?spaceId=general`);
+      const r2 = await reqJson(INSTANCES.b, tokenB, `/api/sync/entities/${entityId}?spaceId=${SPACE}`);
       return r2.status === 200;
     }, 25_000).catch(() => {
       // Re-trigger once and give a final window
       return post(INSTANCES.a, tokenA, `/api/networks/${networkId}/sync`, {})
         .then(() => waitFor(async () => {
-          const r2 = await reqJson(INSTANCES.b, tokenB, `/api/sync/entities/${entityId}?spaceId=general`);
+          const r2 = await reqJson(INSTANCES.b, tokenB, `/api/sync/entities/${entityId}?spaceId=${SPACE}`);
           return r2.status === 200;
         }, 30_000));
     });
@@ -109,20 +114,20 @@ describe('Entity/edge sync — cross-instance (A→B)', () => {
 
   it('edge created on A syncs to B', async () => {
     // Create two entities via brain API (sets correct author for sync push)
-    const fromR = await post(INSTANCES.a, tokenA, '/api/brain/spaces/general/entities', {
+    const fromR = await post(INSTANCES.a, tokenA, `/api/brain/spaces/${SPACE}/entities`, {
       name: `EFrom-${RUN}`, type: 'concept', tags: [],
     });
     assert.equal(fromR.status, 201, `Create EFrom: ${JSON.stringify(fromR.body)}`);
     const entityFromId = fromR.body._id;
 
-    const toR = await post(INSTANCES.a, tokenA, '/api/brain/spaces/general/entities', {
+    const toR = await post(INSTANCES.a, tokenA, `/api/brain/spaces/${SPACE}/entities`, {
       name: `ETo-${RUN}`, type: 'concept', tags: [],
     });
     assert.equal(toR.status, 201, `Create ETo: ${JSON.stringify(toR.body)}`);
     const entityToId = toR.body._id;
 
     // Create edge via brain API (sets correct author for sync push)
-    const edgeR = await post(INSTANCES.a, tokenA, '/api/brain/spaces/general/edges', {
+    const edgeR = await post(INSTANCES.a, tokenA, `/api/brain/spaces/${SPACE}/edges`, {
       from: entityFromId, to: entityToId, label: 'test_relation',
     });
     assert.equal(edgeR.status, 201, `Create edge: ${JSON.stringify(edgeR.body)}`);
@@ -130,12 +135,12 @@ describe('Entity/edge sync — cross-instance (A→B)', () => {
 
     await post(INSTANCES.a, tokenA, `/api/networks/${networkId}/sync`, {});
     await waitFor(async () => {
-      const r2 = await reqJson(INSTANCES.b, tokenB, `/api/sync/edges/${edgeId}?spaceId=general`);
+      const r2 = await reqJson(INSTANCES.b, tokenB, `/api/sync/edges/${edgeId}?spaceId=${SPACE}`);
       return r2.status === 200;
     }).catch(() => {
       return post(INSTANCES.a, tokenA, `/api/networks/${networkId}/sync`, {})
         .then(() => waitFor(async () => {
-          const r2 = await reqJson(INSTANCES.b, tokenB, `/api/sync/edges/${edgeId}?spaceId=general`);
+          const r2 = await reqJson(INSTANCES.b, tokenB, `/api/sync/edges/${edgeId}?spaceId=${SPACE}`);
           return r2.status === 200;
         }, 30_000));
     });
@@ -152,7 +157,7 @@ describe('Entity/edge sync — cross-instance (A→B)', () => {
 
     // Test the tombstone propagation via the sync tombstones endpoint:
     // 1. Check tombstones on A before any sync
-    const tombBefore = await reqJson(INSTANCES.b, tokenB, `/api/sync/tombstones?spaceId=general`);
+    const tombBefore = await reqJson(INSTANCES.b, tokenB, `/api/sync/tombstones?spaceId=${SPACE}`);
     assert.equal(tombBefore.status, 200, `Get tombstones on B: ${JSON.stringify(tombBefore.body)}`);
     assert.ok(Array.isArray(tombBefore.body?.entities), 'tombstones.entities must be an array');
     assert.ok(Array.isArray(tombBefore.body?.edges), 'tombstones.edges must be an array');
@@ -170,7 +175,7 @@ describe('Entity/edge sync — cross-instance (A→B)', () => {
   });
 
   it('GET /api/sync/entities returns items array and nextCursor', async () => {
-    const r = await reqJson(INSTANCES.a, tokenA, '/api/sync/entities?spaceId=general&limit=5');
+    const r = await reqJson(INSTANCES.a, tokenA, `/api/sync/entities?spaceId=${SPACE}&limit=5`);
     assert.equal(r.status, 200, JSON.stringify(r.body));
     assert.ok(Array.isArray(r.body.items), 'items must be an array');
     // nextCursor is null when no more pages
@@ -178,7 +183,7 @@ describe('Entity/edge sync — cross-instance (A→B)', () => {
   });
 
   it('GET /api/sync/edges returns items array and nextCursor', async () => {
-    const r = await reqJson(INSTANCES.a, tokenA, '/api/sync/edges?spaceId=general&limit=5');
+    const r = await reqJson(INSTANCES.a, tokenA, `/api/sync/edges?spaceId=${SPACE}&limit=5`);
     assert.equal(r.status, 200, JSON.stringify(r.body));
     assert.ok(Array.isArray(r.body.items), 'items must be an array');
     assert.ok('nextCursor' in r.body, 'nextCursor must be present in response');
@@ -187,15 +192,15 @@ describe('Entity/edge sync — cross-instance (A→B)', () => {
   it('GET /api/sync/facts cursor pagination works', async () => {
     // Write 3 memories to ensure we have data, then page with limit=2
     for (let i = 0; i < 3; i++) {
-      await post(INSTANCES.a, tokenA, '/api/brain/spaces/general/facts', { fact: `cursor-test-${RUN}-${i}`, tags: ['cursor'] });
+      await post(INSTANCES.a, tokenA, `/api/brain/spaces/${SPACE}/facts`, { fact: `cursor-test-${RUN}-${i}`, tags: ['cursor'] });
     }
 
-    const page1 = await reqJson(INSTANCES.a, tokenA, '/api/sync/facts?spaceId=general&limit=2');
+    const page1 = await reqJson(INSTANCES.a, tokenA, `/api/sync/facts?spaceId=${SPACE}&limit=2`);
     assert.equal(page1.status, 200);
     assert.ok(Array.isArray(page1.body.items));
 
     if (page1.body.nextCursor) {
-      const page2 = await reqJson(INSTANCES.a, tokenA, `/api/sync/facts?spaceId=general&limit=2&cursor=${page1.body.nextCursor}`);
+      const page2 = await reqJson(INSTANCES.a, tokenA, `/api/sync/facts?spaceId=${SPACE}&limit=2&cursor=${page1.body.nextCursor}`);
       assert.equal(page2.status, 200, `Page 2: ${JSON.stringify(page2.body)}`);
       assert.ok(Array.isArray(page2.body.items), 'Page 2 items must be an array');
       // Page 2 items must not overlap with page 1
@@ -211,17 +216,22 @@ describe('Entity/edge sync — cross-instance (A→B)', () => {
 describe('POST /api/sync/tombstones — apply incoming tombstones', () => {
   let token;
 
-  before(() => {
+  before(async () => {
     token = fs.readFileSync(path.join(CONFIGS, 'a', 'token.txt'), 'utf8').trim();
+    ({ id: SPACE, remove: removeSpace } = await createTestSpace('sync-tombstones', [[INSTANCES.a, token]]));
+  });
+
+  after(async () => {
+    await removeSpace?.();
   });
 
   it('returns 200 with applied count when given valid tombstones', async () => {
-    const r = await post(INSTANCES.a, token, '/api/sync/tombstones?spaceId=general', {
+    const r = await post(INSTANCES.a, token, `/api/sync/tombstones?spaceId=${SPACE}`, {
       tombstones: [
         {
           _id: `tomb-test-${RUN}`,
           type: 'fact',
-          spaceId: 'general',
+          spaceId: SPACE,
           deletedAt: new Date().toISOString(),
           instanceId: 'test-instance',
           seq: Date.now(),
@@ -234,7 +244,7 @@ describe('POST /api/sync/tombstones — apply incoming tombstones', () => {
   });
 
   it('returns 400 for invalid tombstone format', async () => {
-    const r = await post(INSTANCES.a, token, '/api/sync/tombstones?spaceId=general', {
+    const r = await post(INSTANCES.a, token, `/api/sync/tombstones?spaceId=${SPACE}`, {
       tombstones: [{ _id: 'x' }],  // missing required fields
     });
     assert.equal(r.status, 400, JSON.stringify(r.body));
@@ -252,14 +262,19 @@ describe('Sync API — new optional fields accepted by Zod schemas', () => {
   let token;
   const RUN = Date.now();
 
-  before(() => {
+  before(async () => {
     token = fs.readFileSync(path.join(CONFIGS, 'a', 'token.txt'), 'utf8').trim();
+    ({ id: SPACE, remove: removeSpace } = await createTestSpace('sync-schema', [[INSTANCES.a, token]]));
+  });
+
+  after(async () => {
+    await removeSpace?.();
   });
 
   it('POST /api/sync/facts accepts description and properties fields', async () => {
-    const r = await post(INSTANCES.a, token, '/api/sync/facts?spaceId=general', {
+    const r = await post(INSTANCES.a, token, `/api/sync/facts?spaceId=${SPACE}`, {
       _id: `sync-mem-desc-${RUN}`,
-      spaceId: 'general',
+      spaceId: SPACE,
       fact: `Sync memory with description ${RUN}`,
       embedding: [],
       embeddingModel: 'none',
@@ -276,9 +291,9 @@ describe('Sync API — new optional fields accepted by Zod schemas', () => {
 
   it('description and properties are persisted after sync upsert', async () => {
     const memId = `sync-mem-desc-verify-${RUN}`;
-    await post(INSTANCES.a, token, '/api/sync/facts?spaceId=general', {
+    await post(INSTANCES.a, token, `/api/sync/facts?spaceId=${SPACE}`, {
       _id: memId,
-      spaceId: 'general',
+      spaceId: SPACE,
       fact: `Verify desc/props after sync ${RUN}`,
       embedding: [],
       embeddingModel: 'none',
@@ -291,16 +306,16 @@ describe('Sync API — new optional fields accepted by Zod schemas', () => {
       updatedAt: new Date().toISOString(),
     });
 
-    const r = await reqJson(INSTANCES.a, token, `/api/sync/facts/${memId}?spaceId=general`);
+    const r = await reqJson(INSTANCES.a, token, `/api/sync/facts/${memId}?spaceId=${SPACE}`);
     assert.equal(r.status, 200, `Fetch synced fact: ${JSON.stringify(r.body)}`);
     assert.equal(r.body.description, 'Verified description', 'description must survive sync round-trip');
     assert.deepStrictEqual(r.body.properties, { key: 'synced-val' }, 'properties must survive sync round-trip');
   });
 
   it('POST /api/sync/entities accepts description field', async () => {
-    const r = await post(INSTANCES.a, token, '/api/sync/entities?spaceId=general', {
+    const r = await post(INSTANCES.a, token, `/api/sync/entities?spaceId=${SPACE}`, {
       _id: `sync-ent-desc-${RUN}`,
-      spaceId: 'general',
+      spaceId: SPACE,
       name: `SyncDescEntity-${RUN}`,
       type: 'concept',
       tags: ['sync-schema-test'],
@@ -316,9 +331,9 @@ describe('Sync API — new optional fields accepted by Zod schemas', () => {
 
   it('entity description survives sync round-trip', async () => {
     const entId = `sync-ent-desc-verify-${RUN}`;
-    await post(INSTANCES.a, token, '/api/sync/entities?spaceId=general', {
+    await post(INSTANCES.a, token, `/api/sync/entities?spaceId=${SPACE}`, {
       _id: entId,
-      spaceId: 'general',
+      spaceId: SPACE,
       name: `VerifyDescEnt-${RUN}`,
       type: 'concept',
       tags: [],
@@ -330,15 +345,15 @@ describe('Sync API — new optional fields accepted by Zod schemas', () => {
       updatedAt: new Date().toISOString(),
     });
 
-    const r = await reqJson(INSTANCES.a, token, `/api/sync/entities/${entId}?spaceId=general`);
+    const r = await reqJson(INSTANCES.a, token, `/api/sync/entities/${entId}?spaceId=${SPACE}`);
     assert.equal(r.status, 200, `Fetch synced entity: ${JSON.stringify(r.body)}`);
     assert.equal(r.body.description, 'Round-trip description', 'entity description must survive sync round-trip');
   });
 
   it('POST /api/sync/edges accepts tags, description, and properties fields', async () => {
-    const r = await post(INSTANCES.a, token, '/api/sync/edges?spaceId=general', {
+    const r = await post(INSTANCES.a, token, `/api/sync/edges?spaceId=${SPACE}`, {
       _id: `sync-edge-rich-${RUN}`,
-      spaceId: 'general',
+      spaceId: SPACE,
       from: `sync-rich-from-${RUN}`,
       to: `sync-rich-to-${RUN}`,
       label: 'sync_rich_rel',
@@ -355,9 +370,9 @@ describe('Sync API — new optional fields accepted by Zod schemas', () => {
 
   it('edge tags, description, and properties survive sync round-trip', async () => {
     const edgeId = `sync-edge-verify-${RUN}`;
-    await post(INSTANCES.a, token, '/api/sync/edges?spaceId=general', {
+    await post(INSTANCES.a, token, `/api/sync/edges?spaceId=${SPACE}`, {
       _id: edgeId,
-      spaceId: 'general',
+      spaceId: SPACE,
       from: `verify-from-${RUN}`,
       to: `verify-to-${RUN}`,
       label: 'verify_sync_rel',
@@ -370,7 +385,7 @@ describe('Sync API — new optional fields accepted by Zod schemas', () => {
       updatedAt: new Date().toISOString(),
     });
 
-    const r = await reqJson(INSTANCES.a, token, `/api/sync/edges/${edgeId}?spaceId=general`);
+    const r = await reqJson(INSTANCES.a, token, `/api/sync/edges/${edgeId}?spaceId=${SPACE}`);
     assert.equal(r.status, 200, `Fetch synced edge: ${JSON.stringify(r.body)}`);
     assert.ok(Array.isArray(r.body.tags) && r.body.tags.includes('edge-roundtrip'), 'edge tags must survive sync round-trip');
     assert.equal(r.body.description, 'Round-trip edge description', 'edge description must survive sync round-trip');
@@ -378,9 +393,9 @@ describe('Sync API — new optional fields accepted by Zod schemas', () => {
   });
 
   it('POST /api/sync/chrono accepts properties field', async () => {
-    const r = await post(INSTANCES.a, token, '/api/sync/chrono?spaceId=general', {
+    const r = await post(INSTANCES.a, token, `/api/sync/chrono?spaceId=${SPACE}`, {
       _id: `sync-chrono-props-${RUN}`,
-      spaceId: 'general',
+      spaceId: SPACE,
       title: `SyncChronoProps-${RUN}`,
       type: 'milestone',
       startsAt: new Date().toISOString(),

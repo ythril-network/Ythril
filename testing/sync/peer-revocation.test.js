@@ -23,10 +23,14 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
-import { dockerExec, INSTANCES, post, get, del, waitFor } from './helpers.js';
+import { dockerExec, INSTANCES, post, get, del, waitFor, createTestSpace } from './helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, 'configs');
+
+/** The space these tests' networks carry and B's data endpoints are read on — their own, never `general` (`Q-75`). */
+let SPACE;
+let testSpace;
 
 let tokenA, tokenB;
 let instanceIdA, instanceIdB;
@@ -80,7 +84,7 @@ async function createClubWithB(outboundTokenForB) {
   const netR = await post(INSTANCES.a, tokenA, '/api/networks', {
     label: `Revocation Test ${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
     type: 'club',
-    spaces: ['general'],
+    spaces: [SPACE],
     votingDeadlineHours: 1,
   });
   assert.equal(netR.status, 201, `create network: ${JSON.stringify(netR.body)}`);
@@ -122,6 +126,13 @@ describe('Peer credential revocation (H7)', () => {
 
     await cleanupStaleNetworks(INSTANCES.a, tokenA);
     await cleanupStaleNetworks(INSTANCES.b, tokenB);
+
+    testSpace = await createTestSpace('peer-revocation', [[INSTANCES.a, tokenA], [INSTANCES.b, tokenB]]);
+    SPACE = testSpace.id;
+  });
+
+  after(async () => {
+    await testSpace?.remove();
   });
 
   it('club direct removal revokes the removed peer\'s PAT and the outbound token', async () => {
@@ -187,7 +198,7 @@ describe('Peer credential revocation (H7)', () => {
       const netR = await post(INSTANCES.a, tokenA, '/api/networks', {
         label: `Revocation Vote Test ${Date.now()}`,
         type: 'democratic',
-        spaces: ['general'],
+        spaces: [SPACE],
         votingDeadlineHours: 1,
       });
       assert.equal(netR.status, 201);
@@ -212,7 +223,7 @@ describe('Peer credential revocation (H7)', () => {
         id: nid,
         label: 'Revocation Vote Test',
         type: 'democratic',
-        spaces: ['general'],
+        spaces: [SPACE],
         votingDeadlineHours: 1,
       });
       assert.ok(netOnB.status === 201 || netOnB.status === 409);
@@ -262,13 +273,13 @@ describe('Peer credential revocation (H7)', () => {
     it('data endpoints refuse requests scoped to the ejected network (401 ejected)', async () => {
       // Previously only /api/sync/networks/:id/* was guarded; data endpoints
       // fell back to "space exists" because the network config was deleted.
-      const r = await get(INSTANCES.b, tokenB, `/api/sync/facts?spaceId=general&networkId=${nid}`);
+      const r = await get(INSTANCES.b, tokenB, `/api/sync/facts?spaceId=${SPACE}&networkId=${nid}`);
       assert.equal(r.status, 401, `expected 401 ejected, got ${r.status}: ${JSON.stringify(r.body)}`);
       assert.equal(r.body?.error, 'ejected');
     });
 
     it('data endpoints for other networks still work on the ejected instance', async () => {
-      const r = await get(INSTANCES.b, tokenB, '/api/sync/facts?spaceId=general');
+      const r = await get(INSTANCES.b, tokenB, `/api/sync/facts?spaceId=${SPACE}`);
       assert.equal(r.status, 200, `expected 200, got ${r.status}: ${JSON.stringify(r.body)}`);
     });
   });
