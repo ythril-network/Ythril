@@ -89,18 +89,25 @@ describe('naming a member as a round\'s proposer does not drop its vote', () => 
 });
 
 describe('an honest proposal still passes', () => {
-  it('two members: the proposer\'s automatic yes is the vote the other member waits for', () => {
-    const r = round({ subjectInstanceId: PEER, votes: [yes(PEER)] });
+  it('two members: the proposer\'s automatic yes and the other member\'s own yes pass it', () => {
+    const r = round({ subjectInstanceId: PEER, votes: [yes(PEER), yes(SELF)] });
     concludeRoundIfReady(net('closed', [PEER]), r);
     assert.equal(r.passed, true);
+  });
+  it('two members: the proposer\'s yes alone does not pass it on the other member (Q-76)', () => {
+    // `net.members` lists every member but this one, so counting only the listed yeses let the proposer decide for
+    // the member concluding the round — which then deleted or wiped its own data without having voted.
+    const r = round({ subjectInstanceId: PEER, votes: [yes(PEER)] });
+    concludeRoundIfReady(net('closed', [PEER]), r);
+    assert.notEqual(r.passed, true);
   });
   it('a proposal whose proposer\'s yes is missing does not pass', () => {
     const r = round({ subjectInstanceId: PEER, votes: [yes(OTHER)] });
     concludeRoundIfReady(net('closed', [PEER, OTHER]), r);
     assert.notEqual(r.passed, true);
   });
-  it('closed: the proposer and every other member said yes', () => {
-    const r = round({ subjectInstanceId: PEER, votes: [yes(PEER), yes(OTHER)] });
+  it('closed: the proposer and every other member said yes, this one included', () => {
+    const r = round({ subjectInstanceId: PEER, votes: [yes(PEER), yes(OTHER), yes(SELF)] });
     concludeRoundIfReady(net('closed', [PEER, OTHER]), r);
     assert.equal(r.passed, true);
   });
