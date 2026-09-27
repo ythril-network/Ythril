@@ -28,6 +28,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A request is no longer dropped after the server was busy** (`Q-73`). An idle connection was closed after
+  Node's default 5 seconds, checked before the server read what had arrived on it. So after a few seconds of heavy
+  work, a request a client or proxy had already sent on a pooled connection failed with "other side closed", and
+  nothing was logged. Idle connections now stay open for 95 seconds, above the common proxy defaults; see
+  *Hosting → TLS Termination*.
+- **A space update that carries no schema no longer logs "Suppression sweep failed"** (`Q-74`). Changing only a
+  setting such as the text level ran the embedding-suppression sweep without a schema to read, so it failed and
+  warned on every such write. It now runs only when the write carried one.
 - **A schema replace on a networked space says it kept what it did not remove** (`Q-61`). A network round is
   applied as a merge on every member and on the proposer, so a replace that left a type out removed nothing, and
   every schema door answered `200` as if it had. The answer now carries `appliedAsMerge`, `keptTypes` and a
