@@ -77,10 +77,24 @@ export function applyConcludedSpaceRounds(net: NetworkConfig, rounds: readonly V
     if (!action) continue;
     (round as VoteRound & { appliedHere?: boolean }).appliedHere = true;
     if (action.kind === 'delete') {
-      void import('./lifecycle.js')
-        .then(({ removeSpace }) => removeSpace(action.localId))
-        .then(() => log.info(`space_deletion round ${round.roundId} passed (${where}): removed '${action.localId}'`))
-        .catch((err: unknown) => log.error(`space_deletion side-effect (${where}): ${err}`));
+      // A network never deletes a member's space (Q-70): the space leaves the network here, every member keeps its
+      // copy, and only the instance whose operator asked for the delete removes its own — once no other network
+      // still carries it, since the operator's delete opened a round on each of them.
+      void import('../networks/network-spaces.js').then(({ removeSpaceFromNetwork }) => {
+        removeSpaceFromNetwork(net.id, action.localId, `space_deletion round ${round.roundId} passed, ${where}`);
+        if (!round.proposedHere) return;
+        setImmediate(() => {
+          void import('../config/loader.js').then(async ({ getConfig }) => {
+            if (getConfig().networks.some(n => n.spaces.includes(action.localId))) {
+              log.info(`space_deletion round ${round.roundId} passed (${where}): '${action.localId}' is still in another network, kept until that round passes`);
+              return;
+            }
+            const { removeSpace } = await import('./lifecycle.js');
+            await removeSpace(action.localId);
+            log.info(`space_deletion round ${round.roundId} passed (${where}): removed this instance's own '${action.localId}'`);
+          }).catch((err: unknown) => log.error(`space_deletion side-effect (${where}): ${err}`));
+        });
+      }).catch((err: unknown) => log.error(`space_deletion side-effect (${where}): ${err}`));
     } else {
       void import('./lifecycle.js').then(({ wipeSpace }) =>
         wipeSpace(action.localId, action.types)

@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A network never deletes a member's space** (`Q-70`). Deleting a networked space opens a vote as before, but
+  when it passes the space now leaves the network on every member instead of being deleted there: each member
+  keeps its copy and data as a local space and can add it to a network again. Only the instance that asked for the
+  delete removes its own copy. On a club or pub/sub network one yes used to delete the space on every member.
+  Emptying a space by vote is unchanged. *Docs changed:* `docs/network-types.md`, `docs/sync-protocol.md`,
+  `docs/integration-guide/08-networks-api.md`, `docs/userguide/04-settings.md`.
+
 ## [5.5.0] — 2026-09-27
 
 **Files sync between members again, a file edited on one side is no longer a conflict, and a sync can carry a

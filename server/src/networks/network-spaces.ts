@@ -154,6 +154,39 @@ export async function addSpacesToNetwork(
 }
 
 /**
+ * Take a space OUT of a network here, and keep it as a local space (`Q-70`).
+ *
+ * Owner, 2026-09-26: a network never deletes a member's space — *"remove space from network and delete for self so
+ * everyone else can keep their copy locally or even readd"*. So a passed deletion round lands as this on every member,
+ * and only the proposer goes on to delete its own copy. Everything the network held FOR the space goes with it — its
+ * id mapping, the schema layer it sent (the effective schema is rebuilt without it), a pending offer of it — or a
+ * re-add later would find the old mapping and layer waiting. The records themselves are untouched: they are the
+ * member's.
+ *
+ * Works on the config as it is when it runs and saves it itself: the callers reach it through a dynamic import, so
+ * whatever config object they held may already have been written. @returns whether the network carried the space.
+ */
+export function removeSpaceFromNetwork(networkId: string, localId: string, why: string): boolean {
+  const cfg = getConfig();
+  const net = cfg.networks.find(n => n.id === networkId);
+  if (!net || !net.spaces.includes(localId)) return false;
+  net.spaces = net.spaces.filter(s => s !== localId);
+  const remoteId = localToRemote(net, localId);
+  if (net.spaceMap && remoteId !== localId) delete net.spaceMap[remoteId];
+  const hadLayer = Boolean(net.schemaLayers?.[localId]);
+  if (net.schemaLayers) delete net.schemaLayers[localId];
+  if (net.pendingSpaces?.some(p => p.localId === localId)) net.pendingSpaces = net.pendingSpaces.filter(p => p.localId !== localId);
+  saveConfig(cfg);
+  log.info(`Network ${networkId}: space '${localId}' left the network (${why}); this instance keeps it as a local space`);
+  if (hadLayer) {
+    void import('../spaces/effective-meta.js')
+      .then(({ recomputeEffectiveMeta }) => recomputeEffectiveMeta(localId, true))
+      .catch((err: unknown) => log.warn(`Network ${networkId}: schema of '${localId}' not rebuilt after it left: ${err}`));
+  }
+  return true;
+}
+
+/**
  * Which announced spaces may be added here, judged by the token that JOINED the network (S-9).
  *
  * Owner, 2026-09-26: *"on joining a network the space definition must come from the token that joins the network,

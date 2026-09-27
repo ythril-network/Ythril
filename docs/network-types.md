@@ -518,13 +518,16 @@ Regardless of network type:
 
 - **Any member can leave at any time**, unilaterally, without a vote.
 - The leaver **keeps all data** on their own machine. This is physically unavoidable and explicitly accepted by all parties when they join.
-- **A vote CAN delete or empty a space on every member, and that is what `space_deletion` and `space_wipe`
-  rounds are.** A proposal opens on every network holding the space; when it concludes, each member
-  applies it to its own copy. So the boundary is not "nobody can touch your data" — it is that the
-  decision is governed by the network's own rules.
+- **A vote CAN empty a space on every member, but it never deletes a member's space.** A `space_wipe` round
+  empties the network's data in the space on every member that votes it through. A `space_deletion` round, which
+  deleting a networked space opens, takes the space **out of the network** on every member instead: each member
+  keeps its copy, with its data, as a local space, and may add it to a network again. Only the instance whose
+  operator asked for the delete removes its own copy, once no other network still carries it. So the boundary is
+  not "nobody can touch your data": a wipe is governed by the network's own rules, and a deletion is never the
+  network's to make.
 
   **It acts only on a round that passed, and only on a space that network carries.** A round that expires without
-  enough yes deletes nothing, a round naming a space the network does not share is ignored however it arrives, and
+  enough yes changes nothing, a round naming a space the network does not share is ignored however it arrives, and
   each member acts on a concluded round once.
 
   **A proposer votes like any member.** The instance that opens a deletion, wipe, space addition or schema change is
@@ -533,7 +536,7 @@ Regardless of network type:
   that another member proposed it.
 
   **Read your network type before relying on that.** On `club` and `pubsub` a round passes on a single
-  yes with no veto, so one member can empty or delete the space everywhere. On `closed` and `braintree`
+  yes with no veto, so one member can empty the space everywhere. On `closed` and `braintree`
   every listed member has to agree, and on `democratic` it is a majority.
 
   > This bullet read *"Force-delete does not exist. There is no mechanism to delete data from another

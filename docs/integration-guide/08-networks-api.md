@@ -293,6 +293,10 @@ that expired is concluded but not passed, and deletes nothing — and only on th
 member and carried by the round's own network. Each member applies it once; gossip re-delivering the round does not
 re-apply it.
 
+**A passed `space_deletion` never deletes a member's space.** It takes the space out of the network on every member,
+which keeps its copy and data as a local space; only the proposer deletes its own copy, once no other network carries
+it. `DELETE /api/spaces/:id` on a networked space still answers `202` with the rounds it opened.
+
 The instance that opens a round other than a join or a removal is one of its voters: its signed `yes` is in `votes`
 from the moment the round opens, and the round's `subjectInstanceId` is informational on those types. A peer cannot
 make another member the proposer by naming it there.
