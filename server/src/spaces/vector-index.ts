@@ -183,66 +183,6 @@ const swapsInFlight = new Set<string>();
 const swapNameFor = (indexName: string): string => `${indexName}__swap`;
 
 /**
- * Change a vector index's definition with no moment in which the collection has no index to answer from.
- *
- * ## Why this exists (Q-102)
- *
- * `updateSearchIndex` changes a definition in place on Atlas, and the old one keeps serving until the new one is
- * ready. mongodb-atlas-local refuses it (every spelling was probed: `"mappings" is required`), so the only change
- * available there was drop and recreate — and between the two, every recall on the collection answered EMPTY,
- * swallowed as "index not ready". For a filter-field change, which costs at most speed while it is pending,
- * a blackout of every search is the wrong trade, and on upgrade it would hit every collection at once.
- *
- * ## The swap, and why it comes back to the original name
- *
- * The new definition is built under a stand-in name; when it serves, searches move to it ({@link liveIndexName});
- * the original is dropped and rebuilt with the new definition; when THAT serves, searches move back and the
- * stand-in is dropped. Two builds instead of one, once per change. Coming back is what keeps every other reader
- * of an index by name — the readiness poll, the pipeline status, the face width probe — correct without knowing
- * that a swap ever happened.
- *
- * Any step that fails leaves the searches on whichever index is still serving, and the next build retries.
- */
-async function swapIndexDefinition(
-  spaceId: string,
-  collectionSuffix: VectorIndexedCollection,
-  indexName: string,
-  definition: { fields: object[] },
-  target: ProbeTarget,
-): Promise<void> {
-  if (swapsInFlight.has(indexName)) return;
-  swapsInFlight.add(indexName);
-  const coll = getDb().collection(`${spaceId}_${collectionSuffix}`);
-  const standIn = swapNameFor(indexName);
-  const build = async (name: string): Promise<boolean> => {
-    await coll.dropSearchIndex(name).catch(() => {});
-    await coll.createSearchIndex(asDoc({ name, type: 'vectorSearch', definition }));
-    return pollVectorIndexReady(spaceId, collectionSuffix, name, target);
-  };
-  try {
-    if (!await build(standIn)) {
-      log.warn(`Vector index swap for ${indexName}: the stand-in did not come up; the current definition keeps serving`);
-      await coll.dropSearchIndex(standIn).catch(() => {});
-      return;
-    }
-    liveIndexNames.set(indexName, standIn);
-    await coll.dropSearchIndex(indexName);
-    await new Promise(r => setTimeout(r, 2000));
-    if (!await build(indexName)) {
-      log.warn(`Vector index swap for ${indexName}: the rebuilt index did not come up; its stand-in keeps serving until the next build`);
-      return;
-    }
-    liveIndexNames.delete(indexName);
-    await coll.dropSearchIndex(standIn).catch(() => {});
-    log.info(`Vector index ${indexName} now has its new definition, with no gap in search`);
-  } catch (err) {
-    log.warn(`Vector index swap for ${indexName} stopped (${err instanceof Error ? err.message : String(err)}); searches stay on ${liveIndexName(indexName)}`);
-  } finally {
-    swapsInFlight.delete(indexName);
-  }
-}
-
-/**
  * Create or validate the $vectorSearch index for a space collection.
  *
  * The index declares the vector field plus a set of `type:"filter"` fields (P6) so recall can
@@ -297,16 +237,7 @@ export async function ensureVectorSearchIndex(
 
   const existing = indexes.find(i => i.name === indexName);
 
-  // A swap this process did not finish (a restart mid-way) leaves its stand-in behind. With the real index
-  // present it is dropped below once the real one is current; with the real one missing it keeps serving
-  // until the real one is rebuilt, so the collection is never without an index to answer from.
-  if (indexes.some(i => i.name === swapNameFor(indexName))) {
-    if (!existing) liveIndexNames.set(indexName, swapNameFor(indexName));
-    else if (!swapsInFlight.has(indexName)) {
-      await coll.dropSearchIndex(swapNameFor(indexName)).catch(() => {});
-      liveIndexNames.delete(indexName);
-    }
-  }
+  await settleLeftoverSwap(spaceId, collectionSuffix, indexName, indexes.map(i => i.name));
 
   if (existing) {
     const existingFields = existing.latestDefinition?.fields ?? [];
@@ -380,7 +311,7 @@ export async function ensureVectorSearchIndex(
         // mongodb-atlas-local refuses every spelling of an in-place vector index update ("mappings" is
         // required), so on that backend the change is made by a SWAP instead — see `swapIndexDefinition`.
         log.warn(`updateSearchIndex failed for ${indexName} (${err}); swapping the definition in without a gap`);
-        const swap = swapIndexDefinition(spaceId, collectionSuffix, indexName, definition, { vectorPath, dims: keptWidth });
+        const swap = swapIndexDefinition(spaceId, collectionSuffix, indexName, definition, vectorPath, keptWidth);
         if (waitForReady) await swap; else void swap;
         return;
       }
@@ -416,6 +347,90 @@ export async function ensureVectorSearchIndex(
       { vectorPath, dims: numDimensions });
     if (!ready) log.warn(`Vector search index ${indexName} did not reach READY state within 60 seconds`);
   }
+}
+
+/**
+ * Change a vector index's definition with no moment in which the collection has no index to answer from.
+ *
+ * ## Why this exists (Q-102)
+ *
+ * `updateSearchIndex` changes a definition in place on Atlas, and the old one keeps serving until the new one is
+ * ready. mongodb-atlas-local refuses it (every spelling was probed: `"mappings" is required`), so the only change
+ * available there was drop and recreate — and between the two, every recall on the collection answered EMPTY,
+ * swallowed as "index not ready". For a filter-field change, which costs at most speed while it is pending,
+ * a blackout of every search is the wrong trade, and on upgrade it would hit every collection at once.
+ *
+ * ## The swap, and why it comes back to the original name
+ *
+ * The new definition is built under a stand-in name; when it serves, searches move to it ({@link liveIndexName});
+ * the original is dropped and rebuilt with the new definition; when THAT serves, searches move back and the
+ * stand-in is dropped. Two builds instead of one, once per change. Coming back is what keeps every other reader
+ * of an index by name — the readiness poll, the pipeline status, the face width probe — correct without knowing
+ * that a swap ever happened.
+ *
+ * Defined AFTER `ensureVectorSearchIndex`, and only reached from past its width refusal: a swap never changes a
+ * width, so it can never be the route by which a face gallery is re-dimensioned.
+ *
+ * Any step that fails leaves the searches on whichever index is still serving, and the next build retries.
+ */
+async function swapIndexDefinition(
+  spaceId: string,
+  collectionSuffix: VectorIndexedCollection,
+  indexName: string,
+  definition: { fields: object[] },
+  vectorPath: string,
+  dims: number,
+): Promise<void> {
+  if (swapsInFlight.has(indexName)) return;
+  swapsInFlight.add(indexName);
+  const coll = getDb().collection(`${spaceId}_${collectionSuffix}`);
+  const standIn = swapNameFor(indexName);
+  const build = async (name: string): Promise<boolean> => {
+    await coll.dropSearchIndex(name).catch(() => {});
+    await coll.createSearchIndex(asDoc({ name, type: 'vectorSearch', definition }));
+    return pollVectorIndexReady(spaceId, collectionSuffix, name, { vectorPath, dims });
+  };
+  try {
+    if (!await build(standIn)) {
+      log.warn(`Vector index swap for ${indexName}: the stand-in did not come up; the current definition keeps serving`);
+      await coll.dropSearchIndex(standIn).catch(() => {});
+      return;
+    }
+    liveIndexNames.set(indexName, standIn);
+    await coll.dropSearchIndex(indexName);
+    await new Promise(r => setTimeout(r, 2000));
+    if (!await build(indexName)) {
+      log.warn(`Vector index swap for ${indexName}: the rebuilt index did not come up; its stand-in keeps serving until the next build`);
+      return;
+    }
+    liveIndexNames.delete(indexName);
+    await coll.dropSearchIndex(standIn).catch(() => {});
+    log.info(`Vector index ${indexName} now has its new definition, with no gap in search`);
+  } catch (err) {
+    log.warn(`Vector index swap for ${indexName} stopped (${err instanceof Error ? err.message : String(err)}); searches stay on ${liveIndexName(indexName)}`);
+  } finally {
+    swapsInFlight.delete(indexName);
+  }
+}
+
+/**
+ * A swap this process did not finish (a restart mid-way) leaves its stand-in behind.
+ *
+ * With the real index present the stand-in is dropped; with the real one missing the stand-in keeps serving until
+ * the real one is rebuilt, so the collection is never without an index to answer from. A swap still in flight in
+ * this process is left alone.
+ */
+async function settleLeftoverSwap(
+  spaceId: string,
+  collectionSuffix: VectorIndexedCollection,
+  indexName: string,
+  listed: string[],
+): Promise<void> {
+  const standIn = swapNameFor(indexName);
+  if (!listed.includes(standIn) || swapsInFlight.has(indexName)) return;
+  if (!listed.includes(indexName)) { liveIndexNames.set(indexName, standIn); return; }
+  await getDb().collection(`${spaceId}_${collectionSuffix}`).dropSearchIndex(standIn).catch(() => {});
+  liveIndexNames.delete(indexName);
 }
 
 /**

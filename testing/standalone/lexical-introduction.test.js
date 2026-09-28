@@ -252,8 +252,9 @@ describe('introduction is gated on evidence', () => {
   });
 
   it('applies the caller eligibility to the fetch', () => {
-    // A channel that skipped tags/filter would resurrect records the caller excluded.
-    assert.match(fn, /\$match: \{ \.\.\.eligibility/);
+    // A channel that skipped tags/filter would resurrect records the caller excluded. ANDed with the id
+    // restriction, never spread beside it: a spread let a caller's own `_id` clause replace the restriction (Q-102).
+    assert.match(fn, /\$match: andPredicates\(eligibility, \{ _id: \{ \$in:/);
   });
 
   it('is capped, so a broad lexical match cannot flood the pool', () => {

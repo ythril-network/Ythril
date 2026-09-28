@@ -86,8 +86,8 @@ const RETRIEVAL_GUIDE = `Three retrieval modes exist and they are easy to confus
    operator object per key (eq, ne, in, exists, gt, gte, lt, lte), never both
    in one filter. Any key is accepted, and tags and a filter both apply.
    The promise: topK is filled from every record that satisfies the filter,
-   whatever its vector rank; an answer that could not be completed says
-   filter_window in degraded. The cost: tags, type, name, status, label and,
+   whatever its vector rank; an answer that could not be completed says so
+   in its degraded reasons. The cost: tags, type, name, status, label and,
    on spaces whose schema declares them, properties.<key> are applied by the
    vector index itself; any other filter costs a pass over the matching
    records, so declare heavily filtered properties on large spaces.

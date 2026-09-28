@@ -138,15 +138,20 @@ describe('the source keeps its contracts', () => {
   // next time a function moves between them.
   const rec = readFileSync(new URL('../../server/src/brain/recall.ts', import.meta.url), 'utf8')
     + readFileSync(new URL('../../server/src/brain/recall-shape.ts', import.meta.url), 'utf8');
+  /** Where the recall predicate is built — both channels read it from here. */
+  const pred = readFileSync(new URL('../../server/src/brain/recall-filter.ts', import.meta.url), 'utf8');
 
   it('the lexical query applies the caller\'s eligibility match', () => {
     // Without it, a tag- or filter-scoped recall would resurrect records the caller excluded — a
     // filter bypass, not a ranking bug.
     assert.ok(/find\(\{ \.\.\.eligibility, \$text/.test(lex),
       'eligibility must be merged into the $text query itself, not applied afterwards');
-    assert.ok(/eligibility\['tags'\] = \{ \$all: tags \}/.test(rec),
-      'tags must use the same $all match the vector path builds');
-    assert.ok(rec.includes('buildMongoFilter(filter)'), 'the filter must go through the shared builder');
+    // THE predicate the vector path applies, from the one function that builds it — not a second copy of the tag
+    // and filter clauses here, which is how a filter naming `tags` came to replace the caller's tags (Q-102).
+    assert.ok(/const match = recallPredicate\(tags, filter\)/.test(rec),
+      'the lexical eligibility must be recallPredicate, the same predicate the vector path builds');
+    assert.ok(/\{ tags: \{ \$all: tags \} \}/.test(pred), 'tags must be an $all match');
+    assert.ok(pred.includes('buildMongoFilter(filter'), 'the filter must go through the shared builder');
   });
 
   it('lexicalSearch never throws — a missing text index degrades to vector-only', () => {

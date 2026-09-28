@@ -71,8 +71,9 @@ before(async () => {
     name: `telescope-${i}-${RUN}`, type: 'instrument',
     description: `orbital telescope mirror calibration run ${i}`, tags: [], properties: {},
   }));
-  for (let i = 0; i < decoys.length; i += 100) {
-    const r = await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/bulk`, { entities: decoys.slice(i, i + 100) });
+  const BATCH = 100;
+  for (let b = 0; b * BATCH < decoys.length; b++) {
+    const r = await post(INSTANCES.a, token(), `/api/brain/spaces/${SPACE}/bulk`, { entities: decoys.slice(b * BATCH, (b + 1) * BATCH) });
     if (r.status >= 300 && r.status !== 207) return;
   }
   seeded = true;
