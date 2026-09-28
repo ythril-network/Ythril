@@ -497,88 +497,52 @@ describe('Recall traverse — links, which are not edges', () => {
   });
 });
 
-describe('Recall traverse — result cap', () => {
-  it('caps the combined output on a dense graph', async (t) => {
-    if (!embeddingAvailable) return t.skip('embedding unavailable');
-    // topK 1, traverse 1 → cap = 1 * (1+1) * 4 = 8. Hub has 30 leaves at hop 1,
-    // so truncation MUST engage: exactly 1 seed + 7 neighbours = 8.
+describe('Recall traverse — a hub past the old inline cap', () => {
+  /*
+   * Q-126 (owner, 2026-09-28): a returned row is complete as requested — record and whole `_graph` — or
+   * absent and named. This case used to assert the CUT: topK 1, traverse 1 gave a cap of 8, so exactly 7 of
+   * the hub's 30 leaves came back and a spill held the rest. The cap stated the old rule; the row now comes
+   * back whole, because 30 nodes is far inside the per-row walk ceiling.
+   */
+  it('returns the dense hub with every leaf, not the first seven', async (t) => {
+    if (!requireEmbedding(t, embeddingAvailable, 'the dense hub seed could not be written')) return;
     const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE_DENSE, ...({
       query: 'telemetry metrics aggregation collectors', types: ['entity'], topK: 1, traverse: 1,
     }) });
     assert.equal(r.status, 200, JSON.stringify(r.body));
-    // The cap bounds the traversed NODES exactly as before — `topK * (traverse+1) * 4` minus the seeds — but
-    // `count` now describes the matches, so the two numbers are asserted separately rather than conflated.
     assert.equal(r.body.count, 1, 'count is the matches, and topK was 1');
-    assert.equal(r.body.results.length, 1, 'exactly one match');
-    assert.equal(r.body.graphNodes, 7, `cap 8 minus 1 seed = 7 traversed nodes, got ${r.body.graphNodes}`);
-    assert.equal(allNested(r.body.results).length, 7, 'and the tree holds exactly those');
+    assert.equal(r.body.results.length, 1, 'exactly one match, and it is returned: 30 leaves fit any budget here');
+    assert.deepEqual(new Set(allNested(r.body.results).map(n => n.node?._id)), new Set(DENSE_LEAVES),
+      'the returned row carries its WHOLE neighbourhood — every leaf, by identity');
+    assert.equal(r.body.graphNodes, DENSE_LEAVES.length, 'graphNodes counts what was sent, which is all of it');
+    assert.equal(r.body.graphTruncated, undefined, 'no row was left out, so nothing is flagged');
+    assert.equal(r.body.incompleteCount ?? 0, 0, 'and nothing is named as incomplete');
   });
 });
 
-// ── Spill: a truncated graph is never silent (B-19) ──────────────────────────
+// ── Spill: only when the caller asked for the remainder (Q-126) ──────────────
 
-describe('Recall traverse — the complete graph is downloadable when it does not fit', () => {
-  // The fixture is deliberately ABOVE the cap: 30 leaves at hop 1 with `topK: 1, traverse: 1` gives a cap of
-  // 8, so 7 nodes come back inline and the whole 30 must be somewhere. A fixture INSIDE the cap cannot see
-  // this at all, which is exactly how the deep-skip defect shipped behind tests that paged 12 and 25 rows.
-  //
-  // Q-92 moved the complete graph OUT of the space: it is a read spill held by the instance, readable by the
-  // token that caused it through `GET /api/brain/spills/:id` and MCP `read_spill`. These cases were anchored
-  // to the old `_tmp/` file in the space's store and are re-anchored to the new contract, not relaxed: the
-  // link is still authenticated, still one day, still the whole neighbourhood. And they FAIL on CI without
-  // an embedder rather than skip, since a skipped spill case is a green run that asserted nothing.
+describe('Recall traverse — no graph spill; a remainder only on remainderDump', () => {
+  // Q-126 reversed the 2026-08-13 ruling that a neighbourhood past the inline cap is cut and written whole
+  // to a spill on every call. There is no inline cap to be past: a row is whole or absent, and the only
+  // spill a traversed recall writes is the MATCH remainder, when the caller asks for it. The read-spill
+  // store and its token-only reads are tested by the red-team suite and by `result-spill-both-doors`.
   const spillReady = (t) => requireEmbedding(t, embeddingAvailable, 'the dense hub seed could not be written');
 
-  it('a graph past the cap returns a link to the whole of it', async (t) => {
+  it('a hub past the old cap writes no spill and names none', async (t) => {
     if (!spillReady(t)) return;
     const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE_DENSE, ...({
       query: 'telemetry metrics aggregation collectors', types: ['entity'], topK: 1, traverse: 1,
     }) });
     assert.equal(r.status, 200, JSON.stringify(r.body));
-    assert.equal(r.body.graphTruncated, true, 'the inline graph is short, and the response must say so');
-    assert.ok(r.body.graphComplete, 'and must say where the rest is');
-    assert.ok(r.body.graphComplete.nodes > r.body.graphNodes,
-      `the spill must hold more than came back inline: ${r.body.graphComplete.nodes} vs ${r.body.graphNodes}`);
-    assert.equal(r.body.graphComplete.nodes, 30, 'the hub has 30 leaves, so the complete graph has 30 nodes');
-    const { spillId } = r.body.graphComplete;
-    assert.match(String(spillId), /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
-      `the spill is named by id: ${JSON.stringify(r.body.graphComplete)}`);
-    assert.equal(r.body.graphComplete.download, `/api/brain/spills/${spillId}`, 'the link is the spill route');
-    // `path` stays, additively, because an MCP agent's only road to a spill before this was path + read_file.
-    assert.equal(r.body.graphComplete.path, `_tmp/graph-${spillId}.json`);
-    assert.ok(r.body.graphComplete.expiresAt, 'a TTL the caller can see');
-    const ttlHours = (new Date(r.body.graphComplete.expiresAt) - Date.now()) / 3_600_000;
-    assert.ok(ttlHours > 20 && ttlHours <= 24, `one day, got ${ttlHours.toFixed(1)}h`);
-  });
-
-  it('the link needs the caller token, and serves the complete graph', async (t) => {
-    if (!spillReady(t)) return;
-    const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE_DENSE, ...({
-      query: 'telemetry metrics aggregation collectors', types: ['entity'], topK: 1, traverse: 1,
-    }) });
-    const url = `${INSTANCES.a}${r.body.graphComplete.download}`;
-
-    // Unauthenticated first. A download URL that worked without a token would be a way to read a space's
-    // records with no auth, which is the one thing this must not become.
-    const anon = await fetch(url);
-    assert.ok(anon.status === 401 || anon.status === 403, `expected a refusal, got ${anon.status}`);
-
-    const authed = await fetch(url, { headers: { Authorization: `Bearer ${token()}` } });
-    assert.equal(authed.status, 200, `the issuing token reads its spill: ${url}`);
-    const body = await authed.json();
-    assert.equal(body.kind, 'graph');
-    // Flattened to one item per NODE, so a single seed's tree can page: `{id, spaceId, depth, via, record}`.
-    const nodes = [body.items, body.nodes].find(Array.isArray) ?? [];
-    assert.equal(nodes.length, 30, 'the spill holds the whole neighbourhood, not the inline slice');
-    assert.deepEqual(new Set(nodes.map(n => n.id)), new Set(DENSE_LEAVES), 'every leaf, by identity');
-    assert.ok(nodes.every(n => n.spaceId === SPACE_DENSE && n.depth === 1 && n.via?.edgeId && n.record),
-      `each node says where it came from and how it was reached: ${JSON.stringify(nodes[0]).slice(0, 200)}`);
+    assert.equal(r.body.graphComplete, undefined, 'graphComplete is never sent');
+    assert.equal(r.body.remainder, undefined, 'and no remainder was asked for');
+    assert.ok(!JSON.stringify(r.body).includes('"spillId"'),
+      `nothing in the answer names a spill: ${JSON.stringify(r.body).slice(0, 300)}`);
   });
 
   it('a graph that FITS gets no link and no flag', async (t) => {
     if (!spillReady(t)) return;
-    // The other half of the check, and the one a flag-only implementation would have got wrong: three
-    // neighbours at depth 1 in the chain space is well inside the cap.
     const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({
       query: 'authentication token scoping vault', types: ['entity'], topK: 10, traverse: 1,
     }) });
@@ -587,26 +551,19 @@ describe('Recall traverse — the complete graph is downloadable when it does no
     assert.equal(r.body.graphComplete, undefined, 'and must not write a file nobody needs');
   });
 
-  it('the spill is not in the space at all — no file, no record, no seq, no embed job', async (t) => {
+  it('remainderDump writes no graph spill and nothing into the space', async (t) => {
     if (!spillReady(t)) return;
-    // It used to be HIDDEN from browsing, which is a weaker claim than it sounds: hidden from the listing,
-    // present in `<space>_files`, advancing the seq, and so synced to every peer. The store is read
-    // directly because the listing is exactly the view that hid it.
     const before = spaceFootprint('a', SPACE_DENSE);
     const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE_DENSE, ...({
       query: 'telemetry metrics aggregation collectors', types: ['entity'], topK: 1, traverse: 1,
+      remainderDump: true,
     }) });
-    assert.ok(r.body.graphComplete, `the call must spill, or the comparison below proves nothing: ${JSON.stringify(r.body).slice(0, 200)}`);
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.equal(r.body.graphComplete, undefined, 'remainderDump asks for the match remainder, never a graph spill');
     const after = spaceFootprint('a', SPACE_DENSE);
     assert.deepEqual(after.fileIds, before.fileIds, 'a recall wrote a file record into the space');
     assert.equal(after.seq, before.seq, 'a recall advanced the space seq');
     assert.deepEqual(after.spillJobs, before.spillJobs, 'a recall queued its own output for embedding');
-
-    // Still true, and now trivially: there is no `_tmp` for the listing to hide, even with derived trees on.
-    const listing = await get(INSTANCES.a, token(), `/api/files/${SPACE_DENSE}?includeDerived=true`);
-    assert.equal(listing.status, 200, JSON.stringify(listing.body));
-    const names = (listing.body?.entries ?? []).map(e => e.name);
-    assert.ok(!names.includes('_tmp'), `a search must leave no _tmp in the space: ${JSON.stringify(names)}`);
   });
 });
 
