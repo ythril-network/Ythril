@@ -29,6 +29,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'url';
 import { INSTANCES, post, get, waitForIndexed as waitForIndexedShared } from '../sync/helpers.js';
 import { openMcpSession } from '../sync/mcp-session.js';
+import { spaceFootprint } from '../_shared/space-footprint.mjs';
+import { requireEmbedding } from '../_shared/embedding-required.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, '..', 'sync', 'configs');
@@ -519,8 +521,16 @@ describe('Recall traverse — the complete graph is downloadable when it does no
   // The fixture is deliberately ABOVE the cap: 30 leaves at hop 1 with `topK: 1, traverse: 1` gives a cap of
   // 8, so 7 nodes come back inline and the whole 30 must be somewhere. A fixture INSIDE the cap cannot see
   // this at all, which is exactly how the deep-skip defect shipped behind tests that paged 12 and 25 rows.
+  //
+  // Q-92 moved the complete graph OUT of the space: it is a read spill held by the instance, readable by the
+  // token that caused it through `GET /api/brain/spills/:id` and MCP `read_spill`. These cases were anchored
+  // to the old `_tmp/` file in the space's store and are re-anchored to the new contract, not relaxed: the
+  // link is still authenticated, still one day, still the whole neighbourhood. And they FAIL on CI without
+  // an embedder rather than skip, since a skipped spill case is a green run that asserted nothing.
+  const spillReady = (t) => requireEmbedding(t, embeddingAvailable, 'the dense hub seed could not be written');
+
   it('a graph past the cap returns a link to the whole of it', async (t) => {
-    if (!embeddingAvailable) return t.skip('embedding unavailable');
+    if (!spillReady(t)) return;
     const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE_DENSE, ...({
       query: 'telemetry metrics aggregation collectors', types: ['entity'], topK: 1, traverse: 1,
     }) });
@@ -528,16 +538,21 @@ describe('Recall traverse — the complete graph is downloadable when it does no
     assert.equal(r.body.graphTruncated, true, 'the inline graph is short, and the response must say so');
     assert.ok(r.body.graphComplete, 'and must say where the rest is');
     assert.ok(r.body.graphComplete.nodes > r.body.graphNodes,
-      `the file must hold more than came back inline: ${r.body.graphComplete.nodes} vs ${r.body.graphNodes}`);
+      `the spill must hold more than came back inline: ${r.body.graphComplete.nodes} vs ${r.body.graphNodes}`);
     assert.equal(r.body.graphComplete.nodes, 30, 'the hub has 30 leaves, so the complete graph has 30 nodes');
-    assert.match(r.body.graphComplete.path, /^_tmp\/graph-[0-9a-f-]+\.json$/);
+    const { spillId } = r.body.graphComplete;
+    assert.match(String(spillId), /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+      `the spill is named by id: ${JSON.stringify(r.body.graphComplete)}`);
+    assert.equal(r.body.graphComplete.download, `/api/brain/spills/${spillId}`, 'the link is the spill route');
+    // `path` stays, additively, because an MCP agent's only road to a spill before this was path + read_file.
+    assert.equal(r.body.graphComplete.path, `_tmp/graph-${spillId}.json`);
     assert.ok(r.body.graphComplete.expiresAt, 'a TTL the caller can see');
     const ttlHours = (new Date(r.body.graphComplete.expiresAt) - Date.now()) / 3_600_000;
     assert.ok(ttlHours > 20 && ttlHours <= 24, `one day, got ${ttlHours.toFixed(1)}h`);
   });
 
   it('the link needs the caller token, and serves the complete graph', async (t) => {
-    if (!embeddingAvailable) return t.skip('embedding unavailable');
+    if (!spillReady(t)) return;
     const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE_DENSE, ...({
       query: 'telemetry metrics aggregation collectors', types: ['entity'], topK: 1, traverse: 1,
     }) });
@@ -549,17 +564,19 @@ describe('Recall traverse — the complete graph is downloadable when it does no
     assert.ok(anon.status === 401 || anon.status === 403, `expected a refusal, got ${anon.status}`);
 
     const authed = await fetch(url, { headers: { Authorization: `Bearer ${token()}` } });
-    assert.equal(authed.status, 200);
-    const body = JSON.parse(await authed.text());
-    assert.equal(body.kind, 'graph-traversal');
-    assert.equal(body.nodes, 30);
-    const nested = body.graph.flatMap(g => g.graph ?? []);
-    assert.equal(nested.length, 30, 'the file holds the whole neighbourhood, not the inline slice');
-    assert.ok(nested[0].edges?.length && nested[0].node && nested[0].paths, 'and holds it in the same shape');
+    assert.equal(authed.status, 200, `the issuing token reads its spill: ${url}`);
+    const body = await authed.json();
+    assert.equal(body.kind, 'graph');
+    // Flattened to one item per NODE, so a single seed's tree can page: `{id, spaceId, depth, via, record}`.
+    const nodes = [body.items, body.nodes].find(Array.isArray) ?? [];
+    assert.equal(nodes.length, 30, 'the spill holds the whole neighbourhood, not the inline slice');
+    assert.deepEqual(new Set(nodes.map(n => n.id)), new Set(DENSE_LEAVES), 'every leaf, by identity');
+    assert.ok(nodes.every(n => n.spaceId === SPACE_DENSE && n.depth === 1 && n.via?.edgeId && n.record),
+      `each node says where it came from and how it was reached: ${JSON.stringify(nodes[0]).slice(0, 200)}`);
   });
 
   it('a graph that FITS gets no link and no flag', async (t) => {
-    if (!embeddingAvailable) return t.skip('embedding unavailable');
+    if (!spillReady(t)) return;
     // The other half of the check, and the one a flag-only implementation would have got wrong: three
     // neighbours at depth 1 in the chain space is well inside the cap.
     const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({
@@ -570,24 +587,26 @@ describe('Recall traverse — the complete graph is downloadable when it does no
     assert.equal(r.body.graphComplete, undefined, 'and must not write a file nobody needs');
   });
 
-  it('the spill is hidden from file browsing and never queued for embedding', async (t) => {
-    if (!embeddingAvailable) return t.skip('embedding unavailable');
-    await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE_DENSE, ...({
+  it('the spill is not in the space at all — no file, no record, no seq, no embed job', async (t) => {
+    if (!spillReady(t)) return;
+    // It used to be HIDDEN from browsing, which is a weaker claim than it sounds: hidden from the listing,
+    // present in `<space>_files`, advancing the seq, and so synced to every peer. The store is read
+    // directly because the listing is exactly the view that hid it.
+    const before = spaceFootprint('a', SPACE_DENSE);
+    const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE_DENSE, ...({
       query: 'telemetry metrics aggregation collectors', types: ['entity'], topK: 1, traverse: 1,
     }) });
+    assert.ok(r.body.graphComplete, `the call must spill, or the comparison below proves nothing: ${JSON.stringify(r.body).slice(0, 200)}`);
+    const after = spaceFootprint('a', SPACE_DENSE);
+    assert.deepEqual(after.fileIds, before.fileIds, 'a recall wrote a file record into the space');
+    assert.equal(after.seq, before.seq, 'a recall advanced the space seq');
+    assert.deepEqual(after.spillJobs, before.spillJobs, 'a recall queued its own output for embedding');
 
-    // Hidden: `_tmp` is output, like `_converted/` and `_extracted/`.
-    const listing = await get(INSTANCES.a, token(), `/api/files/${SPACE_DENSE}`);
+    // Still true, and now trivially: there is no `_tmp` for the listing to hide, even with derived trees on.
+    const listing = await get(INSTANCES.a, token(), `/api/files/${SPACE_DENSE}?includeDerived=true`);
     assert.equal(listing.status, 200, JSON.stringify(listing.body));
     const names = (listing.body?.entries ?? []).map(e => e.name);
-    assert.ok(!names.includes('_tmp'), `_tmp must not be browsable: ${JSON.stringify(names)}`);
-
-    // Not embedded: embedding a read's own output would let the next recall match the JSON dump of an
-    // earlier one, and would spend model time doing it.
-    const queue = await get(INSTANCES.a, token(), `/api/brain/spaces/${SPACE_DENSE}/embedding-queue/media`);
-    assert.equal(queue.status, 200, JSON.stringify(queue.body));
-    const jobs = JSON.stringify(queue.body);
-    assert.ok(!jobs.includes('_tmp/'), `no spill may be queued: ${jobs.slice(0, 300)}`);
+    assert.ok(!names.includes('_tmp'), `a search must leave no _tmp in the space: ${JSON.stringify(names)}`);
   });
 });
 

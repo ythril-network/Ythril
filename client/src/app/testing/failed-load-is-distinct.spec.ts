@@ -22,12 +22,9 @@
  * matching, because the comments explaining these fixes quote the very markers below.
  */
 import { describe, it, expect } from 'vitest';
-import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-
-/** Repo's client/ dir — vitest runs with cwd = client/, and `git ls-files` output is relative to cwd. */
-const CLIENT = resolve(__dirname, '../../..');
+import { CLIENT_ROOT as CLIENT, trackedAppSources } from './tracked-sources';
 
 /**
  * Components that render an empty state but are allowed not to distinguish a failure.
@@ -215,10 +212,8 @@ function analyse(path: string): Surface {
 }
 
 function surfaces(): Surface[] {
-  return execFileSync('git', ['ls-files', 'src/app'], { cwd: CLIENT, encoding: 'utf8' })
-    .split('\n')
-    .map(l => l.trim().replace(/\\/g, '/'))
-    .filter(p => p.endsWith('.component.ts') && !p.endsWith('.spec.ts'))
+  return trackedAppSources()
+    .filter(p => p.endsWith('.component.ts'))
     .map(analyse);
 }
 

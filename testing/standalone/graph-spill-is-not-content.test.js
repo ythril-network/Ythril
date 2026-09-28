@@ -20,7 +20,7 @@
 import { describe, it } from 'node:test';
 import { trackedSources } from './_sources.mjs';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { balancedFrom } from './_structural-window.mjs';
 
 const { isSpillPath, SPILL_DIR } = await import('../../server/dist/brain/spill-path.js');
@@ -162,22 +162,45 @@ describe('the constants say what the ruling said', () => {
       'the inline tree must still be capped exactly as before');
   });
 
-  it('the TTL is stamped through the record machinery, not a new sweeper', () => {
+  /**
+   * Every `putSpill(...)` call in the builder, as its argument text. Q-92: the builder hands a spill to the
+   * instance store and never to a space's file store, so this is where the rule is applied.
+   */
+  const putSpillCalls = () => {
     const spill = read('server/src/brain/graph-spill.ts');
-    assert.match(spill, /ttlDays: SPILL_TTL_DAYS/,
-      'the TTL sweep cascades a file record to its blob; a private sweeper would be a second copy of that');
-  });
+    return [...spill.matchAll(/\bputSpill\(/g)]
+      .map(m => balancedFrom(spill, m.index, 'putSpill in graph-spill.ts').slice(1, -1));
+  };
 
-  it('the file goes to a MEMBER space, never to the space the call was addressed to', () => {
+  it('both spill kinds go to the read-spill store, and its expiresAt is their only lifetime', () => {
     /*
-     * A proxy space is a lens, not a store: `resolveWriteTarget` refuses a write to one without an explicit
-     * `targetSpace` because it owns no files. Addressing the spill at the request's space would have created
-     * a tree and a `{proxy}_files` record for a space meant to have neither. A seed's `spaceId` is always a
-     * concrete member.
+     * Q-92 replaced the rule this asserted (`ttlDays: SPILL_TTL_DAYS` on a `<space>_files` record). A record
+     * TTL is a WRITE into the space: a blob, a FileMeta, a seq bump that syncs it to every peer, an embed job.
+     * A spill now lives in `_read_spills` / `_read_spill_pages`, whose TTL index is its whole lifetime — so a
+     * file-record TTL here would mean the space is being written again.
      */
     const spill = read('server/src/brain/graph-spill.ts');
-    assert.match(spill, /writeSpill\(seeds\[0\]!\.spaceId,/,
-      'the write space must come from a seed, not from a parameter a route can fill with a proxy id');
+    assert.doesNotMatch(spill, /ttlDays/, 'a file-record TTL means the spill is a record in the space again');
+    const kinds = new Set(putSpillCalls().map(a => a.match(/kind:\s*'(\w+)'/)?.[1]));
+    assert.deepEqual([...kinds].sort(), ['graph', 'results'],
+      'both the graph spill and the result remainder must be handed to the store');
+  });
+
+  it('a spill is addressed to NO space — its member spaces are what its records say — and to its caller', () => {
+    /*
+     * Q-92 replaced "the file goes to a MEMBER space" — right while a spill was a file, and the reason the
+     * write went to a seed's space rather than a proxy. There is no write space any more: `putSpill` derives
+     * `memberSpaceIds` from every item's `spaceId`, so a caller that passes its own list can only get it wrong,
+     * and `issuedTo` is what makes the spill readable by the token that caused it and nobody else.
+     */
+    const calls = putSpillCalls();
+    assert.ok(calls.length >= 2, `only ${calls.length} putSpill call(s) — the scan is wrong or a kind is missing`);
+    for (const args of calls) {
+      assert.match(args, /\bissuedTo\b/, `a putSpill call names no owner: ${args.trim().slice(0, 120)}`);
+      assert.doesNotMatch(args, /\bmemberSpaceIds?\b|\bspaceId\s*:/,
+        `a putSpill call names its own space(s) — the store derives them from the items: ${args.trim().slice(0, 120)}`);
+    }
+    const spill = read('server/src/brain/graph-spill.ts');
     assert.ok(!/writeSpaceId/.test(spill),
       'no caller-supplied write space — the routes had `spaceId` and `callSpace` to hand, and both can be a proxy');
 
@@ -216,9 +239,16 @@ describe('the constants say what the ruling said', () => {
     assert.ok(checked >= 2, `only ${checked} spill build(s) examined; the scan found doors but no calls`);
   });
 
-  it('the download link is the authenticated file route', () => {
+  it('the download link is the spill route, never the space\'s file route', () => {
+    /*
+     * Q-92 replaced "the link is the authenticated file route". That route is `files: read` on the space — a
+     * knowledge-only token got a link it could not fetch, and any files-read token could read every spill in
+     * the space. The spill route checks the ISSUER and knowledge read on every member space instead.
+     */
     const spill = read('server/src/brain/graph-spill.ts');
-    assert.match(spill, /\/api\/files\/\$\{encodeURIComponent\(memberSpaceId\)\}\?path=/,
-      'a link that worked without the caller token would read a space with no auth');
+    const store = existsSync('server/src/brain/read-spill-store.ts') ? read('server/src/brain/read-spill-store.ts') : '';
+    assert.match(spill + store, /\/api\/brain\/spills\/\$\{encodeURIComponent\(/,
+      'the download must be `GET /api/brain/spills/:id`, the door that checks who the spill belongs to');
+    assert.doesNotMatch(spill, /\/api\/files\//, 'a spill is not a file in a space, so it has no file-route link');
   });
 });

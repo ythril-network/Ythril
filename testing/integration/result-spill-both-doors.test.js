@@ -34,6 +34,14 @@
  * against the seeded ids, because a `nextSkip` off by one would satisfy every presence assertion while dropping
  * or duplicating a record on every page.
  *
+ * ## Where the remainder lives since Q-92
+ *
+ * Not in the space. The "file" above was a real file in the space's `_tmp/`, with a record, a seq bump and
+ * so a copy on every peer — a search writing data. It is now a read spill held by the instance, readable by
+ * the token that caused it through `GET /api/brain/spills/:id` and MCP `read_spill`; the assertions that
+ * downloaded it read it from there. That no door writes the space is pinned by
+ * `testing/red-team-tests/a-search-never-writes-a-space.test.js`.
+ *
  * Run: node --test testing/integration/result-spill-both-doors.test.js
  */
 import { describe, it, before, after } from 'node:test';
@@ -43,6 +51,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'url';
 import { INSTANCES, post } from '../sync/helpers.js';
 import { openMcpSession } from '../sync/mcp-session.js';
+import { requireEmbedding } from '../_shared/embedding-required.mjs';
+
+const SPILL_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, '..', 'sync', 'configs');
@@ -205,7 +216,9 @@ const fullCount = async () => {
  * and report green for having measured nothing.
  */
 const ready = (t) => {
-  if (ids.length !== COUNT) { t.skip(`seeded ${ids.length}/${COUNT} — writes unavailable`); return false; }
+  // On CI an unseeded corpus FAILS rather than skips (Q-92): every case here is behind a ranked search, and a
+  // skip would report the spill contract green having asserted none of it.
+  if (!requireEmbedding(t, ids.length === COUNT, `seeded ${ids.length}/${COUNT} — writes unavailable`)) return false;
   assert.ok(tightBytes > 0, 'the calibration recall in before() did not produce a budget — see its guard');
   return true;
 };
@@ -286,7 +299,12 @@ describe('REST: a tight budget returns a prefix and a way to reach the rest', ()
     assert.notEqual(r.body.remainder, undefined, 'asked for and not delivered');
     assert.equal(r.body.remainder.matches, r.body.count - r.body.returned,
       'the file holds exactly what did not fit, never the records already sent');
-    assert.match(r.body.remainder.path, /^_tmp\/results-[0-9a-f-]+\.json$/);
+    // Q-92: the remainder is a READ SPILL held by the instance, named by id and fetched from the spill route
+    // — never a file in the space. `path` stays additively, in the shape it had, and names the same spill.
+    const { spillId } = r.body.remainder;
+    assert.match(String(spillId), SPILL_ID, `the remainder is named by id: ${JSON.stringify(r.body.remainder)}`);
+    assert.equal(r.body.remainder.download, `/api/brain/spills/${spillId}`, 'the link is the spill route');
+    assert.equal(r.body.remainder.path, `_tmp/results-${spillId}.json`);
     assert.equal(r.body.remainder.inline, undefined,
       'inline described the old three-record sample and must not reappear');
     // Both ways out of a truncated answer, on the same response. Asking for the file does not cost the
@@ -308,20 +326,22 @@ describe('REST: a tight budget returns a prefix and a way to reach the rest', ()
     const anon = await fetch(url);
     assert.ok(anon.status === 401 || anon.status === 403, `unauthenticated must be refused, got ${anon.status}`);
 
-    const authed = await fetch(url, { headers: { Authorization: `Bearer ${token()}` } });
-    assert.equal(authed.status, 200);
+    // Unbudgeted on purpose — `maxBytes` at its ceiling — so one window is the whole remainder and the counts
+    // below compare the spill with itself rather than with a page of it.
+    const authed = await fetch(`${url}${url.includes('?') ? '&' : '?'}maxBytes=5000000`, { headers: { Authorization: `Bearer ${token()}` } });
+    assert.equal(authed.status, 200, `the issuing token reads its spill: ${url}`);
     const text = await authed.text();
     const body = JSON.parse(text);
 
-    assert.equal(body.kind, 'recall-results');
-    assert.equal(body.results.length, r.body.count - r.body.returned,
-      'the file must hold the remainder, not the whole set — re-sending what the caller has is the old defect');
-    assert.equal(body.matches, body.results.length, 'and its own header must agree with its contents');
-    assert.equal(body.graphNodes, 0, 'no traversal was asked for, so the file claims no nodes');
-    assert.equal(body.records, body.results.length, 'records is matches plus nodes, counted from the payload');
-    assert.equal(body.request.query, QUERY, 'and say what produced it');
+    assert.equal(body.kind, 'results');
+    const items = [body.items, body.results].find(Array.isArray) ?? [];
+    assert.equal(body.truncated, false, 'one unbudgeted window is the whole spill');
+    assert.equal(items.length, r.body.count - r.body.returned,
+      'the spill must hold the remainder, not the whole set — re-sending what the caller has is the old defect');
+    assert.equal(r.body.remainder.matches, items.length, 'and the response that announced it must agree with it');
+    assert.equal(body.request?.query, QUERY, 'and say what produced it');
     // The owner asked for this by name.
-    assert.equal(/"embedding"|"vector"|"embeddings"/.test(text), false, 'no vector may reach the file');
+    assert.equal(/"embedding"|"vector"|"embeddings"/.test(text), false, 'no vector may reach the spill');
   });
 
   it('an answer that fits is untouched — no truncation, no file', async (t) => {
@@ -555,6 +575,16 @@ describe('MCP: the same answer through the other door', () => {
       assert.notEqual(dumped.remainder, undefined, 'asked for and not delivered on the MCP door');
       assert.equal(dumped.remainder.matches, rankedLen - dumped.returned,
         'holding only what did not fit — measured against the RANKED length, not `count`, which is the corpus');
+
+      // And the MCP caller can READ it on this door, without a files right and without leaving MCP: the
+      // same spill, the same count, through `read_spill` (Q-92). The old answer was a path the caller could
+      // only open with `read_file`, which a knowledge-only token cannot call.
+      assert.match(String(dumped.remainder.spillId), SPILL_ID, `named by id on MCP too: ${JSON.stringify(dumped.remainder)}`);
+      const readBack = await session.callTool('read_spill', { id: dumped.remainder.spillId, maxBytes: 5_000_000 });
+      assert.notEqual(readBack?.isError, true, `read_spill failed: ${readBack?.content?.[0]?.text?.slice(0, 200)}`);
+      const spill = JSON.parse(readBack?.content?.[0]?.text ?? '{}');
+      const spillItems = [spill.items, spill.results].find(Array.isArray) ?? [];
+      assert.equal(spillItems.length, dumped.remainder.matches, 'read_spill serves exactly the remainder announced');
 
       // And `skip` continues here too, or the opt-in would strand an MCP caller specifically.
       const next = JSON.parse((await session.callTool('recall', {

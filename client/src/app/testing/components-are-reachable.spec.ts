@@ -27,12 +27,9 @@
  * subject, and the comment above literally names a deleted component.
  */
 import { describe, it, expect } from 'vitest';
-import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-
-/** vitest runs with cwd = client/, and `git ls-files` output is relative to it. */
-const CLIENT = resolve(__dirname, '../../..');
+import { CLIENT_ROOT as CLIENT, trackedAppSources } from './tracked-sources';
 
 /**
  * Components that are legitimately not referenced from another component or a route.
@@ -66,9 +63,7 @@ interface Comp {
 
 /** Every tracked source file. `git ls-files`, not readdir — a gitignored or generated file is not the app. */
 function allSources(): string[] {
-  return execFileSync('git', ['ls-files', 'src/app'], { cwd: CLIENT, encoding: 'utf8' })
-    .split('\n').map(l => l.trim().replace(/\\/g, '/'))
-    .filter(p => p.endsWith('.ts') && !p.endsWith('.spec.ts'));
+  return trackedAppSources();
 }
 
 function tracked(): string[] {

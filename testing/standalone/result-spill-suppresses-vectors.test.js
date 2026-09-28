@@ -19,7 +19,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { routeBody, delegatesCleanly } from './_delegating-routes.mjs';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
 import { bodyOf } from './_structural-window.mjs';
 
@@ -52,8 +52,12 @@ describe('vectors never reach the file', () => {
       _id: 'a',
       embedding: [1, 2, 3],
       record: { vector: [4], name: 'x', nested: [{ embeddings: [9], contentEmbedding: [1], ok: 1 }] },
+      // A file's face chunks carry `faceEmbedding` (Q-92): a file-search spill must not carry it either.
+      _graph: [{ record: { faceEmbedding: [7], label: 'face' } }],
     });
-    assert.equal(JSON.stringify(out).includes('embedding'), false, JSON.stringify(out));
+    // Case-insensitive: `faceEmbedding` does not contain the lower-case word, and that is how it slipped through.
+    assert.equal(/embedding/i.test(JSON.stringify(out)), false, JSON.stringify(out));
+    assert.equal(out._graph[0].record.label, 'face');
     assert.equal(JSON.stringify(out).includes('vector'), false, JSON.stringify(out));
     assert.equal(out.record.name, 'x', 'and keeps everything else');
     assert.equal(out.record.nested[0].ok, 1);
@@ -72,11 +76,16 @@ describe('vectors never reach the file', () => {
     assert.deepEqual(suppressEmbeddings([{ embedding: [1] }, 2]), [{}, 2]);
   });
 
-  it('is applied at the write, not left to the caller', () => {
-    const src = read('server/src/brain/graph-spill.ts');
-    const body = bodyOf(src, 'spillResultSet', 'the vector strip');
-    assert.match(body, /JSON\.stringify\(suppressEmbeddings\(\{/,
-      'the strip must wrap the whole payload at serialisation, not a field somebody remembered');
+  it('is applied inside putSpill, so no caller can store a spill without it', () => {
+    /*
+     * Q-92 replaced "at the write in spillResultSet". The write moved to the read-spill store, and it has two
+     * callers — the result remainder and the graph spill — of which only one stripped. A rule inside the store
+     * is one no caller can forget; `a-read-spill-is-kept-outside-every-space-db` checks the stored pages.
+     */
+    const store = 'server/src/brain/read-spill-store.ts';
+    assert.ok(existsSync(store), `${store} is missing`);
+    assert.match(bodyOf(read(store), 'putSpill', 'the vector strip'), /suppressEmbeddings\(/,
+      'the strip must run inside putSpill, on every item, whichever kind of spill it is');
   });
 });
 
@@ -123,11 +132,16 @@ describe('the remainder is written out, with a TTL', () => {
     assert.doesNotMatch(src, /inline: Math\.min/, 'the stale inline count must be gone from the spill object');
   });
 
-  it('one-day TTL, through the record machinery', () => {
+  it('one day, as the store\'s expiry — the remainder is handed to putSpill, never made a file record', () => {
+    /*
+     * Q-92 replaced "one-day TTL, through the record machinery". A record TTL means a `<space>_files` record,
+     * which is a write into the space a search was reading. The lifetime is now the store's `expiresAt`.
+     */
     assert.equal(SPILL_TTL_DAYS, 1);
-    const src = read('server/src/brain/graph-spill.ts');
-    assert.match(bodyOf(src, 'spillResultSet', 'the TTL'), /ttlDays: SPILL_TTL_DAYS/,
-      'the file must expire with its record, like the graph spill beside it');
+    const body = bodyOf(read('server/src/brain/graph-spill.ts'), 'spillResultSet', 'the lifetime');
+    assert.doesNotMatch(body, /ttlDays/, 'a file-record TTL means the remainder is a record in the space again');
+    assert.match(body, /putSpill\(\{[\s\S]*?kind:\s*'results'/,
+      'the remainder must be handed to the read-spill store as a results spill');
   });
 
   it('all four response sites use it', () => {
