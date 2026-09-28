@@ -1593,3 +1593,106 @@ describe('FileManagerComponent — what a preview decides (characterization for 
     expect(table.rows[0][5]).toBe('');           // an empty cell is empty, not the word "null"
   });
 });
+
+/**
+ * Characterization for Q-92 point 11: the preview's authenticated blob fetch, end to end.
+ *
+ * The preview is one of the hand-written authenticated blob fetches the shared download helper replaces, and
+ * the blocks above pin its seams separately (header per branch, staleness, release). What none of them pins is
+ * the whole path a user sees for an image or a PDF: the REAL request URL, the response blob becoming the URL
+ * the pane shows, and an HTTP error showing in the pane rather than as a toast. The request URL is built by
+ * the real `FilesApi.getFileDownloadUrl`, because the stub above returns an Observable where a string goes.
+ */
+describe('FileManagerComponent — the preview blob fetch (characterization for Q-92)', () => {
+  function createWithRealUrls(toasts: string[]) {
+    const api = makeApi();
+    api.getFileDownloadUrl = (spaceId: string, path: string) => FilesApi.prototype.getFileDownloadUrl.call(null, spaceId, path);
+    TestBed.configureTestingModule({
+      imports: [FileManagerComponent, getTranslocoModule()],
+      providers: [
+        { provide: FilesApi, useValue: api },
+        { provide: SpacesApi, useValue: api },
+        { provide: BrainApi, useValue: api },
+        { provide: AuthService, useValue: { token: () => 't' } },
+        { provide: ActivatedRoute, useValue: { snapshot: { queryParamMap: { get: () => null } }, queryParamMap: of() } },
+        { provide: ToastService, useValue: {
+          show: (m: string) => toasts.push(m), error: (m: string) => toasts.push(m),
+          success: (m: string) => toasts.push(m), info: (m: string) => toasts.push(m),
+        } },
+      ],
+    });
+    const fixture = TestBed.createComponent(FileManagerComponent);
+    fixture.componentRef.setInput('embeddedSpaceId', 'work');
+    fixture.detectChanges();
+    return fixture.componentInstance as any;
+  }
+
+  const settle = async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); };
+
+  it('an image preview fetches the file URL with the bearer and shows the response blob as an object URL', async () => {
+    const spy = withRevokeSpy();
+    const created: unknown[] = [];
+    (URL as any).createObjectURL = (b: unknown) => { created.push(b); return 'blob:pv-' + created.length; };
+    const bytes = { type: 'image/png' };
+    const f = withFetch(() => Promise.resolve(okResponse({ blob: bytes })));
+    try {
+      const toasts: string[] = [];
+      const c = createWithRealUrls(toasts);
+      c.currentPath.set('/pics');
+      c.openPreview(file('cat 1.png'));
+      await settle();
+
+      expect(f.calls).toHaveLength(1);
+      expect(f.calls[0].url).toBe('/api/files/work?path=%2Fpics%2Fcat%201.png');
+      expect(f.calls[0].init).toEqual({ headers: { Authorization: 'Bearer t' } });
+      expect(created).toEqual([bytes]);            // the response body itself, not a copy
+      expect(c.preview.mediaUrl()).toBe('blob:pv-1');
+      expect(c.preview.loading()).toBe(false);
+      expect(toasts).toEqual([]);
+
+      c.closePreview();
+      expect(spy.calls).toEqual(['blob:pv-1']);    // released on close, the one resource this pane owns
+    } finally {
+      f.restore();
+    }
+  });
+
+  it('a PDF preview binds the object URL as a trusted resource URL, not as media', async () => {
+    withRevokeSpy();
+    (URL as any).createObjectURL = () => 'blob:pdf-1';
+    const f = withFetch(() => Promise.resolve(okResponse({ blob: { type: 'application/pdf' } })));
+    try {
+      const c = createWithRealUrls([]);
+      c.openPreview(file('report.pdf'));
+      await settle();
+      expect(f.calls[0].url).toBe('/api/files/work?path=%2Freport.pdf');
+      expect(c.preview.mediaUrl()).toBe('');
+      expect(c.preview.safeUrl()?.changingThisBreaksApplicationSecurity).toBe('blob:pdf-1');
+      c.closePreview();
+    } finally {
+      f.restore();
+    }
+  });
+
+  it('an HTTP error allocates no object URL and shows "HTTP <status>" in the pane, never a toast', async () => {
+    withRevokeSpy();
+    let createdCount = 0;
+    (URL as any).createObjectURL = () => { createdCount++; return 'blob:never'; };
+    let blobRead = false;
+    const f = withFetch(() => Promise.resolve({ ok: false, status: 404, blob: () => { blobRead = true; return Promise.resolve({}); } }));
+    try {
+      const toasts: string[] = [];
+      const c = createWithRealUrls(toasts);
+      c.openPreview(file('gone.png'));
+      await settle();
+      expect(blobRead).toBe(false);
+      expect(createdCount).toBe(0);
+      expect(c.preview.mediaUrl()).toBe('');
+      expect(c.preview.error()).toBe('HTTP 404');
+      expect(c.preview.loading()).toBe(false);
+      expect(toasts).toEqual([]);
+    } finally {
+      f.restore();
+    }
+  });
+});

@@ -436,3 +436,100 @@ describe('SpaceSettingsState.buildMeta — an emptied knowledge type must still 
     expect(meta.typeSchemas!.entity!['ref']).toEqual({ $ref: 'library:cross-space-reference' });
   });
 });
+
+/**
+ * Characterization for Q-92 point 11: the two schema exports, pinned before the hand-written blob saves are
+ * replaced by one shared helper. Both are LOCAL (the payload is built in the browser; no request is made),
+ * so what is pinned is the file the user gets: its name, its type, its JSON, that the blob URL is released,
+ * and that nothing is saved with no space open.
+ */
+describe('SpaceSchemaTabComponent — schema exports (characterization for Q-92)', () => {
+  function stubSave() {
+    const created: Blob[] = [];
+    const revoked: string[] = [];
+    const clicked: { href: string; download: string; revokedBeforeClick: boolean }[] = [];
+    const had = { create: 'createObjectURL' in URL, revoke: 'revokeObjectURL' in URL };
+    const prev = { create: (URL as any).createObjectURL, revoke: (URL as any).revokeObjectURL };
+    (URL as any).createObjectURL = (b: Blob) => { created.push(b); return 'blob:schema-' + created.length; };
+    (URL as any).revokeObjectURL = (u: string) => { revoked.push(u); };
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+      const href = this.getAttribute('href') ?? '';
+      clicked.push({ href, download: this.download, revokedBeforeClick: revoked.includes(href) });
+    });
+    const restore = () => {
+      click.mockRestore();
+      if (had.create) (URL as any).createObjectURL = prev.create; else delete (URL as any).createObjectURL;
+      if (had.revoke) (URL as any).revokeObjectURL = prev.revoke; else delete (URL as any).revokeObjectURL;
+    };
+    return { created, revoked, clicked, restore };
+  }
+
+  const blobJson = (b: Blob) => new Promise<any>((res, rej) => {
+    const r = new FileReader();
+    r.onload = () => res(JSON.parse(String(r.result)));
+    r.onerror = () => rej(r.error);
+    r.readAsText(b);
+  });
+
+  it('Export schemas saves application/json named <spaceId>_schemas.json with the space and its type schemas', async () => {
+    const s = stubSave();
+    try {
+      const { c, state } = setup();
+      state.settingsSpace.set({ id: 'work', label: 'Work' } as never);
+      state.schTypeSchemas = { ...state.schTypeSchemas, entity: { Service: mkType() } };
+      const expectedSchemas = state.buildMeta().typeSchemas ?? {};
+      c.exportSchema();
+
+      expect(s.created).toHaveLength(1);
+      expect(s.created[0].type).toBe('application/json');
+      const body = await blobJson(s.created[0]);
+      expect(Object.keys(body)).toEqual(['spaceId', 'spaceLabel', 'exportedAt', 'typeSchemas']);
+      expect(body.spaceId).toBe('work');
+      expect(body.spaceLabel).toBe('Work');
+      expect(body.exportedAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+      expect(body.typeSchemas).toEqual(JSON.parse(JSON.stringify(expectedSchemas)));
+      expect(body.typeSchemas.entity).toHaveProperty('Service');
+
+      expect(s.clicked).toEqual([{ href: 'blob:schema-1', download: 'work_schemas.json', revokedBeforeClick: false }]);
+      expect(s.revoked).toEqual(['blob:schema-1']);   // AS-IS: revoked synchronously after the click
+    } finally {
+      s.restore();
+    }
+  });
+
+  it('Export one type saves application/json named <spaceId>_<kt>_<name>.json with the type schema', async () => {
+    const s = stubSave();
+    try {
+      const { c, state } = setup();
+      state.settingsSpace.set({ id: 'work', label: 'Work' } as never);
+      state.schTypeSchemas = { ...state.schTypeSchemas, entity: { Service: mkType() } };
+      c.exportTypeSchema('entity', 'Service');
+
+      expect(s.created[0].type).toBe('application/json');
+      const body = await blobJson(s.created[0]);
+      expect(Object.keys(body)).toEqual(['knowledgeType', 'typeName', 'schema']);
+      expect(body.knowledgeType).toBe('entity');
+      expect(body.typeName).toBe('Service');
+      expect(typeof body.schema).toBe('object');
+      expect(s.clicked).toEqual([{ href: 'blob:schema-1', download: 'work_entity_Service.json', revokedBeforeClick: false }]);
+      expect(s.revoked).toEqual(['blob:schema-1']);
+    } finally {
+      s.restore();
+    }
+  });
+
+  it('with no space open neither export saves anything or toasts', () => {
+    const s = stubSave();
+    try {
+      const { c, state } = setup();
+      state.settingsSpace.set(null);
+      c.exportSchema();
+      c.exportTypeSchema('entity', 'Service');
+      expect(s.created).toEqual([]);
+      expect(s.clicked).toEqual([]);
+      expect(toasts).toEqual([]);
+    } finally {
+      s.restore();
+    }
+  });
+});

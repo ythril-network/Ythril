@@ -10,8 +10,13 @@
  * so a passing assertion here means the view genuinely refreshed, not that staleness is invisible.)
  */
 import { TestBed } from '@angular/core/testing';
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { of } from 'rxjs';
+import { provideHttpClient, withInterceptors } from '@angular/common/http';
+import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
+import { Router } from '@angular/router';
+import { authInterceptor } from '../../core/auth.interceptor';
+import { AuthService } from '../../core/auth.service';
 import { type AuditLogEntry } from '../../core/api.types';
 import { AdminApi } from '../../core/admin-api.service';
 import { SpacesApi } from '../../core/spaces-api.service';
@@ -231,5 +236,200 @@ describe('AuditLogComponent (OnPush)', () => {
       entry({ status: 404, operation: 'c' }),
     ]);
     expect(fixture.componentInstance.statusOptions()).toEqual([200, 404]);
+  });
+});
+
+/**
+ * Characterization for Q-92 point 11: the three audit exports, pinned before the page's `downloadBlob` and the
+ * other hand-written blob saves are replaced by one shared helper.
+ *
+ * Two of the three are LOCAL (the page on screen, serialised in the browser); `exportAll` is the one
+ * authenticated download, fetched through `HttpClient` so the auth interceptor (and the MFA one in the app)
+ * applies. It is driven here through the real `AdminApi` and the real `authInterceptor`, so the request the
+ * test sees is the one the app sends.
+ */
+describe('AuditLogComponent — exports (characterization for Q-92)', () => {
+  const ROWS = [
+    entry({ operation: 'memory.create', requestId: 'r-1', ip: '10.0.0.1' } as Partial<AuditLogEntry>),
+    entry({ operation: 'a,b "quoted"', status: 403 }),
+  ];
+
+  /** Stub the object-URL API and the anchor click; `restore` puts all three back. */
+  function stubSave() {
+    const created: Blob[] = [];
+    const revoked: string[] = [];
+    const clicked: { href: string; download: string; revokedBeforeClick: boolean }[] = [];
+    const had = { create: 'createObjectURL' in URL, revoke: 'revokeObjectURL' in URL };
+    const prev = { create: (URL as any).createObjectURL, revoke: (URL as any).revokeObjectURL };
+    (URL as any).createObjectURL = (b: Blob) => { created.push(b); return 'blob:audit-' + created.length; };
+    (URL as any).revokeObjectURL = (u: string) => { revoked.push(u); };
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+      const href = this.getAttribute('href') ?? '';
+      clicked.push({ href, download: this.download, revokedBeforeClick: revoked.includes(href) });
+    });
+    const restore = () => {
+      click.mockRestore();
+      if (had.create) (URL as any).createObjectURL = prev.create; else delete (URL as any).createObjectURL;
+      if (had.revoke) (URL as any).revokeObjectURL = prev.revoke; else delete (URL as any).revokeObjectURL;
+    };
+    return { created, revoked, clicked, restore };
+  }
+
+  const blobText = (b: Blob) => new Promise<string>((res, rej) => {
+    const r = new FileReader();
+    r.onload = () => res(String(r.result));
+    r.onerror = () => rej(r.error);
+    r.readAsText(b);
+  });
+
+  function createLocal(entries: AuditLogEntry[]) {
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({
+      imports: [AuditLogComponent, getTranslocoModule()],
+      providers: [
+        { provide: AdminApi, useValue: makeApi(entries) },
+        { provide: SpacesApi, useValue: makeApi(entries) },
+      ],
+    });
+    const fixture = TestBed.createComponent(AuditLogComponent);
+    fixture.detectChanges();
+    return fixture.componentInstance;
+  }
+
+  function createWithHttp(token: string) {
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({
+      imports: [AuditLogComponent, getTranslocoModule()],
+      providers: [
+        provideHttpClient(withInterceptors([authInterceptor])),
+        provideHttpClientTesting(),
+        { provide: AuthService, useValue: { token: () => token, isAuthenticated: () => true, logout: () => {} } },
+        { provide: Router, useValue: { navigate: () => Promise.resolve(true) } },
+        { provide: SpacesApi, useValue: makeApi([]) },
+      ],
+    });
+    const api = TestBed.inject(AdminApi);
+    vi.spyOn(api, 'getAuditLog').mockReturnValue(of({ entries: ROWS, total: 2, hasMore: false, retentionDays: 90 }) as any);
+    const fixture = TestBed.createComponent(AuditLogComponent);
+    fixture.detectChanges();
+    return { c: fixture.componentInstance, http: TestBed.inject(HttpTestingController), fixture };
+  }
+
+  it('Export JSON saves the page on screen as application/json named audit-log-page.json, then revokes', async () => {
+    const s = stubSave();
+    try {
+      createLocal(ROWS).exportJson();
+      expect(s.created).toHaveLength(1);
+      expect(s.created[0].type).toBe('application/json');
+      expect(await blobText(s.created[0])).toBe(JSON.stringify(ROWS, null, 2));
+      expect(s.clicked).toEqual([{ href: 'blob:audit-1', download: 'audit-log-page.json', revokedBeforeClick: false }]);
+      // AS-IS: revoked synchronously straight after the click (the file manager defers its revoke by 10 s).
+      expect(s.revoked).toEqual(['blob:audit-1']);
+    } finally {
+      s.restore();
+    }
+  });
+
+  it('Export CSV saves text/csv named audit-log-page.csv with the fixed header row and quoted cells', async () => {
+    const s = stubSave();
+    try {
+      createLocal(ROWS).exportCsv();
+      expect(s.created[0].type).toBe('text/csv');
+      const lines = (await blobText(s.created[0])).split('\n');
+      expect(lines[0]).toBe('timestamp,requestId,tokenId,tokenLabel,authMethod,oidcSubject,ip,method,path,spaceId,operation,status,entryId,durationMs');
+      expect(lines).toHaveLength(3);
+      expect(lines[1]).toBe('2026-07-14T10:00:00.000Z,r-1,,,,,10.0.0.1,,,,memory.create,200,,12');
+      expect(lines[2]).toContain('"a,b ""quoted"""');
+      expect(s.clicked).toEqual([{ href: 'blob:audit-1', download: 'audit-log-page.csv', revokedBeforeClick: false }]);
+      expect(s.revoked).toEqual(['blob:audit-1']);
+    } finally {
+      s.restore();
+    }
+  });
+
+  it('Export all GETs the export endpoint with the bearer and the filters, and saves the body as audit-log-<UTC date>.ndjson', async () => {
+    const s = stubSave();
+    try {
+      const { c, http } = createWithHttp('T');
+      c.filterOperation = 'memory.create';
+      c.filterSpaceId = 'work';
+      c.filterStatus = '403';
+      c.filterIp = '10.0.0.1';
+      c.filterRequestId = 'req-9';
+      c.exportAll();
+      expect(c.exportingAll()).toBe(true);
+
+      const req = http.expectOne(r => r.url === '/api/admin/audit-log/export');
+      expect(req.request.method).toBe('GET');
+      expect(req.request.responseType).toBe('blob');
+      expect(req.request.headers.get('Authorization')).toBe('Bearer T');
+      const sent = Object.fromEntries(req.request.params.keys().map(k => [k, req.request.params.get(k)]));
+      // AS-IS: the request-id filter is NOT forwarded to the export, and neither are limit/offset.
+      expect(sent).toEqual({ operation: 'memory.create', spaceId: 'work', status: '403', ip: '10.0.0.1' });
+
+      const body = new Blob(['{"a":1}\n'], { type: 'application/x-ndjson' });
+      req.flush(body);
+
+      expect(s.created).toEqual([body]);   // the response body itself, type and bytes as the server sent them
+      const stamp = new Date().toISOString().slice(0, 10);
+      expect(s.clicked).toEqual([{ href: 'blob:audit-1', download: `audit-log-${stamp}.ndjson`, revokedBeforeClick: false }]);
+      expect(s.clicked[0].download).toMatch(/^audit-log-\d{4}-\d{2}-\d{2}\.ndjson$/);
+      expect(s.revoked).toEqual(['blob:audit-1']);
+      expect(c.exportingAll()).toBe(false);
+      expect(c.exportError()).toBe('');
+      http.verify();
+    } finally {
+      s.restore();
+    }
+  });
+
+  it('with no token Export all sends no Authorization header', () => {
+    const s = stubSave();
+    try {
+      const { c, http } = createWithHttp('');
+      c.exportAll();
+      const req = http.expectOne(r => r.url === '/api/admin/audit-log/export');
+      expect(req.request.headers.has('Authorization')).toBe(false);
+      req.flush(new Blob(['']));
+    } finally {
+      s.restore();
+    }
+  });
+
+  it('an HTTP error on Export all saves nothing and shows auditLog.exportAllFailed inline, not a toast', () => {
+    const s = stubSave();
+    try {
+      const { c, http, fixture } = createWithHttp('T');
+      c.exportAll();
+      const req = http.expectOne(r => r.url === '/api/admin/audit-log/export');
+      // AS-IS: the request asked for a Blob, so the server's JSON error body arrives as a Blob and its
+      // `error` message is unreachable — the page always falls back to the generic key.
+      req.flush(new Blob(['{"error":"export exploded"}'], { type: 'application/json' }), { status: 500, statusText: 'Server Error' });
+
+      expect(s.created).toEqual([]);
+      expect(s.clicked).toEqual([]);
+      expect(s.revoked).toEqual([]);
+      expect(c.exportError()).toBe('auditLog.exportAllFailed');
+      expect(c.exportingAll()).toBe(false);
+      fixture.detectChanges();
+      expect((fixture.nativeElement as HTMLElement).querySelector('.alert.alert-error')?.textContent?.trim())
+        .toBe('auditLog.exportAllFailed');
+    } finally {
+      s.restore();
+    }
+  });
+
+  it('a network failure on Export all saves nothing and shows auditLog.exportAllFailed too', () => {
+    const s = stubSave();
+    try {
+      const { c, http } = createWithHttp('T');
+      c.exportAll();
+      const req = http.expectOne(r => r.url === '/api/admin/audit-log/export');
+      req.error(new ProgressEvent('error'), { status: 0, statusText: 'Unknown Error' });
+      expect(s.created).toEqual([]);
+      expect(c.exportError()).toBe('auditLog.exportAllFailed');
+    } finally {
+      s.restore();
+    }
   });
 });

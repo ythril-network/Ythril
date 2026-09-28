@@ -22,6 +22,7 @@ import { getTranslocoModule } from '../../testing/transloco-testing';
 import { FileManagerComponent } from './file-manager.component';
 import { isOnPush } from '../../testing/onpush';
 import { ConfirmDialogService } from '../../core/confirm-dialog.service';
+import { ToastService } from '../../core/toast.service';
 
 function fileEntry(name: string, isDir = false): FileEntry {
   return {
@@ -977,6 +978,150 @@ describe('FileManagerComponent — preview/download auth', () => {
     // #134 scoped the ?token= fallback to SSE only — the token must NOT ride in the URL.
     expect(String(calls[0].url)).not.toContain('token=');
     expect(calls[0].opts.headers.Authorization).toBe('Bearer T');
+  });
+});
+
+/**
+ * Characterization for Q-92 point 11: what a user observes when they download a file, pinned before the
+ * hand-written blob download is replaced by one shared authenticated-download helper.
+ *
+ * Every case drives `downloadFile` end to end with `fetch`, the object-URL API and the anchor's `click`
+ * stubbed, because jsdom implements none of them. What is pinned is what the user gets: which URL is asked
+ * for and with which credential, what the saved file is called, which bytes it holds, that the blob URL is
+ * released, and what the page says (and does NOT save) when the request fails.
+ */
+describe('FileManagerComponent — downloading a file (characterization for Q-92)', () => {
+  beforeEach(() => TestBed.resetTestingModule());
+
+  function create(token: string) {
+    const toasts: { kind: string; msg: string }[] = [];
+    const api = makeApi([]);
+    // The REAL URL builder, so the request URL asserted below is the one the app sends, not a stub's.
+    api.getFileDownloadUrl = (spaceId: string, path: string) => FilesApi.prototype.getFileDownloadUrl.call(null, spaceId, path);
+    TestBed.configureTestingModule({
+      imports: [FileManagerComponent, getTranslocoModule()],
+      providers: [
+        { provide: FilesApi, useValue: api },
+        { provide: SpacesApi, useValue: api },
+        { provide: AuthService, useValue: { token: () => token } },
+        { provide: ActivatedRoute, useValue: { snapshot: { queryParamMap: { get: () => '' } } } },
+        { provide: ToastService, useValue: {
+          show: () => {},
+          error:   (msg: string) => toasts.push({ kind: 'error', msg }),
+          success: (msg: string) => toasts.push({ kind: 'success', msg }),
+          info:    (msg: string) => toasts.push({ kind: 'info', msg }),
+        } },
+      ],
+    });
+    const fixture = TestBed.createComponent(FileManagerComponent);
+    fixture.componentRef.setInput('embeddedSpaceId', 'work');
+    fixture.detectChanges();
+    return { c: fixture.componentInstance, toasts };
+  }
+
+  /** Stub the four browser seams a download touches; `restore` puts every one back. */
+  function stubBrowser(respond: (url: string) => Promise<unknown>) {
+    const fetches: { url: string; init: any }[] = [];
+    const created: unknown[] = [];
+    const revoked: string[] = [];
+    const clicked: { href: string; download: string; inDom: boolean }[] = [];
+    const had = { fetch: 'fetch' in globalThis, create: 'createObjectURL' in URL, revoke: 'revokeObjectURL' in URL };
+    const prev = { fetch: (globalThis as any).fetch, create: (URL as any).createObjectURL, revoke: (URL as any).revokeObjectURL };
+    (globalThis as any).fetch = (url: string, init: unknown) => { fetches.push({ url, init }); return respond(url); };
+    (URL as any).createObjectURL = (b: unknown) => { created.push(b); return 'blob:dl-' + created.length; };
+    (URL as any).revokeObjectURL = (u: string) => { revoked.push(u); };
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+      clicked.push({ href: this.getAttribute('href') ?? '', download: this.download, inDom: document.body.contains(this) });
+    });
+    const restore = () => {
+      click.mockRestore();
+      if (had.fetch) (globalThis as any).fetch = prev.fetch; else delete (globalThis as any).fetch;
+      if (had.create) (URL as any).createObjectURL = prev.create; else delete (URL as any).createObjectURL;
+      if (had.revoke) (URL as any).revokeObjectURL = prev.revoke; else delete (URL as any).revokeObjectURL;
+    };
+    return { fetches, created, revoked, clicked, restore };
+  }
+
+  const entryNamed = (name: string) => ({ name, isDirectory: false, isFile: true, size: 1, modified: '' } as FileEntry);
+
+  it('fetches the file endpoint for the current folder with the bearer, and saves the bytes under the entry name', async () => {
+    const bytes = new Blob(['%PDF-1.7'], { type: 'application/pdf' });
+    const b = stubBrowser(() => Promise.resolve({ ok: true, status: 200, blob: () => Promise.resolve(bytes) }));
+    vi.useFakeTimers();
+    try {
+      const { c, toasts } = create('T');
+      c.currentPath.set('/docs/q3');
+      await c.downloadFile(entryNamed('report 1.pdf'));
+
+      expect(b.fetches).toHaveLength(1);
+      expect(b.fetches[0].url).toBe('/api/files/work?path=%2Fdocs%2Fq3%2Freport%201.pdf');
+      expect(b.fetches[0].init).toEqual({ headers: { Authorization: 'Bearer T' } });
+
+      // The saved blob IS the response body: same object, so the type the server sent is the type saved.
+      expect(b.created).toEqual([bytes]);
+      expect((b.created[0] as Blob).type).toBe('application/pdf');
+
+      // One anchor, clicked while attached to the document, named after the entry, pointing at the blob URL.
+      expect(b.clicked).toEqual([{ href: 'blob:dl-1', download: 'report 1.pdf', inDom: true }]);
+      // ...and removed afterwards, so repeated downloads do not accumulate anchors.
+      expect(document.body.querySelector('a[href="blob:dl-1"]')).toBeNull();
+
+      // AS-IS: the revoke is DEFERRED by 10 s rather than immediate, so the browser has started the save
+      // before the URL goes away.
+      expect(b.revoked).toEqual([]);
+      vi.advanceTimersByTime(9_999);
+      expect(b.revoked).toEqual([]);
+      vi.advanceTimersByTime(1);
+      expect(b.revoked).toEqual(['blob:dl-1']);
+
+      expect(toasts).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+      b.restore();
+    }
+  });
+
+  it('with no token it sends no Authorization header at all, not an empty bearer', async () => {
+    const b = stubBrowser(() => Promise.resolve({ ok: true, status: 200, blob: () => Promise.resolve(new Blob(['x'])) }));
+    try {
+      const { c } = create('');
+      await c.downloadFile(entryNamed('a.txt'));
+      expect(b.fetches[0].url).toBe('/api/files/work?path=%2Fa.txt');
+      expect(b.fetches[0].init).toEqual({ headers: {} });
+    } finally {
+      b.restore();
+    }
+  });
+
+  it('an HTTP error saves nothing and toasts files.downloadFailed with the status', async () => {
+    let blobRead = false;
+    const b = stubBrowser(() => Promise.resolve({ ok: false, status: 403, blob: () => { blobRead = true; return Promise.resolve(new Blob(['denied'])); } }));
+    try {
+      const { c, toasts } = create('T');
+      await c.downloadFile(entryNamed('secret.pdf'));
+
+      expect(blobRead).toBe(false);          // the error body is never read, let alone saved
+      expect(b.created).toEqual([]);
+      expect(b.clicked).toEqual([]);
+      expect(b.revoked).toEqual([]);
+      // The key is echoed by the testing transloco module; the reason is `httpErrorReason(new Error('HTTP 403'))`.
+      expect(toasts).toEqual([{ kind: 'error', msg: 'files.downloadFailed HTTP 403' }]);
+    } finally {
+      b.restore();
+    }
+  });
+
+  it('a network failure saves nothing and toasts files.downloadFailed with the error message', async () => {
+    const b = stubBrowser(() => Promise.reject(new TypeError('Failed to fetch')));
+    try {
+      const { c, toasts } = create('T');
+      await c.downloadFile(entryNamed('a.txt'));
+      expect(b.created).toEqual([]);
+      expect(b.clicked).toEqual([]);
+      expect(toasts).toEqual([{ kind: 'error', msg: 'files.downloadFailed Failed to fetch' }]);
+    } finally {
+      b.restore();
+    }
   });
 });
 
