@@ -479,6 +479,17 @@ export async function dropSpaceData(spaceId: string): Promise<string[]> {
     log.warn(msg);
     errors.push(msg);
   }
+
+  // 2c. Drop every read spill holding this space's records (Q-92). The prefix drop cannot reach them either:
+  // the spill store is instance-wide. Here rather than in `removeSpace`, so a resumed delete does it too.
+  try {
+    const { dropSpillsForSpace } = await import('../brain/read-spill-store.js');
+    await dropSpillsForSpace(spaceId);
+  } catch (err) {
+    const msg = `Could not drop read spills for '${spaceId}': ${err}`;
+    log.warn(msg);
+    errors.push(msg);
+  }
   // 3. Delete the space files directory
   const filesDir = path.resolve(getDataRoot(), 'files', spaceId);
   try {
@@ -672,6 +683,11 @@ export async function wipeSpace(spaceId: string, types?: WipeCollectionType[]): 
    * A full wipe takes the files too, so this matters most for `types: ['entities']`.
    */
   if (targets.has('entities')) await unlabelAllFaces(spaceId);
+
+  // A read spill holding this space's records outlives a wipe of them otherwise (Q-92): the one-day lifetime
+  // bounds it, but a wipe is an operator saying "gone now". Any wipe, since a spill mixes record kinds.
+  const { dropSpillsForSpace } = await import('../brain/read-spill-store.js');
+  await dropSpillsForSpace(spaceId);
 
   // Clear tombstones for the wiped types.
   // Full wipe: drop everything (single deleteMany with no filter).

@@ -38,7 +38,7 @@ Available as both — REST `POST /api/brain/recall`, MCP tool `recall`:
 | `maxBytes` | — | **none** | Ceiling on the serialised response body, in **real UTF-8 bytes**. `Grüße aus Köln — ąćę` counts 31 characters against 39 bytes; three emoji count 17 against 23. A transport or client limit IS in bytes. **Before 3.7 this bounded characters** — to keep that behaviour, send the same number as `maxChars`. **It has no default**, deliberately: bytes are always ≥ characters, so a byte default equal to the character one would silently become the binding constraint on every non-ASCII answer. **When you set both, both apply** — the answer stops at whichever ceiling it reaches first |
 | `maxTokens` | — | none | A convenience onto **`maxChars`**, converted at a fixed 3.5 characters per token. The ratio is not configurable (`charsPerToken` was removed in 5.0); a caller who needs the ceiling exact should state `maxChars`. If both are sent the **smaller** resulting character figure applies. It is an approximation — the server does not know your tokeniser |
 | `skip` | — | `0` | How many of the ranked matches to skip before filling the byte budget. **This is how you read a truncated answer**: a response with `truncated: true` carries `nextSkip`, and sending it back gets you the next prefix — no match repeated, none missed. The ranking is recomputed per call, so it is a continuation over one ordered answer rather than a cursor over a snapshot |
-| `remainderDump` | — | `false` | Also write the matches that did not fit to the space as JSON and report it as `remainder`. Only meaningful when the answer truncates. Off by default because it is a write on a read path that counts against space storage — page with `skip` to reach the same records without one |
+| `remainderDump` | — | `false` | Also KEEP the matches that did not fit as a read spill and report it as `remainder`, with a `spillId` you read through [`GET /api/brain/spills/:id` or MCP `read_spill`](#reading-a-spill-get-apibrainspillsid-and-mcp-read_spill). Only meaningful when the answer truncates. A spill is readable by your token alone, for up to one day, and is never written into any space. Off by default because most callers want the next page, not a download — page with `skip` to reach the same records without one. A spill that cannot be kept is named in `spillRefused` |
 
 **A hit is `{score, spaceId, type, record}` on both doors.** The record's own fields are under `hit.record`;
 `score`, `spaceId`, `type`, `_graph` and the per-stage scores sit on the hit itself. A REST client written
@@ -410,41 +410,126 @@ carries no `nextSkip` and is the last one. Skipping past the end returns zero re
 
 **This is a continuation over one ranked answer, not a cursor over a snapshot.** Each call re-runs the search,
 so a write landing between two pages can shift what falls where — the same caveat `/query`'s `skip` carries. For
-a set that must be internally consistent, ask for the remainder as a file instead.
+a set that must be internally consistent, ask for the remainder as a spill instead: it is kept as it stood when
+the search ran.
 
 **The ranking itself is deterministic, though**, which is what makes paging usable in the ordinary case: results
 on the same score are ordered by `_id` ascending, so an unchanged corpus always produces the same order.
 
-##### `remainderDump`: the whole remainder as one file (opt-in)
+##### `remainderDump`: the whole remainder as one spill (opt-in)
 
-Send **`remainderDump: true`** and the matches that did not fit are also written to the space's `_tmp/` as JSON,
-reachable through an authenticated download, and reported as `remainder`:
+Send **`remainderDump: true`** and the matches that did not fit are also kept as a **read spill** — for your
+token, outside every space — and reported as `remainder`:
 
 ```json
 {
   "remainder": {
     "matches": 78,
     "records": 264,
+    "spillId": "9f1c…",
     "path": "_tmp/results-9f1c….json",
-    "download": "/api/files/dev-apps?path=_tmp%2Fresults-9f1c….json",
+    "download": "/api/brain/spills/9f1c…",
     "expiresAt": "2026-08-14T20:11:00.000Z"
   }
 }
 ```
 
-- **It defaults to off.** Writing a file is a write on a read path: it
-  counts against space storage and shows up in an operator's usage figures. The common caller wants the next
-  page, not an artifact, and now says so by omission.
+- **It defaults to off.** The common caller wants the next page, not a download, and says so by omission.
+- **A search never writes into a space**, with or without this flag. The spill is not a file, is not in the
+  space's storage or usage figures, never syncs to a peer, and no backup carries it.
 - **`remainder` holds ONLY what did not fit.** It is a continuation, not a copy: the records already in
   `results` are not repeated in it.
-- **`remainder.matches` and `remainder.records` describe the FILE** — matches in it, and matches plus their
-  traversed nodes. Both are counted from what was actually written, so neither can disagree with the download.
-- **`nextSkip` is still there when you ask for the file**, so wanting the artifact never costs you the ability
-  to page.
-- The file is **self-describing**: it repeats the request that produced it, the counts, and its own expiry.
-- **No embedding vectors are written**, at any depth — a result set serialised verbatim is the one place they
-  would otherwise land in a file an operator opens.
-- Same authenticated download and same **one-day** expiry as the graph spill below.
+- **`remainder.matches` and `remainder.records` describe the SPILL** — matches in it, and matches plus their
+  traversed nodes. Both are counted from what was actually kept, so neither can disagree with what you read.
+- **`nextSkip` is still there when you ask for the spill**, so wanting it never costs you the ability to page.
+- **When the spill cannot be kept, the answer says why and loses nothing else.** `remainder` is absent, a
+  top-level `spillRefused` names the reason (see [Reading a spill](#reading-a-spill-get-apibrainspillsid-and-mcp-read_spill)),
+  and `truncated` and `nextSkip` are exactly what they would have been — paging still reaches every record.
+- **No embedding vectors are kept**, at any depth.
+- `path` is **deprecated** — see [Reading a spill](#reading-a-spill-get-apibrainspillsid-and-mcp-read_spill).
+  Read the spill by `spillId`.
+
+#### Reading a spill: `GET /api/brain/spills/:id` and MCP `read_spill`
+
+Two answers can hand you a spill: `remainder` above, and `graphComplete` when a
+[traversal outgrows its inline cap](04h-graph-augmented-recall.md). Both carry a `spillId`, and both are read the
+same way, on either door, with the same parameters:
+
+```http
+GET /api/brain/spills/:id?skip=0&maxChars=50000
+```
+
+```json
+{ "tool": "read_spill", "arguments": { "id": "9f1c…", "skip": 0 } }
+```
+
+| Parameter | Default | Description |
+|---|---|---|
+| `id` | — | The `spillId` the answer named (a path segment on REST) |
+| `skip` | `0` | Items to skip — send the previous page's `nextSkip` |
+| `maxChars` | `50000` REST / `25000` MCP | Ceiling on the window in characters — the same budget, and the same sanctioned difference between the doors, as on `recall` |
+| `maxBytes` | none | Ceiling on the window in UTF-8 bytes |
+| `maxTokens` | none | Converted to characters at 3.5 per token; the smaller figure applies |
+
+**Response** `200`: `kind` (`results` or `graph`), `request` (what the search asked for, so the spill describes
+itself), `total` (items in the whole spill), `expiresAt`, `ceilingHit` (graph spills only, when present),
+`items` (a window of whole items), `returned`, `skip`, `truncated`, `nextSkip` (present exactly when
+`truncated` is), `charsReturned`, `bytesReturned`, `budgetChars` and `budgetBytes`. Loop while `truncated`,
+feeding `nextSkip` back as `skip`, exactly as you page a recall. An item is never split between two windows, and
+the first item of a window is returned even when it alone passes the budget.
+
+- **A results spill's items are the matches**, each with its `_graph` as the answer had it.
+- **A graph spill's items are the traversed NODES, flat**, so a large traversal can page:
+  `{id, spaceId, depth, seedId, via: {edgeId, from}, edges, paths, record}` — `depth` is the hop count, `seedId`
+  the match the walk started from, `via` the edge that reached the node and the node it came from, and `paths`
+  every route to it, so the tree can be rebuilt from the items. `pathsTruncated` is present when a node had more
+  routes than were recorded.
+
+**Who can read it.** Only the token that ran the search, and only while that token still holds knowledge read on
+**every** space whose records are in the spill — checked when you read, not when the spill was made. On MCP every
+one of those spaces must also be inside the connection's accessible spaces. The route needs no other right and
+takes no `space`: the spill knows which spaces it holds.
+
+**How long it lives.** Up to one day, and it may be evicted earlier: each token has a share of spills, by count
+and by size, and past it the token's **own** oldest spills make room for its newer ones. Another caller's spills
+never evict yours. A spill belongs to the token id, so an OAuth connector that re-consents gets a new token and
+loses the spills its old one made.
+
+**It is a snapshot.** A spill holds the records as they were when the search ran, so a record deleted or redacted
+afterwards stays readable **in that token's spill** until the spill expires — at most a day later — and nowhere
+else. Deleting or wiping a space drops every spill holding its records at once, and renaming a space carries them
+to the new id.
+
+| Status | Meaning |
+|---|---|
+| `404` | Unknown id, expired, or not issued to this token — **one answer for all three**, on both doors, so no token can learn that another's spill exists |
+| `410` | Evicted by this token's own newer spills. Only the owner ever sees it. Repeat the search to make a new one |
+| `400` | A malformed `skip` or budget, with the same wording `recall` uses |
+
+**`spillRefused`.** A search that could not keep its spill still answers in full, as if it had not asked for
+one, and adds a top-level `spillRefused` with one of these codes:
+
+| Code | Why |
+|---|---|
+| `over-share` | The spill alone is larger than one token's share (`READ_SPILL_TOKEN_MAX_MB`) |
+| `instance-ceiling` | The instance already holds its maximum of spills (`READ_SPILL_INSTANCE_MAX_MB`). The ceiling refuses; it never evicts another caller's spill |
+| `no-token` | The call carried no token id, so there is nobody to keep the spill for |
+| `unattributed` | A record names no space, so who may read the spill cannot be decided |
+| `empty` | There was nothing to keep |
+| `failed` | The store failed; the instance log says why |
+
+The caps are operator settings — see [Environment Variables](02-hosting.md#environment-variables).
+
+**`path` is deprecated.** `remainder.path` and `graphComplete.path` are still sent, as
+`_tmp/results-<spillId>.json` and `_tmp/graph-<spillId>.json`, because before 5.5.3 a spill was a file in the
+space and an MCP agent's only road to it was `read_file`. No such file exists now: `read_file` and
+[`GET /api/files/:spaceId?path=…`](05-files-api.md) resolve that exact path against the spill store, under the
+same rule as above (the issuing token only, the same `404` and `410`), and return the spill's first window under
+that door's default budget — `truncated` and `nextSkip` say when that was not all of it, and `read_spill` (or the
+spill route) continues from `nextSkip`.
+Both the field and that resolution are removed at the next major. Read by `spillId`.
+
+Reading a spill is audited as `brain.spill.read` — a read, so it is recorded only when the instance logs reads.
 
 #### Recall without passage bodies (`includeFileContent`)
 
@@ -632,7 +717,7 @@ Given an existing entry's `_id`, find other entries with high vector similarity.
 | `maxBytes` | — | **none** | Ceiling on the serialised response body, in **real UTF-8 bytes**. `Grüße aus Köln — ąćę` counts 31 characters against 39 bytes; three emoji count 17 against 23. A transport or client limit IS in bytes. **Before 3.7 this bounded characters** — to keep that behaviour, send the same number as `maxChars`. **It has no default**, deliberately: bytes are always ≥ characters, so a byte default equal to the character one would silently become the binding constraint on every non-ASCII answer. **When you set both, both apply** — the answer stops at whichever ceiling it reaches first |
 | `maxTokens` | — | none | A convenience onto **`maxChars`**, converted at a fixed 3.5 characters per token. The ratio is not configurable (`charsPerToken` was removed in 5.0); a caller who needs the ceiling exact should state `maxChars`. If both are sent the **smaller** resulting character figure applies. It is an approximation — the server does not know your tokeniser |
 | `skip` | — | `0` | How many of the ranked matches to skip before filling the byte budget. **This is how you read a truncated answer**: a response with `truncated: true` carries `nextSkip`, and sending it back gets you the next prefix — no match repeated, none missed. The ranking is recomputed per call, so it is a continuation over one ordered answer rather than a cursor over a snapshot |
-| `remainderDump` | — | `false` | Also write the matches that did not fit to the space as JSON and report it as `remainder`. Only meaningful when the answer truncates. Off by default because it is a write on a read path that counts against space storage — page with `skip` to reach the same records without one |
+| `remainderDump` | — | `false` | Also keep the matches that did not fit as a read spill and report it as `remainder`, exactly as on `recall` — see [Reading a spill](#reading-a-spill-get-apibrainspillsid-and-mcp-read_spill). Never written into any space. Off by default — page with `skip` to reach the same records without one |
 | `crossSpace` | — | `false` | If `true`, search across all spaces the token can access |
 
 **Response** `200`:

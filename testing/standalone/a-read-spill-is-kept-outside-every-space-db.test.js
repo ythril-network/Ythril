@@ -139,8 +139,9 @@ describe('a read spill lives in the instance store, never in a space', { skip },
 
   describe('pages', () => {
     it('are cut on item boundaries, in order, and none passes the page size unless one item does', async () => {
-      // ~100 KB items make two per page; the 300 KB one at position 4 is larger than a page on its own.
-      const items = records(9, 100_000);
+      // ~80 KB items make three per page; the 300 KB one at position 4 is larger than a page on its own. The
+      // whole spill stays under the 1 MB share set above — a larger one is refused, which is its own case.
+      const items = records(9, 80_000);
       items.splice(4, 0, record(99, 'general', 300_000));
       const { id } = await putOk({ items });
 
@@ -223,7 +224,8 @@ describe('a read spill lives in the instance store, never in a space', { skip },
     }
 
     it('every page is written before the header', async () => {
-      const writes = await recordingWrites(() => putOk({ items: records(12, 100_000) }));
+      // Several pages, and under the 1 MB share so the put is not refused before it writes anything.
+      const writes = await recordingWrites(() => putOk({ items: records(12, 60_000) }));
       const firstHeader = writes.findIndex(w => w.coll === HEADERS);
       const lastPage = writes.map(w => w.coll).lastIndexOf(PAGES);
       assert.ok(firstHeader > -1, `no header write recorded: ${JSON.stringify(writes)}`);

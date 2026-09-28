@@ -10,6 +10,15 @@
 
 When usage approaches the quota limit, writes will first return warnings and eventually be rejected. Contact your administrator to raise the quota.
 
+**Search results kept for download do not count.** A search whose answer is too large to show whole can keep the
+rest for the person who ran it, for up to a day (see *When the answer itself does not fit* on the
+[Brain](02-brain.md) page). Those are kept outside every space, have their own limits, and are left out of the
+Brain figure here, so a busy day of large searches cannot fill the quota and block writes.
+
+**They are a snapshot of the moment the search ran.** A record deleted or redacted afterwards can still be read in
+a kept result, by the person who ran that search and nobody else, until it expires at most a day later. Deleting
+or wiping a space removes every kept result holding its records straight away.
+
 ---
 
 ## Settings — Data
@@ -39,6 +48,11 @@ Toggle the **Maintenance mode** button to enable or disable it. A banner appears
 Click **Back Up Now** to trigger an immediate point-in-time dump of the entire MongoDB database. The backup is stored inside the instance's data directory (`<data-root>/backups/<timestamp>/`). Each backup contains a `manifest.json` with metadata and one NDJSON file per collection.
 
 The **Backups** table lists all available backups with their timestamp and the collections they contain.
+
+**A backup never contains the search results kept for download.** They belong to the person who ran the search
+and last up to a day; in a backup they would outlive that day — including records deleted or redacted since —
+for as long as the backup is kept. So they are left out of every backup, manual, scheduled and offsite, and a
+restore leaves the ones currently kept alone.
 
 ### Scheduled and offsite backups
 
@@ -246,6 +260,14 @@ field, from, to. Two things are worth reading carefully:
   a secret into a log that admins can read and that is retained for months. When you need to know exactly
   what a request contained, the resource's own history or your reverse proxy's logs are the place to look;
   the audit log deliberately does not keep it.
+
+**Old saved search results removed from spaces.** Versions before 5.5.3 kept a search's cut-off results as a
+file inside the space, under a hidden `_tmp` folder, and those files travelled to every other instance in a
+network. Since then nothing is written into a space by a search, and a clean-up every few minutes removes the old files —
+the ones written here and the ones that arrived from other instances. For each space it cleans, the log shows
+one entry, operation `file.legacy_spill.sweep`, with the space named and no token, because the instance did it
+itself. It sends no webhook and tells no other instance, and it cannot be undone. Reading kept results
+appears as `brain.spill.read`, and only when the instance is set to log reads.
 
 **Exporting:** Download the current filtered view as JSON or CSV.
 

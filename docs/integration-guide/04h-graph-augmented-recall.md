@@ -122,7 +122,8 @@ actually reached was the weaker.
 | `pathsTruncated` | Present and `true` only when a node had more routes than were recorded (cap: 8) |
 | `_graph` | Present on a nested node too, so depth is a tree: `adr-0088` hangs off `adr-0079`, which hangs off the match |
 | `graphTruncated` | Present and `true` only when the inline graph is **short of the real neighbourhood** |
-| `graphComplete` | `{nodes, path, download, expiresAt}` — where the **whole** graph was written. Present with `graphTruncated` whenever a complete copy exists, which is not always: see below |
+| `graphComplete` | `{nodes, spillId, path, download, expiresAt, ceilingHit?}` — where the **whole** graph was kept. Present with `graphTruncated` whenever a complete copy was kept, which is not always: see below |
+| `spillRefused` | Present when the graph was short and a complete copy could NOT be kept — the reason code. `graphTruncated` is then present without `graphComplete` |
 
 Note `adr-0088` above: it is reachable two ways and appears **once**, with both routes in `paths`. A caller
 counting rows never double-counts a record, and no relationship is invisible.
@@ -132,8 +133,8 @@ counting rows never double-counts a record, and no relationship is invisible.
 - **Depth cap:** `traverse` must be `0`–`5`. A value of `6` or higher (or a negative/non-integer value) returns `400` — it is rejected, not clamped.
 - **Node cap, and it is a spill point rather than a truncation point:** the inline traversed nodes are capped at
   `topK × (traverse + 1) × 4` minus the matches, preferring lower-hop records. When the neighbourhood is bigger
-  than that, the **complete** graph is written to the space's `_tmp/` as JSON and the response carries
-  `graphTruncated: true` plus `graphComplete`:
+  than that, the **complete** graph is kept as a read spill and the response carries `graphTruncated: true`
+  plus `graphComplete`:
 
   ```json
   {
@@ -141,34 +142,41 @@ counting rows never double-counts a record, and no relationship is invisible.
     "graphTruncated": true,
     "graphComplete": {
       "nodes": 30,
+      "spillId": "9f1c…",
       "path": "_tmp/graph-9f1c….json",
-      "download": "/api/files/dev-apps?path=_tmp%2Fgraph-9f1c….json",
+      "download": "/api/brain/spills/9f1c…",
       "expiresAt": "2026-08-14T15:41:00.000Z"
     }
   }
   ```
 
-  So a caller either receives the whole neighbourhood inline or receives a link to the whole neighbourhood —
-  never a silently short one. There is no `total` for a neighbourhood to compare against, and a short graph
-  reads as *"this record has few relationships"*, which is a wrong conclusion about the data rather than about
-  the request.
+  So a caller receives the whole neighbourhood inline, or a link to the whole neighbourhood, or — when the
+  spill could not be kept — a `graphTruncated` that says the graph is short. Never a silently short one. There
+  is no `total` for a neighbourhood to compare against, and a short graph reads as *"this record has few
+  relationships"*, which is a wrong conclusion about the data rather than about the request.
 
-  - The **download is the ordinary authenticated file route** — your own token, the space's own access control.
-    Which also means a token with brain read but **no files read** receives a link it cannot fetch. It still
-    learns the graph was short, which is the part that was previously invisible; grant `files: read` on the
-    space if you want the spill itself.
-  - The file **expires after one day** and is removed with its record by the retention sweep.
-  - It is **hidden from file browsing** (like `_converted/` and `_extracted/`) and is **never embedded**, so it
-    cannot come back as a recall hit.
-- **`graphTruncated` can arrive WITHOUT `graphComplete`, and that is the honest case.** The link scans — the
-  ones that follow the LINKS a fact, chrono entry or file carries — are bounded per hop, and a hop can
+  - **Read it with `GET /api/brain/spills/:id` or MCP `read_spill`**, by `spillId`. The spill's items are the
+    traversed NODES, flat — `{id, spaceId, depth, seedId, via, edges, paths, record}` — so a large traversal
+    pages like any other answer. The same knowledge read that let you search is what lets you read it: only the
+    token that ran the search can, while it still holds knowledge read on every space the graph reached.
+    See [Reading a spill](04a-recall-api.md#reading-a-spill-get-apibrainspillsid-and-mcp-read_spill).
+  - It **lives up to one day, and may be evicted earlier** by your token's own newer spills (a `410` then says
+    so).
+  - **Nothing is written into any space.** The spill is not a file, so it is never browsed, embedded, synced to
+    a peer or kept in a backup, and cannot come back as a recall hit.
+  - `path` is **deprecated**: no such file exists, and `read_file` resolves it for the issuing token only until
+    the next major.
+- **`graphTruncated` can arrive WITHOUT `graphComplete`, in two cases.** The first is that the spill could not be
+  kept — the token's share, the instance ceiling, or a store failure — and then a top-level `spillRefused` names
+  the reason; the inline graph is exactly what it would otherwise have been, and repeating the search later, or
+  narrowing it, is how you get the rest. The second is the honest case: the link scans — the ones that follow the LINKS a fact, chrono entry or file carries — are bounded per hop, and a hop can
   spend its whole budget on records it then discards as already-visited. The neighbourhood is short, and there
   is **no complete copy to offer**, because the records that are missing are exactly the ones never read. So
   the flag stands alone: you are told the graph is partial, and a narrower `edgeLabels` or a lower `traverse`
   is what makes it whole. Before 3.6.1 this case was reported as complete.
 
   - The spill walk is itself bounded, at 20× the inline cap. If even that is reached, `graphComplete.ceilingHit`
-    is `true` and the same flag is inside the file — a second silent truncation inside the fix for the first one
+    is `true` and the same flag is inside the spill — a second silent truncation inside the fix for the first one
     would be the same defect again.
 - **Cycle-safe:** each record is visited once, so a circular graph (A→B→C→A) never loops or produces duplicates. A record reachable by several routes is nested under the **shortest** one, with the rest in `paths`.
 - **Space-scoped:** traversal stays within the spaces the calling token may access. An edge pointing at a record in a space the token cannot see (or at an id that is not an entity) is silently skipped — no data and no `403` leak.

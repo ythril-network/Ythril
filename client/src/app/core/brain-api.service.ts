@@ -1,7 +1,8 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { Observable, of } from 'rxjs';
-import { map, switchMap } from 'rxjs/operators';
+import { EMPTY, Observable, of } from 'rxjs';
+import { expand, map, reduce, switchMap } from 'rxjs/operators';
+import { SPILL_PAGE_MAX, type SpillPage, type WholeSpill } from './read-spill';
 import { filterCall } from './filter-call';
 import { hydrateLinks, recordsLinkingTo, type LinkFromKind } from './record-links';
 import type {
@@ -154,10 +155,9 @@ export interface RecallRequestBody {
        */
       skip?: number;
       /**
-       * Also WRITE the matches that did not fit to the space, as a JSON file with a one-day download.
-       *
-       * The only parameter on this read route that writes anything, which is why it is opt-in and why the UI
-       * says so on the control rather than in a tooltip.
+       * Also KEEP the matches that did not fit, for this token, for up to a day: the answer's `remainder`
+       * points at them (`read-spill.ts`). Nothing is written into the space. It may be refused, and then
+       * `spillRefused` says why and `nextSkip` still continues the answer.
        */
       remainderDump?: boolean;
 }
@@ -325,6 +325,38 @@ export class BrainApi {
     body: RecallRequestBody,
   ): Observable<RecallResponse> {
     return this.http.post<RecallResponse>('/api/brain/recall', { ...body, space: spaceId });
+  }
+
+  /** One page of a spill, at the widest window the server serves. Only the token that ran the search may. */
+  readSpillPage(spillId: string, skip = 0): Observable<SpillPage> {
+    return this.http.get<SpillPage>(`/api/brain/spills/${encodeURIComponent(spillId)}`, {
+      params: { skip, maxBytes: SPILL_PAGE_MAX, maxChars: SPILL_PAGE_MAX },
+    });
+  }
+
+  /**
+   * The WHOLE spill: every page, following `nextSkip` until the server stops sending one.
+   *
+   * One GET is one window, not the spill, so a download that saved the first page would hand over a part
+   * under a name that promises the whole. The header fields come from the first page; the items are every
+   * page's, in order. A failing page fails the whole read, so a partial file is never assembled.
+   */
+  readWholeSpill(spillId: string): Observable<WholeSpill> {
+    return this.readSpillPage(spillId).pipe(
+      expand(p => p.nextSkip !== undefined && p.nextSkip > p.skip ? this.readSpillPage(spillId, p.nextSkip) : EMPTY),
+      reduce<SpillPage, WholeSpill | null>((acc, p) => {
+        if (!acc) {
+          return {
+            kind: p.kind, request: p.request, total: p.total, expiresAt: p.expiresAt,
+            ...(p.ceilingHit ? { ceilingHit: true } : {}),
+            items: [...p.items],
+          };
+        }
+        acc.items.push(...p.items);
+        return acc;
+      }, null),
+      map(whole => whole!),
+    );
   }
 
   // ── Brain — facts ──────────────────────────────────────────────────────

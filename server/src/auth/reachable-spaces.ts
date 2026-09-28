@@ -80,3 +80,16 @@ export function spacesWhereTokenMay(
 export function holdsRung(rights: TokenRights, space: string, area: SpaceArea, needs: Rung): boolean {
   return satisfies(effectiveRung(rights, space, area), needs);
 }
+
+/**
+ * Does this token hold `needs` or better on `area` in EVERY one of these spaces?
+ *
+ * **An empty list is `false`, and that is the forgettable part.** `[].every(...)` is `true`, so a hand-written
+ * copy answers "holds it everywhere" about a set nobody named — the empty-means-everything shape this codebase
+ * has shipped three times. A caller for whom an empty set genuinely means yes says so at its own call site.
+ */
+export function holdsRungOnEvery(
+  rights: TokenRights | undefined, spaces: readonly string[], area: SpaceArea, needs: Rung,
+): boolean {
+  return !!rights && spaces.length > 0 && spaces.every(s => holdsRung(rights, s, area, needs));
+}

@@ -800,8 +800,8 @@ syncDocsRouter.post('/batch-upsert', syncRateLimit, requireAuth, denyReadOnly, a
       // `?? -1` so a record stamped before 4.0 — which has no seq — is overwritten by anything that arrives,
       // rather than winning for ever against every peer by comparing `undefined`.
       if (!existing || incoming.seq > (existing.seq ?? -1)) {
-        await ingestFileMeta(spaceId, incoming as never);
-        fileMetaStats.upserted++;
+        if (await ingestFileMeta(spaceId, incoming as never)) fileMetaStats.upserted++;
+        else fileMetaStats.skipped++;
       } else {
         fileMetaStats.skipped++;
       }

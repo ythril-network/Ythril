@@ -28,6 +28,7 @@ import { getTranslocoModule } from '../../testing/transloco-testing';
 import { BrainStore } from './brain-store.service';
 import { QueryTabComponent } from './query-tab.component';
 import { ToastService } from '../../core/toast.service';
+import { SPILL_REFUSAL_CODES } from '../../core/read-spill';
 
 /**
  * Comments STRIPPED, and this file is why the rule exists.
@@ -252,9 +253,14 @@ const MAX_MAX_BYTES = 5_000_000;
 /** Rendered text for the keys these cases look for, so a match is on a sentence rather than an echoed key. */
 const T: Record<string, string> = {
   'brain.query.graphShort.download': 'GRAPH-DOWNLOAD',
+  'brain.query.graphShort.title': 'GRAPH-TITLE',
+  'brain.query.graphShort.unread': 'GRAPH-UNREAD',
+  'brain.query.truncated.title': 'TRUNCATED-TITLE',
+  'brain.query.truncated.what': 'WHAT-ADVICE',
   'brain.query.remainder.download': 'REMAINDER-DOWNLOAD',
   'brain.query.remainder.expires': 'EXPIRES {{date}}',
   'brain.query.spillRefused': 'SPILL-REFUSED {{reason}}',
+  ...Object.fromEntries(SPILL_REFUSAL_CODES.map(c => [`brain.query.spillRefused.reason.${c}`, `R-${c.toUpperCase()}-WORDS`])),
   'brain.query.spill.notFound': 'SPILL-NOT-FOUND',
   'brain.query.spill.gone': 'SPILL-GONE',
 };
@@ -367,7 +373,12 @@ describe('Q-92: the spill download is a button that pages the whole spill throug
 
   it('the template binds no anchor to a download URL — a link cannot send the bearer', () => {
     // Source-level half of the rule, so it holds for states the behavioural cases below do not render.
-    expect(component, 'an `<a [href]>` bound to a spill `download` is back').not.toMatch(/\[href\]\s*=\s*"[^"]*\.download\b/);
+    // Both files that render the notices: the tab, and the ending component the download moved into.
+    const ending = stripComments(readFileSync('src/app/pages/brain/spill-ending.component.ts', 'utf8'));
+    expect(ending, 'the spill ending no longer renders the download button — this check reads the wrong file').toMatch(/\(click\)="download\(/);
+    for (const src of [component, ending]) {
+      expect(src, 'an `<a [href]>` bound to a spill `download` is back').not.toMatch(/\[href\]\s*=\s*"[^"]*\.download\b/);
+    }
   });
 
   for (const k of KINDS) {
@@ -436,31 +447,82 @@ describe('Q-92: the spill download is a button that pages the whole spill throug
 describe('Q-92: the page renders `remainder` and `spillRefused`', () => {
   afterEach(() => TestBed.resetTestingModule());
 
-  it('a remainder shows its expiry through the date pipe, not as the raw ISO string', () => {
+  it('a remainder shows its expiry in the app\'s one timestamp format, not the browser\'s or the wire\'s', () => {
     const m = mount();
     answer(m, KINDS[1].response('sp-r'));
     const text = visibleText(m);
     expect(text, 'the remainder is not rendered at all').toContain('REMAINDER-DOWNLOAD');
     // A FORMAT, not a rendering: CI runs in UTC and a laptop does not, so the day and hour differ by zone.
-    // What must hold anywhere: a date follows the label, with digits in it, and it is not the wire string.
-    expect(text).toMatch(/EXPIRES\s+\S*\d/);
+    // The format is the one `formatTimestampParts` gives every other page — dd.MM.yyyy and a 24-hour time —
+    // so a sixth spelling of a date (the reason that module exists) cannot come back here.
+    expect(text).toMatch(/EXPIRES \d{2}\.\d{2}\.\d{4} \d{2}:\d{2}:\d{2}/);
     expect(text, 'the expiry is printed as the raw wire value').not.toContain(EXPIRES);
   });
 
-  it('a refused spill says so and why — on the results notice and on the graph notice alike', () => {
+  it('a refused spill says so and why, in words — on the results notice and on the graph notice alike', () => {
     for (const response of [
       { truncated: true, returned: 1, count: 4, nextSkip: 1, spillRefused: 'instance-ceiling' },
-      { graphTruncated: true, graphNodes: 2, spillRefused: 'token-share' },
+      { graphTruncated: true, graphNodes: 2, spillRefused: 'over-share' },
     ]) {
       const m = mount();
       answer(m, response);
       const text = visibleText(m);
-      expect(text, `spillRefused "${response.spillRefused}" is not rendered`).toContain(`SPILL-REFUSED ${response.spillRefused}`);
+      const words = T[`brain.query.spillRefused.reason.${response.spillRefused}`];
+      expect(text, `spillRefused "${response.spillRefused}" is not rendered in words`).toContain(`SPILL-REFUSED ${words}`);
+      expect(text, `the raw code "${response.spillRefused}" reaches the reader`).not.toContain(response.spillRefused);
       const root = m.fixture.nativeElement as HTMLElement;
       expect(buttonWith(root, 'REMAINDER-DOWNLOAD') ?? buttonWith(root, 'GRAPH-DOWNLOAD'),
         'a refused spill still offers a download').toBeNull();
       TestBed.resetTestingModule();
     }
+  });
+
+  /*
+   * ONE NOTICE PER SHORT ANSWER, AND IT NEVER CONTRADICTS ITSELF. Found driving the page (Q-92 verify, 2026-09-28):
+   * with "Keep what did not fit" ticked and the keep refused, the shortened-answer notice still advised ticking it,
+   * and the refusal sat in a second box below. So each notice ends with exactly one of: the download (kept), the
+   * refusal (asked, not kept), or the advice (not asked) — the refusal lives in the notice whose copy is missing.
+   */
+  const alerts = (m: Mounted) => [...(m.fixture.nativeElement as HTMLElement).querySelectorAll('.alert')]
+    .map(a => a.textContent ?? '');
+
+  it('results: a refused keep replaces the advice inside the shortened-answer notice, and is said once', () => {
+    const m = mount();
+    answer(m, { truncated: true, returned: 1, count: 4, nextSkip: 1, spillRefused: 'over-share' });
+    const refusal = `SPILL-REFUSED ${T['brain.query.spillRefused.reason.over-share']}`;
+    const holding = alerts(m).filter(a => a.includes(refusal));
+    expect(holding, 'the refusal is not said exactly once').toHaveLength(1);
+    expect(holding[0], 'the refusal is not inside the shortened-answer notice').toContain('TRUNCATED-TITLE');
+    expect(visibleText(m), 'the notice still advises ticking a box that was ticked').not.toContain('WHAT-ADVICE');
+  });
+
+  it('results: a kept remainder offers the download instead of the advice', () => {
+    const m = mount();
+    answer(m, KINDS[1].response('sp-kept'));
+    expect(visibleText(m)).toContain('REMAINDER-DOWNLOAD');
+    expect(visibleText(m), 'the advice to tick "keep" is shown although the rest was kept').not.toContain('WHAT-ADVICE');
+  });
+
+  it('results: nothing asked, nothing refused — the advice is shown', () => {
+    const m = mount();
+    answer(m, { truncated: true, returned: 1, count: 4, nextSkip: 1 });
+    expect(visibleText(m)).toContain('WHAT-ADVICE');
+  });
+
+  it('graph: a refused keep sits inside the graph notice, in place of the "no complete copy" line', () => {
+    const m = mount();
+    answer(m, { graphTruncated: true, graphNodes: 2, spillRefused: 'instance-ceiling' });
+    const refusal = `SPILL-REFUSED ${T['brain.query.spillRefused.reason.instance-ceiling']}`;
+    const holding = alerts(m).filter(a => a.includes(refusal));
+    expect(holding, 'the refusal is not said exactly once').toHaveLength(1);
+    expect(holding[0], 'the refusal is not inside the graph notice').toContain('GRAPH-TITLE');
+    expect(visibleText(m), 'a refused keep is described as a walk that stopped reading').not.toContain('GRAPH-UNREAD');
+  });
+
+  it('a refusal reason this client does not know is shown as it arrived, not dropped', () => {
+    const m = mount();
+    answer(m, { truncated: true, returned: 1, count: 4, nextSkip: 1, spillRefused: 'a-newer-reason' });
+    expect(visibleText(m)).toContain('SPILL-REFUSED a-newer-reason');
   });
 
   it('an answer with no refusal shows no refusal', () => {
@@ -482,6 +544,31 @@ describe('Q-92: the strings no longer say a search writes into the space', () =>
       for (const k of NEW_KEYS) expect(t[k], `${k} missing from ${l}.json`).toBeTruthy();
       expect(t['brain.query.remainder.expires'], `${l}: the expiry sentence has no {{date}}`).toContain('{{date}}');
       expect(t['brain.query.spillRefused'], `${l}: the refusal sentence has no {{reason}}`).toContain('{{reason}}');
+    }
+  });
+
+  it('the client knows every refusal code the SERVER can send — read from the server, not from this list', () => {
+    // Derived from where the codes are produced: each `refused: '<code>: …'` in the store, plus the `failed` a
+    // throwing store degrades to. Checked against the client's own list would be the list agreeing with itself,
+    // and a code the server gained would reach the reader raw.
+    const store = readFileSync('../server/src/brain/read-spill-store.ts', 'utf8');
+    const spill = readFileSync('../server/src/brain/graph-spill.ts', 'utf8');
+    const server = new Set([
+      ...[...store.matchAll(/refused:\s*['`]([a-z][a-z-]*):/g)].map(m => m[1]!),
+      ...[...spill.matchAll(/spillRefused:\s*'([a-z][a-z-]*)'/g)].map(m => m[1]!),
+    ]);
+    expect(server.size, 'found no refusal codes in the server — the producing code moved').toBeGreaterThanOrEqual(2);
+    const known: readonly string[] = SPILL_REFUSAL_CODES;
+    expect([...server].filter(c => !known.includes(c)), 'server codes the client has no words for').toEqual([]);
+  });
+
+  it('every refusal code has its words in en, de and pl, and de/pl are not English', () => {
+    expect(SPILL_REFUSAL_CODES.length, 'no refusal codes found — the list moved or emptied').toBeGreaterThan(0);
+    for (const c of SPILL_REFUSAL_CODES) {
+      const k = `brain.query.spillRefused.reason.${c}`;
+      for (const l of LOCALES) expect(locale(l)[k], `${k} missing from ${l}.json`).toBeTruthy();
+      expect(locale('de')[k], `de ${k} is the English text`).not.toBe(locale('en')[k]);
+      expect(locale('pl')[k], `pl ${k} is the English text`).not.toBe(locale('en')[k]);
     }
   });
 

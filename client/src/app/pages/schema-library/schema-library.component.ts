@@ -26,6 +26,7 @@ import { PhIconComponent } from '../../shared/ph-icon.component';
 import { PropSchemaTableComponent } from '../../shared/prop-schema-table.component';
 import { ErrorStateComponent } from '../../shared/error-state.component';
 import { httpErrorReason } from '../../core/http-error';
+import { saveBlob } from '../../core/authenticated-download';
 import { ModalDirective } from '../../shared/modal.directive';
 import { CHIP_STYLES } from '../../shared/chip.styles';
 
@@ -1126,12 +1127,7 @@ export class SchemaLibraryComponent implements OnInit {
 
   exportEntry(entry: SchemaLibraryEntry): void {
     const blob = new Blob([JSON.stringify(entry, null, 2)], { type: 'application/json' });
-    const url  = URL.createObjectURL(blob);
-    const a    = document.createElement('a');
-    a.href     = url;
-    a.download = `schema-library_${entry.name}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
+    saveBlob(blob, `schema-library_${entry.name}.json`);
   }
 
   // ── Import entries from file ───────────────────────────────────────────────

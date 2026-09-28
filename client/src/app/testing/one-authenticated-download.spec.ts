@@ -95,8 +95,9 @@ describe('one authenticated download', () => {
   it('every download site reaches it — the query tab\'s spill download among them', () => {
     const mod = downloadModule();
     const users = importersOf(mod);
-    // The query tab is the sixth site, the one Q-92 adds; the page that pages a spill and sends the bearer.
-    expect(users, `${mod} is not imported by the query tab`).toContain('src/app/pages/brain/query-tab.component.ts');
+    // The spill download is the sixth site, the one Q-92 adds: the notice ending that pages a spill and sends the
+    // bearer. It lived in the query tab until the ending moved into a component of its own.
+    expect(users, `${mod} is not imported by the spill download`).toContain('src/app/pages/brain/spill-ending.component.ts');
     // A FLOOR, not a count: five pages saved or fetched a download by hand before the module existed, plus the
     // query tab. Fewer importers than that means a site kept its own copy under a spelling this gate missed.
     expect(users.length, `only ${users.length} files import ${mod}:\n  ${users.join('\n  ')}`)

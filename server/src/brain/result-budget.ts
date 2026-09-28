@@ -7,6 +7,7 @@
  * Size is the only limit. It already prices a dense subtree above a sparse one, and a second limit (records,
  * nodes) would let two rules disagree about the same response.
  */
+import { log } from '../util/log.js';
 
 /**
  * TWO DEFAULTS, ONE PER DOOR — a sanctioned divergence, not drift (`CLAUDE.md`, "MCP and REST are ONE API").
@@ -138,6 +139,20 @@ export function resolveBudget(req: BudgetRequest, operatorDefault = DEFAULT_MAX_
 const clampBudget = (n: number): number => Math.min(Math.max(n, MIN_MAX_BYTES), MAX_MAX_BYTES);
 
 /**
+ * A query-string value as the paging and budget grammar takes it, for the GET doors whose parameters arrive as
+ * strings (`GET /api/brain/spills/:id`). Absent stays absent; a numeric string becomes its number; ANYTHING
+ * else passes through unchanged, so `resolvePaging` / `resolveBudget` refuse it with the same message a JSON
+ * body gets. Not `parseSkip`/`parseLimit` (`util/pagination.ts`): those fall back to a default, and a door
+ * that silently floors `skip=abc` to 0 is the one that disagrees with its twin.
+ */
+export function queryInt(v: unknown): unknown {
+  if (v === undefined) return undefined;
+  if (typeof v !== 'string' || v.trim() === '') return v;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : v;
+}
+
+/**
  * `skip` and `remainderDump`, validated in ONE place for both doors, so no door can 400 what another silently
  * floors to a default.
  */
@@ -195,29 +210,49 @@ export interface BudgetOutcome<T> {
  */
 export function applyBudget<T>(results: readonly T[], budget: ResolvedBudget): BudgetOutcome<T> {
   const returned: T[] = [];
-  // The envelope's own braces and the `results` key cost a little; charging it keeps the reported sizes
-  // honest against the body the caller receives rather than against the array alone.
-  let usedChars = 2;
-  let usedBytes = 2;
+  const meter = budgetMeter(budget);
   let i = 0;
   for (; i < results.length; i++) {
-    const serialised = JSON.stringify(results[i]);
-    const addChars = serialised.length + 1;                      // +1 for the separating comma
-    const addBytes = Buffer.byteLength(serialised, 'utf8') + 1;
-    // EITHER ceiling stops it; which one is tighter depends on this content.
-    const overChars = usedChars + addChars > budget.chars;
-    const overBytes = budget.bytes !== null && usedBytes + addBytes > budget.bytes;
-    if (returned.length > 0 && (overChars || overBytes)) break;
+    if (!meter.admit(results[i])) break;
     returned.push(results[i]!);
-    usedChars += addChars;
-    usedBytes += addBytes;
   }
   return {
     returned,
     remainder: results.slice(i) as T[],
-    charsReturned: usedChars,
-    bytesReturned: usedBytes,
+    charsReturned: meter.chars(),
+    bytesReturned: meter.bytes(),
     truncated: i < results.length,
+  };
+}
+
+/**
+ * THE admission rule, one item at a time — for a reader that cannot hold the whole list, such as a spill whose
+ * pages are decoded only as the window reaches them (`read-spill-store.ts`). `applyBudget` is this in a loop.
+ *
+ * Measured on the SERIALISED item, in both units; EITHER ceiling stops it; the FIRST item is always admitted,
+ * however large, or it could never be read. The envelope's own braces cost 2, and each item a separating comma.
+ */
+export function budgetMeter(budget: { chars: number; bytes: number | null }): {
+  admit(item: unknown): boolean; chars(): number; bytes(): number;
+} {
+  let usedChars = 2;
+  let usedBytes = 2;
+  let admitted = 0;
+  return {
+    admit(item) {
+      const serialised = JSON.stringify(item);
+      const addChars = serialised.length + 1;
+      const addBytes = Buffer.byteLength(serialised, 'utf8') + 1;
+      const overChars = usedChars + addChars > budget.chars;
+      const overBytes = budget.bytes !== null && usedBytes + addBytes > budget.bytes;
+      if (admitted > 0 && (overChars || overBytes)) return false;
+      usedChars += addChars;
+      usedBytes += addBytes;
+      admitted++;
+      return true;
+    },
+    chars: () => usedChars,
+    bytes: () => usedBytes,
   };
 }
 
@@ -254,8 +289,8 @@ export function budgetFields<T>(
  * The whole budgeted envelope for one response — the shape every result path (recall and find-similar, plain
  * and traversing, both doors) returns, so no path can apply the budget differently or not at all.
  *
- * `spillRemainder` is passed in because only the caller knows the member space and request to describe the
- * file with. **It receives ONLY the matches that did not fit**, never what the caller already holds.
+ * `spillRemainder` is passed in because only the caller knows its token and the request to describe the spill
+ * with. **It receives ONLY the matches that did not fit**, never what the caller already holds.
  */
 export async function budgetedEnvelope<T, S>(opts: {
   results: readonly T[];
@@ -265,8 +300,8 @@ export async function budgetedEnvelope<T, S>(opts: {
   /** Offset this page began at, so the reported continuation is absolute. */
   skip?: number;
   /**
-   * WRITE THE REMAINDER TO THE SPACE? Default NO: it is a WRITE ON A READ PATH, and the common caller wants
-   * the next page (`skip`), not a file. **This may only be optional BECAUSE `nextSkip` exists** — an opt-in
+   * KEEP THE REMAINDER as a read spill? Default NO: the common caller wants the next page (`skip`), not a
+   * download. (It no longer writes the space — Q-92 moved spills to the instance's read-spill store.) **This may only be optional BECAUSE `nextSkip` exists** — an opt-in
    * dump without a stated continuation strands a truncated caller, so the two must not be separated.
    */
   remainderDump?: boolean;
@@ -278,8 +313,23 @@ export async function budgetedEnvelope<T, S>(opts: {
   const outcome = applyBudget(page, opts.budget);
   const fields = budgetFields(outcome, opts.results.length, opts.budget, skip);
   if (outcome.truncated && opts.remainderDump === true) {
-    const spill = await opts.spillRemainder(outcome.remainder);
-    if (spill) fields['remainder'] = spill;
+    // A spill NEVER fails the read (Q-92): the answer already holds everything that fit and says where to
+    // continue, so a refused or failed spill costs the caller a convenience, not the answer.
+    let spill: S | null;
+    try {
+      spill = await opts.spillRemainder(outcome.remainder);
+    } catch (err) {
+      // `spillResultSet` reports its own failures and never throws; this guards any other spiller handed in,
+      // and says so rather than swallowing it.
+      log.warn(`Result spill failed: ${err instanceof Error ? err.message : String(err)}`);
+      spill = null;
+      fields['spillRefused'] = 'failed';
+    }
+    if (spill && typeof spill === 'object' && 'spillRefused' in spill) {
+      fields['spillRefused'] = (spill as { spillRefused: unknown }).spillRefused;
+    } else if (spill) {
+      fields['remainder'] = spill;
+    }
   }
   return { results: outcome.returned, fields };
 }

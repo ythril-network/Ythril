@@ -35,7 +35,7 @@
  */
 import type { TokenRights } from '../config/rights-shape.js';
 import { isInstanceAdmin } from './instance-admin.js';
-import { holdsRung } from './reachable-spaces.js';
+import { holdsRung, holdsRungOnEvery } from './reachable-spaces.js';
 import { effectiveRung } from './mint-cap.js';
 import { mayLeaveNetwork, type LeaveVerdict } from './network-membership.js';
 import { administers } from './mint-cap.js';
@@ -85,7 +85,10 @@ export function networkLeaveRefusal(
 /** Does this token hold `needs` on networks for EVERY space `net` carries? Instance admin always does. */
 function holdsOnEvery(caller: Caller, net: { spaces: string[] }, needs: 'read' | 'write' | 'admin'): boolean {
   if (isInstanceAdmin(caller)) return true;
-  return !!caller.rights && net.spaces.every(s => holdsRung(caller.rights!, s, 'networks', needs));
+  // A network carrying no spaces is held by any token with a matrix — the answer this always gave, stated here
+  // because the shared predicate refuses an empty list.
+  if (net.spaces.length === 0) return !!caller.rights;
+  return holdsRungOnEvery(caller.rights, net.spaces, 'networks', needs);
 }
 
 /** The networks this token may see: `networks: read` on every space each carries. One filter for both doors. */

@@ -663,19 +663,25 @@ subtree, so a deeper or wider traversal means fewer matches fit — they are abs
 `null` unless you asked for a byte ceiling. `nextSkip` is there exactly when `truncated` is.
 `count` stays the FULL total on a skipped page rather than shrinking as you advance.
 
-**`remainderDump: true`** additionally writes what did not fit to the space's `_tmp/` as JSON and reports it as
-`remainder: {matches, records, path, download, expiresAt}`. It is off by default because writing a file on a
-read path counts against space storage and most callers want the next page rather than an artifact. `remainder`
-carries **only** what did not fit — a continuation, not a copy. The file carries no embedding vectors and
-expires after one day.
+**`remainderDump: true`** additionally keeps what did not fit as a **read spill** and reports it as
+`remainder: {matches, records, spillId, path, download, expiresAt}`. It is off by default because most callers
+want the next page rather than a download. `remainder` carries **only** what did not fit — a continuation, not a
+copy. A search never writes into a space: the spill is kept outside every space, for your token alone, carries
+no embedding vectors, and lives up to one day — it may be evicted earlier by your token's own newer spills. Read
+it with `GET /api/brain/spills/:id` or MCP `read_spill`. A spill that cannot be kept leaves `remainder` out and
+names the reason in `spillRefused`; `truncated` and `nextSkip` are unchanged.
 
 > The full treatment is in [Prefiltered Recall and the byte budget](04a-recall-api.md).
 
 `recall` and `similar` with `traverse > 0` cap the traversed nodes they return inline. Past that cap the
-**complete** graph is written to the space's file store under `_tmp/` as JSON, and the response carries
-`graphTruncated: true` with `graphComplete: {nodes, path, download, expiresAt}`. The download is the normal
-authenticated `GET /api/files/:spaceId?path=…`, the file expires after one day, and it is hidden from browsing
-and never embedded.
+**complete** graph is kept as a read spill, and the response carries `graphTruncated: true` with
+`graphComplete: {nodes, spillId, path, download, expiresAt}`. `download` is `GET /api/brain/spills/:id` (MCP
+`read_spill`), readable by the token that ran the search alone, for up to one day — it may be evicted earlier by
+that token's own newer spills. Nothing is written into any space, so nothing is embedded, browsed or synced.
+`path` is deprecated.
+
+> Both spills, their paging, their refusals and the deprecated `path`:
+> [Reading a spill](04a-recall-api.md#reading-a-spill-get-apibrainspillsid-and-mcp-read_spill).
 
 The alternative — a `truncated` flag alone — tells a caller their graph was cut and leaves them no way to get
 the rest, which on a neighbourhood is a dead end: there is no `total` to page against.
@@ -683,7 +689,8 @@ the rest, which on a neighbourhood is a dead end: there is no `total` to page ag
 **A `truncated` flag alone is still the right answer in one case.** The link scans that follow a
 record's links are bounded per hop, and a hop can spend its budget on records it discards as already
 visited — so the graph is short and there is no complete copy to write, because the missing records were never
-read. `graphTruncated: true` arrives on its own. Read the flag, and treat `graphComplete` as optional.
+read. `graphTruncated: true` arrives on its own. **It also arrives alone when the spill could not be kept**, and
+then `spillRefused` names why. Read the flag, and treat `graphComplete` as optional.
 
 #### Unknown body fields are refused
 

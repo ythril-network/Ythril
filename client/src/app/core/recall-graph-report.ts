@@ -16,18 +16,17 @@
  * typed the client could not tell either.
  */
 
-/** Where the WHOLE graph was written, when the instance was able to write it. */
-export interface GraphSpillLink {
-  /** How many traversed nodes the FILE holds — the number the inline graph fell short of. */
+import type { SpillLink } from './read-spill';
+
+/**
+ * The WHOLE graph, kept for the caller's own token, when the instance was able to keep it. What a spill is,
+ * who may read it and for how long is `read-spill.ts`; a refused one is `spillRefused` on the answer.
+ */
+export interface GraphSpillLink extends SpillLink {
+  /** How many traversed nodes the SPILL holds — the number the inline graph fell short of. */
   nodes: number;
-  /** Path within the space's file store. */
-  path: string;
-  /** Authenticated download URL: the caller's own token, as for any file in the space. */
-  download: string;
-  /** ISO timestamp after which the file and its record are gone. */
-  expiresAt: string;
   /**
-   * The spill walk hit its OWN ceiling, so even the file is not the whole graph.
+   * The spill walk hit its OWN ceiling, so even the spill is not the whole graph.
    *
    * Rare and worth saying: without it a reader takes the download as the complete answer, which is the same
    * mistake one level down as taking the inline graph for it.
@@ -46,10 +45,11 @@ export interface RecallGraphReport {
    */
   graphTruncated?: boolean;
   /**
-   * The whole graph, written out — present only when there WAS one to write.
+   * The whole graph, kept — present only when there WAS one to keep and it was not refused.
    *
-   * Absent while `graphTruncated` is true is a real case rather than an omission: a bounded link scan leaves
-   * nothing complete to write, because the records missing from the graph are precisely the ones never read.
+   * Absent while `graphTruncated` is true is a real case rather than an omission, twice over: a bounded link
+   * scan leaves nothing complete to keep, because the records missing from the graph are precisely the ones
+   * never read; and a refused spill (`spillRefused` on the answer) keeps nothing.
    */
   graphComplete?: GraphSpillLink;
 }

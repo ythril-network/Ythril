@@ -285,6 +285,8 @@ export const ROUTE_RULES: RouteRule[] = [
   // `spaceId` falls back to the spaces the guard authorised — see the entry builder below.
   { method: 'POST',   pattern: /^\/api\/brain\/filter$/,                            operation: 'brain.filter',         read: true },
   { method: 'POST',   pattern: /^\/api\/brain\/similar$/,                           operation: 'brain.similar',        read: true },
+  // A read spill (Q-92) names no space in its path: the spaces it touches are the spill's own record.
+  { method: 'GET',    pattern: /^\/api\/brain\/spills\/[^/]+$/,                     operation: 'brain.spill.read',     read: true },
   { method: 'GET',    pattern: /^\/api\/brain\/(?:spaces\/)?([^/]+)\/stats$/,      operation: 'brain.stats',          spaceGroup: 1, read: true },
 
   // ── Bulk write ───────────────────────────────────────────────────────────
@@ -472,6 +474,12 @@ export const CONFIG_RELOAD_OPERATIONS = {
   removed: 'space.reload_removed',
   kept: 'space.reload_kept',
 } as const;
+
+/**
+ * The recurring sweep (every TTL sweep cycle) of read spills older versions wrote into spaces (Q-92, `files/legacy-spill-sweep.ts`): one entry
+ * per space it cleaned. Written directly, outside the route rules, so named here like the two above.
+ */
+export const LEGACY_SPILL_SWEEP_OPERATION = 'file.legacy_spill.sweep';
 
 /** Log a failed auth attempt — called explicitly from auth middleware when needed. */
 export function logAuthFailure(req: Request): void {

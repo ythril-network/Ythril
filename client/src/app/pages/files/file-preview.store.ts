@@ -11,7 +11,7 @@ import markdown from 'highlight.js/lib/languages/markdown';
 import python from 'highlight.js/lib/languages/python';
 import bash from 'highlight.js/lib/languages/bash';
 import plaintext from 'highlight.js/lib/languages/plaintext';
-import { AuthService } from '../../core/auth.service';
+import { AuthenticatedDownload } from '../../core/authenticated-download';
 import { MarkdownRenderService } from '../../shared/markdown-render.service';
 import { httpErrorReason } from '../../core/http-error';
 import type { FileEntry } from '../../core/api.types';
@@ -129,7 +129,7 @@ export function xlsxCellText(v: unknown): string {
  */
 @Injectable()
 export class FilePreviewStore {
-  private readonly auth = inject(AuthService);
+  private readonly download = inject(AuthenticatedDownload);
   private readonly sanitizer = inject(DomSanitizer);
   private readonly markdown = inject(MarkdownRenderService);
 
@@ -283,10 +283,8 @@ export class FilePreviewStore {
     show: (value: V) => void,
   ): void {
     this.loading.set(true);
-    const token = this.auth.token();
-    const headers: HeadersInit = token ? { Authorization: `Bearer ${token}` } : {};
-    fetch(url, { headers })
-      .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return produce(r); })
+    // The bearer, the same-origin rule and the `HTTP <status>` throw live in the shared download module.
+    this.download.fetch(url, produce)
       .then(value => {
         if (!this.stillShowing(entry)) return;
         show(value);

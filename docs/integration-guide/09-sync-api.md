@@ -261,6 +261,15 @@ heard of.
 and the receiver makes its own, with its own chunker and its own model; stripped, it would land as a FILE
 under an id ending in `#0`, carrying another instance's passage text.
 
+**A read spill never syncs, in either direction.** Versions before 5.5.3 kept a `recall` or `similar` answer
+too large to return inline as a file at the space root — `_tmp/graph-<uuid>.json` or
+`_tmp/results-<uuid>.json` — and it replicated like content and never expired on the receiving peer. Spills
+now live outside every space, and exactly that root path is instance-local: it is left out of the manifest
+this instance serves and out of the space hash, its bytes are never pulled, and its metadata is dropped
+whether it arrives by push or by pull — a pushed one is counted as `skipped`, not refused, so an older peer's
+push still succeeds. An older peer keeps offering its spills until it upgrades; this instance drops them, and
+its own copies are swept locally, so a mixed network converges without anyone upgrading first.
+
 **Deletions travel on `/api/sync/file-tombstones`**, as they always have — a deleted file has a file
 tombstone rather than a brain one, so the metadata page carries no tombstones of its own.
 

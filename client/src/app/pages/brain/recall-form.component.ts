@@ -46,7 +46,7 @@ export interface RecallFormState {
   maxChars: number;
   maxTokens: number;
   skip: number;
-  /** WRITES A FILE into the space. The control has to say so, which is why it is not just another checkbox. */
+  /** Keep the matches that did not fit, for this token, for up to a day. Writes nothing into the space. */
   remainderDump: boolean;
 }
 
@@ -418,19 +418,16 @@ export interface RecallTypeOpt {
       </label>
       <input type="number" [(ngModel)]="form().skip" name="recallSkip" min="0" />
     </div>
-    <!-- The only control on this form that WRITES, so it says so on the face rather than in a tooltip: it
-         puts a JSON file into the space and that file is downloadable for a day. A checkbox that looks like
-         its three read-only neighbours would be the dishonest version. -->
+    <!-- What the checkbox promises is said IN the page and tied to it with aria-describedby: a title-only
+         hint reaches neither a keyboard nor a screen reader. The promise, not a location: the complete
+         result, readable by this token for up to a day. -->
     <label class="rf-check">
-      <input type="checkbox" [(ngModel)]="form().remainderDump" name="recallRemainderDump" />
+      <input type="checkbox" [(ngModel)]="form().remainderDump" name="recallRemainderDump" aria-describedby="rf-remainder-dump-note" />
       <span>{{ 'brain.query.remainderDump' | transloco }}</span>
-      <span class="rf-hint" [attr.title]="'brain.query.remainderDump.tooltip' | transloco"><ph-icon name="info" [size]="11"/></span>
     </label>
-    @if (form().remainderDump) {
-      <div class="sch-msg" style="font-size:11px; color:var(--text-muted); margin-top:4px;">
-        {{ 'brain.query.remainderDump.writes' | transloco }}
-      </div>
-    }
+    <div id="rf-remainder-dump-note" style="font-size:11px; color:var(--text-muted); margin-top:4px;">
+      {{ 'brain.query.remainderDump.tooltip' | transloco }}
+    </div>
   </div>
   <!-- The request this form would send, as an operator would paste it into an MCP call.
        It does NOT re-build the request: it calls the same function the search calls and prints what comes

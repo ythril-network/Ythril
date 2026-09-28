@@ -152,7 +152,8 @@ has to be one.
 |---|---|---|
 | counts that keep growing | paging `recall` with `topK`/an unsupported `offset` | `query` with `skip` and `total` |
 | a phrase search finds nothing | `$regex` over prose | `recall` |
-| "this record has no relationships" | a truncated traversal, before the spill | check `truncated` / `graphTruncated`, fetch `complete` |
+| "this record has no relationships" | a short graph read as the whole neighbourhood | check `graphTruncated`; when `graphComplete` is present, read its `spillId` with `read_spill` / `GET /api/brain/spills/:id` |
+| "there are no more matches" | a budgeted answer read as the whole result | check `truncated` and page with `nextSkip` as `skip`; `remainder.spillId` is the same records kept in one spill |
 | a filtered recall returns fewer than `topK` | assuming a post-filter | `topK` is filled from records that SATISFY the filter, so nothing matching was dropped — the candidates genuinely ran out |
 | slow, wide answers | `traverse` 2+ with a large `topK` | narrow the seeds first |
 

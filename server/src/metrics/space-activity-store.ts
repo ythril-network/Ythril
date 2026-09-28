@@ -25,6 +25,7 @@
  * with what it was carrying.
  */
 import { col, asFilter } from '../db/mongo.js';
+import { ensureExpiryIndex } from '../db/expiry-index.js';
 import { log } from '../util/log.js';
 import { drainSpaceActivity, hourBucket, activityDocId, type CallClass } from './space-activity.js';
 
@@ -63,10 +64,9 @@ export async function ensureActivityIndexes(): Promise<void> {
   const c = col<ActivityDoc>(ACTIVITY_COLLECTION);
   await c.createIndex({ space: 1, bucket: -1 });
   await c.createIndex({ bucket: -1 });
-  await c.createIndex({ bucketAt: 1 }, {
-    name: 'ttl_bucketAt',
-    expireAfterSeconds: ACTIVITY_RETENTION_DAYS * 24 * 60 * 60,
-  });
+  // Through the shared helper, so a changed retention is applied to an index that already exists — a bare
+  // `createIndex` throws on the changed option and the old lifetime stays for ever.
+  await ensureExpiryIndex(ACTIVITY_COLLECTION, 'bucketAt', ACTIVITY_RETENTION_DAYS * 24 * 60 * 60, 'ttl_bucketAt');
 }
 
 /**

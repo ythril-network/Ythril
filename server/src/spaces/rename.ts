@@ -64,6 +64,17 @@ export async function moveSpaceData(oldId: string, newId: string): Promise<strin
     errors.push(msg);
   }
 
+  // 1b'. Read spills name their member spaces (Q-92): the renamed one follows, or its owner's read check
+  // would name a space that no longer exists and refuse the spill. Idempotent on a resumed rename.
+  try {
+    const { renameSpillsForSpace } = await import('../brain/read-spill-store.js');
+    await renameSpillsForSpace(oldId, newId);
+  } catch (err) {
+    const msg = `Could not move read spills from ${oldId} to ${newId}: ${err}`;
+    log.warn(msg);
+    errors.push(msg);
+  }
+
   // 1c. Migrate the GLOBAL collections that are keyed by space id.
   //
   // These are not under the `{oldId}_` prefix, so the collection rename above misses them

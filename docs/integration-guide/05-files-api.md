@@ -130,6 +130,16 @@ file that looks complete.
 
 Active-content types that can execute script when rendered in the browser (`.html`, `.htm`, `.svg`, `.xml`, `.xhtml`) are served with `Content-Disposition: attachment` and a `sandbox` Content-Security-Policy (stored-XSS guard). Passive types — images, PDF, plain text — are served `inline` and preview normally.
 
+**A read spill's `path` is not a file here — deprecated, and removed at the next major.** `recall` and
+`similar` still send `path` on `graphComplete` and `remainder`, shaped `_tmp/graph-<spillId>.json` or
+`_tmp/results-<spillId>.json`, because before 5.5.3 a spill was a file at the space root. Since then no search
+writes into a space, and exactly that path at the root is answered from the spill store instead of the file
+store: JSON, `Cache-Control: no-store`, for the **token that ran the search alone**, under the same rule and the
+same `404` / `410` as `GET /api/brain/spills/:id` — `files: read` on the space is not enough. It returns the
+spill's first window under the default budget, with `nextSkip` when there is more. Read spills by `spillId`; see
+[Reading a spill](04a-recall-api.md#reading-a-spill-get-apibrainspillsid-and-mcp-read_spill). A file of your own
+under a `_tmp` folder deeper in the tree, or with any other name, is an ordinary file.
+
 ---
 
 ### List Directory
@@ -158,6 +168,13 @@ GET /api/files/:spaceId?path=reports/
 
 A directory's `size` is the recursive sum of everything beneath it. Files carry their `embeddingStatus` and
 `tags` from the file's metadata record.
+
+**The root `_converted/`, `_extracted/` and `_tmp/` directories are left out of a listing** unless you send
+`?includeDerived=true`. The first two are the conversion pipeline's output
+([Conversion Pipeline](05a-conversion-pipeline.md)). `_tmp/` is where versions before 5.5.3 wrote read spills;
+nothing writes spills there now, and the ones that remain are swept away by the retention pass every few minutes — anything else under it is
+yours and is kept. Only at the root: a directory of your own with one of these names deeper in the tree is
+listed like any other.
 
 **`progress` / `progressAt` are present only while a file is in flight** (`pending`/`processing`) *and* its
 worker has reported at least one step:

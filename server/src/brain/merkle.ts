@@ -27,6 +27,7 @@
 import { createHash } from 'node:crypto';
 import { col, asFilter } from '../db/mongo.js';
 import { buildFileManifest } from '../files/manifest.js';
+import { spillIdFromPath } from './spill-path.js';
 import { BRAIN_COLLECTIONS } from '../config/types-knowledge.js';
 import { LOCAL_ONLY_FIELDS, LOCAL_ONLY_EXCLUSION } from '../sync/local-only-fields.js';
 
@@ -210,6 +211,9 @@ export async function computeMerkleRoot(spaceId: string): Promise<MerkleResult> 
       .project(collType === 'files' ? FILE_HASH_PROJECTION : DERIVED_PROJECTION);
 
     for await (const doc of cursor) {
+      // A legacy spill's FileMeta (Q-92) replicates in neither direction any more, so hashing it would report
+      // a divergence every cycle between an instance that swept its spills and one that has not.
+      if (collType === 'files' && spillIdFromPath(String((doc as { _id?: unknown })._id ?? ''))) continue;
       leaves.push(docLeaf(collType, doc as Record<string, unknown>));
     }
   }

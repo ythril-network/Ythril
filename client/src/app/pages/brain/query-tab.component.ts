@@ -11,6 +11,8 @@ import { RecallFormComponent, type RecallFormState, type RecallTypeOpt } from '.
 import { JsonTreeComponent } from '../../shared/json-tree.component';
 import { recallRequestFrom } from './recall-request';
 import { BrainStore } from './brain-store.service';
+import { type ResultSpillLink } from '../../core/read-spill';
+import { SpillEndingComponent } from './spill-ending.component';
 
 /**
  * The brain page's Query tab — advanced (MongoDB-style) query + semantic recall.
@@ -26,7 +28,7 @@ import { BrainStore } from './brain-store.service';
   selector: 'app-query-tab',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [CommonModule, FormsModule, TranslocoPipe, PhIconComponent, RecallFormComponent, JsonTreeComponent, SupersededBadgeComponent],
+  imports: [CommonModule, FormsModule, TranslocoPipe, PhIconComponent, RecallFormComponent, JsonTreeComponent, SupersededBadgeComponent, SpillEndingComponent],
   styles: [`
     .query-panel {
       display: flex;
@@ -239,7 +241,10 @@ import { BrainStore } from './brain-store.service';
                 <div class="alert alert-warning" style="margin-top:12px;">
                   <div><strong>{{ 'brain.query.truncated.title' | transloco: { returned: t.returned, count: t.count } }}</strong></div>
                   <div style="font-size:12px; margin-top:4px;">{{ 'brain.query.truncated.body' | transloco }}</div>
-                  <div style="font-size:12px; margin-top:4px;">{{ 'brain.query.truncated.what' | transloco }}</div>
+                  <!-- ONE ENDING, never two that disagree (see SpillEndingComponent). -->
+                  <app-spill-ending [link]="recallRemainder()" [refused]="spillRefused()"
+                    labelKey="brain.query.remainder.download" [labelParams]="{ matches: recallRemainder()?.matches }"
+                    fallbackKey="brain.query.truncated.what" />
                 </div>
               }
 
@@ -250,19 +255,17 @@ import { BrainStore } from './brain-store.service';
                    missing here are records the traversal never read. Placed beside the truncation notice and
                    above the results for the same reason — a reader who reaches the end has already concluded
                    the neighbourhood was complete. The download is offered only when there IS one: a bounded
-                   link scan leaves nothing complete to write. -->
+                   link scan leaves nothing complete to keep, and a refused spill keeps nothing.
+                   A BUTTON, not a link: the spill is read with the caller's token and page by page, and an
+                   anchor can do neither. -->
               @if (graphShort(); as g) {
                 <div class="alert alert-warning" style="margin-top:12px;">
                   <div><strong>{{ 'brain.query.graphShort.title' | transloco: { nodes: g.nodes } }}</strong></div>
                   <div style="font-size:12px; margin-top:4px;">{{ 'brain.query.graphShort.body' | transloco }}</div>
-                  @if (g.complete; as c) {
-                    <div style="font-size:12px; margin-top:4px;">
-                      <a [href]="c.download" target="_blank" rel="noopener">{{ 'brain.query.graphShort.download' | transloco: { nodes: c.nodes } }}</a>
-                      @if (c.ceilingHit) {
-                        <span style="margin-left:6px;">{{ 'brain.query.graphShort.ceilingHit' | transloco }}</span>
-                      }
-                    </div>
-                  }
+                  <app-spill-ending [link]="g.complete ?? null" [refused]="spillRefused()"
+                    labelKey="brain.query.graphShort.download" [labelParams]="{ nodes: g.complete?.nodes }"
+                    [extraKey]="g.complete?.ceilingHit ? 'brain.query.graphShort.ceilingHit' : null"
+                    fallbackKey="brain.query.graphShort.unread" />
                 </div>
               }
 
@@ -614,8 +617,12 @@ export class QueryTabComponent {
   /** The response as it arrived, for the JSON view. Never read by the rendered view. */
   recallRaw = signal<unknown>(null);
 
-  /** Set when the traversal stopped short, with the download link if the instance could write one. */
+  /** Set when the traversal stopped short, with the spill if the instance kept one. */
   graphShort = signal<{ nodes: number; complete: RecallResponse['graphComplete'] | null } | null>(null);
+  /** The matches that did not fit, kept for this token when the search asked (`remainderDump`). */
+  recallRemainder = signal<ResultSpillLink | null>(null);
+  /** Why the answer's spill was NOT kept, as the server said it. */
+  spillRefused = signal<string | null>(null);
 
   /**
    * Which view of the answer is showing.
@@ -752,6 +759,7 @@ export class QueryTabComponent {
     this.recallError.set('');
     this.recallResults.set([]);
     this.recallTruncated.set(null);
+    this.resetSpill();
     this.recallRan.set(false);   // a stale "no matches" must not describe the search now running
     this.brainApi.recallBrain(this.spaceId(), body).subscribe({
       /*
@@ -795,6 +803,8 @@ export class QueryTabComponent {
         this.recallTruncated.set(res.truncated === true
           ? { returned: res.returned ?? res.results.length, count: res.count }
           : null);
+        this.recallRemainder.set(res.remainder ?? null);
+        this.spillRefused.set(res.spillRefused ?? null);
       },
       // NOT `recallRan` on an error: a failed search did not find nothing, it did not finish. Saying "no
       // matches" beside an error message would tell the reader two different things about one click.
@@ -809,6 +819,14 @@ export class QueryTabComponent {
     this.graphShort.set(null);
     this.recallError.set('');
     this.recallTruncated.set(null);
+    this.resetSpill();
+  }
+
+  /** A spill and its refusal describe ONE answer; neither may outlive it (a failed download lives and dies with
+   *  the notice's ending component, which a new answer re-creates). */
+  private resetSpill(): void {
+    this.recallRemainder.set(null);
+    this.spillRefused.set(null);
   }
 
   /**

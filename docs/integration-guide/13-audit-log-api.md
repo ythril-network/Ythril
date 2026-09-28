@@ -163,12 +163,12 @@ Audit entries are recorded for all write operations and (when `logReads` is enab
 | Chrono | `chrono.create`, `chrono.update`, `chrono.delete`, `chrono.list` |
 | Bulk | `bulk.write` — one entry for the whole call, not one per record |
 | Ingest | `brain.ingest` — one entry for the start of a run; `brain.ingest.status` (a read, recorded only with `logReads`) |
-| File | `file.create`, `file.update`, `file.delete`, `file.read`, `file.list`, `file.mkdir`, `file.meta.update`, `file.retry_embedding`, `file.retry_embedding_all` |
+| File | `file.create`, `file.update`, `file.delete`, `file.read`, `file.list`, `file.mkdir`, `file.meta.update`, `file.retry_embedding`, `file.retry_embedding_all`, `file.legacy_spill.sweep` (the instance removing, from one space, the read spills versions before 5.5.3 wrote into it — one entry per space per run that removed any, with no token) |
 | Space | `space.create`, `space.update`, `space.delete`, `space.wipe`, `space.reload_added` / `space.reload_removed` / `space.reload_kept` (a config reload, by the watcher or `POST /api/admin/reload-config`, that added a space, removed one the file listed in `removeSpaces`, or kept one the file no longer lists), `space.list`, `space.rename`, `space.reorder`, `space.reindex`, `space.indexes.rebuild`, `space.embeddings.reembed`, `space.activity.reset`, `space.schema.update`, `space.schema.delete`, `space.schema.validate` |
 | Token | `token.create`, `token.update`, `token.regenerate`, `token.delete` |
 | MFA | `mfa.enable`, `mfa.disable` |
 | Webhook | `webhook.create`, `webhook.update`, `webhook.delete`, `webhook.test` |
-| Brain | `brain.recall`, `brain.filter`, `brain.similar`, `brain.traverse`, `brain.stats`, `brain.retry_embedding`, `brain.events.ticket` (issuing a short-lived ticket for the live event stream) |
+| Brain | `brain.recall`, `brain.filter`, `brain.similar`, `brain.spill.read` (`GET /api/brain/spills/:id` and MCP `read_spill` — a read, so recorded only with `logReads`; the path names no space), `brain.traverse`, `brain.stats`, `brain.retry_embedding`, `brain.events.ticket` (issuing a short-lived ticket for the live event stream) |
 | Duplicates | `duplicate.scan`, `duplicate.merge`, `duplicate.dismiss`, `duplicate.reopen` |
 | Contradictions | `contradiction.scan`, `contradiction.resolve`, `contradiction.dismiss`, `contradiction.reopen` |
 | Conflicts | `conflict.seed`, `conflict.resolve`, `conflict.bulk_resolve`, `conflict.link_violation.delete` |

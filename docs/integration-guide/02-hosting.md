@@ -97,6 +97,9 @@ DEBUG=1 docker compose up
 | `SHUTDOWN_READY_GRACE_MS` | `2000` | How long to keep serving after `/ready` starts returning **503**, before the drain begins. On SIGTERM the server reports not-ready immediately so an orchestrator takes it out of rotation; this is the window for a readiness probe to notice. Kubernetes' default probe period is 10 s, so some probes will miss a 2 s window — raise it if your rolling updates still drop requests. **Set it to `0` on a single-instance deployment**: there is no load balancer to inform and the wait is pure delay. Comes out of the same stop-grace budget as `SHUTDOWN_DRAIN_MS`. `/health` (liveness) keeps returning 200 throughout — a liveness probe that fails on SIGTERM invites a SIGKILL mid-drain. |
 | `RECALL_BUDGET_MS` | `25000` | End-to-end budget for one recall call. Every hop runs in series — embed the query, the per-type vector searches, the lexical channel, the cross-encoder — and each has its own timeout with nothing watching the total. This sits under the ~30 s a typical MCP client waits, so the server stops working before the caller stops listening. It is a **budget, not a hard abort**: the only hop it can cancel is the reranker, because that is the only optional one. |
 | `RERANK_MIN_BUDGET_MS` | `3000` | Below this much remaining budget the reranker is **skipped** rather than started, and recall returns the fused order. Starting a cross-encoder pass that cannot finish burns time that was needed to return the answer; a slightly worse ranking delivered beats a perfect one the caller has already given up on. The skip is logged. |
+| `READ_SPILL_TOKEN_MAX_MB` | `64` | How many megabytes of read spills one token may hold — the part of a `recall` or `similar` answer that did not fit, kept for the token that asked (see [Reading a spill](04a-recall-api.md#reading-a-spill-get-apibrainspillsid-and-mcp-read_spill)). Measured as **raw JSON**, not as stored, because the decompressed size is what a reader pays. Past it a token's **own** oldest spills are evicted to make room; a single spill larger than the whole share is refused (`spillRefused: over-share`) and the answer keeps `nextSkip`. `1`–`16384`. |
+| `READ_SPILL_TOKEN_MAX_COUNT` | `50` | How many read spills one token may hold. Past it, the token's own oldest spill is evicted — reading it then answers `410`. `1`–`100000`. |
+| `READ_SPILL_INSTANCE_MAX_MB` | `1024` | How many megabytes of read spills the whole instance holds, raw JSON. At the ceiling a new spill is **refused** (`spillRefused: instance-ceiling`) rather than evicting another caller's — a busy token cannot push out somebody else's results. Spills live outside every space: they count toward no space's storage and no quota, and no backup carries them. `1`–`1048576`. |
 | `METRICS_TOKEN` | (unset) | When set, `GET /metrics` requires this exact value as a Bearer token — the recommended path for Prometheus scrape configs. If unset, the endpoint falls back to requiring a valid admin PAT. |
 | `TRUST_PROXY` | `false` | Express `trust proxy` setting (overrides the `trustProxy` config key). Default `false` — `req.ip` comes from the socket. **Set this when running behind a reverse proxy**, to the exact number of proxy hops (e.g. `1`), *not* `true` (which trusts the whole `X-Forwarded-For` chain and is client-spoofable). Also accepts `loopback` or a comma-separated CIDR/IP list. Rate limiting and the audit log key on `req.ip`, so a wrong value here is a security setting. |
 | `SYNC_ALLOW_PRIVATE_PEERS` | `false` | Allow sync **peer URLs** to resolve to private/reserved addresses (RFC-1918, CGNAT, IPv6 ULA) — for same-host or LAN networks (overrides the `allowPrivatePeers` config key). Default `false`: sync connects only to public peers, and any peer that tries to move its URL onto a private address is refused. Even when `true`, crown-jewel addresses (loopback, link-local / cloud IMDS `169.254.169.254`, unspecified) stay blocked. |
@@ -760,6 +763,16 @@ Named volumes persist across upgrades. The server applies any pending MongoDB in
 
 **Breaking changes**, when they occur, will be listed in `CHANGELOG.md` with migration steps.
 
+**Upgrading to 5.5.3 or later deletes the read spills older versions wrote into spaces, and that cannot be
+undone.** Before it, a `recall` or `similar` answer too large to return inline was saved as a file at the root
+of the seed's space — `_tmp/graph-<id>.json` or `_tmp/results-<id>.json` — which replicated to every peer and
+never expired there. They are one caller's search results, not content, and spills now live outside every
+space. From the first boot, a sweep inside the retention pass (every few minutes) removes every such file and its record,
+whether it was written here or pulled from a peer, with no tombstone and no webhook; each space it cleans gets one
+log line and one audit entry, `file.legacy_spill.sweep`, naming the space. Only that exact root path is
+touched: a `_tmp` folder of your own deeper in the tree, and any other file under the root `_tmp`, are left
+alone. Copy the root `_tmp/` out of a space's file store first if you want to keep one.
+
 ### Rolling Back
 
 **The first boot on a new version rewrites `config.json`, and some of those rewrites drop a field an older
@@ -819,6 +832,12 @@ docker compose up -d
 UI ignore ones they do not know, so an older build reads newer records — it simply does not show the newer fields.
 The exception is anything created by a feature the old version lacks: a record whose `type` has no schema in the
 old build is still stored and still returned, just unvalidated.
+
+**Rolling back past 5.5.3 leaves the read-spill store behind, and it empties itself.** The `_read_spills` and
+`_read_spill_pages` collections are unknown to an older build, which neither reads nor removes them; their
+MongoDB TTL index keeps running, so every spill in them is gone within a day. Until then an older build's
+backups include them, because it does not know to leave them out. The legacy spills the upgrade swept are not
+restored, and an older build goes back to writing new spills into the space.
 
 **Vector indexes are rebuilt on boot**, so a rollback that changes the embedding model or its dimensions costs a
 reindex, not data. Check `GET /ready` before sending traffic — see [Runtime Model Downloads](#runtime-model-downloads)

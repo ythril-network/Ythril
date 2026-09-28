@@ -324,7 +324,7 @@ the rest after them, labelled with the score that placed them, because a reranke
 one the model did not read.
 
 **If a graph walk stops short, the panel says so** and offers the whole graph as a download where the
-instance was able to write one. What is missing from a short graph are records the walk never read; the
+instance was able to keep one. What is missing from a short graph are records the walk never read; the
 results themselves are unaffected.
 
 **You can create a record and its relationships in one go.** Anything that writes a fact, an entity or a
@@ -361,7 +361,7 @@ describe is a search you can run without writing a request by hand:
 - **Tags** — a tag filter applied to results.
 - **Fields returned** — a JSON object choosing which fields each result carries, e.g. `{ "description": 1 }`; it can exclude as well as include. Leave it empty for whole records. Worth being careful with rather than clever: a selection that omits the field you are reading gives you a result that looks complete and is missing the answer.
 - **Skip results** — start further down the ranking. When an answer is shortened it tells you where to continue from; that number goes here. It counts from the top of the ranking, not from the last page, so it replaces the previous value rather than adding to it.
-- **Save what did not fit** — the one setting on this form that WRITES. It puts the matches that were cut off into this space as a JSON file, downloadable for a day, and the form says so as soon as you tick it.
+- **Save what did not fit** — keep the matches that were cut off, so you can download them as one JSON file. They are kept for **you alone** — the sign-in or token that ran the search — for up to a day, and may go sooner if you run many large searches, because each caller's newest saved results make room by removing its own oldest. **A search never changes a space**, with this ticked or not: what is kept is not a file in the space, does not appear in its file manager or storage figures, never reaches another instance in a network, and is not in any backup. If the results could not be kept — you already hold as much as one caller may, or the instance holds its maximum — the answer says why, and **Skip results** still reaches every one of them.
 
 **The request this would send** sits beside the form and updates as you type. It is the exact body the
 **Search** button sends, with a **Copy** button — paste it into a `recall` call over MCP or REST and you get
@@ -382,15 +382,16 @@ the same answer. Two uses, and the second is the reason it is there:
 
   **The walk follows edges only, unless you ask for more.** A fact, timeline entry or file that names an entity is related to it — but that link is a field on the record, not an edge, so the hops above do not follow it. Three checkboxes turn each kind on: **Also return chrono entries / facts / files reached**. They are off by default because a search answer has a size budget and each match is counted together with everything hanging off it, so records nobody asked for are paid for in answers that no longer fit. With one on, a match that is itself a fact also stops coming back with an empty neighbourhood — the walk starts from the entities that fact names.
 - **When the surroundings do not fit** — a search that reaches more connected records than it can show returns
-  the ones nearest your matches and writes the *whole* neighbourhood to a downloadable file in the space, valid
-  for a day. The result says both: how many it showed, and where the complete set is. A short graph would
-  otherwise read as "this record has few relationships", which is a statement about your data rather than about
-  the search.
+  the ones nearest your matches and keeps the *whole* neighbourhood for you to download — for you alone, for up
+  to a day, and possibly less if you run many large searches. Nothing is written into the space. The result says
+  both: how many it showed, and where the complete set is. A short graph would otherwise read as "this record
+  has few relationships", which is a statement about your data rather than about the search. If the whole
+  neighbourhood could not be kept, the result is still marked short, says why, and offers no download.
 
   **Sometimes there is no complete set to offer, and the result says that too.** Following the records that
   merely *name* an entity is bounded per hop, so a dense space can use up a hop's budget on records it has
   already shown. The neighbourhood is then genuinely partial — the rest was never read, so there is nothing to
-  write to a file — and the result is marked short with no download beside it. Narrowing the search, or asking
+  keep — and the result is marked short with no download beside it. Narrowing the search, or asking
   for fewer hops, is what makes it whole.
 - **When the answer itself does not fit** — a search result is also bounded by SIZE, not only by `topK`. Ask
   for a hundred matches with their surroundings and the answer can be larger than anything that should arrive
@@ -425,9 +426,10 @@ the same answer. Two uses, and the second is the reason it is there:
       keep a character ceiling.
   - Narrowing the search — fewer results, fewer graph hops, a tighter filter — does the same job from the other
     end, and a search that comes back shortened is usually a sign the question was broader than intended.
-  - **Getting the whole tail as one file is a request you make, not something that happens to you.** An API
-    caller can add `remainderDump` to have everything that did not fit written to a downloadable file in the
-    space, valid for a day. Nothing is written unless it was asked for.
+  - **Getting the whole tail in one piece is a request you make, not something that happens to you.** Tick
+    **Save what did not fit**, or as an API caller add `remainderDump`, and everything that did not fit is kept
+    for the caller that asked, for up to a day, to download or page through. Nothing is kept unless it was
+    asked for, and nothing is ever written into the space.
 - **maxTimeMS** — a time limit for this one search. It can only make the search stricter than the instance's own budget, never looser. When the limit is reached you get a **partial** answer rather than an error or a hang: whatever finished is returned, and the result says it was cut short.
 - **Something you wrote seconds ago is findable, with nothing to switch on.** Meaning-matching
   reads an index, and that index takes a few seconds to catch up after a write — measured here at about

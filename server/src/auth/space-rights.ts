@@ -324,6 +324,9 @@ export const TOOL_RIGHTS: readonly ToolRight[] = [
   { tool: 'recall', area: 'knowledge', needs: 'read' },
   { tool: 'filter', area: 'knowledge', needs: 'read' },
   { tool: 'similar', area: 'knowledge', needs: 'read' },
+  // The rung that produced the spill. Named here so the tool is priced; the act checks it against the spill's
+  // stored member spaces, because a spill names no space for the dispatcher to check (Q-92).
+  { tool: 'read_spill', area: 'knowledge', needs: 'read' },
   { tool: 'graph_traverse', area: 'knowledge', needs: 'read' },
   { tool: 'save_bulk', area: 'knowledge', needs: 'write' },
   { tool: 'ingest', area: 'knowledge', needs: 'write' },
@@ -513,6 +516,13 @@ export const NOT_AREA_SCOPED: readonly { route: string; why: string }[] = [
     route: '/api/spaces/reorder',
     why: 'Display order of the space list in the UI. Instance-level presentation state that names no space '
        + 'in its path and reads none of their data.',
+  },
+  {
+    route: '/api/brain/spills/:id',
+    why: 'A read spill (Q-92) is found by its id and names no space, so a path scope would resolve to none '
+       + 'and pass every check. The act checks it instead: the token that issued the spill, holding knowledge '
+       + 'read on EVERY one of the spill\'s stored member spaces (`brain/read-spill-act.ts`). MCP `read_spill` '
+       + 'carries the knowledge-read row in TOOL_RIGHTS.',
   },
 ];
 

@@ -153,6 +153,8 @@ export const MCP_TOOL_OPERATIONS: Record<string, string | string[] | null> = {
    * rule of its own, so there is no operation for it to disagree with.
    */
   similar: 'brain.similar',
+  // The rest of a recall or similar answer, as the REST route logs it.
+  read_spill: 'brain.spill.read',
   // Returns the space's schema and counts. `space.list` is the REST read that exposes the same shape.
   space_meta: 'space.list',
 

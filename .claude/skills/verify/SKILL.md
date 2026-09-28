@@ -14,9 +14,27 @@ Boot an isolated copy instead; it takes ~30 s.
 $env:PORT='3260'; $env:TRUST_PROXY='1'                 # TRUST_PROXY=1 or the dev proxy's xfwd header 500s every API call (rate limiter)
 $env:CONFIG_PATH='<scratch>\config\config.json'        # nonexistent file → server boots in first-run /setup mode
 $env:DATA_ROOT='<scratch>\data'
-$env:MONGO_URI='mongodb://127.0.0.1:27017/ythril_scratch'   # host mongod (8.2+, supports $vectorSearch); distinct DB name isolates it
+$env:MONGO_URI='mongodb://127.0.0.1:27017/ythril_scratch'   # host mongod; distinct DB name isolates it. NO vector search — see below
 Set-Location server; npx tsx src/index.ts              # run in background, redirect output to a log
 ```
+
+**Anything that runs `recall` or `similar` needs a search engine, and host mongod has none.** Every recall answers
+`SearchNotEnabled` (code 31082) against it — found by the Q-92 verify, 2026-09-28; this line used to say host mongod
+"supports $vectorSearch". For those, give the scratch server its own Atlas-local container and remove it afterwards:
+
+```powershell
+docker run -d --name ythril-verify-mongo -p 127.0.0.1:27047:27017 mongodb/mongodb-atlas-local:latest
+$env:MONGO_URI='mongodb://127.0.0.1:27047/ythril_scratch?directConnection=true'
+# ... drive, then:
+docker rm -f ythril-verify-mongo
+```
+
+**Screenshot the element, not the page.** The app scrolls inside an inner container, so `fullPage: true` captures
+only the viewport; use `locator.screenshot()` for anything below the fold, and count elements in the DOM (for
+example `.alert-warning`) when the claim is that something appears once.
+
+Seed large records LAST and wait for the embed log to go quiet before driving the UI: local embedding runs on the
+server's main thread (Q-99), so ~100 KB of text per record stalls every request, `/login` included, for seconds.
 
 Wait for `http://localhost:3260/health` → 200. To reset to first-run: stop the server,
 delete the scratch config files, drop the scratch DB

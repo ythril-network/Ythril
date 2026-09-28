@@ -21,6 +21,7 @@ import { spaceCollection } from '../db/space-collection.js';
 import { openStoredRead, StoredFileUnreadable } from './stored-bytes.js';
 import { log } from '../util/log.js';
 import { noteUnreadable, clearUnreadable } from './unreadable-files.js';
+import { spillIdFromPath } from '../brain/spill-path.js';
 
 export interface ManifestEntry {
   path: string;        // relative to space files root, e.g. "notes/2024.md"
@@ -100,6 +101,9 @@ export async function buildFileManifest(
       } else if (stat.isFile()) {
         if (since && stat.mtimeMs < since.getTime()) continue;
         const relPath = path.relative(root, abs).replace(/\\/g, '/');
+        // A spill an older version wrote into the space (Q-92) is one caller's search result, not content:
+        // never offered to a peer, and so never counted in the space hash either. The sweep removes it.
+        if (spillIdFromPath(relPath)) continue;
         seen.add(relPath);
         const cached = cache.get(relPath);
         let sha256: string;

@@ -19,11 +19,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   being served as ciphertext, and so is an encrypted file on an instance whose secret was removed. The security
   report gains `atRest.files`. See [Encryption at Rest](docs/integration-guide/02a-encryption-at-rest.md#uploaded-files) for what
   stays readable on disk, rolling back, and the temporary plaintext copy `ffmpeg` needs while it indexes media.
+- **`read_spill` and `GET /api/brain/spills/:id` read what a search could not return inline** (Q-92). One act behind
+  both doors, the same parameters on each — `id`, `skip`, `maxChars`, `maxBytes`, `maxTokens` — paged like a
+  search, with whole items, `truncated` and `nextSkip`. Only the token that ran the search can read its spill, and
+  only while it holds knowledge read on every space whose records are inside; anyone else, an unknown id and an
+  expired one all get the same `404`, and a spill its owner's newer spills evicted answers `410`. See
+  [Reading a spill](docs/integration-guide/04a-recall-api.md#reading-a-spill-get-apibrainspillsid-and-mcp-read_spill).
+- **`graphComplete` and `remainder` carry a `spillId`**, the id `read_spill` takes.
+- **`spillRefused`**: a `recall` or `similar` whose spill could not be kept says why — `over-share`,
+  `instance-ceiling`, `no-token`, `unattributed`, `empty` or `failed` — and still answers in full, with `truncated`
+  and `nextSkip` exactly as without it. A spill never fails the search.
+- **Three limits on read spills**, validated at boot like every numeric setting: `READ_SPILL_TOKEN_MAX_MB` (64)
+  and `READ_SPILL_TOKEN_MAX_COUNT` (50) bound one token, and past them the token's own oldest spills make room;
+  `READ_SPILL_INSTANCE_MAX_MB` (1024) bounds the instance, and refuses a new spill rather than evicting anybody
+  else's. All three count raw JSON megabytes. See
+  [Environment Variables](docs/integration-guide/02-hosting.md#environment-variables).
 
 ### Changed
 
 - **The shipped Kubernetes Deployment uses `strategy: Recreate`**, so an old and a new pod never write the same
   data volume at once during a rollout.
+- **A spill's `download` is `/api/brain/spills/:id`**, on `graphComplete` and `remainder` alike. It was the files
+  route on the seed's space, which a token with knowledge read and no files read could not fetch.
+- **A graph spill's items are the traversed nodes, flat** — `{id, spaceId, depth, seedId, via: {edgeId, from},
+  edges, paths, record}` — so a large traversal pages like any other answer. It was one JSON document holding the
+  nested tree.
+- **A spill lives up to one day, and may be evicted earlier** by its own token's newer spills. Every place that said
+  "expires after one day" says so now.
+- **Backups and the storage quota leave read spills out.** A backup would have kept a copy — of records since
+  deleted or redacted — for as long as backups are kept, and counting them could have tripped the brain quota on
+  writes with nothing to show why. A restore leaves the current spills alone.
+- **The read spills versions before 5.5.3 wrote into spaces are removed, and never sync again.** A root
+  `_tmp/graph-<uuid>.json` or `_tmp/results-<uuid>.json` is left out of the manifest and the space hash, its bytes
+  are never pulled and its metadata is dropped on push and pull (counted as `skipped`, so an older peer's push still
+  succeeds), and the retention sweep, every few minutes, deletes every copy on this instance — written here or pulled from a peer — with no
+  tombstone and no webhook, and one `file.legacy_spill.sweep` audit entry per space it cleaned. **The deletion
+  cannot be undone**; a `_tmp` folder of your own deeper in the tree, and other files under the root `_tmp`, are not
+  touched. See [Upgrading](docs/integration-guide/02-hosting.md#upgrading).
+- **Deprecated: `path` on `graphComplete` and `remainder`, and its resolution through `read_file` and
+  `GET /api/files/:spaceId?path=`** — removed at the next major. No such file exists since Q-92; the files doors
+  answer exactly that path from the spill store, for the token that ran the search alone, so a caller built on
+  `path` + `read_file` keeps working until then. One read of that path now answers ONE window — the first page
+  under the door's default budget, with `nextSkip` when there is more — where it used to return the whole file;
+  continue with `read_spill` or the spill route from `nextSkip`. Read by `spillId`.
 
 ### Fixed
 
@@ -34,6 +72,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A file arriving by sync is written inside its own space, whatever path the peer names.** The pull path joined
   the peer's manifest path onto the space directory without the sandbox check every other write gets, so a path
   climbing out of the space would have been written outside it.
+- **The Query tab's spill downloads work.** "Download the whole graph" was a plain link, which carries no
+  `Authorization` header, so it could never be followed; it is a button that fetches every page of the spill and
+  saves one file. The remainder a search kept with "Save what did not fit" is now offered too, with its expiry, and a
+  spill that is gone or was not kept says so.
+
+### Security
+
+- **A search never writes into a space** (Q-92). A `recall` or `similar` whose traversal outgrew its inline cap, or
+  that asked for `remainderDump`, saved the rest as a file in the seed's space: a blob under `_tmp/`, a file record,
+  a change that synced it to every peer, and an embedding job for the search's own output — so a token holding only
+  knowledge read changed a space by searching it. Spills now live in a store outside every space, for the token
+  that caused them.
+- **Only the token that ran a search can read what it kept.** A spill was an ordinary file on the space, so any
+  token with files read there could list `_tmp` and read every other caller's search results. The spill route and
+  `read_spill` check the issuing token and knowledge read on every space in the spill, today rather than when it
+  was made, and answer anyone else as if the spill did not exist. The deprecated `path` resolves under the same
+  rule.
+- **Spills no longer reach peers, and the copies that did are removed.** A spill replicated like content, and the
+  copy a peer pulled never expired there, so one caller's results accumulated on every instance in a network. Spills
+  are instance-local now, sync drops the old path shape in both directions, and the retention sweep deletes what is
+  left.
+- **The web app sends its session token to this instance only.** The request interceptor tested "same origin" as
+  "starts with `/` or with the origin", so a protocol-relative URL (`//other.example/…`, and `/\other.example/…`,
+  which a browser reads the same way) or a host that merely begins with the origin (`<origin>.other.net`) received
+  the bearer too. One rule now decides it for the interceptor and for authenticated downloads alike.
 
 ## [5.5.2] — 2026-09-27
 

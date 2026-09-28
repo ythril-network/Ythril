@@ -34,6 +34,7 @@ import { mapGraphNodes, graphNodeRecord } from '../../brain/recall-graph.js';
 import { applyProjection, normaliseProjection, type NormalisedProjection } from '../../brain/projection.js';
 import { withTraverseBodies } from '../../brain/traverse-bodies.js';
 import { resolveBudget, resolvePaging, budgetedEnvelope, type BudgetRequest } from '../../brain/result-budget.js';
+import { requestActor } from '../../auth/request-actor.js';
 import { sendReadFailure, statesRetryability } from './_read-failure.js';
 import { spaceCollection } from '../../db/space-collection.js';
 
@@ -468,7 +469,7 @@ searchRouter.post('/similar', globalRateLimit, requireBodyScopedSpace('knowledge
         skip: paging.skip,
         remainderDump: paging.remainderDump,
         spillRemainder: remainder => spillResultSet({
-          memberSpaceId: result.results[0]?.spaceId ?? spaceId,
+          issuedTo: requestActor(req).tokenId,
           results: remainder,
           request: { entryId, entryType, topK, traverse: 0 },
         }),
@@ -490,12 +491,13 @@ searchRouter.post('/similar', globalRateLimit, requireBodyScopedSpace('knowledge
     // graph walk into an unbounded one. `MAX_GRAPH_NODES` is shared with recall's traverse so the two
     // cannot drift — the comment above says that is the point.
     const totalCap = Math.min(topK * (safeTraverse + 1) * 4, MAX_GRAPH_NODES);
-    const { graph, spill, truncated: graphTruncated } = await buildGraphWithSpill(
+    const { graph, spill, spillRefused, truncated: graphTruncated } = await buildGraphWithSpill(
       traverseSpaces,
       result.results.map(r => ({ _id: r._id, spaceId: r.spaceId })),
       safeTraverse,
       Math.max(0, totalCap - result.results.length),
       fsTraverseOpt,
+      requestActor(req).tokenId,
     );
     const itemsWithGraph = withoutDiagnostics(
       stripContentIfAsked(result.results, safeIncludeFileContent), safeIncludeDiagnostics)
@@ -511,7 +513,7 @@ searchRouter.post('/similar', globalRateLimit, requireBodyScopedSpace('knowledge
       skip: paging.skip,
       remainderDump: paging.remainderDump,
       spillRemainder: remainder => spillResultSet({
-        memberSpaceId: result.results[0]?.spaceId ?? spaceId,
+        issuedTo: requestActor(req).tokenId,
         results: remainder,
         request: { entryId, entryType, topK, traverse: safeTraverse },
       }),
@@ -534,6 +536,7 @@ searchRouter.post('/similar', globalRateLimit, requireBodyScopedSpace('knowledge
       graphNodes: countGraphNodes(itemsBudgeted.results),
       ...(graphTruncated ? { graphTruncated: true } : {}),
       ...(spill ? { graphComplete: spill } : {}),
+      ...(spillRefused ? { spillRefused } : {}),
     });
   } catch (err: unknown) {
     if (err instanceof NotFoundError) {

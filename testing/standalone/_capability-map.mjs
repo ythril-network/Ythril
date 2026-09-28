@@ -53,6 +53,7 @@ export const CAPABILITIES = [
 
   ['Brain — search', 'recall', 'POST /api/brain/recall'],
   ['Brain — search', 'similar', 'POST /api/brain/similar'],
+  ['Brain — search', 'read_spill', 'GET /api/brain/spills/:id'],
   ['Brain — search', 'graph_traverse', 'POST /api/brain/spaces/:spaceId/traverse'],
 
   ['Brain — bulk', 'save_bulk', 'POST /api/brain/spaces/:spaceId/bulk'],

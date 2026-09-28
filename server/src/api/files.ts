@@ -54,6 +54,7 @@ import { hideDerivedTrees } from '../files/derived-trees.js';
 import { registerUploadRoute } from './files-upload.js';
 import { webhookToken, requireQueryPath } from './files-request.js';
 import { spaceCollection } from '../db/space-collection.js';
+import { answerSpillPath } from './brain/spills.js';
 
 export const fileStoreRouter = Router();
 
@@ -242,6 +243,8 @@ fileStoreRouter.get('/:spaceId', globalRateLimit, requireSpaceAuth, async (req, 
 
   const filePath = req.query['path'];
   const normalised = typeof filePath === 'string' && filePath.trim() ? filePath : '.';
+  // A spill's deprecated `path` (Q-92): answered from the spill store for its issuer alone, never as a file here.
+  if (await answerSpillPath(req, res, normalised)) return;
   const memberIds = memberSpacesForRequest(req, spaceId);
 
   // Directory listing — aggregate across all member spaces

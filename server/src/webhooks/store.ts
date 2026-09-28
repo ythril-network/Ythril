@@ -7,7 +7,8 @@
 
 import { v4 as uuidv4 } from 'uuid';
 import type { Filter, UpdateFilter, Sort } from 'mongodb';
-import { col, getDb } from '../db/mongo.js';
+import { col } from '../db/mongo.js';
+import { ensureExpiryIndex } from '../db/expiry-index.js';
 import { log } from '../util/log.js';
 import { encryptSecret, decryptSecret, isEncrypted } from '../util/crypto.js';
 import type { WebhookSubscription, WebhookDelivery, WebhookEventType } from './types.js';
@@ -26,21 +27,7 @@ const DELIVERY_RETENTION_SECONDS = 30 * 24 * 60 * 60;
  */
 export async function initWebhookDeliveryIndexes(): Promise<void> {
   const dc = col<WebhookDelivery>(DELIVERIES_COLLECTION);
-  try {
-    await dc.createIndex(
-      { _expireAt: 1 },
-      { expireAfterSeconds: 0, name: 'ttl_delivery_expireAt' },
-    );
-  } catch {
-    try {
-      await getDb().command({
-        collMod: DELIVERIES_COLLECTION,
-        index: { name: 'ttl_delivery_expireAt', expireAfterSeconds: 0 },
-      });
-    } catch (err) {
-      log.warn(`Could not update delivery TTL index: ${err}`);
-    }
-  }
+  await ensureExpiryIndex(DELIVERIES_COLLECTION, '_expireAt', 0, 'ttl_delivery_expireAt');
   await dc.createIndex({ webhookId: 1, timestamp: -1 });
 }
 
