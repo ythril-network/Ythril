@@ -11,9 +11,19 @@ import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.
 import { joinByInviteKeyAct, joinRemoteAct } from '../../networks/join-remote-act.js';
 import { addMemberAct, removeMemberAct } from '../../networks/member-acts.js';
 import { uuidSchema } from './shared.js';
+import { DEFAULT_JOIN_SYNC_SCHEDULE } from '../../sync/schedule.js';
 import { callerOf, networkIdSchema, toResult } from './networks.js';
 
 const SPACE_ID = { type: 'string', minLength: 1, maxLength: 40, pattern: '^[a-z0-9-]+$' } as const;
+
+/** The joiner's schedule (Q-137), declared once for both join tools so the two cannot describe it differently. */
+const JOIN_SYNC_SCHEDULE = {
+  type: 'string', maxLength: 200,
+  description: 'Optional: the cron schedule this instance syncs the joined network on, e.g. "*/15 * * * *"; "" for '
+    + `manual sync only. Omitted, the join adopts the inviter's schedule, or "${DEFAULT_JOIN_SYNC_SCHEDULE}" when the `
+    + 'inviter offers none. Refused (400) before the handshake when it is not a runnable cron expression. A network this instance '
+    + 'already carries keeps its own schedule.',
+} as const;
 
 export const network_join_remoteTool: ToolHandler = {
   name: 'network_join_remote',
@@ -46,6 +56,7 @@ export const network_join_remoteTool: ToolHandler = {
       networkSpaces: { type: 'array', items: SPACE_ID, description: 'From the invite bundle; informational only.' },
       inviteCode: { type: 'string', description: 'From the invite bundle; informational only.' },
       spaceMap: { type: 'object', additionalProperties: SPACE_ID, description: 'Optional: a space of the network → the local space id to put it in. Key it by the name the invite shows for the space (`spaces`); the network\'s id for it (`networkSpaces`) is accepted too. A space not named keeps the name the invite shows.' },
+      syncSchedule: JOIN_SYNC_SCHEDULE,
     },
     required: ['handshakeId', 'inviteUrl', 'rsaPublicKeyPem', 'networkId', 'myUrl'],
     additionalProperties: false,
@@ -72,6 +83,7 @@ export const network_join_by_keyTool: ToolHandler = {
       inviteKey: { type: 'string', minLength: 20, maxLength: 200, description: 'The network\'s published invite key (`ythril_invite_…`).' },
       myUrl: { type: 'string', minLength: 1, description: 'This instance\'s externally reachable base URL, which the publisher will sync with.' },
       spaceMap: { type: 'object', additionalProperties: SPACE_ID, description: 'Optional: a space of the network → the local space id to put it in, keyed by the name the publisher gives it or by the network\'s id for it. A space not named keeps the publisher\'s name; a renamed one lands under its current name with the alias recorded.' },
+      syncSchedule: JOIN_SYNC_SCHEDULE,
     },
     required: ['publisherUrl', 'inviteKey', 'myUrl'],
     additionalProperties: false,

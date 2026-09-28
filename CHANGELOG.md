@@ -107,6 +107,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A joined network syncs on its own** (Q-137). The join registered the network with no schedule, which is manual
+  only, so a joiner never pulled and a subscriber depended on its publisher pushing everything. The join now adopts
+  the inviter's schedule, carried as `syncSchedule` in the invite apply answer, or every 15 minutes when the inviter
+  offers none it could run. `POST /api/networks/join-remote`, `/join-by-key` and both MCP join tools take an optional
+  `syncSchedule` that wins (`""` for manual), refused `400` before the handshake when it cannot run. A network joined
+  before this keeps no schedule; set one on its card. See
+  [Join Remote](docs/integration-guide/08-networks-api.md#join-remote-rsa-handshake).
 - **A renamed space reaches a new member once, under the network's name** (Q-133). An invite answered with the
   inviter's LOCAL space ids, while every later exchange used the network's, so a member joining after the publisher
   renamed a space held it twice — `y-twin` beside `y-project-template` — and the second copy never synced. Invite

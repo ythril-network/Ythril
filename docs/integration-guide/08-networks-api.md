@@ -355,7 +355,7 @@ POST /api/networks/join-by-key
 
 Called on the JOINING instance. Joins a pub/sub network with nothing but its publisher's URL and its published invite
 key: this instance redeems the key at the publisher (below), then runs the same handshake as
-[Join Remote](#join-remote-rsa-handshake), so the answer, the optional `spaceMap` and the rights are the same. `networks: write` (or
+[Join Remote](#join-remote-rsa-handshake), so the answer, the optional `spaceMap` and `syncSchedule`, and the rights are the same. `networks: write` (or
 administering the space) on every existing local space the join maps to, and `createSpaces` for any it creates; the
 joining token is also what later decides which announced spaces the network may add ([Pending Spaces](#pending-spaces)).
 MCP: `network_join_by_key` with the same fields.
@@ -443,6 +443,14 @@ Executes the full 3-step RSA handshake server-side. No plaintext tokens cross th
 | `invalid_answer` | the inviter named a space with an id no space can have |
 
 The answer's `spaceMap` lists every alias the join recorded — the ones you asked for and the ones a renamed space needed. **Changed in 5.5.3**: it used to list only the ones you asked for.
+
+**`syncSchedule`** (optional) — the cron schedule this instance syncs the joined network on; `""` means manual sync
+only. Left out, the join adopts the inviter's own schedule, which its apply answer carries as `syncSchedule` (absent
+when the inviter syncs manually), and falls back to every 15 minutes (`*/15 * * * *`) when the inviter offers none
+it could run. A value the scheduler cannot run is refused `400` before the handshake, in the sentence
+`POST /api/networks` gives. Only a network the join creates is scheduled; one this instance already carries keeps its
+own. **Changed in 5.5.3**: a joined network used to get no schedule, which is manual-only, so a joiner never pulled
+on its own. Change it later on the network card or with `PATCH /api/networks/:id`.
 
 ### Join Troubleshooting: private or local URLs rejected
 

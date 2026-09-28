@@ -552,6 +552,9 @@ generated for you, follow these steps:
    deleted, and a peer can never delete a record your instance wrote.
 5. Click **Confirm and join**.
 
+The joined network syncs on its own from then on: on the inviter's schedule, or every 15 minutes when the inviter
+syncs only by hand. Change it on the network card (see [Sync schedule](#sync-schedule)).
+
 **Two of the network's spaces cannot go into one of yours.** The dialog marks both rows and says which space they collide on; change one of them. Joining with a key (rather than an invite code) has no mapping rows, so a collision there is refused with a pointer to the invite code instead.
 
 **Spaces the network adds later wait for you unless your token could have joined them.** When a publisher, a

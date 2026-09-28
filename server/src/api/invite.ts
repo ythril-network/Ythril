@@ -398,6 +398,9 @@ inviteRouter.post('/apply', authRateLimit, async (req, res) => {
     // for an older joiner, which reads nothing else.
     spaces: net.spaces,
     networkSpaces: announcedSpaces(net),
+    // This instance's schedule, an offer the joiner adopts when it states none (Q-137). Absent when it syncs manually.
+    // In the answer and not the bundle: the bundle is passed whole to a join, where it would read as the caller's own.
+    ...(net.syncSchedule ? { syncSchedule: net.syncSchedule } : {}),
   });
 });
 

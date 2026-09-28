@@ -32,6 +32,8 @@ import { widenPeerTokensOf } from './network-spaces.js';
 import { inviterIsWhoItClaims, knownPeerAt } from '../auth/peer-identity.js';
 import { resolveJoinSpaces } from './join-spaces.js';
 import { recordSpaceAlias } from '../sync/space-map.js';
+import { joinedSyncSchedule, syncScheduleRefusal } from '../sync/schedule.js';
+import { scheduleSyncForNetwork } from '../sync/scheduler.js';
 
 type Caller = Parameters<typeof networkJoinRefusal>[0] & { id?: string };
 
@@ -70,6 +72,11 @@ export const JoinRemoteBody = z.object({
   spaces: z.array(z.string()).max(1000).optional(),
   networkSpaces: z.array(z.string()).max(1000).optional(),
   inviteCode: z.string().max(8192).optional(),
+  /**
+   * The schedule this instance syncs the joined network on (Q-137). Wins over the inviter's; `''` is manual on purpose;
+   * absent adopts the inviter's, or `DEFAULT_JOIN_SYNC_SCHEDULE`. Checked by `syncScheduleRefusal` like create's.
+   */
+  syncSchedule: z.string().max(200).optional(),
   /** Optional space aliasing: maps remote space IDs to desired local space IDs.
    *  When the UI detects a collision, the user can choose a different local ID.
    *  Any remote IDs not present in this map will keep their original ID. */
@@ -89,7 +96,11 @@ export async function joinRemoteAct(caller: Caller, input: unknown): Promise<Net
 
   // `rsaPublicKeyPem` is validated by JoinRemoteBody but not needed here — Brain A's key is read
   // back from the apply response below, so it is deliberately not destructured.
-  const { handshakeId, inviteUrl, networkId, myUrl, spaceMap: requestedSpaceMap } = parsed.data;
+  const { handshakeId, inviteUrl, networkId, myUrl, spaceMap: requestedSpaceMap, syncSchedule: statedSchedule } = parsed.data;
+  // Before any call to the inviter: a schedule the scheduler cannot run is refused with the sentence create and update
+  // give, so a refused join leaves nothing behind (Q-137).
+  const scheduleRefusal = syncScheduleRefusal(statedSchedule);
+  if (scheduleRefusal) return { status: 400, error: scheduleRefusal };
   const cfg = getConfig();
 
   // ── Step A: apply — call Brain A's /api/invite/apply ──────────────────────
@@ -141,6 +152,8 @@ export async function joinRemoteAct(caller: Caller, input: unknown): Promise<Net
     spaces: string[];
     /** Q-133: the network's id for each of `spaces`, index-aligned. Absent from an older inviter. */
     networkSpaces?: unknown;
+    /** Q-137: the inviter's own schedule, an offer validated by `joinedSyncSchedule`. Absent when it syncs manually. */
+    syncSchedule?: unknown;
   }>(applyRes, 'network peer');
 
   // S-6: the inviter's id is its own claim. A peer this instance already knows must be answering from the origin it
@@ -276,8 +289,13 @@ export async function joinRemoteAct(caller: Caller, input: unknown): Promise<Net
   // Reload config to get fresh state (apply may have taken a few seconds)
   const freshCfg = getConfig();
   let net = freshCfg.networks.find(n => n.id === networkId);
+  // Only a network this join CREATES gets a schedule here; one this instance already carries keeps its own.
+  let armSchedule: string | undefined;
   if (!net) {
+    const schedule = joinedSyncSchedule(statedSchedule, applyData.syncSchedule);
+    armSchedule = schedule || undefined;
     net = {
+      ...(armSchedule ? { syncSchedule: armSchedule } : {}),
       id: networkId,
       label: applyData.networkLabel ?? 'Remote network',
       type: (applyData.networkType as NetworkConfig['type']) ?? 'closed',
@@ -323,6 +341,7 @@ export async function joinRemoteAct(caller: Caller, input: unknown): Promise<Net
   // with the same inviter racing this one cannot leave the token the inviter keeps without them.
   widenPeerTokensOf(freshCfg, [applyData.instanceId], allNetworkSpaces);
   saveConfig(freshCfg);
+  if (armSchedule) scheduleSyncForNetwork(networkId, armSchedule);
   log.info(`join-remote: joined '${applyData.networkLabel}' (${networkId}) via RSA handshake`);
 
   return { status: 200, body: {
@@ -348,6 +367,8 @@ export const JoinByKeyBody = z.object({
   myUrl: SSRF_SAFE_URL,
   /** Optional space aliasing, as for `join-remote`. */
   spaceMap: z.record(z.string(), z.string().min(1).max(40).regex(/^[a-z0-9-]+$/)).optional(),
+  /** The joiner's schedule, as for `join-remote` (Q-137). */
+  syncSchedule: z.string().max(200).optional(),
 }).strict();
 
 /**
@@ -361,7 +382,10 @@ export const JoinByKeyBody = z.object({
 export async function joinByInviteKeyAct(caller: Caller, input: unknown): Promise<NetworkActResult> {
   const parsed = JoinByKeyBody.safeParse(input);
   if (!parsed.success) return { status: 400, error: parsed.error.message };
-  const { publisherUrl, inviteKey, myUrl, spaceMap } = parsed.data;
+  const { publisherUrl, inviteKey, myUrl, spaceMap, syncSchedule } = parsed.data;
+  // Refused before the key is redeemed, so a bad schedule does not spend a handshake (Q-137).
+  const scheduleRefusal = syncScheduleRefusal(syncSchedule);
+  if (scheduleRefusal) return { status: 400, error: scheduleRefusal };
   const redeemUrl = `${new URL(publisherUrl).origin}/api/invite/redeem`;
   let r: Response;
   try {
@@ -382,5 +406,6 @@ export async function joinByInviteKeyAct(caller: Caller, input: unknown): Promis
   return joinRemoteAct(caller, {
     handshakeId: bundle.handshakeId, inviteUrl: bundle.inviteUrl, rsaPublicKeyPem: bundle.rsaPublicKeyPem,
     networkId: bundle.networkId, myUrl, ...(spaceMap ? { spaceMap } : {}),
+    ...(syncSchedule !== undefined ? { syncSchedule } : {}),
   });
 }
