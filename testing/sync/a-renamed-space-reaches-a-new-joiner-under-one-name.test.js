@@ -21,7 +21,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
 import {
-  INSTANCES, post, patch, get, del, delWithBody, dockerExec, readContainerConfig, triggerSync, waitFor,
+  INSTANCES, post, patch, del, delWithBody, dockerExec, readContainerConfig, triggerSync, waitFor, readCollection,
 } from './helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -92,16 +92,16 @@ describe('a new joiner of a renamed space', () => {
     assert.ok(r.status < 300, JSON.stringify(r.body));
     await waitFor(async () => {
       await triggerSync(INSTANCES.a, tokenA, networkId);
-      const list = await get(INSTANCES.a, tokenA, `/api/brain/spaces/${NEW}/entities?limit=50`);
-      return (list.body?.entities ?? list.body?.results ?? []).some(e => e.name === `q133-entity-${RUN}`);
+      const r = await readCollection(INSTANCES.a, tokenA, NEW, 'entities', { filter: { name: `q133-entity-${RUN}` } });
+      return (r.results ?? []).length === 1;
     }, 30_000, 1_000, 'the record B wrote never reached A\'s NEW');
     assert.ok(!spacesOnA().includes(OLD));
   });
 });
 
-describe('a join whose mapping is ambiguous is refused on both doors, before anything is created', () => {
-  // x -> y, then z -> x on the publisher: the answer shows [y, x] with network ids [x, z]. A joiner mapping `x`
-  // could mean the space now called x or the one the network still calls x — so it is refused, not guessed.
+describe('a name the network still uses, and a join that would re-point an aliased space, are refused', () => {
+  // x -> y on the publisher: the network still calls y `x`. So `x` may not be taken by another space there, and a
+  // second join that asked for the network's `x` to go somewhere new here would move a space that already syncs.
   const X = `q133x-${RUN}`, Y = `q133y-${RUN}`, Z = `q133z-${RUN}`, FOO = `q133foo-${RUN}`;
   let ambNet;
 
@@ -111,7 +111,12 @@ describe('a join whose mapping is ambiguous is refused on both doors, before any
     assert.equal(n.status, 201, JSON.stringify(n.body));
     ambNet = n.body.id;
     assert.equal((await patch(INSTANCES.b, tokenB, `/api/spaces/${X}/rename`, { newId: Y })).status, 200);
-    assert.equal((await patch(INSTANCES.b, tokenB, `/api/spaces/${Z}/rename`, { newId: X })).status, 200);
+  });
+
+  it('the publisher refuses renaming another space onto the name the network still uses', async () => {
+    const r = await patch(INSTANCES.b, tokenB, `/api/spaces/${Z}/rename`, { newId: X });
+    assert.equal(r.status, 409, `a second space took the network's name for the renamed one: ${JSON.stringify(r.body)}`);
+    assert.equal(r.body.code, 'space_name_in_use');
   });
 
   after(async () => {
@@ -120,28 +125,32 @@ describe('a join whose mapping is ambiguous is refused on both doors, before any
     for (const id of [X, Y, Z, FOO]) await delWithBody(INSTANCES.a, tokenA, `/api/spaces/${id}`, { confirm: true }).catch(() => {});
   });
 
-  const invite = async () => {
+  const invite = async (spaceMap) => {
     const inv = await post(INSTANCES.b, tokenB, '/api/invite/generate', { networkId: ambNet });
     assert.equal(inv.status, 201, JSON.stringify(inv.body));
     return {
       handshakeId: inv.body.handshakeId, inviteUrl: 'http://ythril-b:3200/api/invite/apply',
-      rsaPublicKeyPem: inv.body.rsaPublicKeyPem, networkId: ambNet, myUrl: 'http://ythril-a:3200', spaceMap: { [X]: FOO },
+      rsaPublicKeyPem: inv.body.rsaPublicKeyPem, networkId: ambNet, myUrl: 'http://ythril-a:3200', ...(spaceMap ? { spaceMap } : {}),
     };
   };
 
-  it('REST and MCP answer the same code and sentence, and A gains no space and no network', async () => {
-    const rest = await post(INSTANCES.a, tokenA, '/api/networks/join-remote', await invite());
-    assert.equal(rest.status, 400, `the ambiguous mapping was resolved by guessing: ${rest.status} ${JSON.stringify(rest.body)}`);
+  it('a join landing two network spaces on one local space answers the same code and sentence on both doors, and creates nothing', async () => {
+    // The renamed space by its shown name, the other by its own: both onto FOO. (A second join of the same network
+    // through the same inviter is refused by the inviter before this instance resolves anything, so the
+    // `network_id_aliased` case is pinned by the resolver's truth table instead.)
+    const map = { [Y]: FOO, [Z]: FOO };
+    const rest = await post(INSTANCES.a, tokenA, '/api/networks/join-remote', await invite(map));
+    assert.equal(rest.status, 400, `two spaces were joined into one: ${rest.status} ${JSON.stringify(rest.body)}`);
     assert.equal(rest.body.code, 'join_mapping_collision');
     const { openMcpSession } = await import('./mcp-session.js');
     const s = await openMcpSession(tokenA, INSTANCES.a);
     try {
-      const r = await s.callTool('network_join_remote', await invite());
+      const r = await s.callTool('network_join_remote', await invite(map));
       assert.equal(r?.content?.[0]?.text, `Error (400): ${rest.body.error}`);
     } finally { s.close(); }
     const cfg = readContainerConfig('ythril-a');
     assert.ok(!cfg.networks.some(n => n.id === ambNet), 'a refused join left a network behind');
-    assert.ok(!cfg.spaces.some(s => [X, Y, Z, FOO].includes(s.id)), 'a refused join created a space');
+    assert.ok(!cfg.spaces.some(sp => [X, Y, Z, FOO].includes(sp.id)), 'a refused join created a space');
   });
 });
 
@@ -171,5 +180,28 @@ describe('a member that joined before the fix heals from its upstream', () => {
     for (const k of ['spaceMap', 'spaces', 'pendingSpaces', 'dismissedSpaces']) {
       assert.deepEqual(afterNet[k], JSON.parse(before)[k], `a second cycle changed ${k}`);
     }
+  });
+
+  it('where the heal does not apply, the operator repairs it by accepting the network\'s name onto the carried space', async () => {
+    // A dismissed id is never healed — the operator's answer wins — so this is the path a member takes when it
+    // dismissed the duplicate, and the one a member of a voted network (which has no upstream) always takes.
+    const script = [
+      `const fs=require('fs');const p='/config/config.json';`,
+      `const c=JSON.parse(fs.readFileSync(p,'utf8'));`,
+      `const n=c.networks.find(x=>x.id==='${networkId}');`,
+      `if(n&&n.spaceMap){delete n.spaceMap['${OLD}'];}`,
+      `n.dismissedSpaces=['${OLD}'];`,
+      `fs.writeFileSync(p,JSON.stringify(c,null,2));process.stdout.write('ok');`,
+    ].join('');
+    dockerExec(`docker exec ythril-a node -e "${script}"`);
+    assert.ok((await post(INSTANCES.a, tokenA, '/api/admin/reload-config', {})).status < 300);
+    await cycle();
+    assert.equal(netOnA()?.spaceMap?.[OLD], undefined, 'a dismissed id was healed — the operator\'s dismissal was overridden');
+
+    const r = await post(INSTANCES.a, tokenA, `/api/networks/${networkId}/pending-spaces`, { spaceId: OLD, action: 'accept', mapTo: NEW });
+    assert.equal(r.status, 200, `accepting the network's name onto the carried space was refused: ${r.status} ${JSON.stringify(r.body)}`);
+    assert.deepEqual(netOnA()?.spaceMap ?? {}, { [OLD]: NEW });
+    assert.ok(!spacesOnA().includes(OLD), 'the repair created a second space');
+    assert.ok(!(netOnA()?.dismissedSpaces ?? []).includes(OLD), 'the id stays dismissed although it now syncs');
   });
 });

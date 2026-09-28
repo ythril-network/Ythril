@@ -12,6 +12,7 @@ import { getConfig, saveConfig, getDataRoot, mutateConfig } from '../config/load
 import { log } from '../util/log.js';
 import type { Config, SpaceConfig } from '../config/types.js';
 import { PER_SPACE_WATERMARKS } from '../config/types-networks.js';
+import { retargetSpaceAliases, spaceNameInUseRefusal, SpaceNameInUseError } from '../sync/space-map.js';
 import { repairStaleSpaceIds, pendingOpConflictMessage, beginSpaceOp, endSpaceOp } from './_shared.js';
 
 /** Physically move a space's MongoDB collections and file directories from
@@ -182,18 +183,21 @@ export function applySpaceRenameToConfig(cfg: Config, space: SpaceConfig, oldId:
     const idx = net.spaces.indexOf(oldId);
     if (idx !== -1) {
       net.spaces[idx] = newId;
-      // Record in spaceMap so peers using the old ID can still sync.
-      if (!net.spaceMap) net.spaceMap = {};
-      // Update any existing mapping whose target was oldId (rare: chained renames)
-      for (const [remote, local] of Object.entries(net.spaceMap)) {
-        if (local === oldId) {
-          net.spaceMap[remote] = newId;
-        }
+      // The network keeps calling the space by its network id; only the local end of each alias moves, and oldId stays
+      // reachable for a member that joined while this instance called the space that (Q-133).
+      retargetSpaceAliases(net, oldId, newId);
+
+      // What this network keeps keyed by the LOCAL id follows the space, or the network's layer drops out of the
+      // effective meta, the leave rule loses who established the membership, and a pending offer points at nothing.
+      if (net.schemaLayers?.[oldId] !== undefined && net.schemaLayers[newId] === undefined) {
+        net.schemaLayers[newId] = net.schemaLayers[oldId]!;
+        delete net.schemaLayers[oldId];
       }
-      // Add direct mapping oldId → newId (a peer spoke may still reference the old ID)
-      if (!net.spaceMap[oldId] || net.spaceMap[oldId] === oldId) {
-        net.spaceMap[oldId] = newId;
+      if (net.spaceOrigins?.[oldId] !== undefined && net.spaceOrigins[newId] === undefined) {
+        net.spaceOrigins[newId] = net.spaceOrigins[oldId]!;
+        delete net.spaceOrigins[oldId];
       }
+      for (const p of net.pendingSpaces ?? []) if (p.localId === oldId) p.localId = newId;
     }
 
     // Update member watermark keys (lastSeqReceived / lastSeqPushed / lastSeqServed /
@@ -298,6 +302,10 @@ async function renameSpaceInner(oldId: string, newId: string): Promise<SpaceConf
   if (!space) throw new Error(`Space '${oldId}' not found`);
   if (space.builtIn) throw new Error(`Cannot rename built-in space '${oldId}'`);
   if (cfg.spaces.some(s => s.id === newId)) throw new Error(`Space '${newId}' already exists`);
+  // A network may still call ANOTHER space by `newId` — its name before a rename (Q-133). Taking it would make this
+  // space indistinguishable from that one to every peer. Checked before anything moves.
+  const inUse = spaceNameInUseRefusal(cfg.networks.filter(n => n.spaces.includes(oldId)), newId);
+  if (inUse) throw new SpaceNameInUseError(inUse);
 
   const resuming = cfg.pendingSpaceOp?.type === 'rename'
     && cfg.pendingSpaceOp.spaceId === oldId

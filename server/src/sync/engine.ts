@@ -28,7 +28,8 @@ import { resolveWatermark, truncationWarn, type TransferOutcome } from './waterm
 import { pullTombstones, pushTombstones } from './tombstone-transfer.js';
 import { applyConcludedSpaceRounds } from '../spaces/apply-wipe-round.js';
 import { bumpSeq, isSeqImplausible } from '../util/seq.js';
-import { adoptAnnouncedSpaces, announcedSpaces } from '../networks/network-spaces.js';
+import { adoptAnnouncedSpaces, announcedSpaces, healAnnouncedAliases } from '../networks/network-spaces.js';
+import { selfRecordFor } from '../networks/self-record.js';
 import { pullSpaceMetaFromUpstream } from './space-meta-pull.js';
 import { peerSafeFetch, isPeerUrlAllowed } from './peer-fetch.js';
 import { concludeRoundIfReady, sendMemberRemovedNotify } from './governance.js';
@@ -57,10 +58,9 @@ import type {
 } from '../config/types.js';
 import { resolveSafePath } from '../files/sandbox.js';
 import type { FileMetaDoc } from '../config/types.js';
-import { acceptVoteCast, getSigningPublicKey, getSigningKeyRotation, pinMemberSigningKey } from '../util/signing.js';
+import { acceptVoteCast, pinMemberSigningKey } from '../util/signing.js';
 import { assertPeerAtFloor } from './peer-floor.js';
 import { REPLICATED_FAMILIES, type PayloadKey } from './replicated-families.js';
-import { SERVER_VERSION } from '../util/server-version.js';
 import { stripLocalOnly } from './local-only-fields.js';
 import { spaceCollection } from '../db/space-collection.js';
 
@@ -84,6 +84,7 @@ const STALE_FAILURE_THRESHOLD = 10;
 // Moved to ./space-map.ts (pure). Re-exported so existing importers are unaffected.
 
 export { remoteToLocal, localToRemote } from './space-map.js';
+import { reverseSpaceMap as reverseSpaceMapOf } from './space-map.js';
 
 // ── Cron scheduler ─────────────────────────────────────────────────────────
 // Moved to ./scheduler.ts, on the god-file gate's own instruction: "put the new behaviour beside it rather than
@@ -388,7 +389,8 @@ async function runSyncForMember(
     const peerWarm = peerSafeFetch(`${member.url}/api/sync/warm`, {
       ...fetchOpts(),
       method: 'POST',
-      body: JSON.stringify({ networkId: net.id, spaces: net.spaces }),
+      // The network's ids (Q-133): the peer maps them to its own spaces; a local name would warm nothing there.
+      body: JSON.stringify({ networkId: net.id, spaces: announcedSpaces(net) }),
     }).then(r => r.body?.cancel()).catch(() => {});
 
     const localWarm = Promise.all(
@@ -442,17 +444,14 @@ async function runSyncForMember(
    */
   assertPeerAtFloor(net.id, member.instanceId, member.version);
 
-  // Pre-build reverse spaceMap (local → remote) for O(1) lookup per space
-  // instead of the O(n) linear scan inside localToRemote().
-  const reverseSpaceMap = new Map(
-    Object.entries(net.spaceMap ?? {}).map(([remote, local]) => [local, remote]),
-  );
+  // Local -> network id, built once per cycle. FIRST match, as `localToRemote` answers (Q-133): a later key for the
+  // same space is an inbound alias a rename left behind, and pulling by it would address the space by a name the
+  // network does not use. The inline Map this replaced kept the LAST key, the opposite of the documented rule.
+  const toNetworkId = reverseSpaceMapOf(net);
 
   for (const spaceId of net.spaces) {
-    // Resolve remote space ID for this local space — peers reference spaces by
-    // their original (remote) ID, which may differ from our local ID when
-    // spaceMap aliasing is active.
-    const remoteSpaceId = reverseSpaceMap.get(spaceId) ?? spaceId;
+    // Peers reference a space by the network's id, which differs from ours once it has been renamed or mapped.
+    const remoteSpaceId = toNetworkId.get(spaceId) ?? spaceId;
 
     // Skip spaces that don't exist in local config — prevents orphan data and collection access
     // for space IDs that were registered on the network but never created locally.
@@ -539,28 +538,9 @@ async function gossipWithPeer(
 
   // 1. Push self-record to peer
   try {
-    // Determine our own public URL: prefer the INSTANCE_URL env var; fall back to empty
-    // string so the peer keeps whatever URL it already has for us.
-    const selfUrl = process.env['INSTANCE_URL'] ?? '';
-    /*
-     * `version` is on BOTH self-records — this one and the piggyback in `api/sync/members.ts`. They
-     * are the two directions of one exchange, so a field on only one of them means a peer learns our
-     * version when it calls us and never when we call it: the floor would then depend on who dialled.
-     */
-    const selfRecord: Record<string, unknown> = {
-      instanceId: cfg.instanceId,
-      label: cfg.instanceLabel,
-      version: SERVER_VERSION,
-      spaces: announcedSpaces(net), // F-38.3: what a peer below us adopts; `adoptAnnouncedSpaces` ignores it from anyone else
-      children: net.members
-        .filter(m => m.parentInstanceId === cfg.instanceId)
-        .map(m => m.instanceId),
-    };
-    if (selfUrl) selfRecord['url'] = selfUrl;
-    const ownSigningKey = getSigningPublicKey();
-    if (ownSigningKey) selfRecord['signingPublicKey'] = ownSigningKey;
-    const ownRotation = getSigningKeyRotation();
-    if (ownRotation) selfRecord['signingKeyRotation'] = ownRotation;
+    // ONE builder for both directions of the exchange (`networks/self-record.ts`): a field on only one of them means
+    // a peer learns it when it calls us and never when we call it.
+    const selfRecord = selfRecordFor(cfg, net, member);
     const resp = await peerSafeFetch(`${base}/members`, {
       ...opts(),
       method: 'POST',
@@ -572,7 +552,11 @@ async function gossipWithPeer(
         const body = await boundedJson<{ status: string; self?: Partial<NetworkMember> & { signingKeyRotation?: import('../util/signing.js').SigningKeyRotation } }>(resp, 'sync peer');
         const peerSelf = body.self;
         if (peerSelf?.instanceId === member.instanceId) {
-          await adoptAnnouncedSpaces(net.id, member.instanceId, (peerSelf as { spaces?: unknown }).spaces);
+          // Q-133: heal a missing alias BEFORE adoption, or the network id would be adopted as a second space. It
+          // swallows and logs its own failure, so a bad heal cannot skip the member-record update below.
+          const announced = peerSelf as { spaces?: unknown; spaceNames?: unknown };
+          await healAnnouncedAliases(net.id, member.instanceId, announced.spaces, announced.spaceNames);
+          await adoptAnnouncedSpaces(net.id, member.instanceId, announced.spaces);
           const freshCfg = getConfig();
           const freshNet = freshCfg.networks.find(n => n.id === net.id);
           if (freshNet) {

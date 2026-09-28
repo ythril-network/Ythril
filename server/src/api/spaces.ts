@@ -14,6 +14,7 @@ import { needsReindex } from '../spaces/_shared.js';
 import { removeSpace } from '../spaces/lifecycle.js';
 import { openRoundHere } from '../networks/round-local-state.js';
 import { makeSignedOwnCast } from '../util/signing.js';
+import { localToRemote, SpaceNameInUseError } from '../sync/space-map.js';
 import { renameSpace } from '../spaces/rename.js';
 import { reorderSpaces } from '../spaces/spaces.js';
 import { checkMetaPrecondition, preconditionErrorBody } from '../spaces/meta-precondition.js';
@@ -99,7 +100,10 @@ spacesRouter.patch('/:id/rename', globalRateLimit, requireAdminOrSpaceAdminMfaSc
     res.json({ space });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    if (msg.includes('not found')) {
+    if (err instanceof SpaceNameInUseError) {
+      // Typed, not matched on wording (Q-133): a refusal whose sentence changes must not fall through to a 500.
+      res.status(409).json({ error: msg, code: err.code });
+    } else if (msg.includes('not found')) {
       res.status(404).json({ error: msg });
     } else if (msg.includes('already exists')) {
       res.status(409).json({ error: msg });
@@ -842,6 +846,8 @@ spacesRouter.delete('/:id', globalRateLimit, requireAdminMfaScoped('id'), async 
       openedAt: now,
       votes: [],
       spaceId: id,
+      // The network's id for it (Q-133): a member that calls the space something else resolves this one.
+      networkSpaceId: localToRemote(net, id),
     });
     // The proposer is a voter like any member (S-7): its yes is required and cast here, SIGNED, so a relayed copy of
     // it survives — a bare cast is taken only from the voter itself.

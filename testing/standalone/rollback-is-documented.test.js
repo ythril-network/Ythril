@@ -168,6 +168,9 @@ describe('every rewrite an upgrade performs is documented as one-way', () => {
       // rather than leaving a rewrite unmentioned, which is what a reader would otherwise have to assume
       // the worst about.
       migrateSyncScheduleShorthands: 'syncSchedule',
+      // Q-133: MOVES a network's schema layer / membership origin from a renamed space's old name to its current
+      // one. Nothing is deleted; an older build looks under the old key again and finds the layer gone there.
+      migrateNetworkSpaceKeys: 'schema layer or membership origin',
     };
     const section = rollbackSection();
     const undocumented = [];

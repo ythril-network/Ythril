@@ -481,6 +481,14 @@ export const CONFIG_RELOAD_OPERATIONS = {
  */
 export const LEGACY_SPILL_SWEEP_OPERATION = 'file.legacy_spill.sweep';
 
+/**
+ * A member's missing alias for a network space, restored from its upstream's announcement (Q-133,
+ * `networks/network-spaces.ts` `healAnnouncedAliases`): one entry per alias it recorded. It re-points which local
+ * space a network id's traffic lands in, so it is audited though no request asked for it. Written directly, like the
+ * sweep above.
+ */
+export const SPACE_ALIAS_HEAL_OPERATION = 'network.space_alias.heal';
+
 /** Log a failed auth attempt — called explicitly from auth middleware when needed. */
 export function logAuthFailure(req: Request): void {
   const fullPath = (req.originalUrl || req.url).split('?')[0];

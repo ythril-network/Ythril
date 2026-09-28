@@ -59,7 +59,9 @@ const DATA_VALUES = new Map([
 let ANSWER_VALUES = [];
 before(async () => {
   const { INCOMPLETE_ROW_REASONS, WALK_STOPS } = await import('../../server/dist/brain/row-graphs.js');
-  ANSWER_VALUES = [...INCOMPLETE_ROW_REASONS, ...WALK_STOPS];
+  // And the `code` a network refusal carries (Q-133), from the one list of them.
+  const { NETWORK_REFUSAL_CODES } = await import('../../server/dist/networks/refusal-codes.js');
+  ANSWER_VALUES = [...INCOMPLETE_ROW_REASONS, ...WALK_STOPS, ...NETWORK_REFUSAL_CODES];
   assert.ok(ANSWER_VALUES.length >= 2, 'the answer values were not read');
 });
 

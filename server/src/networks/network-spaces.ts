@@ -35,7 +35,10 @@ import { networkJoinRefusal } from '../auth/network-rights.js';
 import { withInstanceAdminGrants } from '../auth/instance-admin-grants.js';
 import type { TokenRights } from '../config/rights-shape.js';
 import { createSpace } from '../spaces/lifecycle.js';
-import { localToRemote, remoteToLocal } from '../sync/space-map.js';
+import { localToRemote, remoteToLocal, recordSpaceAlias, reverseSpaceMap, isSpaceId, forgetSpaceAliases } from '../sync/space-map.js';
+import { PER_SPACE_WATERMARKS } from '../config/types-networks.js';
+import { logAuditEntry } from '../audit/audit.js';
+import { SPACE_ALIAS_HEAL_OPERATION } from '../audit/middleware.js';
 import { log } from '../util/log.js';
 import { networkRole } from './network-role.js';
 
@@ -44,6 +47,9 @@ const SPACE_ID = /^[a-z0-9-]{1,40}$/;
 
 /** At most this many spaces are adopted from one announcement: a bound on what one peer message may create. */
 const MAX_ADOPTED_PER_ANNOUNCE = 50;
+
+/** At most this many name hints per self-record, and read per announcement (`Q-133`) — the same bound, for the same reason. */
+export const MAX_SPACE_NAMES = 50;
 
 /**
  * The instance this one learns the network's spaces from, or `undefined` when nobody is above it: a subscriber's
@@ -138,11 +144,13 @@ export async function addSpacesToNetwork(
     if (!net) return [];
     const added = entries.map(e => e.localId).filter((id, i, all) => !net.spaces.includes(id) && all.indexOf(id) === i);
     if (!added.length) return [];
-    for (const e of entries) if (e.localId !== e.networkId && added.includes(e.localId)) (net.spaceMap ??= {})[e.networkId] = e.localId;
+    for (const e of entries) {
+      if (e.localId === e.networkId || !added.includes(e.localId)) continue;
+      const why = recordSpaceAlias(net, e.networkId, e.localId);
+      if (why) log.warn(`Network ${networkId}: alias '${e.networkId}' -> '${e.localId}' not recorded: ${why}`);
+    }
     net.spaces.push(...added);
-    // An added space is no longer a proposal: a pending entry left behind would offer to add it a second time.
-    const addedIds = new Set(entries.filter(e => added.includes(e.localId)).map(e => e.networkId));
-    if (net.pendingSpaces?.some(p => addedIds.has(p.networkId))) net.pendingSpaces = net.pendingSpaces.filter(p => !addedIds.has(p.networkId));
+    clearSettledProposals(net, entries.filter(e => added.includes(e.localId)).map(e => e.networkId));
     widenPeerTokens(cfg, net, added);
     saveConfig(cfg);
     log.info(`Network ${networkId}: added space(s) ${added.join(', ')} (${why})`);
@@ -151,6 +159,16 @@ export async function addSpacesToNetwork(
     log.warn(`Network ${networkId}: could not add space(s) (${why}): ${err}`);
     return [];
   }
+}
+
+/**
+ * A network space that is now carried is no longer a proposal: a pending entry left behind would offer to add it a
+ * second time, and the network view would say the opposite of what syncs. One clean-up for both ways a space becomes
+ * carried after create — adoption and the Q-133 heal — so neither leaves its offer standing.
+ */
+function clearSettledProposals(net: NetworkConfig, networkIds: readonly string[]): void {
+  const settled = new Set(networkIds);
+  if (net.pendingSpaces?.some(p => settled.has(p.networkId))) net.pendingSpaces = net.pendingSpaces.filter(p => !settled.has(p.networkId));
 }
 
 /**
@@ -171,10 +189,13 @@ export function removeSpaceFromNetwork(networkId: string, localId: string, why: 
   const net = cfg.networks.find(n => n.id === networkId);
   if (!net || !net.spaces.includes(localId)) return false;
   net.spaces = net.spaces.filter(s => s !== localId);
-  const remoteId = localToRemote(net, localId);
-  if (net.spaceMap && remoteId !== localId) delete net.spaceMap[remoteId];
+  forgetSpaceAliases(net, localId);
   const hadLayer = Boolean(net.schemaLayers?.[localId]);
   if (net.schemaLayers) delete net.schemaLayers[localId];
+  if (net.spaceOrigins) delete net.spaceOrigins[localId];
+  for (const member of net.members) {
+    for (const key of PER_SPACE_WATERMARKS) delete (member[key] as Record<string, unknown> | undefined)?.[localId];
+  }
   if (net.pendingSpaces?.some(p => p.localId === localId)) net.pendingSpaces = net.pendingSpaces.filter(p => p.localId !== localId);
   saveConfig(cfg);
   log.info(`Network ${networkId}: space '${localId}' left the network (${why}); this instance keeps it as a local space`);
@@ -261,6 +282,89 @@ export async function adoptAnnouncedSpaces(networkId: string, fromInstanceId: st
   const { adopt: allowed, pending } = adoptionDecision(net, cfg.tokens, cfg.spaces.map(s => s.id), proposed);
   holdAsPending(cfg, net, pending, fromInstanceId, `upstream ${fromInstanceId} announced`);
   return allowed.length ? addSpacesToNetwork(networkId, allowed, `announced by upstream ${fromInstanceId}, joined by ${net.joinedBy}`) : [];
+}
+
+/*
+ * ─── The heal for a member that joined before Q-133 ─────────────────────────────────────────────────────────────
+ *
+ * Until Q-133 the invite answer handed a joiner the inviter's LOCAL names. A joiner of a renamed space therefore holds
+ * it under the inviter's current name with no alias, while every announcement names it by the network's id — which
+ * `spacesToAdopt` then offers as a new, empty space. The upstream's self-record carries `spaceNames` (network id ->
+ * its own name) and this restores the alias instead.
+ *
+ * The rules, each a way the heal could otherwise re-point a LIVE space:
+ * - only from the upstream (a subscriber's publisher, a tree node's parent), whose announcement is the network's;
+ *   a sibling could otherwise aim any network id at any space here;
+ * - only for a network id this instance neither carries nor aliases, and that the operator has not dismissed;
+ * - only onto a local space this network carries, that answers to no network id but its own, and that the upstream
+ *   does NOT itself announce — a space synced under its own id is live, not the one waiting for its alias;
+ * - never when two network ids of one announcement point at the same local space.
+ * It creates nothing and removes nothing.
+ */
+
+/** What the heal would record for this announcement, decided without touching config. */
+export function healSpaceAliases(
+  net: Pick<NetworkConfig, 'type' | 'spaces' | 'spaceMap' | 'members' | 'dismissedSpaces' | 'myParentInstanceId'>,
+  fromInstanceId: string,
+  announced: unknown,
+  spaceNames: unknown,
+): { networkId: string; localId: string }[] {
+  if (!Array.isArray(announced) || !fromInstanceId || upstreamOf(net as NetworkConfig) !== fromInstanceId) return [];
+  if (spaceNames === null || typeof spaceNames !== 'object' || Array.isArray(spaceNames)) return [];
+  const names = new Map<string, string>();
+  for (const [networkId, local] of Object.entries(spaceNames as Record<string, unknown>).slice(0, MAX_SPACE_NAMES)) {
+    if (isSpaceId(networkId) && isSpaceId(local)) names.set(networkId, local);
+  }
+  const announcedIds = new Set(announced.slice(0, MAX_SPACE_NAMES).filter(isSpaceId));
+  const reverse = reverseSpaceMap(net);
+  const proposed: { networkId: string; localId: string }[] = [];
+  for (const networkId of announcedIds) {
+    if (net.dismissedSpaces?.includes(networkId)) continue;
+    if (net.spaceMap?.[networkId] !== undefined || net.spaces.includes(networkId)) continue;
+    const localId = names.get(networkId);
+    if (!localId || !net.spaces.includes(localId)) continue;
+    if (reverse.has(localId) || announcedIds.has(localId)) continue;
+    proposed.push({ networkId, localId });
+  }
+  const targets = new Map<string, number>();
+  for (const p of proposed) targets.set(p.localId, (targets.get(p.localId) ?? 0) + 1);
+  const ambiguous = proposed.filter(p => targets.get(p.localId)! > 1);
+  if (ambiguous.length) {
+    log.warn(`Network: not healing ${ambiguous.map(p => `'${p.networkId}'`).join(', ')} — they point at the same local space '${ambiguous[0]!.localId}'`);
+  }
+  return proposed.filter(p => targets.get(p.localId) === 1);
+}
+
+/**
+ * Apply the heal for one announcement. Never throws, so a bad announcement cannot cost the member exchange its other
+ * work; writes nothing (and saves nothing) when there is nothing to heal, so an idle network does not rewrite config.
+ * Decided and recorded on one config snapshot with no await between.
+ */
+export async function healAnnouncedAliases(networkId: string, fromInstanceId: string, announced: unknown, spaceNames: unknown): Promise<void> {
+  try {
+    const cfg = getConfig();
+    if (cfg.pendingSpaceOp) return; // a rename or delete is moving a space: the next cycle heals against its result
+    const net = cfg.networks.find(n => n.id === networkId);
+    if (!net) return;
+    const heals = healSpaceAliases(net, fromInstanceId, announced, spaceNames);
+    const recorded = heals.filter(h => {
+      const why = recordSpaceAlias(net, h.networkId, h.localId);
+      if (why) log.warn(`Network ${networkId}: heal of '${h.networkId}' -> '${h.localId}' not recorded: ${why}`);
+      return why === null;
+    });
+    if (!recorded.length) return;
+    clearSettledProposals(net, recorded.map(h => h.networkId));
+    saveConfig(cfg);
+    for (const h of recorded) {
+      log.info(`Network ${networkId}: healed the alias '${h.networkId}' -> '${h.localId}' from upstream ${fromInstanceId}`);
+      logAuditEntry({
+        ip: 'internal', method: 'SYNC', path: 'internal:space-alias-heal', spaceId: h.localId,
+        operation: SPACE_ALIAS_HEAL_OPERATION, status: 200, durationMs: 0,
+      });
+    }
+  } catch (err) {
+    log.warn(`Network ${networkId}: alias heal from ${fromInstanceId} failed: ${err}`);
+  }
 }
 
 /**

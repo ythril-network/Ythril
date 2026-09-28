@@ -20,6 +20,7 @@ import { NetworksApi } from '../../core/networks-api.service';
 import { ToastService } from '../../core/toast.service';
 import { ConfirmDialogService } from '../../core/confirm-dialog.service';
 import { TranslocoService } from '@jsverse/transloco';
+import { refusalText } from '../../core/refusal-text';
 
 @Component({
   selector: 'app-space-danger-tab',
@@ -445,7 +446,7 @@ export class SpaceDangerTabComponent {
         this.state.dangerRenameId = space.id;
         this.networksApi.listNetworks().subscribe({ next: ({ networks }) => this.store.networks.set(networks), error: () => {} });
       },
-      error: (err) => { this.state.dangerRenaming.set(false); this.state.dangerRenameError.set(err.error?.error ?? this.transloco.translate('spaces.error.renameFailed')); },
+      error: (err) => { this.state.dangerRenaming.set(false); this.state.dangerRenameError.set(refusalText(this.transloco, err, 'spaces.error.renameFailed')); },
     });
   }
 

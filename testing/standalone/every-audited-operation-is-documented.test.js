@@ -61,7 +61,7 @@ import { stripComments } from './_strip-comments.mjs';
 const GUIDE = 'docs/integration-guide/13-audit-log-api.md';
 const HEADING = '### Tracked operations';
 
-let ROUTE_RULES, AUTH_FAILED_OPERATION, CONFIG_RELOAD_OPERATIONS, LEGACY_SPILL_SWEEP_OPERATION, MCP_TOOL_OPERATIONS;
+let ROUTE_RULES, AUTH_FAILED_OPERATION, CONFIG_RELOAD_OPERATIONS, LEGACY_SPILL_SWEEP_OPERATION, MCP_TOOL_OPERATIONS, AUDIT_MODULE;
 
 /**
  * The rows of the operations table, as one string.
@@ -91,6 +91,15 @@ function auditedOperations() {
   ops.add(AUTH_FAILED_OPERATION);
   for (const op of Object.values(CONFIG_RELOAD_OPERATIONS)) ops.add(op);
   ops.add(LEGACY_SPILL_SWEEP_OPERATION);
+  /*
+   * And EVERY operation the module declares for an entry written outside the route rules — derived from its exports
+   * (`*_OPERATION`, `*_OPERATIONS`), not named here. Naming them is how `file.legacy_spill.sweep` was missed until
+   * the table was checked by hand, and how `network.space_alias.heal` (Q-133) would have been.
+   */
+  for (const [name, value] of Object.entries(AUDIT_MODULE)) {
+    if (/_OPERATION$/.test(name) && typeof value === 'string') ops.add(value);
+    if (/_OPERATIONS$/.test(name) && value && typeof value === 'object') for (const op of Object.values(value)) ops.add(op);
+  }
   for (const value of Object.values(MCP_TOOL_OPERATIONS)) {
     if (!value) continue;                  // `null` is "deliberately not an audited operation"
     for (const op of (Array.isArray(value) ? value : [value])) ops.add(op);
@@ -100,8 +109,8 @@ function auditedOperations() {
 
 describe('every audited operation is documented', () => {
   before(async () => {
-    ({ ROUTE_RULES, AUTH_FAILED_OPERATION, CONFIG_RELOAD_OPERATIONS, LEGACY_SPILL_SWEEP_OPERATION }
-      = await import('../../server/dist/audit/middleware.js'));
+    AUDIT_MODULE = await import('../../server/dist/audit/middleware.js');
+    ({ ROUTE_RULES, AUTH_FAILED_OPERATION, CONFIG_RELOAD_OPERATIONS, LEGACY_SPILL_SWEEP_OPERATION } = AUDIT_MODULE);
     ({ MCP_TOOL_OPERATIONS } = await import('../../server/dist/mcp/audit-map.js'));
   });
 

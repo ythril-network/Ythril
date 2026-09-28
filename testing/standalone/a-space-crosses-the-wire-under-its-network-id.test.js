@@ -24,6 +24,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
 const spaceMap = await import('../../server/dist/sync/space-map.js');
 const networkSpaces = await import('../../server/dist/networks/network-spaces.js');
@@ -121,8 +122,9 @@ describe('the join resolves every space through one function, refusing before an
   });
 
   it('a malformed networkSpaces is ignored, never trusted', () => {
-    for (const bad of [['x', 'y'], [1], ['BAD ID'], ['dup', 'dup']]) {
-      const r = resolve()({ spaces: bad.length === 2 ? ['p', 'q'] : ['p'], networkSpaces: bad }, undefined, undefined, []);
+    // Against two shown spaces: too short, a non-string, not a space id, a repeat.
+    for (const bad of [['x'], [1, 2], ['BAD ID', 'q'], ['dup', 'dup']]) {
+      const r = resolve()({ spaces: ['p', 'q'], networkSpaces: bad }, undefined, undefined, []);
       assert.equal(r.ok, true);
       assert.deepEqual(r.entries.map(e => e.networkId), r.entries.map(e => e.localId), `trusted ${JSON.stringify(bad)}`);
     }
@@ -230,5 +232,17 @@ describe('the boot migration re-keys what an older rename left behind, and drops
     const cfg = { networks: [{ id: 'n1', spaces: ['l'], spaceMap: { k: 'l' }, schemaLayers: { k: { purpose: 'stale' }, l: { purpose: 'live' } } }] };
     run(cfg);
     assert.deepEqual(cfg.networks[0].schemaLayers.l, { purpose: 'live' });
+  });
+});
+
+describe('every refusal code has words in every language the client ships', () => {
+  it('each NETWORK_REFUSAL_CODES entry is translated in en, de and pl', async () => {
+    const { NETWORK_REFUSAL_CODES } = await import('../../server/dist/networks/refusal-codes.js');
+    assert.ok(NETWORK_REFUSAL_CODES.length >= 4, 'the code list was not read');
+    for (const lang of ['en', 'de', 'pl']) {
+      const strings = JSON.parse(readFileSync(`client/public/assets/i18n/${lang}.json`, 'utf8'));
+      const missing = NETWORK_REFUSAL_CODES.filter(c => typeof strings[`networks.refusal.${c}`] !== 'string');
+      assert.deepEqual(missing, [], `${lang}.json has no words for these refusal codes, so its user sees the server's English sentence`);
+    }
   });
 });

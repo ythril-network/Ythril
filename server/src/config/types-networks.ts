@@ -123,6 +123,11 @@ export interface VoteRound {
   pendingMember?: NetworkMember;  // stored on join rounds; added to members when vote passes
   spaceId?: string;              // populated for space_deletion, space_wipe, meta_change and space_addition rounds (space_addition: the NETWORK's id for it)
   /**
+   * The network's id for the space of a space_deletion or space_wipe round (`Q-133`). `spaceId` stays the proposer's
+   * local id because a 5.0/5.1 peer applies it raw; a receiver prefers this one (`roundSpaceLocalId`).
+   */
+  networkSpaceId?: string;
+  /**
    * Which collections a `space_wipe` round will empty, or absent for all five.
    *
    * Carried ON THE ROUND rather than resolved at conclusion, because a partial wipe is what the members

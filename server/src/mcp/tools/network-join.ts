@@ -23,8 +23,13 @@ export const network_join_remoteTool: ToolHandler = {
     + 'WHO MAY: `networks: write` (or administering the space) on every existing local space the join maps to; a '
     + 'space the join would create needs `createSpaces` too. The check runs after the inviter names its spaces and '
     + 'before anything is written, so a refused join leaves nothing behind.\n\n'
-    + 'THE MAPPING IS ADDITIVE: a remote space lands on the local space of the same id, or the one `spaceMap` names, '
-    + 'and a missing one is created. Nothing local is removed. No token is ever returned: both travel RSA-wrapped.',
+    + 'THE MAPPING IS ADDITIVE: each of the network\'s spaces lands on the local space of the name the invite shows '
+    + 'for it (`spaces` in the bundle), or on the one `spaceMap` names, and a missing one is created. Nothing local is '
+    + 'removed. A space the inviter RENAMED keeps its old name as the network\'s id (`networkSpaces`, beside `spaces`): '
+    + 'the join lands it under the current name and records the alias, so everything the network sends later reaches '
+    + 'that one space. Refused (400) before anything is written, with a `code`: `join_mapping_collision` when two '
+    + 'spaces would land on one local space or a `spaceMap` key could mean two spaces; `network_id_aliased` when this '
+    + 'instance already carries one of them under another name. No token is ever returned: both travel RSA-wrapped.',
   mutating: true,
   inputSchema: (_s: ToolSchemas) => ({
     type: 'object',
@@ -35,7 +40,12 @@ export const network_join_remoteTool: ToolHandler = {
       networkId: uuidSchema('From the invite bundle: the network being joined.'),
       myUrl: { type: 'string', minLength: 1, description: 'This instance\'s externally reachable base URL, which the inviter will sync with.' },
       expiresAt: { type: 'string', description: 'From the invite bundle; informational only.' },
-      spaceMap: { type: 'object', additionalProperties: SPACE_ID, description: 'Optional: remote space id → the local space id to map it onto. A remote id not named keeps its own id.' },
+      // The rest of the bundle, so it can be passed whole as the description says (Q-133). Informational: the join
+      // reads the inviter's own answer, never these.
+      spaces: { type: 'array', items: SPACE_ID, description: 'From the invite bundle; informational only — the inviter\'s answer is what the join uses.' },
+      networkSpaces: { type: 'array', items: SPACE_ID, description: 'From the invite bundle; informational only.' },
+      inviteCode: { type: 'string', description: 'From the invite bundle; informational only.' },
+      spaceMap: { type: 'object', additionalProperties: SPACE_ID, description: 'Optional: a space of the network → the local space id to put it in. Key it by the name the invite shows for the space (`spaces`); the network\'s id for it (`networkSpaces`) is accepted too. A space not named keeps the name the invite shows.' },
     },
     required: ['handshakeId', 'inviteUrl', 'rsaPublicKeyPem', 'networkId', 'myUrl'],
     additionalProperties: false,
@@ -61,7 +71,7 @@ export const network_join_by_keyTool: ToolHandler = {
       publisherUrl: { type: 'string', minLength: 1, description: 'The publisher\'s base URL, as the invite gives it. Must be https unless this instance allows insecure peers.' },
       inviteKey: { type: 'string', minLength: 20, maxLength: 200, description: 'The network\'s published invite key (`ythril_invite_…`).' },
       myUrl: { type: 'string', minLength: 1, description: 'This instance\'s externally reachable base URL, which the publisher will sync with.' },
-      spaceMap: { type: 'object', additionalProperties: SPACE_ID, description: 'Optional: remote space id → the local space id to map it onto. A remote id not named keeps its own id.' },
+      spaceMap: { type: 'object', additionalProperties: SPACE_ID, description: 'Optional: a space of the network → the local space id to put it in, keyed by the name the publisher gives it or by the network\'s id for it. A space not named keeps the publisher\'s name; a renamed one lands under its current name with the alias recorded.' },
     },
     required: ['publisherUrl', 'inviteKey', 'myUrl'],
     additionalProperties: false,

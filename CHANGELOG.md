@@ -45,6 +45,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **A network's `spaceMap` may name several keys for one local space** (Q-133): the first is the network's id,
+  later ones are the local names a rename left behind, kept for members that joined under them. A join or network
+  answer lists every one. Renaming a space back to its network id removes the mapping.
+- **New refusals, each with a `code`** (Q-133), identical on REST and MCP: joining a network is refused `400`
+  `join_mapping_collision` when two of its spaces would land in one local space, `network_id_aliased` when a network
+  id is already another space's alias, and `invalid_answer` for a malformed invite answer; renaming a space, and
+  adding one to a network, is refused `409` `space_name_in_use` when another space already syncs under that name.
+  Nothing is created or moved by a refused call.
+- **A space vote round carries `networkSpaceId`** beside `spaceId`, and `GET /api/networks/:id/votes` /
+  `network_votes` name each round's space by `localSpaceId`, as this instance calls it (Q-133).
+- **Accepting a pending space with `mapTo` onto a space the network already carries records the alias** instead of
+  answering `409`, when that space has no network id yet (Q-133).
+- **On upgrade, a network's schema layer and membership origin kept under a renamed space's old name move to its
+  current name** (Q-133, `migrateNetworkSpaceKeys`). Nothing is dropped. Rolling back, the space loses that
+  network's schema layer until the network next sends it — see
+  [Rolling back](docs/integration-guide/02-hosting.md#rolling-back).
+
 - **A recall with both `tags` and a filter naming `tags` applies both** (Q-102). The filter used to REPLACE the
   `tags` parameter, so `tags: ["a"]` with `filter: {"tags": "b"}` answered records tagged `b` alone. A caller who
   relied on that gets fewer records now: the ones carrying both.
@@ -87,6 +104,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A renamed space reaches a new member once, under the network's name** (Q-133). An invite answered with the
+  inviter's LOCAL space ids, while every later exchange used the network's, so a member joining after the publisher
+  renamed a space held it twice — `y-twin` beside `y-project-template` — and the second copy never synced. Invite
+  answers now carry `networkSpaces`, index-aligned with `spaces`, and the joiner records each space under it. A
+  member that already has the duplicate heals from its publisher or tree parent once both run this version
+  (audited as `network.space_alias.heal`); on a club, closed or democratic network, accept the waiting space with
+  `mapTo` naming the space you carry. The idle duplicate is left for you to remove. A pre-5.5.3 joiner of an
+  upgraded publisher still gets the duplicate until it upgrades too. See
+  [Networks API](docs/integration-guide/08-networks-api.md) and
+  [A space that shows up twice](docs/userguide/04-settings.md#a-space-that-shows-up-twice).
+
 - **A filtered recall returns every matching record it has room for, whatever its vector rank** (Q-102). A filter
   the vector index cannot apply — an undeclared property, `exists`, `ne`, most raw MongoDB — scored only the
   nearest 1000–10000 records and filtered after, so a match outside that window was dropped with `count: 0` and
@@ -114,6 +142,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   read whole is named above the results, with the reason.
 
 ### Security
+
+- **`POST /api/sync/warm` warms only a network the calling peer belongs to, and only the spaces that network
+  carries** (Q-133). It opened collection handles for any space id in the body.
 
 - **A search never writes into a space** (Q-92). A `recall` or `similar` whose traversal outgrew its inline cap, or
   that asked for `remainderDump`, saved the rest as a file in the seed's space: a blob under `_tmp/`, a file record,

@@ -11,11 +11,11 @@ import { peerRelayCaller, PEER_RELAY_REFUSAL } from '../../auth/peer-relay.js';
 import { log } from '../../util/log.js';
 import { reportServerFailure } from '../../util/report-failure.js';
 import { isPeerUrlAllowed } from '../../sync/peer-fetch.js';
-import { getSigningPublicKey, getSigningKeyRotation, pinMemberSigningKey, type SigningKeyRotation } from '../../util/signing.js';
-import { SERVER_VERSION } from '../../util/server-version.js';
+import { pinMemberSigningKey, type SigningKeyRotation } from '../../util/signing.js';
 import { peerFloorRefusal } from '../../sync/peer-floor.js';
 import type { NetworkMember } from '../../config/types.js';
-import { adoptAnnouncedSpaces, announcedSpaces } from '../../networks/network-spaces.js';
+import { adoptAnnouncedSpaces, healAnnouncedAliases } from '../../networks/network-spaces.js';
+import { selfRecordFor } from '../../networks/self-record.js';
 
 export const syncMembersRouter = Router();
 
@@ -167,29 +167,18 @@ syncMembersRouter.post('/networks/:networkId/members', syncRateLimit, requireAut
      * our publisher, our tree parent — and `adoptAnnouncedSpaces` is where that is decided, so a subscriber announcing
      * a space to its publisher changes nothing. After the member update, which saved: adoption re-reads the config.
      */
-    if (callerPeerId) await adoptAnnouncedSpaces(net.id, callerPeerId, (incoming as { spaces?: unknown }).spaces);
+    if (callerPeerId) {
+      // Q-133: the alias heal first, so a network id this instance merely lacks an alias for is not adopted as a
+      // second space. It swallows and logs its own failure: this route must still answer.
+      const announced = incoming as { spaces?: unknown; spaceNames?: unknown };
+      await healAnnouncedAliases(net.id, callerPeerId, announced.spaces, announced.spaceNames);
+      await adoptAnnouncedSpaces(net.id, callerPeerId, announced.spaces);
+    }
 
-    // Piggyback our own identity in the response so the caller can update their record for us
-    const selfUrl = process.env['INSTANCE_URL'] ?? '';
-    /*
-     * OUR version goes on the self-record because the exchange is symmetric: the caller announces
-     * itself in the body, we piggyback ourselves in the reply. A floor enforced from one side only is
-     * one instance refusing a peer that has no idea why — and the peer's own operator is the person
-     * who has to act on it.
-     */
-    const selfRecord: Record<string, unknown> = {
-      instanceId: cfg.instanceId,
-      label: cfg.instanceLabel,
-      version: SERVER_VERSION,
-      // What the caller adopts when we are its upstream (F-38.3) — read from the config as it is NOW, after adoption.
-      spaces: announcedSpaces(getConfig().networks.find(n => n.id === net.id) ?? net),
-    };
-    if (selfUrl) selfRecord['url'] = selfUrl;
-    const ownSigningKey = getSigningPublicKey();
-    if (ownSigningKey) selfRecord['signingPublicKey'] = ownSigningKey;
-    const ownRotation = getSigningKeyRotation();
-    if (ownRotation) selfRecord['signingKeyRotation'] = ownRotation;
-    res.status(200).json({ status: 'ok', self: selfRecord });
+    // Piggyback our own identity in the response so the caller can update their record for us — built by the one
+    // builder both directions use (`networks/self-record.ts`), from the config as it is NOW, after adoption.
+    const liveNet = getConfig().networks.find(n => n.id === net.id) ?? net;
+    res.status(200).json({ status: 'ok', self: selfRecordFor(cfg, liveNet, existing) });
   } catch (err) {
     log.error(`sync POST members: ${err}`);
     res.status(500).json({ error: 'Internal error' });

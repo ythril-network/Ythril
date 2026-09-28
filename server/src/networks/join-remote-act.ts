@@ -30,6 +30,8 @@ import { BCRYPT_ROUNDS, SSRF_SAFE_URL } from '../api/networks/_shared.js';
 import type { NetworkActResult } from './network-acts.js';
 import { widenPeerTokensOf } from './network-spaces.js';
 import { inviterIsWhoItClaims, knownPeerAt } from '../auth/peer-identity.js';
+import { resolveJoinSpaces } from './join-spaces.js';
+import { recordSpaceAlias } from '../sync/space-map.js';
 
 type Caller = Parameters<typeof networkJoinRefusal>[0] & { id?: string };
 
@@ -61,6 +63,13 @@ export const JoinRemoteBody = z.object({
   myUrl: SSRF_SAFE_URL,
   /** expiresAt from invite bundle — informational only */
   expiresAt: z.string().optional(),
+  /**
+   * The rest of the invite bundle, informational only, so it can be passed whole on either door (Q-133). The join
+   * reads the inviter's own apply answer for the spaces, never these — a bundle is not signed.
+   */
+  spaces: z.array(z.string()).max(1000).optional(),
+  networkSpaces: z.array(z.string()).max(1000).optional(),
+  inviteCode: z.string().max(8192).optional(),
   /** Optional space aliasing: maps remote space IDs to desired local space IDs.
    *  When the UI detects a collision, the user can choose a different local ID.
    *  Any remote IDs not present in this map will keep their original ID. */
@@ -130,6 +139,8 @@ export async function joinRemoteAct(caller: Caller, input: unknown): Promise<Net
     networkLabel: string;
     networkType: string;
     spaces: string[];
+    /** Q-133: the network's id for each of `spaces`, index-aligned. Absent from an older inviter. */
+    networkSpaces?: unknown;
   }>(applyRes, 'network peer');
 
   // S-6: the inviter's id is its own claim. A peer this instance already knows must be answering from the origin it
@@ -155,29 +166,39 @@ export async function joinRemoteAct(caller: Caller, input: unknown): Promise<Net
 
   // Create a PAT in this brain's token store scoped to network spaces.
   // Brain A will present this token when calling THIS brain's sync endpoints.
-  const remoteSpaceIds: string[] = applyData.spaces ?? [];
+  /*
+   * Q-133: which local space each network space lands on, decided ONCE (`join-spaces.ts`), before any write. The
+   * network id and this instance's name for the space are two things once a publisher has renamed it; the rights
+   * check below and the creation loop both read these entries, so they cannot check one set and create another.
+   */
+  const existingNet = cfg.networks.find(n => n.id === networkId);
+  const resolved = resolveJoinSpaces(applyData, requestedSpaceMap, existingNet, cfg.spaces.map(s => s.id));
+  if (!resolved.ok) return { status: 400, error: resolved.error, code: resolved.code };
+  // A network this instance already carries merges the new spaces only when the answer names them by the network's
+  // ids; an older inviter's local names would add the wrong ids, so that path keeps its old behaviour (adds nothing).
+  // A space the operator dismissed stays out.
+  const entries = resolved.entries.filter(e => !existingNet
+    || (resolved.networkIdsTrusted && !existingNet.dismissedSpaces?.includes(e.networkId)));
   const existingSpaces: string[] = [];
   const createdSpaces: string[] = [];
-  const spaceMap: Record<string, string> = {};
+  // Through the one alias writer, before anything is written: the resolver already refused every pair it could not
+  // record, so a refusal here is a disagreement between the two, and the join stops rather than guessing.
+  const aliases: { spaceMap?: Record<string, string> } = {};
+  for (const { networkId: remoteId, localId } of entries) {
+    const why = localId === remoteId ? null : recordSpaceAlias(aliases, remoteId, localId);
+    if (why) return { status: 400, error: `The join could not record the space mapping: ${why}.`, code: 'join_mapping_collision' };
+  }
+  const spaceMap = aliases.spaceMap ?? {};
 
   // F-34.1: which local spaces this join would touch — before ANY local write. Refused here, nothing was created
   // and finalize is never called, so the inviter's token for us expires with the handshake.
-  const localOf = (remoteId: string) => requestedSpaceMap?.[remoteId] ?? remoteId;
   const joinRefusal = networkJoinRefusal(caller, {
-    existing: remoteSpaceIds.map(localOf).filter(id => cfg.spaces.some(cs => cs.id === id)),
-    toCreate: remoteSpaceIds.map(localOf).filter(id => !cfg.spaces.some(cs => cs.id === id)),
+    existing: entries.map(e => e.localId).filter(id => cfg.spaces.some(cs => cs.id === id)),
+    toCreate: entries.map(e => e.localId).filter(id => !cfg.spaces.some(cs => cs.id === id)),
   });
   if (joinRefusal) return { status: 403, error: joinRefusal };
 
-  for (const remoteId of remoteSpaceIds) {
-    // Check if the user chose a different local ID for this remote space
-    const localId = requestedSpaceMap?.[remoteId] ?? remoteId;
-
-    if (localId !== remoteId) {
-      // Record the alias — sync engine will use this to translate peer space IDs
-      spaceMap[remoteId] = localId;
-    }
-
+  for (const { networkId: remoteId, localId } of entries) {
     if (cfg.spaces.some(cs => cs.id === localId)) {
       existingSpaces.push(localId);
     } else {
@@ -270,6 +291,14 @@ export async function joinRemoteAct(caller: Caller, input: unknown): Promise<Net
       origin: 'joined',
     };
     freshCfg.networks.push(net);
+  } else {
+    // Q-133: a join into a network this instance already carries MERGES the spaces it resolved, through the one alias
+    // writer, instead of leaving them created but outside the network. `entries` is empty for an older inviter.
+    for (const s of allNetworkSpaces) if (!net.spaces.includes(s)) net.spaces.push(s);
+    for (const [remote, local] of Object.entries(spaceMap)) {
+      const why = recordSpaceAlias(net, remote, local);
+      if (why) log.warn(`join-remote: network ${networkId}: alias '${remote}' -> '${local}' not recorded: ${why}`);
+    }
   }
   // Who established each membership, so the leave rule can tell this token's own from another's.
   const joiner = caller.id;

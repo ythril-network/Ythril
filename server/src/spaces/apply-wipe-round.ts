@@ -28,7 +28,7 @@
 import { log } from '../util/log.js';
 import type { NetworkConfig, VoteRound } from '../config/types.js';
 import type { WipeCollectionType } from './lifecycle.js';
-import { carriedLocalId } from '../sync/space-map.js';
+import { roundSpaceLocalId } from '../sync/space-map.js';
 
 /** What a concluded space round does here, if anything. */
 export type SpaceRoundAction =
@@ -38,13 +38,13 @@ export type SpaceRoundAction =
 /** The decision, pure: a passed, unvetoed, not-yet-applied deletion or wipe of a space this network carries. */
 export function spaceRoundAction(
   net: Pick<NetworkConfig, 'spaces' | 'spaceMap'>,
-  round: Pick<VoteRound, 'type' | 'spaceId' | 'concluded' | 'passed' | 'votes' | 'wipeTypes'> & { appliedHere?: boolean },
+  round: Pick<VoteRound, 'type' | 'spaceId' | 'networkSpaceId' | 'concluded' | 'passed' | 'votes' | 'wipeTypes'> & { appliedHere?: boolean },
 ): SpaceRoundAction | null {
   if (round.type !== 'space_deletion' && round.type !== 'space_wipe') return null;
   if (!round.concluded || !round.passed || round.appliedHere || !round.spaceId) return null;
   // A single veto stops it.
   if (round.votes.some(v => v.vote === 'veto')) return null;
-  const localId = carriedLocalId(net, round.spaceId);
+  const localId = roundSpaceLocalId(net, round);
   if (!localId) return null;
   if (round.type === 'space_deletion') return { kind: 'delete', localId };
   // The types the members VOTED for, never a fresh default. A round approved for `files` must not conclude

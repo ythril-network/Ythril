@@ -200,7 +200,10 @@ The rename atomically:
 
 - Moves all MongoDB collections (facts, entities, edges, chrono, tombstones, files, etc.) to the new prefix.
 - Moves the file directory from `/data/files/{old}` to `/data/files/{new}`.
-- Updates all network `spaces[]` arrays and adds a `spaceMap` entry so peers continue syncing.
+- Updates all network `spaces[]` arrays and records the old id in each network's `spaceMap`, so the space
+  keeps crossing the wire under the id the network knows it by. A space that was already mapped keeps its
+  network id as the first key and gains the old local id as an inbound alias — kept for members that joined
+  under that name. Renaming a space back to its network id removes the mapping instead.
 - Moves every token's rights for the space to the new ID: its `rights.perSpace` row, and its entry in
   `rights.spaceAdmin.spaces` when the token administers the space by name.
 
@@ -215,6 +218,7 @@ The rename atomically:
 | `400`  | Invalid `newId` format, or trying to rename a built-in space (e.g. `general`) |
 | `404`  | Source space does not exist |
 | `409`  | `newId` already exists |
+| `409`  | `code: "space_name_in_use"` — another space already syncs under `newId` in one of this instance's networks; nothing is moved. Pick another name |
 | `500`  | Partial rename failure (collections may be in an inconsistent state) |
 
 ---

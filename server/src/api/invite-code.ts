@@ -53,6 +53,8 @@ export interface InviteBundle {
   rsaPublicKeyPem: string;
   expiresAt?: string;
   spaces?: string[];
+  /** The network's id for each of `spaces`, index-aligned (`Q-133`); absent from an older instance. */
+  networkSpaces?: string[];
   /** The bundle as one line, when the instance that produced it was new enough to have one. */
   inviteCode?: string;
   [k: string]: unknown;

@@ -19,6 +19,11 @@ export interface ServerVoteRound {
   subjectLabel?: string;
   subjectInstanceId?: string;
   spaceId?: string;
+  /**
+   * What THIS instance calls the round's space (Q-133). `spaceId` is the network's id or the proposer's, and after a
+   * rename neither is the name the operator here knows. Absent from an older server, and for a space not yet carried.
+   */
+  localSpaceId?: string;
   openedAt: string;
   deadline: string;
   concluded?: boolean;
@@ -33,7 +38,10 @@ export function voteRoundFromServer(networkId: string, r: ServerVoteRound): Vote
     networkId,
     type: r.type,
     // A round about a space names the space first: "add notes" says more than "add brain-a".
-    subject: r.spaceId ? (who ? `${r.spaceId} (${who})` : r.spaceId) : who,
+    subject: (() => {
+      const space = r.localSpaceId ?? r.spaceId;
+      return space ? (who ? `${space} (${who})` : space) : who;
+    })(),
     openedAt: r.openedAt,
     deadline: r.deadline,
     status: !r.concluded ? 'open' : r.passed ? 'passed' : 'failed',

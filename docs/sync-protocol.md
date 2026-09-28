@@ -93,7 +93,15 @@ The sync engine uses two helpers to translate between remote and local space IDs
 
 **Inbound requests are translated too.** A peer names the space by the network's id, so every `/api/sync/*` request that carries a `networkId` has its `spaceId` translated through that network's `spaceMap` before any route admits, reads or writes by it. It only renames: the translated id is admitted by the same rule as the local one.
 
-Spaces without an entry in `spaceMap` pass through unchanged (identity mapping). The `spaceMap` is also updated automatically when a local space is renamed — `renameSpace()` adds or updates the reverse mapping on every network that references the old space ID.
+Spaces without an entry in `spaceMap` pass through unchanged (identity mapping).
+
+**Every id a space crosses the wire under is its NETWORK id.** That includes the invite answers: an inviter's `spaces` names its own local ids, and the answer carries `networkSpaces`, index-aligned with `spaces`, naming each one's network id. A joiner that stored the local id instead would hold one space under two names the first time the inviter's local name differed from the network's — which is what a rename produces. A joiner trusts `networkSpaces` only when it is a list of valid space ids, as long as `spaces`, with no duplicates; otherwise it falls back to `spaces`, which is what a pre-fix inviter sends.
+
+**A local space may be reached by several keys.** When a space that is already mapped is renamed, its network id stays the FIRST key and the old local id is appended as an inbound alias, because a member that joined under that name still asks for it. `localToRemote` answers the first key; `remoteToLocal` accepts any of them. Renaming a space back to its network id deletes the mapping rather than aliasing the id onto itself. Every write to `spaceMap` goes through `sync/space-map.ts`, which refuses an alias that would overwrite another space's key, alias a space to itself, or give one local space a second network id.
+
+**A duplicate left by the old behaviour heals from upstream only.** When a member reports an announced space its receiver holds under another local name (by `spaceNames` in the self-record), the receiver records the alias — but only from the member it syncs FROM (the publisher on a pub/sub network, the parent on a braintree), only for a space it has not dismissed, and it writes a `network.space_alias.heal` audit entry. A downstream member can never rename a space for its upstream.
+
+**Vote rounds carry both ids.** A space round keeps `spaceId` (the proposer's local id, which a 5.0/5.1 peer applies directly) and gains `networkSpaceId`; a receiver resolves the round through `networkSpaceId` when present and falls back to `spaceId` only when it is absent.
 
 ---
 
@@ -344,7 +352,7 @@ With `merkle: true` on the network config, the engine ends each per-space sync b
 
 At the **start** of each cycle — before any data sync, see [Overview](#overview) for why — the engine performs a lightweight member identity exchange with each peer:
 
-1. **Self-announce** — `POST /api/sync/networks/:networkId/members` with `{ instanceId, label, children?, url?, signingPublicKey?, signingKeyRotation? }`. The `url` field is included only when the `INSTANCE_URL` environment variable is set; if omitted, the peer keeps the URL it already has on record. The signing fields distribute the instance's vote-signing public key (see [Signed vote casts](#signed-vote-casts)).
+1. **Self-announce** — `POST /api/sync/networks/:networkId/members` with `{ instanceId, label, version, spaces, children?, spaceNames?, url?, signingPublicKey?, signingKeyRotation? }`. `spaces` names the spaces this instance carries by their NETWORK ids; `spaceNames` maps each network id to this instance's local name where the two differ, and is sent only to a member this instance is upstream of (see [Space ID remapping](#space-id-remapping-spacemap)). The peer's piggybacked answer is built by the same function, so the two directions carry the same fields. The `url` field is included only when the `INSTANCE_URL` environment variable is set; if omitted, the peer keeps the URL it already has on record. The signing fields distribute the instance's vote-signing public key (see [Signed vote casts](#signed-vote-casts)).
 
 2. **Self-record piggyback** — the receiving peer includes its own current identity in the `200` response as `{ status: 'ok', self: { instanceId, label, url?, signingPublicKey?, signingKeyRotation? } }`. The caller updates its local member entry for that peer from this payload — no separate GET is needed.
 

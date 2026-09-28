@@ -269,6 +269,12 @@ one entry, operation `file.legacy_spill.sweep`, with the space named and no toke
 itself. It sends no webhook and tells no other instance, and it cannot be undone. Reading kept results
 appears as `brain.spill.read`, and only when the instance is set to log reads.
 
+**A network space's name repaired from its upstream.** An instance that joined a network before 5.5.3 could hold a
+space the publisher had renamed without knowing the network still calls it by its old name — so the space arrived a
+second time under that old name. When this instance's upstream (its publisher, or its parent in a tree) now names
+the space both ways, the instance records the missing link itself and logs one entry per space, operation
+`network.space_alias.heal`, with the space named and no token. Nothing is created or deleted by it.
+
 **Exporting:** Download the current filtered view as JSON or CSV.
 
 **Live server log:** the **Server Log** sub-tab streams the instance's log in real time over Server-Sent Events (SSE). It loads the recent lines and then appends new ones as they happen, colour-coded by level.

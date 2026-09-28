@@ -2,6 +2,7 @@ import { Component, computed, inject, input, output, signal } from '@angular/cor
 import { FormsModule } from '@angular/forms';
 import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
 import { Network, Space } from '../../core/api.types';
+import { refusalText } from '../../core/refusal-text';
 import { NetworksApi } from '../../core/networks-api.service';
 import { ToastService } from '../../core/toast.service';
 
@@ -65,7 +66,7 @@ export class NetworkAddSpaceComponent {
       },
       error: (err) => {
         this.adding.set(false);
-        this.toast.error(err.error?.error ?? this.transloco.translate('networks.error.addSpaceFailed'));
+        this.toast.error(refusalText(this.transloco, err, 'networks.error.addSpaceFailed'));
       },
     });
   }

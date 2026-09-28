@@ -78,3 +78,23 @@ describe('the member self-record has one builder', () => {
     assert.ok(callers.length >= 2, `only ${callers.length} caller(s) of selfRecordFor — the exchange has two directions`);
   });
 });
+
+describe('a network\'s space mapping is written in one module', () => {
+  /*
+   * `sync/space-map.ts` is where the refusals live: no overwrite of another space's key, no self-alias, no second
+   * network id for one space. A write anywhere else skips them, and the one it skips is the one that re-points a
+   * synced space at the wrong collection. Read-only uses (`Object.entries(net.spaceMap)`, lookups) are not writes.
+   */
+  const OWNER = 'server/src/sync/space-map.ts';
+  const WRITE = /spaceMap!?\??\.?\[[^\]]+\]\s*=(?!=)|delete\s+[\w.!?]*spaceMap\b|\.spaceMap\s*(?:\?\?)?=(?!=)/g;
+
+  it('the owner itself matches the pattern, so the pattern can see a write', () => {
+    assert.ok([...read(OWNER).matchAll(new RegExp(WRITE))].length >= 2, 'the write pattern finds nothing even in space-map.ts');
+  });
+
+  it('no other source writes a spaceMap', () => {
+    const offenders = sources.filter(f => f !== OWNER).flatMap(f =>
+      [...read(f).matchAll(new RegExp(WRITE))].map(m => `${f}: ${m[0]}`));
+    assert.deepEqual(offenders, [], 'these write a spaceMap by hand; go through recordSpaceAlias, retargetSpaceAliases or forgetSpaceAliases');
+  });
+});
