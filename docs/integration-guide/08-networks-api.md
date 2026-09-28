@@ -102,7 +102,7 @@ POST /api/networks
 
 **Network types**: `closed` (unanimous vote), `democratic` (majority), `club` (proposer only), `braintree` (tree hierarchy), `pubsub` (auto-join publisher/subscriber, push-only).
 
-**`requireSignedVotes`** (optional, default `false`): when `true`, governance vote casts must carry a valid Ed25519 signature from the voting member (strict mode). Leave it off until every member has synced at least once so their signing keys are published; then enable it (also settable via `PATCH`) to reject any unsigned or forged vote. See [Sync Protocol → Signed vote casts](../sync-protocol.md).
+**`requireSignedVotes`** (optional, default `false`): when `true`, governance vote casts must carry a valid Ed25519 signature from the voting member (strict mode). Leave it off until every member has synced at least once so their signing keys are published; then enable it (also settable via `PATCH`) to reject any unsigned or forged vote. Since 5.5.3 every cast also signs the round's type and target (`bsig`), so a member relaying a space deletion or wipe cannot re-aim it at another space; see [Sync Protocol → Signed vote casts](../sync-protocol.md#signed-vote-casts) for the transition while older members remain.
 
 **`syncSchedule`** (optional): how often this network syncs automatically. Give a standard **cron expression** (e.g. `"*/5 * * * *"` = every 5 minutes, `"0 * * * *"` = hourly) — the same node-cron engine the backup scheduler uses. Omit it (or set it empty) for manual-sync only.
 

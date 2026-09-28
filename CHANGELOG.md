@@ -162,6 +162,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **A relaying member cannot re-aim a vote round** (Q-138). A vote cast's signature covered the round's id but not
+  what it does, so a member relaying a `space_deletion` or `space_wipe` round could rewrite its target space or wiped
+  types and every honest cast still verified on the instance that learned the round from it. A cast now also carries
+  `bsig`, signed over the round's type, `spaceId`, `networkSpaceId` and `wipeTypes` and checked against the round it
+  is applied to. A cast without it is refused from a voter known to run 5.5.3 or later; from an older member the old
+  check stands until it upgrades. See [Signed vote casts](docs/sync-protocol.md#signed-vote-casts).
 - **`POST /api/sync/warm` warms only a network the calling peer belongs to, and only the spaces that network
   carries** (Q-133). It opened collection handles for any space id in the body.
 

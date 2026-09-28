@@ -58,7 +58,7 @@ import type {
 } from '../config/types.js';
 import { resolveSafePath } from '../files/sandbox.js';
 import type { FileMetaDoc } from '../config/types.js';
-import { acceptVoteCast, pinMemberSigningKey } from '../util/signing.js';
+import { acceptVoteCast, pinMemberSigningKey, castForWire } from '../util/signing.js';
 import { assertPeerAtFloor } from './peer-floor.js';
 import { REPLICATED_FAMILIES, type PayloadKey } from './replicated-families.js';
 import { stripLocalOnly } from './local-only-fields.js';
@@ -727,12 +727,13 @@ async function propagateVotesWithPeer(
         if (idx >= 0) {
           // Only replace if the new cast changes the vote value; preserve the
           // signature that came with it.
-          if (local.votes[idx]!.vote !== peerCast.vote || local.votes[idx]!.sig !== peerCast.sig) {
-            local.votes[idx] = peerCast;
+          const had = local.votes[idx]!;
+          if (had.vote !== peerCast.vote || had.sig !== peerCast.sig || had.bsig !== peerCast.bsig) {
+            local.votes[idx] = castForWire(peerCast);
             changed = true;
           }
         } else {
-          local.votes.push(peerCast);
+          local.votes.push(castForWire(peerCast));
           changed = true;
         }
       }
@@ -799,7 +800,8 @@ async function propagateVotesWithPeer(
           method: 'POST',
           // Forward the signature (and castAt) so the peer can verify and, when
           // valid, relay this cast onward — signed casts are relay-safe.
-          body: JSON.stringify({ vote: cast.vote, instanceId: cast.instanceId, sig: cast.sig, castAt: cast.castAt }),
+          // Both signatures travel (Q-138): the one shape the relay route reads back.
+          body: JSON.stringify(castForWire(cast)),
         }).catch(err => log.warn(`Vote push (${round.roundId}) to ${member.label}: ${err}`));
       }
     }
