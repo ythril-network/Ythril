@@ -48,6 +48,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The `createSpaces` right creates a space on every door, and the creator administers it** (Q-134). `POST
+  /api/spaces` and `save_space` required an instance administrator while a network join honoured `createSpaces`;
+  all three now ask one predicate, with one `403` sentence on REST and MCP, and `save_space` is listed to a token
+  holding the right. MFA still applies to the REST create. The token that creates a space — directly, by joining a
+  network, or as the token a network was joined with when it later adds one — is added to that space's
+  administrators (`rights.spaceAdmin.spaces`) in the same write, audited as the new operation `token.creator_grant`;
+  its floor, `instanceAdmin` and other rows are untouched. An OIDC session stores no rights, so its identity mapping
+  still decides what it reaches. A join that creates a space still needs a floor of `networks: write`. See
+  [Spaces API](docs/integration-guide/06-spaces-api.md) and [Tokens API](docs/integration-guide/07-tokens-api.md).
 - **A network's `spaceMap` may name several keys for one local space** (Q-133): the first is the network's id,
   later ones are the local names a rename left behind, kept for members that joined under them. A join or network
   answer lists every one. Renaming a space back to its network id removes the mapping.

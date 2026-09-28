@@ -34,7 +34,7 @@ import { reachesSpace } from '../auth/space-reach.js';
 import { networkJoinRefusal } from '../auth/network-rights.js';
 import { withInstanceAdminGrants } from '../auth/instance-admin-grants.js';
 import type { TokenRights } from '../config/rights-shape.js';
-import { createSpace } from '../spaces/lifecycle.js';
+import { createSpace, type SpaceCreator } from '../spaces/lifecycle.js';
 import { localToRemote, remoteToLocal, recordSpaceAlias, reverseSpaceMap, isSpaceId, forgetSpaceAliases } from '../sync/space-map.js';
 import { PER_SPACE_WATERMARKS } from '../config/types-networks.js';
 import { logAuditEntry } from '../audit/audit.js';
@@ -132,11 +132,13 @@ export async function addSpacesToNetwork(
   networkId: string,
   entries: readonly { networkId: string; localId: string }[],
   why: string,
+  /** Who a space created here is credited to (Q-134): the accepting token, or the network's joining token. */
+  creator: SpaceCreator,
 ): Promise<string[]> {
   try {
     for (const { localId } of entries) {
       if (getConfig().spaces.some(s => s.id === localId)) continue;
-      await createSpace({ id: localId, label: localId.charAt(0).toUpperCase() + localId.slice(1) });
+      await createSpace({ id: localId, label: localId.charAt(0).toUpperCase() + localId.slice(1) }, creator);
     }
     // Re-read after the awaits: `createSpace` saved the config, and a stale copy would write that away.
     const cfg = getConfig();
@@ -281,7 +283,8 @@ export async function adoptAnnouncedSpaces(networkId: string, fromInstanceId: st
   if (!proposed.length) return [];
   const { adopt: allowed, pending } = adoptionDecision(net, cfg.tokens, cfg.spaces.map(s => s.id), proposed);
   holdAsPending(cfg, net, pending, fromInstanceId, `upstream ${fromInstanceId} announced`);
-  return allowed.length ? addSpacesToNetwork(networkId, allowed, `announced by upstream ${fromInstanceId}, joined by ${net.joinedBy}`) : [];
+  // Credited to the token that joined the network here — the authority adoptionDecision just judged by (Q-134).
+  return allowed.length ? addSpacesToNetwork(networkId, allowed, `announced by upstream ${fromInstanceId}, joined by ${net.joinedBy}`, { tokenId: net.joinedBy ?? null }) : [];
 }
 
 /*
@@ -427,7 +430,7 @@ export function applySpaceAdditionRound(net: NetworkConfig, round: VoteRound, wh
         }
       }
     }
-    void addSpacesToNetwork(net.id, [entry], `space_addition round ${round.roundId}, ${where}`).then(async added => {
+    void addSpacesToNetwork(net.id, [entry], `space_addition round ${round.roundId}, ${where}`, { tokenId: net.joinedBy ?? null }).then(async added => {
       // Q-60: the round carries the space's schema, since a voted network has no meta pull — kept as the layer.
       if (!added.includes(entry.localId) || !round.pendingMeta || round.proposedHere) return;
       const { acceptNetworkLayer } = await import('../sync/space-meta-pull.js');

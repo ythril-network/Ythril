@@ -1,12 +1,15 @@
 import type { TokenRights } from '../config/rights-shape.js';
 import { canWriteAnywhere } from '../auth/write-anywhere.js';
 import { administersAnySpace } from '../auth/editor-scope.js';
+import { mayCreateSpaces } from '../auth/create-spaces.js';
 
 /** The shape this needs off a tool — the two flags that decide whether it is reachable at all. */
 export interface VisibilityFlags {
   mutating?: boolean;
   admin?: boolean;
   spaceAdmin?: boolean;
+  /** Creates a space: reachable with the createSpaces right or instance admin (`Q-134`, `auth/create-spaces.ts`). */
+  createsSpaces?: boolean;
 }
 
 /**
@@ -38,6 +41,9 @@ export interface VisibilityFlags {
  */
 export function toolIsVisible(tool: VisibilityFlags, rights: TokenRights | undefined): boolean {
   if (tool.admin) return rights?.instanceAdmin === true;
+  // The same predicate the REST create and a join ask (Q-134), so a token that may create spaces is shown the tool.
+  // Not also "can write somewhere": a token whose only right is to create a space holds no rung in any existing one.
+  if (tool.createsSpaces) return mayCreateSpaces({ rights });
   // A space-admin tool is LISTED to anyone who administers a space, and refused per call for the space they
   // did not administer. Coarse here for the reason stated above — `tools/list` is answered before any space is
   // named, so "administers something" is the only question that can be asked at this point. `spaceAdminRefusal`

@@ -14,7 +14,7 @@ Since F-34 a token below instance admin acts on a network through the **`network
 | `PATCH /api/networks/:id` | `admin` — the settings are shared by every space |
 | `DELETE /api/networks/:id` | `write` for a membership you established, `admin` for anyone's (or one with no recorded establisher) |
 | `POST /api/networks/:id/spaces` | `admin` on every space it already carries, and `write` on the space being added — or administering each of them. On club, closed and democratic networks it opens a vote |
-| `POST /api/networks/join-remote` | `write` on every existing local space the join maps to; a space it would create needs `createSpaces` and a floor of `write` too. Checked after the handshake's apply and before finalize — refused, nothing is written and the handshake expires |
+| `POST /api/networks/join-remote` | `write` on every existing local space the join maps to; a space it would create needs `createSpaces` and a floor of `write` too, and the joining token becomes the administrator of each space the join creates. Checked after the handshake's apply and before finalize — refused, nothing is written and the handshake expires |
 
 **A space admin needs no Networks column for its own spaces** (F-37). A token that administers every space an act touches may create a network carrying them, join one mapped onto them (onto a NEW space too, when it also holds `createSpaces`), see the network, and generate its invite (`POST /api/invite/generate`, `POST /api/networks/:id/invite`) — which is what makes a network it created joinable. A space it does not administer still needs the column, and the refusal names it.
 

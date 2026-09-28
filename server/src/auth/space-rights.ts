@@ -291,10 +291,10 @@ export const ROUTE_RIGHTS: readonly RouteRight[] = [
  * `scripts/surface-matrix.mjs`, and `mcp-tool-rights.test.js` re-derives it and fails if the two disagree.
  * So a rung changed on a route moves its tool in the same commit, or the gate goes red.
  *
- * A tool ABSENT from this table is instance-level: it is governed by the `admin` flag on the tool and by
- * `instanceAdmin` on the token, not by a per-space rung, because the capability it maps to is not scoped to
- * a space at all (`list_spaces`, `save_space`, `update_space`, `list_tokens`, `network_peers`, `network_sync`,
- * `delete_space_data`, `help`).
+ * A tool ABSENT from this table is not governed by a per-space rung: a flag on the tool decides it — `admin`
+ * against `instanceAdmin`, `createsSpaces` against the createSpaces right (`save_space`, Q-134), `spaceAdmin`
+ * against administering the named space (`space_rename`, `delete_space_data`) — or it reaches nothing a rung
+ * governs (`list_spaces`, `list_tokens`, `network_peers`, `network_sync`, `help`).
  */
 export interface ToolRight {
   tool: string;
@@ -502,9 +502,9 @@ export const NOT_AREA_SCOPED: readonly { route: string; why: string }[] = [
   },
   {
     route: '/api/spaces',
-    why: 'The collection, not a space. GET lists which spaces a token reaches and POST creates one — both '
-       + 'governed by the instance-level `createSpaces` right, and neither is a view of any one space\'s '
-       + 'data. There is no `:id` to scope an area check to.',
+    why: 'The collection, not a space. GET lists which spaces a token reaches; POST creates one, governed by '
+       + 'the instance-level `createSpaces` right (`requireCreateSpacesMfa`, Q-134). Neither is a view of any one '
+       + 'space\'s data, and there is no `:id` to scope an area check to.',
   },
   {
     route: '/api/spaces/:id/activity/reset',

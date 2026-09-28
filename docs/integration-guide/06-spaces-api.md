@@ -84,7 +84,7 @@ same measurement. It previously returned counts only while `help()` told callers
 
 ### Create a Space
 
-**Admin only** — `POST /api/spaces` requires an admin token (and a valid `X-TOTP-Code` when MFA is enabled); it is `requireAdminMfa`-gated. A non-admin token gets `403`.
+**The `createSpaces` right** — `POST /api/spaces` needs a token holding `createSpaces` (or instance admin), and a valid `X-TOTP-Code` when MFA applies to it. It is the same predicate `save_space` and a network join ask, and the same `403` sentence on both doors: `This token may not create spaces: creating one needs the createSpaces right, or instance admin.` **The token that creates a space administers it**: the space is added to its `rights.spaceAdmin.spaces` in the same write, unless it already administers the space, and the grant is audited as `token.creator_grant`. An OIDC session has no stored rights to add it to, so its identity mapping decides what it reaches. **Changed in 5.5.3**: this route used to require instance admin.
 
 ```http
 POST /api/spaces

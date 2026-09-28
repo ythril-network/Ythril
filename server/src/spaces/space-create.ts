@@ -24,7 +24,7 @@ import type { SpaceConfig, SpaceMeta } from '../config/types.js';
 import type { z } from 'zod';
 import { getConfig } from '../config/loader.js';
 import { slugify } from './_shared.js';
-import { createSpace } from './lifecycle.js';
+import { createSpace, type SpaceCreator } from './lifecycle.js';
 import { CreateSpaceBody, TypeSchemasZ, findBrokenLibraryRefs, brokenRefsError, stripServerOwnedSpace } from './body-schemas.js';
 import { refuseRemovedDescription } from './spaces.js';
 
@@ -141,9 +141,9 @@ export type SpaceCreateOutcome =
  * typed — that is how the route did it, and changing it in an extraction would be changing behaviour under cover of
  * moving it. Worth a typed error eventually; not in a PR whose value is being provably behaviour-preserving.
  */
-export async function applySpaceCreate(plan: SpaceCreatePlan): Promise<SpaceCreateOutcome> {
+export async function applySpaceCreate(plan: SpaceCreatePlan, creator: SpaceCreator): Promise<SpaceCreateOutcome> {
   try {
-    const space = await createSpace(plan.args);
+    const space = await createSpace(plan.args, creator);
     return { outcome: 'created', space };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);

@@ -37,6 +37,7 @@ import { log, currentRequestId } from '../util/log.js';
 import { reachableSpaceIds } from '../auth/space-reach.js';
 import { toolRightsRefusal, spaceAdminRefusal } from './tool-rights-guard.js';
 import { toolIsVisible } from './tool-visibility.js';
+import { createSpacesRefusal } from '../auth/create-spaces.js';
 import type { TokenRights } from '../config/rights-shape.js';
 import { memberSpacesWithin } from '../spaces/proxy-scoped.js';
 import { classifyReadFailure } from '../brain/store-failure.js';
@@ -121,6 +122,9 @@ export async function callTool(req: ToolCallRequest): Promise<ToolCallOutcome> {
   // Reachability, from the same predicate that builds `tools/list` — so a listing cannot advertise a tool
   // this refuses. Filtering the list stays advisory; this is the enforcement point.
   if (tool && !toolIsVisible(tool, rights)) {
+    // A space-creating tool is refused in the REST create's own sentence (Q-134): one predicate, one refusal.
+    const createRefusal = tool.createsSpaces ? createSpacesRefusal({ rights }) : null;
+    if (createRefusal) return refuse(403, `Error (403): ${createRefusal}`);
     return refuse(403, tool.admin
       ? `Error: tool '${name}' requires a token with instance-admin rights`
       // Without its own branch a space-admin tool would be refused as "mutates, and this token holds no

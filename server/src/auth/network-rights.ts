@@ -40,6 +40,7 @@ import { effectiveRung } from './mint-cap.js';
 import { mayLeaveNetwork, type LeaveVerdict } from './network-membership.js';
 import { administers } from './mint-cap.js';
 import { administersAnySpace } from './editor-scope.js';
+import { mayCreateSpaces, CREATE_SPACES_PHRASE } from './create-spaces.js';
 
 type Caller = Parameters<typeof isInstanceAdmin>[0] & { id?: string; rights?: TokenRights };
 
@@ -116,11 +117,11 @@ export function networkJoinRefusal(caller: Caller, spaces: { existing: string[];
   const reasons: string[] = [];
   if (short.length) reasons.push(`'write' on networks, or administering the space, is short on: ${short.join(', ')}`);
   if (spaces.toCreate.length) {
-    if (!rights?.createSpaces) reasons.push(`the join would create ${spaces.toCreate.join(', ')}, and this token may not create spaces (createSpaces)`);
+    if (!mayCreateSpaces(caller)) reasons.push(`the join would create ${spaces.toCreate.join(', ')}, and ${CREATE_SPACES_PHRASE}`);
     else if (!administersAnySpace(caller)) {
       // A space admin that may create spaces joins onto new ones (`F-37`); anyone else needs the floor, because a
       // space the join creates has no row yet and the floor is the only rung it can hold.
-      const noFloor = spaces.toCreate.filter(s => !holdsRung(rights, s, 'networks', 'write'));
+      const noFloor = spaces.toCreate.filter(s => !rights || !holdsRung(rights, s, 'networks', 'write'));
       if (noFloor.length) reasons.push(`the join would create ${noFloor.join(', ')}, which needs a floor of 'write' on networks — a new space has no row`);
     }
   }

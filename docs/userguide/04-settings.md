@@ -44,6 +44,9 @@ Storage shows **megabytes** below 1 GiB, so a small space reads `40 MB` rather t
 
 ### Creating a space
 
+You need a token that **may create new spaces** (or an instance administrator). The space you create is then
+yours to administer.
+
 Click **Create New Space**. Fill in:
 
 - **Display Name** — the human-readable label shown everywhere in the UI.
@@ -243,6 +246,10 @@ Then **Create token** — the value is shown **once**. Copy it immediately.
 > **The two instance-level checkboxes are the widest thing this dialog can grant.** **Instance
 > administrator** and **May create new spaces** are not rungs on a space: the dialog says so itself —
 > *"these apply to the whole instance. A space-restricted administrator cannot grant them."*
+>
+> **May create new spaces is enough to create one**, from this page, over the API, with the `save_space` tool, or by
+> joining a network — no instance administrator needed. The token that creates a space becomes its administrator,
+> and that grant is written to the audit log (`token.creator_grant`).
 
 The matrix is the whole permission model. A spaces list and a three-way Read-only / Standard / Admin level
 describe the same access in an older vocabulary, and the server refuses a request that uses both those and

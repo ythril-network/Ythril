@@ -125,6 +125,11 @@ export interface ToolHandler {
   /** Requires an admin token (instance-level, no space scoping). */
   admin?: boolean;
   /**
+   * Creates a space: reachable with the `createSpaces` right or instance admin, decided by `mayCreateSpaces` — the
+   * predicate `POST /api/spaces` and a network join ask (`Q-134`). Set INSTEAD of `admin`, never alongside it.
+   */
+  createsSpaces?: boolean;
+  /**
    * Requires administering THE SPACE this call names — or the instance.
    *
    * The MCP half of `requireAdminOrSpaceAdminMfaScoped`. `admin: true` asks an instance-level question and is

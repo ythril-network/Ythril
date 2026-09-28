@@ -489,6 +489,13 @@ export const LEGACY_SPILL_SWEEP_OPERATION = 'file.legacy_spill.sweep';
  */
 export const SPACE_ALIAS_HEAL_OPERATION = 'network.space_alias.heal';
 
+/**
+ * A token given admin of the space it just created (`Q-134`, `auth/creator-grant.ts`). It widens a token's rights with
+ * no request to the token routes, so it is audited separately from the create that caused it: the entry names the
+ * token and the space. Written directly by `createSpace`.
+ */
+export const CREATOR_GRANT_OPERATION = 'token.creator_grant';
+
 /** Log a failed auth attempt — called explicitly from auth middleware when needed. */
 export function logAuthFailure(req: Request): void {
   const fullPath = (req.originalUrl || req.url).split('?')[0];

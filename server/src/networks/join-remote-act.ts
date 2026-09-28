@@ -218,7 +218,8 @@ export async function joinRemoteAct(caller: Caller, input: unknown): Promise<Net
       // Auto-create missing spaces so sync has valid targets.
       // Label is capitalised version of the slug (e.g. "test" → "Test").
       try {
-        await createSpace({ id: localId, label: localId.charAt(0).toUpperCase() + localId.slice(1) });
+        // Credited to the joining token, which then administers what the join created (Q-134).
+        await createSpace({ id: localId, label: localId.charAt(0).toUpperCase() + localId.slice(1) }, { tokenId: caller.id ?? null });
         createdSpaces.push(localId);
         log.info(`join-remote: auto-created space '${localId}'${localId !== remoteId ? ` (alias for remote '${remoteId}')` : ''} for network ${networkId}`);
       } catch (err) {

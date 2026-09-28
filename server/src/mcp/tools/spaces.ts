@@ -594,14 +594,15 @@ export const schema_updateTool: ToolHandler = {
  */
 export const save_spaceTool: ToolHandler = {
   name: 'save_space',
-  description: 'Create a new space. Requires an admin token. The id is derived from the label when omitted. '
+  description: 'Create a new space. Needs the createSpaces right (or instance admin), and the token that creates it '
+    + 'becomes its administrator. The id is derived from the label when omitted. '
     + 'A new space is seeded with a fully strict schema posture (validationMode: strict, strictLinkage: true) '
     + 'unless you pass meta saying otherwise — with no typeSchemas defined yet that accepts every type, so it does '
     + 'not block an empty space. A proxy space (proxyFor) holds no data of its own and is left un-seeded. '
     + 'Set `faceDescriptorDims` HERE if you are bringing your own recogniser: it can be changed later with `update_space`, but ONLY while the space has never held a face descriptor, so getting it right at creation is the reliable path. Refusals match POST /api/spaces exactly, including 422 for a $ref to a schema-library entry that '
     + 'does not exist and 409 when the id is taken.',
   mutating: true,
-  admin: true,
+  createsSpaces: true,
   inputSchema: (_s: ToolSchemas) => ({
     type: 'object',
     properties: {
@@ -680,7 +681,8 @@ export const save_spaceTool: ToolHandler = {
       };
     }
 
-    const result = await applySpaceCreate(decision.plan);
+    // The calling token is credited, so it administers what it created (Q-134) — as the REST door credits its caller.
+    const result = await applySpaceCreate(decision.plan, { tokenId: ctx.actor?.tokenId ?? null });
     if (result.outcome === 'conflict') {
       // 409, and reported as its own thing rather than as a generic failure: the id being taken is often a successful
       // retry of a request whose response was lost, and an agent that can tell the two apart stops retrying.

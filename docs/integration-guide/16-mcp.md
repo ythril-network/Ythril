@@ -346,7 +346,7 @@ row survives its own tool being built, so the list cannot keep advertising a gap
 | `space_rename` | Rename a space: its collections, files and token rights move to `newId`, and every network carrying it keeps syncing it under the network's name for it. Instance-admin or administering the space. Same answer and refusals as `PATCH /api/spaces/:id/rename`, including `409` with `code: space_name_in_use`. A connection opened before the rename lists the old id until it reconnects |
 | `space_reindex` | Re-embed every record in a space with the currently configured embedding model (admin only) — the recovery path after changing embedder or model. Returns as soon as the job STARTS; it runs in the background and may take minutes, so poll rather than waiting on the call. One job per instance at a time; a second call while one runs is refused. A PROXY space is refused by name, with its members listed so you can reindex those instead. Idempotent |
 | `space_reembed` | Queue embeddings for records in a space that have NONE — the way back from `suppressEmbeddings`, and the repair after an embedding run stopped partway. **Not `space_reindex`:** that one re-embeds EVERY record and returns as soon as the job starts; this touches only records with no vector, is awaited, and the counts it returns (`enqueued`, `skippedSuppressed`, `byKind`, `remaining`, `truncated`) are the answer. Bounded by `limit`; `truncated: true` means call again |
-| `save_space` | Create a space (admin only). The id is derived from the label when omitted. A new space is seeded `validationMode: strict` + `strictLinkage: true` unless `meta` says otherwise; a `proxyFor` space is left un-seeded because it stores nothing of its own. **`faceDescriptorDims` is create-only and permanent** — 128 for MobileFaceNet-class models, 512 for ArcFace / AdaFace / FaceNet / EdgeFace. Same refusals as `POST /api/spaces`, including `422` for a missing schema-library `$ref` and `409` when the id is taken |
+| `save_space` | Create a space — needs the `createSpaces` right or instance admin, and the creating token becomes its administrator. The id is derived from the label when omitted. A new space is seeded `validationMode: strict` + `strictLinkage: true` unless `meta` says otherwise; a `proxyFor` space is left un-seeded because it stores nothing of its own. **`faceDescriptorDims` is create-only and permanent** — 128 for MobileFaceNet-class models, 512 for ArcFace / AdaFace / FaceNet / EdgeFace. Same refusals as `POST /api/spaces`, including `422` for a missing schema-library `$ref` and `409` when the id is taken |
 | `schema_update` | Write the space's type schemas and its other meta fields — `validationMode`, `strictLinkage`, `usageNotes`, `suppressEmbeddings`, `whenDuePasses` (needs `schema` `admin` on the space). **Merges** by default: types you do not name are preserved. `typeSchemasMode: "replace"` makes the payload authoritative, which is the only way to DELETE a type. `targetNetwork` proposes the edit to ONE network as that network's definition instead (F-39.5), as on `PATCH`. Same refusals as `PATCH /api/spaces/:id`, including `422` for a `$ref` to a schema-library entry that does not exist. In a networked space it opens a meta vote rather than applying at once |
 | `delete_space_data` | Wipe all or specific collection types from the space. Needs the **space-admin** grant on the space named (or instance admin), and `confirm: true`. Throttled to five calls a minute per token, on both doors |
 | `network_peers` | List the peers of the networks you may see — `networks: read` on every space a network carries, or administering every one |
@@ -375,10 +375,14 @@ row survives its own tool being built, so the list cannot keep advertising a gap
 | `space_set_network_precedence` | Reorder which network wins a schema clash, highest first; rebuilds the space's schema. `schema: admin`. Same as `PUT /api/spaces/:id/network-precedence` |
 | `network_sync` | Trigger immediate sync (all networks, one network via `networkId`, or one peer via `peerId`) (admin only). With `networkId`, `note` (and `spaces`) attach a change note for the members below, refused when nobody is below. The REST doors are `POST /api/networks/:id/sync` (its `{ note, spaces }` body) and `POST /api/networks/peers/:peerId/sync` |
 
-> **Instance-admin tools.** `network_sync`, `save_space` and `space_reindex` require
-> instance-admin rights: they expose the whole peer topology, drive outbound connections to every peer, or
-> create spaces, and none of them is scoped to one space. They are hidden from `tools/list` for other
-> tokens and rejected if called directly.
+> **Instance-admin tools.** `network_sync` and `space_reindex` require
+> instance-admin rights: they expose the whole peer topology or drive outbound connections to every peer, and
+> neither is scoped to one space. They are hidden from `tools/list` for other tokens and rejected if called
+> directly.
+>
+> **`save_space` needs the `createSpaces` right** (or instance admin) — the same predicate as `POST /api/spaces`
+> and a network join, refused in the same sentence. It is listed to any token holding it, and the token that
+> creates a space becomes its administrator. **Changed in 5.5.3**: it used to be instance-admin only.
 >
 > **`delete_space_data` is SPACE-admin, not instance-admin** (5.0). It empties one named space, so
 > "administers that space" is the honest requirement, and demanding the instance was the old flag showing
@@ -700,7 +704,7 @@ only shape and the two are identical by construction.
 | | `update_file_meta` | `PATCH /api/brain/spaces/:spaceId/files` | write `files` |
 | **Spaces** | | | |
 | | `list_spaces` | `GET /api/spaces` | read (MCP) · instance-level |
-| | `save_space` | `POST /api/spaces` | admin (MCP) · instance-level |
+| | `save_space` | `POST /api/spaces` | `createSpaces` (or instance admin) · instance-level |
 | | `update_space` | `PATCH /api/spaces/:id` | space-admin of the named space, and write `schema` |
 | | `space_rename` | `PATCH /api/spaces/:id/rename` | space-admin of the named space |
 | | `space_meta` | `GET /api/spaces/:id/meta` | read `schema` |

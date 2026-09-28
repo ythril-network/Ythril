@@ -5,7 +5,7 @@ import { registerReembedRoute } from './spaces-reembed.js';
 import { registerActivityResetRoute } from './spaces-activity.js';
 import {
   requireAuth, requireSpaceAuthScoped, requireSpaceAuthMfaScoped, requireAdminMfa, requireAdminMfaScoped,
-  requireAdminOrSpaceAdminMfaScoped, denyReadOnly,
+  requireAdminOrSpaceAdminMfaScoped, denyReadOnly, requireCreateSpacesMfa,
 } from '../auth/middleware.js';
 import { globalRateLimit } from '../rate-limit/middleware.js';
 import { editorScopeFor } from '../auth/editor-scope.js';
@@ -259,14 +259,16 @@ spacesRouter.get('/', globalRateLimit, requireAuth, async (req, res) => {
 //
 // `space-create-contract.test.js` pins that chain, including that a refusal leaves NO SPACE BEHIND, and it was proven
 // against this handler before the move.
-spacesRouter.post('/', globalRateLimit, requireAdminMfa, async (req, res) => {
+// The createSpaces right, not instance admin (Q-134): the one predicate every creating door asks. MFA stays — it is a
+// per-token policy, not an admin property.
+spacesRouter.post('/', globalRateLimit, requireCreateSpacesMfa, async (req, res) => {
   const decision = planSpaceCreate(req.body);
   if (!decision.ok) {
     res.status(decision.refusal.status).json(decision.refusal.body);
     return;
   }
 
-  const result = await applySpaceCreate(decision.plan);
+  const result = await applySpaceCreate(decision.plan, { tokenId: req.authToken?.id ?? null });
   if (result.outcome === 'conflict') {
     res.status(409).json({ error: result.error });
     return;

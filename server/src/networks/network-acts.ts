@@ -351,7 +351,7 @@ export async function resolvePendingSpaceAct(caller: Caller, id: string, input: 
   if (refusal) return { status: 403, error: refusal };
   dropPending();
   saveConfig(cfg);
-  const added = await addSpacesToNetwork(net.id, [{ networkId: spaceId, localId }], `pending space accepted by ${caller.id ?? 'an instance admin'}`);
+  const added = await addSpacesToNetwork(net.id, [{ networkId: spaceId, localId }], `pending space accepted by ${caller.id ?? 'an instance admin'}`, { tokenId: caller.id ?? null });
   const after = getConfig();
   const netAfter = after.networks.find(n => n.id === id);
   if (!netAfter || !added.includes(localId)) {

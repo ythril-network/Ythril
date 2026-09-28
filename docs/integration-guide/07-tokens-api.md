@@ -299,11 +299,14 @@ your scope* with the same function the edit routes use, so a matrix-only request
 >
 > **If you branch on it, read `rights.instanceAdmin`.** And note what it is *not*: holding the `admin` rung
 > in every space is a different thing. That grants those spaces, and says nothing about spaces created
-> tomorrow or about instance-shaped routes like creating a space or joining a network — only `instanceAdmin`
-> or an all-spaces floor does.
+> tomorrow or about instance-shaped routes like joining a network — only `instanceAdmin` or an all-spaces
+> floor does. **Creating a space is `createSpaces`** (or `instanceAdmin`), on every door — `POST /api/spaces`,
+> `save_space` and a network join — and the token that creates a space becomes its administrator: the space is
+> added to its `rights.spaceAdmin.spaces`, audited as `token.creator_grant`.
 >
-> **OIDC sessions are unaffected.** They are built per request from a claim mapping and carry no matrix, so
-> the flag is where their answer legitimately lives; every admin check falls back to it for exactly that case.
+> **OIDC sessions are unaffected.** They derive their matrix per request from the claim mapping and store
+> none, so a grant to one — such as a creator's — has nowhere to persist; the mapping is what decides what an
+> OIDC session reaches.
 
 **Response** `201`:
 

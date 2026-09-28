@@ -223,17 +223,22 @@ describe('the MCP door widens with the REST one', () => {
   }
 
   it('the tools that are genuinely instance-shaped did NOT get swept along', () => {
-    // `save_space` has no space to scope to — creating one is not an act within a space. `space_reindex`
-    // likewise stays instance-admin.
+    // `space_reindex` stays instance-admin. `save_space` was in this list and is not any more — owner, 2026-09-28:
+    // *"Create space has a extra toggle to avoid needing instance admin to create space"* (Q-134). It is gated by the
+    // createSpaces right through `createsSpaces: true`, and still NOT by administering a space: creating one is not
+    // an act within any space, so the space-admin flag would be the wrong question.
     //
     // `delete_space_data` WAS in this list and is not any more. Owner, 2026-09-16: *"Sync both doors!!!
     // Space admin to wipe space"*. Its five REST routes ask `<area>: admin` for ONE space, so the
     // administrator of a space could empty it over REST and not over MCP — two doors agreeing on the word
     // `admin` and not on its scope, which is the asymmetry that reads as agreement in a diff.
-    for (const name of ['save_space', 'space_reindex']) {
+    for (const name of ['space_reindex']) {
       assert.match(mcpTool(name), /\n {2}admin: true/, `${name} must stay instance-admin only`);
       assert.doesNotMatch(mcpTool(name), /spaceAdmin: true/, `${name} must stay instance-admin only`);
     }
+    assert.match(mcpTool('save_space'), /\n {2}createsSpaces: true/, 'save_space is gated by the createSpaces right');
+    assert.doesNotMatch(mcpTool('save_space'), /\n {2}(admin|spaceAdmin): true/,
+      'save_space asks the createSpaces question, not an administrator one');
   });
 
   it('delete_space_data is SPACE-admin, because its REST counterpart is', () => {
