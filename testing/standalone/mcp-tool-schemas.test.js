@@ -112,7 +112,10 @@ describe('MCP tool schemas — universal invariants', () => {
     // 70 -> 71: `read_spill` (Q-92), the door onto `readSpillAct` like `GET /api/brain/spills/:id`. Prerequisites done:
     // a `TOOL_RIGHTS` row at knowledge read, an audit-map entry under the route's operation (`brain.spill.read`),
     // the route's `NOT_AREA_SCOPED` row saying where the check really is, and `16-mcp.md` rows.
-    assert.equal(ALL_TOOLS.length, 71);
+    // 71 -> 72: `space_rename` (Q-139), the door onto `renameSpaceAct` like `PATCH /api/spaces/:id/rename`:
+    // `spaceAdmin: true` as the route's space-admin guard, an audit-map entry under `space.rename`, the route moved
+    // from NOT_A_CAPABILITY to CAPABILITIES, and `16-mcp.md` rows plus the read-only list.
+    assert.equal(ALL_TOOLS.length, 72);
   });
 
   it('every tool advertises a closed object schema (type:object, additionalProperties:false)', () => {

@@ -14,8 +14,8 @@ import { needsReindex } from '../spaces/_shared.js';
 import { removeSpace } from '../spaces/lifecycle.js';
 import { openRoundHere } from '../networks/round-local-state.js';
 import { makeSignedOwnCast } from '../util/signing.js';
-import { localToRemote, SpaceNameInUseError } from '../sync/space-map.js';
-import { renameSpace } from '../spaces/rename.js';
+import { localToRemote } from '../sync/space-map.js';
+import { renameSpaceAct } from '../spaces/rename.js';
 import { reorderSpaces } from '../spaces/spaces.js';
 import { checkMetaPrecondition, preconditionErrorBody } from '../spaces/meta-precondition.js';
 import { gatherCompletenessFacts, scoreCompleteness } from '../spaces/completeness.js';
@@ -90,29 +90,14 @@ spacesRouter.patch('/:id/rename', globalRateLimit, requireAdminOrSpaceAdminMfaSc
     res.status(400).json({ error: parsed.error.message });
     return;
   }
-
   // The rename IS the change, so the snapshot is just the two ids. Set before the attempt and only read
   // by the audit middleware on a <400 response, so a failed rename records nothing.
   req.auditSnapshots = { before: { id: oldId }, after: { id: parsed.data.newId } };
 
-  try {
-    const space = await renameSpace(oldId, parsed.data.newId);
-    res.json({ space });
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    if (err instanceof SpaceNameInUseError) {
-      // Typed, not matched on wording (Q-133): a refusal whose sentence changes must not fall through to a 500.
-      res.status(409).json({ error: msg, code: err.code });
-    } else if (msg.includes('not found')) {
-      res.status(404).json({ error: msg });
-    } else if (msg.includes('already exists')) {
-      res.status(409).json({ error: msg });
-    } else if (msg.includes('built-in')) {
-      res.status(400).json({ error: msg });
-    } else {
-      res.status(500).json({ error: msg });
-    }
-  }
+  // One mapping from a failed rename to its status, shared with the `space_rename` tool (Q-139).
+  const r = await renameSpaceAct(oldId, parsed.data);
+  if (r.status === 200) { res.json({ space: r.space }); return; }
+  res.status(r.status).json(r.code ? { error: r.error, code: r.code } : { error: r.error });
 });
 
 // POST /api/spaces/reorder

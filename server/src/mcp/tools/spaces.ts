@@ -11,6 +11,8 @@ import { spacePurpose } from '../../spaces/spaces.js';
 import { SPACE_PURPOSE_MAX, needsReindex } from '../../spaces/_shared.js';
 import { measureSpaceUsage } from '../../spaces/space-usage.js';
 import { spaceCollection } from '../../db/space-collection.js';
+import { renameSpaceAct } from '../../spaces/rename.js';
+import { toResult } from './networks.js';
 
 export const list_spacesTool: ToolHandler = {
   name: 'list_spaces',
@@ -231,6 +233,45 @@ export const space_metaTool: ToolHandler = {
       }],
       structuredContent: metaResult,
     };
+  },
+};
+
+/**
+ * Rename a space — the MCP door of `PATCH /api/spaces/:id/rename` (`Q-139`).
+ *
+ * It was classified as kept off the agent surface, a judgement no owner ruling stood behind, while the rule is that
+ * every capability has both doors and the rights matrix decides who uses it. Same caller (`spaceAdmin: true` is the
+ * dispatcher's per-space twin of the route's `requireAdminOrSpaceAdminMfaScoped`), same body, and the same answer
+ * and refusals, because both call `renameSpaceAct`.
+ */
+export const space_renameTool: ToolHandler = {
+  name: 'space_rename',
+  description: 'Rename the space named in `space` to `newId`: every collection, file and index moves, token rights for '
+    + 'the space move with it, and each network that carries it keeps syncing it under the name the network knows. '
+    + 'Needs instance-admin rights OR administering the space named in `space`. Same answer and refusals as '
+    + '`PATCH /api/spaces/:id/rename`: 409 when `newId` exists, or (with `code: space_name_in_use`) when another space '
+    + 'already syncs under that name in one of this instance\'s networks; 400 for a built-in space or an invalid id; '
+    + '404 for an unknown space. A connection opened before the rename still lists the old id until it reconnects.',
+  mutating: true,
+  spaceAdmin: true,
+  spaceRequired: true,
+  inputSchema: (s: ToolSchemas) => ({
+    type: 'object',
+    properties: {
+      space: s.requiredSpace,
+      newId: {
+        type: 'string', minLength: 1, maxLength: 40, pattern: '^[a-z0-9-]+$',
+        description: 'The new space id: lowercase letters, digits and hyphens, at most 40.',
+      },
+    },
+    required: ['space', 'newId'],
+    additionalProperties: false,
+  }),
+  async handle(ctx: ToolContext): Promise<ToolResult> {
+    const { args: a, callSpace } = ctx;
+    const r = await renameSpaceAct(callSpace, { newId: a['newId'] });
+    if (r.status === 200) ctx.recordChanges?.({ id: callSpace }, { id: r.space.id });
+    return toResult(r.status === 200 ? { status: 200, body: { space: r.space } } : r, `Space '${callSpace}' renamed.`);
   },
 };
 

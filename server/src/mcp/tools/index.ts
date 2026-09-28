@@ -1,6 +1,6 @@
 import type { ToolHandler } from './types.js';
 import { space_schema_layersTool, space_set_network_precedenceTool } from './schema-layers.js';
-import { list_spacesTool, space_statsTool, space_metaTool, update_spaceTool, schema_updateTool, save_spaceTool, delete_space_dataTool , list_tokensTool } from './spaces.js';
+import { list_spacesTool, space_statsTool, space_metaTool, update_spaceTool, space_renameTool, schema_updateTool, save_spaceTool, delete_space_dataTool , list_tokensTool } from './spaces.js';
 import { save_factTool, update_factTool, delete_factTool } from './fact.js';
 import { recallTool, find_similarTool } from './search.js';
 import { read_spillTool } from './read-spill.js';
@@ -68,6 +68,7 @@ export const ALL_TOOLS: ToolHandler[] = [
   create_dirTool,
   move_fileTool,
   update_spaceTool,
+  space_renameTool,
   schema_updateTool,
   save_spaceTool,
   space_reindexTool,

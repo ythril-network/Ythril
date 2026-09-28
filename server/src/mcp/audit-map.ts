@@ -68,6 +68,7 @@ export const MCP_TOOL_OPERATIONS: Record<string, string | string[] | null> = {
   save_bulk: 'bulk.write',
   ingest: 'brain.ingest',
   update_space: 'space.update',
+  space_rename: 'space.rename',
   schema_update: 'space.update',
   save_space: 'space.create',
   space_reindex: 'space.reindex',

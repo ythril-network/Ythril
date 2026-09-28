@@ -196,6 +196,9 @@ Authorization: Bearer <admin-token>
 
 `newId` must be lowercase alphanumeric + hyphens, 1-40 chars (`/^[a-z0-9-]+$/`).
 
+Instance admin, or a token administering the space (`spaceAdmin`), with `X-TOTP-Code` when MFA applies. MCP:
+`space_rename` with `{ "space", "newId" }` — the same caller, answer and refusals.
+
 The rename atomically:
 
 - Moves all MongoDB collections (facts, entities, edges, chrono, tombstones, files, etc.) to the new prefix.

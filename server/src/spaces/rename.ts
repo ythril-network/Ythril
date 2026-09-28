@@ -14,6 +14,8 @@ import type { Config, SpaceConfig } from '../config/types.js';
 import { PER_SPACE_WATERMARKS } from '../config/types-networks.js';
 import { retargetSpaceAliases, spaceNameInUseRefusal, SpaceNameInUseError } from '../sync/space-map.js';
 import { repairStaleSpaceIds, pendingOpConflictMessage, beginSpaceOp, endSpaceOp } from './_shared.js';
+import { RenameSpaceBody } from './body-schemas.js';
+import type { NetworkRefusalCode } from '../networks/refusal-codes.js';
 
 /** Physically move a space's MongoDB collections and file directories from
  *  {oldId}_* / files/oldId to {newId}_* / files/newId. Idempotent — after a partial
@@ -293,6 +295,32 @@ export async function renameSpace(oldId: string, newId: string): Promise<SpaceCo
     return await renameSpaceInner(oldId, newId);
   } finally {
     endSpaceOp();
+  }
+}
+
+/** A rename's answer as both doors give it: the renamed space, or the status and sentence of the refusal. */
+export type RenameSpaceResult =
+  | { status: 200; space: SpaceConfig }
+  | { status: 400 | 404 | 409 | 500; error: string; code?: NetworkRefusalCode };
+
+/**
+ * Rename a space from a request body — the ONE mapping from what `renameSpace` throws to what a caller is told
+ * (`Q-139`). `PATCH /api/spaces/:id/rename` and the `space_rename` tool both call this, so a refusal cannot answer
+ * 409 on one door and 500 on the other. Authorisation is each door's own guard, which runs before this.
+ */
+export async function renameSpaceAct(oldId: string, body: unknown): Promise<RenameSpaceResult> {
+  const parsed = RenameSpaceBody.safeParse(body);
+  if (!parsed.success) return { status: 400, error: parsed.error.message };
+  try {
+    return { status: 200, space: await renameSpace(oldId, parsed.data.newId) };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    // Typed, not matched on wording (Q-133): a refusal whose sentence changes must not fall through to a 500.
+    if (err instanceof SpaceNameInUseError) return { status: 409, error: msg, code: err.code };
+    if (msg.includes('not found')) return { status: 404, error: msg };
+    if (msg.includes('already exists')) return { status: 409, error: msg };
+    if (msg.includes('built-in')) return { status: 400, error: msg };
+    return { status: 500, error: msg };
   }
 }
 

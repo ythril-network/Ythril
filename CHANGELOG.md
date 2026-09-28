@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`space_rename` renames a space over MCP** (Q-139), the door `PATCH /api/spaces/:id/rename` lacked: instance admin
+  or administering the space, the same `{ space }` answer, and the same refusals — including `409` with
+  `code: space_name_in_use`. See [MCP → tools](docs/integration-guide/16-mcp.md).
 - **`degraded` reason `filter_window`**: a filtered answer that could not be completed says so, and returns what it
   found (Q-102). Treat an unknown reason as "degraded". **`ythril_recall_fresh_scan_capped_total`** counts fresh-write
   scans whose window held more records than `DUPE_FRESH_SCAN_CAP`.

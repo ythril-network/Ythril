@@ -172,7 +172,8 @@ Each space row carries only a gear/configure (⚙) button — there is no pencil
 
 ### Renaming a space
 
-Open the space's settings panel and go to the **Danger** tab to rename its ID. All data, files, token scopes, and network sync mappings are updated automatically.
+Open the space's settings panel and go to the **Danger** tab to rename its ID. All data, files, token scopes, and network sync mappings are updated automatically. An agent
+administering the space can do the same over MCP with the `space_rename` tool.
 
 A space in a network keeps syncing under the name the network knows it by, so members that joined before the rename see no change. A name another space already syncs under, in any network this instance belongs to, is refused before anything moves — the message names that space and the network; pick another name.
 

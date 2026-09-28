@@ -93,6 +93,7 @@ export const CAPABILITIES = [
   ['Spaces', 'list_spaces', 'GET /api/spaces'],
   ['Spaces', 'save_space', 'POST /api/spaces'],
   ['Spaces', 'update_space', 'PATCH /api/spaces/:id'],
+  ['Spaces', 'space_rename', 'PATCH /api/spaces/:id/rename'],
   ['Spaces', 'space_meta', 'GET /api/spaces/:id/meta'],
   ['Spaces', 'schema_update', 'PUT /api/spaces/:id/schema'],
   ['Spaces', 'space_schema_layers', 'GET /api/spaces/:id/schema-layers'],
@@ -199,8 +200,6 @@ export const NOT_A_CAPABILITY = new Map(Object.entries({
     + '`knowledge: read` while `space_meta` is `schema: read`, so they are not one call.',
   '/api/spaces/:id/activity/reset': 'clears that usage dashboard.',
   '/api/spaces/reorder': 'the order spaces appear in the UI sidebar.',
-  '/api/spaces/:id/rename': 'renaming a space moves every collection it owns. Space-admin, and a '
-    + 'destructive-adjacent operation deliberately kept off the agent surface.',
   '/api/spaces/:id/rebuild-indexes': 'rebuilds the Atlas search indexes — a repair for a broken index, '
     + 'which is an operator diagnosis rather than something an agent can know it needs.',
   '/api/spaces/:id/validate-schema': 'dry-runs a schema against stored records, for the schema editor.',
