@@ -135,7 +135,8 @@ export function parseTraverseOption(raw: unknown, maxDepth: number): TraversePar
     return {
       ok: false,
       error: `traverse has unknown field(s): ${unknown.join(', ')}. Allowed: ${TRAVERSE_OPTION_FIELDS.join(', ')}. `
-        + 'Note `limit` is not accepted here — in a recall the node cap comes from topK and the byte budget.',
+        + 'Note `limit` is not accepted here — in a recall the walk is bounded per match by the instance and the '
+        + 'answer by the byte budget, and each match comes with its whole graph or not at all.',
     };
   }
 
@@ -210,8 +211,8 @@ export function echoTraverse(opt: TraverseOption): number | TraverseOption {
  * reach one surface and not the other: there is one list, and both the acceptance and the advertisement come
  * out of it.
  *
- * `additionalProperties: false` is kept deliberately. `limit` is not accepted here — in a recall the node cap
- * comes from `topK` and the byte budget, and a traverse that could raise it would overrule the budget
+ * `additionalProperties: false` is kept deliberately. `limit` is not accepted here — in a recall the walk is
+ * bounded per match by the instance (`search-bounds.ts`) and the answer by the byte budget, and a traverse that could raise it would overrule the budget
  * governing the rest of the answer — and a schema that accepted any key would let it through.
  *
  * @param maxDepth the ceiling this door allows, so the schema and the parser quote the same number.

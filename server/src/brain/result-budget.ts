@@ -233,12 +233,22 @@ export function applyBudget<T>(results: readonly T[], budget: ResolvedBudget): B
  * however large, or it could never be read. The envelope's own braces cost 2, and each item a separating comma.
  */
 export function budgetMeter(budget: { chars: number; bytes: number | null }): {
-  admit(item: unknown): boolean; chars(): number; bytes(): number;
+  admit(item: unknown): boolean; charge(item: unknown): void; chars(): number; bytes(): number;
 } {
   let usedChars = 2;
   let usedBytes = 2;
   let admitted = 0;
   return {
+    /**
+     * Count something the answer carries that is NOT a row — a named left-out row (Q-126). Never refused: it
+     * describes rows already consumed, and leaving it out would make the answer silent about them. It still
+     * spends the budget, so the rows after it pay for it.
+     */
+    charge(item) {
+      const serialised = JSON.stringify(item);
+      usedChars += serialised.length + 1;
+      usedBytes += Buffer.byteLength(serialised, 'utf8') + 1;
+    },
     admit(item) {
       const serialised = JSON.stringify(item);
       const addChars = serialised.length + 1;
@@ -313,23 +323,126 @@ export async function budgetedEnvelope<T, S>(opts: {
   const outcome = applyBudget(page, opts.budget);
   const fields = budgetFields(outcome, opts.results.length, opts.budget, skip);
   if (outcome.truncated && opts.remainderDump === true) {
-    // A spill NEVER fails the read (Q-92): the answer already holds everything that fit and says where to
-    // continue, so a refused or failed spill costs the caller a convenience, not the answer.
-    let spill: S | null;
-    try {
-      spill = await opts.spillRemainder(outcome.remainder);
-    } catch (err) {
-      // `spillResultSet` reports its own failures and never throws; this guards any other spiller handed in,
-      // and says so rather than swallowing it.
-      log.warn(`Result spill failed: ${err instanceof Error ? err.message : String(err)}`);
-      spill = null;
-      fields['spillRefused'] = 'failed';
-    }
-    if (spill && typeof spill === 'object' && 'spillRefused' in spill) {
-      fields['spillRefused'] = (spill as { spillRefused: unknown }).spillRefused;
-    } else if (spill) {
-      fields['remainder'] = spill;
-    }
+    await keepRemainder(fields, () => opts.spillRemainder(outcome.remainder));
   }
   return { results: outcome.returned, fields };
+}
+
+/**
+ * Keep a remainder and report it on the answer's `fields` — as `remainder`, or as `spillRefused` with its reason.
+ *
+ * **A spill NEVER fails the read** (Q-92): the answer already holds everything that fit and says where to continue,
+ * so a refused or failed spill costs the caller a convenience, not the answer. That guard is the part a hand-written
+ * copy drops, which is why both envelopes reach it here rather than each writing its own try/catch.
+ */
+async function keepRemainder<S>(fields: Record<string, unknown>, spill: () => Promise<S | null>): Promise<void> {
+  let kept: S | null;
+  try {
+    kept = await spill();
+  } catch (err) {
+    // `spillResultSet` reports its own failures and never throws; this guards any other spiller handed in,
+    // and says so rather than swallowing it.
+    log.warn(`Result spill failed: ${err instanceof Error ? err.message : String(err)}`);
+    kept = null;
+    fields['spillRefused'] = 'failed';
+  }
+  if (kept && typeof kept === 'object' && 'spillRefused' in kept) {
+    fields['spillRefused'] = (kept as { spillRefused: unknown }).spillRefused;
+  } else if (kept) {
+    fields['remainder'] = kept;
+  }
+}
+
+/** A result row that was left out because it could not be delivered whole, named so the caller is told. */
+export interface IncompleteRow {
+  _id: string;
+  spaceId: string;
+  type: string;
+  /** Its name, title or a one-line summary — what a reader recognises it by. */
+  name: string;
+  reason: string;
+}
+
+/** At most this many left-out rows are named in one answer; `incompleteCount` counts them all. */
+export const MAX_NAMED_INCOMPLETE_ROWS = 50;
+
+/**
+ * The same admission rule, for rows that are BUILT one at a time — a traversal's rows, whose graphs are walked
+ * only while the budget can still take them (Q-126). One meter, so there is one statement of what fits.
+ *
+ * Row by row, in rank order from `skip`:
+ * - a whole row is admitted while it fits, and the answer stops at the first that does not (`truncatedBy:
+ *   'budget'`) — the first row of a page always fits, exactly as in `applyBudget`;
+ * - a row that cannot be delivered whole is consumed and NAMED (`incompleteRows`, `incompleteCount`), never
+ *   shortened — the naming is charged to the budget;
+ * - a row the call's work bounds did not reach ends the answer (`truncatedBy: 'walk_budget' | 'deadline'`).
+ *
+ * `nextSkip` is always the index of the first row not consumed, so `returned + incompleteCount +
+ * (count - nextSkip) = count - skip` holds on every page and paging always moves forward.
+ *
+ * With `remainderDump: true` and a budget cut, the rows after the cut are built too, within the same work
+ * bounds, and handed to `spillRemainder` — whole rows only, with the left-out ones named beside them.
+ */
+export async function budgetedRowsEnvelope<T, S>(opts: {
+  total: number;
+  budget: ResolvedBudget;
+  skip?: number;
+  remainderDump?: boolean;
+  build: (index: number, first: boolean) => Promise<{ row: T } | { incomplete: IncompleteRow } | { stop: string }>;
+  spillRemainder: (remainder: T[], about: { incompleteRows: IncompleteRow[]; incompleteCount: number; stoppedAt?: number })
+    => Promise<S | null>;
+}): Promise<{ results: T[]; fields: Record<string, unknown> }> {
+  const skip = opts.skip ?? 0;
+  const meter = budgetMeter(opts.budget);
+  const returned: T[] = [];
+  const named: IncompleteRow[] = [];
+  let incompleteCount = 0;
+  let nextSkip: number | undefined;
+  let truncatedBy: string | undefined;
+  let pending: T | undefined;
+
+  for (let i = skip; i < opts.total; i++) {
+    const built = await opts.build(i, i === skip);
+    if ('stop' in built) { nextSkip = i; truncatedBy = built.stop; break; }
+    if ('incomplete' in built) {
+      incompleteCount++;
+      if (named.length < MAX_NAMED_INCOMPLETE_ROWS) { named.push(built.incomplete); meter.charge(built.incomplete); }
+      continue;
+    }
+    if (!meter.admit(built.row)) { nextSkip = i; truncatedBy = 'budget'; pending = built.row; break; }
+    returned.push(built.row);
+  }
+
+  const fields: Record<string, unknown> = {
+    returned: returned.length,
+    count: opts.total,
+    truncated: nextSkip !== undefined,
+    budgetChars: opts.budget.chars,
+    budgetBytes: opts.budget.bytes,
+    charsReturned: meter.chars(),
+    bytesReturned: meter.bytes(),
+    ...(nextSkip !== undefined ? { nextSkip, truncatedBy } : {}),
+    ...(incompleteCount > 0 ? { incompleteCount, incompleteRows: named } : {}),
+  };
+
+  if (pending !== undefined && opts.remainderDump === true && nextSkip !== undefined) {
+    const remainder: T[] = [pending];
+    const remNamed: IncompleteRow[] = [];
+    let remIncomplete = 0;
+    let stoppedAt: number | undefined;
+    for (let j = nextSkip + 1; j < opts.total; j++) {
+      const built = await opts.build(j, false);
+      if ('stop' in built) { stoppedAt = j; break; }
+      if ('incomplete' in built) {
+        remIncomplete++;
+        if (remNamed.length < MAX_NAMED_INCOMPLETE_ROWS) remNamed.push(built.incomplete);
+        continue;
+      }
+      remainder.push(built.row);
+    }
+    await keepRemainder(fields, () => opts.spillRemainder(remainder, {
+      incompleteRows: remNamed, incompleteCount: remIncomplete, ...(stoppedAt !== undefined ? { stoppedAt } : {}),
+    }));
+  }
+  return { results: returned, fields };
 }

@@ -143,9 +143,11 @@ async function linkedRecordsFromRows(
   mid: string, rows: readonly LinkEnd[], wanted: readonly LinkClass[], remaining: number | undefined,
   attributedOnly: ReadonlySet<LinkClass>,
 ): Promise<FoundRecords> {
-  // A cursor that came back FULL is the case that hides: the database stopped reading, so there may be
-  // more behind it — and that is true however many of these survive the class filter and the visited set.
-  const capped = remaining !== undefined && rows.length >= remaining;
+  // A cursor that came back PAST the budget is the case that hides: the database had more behind it — and that is
+  // true however many of these survive the class filter and the visited set. The caller asks for one row more
+  // than `remaining` as the probe, and only `remaining` of them are used.
+  const capped = remaining !== undefined && rows.length > remaining;
+  if (capped) rows = rows.slice(0, remaining);
 
   const byPair = new Map<string, LinkClass>();
   for (const c of wanted) byPair.set(`${c.kind}>${c.toKind}`, c);
@@ -256,8 +258,11 @@ export async function linkedRecordsAtFrontier(
      * its pre-upgrade links were only ever in the arrays this release removed — see `assertLinkRecords`.
      */
     assertLinkRecords(mid);
-    const rows = await linkedRecordsFromRows(
-      mid, await linksPointingAt(mid, frontier, remaining), wanted, remaining, attributedOnly);
+    // One row MORE than the budget is the probe (Q-126): a cursor that stops at exactly `remaining` cannot tell
+    // "there were exactly that many" from "there were more", and a walk that reports the first as cut drops a
+    // whole result row that was complete.
+    const pointing = await linksPointingAt(mid, frontier, remaining === undefined ? undefined : remaining + 1);
+    const rows = await linkedRecordsFromRows(mid, pointing, wanted, remaining, attributedOnly);
     if (rows.capped) scanCapped = true;
 
     for (const { cls, doc, via } of rows.found) {
@@ -357,8 +362,9 @@ export async function entitiesLinkedFromRecords(
        *
        * Per class it was six queries plus six scope reads. See `linksPointingAt` for what that measured.
        */
-      const rows = await linksStartingFrom(mid, recordIds, remaining);
-      if (remaining !== undefined && rows.length >= remaining) scanCapped = true;
+      // `+ 1` is the probe, as in `linkedRecordsAtFrontier`: exactly `remaining` rows is a complete read.
+      let rows = await linksStartingFrom(mid, recordIds, remaining === undefined ? undefined : remaining + 1);
+      if (remaining !== undefined && rows.length > remaining) { scanCapped = true; rows = rows.slice(0, remaining); }
 
       const byPair = new Map<string, LinkClass>();
       for (const c of wanted) byPair.set(`${c.kind}>${c.toKind}`, c);

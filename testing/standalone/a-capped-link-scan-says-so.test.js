@@ -44,7 +44,7 @@ const EDGES = 'server/src/brain/edges.ts';
  * production code rather than one moved module.
  */
 const SEEDS = 'server/src/brain/recall-seed-traversal.ts';
-const SPILL = 'server/src/brain/graph-spill.ts';
+const ROWS = 'server/src/brain/row-graphs.ts';
 
 /*
  * THE READING FUNCTIONS, which is not the same list as the two exported scans.
@@ -80,19 +80,31 @@ describe('a bounded scan reports that it stopped early', () => {
        * limit was spent on records that were then discarded, which is the reported failure.
        */
       /*
-       * `>=` is accepted as well as `===`, and on the link-record path it is REQUIRED rather than tolerated.
+       * THE PROBE (Q-126). The cursor is asked for ONE row more than the budget, so "more rows than the
+       * budget came back" is the test — strictly greater. It replaced `length >= remaining`, which could not
+       * tell a read that ended exactly at the budget from one that stopped there, and so called every
+       * exactly-full neighbourhood capped. Under the whole-row rule a capped scan LEAVES THE ROW OUT, so that
+       * false positive now costs a caller a record rather than a flag.
        *
-       * There the bound is spent on LINK ROWS and the array being measured holds RECORDS, which is the
-       * smaller number as soon as two rows name the same record. An equality test would then be false on
-       * exactly the dense neighbourhoods the bound exists for, and the answer would come back short and
-       * flagged complete — the failure this whole gate was written about, arriving through the new path.
+       * Measured on the LINK ROWS, before they are resolved to records: two rows naming one record would make
+       * the record count the smaller number on exactly the dense neighbourhoods the bound exists for.
        */
       const body = bodyOf(read(FRONTIER), fn);
-      // `remaining` in the exported scans, `left` in the per-class helper — one bound under two names.
-      assert.match(body, /length\s*(===|>=)\s*(remaining|left)|(remaining|left)\s*(===|<=)\s*\w+\.length/,
-        `${fn} does not notice a cursor that came back full, which is the case the bound actually hits`);
+      assert.match(body, /rows\.length\s*>\s*remaining/,
+        `${fn} does not notice a cursor that came back over its budget, which is the case the bound actually hits`);
+      assert.doesNotMatch(body, /length\s*>=\s*remaining/,
+        `${fn} counts an exactly-full read as capped again, and a complete row would be left out`);
     });
   }
+
+  it('each exported scan asks its cursor for the probe row', () => {
+    // Without the `+ 1` the strict test above can never fire: a cursor limited to `remaining` returns at
+    // most `remaining`, so every capped read would be reported complete.
+    const src = read(FRONTIER);
+    for (const fn of EXPORTED) {
+      assert.match(bodyOf(src, fn), /remaining \+ 1/, `${fn} does not ask for the probe row`);
+    }
+  });
 
   it('both scans are covered — neither is left as the weaker copy', () => {
     // One rule, several implementations, the weaker winning silently is this repo's signature defect, and
@@ -160,10 +172,13 @@ describe('and the caller turns that into a truncation the API states', () => {
   });
 
   it('the recall path carries it too, so both surfaces agree', () => {
-    // REST and MCP read the same `spill`, so the fix has to land where they share it rather than on either
-    // door — otherwise `graphTruncated` would mean different things depending on which client was used.
-    assert.match(bodyOf(read(SEEDS), 'traverseRecallSeeds'), /walk\.scanCapped\)\s*scanCapped = true/,
-      'the recall traversal drops the signal, so a recall reports a short graph as a whole one');
+    // Every traversing door answers through the one row walker, so the fix lands where they share it rather
+    // than on either door — otherwise a short graph would be reported by one client and not the other.
+    // Q-126: a row whose scan stopped reading is not returned short; it is left out and named `link_scan`.
+    assert.match(bodyOf(read(ROWS), 'whyRowIsShort'), /walk\.scanCapped\)\s*return 'link_scan'/,
+      'the row judgement drops the signal, so a recall returns a short graph as a whole one');
+    assert.match(bodyOf(read(ROWS), 'rowGraphWalker'), /const short = whyRowIsShort\(walk,[^;]*;\s*if \(short\) return \{ incomplete: short \}/,
+      'the row walker does not act on the judgement, so a short row is returned anyway');
 
     /*
      * BOTH of the recall walk's scans, and they are separate code paths: a seed pre-pass that follows a
@@ -174,9 +189,5 @@ describe('and the caller turns that into a truncation the API states', () => {
     const seeds = bodyOf(read(SEEDS), 'traverseFromSeeds');
     assert.equal((seeds.match(/[Cc]apped\)\s*capped = true/g) ?? []).length, 2,
       'one of the recall walk\'s two scans does not raise the flag — the pre-pass and the per-hop scan both must');
-
-    assert.match(bodyOf(read(SPILL), 'buildGraphWithSpill'), /truncated:\s*scanCapped/,
-      'a graph short because a scan stopped reading is still reported complete: there is no spill file to '
-      + 'derive the flag from, because the missing records are the ones never read');
   });
 });

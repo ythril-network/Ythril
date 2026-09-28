@@ -40,6 +40,13 @@ const read = p => stripComments(readFileSync(p, 'utf8'));
  * graph branch, so the plainest large call — `topK: 100`, no traversal — returned everything uncapped. It
  * happened twice, on both doors, which is why the branches are counted rather than assumed.
  */
+/**
+ * The result paths that go through a shared budget: the flat envelope, or — for a traversing answer since
+ * Q-126 — `traversedAnswer`, which budgets whole rows through `budgetedRowsEnvelope`. Either one is a bounded
+ * path; a path through neither returns what it has.
+ */
+const budgetedPaths = src => (src.match(/budgetedEnvelope\(\{|traversedAnswer\(\{/g) ?? []).length;
+
 function expectedSites(name, src) {
   if (name === 'MCP') return 4;
   return 2 * ['/recall', '/similar']
@@ -171,7 +178,7 @@ describe('the remainder is written out, with a TTL', () => {
     // whatever the number is spelled as — so that is what is refused.
     for (const [name, src] of [['REST', rest], ['MCP', mcp]]) {
       const floor = expectedSites(name, src);
-      assert.ok((src.match(/budgetedEnvelope\(\{/g) ?? []).length >= floor,
+      assert.ok(budgetedPaths(src) >= floor,
         `${name} must bound every result path through the shared budget rather than returning what it has `
         + `— ${floor} path(s) expected`);
       // A CONSTANT second argument is the tell: `slice(0, SPILL_INLINE_RESULTS)` and `slice(0, 3)` both cut
@@ -190,7 +197,8 @@ describe('the remainder is written out, with a TTL', () => {
     const restSrc = read('server/src/api/brain/search.ts');
     const mcpSrc = read('server/src/mcp/tools/search.ts');
     for (const [name, src] of [['REST', restSrc], ['MCP', mcpSrc]]) {
-      const callbacks = (src.match(/spillRemainder: remainder => spillResultSet\(\{/g) ?? []).length;
+      // `(remainder, about)` on a traversing path: `about` names the rows left out of the remainder too.
+      const callbacks = (src.match(/spillRemainder: (remainder|\(remainder, about\)) => spillResultSet\(\{/g) ?? []).length;
       const remainders = (src.match(/results: remainder,/g) ?? []).length;
       const want = expectedSites(name, src);
       assert.equal(callbacks, want, `${name}: expected ${want} spill callback(s), found ${callbacks}`);
@@ -211,7 +219,7 @@ describe('the remainder is written out, with a TTL', () => {
      */
     for (const [name, src] of [['REST', read('server/src/api/brain/search.ts')],
                                ['MCP', read('server/src/mcp/tools/search.ts')]]) {
-      const envelopes = (src.match(/budgetedEnvelope\(\{/g) ?? []).length;
+      const envelopes = budgetedPaths(src);
       const skips = (src.match(/skip: paging\.skip,/g) ?? []).length;
       const dumps = (src.match(/remainderDump: paging\.remainderDump,/g) ?? []).length;
       assert.equal(skips, envelopes,
@@ -250,6 +258,16 @@ describe('the remainder is written out, with a TTL', () => {
       'the skip must be applied inside the envelope, or `count` stops reporting the total');
     assert.match(budget, /budgetFields\(outcome, opts\.results\.length, opts\.budget, skip\)/,
       'and the total handed to budgetFields must be the pre-skip length');
+
+    // The whole-row envelope a traversing answer is built with holds the same two rules (Q-126): the
+    // continuation whenever it truncated, and the dump only on an explicit true.
+    const rows = bodyOf(budget, 'budgetedRowsEnvelope', 'the whole-row envelope');
+    assert.match(rows, /truncated: nextSkip !== undefined,/, 'truncated must be exactly "a continuation exists"');
+    assert.match(rows, /\.\.\.\(nextSkip !== undefined \? \{ nextSkip, truncatedBy \} : \{\}\)/,
+      'a truncated traversing answer must say where to continue and which bound stopped it');
+    assert.match(rows, /opts\.remainderDump === true && nextSkip !== undefined/,
+      'the traversing dump must be gated on an explicit true');
+    assert.match(rows, /count: opts\.total,/, '`count` must be the pre-skip total');
   });
 
   it('`count` still reports the real total, not the sample', () => {

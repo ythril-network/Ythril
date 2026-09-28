@@ -4,7 +4,7 @@ import { groupRecallResults, chunkLabel, passageText, relatedOf, orderingOf } fr
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
-import { QueryCollection, QueryResult, RecallResult, RecallResponse, RECORD_TYPES, BRAIN_COLLECTIONS } from '../../core/api.types';
+import { QueryCollection, QueryResult, RecallResult, RECORD_TYPES, BRAIN_COLLECTIONS } from '../../core/api.types';
 import { BrainApi } from '../../core/brain-api.service';
 import { PhIconComponent } from '../../shared/ph-icon.component';
 import { RecallFormComponent, type RecallFormState, type RecallTypeOpt } from './recall-form.component';
@@ -12,6 +12,7 @@ import { JsonTreeComponent } from '../../shared/json-tree.component';
 import { recallRequestFrom } from './recall-request';
 import { BrainStore } from './brain-store.service';
 import { type ResultSpillLink } from '../../core/read-spill';
+import { type IncompleteRow } from '../../core/recall-graph-report';
 import { SpillEndingComponent } from './spill-ending.component';
 
 /**
@@ -241,6 +242,11 @@ import { SpillEndingComponent } from './spill-ending.component';
                 <div class="alert alert-warning" style="margin-top:12px;">
                   <div><strong>{{ 'brain.query.truncated.title' | transloco: { returned: t.returned, count: t.count } }}</strong></div>
                   <div style="font-size:12px; margin-top:4px;">{{ 'brain.query.truncated.body' | transloco }}</div>
+                  <!-- WHICH bound stopped it, when it was the graph walk rather than the byte budget: the remedy
+                       differs (a shallower walk, not a bigger answer). -->
+                  @if (t.by === 'walk_budget' || t.by === 'deadline') {
+                    <div style="font-size:12px; margin-top:4px;">{{ 'brain.query.truncated.by.' + t.by | transloco }}</div>
+                  }
                   <!-- ONE ENDING, never two that disagree (see SpillEndingComponent). -->
                   <app-spill-ending [link]="recallRemainder()" [refused]="spillRefused()"
                     labelKey="brain.query.remainder.download" [labelParams]="{ matches: recallRemainder()?.matches }"
@@ -251,25 +257,27 @@ import { SpillEndingComponent } from './spill-ending.component';
               <!-- A SEARCH THAT MATCHED NOTHING SAYS SO. Without this the panel showed exactly what it
                    shows before the first search — nothing — so a reader could not tell an answered question
                    from an unasked one, and the natural reading is that the button did not work. -->
-              <!-- THE WALK STOPPED SHORT, which is a different fact from the answer being shortened: what is
-                   missing here are records the traversal never read. Placed beside the truncation notice and
-                   above the results for the same reason — a reader who reaches the end has already concluded
-                   the neighbourhood was complete. The download is offered only when there IS one: a bounded
-                   link scan leaves nothing complete to keep, and a refused spill keeps nothing.
-                   A BUTTON, not a link: the spill is read with the caller's token and page by page, and an
-                   anchor can do neither. -->
-              @if (graphShort(); as g) {
-                <div class="alert alert-warning" style="margin-top:12px;">
-                  <div><strong>{{ 'brain.query.graphShort.title' | transloco: { nodes: g.nodes } }}</strong></div>
-                  <div style="font-size:12px; margin-top:4px;">{{ 'brain.query.graphShort.body' | transloco }}</div>
-                  <app-spill-ending [link]="g.complete ?? null" [refused]="spillRefused()"
-                    labelKey="brain.query.graphShort.download" [labelParams]="{ nodes: g.complete?.nodes }"
-                    [extraKey]="g.complete?.ceilingHit ? 'brain.query.graphShort.ceilingHit' : null"
-                    fallbackKey="brain.query.graphShort.unread" />
+              <!-- MATCHES LEFT OUT, because their graph could not be read whole (Q-126). A match is shown with
+                   its WHOLE graph or not at all, so nothing above is short — but a match that exists and is not
+                   shown must be named, or a reader concludes it does not exist. Placed above the results for the
+                   same reason as the truncation notice. -->
+              @if (leftOut(); as lo) {
+                <div class="alert alert-warning" role="status" aria-live="polite" style="margin-top:12px;">
+                  <div><strong>{{ 'brain.query.leftOut.title' | transloco: { count: lo.count } }}</strong></div>
+                  <div style="font-size:12px; margin-top:4px;">{{ 'brain.query.leftOut.body' | transloco }}</div>
+                  <ul class="left-out" style="font-size:12px; margin:6px 0 0 18px;">
+                    @for (row of lo.rows; track row._id) {
+                      <li>{{ row.name }} ({{ row.type }}, {{ row.spaceId }}) — {{ 'brain.query.leftOut.reason.' + row.reason | transloco }}</li>
+                    }
+                  </ul>
+                  @if (lo.count > lo.rows.length) {
+                    <div style="font-size:12px; margin-top:4px;">{{ 'brain.query.leftOut.more' | transloco: { more: lo.count - lo.rows.length } }}</div>
+                  }
                 </div>
               }
 
-              @if (recallRan() && !recallResults().length && !recallError()) {
+              <!-- Not when matches were LEFT OUT: those are matches, so "no matches" would be false. -->
+              @if (recallRan() && !recallResults().length && !recallError() && !leftOut()) {
                 <div class="query-empty">{{ 'brain.query.noMatches' | transloco }}</div>
               }
 
@@ -577,7 +585,7 @@ export class QueryTabComponent {
    * left out: they are for a caller tuning a request programmatically, and a byte count in the interface is a
    * number nobody can do anything with.
    */
-  recallTruncated = signal<{ returned: number; count: number } | null>(null);
+  recallTruncated = signal<{ returned: number; count: number; by: string | null } | null>(null);
 
   /** Type names offered by the recall "filter by type" dropdown (F5): schema type
    *  names for the space UNION the distinct `type` values present in the loaded
@@ -618,7 +626,7 @@ export class QueryTabComponent {
   recallRaw = signal<unknown>(null);
 
   /** Set when the traversal stopped short, with the spill if the instance kept one. */
-  graphShort = signal<{ nodes: number; complete: RecallResponse['graphComplete'] | null } | null>(null);
+  leftOut = signal<{ count: number; rows: IncompleteRow[] } | null>(null);
   /** The matches that did not fit, kept for this token when the search asked (`remainderDump`). */
   recallRemainder = signal<ResultSpillLink | null>(null);
   /** Why the answer's spill was NOT kept, as the server said it. */
@@ -785,23 +793,19 @@ export class QueryTabComponent {
         // and showing only the results is what made this panel teach a shape the product does not have.
         this.recallRaw.set(res);
         /*
-         * A SHORT GRAPH IS ITS OWN FACT, not a shade of `truncated`.
+         * A LEFT-OUT MATCH IS ITS OWN FACT, not a shade of `truncated`.
          *
-         * `truncated` is the byte budget dropping whole matches off the end of the ranking. This is the WALK
-         * stopping, so what is missing are records it never read — and the panel showed `graphNodes` with
-         * nothing to say whether that was the whole neighbourhood or the first few of forty.
-         *
-         * `graphComplete` may be absent while this is true: a bounded link scan leaves nothing complete to
-         * write, because the missing records are precisely the ones never read. So the link is optional and
-         * its absence is not an error.
+         * `truncated` is the answer stopping before the end of the ranking. These are matches CONSUMED and not
+         * shown, because their graph could not be read whole — the rows after them are still here. Keyed on
+         * the count, not on `graphTruncated`, which means the same thing and carries nothing to show.
          */
-        this.graphShort.set(res.graphTruncated === true
-          ? { nodes: res.graphNodes ?? 0, complete: res.graphComplete ?? null }
+        this.leftOut.set((res.incompleteCount ?? 0) > 0
+          ? { count: res.incompleteCount!, rows: res.incompleteRows ?? [] }
           : null);
         // `=== true` rather than truthy: the field is optional on the type (an older server sends none), and an
         // absent one must read as "not truncated" rather than as "unknown".
         this.recallTruncated.set(res.truncated === true
-          ? { returned: res.returned ?? res.results.length, count: res.count }
+          ? { returned: res.returned ?? res.results.length, count: res.count, by: res.truncatedBy ?? null }
           : null);
         this.recallRemainder.set(res.remainder ?? null);
         this.spillRefused.set(res.spillRefused ?? null);
@@ -816,7 +820,7 @@ export class QueryTabComponent {
     this.recallRan.set(false);
     this.recallResults.set([]);
     this.recallRaw.set(null);
-    this.graphShort.set(null);
+    this.leftOut.set(null);
     this.recallError.set('');
     this.recallTruncated.set(null);
     this.resetSpill();

@@ -33,7 +33,6 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { routeBody, delegatesCleanly } from './_delegating-routes.mjs';
 import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
 import { statementAround } from './_structural-window.mjs';
@@ -42,6 +41,10 @@ const { countGraphNodes } = await import('../../server/dist/brain/graph-spill.js
 
 /** REST first: the derivation below subtracts the REST routes that no longer build their own response. */
 const DOORS = ['server/src/api/brain/search.ts', 'server/src/mcp/tools/search.ts'];
+/** Where every traversing answer is built, and so where its count is taken (Q-126). */
+const BUILDER = 'server/src/brain/traversed-answer.ts';
+/** Every file that emits a count: the builder, plus any door that still does it itself. */
+const EMITTERS = [...DOORS, BUILDER];
 
 describe('countGraphNodes reads both doors shapes', () => {
   it('counts a REST-shaped payload, where _graph sits beside the match', () => {
@@ -61,36 +64,28 @@ describe('countGraphNodes reads both doors shapes', () => {
 });
 
 describe('every door counts what it sent', () => {
-  it('finds a report site for every surface that BUILDS a response, so an empty sweep cannot pass', () => {
+  it('every traversing door reports the count from the ONE builder, and none counts for itself', () => {
     /*
-     * The expected count is DERIVED, not written down, and the reason is what happened to it.
+     * Q-126 moved the count into `traversedAnswer`, the builder every traversing answer goes through, so
+     * there is one emitter rather than one per door and per capability. The doors are derived — every
+     * source that calls the builder — with a floor, because an empty sweep passes every loop over it.
      *
-     * It read `4` — recall and find_similar on each of two doors — and went red when
-     * `POST /api/brain/recall` collapsed onto `callTool`. That route builds no response any more, so it
-     * emits no `graphNodes` and needs none: the count was right and then the world changed under it. The
-     * obvious repair is to write `3`, and the next collapse makes that wrong too.
-     *
-     * So: two capabilities on two doors, MINUS the REST routes that delegate. A gate that derives its own
-     * number cannot be made stale by a refactor that is doing the right thing.
+     * A door that emits `graphNodes` itself again is a second count that can describe a different set of
+     * records than the payload, which is the defect this file is about.
      */
-    const restSrc = stripComments(readFileSync(DOORS[0], 'utf8'));
-    const delegated = ['/recall', '/similar']
-      .filter(p => { const b = routeBody(restSrc, p); return b && delegatesCleanly(b, `POST ${p}`); });
-    const expected = 4 - delegated.length;
-
-    const sites = DOORS.flatMap(d =>
-      [...stripComments(readFileSync(d, 'utf8')).matchAll(/graphNodes:/g)].map(m => `${d}@${m.index}`));
-    assert.equal(
-      sites.length, expected,
-      `expected ${expected} graphNodes emitters — recall and find_similar on each door, less the `
-      + `${delegated.length} REST route(s) that delegate (${delegated.join(', ') || 'none'}) — found `
-      + `${sites.length}. The scan has broken, or a fifth search surface exists and needs the same treatment.`,
-    );
+    const builder = stripComments(readFileSync(BUILDER, 'utf8'));
+    assert.equal((builder.match(/graphNodes:/g) ?? []).length, 1, 'the builder must emit the count exactly once');
+    const doors = DOORS.filter(d => /traversedAnswer\(/.test(stripComments(readFileSync(d, 'utf8'))));
+    assert.ok(doors.length >= 2, `only ${doors.length} door(s) answer through the builder; REST and MCP are the minimum`);
+    for (const d of doors) {
+      assert.doesNotMatch(stripComments(readFileSync(d, 'utf8')), /graphNodes:/,
+        `${d} emits a graphNodes of its own beside the builder's`);
+    }
   });
 
   it('none of them reports the pre-budget total', () => {
     const stale = [];
-    for (const door of DOORS) {
+    for (const door of EMITTERS) {
       const src = stripComments(readFileSync(door, 'utf8'));
       for (const m of src.matchAll(/graphNodes:/g)) {
         const stmt = statementAround(src, m.index, `${door} graphNodes`);
@@ -112,7 +107,7 @@ describe('every door counts what it sent', () => {
      * alike, the compiler would have been happy and each door would have reported its sibling endpoint's
      * count, which is exactly the class of bug this whole file is about.
      */
-    for (const door of DOORS) {
+    for (const door of EMITTERS) {
       const src = stripComments(readFileSync(door, 'utf8'));
       for (const m of src.matchAll(/graphNodes:\s*countGraphNodes\((\w+)\.results\)/g)) {
         const envelope = m[1];
@@ -129,10 +124,14 @@ describe('every door counts what it sent', () => {
   it('the count is taken AFTER the budget, never before it', () => {
     // Counting the array handed TO `budgetedEnvelope` would reproduce the defect with a different expression:
     // the point is not which function counts, it is which array.
-    for (const door of DOORS) {
+    for (const door of EMITTERS) {
       const src = stripComments(readFileSync(door, 'utf8'));
       for (const m of src.matchAll(/countGraphNodes\((\w+)\.results\)/g)) {
-        const decl = src.indexOf(`const ${m[1]} = await budgetedEnvelope(`);
+        // Either budget: the flat one, or the whole-row one a traversing answer is built with.
+        const decl = Math.max(
+          src.indexOf(`const ${m[1]} = await budgetedEnvelope(`),
+          src.indexOf(`const ${m[1]} = await budgetedRowsEnvelope<`),
+        );
         assert.notEqual(
           decl, -1,
           `${door} counts \`${m[1]}.results\`, which is not the output of a budgeted envelope — so the count `

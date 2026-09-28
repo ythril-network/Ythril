@@ -28,6 +28,7 @@ where the detail lives so nothing here becomes the second source of truth.
 | [01](decisions/01-pdfium-not-pymupdf.md) | PDF and office rasterisation uses **PDFium**, not PyMuPDF | swapping in PyMuPDF for its nicer API, and taking AGPL-3.0 into a redistributed image |
 | [02](decisions/02-two-layer-ssrf-defence.md) | SSRF is checked **twice** — a string check at config time, a DNS-resolved check at use time | deleting the "redundant" second check, reopening DNS-rebinding and redirect pivots |
 | [03](decisions/03-no-runtime-model-downloads.md) | The published image **may not fetch a model at runtime** | "fixing" a failed model load by letting it download, which silently sends an air-gapped operator's IP to a third party |
+| [04](decisions/04-a-result-row-is-whole-or-absent.md) | A search result row is **whole or absent**, and nothing is spilled unasked | a node cap or spill threshold below the byte budget that shortens a row "to keep more matches" |
 
 ## Format
 

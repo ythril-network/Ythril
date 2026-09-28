@@ -323,9 +323,8 @@ same as a reranker scoring nothing. The reranking model scores the top 100 candi
 the rest after them, labelled with the score that placed them, because a reranked result always ranks above
 one the model did not read.
 
-**If a graph walk stops short, the panel says so** and offers the whole graph as a download where the
-instance was able to keep one. What is missing from a short graph are records the walk never read; the
-results themselves are unaffected.
+**If a match's graph could not be read whole, the panel names the match** and why, instead of showing it with
+part of its graph. Every match that is shown carries all of its graph.
 
 **You can create a record and its relationships in one go.** Anything that writes a fact, an entity or a
 timeline entry — the app, the API, or an AI assistant — can attach it to other records in the same action,
@@ -381,18 +380,16 @@ the same answer. Two uses, and the second is the reason it is there:
   - **Only these edge labels** — follow just these relationship types, comma-separated. This matters most on a space where a few records are connected to almost everything: an unnarrowed hop off one of those returns whichever neighbours fitted, and nothing distinguishes that from a deliberate answer.
 
   **The walk follows edges only, unless you ask for more.** A fact, timeline entry or file that names an entity is related to it — but that link is a field on the record, not an edge, so the hops above do not follow it. Three checkboxes turn each kind on: **Also return chrono entries / facts / files reached**. They are off by default because a search answer has a size budget and each match is counted together with everything hanging off it, so records nobody asked for are paid for in answers that no longer fit. With one on, a match that is itself a fact also stops coming back with an empty neighbourhood — the walk starts from the entities that fact names.
-- **When the surroundings do not fit** — a search that reaches more connected records than it can show returns
-  the ones nearest your matches and keeps the *whole* neighbourhood for you to download — for you alone, for up
-  to a day, and possibly less if you run many large searches. Nothing is written into the space. The result says
-  both: how many it showed, and where the complete set is. A short graph would otherwise read as "this record
-  has few relationships", which is a statement about your data rather than about the search. If the whole
-  neighbourhood could not be kept, the result is still marked short, says why, and offers no download.
+- **When the surroundings do not fit** — every match you get comes with its *whole* neighbourhood, to the
+  number of hops you asked for, or it does not come at all. A match whose neighbourhood is too large to walk,
+  whose links could not all be read, or that ran out of time is **left out**, and the panel names it above the
+  results with the reason — so you know it exists, and a short graph never reads as "this record has few
+  relationships". Narrowing the edge labels or asking for fewer hops brings it back whole. The other matches
+  are unaffected.
 
-  **Sometimes there is no complete set to offer, and the result says that too.** Following the records that
-  merely *name* an entity is bounded per hop, so a dense space can use up a hop's budget on records it has
-  already shown. The neighbourhood is then genuinely partial — the rest was never read, so there is nothing to
-  keep — and the result is marked short with no download beside it. Narrowing the search, or asking
-  for fewer hops, is what makes it whole.
+  **A search also has one walk budget and one time limit.** When a search runs out of either, it stops at the
+  last whole match and says so in the shortened-answer notice, the same way it does when the answer is too big.
+  Nothing is written anywhere unless you tick **Keep what did not fit**.
 - **When the answer itself does not fit** — a search result is also bounded by SIZE, not only by `topK`. Ask
   for a hundred matches with their surroundings and the answer can be larger than anything that should arrive
   in one piece, so what fits comes back in full and the answer says where to carry on from. Two things are

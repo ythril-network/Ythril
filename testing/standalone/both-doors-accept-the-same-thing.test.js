@@ -185,8 +185,15 @@ describe('the parity gaps, one case each', () => {
 
     assert.match(code('server/src/brain/recall.ts'), /MAX_PER_TYPE_CANDIDATES/,
       'the per-type over-fetch scales with topK and has no absolute bound');
-    assert.match(code(REST_SEARCH), /MAX_GRAPH_NODES/,
-      'the graph walk scales with topK and has no absolute bound');
+    // Q-126: the walk's bound no longer scales with topK at all. It is per row and per call, in one module
+    // every traversing door reaches through `traversedAnswer`, so neither door can hold a looser copy.
+    const bounds = code('server/src/brain/search-bounds.ts');
+    assert.match(bounds, /export const MAX_ROW_GRAPH_NODES = /, 'a traversed row has no absolute bound');
+    assert.match(bounds, /export const MAX_CALL_WALK_NODES = /, 'a traversing call has no absolute bound');
+    for (const door of [REST_SEARCH, MCP_SEARCH]) {
+      assert.doesNotMatch(code(door), /MAX_GRAPH_NODES|MAX_ROW_GRAPH_NODES|MAX_CALL_WALK_NODES/,
+        `${door} holds a graph bound of its own again`);
+    }
   });
 
   it('and the FORM is not the narrowest door of the three', () => {

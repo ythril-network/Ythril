@@ -3,53 +3,49 @@
  *
  * ## Its own module because `api.types.ts` is frozen, and the freeze is right
  *
- * The god-file ratchet refused these two fields with the instruction it always gives: *"put the new
- * behaviour beside it rather than inside it"*. That is the correct answer here rather than an obstacle —
- * these describe one subject, they carry more prose than the fields around them, and `RecallResponse`
- * extends this instead of absorbing it.
+ * The god-file ratchet refused these fields with the instruction it always gives: *"put the new behaviour
+ * beside it rather than inside it"*. They describe one subject, they carry more prose than the fields around
+ * them, and `RecallResponse` extends this instead of absorbing it.
  *
- * ## The distinction the two fields exist for
+ * ## The rule these fields report (Q-126)
  *
- * `truncated` on the response is the byte budget dropping whole MATCHES off the end of the ranking. This is
- * the WALK stopping, so what is missing are records the traversal never read. A caller who sees
- * `graphNodes: 7` cannot tell the whole neighbourhood from the first seven of forty, and before these were
- * typed the client could not tell either.
+ * Owner, 2026-09-28: *"if the requested graph doesnt fit the whole resultrow including the root should be not
+ * returned"*. Every match in `results` carries its WHOLE graph. A match whose graph could not be read whole is
+ * not shown with part of it — it is left out and named in `incompleteRows`. So a returned graph is never
+ * short, and what this module reports is which matches were withheld and why, and which bound ended the
+ * answer. `graphComplete`, the link to a spilled whole graph beside a shortened inline one, is gone with the
+ * shortened graph it came with.
  */
 
-import type { SpillLink } from './read-spill';
+/** Why a match was left out. The server's `INCOMPLETE_ROW_REASONS`, which this mirrors. */
+export type IncompleteRowReason = 'walk_ceiling' | 'link_scan' | 'paths' | 'deadline';
 
-/**
- * The WHOLE graph, kept for the caller's own token, when the instance was able to keep it. What a spill is,
- * who may read it and for how long is `read-spill.ts`; a refused one is `spillRefused` on the answer.
- */
-export interface GraphSpillLink extends SpillLink {
-  /** How many traversed nodes the SPILL holds — the number the inline graph fell short of. */
-  nodes: number;
-  /**
-   * The spill walk hit its OWN ceiling, so even the spill is not the whole graph.
-   *
-   * Rare and worth saying: without it a reader takes the download as the complete answer, which is the same
-   * mistake one level down as taking the inline graph for it.
-   */
-  ceilingHit?: boolean;
+/** One match left out because its graph could not be read whole — named so the reader knows it exists. */
+export interface IncompleteRow {
+  _id: string;
+  spaceId: string;
+  type: string;
+  /** Its name, title or a one-line summary. */
+  name: string;
+  reason: IncompleteRowReason | string;
 }
 
 /** The graph half of a recall or find-similar response. */
 export interface RecallGraphReport {
-  /** How many traversed nodes came back INLINE, counted from the payload actually sent. */
+  /** How many traversed nodes came back, counted from the payload actually sent. */
   graphNodes?: number;
   /**
-   * The traversal stopped short, so the graph you were given is not the whole neighbourhood.
-   *
-   * Present only when it bit, which is the same shape as `truncated`: never read an absence as unknown.
+   * At least one match was left out because its graph could not be read whole — exactly when
+   * `incompleteCount` is present. It never means a returned graph is short: none is.
    */
   graphTruncated?: boolean;
+  /** How many matches were left out that way, named or not. */
+  incompleteCount?: number;
+  /** The left-out matches, at most a fixed number named; `incompleteCount` counts them all. */
+  incompleteRows?: IncompleteRow[];
   /**
-   * The whole graph, kept — present only when there WAS one to keep and it was not refused.
-   *
-   * Absent while `graphTruncated` is true is a real case rather than an omission, twice over: a bounded link
-   * scan leaves nothing complete to keep, because the records missing from the graph are precisely the ones
-   * never read; and a refused spill (`spillRefused` on the answer) keeps nothing.
+   * Beside `truncated` and `nextSkip`: which bound ended the answer. `budget` is the byte budget; the other two
+   * are the graph walk's — the most one search may walk, and its deadline.
    */
-  graphComplete?: GraphSpillLink;
+  truncatedBy?: 'budget' | 'walk_budget' | 'deadline' | string;
 }

@@ -131,8 +131,8 @@ file that looks complete.
 Active-content types that can execute script when rendered in the browser (`.html`, `.htm`, `.svg`, `.xml`, `.xhtml`) are served with `Content-Disposition: attachment` and a `sandbox` Content-Security-Policy (stored-XSS guard). Passive types — images, PDF, plain text — are served `inline` and preview normally.
 
 **A read spill's `path` is not a file here — deprecated, and removed at the next major.** `recall` and
-`similar` still send `path` on `graphComplete` and `remainder`, shaped `_tmp/graph-<spillId>.json` or
-`_tmp/results-<spillId>.json`, because before 5.5.3 a spill was a file at the space root. Since then no search
+`similar` still send `path` on `remainder`, shaped `_tmp/results-<spillId>.json` (an older answer's
+`graphComplete.path` was `_tmp/graph-<spillId>.json`), because before 5.5.3 a spill was a file at the space root. Since then no search
 writes into a space, and exactly that path at the root is answered from the spill store instead of the file
 store: JSON, `Cache-Control: no-store`, for the **token that ran the search alone**, under the same rule and the
 same `404` / `410` as `GET /api/brain/spills/:id` — `files: read` on the space is not enough. It returns the

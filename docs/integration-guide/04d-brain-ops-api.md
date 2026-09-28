@@ -673,24 +673,19 @@ names the reason in `spillRefused`; `truncated` and `nextSkip` are unchanged.
 
 > The full treatment is in [Prefiltered Recall and the byte budget](04a-recall-api.md).
 
-`recall` and `similar` with `traverse > 0` cap the traversed nodes they return inline. Past that cap the
-**complete** graph is kept as a read spill, and the response carries `graphTruncated: true` with
-`graphComplete: {nodes, spillId, path, download, expiresAt}`. `download` is `GET /api/brain/spills/:id` (MCP
-`read_spill`), readable by the token that ran the search alone, for up to one day — it may be evicted earlier by
-that token's own newer spills. Nothing is written into any space, so nothing is embedded, browsed or synced.
-`path` is deprecated.
+`recall` and `similar` with `traverse > 0` return each match with its **whole** graph, or leave it out. A match
+whose neighbourhood cannot be read whole — past the per-match node ceiling, a link scan past its bound, too many
+routes to one node, or out of time — is named in `incompleteRows` and counted in `incompleteCount`, and
+`graphTruncated: true` says at least one was; no returned graph is ever short. When the call's walk bound or its
+deadline runs out, the answer stops at the last whole match with `truncatedBy` (`walk_budget` or `deadline`)
+and `nextSkip`, the way the byte budget stops it. Nothing is written unless `remainderDump: true` is sent.
 
-> Both spills, their paging, their refusals and the deprecated `path`:
-> [Reading a spill](04a-recall-api.md#reading-a-spill-get-apibrainspillsid-and-mcp-read_spill).
+> The rule, the reasons and the bounds: [Graph-augmented recall](04h-graph-augmented-recall.md). The one spill
+> left, its paging and its refusals: [Reading a spill](04a-recall-api.md#reading-a-spill-get-apibrainspillsid-and-mcp-read_spill).
 
-The alternative — a `truncated` flag alone — tells a caller their graph was cut and leaves them no way to get
-the rest, which on a neighbourhood is a dead end: there is no `total` to page against.
-
-**A `truncated` flag alone is still the right answer in one case.** The link scans that follow a
-record's links are bounded per hop, and a hop can spend its budget on records it discards as already
-visited — so the graph is short and there is no complete copy to write, because the missing records were never
-read. `graphTruncated: true` arrives on its own. **It also arrives alone when the spill could not be kept**, and
-then `spillRefused` names why. Read the flag, and treat `graphComplete` as optional.
+Until 5.5.3 a large neighbourhood was cut to an inline cap and the whole graph kept as a spill behind
+`graphComplete`. A caller then held a row whose graph was part of what it asked for, and had to fetch and merge
+the rest; a row is now what was asked for or it is not there.
 
 #### Unknown body fields are refused
 

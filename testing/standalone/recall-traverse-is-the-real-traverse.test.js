@@ -41,7 +41,8 @@ const EDGES = stripComments(
   + readFileSync('server/src/brain/recall-seed-traversal.ts', 'utf8')
   + readFileSync('server/src/brain/edges.ts', 'utf8'),
 );
-const SPILL = stripComments(readFileSync('server/src/brain/graph-spill.ts', 'utf8'));
+const ANSWER = stripComments(readFileSync('server/src/brain/traversed-answer.ts', 'utf8'));
+const ROWS = stripComments(readFileSync('server/src/brain/row-graphs.ts', 'utf8'));
 const REST = stripComments(readFileSync('server/src/api/brain/search.ts', 'utf8'));
 const MCP = stripComments(readFileSync('server/src/mcp/tools/search.ts', 'utf8'));
 const OPTION = stripComments(readFileSync('server/src/brain/traverse-option.ts', 'utf8'));
@@ -110,7 +111,7 @@ describe('ONE parser, so the two doors cannot disagree about a narrowing', () =>
   });
 
   it('`limit` is refused inside the object, and the refusal says why', () => {
-    // In a recall the node cap comes from topK and the byte budget. A traverse that could raise it would
+    // In a recall the walk is bounded per row by the instance and the answer by the byte budget. A traverse that could raise it would
     // overrule the budget governing the rest of the answer, so this is a deliberate omission and the error
     // message has to say so or the next caller reads it as an oversight.
     assert.doesNotMatch(OPTION, /TRAVERSE_OPTION_FIELDS = \[[^\]]*'limit'/,
@@ -120,20 +121,26 @@ describe('ONE parser, so the two doors cannot disagree about a narrowing', () =>
 });
 
 describe('the narrowing reaches the database', () => {
-  it('the spill builder PASSES it on, not merely accepts it', () => {
+  it('the answer builder and the row walker each PASS it on, not merely accept it', () => {
     /*
-     * Bounded to the `traverseRecallSeeds` CALL, and that is the whole assertion.
+     * Bounded to each CALL, and that is the whole assertion. Two hops since Q-126: `traversedAnswer` hands
+     * it to `rowGraphWalker`, which hands it to the `traverseFromSeeds` call that reaches the database.
      *
      * The first version searched the function body for the word `narrowing` and SURVIVED the mutant that
      * removes it from the call while leaving `narrowing?: TraverseNarrowing` in the signature — a parameter
      * accepted and dropped, which is precisely the defect this file exists to catch, passing its own gate.
      */
-    const body = bodyOf(SPILL, 'buildGraphWithSpill');
-    const callAt = body.indexOf('traverseRecallSeeds(');
-    assert.ok(callAt > -1, 'buildGraphWithSpill no longer calls traverseRecallSeeds — re-anchor this gate');
-    const args = balancedFrom(body, body.indexOf('(', callAt), 'the traverseRecallSeeds call');
-    assert.match(args, /narrowing/,
-      'buildGraphWithSpill accepts the narrowing and does not pass it on, so it never reaches the query');
+    for (const [file, fn, callee] of [
+      [ANSWER, 'traversedAnswer', 'rowGraphWalker('],
+      [ROWS, 'rowGraphWalker', 'traverseFromSeeds('],
+    ]) {
+      const body = bodyOf(file, fn);
+      const callAt = body.indexOf(callee);
+      assert.ok(callAt > -1, `${fn} no longer calls ${callee} — re-anchor this gate`);
+      const args = balancedFrom(body, body.indexOf('(', callAt), `the ${callee} call`);
+      assert.match(args, /opts\.narrowing/,
+        `${fn} accepts the narrowing and does not pass it on, so it never reaches the query`);
+    }
   });
 
   it('every recall-side expansion passes it, at every site that still has one', () => {
@@ -150,12 +157,12 @@ describe('the narrowing reaches the database', () => {
     for (const [name, src] of [['REST', REST], ['MCP', MCP]]) {
       const expected = name === 'MCP' ? 2 : ['/recall', '/similar']
         .filter(p => { const b = routeBody(src, p); return b && !delegatesCleanly(b, `POST ${p}`); }).length;
-      const calls = [...src.matchAll(/buildGraphWithSpill\(/g)];
+      const calls = [...src.matchAll(/traversedAnswer\(/g)];
       assert.equal(calls.length, expected,
         `${name} should have ${expected} expansion call site(s), found ${calls.length}`);
       for (const m of calls) {
-        const args = balancedFrom(src, src.indexOf('(', m.index), `${name} buildGraphWithSpill`);
-        assert.match(args, /TraverseOpt|traverseOpt/,
+        const args = balancedFrom(src, src.indexOf('(', m.index), `${name} traversedAnswer`);
+        assert.match(args, /narrowing:\s*\w*(TraverseOpt|traverseOpt)/,
           `${name} has an expansion that does not pass the narrowing: ${args.slice(0, 120)}`);
       }
     }

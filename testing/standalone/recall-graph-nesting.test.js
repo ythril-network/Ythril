@@ -17,6 +17,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
 const { nestNeighbours, mapGraphNodes } = await import('../../server/dist/brain/recall-graph.js');
 
@@ -109,12 +110,14 @@ describe('a node reachable more than one way', () => {
     assert.deepEqual(d.paths, [['A', 'B', 'D'], ['A', 'C', 'D']]);
   });
 
-  it('says so when routes were dropped', () => {
+  it('never marks a node as missing routes — a row with dropped routes is not returned at all', () => {
+    // Q-126 removed `pathsTruncated`: a node carrying only some of its routes is a shortened row, and a
+    // shortened row is left out and named `paths` by the row walker instead (`row-graphs.ts`). A flag here
+    // would mean a shortened row had been returned.
     const { bySeed: b } = nestNeighbours([hop('B', 'A', ['A', 'B'], [], true)], ['A']);
-    assert.equal(b.get('A')[0].pathsTruncated, true);
-    // And stays quiet when nothing was dropped — a flag present on every node is a flag nobody reads.
-    const { bySeed: c } = nestNeighbours([hop('B', 'A', ['A', 'B'])], ['A']);
-    assert.ok(!('pathsTruncated' in c.get('A')[0]));
+    assert.ok(!('pathsTruncated' in b.get('A')[0]), 'a node is marked as short, so a short row reached the answer');
+    assert.match(readFileSync('server/src/brain/row-graphs.ts', 'utf8'),
+      /altPathsTruncated\)\) return 'paths'/, 'the walker no longer leaves a row with dropped routes out');
   });
 });
 

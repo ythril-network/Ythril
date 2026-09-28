@@ -27,7 +27,7 @@ before(async () => {
 
 /** Tool names, and every property name any tool's input schema declares, at any depth. */
 function vocabulary() {
-  const words = new Set([...tools.map(t => t.name), ...DATA_VALUES.keys()]);
+  const words = new Set([...tools.map(t => t.name), ...DATA_VALUES.keys(), ...ANSWER_VALUES]);
   const walk = (o) => {
     if (!o || typeof o !== 'object') return;
     if (o.properties && typeof o.properties === 'object') for (const k of Object.keys(o.properties)) words.add(k);
@@ -50,6 +50,18 @@ const DATA_VALUES = new Map([
   // it became (embed-job-tools-say-which-queue.test.js asserts it stays).
   ['retry_failed_embeddings', 'the name retry_embed_media had until 3.1'],
 ]);
+
+/**
+ * Values an answer carries — why a row was left out (`incompleteRows[].reason`) and which bound ended an answer
+ * (`truncatedBy`). Read from the module that defines them, never listed, so a new reason is known here the day
+ * it exists and a retired one stops being excused.
+ */
+let ANSWER_VALUES = [];
+before(async () => {
+  const { INCOMPLETE_ROW_REASONS, WALK_STOPS } = await import('../../server/dist/brain/row-graphs.js');
+  ANSWER_VALUES = [...INCOMPLETE_ROW_REASONS, ...WALK_STOPS];
+  assert.ok(ANSWER_VALUES.length >= 2, 'the answer values were not read');
+});
 
 /** The snake_case words of a text — the shape every tool name has and prose words do not. */
 const snakeWords = (text) => [...new Set(text.match(/\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b/g) ?? [])];

@@ -25,9 +25,8 @@ do. Pass an object instead to walk the graph the way `POST /traverse` always cou
 | `direction` | no | `both` | `outbound`, `inbound` or `both`. A bare number means `both`. **It narrows stored edges only** — see below |
 
 **Why this matters more than it sounds.** On any graph where a few nodes hold most of the edges — a person, a
-project, a recurring topic — one unnarrowed hop off such a node returns whichever neighbours the node cap
-happened to keep, and nothing in the response distinguishes that from a deliberate answer. Narrowing is how you
-ask for the neighbourhood you meant.
+project, a recurring topic — one unnarrowed hop off such a node can reach so much that the match is left out as
+too large to walk whole. Narrowing is how you ask for the neighbourhood you meant, and get it whole.
 
 **`direction` narrows stored edges only, and never links.** A link is a **record** with a `from` and a `to` since 4.0 — but which way it runs is fixed by the
 KINDS at its ends rather than by the data. A fact names entities and an entity names nothing, so asking for
@@ -44,8 +43,8 @@ linked records at all, because nothing hangs off an entity. That is a large sile
 call, for a parameter that would still have nothing useful to select between. If you want edges in one direction
 and no links at all, leave the three `include*` flags off; they are off by default.
 
-**`limit` is deliberately not accepted here.** In a standalone traverse the caller sets it; in a recall the node
-cap comes from `topK` and the byte budget, and a `traverse.limit` would let one parameter overrule the budget
+**`limit` is deliberately not accepted here.** In a standalone traverse the caller sets it; in a recall the walk is
+bounded per match by the instance and the answer by the byte budget, and a `traverse.limit` would let one parameter overrule the budget
 governing the rest of the answer. An unknown field inside the object is a `400`, not an ignored key.
 
 **The response echoes what was applied** as `traverse` — a number when nothing was narrowed, so an existing
@@ -119,11 +118,11 @@ actually reached was the weaker.
 | `edges` | **Every** edge joining this node to the one it is nested under, whole documents, `description` and `tags` included, `from`/`to` replaced by `direction` (`outbound`/`inbound`/`self`). Usually one; more for a pair joined twice, and on a node with a self-loop |
 | `node` | The reached **entity** document |
 | `paths` | Every route from a match to this node, record ids, match first. `paths[0]` is the nesting route; `paths[0].length - 1` is the hop count |
-| `pathsTruncated` | Present and `true` only when a node had more routes than were recorded (cap: 8) |
 | `_graph` | Present on a nested node too, so depth is a tree: `adr-0088` hangs off `adr-0079`, which hangs off the match |
-| `graphTruncated` | Present and `true` only when the inline graph is **short of the real neighbourhood** |
-| `graphComplete` | `{nodes, spillId, path, download, expiresAt, ceilingHit?}` — where the **whole** graph was kept. Present with `graphTruncated` whenever a complete copy was kept, which is not always: see below |
-| `spillRefused` | Present when the graph was short and a complete copy could NOT be kept — the reason code. `graphTruncated` is then present without `graphComplete` |
+| `incompleteRows` | The matches left out because their graph could not be read whole: `{_id, spaceId, type, name, reason}`, at most 50 named. Present only when there were any |
+| `incompleteCount` | How many matches were left out that way — all of them, named or not |
+| `graphTruncated` | Present and `true` exactly when `incompleteCount` is. It never means a returned graph is short: none is |
+| `truncatedBy` | Beside `nextSkip`, which bound ended the answer: `budget` (the byte budget), `walk_budget` (the call's walk bound) or `deadline` |
 
 Note `adr-0088` above: it is reachable two ways and appears **once**, with both routes in `paths`. A caller
 counting rows never double-counts a record, and no relationship is invisible.
@@ -131,53 +130,44 @@ counting rows never double-counts a record, and no relationship is invisible.
 **Guard rails:**
 
 - **Depth cap:** `traverse` must be `0`–`5`. A value of `6` or higher (or a negative/non-integer value) returns `400` — it is rejected, not clamped.
-- **Node cap, and it is a spill point rather than a truncation point:** the inline traversed nodes are capped at
-  `topK × (traverse + 1) × 4` minus the matches, preferring lower-hop records. When the neighbourhood is bigger
-  than that, the **complete** graph is kept as a read spill and the response carries `graphTruncated: true`
-  plus `graphComplete`:
+- **A match comes with its whole graph, or it does not come.** Each match is walked on its own, to the depth
+  you asked for, and its `_graph` holds every node that walk reaches and every route to each. A graph is never
+  cut short. A match whose neighbourhood cannot be read whole is **left out** of `results` and named in
+  `incompleteRows` instead, with the reason:
+
+  | `reason` | What happened | What brings it back |
+  |---|---|---|
+  | `walk_ceiling` | its neighbourhood holds more than 5000 nodes | a narrower `edgeLabels`, or a lower `traverse` |
+  | `link_scan` | a bounded read of its edges or links stopped before running out | the same |
+  | `paths` | one node in it can be reached more than 32 ways | the same |
+  | `deadline` | the first match of the page could not be walked in time | a higher `maxTimeMS`, or the same narrowing |
 
   ```json
   {
+    "results": [ … every match that came whole … ],
     "graphNodes": 7,
     "graphTruncated": true,
-    "graphComplete": {
-      "nodes": 30,
-      "spillId": "9f1c…",
-      "path": "_tmp/graph-9f1c….json",
-      "download": "/api/brain/spills/9f1c…",
-      "expiresAt": "2026-08-14T15:41:00.000Z"
-    }
+    "incompleteCount": 1,
+    "incompleteRows": [
+      { "_id": "hub-17", "spaceId": "general", "type": "entity", "name": "Platform", "reason": "walk_ceiling" }
+    ]
   }
   ```
 
-  So a caller receives the whole neighbourhood inline, or a link to the whole neighbourhood, or — when the
-  spill could not be kept — a `graphTruncated` that says the graph is short. Never a silently short one. There
-  is no `total` for a neighbourhood to compare against, and a short graph reads as *"this record has few
-  relationships"*, which is a wrong conclusion about the data rather than about the request.
-
-  - **Read it with `GET /api/brain/spills/:id` or MCP `read_spill`**, by `spillId`. The spill's items are the
-    traversed NODES, flat — `{id, spaceId, depth, seedId, via, edges, paths, record}` — so a large traversal
-    pages like any other answer. The same knowledge read that let you search is what lets you read it: only the
-    token that ran the search can, while it still holds knowledge read on every space the graph reached.
-    See [Reading a spill](04a-recall-api.md#reading-a-spill-get-apibrainspillsid-and-mcp-read_spill).
-  - It **lives up to one day, and may be evicted earlier** by your token's own newer spills (a `410` then says
-    so).
-  - **Nothing is written into any space.** The spill is not a file, so it is never browsed, embedded, synced to
-    a peer or kept in a backup, and cannot come back as a recall hit.
-  - `path` is **deprecated**: no such file exists, and `read_file` resolves it for the issuing token only until
-    the next major.
-- **`graphTruncated` can arrive WITHOUT `graphComplete`, in two cases.** The first is that the spill could not be
-  kept — the token's share, the instance ceiling, or a store failure — and then a top-level `spillRefused` names
-  the reason; the inline graph is exactly what it would otherwise have been, and repeating the search later, or
-  narrowing it, is how you get the rest. The second is the honest case: the link scans — the ones that follow the LINKS a fact, chrono entry or file carries — are bounded per hop, and a hop can
-  spend its whole budget on records it then discards as already-visited. The neighbourhood is short, and there
-  is **no complete copy to offer**, because the records that are missing are exactly the ones never read. So
-  the flag stands alone: you are told the graph is partial, and a narrower `edgeLabels` or a lower `traverse`
-  is what makes it whole. Before 3.6.1 this case was reported as complete.
-
-  - The spill walk is itself bounded, at 20× the inline cap. If even that is reached, `graphComplete.ceilingHit`
-    is `true` and the same flag is inside the spill — a second silent truncation inside the fix for the first one
-    would be the same defect again.
+  So a returned match is exactly what you asked for. A short graph read as *"this record has few
+  relationships"* is a wrong conclusion about the data, and there is no `total` for a neighbourhood a caller
+  could compare against to notice — which is why a short row is withheld and named rather than returned.
+  Until 5.5.3 a large neighbourhood was cut to an inline node cap and the whole graph kept as a spill behind
+  `graphComplete`; that field is gone, and a `graphComplete.spillId` you still hold is readable until it expires.
+- **The call has one walk budget and one deadline.** Every match walked counts against the call's walk bound
+  (50000 nodes, matches that turn out incomplete included), and the whole call runs under one deadline —
+  `maxTimeMS` on `recall`, the instance's recall budget on `similar`. When either runs out, the answer stops at
+  the last whole match exactly as the byte budget does: `truncated: true`, `nextSkip`, and `truncatedBy` of
+  `walk_budget` or `deadline`. Send `nextSkip` back as `skip` to continue. The first match of a page is always
+  walked, so every page makes progress.
+- **Nothing is written unless you ask.** With `remainderDump: true` and a byte-budget cut, the matches after
+  the cut are walked too — whole or named, within the same bounds — and kept as a `remainder` spill. Without
+  it, nothing is written anywhere.
 - **Cycle-safe:** each record is visited once, so a circular graph (A→B→C→A) never loops or produces duplicates. A record reachable by several routes is nested under the **shortest** one, with the rest in `paths`.
 - **Space-scoped:** traversal stays within the spaces the calling token may access. An edge pointing at a record in a space the token cannot see (or at an id that is not an entity) is silently skipped — no data and no `403` leak.
 - **Entities, and the records that mention them.** A walk follows two things: stored **edges**, whose endpoints

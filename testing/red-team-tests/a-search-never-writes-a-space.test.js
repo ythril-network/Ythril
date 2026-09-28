@@ -10,13 +10,14 @@
  *
  * ## The rule these cases pin
  *
- * - Every spill site — `recall` and `similar`, each with a graph past the cap, a truncated `remainderDump`,
- *   and a truncated `remainderDump` under a traversal, on BOTH doors — leaves the space's file records, its
- *   seq counter and its embed queue exactly as they were. Asserted door by door over one table, so a door
- *   that still writes is a named failure rather than an average.
- * - The spill is still delivered (the 2026-08-13 ruling stands: the complete result, a link, a day): the
- *   response carries `spillId`, and the SAME token pages it through `GET /api/brain/spills/:id` and the MCP
- *   `read_spill` tool, identically, across a storage-page boundary.
+ * - Every search site — `recall` and `similar`, each with a graph past the old inline cap, a truncated
+ *   `remainderDump`, and a truncated `remainderDump` under a traversal, on BOTH doors — leaves the space's file
+ *   records, its seq counter and its embed queue exactly as they were. Asserted door by door over one table, so
+ *   a door that still writes is a named failure rather than an average.
+ * - Since Q-126 a graph is never spilled: the hub comes back WHOLE and nothing is written without
+ *   `remainderDump` (owner, 2026-09-28, reversing the 2026-08-13 auto-spill). The remainder spill is delivered
+ *   when asked: the response carries `spillId`, and the SAME token pages it through `GET /api/brain/spills/:id`
+ *   and the MCP `read_spill` tool, identically, each row whole, across a storage-page boundary.
  * - Nobody else reads it. Another token with read on the space gets the same 404 as an id that never
  *   existed, on both doors; a token that lost read on one of the spill's member spaces gets that 404 too.
  * - The legacy `path` still resolves — through `read_file` and the files GET — for its issuer only.
@@ -193,21 +194,29 @@ const mcpDoor = (tool, args) => async (tok) => {
   try { return mcpJson(await s.callTool(tool, args())); } finally { s.close(); }
 };
 
+/**
+ * `spills: false` rows are the graph that used to be spilled unasked: a hub past the old inline cap. Since
+ * Q-126 it comes back WHOLE and nothing is written without `remainderDump` — so those rows assert the absence
+ * of a spill, and that the absence is not the hub having been dropped instead.
+ */
 const SITES = [
-  { name: 'recall, a graph past the cap', rest: '/api/brain/recall', tool: 'recall', args: graphArgs, pick: b => b.graphComplete },
-  { name: 'recall, remainderDump', rest: '/api/brain/recall', tool: 'recall', args: () => recallDumpArgs(0), pick: b => b.remainder },
-  { name: 'recall, remainderDump under a traversal', rest: '/api/brain/recall', tool: 'recall', args: () => recallDumpArgs(1), pick: b => b.remainder },
-  { name: 'similar, a graph past the cap', rest: '/api/brain/similar', tool: 'similar', args: similarGraphArgs, pick: b => b.graphComplete },
-  { name: 'similar, remainderDump', rest: '/api/brain/similar', tool: 'similar', args: () => similarDumpArgs(0), pick: b => b.remainder },
-  { name: 'similar, remainderDump under a traversal', rest: '/api/brain/similar', tool: 'similar', args: () => similarDumpArgs(1), pick: b => b.remainder },
+  { name: 'recall, a whole graph past the old cap, no flag', rest: '/api/brain/recall', tool: 'recall', args: graphArgs, spills: false },
+  { name: 'recall, remainderDump', rest: '/api/brain/recall', tool: 'recall', args: () => recallDumpArgs(0), spills: true },
+  { name: 'recall, remainderDump under a traversal', rest: '/api/brain/recall', tool: 'recall', args: () => recallDumpArgs(1), spills: true },
+  { name: 'similar, a whole graph past the old cap, no flag', rest: '/api/brain/similar', tool: 'similar', args: similarGraphArgs, spills: false },
+  { name: 'similar, remainderDump', rest: '/api/brain/similar', tool: 'similar', args: () => similarDumpArgs(0), spills: true },
+  { name: 'similar, remainderDump under a traversal', rest: '/api/brain/similar', tool: 'similar', args: () => similarDumpArgs(1), spills: true },
 ];
 const DOORS = SITES.flatMap(site => [
-  { label: `REST ${site.rest} — ${site.name}`, call: restDoor(site.rest, site.args), pick: site.pick },
-  { label: `MCP ${site.tool} — ${site.name}`, call: mcpDoor(site.tool, site.args), pick: site.pick },
+  { label: `REST ${site.rest} — ${site.name}`, call: restDoor(site.rest, site.args), spills: site.spills },
+  { label: `MCP ${site.tool} — ${site.name}`, call: mcpDoor(site.tool, site.args), spills: site.spills },
 ]);
 
+/** The node ids in one returned row's `_graph`, whichever door's shape the row has. */
+const graphIdsOf = (row) => (row?._graph ?? row?.record?._graph ?? []).map(n => n.node?._id);
+
 describe('a search by a read-only token leaves the space exactly as it was', () => {
-  it('the door table covers all six spill sites on both doors', () => {
+  it('the door table covers every search site on both doors', () => {
     // A floor, so a table edited down to nothing cannot pass every case below by having none.
     assert.equal(DOORS.length, 12);
   });
@@ -217,15 +226,23 @@ describe('a search by a read-only token leaves the space exactly as it was', () 
       if (!ready(t)) return;
       const before = spaceFootprint('a', S);
       const body = await door.call(reader);
-      const spill = door.pick(body);
-      // Without a spill this case would compare two identical footprints and prove nothing.
-      assert.ok(spill, `this call must spill or it tests nothing: ${JSON.stringify(body).slice(0, 300)}`);
       const after = spaceFootprint('a', S);
       assert.deepEqual(after.fileIds, before.fileIds,
         `a search wrote file records into '${S}': ${JSON.stringify(after.fileIds.filter(f => !before.fileIds.includes(f)))}`);
       assert.equal(after.seq, before.seq, 'a search advanced the space seq, so its write would sync to every peer');
       assert.deepEqual(after.spillJobs, before.spillJobs, 'a search queued an embed job for its own output');
-      assert.match(String(spill.spillId), UUID, `the spill is delivered by id: ${JSON.stringify(spill)}`);
+      if (door.spills) {
+        // Without a spill this case would compare two identical footprints and prove nothing.
+        assert.ok(body.remainder, `this call must spill or it tests nothing: ${JSON.stringify(body).slice(0, 300)}`);
+        assert.match(String(body.remainder.spillId), UUID, `the spill is delivered by id: ${JSON.stringify(body.remainder)}`);
+      } else {
+        assert.equal(body.remainder, undefined, 'a spill was written without remainderDump');
+        assert.equal(body.graphComplete, undefined, 'a graph spill is back');
+        // The absence proves something only if the hub came back — and came back whole.
+        const [row] = body.results ?? [];
+        assert.deepEqual([...graphIdsOf(row)].sort(), [...LEAVES].sort(),
+          `the hub must come back with every leaf, not be dropped or cut: ${JSON.stringify(body).slice(0, 300)}`);
+      }
     });
   }
 });
@@ -272,12 +289,20 @@ function windowOf(body) {
 }
 const itemId = (it) => it?.id ?? it?.record?._id ?? it?.node?._id;
 
-async function readerGraphSpill() {
-  const body = json(await post(A, reader, '/api/brain/recall', graphArgs()));
-  assert.ok(body.graphComplete, `the fixture must spill: ${JSON.stringify(body).slice(0, 300)}`);
-  assert.equal(body.graphComplete.ceilingHit, undefined, 'the fixture must fit the spill ceiling, or "whole" is untestable');
-  assert.equal(body.graphComplete.nodes, LEAVES.length, 'the spill holds every leaf');
-  return body.graphComplete;
+/**
+ * A LARGE remainder spill: the two hubs (each ~310 KiB with its 120 leaves) and the vault services, cut after
+ * the first row. The other hub is the remainder's first item — whole, with every leaf — so the spill spans
+ * storage pages, and the vault rows after it make a second read window. Which hub ranks first is not fixed;
+ * the pair is what the assertions use. Returns the spill and the id of the hub that was answered inline.
+ */
+async function readerLargeSpill() {
+  const body = json(await post(A, reader, '/api/brain/recall', {
+    space: S, query: HUB_QUERY, types: ['entity'], topK: 12, traverse: 1, maxBytes: 1000, remainderDump: true,
+  }));
+  const spillId = remainderSpillId(body);
+  const inline = body.results?.[0]?.record?._id ?? body.results?.[0]?._id;
+  assert.ok([hubId, twinId].includes(inline), `the first row must be a hub, or the fixture is wrong: ${inline}`);
+  return { ...body.remainder, spillId, inline };
 }
 
 /** A remainder spill: the fixture half (it spilled at all) apart from the contract half (it names an id). */
@@ -288,10 +313,9 @@ function remainderSpillId(body) {
 }
 
 describe('the issuing token reads its spill, whole, on both doors', () => {
-  it('pages every node through REST and MCP, identically, across a storage-page boundary', async (t) => {
+  it('pages every row through REST and MCP, identically, each whole, across a storage-page boundary', async (t) => {
     if (!ready(t)) return;
-    const spill = await readerGraphSpill();
-    assert.match(String(spill.spillId), UUID, `the response names the spill: ${JSON.stringify(spill)}`);
+    const spill = await readerLargeSpill();
     assert.equal(spill.download, `/api/brain/spills/${spill.spillId}`, 'the link is the spill route, not a file in the space');
 
     const rest = await pageRest(reader, spill.spillId, 40_000);
@@ -299,12 +323,16 @@ describe('the issuing token reads its spill, whole, on both doors', () => {
 
     assert.ok(rest.windows > 1 && mcp.windows > 1, `the read budget must bite: ${rest.windows}/${mcp.windows} window(s)`);
     const restIds = rest.items.map(itemId);
-    assert.equal(new Set(restIds).size, restIds.length, 'a node was served twice across REST windows');
-    assert.deepEqual([...restIds].sort(), [...LEAVES].sort(), 'REST paging must reach every node, and only those');
+    assert.equal(new Set(restIds).size, restIds.length, 'a row was served twice across REST windows');
+    assert.ok(!restIds.includes(spill.inline), 'the spill repeats the row already answered inline');
+    const otherHub = spill.inline === hubId ? twinId : hubId;
+    const hubRow = rest.items.find(i => itemId(i) === otherHub);
+    assert.ok(hubRow, `the other hub is not in the remainder: ${JSON.stringify(restIds)}`);
+    assert.deepEqual([...graphIdsOf(hubRow)].sort(), [...LEAVES].sort(), 'a spilled row is whole: every leaf, nothing else');
     assert.deepEqual(mcp.items.map(itemId), restIds, 'the two doors serve the same spill in the same order');
-    assert.equal(rest.header.kind, 'graph');
+    assert.equal(rest.header.kind, 'results');
 
-    // ~300 KiB of nodes against 256 KiB pages: the store holds it in more than one page, so the windows above
+    // ~310 KiB in one row against 256 KiB pages: the store holds it in more than one page, so the windows above
     // crossed a page boundary rather than reading one page twice.
     const rows = spillRows('a', spill.spillId);
     assert.equal(rows.headers, 1, 'one header per spill');
@@ -315,7 +343,7 @@ describe('the issuing token reads its spill, whole, on both doors', () => {
 describe('nobody else reads it — one uniform 404, on every door', () => {
   it('another token with read on the space gets exactly what an unknown id gets', async (t) => {
     if (!ready(t)) return;
-    const spill = await readerGraphSpill();
+    const spill = { spillId: remainderSpillId(json(await post(A, reader, '/api/brain/recall', recallDumpArgs(0)))) };
     const mine = await get(A, reader, `/api/brain/spills/${spill.spillId}`);
     assert.equal(mine.status, 200, `the issuer reads it first, or the refusal below proves nothing: ${mine.status}`);
 
@@ -369,7 +397,8 @@ describe('nobody else reads it — one uniform 404, on every door', () => {
 describe('the legacy `path` still resolves — for its issuer only', () => {
   it('read_file and the files GET serve it to the issuer and 404 everyone else', async (t) => {
     if (!ready(t)) return;
-    const spill = await readerGraphSpill();
+    const body = json(await post(A, reader, '/api/brain/recall', recallDumpArgs(0)));
+    const spill = { ...body.remainder, spillId: remainderSpillId(body) };
     const url = `/api/files/${encodeURIComponent(S)}?path=${encodeURIComponent(spill.path)}`;
 
     // The refusal first: it is the half the unchanged code gets wrong, since a spill in the space's own
@@ -389,7 +418,7 @@ describe('the legacy `path` still resolves — for its issuer only', () => {
       const r = await s.callTool('read_file', { space: S, path: spill.path });
       assert.notEqual(r?.isError, true, `and so does read_file: ${r?.content?.[0]?.text?.slice(0, 200)}`);
     } finally { s.close(); }
-    assert.equal(spill.path, `_tmp/graph-${spill.spillId}.json`, 'the path keeps its shape and names the spill');
+    assert.equal(spill.path, `_tmp/results-${spill.spillId}.json`, 'the path keeps its shape and names the spill');
   });
 });
 

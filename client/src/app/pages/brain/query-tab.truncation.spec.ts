@@ -252,9 +252,12 @@ const MAX_MAX_BYTES = 5_000_000;
 
 /** Rendered text for the keys these cases look for, so a match is on a sentence rather than an echoed key. */
 const T: Record<string, string> = {
-  'brain.query.graphShort.download': 'GRAPH-DOWNLOAD',
-  'brain.query.graphShort.title': 'GRAPH-TITLE',
-  'brain.query.graphShort.unread': 'GRAPH-UNREAD',
+  'brain.query.leftOut.title': 'LEFTOUT-TITLE',
+  'brain.query.leftOut.more': 'LEFTOUT-MORE',
+  'brain.query.leftOut.reason.walk_ceiling': 'REASON-CEILING',
+  'brain.query.leftOut.reason.link_scan': 'REASON-SCAN',
+  'brain.query.truncated.by.walk_budget': 'BY-WALK',
+  'brain.query.truncated.by.deadline': 'BY-DEADLINE',
   'brain.query.truncated.title': 'TRUNCATED-TITLE',
   'brain.query.truncated.what': 'WHAT-ADVICE',
   'brain.query.remainder.download': 'REMAINDER-DOWNLOAD',
@@ -329,17 +332,11 @@ function visibleText(m: Mounted): string {
   return `${(m.fixture.nativeElement as HTMLElement).textContent ?? ''}\n${toasts}`;
 }
 
-/** The two kinds of spill, each with the response that offers it and the control that fetches it. */
+/**
+ * The kinds of spill an answer can offer, each with the response that offers it and the control that fetches it.
+ * One since Q-126: a graph is never spilled, because a match comes with its whole graph or not at all.
+ */
 const KINDS = [
-  {
-    kind: 'graph',
-    control: 'GRAPH-DOWNLOAD',
-    response: (id: string) => ({
-      graphTruncated: true, graphNodes: 2,
-      graphComplete: { nodes: 3, spillId: id, path: `_tmp/graph-${id}.json`, download: `/api/brain/spills/${id}`, expiresAt: EXPIRES },
-    }),
-    item: (n: number) => ({ id: `n${n}`, spaceId: 'work', depth: 1, record: { _id: `n${n}`, name: `item-marker-${n}` } }),
-  },
   {
     kind: 'results',
     control: 'REMAINDER-DOWNLOAD',
@@ -449,7 +446,7 @@ describe('Q-92: the page renders `remainder` and `spillRefused`', () => {
 
   it('a remainder shows its expiry in the app\'s one timestamp format, not the browser\'s or the wire\'s', () => {
     const m = mount();
-    answer(m, KINDS[1].response('sp-r'));
+    answer(m, KINDS[0].response('sp-r'));
     const text = visibleText(m);
     expect(text, 'the remainder is not rendered at all').toContain('REMAINDER-DOWNLOAD');
     // A FORMAT, not a rendering: CI runs in UTC and a laptop does not, so the day and hour differ by zone.
@@ -459,10 +456,10 @@ describe('Q-92: the page renders `remainder` and `spillRefused`', () => {
     expect(text, 'the expiry is printed as the raw wire value').not.toContain(EXPIRES);
   });
 
-  it('a refused spill says so and why, in words — on the results notice and on the graph notice alike', () => {
+  it('a refused spill says so and why, in words', () => {
     for (const response of [
       { truncated: true, returned: 1, count: 4, nextSkip: 1, spillRefused: 'instance-ceiling' },
-      { graphTruncated: true, graphNodes: 2, spillRefused: 'over-share' },
+      { truncated: true, returned: 1, count: 4, nextSkip: 1, spillRefused: 'over-share' },
     ]) {
       const m = mount();
       answer(m, response);
@@ -471,8 +468,7 @@ describe('Q-92: the page renders `remainder` and `spillRefused`', () => {
       expect(text, `spillRefused "${response.spillRefused}" is not rendered in words`).toContain(`SPILL-REFUSED ${words}`);
       expect(text, `the raw code "${response.spillRefused}" reaches the reader`).not.toContain(response.spillRefused);
       const root = m.fixture.nativeElement as HTMLElement;
-      expect(buttonWith(root, 'REMAINDER-DOWNLOAD') ?? buttonWith(root, 'GRAPH-DOWNLOAD'),
-        'a refused spill still offers a download').toBeNull();
+      expect(buttonWith(root, 'REMAINDER-DOWNLOAD'), 'a refused spill still offers a download').toBeNull();
       TestBed.resetTestingModule();
     }
   });
@@ -498,7 +494,7 @@ describe('Q-92: the page renders `remainder` and `spillRefused`', () => {
 
   it('results: a kept remainder offers the download instead of the advice', () => {
     const m = mount();
-    answer(m, KINDS[1].response('sp-kept'));
+    answer(m, KINDS[0].response('sp-kept'));
     expect(visibleText(m)).toContain('REMAINDER-DOWNLOAD');
     expect(visibleText(m), 'the advice to tick "keep" is shown although the rest was kept').not.toContain('WHAT-ADVICE');
   });
@@ -509,14 +505,74 @@ describe('Q-92: the page renders `remainder` and `spillRefused`', () => {
     expect(visibleText(m)).toContain('WHAT-ADVICE');
   });
 
-  it('graph: a refused keep sits inside the graph notice, in place of the "no complete copy" line', () => {
+  /*
+   * Q-126: a match comes with its WHOLE graph or is left out and NAMED. The page has to say which matches were
+   * left out and why, or a reader concludes they do not exist — and it must never offer a graph download,
+   * because there is none.
+   */
+  it('left out: every named match is shown with its reason, in words, and the rest are counted', () => {
     const m = mount();
-    answer(m, { graphTruncated: true, graphNodes: 2, spillRefused: 'instance-ceiling' });
-    const refusal = `SPILL-REFUSED ${T['brain.query.spillRefused.reason.instance-ceiling']}`;
-    const holding = alerts(m).filter(a => a.includes(refusal));
-    expect(holding, 'the refusal is not said exactly once').toHaveLength(1);
-    expect(holding[0], 'the refusal is not inside the graph notice').toContain('GRAPH-TITLE');
-    expect(visibleText(m), 'a refused keep is described as a walk that stopped reading').not.toContain('GRAPH-UNREAD');
+    answer(m, {
+      graphTruncated: true, graphNodes: 0, incompleteCount: 3,
+      incompleteRows: [
+        { _id: 'h1', spaceId: 'work', type: 'entity', name: 'hub-marker-1', reason: 'walk_ceiling' },
+        { _id: 'h2', spaceId: 'work', type: 'entity', name: 'hub-marker-2', reason: 'link_scan' },
+      ],
+    });
+    const holding = alerts(m).filter(a => a.includes('LEFTOUT-TITLE'));
+    expect(holding, 'the left-out notice is not shown exactly once').toHaveLength(1);
+    expect(holding[0]).toContain('hub-marker-1');
+    expect(holding[0]).toContain('REASON-CEILING');
+    expect(holding[0]).toContain('hub-marker-2');
+    expect(holding[0]).toContain('REASON-SCAN');
+    expect(holding[0], 'a raw reason code reaches the reader').not.toContain('walk_ceiling');
+    expect(holding[0], 'the unnamed third match is not counted').toContain('LEFTOUT-MORE');
+    const anchors = [...(m.fixture.nativeElement as HTMLElement).querySelectorAll('a')]
+      .filter(a => (a.getAttribute('href') ?? '').includes('/api/brain/spills/'));
+    expect(anchors, 'a graph download is offered, and there is no graph spill').toHaveLength(0);
+  });
+
+  it('left out: every match left out means the page does not claim there were no matches', () => {
+    const m = mount();
+    answer(m, { results: [], count: 1, graphTruncated: true, incompleteCount: 1,
+      incompleteRows: [{ _id: 'h1', spaceId: 'work', type: 'entity', name: 'hub-marker-1', reason: 'walk_ceiling' }] });
+    const root = m.fixture.nativeElement as HTMLElement;
+    expect(root.querySelector('.query-empty'), '"no matches" is shown beside a match that was left out').toBeNull();
+    expect(root.querySelector('.alert[role="status"]'), 'the left-out notice is not announced').toBeTruthy();
+  });
+
+  it('left out: nothing is said when no match was left out', () => {
+    const m = mount();
+    answer(m, { graphNodes: 4 });
+    expect(visibleText(m)).not.toContain('LEFTOUT-TITLE');
+  });
+
+  it('a truncation the graph walk caused says which bound stopped it; the byte budget adds nothing', () => {
+    for (const [by, want] of [['walk_budget', 'BY-WALK'], ['deadline', 'BY-DEADLINE']] as const) {
+      const m = mount();
+      answer(m, { truncated: true, returned: 1, count: 4, nextSkip: 1, truncatedBy: by });
+      const holding = alerts(m).filter(a => a.includes('TRUNCATED-TITLE'));
+      expect(holding[0], `${by} is not named inside the shortened-answer notice`).toContain(want);
+      TestBed.resetTestingModule();
+    }
+    const m = mount();
+    answer(m, { truncated: true, returned: 1, count: 4, nextSkip: 1, truncatedBy: 'budget' });
+    expect(visibleText(m)).not.toContain('BY-WALK');
+    expect(visibleText(m)).not.toContain('BY-DEADLINE');
+  });
+
+  it('every new left-out and walk-bound key exists in en, de and pl, and de/pl are not English', () => {
+    const keys = ['brain.query.leftOut.title', 'brain.query.leftOut.body', 'brain.query.leftOut.more',
+      ...['walk_ceiling', 'link_scan', 'paths', 'deadline'].map(r => `brain.query.leftOut.reason.${r}`),
+      'brain.query.truncated.by.walk_budget', 'brain.query.truncated.by.deadline'];
+    for (const k of keys) {
+      for (const l of LOCALES) expect(locale(l)[k], `${k} missing from ${l}.json`).toBeTruthy();
+      expect(locale('de')[k], `de ${k} is the English text`).not.toBe(locale('en')[k]);
+      expect(locale('pl')[k], `pl ${k} is the English text`).not.toBe(locale('en')[k]);
+    }
+    for (const l of LOCALES) {
+      expect(Object.keys(locale(l)).filter(k => k.startsWith('brain.query.graphShort.')), `${l} keeps graphShort keys`).toEqual([]);
+    }
   });
 
   it('a refusal reason this client does not know is shown as it arrived, not dropped', () => {
@@ -527,7 +583,7 @@ describe('Q-92: the page renders `remainder` and `spillRefused`', () => {
 
   it('an answer with no refusal shows no refusal', () => {
     const m = mount();
-    answer(m, KINDS[1].response('sp-r'));
+    answer(m, KINDS[0].response('sp-r'));
     expect(visibleText(m)).not.toContain('SPILL-REFUSED');
   });
 });

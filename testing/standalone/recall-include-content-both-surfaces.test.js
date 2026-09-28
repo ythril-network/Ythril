@@ -93,15 +93,19 @@ describe('recall exposes includeFileContent on both surfaces', () => {
      */
     const restBuilders = ['/recall', '/similar']
       .filter(p => { const b = routeBody(rest, p); return b && !delegatesCleanly(b, `POST ${p}`); });
-    const sites = [...rest.matchAll(/buildGraphWithSpill\(/g)].map(m => m.index);
+    // Anchored on `traversedAnswer(` since Q-126 — the one builder every traversing answer goes through. The
+    // strip runs on the rows BEFORE they are handed to it, so the window opens at the end of the plain branch
+    // (its `return;`) and closes at the response this branch builds.
+    const sites = [...rest.matchAll(/traversedAnswer\(/g)].map(m => m.index);
     assert.equal(sites.length, restBuilders.length,
       `${restBuilders.length} REST route(s) still build their own response (${restBuilders.join(', ') || 'none'}) `
       + `but ${sites.length} expand a graph`);
     for (const at of sites) {
       const responseAt = rest.indexOf('res.json(', at);
-      assert.ok(responseAt > at,
-        'no `res.json(` after a graph build — the handler changed shape, so this gate measures nothing');
-      const window = rest.slice(at, responseAt);
+      const branchAt = rest.lastIndexOf('return;', at);
+      assert.ok(responseAt > at && branchAt > -1,
+        'no plain branch before, or no `res.json(` after, a graph build — the handler changed shape, so this gate measures nothing');
+      const window = rest.slice(branchAt, responseAt);
       assert.match(window, /stripContentIfAsked\([^)]*safeInclude\w*\)/,
         'a traverse response must apply the same strip as the plain one');
       // The same question for the flag that arrived beside it. `includeDiagnostics` is recursive by the

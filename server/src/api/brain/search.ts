@@ -15,10 +15,12 @@ import { NotFoundError } from '../../util/errors.js';
 import { countFacts } from '../../brain/fact.js';
 import { getEmbedJobCounts } from '../../brain/embed-queue.js';
 import { TRAVERSE_BODY_FIELDS, FIND_SIMILAR_BODY_FIELDS, unknownBodyFields } from '../../brain/query.js';
-import { findSimilar, type RecallKnowledgeType, type RecallResult } from '../../brain/recall.js';
+import { findSimilar, RECALL_BUDGET_MS, type RecallKnowledgeType, type RecallResult } from '../../brain/recall.js';
 import { traverseGraph } from '../../brain/edges.js';
 import { MAX_RECALL_TRAVERSE } from '../../brain/recall-seed-traversal.js';
-import { buildGraphWithSpill, spillResultSet, countGraphNodes } from '../../brain/graph-spill.js';
+import { spillResultSet } from '../../brain/graph-spill.js';
+import { traversedAnswer } from '../../brain/traversed-answer.js';
+import { deadlineFrom } from '../../brain/search-bounds.js';
 import { parseTraverseOption } from '../../brain/traverse-option.js';
 import { getConfig } from '../../config/loader.js';
 import { col } from '../../db/mongo.js';
@@ -38,15 +40,11 @@ import { requestActor } from '../../auth/request-actor.js';
 import { sendReadFailure, statesRetryability } from './_read-failure.js';
 import { spaceCollection } from '../../db/space-collection.js';
 
-/**
- * The most graph nodes one response may expand to, however large `topK` is.
- *
- * The formula `topK * (traverse + 1) * 4` is what shapes a normal answer, and it is shared with recall's
- * own traverse so the two cannot drift. This constant is the absolute bound beside it, needed since
- * `P-34` removed the ceiling on `topK`: the byte budget stops an oversized walk being RETURNED, and this
- * stops it being WALKED.
+/*
+ * `MAX_GRAPH_NODES` lived here, private to this file, with a comment saying recall shared it. It did not: only
+ * this route applied it, and here `topK <= 100` meant it could never bind. The bounds on a graph walk are now
+ * `brain/search-bounds.ts`, and every door — this one included — reaches them through `traversedAnswer`.
  */
-const MAX_GRAPH_NODES = 5000;
 
 export const searchRouter = Router();
 
@@ -336,6 +334,7 @@ searchRouter.post('/recall', globalRateLimit, requireAuth, statesRetryability, a
 const VALID_ENTRY_TYPES = new Set<string>(RECORD_TYPES);
 
 searchRouter.post('/similar', globalRateLimit, requireBodyScopedSpace('knowledge', 'read'), statesRetryability, async (req, res) => {
+  const startedAt = Date.now();
   const authorised = req.authorisedSpaces ?? [];
   const namedSpace = req.resolvedSpaceId;
   const spaceId = namedSpace ?? authorised[0] ?? '';
@@ -482,40 +481,30 @@ searchRouter.post('/similar', globalRateLimit, requireBodyScopedSpace('knowledge
       return;
     }
 
-    // Graph-augmented: expand the similar matches along edges. Deliberately the SAME builder, cap formula and
-    // envelope `recall`'s traverse uses — a caller who can read one response can read the other, and a second
-    // copy of the shape is how the two would drift.
+    // Graph-augmented: the SAME answer `recall`'s traverse gives, through the same module — every row with its
+    // WHOLE graph, or left out and named (Q-126). A caller who can read one response can read the other.
     const traverseSpaces = crossSpaceIds ?? [spaceId];
-    // Bounded absolutely as well as by `topK`, which no longer has a ceiling of its own (`P-34`). The
-    // formula is what shapes a NORMAL answer; the constant is what stops an enormous `topK` turning a
-    // graph walk into an unbounded one. `MAX_GRAPH_NODES` is shared with recall's traverse so the two
-    // cannot drift — the comment above says that is the point.
-    const totalCap = Math.min(topK * (safeTraverse + 1) * 4, MAX_GRAPH_NODES);
-    const { graph, spill, spillRefused, truncated: graphTruncated } = await buildGraphWithSpill(
-      traverseSpaces,
-      result.results.map(r => ({ _id: r._id, spaceId: r.spaceId })),
-      safeTraverse,
-      Math.max(0, totalCap - result.results.length),
-      fsTraverseOpt,
-      requestActor(req).tokenId,
-    );
-    const itemsWithGraph = withoutDiagnostics(
-      stripContentIfAsked(result.results, safeIncludeFileContent), safeIncludeDiagnostics)
-      .map(r => {
-        const nested = mapGraphNodes(
-          graph.bySeed.get(r._id), graphNodeRecord, safeIncludeDiagnostics, safeProjection);
-        return nested ? { ...r, _graph: nested } : r;
-      });
-    const items = projectResults(itemsWithGraph as RecallResult[], safeProjection);
-    const itemsBudgeted = await budgetedEnvelope({
-      results: items,
+    const shaped = new Map(withoutDiagnostics(
+      stripContentIfAsked(result.results, safeIncludeFileContent), safeIncludeDiagnostics).map(r => [r._id, r]));
+    const itemsBudgeted = await traversedAnswer({
+      seeds: result.results,
+      memberIds: traverseSpaces,
+      maxDepth: safeTraverse,
+      narrowing: fsTraverseOpt,
+      // similar has no `maxTimeMS` of its own; its walk runs under the instance's recall budget.
+      deadline: deadlineFrom(startedAt, RECALL_BUDGET_MS),
       budget,
       skip: paging.skip,
       remainderDump: paging.remainderDump,
-      spillRemainder: remainder => spillResultSet({
+      shapeRow: (seed, nodes) => {
+        const base = shaped.get(seed._id) ?? seed;
+        const nested = mapGraphNodes(nodes, graphNodeRecord, safeIncludeDiagnostics, safeProjection);
+        return projectResults([(nested ? { ...base, _graph: nested } : base) as RecallResult], safeProjection)[0]!;
+      },
+      spillRemainder: (remainder, about) => spillResultSet({
         issuedTo: requestActor(req).tokenId,
         results: remainder,
-        request: { entryId, entryType, topK, traverse: safeTraverse },
+        request: { entryId, entryType, topK, traverse: safeTraverse, ...about },
       }),
     });
     res.json({
@@ -523,20 +512,6 @@ searchRouter.post('/similar', globalRateLimit, requireBodyScopedSpace('knowledge
       results: itemsBudgeted.results,
       ...itemsBudgeted.fields,
       traverseDepth: safeTraverse,
-      // Counted from the payload actually being sent, not from what the traversal REACHED.
-      //
-      // `graph.nodes` is the total across every seed the walk visited — including seeds the byte budget then
-      // evicted, so the number described an answer the caller did not receive. The integration guide already
-      // said this field is "how many traversed nodes came back", which was simply false.
-      //
-      // `countGraphNodes` walks the emitted structure, so it is correct for both doors' shapes by
-      // construction — flat with `_graph` alongside on REST, nested under `record` on MCP — and it is the
-      // same function the spill file uses to describe itself, for the same reason: a count passed in
-      // alongside a payload can describe a different set of records than the payload does.
-      graphNodes: countGraphNodes(itemsBudgeted.results),
-      ...(graphTruncated ? { graphTruncated: true } : {}),
-      ...(spill ? { graphComplete: spill } : {}),
-      ...(spillRefused ? { spillRefused } : {}),
     });
   } catch (err: unknown) {
     if (err instanceof NotFoundError) {

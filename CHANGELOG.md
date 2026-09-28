@@ -28,7 +28,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   only while it holds knowledge read on every space whose records are inside; anyone else, an unknown id and an
   expired one all get the same `404`, and a spill its owner's newer spills evicted answers `410`. See
   [Reading a spill](docs/integration-guide/04a-recall-api.md#reading-a-spill-get-apibrainspillsid-and-mcp-read_spill).
-- **`graphComplete` and `remainder` carry a `spillId`**, the id `read_spill` takes.
+- **`remainder` carries a `spillId`**, the id `read_spill` takes.
+- **`incompleteRows`, `incompleteCount` and `truncatedBy` on a traversing `recall` or `similar`** (Q-126), on both
+  doors. `incompleteRows` names each match left out because its graph could not be read whole —
+  `{_id, spaceId, type, name, reason}`, reason `walk_ceiling`, `link_scan`, `paths` or `deadline`, at most 50
+  named — and `incompleteCount` counts them all. `truncatedBy`, beside `nextSkip`, says which bound ended the
+  answer: `budget`, `walk_budget` or `deadline`.
 - **`spillRefused`**: a `recall` or `similar` whose spill could not be kept says why — `over-share`,
   `instance-ceiling`, `no-token`, `unattributed`, `empty` or `failed` — and still answers in full, with `truncated`
   and `nextSkip` exactly as without it. A spill never fails the search.
@@ -47,11 +52,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (Q-102). See [Upgrading](docs/integration-guide/02-hosting.md#upgrading).
 - **The shipped Kubernetes Deployment uses `strategy: Recreate`**, so an old and a new pod never write the same
   data volume at once during a rollout.
-- **A spill's `download` is `/api/brain/spills/:id`**, on `graphComplete` and `remainder` alike. It was the files
-  route on the seed's space, which a token with knowledge read and no files read could not fetch.
-- **A graph spill's items are the traversed nodes, flat** — `{id, spaceId, depth, seedId, via: {edgeId, from},
-  edges, paths, record}` — so a large traversal pages like any other answer. It was one JSON document holding the
-  nested tree.
+- **A traversing `recall` or `similar` returns each match with its WHOLE graph, or leaves it out and names it**
+  (Q-126, owner ruling 2026-09-28: *"if i get a result i want to be sure i get what i asked for"*). Each match is
+  walked on its own, to the depth asked for; a neighbourhood past the per-match node ceiling, a link scan past its
+  bound, a node reachable more ways than are recorded, or the deadline leaves that match out of `results` and in
+  `incompleteRows`, and no returned graph is ever shortened. The whole call has one walk budget and one deadline,
+  and running out of either ends the answer at the last whole match with `truncated`, `nextSkip` and
+  `truncatedBy`, exactly as the byte budget does. **Removed: `graphComplete`**, the link to a spilled whole graph
+  beside a shortened inline one, and the spill behind it — nothing is written unless `remainderDump: true` is
+  sent. **`graphTruncated` changed meaning**: it is now `true` exactly when `incompleteCount` is, and never means a
+  returned graph is short. **Removed: `pathsTruncated`** on a node, for the same reason. A caller that read
+  `graphComplete` reads `incompleteRows` and narrows `edgeLabels` or `traverse` to bring a match back. See
+  [Graph-augmented recall](docs/integration-guide/04h-graph-augmented-recall.md).
+- **A spill's `download` is `/api/brain/spills/:id`**. It was the files route on the seed's space, which a token
+  with knowledge read and no files read could not fetch.
 - **A spill lives up to one day, and may be evicted earlier** by its own token's newer spills. Every place that said
   "expires after one day" says so now.
 - **Backups and the storage quota leave read spills out.** A backup would have kept a copy — of records since
@@ -64,7 +78,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   tombstone and no webhook, and one `file.legacy_spill.sweep` audit entry per space it cleaned. **The deletion
   cannot be undone**; a `_tmp` folder of your own deeper in the tree, and other files under the root `_tmp`, are not
   touched. See [Upgrading](docs/integration-guide/02-hosting.md#upgrading).
-- **Deprecated: `path` on `graphComplete` and `remainder`, and its resolution through `read_file` and
+- **Deprecated: `path` on `remainder`, and its resolution through `read_file` and
   `GET /api/files/:spaceId?path=`** — removed at the next major. No such file exists since Q-92; the files doors
   answer exactly that path from the spill store, for the token that ran the search alone, so a caller built on
   `path` + `read_file` keeps working until then. One read of that path now answers ONE window — the first page
@@ -93,10 +107,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A file arriving by sync is written inside its own space, whatever path the peer names.** The pull path joined
   the peer's manifest path onto the space directory without the sandbox check every other write gets, so a path
   climbing out of the space would have been written outside it.
-- **The Query tab's spill downloads work.** "Download the whole graph" was a plain link, which carries no
-  `Authorization` header, so it could never be followed; it is a button that fetches every page of the spill and
-  saves one file. The remainder a search kept with "Save what did not fit" is now offered too, with its expiry, and a
-  spill that is gone or was not kept says so.
+- **The Query tab's spill download works.** "Download the whole graph" was a plain link, which carries no
+  `Authorization` header, so it could never be followed. It is gone with the graph spill (Q-126); the remainder a
+  search kept with "Keep what did not fit" is offered as a button that fetches every page and saves one file, with
+  its expiry, and a spill that is gone or was not kept says so. A match left out because its graph could not be
+  read whole is named above the results, with the reason.
 
 ### Security
 

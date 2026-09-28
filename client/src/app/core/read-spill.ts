@@ -3,8 +3,9 @@
  *
  * ## Why this is its own module
  *
- * Two answers point at a spill, the results remainder (`remainder`) and the whole graph (`graphComplete`),
- * and they had each described it separately, as a file in the space. Since Q-92 a search writes nothing into a
+ * An answer points at a spill as its results remainder (`remainder`). Until Q-126 a second one pointed at the
+ * whole graph (`graphComplete`); a match now comes with its whole graph or is left out, so no graph is spilled.
+ * The two had each described a spill separately, as a file in the space. Since Q-92 a search writes nothing into a
  * space: the spill is held by the instance, belongs to the token that ran the search, and is read back page by
  * page through `GET /api/brain/spills/:id` (MCP `read_spill`). One description, so the two halves cannot drift
  * apart about what the link means or how long it lasts.
@@ -39,8 +40,8 @@ export interface ResultSpillLink extends SpillLink {
 }
 
 /**
- * Why a spill that was asked for (or that a short graph would have produced) was not kept. The answer then
- * carries no `remainder` / `graphComplete`, and falls back to `truncated` + `nextSkip` or `graphTruncated`.
+ * Why a spill that was asked for was not kept. The answer then carries no `remainder`, and falls back to
+ * `truncated` + `nextSkip`.
  * Open-ended on purpose: a newer server's reason is shown as it arrives rather than dropped.
  */
 /**

@@ -610,8 +610,11 @@ async function introduceLexicalOnly(
 
 
 
-/** The effective budget for one recall: the caller may lower the instance ceiling, never raise it. */
-function effectiveBudgetFor(maxTimeMS: number | undefined): number {
+/**
+ * The effective budget for one recall: the caller may lower the instance ceiling, never raise it. Exported so
+ * a traversing recall's graph walk runs under the SAME deadline as its search (Q-126), not a fresh one.
+ */
+export function effectiveBudgetFor(maxTimeMS: number | undefined): number {
   return Math.max(MIN_RECALL_BUDGET_MS, Math.min(maxTimeMS ?? RECALL_BUDGET_MS, RECALL_BUDGET_MS));
 }
 
