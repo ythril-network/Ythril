@@ -51,7 +51,7 @@ and the infra pin not turned off):
      changed is that nothing downstream assumes it. A gallery built at one width keeps rejecting another
      even if the default changes later — its stored vectors have not moved.
    - **A descriptor of any other width is skipped, and the first one is logged as a warning** naming the width received and which path produced it (in-process or external). One odd descriptor must not fail a whole media job, so the skip itself is not an error; the log is once per process, because a changed width means every face is affected and a per-face log would bury the message. If face recognition appears to find nothing, check for this warning before concluding the images have no faces — that is the symptom a width mismatch produces.
-4. **Gallery search** — each descriptor is searched against the space's face gallery (all face-chunk records that have a `faceEntityId`) using an exact `$vectorSearch`. The top-1 result is examined.
+4. **Gallery search** — each descriptor is searched against the space's face gallery (all face-chunk records that have a `faceEntityId`) using an exact `$vectorSearch`. The top-1 result is examined. **Every labelled face competes, however many unlabelled faces are nearer** — until 5.5.3 only the nearest thousand faces were looked at, so in a large archive a labelled match behind them was recorded as "no match". A search that cannot be completed (it ran out of time, or the face index is still being updated) makes the media job **retry**, rather than writing the face unlabelled for good.
 5. **Auto-label** — if the top match's cosine similarity score ≥ `confidenceThreshold` (default: `0.6`), the parent image is linked to that entity (a `file` → `entity` link record is written). The first successful match wins.
 6. **Persist face-chunks** — one `{fileId}#face-chunk{N}` filemeta record per detected face is written (or replaced on reprocess) with:
    - `faceEmbedding` — the 128d descriptor
@@ -139,7 +139,7 @@ The matcher reads the width from **the space's own index**, not from an instance
 
 **There is still no supported way to move a POPULATED gallery to a new width.** An earlier version of this page said to re-embed its faces at the new width first, which described a path that was never built: having re-embedded, there was no call that set the new number. There is one now — see above — but it refuses precisely the populated case, because the refusal protects vectors that already exist. Re-create the space at the width you want.
 
-When the face recognition feature is first enabled, any existing `initSpace` call will create the required index. If you add the feature after spaces already exist, re-run `initSpace` for each space or create the index manually via the Atlas UI / MongoDB admin API.
+When the face recognition feature is first enabled, any existing `initSpace` call will create the required index. If you add the feature after spaces already exist, re-run `initSpace` for each space or create the index manually via the Atlas UI / MongoDB admin API. A manual definition must declare `_id` as a filter field (`{"fields": [{"type": "vector", "path": "faceEmbedding", "numDimensions": <width>, "similarity": "cosine"}, {"type": "filter", "path": "_id"}]}`), or a labelled face behind many closer unlabelled ones cannot be found and every such image's job retries.
 
 #### An unacknowledged endpoint is stored and UNUSED — it does not block anything else
 

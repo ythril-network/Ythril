@@ -151,6 +151,9 @@ export async function initSpace(
   // Chunk records point at their file through `parentFileId`. Both the chunk-grouping reads and
   // completeness' "was this file ever chunked" join go through it.
   await filesColl.createIndex({ parentFileId: 1 });
+  // The face gallery reads the LABELLED faces' ids to complete its search (Q-102, `gallerySearch`). Partial, so it
+  // indexes the few labelled faces and none of the unlabelled crowd — or any record that is not a face at all.
+  await filesColl.createIndex({ faceEntityId: 1 }, { partialFilterExpression: { faceEntityId: { $exists: true } } });
 
   // ── The media job queue: the most-polled collection in the product, and it had no index at all ──
   //

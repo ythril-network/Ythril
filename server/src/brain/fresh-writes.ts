@@ -52,7 +52,10 @@ import { getEmbeddingConfig } from '../config/loader.js';
 import { atlasScoreFromParts, norm } from './vector-score.js';
 import { log } from '../util/log.js';
 import { envInt } from '../config/env-num.js';
-import { recallFreshWritesFoundTotal } from '../metrics/registry.js';
+import { recallFreshWritesFoundTotal, recallFreshScanCappedTotal } from '../metrics/registry.js';
+
+/** When each collection last warned that its fresh-write scan was capped — see the warning. */
+const capWarnedAt = new Map<string, number>();
 
 /**
  * How far back "fresh" reaches.
@@ -118,15 +121,21 @@ export async function matchFreshWrites(
     const queryNorm = norm(queryVector);
     const cutoff = new Date(now - FRESH_WINDOW_MS).toISOString();
 
-    const rows = await col(collName).aggregate<{ _id: string; dot: number; norm: number }>([
+    const [facet] = await col(collName).aggregate<{ inWindow: Array<{ n: number }>; rows: Array<{ _id: string; dot: number; norm: number; dims: number }> }>([
       // Newest first, capped, BEFORE anything expensive. This is the index walk that keeps the cost flat.
       { $sort: { seq: -1 } },
       { $limit: FRESH_SCAN_CAP },
       // Then the window, and then the vector math — in that order, so a quiet space pays for neither.
       // `embedding` is absent on a record still queued for embedding, and on one excluded from vector
       // search; both are correctly invisible to a similarity check.
-      { $match: { updatedAt: { $gte: cutoff }, embedding: { $type: 'array' }, ...(predicate ?? {}) } },
-      {
+      //
+      // The window and the vector guard are the SCAN's, and a caller's predicate narrows them — ANDed, never
+      // spread in, or a filter naming `updatedAt` replaced the window and one naming `embedding` let a
+      // vectorless record reach `$size` and fail the whole scan (Q-102).
+      { $match: { $and: [{ updatedAt: { $gte: cutoff } }, { embedding: { $type: 'array' } }] } },
+      // Counted BEFORE the caller's predicate: whether the cap cut the window off is a fact about the window,
+      // and counting after the filter reported it only when every capped record happened to match.
+      { $facet: { inWindow: [{ $count: 'n' }], rows: [...(predicate ? [{ $match: predicate }] : []), {
         $project: {
           _id: 1,
           dot: {
@@ -153,15 +162,24 @@ export async function matchFreshWrites(
           // against a prefix of itself and land anywhere. Carry the length and drop those below.
           dims: { $size: '$embedding' },
         },
-      },
-    ]).toArray() as Array<{ _id: string; dot: number; norm: number; dims: number }>;
+      }] } },
+    ]).toArray();
+    const rows = facet?.rows ?? [];
 
-    if (rows.length === FRESH_SCAN_CAP) {
-      log.warn(
-        `Fresh-write duplicate scan hit its ${FRESH_SCAN_CAP}-document cap on ${collName}: only the newest ` +
-        `${FRESH_SCAN_CAP} records of the last ${Math.round(FRESH_WINDOW_MS / 1000)}s were compared. ` +
-        'Raise DUPE_FRESH_SCAN_CAP if this space sustains that write rate.',
-      );
+    if ((facet?.inWindow?.[0]?.n ?? 0) >= FRESH_SCAN_CAP) {
+      recallFreshScanCappedTotal.inc();
+      // Once a minute per collection: a space that sustains the write rate hits this on EVERY recall, and a
+      // warning per call buries the one line that says what to change.
+      const last = capWarnedAt.get(collName) ?? 0;
+      if (now - last >= 60_000) {
+        capWarnedAt.set(collName, now);
+        log.warn(
+          `Fresh-write scan hit its ${FRESH_SCAN_CAP}-document cap on ${collName}: only the newest ` +
+          `${FRESH_SCAN_CAP} records of the last ${Math.round(FRESH_WINDOW_MS / 1000)}s were compared, so a record ` +
+          'written in that window and not yet indexed may be missing from a search or a duplicate check. ' +
+          'Raise DUPE_FRESH_SCAN_CAP if this space sustains that write rate.',
+        );
+      }
     }
 
     const out: FreshMatch[] = [];

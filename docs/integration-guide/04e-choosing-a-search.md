@@ -74,13 +74,14 @@ message is rarely textually similar to the message's subject.
 ## Combining them: the two-call pattern that beats one clever call
 
 **Filter first, rank second — in one call.** `recall`'s `filter` accepts the same grammar `query` does, including
-`$or` and `$regex` nested to depth 8. **`topK` is filled from records that satisfy the filter**, never applied to
-an already-cut shortlist — so a filtered `topK: 10` still returns ten, and nothing matching is silently dropped.
+`$or` and `$regex` nested to depth 8. **`topK` is filled from every record that satisfies the filter, whatever its
+vector rank** — so a filtered `topK: 10` returns ten when ten match, and nothing matching is silently dropped. An
+answer that could not be completed says `filter_window` in `degraded`.
 
-That promise holds however the filter is written; only the speed differs. A simple condition on an allowlisted
-key becomes a native pre-filter inside the vector index. **Raw MongoDB — including the `$or` above — cannot**, so
-the whole space is scored and then filtered: slower, same records. Declaring a heavily-filtered property in the
-space schema is what keeps it on the fast path.
+That promise holds however the filter is written; only the cost differs. A flat condition on `tags`, `type`,
+`name`, `status`, `label` or a declared property is applied by the vector index itself. Anything else — including
+the `$or` above — costs a pass over the matching records. Declaring a heavily filtered property in the space
+schema is what keeps it on the fast path.
 
 ```json
 { "query": "who owns the vault service",
@@ -154,7 +155,7 @@ has to be one.
 | a phrase search finds nothing | `$regex` over prose | `recall` |
 | "this record has no relationships" | a short graph read as the whole neighbourhood | check `graphTruncated`; when `graphComplete` is present, read its `spillId` with `read_spill` / `GET /api/brain/spills/:id` |
 | "there are no more matches" | a budgeted answer read as the whole result | check `truncated` and page with `nextSkip` as `skip`; `remainder.spillId` is the same records kept in one spill |
-| a filtered recall returns fewer than `topK` | assuming a post-filter | `topK` is filled from records that SATISFY the filter, so nothing matching was dropped — the candidates genuinely ran out |
+| a filtered recall returns fewer than `topK` | assuming a post-filter | `topK` is filled from every record that satisfies the filter, whatever its rank, so nothing matching was dropped — the matches genuinely ran out. The exception says so: `degraded` carries `filter_window` |
 | slow, wide answers | `traverse` 2+ with a large `topK` | narrow the seeds first |
 
 ---

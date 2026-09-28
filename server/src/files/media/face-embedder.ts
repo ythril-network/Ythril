@@ -40,11 +40,13 @@ import { updateFileMeta } from '../file-meta.js';
 import { linksStartingFrom } from '../../brain/link-adjacency.js';
 import { log } from '../../util/log.js';
 import { isUsableDescriptor } from './face-descriptor.js';
-import { faceDescriptorDimsFor } from '../../spaces/vector-index.js';
+import { faceDescriptorDimsFor, liveIndexName } from '../../spaces/vector-index.js';
 import type { FileMetaDoc, EntityDoc } from '../../config/types.js';
 import type { Config as HumanConfig, Result } from '@vladmandic/human';
 import { detectFacesExternal, externalFaceReady, inProcessFallbackAllowed } from './face-external.js';
 import { spaceCollection } from '../../db/space-collection.js';
+import { predicateRecall, type PredicateIdMemo } from '../../brain/predicate-recall.js';
+import { isMaxTimeExpired } from '../../db/max-time.js';
 
 // ── Singleton Human instance (lazy init) ──────────────────────────────────
 
@@ -162,62 +164,78 @@ export async function labelStillResolves(spaceId: string, entityId: string): Pro
 }
 
 /**
- * Search the face gallery (labeled face-chunk records in the space) for the
- * closest match to the given descriptor, which is FACE_DESCRIPTOR_DIMS wide.
+ * The gallery could not give an answer — distinct from "no match", which is one.
  *
- * Uses exact-mode $vectorSearch so all gallery entries are considered, then
- * a post-match filter for faceEntityId to restrict to labeled faces only.
- *
- * Returns { entityId, score } if the top match passes the threshold,
- * or null if the gallery is empty / no match meets the threshold.
+ * `embedImage` rethrows it so the media job RETRIES. Returning `null` instead writes the face chunk unlabelled,
+ * and nothing ever runs it again: a timeout or an index still updating would become a permanently unlabelled
+ * face, indistinguishable from a stranger.
  */
-async function gallerySearch(
+export class GalleryIncompleteError extends Error {
+  constructor(spaceId: string, why: string) {
+    super(`face gallery search in '${spaceId}' could not complete (${why}) — retry`);
+    this.name = 'GalleryIncompleteError';
+  }
+}
+
+/** The whole budget one gallery search gets. A media job is background work: accuracy over speed. */
+const GALLERY_BUDGET_MS = 30_000;
+
+/**
+ * Search the face gallery (labelled face-chunk records in the space) for the closest match to the given
+ * descriptor, which is FACE_DESCRIPTOR_DIMS wide.
+ *
+ * ## Every labelled face competes, however many unlabelled faces are nearer (Q-102)
+ *
+ * It was `$vectorSearch exact:true limit: 1000` THEN `$match {faceEntityId: exists}` — the filtered-recall
+ * window, one module over. In a photo archive every face is unlabelled until somebody labels it, so past a
+ * thousand unlabelled faces nearer than the nearest labelled one, the match was outside the window and the face
+ * was recorded as "no match", permanently. It now goes through `predicateRecall`, the same two stages a
+ * filtered recall uses: the window first, completed from the labelled faces' ids when the window cannot prove
+ * it held the best one.
+ *
+ * Returns `{ entityId, score }` when the best labelled face passes the threshold, `null` when the gallery holds
+ * no labelled face that does (or no face index exists yet), and THROWS {@link GalleryIncompleteError} when the
+ * search could not be completed — see there. Exported as the test seam.
+ */
+export async function gallerySearch(
   spaceId: string,
   descriptor: number[],
   threshold: number,
+  /** The labelled-face id set, shared by every face of one image so a group photo reads it once. */
+  memo?: PredicateIdMemo,
 ): Promise<{ entityId: string; score: number } | null> {
-  const indexName = `${spaceId}_files_faceEmbedding`;
+  const indexName = liveIndexName(`${spaceId}_files_faceEmbedding`);
+  const startedAt = Date.now();
+  let out;
   try {
-    const pipeline: object[] = [
-      {
-        $vectorSearch: {
-          index: indexName,
-          path: 'faceEmbedding',
-          queryVector: descriptor,
-          // Exact (exhaustive) scan: the face-specific index only contains
-          // face-chunk records, so this is efficient regardless of index size.
-          // High limit ensures the best-scoring labeled face is within the
-          // returned window even if unlabeled faces score higher.
-          exact: true,
-          limit: 1000,
-        },
-      },
-      // Post-match for labeled faces only (doesn't require an index filter field)
-      { $match: { faceEntityId: { $exists: true, $ne: null } } },
-      { $addFields: { _score: { $meta: 'vectorSearchScore' } } },
-      { $project: { _score: 1, faceEntityId: 1 } },
-      { $limit: 1 },
-    ];
-
-    const results = await col<FileMetaDoc & { _score: number }>(spaceCollection(spaceId, 'files'))
-      .aggregate(pipeline)
-      .toArray();
-
-    if (results.length === 0) return null;
-
-    const top = results[0]!;
-    if (typeof top._score !== 'number' || top._score < threshold) return null;
-    if (!top.faceEntityId) return null;
-
-    const entityId = top.faceEntityId as string;
-    if (!await labelStillResolves(spaceId, entityId)) return null;
-
-    return { entityId, score: top._score };
+    out = await predicateRecall({
+      collName: spaceCollection(spaceId, 'files'),
+      indexName,
+      vectorPath: 'faceEmbedding',
+      queryVector: descriptor,
+      topK: 1,
+      predicate: { faceEntityId: { $exists: true, $ne: null } },
+      shape: [{ $project: { score: 1, faceEntityId: 1 } }],
+      remaining: () => Math.max(100, GALLERY_BUDGET_MS - (Date.now() - startedAt)),
+      memo,
+    });
   } catch (err) {
-    // The face index may not exist yet (feature just enabled, initSpace pending)
+    if (isMaxTimeExpired(err)) throw new GalleryIncompleteError(spaceId, 'the search ran out of time');
+    // No face index yet (the feature just enabled, the space's indexes still building): no gallery to match
+    // against, which is an answer — as it always was.
     log.debug(`Face gallery search failed for ${spaceId}: ${err instanceof Error ? err.message : String(err)}`);
     return null;
   }
+  if (out.degraded.length > 0) throw new GalleryIncompleteError(spaceId, out.degraded.join(', '));
+
+  const top = out.docs[0];
+  if (!top) return null;
+  const score = top['score'];
+  if (typeof score !== 'number' || score < threshold) return null;
+  const entityId = top['faceEntityId'];
+  if (typeof entityId !== 'string' || !entityId) return null;
+  if (!await labelStillResolves(spaceId, entityId)) return null;
+  return { entityId, score };
 }
 
 // ── Public API ─────────────────────────────────────────────────────────────
@@ -332,6 +350,8 @@ export async function embedFaces(
   const now = new Date().toISOString();
   const author = authorRef();
   let autoLabelEntityId: string | undefined;
+  /** The labelled faces' ids, read once for this image however many faces it holds — see `gallerySearch`. */
+  const galleryMemo: PredicateIdMemo = new Map();
 
   // ── 3. Process each detected face ────────────────────────────────────────
   for (let i = 0; i < faces.length; i++) {
@@ -351,7 +371,7 @@ export async function embedFaces(
     }
 
     // Gallery search — find the closest labeled face
-    const match = await gallerySearch(spaceId, embedding, faceCfg.confidenceThreshold);
+    const match = await gallerySearch(spaceId, embedding, faceCfg.confidenceThreshold, galleryMemo);
 
     const faceEntityId = match?.entityId;
     const faceScore = match?.score;

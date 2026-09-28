@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`degraded` reason `filter_window`**: a filtered answer that could not be completed says so, and returns what it
+  found (Q-102). Treat an unknown reason as "degraded". **`ythril_recall_fresh_scan_capped_total`** counts fresh-write
+  scans whose window held more records than `DUPE_FRESH_SCAN_CAP`.
 - **Uploaded files are encrypted at rest when the instance has a master secret** (F-43). The same
   `YTHRIL_MASTER_KEY` / `YTHRIL_MASTER_PASSPHRASE` that already encrypts the state files now covers every file under
   `<data-root>/files/` and the resumable-upload staging area, in a chunked AES-256-GCM format that streams a file of
@@ -37,6 +40,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **A recall with both `tags` and a filter naming `tags` applies both** (Q-102). The filter used to REPLACE the
+  `tags` parameter, so `tags: ["a"]` with `filter: {"tags": "b"}` answered records tagged `b` alone. A caller who
+  relied on that gets fewer records now: the ones carrying both.
+- **Every vector index gains `_id` as a filter field, rebuilt once on the first boot with no gap in search**
+  (Q-102). See [Upgrading](docs/integration-guide/02-hosting.md#upgrading).
 - **The shipped Kubernetes Deployment uses `strategy: Recreate`**, so an old and a new pod never write the same
   data volume at once during a rollout.
 - **A spill's `download` is `/api/brain/spills/:id`**, on `graphComplete` and `remainder` alike. It was the files
@@ -65,6 +73,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A filtered recall returns every matching record it has room for, whatever its vector rank** (Q-102). A filter
+  the vector index cannot apply — an undeclared property, `exists`, `ne`, most raw MongoDB — scored only the
+  nearest 1000–10000 records and filtered after, so a match outside that window was dropped with `count: 0` and
+  `truncated: false`, while the schema, `help()` and the guide promised the opposite. The window is now completed
+  from the matching records whenever it cannot prove it held the answer; a filter the index can apply costs what it
+  did, and any other costs a pass over the matching records. Both doors.
+- **Face auto-labelling finds a labelled face behind closer unlabelled ones** (Q-102). The gallery looked at the
+  nearest thousand faces only, so in a large archive a labelled match behind them was recorded as "no match", for
+  good. A gallery search that cannot be completed now makes the media job retry instead of writing the face
+  unlabelled.
+- **A filter can no longer switch off the fresh-write scan's own guards** (Q-102). A raw filter naming `updatedAt`
+  widened the "written in the last three minutes" window to every recent record, and one naming `embedding` failed
+  the scan and dropped the record written a moment ago.
 - **A restore answers in time however many spaces the instance holds.** After reloading the data, the restore
   rebuilt every space's vector indexes one space after another before answering, so the request grew by several
   seconds per space, and an instance with a few dozen spaces saw it time out — reporting a failed restore that had

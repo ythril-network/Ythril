@@ -40,14 +40,24 @@ export type VectorIndexedCollection = typeof VECTOR_INDEXED_COLLECTIONS[number];
  * filter API (`ALLOWED_FILTER_KEY_PREFIXES` in brain/fact.ts: tags/type/name/status/label) are
  * listed. `properties.<key>` paths are added dynamically from the space's schema — see
  * `deriveVectorFilterFields`.
+ *
+ * `_id` is on every one for a different reason (Q-102): a filter the index cannot apply is completed by scoring
+ * the ids that satisfy it, read from the collection, through a native `_id` filter — see
+ * `brain/predicate-recall.ts`. An index without it refuses that search, and the answer says `filter_window`.
  */
 const FIXED_VECTOR_FILTER_FIELDS: Record<VectorIndexedCollection, string[]> = {
-  facts: ['tags', 'type'],
-  entities: ['tags', 'type', 'name'],
-  edges: ['tags', 'type', 'label'],
-  chrono: ['tags', 'type', 'status'],
-  files: ['tags'],
+  facts: ['_id', 'tags', 'type'],
+  entities: ['_id', 'tags', 'type', 'name'],
+  edges: ['_id', 'tags', 'type', 'label'],
+  chrono: ['_id', 'tags', 'type', 'status'],
+  files: ['_id', 'tags'],
 };
+
+/**
+ * The face gallery's filter fields. Only `_id`: the gallery is completed the same way a filtered recall is, by
+ * scoring the labelled faces' ids — see `gallerySearch`.
+ */
+export const FACE_VECTOR_FILTER_FIELDS = ['_id'];
 
 /** Map a per-space collection suffix to the KnowledgeType whose schema governs its `properties`. */
 const COLLECTION_KNOWLEDGE_TYPE: Partial<Record<VectorIndexedCollection, KnowledgeType>> = {
@@ -158,6 +168,81 @@ export async function searchAvailable(
 }
 
 /**
+ * Which index a search should query right now, by the index's own name.
+ *
+ * Always the name itself — except while {@link swapIndexDefinition} is rebuilding it, when the stand-in holding
+ * the new definition answers instead. Every search reads its index name through this, so a swap cannot leave one
+ * query path pointed at an index that has just been dropped.
+ */
+export function liveIndexName(indexName: string): string {
+  return liveIndexNames.get(indexName) ?? indexName;
+}
+
+const liveIndexNames = new Map<string, string>();
+const swapsInFlight = new Set<string>();
+const swapNameFor = (indexName: string): string => `${indexName}__swap`;
+
+/**
+ * Change a vector index's definition with no moment in which the collection has no index to answer from.
+ *
+ * ## Why this exists (Q-102)
+ *
+ * `updateSearchIndex` changes a definition in place on Atlas, and the old one keeps serving until the new one is
+ * ready. mongodb-atlas-local refuses it (every spelling was probed: `"mappings" is required`), so the only change
+ * available there was drop and recreate — and between the two, every recall on the collection answered EMPTY,
+ * swallowed as "index not ready". For a filter-field change, which costs at most speed while it is pending,
+ * a blackout of every search is the wrong trade, and on upgrade it would hit every collection at once.
+ *
+ * ## The swap, and why it comes back to the original name
+ *
+ * The new definition is built under a stand-in name; when it serves, searches move to it ({@link liveIndexName});
+ * the original is dropped and rebuilt with the new definition; when THAT serves, searches move back and the
+ * stand-in is dropped. Two builds instead of one, once per change. Coming back is what keeps every other reader
+ * of an index by name — the readiness poll, the pipeline status, the face width probe — correct without knowing
+ * that a swap ever happened.
+ *
+ * Any step that fails leaves the searches on whichever index is still serving, and the next build retries.
+ */
+async function swapIndexDefinition(
+  spaceId: string,
+  collectionSuffix: VectorIndexedCollection,
+  indexName: string,
+  definition: { fields: object[] },
+  target: ProbeTarget,
+): Promise<void> {
+  if (swapsInFlight.has(indexName)) return;
+  swapsInFlight.add(indexName);
+  const coll = getDb().collection(`${spaceId}_${collectionSuffix}`);
+  const standIn = swapNameFor(indexName);
+  const build = async (name: string): Promise<boolean> => {
+    await coll.dropSearchIndex(name).catch(() => {});
+    await coll.createSearchIndex(asDoc({ name, type: 'vectorSearch', definition }));
+    return pollVectorIndexReady(spaceId, collectionSuffix, name, target);
+  };
+  try {
+    if (!await build(standIn)) {
+      log.warn(`Vector index swap for ${indexName}: the stand-in did not come up; the current definition keeps serving`);
+      await coll.dropSearchIndex(standIn).catch(() => {});
+      return;
+    }
+    liveIndexNames.set(indexName, standIn);
+    await coll.dropSearchIndex(indexName);
+    await new Promise(r => setTimeout(r, 2000));
+    if (!await build(indexName)) {
+      log.warn(`Vector index swap for ${indexName}: the rebuilt index did not come up; its stand-in keeps serving until the next build`);
+      return;
+    }
+    liveIndexNames.delete(indexName);
+    await coll.dropSearchIndex(standIn).catch(() => {});
+    log.info(`Vector index ${indexName} now has its new definition, with no gap in search`);
+  } catch (err) {
+    log.warn(`Vector index swap for ${indexName} stopped (${err instanceof Error ? err.message : String(err)}); searches stay on ${liveIndexName(indexName)}`);
+  } finally {
+    swapsInFlight.delete(indexName);
+  }
+}
+
+/**
  * Create or validate the $vectorSearch index for a space collection.
  *
  * The index declares the vector field plus a set of `type:"filter"` fields (P6) so recall can
@@ -211,6 +296,17 @@ export async function ensureVectorSearchIndex(
   }
 
   const existing = indexes.find(i => i.name === indexName);
+
+  // A swap this process did not finish (a restart mid-way) leaves its stand-in behind. With the real index
+  // present it is dropped below once the real one is current; with the real one missing it keeps serving
+  // until the real one is rebuilt, so the collection is never without an index to answer from.
+  if (indexes.some(i => i.name === swapNameFor(indexName))) {
+    if (!existing) liveIndexNames.set(indexName, swapNameFor(indexName));
+    else if (!swapsInFlight.has(indexName)) {
+      await coll.dropSearchIndex(swapNameFor(indexName)).catch(() => {});
+      liveIndexNames.delete(indexName);
+    }
+  }
 
   if (existing) {
     const existingFields = existing.latestDefinition?.fields ?? [];
@@ -275,6 +371,19 @@ export async function ensureVectorSearchIndex(
       }
       return;
     } catch (err) {
+      // A FILTER-ONLY change is never dropped and recreated. That blacks out every recall on the collection
+      // until the new index has synced — for a change whose absence costs only speed, or, for `_id`, a
+      // disclosed `filter_window` on the few filtered recalls that need completing. The old definition keeps
+      // serving, and the next build tries the update again (Q-102).
+      const keptWidth = (definition.fields[0] as { numDimensions?: number }).numDimensions;
+      if (keptWidth != null && keptWidth === existingDims) {
+        // mongodb-atlas-local refuses every spelling of an in-place vector index update ("mappings" is
+        // required), so on that backend the change is made by a SWAP instead — see `swapIndexDefinition`.
+        log.warn(`updateSearchIndex failed for ${indexName} (${err}); swapping the definition in without a gap`);
+        const swap = swapIndexDefinition(spaceId, collectionSuffix, indexName, definition, { vectorPath, dims: keptWidth });
+        if (waitForReady) await swap; else void swap;
+        return;
+      }
       // updateSearchIndex may be unsupported (older Atlas Local) or reject a dims change — fall
       // back to drop + recreate. This one path DOES leave a brief INITIAL_SYNC gap during which
       // recall on this collection returns empty (handled by the recall error-swallow), which is
@@ -665,7 +774,7 @@ export async function buildSpaceVectorIndexes(
     // gallery is never re-dimensioned, because nothing re-derives the vectors already stored in it.
     const configuredDims = getConfig().spaces.find(s => s.id === spaceId)?.faceDescriptorDims
       ?? FACE_DESCRIPTOR_DIMS;
-    await ensureVectorSearchIndex(spaceId, 'files', configuredDims, 'cosine', 'faceEmbedding', 'faceEmbedding', waitForReady, undefined, { ...opts, refuseWidthChange: true });
+    await ensureVectorSearchIndex(spaceId, 'files', configuredDims, 'cosine', 'faceEmbedding', 'faceEmbedding', waitForReady, FACE_VECTOR_FILTER_FIELDS, { ...opts, refuseWidthChange: true });
   }
 }
 

@@ -20,9 +20,12 @@ import { needsReindex } from '../spaces/_shared.js';
 // The pure half — merge, rank and the text projections. Moved out to pay back part of this file's
 // god-file ratchet raise; see recall-shape.ts for why the type import back here is not a cycle.
 import { mergeRecallResults, byIdAsc, byRankThenId, summariseRecall } from './recall-shape.js';
-import { vectorFilterFieldsFor } from '../spaces/vector-index.js';
-import { buildMongoFilter, toNativeVectorFilter, rawToNativeVectorFilter } from './filter.js';
-import { isRawFilter, recallPredicate, type RecallFilter } from './recall-filter.js';
+import { vectorFilterFieldsFor, liveIndexName } from '../spaces/vector-index.js';
+import { toNativeVectorFilter, rawToNativeVectorFilter } from './filter.js';
+import { recallPredicate, andPredicates, isRawFilter, type RecallFilter } from './recall-filter.js';
+import { predicateRecall, type PredicateIdMemo } from './predicate-recall.js';
+import type { DegradedReason } from './degraded-reasons.js';
+import { isMaxTimeExpired } from '../db/max-time.js';
 import { observeRecallPath, type RecallPathObservation } from './recall-path.js';
 export { observeRecallPath, type RecallPathObservation };
 import { deriveChronoStatus } from './chrono-status.js';
@@ -94,7 +97,7 @@ export const MIN_SEARCH_DEADLINE_MS = 100;
  */
 async function settleSearches(
   searches: Promise<RecallResult[]>[],
-  noteDegraded: (reason: string) => void,
+  noteDegraded: (reason: DegradedReason) => void,
 ): Promise<RecallResult[][]> {
   const settled = await Promise.allSettled(searches);
   const kept: RecallResult[][] = [];
@@ -339,6 +342,11 @@ export async function recall(
    */
   const pathObs = opts?.observePath ?? observeRecallPath();
 
+  // One budget for every collection search this call makes, read afresh before each round trip, plus the
+  // channel a search reports an incomplete answer through, and the matching-id sets the floor and the main
+  // search share rather than each reading them from the collection.
+  const budget: SearchBudget = { remaining: searchDeadline, noteDegraded, memo: new Map() };
+
   // Phase 1: for each type with a minPerType floor > 0, guarantee that many results
   const guaranteed: RecallResult[] = [];
   const guaranteedIds = new Set<string>();
@@ -346,7 +354,7 @@ export async function recall(
     const floorSearches = Object.entries(minPerType)
       .filter(([t, floor]) => activeTypes.includes(t as RecallKnowledgeType) && (floor ?? 0) > 0)
       .map(([t, floor]) =>
-        recallByType(spaceId, t as RecallKnowledgeType, embResult.vector, floor!, tags, filter, pathObs, searchDeadline()),
+        recallByType(spaceId, t as RecallKnowledgeType, embResult.vector, floor!, tags, filter, pathObs, budget),
       );
     const floorResults = (await settleSearches(floorSearches, noteDegraded)).flat();
     for (const r of floorResults) {
@@ -367,7 +375,7 @@ export async function recall(
   // stays — but `topK` has no ceiling of its own since `P-34`, and a per-type fetch that scales without
   // one is how an oversized request becomes an oversized query rather than a slow answer.
   const perTypeK = Math.min(Math.ceil(topK * (reranking ? candidateMultiplier() : 1.5)), MAX_PER_TYPE_CANDIDATES);
-  const searches = activeTypes.map(t => recallByType(spaceId, t, embResult.vector, perTypeK, tags, filter, pathObs, searchDeadline()));
+  const searches = activeTypes.map(t => recallByType(spaceId, t, embResult.vector, perTypeK, tags, filter, pathObs, budget));
   const allResults = (await settleSearches(searches, noteDegraded)).flat();
 
   /*
@@ -463,13 +471,10 @@ async function applyLexicalFusion(
 ): Promise<boolean> {
   if (pool.length === 0) return false;
 
-  // Same two matches `recallByType`'s exhaustive path applies, so the two channels agree on eligibility.
-  const eligibility: Record<string, unknown> = {};
-  if (tags && tags.length > 0) eligibility['tags'] = { $all: tags };
-  // Either grammar reaches the same eligibility match, so the lexical channel agrees with the vector one about which
-  // records qualify. A raw filter arrives already validated and needs no translation.
-  const built = filter == null ? null : isRawFilter(filter) ? filter.__raw : (Object.keys(filter).length > 0 ? buildMongoFilter(filter) : null);
-  const match = built ? { ...eligibility, ...built } : eligibility;
+  // THE predicate `recallByType` applies, from the one function that builds it, so the two channels agree on
+  // eligibility. It was assembled here a second time by spreading the filter over the tag clause, so a filter
+  // naming `tags` replaced the caller's `tags` in this channel even after the vector path stopped doing so.
+  const match = recallPredicate(tags, filter) ?? {};
 
   const limit = perTypeK * LEXICAL_LIMIT_MULTIPLIER;
   const perType = await Promise.all(
@@ -558,7 +563,8 @@ async function introduceLexicalOnly(
 
   try {
     const docs = await col(collName).aggregate<Record<string, unknown>>([
-      { $match: { ...eligibility, _id: { $in: [...overlapIds, ...newIds] } } },
+      // ANDed: a caller's own `_id` clause in `eligibility` must narrow this restriction, not be replaced by it.
+      { $match: andPredicates(eligibility, { _id: { $in: [...overlapIds, ...newIds] } })! },
       { $project: { ...commonProject, ...typeProject, embedding: 1 } },
     ]).toArray();
 
@@ -610,7 +616,7 @@ function effectiveBudgetFor(maxTimeMS: number | undefined): number {
 }
 
 /** Count a degradation on the metric AND tell the caller, once per reason. One channel, two readers. */
-function degradedNoter(collector: string[] | undefined): (reason: string) => void {
+function degradedNoter(collector: string[] | undefined): (reason: DegradedReason) => void {
   return (reason) => {
     recallDegradedTotal.labels({ reason }).inc();
     if (collector && !collector.includes(reason)) collector.push(reason);
@@ -630,7 +636,7 @@ async function rerankStage(
   pool: RecallResult[],
   remaining: number,
   budgetMs: number,
-  noteDegraded: (reason: string) => void,
+  noteDegraded: (reason: DegradedReason) => void,
   /** Which key picks the candidates the cap keeps — see `rerankPool`. Required, so no caller inherits one. */
   order: 'fused' | 'vector',
 ): Promise<void> {
@@ -782,6 +788,22 @@ function recallProjection(knowledgeType: RecallKnowledgeType): {
   return { commonProject, typeProject };
 }
 
+/**
+ * What one recall hands each of its collection searches.
+ *
+ * - `remaining` — the budget LEFT, read before every round trip. It was a number computed once when the search
+ *   was started, which was right while a search made one round trip; a filtered search can now make several,
+ *   and each must fit inside what the ones before it left.
+ * - `noteDegraded` — the typed channel a search reports an incomplete answer through. Only a timeout could be
+ *   reported before, by throwing; `filter_window` is an answer that DID come back and is incomplete.
+ * - `memo` — the matching-id sets, so the floor search and the main search over one collection read them once.
+ */
+interface SearchBudget {
+  remaining: () => number;
+  noteDegraded: (reason: DegradedReason) => void;
+  memo?: PredicateIdMemo;
+}
+
 /** Run $vectorSearch against a single collection and map results to RecallResult. */
 /*
  * `RecallPathObservation` and `observeRecallPath` moved to `brain/recall-path.ts`. Three callers, none of
@@ -797,19 +819,15 @@ async function recallByType(
   filter?: RecallFilter,
   /** Records which path this collection took. See `RecallPathObservation`. */
   observe?: RecallPathObservation,
-  /**
-   * Server-side deadline for this collection's search, in ms.
-   *
-   * The vector aggregations carried NO time limit at all, which made the end-to-end budget decorative
-   * for the hop most likely to be slow: `RECALL_BUDGET_MS` could only ever cancel the reranker, so a slow
-   * `$vectorSearch` blew past any deadline and the caller had already given up. A per-call `maxTimeMS`
-   * that cannot cut this is a promise the server cannot keep.
-   */
-  maxTimeMS?: number,
+  /** The recall's deadline and reporting channel — see {@link SearchBudget}. Absent = unbounded, as before. */
+  budget?: SearchBudget,
 ): Promise<RecallResult[]> {
+  /** Read before EVERY round trip: one filtered search can make several, and each must fit what is left. */
+  const deadline = (): number | undefined => budget?.remaining();
   const collSuffix = KNOWLEDGE_COLLECTION[knowledgeType];
   const collName = `${spaceId}_${collSuffix}`;
-  const indexName = `${spaceId}_${collSuffix}_embedding`;
+  // Through `liveIndexName`: while a definition change is being swapped in, the stand-in answers.
+  const indexName = liveIndexName(`${spaceId}_${collSuffix}_embedding`);
 
   // `mongoFilter` counts: without it here a raw filter would fall through to the unfiltered ANN path and be silently
   // ignored — a filtered search returning unfiltered results, which is the defect class this whole change came from.
@@ -829,30 +847,36 @@ async function recallByType(
   });
 
   /**
-   * Exhaustive fallback: `exact:true` scores ALL vectors, then post-`$match` filters and re-limits.
-   * Correct for any filter (including dynamic `properties.*` and `$exists`), but pays O(N) scoring.
-   * The historical path — used only when a filter can't be pushed into the index natively.
+   * A filter the index cannot apply: every record satisfying it competes for `topK`, whatever its vector rank.
+   *
+   * This was one `$vectorSearch exact:true` over the nearest 1000–10000 records THEN `$match` — so it scored a
+   * window and filtered after, and a match outside the window was dropped with nothing saying so (Q-102).
+   * `predicateRecall` keeps that window as its first stage and completes the answer from the collection when
+   * the window cannot prove it was enough. The predicate is ONE, shared with the fresh-write scan and the
+   * lexical channel — see `recallPredicate`.
    */
-  const exhaustivePipeline = (): object[] => {
-    const ennLimit = Math.min(10000, Math.max(topK * 100, 1000));
-    const p: object[] = [{ $vectorSearch: { index: indexName, path: 'embedding', queryVector, exact: true, limit: ennLimit } }];
-    // ONE predicate, shared with the fresh-write scan. Written separately at the two sites, the second one
-    // was written without the filter at all — see `recallPredicate`.
-    const predicate = recallPredicate(tags, filter);
-    if (predicate) p.push({ $match: predicate });
-    p.push({ $limit: topK });
-    return [...p, ...tail];
+  const predicateSearch = async (): Promise<Record<string, unknown>[]> => {
+    const out = await predicateRecall({
+      collName, indexName, vectorPath: 'embedding', queryVector, topK,
+      predicate: recallPredicate(tags, filter) ?? {},
+      shape: [{ $addFields: { _knowledgeType: knowledgeType } }, { $project: { ...commonProject, ...typeProject } }],
+      remaining: () => deadline() ?? RECALL_BUDGET_MS,
+      memo: budget?.memo,
+    });
+    for (const r of out.degraded) budget?.noteDegraded(r);
+    return out.docs;
   };
 
   // Decide the primary path (P6).
   //  - no filter  → ANN (unchanged).
   //  - declarable filter → `exact:true` + native `filter`: Atlas restricts to the matching subset
   //    FIRST, then exhaustively scores only that subset. Exact results, cost ∝ matching set, not N.
-  //  - non-declarable filter (dynamic properties / $exists) → exhaustive scan + post-$match.
-  let primary: object[];
+  //  - non-declarable filter (dynamic properties / $exists) → `predicateSearch`: the nearest window, completed
+  //    from the collection whenever the window cannot prove it held the answer.
+  let primary: () => Promise<Record<string, unknown>[]>;
   let usedNativeFilter = false;
   if (!hasFilter && !hasTags) {
-    primary = [annStage(), ...tail];
+    primary = () => run([annStage(), ...tail]);
   } else {
     const declared = new Set(vectorFilterFieldsFor(spaceId, collSuffix));
     /*
@@ -874,14 +898,14 @@ async function recallByType(
     if (nativeFilter) {
       usedNativeFilter = true;
       observe?.prefilter();
-      primary = [
+      primary = () => run([
         { $vectorSearch: { index: indexName, path: 'embedding', queryVector, exact: true, filter: nativeFilter, limit: topK } },
         ...tail,
-      ];
+      ]);
     } else {
       // Observed, not predicted: this is the branch that actually scans.
       observe?.scanned();
-      primary = exhaustivePipeline();
+      primary = predicateSearch;
     }
   }
 
@@ -896,14 +920,21 @@ async function recallByType(
     throw err;
   };
 
-  /** Apply the deadline only when there is one, so an unbounded call behaves exactly as before. */
-  const run = (pipeline: object[]) => {
+  /**
+   * Apply the deadline only when there is one, so an unbounded call behaves exactly as before.
+   *
+   * The vector aggregations carried NO time limit at all once, which made the end-to-end budget decorative for
+   * the hop most likely to be slow: `RECALL_BUDGET_MS` could only ever cancel the reranker. Declared here and
+   * called only through `primary`, which runs below, after it.
+   */
+  function run(pipeline: object[]): Promise<Record<string, unknown>[]> {
     const cursor = col(collName).aggregate<Record<string, unknown>>(pipeline);
-    return (maxTimeMS != null ? cursor.maxTimeMS(maxTimeMS) : cursor).toArray();
-  };
+    const ms = deadline();
+    return (ms != null ? cursor.maxTimeMS(ms) : cursor).toArray();
+  }
 
   try {
-    const docs = await run(primary);
+    const docs = await primary();
     return docs.map(d => mapToRecallResult(d, knowledgeType));
   } catch (err) {
     // A deadline that expired is NOT an index error and must not be swallowed as an empty collection —
@@ -923,7 +954,7 @@ async function recallByType(
          * is empty and has none. Counting it reported `exhaustive` on almost every recall in a space that
          * does not hold all five record kinds, which is most of them, for a cost nobody paid.
          */
-        const docs = await run(exhaustivePipeline());
+        const docs = await predicateSearch();
         return docs.map(d => mapToRecallResult(d, knowledgeType));
       } catch (err2) {
         if (isMaxTimeExpired(err2)) throw new RecallSearchTimeout(knowledgeType);
@@ -989,21 +1020,6 @@ class RecallSearchTimeout extends Error {
     super(`recall: the ${knowledgeType} search exceeded its deadline`);
     this.name = 'RecallSearchTimeout';
   }
-}
-
-/**
- * Did MongoDB abort this operation because `maxTimeMS` expired?
- *
- * Keyed on **error code 50** (`MaxTimeMSExpired`) first, because a code is stable where a message is not.
- * The message check is a fallback for drivers or proxies that wrap the error and lose the code — without it,
- * a wrapped timeout would fall through to `swallowIndexError`, fail its regex, and surface as a 500 for what
- * is a deliberate deadline.
- */
-function isMaxTimeExpired(err: unknown): boolean {
-  const code = (err as { code?: unknown } | null)?.code;
-  if (code === 50) return true;
-  const msg = err instanceof Error ? err.message : String(err);
-  return /maxtimems|operation exceeded time limit|exceeded time limit/i.test(msg);
 }
 
 function mapToRecallResult(doc: Record<string, unknown>, knowledgeType: RecallKnowledgeType): RecallResult {

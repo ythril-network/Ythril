@@ -206,6 +206,13 @@ export type RecallFilter = FilterExpression | RawMongoFilter;
  * The forgettable part is inside: a caller cannot construct the tag clause and forget the filter, because
  * there is one thing to call and it returns both.
  *
+ * ## The two halves are ANDed, never spread into one object (Q-102)
+ *
+ * It built `{ ...{tags: {$all: tags}}, ...filter }`, so a raw filter naming `tags` REPLACED the `tags`
+ * parameter instead of narrowing it: `tags: ['a']` with `filter: {tags: 'b'}` answered records tagged `b`
+ * alone, at 200. Every site where a caller's predicate meets a server constraint merges through
+ * {@link andPredicates} for the same reason.
+ *
  * Returns `undefined` rather than `{}` for an unconstrained recall, so a caller can tell "no predicate" from
  * "a predicate that happens to be empty" without inspecting the object.
  */
@@ -213,11 +220,27 @@ export function recallPredicate(
   tags: string[] | undefined,
   filter: RecallFilter | undefined,
 ): Record<string, unknown> | undefined {
-  const p: Record<string, unknown> = {
-    ...(tags && tags.length > 0 ? { tags: { $all: tags } } : {}),
-    ...(filter == null ? {}
-      : isRawFilter(filter) ? filter.__raw
-        : buildMongoFilter(filter as FilterExpression)),
-  };
-  return Object.keys(p).length > 0 ? p : undefined;
+  return andPredicates(
+    tags && tags.length > 0 ? { tags: { $all: tags } } : undefined,
+    filter == null ? undefined : isRawFilter(filter) ? filter.__raw : buildMongoFilter(filter as FilterExpression),
+  );
+}
+
+/**
+ * Every given predicate must hold — as `$and`, never as one object built by spreading.
+ *
+ * A spread lets a later predicate's key REPLACE an earlier one's: a caller's `{_id: …}` erases the server's
+ * `{_id: {$in: …}}`, a caller's `{updatedAt: {$exists: true}}` erases the freshness window. Each site that did
+ * that was correct until a caller named the same key, and nothing reported the widening. So the merge is one
+ * function, and the forgettable part — that it is an intersection — is the only thing it does.
+ *
+ * Empty and absent predicates are dropped, and a single survivor is returned as itself, so the common case
+ * reads exactly as it did. `undefined` when nothing constrains.
+ */
+export function andPredicates(
+  ...parts: Array<Record<string, unknown> | null | undefined>
+): Record<string, unknown> | undefined {
+  const kept = parts.filter((p): p is Record<string, unknown> => p != null && Object.keys(p).length > 0);
+  if (kept.length === 0) return undefined;
+  return kept.length === 1 ? kept[0] : { $and: kept };
 }

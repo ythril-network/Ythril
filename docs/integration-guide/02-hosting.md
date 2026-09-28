@@ -773,7 +773,18 @@ log line and one audit entry, `file.legacy_spill.sweep`, naming the space. Only 
 touched: a `_tmp` folder of your own deeper in the tree, and any other file under the root `_tmp`, are left
 alone. Copy the root `_tmp/` out of a space's file store first if you want to keep one.
 
+**Upgrading to 5.5.3 or later rebuilds every vector index once, with no gap in search.** Each index gains `_id` as a
+filter field, which is what lets a filtered recall complete its answer. Where the database can change an index in
+place (Atlas) it does; where it cannot (`mongodb-atlas-local`), the new definition is built under a second name,
+searches move to it, the original is rebuilt, and searches move back. Until an index is done, a filtered recall that
+needs completing returns what it found and says `filter_window` in `degraded`; every other search is unaffected. On
+a large instance this takes as long as building every index twice, in the background.
+
 ### Rolling Back
+
+**A rollback from 5.5.3 rebuilds the vector indexes once more**, to the previous version's filter fields. Search
+keeps working meanwhile, except on `mongodb-atlas-local`, where the older build drops and recreates each index and
+recall on it answers empty until it is ready. Nothing is lost; the records are untouched.
 
 **The first boot on a new version rewrites `config.json`, and some of those rewrites drop a field an older
 build reads.** So a rollback is not simply "run the previous image": that path exists, but it needs the copy of

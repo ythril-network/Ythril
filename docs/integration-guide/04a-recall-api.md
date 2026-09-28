@@ -24,11 +24,11 @@ Available as both — REST `POST /api/brain/recall`, MCP tool `recall`:
 | `topK` | — | `10` | Max returned results, minimum 1 and **no ceiling** — the same on both doors. What comes back is bounded by the byte budget instead: every record whole, `truncated` on every response, `nextSkip` when it bit |
 | `types` | — | all types | Restrict result knowledge types |
 | `minScore` | — | none | Filter out low-similarity matches |
-| `filter` | — | none | Property equality/comparison filter (see below) |
+| `filter` | — | none | Hard filter, in raw MongoDB or the operator-object grammar (see [Filtered Recall](#filtered-recall-filter-parameter)). `topK` is filled from every record that satisfies it, whatever its vector rank |
 | `tags` | — | none | Array of strings — restrict to records carrying these tags |
 | `minPerType` | — | none | Object mapping knowledge type → minimum hits, e.g. `{ "entity": 2 }`. Guarantees at least that many results of the type; each value is clamped to `topK` |
 | `maxPerType` | — | none | Object mapping knowledge type → **maximum** hits, e.g. `{ "file": 2 }` — the ceiling to `minPerType`'s floor. A slot the cap frees goes to another type. Each value must be at least `1` and is clamped to `topK`; a value below `minPerType` for the same type is a `400` (see below) |
-| `maxTimeMS` | — | the instance budget | Deadline for this recall, in ms. **Can only lower the instance's `RECALL_BUDGET_MS`, never raise it** — a larger value is clamped to it, and a very small one is clamped up to a 250 ms floor. On expiry you get a **partial** answer with a `degraded` field, not an error and not a hang |
+| `maxTimeMS` | — | the instance budget | Deadline for this recall, in ms. **Can only lower the instance's `RECALL_BUDGET_MS`, never raise it** — a larger value is clamped to it, and a very small one is clamped up to a 250 ms floor. On expiry you get a **partial** answer with a `degraded` field, not an error and not a hang. `degraded` names one or more of `search_timeout`, `rerank_skipped_budget`, `rerank_unavailable` and `filter_window` — see the reason table below |
 | `traverse` | — | `0` | Graph expansion: an integer depth `0`–`5`, **or an object `{depth, edgeLabels, direction}`** — a `traverse` call without its start node, because the matches *are* the start nodes. `0` = classic recall. See [Graph-Augmented Recall](04h-graph-augmented-recall.md#graph-augmented-recall-traverse-parameter) |
 | `includeFileContent` | — | `true` | Whether file-chunk results carry `content` — the passage body. `false` returns locations and metadata only (path, heading, chunk index, tags, properties). **File chunks ONLY** — it does nothing on a search returning entities, facts, edges or chrono entries; use `projection` to trim those. A non-boolean is a `400`, never coerced |
 | `includeRecordMeta` | — | `false` | Add back the fields that describe where a record SITS rather than what it says: `createdAt`, `updatedAt` and the link-id arrays. Measured on a real corpus only **30%** of a recall answer was content and most of the rest was this, which at a tight `maxChars` is evidence you paid for and did not get. `createdAt` is the one to be careful of — it is when the RECORD was written, not when the remembered thing happened, which lives in the record's own properties. **Applies recursively**, so a `traverse` answer's `_graph` follows it at every depth. MCP takes the same parameter with the same default. A non-boolean is a `400`, never coerced |
@@ -81,6 +81,9 @@ one that ran out of time contributes nothing and the response gains a `degraded`
 | `search_timeout` | at least one collection's vector search hit the deadline, so the answer is **partial** — fewer results than the corpus holds, not fewer results because the corpus is empty |
 | `rerank_skipped_budget` | the cross-encoder was configured but not run: too little budget was left. The order is the hybrid-fusion order, which is a slightly worse ranking, delivered |
 | `rerank_unavailable` | the cross-encoder was configured and did not answer (unreachable, non-2xx, unreadable body) |
+| `filter_window` | a filtered answer could not be completed, so it **may be missing records that satisfy the filter**: the vector index was still being updated to a definition that can complete it, or more than 500 000 records matched a filter the index cannot apply. What was found is returned |
+
+The set grows between releases: **treat an unknown reason as "degraded"**, never as an error.
 
 **`degraded` is absent when nothing degraded** — it is not an empty array on every healthy response, because a
 field that is almost always empty is one readers stop looking at. Treat its presence as "this answer is
@@ -275,7 +278,7 @@ Read in the order the server applies them:
 | `query` | Ranked semantically **and** lexically. `NMK-SI-11` is the reason the lexical channel matters — its embedding carries almost no meaning. |
 | `types` | Restricts which collections are searched at all. Edges are excluded. |
 | `tags` | Hard filter, **AND** semantics — a record must carry *both* `auth` and `postmortem`. |
-| `filter` | Hard filter. Keys must start with `properties.`, `tags`, `type`, `name`, `status` or `label`; any other key is rejected. Operators: `eq`, `ne`, `in`, `exists`, `gt`, `gte`, `lt`, `lte`. All conditions must match. |
+| `filter` | Hard filter, in raw MongoDB or the operator-object grammar (`eq`, `ne`, `in`, `exists`, `gt`, `gte`, `lt`, `lte`). Any key. All conditions must match, and with `tags` both apply. |
 | `minPerType` | Guarantees a floor per type *if that many exist*, so a flood of file passages cannot crowd out every entity. Each value is clamped to `topK`. |
 | `maxPerType` | The ceiling to that floor, and the other half of the same problem: one long file passage that scores well can take slots several one-line records would have answered more cheaply. A candidate whose type is already at its cap is **skipped and the walk continues**, so the freed slot goes to another type rather than shortening the list. |
 | `minScore` | Applied **last**, on the vector score, and it can drop a `minPerType`-guaranteed result — a floor is a request for coverage, not a licence to return matches you called too weak. |
@@ -356,9 +359,9 @@ The MCP `recall` tool takes the same parameters, plus `space` — one name, a li
 }
 ```
 
-**Performance note.** `tags`, `type`, `name`, `status`, `label` — and, on spaces whose schema declares
-them, `properties.<key>` — are pushed into the vector index as native pre-filters. Undeclared
-`properties.*` and `exists` are still correct but scan exhaustively, so prefer declared fields on large
+**Performance note.** Every filter returns every matching record it has room for. `tags`, `type`, `name`,
+`status`, `label` — and, on spaces whose schema declares them, `properties.<key>` — are applied by the vector
+index itself. Any other filter costs a pass over the matching records, so prefer declared fields on large
 spaces. `traverse` above 2 on a dense graph is slow; narrow the seed set with `tags`/`filter` first.
 
 #### A large answer comes back as a prefix, and you page through the rest
@@ -568,9 +571,20 @@ records straight from each collection** — write a fact and search for it in th
   reports the same lag (ANN 1088 ms, ENN 1083 ms on the same insert). `ythril_recall_fresh_writes_found_total`
   counts what the scan found — zero means the index is keeping up on this instance.
 
-#### Prefiltered Recall (`filter` parameter)
+#### Filtered Recall (`filter` parameter)
 
 Use `filter` to restrict results to records where specific properties match a condition.
+
+**The promise: `topK` is filled from every record that satisfies the filter, whatever its vector rank.** A
+filtered recall cannot silently miss a matching record. If an answer could not be completed, `degraded` says
+`filter_window` and what was found is returned.
+
+**The cost is what differs.** A filter on `tags`, `type`, `name`, `status`, `label` or a schema-declared
+`properties.<key>`, written as a flat conjunction in either grammar, is applied by the vector index itself and
+costs what an unfiltered recall costs. Any other filter — an undeclared property, `exists`, `ne`, `$or`,
+`$regex` — costs a pass over the space's matching records. Declare a heavily filtered property in the space
+schema to keep it fast. `filterPath` in the response says which this answer took: `prefilter` (the index
+applied it) or `exhaustive` (the index could not; the answer is still complete).
 
 **Two grammars are accepted.** The operator-object form below takes one operator object per key, AND-ed across
 keys. **Raw MongoDB is also accepted** — the same operators `query` takes (`$or`, `$and`, `$not`, `$nor`, `$in`, `$regex`,
@@ -593,19 +607,15 @@ predicate in one call:
 }
 ```
 
-**Both doors accept and refuse the same filters**, including the refusals: an out-of-allowlist key and a MIXED
-filter fail identically on REST and on the MCP `recall` tool.
+**Both doors accept and refuse the same filters**, including the refusals: a MIXED filter and an operator the
+parser refuses fail identically on REST and on the MCP `recall` tool.
 
 Three rules apply to both grammars:
 
 - **A filter that MIXES them is a `400`** naming the offending keys, rather than one half quietly winning.
-- **The key allowlist still applies**, recursively — including inside `$or`. Keys must start with `properties.`, `tags`,
-  `type`, `name`, `status` or `label`. The raw grammar does not widen the keys, because a recall filter that could name
-  any field would be a way to filter a vector search on fields the index cannot serve.
-- **A raw filter takes the exhaustive path.** `$or` and `$regex` cannot be pushed into `$vectorSearch` as a native
-  pre-filter, so the whole space is scored and then filtered — slower, same records, and still nothing dropped by `topK`.
-
-The operator-object form keeps the native pre-filter path where the fields are declared.
+- **Any key is accepted.** A key decides only whether the index can apply the filter, never whether it is allowed.
+- **`tags` and a filter naming `tags` both apply.** A record must carry the `tags` AND satisfy the filter; the
+  filter narrows the parameter, never replaces it.
 
 ```json
 {
@@ -637,8 +647,6 @@ Multiple operators on the same key are AND-ed (range queries):
 { "properties.score": { "gte": 50, "lt": 100 } }
 ```
 
-**Allowed filter key prefixes:** `properties.`, `tags`, `type`, `name`, `status`, `label`. Any other key returns `400`. This prevents filter-key injection attacks.
-
 **Examples:**
 
 ```json
@@ -655,7 +663,7 @@ Multiple operators on the same key are AND-ed (range queries):
 { "filter": { "properties.domain": { "exists": true } } }
 ```
 
-> **Performance note:** A filter that references only declared index fields — `tags`, `type`, `name`, `status`, `label`, and any schema-declared `properties.<key>` — using the operators `eq`, `in`, `gt`, `gte`, `lt`, or `lte` is pushed into a native `$vectorSearch` `filter` and runs as `exact:true` search restricted to the matching subset, so cost is proportional to the number of matching records rather than the whole collection. Only undeclared dynamic `properties.*` keys, `exists`, and `ne` fall back to the exhaustive ENN path, which scores every document in the space before applying the filter. To keep a heavily-filtered property on the fast path, declare it in the space schema rather than adding a standalone MongoDB index.
+> **Performance note:** A filter that references only declared index fields — `tags`, `type`, `name`, `status`, `label`, and any schema-declared `properties.<key>` — using the operators `eq`, `in`, `gt`, `gte`, `lt`, or `lte` is applied by the vector index, so its cost is proportional to the number of matching records rather than the whole collection. Any other filter is answered from the nearest records first and, when those cannot prove they hold the answer, completed by reading the matching records' ids from the collection and scoring them — complete either way, and slower on a large space with many matches. To keep a heavily filtered property on the fast path, declare it in the space schema rather than adding a standalone MongoDB index.
 
 **What is vector-indexed:**
 
