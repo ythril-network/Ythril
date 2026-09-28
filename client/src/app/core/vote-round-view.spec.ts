@@ -25,6 +25,14 @@ describe('voteRoundFromServer', () => {
     expect(voteRoundFromServer('n', server()).subject).toBe('notes (brain-a)');
     expect(voteRoundFromServer('n', server({ spaceId: undefined })).subject).toBe('brain-a');
   });
+  it('names the space by THIS instance\'s name for it, not the network\'s (Q-133)', () => {
+    // After a rename the network may call the space `y-twin` while this instance calls it `y-project-template`; an
+    // operator asked to vote on deleting it must see the name they know. The server's `localSpaceId` is that name.
+    const r = voteRoundFromServer('n', server({ spaceId: 'y-twin', localSpaceId: 'y-project-template' } as never));
+    expect(r.subject).toBe('y-project-template (brain-a)');
+    expect(voteRoundFromServer('n', server({ spaceId: 'y-twin' })).subject, 'an older server sends no localSpaceId')
+      .toBe('y-twin (brain-a)');
+  });
   it('carries the network and the casts', () => {
     const r = voteRoundFromServer('net-1', server());
     expect(r.networkId).toBe('net-1');
