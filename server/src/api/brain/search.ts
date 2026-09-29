@@ -36,10 +36,11 @@ import { mapGraphNodes, graphNodeRecord } from '../../brain/recall-graph.js';
 import { stripRecordMeta } from '../../brain/recall-record-meta.js';
 import { applyProjection, normaliseProjection, type NormalisedProjection } from '../../brain/projection.js';
 import { withTraverseBodies } from '../../brain/traverse-bodies.js';
-import { resolveBudget, resolvePaging, budgetedEnvelope, type BudgetRequest } from '../../brain/result-budget.js';
+import { resolveBudget, resolvePaging, budgetedEnvelope, defaultBudgetChars, type BudgetRequest } from '../../brain/result-budget.js';
 import { requestActor } from '../../auth/request-actor.js';
 import { sendReadFailure, statesRetryability } from './_read-failure.js';
 import { spaceCollection } from '../../db/space-collection.js';
+import { pageTraversal } from '../../brain/traverse-page.js';
 
 /*
  * `MAX_GRAPH_NODES` lived here, private to this file, with a comment saying recall shared it. It did not: only
@@ -232,8 +233,18 @@ searchRouter.post('/spaces/:spaceId/traverse', globalRateLimit, requireSpaceAuth
   }
   const result = await traverseGraph(memberIds, startId.trim(), effectiveDirection, effectiveEdgeLabels, effectiveDepth, effectiveLimit,
     inclusions.includeChrono, inclusions.includeMemories, inclusions.includeFiles, inclusions.includeEdges);
-  res.json(await withTraverseBodies(memberIds, result,
-    normaliseProjection(projection as Record<string, unknown> | undefined), includeDiagnostics === true));
+  const bodies = await withTraverseBodies(memberIds, result,
+    normaliseProjection(projection as Record<string, unknown> | undefined), includeDiagnostics === true);
+  // Q-132: whole nodes in hop order under the byte budget, the same function the MCP tool pages through.
+  const paged = await pageTraversal(bodies, req.body as Record<string, unknown>, {
+    budgetChars: defaultBudgetChars('rest'),
+    spillRemainder: remainder => spillResultSet({
+      issuedTo: requestActor(req).tokenId, results: remainder,
+      request: { startId, direction: effectiveDirection, maxDepth: effectiveDepth, limit: effectiveLimit },
+    }),
+  });
+  if (!paged.ok) { res.status(400).json({ error: paged.error }); return; }
+  res.json(paged.body);
 });
 
 

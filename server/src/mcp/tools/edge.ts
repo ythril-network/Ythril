@@ -16,6 +16,10 @@ import { parseRecordSuppression } from '../../brain/suppress-embeddings.js';
 import { parseRecordSuperseded } from '../../brain/record-flag.js';
 import { withTraverseBodies } from '../../brain/traverse-bodies.js';
 import { normaliseProjection } from '../../brain/projection.js';
+import { pageTraversal } from '../../brain/traverse-page.js';
+import { defaultBudgetChars } from '../../brain/result-budget.js';
+import { spillResultSet } from '../../brain/graph-spill.js';
+import { pageBudgetSchema } from './_page-budget-schema.js';
 
 export const save_edgeTool: ToolHandler = {
   name: 'save_edge',
@@ -327,7 +331,7 @@ export const graph_traverseTool: ToolHandler = {
     + '• This returns a flat node list with a depth on each; `recall` nests its walk under the match that reached it.\n\n'
     + 'It is also blind to meaning, which is the point: a node reached in three hops is reached whether or not it resembles anything, and nothing here is embedded or ranked. A record retired from semantic ranking is reached exactly as any other.\n\n'
     + 'AN EDGE TO A FACT, CHRONO ENTRY OR FILE IS FOLLOWED, and no flag governs it. An edge declares the KIND at each end, so `supersedes` between two facts is a real stored edge — before 5.0 the walk looked every neighbour up among entities and dropped the rest in silence, so such an edge was stored and reached by nothing. The include flags below are about IMPLICIT links (a record naming this one), of which a busy node has thousands; an edge exists only because somebody drew it, so there are exactly as many as were meant. This also means a walk can START from a fact or a chrono entry, not only an entity.\n\n'
-    + 'THE RESPONSE: `nodes` — each with `id`, `name`, `type`, `kind` ("entity", or the collection it lives in when it is a chrono entry, fact or file — reached either through an explicit edge or through one of the include flags) and the `depth` it was found at, `startId` itself at depth 0. `edges` — EVERY relationship among the records in `nodes`, unless `includeEdges` is false: a self-loop is listed, and a pair joined by two differently-labelled edges is listed twice. Before 5.0 this held one edge per node reached, whichever was read first, so a self-loop never appeared at all and the second edge between a pair vanished with `truncated: false` — which means nothing was cut for size. `truncated` — true when `limit` cut the walk, and worth reading: a truncated walk is a PARTIAL graph, so an impact assessment run on one is answering a smaller question than it was asked.',
+    + 'THE RESPONSE: `nodes` — each with `id`, `name`, `type`, `kind` ("entity", or the collection it lives in when it is a chrono entry, fact or file — reached either through an explicit edge or through one of the include flags) and the `depth` it was found at, `startId` itself at depth 0. `edges` — EVERY relationship among the records in `nodes`, unless `includeEdges` is false: a self-loop is listed, and a pair joined by two differently-labelled edges is listed twice. Before 5.0 this held one edge per node reached, whichever was read first, so a self-loop never appeared at all and the second edge between a pair vanished with `truncated: false` — which means nothing was cut for size. `truncated` — true when the answer is partial, for either of two reasons reported apart: `limitReached` (the walk hit `limit`; raise it to walk further) or a page cut by the byte budget (`nextSkip` present; send it back as `skip`). Nodes come WHOLE, in hop order, each page carrying the edges from its nodes back to nodes already delivered, so every edge arrives exactly once across the pages. `count` is every node the walk found, `returned` this page\'s. A partial graph answers a smaller question than it was asked, which is why it is worth reading.',
   spaceRequired: true,
   inputSchema: (s: ToolSchemas) => ({
           type: 'object',
@@ -346,7 +350,8 @@ export const graph_traverseTool: ToolHandler = {
               description: 'Filter traversal to specific edge labels only. Omit to traverse all labels.',
             },
             maxDepth: { type: 'number', minimum: 1, maximum: 10, default: 3, description: 'Maximum hops from startId (clamped to 1–10). Default 3.' },
-            limit: { type: 'number', minimum: 1, maximum: 1000, default: 100, description: 'Maximum total nodes returned (clamped to 1–1000). Default 100.' },
+            limit: { type: 'number', minimum: 1, maximum: 1000, default: 100, description: 'How many nodes the WALK may visit (clamped to 1–1000). Default 100. A walk that hit it answers `limitReached: true` — a partial graph that only a larger `limit` reaches. What the walk found then pages under the byte budget (`skip`, `nextSkip`).' },
+            ...pageBudgetSchema('node'),
             includeChrono: { type: 'boolean', default: true, description: 'Follow chrono-to-entity links inbound, so chrono entries about a node are reached too. Chrono nodes carry kind:"chrono"; entity nodes are unchanged. Set false for entity-only results.' },
             includeMemories: { type: 'boolean', default: false, description: 'Follow fact-to-entity links inbound, so facts about a node are reached too. Fact nodes carry kind:"fact". Opt-IN rather than on by default, unlike includeChrono: facts are usually the most numerous record type and every node counts against `limit`, so enabling it on a fact-heavy space can truncate away the entities you traversed for. Raise `limit` with it.' },
             includeFiles: { type: 'boolean', default: false, description: 'Follow file-to-entity links inbound, so documents about a node are reached too. File nodes carry kind:"file" and file META ONLY — the path as `name`, plus `description` and `tags`. Never passage text: a file body is its chunks, they are the largest thing stored, and a structural walk must not pay for them. Read a chunk with the file API once you know which document you want. Opt-in, like includeMemories.' },
@@ -383,12 +388,20 @@ export const graph_traverseTool: ToolHandler = {
       a['includeEdges'] !== false);
     const bodies = await withTraverseBodies(memberIds, result,
       normaliseProjection(a['projection'] as Record<string, unknown> | undefined), a['includeDiagnostics'] === true);
+    // Q-132: whole nodes in hop order under the byte budget, the same function the REST route pages through.
+    const paged = await pageTraversal(bodies, a, {
+      budgetChars: defaultBudgetChars(ctx.transport),
+      spillRemainder: remainder => spillResultSet({
+        issuedTo: ctx.actor?.tokenId, results: remainder, request: { startId, direction, maxDepth, limit },
+      }),
+    });
+    if (!paged.ok) throw new Error(paged.error);
     return {
       content: [{
         type: 'text' as const,
-        text: JSON.stringify(bodies),
+        text: JSON.stringify(paged.body),
       }],
-      structuredContent: { ...bodies },
+      structuredContent: { ...paged.body },
     };
   },
 };

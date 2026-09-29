@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Every list that stopped at a number now says so and can be read to the end** (bundle-34). Owner rule: *"if i
+  get a result i want to be sure i get what i asked for."* Each now pages through one rule (`brain/list-page.ts`):
+  whole rows, `limit` and `skip` refused rather than floored when they are not numbers, the byte budget, and
+  `count`, `total`, `limit`, `skip`, `truncated` and `nextSkip` on every answer.
+  - **`graph_traverse` and `POST /api/brain/spaces/:id/traverse`** answer whole nodes in hop order under the byte
+    budget, each page carrying the edges back to nodes already delivered, with `skip`/`nextSkip` and `remainderDump`;
+    `limit` still caps the walk and a walk that hit it says `limitReached` (`Q-132`).
+  - **The duplicate and contradiction review lists** page instead of stopping at 500; the Review tab reads every
+    page (`Q-127`).
+  - **A file's extract** returns its converted Markdown whole, or in whole paragraphs that page to the end with
+    **Show more** — it was cut mid-sentence at 256K characters — and its image list says when it is cut (`Q-128`).
+  - **The schema dry-run** says, per collection, how many records it checked against how many exist and whether the
+    check was complete, and pages its violations (`Q-129`).
+  - **The notify event list** pages and says when it is cut (`Q-130`).
+  - **Resolving entities by id** in the web UI asks for every id instead of dropping those past 100 (`Q-131`).
 - **A slow or failing reranker no longer holds every search (`Q-157`).** Measured on a 5.6.0 instance: every
   recall took 20 s — the reranker's time limit — and was answered in fused order anyway, while the same recall
   without reranking took 90 ms. A reranker pass that fails, runs out its own time limit, or takes more than half of
