@@ -77,6 +77,38 @@ export interface NetworkMember {
    *  this stamp both look identical, and treating them the same refuses every member of an
    *  asymmetric or manually-provisioned network for ever. */
   versionCheckedAt?: string;
+  /** When this member was admitted to the network, by whichever member admitted it (`Q-135`). It travels with the
+   *  roster, so every member compares a removal against the SAME admission: the later of the two acts wins. Absent
+   *  on a member admitted before it was recorded, which reads as the oldest admission there is. */
+  admittedAt?: string;
+  /** The member whose roster introduced this one here, when this instance did not admit it itself (`Q-135`). */
+  introducedBy?: string;
+}
+
+/**
+ * A club member this instance has learned of from a peer's roster and not yet paired with (`Q-135`).
+ *
+ * Not a member yet, because credentials are pairwise: there is nothing to sync with until the two instances have
+ * each minted the other a token. `networks/member-introductions.ts` owns the whole lifecycle.
+ */
+export interface MemberIntroduction {
+  instanceId: string;
+  label: string;
+  /** The address the introducing peer vouched for. Pairing calls THIS, never an address a request supplies. */
+  url: string;
+  admittedAt?: string;
+  introducedBy: string;
+  introducedAt: string;
+  /** The token this instance minted for the newcomer while it opens a pairing; the confirm call must present it. */
+  pairingTokenId?: string;
+  lastAttemptAt?: string;
+  lastError?: string;
+}
+
+/** A club member removed here, kept so the removal travels to every member and a stale roster cannot re-add it. */
+export interface MemberRemoval {
+  instanceId: string;
+  removedAt: string;
 }
 
 /**
@@ -249,6 +281,10 @@ export interface NetworkConfig {
    *  unsigned casts are accepted only directly from the voter (never relayed). */
   requireSignedVotes?: boolean;
   members: NetworkMember[];
+  /** Club only: members learned from a peer's roster and not yet paired with (`Q-135`). */
+  introductions?: MemberIntroduction[];
+  /** Club only: members removed here, newest last and bounded, answered to peers beside the roster (`Q-135`). */
+  removedMembers?: MemberRemoval[];
   pendingRounds: VoteRound[];
   syncSchedule?: string;     // cron expression; omit = manual only
   inviteKeyHash?: string;    // bcrypt of current active invite key

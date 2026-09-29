@@ -41,6 +41,9 @@ export const network_getTool: ToolHandler = {
     + 'verdict, and its settings. Same answer as `GET /api/networks/:id`.\n\n'
     + 'A NETWORK YOU MAY NOT SEE IS "not found", never "forbidden" — a refusal would confirm it exists. You see a '
     + 'network with `networks: read` on EVERY space it carries, or by administering every one of them.\n\n'
+    + 'ON A CLUB, `introductions` lists members a peer introduced that this instance is still connecting to, each '
+    + 'with `lastError` when an attempt failed: every club member connects to every other, not only to whoever '
+    + 'admitted it, so records keep flowing when the organiser is offline. Absent when nothing is pending.\n\n'
     + 'NO CREDENTIALS ARE EVER RETURNED: member token hashes, TLS overrides and the invite-key hash are stripped.',
   inputSchema: (_s: ToolSchemas) => ({
     type: 'object', properties: { id: networkIdSchema }, required: ['id'], additionalProperties: false,

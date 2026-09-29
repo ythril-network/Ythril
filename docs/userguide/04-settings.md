@@ -487,6 +487,11 @@ card also lists the spaces the network carries, and for a space you mapped under
 network's name for it. A subscriber sees no invite and cannot remove its publisher: on pub/sub only the publisher
 invites and removes; a subscriber that wants out leaves the network.
 
+**On a club every member connects to every other member, not only to whoever invited it.** When the organiser
+admits a new member, the others learn of it on their next sync and connect to it directly, so the club keeps
+syncing when the organiser is offline. Until a connection is made the card lists that member under **Connecting**,
+with the reason if an attempt failed. Removing a member from a club removes it on every member.
+
 **Adding a space to a network.** The card's Spaces list has an **Add space** picker offering your spaces the
 network does not carry yet, where your position allows it: the publisher of a pub/sub network, the root of a tree or
 a club's organiser, which all add it at once, or any member of a closed or democratic network, where it opens a vote

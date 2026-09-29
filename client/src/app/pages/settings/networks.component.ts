@@ -7,6 +7,7 @@ import { NetworksApi } from '../../core/networks-api.service';
 import { NetworkInvitePanelComponent } from './network-invite-panel.component';
 import { NetworkAddSpaceComponent } from './network-add-space.component';
 import { NetworkPendingSpacesComponent } from './network-pending-spaces.component';
+import { NetworkConnectingComponent } from './network-connecting.component';
 import { NetworkChangeNotesComponent } from './network-change-notes.component';
 import { SpacesApi } from '../../core/spaces-api.service';
 import { AdminApi } from '../../core/admin-api.service';
@@ -27,7 +28,7 @@ import { NetworkEnableWizardComponent } from './network-enable-wizard.component'
 @Component({
   selector: 'app-networks',
   standalone: true,
-  imports: [CommonModule, FormsModule, TranslocoPipe, PhIconComponent, StatusPillComponent, SummaryStripComponent, RelativeTimeComponent, ErrorStateComponent, NetworkCreateDialogComponent, NetworkJoinDialogComponent, NetworkEnableWizardComponent, NetworkMemberRowComponent, NetworkInvitePanelComponent, NetworkAddSpaceComponent, NetworkPendingSpacesComponent, NetworkChangeNotesComponent],
+  imports: [CommonModule, FormsModule, TranslocoPipe, PhIconComponent, StatusPillComponent, SummaryStripComponent, RelativeTimeComponent, ErrorStateComponent, NetworkCreateDialogComponent, NetworkJoinDialogComponent, NetworkEnableWizardComponent, NetworkMemberRowComponent, NetworkInvitePanelComponent, NetworkAddSpaceComponent, NetworkPendingSpacesComponent, NetworkConnectingComponent, NetworkChangeNotesComponent],
   styles: [`
     .network-card {
       background: var(--bg-surface);
@@ -292,6 +293,8 @@ import { NetworkEnableWizardComponent } from './network-enable-wizard.component'
                     (remove)="removeMember(net, m.instanceId, m.label)" />
                 }
               }
+              <!-- Club members a peer introduced, not connected to yet (Q-135) -->
+              <app-network-connecting [network]="net" />
               <!-- Open votes -->
               @if (openVotes(net.id).length > 0) {
                 <div style="margin-top:16px;">

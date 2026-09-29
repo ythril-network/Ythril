@@ -23,6 +23,7 @@ import type { NetworkMember, VoteRound } from '../config/types.js';
 import { BCRYPT_ROUNDS, SSRF_SAFE_URL, safeMemberList } from '../api/networks/_shared.js';
 import type { NetworkActResult } from './network-acts.js';
 import { openRoundHere } from './round-local-state.js';
+import { stampAdmission, recordRemoval } from './member-introductions.js';
 
 export const AddMemberBody = z.object({
   instanceId: z.string().min(1),
@@ -92,6 +93,7 @@ export async function addMemberAct(networkId: string, input: unknown): Promise<N
     // If 'both' is provided, default to 'push' (the common publisher-side case); explicit 'pull' is respected so the
     // subscriber can manually add the publisher.
     if (freshNet.type === 'pubsub' && member.direction === 'both') member.direction = 'push';
+    stampAdmission(freshNet, member);
     freshNet.members.push(member);
     storePeerToken(instanceId, token);
     saveConfig(freshCfg);
@@ -148,6 +150,8 @@ export function removeMemberAct(networkId: string, instanceId: string): NetworkA
   if (net.type === 'club' || net.type === 'pubsub') {
     // Club / Pubsub: publisher (owner) removes directly, no vote required
     net.members.splice(memberIdx, 1);
+    // Q-135: on a club the removal travels to every member beside the roster, the way the admission did.
+    recordRemoval(net, subject.instanceId);
     saveConfig(cfg);
     revokePeerCredentialsIfOrphaned(subject.instanceId)
       .catch(err => log.error(`peer credential revocation for ${subject.instanceId}: ${err}`));
@@ -323,6 +327,7 @@ export async function admitByInviteKeyAct(networkId: string, input: unknown): Pr
   // Club / Pubsub — direct join via invite key (documented behavior)
   // Pubsub subscribers are always push-only (publisher pushes to them).
   if (freshNet.type === 'pubsub') member.direction = 'push';
+  stampAdmission(freshNet, member);
   freshNet.members.push(member);
   // Pubsub keys are reusable (publishable in docs, QR codes, etc.)
   // All other types consume the key after use to prevent replay.
