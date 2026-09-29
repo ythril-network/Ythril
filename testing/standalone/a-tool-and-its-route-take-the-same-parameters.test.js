@@ -199,19 +199,37 @@ describe('a tool and its route take the same parameters', () => {
      *
      * Derived from the registry rather than from a list of the routes that delegate today, so the second
      * and third collapses are checked by the commit that makes them.
+     *
+     * "Its own capability" is the AUDIT OPERATION, not the route's last path segment. The segment was the
+     * first proxy, and it held while every collapsed route happened to share its tool's name — `recall`,
+     * `similar`. `Q-109` collapsed `POST /spaces/:id/traverse` onto `graph_traverse`, a correct delegation
+     * the segment rule reported as wrong. The operation is what both registries already say the capability
+     * IS: `ROUTE_RULES` names the route's, `MCP_TOOL_OPERATIONS` the tool's, and neither was written for
+     * this gate — so a route forwarding to a sibling tool (traverse to `similar`) still fails here.
      */
     const wrong = [];
-    for (const row of rows) {
-      if (!row.delegatesTo) continue;
+    const delegating = rows.filter(r => r.delegatesTo);
+    // A floor: `recall`, `similar` and `graph_traverse` delegate today. Zero delegating rows would pass the
+    // loop below while checking nothing — the parser losing `callTool` looks exactly like no collapse yet.
+    assert.ok(delegating.length >= 3,
+      `only ${delegating.length} delegating route(s) found — the parser lost the callTool shape`);
+    for (const row of delegating) {
       if (!ALL_TOOLS.some(t => t.name === row.delegatesTo)) {
         wrong.push(`${row.method} ${row.route} forwards to '${row.delegatesTo}', which is not a tool`);
         continue;
       }
-      // The route's last path segment is the capability it advertises. A delegation to anything else is a
-      // door answering a question nobody asked it.
-      const segment = row.route.split('/').filter(Boolean).pop();
-      if (segment !== row.delegatesTo) {
-        wrong.push(`${row.method} ${row.route} forwards to the '${row.delegatesTo}' tool`);
+      const routeOps = ROUTE_RULES
+        .filter(u => u.method === row.method && u.pattern.test(concrete(row.route)))
+        .map(u => u.operation);
+      if (!routeOps.length) {
+        // Unclassified is not "matches": a route the audit cannot name has no capability to compare against.
+        wrong.push(`${row.method} ${row.route} forwards to '${row.delegatesTo}' but no audit rule names the route`);
+        continue;
+      }
+      const toolOps = operationsOf(row.delegatesTo);
+      if (!routeOps.some(op => toolOps.includes(op))) {
+        wrong.push(`${row.method} ${row.route} (${routeOps.join('|')}) forwards to the '${row.delegatesTo}' `
+          + `tool (${toolOps.join('|') || 'no operation'})`);
       }
     }
     assert.deepEqual(wrong, [],

@@ -17,12 +17,14 @@
  * because there is no wrong behaviour to observe. The route works. The MCP tool works. Only the human is
  * missing a control.
  *
- * ## Why the check is derived from the route
+ * ## Why the check is derived from the tool schema the route hands its body to
  *
  * A list of parameters written here by hand would go stale the moment the route gains one — the same failure
- * in a new place. So the accepted set is parsed out of the route itself, both from its destructure and from
- * the fields it reads off `req.body` separately, and every name found has to appear in two places on the
- * client: the typed request body (or it cannot be sent) and the recall submit call (or nothing sends it).
+ * in a new place. So the accepted set is read from what the route is validated against. That was once parsed
+ * out of each handler's destructure; both `/recall` and `/spaces/:spaceId/traverse` now hand their whole body
+ * to a tool through `callTool` (`Q-109` for traverse), so the tool's published `inputSchema` is the list, and
+ * every name in it has to appear on the client: in the typed request body (or it cannot be sent) and, for
+ * recall, in the submit call (or nothing sends it).
  *
  * Run: node --test testing/standalone/recall-params-reach-the-ui.test.js
  */
@@ -31,7 +33,10 @@ import assert from 'node:assert/strict';
 import { balancedFrom } from './_structural-window.mjs';
 import { readFileSync } from 'node:fs';
 
+import { delegatesCleanly, delegationOf } from './_delegating-routes.mjs';
+
 const { ALL_TOOLS } = await import('../../server/dist/mcp/tools/index.js');
+const { pageBudgetSchema } = await import('../../server/dist/mcp/tools/_page-budget-schema.js');
 
 const ROUTE = 'server/src/api/brain/search.ts';
 const API = 'client/src/app/core/brain-api.service.ts';
@@ -66,31 +71,6 @@ function handlerSource(path) {
   assert.ok(start > 0, `the ${path} route declaration was not found in ${ROUTE}`);
   const after = whole.indexOf('searchRouter.post(', start + 1);
   return whole.slice(start, after > 0 ? after : undefined);
-}
-
-/**
- * Parameters a route accepts. Several sources, because a handler reads them more than one way: most arrive in
- * one destructure, booleans are pulled off `req.body` individually so a non-boolean can be rejected rather
- * than coerced, and a group of related flags may be read by iterating an object of defaults.
- */
-function paramsOf(path) {
-  const src = handlerSource(path);
-
-  const destructure = /const \{([^}]*)\} = req\.body \?\? \{\};/.exec(src);
-  assert.ok(destructure, `no destructure found for ${path}`);
-  const names = new Set(destructure[1].split(',').map(s => s.trim()).filter(Boolean));
-
-  for (const m of src.matchAll(/\(req\.body as \{\s*(\w+)\?: unknown\s*\}\)\.\1/g)) {
-    names.add(m[1]);
-  }
-
-  // The flags-with-defaults form: `const inclusions = { includeChrono: true, … }` iterated over `req.body`.
-  // Without this the traverse flags would be invisible to the gate, which is the same blindness in a new shape.
-  const defaults = /const \w+ = \{([^}]*)\};\s*for \(const \w+ of Object\.keys/.exec(src);
-  if (defaults) {
-    for (const m of defaults[1].matchAll(/(\w+):\s*(?:true|false)/g)) names.add(m[1]);
-  }
-  return names;
 }
 
 /**
@@ -167,10 +147,39 @@ describe('recall parameters reach the UI', () => {
     // The gate's first version found this by accident, sweeping too widely. `includeChrono` was accepted by
     // the traverse route, offered by the MCP tool, and absent from the client's typed body — the recall gap
     // exactly, one route over. The owner then asked for `includeMemories` and `includeEdges` alongside it.
-    const params = [...paramsOf('/spaces/:spaceId/traverse')];
+    //
+    // Read from the `graph_traverse` SCHEMA, as `routeParams` reads recall's, and for the same reason: the
+    // route's destructure and its `inclusions` defaults object were deleted when it collapsed onto the tool
+    // (`Q-109`), so the schema is now the only list of what the route accepts. Asserted, not assumed: the
+    // route must hand its whole body to that tool, or the schema is not its contract.
+    const route = handlerSource('/spaces/:spaceId/traverse');
+    assert.ok(delegatesCleanly(route, 'POST /spaces/:spaceId/traverse') && delegationOf(route).tool === 'graph_traverse',
+      'the traverse route no longer hands its body to graph_traverse, so the tool schema is not what it accepts '
+      + '— re-anchor this case on whatever the route reads');
+    const traverseTool = ALL_TOOLS.find(t => t.name === 'graph_traverse');
+    assert.ok(traverseTool, 'the graph_traverse tool is not in the registry — re-anchor this gate');
+    const schemaKeys = Object.keys(traverseTool.inputSchema({ requiredSpace: {}, optionalSpace: {} }).properties);
     for (const flag of ['includeChrono', 'includeMemories', 'includeFiles', 'includeEdges']) {
-      assert.ok(params.includes(flag), `the traverse route no longer accepts \`${flag}\``);
+      assert.ok(schemaKeys.includes(flag), `the traverse route no longer accepts \`${flag}\``);
     }
+    /*
+     * What the client body is NOT asked to declare, each derived or reasoned rather than guessed:
+     *   - `space` is the path segment on this route, not a body key.
+     *   - the page-budget keys (`skip`, `maxChars`, …) come from `pageBudgetSchema`, read here rather than
+     *     listed. The panel renders one walk; paging it is not a control this gate is about, and the handler's
+     *     destructure this case used to read never named them either.
+     *   - UI_GAP: accepted on both doors and not offered by the panel yet. A row is a defect nobody has got to,
+     *     so it may only shrink, and the case after the loop fails the day the client declares one.
+     */
+    const pageKeys = new Set(Object.keys(pageBudgetSchema('node')));
+    assert.ok(pageKeys.has('skip') && pageKeys.size >= 3, 'pageBudgetSchema no longer yields the paging keys');
+    const UI_GAP = new Map([
+      ['projection', 'F-32 added it to both doors for agents reading a subgraph with its bodies; the Brain graph panel draws names and never asked for bodies'],
+      ['includeDiagnostics', 'meaningful only with `projection`, which the panel does not send'],
+    ]);
+    const params = schemaKeys.filter(k => k !== 'space' && !pageKeys.has(k) && !UI_GAP.has(k));
+    assert.ok(params.includes('startId') && params.length >= 9,
+      `only ${params.length} traverse params left to compare — the derivation is wrong, not the client`);
 
     const api = stripComments(readFileSync(API, 'utf8'));
     // Same conversion: the subject is the request body TYPE, bounded by its own brace.
@@ -181,6 +190,8 @@ describe('recall parameters reach the UI', () => {
     const missing = params.filter(p => !declared.has(p));
     assert.deepEqual(missing, [],
       `the traverse route accepts ${missing.join(', ')} and the client body type does not declare it`);
+    const closed = [...UI_GAP.keys()].filter(k => declared.has(k) || !schemaKeys.includes(k));
+    assert.deepEqual(closed, [], `these UI_GAP rows no longer describe a gap — delete them: ${closed.join(', ')}`);
 
     // MCP is the other consumer, and its schema is `additionalProperties: false` — an undeclared flag is not
     // merely undocumented there, it is REJECTED. So the tool schema has to carry each one.

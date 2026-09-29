@@ -31,14 +31,21 @@
  * and the rest rely on the integration suite exercising each parameter.
  *
  * Run: node --test testing/standalone/brain-read-bodies-are-strict.test.js
+ * (requires a prior `npm run build` in server/ — the delegated tools' validator is exercised, not read)
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { balancedFrom } from './_structural-window.mjs';
-import { delegatesCleanly } from './_delegating-routes.mjs';
+import { delegatesCleanly, delegationOf } from './_delegating-routes.mjs';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+// Built modules, for the one case that exercises the delegated tools' validator rather than reading source: a
+// delegating route's strictness is a property of the tool's compiled schema, which no source regex can see.
+const { ALL_TOOLS } = await import('../../server/dist/mcp/tools/index.js');
+const { toolSchemasFor, materialisedSchema } = await import('../../server/dist/mcp/tool-schema.js');
+const { makeArgsValidator } = await import('../../server/dist/mcp/validate-args.js');
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const SEARCH = join(ROOT, 'server', 'src', 'api', 'brain', 'search.ts');
@@ -249,14 +256,69 @@ describe('brain read routes refuse unknown body keys', () => {
       'the cast-then-dot shape must be detected — it is the one that was missed, and if this stops matching '
       + 'the coverage check silently stops covering it');
 
-    // And the sweep still reads real keys off real handlers, so the loop above is not running over nothing.
-    const swept = postRoutes()
-      .filter(r => !(r.path in EXEMPT) && !delegatesToATool(r.body))
-      .flatMap(r => [...r.body.matchAll(/const\s*\{([^}]+)\}\s*=\s*req\.body/g)]
-        .flatMap(m => m[1].split(',').map(n => n.trim().split(':')[0].trim()).filter(Boolean)));
-    assert.ok(swept.length >= 5,
-      `the extraction found only ${swept.length} body keys across every non-delegating route — the regexes `
-      + 'match the fixture and not the code, which is a gate measuring itself');
+    /*
+     * And the sweep still reads real keys off real handlers, so the loop above is not running over nothing —
+     * WHEN there is a handler left for it to run over. `Q-109` collapsed `/spaces/:spaceId/traverse`, the last
+     * POST route here with its own body parse, onto `graph_traverse`; every non-exempt route now delegates,
+     * and "found fewer than five keys in zero handlers" was measuring the collapse, not the regexes.
+     *
+     * The loop running over nothing is still not allowed to pass quietly. It is allowed only because every
+     * route it skipped is held by the NEXT case instead — a delegation whose tool refuses an unknown key — and
+     * this asserts that partition: each non-exempt POST route is either swept here or delegated there, never
+     * neither. The moment a hand-written handler returns, the five-key floor applies to it again.
+     */
+    const nonExempt = postRoutes().filter(r => !(r.path in EXEMPT));
+    const handWritten = nonExempt.filter(r => !delegatesToATool(r.body));
+    const delegated = nonExempt.filter(r => delegatesToATool(r.body));
+    assert.equal(handWritten.length + delegated.length, nonExempt.length,
+      'a POST route is neither swept for its read keys nor delegated to a strict tool');
+    if (handWritten.length) {
+      const swept = handWritten
+        .flatMap(r => [...r.body.matchAll(/const\s*\{([^}]+)\}\s*=\s*req\.body/g)]
+          .flatMap(m => m[1].split(',').map(n => n.trim().split(':')[0].trim()).filter(Boolean)));
+      assert.ok(swept.length >= 5,
+        `the extraction found only ${swept.length} body keys across ${handWritten.length} non-delegating `
+        + 'route(s) — the regexes match the fixture and not the code, which is a gate measuring itself');
+    } else {
+      assert.ok(delegated.length >= 3,
+        `no hand-written handler is left to sweep and only ${delegated.length} route(s) delegate — the route `
+        + 'enumeration lost its subjects, which is not the same as every route being strict');
+    }
+  });
+
+  it('a delegating route is strict because its TOOL refuses an unknown key', () => {
+    /*
+     * Where the strictness of `/recall`, `/similar` and `/spaces/:spaceId/traverse` now lives, asserted there
+     * rather than assumed from the word `callTool`. The three cases above skip a delegating route; this is
+     * the case that has to hold for skipping it to be honest.
+     *
+     * Two halves, because either alone concludes about more than it checks. The SCHEMA must say
+     * `additionalProperties: false` — read from `materialisedSchema`, the object `makeArgsValidator` compiles
+     * and `tools/list` advertises, not from the tool's source. And the VALIDATOR must actually refuse a
+     * misspelt key with the tool's own sentence: a schema flag nobody compiles is documentation.
+     */
+    const delegated = postRoutes()
+      .filter(r => !(r.path in EXEMPT) && delegatesToATool(r.body))
+      .map(r => ({ path: r.path, tool: delegationOf(r.body).tool }));
+    assert.ok(delegated.length >= 3, `only ${delegated.length} delegating POST route(s) found on the search router`);
+    const loose = [];
+    for (const { path, tool: name } of delegated) {
+      const tool = ALL_TOOLS.find(t => t.name === name);
+      if (!tool) { loose.push(`${path} → '${name}' is not a tool`); continue; }
+      const schema = materialisedSchema(tool, toolSchemasFor(['general']), ['general']);
+      if (schema.additionalProperties !== false) {
+        loose.push(`${path} → ${name}: its schema does not set additionalProperties: false`);
+        continue;
+      }
+      const refusal = makeArgsValidator(toolSchemasFor(['general']), ['general'])
+        .validate(tool, { space: 'general', maxDeptth: 3 });
+      if (!refusal || !refusal.includes("unexpected property 'maxDeptth'")) {
+        loose.push(`${path} → ${name}: a misspelt key is not refused (${refusal ?? 'accepted'})`);
+      }
+    }
+    assert.deepEqual(loose, [],
+      'a route that hands its body to a tool is only strict if the tool refuses what it does not declare:\n  '
+      + loose.join('\n  '));
   });
 
   it('every exemption carries a real reason', () => {
