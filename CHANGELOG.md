@@ -122,6 +122,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **On an instance whose vector index uses `euclidean`, locally computed scores match the engine's** (Q-117). The
+  engine scores euclidean as `1 / (1 + d²)` and Ythril computed `1 / (1 + d)`, up to 0.09 apart, so the fresh-write
+  duplicate threshold acted on the wrong scale and the lexical channel's agreement check never passed. Cosine and
+  `dotProduct` were already right. The mapping is now held to the engine's own score for all three metrics by a
+  database test.
 - **`includeRecordMeta` holds at every depth, and on `similar`** (Q-90). A traversed recall carried every match's and
   every neighbour's `createdAt`/`updatedAt` whatever the flag said, and `similar` accepted no such flag although the
   guide documented it. Both doors of both searches now drop the bookkeeping unless asked, on the match and every
