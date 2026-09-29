@@ -292,6 +292,16 @@ import { NetworkEnableWizardComponent } from './network-enable-wizard.component'
                     (remove)="removeMember(net, m.instanceId, m.label)" />
                 }
               }
+              <!-- Club members a peer introduced, not connected to yet (Q-135) -->
+              @if (net.introductions?.length) {
+                <div class="section-title">{{ 'networks.network.connecting.title' | transloco }}</div>
+                @for (i of net.introductions; track i.instanceId) {
+                  <div class="connecting-row" style="padding:4px 0; font-size:13px;">
+                    <span>{{ i.label }}</span>
+                    <span style="color:var(--text-muted);"> · @if (i.lastError) { {{ 'networks.network.connecting.failed' | transloco }} <span class="connecting-reason">{{ i.lastError }}</span> } @else { {{ 'networks.network.connecting.pending' | transloco }} }</span>
+                  </div>
+                }
+              }
               <!-- Open votes -->
               @if (openVotes(net.id).length > 0) {
                 <div style="margin-top:16px;">

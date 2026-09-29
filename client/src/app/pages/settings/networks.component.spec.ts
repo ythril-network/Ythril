@@ -94,6 +94,21 @@ describe('NetworksComponent (characterization)', () => {
   // network-create-dialog.component.spec.ts when the Create dialog became its own child component.
   // The parent only appends the emitted network and closes — pinned by the onNetworkCreated test below.
 
+  it('a club card lists the members it is still connecting to, with why an attempt failed (Q-135)', () => {
+    make();
+    api.listNetworks.mockReturnValue(of({ networks: [net({ id: 'n1', type: 'club', introductions: [
+      { instanceId: 'i-b', label: 'breituai', url: 'https://b', introducedBy: 'i-o', introducedAt: '2026-09-29T10:00:00Z' },
+      { instanceId: 'i-c', label: 'home', url: 'https://c', introducedBy: 'i-o', introducedAt: '2026-09-29T10:00:00Z', lastError: 'HTTP 404' },
+    ] } as any)] }));
+    const fixture = TestBed.createComponent(NetworksComponent);
+    fixture.detectChanges();
+    fixture.componentInstance.toggleNetwork('n1');
+    fixture.detectChanges();
+    const rows = [...fixture.nativeElement.querySelectorAll('.connecting-row')].map((r: Element) => r.textContent ?? '');
+    expect(rows.length).toBe(2);
+    expect(rows[1]).toContain('HTTP 404');
+  });
+
   it('onNetworkCreated() appends the created network and closes the dialog', () => {
     const c = make();
     c.networks.set([net({ id: 'n1' })]);
