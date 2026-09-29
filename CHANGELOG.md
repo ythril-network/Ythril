@@ -16,6 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `outbound`), an `edgeLabels` list holding a non-string (it became ALL labels — a widening) and a blank `startId`.
   Refusals carry the tool's wording, and an unknown key is named in the message rather than in `unrecognized_keys`.
   **Who is affected:** a REST client that relied on a clamp or fallback.
+- **The Graph view draws the whole neighbourhood, not the first page of it (`Q-109`).** Since `graph_traverse` pages its
+  nodes under the byte budget, the view sent no `skip` and drew whatever the first page held; it now reads every page
+  and joins them. It still says the graph is partial when the walk itself stopped at its `limit`.
 
 - **Breaking:** **REST `POST /api/brain/similar` answers in the `similar` tool's shape (`Q-89`).** Each hit is now
   `{score, spaceId, type, record}` and `source` is `{type, id, summary}`, as MCP has always answered — the route
