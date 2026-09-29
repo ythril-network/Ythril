@@ -35,6 +35,7 @@ import { NotFoundError } from '../../util/errors.js';
 // and its own idea of what 'contains' means. Two spellings of one join is how the doors start
 // disagreeing about which records a name matches.
 import { rankingFields } from '../../brain/recall-shape.js';
+import { pageBudgetSchema } from './_page-budget-schema.js';
 
 /**
  * Space scope for find_similar — mirrors recall's omit-space idiom (F1 consistency).
@@ -215,30 +216,8 @@ export const recallTool: ToolHandler = {
               type: 'object',
               description: 'Fields to include (1) or exclude (0), the same grammar `filter` takes and applied to each result\'s `record` — dotted paths work, so `{"name": 1, "properties.status": 1}` is valid. REACH FOR THIS RATHER THAN SKIPPING IT: it is the difference between an answer you can read inline and one that overruns your context. Measured by an integrator before this existed — a search for fifteen names, a `from`, a `kind` and a `status` returned 100,547 characters where the wanted data was about 1.5 KB, and their client refused the response outright. IT APPLIES RECURSIVELY: a `traverse` answer\'s `_graph` nodes and edges are projected at every depth, which is where a large answer actually comes from. Inclusion and exclusion cannot be mixed (the non-`_id` fields decide which you meant), `_id` survives an inclusion projection unless you send `_id: 0`, and the embedding VECTOR can never be projected back in — an explicit `embedding: 1` is dropped rather than honoured. The ranking envelope (`score`, `spaceId`, `type`) sits outside `record` here and is never projected away, so you cannot lose the score you searched for.',
             },
-            maxChars: {
-              type: 'integer',
-              minimum: 1000,
-              description: 'Ceiling on the serialised response body, in CHARACTERS. **DEFAULT 25000 ON THIS DOOR, and 50000 on REST — the one place the two doors deliberately differ.** Both accept the same parameter with the same floor, the same ceiling and the same refusal; only the number applied when you say nothing differs, because an MCP tool result meets a hard per-result ceiling inside YOUR client that you cannot raise, while a REST body lands in a buffer its caller allocated. Measured: a caller received a 98356-character answer that was correct, in budget and fully specified, and their client refused it outright. 25000 is about 6 whole records at ~4 KB each, roughly 7000 tokens. RAISE IT IF YOUR CLIENT CAN TAKE MORE — up to 5000000. THIS IS THE PARAMETER THAT USED TO BE CALLED `maxBytes`: it always counted characters, which equal bytes only for ASCII. If your limit is really in bytes, use `maxBytes` — it counts real UTF-8 bytes now, and both apply when you set both.',
-            },
-            maxBytes: {
-              type: 'integer',
-              minimum: 1000,
-              description: 'Ceiling on the serialised response body, in real UTF-8 BYTES. **NO DEFAULT — opt-in.** Set it when your limit is genuinely a byte limit, which a transport or buffer limit is. It is not defaulted because bytes are always ≥ characters, so a byte default equal to the character one would silently become the binding constraint on every non-ASCII answer. WHEN YOU SET BOTH, BOTH APPLY: the answer stops at whichever ceiling it reaches first, which for German or Polish content is about 26% sooner in bytes than the same number of characters suggests, and about 35% sooner for emoji. **THIS PARAMETER CHANGED MEANING IN 3.7** — it used to bound characters while its name, its refusal and its response field all said bytes. If you set it before and want the old behaviour, send the same number as `maxChars`.',
-            },
-            maxTokens: {
-              type: 'integer',
-              minimum: 1,
-              description: 'A convenience onto `maxBytes`, converted at a fixed 3.5 characters per token. If you send both, the SMALLER resulting byte figure applies — stating two ceilings means you meant both. It is an approximation and cannot be anything else, because the server does not know your tokeniser: the realistic span across these payloads is 3.0–3.9 chars/token, and 3.5 was chosen because the customary 4.0 UNDER-counts tokens and is worst exactly on graph-heavy responses. Undershooting costs one more page; overshooting costs a blown context, and those are not symmetric.',
-            },
-            skip: {
-              type: 'integer',
-              minimum: 0,
-              description: 'How many of the ranked matches to skip before filling the byte budget (default 0). THIS IS HOW YOU READ A TRUNCATED ANSWER: a response with `truncated: true` also carries `nextSkip`, and sending that back gets you the next prefix — no match repeated, none missed. The ranking is recomputed per call, so this is a continuation over one ordered answer rather than a cursor over a snapshot; a write between two pages can shift what lands where. Skipping past the end returns zero results with `truncated: false`, which is how a loop knows it is done.',
-            },
-            remainderDump: {
-              type: 'boolean',
-              description: 'Also KEEP the matches that did not fit as a spill, reported as `remainder` with a `spillId` for `read_spill` (default false). Only meaningful when the answer truncates. A spill is readable by your token alone, for up to one day, and is never written into any space; paging with `skip`/`nextSkip` reaches the same records without one. If it cannot be kept, `spillRefused` says why. It used to happen unconditionally on every truncated call, which meant a caller that only wanted the next page paid for a download it never opened.',
-            },
+            // The size ceilings and the paging pair, from the one schema every budgeted tool takes (Q-161).
+            ...pageBudgetSchema('match'),
             traverse: {
               // A depth, or a whole traversal minus its start node. Built from `TRAVERSE_OPTION_FIELDS` rather
               // than spelled out here — see `traverseOptionSchema`, which exists because these two tools each
@@ -521,30 +500,8 @@ export const find_similarTool: ToolHandler = {
               type: 'object',
               description: 'Fields to include (1) or exclude (0), the same grammar `filter` takes and applied to each result\'s `record` — dotted paths work, so `{"name": 1, "properties.status": 1}` is valid. REACH FOR THIS RATHER THAN SKIPPING IT: it is the difference between an answer you can read inline and one that overruns your context. Measured by an integrator before this existed — a search for fifteen names, a `from`, a `kind` and a `status` returned 100,547 characters where the wanted data was about 1.5 KB, and their client refused the response outright. IT APPLIES RECURSIVELY: a `traverse` answer\'s `_graph` nodes and edges are projected at every depth, which is where a large answer actually comes from. Inclusion and exclusion cannot be mixed (the non-`_id` fields decide which you meant), `_id` survives an inclusion projection unless you send `_id: 0`, and the embedding VECTOR can never be projected back in — an explicit `embedding: 1` is dropped rather than honoured. The ranking envelope (`score`, `spaceId`, `type`) sits outside `record` here and is never projected away, so you cannot lose the score you searched for.',
             },
-            maxChars: {
-              type: 'integer',
-              minimum: 1000,
-              description: 'Ceiling on the serialised response body, in CHARACTERS. **DEFAULT 25000 ON THIS DOOR, and 50000 on REST — the one place the two doors deliberately differ.** Both accept the same parameter with the same floor, the same ceiling and the same refusal; only the number applied when you say nothing differs, because an MCP tool result meets a hard per-result ceiling inside YOUR client that you cannot raise, while a REST body lands in a buffer its caller allocated. Measured: a caller received a 98356-character answer that was correct, in budget and fully specified, and their client refused it outright. 25000 is about 6 whole records at ~4 KB each, roughly 7000 tokens. RAISE IT IF YOUR CLIENT CAN TAKE MORE — up to 5000000. THIS IS THE PARAMETER THAT USED TO BE CALLED `maxBytes`: it always counted characters, which equal bytes only for ASCII. If your limit is really in bytes, use `maxBytes` — it counts real UTF-8 bytes now, and both apply when you set both.',
-            },
-            maxBytes: {
-              type: 'integer',
-              minimum: 1000,
-              description: 'Ceiling on the serialised response body, in real UTF-8 BYTES. **NO DEFAULT — opt-in.** Set it when your limit is genuinely a byte limit, which a transport or buffer limit is. It is not defaulted because bytes are always ≥ characters, so a byte default equal to the character one would silently become the binding constraint on every non-ASCII answer. WHEN YOU SET BOTH, BOTH APPLY: the answer stops at whichever ceiling it reaches first, which for German or Polish content is about 26% sooner in bytes than the same number of characters suggests, and about 35% sooner for emoji. **THIS PARAMETER CHANGED MEANING IN 3.7** — it used to bound characters while its name, its refusal and its response field all said bytes. If you set it before and want the old behaviour, send the same number as `maxChars`.',
-            },
-            maxTokens: {
-              type: 'integer',
-              minimum: 1,
-              description: 'A convenience onto `maxBytes`, converted at a fixed 3.5 characters per token. If you send both, the SMALLER resulting byte figure applies — stating two ceilings means you meant both. It is an approximation and cannot be anything else, because the server does not know your tokeniser: the realistic span across these payloads is 3.0–3.9 chars/token, and 3.5 was chosen because the customary 4.0 UNDER-counts tokens and is worst exactly on graph-heavy responses. Undershooting costs one more page; overshooting costs a blown context, and those are not symmetric.',
-            },
-            skip: {
-              type: 'integer',
-              minimum: 0,
-              description: 'How many of the ranked matches to skip before filling the byte budget (default 0). THIS IS HOW YOU READ A TRUNCATED ANSWER: a response with `truncated: true` also carries `nextSkip`, and sending that back gets you the next prefix — no match repeated, none missed. The ranking is recomputed per call, so this is a continuation over one ordered answer rather than a cursor over a snapshot; a write between two pages can shift what lands where. Skipping past the end returns zero results with `truncated: false`, which is how a loop knows it is done.',
-            },
-            remainderDump: {
-              type: 'boolean',
-              description: 'Also KEEP the matches that did not fit as a spill, reported as `remainder` with a `spillId` for `read_spill` (default false). Only meaningful when the answer truncates. A spill is readable by your token alone, for up to one day, and is never written into any space; paging with `skip`/`nextSkip` reaches the same records without one. If it cannot be kept, `spillRefused` says why. It used to happen unconditionally on every truncated call, which meant a caller that only wanted the next page paid for a download it never opened.',
-            },
+            // The size ceilings and the paging pair, from the one schema every budgeted tool takes (Q-161).
+            ...pageBudgetSchema('match'),
             // Refused above 100, not clamped: the validator's range IS the contract (`mcp-args-validation`), so the
             // description says so. It said "clamped", which REST did until it answered through this tool (Q-89).
             topK: { type: 'number', minimum: 1, maximum: 100, default: 10, description: 'Max results to return, 1–100; a value outside that is refused, never clamped. Default 10.' },

@@ -1,11 +1,46 @@
+import { MIN_MAX_BYTES, MAX_MAX_BYTES, DEFAULT_MAX_CHARS, MCP_DEFAULT_MAX_CHARS, DEFAULT_CHARS_PER_TOKEN } from '../../brain/result-budget.js';
+
 /**
- * The input schema of the paging and size parameters a budgeted tool takes: `skip`, `maxChars`, `maxBytes`,
- * `maxTokens`, `remainderDump` (`Q-132`).
+ * The input schema of the size ceilings every budgeted tool takes: `maxChars`, `maxBytes`, `maxTokens` (`Q-161`).
  *
- * Every budgeted tool accepts the same five with the same floors and the same meaning, because they all resolve
- * through `brain/result-budget.ts`. Four tools spelled the schema out by hand before this existed; `graph_traverse` is
- * the first to take it from here, and moving the others is its own ticket. `unit` names what one row of THIS answer is
- * ("node", "match"), so the description a caller reads while building arguments says what `skip` counts.
+ * All of them resolve through `brain/result-budget.ts`, so the schema is derived from it rather than written per tool.
+ * Four tools spelled it out by hand and had drifted from the resolver and from each other: one accepted `maxChars: 1`
+ * where the rest refused anything under 1000, one said `maxTokens` converts onto `maxBytes`, and every copy refused a
+ * `maxBytes` under 1000 that the resolver deliberately honours. So the floors here are the resolver's: a small
+ * `maxChars` is RAISED to the floor rather than refused, and `maxBytes` has none. `unit` names what one row of THIS
+ * answer is ("match", "row", "node", "item"), so the description a caller reads while building arguments says what
+ * a budget cuts.
+ */
+export function budgetSizeSchema(unit: string): Record<string, Record<string, unknown>> {
+  return {
+    maxChars: {
+      type: 'integer', minimum: 1,
+      description: `Ceiling on the serialised answer, in CHARACTERS: whole ${unit}s only, the rest reached with \`nextSkip\`. `
+        + `Default ${MCP_DEFAULT_MAX_CHARS} on MCP and ${DEFAULT_MAX_CHARS} on REST — the one default the two doors deliberately `
+        + 'differ on, because an MCP result meets a ceiling inside your client that you cannot raise. Held between '
+        + `${MIN_MAX_BYTES} and ${MAX_MAX_BYTES}: a smaller value is raised to ${MIN_MAX_BYTES}, not refused. Characters equal `
+        + 'bytes only for ASCII — for a byte ceiling use `maxBytes`.',
+    },
+    maxBytes: {
+      type: 'integer', minimum: 1,
+      description: 'Ceiling on the serialised answer in real UTF-8 BYTES — what a transport or buffer limit is. No default, '
+        + 'deliberately: bytes are always at least characters, so a byte default would silently bind on every non-ASCII '
+        + `answer. No floor either — a caller who states 500 bytes has a reason. Up to ${MAX_MAX_BYTES}. When both are set, `
+        + 'the answer stops at whichever it reaches first.',
+    },
+    maxTokens: {
+      type: 'integer', minimum: 1,
+      description: `A convenience onto \`maxChars\`, at a fixed ${DEFAULT_CHARS_PER_TOKEN} characters per token. When both are `
+        + 'set the smaller resulting ceiling applies. An approximation: the server does not know your tokeniser.',
+    },
+  };
+}
+
+/**
+ * The size ceilings plus the paging pair a tool that SPILLS takes: `skip` and `remainderDump` (`Q-132`, `Q-161`).
+ *
+ * Built on `budgetSizeSchema` rather than beside it, so the ceilings cannot be written twice. A tool that pages by
+ * `limit` and keeps no spill — `filter` — takes the size schema alone and states its own `skip`.
  */
 export function pageBudgetSchema(unit: string): Record<string, Record<string, unknown>> {
   return {
@@ -13,18 +48,7 @@ export function pageBudgetSchema(unit: string): Record<string, Record<string, un
       type: 'integer', minimum: 0,
       description: `How many ${unit}s to skip before filling the byte budget (default 0). A response with \`truncated: true\` and \`nextSkip\` continues when you send \`nextSkip\` back as \`skip\` — none repeated, none missed.`,
     },
-    maxChars: {
-      type: 'integer', minimum: 1000,
-      description: `Ceiling on the serialised answer, in CHARACTERS: whole ${unit}s only, the rest reached with \`nextSkip\`. Default 25000 on MCP and 50000 on REST — the one default the two doors deliberately differ on; up to 5000000.`,
-    },
-    maxBytes: {
-      type: 'integer', minimum: 1000,
-      description: 'Ceiling on the serialised answer in real UTF-8 BYTES. No default; when both are set, the answer stops at whichever it reaches first.',
-    },
-    maxTokens: {
-      type: 'integer', minimum: 1,
-      description: 'A convenience onto `maxChars`, at 3.5 characters per token. The smaller resulting ceiling applies.',
-    },
+    ...budgetSizeSchema(unit),
     remainderDump: {
       type: 'boolean',
       description: `Also keep the ${unit}s that did not fit as a spill for \`read_spill\` (default false), readable by your token alone for a day. Paging with \`skip\` reaches the same ${unit}s without one.`,
