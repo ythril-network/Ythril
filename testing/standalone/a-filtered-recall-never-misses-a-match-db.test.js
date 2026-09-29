@@ -347,10 +347,12 @@ describe('a filtered recall never misses a matching record', { skip }, () => {
         paths = await liveFilterPaths(mongo, `${OLDDEF}_entities`, `${OLDDEF}_entities_embedding`);
         if (paths.includes('_id')) {
           try {
-            await mongo.col(`${OLDDEF}_entities`).aggregate([{ $vectorSearch: {
+            // The record must come BACK, not merely the query run: CI saw the new definition accept the `_id` filter
+            // while it still held none of the records, so a probe that only did not throw ended the wait too early.
+            const probe = await mongo.col(`${OLDDEF}_entities`).aggregate([{ $vectorSearch: {
               index: `${OLDDEF}_entities_embedding`, path: 'embedding', queryVector: queryAxis(DIMS),
               exact: true, limit: 1, filter: { _id: { $in: ['far-target'] } } } }]).toArray();
-            break;
+            if (probe.some(d => d._id === 'far-target')) break;
           } catch { /* the new definition is not serving yet */ }
         }
         await new Promise(r => setTimeout(r, 1000));
@@ -360,7 +362,7 @@ describe('a filtered recall never misses a matching record', { skip }, () => {
         + 'to a definition with _id never happened');
       const settled = await filteredRecall(OLDDEF, { 'properties.marker': 'x' }, 10);
       assert.ok(settled.ids.includes('far-target'),
-        `once the _id filter serves the answer must be complete: [${settled.ids.join(', ')}]`);
+        `once the _id filter serves the answer must be complete: [${settled.ids.join(', ')}], degraded [${settled.degraded.join(', ')}]`);
       assert.ok(!settled.degraded.includes('filter_window'),
         'a refusal verdict cached past the index\'s recovery would disclose a gap that no longer exists');
     });
