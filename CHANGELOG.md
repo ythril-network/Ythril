@@ -16,6 +16,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `outbound`), an `edgeLabels` list holding a non-string (it became ALL labels — a widening) and a blank `startId`.
   Refusals carry the tool's wording, and an unknown key is named in the message rather than in `unrecognized_keys`.
   **Who is affected:** a REST client that relied on a clamp or fallback.
+- **A request past a cap is refused, not served smaller (`Q-109`).** A bulk write with more than 500 items in one array
+  refuses the whole batch with a `400` naming the array, before anything is written; it used to drop the items past
+  500 and answer with the same `207` as a clean batch. `network_sync_history`'s `limit` is refused outside 1–100 on both
+  doors (REST clamped 500 to 100 and let a negative through). The embed-queue listing's `limit` over 200 is a `400`
+  where REST echoed it and served 200. **Who is affected:** a caller that relied on the quiet cut.
+- **`list_embed_jobs` reaches every job, on a proxy too (`Q-109`).** It is now the act REST's embed-queue listing calls:
+  it takes `skip`, reads and sums a proxy space's members, and — on both doors — returns `transientFailures`, the field
+  its own description told callers to read and neither door sent.
 - **The Graph view draws the whole neighbourhood, not the first page of it (`Q-109`).** Since `graph_traverse` pages its
   nodes under the byte budget, the view sent no `skip` and drew whatever the first page held; it now reads every page
   and joins them. It still says the graph is partial when the walk itself stopped at its `limit`.

@@ -9,7 +9,7 @@
 
 import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.js';
 import { TTL_DAYS_SCHEMA, SUPERSEDED_SCHEMA, SUPPRESS_EMBEDDINGS_SCHEMA, uuidSchema } from './shared.js';
-import { bulkWrite, bulkWriteTotal } from '../../brain/bulk.js';
+import { bulkWrite, bulkWriteTotal, BULK_MAX_PER_TYPE } from '../../brain/bulk.js';
 import { resolveWriteTarget } from '../../spaces/proxy.js';
 import { emitWebhookEvent } from '../../webhooks/dispatcher.js';
 import { edgeEndpointKindSchema } from '../../brain/entity-refs.js';
@@ -66,8 +66,8 @@ export const save_bulkTool: ToolHandler = {
             space: s.requiredSpace,
             facts: {
               type: 'array',
-              maxItems: 500,
-              description: 'Fact entries to insert (max 500; excess entries are dropped). Same fields as the `saveFact` tool.',
+              maxItems: BULK_MAX_PER_TYPE,
+              description: `Fact entries to insert (at most ${BULK_MAX_PER_TYPE}; a longer array refuses the whole batch, before anything is written). ` + 'Same fields as the `saveFact` tool.',
               items: {
                 type: 'object',
                 additionalProperties: false,
@@ -112,8 +112,8 @@ export const save_bulkTool: ToolHandler = {
             },
             entities: {
               type: 'array',
-              maxItems: 500,
-              description: 'Entity entries to upsert (max 500; excess entries are dropped). Same fields as the `save_entity` tool.',
+              maxItems: BULK_MAX_PER_TYPE,
+              description: `Entity entries to upsert (at most ${BULK_MAX_PER_TYPE}; a longer array refuses the whole batch, before anything is written). ` + 'Same fields as the `save_entity` tool.',
               items: {
                 type: 'object',
                 additionalProperties: false,
@@ -148,8 +148,8 @@ export const save_bulkTool: ToolHandler = {
             },
             edges: {
               type: 'array',
-              maxItems: 500,
-              description: 'Edge entries to upsert (max 500; excess entries are dropped). Same fields as the `save_edge` tool.',
+              maxItems: BULK_MAX_PER_TYPE,
+              description: `Edge entries to upsert (at most ${BULK_MAX_PER_TYPE}; a longer array refuses the whole batch, before anything is written). ` + 'Same fields as the `save_edge` tool.',
               items: {
                 type: 'object',
                 additionalProperties: false,
@@ -206,8 +206,8 @@ export const save_bulkTool: ToolHandler = {
             },
             chrono: {
               type: 'array',
-              maxItems: 500,
-              description: 'Chrono entries to insert (max 500; excess entries are dropped). Same fields as the `save_chrono` tool.',
+              maxItems: BULK_MAX_PER_TYPE,
+              description: `Chrono entries to insert (at most ${BULK_MAX_PER_TYPE}; a longer array refuses the whole batch, before anything is written). ` + 'Same fields as the `save_chrono` tool.',
               items: {
                 type: 'object',
                 additionalProperties: false,

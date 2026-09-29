@@ -6,7 +6,7 @@
 import { Router } from 'express';
 import { requireSpaceAuth, denyReadOnly } from '../../auth/middleware.js';
 import { globalRateLimit } from '../../rate-limit/middleware.js';
-import { bulkWrite, bulkWriteTotal, BULK_BODY_KEYS, type BulkInput } from '../../brain/bulk.js';
+import { bulkWrite, bulkWriteTotal, bulkSizeRefusal, BULK_BODY_KEYS, type BulkInput } from '../../brain/bulk.js';
 import { retiredWriteFieldError } from '../../brain/retired-write-fields.js';
 import { unknownBodyFields } from '../../brain/query.js';
 import { getConfig } from '../../config/loader.js';
@@ -75,6 +75,9 @@ bulkRouter.post('/spaces/:spaceId/bulk', globalRateLimit, requireSpaceAuth, deny
       if (itemRetired) { res.status(400).json({ error: itemRetired }); return; }
     }
   }
+
+  const tooLarge = bulkSizeRefusal(body);
+  if (tooLarge) { res.status(400).json({ error: tooLarge }); return; }
 
   const result = await bulkWrite(targetSpace, {
     ...(body as BulkInput),

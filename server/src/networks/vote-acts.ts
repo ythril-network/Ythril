@@ -83,8 +83,16 @@ export function castVoteAct(id: string, roundId: string, input: unknown): Networ
 
 /** The newest sync cycles recorded for a network, newest first; `limit` 1–100, default 20. */
 export async function syncHistoryAct(id: string, limit: unknown): Promise<NetworkActResult> {
-  const net = getConfig().networks.find(n => n.id === id);
+  // Refused outside 1–100, as the MCP schema refuses it (Q-109). This clamped 500 to 100 without a word and let a
+  // negative through to the read, and REST reaches it with the query string's text — so it is parsed here, strictly.
+  let n = 20;
+  if (limit !== undefined && limit !== '') {
+    n = typeof limit === 'number' ? limit : Number(limit);
+    if (!Number.isInteger(n) || n < 1 || n > 100) {
+      return { status: 400, error: '`limit` must be an integer from 1 to 100' };
+    }
+  }
+  const net = getConfig().networks.find(x => x.id === id);
   if (!net) return notFound;
-  const n = Math.min(parseInt(String(limit ?? ''), 10) || 20, 100);
   return { status: 200, body: { history: await getSyncHistory(net.id, n) } };
 }
