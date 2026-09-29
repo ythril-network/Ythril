@@ -1,6 +1,8 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
+import { map } from 'rxjs/operators';
+import { readEveryPage } from './read-every-page';
 import type { DuplicateRecord } from './api.types';
 
 /** Near-duplicate brain-record candidates: list, dismiss, re-rate, merge, and rescan. */
@@ -8,10 +10,14 @@ import type { DuplicateRecord } from './api.types';
 export class DuplicatesApi {
   private http = inject(HttpClient);
 
+  /** The WHOLE list, every page (Q-127): the review tab filters and sorts it in the browser. */
   listDuplicates(status: 'open' | 'dismissed' | 'all' = 'open', space?: string): Observable<{ duplicates: DuplicateRecord[] }> {
-    const params = new URLSearchParams({ status });
-    if (space) params.set('space', space);
-    return this.http.get<{ duplicates: DuplicateRecord[] }>(`/api/duplicates?${params.toString()}`);
+    return readEveryPage(skip => {
+      const params = new URLSearchParams({ status });
+      if (space) params.set('space', space);
+      if (skip) params.set('skip', String(skip));
+      return this.http.get<{ duplicates: DuplicateRecord[]; nextSkip?: number }>(`/api/duplicates?${params.toString()}`);
+    }).pipe(map(pages => ({ duplicates: pages.flatMap(p => p.duplicates) })));
   }
 
   dismissDuplicate(id: string): Observable<{ status: string }> {

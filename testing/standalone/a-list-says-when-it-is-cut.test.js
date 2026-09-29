@@ -12,7 +12,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { pageList } from '../../server/dist/brain/list-page.js';
+import { pageList, pageMemberList } from '../../server/dist/brain/list-page.js';
 
 const rows = n => Array.from({ length: n }, (_, i) => ({ i, text: `row ${i}` }));
 
@@ -63,6 +63,37 @@ describe('a list says when it is cut', () => {
     assert.equal(pageList(rows(3), { skip: -1 }, { defaultLimit: 50 }).ok, false);
     assert.equal(pageList(rows(3), { limit: 0 }, { defaultLimit: 50 }).ok, false);
     assert.equal(pageList(rows(3), { limit: 'abc' }, { defaultLimit: 50 }).ok, false);
+  });
+
+  it('a list across member spaces pages at the database and nextSkip reaches every row of every space', async () => {
+    // Two spaces, sorted descending by score as the review lists are; 7 + 5 rows, pages of 4.
+    const spaces = { s1: Array.from({ length: 7 }, (_, i) => ({ id: `a${i}`, score: 100 - i * 2 })),
+      s2: Array.from({ length: 5 }, (_, i) => ({ id: `b${i}`, score: 99 - i * 2 })) };
+    const compare = (a, b) => (b.score - a.score) || a.id.localeCompare(b.id);
+    const seen = [];
+    let skip = 0;
+    for (let pages = 0; pages < 10; pages++) {
+      const r = await pageMemberList({
+        members: ['s1', 's2'],
+        readMember: async (m, limit, sk) => spaces[m].slice().sort(compare).slice(sk, sk + limit),
+        countMember: async m => spaces[m].length,
+        compare, req: { limit: 4, skip }, page: { defaultLimit: 50 }, ceiling: 100,
+      });
+      assert.equal(r.ok, true, r.error);
+      assert.equal(r.fields.total, 12);
+      seen.push(...r.rows.map(x => x.id));
+      if (!r.fields.truncated) break;
+      skip = r.fields.nextSkip;
+    }
+    const all = [...spaces.s1, ...spaces.s2].sort(compare).map(x => x.id);
+    assert.deepEqual(seen, all, 'in order, none repeated, none missed');
+  });
+
+  it('a merge deeper than its ceiling is refused with a sentence, not answered short', async () => {
+    const r = await pageMemberList({ members: ['s1', 's2'], readMember: async () => [], countMember: async () => 0,
+      compare: () => 0, req: { limit: 50, skip: 90 }, page: { defaultLimit: 50 }, ceiling: 100 });
+    assert.equal(r.ok, false);
+    assert.match(r.error, /must not exceed 100/);
   });
 
   it('numeric strings from a query string are read as numbers', () => {

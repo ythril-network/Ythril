@@ -19,6 +19,7 @@
  * (`spaces/page-across-members.ts`) and reports through `listPageFields`, so the fields stay one shape.
  */
 import { applyBudget, budgetFields, resolveBudget, queryInt, DEFAULT_MAX_CHARS, type BudgetRequest } from './result-budget.js';
+import { pageAcrossMembers } from '../spaces/page-across-members.js';
 
 export interface ListPageRequest extends BudgetRequest {
   limit?: unknown;
@@ -70,6 +71,47 @@ export function listPageFields(opts: { page: readonly unknown[]; returned: numbe
     skip: opts.skip,
     truncated: more,
     ...(more ? { nextSkip: typeof budgetNext === 'number' ? budgetNext : opts.skip + opts.returned } : {}),
+  };
+}
+
+/**
+ * One page of a list that lives in several member spaces' collections and is too large to hold: paged at the
+ * database through `pageAcrossMembers` (skip pushed down for one space, a bounded merge for several), counted per
+ * space for `total`, then held to the byte budget — answering the same fields as `pageList`.
+ */
+export async function pageMemberList<T>(opts: {
+  members: readonly string[];
+  readMember: (memberId: string, limit: number, skip: number) => Promise<T[]>;
+  countMember: (memberId: string) => Promise<number>;
+  compare: (a: T, b: T) => number;
+  req: ListPageRequest;
+  page: ListPageOptions;
+  /** The deepest `skip + limit` a multi-space merge may read; past it the call is refused with a sentence. */
+  ceiling: number;
+}): Promise<ListPage<T>> {
+  const paging = resolveListPaging(opts.req, opts.page);
+  if (!paging.ok) return paging;
+  const budget = resolveBudget({
+    ...(opts.req.maxChars !== undefined ? { maxChars: queryInt(opts.req.maxChars) } : {}),
+    ...(opts.req.maxBytes !== undefined ? { maxBytes: queryInt(opts.req.maxBytes) } : {}),
+    ...(opts.req.maxTokens !== undefined ? { maxTokens: queryInt(opts.req.maxTokens) } : {}),
+  } as BudgetRequest, opts.page.budgetChars ?? DEFAULT_MAX_CHARS);
+  if (!budget.ok) return budget;
+  const read = await pageAcrossMembers({
+    members: opts.members, readMember: opts.readMember, compare: opts.compare,
+    limit: paging.limit, skip: paging.skip, ceiling: opts.ceiling,
+  });
+  if (!read.ok) return read;
+  let total = 0;
+  for (const m of opts.members) total += await opts.countMember(m);
+  const outcome = applyBudget(read.rows, budget);
+  return {
+    ok: true,
+    rows: outcome.returned,
+    fields: listPageFields({
+      page: read.rows, returned: outcome.returned.length, total, limit: paging.limit, skip: paging.skip,
+      budgetFields: budgetFields(outcome, total, budget, paging.skip),
+    }),
   };
 }
 
