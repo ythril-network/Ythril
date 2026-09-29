@@ -811,7 +811,7 @@ export interface Network {
   /** Spaces an upstream announced that were not adopted here, each with why (S-9); the operator accepts or dismisses them. */
   pendingSpaces?: { networkId: string; localId: string; why: string; from: string; at: string }[];
   /** Club only: members a peer introduced that this instance is still connecting to (Q-135), with why if it failed. */
-  introductions?: { instanceId: string; label: string; url: string; introducedBy: string; introducedAt: string; lastAttemptAt?: string; lastError?: string }[];
+  introductions?: { instanceId: string; label: string; url: string; introducedBy: string; introducedAt: string; lastAttemptAt?: string; lastError?: string; needsApproval?: boolean }[];
 }
 
 export interface NetworkMember {

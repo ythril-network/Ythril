@@ -141,6 +141,7 @@ export const CAPABILITIES = [
   ['Networks', 'network_join_by_key', 'POST /api/networks/join-by-key'],
   ['Networks', 'network_member_add', 'POST /api/networks/:id/members'],
   ['Networks', 'network_member_remove', 'DELETE /api/networks/:id/members/:instanceId'],
+  ['Networks', 'network_introduction_accept', 'POST /api/networks/:id/introductions/:instanceId/accept'],
   ['Networks', 'network_member_admit', 'POST /api/networks/:id/join'],
   ['Networks', 'network_member_signing_key', 'PUT /api/networks/:id/members/:instanceId/signing-key'],
   ['Networks', 'network_reparent_self', 'POST /api/networks/:id/reparent-self'],

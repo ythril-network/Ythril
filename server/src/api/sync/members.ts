@@ -16,7 +16,7 @@ import { peerFloorRefusal } from '../../sync/peer-floor.js';
 import type { NetworkMember } from '../../config/types.js';
 import { adoptAnnouncedSpaces, healAnnouncedAliases } from '../../networks/network-spaces.js';
 import { selfRecordFor } from '../../networks/self-record.js';
-import { isMeshNetwork } from '../../networks/member-introductions.js';
+import { rosterIsAuthority } from '../../networks/member-introductions.js';
 
 export const syncMembersRouter = Router();
 
@@ -52,7 +52,7 @@ syncMembersRouter.get('/networks/:networkId/members', syncRateLimit, requireAuth
       return safe;
     });
     // Q-135: a club's removals travel beside its roster, so every member applies a removal made anywhere.
-    res.json({ members: safeMembers, ...(isMeshNetwork(net) ? { removed: net.removedMembers ?? [] } : {}), updatedAt: new Date().toISOString() });
+    res.json({ members: safeMembers, ...(rosterIsAuthority(net) ? { removed: net.removedMembers ?? [] } : {}), updatedAt: new Date().toISOString() });
   } catch (err) {
     reportServerFailure('sync GET /networks/:networkId/members', err);
     res.status(500).json({ error: 'Internal error' });

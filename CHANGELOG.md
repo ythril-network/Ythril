@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A closed or democratic network connects every member too, on its own votes (`Q-154`).** Only the member that
+  held a newcomer's credentials used to admit it; every other member concluded the join vote and connected to
+  nobody. Now a passed join round introduces the newcomer on every member and the two pair as club members do, and
+  a newcomer trusts the list of the member that admitted it. A roster entry anyone else proposes — on a network
+  whose members joined before this, with their votes long pruned — waits under **Connecting** for the operator's
+  **Accept** (`POST /api/networks/:id/introductions/:instanceId/accept`, MCP `network_introduction_accept`,
+  instance-admin), because a member of a voted network votes and one member's word must not let it in. A refused
+  pairing is retried after half a minute, doubling to five: members learn of a passed vote at about the same moment,
+  so a first call that arrives before the other side has concluded it is a race, not a refusal.
 - **A slow or failing reranker no longer holds every search (`Q-157`).** Measured on a 5.6.0 instance: every
   recall took 20 s — the reranker's time limit — and was answered in fused order anyway, while the same recall
   without reranking took 90 ms. A reranker pass that fails, runs out its own time limit, or takes more than half of

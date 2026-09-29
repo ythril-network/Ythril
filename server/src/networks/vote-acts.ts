@@ -21,6 +21,7 @@ import { makeSignedOwnCast } from '../util/signing.js';
 import { log } from '../util/log.js';
 import type { NetworkActResult } from './network-acts.js';
 import { roundSpaceLocalId } from '../sync/space-map.js';
+import { applyPassedJoin } from './member-introductions.js';
 
 export const CastVoteBody = z.object({ vote: z.enum(['yes', 'veto']) });
 
@@ -64,16 +65,10 @@ export function castVoteAct(id: string, roundId: string, input: unknown): Networ
 
   concludeRoundIfReady(net, round);
 
-  // A passed join admits the pending member — only on the direct parent in a tree, so ancestor-voters do not add
-  // the joiner to their own lists.
-  if (round.concluded && round.type === 'join' && round.pendingMember &&
-      !net.members.some(m => m.instanceId === round.subjectInstanceId)) {
-    const vetoCount = round.votes.filter(v => v.vote === 'veto').length;
-    const isDirectParent = !round.pendingMember.parentInstanceId || round.pendingMember.parentInstanceId === cfg.instanceId;
-    if (vetoCount === 0 && (net.type !== 'braintree' || isDirectParent)) {
-      net.members.push(round.pendingMember);
-      log.info(`Join vote ${round.roundId} passed — added member ${round.subjectLabel} to network ${net.id}`);
-    }
+  // A passed join: the credential holder admits, every other member of a voted network introduces (Q-154). This site
+  // admitted on a gossip copy, whose token hash is stripped — a member with no credential, which never paired.
+  if (applyPassedJoin(net, cfg.instanceId, round) === 'admitted') {
+    log.info(`Join vote ${round.roundId} passed — added member ${round.subjectLabel} to network ${net.id}`);
   }
   // Deletion, wipe and addition: the function all three conclusion sites call (X-5, F-38.4).
   applyConcludedSpaceRounds(net, [round], 'local vote');

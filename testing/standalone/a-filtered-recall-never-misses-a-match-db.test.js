@@ -360,7 +360,15 @@ describe('a filtered recall never misses a matching record', { skip }, () => {
       assert.ok(paths.includes('_id'),
         `production's builder left ${OLDDEF}_entities_embedding at [${paths.join(', ')}] — the in-place update `
         + 'to a definition with _id never happened');
-      const settled = await filteredRecall(OLDDEF, { 'properties.marker': 'x' }, 10);
+      // Polled, not read once. CI saw a probe answered by the new definition followed by a recall answered by the old
+      // one, which still refuses `_id` — so the recall said filter_window, correctly, a second after the probe. What
+      // this case pins is that no verdict outlives the index's recovery, and a cached one would never clear here.
+      let settled;
+      do {
+        settled = await filteredRecall(OLDDEF, { 'properties.marker': 'x' }, 10);
+        if (settled.ids.includes('far-target') && !settled.degraded.includes('filter_window')) break;
+        await new Promise(r => setTimeout(r, 1000));
+      } while (Date.now() < deadline + 30_000);
       assert.ok(settled.ids.includes('far-target'),
         `once the _id filter serves the answer must be complete: [${settled.ids.join(', ')}], degraded [${settled.degraded.join(', ')}]`);
       assert.ok(!settled.degraded.includes('filter_window'),

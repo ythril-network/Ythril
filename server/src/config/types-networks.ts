@@ -99,9 +99,13 @@ export interface MemberIntroduction {
   admittedAt?: string;
   introducedBy: string;
   introducedAt: string;
+  /** A voted network's roster entry this instance's operator has not accepted yet (`Q-154`): nothing pairs with it. */
+  needsApproval?: boolean;
   /** The token this instance minted for the newcomer while it opens a pairing; the confirm call must present it. */
   pairingTokenId?: string;
   lastAttemptAt?: string;
+  /** How many times this instance has opened the pairing; the retry wait doubles with each (`pairRetryDue`). */
+  attempts?: number;
   lastError?: string;
 }
 
@@ -281,8 +285,10 @@ export interface NetworkConfig {
    *  unsigned casts are accepted only directly from the voter (never relayed). */
   requireSignedVotes?: boolean;
   members: NetworkMember[];
-  /** Club only: members learned from a peer's roster and not yet paired with (`Q-135`). */
+  /** Club, closed and democratic: members introduced and not yet paired with (`Q-135`, `Q-154`). */
   introductions?: MemberIntroduction[];
+  /** The member whose invite admitted this instance, recorded at join: on a voted network its roster vouches (`Q-154`). */
+  admittedVia?: string;
   /** Club only: members removed here, newest last and bounded, answered to peers beside the roster (`Q-135`). */
   removedMembers?: MemberRemoval[];
   pendingRounds: VoteRound[];

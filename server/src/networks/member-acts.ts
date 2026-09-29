@@ -23,7 +23,7 @@ import type { NetworkMember, VoteRound } from '../config/types.js';
 import { BCRYPT_ROUNDS, SSRF_SAFE_URL, safeMemberList } from '../api/networks/_shared.js';
 import type { NetworkActResult } from './network-acts.js';
 import { openRoundHere } from './round-local-state.js';
-import { stampAdmission, recordRemoval } from './member-introductions.js';
+import { stampAdmission, recordRemoval, acceptIntroduction } from './member-introductions.js';
 
 export const AddMemberBody = z.object({
   instanceId: z.string().min(1),
@@ -337,6 +337,25 @@ export async function admitByInviteKeyAct(networkId: string, input: unknown): Pr
 
   // Return peer the member list and network metadata (enough to start syncing)
   return { status: 200, body: { status: 'joined', members: safeMemberList(freshNet, instanceId), networkId: freshNet.id } };
+}
+
+/**
+ * The operator's OK on a member another member's roster only PROPOSED, on a closed or democratic network (`Q-154`).
+ *
+ * On a voted network a roster is not the authority — an admitted instance votes — so an introduction from anyone but
+ * the member that admitted this instance waits here until the operator accepts it; pairing follows on the next sync.
+ * Instance-admin on both doors, as every member act is: it decides who this instance trusts.
+ */
+export function acceptIntroductionAct(networkId: string, instanceId: string): NetworkActResult {
+  const cfg = getConfig();
+  const net = cfg.networks.find(n => n.id === networkId);
+  if (!net) return NOT_FOUND;
+  if (!acceptIntroduction(net, instanceId)) {
+    return { status: 404, error: 'No introduction of that instance is waiting for an OK on this network' };
+  }
+  saveConfig(cfg);
+  log.info(`Network ${net.id}: introduction of ${instanceId} accepted; pairing follows on the next sync`);
+  return { status: 200, body: { status: 'accepted', instanceId } };
 }
 
 /**

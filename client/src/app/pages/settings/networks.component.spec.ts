@@ -109,6 +109,25 @@ describe('NetworksComponent (characterization)', () => {
     expect(rows[1]).toContain('HTTP 404');
   });
 
+  it('a voted network\'s proposed member waits for an OK, and Accept sends it and reloads (Q-154)', () => {
+    make();
+    api.acceptIntroduction = vi.fn(() => of({ status: 'accepted', instanceId: 'i-p' }));
+    api.listNetworks.mockReturnValue(of({ networks: [net({ id: 'n1', type: 'closed', introductions: [
+      { instanceId: 'i-p', label: 'member-p', url: 'https://p', introducedBy: 'i-o', introducedAt: '2026-09-29T10:00:00Z', needsApproval: true },
+      { instanceId: 'i-v', label: 'member-v', url: 'https://v', introducedBy: 'round:r1', introducedAt: '2026-09-29T10:00:00Z' },
+    ] } as any)] }));
+    const fixture = TestBed.createComponent(NetworksComponent);
+    fixture.detectChanges();
+    fixture.componentInstance.toggleNetwork('n1');
+    fixture.detectChanges();
+    const buttons = fixture.nativeElement.querySelectorAll('.connecting-accept');
+    expect(buttons.length, 'only the proposed member asks for an OK').toBe(1);
+    const before = api.listNetworks.mock.calls.length;
+    (buttons[0] as HTMLButtonElement).click();
+    expect(api.acceptIntroduction).toHaveBeenCalledWith('n1', 'i-p');
+    expect(api.listNetworks.mock.calls.length, 'the page reloads after an Accept').toBeGreaterThan(before);
+  });
+
   it('onNetworkCreated() appends the created network and closes the dialog', () => {
     const c = make();
     c.networks.set([net({ id: 'n1' })]);

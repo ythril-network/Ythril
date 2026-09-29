@@ -69,8 +69,10 @@ describe('a club roster introduces and removes', () => {
     assert.equal(net.removedMembers.length, 0);
   });
 
-  it('touches nothing on a network that is not a club', () => {
-    for (const type of ['closed', 'democratic', 'pubsub', 'braintree']) {
+  // Voted networks mesh too since `Q-154`, on their own votes rather than a roster's word:
+  // `a-voted-network-pairs-on-its-own-votes.test.js`. What stays out entirely is the star and the tree.
+  it('touches nothing on a network that does not mesh', () => {
+    for (const type of ['pubsub', 'braintree']) {
       const net = club({ type });
       const r = mergePeerRoster(net, SELF, PEER, [listed('cccc')], [{ instanceId: PEER, removedAt: T2 }]);
       assert.equal(r.changed, false, type);

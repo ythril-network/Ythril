@@ -154,6 +154,13 @@ describe('a network\'s members through MCP and through REST', () => {
     assert.equal(rest.status, 404, JSON.stringify(rest.body));
     assert.equal((await tool(mcpA, 'network_member_remove', { id: club, instanceId: `nobody-${RUN}` })).text, `Error (404): ${rest.body.error}`);
   });
+
+  it('network_introduction_accept refuses an id nothing proposed, alike on both doors (Q-154)', async () => {
+    const closed = await network('closed');
+    const rest = await post(INSTANCES.a, adminA, `/api/networks/${closed}/introductions/nobody-${RUN}/accept`, {});
+    assert.equal(rest.status, 404, JSON.stringify(rest.body));
+    assert.equal((await tool(mcpA, 'network_introduction_accept', { id: closed, instanceId: `nobody-${RUN}` })).text, `Error (404): ${rest.body.error}`);
+  });
 });
 
 describe('admitting by invite key, a signing key and the topology acts through MCP and through REST', () => {

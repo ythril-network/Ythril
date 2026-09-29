@@ -30,7 +30,7 @@ import { applyConcludedSpaceRounds } from '../spaces/apply-wipe-round.js';
 import { bumpSeq, isSeqImplausible } from '../util/seq.js';
 import { adoptAnnouncedSpaces, announcedSpaces, healAnnouncedAliases } from '../networks/network-spaces.js';
 import { selfRecordFor } from '../networks/self-record.js';
-import { mergePeerRoster, revokeRemoved, pairIntroduced } from '../networks/member-introductions.js';
+import { mergePeerRoster, revokeRemoved, pairIntroduced, applyPassedJoin } from '../networks/member-introductions.js';
 import { pullSpaceMetaFromUpstream } from './space-meta-pull.js';
 import { peerSafeFetch, isPeerUrlAllowed } from './peer-fetch.js';
 import { concludeRoundIfReady, sendMemberRemovedNotify } from './governance.js';
@@ -755,22 +755,9 @@ async function propagateVotesWithPeer(
           if (justPassed && round.type === 'remove') {
             sendMemberRemovedNotify(round.subjectUrl, round.subjectInstanceId, net.id);
           }
-          // For join rounds, add the held pending member on conclusion.
-          // Braintree: only the direct parent (the node that opened the round)
-          // admits — ancestor-voters must NOT add the joining node to their own
-          // member list. Other vote-governed types: only the instance holding
-          // the joiner's credentials admits (gossip-adopted round copies have
-          // pendingMember.tokenHash stripped).
-          if (justPassed && round.type === 'join' && round.pendingMember) {
-            const alreadyAdded = freshNet.members.some(m => m.instanceId === round.subjectInstanceId);
-            const mayAdmit = freshNet.type === 'braintree'
-              ? (!round.pendingMember.parentInstanceId || round.pendingMember.parentInstanceId === fresh.instanceId)
-              : Boolean(round.pendingMember.tokenHash);
-            const vetoed = round.votes.some(v => v.vote === 'veto');
-            if (!alreadyAdded && mayAdmit && !vetoed) {
-              freshNet.members.push(round.pendingMember);
-              log.info(`Join round ${round.roundId} concluded via gossip — added ${round.subjectLabel} to network ${net.id}`);
-            }
+          // A passed join: the credential holder admits, every other member of a voted network introduces (Q-154).
+          if (justPassed && applyPassedJoin(freshNet, fresh.instanceId, round) === 'admitted') {
+            log.info(`Join round ${round.roundId} concluded via gossip — added ${round.subjectLabel} to network ${net.id}`);
           }
         }
       }
