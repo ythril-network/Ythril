@@ -39,12 +39,17 @@ import net from 'node:net';
 export const TEST_MONGO_HOST = process.env['YTHRIL_TEST_MONGO_HOST'] ?? '127.0.0.1';
 export const TEST_MONGO_PORT = Number(process.env['YTHRIL_TEST_MONGO_PORT'] ?? 27117);
 
-const CREDS = 'ythril:ythril-test-pw';
+/**
+ * `user:password` for the test Mongo. Set `YTHRIL_TEST_MONGO_CREDS=` (empty) to run the DB-backed files against a
+ * developer's own mongod that has no users — together with the host/port overrides above. The default is the
+ * test stack's, so CI and `npm run test:up` need nothing set.
+ */
+const CREDS = process.env['YTHRIL_TEST_MONGO_CREDS'] ?? 'ythril:ythril-test-pw';
 
 /** Connection URI for a dedicated harness database. */
 export function testMongoUri(dbName) {
-  return `mongodb://${CREDS}@${TEST_MONGO_HOST}:${TEST_MONGO_PORT}/${dbName}` +
-    '?directConnection=true&authSource=admin';
+  return `mongodb://${CREDS ? `${CREDS}@` : ''}${TEST_MONGO_HOST}:${TEST_MONGO_PORT}/${dbName}` +
+    `?directConnection=true${CREDS ? '&authSource=admin' : ''}`;
 }
 
 /**

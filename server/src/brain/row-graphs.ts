@@ -31,8 +31,27 @@
  *
  * A later row that meets the deadline or the call's walk bound is not walked at all: the answer ends there
  * (`stop`) and `nextSkip` points at it, because it may well be complete given time.
+ *
+ * ## Rows are walked a window at a time, and each is still its own walk (Q-136)
+ *
+ * Handed the page's `seeds`, the walker walks up to `ROW_WALK_WINDOW` rows ahead together (`walk-in-step.ts`):
+ * one edge read and one record read per kind per hop for the whole window, each row keeping its own visited
+ * set, paths and bookkeeping. Every row's graph is byte-for-byte its per-seed graph, because each row's reads
+ * are answered with exactly what its own reads would have returned — and a row whose share of an edge read
+ * would fill its own `limit` (a hub over the row ceiling, a node whose edges all lead back) is answered by its
+ * own read, alone, for that read. See `walk-in-step.ts` for the rule and why a union cannot be trusted to
+ * reproduce a capped edge read.
+ *
+ * Everything that decides the ANSWER still happens here, one row at a time and in order, when the row is
+ * asked for: the call's walked-node total, the deadline check before a later row, and the judgement of the
+ * row. So a row walked ahead that the answer never reaches — past the byte budget, the call's walk bound or
+ * the deadline — changes nothing but the time spent; and a walk the deadline stopped is reported for the row
+ * it belongs to, `deadline` for the first and `stop` after it, exactly as a row walked alone reports it.
+ *
+ * Without `seeds` each row is walked alone, as it always was — the reference the window is tested against.
  */
-import { traverseFromSeeds, WalkDeadlineExceeded } from './recall-seed-traversal.js';
+import { traverseFromSeeds, WalkDeadlineExceeded, type SeedTraverse, type WalkReads } from './recall-seed-traversal.js';
+import { walkInStep, newRecordCache } from './walk-in-step.js';
 import { nestNeighbours, type GraphNode } from './recall-graph.js';
 import type { TraverseNarrowing } from './frontier-query.js';
 import { walkBounds } from './search-bounds.js';
@@ -68,6 +87,15 @@ export function whyRowIsShort(
 }
 
 /**
+ * How many rows are walked together. Sixteen is a page of a typical `topK` in one window, so most answers
+ * walk once; a larger window walks further past a byte budget that stops the answer early, for rows nobody
+ * receives.
+ */
+export const ROW_WALK_WINDOW = 16;
+
+type WalkSeed = { _id: string; spaceId: string };
+
+/**
  * A walker for one call. It keeps the call's running total, so every row it walks — complete or not — counts
  * against `MAX_CALL_WALK_NODES`.
  *
@@ -80,20 +108,70 @@ export function rowGraphWalker(opts: {
   narrowing?: TraverseNarrowing;
   /** Milliseconds left of the call's ONE deadline. */
   deadline: () => number;
-}): (seed: { _id: string; spaceId: string }, first: boolean) => Promise<RowGraph> {
+  /**
+   * Every row of the answer, in order — the rows a window may walk ahead of the one asked for. Absent, each
+   * row is walked alone. A seed not in this list is walked alone too.
+   */
+  seeds?: readonly WalkSeed[];
+  /** Rows per window; `ROW_WALK_WINDOW` unless a test says otherwise. */
+  window?: number;
+}): (seed: WalkSeed, first: boolean) => Promise<RowGraph> {
   const allowed = new Set(opts.memberIds);
   let walked = 0;
+  const window = Math.max(1, opts.window ?? ROW_WALK_WINDOW);
+  const seeds = opts.seeds ?? [];
+  /** A row by what it IS, not by which object carries it — a caller may hand the same row in a new object. */
+  const keyOf = (s: WalkSeed): string => `${s.spaceId}\u0000${s._id}`;
+  const position = new Map<string, number>();
+  seeds.forEach((s, i) => { if (!position.has(keyOf(s))) position.set(keyOf(s), i); });
+  /** Rows a window has started walking — each is walked ahead once; asked for again, it is walked alone. */
+  const started = new Set<string>();
+  const ahead = new Map<string, Promise<SeedTraverse>>();
+  const cache = newRecordCache();
+  const walkable = (s: WalkSeed): boolean => opts.maxDepth >= 1 && allowed.has(s.spaceId);
+
+  /** Walk the window starting at `from`, one step per space, each row's walk held until its row is asked for. */
+  const walkWindow = (from: number, rowNodes: number): void => {
+    const bySpace = new Map<string, WalkSeed[]>();
+    for (let i = from; i < Math.min(seeds.length, from + window); i++) {
+      const s = seeds[i]!;
+      if (started.has(keyOf(s)) || !walkable(s)) continue;
+      started.add(keyOf(s));
+      const group = bySpace.get(s.spaceId);
+      if (group) group.push(s); else bySpace.set(s.spaceId, [s]);
+    }
+    for (const group of bySpace.values()) {
+      const walks = walkInStep(group.map(s => (reads: WalkReads) =>
+        traverseFromSeeds(s.spaceId, [s._id], opts.maxDepth, rowNodes + 1, opts.narrowing, opts.deadline, reads)), cache);
+      group.forEach((s, i) => {
+        const w = walks[i]!;
+        // Held, not awaited: a row the answer never reaches must not surface its failure as an unhandled one.
+        w.catch(() => undefined);
+        ahead.set(keyOf(s), w);
+      });
+    }
+  };
+
+  /** This row's walk: from its window, or alone when it has none. */
+  const walkOf = (seed: WalkSeed, rowNodes: number): Promise<SeedTraverse> => {
+    const key = keyOf(seed);
+    const at = position.get(key);
+    if (at !== undefined && !started.has(key)) walkWindow(at, rowNodes);
+    const held = ahead.get(key);
+    if (held) { ahead.delete(key); return held; }
+    // One node MORE than the ceiling is the probe: exactly the ceiling is a complete row.
+    return traverseFromSeeds(seed.spaceId, [seed._id], opts.maxDepth, rowNodes + 1, opts.narrowing, opts.deadline);
+  };
+
   return async (seed, first) => {
     const bounds = walkBounds();
     if (!first && walked >= bounds.callNodes) return { stop: 'walk_budget' };
     if (!first && opts.deadline() <= 0) return { stop: 'deadline' };
     // Fail closed: a seed outside the caller's spaces is never walked. It cannot reach here through a search —
     // the seeds come from the same space list — so this is a guard, not a path.
-    if (opts.maxDepth < 1 || !allowed.has(seed.spaceId)) return { nodes: undefined };
+    if (!walkable(seed)) return { nodes: undefined };
     try {
-      // One node MORE than the ceiling is the probe: exactly the ceiling is a complete row.
-      const walk = await traverseFromSeeds(
-        seed.spaceId, [seed._id], opts.maxDepth, bounds.rowNodes + 1, opts.narrowing, opts.deadline);
+      const walk = await walkOf(seed, bounds.rowNodes);
       walked += walk.neighbours.length;
       const short = whyRowIsShort(walk, bounds.rowNodes);
       if (short) return { incomplete: short };

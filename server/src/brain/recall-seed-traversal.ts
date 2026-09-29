@@ -22,7 +22,14 @@
 
 import { col, asFilter } from '../db/mongo.js';
 import { NEVER_RETURNED_PROJECTION } from './read-projection.js';
-import { linkedRecordsAtFrontier, entitiesLinkedFromRecords, type LinkedRecord } from './link-frontier.js';
+import {
+  linkedRecordsAtFrontier, entitiesLinkedFromRecords, STORED_LINK_READS, type LinkedRecord, type LinkReads,
+} from './link-frontier.js';
+import { docsFromCollection } from './link-adjacency.js';
+import {
+  readRecordsById, edgeReadOrder, byStoredId, withoutRecordId,
+  type RankedEdge, type RecordsById, type TimeLeft,
+} from './walk-reads.js';
 import { frontierEdgeQuery, type TraverseNarrowing } from './frontier-query.js';
 import { edgeEndpointKind } from './entity-refs.js';
 import { endpointRecordsByKind } from './edge-endpoint-names.js';
@@ -128,6 +135,90 @@ export interface SeedTraverseNeighbor {
 }
 
 /**
+ * Every read one seed walk makes, as one object — so a window of walks can share them (Q-136).
+ *
+ * The walk below is written once. `perSeedReads` answers each read with its own query, which is the walk as it
+ * always ran; `walk-in-step.ts` answers the reads of several walks at once from one query per kind and hands
+ * each walk exactly what its own query would have returned. Every order-sensitive read comes back in the order
+ * `walk-reads.ts` states, from either, which is what makes the two the same walk rather than two walks that
+ * usually agree.
+ */
+export interface WalkReads extends LinkReads {
+  /** The edges touching `frontier`, narrowed, at most `limit`, in `edgeReadOrder`. */
+  edgesTouching(
+    spaceId: string, frontier: readonly string[], narrowing: TraverseNarrowing | undefined, limit: number,
+    timeLeft: TimeLeft,
+  ): Promise<EdgeDoc[]>;
+  /** Records of one collection by id, in `_id` order. */
+  recordsById: RecordsById;
+}
+
+/**
+ * One frontier's edges, as the database reads them — with each edge's record id, which is the one tie the
+ * index key cannot break (`edgeReadOrder`). Shared by both ways of walking: `perSeedReads` asks it for one
+ * seed's frontier, `walk-in-step.ts` for a window's.
+ */
+export async function readFrontierEdges(
+  spaceId: string, frontier: readonly string[], narrowing: TraverseNarrowing | undefined,
+  limit: number | undefined, maxTimeMS: number | undefined,
+): Promise<RankedEdge[]> {
+  // An EDGE is a searchable record with a vector of its own, and this query fetched it whole: the edge
+  // document is returned verbatim as `_graph[].edge`, so a `recall(traverse: n)` shipped a full float
+  // array per hop, on both doors. Nothing consumes it — `nestNeighbours` only nests the document — so
+  // dropping it is pure subtraction.
+  //
+  // **This comment used to claim it was "matching the entity query below and every other read path in
+  // the codebase". That was false, and the claim is why nobody checked.** Five readers had no projection
+  // at all — the three list functions and the two entity lookups — and a caller measured 11.19 MB from
+  // `GET /entities?limit=500` where `/query` answered 0.145 MB. All of them now share
+  // `NEVER_RETURNED_PROJECTION`, so the sentence is true; do not restate universality here again, because
+  // the constant is what makes it true and a comment cannot.
+  //
+  // NARROWED, since 3.5: `edgeLabels` and `direction` reach here now. They did not before, so recall's
+  // expansion followed every edge both ways while the standalone `traverse` tool — building the same
+  // query twenty lines away — applied both. One rule, two implementations, and this was the weaker one.
+  //
+  // The `spaceId` field is in the predicate because `frontierEdgeQuery` is shared with the standalone
+  // path, which queries across member spaces by name and needs it. Here the collection name already scopes
+  // it, so the extra clause is redundant rather than wrong — see the note in the walk on why filtering the
+  // ENTITY read on a redundant spaceId was actively harmful.
+  const cursor = col<EdgeDoc>(spaceCollection(spaceId, 'edges'))
+    .find(asFilter<EdgeDoc>(frontierEdgeQuery(spaceId, [...frontier], narrowing)))
+    .project(NEVER_RETURNED_PROJECTION)
+    .showRecordId(true);
+  // Bounded for the same reason as the standalone walk's, and with the same `+ 1` truncation probe (W-11):
+  // unbounded, one hub read its whole edge set per hop, and the node cap counts hydrated rows rather than
+  // documents. The rule belongs on BOTH paths — these two have drifted before, twenty lines apart, which is
+  // why `frontierEdgeQuery` exists at all. The CALLER passes the probe; a shared read passes its window's sum.
+  if (limit !== undefined) cursor.limit(limit);
+  if (maxTimeMS !== undefined) cursor.maxTimeMS(maxTimeMS);
+  return await cursor.toArray() as RankedEdge[];
+}
+
+/**
+ * Each read answered by its own query: one seed's walk, alone. The reference the shared walk is measured
+ * against, and what every caller that walks one row gets.
+ *
+ * Its order-sensitive reads are sorted into the stated order. On the indexes a space is built with that sort
+ * changes nothing — it is what makes the per-seed and the shared walk agree whatever the planner does.
+ */
+export const perSeedReads: WalkReads = {
+  async edgesTouching(spaceId, frontier, narrowing, limit, timeLeft) {
+    const edges = await readFrontierEdges(spaceId, frontier, narrowing, limit, timeLeft());
+    return edges.sort(edgeReadOrder(new Set(frontier), narrowing?.direction ?? 'both')).map(withoutRecordId);
+  },
+  recordsById: async <T extends { _id: string }>(
+    collection: string, ids: readonly string[], extra?: Record<string, unknown>, timeLeft?: TimeLeft,
+  ) => (await readRecordsById<T>(collection, ids, extra, timeLeft)).sort(byStoredId),
+  linksPointingAt: STORED_LINK_READS.linksPointingAt,
+  linksStartingFrom: STORED_LINK_READS.linksStartingFrom,
+  docsFromCollection: async <T extends { _id: string }>(
+    spaceId: string, collection: Parameters<typeof docsFromCollection>[1], ids: readonly string[],
+    projection?: Record<string, 1>, extra?: Record<string, unknown>,
+  ) => (await docsFromCollection<T>(spaceId, collection, ids, projection, extra)).sort(byStoredId),
+};
+
+/**
  * Multi-source, depth-limited BFS over the edge graph of a SINGLE space, seeded
  * from a set of recall-match IDs. Follows edges in BOTH directions, records the
  * shortest path to each neighbour (BFS visit order guarantees shortest-first),
@@ -150,6 +241,8 @@ export async function traverseFromSeeds(
    * `WalkDeadlineExceeded` between hops once it is spent. Absent means unbounded, as the standalone callers were.
    */
   deadline?: () => number,
+  /** Where every read goes — see `WalkReads`. Absent, each is its own query. */
+  reads: WalkReads = perSeedReads,
 ): Promise<SeedTraverse> {
   if (seedIds.length === 0 || maxDepth < 1 || limit < 1) return { neighbours: [], scanCapped: false };
   /** The deadline as a query's own `maxTimeMS`, or none. Throws once nothing is left. */
@@ -159,11 +252,7 @@ export async function traverseFromSeeds(
     if (ms <= 0) throw new WalkDeadlineExceeded();
     return Math.max(1, Math.floor(ms));
   };
-  /** Apply what is left of the deadline to one find cursor. */
-  const bounded = <C extends { maxTimeMS(ms: number): C }>(cursor: C): C => {
-    const ms = timeLeft();
-    return ms === undefined ? cursor : cursor.maxTimeMS(ms);
-  };
+  const entities = spaceCollection(spaceId, 'entities');
 
   // Set by either link scan when it stopped reading rather than running out of matches. Carried out rather
   // than returned early: unlike the standalone traversal this one has a pre-pass whose results are still
@@ -218,14 +307,12 @@ export async function traverseFromSeeds(
   // Once, on the seeds. Everything reached afterwards is an entity or a leaf.
   if (narrowing?.includeChrono || narrowing?.includeMemories || narrowing?.includeFiles) {
     const { records: outbound, scanCapped: seedScanCapped } = await entitiesLinkedFromRecords(
-      [spaceId], frontier, narrowing, narrowing.edgeLabels, limit);
+      [spaceId], frontier, narrowing, narrowing.edgeLabels, limit, reads);
     if (seedScanCapped) capped = true;
     const wanted = outbound.filter(l => !visited.has(l.to));
     if (wanted.length > 0) {
-      const linkedEntities = await bounded(col<EntityDoc>(spaceCollection(spaceId, 'entities'))
-        .find(asFilter<EntityDoc>({ _id: { $in: [...new Set(wanted.map(l => l.to))] } }))
-        .project(NEVER_RETURNED_PROJECTION))
-        .toArray() as EntityDoc[];
+      const linkedEntities = await reads.recordsById<EntityDoc>(
+        entities, [...new Set(wanted.map(l => l.to))], undefined, timeLeft);
       const byId = new Map(linkedEntities.map(e => [e._id, e]));
       for (const link of wanted) {
         const entity = byId.get(link.to);
@@ -252,35 +339,8 @@ export async function traverseFromSeeds(
 
   while (frontier.length > 0 && depth < maxDepth) {
     const hopBudget = Math.max(0, limit - results.length);
-    const edges = await bounded(col<EdgeDoc>(spaceCollection(spaceId, 'edges'))
-      // An EDGE is a searchable record with a vector of its own, and this query fetched it whole: the edge
-      // document is returned verbatim as `_graph[].edge`, so a `recall(traverse: n)` shipped a full float
-      // array per hop, on both doors. Nothing consumes it — `nestNeighbours` only nests the document — so
-      // dropping it is pure subtraction.
-      //
-      // **This comment used to claim it was "matching the entity query below and every other read path in
-      // the codebase". That was false, and the claim is why nobody checked.** Five readers had no projection
-      // at all — the three list functions and the two entity lookups — and a caller measured 11.19 MB from
-      // `GET /entities?limit=500` where `/query` answered 0.145 MB. All of them now share
-      // `NEVER_RETURNED_PROJECTION`, so the sentence is true; do not restate universality here again, because
-      // the constant is what makes it true and a comment cannot.
-      //
-      // NARROWED, since 3.5: `edgeLabels` and `direction` reach here now. They did not before, so recall's
-      // expansion followed every edge both ways while the standalone `traverse` tool — building the same
-      // query twenty lines away — applied both. One rule, two implementations, and this was the weaker one.
-      //
-      // The `spaceId` field is in the predicate because `frontierEdgeQuery` is shared with the standalone
-      // path, which queries across member spaces by name and needs it. Here the collection name already scopes
-      // it, so the extra clause is redundant rather than wrong — see the note below on why filtering the
-      // ENTITY read on a redundant spaceId was actively harmful.
-      .find(asFilter<EdgeDoc>(frontierEdgeQuery(spaceId, frontier, narrowing)))
-      .project(NEVER_RETURNED_PROJECTION)
-      // Bounded for the same reason as the standalone walk's, and with the same `+ 1` truncation probe (W-11):
-      // unbounded, one hub read its whole edge set per hop, and the node cap counts hydrated rows rather than
-      // documents. The rule belongs on BOTH paths — these two have drifted before, twenty lines apart, which is
-      // why `frontierEdgeQuery` exists at all.
-      .limit(hopBudget + 1))
-      .toArray() as EdgeDoc[];
+    // One seed's edges, bounded with the `+ 1` truncation probe (W-11) — see `readFrontierEdges`.
+    const edges = await reads.edgesTouching(spaceId, frontier, narrowing, hopBudget + 1, timeLeft);
     if (edges.length > hopBudget) {
       capped = true;
       edges.length = hopBudget;
@@ -386,7 +446,7 @@ export async function traverseFromSeeds(
     // with all three flags on makes up to 3N of these reads.
     const { records: linkedHere, scanCapped: hopScanCapped } = await linkedRecordsAtFrontier(
       [spaceId], frontier, visited, narrowing ?? {}, narrowing?.edgeLabels,
-      Math.max(0, limit - results.length));
+      Math.max(0, limit - results.length), reads);
     if (hopScanCapped) capped = true;
 
     // `deferred` counts: a fact seed has no edges and links nothing backwards, so both counters above are
@@ -402,12 +462,9 @@ export async function traverseFromSeeds(
     // EDGE was found but its neighbour ENTITY was silently dropped, so a traversal returned
     // half a graph with no error. Filtering on a redundant, denormalised field is what made
     // a space rename hide data in the first place.
-    const entities = await bounded(col<EntityDoc>(spaceCollection(spaceId, 'entities'))
-      .find(asFilter<EntityDoc>({ _id: { $in: newNeighborIds } }))
-      .project(NEVER_RETURNED_PROJECTION))
-      .toArray() as EntityDoc[];
+    const reachedEntities = await reads.recordsById<EntityDoc>(entities, newNeighborIds, undefined, timeLeft);
     const entityMap = new Map<string, EntityDoc>();
-    for (const e of entities) entityMap.set(e._id, e);
+    for (const e of reachedEntities) entityMap.set(e._id, e);
 
     /*
      * AND THE NEIGHBOURS THAT ARE NOT ENTITIES — the same resolver the standalone walk uses.
@@ -418,7 +475,7 @@ export async function traverseFromSeeds(
      * comment made the drop look intentional, which is why it survived.
      */
     const nonEntityNeighbors = await endpointRecordsByKind(
-      [spaceId], newNeighborIds.map(id => ({ id, kind: neighborKinds.get(id) ?? 'entity' })));
+      [spaceId], newNeighborIds.map(id => ({ id, kind: neighborKinds.get(id) ?? 'entity' })), reads.recordsById);
 
     const nextFrontier: string[] = [];
     for (const neighborId of newNeighborIds) {
@@ -454,10 +511,10 @@ export async function traverseFromSeeds(
       selfLoopsAtSeed.delete(seedId);
       const kind = edgeEndpointKind(loops[0].fromKind);
       const entity = kind === 'entity'
-        ? (await bounded(col<EntityDoc>(spaceCollection(spaceId, 'entities'))
-            .find(asFilter<EntityDoc>({ _id: seedId })).project(NEVER_RETURNED_PROJECTION)).toArray() as EntityDoc[])[0]
+        ? (await reads.recordsById<EntityDoc>(entities, [seedId], undefined, timeLeft))[0]
         : undefined;
-      const other = entity ? undefined : (await endpointRecordsByKind([spaceId], [{ id: seedId, kind }])).get(seedId);
+      const other = entity ? undefined
+        : (await endpointRecordsByKind([spaceId], [{ id: seedId, kind }], reads.recordsById)).get(seedId);
       // The edge outlived the record, or the seed lives somewhere this walk cannot read. Same `continue` and
       // the same meaning as the neighbour loop above.
       if (!entity && !other) continue;

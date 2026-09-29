@@ -31,6 +31,7 @@ import type { RefKind } from '../config/types-knowledge.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { recordDisplayName, recordDisplayType } from './link-frontier.js';
 import { NEVER_RETURNED_PROJECTION } from './read-projection.js';
+import { readRecordsById, type RecordsById } from './walk-reads.js';
 import type { ChronoEntry, FactDoc, FileMetaDoc } from '../config/types.js';
 
 /**
@@ -268,6 +269,11 @@ export interface EndpointRecord {
 export async function endpointRecordsByKind(
   memberIds: readonly string[],
   wanted: ReadonlyArray<{ id: string; kind: RefKind }>,
+  /**
+   * Where the records come from. Replaceable so recall's row walker can answer a window of rows from one read
+   * (Q-136, `walk-in-step.ts`); the default is the plain query, so every other caller reads as it always did.
+   */
+  byId: RecordsById = readRecordsById,
 ): Promise<Map<string, EndpointRecord>> {
   const out = new Map<string, EndpointRecord>();
   const byKind = new Map<'fact' | 'chrono' | 'file', Set<string>>();
@@ -280,10 +286,7 @@ export async function endpointRecordsByKind(
 
   for (const [kind, ids] of byKind) {
     for (const mid of memberIds) {
-      const docs = await col<Record<string, unknown>>(spaceCollection(mid, collectionForRefKind(kind)))
-        .find(asFilter<Record<string, unknown>>({ _id: { $in: [...ids] }, spaceId: mid }),
-          { projection: NEVER_RETURNED_PROJECTION })
-        .toArray();
+      const docs = await byId<{ _id: string }>(spaceCollection(mid, collectionForRefKind(kind)), [...ids], { spaceId: mid });
       for (const d of docs) out.set(String(d['_id']), { doc: d as unknown as EndpointDoc, kind });
     }
   }
