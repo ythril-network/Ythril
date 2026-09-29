@@ -24,6 +24,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     check was complete, and pages its violations (`Q-129`).
   - **The notify event list** pages and says when it is cut (`Q-130`).
   - **Resolving entities by id** in the web UI asks for every id instead of dropping those past 100 (`Q-131`).
+- **A peer keeps one token, not one per join (`Q-163`).** Every network joined with the same instance minted it a
+  new token and left the previous one valid, though the peer keeps only the newest and could never present the
+  others: an instance showed eight `peer:` tokens for one peer, seven of them last used minutes after they were made.
+  A completed handshake now revokes the tokens it replaces, on both sides and for club pairings too, and an instance
+  drops the unused leftovers when it starts. A token still in a handshake is left alone, since two joins can overlap.
+
 - **A slow or failing reranker no longer holds every search (`Q-157`).** Measured on a 5.6.0 instance: every
   recall took 20 s — the reranker's time limit — and was answered in fused order anyway, while the same recall
   without reranking took 90 ms. A reranker pass that fails, runs out its own time limit, or takes more than half of
