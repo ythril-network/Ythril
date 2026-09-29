@@ -8,7 +8,7 @@
  */
 
 /**
- * The store root that HELD spilled read results before Q-92 (5.5.3); spills now live in `read-spill-store.ts`,
+ * The store root that HELD spilled read results before Q-92 (5.6.0); spills now live in `read-spill-store.ts`,
  * outside every space. Still hidden from browsing (`DERIVED_TREES`) and still declined by the embed queue,
  * because older peers keep writing spills here until they upgrade and the TTL sweep removes them every cycle.
  * END CONDITION: at the next major, delete that hiding, the embed-queue decline, the deprecated `path` and its

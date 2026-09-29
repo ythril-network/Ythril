@@ -330,7 +330,7 @@ export async function resolvePendingSpaceAct(caller: Caller, id: string, input: 
   if (net.spaces.includes(localId)) {
     /*
      * The operator's repair (Q-133): the network's space IS one this instance already carries, under a name the
-     * network does not use — a member that joined before 5.5.3 got a renamed space's current name with no alias, and
+     * network does not use — a member that joined before 5.6.0 got a renamed space's current name with no alias, and
      * the network then proposed its old name as a new space. Accepting it ONTO the carried space records the alias
      * instead of creating a second space. Only an explicit `mapTo`, only onto a space with no network id of its own,
      * and with the same right the accept needs; anything else is still "already carried".

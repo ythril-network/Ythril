@@ -3,7 +3,7 @@
  *
  * ## Why (Q-92, design point 8)
  *
- * Before 5.5.3 a recall's remainder and an over-cap traversal were written as root `_tmp/results-<uuid>.json` and
+ * Before 5.6.0 a recall's remainder and an over-cap traversal were written as root `_tmp/results-<uuid>.json` and
  * `_tmp/graph-<uuid>.json`, with a `<space>_files` record. They replicated, and a pulled copy never expired
  * (`_expireAt` is local-only). Sync now carries the shape in neither direction, so what is left is local: the
  * sweep deletes it.

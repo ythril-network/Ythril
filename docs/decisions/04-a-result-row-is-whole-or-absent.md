@@ -5,7 +5,7 @@
 
 ## Context
 
-A traversing `recall` returns each match with the graph around it, nested under `_graph`. Until 5.5.3 the matches
+A traversing `recall` returns each match with the graph around it, nested under `_graph`. Until 5.6.0 the matches
 were walked together and the merged neighbourhood was cut to an inline node cap. A match whose neighbourhood was
 larger came back with **part** of its graph — whichever nodes the cut happened to keep — and the complete graph was
 written to a spill behind `graphComplete`, on every such call, whether or not the caller had asked for it.

@@ -575,9 +575,9 @@ of the joining token, so everything they announce waits here.
 
 ### A space that shows up twice
 
-Before 5.5.3 a space the publisher had renamed reached a new member under the publisher's local name AND under the network's name, so the member held it twice (for example `y-twin` next to `y-project-template`). Upgrading stops it happening again. For a member that already has the duplicate:
+Before 5.6.0 a space the publisher had renamed reached a new member under the publisher's local name AND under the network's name, so the member held it twice (for example `y-twin` next to `y-project-template`). Upgrading stops it happening again. For a member that already has the duplicate:
 
-- **On a pub/sub network or a tree, it heals by itself** once both sides run 5.5.3: the publisher tells the member which name it means, and the member's copy syncs under the network's name again. Each repair is in the audit log as `network.space_alias.heal`. The now-idle duplicate stays until you remove it: take it out of the network (**not** Dismiss, which would stop the real one being repaired), then delete the space.
+- **On a pub/sub network or a tree, it heals by itself** once both sides run 5.6.0: the publisher tells the member which name it means, and the member's copy syncs under the network's name again. Each repair is in the audit log as `network.space_alias.heal`. The now-idle duplicate stays until you remove it: take it out of the network (**not** Dismiss, which would stop the real one being repaired), then delete the space.
 - **On a club, closed or democratic network**, press **Accept** on the waiting space and type the name of the space you already carry: that records the network's name for it instead of creating a second one.
 
 Open votes name a space as this instance calls it, so a round about a renamed space shows your name, not the proposer's.

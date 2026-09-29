@@ -1,5 +1,5 @@
 /**
- * Remove the read spills versions before 5.5.3 wrote INTO a space (Q-92).
+ * Remove the read spills versions before 5.6.0 wrote INTO a space (Q-92).
  *
  * A recall's remainder and an over-cap traversal used to be a root `_tmp/results-<uuid>.json` or
  * `_tmp/graph-<uuid>.json` with a `<space>_files` record. They replicated, and a pulled copy never expired

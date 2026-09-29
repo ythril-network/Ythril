@@ -455,7 +455,7 @@ token, outside every space — and reported as `remainder`:
 
 #### Reading a spill: `GET /api/brain/spills/:id` and MCP `read_spill`
 
-An answer hands you a spill as `remainder` above, only when you sent `remainderDump: true`. Before 5.5.3 a
+An answer hands you a spill as `remainder` above, only when you sent `remainderDump: true`. Before 5.6.0 a
 traversal past its inline node cap also spilled its whole graph behind `graphComplete`; no answer does that now
 ([a match comes with its whole graph or not at all](04h-graph-augmented-recall.md)), and a `graphComplete.spillId`
 you still hold is read the same way until it expires. Either is read on either door, with the same parameters:
@@ -485,7 +485,7 @@ the first item of a window is returned even when it alone passes the budget.
 
 - **A results spill's items are the matches**, each whole, with its complete `_graph`. A match that could not be
   read whole is not in it; the spill's `request` names it in `incompleteRows` and counts it in `incompleteCount`.
-- **An older graph spill** (`graphComplete.spillId`, from an answer made before 5.5.3) is still read the same way
+- **An older graph spill** (`graphComplete.spillId`, from an answer made before 5.6.0) is still read the same way
   until it expires; its items are the traversed nodes, flat.
 
 **Who can read it.** Only the token that ran the search, and only while that token still holds knowledge read on
@@ -524,7 +524,7 @@ one, and adds a top-level `spillRefused` with one of these codes:
 The caps are operator settings — see [Environment Variables](02-hosting.md#environment-variables).
 
 **`path` is deprecated.** `remainder.path` is still sent, as `_tmp/results-<spillId>.json` (and an older
-`graphComplete.path` was `_tmp/graph-<spillId>.json`), because before 5.5.3 a spill was a file in the
+`graphComplete.path` was `_tmp/graph-<spillId>.json`), because before 5.6.0 a spill was a file in the
 space and an MCP agent's only road to it was `read_file`. No such file exists now: `read_file` and
 [`GET /api/files/:spaceId?path=…`](05-files-api.md) resolve that exact path against the spill store, under the
 same rule as above (the issuing token only, the same `404` and `410`), and return the spill's first window under
