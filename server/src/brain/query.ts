@@ -108,6 +108,8 @@ export const TRAVERSE_BODY_FIELDS: ReadonlySet<string> = new Set([
   'includeChrono', 'includeMemories', 'includeFiles', 'includeEdges',
   // `F-32`: the bodies of what the walk reached, projected — the same parameters the MCP tool takes.
   'projection', 'includeDiagnostics',
+  // `Q-132`: the answer paged under the byte budget, as every result path is.
+  'skip', 'maxChars', 'maxBytes', 'maxTokens', 'remainderDump',
 ]);
 
 /*

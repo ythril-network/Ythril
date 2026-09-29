@@ -110,6 +110,29 @@ export function joinedSyncSchedule(stated: string | undefined, offered: unknown)
   return DEFAULT_JOIN_SYNC_SCHEDULE;
 }
 
+/**
+ * Give the join default to every joined network that never stated a schedule — the ones joined before it existed.
+ *
+ * `joinedSyncSchedule` only reached networks joined after it shipped, so an instance that joined before carries no
+ * schedule, syncs only when its peer starts a cycle, and nothing says so. `''` is manual CHOSEN and is left alone;
+ * `undefined` is never stated. A network this instance created is left alone too: the default is a joiner's rule.
+ * An absent `origin` predates the field and is treated as joined, because a creator states a schedule at creation.
+ *
+ * Mutates in memory and returns the networks it scheduled; the caller persists and logs them. Settles: a second
+ * call finds nothing.
+ */
+export function defaultUnstatedJoinedSchedules(
+  config: { networks?: { id: string; origin?: 'created' | 'joined'; syncSchedule?: string }[] },
+): string[] {
+  const scheduled: string[] = [];
+  for (const net of config.networks ?? []) {
+    if (net.origin === 'created' || net.syncSchedule !== undefined) continue;
+    net.syncSchedule = DEFAULT_JOIN_SYNC_SCHEDULE;
+    scheduled.push(net.id);
+  }
+  return scheduled;
+}
+
 /** One network's stored schedule that cannot be translated and cannot be run. */
 export interface UnrunnableSchedule {
   networkId: string;

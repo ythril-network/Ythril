@@ -77,7 +77,8 @@ const RETRIEVAL_GUIDE = `Three retrieval modes exist and they are easy to confus
    that phrase, not things tagged "confidential"; to restrict, pass tags/filter
    (mode 3). Ranking may be refined further by a cross-encoder when the operator
    has configured one; results carry score (vector), and lexicalScore /
-   fusedScore / rerankScore when those stages ran. minScore always filters on
+   fusedScore (with vectorRank and lexicalRank, the two ranks it came from) /
+   rerankScore when those stages ran. minScore always filters on
    the VECTOR score, never on the fused or rerank score.
 
 3. **recall with tags/types/filter** — semantic ranking WITHIN a structured

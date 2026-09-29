@@ -236,6 +236,8 @@ guarded at the rung it advertises rather than at "administers the whole space".
 {
   "spaceId": "eng-kb",
   "meta": { "validationMode": "strict", "typeSchemas": { "entity": { "service": {}, "person": {} } }, "..." : "..." },
+  "checked": { "entities": { "checked": 10000, "total": 14200 }, "edges": { "checked": 830, "total": 830 }, "...": "..." },
+  "complete": false,
   "totalViolations": 3,
   "violations": [
     {
@@ -249,7 +251,12 @@ guarded at the rung it advertises rather than at "administers the whole space".
 }
 ```
 
-Scans up to 10,000 documents per collection per member space. Response capped at 500 violations.
+**It says how much it checked** (`Q-129`). It scans up to 10,000 documents per collection per member space, and
+`checked` reports, per collection, how many were checked against how many exist; `complete` is `true` only when
+every document was. A clean dry-run with `complete: false` is a clean dry-run of the first 10,000 — not of the
+space. **The violation list is paged**: `limit` (default and ceiling 500) and `skip` in the body or the query string,
+and the answer carries `count`, `total`, `limit`, `skip`, `truncated` and `nextSkip` exactly when more violations
+remain, as every paged list does. `totalViolations` stays, and equals `total`.
 
 ---
 

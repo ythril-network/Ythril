@@ -46,11 +46,18 @@ const read = p => stripComments(readFileSync(p, 'utf8'));
  * path; a path through neither returns what it has.
  */
 const budgetedPaths = src => (src.match(/budgetedEnvelope\(\{|traversedAnswer\(\{/g) ?? []).length;
+// `pageTraversal` (Q-132) bounds the standalone walk through the same budget module. It is counted as BOUNDED but not
+// among the envelopes whose paging is threaded through by hand: it resolves `skip` and `remainderDump` from the raw
+// request itself, so it cannot drop them the way a hand-passed `paging.skip` can.
+const boundedPaths = src => budgetedPaths(src) + (src.match(/pageTraversal\(/g) ?? []).length;
 
 function expectedSites(name, src) {
   if (name === 'MCP') return 4;
   return 2 * ['/recall', '/similar']
-    .filter(p => { const b = routeBody(src, p); return b && !delegatesCleanly(b, `POST ${p}`); }).length;
+    .filter(p => { const b = routeBody(src, p); return b && !delegatesCleanly(b, `POST ${p}`); }).length
+    // `Q-132`: the traverse route pages its walk and keeps a remainder only on `remainderDump` — ONE branch, since a
+    // walk has no plain-versus-traversing split. (Its MCP twin, `graph_traverse`, lives in edge.ts, not search.ts.)
+    + (/spillResultSet\(\{/.test(routeBody(src, '/spaces/:spaceId/traverse') ?? '') ? 1 : 0);
 }
 
 describe('vectors never reach the file', () => {
@@ -178,7 +185,7 @@ describe('the remainder is written out, with a TTL', () => {
     // whatever the number is spelled as — so that is what is refused.
     for (const [name, src] of [['REST', rest], ['MCP', mcp]]) {
       const floor = expectedSites(name, src);
-      assert.ok(budgetedPaths(src) >= floor,
+      assert.ok(boundedPaths(src) >= floor,
         `${name} must bound every result path through the shared budget rather than returning what it has `
         + `— ${floor} path(s) expected`);
       // A CONSTANT second argument is the tell: `slice(0, SPILL_INLINE_RESULTS)` and `slice(0, 3)` both cut

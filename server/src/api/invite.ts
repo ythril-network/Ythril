@@ -49,7 +49,7 @@ import { networkInviteRefusal, visibleNetworks } from '../auth/network-rights.js
 import { isInstanceAdmin } from '../auth/instance-admin.js';
 import { authRateLimit, globalRateLimit } from '../rate-limit/middleware.js';
 import { getConfig, saveConfig, getSecrets, saveSecrets } from '../config/loader.js';
-import { createToken, setTokenExpiry } from '../auth/tokens.js';
+import { createToken, adoptPeerToken } from '../auth/tokens.js';
 import { peerTokenSpaces } from '../auth/peer-token-scope.js';
 import { claimedPeerIsProven } from '../auth/peer-identity.js';
 import { announcedSpaces, widenPeerTokensOf } from '../networks/network-spaces.js';
@@ -588,8 +588,9 @@ inviteRouter.post('/finalize', authRateLimit, async (req, res) => {
   // handshake with the same peer whose apply landed before this finalize, and which may be the one the joiner keeps.
   widenPeerTokensOf(cfg, [instanceId], net.spaces);
   saveConfig(cfg);
-  // The membership is real now, so the handshake's token lives with it rather than with the handshake.
-  setTokenExpiry(session.tokenForPeerId, null);
+  // The membership is real now, so the handshake's token lives with it rather than with the handshake — and it
+  // replaces every token an earlier handshake gave the same peer, which it can no longer present (Q-163).
+  await adoptPeerToken(session.tokenForPeerId);
 
   // Discard the session — private key is no longer needed
   dropSession(sessionKey);

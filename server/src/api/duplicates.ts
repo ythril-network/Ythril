@@ -21,6 +21,8 @@ import { computeMergePlan, applyResolutions, executeMerge } from '../brain/merge
 import { nliConfigured } from '../brain/nli-client.js';
 import type { DupeCandidateDoc, ContradictionCandidateDoc } from '../config/types.js';
 import { spaceCollection } from '../db/space-collection.js';
+import { pageMemberList } from '../brain/list-page.js';
+import { defaultBudgetChars } from '../brain/result-budget.js';
 
 /** Find a candidate across the caller's accessible spaces. */
 async function findCandidate(id: string, rights?: TokenRights): Promise<{ doc: DupeCandidateDoc; spaceId: string } | null> {
@@ -211,26 +213,32 @@ duplicatesRouter.get('/', globalRateLimit, requireAuth, async (req, res) => {
     let spaces = accessibleSpaces(req);
     if (spaceFilter) spaces = spaces.filter(id => id === spaceFilter);
 
-    const results: DupeCandidateDoc[] = [];
-    /** Per space, the contradiction signal for each pair — see `contradictionSignalsFor`. */
+    // Served by the {status, score, detectedAt} index (de-prefixed in P10): `status` is the leading equality field
+    // and the sort by (score desc, detectedAt desc) follows it. The redundant `spaceId` equality is a harmless
+    // residual (the collection is already per-space).
+    const q = (spaceId: string) => (status === 'all' ? { spaceId } : { spaceId, status });
+    const coll = (spaceId: string) => col<DupeCandidateDoc>(spaceCollection(spaceId, 'dupeCandidates'));
+    // Q-127: a page, never a list stopped at 500 with nothing saying so. Whole rows, `total`, `truncated`,
+    // `nextSkip`, through the one list rule; a many-space merge is bounded by its ceiling, refused past it.
+    const page = await pageMemberList<DupeCandidateDoc>({
+      members: spaces,
+      readMember: async (spaceId, limit, skip) => await coll(spaceId).find(asFilter<DupeCandidateDoc>(q(spaceId)))
+        .sort({ score: -1, detectedAt: -1 }).skip(skip).limit(limit).toArray() as DupeCandidateDoc[],
+      countMember: spaceId => coll(spaceId).countDocuments(asFilter<DupeCandidateDoc>(q(spaceId))),
+      compare: (a, b) => (b.score - a.score) || b.detectedAt.localeCompare(a.detectedAt) || a._id.localeCompare(b._id),
+      req: req.query as Record<string, unknown>,
+      page: { defaultLimit: 100, maxLimit: 500, budgetChars: defaultBudgetChars('rest') },
+      ceiling: 5_000,
+    });
+    if (!page.ok) { res.status(400).json({ error: page.error }); return; }
+    /** Per space, the contradiction signal for each pair on THIS page — see `contradictionSignalsFor`. */
     const signals = new Map<string, Map<string, ContradictionSignal>>();
-    for (const spaceId of spaces) {
-      // Served by the {status, score, detectedAt} index (de-prefixed in P10): `status` is the
-      // leading equality field and the sort by (score desc, detectedAt desc) follows it. The
-      // redundant `spaceId` equality is a harmless residual (the collection is already per-space).
-      const q = status === 'all' ? { spaceId } : { spaceId, status };
-      const docs = await col<DupeCandidateDoc>(spaceCollection(spaceId, 'dupeCandidates'))
-        .find(asFilter<DupeCandidateDoc>(q))
-        .sort({ score: -1, detectedAt: -1 })
-        .limit(500)
-        .toArray() as DupeCandidateDoc[];
-      results.push(...docs);
-      signals.set(spaceId, await contradictionSignalsFor(spaceId, docs));
+    for (const spaceId of new Set(page.rows.map(r => r.spaceId))) {
+      signals.set(spaceId, await contradictionSignalsFor(spaceId, page.rows.filter(r => r.spaceId === spaceId)));
     }
-    results.sort((a, b) => (b.score - a.score) || b.detectedAt.localeCompare(a.detectedAt));
-    // Cap the merged cross-space result so a many-space token can't materialise 500×spaces rows.
     res.json({
-      duplicates: results.slice(0, 500).map(c => toRecord(c, signals.get(c.spaceId)?.get(pairKey(c)))),
+      duplicates: page.rows.map(c => toRecord(c, signals.get(c.spaceId)?.get(pairKey(c)))),
+      ...page.fields,
     });
   } catch (err) {
     log.error(`GET /api/duplicates: ${err}`);

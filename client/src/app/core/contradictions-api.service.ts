@@ -1,6 +1,8 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
+import { map } from 'rxjs/operators';
+import { readEveryPage } from './read-every-page';
 import type { ContradictionRecord } from './api.types';
 
 /**
@@ -39,9 +41,13 @@ export class ContradictionsApi {
    * view cannot tell them apart on its own — see the note on the server route.
    */
   listContradictions(status: 'open' | 'dismissed' | 'resolved' | 'all' = 'open', space?: string): Observable<{ contradictions: ContradictionRecord[]; nliConfigured: boolean }> {
-    const params = new URLSearchParams({ status });
-    if (space) params.set('space', space);
-    return this.http.get<{ contradictions: ContradictionRecord[]; nliConfigured: boolean }>(`/api/contradictions?${params.toString()}`);
+    // The WHOLE list, every page (Q-127): the review tab filters and sorts it in the browser.
+    return readEveryPage(skip => {
+      const params = new URLSearchParams({ status });
+      if (space) params.set('space', space);
+      if (skip) params.set('skip', String(skip));
+      return this.http.get<{ contradictions: ContradictionRecord[]; nliConfigured: boolean; nextSkip?: number }>(`/api/contradictions?${params.toString()}`);
+    }).pipe(map(pages => ({ contradictions: pages.flatMap(p => p.contradictions), nliConfigured: pages[0]!.nliConfigured })));
   }
 
   dismissContradiction(id: string): Observable<{ status: string }> {

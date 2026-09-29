@@ -204,8 +204,9 @@ export class FilesApi {
    * One request, because the three are only meaningful together and the partitioning is a server-side fact.
    * `limit`/`skip` page the chunks — a 500-page document has thousands, and this is a diagnostic view.
    */
-  getFileExtract(spaceId: string, path: string, limit = 100, skip = 0): Observable<FileExtract> {
-    const params = new HttpParams().set('path', path).set('limit', limit).set('skip', skip);
+  getFileExtract(spaceId: string, path: string, limit = 100, skip = 0, markdownSkip = 0): Observable<FileExtract> {
+    let params = new HttpParams().set('path', path).set('limit', limit).set('skip', skip);
+    if (markdownSkip) params = params.set('markdownSkip', markdownSkip);
     return this.http.get<FileExtract>(`/api/brain/spaces/${spaceId}/files/extract`, { params });
   }
 

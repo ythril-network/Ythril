@@ -66,7 +66,7 @@ const seed = () => ({
   _id: 'seed-1', spaceId: 'general', type: 'entity', name: 'API', entityType: 'service',
   tags: ['infra'], description: 'the public API', properties: {},
   createdAt: 'c', updatedAt: 'u', score: 0.81,
-  lexicalScore: 0.44, fusedScore: 0.72, rerankScore: 0.91,
+  lexicalScore: 0.44, fusedScore: 0.72, vectorRank: 2, lexicalRank: 1, rerankScore: 0.91,
   seq: 88, embeddingModel: 'm', matchedText: 'API service infra',
 });
 
@@ -156,7 +156,7 @@ describe('the default withholds the system fields, everywhere', () => {
 
   it('and every RANKING score that ran DOES survive, on both doors, unasked', () => {
     // The other half of the split, and the reason for it. A caller must be able to see the number that ordered
-    // the result without setting a flag whose purpose is removing cost — three floats are not a cost.
+    // the result without setting a flag whose purpose is removing cost — a handful of numbers is not a cost.
     for (const [door, r] of [['REST', restResult(false)], ['MCP', mcpResult(false)]]) {
       const keys = flatKeys(r);
       for (const f of RECALL_RANKING_DIAGNOSTICS) {

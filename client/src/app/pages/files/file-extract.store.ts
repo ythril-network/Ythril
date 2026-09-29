@@ -92,4 +92,26 @@ export class FileExtractStore {
   more(spaceId: string, path: string): void {
     this.load(spaceId, path, this.extract()?.chunks.length ?? 0);
   }
+
+  /**
+   * The next window of the converted Markdown, appended to what is on screen (Q-128). A window is whole paragraphs,
+   * so the text shown is always text the document contains, and reading on reaches the end.
+   */
+  moreMarkdown(spaceId: string, path: string): void {
+    const x = this.extract();
+    const next = x?.converted?.markdownNextSkip;
+    if (!x?.converted || next === undefined) return;
+    this.loading.set(true);
+    this.error.set(null);
+    this.filesApi.getFileExtract(spaceId, path, PAGE, 0, next).subscribe({
+      next: (y) => {
+        const cur = this.extract();
+        if (cur?.converted && y.converted) {
+          this.extract.set({ ...cur, converted: { ...y.converted, markdown: cur.converted.markdown + y.converted.markdown, markdownSkip: cur.converted.markdownSkip } });
+        }
+        this.loading.set(false);
+      },
+      error: (e) => { this.error.set(httpErrorReason(e)); this.loading.set(false); },
+    });
+  }
 }

@@ -31,6 +31,8 @@ import { REF_KINDS, type RefKind } from '../config/types-knowledge.js';
 import { webhookToken } from './brain/_shared.js';
 import type { ContradictionCandidateDoc } from '../config/types.js';
 import { spaceCollection } from '../db/space-collection.js';
+import { pageMemberList } from '../brain/list-page.js';
+import { defaultBudgetChars } from '../brain/result-budget.js';
 
 export const contradictionsRouter = Router();
 
@@ -98,21 +100,21 @@ contradictionsRouter.get('/', globalRateLimit, requireAuth, async (req, res) => 
     let spaces = accessibleSpaces(req, 'read');
     if (spaceFilter) spaces = spaces.filter(id => id === spaceFilter);
 
-    const results: ContradictionCandidateDoc[] = [];
-    for (const spaceId of spaces) {
-      const q = status === 'all' ? { spaceId } : { spaceId, status };
-      const docs = await collectionFor(spaceId)
-        .find(asFilter<ContradictionCandidateDoc>(q))
-        // Deterministic findings first (confidence 1), then the model's most confident. Within a tie the
-        // newest, so a reviewer meets fresh disagreements rather than re-reading the same old ones.
-        .sort({ confidence: -1, detectedAt: -1 })
-        .limit(500)
-        .toArray() as ContradictionCandidateDoc[];
-      results.push(...docs);
-    }
-    results.sort((a, b) => (b.confidence - a.confidence) || b.detectedAt.localeCompare(a.detectedAt));
-    // Cap the merged cross-space result, as duplicates does — a many-space token must not materialise
-    // 500 x spaces rows.
+    const q = (spaceId: string) => (status === 'all' ? { spaceId } : { spaceId, status });
+    // Q-127: a page through the one list rule, never a list stopped at 500 with nothing saying so.
+    const page = await pageMemberList<ContradictionCandidateDoc>({
+      members: spaces,
+      // Deterministic findings first (confidence 1), then the model's most confident. Within a tie the newest, so a
+      // reviewer meets fresh disagreements rather than re-reading the same old ones.
+      readMember: async (spaceId, limit, skip) => await collectionFor(spaceId).find(asFilter<ContradictionCandidateDoc>(q(spaceId)))
+        .sort({ confidence: -1, detectedAt: -1 }).skip(skip).limit(limit).toArray() as ContradictionCandidateDoc[],
+      countMember: spaceId => collectionFor(spaceId).countDocuments(asFilter<ContradictionCandidateDoc>(q(spaceId))),
+      compare: (a, b) => (b.confidence - a.confidence) || b.detectedAt.localeCompare(a.detectedAt) || a._id.localeCompare(b._id),
+      req: req.query as Record<string, unknown>,
+      page: { defaultLimit: 100, maxLimit: 500, budgetChars: defaultBudgetChars('rest') },
+      ceiling: 5_000,
+    });
+    if (!page.ok) { res.status(400).json({ error: page.error }); return; }
     // `nliConfigured` rides along because the client has to explain an EMPTY list, and it cannot tell
     // "nothing disagrees" from "the judge never ran" without knowing this. It used to guess, and always
     // guessed the alarming answer: the empty state asserted "contradiction detection is not running yet —
@@ -125,7 +127,7 @@ contradictionsRouter.get('/', globalRateLimit, requireAuth, async (req, res) => 
     // Note it is NOT "is detection running". The structured pass runs with no model at all — see
     // `scanSpace`, which uses `['structured']` when nothing is configured. This says only whether the
     // model-judged pass is among the ones that run.
-    res.json({ contradictions: results.slice(0, 500).map(toRecord), nliConfigured: nliConfigured() });
+    res.json({ contradictions: page.rows.map(toRecord), ...page.fields, nliConfigured: nliConfigured() });
   } catch (err) {
     log.error(`GET /api/contradictions: ${err}`);
     res.status(500).json({ error: 'Internal error' });

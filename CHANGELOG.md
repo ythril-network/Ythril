@@ -9,6 +9,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Every list that stopped at a number now says so and can be read to the end** (bundle-34). Owner rule: *"if i
+  get a result i want to be sure i get what i asked for."* Each now pages through one rule (`brain/list-page.ts`):
+  whole rows, `limit` and `skip` refused rather than floored when they are not numbers, the byte budget, and
+  `count`, `total`, `limit`, `skip`, `truncated` and `nextSkip` on every answer.
+  - **`graph_traverse` and `POST /api/brain/spaces/:id/traverse`** answer whole nodes in hop order under the byte
+    budget, each page carrying the edges back to nodes already delivered, with `skip`/`nextSkip` and `remainderDump`;
+    `limit` still caps the walk and a walk that hit it says `limitReached` (`Q-132`).
+  - **The duplicate and contradiction review lists** page instead of stopping at 500; the Review tab reads every
+    page (`Q-127`).
+  - **A file's extract** returns its converted Markdown whole, or in whole paragraphs that page to the end with
+    **Show more** — it was cut mid-sentence at 256K characters — and its image list says when it is cut (`Q-128`).
+  - **The schema dry-run** says, per collection, how many records it checked against how many exist and whether the
+    check was complete, and pages its violations (`Q-129`).
+  - **The notify event list** pages and says when it is cut (`Q-130`).
+  - **Resolving entities by id** in the web UI asks for every id instead of dropping those past 100 (`Q-131`).
+- **A network joined before the join default now syncs on its own.** 5.6.0 gave a new join a schedule (every 15
+  minutes, or the inviter's), but a network joined earlier kept none and pulled only when its peer started a cycle —
+  seen on an instance whose two joined networks had no schedule at all. It gets the default at the next start, named
+  in the log. Clearing a schedule now stores manual as a choice (`""`) rather than as nothing, so manual set on
+  purpose is never replaced; one cleared before this change reads as never set, so it is scheduled once.
+
+- **A peer keeps one token, not one per join (`Q-163`).** Every network joined with the same instance minted it a
+  new token and left the previous one valid, though the peer keeps only the newest and could never present the
+  others: an instance showed eight `peer:` tokens for one peer, seven of them last used minutes after they were made.
+  A completed handshake now revokes the tokens it replaces, on both sides and for club pairings too, and an instance
+  drops the unused leftovers when it starts. A token still in a handshake is left alone, since two joins can overlap.
+
 - **A closed or democratic network connects every member too, on its own votes (`Q-154`).** Only the member that
   held a newcomer's credentials used to admit it; every other member concluded the join vote and connected to
   nobody. Now a passed join round introduces the newcomer on every member and the two pair as club members do, and
@@ -28,7 +55,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   type's matches together by raw MongoDB text score, whose scale is each collection's own, so a fact could outrank
   an entity only because facts are longer — the comparison reciprocal rank fusion exists to avoid. The Query tab
   now says what `fusedScore` is: a rank score, `1/(60 + rank by meaning) + 1/(60 + rank by text)`, about 0.016 to
-  0.033, never a similarity.
+  0.033, never a similarity. Every fused result also carries the two ranks it came from, `vectorRank` and
+  `lexicalRank` (absent when the text search missed it), on both doors, and the Query tab shows them beside the
+  figure — so the score can be checked rather than taken on trust.
 - **`filter`'s `total` counts what a name join matches (`Q-160`).** With `fromName`, `toName` or `entityName`, the
   rows were right and `total` counted the whole collection — `count: 2, total: 86` on a space of 86 edges — so a
   caller comparing the two, as the tool tells it to, read on for pages that did not exist. Reported by the platform

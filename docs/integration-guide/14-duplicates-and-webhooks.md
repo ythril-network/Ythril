@@ -61,11 +61,13 @@ Base path: `/api/duplicates`.
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| `GET` | `/api/duplicates?status=open&space=<id>` | any token (space-scoped) | List candidates. `status` = `open` (default), `dismissed`, or `all`. |
+| `GET` | `/api/duplicates?status=open&space=<id>&limit=100&skip=0` | any token (space-scoped) | List candidates, one page. `status` = `open` (default), `dismissed`, or `all`. |
 | `POST` | `/api/duplicates/:id/dismiss` | non-read-only | Mark a pair reviewed / not-a-duplicate. A later re-embed/re-sync will not resurface it; a real content change will. |
 | `POST` | `/api/duplicates/:id/reopen` | non-read-only | Manually re-rate a **dismissed** pair back onto the open list. `404` if the pair is not currently dismissed. |
 | `POST` | `/api/duplicates/:id/merge` | non-read-only | Merge an entity candidate losslessly. `409` with the merge plan if there is a value conflict. |
 | `POST` | `/api/duplicates/scan?space=<id>` | `dataQuality` write + MFA | Trigger an on-demand full re-scan. It only ever touches spaces where the token holds `dataQuality` write — naming one it does not answers `404`. Requires `X-TOTP-Code` when MFA is enabled. |
+
+**Paged, and it says so** (`Q-127`): `limit` (default 100, held to 500) and `skip`, and every answer carries `count` (rows in this page), `total` (every matching candidate across the spaces), `limit`, `skip`, `truncated` and `nextSkip` exactly when there are more — the fields every paged list answers with. It used to stop at 500 with nothing saying so. Across several spaces `skip + limit` is held to 5000 and refused past it; page one space for a deeper sweep. `maxChars` / `maxBytes` bound the body. The web UI reads every page.
 
 A candidate is `{ id, spaceId, type, aId, aSummary, bId, bSummary, score, status, resolution?, contradiction, negationAsymmetry?, detectedAt, updatedAt }`. The web UI (a space's **Brain → Review** tab) lists that space's candidates with dismiss / merge / re-rate actions, a **search box** (handy for a large dismissed pile), and a "Scan now" button.
 
@@ -103,7 +105,7 @@ sticky dismissal — because the Review tab presents both under one vocabulary.
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| `GET` | `/api/contradictions?status=open&space=<id>` | any token (space-scoped) | List candidates. `status` = `open` (default), `dismissed`, `resolved`, or `all`. |
+| `GET` | `/api/contradictions?status=open&space=<id>&limit=100&skip=0` | any token (space-scoped) | List candidates, one page, paged exactly as duplicates are. `status` = `open` (default), `dismissed`, `resolved`, or `all`. |
 | `POST` | `/api/contradictions/:id/dismiss` | non-read-only | Reviewed / not a real disagreement. Content-gated exactly like a duplicate dismissal. |
 | `POST` | `/api/contradictions/:id/reopen` | non-read-only | Bring a **dismissed** pair back onto the open list. `404` if it is not currently dismissed. |
 | `POST` | `/api/contradictions/:id/resolve` | non-read-only | Body `{ "resolution": "edited" \| "linked" \| "superseded" }`. Records HOW a human settled it. `superseded` also needs `"winner": "a" \| "b"` — see below. |

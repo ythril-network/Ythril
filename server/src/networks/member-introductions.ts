@@ -45,7 +45,7 @@
  */
 import bcrypt from 'bcrypt';
 import { getConfig, saveConfig, getSecrets, saveSecrets } from '../config/loader.js';
-import { createToken, revokeToken, setTokenExpiry, revokePeerCredentialsIfOrphaned } from '../auth/tokens.js';
+import { createToken, revokeToken, adoptPeerToken, revokePeerCredentialsIfOrphaned } from '../auth/tokens.js';
 import { peerTokenSpaces } from '../auth/peer-token-scope.js';
 import { peerSafeFetch, isPeerUrlAllowed } from '../sync/peer-fetch.js';
 import { widenPeerTokensOf } from './network-spaces.js';
@@ -264,7 +264,7 @@ async function admitIntroduced(networkId: string, instanceId: string, outboundTo
   saveSecrets(secrets);
   widenPeerTokensOf(cfg, [instanceId], net.spaces);
   saveConfig(cfg);
-  setTokenExpiry(tokenId, null);
+  await adoptPeerToken(tokenId);   // live now, and it replaces what an earlier handshake gave that peer (Q-163)
   log.info(`Club ${networkId}: paired with ${intro.label} (${instanceId})`);
   return true;
 }

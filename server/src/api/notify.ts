@@ -7,6 +7,8 @@
  */
 
 import { Router } from 'express';
+import { pageList } from '../brain/list-page.js';
+import { defaultBudgetChars } from '../brain/result-budget.js';
 import { z } from 'zod';
 import { requireAuth, isInstanceAdmin } from '../auth/middleware.js';
 import { notifyRateLimit } from '../rate-limit/middleware.js';
@@ -202,9 +204,12 @@ notifyRouter.post('/', notifyRateLimit, requireAuth, (req, res) => {
 // ── GET /api/notify — list recent events (admin) ───────────────────────────
 
 notifyRouter.get('/', notifyRateLimit, requireAuth, (req, res) => {
-  const { networkId, limit = '50' } = req.query as Record<string, string>;
+  const { networkId, limit, skip, maxChars, maxBytes } = req.query as Record<string, string | undefined>;
   let results = _events.slice().reverse(); // newest first
   if (networkId) results = results.filter(e => e.networkId === networkId);
-  const pageSize = Math.min(parseInt(limit, 10) || 50, 200);
-  res.json({ events: results.slice(0, pageSize) });
+  // Q-130: the shared page rule, so a list cut at its page size says so and can be read on with `skip`. It was
+  // `slice(0, 200)` with nothing in the answer to tell a complete list from a cut one.
+  const page = pageList(results, { limit, skip, maxChars, maxBytes }, { defaultLimit: 50, maxLimit: 200, budgetChars: defaultBudgetChars('rest') });
+  if (!page.ok) { res.status(400).json({ error: page.error }); return; }
+  res.json({ events: page.rows, ...page.fields });
 });

@@ -17,6 +17,9 @@ export interface RecallHit {
   score?: number;
   lexicalScore?: number;
   fusedScore?: number;
+  /** The two ranks `fusedScore` was computed from (`Q-159`); `lexicalRank` absent when the text search missed it. */
+  vectorRank?: number;
+  lexicalRank?: number;
   rerankScore?: number;
   record: Record<string, unknown>;
   _graph?: unknown[];

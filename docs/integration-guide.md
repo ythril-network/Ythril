@@ -21,8 +21,8 @@ stands on its own.
 6. [Spaces API](integration-guide/06-spaces-api.md)
    [Space Schemas & Validation](integration-guide/06a-schema-api.md) · [Schema Library](integration-guide/06b-schema-library-api.md)
 7. [Tokens API](integration-guide/07-tokens-api.md)
-8. [Networks & Invite APIs](integration-guide/08-networks-api.md)
-   Invite API
+8. [Networks API](integration-guide/08-networks-api.md)
+   [Invite API](integration-guide/08a-invite-api.md)
 9. [Notify & Sync APIs](integration-guide/09-sync-api.md)
    Sync API
 10. [MFA & Conflicts APIs](integration-guide/10-mfa-and-conflicts.md)

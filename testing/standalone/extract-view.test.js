@@ -75,13 +75,17 @@ describe('the extract route', () => {
     // the thing that takes the page down while someone is trying to work out why recall is poor.
     assert.match(handler, /parseLimit\(req\.query\['limit'\]/);
     assert.match(handler, /parseSkip\(req\.query\['skip'\]\)/);
-    assert.match(handler, /limit\(MAX_DERIVED_RECORDS\)/);
-    assert.match(handler, /slice\(0, MAX_CONVERTED_BYTES\)/);
-    assert.match(src, /const MAX_CONVERTED_BYTES = 256 \* 1024/);
+    // Q-128: the images page through the shared list rule and the Markdown comes in whole-paragraph windows. The
+    // old spellings (`limit(MAX_DERIVED_RECORDS)`, `slice(0, MAX_CONVERTED_BYTES)`) were the cuts that said nothing.
+    assert.match(handler, /pageList\(allImages,/);
+    assert.match(handler, /markdownWindow\(text, /);
+    assert.match(src, /const MAX_CONVERTED_CHARS = 256 \* 1024/);
+    assert.doesNotMatch(handler, /\.slice\(0, MAX_CONVERTED/, 'the Markdown must never be cut mid-text again');
   });
 
   it('says when the Markdown was cut rather than returning a silently short document', () => {
-    assert.match(handler, /truncated: text\.length > MAX_CONVERTED_BYTES/);
+    assert.match(handler, /truncated: w\.truncated/);
+    assert.match(handler, /markdownNextSkip: w\.nextSkip/, 'and says where the rest starts');
   });
 
   it('returns the total so the client can tell one page from all of them', () => {

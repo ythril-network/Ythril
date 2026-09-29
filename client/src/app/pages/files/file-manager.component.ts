@@ -221,6 +221,7 @@ import { ModalDirective } from '../../shared/modal.directive';
             (showMeta)="showMetaMode()"
             (showExtract)="showExtractMode()"
             (more)="moreChunks(preview.file()!)"
+            (moreMarkdown)="moreMarkdown(preview.file()!)"
             (retryExtract)="loadExtract(preview.file()!)"
             (save)="saveMeta(preview.file()!)"
             (cancelEdit)="cancelMeta()"
@@ -518,6 +519,11 @@ export class FileManagerComponent implements OnInit, OnDestroy {
   /** Next page of chunks. The store counts from what is on screen, not from the last response's own skip. */
   moreChunks(entry: FileEntry): void {
     this.extractStore.more(this.activeSpaceId(), this.relPath(entry));
+  }
+
+  /** The next window of the converted Markdown, whole paragraphs, appended (Q-128). */
+  moreMarkdown(entry: FileEntry): void {
+    this.extractStore.moreMarkdown(this.activeSpaceId(), this.relPath(entry));
   }
 
   /**

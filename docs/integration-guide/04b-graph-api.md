@@ -500,13 +500,25 @@ POST /api/brain/spaces/:spaceId/traverse
 | `direction` | — | `"outbound"` | `"outbound"` follows edges from the node, `"inbound"` follows edges to it, `"both"` follows in either direction. **Stored edges only** — it does not narrow links; see below |
 | `edgeLabels` | — | all labels | Filter traversal to specific edge labels only |
 | `maxDepth` | — | `3` | Maximum hops from `startId`; hard-capped at `10` |
-| `limit` | — | `100` | Maximum total nodes returned, **clamped to 1–1000 on both doors** — `limit: 5000` silently becomes 1000 |
+| `limit` | — | `100` | How many nodes the **walk** may visit, **clamped to 1–1000 on both doors** — `limit: 5000` silently becomes 1000. A walk that hit it answers `limitReached: true`: a partial graph only a larger `limit` reaches |
 | `includeChrono` | — | `true` | Also reach chrono entries LINKED to a traversed node. Set `false` for entity-only results. A non-boolean is a `400`, never coerced |
 | `includeMemories` | — | `false` | Also reach facts LINKED to a traversed node, marked `kind: "fact"`. **Opt-in, unlike `includeChrono`** — see the note below. A non-boolean is a `400`. **This door's `false` is a real default**, so an unsaid flag brings no facts: recall's expansion differs and brings ATTRIBUTED claims when the flag is unsaid, because its caller asked a question rather than asked to explore — see [the recall page](04a-recall-api.md) |
 | `includeFiles` | — | `false` | Also reach files LINKED to a traversed node, marked `kind: "file"` and carrying **file meta only**. Opt-in. A non-boolean is a `400` |
 | `includeEdges` | — | `true` | Whether the response carries the `edges` list. **This does not change the walk** — edges are how the graph is traversed. A non-boolean is a `400` |
 | `projection` | — | none | Return each reached record's **body**, projected — see [Bodies in one call](#bodies-in-one-call-projection) below. Omitted, the answer is the lean one, unchanged. A non-object is a `400` |
 | `includeDiagnostics` | — | `false` | With `projection`: add back `matchedText`, `embeddingModel` and `seq` on each body. Never the vector. A non-boolean is a `400` |
+| `skip` | — | `0` | How many nodes to skip before filling the byte budget — send back `nextSkip` to read on (`Q-132`) |
+| `maxChars` | — | `50000` (MCP `25000`) | Ceiling on the answer in characters; whole nodes only |
+| `maxBytes` | — | none | Ceiling in real UTF-8 bytes; both apply when both are set |
+| `maxTokens` | — | none | A convenience onto `maxChars`, at 3.5 characters per token |
+| `remainderDump` | — | `false` | Also keep the nodes that did not fit as a spill for `read_spill`, readable by your token alone for a day |
+
+**The answer pages, and says when it is partial** (`Q-132`). What the walk found comes back as **whole nodes in hop
+order** under the byte budget, each page carrying the edges from its nodes back to nodes already delivered — so every
+edge arrives exactly once across the pages, and a page's edges only ever join nodes you hold. `count` is every node
+the walk found, `returned` this page's, `nextSkip` present exactly when more follow. `truncated` is `true` for either
+cut: the page's (`nextSkip`) or the walk's (`limitReached`). It used to cut the node list at `limit` with `truncated`
+alone, no bound on the size of the answer and no way to read on. MCP `graph_traverse` takes the same parameters.
 
 > **`includeMemories` means three things on a RECALL, and this table is the one to read for it.** An
 > *attributed* claim is one an AI assistant originated rather than a person. It is stored with no vector, so

@@ -280,7 +280,8 @@ describe('the documented format is the format', () => {
     .map(({ line, text }) => `${path}:${line}: ${text.trim().slice(0, 90)}`);
 
   it('the networks API names a shorthand only where it says it was removed', () => {
-    const found = offenders('docs/integration-guide/08-networks-api.md');
+    // Both halves of the networks guide: the invite API was split out of it (Q-163) and carries the schedule too.
+    const found = ['docs/integration-guide/08-networks-api.md', 'docs/integration-guide/08a-invite-api.md'].flatMap(offenders);
     assert.deepEqual(found, [], `these lines still offer a shorthand as if it worked:\n  ${found.join('\n  ')}`);
   });
 

@@ -20,7 +20,7 @@ import { z } from 'zod';
 import { networkJoinRefusal } from '../auth/network-rights.js';
 import { recordOrigin } from '../auth/network-membership.js';
 import { getConfig, saveConfig, getSecrets, saveSecrets } from '../config/loader.js';
-import { createToken, revokeToken } from '../auth/tokens.js';
+import { createToken, revokeToken, adoptPeerToken } from '../auth/tokens.js';
 import { peerTokenSpaces } from '../auth/peer-token-scope.js';
 import { createSpace } from '../spaces/lifecycle.js';
 import { log } from '../util/log.js';
@@ -35,6 +35,9 @@ import { resolveJoinSpaces } from './join-spaces.js';
 import { recordSpaceAlias } from '../sync/space-map.js';
 import { joinedSyncSchedule, syncScheduleRefusal } from '../sync/schedule.js';
 import { scheduleSyncForNetwork } from '../sync/scheduler.js';
+
+/** How long the token minted for the inviter lives before the handshake completes and `adoptPeerToken` lifts it. */
+const JOIN_TOKEN_TTL_MS = 10 * 60_000;
 
 type Caller = Parameters<typeof networkJoinRefusal>[0] & { id?: string };
 
@@ -233,7 +236,9 @@ export async function joinRemoteAct(caller: Caller, input: unknown): Promise<Net
   const allNetworkSpaces = [...existingSpaces, ...createdSpaces];
   const { record: tokenForARecord, plaintext: tokenForAPlaintext } = await createToken({
     name: `peer:${applyData.instanceLabel ?? 'remote'}`,
-    expiresAt: null,
+    // Expires until the handshake completes, when `adoptPeerToken` lifts it (Q-163): a token in flight must be told
+    // apart from a live one, or adopting a second join's token would revoke this one before the inviter holds it.
+    expiresAt: new Date(Date.now() + JOIN_TOKEN_TTL_MS).toISOString(),
     // Every network the pair shares, not this one alone: the inviter keeps one token for us and this one replaces it.
     spaces: peerTokenSpaces(applyData.instanceId, allNetworkSpaces),
     peerInstanceId: applyData.instanceId, // link this PAT to the peer that will present it
@@ -271,6 +276,8 @@ export async function joinRemoteAct(caller: Caller, input: unknown): Promise<Net
   const secrets = getSecrets();
   secrets.peerTokens[applyData.instanceId] = tokenForB;
   saveSecrets(secrets);
+  // The inviter holds this token now, and it replaces every one an earlier join gave the same instance (Q-163).
+  await adoptPeerToken(tokenForARecord.id);
 
   // Hashed BEFORE the network is looked up, and that order is the point.
   //
@@ -295,9 +302,10 @@ export async function joinRemoteAct(caller: Caller, input: unknown): Promise<Net
   let armSchedule: string | undefined;
   if (!net) {
     const schedule = joinedSyncSchedule(statedSchedule, applyData.syncSchedule);
-    armSchedule = schedule || undefined;
+    // Stored even when `''`: manual chosen at the join must not read as never stated at the next boot.
+    armSchedule = schedule;
     net = {
-      ...(armSchedule ? { syncSchedule: armSchedule } : {}),
+      syncSchedule: schedule,
       id: networkId,
       label: applyData.networkLabel ?? 'Remote network',
       type: (applyData.networkType as NetworkConfig['type']) ?? 'closed',

@@ -98,6 +98,7 @@ export type DetailMode = 'preview' | 'meta' | 'extract';
               [loading]="extract.loading()"
               [error]="extract.error()"
               (more)="more.emit()"
+              (moreMarkdown)="moreMarkdown.emit()"
               (retry)="retryExtract.emit()" />
           } @else {
             <!-- File-meta edit form (embedded only — reuses the Brain ref-field widgets). -->
@@ -135,6 +136,7 @@ export class FileDetailPaneComponent {
   readonly showMeta = output<void>();
   readonly showExtract = output<void>();
   readonly more = output<void>();
+  readonly moreMarkdown = output<void>();
   readonly retryExtract = output<void>();
   readonly save = output<void>();
   readonly cancelEdit = output<void>();

@@ -33,6 +33,10 @@ import { reachesSpace } from '../../auth/space-reach.js';
 import { canWriteAnywhere } from '../../auth/write-anywhere.js';
 import type { TokenRights } from '../../config/rights-shape.js';
 import { spaceCollection } from '../../db/space-collection.js';
+import { markdownWindow } from '../../files/markdown-window.js';
+import { pageList } from '../../brain/list-page.js';
+import { defaultBudgetChars } from '../../brain/result-budget.js';
+import { queryInt } from '../../brain/result-budget.js';
 
 /**
  * The rights off a token record. A cast, for the same reason the MCP router needs one: the record is a
@@ -73,13 +77,12 @@ export const fileMetaRouter = Router();
  * ## Bounds
  *
  * A 500-page document has thousands of chunks and a Markdown file measured in megabytes, and this is a
- * diagnostic — so chunks paginate (`limit`/`skip`, newest-agnostic: always by `chunkIndex`), and the
- * Markdown is capped with `truncated` telling the truth about it. The full file is downloadable through the
- * file store, which is where an unbounded read belongs.
+ * diagnostic — so chunks paginate (`limit`/`skip`, newest-agnostic: always by `chunkIndex`), the Markdown comes
+ * back whole or in whole paragraphs from `markdownSkip` (`files/markdown-window.ts`, never cut mid-text), and the
+ * images page through the shared list rule under `images*` (`Q-128`). Each says when it is cut and where to go on.
  */
-const MAX_CONVERTED_BYTES = 256 * 1024;
-/** Extracted images are capped at 50 by the pipeline; 200 leaves room without becoming unbounded. */
-const MAX_DERIVED_RECORDS = 200;
+/** Characters of converted Markdown per window. It was `MAX_CONVERTED_BYTES` and sliced UTF-16 characters (Q-128). */
+const MAX_CONVERTED_CHARS = 256 * 1024;
 
 fileMetaRouter.get('/spaces/:spaceId/files/extract', globalRateLimit, requireSpaceAuth, async (req, res) => {
   const spaceId = req.params['spaceId'] as string;
@@ -96,6 +99,11 @@ fileMetaRouter.get('/spaces/:spaceId/files/extract', globalRateLimit, requireSpa
   const parentId = toDocId(rawPath);
   const limit = parseLimit(req.query['limit'], 100, 500);
   const skip = parseSkip(req.query['skip']);
+  const markdownSkip = queryInt(req.query['markdownSkip']);
+  if (markdownSkip !== undefined && !(typeof markdownSkip === 'number' && Number.isInteger(markdownSkip) && markdownSkip >= 0)) {
+    res.status(400).json({ error: '`markdownSkip` must be a non-negative integer character offset' });
+    return;
+  }
 
   // Resolved per MEMBER, and the member is kept: on a proxy space the derived records live in the same
   // member collection as their parent, and querying another member's would silently return nothing.
@@ -121,14 +129,14 @@ fileMetaRouter.get('/spaces/:spaceId/files/extract', globalRateLimit, requireSpa
     files.countDocuments(asFilter<FileMetaDoc>(chunkFilter)),
   ]);
 
-  // Everything else derived from this parent: the `_converted/` record and the `_extracted/` images.
-  // One query, partitioned by path, because both are bounded and neither is worth a round trip.
+  // Everything else derived from this parent: the `_converted/` record and the `_extracted/` images. Read whole —
+  // the pipeline writes at most 50 images per file — and the images then page through the shared list rule, so a
+  // file with more says so rather than stopping at a number (Q-128). Metadata only; the image bytes stay in the store.
   const derived = await files
     .find(asFilter<FileMetaDoc>({ parentFileId: parentId, chunkIndex: { $exists: false } }))
-    .limit(MAX_DERIVED_RECORDS)
     .toArray() as FileMetaDoc[];
 
-  const images = derived
+  const allImages = derived
     .filter(d => d.path.startsWith('_extracted/'))
     .sort((a, b) => a.path.localeCompare(b.path, undefined, { numeric: true }))
     .map(d => ({
@@ -140,21 +148,29 @@ fileMetaRouter.get('/spaces/:spaceId/files/extract', globalRateLimit, requireSpa
       sizeBytes: d.sizeBytes,
       embeddingStatus: d.embeddingStatus ?? null,
     }));
+  const imagePage = pageList(allImages, { limit: req.query['imagesLimit'], skip: req.query['imagesSkip'] },
+    { defaultLimit: 200, maxLimit: 200, budgetChars: defaultBudgetChars('rest') });
+  if (!imagePage.ok) { res.status(400).json({ error: imagePage.error.replace(/`(limit|skip)`/, '`images$1`') }); return; }
 
   // The converted Markdown, read from the file store rather than from the record — the record carries
   // metadata, the bytes are the thing being inspected. Absent for formats that need no conversion
   // (`.md`/`.txt` are already Markdown and produce no `_converted/` copy).
   const convertedRecord = derived.find(d => d.path.startsWith('_converted/'))
     ?? (parent.convertedFileId ? await getFileMeta(member, parent.convertedFileId) : null);
-  let converted: { path: string; markdown: string; truncated: boolean; sizeBytes: number; unreadable?: string } | null = null;
+  let converted: { path: string; markdown: string; truncated: boolean; sizeBytes: number; unreadable?: string;
+    markdownSkip?: number; markdownChars?: number; markdownNextSkip?: number } | null = null;
   if (convertedRecord) {
     try {
       const text = await readFile(member, convertedRecord.path);
+      const w = markdownWindow(text, typeof markdownSkip === 'number' ? markdownSkip : 0, MAX_CONVERTED_CHARS);
       converted = {
         path: convertedRecord.path,
-        markdown: text.slice(0, MAX_CONVERTED_BYTES),
-        truncated: text.length > MAX_CONVERTED_BYTES,
+        markdown: w.markdown,
+        truncated: w.truncated,
         sizeBytes: convertedRecord.sizeBytes,
+        markdownSkip: w.skip,
+        markdownChars: w.totalChars,
+        ...(w.nextSkip !== undefined ? { markdownNextSkip: w.nextSkip } : {}),
       };
     } catch (err) {
       // The record exists and the bytes do not. Worth reporting as its own state rather than as an
@@ -192,7 +208,11 @@ fileMetaRouter.get('/spaces/:spaceId/files/extract', globalRateLimit, requireSpa
     chunkTotal,
     limit,
     skip,
-    images,
+    images: imagePage.rows,
+    // The image list's own page, prefixed because `limit`/`skip` above are the chunks' (Q-128).
+    imagesTotal: imagePage.fields['total'],
+    imagesTruncated: imagePage.fields['truncated'],
+    ...(imagePage.fields['nextSkip'] !== undefined ? { imagesNextSkip: imagePage.fields['nextSkip'] } : {}),
   });
 });
 

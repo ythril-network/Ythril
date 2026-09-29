@@ -43,6 +43,18 @@ export async function startConfiguredInstanceServices(): Promise<void> {
     log.error(`Sweeping orphaned peer tokens failed: ${err}`);
   }
 
+  // Peer tokens a newer handshake with the same peer replaced, from before a handshake revoked them itself (Q-163).
+  // Only those the peer has provably stopped presenting — see `supersededPeerTokenIds`.
+  try {
+    const { getConfig } = await import('./config/loader.js');
+    const { supersededPeerTokenIds, revokeToken } = await import('./auth/tokens.js');
+    const ids = supersededPeerTokenIds(getConfig());
+    for (const id of ids) await revokeToken(id);
+    if (ids.length > 0) log.info(`Revoked ${ids.length} peer token(s) a newer handshake had replaced`);
+  } catch (err) {
+    log.error(`Sweeping replaced peer tokens failed: ${err}`);
+  }
+
   // The read-spill TTL index in its OWN try, ahead of phase 1 (Q-92): a failure below would otherwise skip it,
   // and the read-time expiry check would hide the missing index until the instance ceiling refused every spill.
   try {
