@@ -29,6 +29,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Moving a file or folder leaves nothing at its old path, even while the file is still being processed.** A
+  document's conversion that finished after the move wrote its chunk records under the path the file had just
+  left — a folder that no longer existed, with nothing to ever delete them (caught on CI by `files.test.js`,
+  two records left under a moved folder). The conversion now commits its records in one transaction that holds
+  only while its job is still claimed, and a move takes that claim before any bytes leave, then re-queues the job
+  at the new path. A run that finds its moved file missing no longer "cleans up a deleted file" either — which
+  deleted the job and records the move was carrying. And a move now carries everything a file owns: a renamed
+  file's chunks used to stay at the old path, a moved folder's chunks kept naming parents that no longer existed
+  (so deleting the moved file removed none of them), and the `_converted/`/`_extracted/` sidecars moved for
+  neither. REST `PATCH /api/files/:spaceId` and MCP `move_file` now run the same move (`files/move-cascade.ts`).
 - **Every list that stopped at a number now says so and can be read to the end** (bundle-34). Owner rule: *"if i
   get a result i want to be sure i get what i asked for."* Each now pages through one rule (`brain/list-page.ts`):
   whole rows, `limit` and `skip` refused rather than floored when they are not numbers, the byte budget, and
