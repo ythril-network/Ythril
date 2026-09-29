@@ -13,7 +13,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post, delWithBody } from '../sync/helpers.js';
+import { INSTANCES, post, delWithBody, waitForSimilarityIndex } from '../sync/helpers.js';
 import { openMcpSession } from '../sync/mcp-session.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -34,6 +34,9 @@ before(async () => {
   assert.ok(adaId && babbageId, JSON.stringify({ ada: ada.body, babbage: babbage.body }));
   const e = await post(INSTANCES.a, admin, `/api/brain/spaces/${SPACE}/edges`, { from: adaId, to: babbageId, label: 'worked_with', waitForEmbedding: true });
   assert.ok(e.status === 200 || e.status === 201, JSON.stringify(e.body));
+  // `similar` searches the index and nothing else — recall's fresh-write scan does not reach it — so an embedded
+  // fixture is not yet a findable one. Wait on the index state the similar cases assert, not on time.
+  await waitForSimilarityIndex(INSTANCES.a, admin, SPACE, adaId, 'entity', babbageId);
   mcp = await openMcpSession(admin);
 });
 
