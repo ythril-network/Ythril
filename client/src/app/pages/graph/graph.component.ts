@@ -16,9 +16,11 @@ import { CommonModule, Location } from '@angular/common';
 import { ProxySpaceBadgeComponent } from '../../shared/proxy-space-badge.component';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute } from '@angular/router';
-import { Subscription, TimeoutError, forkJoin, of } from 'rxjs';
+import { Subscription, TimeoutError, of } from 'rxjs';
 import { catchError, timeout } from 'rxjs/operators';
-import { readinessReasons, type ReadinessReason } from './graph-readiness';
+import { GraphLoadWatch, WAIT_GIVE_UP_MS } from './graph-load-watch';
+import { GraphDetailFilter } from './graph-detail-filter';
+import { linkedToNode, linkedToEdge, type LinkedRecords } from './graph-linked-fetch';
 import { PhIconComponent } from '../../shared/ph-icon.component';
 import { ErrorStateComponent } from '../../shared/error-state.component';
 import { httpErrorReason } from '../../core/http-error';
@@ -50,9 +52,7 @@ import { RecordDrawerComponent } from '../brain/record-drawer.component';
 import { RecordDrawerState } from '../brain/record-drawer-state.service';
 import { BrainStore } from '../brain/brain-store.service';
 import { EntityRefPicker } from '../brain/entity-ref-picker.service';
-import {
-  DetailRow, DetailRef, buildDetailRows, filterAndSortDetails,
-} from './graph-details';
+import { DetailRow, DetailRef, buildDetailRows, filterAndSortDetails } from './graph-details';
 import {
   TraversalCache, emptyCache, decideFetch, applyResult, filterToDepth,
 } from './graph-traversal-cache';
@@ -65,11 +65,6 @@ import { canWriteAnywhere } from '../../core/token-capability';
 import { lookupForNode, lookupForEdge } from './graph-record-lookup';
 
 
-
-/** How long a load may run before the tab says it is still waiting, and why (Q-155). */
-const WAIT_EXPLAIN_MS = 3_000;
-/** How long a load may run before it ends in the error state rather than spinning for ever (Q-155). */
-const WAIT_GIVE_UP_MS = 30_000;
 
 @Component({
   selector: 'app-graph-view',
@@ -180,12 +175,12 @@ const WAIT_GIVE_UP_MS = 30_000;
 
             <!-- Lists pane: facts + chrono -->
             <app-graph-linked-records
-              [facts]="filteredMemories()"
-              [chrono]="filteredChrono()"
+              [facts]="details.visibleFacts()"
+              [chrono]="details.visibleChrono()"
               [(typeFilter)]="detailTypeFilter"
               [(descFilter)]="detailDescFilter"
-              [emptyMemoriesKey]="detailFilterActive() ? 'graph.panel.noMatches' : 'graph.panel.noMemories'"
-              [emptyChronoKey]="detailFilterActive() ? 'graph.panel.noMatches' : 'graph.panel.noChronoEntries'"
+              [emptyMemoriesKey]="details.active() ? 'graph.panel.noMatches' : 'graph.panel.noMemories'"
+              [emptyChronoKey]="details.active() ? 'graph.panel.noMatches' : 'graph.panel.noChronoEntries'"
               (open)="openDetailPopup($event)" />
 
           </div>
@@ -213,12 +208,12 @@ const WAIT_GIVE_UP_MS = 30_000;
 
             <!-- Lists pane: facts + chrono for both endpoints -->
             <app-graph-linked-records
-              [facts]="filteredMemories()"
-              [chrono]="filteredChrono()"
+              [facts]="details.visibleFacts()"
+              [chrono]="details.visibleChrono()"
               [(typeFilter)]="detailTypeFilter"
               [(descFilter)]="detailDescFilter"
-              [emptyMemoriesKey]="detailFilterActive() ? 'graph.panel.noMatches' : 'graph.panel.noLinkedMemories'"
-              [emptyChronoKey]="detailFilterActive() ? 'graph.panel.noMatches' : 'graph.panel.noLinkedChrono'"
+              [emptyMemoriesKey]="details.active() ? 'graph.panel.noMatches' : 'graph.panel.noLinkedMemories'"
+              [emptyChronoKey]="details.active() ? 'graph.panel.noMatches' : 'graph.panel.noLinkedChrono'"
               (open)="openDetailPopup($event)" />
 
           </div>
@@ -273,8 +268,7 @@ export class GraphComponent implements OnInit, AfterViewInit, OnDestroy {
     effect(() => {
       this.selectedNode();
       this.selectedEdge();
-      this.detailTypeFilter.set('all');
-      this.detailDescFilter.set('');
+      this.details.reset();
     });
 
     // The drawer patches the `BrainStore` lists, which this page does not render. Its per-node arrays
@@ -355,8 +349,12 @@ export class GraphComponent implements OnInit, AfterViewInit, OnDestroy {
   nodeMemories = signal<Fact[]>([]);
   nodeChrono = signal<ChronoEntry[]>([]);
 
-  detailTypeFilter = signal<'all' | 'fact' | 'chrono'>('all');
-  detailDescFilter = signal('');
+  /** The panel's filter over the two lists above — see `graph-detail-filter.ts`. */
+  protected details: GraphDetailFilter = new GraphDetailFilter(this.nodeMemories, this.nodeChrono, () => this.filteredDetails());
+  detailTypeFilter = this.details.type;
+  detailDescFilter = this.details.text;
+  allDetails = computed<DetailRow[]>(() => buildDetailRows(this.nodeMemories(), this.nodeChrono()));
+  filteredDetails = computed<DetailRow[]>(() => filterAndSortDetails(this.allDetails(), this.details.view()));
   nodeCount = signal(0);
   edgeCount = signal(0);
 
@@ -368,62 +366,19 @@ export class GraphComponent implements OnInit, AfterViewInit, OnDestroy {
   // Drawer state lives in the shared `RecordDrawerState` provided above. This page only opens it
   // and reacts to `lastSaved`; it holds no edit models of its own.
 
-  loading = signal(false);
   /** Failure reason for the last traversal; null when it succeeded (U3). A
    *  failed traversal must not render as an empty graph (which reads as "no
    *  connections"). */
   loadError = signal<string | null>(null);
   private lastTraverse: { startId: string; maxDepth: number; direction: 'outbound' | 'inbound' | 'both' } | null = null;
-  /**
-   * Q-155: a wait past `WAIT_EXPLAIN_MS` says so, and says why from what the server reports for the space — its
-   * search indexes being built, records waiting to be embedded. An upgraded instance rebuilding its indexes left
-   * this tab spinning with nothing on it. `WAIT_GIVE_UP_MS` ends a request that never answers in the error state.
-   */
-  waiting = signal(false);
-  waitReasons = signal<ReadinessReason[]>([]);
-  private waitTimer: ReturnType<typeof setTimeout> | null = null;
   private transloco = inject(TranslocoService);
+  /** Q-155: a long load says it is still waiting, and why — see `graph-load-watch.ts`. */
+  private loadWatch = new GraphLoadWatch(this.spacesApi, this.transloco);
+  loading = this.loadWatch.loading;
+  waiting = this.loadWatch.waiting;
+  waitReasons = this.loadWatch.reasons;
 
   // ── Computed ────────────────────────────────────────────────────────────────
-  allDetails = computed<DetailRow[]>(() => buildDetailRows(this.nodeMemories(), this.nodeChrono()));
-
-  /*
-   * The sort arguments are FIXED, and saying so is the honest version of what was already happening. Nothing
-   * could change them once the detail table moved to `graph-linked-records`, which filters but does not sort —
-   * and the order is discarded anyway, because the only reader of this turns it into a Set of ids.
-   */
-  filteredDetails = computed<DetailRow[]>(() => filterAndSortDetails(this.allDetails(), {
-    type: this.detailTypeFilter(),
-    text: this.detailDescFilter(),
-    field: 'createdAt',
-    asc: false,
-  }));
-
-  /** True when the panel is showing less than everything — drives the "no matches" empty state. */
-  detailFilterActive = computed(() => this.detailTypeFilter() !== 'all' || this.detailDescFilter().trim() !== '');
-
-  /**
-   * The surviving row ids, used to narrow the two lists.
-   *
-   * The lists render `Fact`/`ChronoEntry` records, not `DetailRow`s, and that matters: a chrono row
-   * shows `startsAt` (when the thing happens) while a `DetailRow` only carries `createdAt` (when it was
-   * written). Feeding rows straight through would silently swap the date on every chrono entry. So the
-   * tested pipeline decides WHICH records survive, and the records themselves still supply what is drawn.
-   */
-  private visibleDetailIds = computed<Set<string>>(() => new Set(this.filteredDetails().map(r => r.id)));
-
-  filteredMemories = computed<Fact[]>(() => {
-    if (!this.detailFilterActive()) return this.nodeMemories();
-    const ids = this.visibleDetailIds();
-    return this.nodeMemories().filter(m => ids.has(m._id));
-  });
-
-  filteredChrono = computed<ChronoEntry[]>(() => {
-    if (!this.detailFilterActive()) return this.nodeChrono();
-    const ids = this.visibleDetailIds();
-    return this.nodeChrono().filter(c => ids.has(c._id));
-  });
-
   panelTitle = computed(() => {
     const n = this.selectedNode();
     if (n) return n.name;
@@ -499,7 +454,7 @@ export class GraphComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   ngOnDestroy(): void {
-    this.endWait();
+    this.loadWatch.end();
     this.subs.unsubscribe();
     if (this.cy) {
       this.cy.destroy();
@@ -526,12 +481,10 @@ export class GraphComponent implements OnInit, AfterViewInit, OnDestroy {
     this.pendingFocusId = null;
     this.direction.set('both');
     this.depth.set(2);
-    this.loading.set(true);
-    this.beginWait(spaceId);
+    this.loadWatch.begin(spaceId);
     this.brainApi.getEntity(spaceId, id).pipe(timeout(WAIT_GIVE_UP_MS), catchError(e => of(e instanceof TimeoutError ? e : null))).subscribe(ent => {
-      this.loading.set(false);
-      this.endWait();
-      if (ent instanceof TimeoutError) this.loadError.set(this.transloco.translate('graph.waiting.gaveUp', { seconds: WAIT_GIVE_UP_MS / 1000 }));
+      this.loadWatch.end();
+      if (ent instanceof TimeoutError) this.loadError.set(this.loadWatch.gaveUpMessage());
       else if (ent) this.selectRoot(ent);
       else this.loadError.set(`Entity '${id}' could not be loaded in this space.`);
     });
@@ -636,14 +589,19 @@ export class GraphComponent implements OnInit, AfterViewInit, OnDestroy {
   selectRoot(entity: Entity, pushHistory = false): void {
     this.rootEntity.set(entity);
     this.searchQuery.set(entity.name);
-    this.selectedNode.set(null);
-    this.selectedEntityRecord.set(null);
-    this.selectedEdge.set(null);
-    this.selectedEdgeRecord.set(null);
+    this.clearSelection();
     this.nodeMemories.set([]);
     this.nodeChrono.set([]);
     if (!this.isEmbedded()) this.updateUrl(entity._id, pushHistory);
     this.traverse(entity._id, this.depth(), this.direction());
+  }
+
+  /** Nothing selected: no node, no edge, and neither's record — the panel closes. */
+  private clearSelection(): void {
+    this.selectedNode.set(null);
+    this.selectedEntityRecord.set(null);
+    this.selectedEdge.set(null);
+    this.selectedEdgeRecord.set(null);
   }
 
   fitGraph(): void {
@@ -652,10 +610,7 @@ export class GraphComponent implements OnInit, AfterViewInit, OnDestroy {
 
   resetGraph(): void {
     this.rootEntity.set(null);
-    this.selectedNode.set(null);
-    this.selectedEntityRecord.set(null);
-    this.selectedEdge.set(null);
-    this.selectedEdgeRecord.set(null);
+    this.clearSelection();
     this.nodeMemories.set([]);
     this.nodeChrono.set([]);
     this.searchQuery.set('');
@@ -674,10 +629,7 @@ export class GraphComponent implements OnInit, AfterViewInit, OnDestroy {
     const spaceId = this.activeSpaceId();
     if (!spaceId) return;
 
-    this.selectedNode.set(null);
-    this.selectedEntityRecord.set(null);
-    this.selectedEdge.set(null);
-    this.selectedEdgeRecord.set(null);
+    this.clearSelection();
 
     const req = { startId, maxDepth, direction };
     const plan = decideFetch(this.cache, req);
@@ -688,50 +640,24 @@ export class GraphComponent implements OnInit, AfterViewInit, OnDestroy {
       return;
     }
 
-    this.loading.set(true);
     this.loadError.set(null);
     this.lastTraverse = req;
-    this.beginWait(spaceId);
+    this.loadWatch.begin(spaceId);
     this.brainApi.traverseGraph(spaceId, { startId, direction, maxDepth, limit: 200 }).pipe(timeout(WAIT_GIVE_UP_MS)).subscribe({
       error: (e) => {
-        this.loading.set(false);
-        this.endWait();
+        this.loadWatch.end();
         this.loadError.set(e instanceof TimeoutError
-          ? this.transloco.translate('graph.waiting.gaveUp', { seconds: WAIT_GIVE_UP_MS / 1000 })
+          ? this.loadWatch.gaveUpMessage()
           : httpErrorReason(e));
       },
       next: (result) => {
-        this.loading.set(false);
-        this.endWait();
+        this.loadWatch.end();
         this.waitReasons.set([]);
         this.cache = applyResult(this.cache, plan, req, result);
         this.truncated.set(result.truncated);
         this.applyDepthFilter(startId, maxDepth);
       },
     });
-  }
-
-  /** Start the clock that turns a long wait into words; the reasons are read only if the wait gets that long. */
-  private beginWait(spaceId: string): void {
-    this.endWait();
-    this.waitReasons.set([]);
-    this.waitTimer = setTimeout(() => {
-      this.waitTimer = null;
-      this.waiting.set(true);
-      forkJoin({
-        spaces: this.spacesApi.listSpaces().pipe(catchError(() => of(null))),
-        stats: this.spacesApi.getSpaceStats(spaceId).pipe(catchError(() => of(null))),
-      }).subscribe(({ spaces, stats }) => {
-        const space = spaces?.spaces.find(s => s.id === spaceId);
-        this.waitReasons.set(readinessReasons(space?.indexStatus, stats?.embedQueue));
-      });
-    }, WAIT_EXPLAIN_MS);
-  }
-
-  /** Stop the clock. The reasons stay, so an error state that follows can still show them. */
-  private endWait(): void {
-    if (this.waitTimer) { clearTimeout(this.waitTimer); this.waitTimer = null; }
-    this.waiting.set(false);
   }
 
   /** Re-run the last traversal — bound to the error state's Retry button. */
@@ -799,17 +725,7 @@ export class GraphComponent implements OnInit, AfterViewInit, OnDestroy {
       catchError(() => of(null)),
     ).subscribe(rec => { if (rec) this.selectedEntityRecord.set(rec as Entity); });
 
-    forkJoin({
-      mems: this.brainApi.listFacts(spaceId, 100, 0, { entity: entityId }).pipe(
-        catchError(() => of({ facts: [] as Fact[] })),
-      ),
-      chrono: this.brainApi.chronoLinkedTo(spaceId, entityId).pipe(
-        catchError(() => of([] as ChronoEntry[])),
-      ),
-    }).subscribe(({ mems, chrono }) => {
-      this.nodeMemories.set(mems.facts);
-      this.nodeChrono.set(chrono);
-    });
+    linkedToNode(this.brainApi, spaceId, entityId).subscribe(linked => this.showLinked(linked));
   }
 
   openEntityPopup(node: TraverseNode): void {
@@ -843,24 +759,12 @@ export class GraphComponent implements OnInit, AfterViewInit, OnDestroy {
     }
 
     // Load memories/chronos linked to BOTH endpoints
-    forkJoin({
-      mems: this.brainApi.listFacts(spaceId, 100, 0, { entity: te.from }).pipe(
-        catchError(() => of({ facts: [] as Fact[] })),
-      ),
-      chrono: this.brainApi.chronoLinkedTo(spaceId, te.from).pipe(
-        catchError(() => of([] as ChronoEntry[])),
-      ),
-    }).subscribe(({ mems, chrono }) => {
-      // filter to those also referencing te.to
-      const filteredMems = mems.facts.filter(m =>
-        Array.isArray(m.linkEntities) && m.linkEntities.includes(te.to)
-      );
-      const filteredChrono = chrono.filter(c =>
-        Array.isArray(c.linkEntities) && c.linkEntities.includes(te.from) && c.linkEntities.includes(te.to)
-      );
-      this.nodeMemories.set(filteredMems);
-      this.nodeChrono.set(filteredChrono);
-    });
+    linkedToEdge(this.brainApi, spaceId, te.from, te.to).subscribe(linked => this.showLinked(linked));
+  }
+
+  private showLinked({ facts, chrono }: LinkedRecords): void {
+    this.nodeMemories.set(facts);
+    this.nodeChrono.set(chrono);
   }
 
   // Takes only what it reads. The template used to build seven-field DetailRow literals at four call
