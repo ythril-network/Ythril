@@ -35,11 +35,12 @@
  */
 import type { TokenRights } from '../config/rights-shape.js';
 import { isInstanceAdmin } from './instance-admin.js';
-import { holdsRung } from './reachable-spaces.js';
+import { holdsRung, holdsRungOnEvery } from './reachable-spaces.js';
 import { effectiveRung } from './mint-cap.js';
 import { mayLeaveNetwork, type LeaveVerdict } from './network-membership.js';
 import { administers } from './mint-cap.js';
 import { administersAnySpace } from './editor-scope.js';
+import { mayCreateSpaces, CREATE_SPACES_PHRASE } from './create-spaces.js';
 
 type Caller = Parameters<typeof isInstanceAdmin>[0] & { id?: string; rights?: TokenRights };
 
@@ -85,7 +86,10 @@ export function networkLeaveRefusal(
 /** Does this token hold `needs` on networks for EVERY space `net` carries? Instance admin always does. */
 function holdsOnEvery(caller: Caller, net: { spaces: string[] }, needs: 'read' | 'write' | 'admin'): boolean {
   if (isInstanceAdmin(caller)) return true;
-  return !!caller.rights && net.spaces.every(s => holdsRung(caller.rights!, s, 'networks', needs));
+  // A network carrying no spaces is held by any token with a matrix — the answer this always gave, stated here
+  // because the shared predicate refuses an empty list.
+  if (net.spaces.length === 0) return !!caller.rights;
+  return holdsRungOnEvery(caller.rights, net.spaces, 'networks', needs);
 }
 
 /** The networks this token may see: `networks: read` on every space each carries. One filter for both doors. */
@@ -113,11 +117,11 @@ export function networkJoinRefusal(caller: Caller, spaces: { existing: string[];
   const reasons: string[] = [];
   if (short.length) reasons.push(`'write' on networks, or administering the space, is short on: ${short.join(', ')}`);
   if (spaces.toCreate.length) {
-    if (!rights?.createSpaces) reasons.push(`the join would create ${spaces.toCreate.join(', ')}, and this token may not create spaces (createSpaces)`);
+    if (!mayCreateSpaces(caller)) reasons.push(`the join would create ${spaces.toCreate.join(', ')}, and ${CREATE_SPACES_PHRASE}`);
     else if (!administersAnySpace(caller)) {
       // A space admin that may create spaces joins onto new ones (`F-37`); anyone else needs the floor, because a
       // space the join creates has no row yet and the floor is the only rung it can hold.
-      const noFloor = spaces.toCreate.filter(s => !holdsRung(rights, s, 'networks', 'write'));
+      const noFloor = spaces.toCreate.filter(s => !rights || !holdsRung(rights, s, 'networks', 'write'));
       if (noFloor.length) reasons.push(`the join would create ${noFloor.join(', ')}, which needs a floor of 'write' on networks — a new space has no row`);
     }
   }

@@ -141,8 +141,11 @@ export interface GraphNode {
    * `paths[0]` is the route it is nested under. `paths[0].length - 1` is the hop count.
    */
   paths: string[][];
-  /** True when this node has more routes than were recorded. */
-  pathsTruncated?: boolean;
+  /*
+   * `pathsTruncated` was here: true when a node had more routes than were recorded. It is gone (Q-126) — a row
+   * holding such a node is not returned at all (`row-graphs.ts`, reason `paths`), so on every row that IS
+   * returned `paths` is complete and the flag could only ever be absent.
+   */
   /** Nodes reached FROM this one. Absent rather than empty when it is a leaf, so depth reads as a tree. */
   _graph?: GraphNode[];
 }
@@ -187,7 +190,7 @@ export function mapGraphNodes<T>(
    * they are usually the bulk of what a projection is being asked to remove.
    */
   projection?: NormalisedProjection,
-): { edges: GraphHopEdge[]; node: T; paths: string[][]; pathsTruncated?: boolean; _graph?: unknown[] }[] | undefined {
+): { edges: GraphHopEdge[]; node: T; paths: string[][]; _graph?: unknown[] }[] | undefined {
   if (!nodes) return undefined;
   return nodes.map(n => {
     const children = mapGraphNodes(n._graph, shapeNode, includeDiagnostics, projection);
@@ -207,7 +210,6 @@ export function mapGraphNodes<T>(
         return (projection ? applyProjection(shaped, projection) : shaped) as T;
       })(),
       paths: n.paths,
-      ...(n.pathsTruncated ? { pathsTruncated: true } : {}),
       ...(children ? { _graph: children } : {}),
     };
   });
@@ -237,8 +239,8 @@ export function nestNeighbours(flat: SeedTraverseNeighbor[], seedIds: string[]):
   const byParent = new Map<string, GraphNode[]>();
   const nodeFor = new Map<string, GraphNode>();
 
-  // Shallowest first, so a parent always exists before the child that hangs off it. `traverseRecallSeeds`
-  // already sorts by hops, but this function is also called with hand-built lists and must not depend on that.
+  // Shallowest first, so a parent always exists before the child that hangs off it. The walk emits hop order,
+  // but this function is also called with hand-built lists and must not depend on that.
   const ordered = [...flat].sort((a, b) => a.hops - b.hops);
 
   for (const n of ordered) {
@@ -246,7 +248,6 @@ export function nestNeighbours(flat: SeedTraverseNeighbor[], seedIds: string[]):
       edges: n.edges,
       node: n.record,
       paths: [n.idPath, ...n.altPaths],
-      ...(n.altPathsTruncated ? { pathsTruncated: true } : {}),
     };
     nodeFor.set(n._id, gn);
     const siblings = byParent.get(n.parentId) ?? [];
@@ -254,9 +255,9 @@ export function nestNeighbours(flat: SeedTraverseNeighbor[], seedIds: string[]):
     byParent.set(n.parentId, siblings);
   }
 
-  // Attach children to their parents. A child whose parent was dropped by the node limit is attached to the
-  // seed its route starts from instead of being discarded: its `paths` still state the real route, so the
-  // relationship stays true, and dropping it would make the limit delete a node the caller never asked about.
+  // Attach children to their parents. A child whose parent is not in the list is attached to the seed its route
+  // starts from instead of being discarded: its `paths` still state the real route. Since Q-126 a walked row is
+  // never cut, so this no longer happens on the recall path; it holds for hand-built lists, and costs nothing.
   const seedSet = new Set(seedIds);
   for (const [parentId, children] of byParent) {
     if (seedSet.has(parentId)) continue;

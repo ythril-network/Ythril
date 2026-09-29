@@ -31,6 +31,7 @@ import { getConfig, saveConfig } from '../config/loader.js';
 import type { NetworkConfig, VoteRound } from '../config/types.js';
 import { makeSignedOwnCast } from '../util/signing.js';
 import { openRoundHere } from '../networks/round-local-state.js';
+import { localToRemote } from '../sync/space-map.js';
 
 /** The verdict: wipe now, or a round was opened on each network holding the space. */
 export type WipePlan =
@@ -87,6 +88,8 @@ export function planSpaceWipe(spaceId: string, types?: readonly string[]): WipeP
       openedAt: now,
       votes: [],
       spaceId,
+      // The network's id for it (Q-133): a member that calls the space something else resolves this one.
+      networkSpaceId: localToRemote(net, spaceId),
       // Omitted rather than defaulted when the caller wants everything: an absent `wipeTypes` means every
       // brain collection at conclusion, which is the same meaning it has on the request. It said "all
       // five" and `WIPE_COLLECTION_TYPES` is `BRAIN_COLLECTIONS` — six, with `links` the one left out.

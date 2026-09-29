@@ -89,6 +89,27 @@ export function syncScheduleRefusal(schedule: unknown): string | null {
     + 'minutes or "0 * * * *" for hourly — or leave it empty for manual sync only.';
 }
 
+/**
+ * What a network joined without a stated schedule syncs on when the inviter offers none it could use (`Q-137`).
+ * Every fifteen minutes: the cadence the onboarding promised and the creating side runs. Not manual — a joined
+ * network on manual never pulls, so a subscriber would depend on its publisher pushing everything.
+ */
+export const DEFAULT_JOIN_SYNC_SCHEDULE = '*/15 * * * *';
+
+/**
+ * The schedule a joined network syncs on — decided in ONE place for both join doors (`Q-137`).
+ *
+ * `stated` is the caller's, already refused at the door if unrunnable, and wins — including `''`, which is manual on
+ * purpose. Otherwise the inviter's offer is adopted when it is a schedule this door would accept, and anything else
+ * (absent, empty, not a string, not cron, a retired shorthand) gives the default: an offer is another instance's
+ * value, so it is validated here rather than stored as it came.
+ */
+export function joinedSyncSchedule(stated: string | undefined, offered: unknown): string {
+  if (stated !== undefined) return stated.trim();
+  if (typeof offered === 'string' && offered.trim() && syncScheduleRefusal(offered) === null) return offered.trim();
+  return DEFAULT_JOIN_SYNC_SCHEDULE;
+}
+
 /** One network's stored schedule that cannot be translated and cannot be run. */
 export interface UnrunnableSchedule {
   networkId: string;

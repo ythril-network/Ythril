@@ -25,6 +25,7 @@ import type { TokenRights } from '../config/rights-shape.js';
 // lives in its own module because `mcp/oauth.ts` needs it too, and this file already imports from there.
 export { isInstanceAdmin } from './instance-admin.js';
 import { isInstanceAdmin } from './instance-admin.js';
+import { createSpacesRefusal } from './create-spaces.js';
 
 // Augment Express Request type
 declare global {
@@ -921,6 +922,30 @@ export async function requireAuthMfa(req: Request, res: Response, next: NextFunc
   if (!auth) return;
   const { record, bearer } = auth;
 
+  if (!enforceMfa(req, res, bearer, record)) return;
+
+  attachToken(req, res, next, record, bearer);
+}
+
+/**
+ * Creating a space: the createSpaces right or instance admin, then the second factor (`Q-134`).
+ *
+ * `requireAdminMfa` with the admin check replaced by `createSpacesRefusal` — the predicate `save_space` and a network
+ * join ask, so the three doors cannot disagree. It is also the route's write guard: `denyReadOnly` asks whether the
+ * token can write in some EXISTING space, and a token whose only right is to create one holds none, which is exactly
+ * the token this exists for. Holding `createSpaces` is the write question for this route; a legacy read-only token
+ * never holds it (the rights migration maps it from `admin`).
+ */
+export async function requireCreateSpacesMfa(req: Request, res: Response, next: NextFunction): Promise<void> {
+  const auth = await resolveAuthOrFail(req, res, {});
+  if (!auth) return;
+  const { record, bearer } = auth;
+
+  const refusal = createSpacesRefusal(record);
+  if (refusal) {
+    res.status(403).json({ error: refusal });
+    return;
+  }
   if (!enforceMfa(req, res, bearer, record)) return;
 
   attachToken(req, res, next, record, bearer);

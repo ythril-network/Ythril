@@ -77,7 +77,7 @@ describe('the traverse object schema accepts what the parser accepts', () => {
 
   it('the object branch still refuses an unknown key', () => {
     // The other direction. Declaring the flags by opening the schema up would let `limit` through — which is
-    // deliberately not accepted, because in a recall the node cap comes from topK and the byte budget.
+    // deliberately not accepted, because in a recall the walk is bounded per match by the instance and the answer by the byte budget.
     for (const tool of TOOLS) {
       assert.equal(traverseObjectBranch(tool).additionalProperties, false,
         `${tool.name} would accept any key inside traverse, including the ones the parser exists to refuse`);

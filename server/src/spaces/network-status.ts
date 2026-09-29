@@ -1,4 +1,5 @@
 import type { NetworkConfig } from '../config/types.js';
+import { roundSpaceLocalId } from '../sync/space-map.js';
 
 export interface SpaceNetworkInfo {
   networks: { id: string; label: string; type: NetworkConfig['type'] }[];
@@ -50,7 +51,9 @@ export function spaceNetworkInfo(
   const awaitingMyVote = nets.some(n =>
     n.pendingRounds.some(r =>
       !r.concluded &&
-      (!r.spaceId || r.spaceId === spaceId) &&
+      // Resolved to THIS instance's name for the space (Q-133): a round names it by the network's id, or by its
+      // proposer's local id, and neither is this instance's name once the two differ.
+      (!r.spaceId || roundSpaceLocalId(n, r) === spaceId) &&
       // eligible: braintree rounds restrict to requiredVoters; others are open to all members
       (!r.requiredVoters || r.requiredVoters.includes(myInstanceId)) &&
       // not yet cast by us

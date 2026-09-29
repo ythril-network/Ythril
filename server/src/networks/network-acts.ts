@@ -37,9 +37,10 @@ import { log } from '../util/log.js';
 import { networkRole } from './network-role.js';
 import { addSpacesToNetwork, widenPeerTokens } from './network-spaces.js';
 import { concludeRoundIfReady } from '../sync/governance.js';
-import { localToRemote, remoteToLocal } from '../sync/space-map.js';
+import { localToRemote, remoteToLocal, spaceNameInUseRefusal, reverseSpaceMap, recordSpaceAlias } from '../sync/space-map.js';
 import { makeSignedOwnCast } from '../util/signing.js';
 import { openRoundHere } from './round-local-state.js';
+import type { NetworkRefusalCode } from './refusal-codes.js';
 
 type Caller = Parameters<typeof visibleNetworks>[0] & { id?: string };
 
@@ -47,7 +48,12 @@ type Caller = Parameters<typeof visibleNetworks>[0] & { id?: string };
 export type NetworkActResult =
   | { status: 200 | 201 | 202; body: Record<string, unknown> }
   | { status: 204; body?: undefined }
-  | { status: 400 | 403 | 404 | 409 | 410 | 500 | 502; error: string }
+  /**
+   * `code`, when present, is the machine name of the refusal a client translates by (`NETWORK_REFUSAL_CODES`). It
+   * is additive: the sentence in `error` is unchanged, and both doors carry it — REST in the body, MCP in its
+   * structured content.
+   */
+  | { status: 400 | 403 | 404 | 409 | 410 | 500 | 502; error: string; code?: NetworkRefusalCode }
   /**
    * What ANOTHER instance answered, relayed as it came: a join's apply or finalize refused by the inviter. REST
    * sends `upstream` verbatim, as it always has; MCP reads `error` — the inviter's own sentence when it gave one.
@@ -223,6 +229,10 @@ export function addNetworkSpaceAct(caller: Caller, id: string, input: unknown): 
   }
   if (!cfg.spaces.some(s => s.id === spaceId)) return { status: 400, error: `Unknown space: ${spaceId}` };
   if (net.spaces.includes(spaceId)) return { status: 409, error: `The network already carries '${spaceId}'.` };
+  // Q-133: after a rename the network still calls the renamed space by its old name. A new space under that name
+  // would be announced twice and every peer request for it sent to the renamed one — it would never reach anybody.
+  const inUse = spaceNameInUseRefusal([net], spaceId);
+  if (inUse) return { status: 409, error: inUse, code: 'space_name_in_use' };
   const networkSpaceId = localToRemote(net, spaceId);
   if (net.pendingRounds.some(r => r.type === 'space_addition' && !r.concluded && r.spaceId === networkSpaceId)) {
     return { status: 409, error: `A vote to add '${spaceId}' to this network is already open.` };
@@ -317,13 +327,31 @@ export async function resolvePendingSpaceAct(caller: Caller, id: string, input: 
   }
 
   const localId = mapTo ?? entry.localId;
-  if (net.spaces.includes(localId)) return { status: 409, error: `The network already carries '${localId}' here.` };
+  if (net.spaces.includes(localId)) {
+    /*
+     * The operator's repair (Q-133): the network's space IS one this instance already carries, under a name the
+     * network does not use — a member that joined before 5.5.3 got a renamed space's current name with no alias, and
+     * the network then proposed its old name as a new space. Accepting it ONTO the carried space records the alias
+     * instead of creating a second space. Only an explicit `mapTo`, only onto a space with no network id of its own,
+     * and with the same right the accept needs; anything else is still "already carried".
+     */
+    const repairable = mapTo !== undefined && reverseSpaceMap(net).get(localId) === undefined;
+    if (!repairable) return { status: 409, error: `The network already carries '${localId}' here.` };
+    const refusal = networkJoinRefusal(caller, { existing: [localId], toCreate: [] });
+    if (refusal) return { status: 403, error: refusal };
+    const why = recordSpaceAlias(net, spaceId, localId);
+    if (why) return { status: 409, error: why };
+    dropPending();
+    saveConfig(cfg);
+    log.info(`Network ${net.id}: the network's '${spaceId}' now reaches the carried space '${localId}' (pending space accepted onto it)`);
+    return { status: 200, body: networkView(net), audit: { before, after: pendingSnapshot(net) } };
+  }
   const exists = cfg.spaces.some(s => s.id === localId);
   const refusal = networkJoinRefusal(caller, exists ? { existing: [localId], toCreate: [] } : { existing: [], toCreate: [localId] });
   if (refusal) return { status: 403, error: refusal };
   dropPending();
   saveConfig(cfg);
-  const added = await addSpacesToNetwork(net.id, [{ networkId: spaceId, localId }], `pending space accepted by ${caller.id ?? 'an instance admin'}`);
+  const added = await addSpacesToNetwork(net.id, [{ networkId: spaceId, localId }], `pending space accepted by ${caller.id ?? 'an instance admin'}`, { tokenId: caller.id ?? null });
   const after = getConfig();
   const netAfter = after.networks.find(n => n.id === id);
   if (!netAfter || !added.includes(localId)) {

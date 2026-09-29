@@ -84,7 +84,7 @@ same measurement. It previously returned counts only while `help()` told callers
 
 ### Create a Space
 
-**Admin only** — `POST /api/spaces` requires an admin token (and a valid `X-TOTP-Code` when MFA is enabled); it is `requireAdminMfa`-gated. A non-admin token gets `403`.
+**The `createSpaces` right** — `POST /api/spaces` needs a token holding `createSpaces` (or instance admin), and a valid `X-TOTP-Code` when MFA applies to it. It is the same predicate `save_space` and a network join ask, and the same `403` sentence on both doors: `This token may not create spaces: creating one needs the createSpaces right, or instance admin.` **The token that creates a space administers it**: the space is added to its `rights.spaceAdmin.spaces` in the same write, unless it already administers the space, and the grant is audited as `token.creator_grant`. An OIDC session has no stored rights to add it to, so its identity mapping decides what it reaches. **Changed in 5.5.3**: this route used to require instance admin.
 
 ```http
 POST /api/spaces
@@ -196,11 +196,17 @@ Authorization: Bearer <admin-token>
 
 `newId` must be lowercase alphanumeric + hyphens, 1-40 chars (`/^[a-z0-9-]+$/`).
 
+Instance admin, or a token administering the space (`spaceAdmin`), with `X-TOTP-Code` when MFA applies. MCP:
+`space_rename` with `{ "space", "newId" }` — the same caller, answer and refusals.
+
 The rename atomically:
 
 - Moves all MongoDB collections (facts, entities, edges, chrono, tombstones, files, etc.) to the new prefix.
 - Moves the file directory from `/data/files/{old}` to `/data/files/{new}`.
-- Updates all network `spaces[]` arrays and adds a `spaceMap` entry so peers continue syncing.
+- Updates all network `spaces[]` arrays and records the old id in each network's `spaceMap`, so the space
+  keeps crossing the wire under the id the network knows it by. A space that was already mapped keeps its
+  network id as the first key and gains the old local id as an inbound alias — kept for members that joined
+  under that name. Renaming a space back to its network id removes the mapping instead.
 - Moves every token's rights for the space to the new ID: its `rights.perSpace` row, and its entry in
   `rights.spaceAdmin.spaces` when the token administers the space by name.
 
@@ -215,6 +221,7 @@ The rename atomically:
 | `400`  | Invalid `newId` format, or trying to rename a built-in space (e.g. `general`) |
 | `404`  | Source space does not exist |
 | `409`  | `newId` already exists |
+| `409`  | `code: "space_name_in_use"` — another space already syncs under `newId` in one of this instance's networks; nothing is moved. Pick another name |
 | `500`  | Partial rename failure (collections may be in an inconsistent state) |
 
 ---

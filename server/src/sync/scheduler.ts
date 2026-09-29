@@ -35,6 +35,11 @@ const _armed = armedSchedules();
  */
 export function startSyncScheduler(): void {
   const cfg = getConfig();
+  // A reload that no longer lists a network stops its task (`Q-144`); the survivors keep their phase, below.
+  const listed = new Set(cfg.networks.map(n => n.id));
+  for (const id of [..._scheduledTasks.keys()]) {
+    if (!listed.has(id)) stopScheduledSync(id);
+  }
   for (const net of cfg.networks) {
     scheduleSyncForNetwork(net.id, net.syncSchedule);
   }
@@ -68,8 +73,7 @@ export function scheduleSyncForNetwork(networkId: string, schedule?: string): vo
    */
   if (cronExpr && _armed.isArmed(networkId, cronExpr) && _scheduledTasks.has(networkId)) return;
 
-  const old = _scheduledTasks.get(networkId);
-  if (old) { old.stop(); _scheduledTasks.delete(networkId); _armed.forget(networkId); }
+  stopScheduledSync(networkId);
 
   if (!schedule) return;
 
@@ -78,13 +82,42 @@ export function scheduleSyncForNetwork(networkId: string, schedule?: string): vo
     return;
   }
 
-  const task = cronSchedule(cronExpr, () => {
-    runSyncForNetwork(networkId).catch(err =>
-      log.error(`Scheduled sync failed for network ${networkId}: ${err}`),
-    );
-  });
+  const task = cronSchedule(cronExpr, () => { void runScheduledSync(networkId); });
 
   _scheduledTasks.set(networkId, task);
   _armed.note(networkId, cronExpr);
   log.info(`Sync scheduled for network ${networkId} (cron: "${cronExpr}")`);
+}
+
+/**
+ * One scheduled tick: sync the network, or — when it is no longer configured — stop its own task (`Q-144`).
+ *
+ * The check lives HERE, in the tick, so no path that removes a network has to remember to unschedule it. Leaving,
+ * deleting, being ejected and a reload that drops it all removed the network and none stopped its task, so every one
+ * kept firing and logged `Network <id> not found` at ERROR each tick. `Q-137` arms a schedule on every join, which
+ * made that every network an instance has ever left. A network that is gone is not a failed sync.
+ */
+export async function runScheduledSync(networkId: string): Promise<void> {
+  if (!getConfig().networks.some(n => n.id === networkId)) {
+    stopScheduledSync(networkId);
+    log.info(`Sync schedule for network ${networkId} stopped: the network is no longer configured`);
+    return;
+  }
+  await runSyncForNetwork(networkId).catch(err =>
+    log.error(`Scheduled sync failed for network ${networkId}: ${err}`),
+  );
+}
+
+/** Stop one network's task and forget what it had armed, so a later schedule re-arms rather than skipping. */
+function stopScheduledSync(networkId: string): void {
+  const task = _scheduledTasks.get(networkId);
+  if (!task) return;
+  task.stop();
+  _scheduledTasks.delete(networkId);
+  _armed.forget(networkId);
+}
+
+/** The networks with an armed schedule — for tests; nothing decides anything from it. */
+export function scheduledSyncNetworks(): string[] {
+  return [..._scheduledTasks.keys()];
 }

@@ -23,6 +23,7 @@
  * silently showing six with no explanation is what would mislead.
  */
 import type { RecallResult } from '../../core/api.types';
+import { recordOf } from './recall-hits';
 
 /** The file-specific fields the server sends on a recall hit. `RecallResult` is index-signature typed, so
  *  these are narrowed here rather than being assumed at every use site. */
@@ -72,9 +73,9 @@ const str = (v: unknown): string | undefined => (typeof v === 'string' && v.trim
  *
  * **It does NOT fall back to the hit itself.** A tolerant reader would keep working against either shape
  * and hide the day the server stops sending one — which is how a client ends up quietly rendering nothing.
+ * It now lives in `recall-hits.ts` and throws on a hit without a record (`Q-87`): the four consumers that did not
+ * use it rendered exactly that nothing.
  */
-const recordOf = (r: RecallResult): Record<string, unknown> =>
-  (r['record'] ?? {}) as Record<string, unknown>;
 
 /**
  * The key a file hit groups under: its parent document when it is a chunk, otherwise itself.
@@ -190,7 +191,8 @@ export function passageText(r: RecallResult): string | undefined {
  */
 /** One traversed neighbour, kept as the whole record with what placed it in the graph. */
 export interface RelatedRecord {
-  record: RecallResult;
+  /** A traversed NODE is a record itself, not a hit — it has no envelope around it. */
+  record: Record<string, unknown>;
   kind: string;
   hops: number;
   label?: string;
@@ -231,12 +233,15 @@ export function relatedOf(match: RecallResult): RelatedGroups {
       const node = entry['node'];
       if (node === null || typeof node !== 'object' || Array.isArray(node)) continue;
       const rec = node as Record<string, unknown>;
-      const edge = (entry['edge'] ?? {}) as Record<string, unknown>;
+      // The server sends `edges` — every edge that reached this node — not one `edge` (Q-87); the first is the
+      // one the label shows. Reading the singular field showed no label on any traversed neighbour.
+      const edges = Array.isArray(entry['edges']) ? (entry['edges'] as unknown[]) : [];
+      const edge = (edges[0] && typeof edges[0] === 'object' ? edges[0] : {}) as Record<string, unknown>;
       const paths = Array.isArray(entry['paths']) ? (entry['paths'] as unknown[]) : [];
       const primary = Array.isArray(paths[0]) ? (paths[0] as unknown[]) : [];
       const kind = typeof rec['kind'] === 'string' ? (rec['kind'] as string) : 'entity';
       const item: RelatedRecord = {
-        record: rec as RecallResult,
+        record: rec,
         kind,
         hops: Math.max(1, primary.length - 1),
         ...(typeof edge['label'] === 'string' ? { label: edge['label'] as string } : {}),
@@ -250,7 +255,7 @@ export function relatedOf(match: RecallResult): RelatedGroups {
       walk(rec['_graph'] ?? entry['_graph']);
     }
   };
-  walk((match as Record<string, unknown>)['_graph']);
+  walk(match._graph);
   return out;
 }
 

@@ -110,6 +110,7 @@ export const HELP_DOCS = [
       'decisions/01-pdfium-not-pymupdf.md',
       'decisions/02-two-layer-ssrf-defence.md',
       'decisions/03-no-runtime-model-downloads.md',
+      'decisions/04-a-result-row-is-whole-or-absent.md',
     ],
   },
   { id: 'workstation-mode-guide', file: 'workstation-mode-guide.md' },

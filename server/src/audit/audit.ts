@@ -10,6 +10,7 @@
 
 import { v4 as uuidv4 } from 'uuid';
 import { getDb } from '../db/mongo.js';
+import { ensureExpiryIndex } from '../db/expiry-index.js';
 import { getConfig } from '../config/loader.js';
 import { log } from '../util/log.js';
 import type { AuditLogEntry } from './entry.js';
@@ -55,25 +56,9 @@ export async function initAuditCollection(): Promise<void> {
   // Drop legacy string-based TTL index if present (it had no effect).
   try { await c.dropIndex('ttl_timestamp'); } catch { /* not present */ }
 
-  // Ensure TTL index with expireAfterSeconds: 0.  Use collMod to update
-  // the value in-place if the index already exists with a different value,
-  // avoiding the noisy drop-and-recreate pattern.
-  try {
-    await c.createIndex(
-      { _expireAt: 1 },
-      { expireAfterSeconds: 0, name: 'ttl_expireAt' },
-    );
-  } catch {
-    // Index already exists with a different expireAfterSeconds — update in-place.
-    try {
-      await db.command({
-        collMod: COLLECTION,
-        index: { name: 'ttl_expireAt', expireAfterSeconds: 0 },
-      });
-    } catch (err) {
-      log.warn(`Could not update audit TTL index: ${err}`);
-    }
-  }
+  // Ensure TTL index with expireAfterSeconds: 0, corrected in place (collMod) when one exists with another
+  // value rather than dropped and recreated — see `db/expiry-index.ts`.
+  await ensureExpiryIndex(COLLECTION, '_expireAt', 0, 'ttl_expireAt');
 
   // Query indexes
   await c.createIndex({ tokenId: 1, timestamp: -1 });

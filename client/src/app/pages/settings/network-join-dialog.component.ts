@@ -1,8 +1,9 @@
-import { Component, inject, signal, input, output } from '@angular/core';
+import { Component, ElementRef, inject, signal, input, output } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Space } from '../../core/api.types';
 import { decodeInviteCode, looksLikeInviteCode } from '../../core/invite-code';
+import { refusalText } from '../../core/refusal-text';
 import { NetworksApi } from '../../core/networks-api.service';
 import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
 import { PhIconComponent } from '../../shared/ph-icon.component';
@@ -59,7 +60,8 @@ import { ModalDirective } from '../../shared/modal.directive';
           <button class="icon-btn" [attr.aria-label]="'common.close' | transloco" (click)="close.emit()"><ph-icon name="x" [size]="14"/></button>
         </div>
 
-        @if (joinError()) { <div class="alert alert-error">{{ joinError() }}</div> }
+        <!-- role=alert: a refusal is announced, not only painted — a screen-reader user otherwise hears nothing (Q-133). -->
+        @if (joinError()) { <div class="alert alert-error" role="alert" id="join-error">{{ joinError() }}</div> }
         @if (joinSuccess()) { <div class="alert alert-success">{{ joinSuccess() }}</div> }
 
         <div class="field">
@@ -93,10 +95,13 @@ import { ModalDirective } from '../../shared/modal.directive';
               <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px; flex-wrap:wrap;">
                 <span class="badge badge-gray mono" style="min-width:80px;">{{ remoteId }}</span>
                 <select
+                  class="join-target"
                   [ngModel]="joinSpaceActions[remoteId]"
                   (ngModelChange)="onCollisionActionChange(remoteId, $event)"
                   [name]="'target-' + remoteId"
                   [attr.aria-label]="'networks.dialog.join.mapping.targetAriaLabel' | transloco: { remoteId }"
+                  [attr.aria-invalid]="collidingRows().includes(remoteId) ? 'true' : null"
+                  [attr.aria-describedby]="collidingRows().includes(remoteId) ? 'join-error' : null"
                   style="width:210px;"
                 >
                   <option value="merge">{{ (existsLocally(remoteId) ? 'networks.dialog.join.mapping.sameMerge' : 'networks.dialog.join.mapping.sameCreate') | transloco: { remoteId } }}</option>
@@ -174,6 +179,9 @@ export class NetworkJoinDialogComponent {
   joinSpaceActions: Record<string, 'merge' | 'alias' | 'mapToExisting'> = {};
   joinSpaceAliases: Record<string, string> = {};
   joinSpaceTargets: Record<string, string> = {};
+  /** The rows the last confirm refused for landing on one local space (Q-133) — marked invalid for assistive tech. */
+  collidingRows = signal<string[]>([]);
+  private host = inject<ElementRef<HTMLElement>>(ElementRef);
   private joinParsedBundle: any = null;
   /** The publisher's base URL, asked for when a pub/sub's published invite key is pasted (F-41). */
   publisherUrl = '';
@@ -240,6 +248,9 @@ export class NetworkJoinDialogComponent {
         this.joinSpaceTargets[id] = '';
       }
       this.joinMapSpaces.set(bundle.spaces as string[]);
+      // The rows appear after the paste: focus goes to the first, or a keyboard user is left on a button that now
+      // means something else.
+      setTimeout(() => this.host.nativeElement.querySelector<HTMLSelectElement>('select.join-target')?.focus());
       return; // wait for the operator to confirm the targets
     }
 
@@ -283,7 +294,35 @@ export class NetworkJoinDialogComponent {
         return;
       }
     }
+    // The server's rule, checked here first (Q-133): two of the network's spaces landing on one local space would
+    // sync both into it. Refused inline, on the rows that collide, rather than as a raw refusal after the handshake.
+    const landing = new Map<string, string[]>();
+    for (const remoteId of this.joinMapSpaces()) {
+      const local = this.targetOf(remoteId);
+      landing.set(local, [...(landing.get(local) ?? []), remoteId]);
+    }
+    const colliding = [...landing.values()].find(rows => rows.length > 1);
+    if (colliding) {
+      this.collidingRows.set(colliding);
+      this.joinError.set(this.transloco.translate('networks.dialog.join.error.sameTarget', { spaces: this.list(colliding) }));
+      return;
+    }
+    this.collidingRows.set([]);
     this.executeJoin();
+  }
+
+  /** The local space a row lands on, as the operator set it. */
+  private targetOf(remoteId: string): string {
+    const action = this.joinSpaceActions[remoteId];
+    if (action === 'alias') return this.joinSpaceAliases[remoteId]?.trim() ?? remoteId;
+    if (action === 'mapToExisting') return this.joinSpaceTargets[remoteId] ?? remoteId;
+    return remoteId;
+  }
+
+  /** A list in the reader's language, not joined with a hard-coded comma. */
+  private list(items: string[]): string {
+    try { return new Intl.ListFormat(this.transloco.getActiveLang(), { type: 'conjunction' }).format(items); }
+    catch { return items.join(', '); }
   }
 
   private executeJoin(): void {
@@ -321,14 +360,21 @@ export class NetworkJoinDialogComponent {
       : 'networks.dialog.join.success.joined';
     let msg = this.transloco.translate(successKey, { networkLabel: result.networkLabel });
     if (result.createdSpaces?.length) {
-      msg += ` ${this.transloco.translate('networks.dialog.join.success.createdSpaces', { spaces: result.createdSpaces.join(', ') })}`;
+      msg += ` ${this.transloco.translate('networks.dialog.join.success.createdSpaces', { spaces: this.list(result.createdSpaces) })}`;
     }
     if (result.existingSpaces?.length) {
-      msg += ` ${this.transloco.translate('networks.dialog.join.success.existingSpaces', { spaces: result.existingSpaces.join(', ') })}`;
+      msg += ` ${this.transloco.translate('networks.dialog.join.success.existingSpaces', { spaces: this.list(result.existingSpaces) })}`;
     }
-    if (result.spaceMap && Object.keys(result.spaceMap).length > 0) {
-      const aliases = Object.entries(result.spaceMap).map(([r, l]) => `${r} → ${l}`).join(', ');
-      msg += ` ${this.transloco.translate('networks.dialog.join.success.aliases', { aliases })}`;
+    // The answer's spaceMap is keyed by the NETWORK's ids since Q-133, which the operator never saw. Each is shown by
+    // the name the invite listed instead, and an entry whose shown name IS its local space (a renamed space joined
+    // under the publisher's current name) is no alias the operator made, so it is not announced as one.
+    const shown = this.shownNames();
+    const pairs = Object.entries(result.spaceMap ?? {})
+      .map(([networkId, local]) => ({ from: shown.get(networkId) ?? networkId, to: local }))
+      .filter(p => p.from !== p.to)
+      .map(p => this.transloco.translate('networks.dialog.join.success.aliasPair', p));
+    if (pairs.length > 0) {
+      msg += ` ${this.transloco.translate('networks.dialog.join.success.aliases', { aliases: this.list(pairs) })}`;
     }
     this.joinSuccess.set(msg);
     this.joinBundle = '';
@@ -340,8 +386,17 @@ export class NetworkJoinDialogComponent {
     this.joined.emit(); // host reloads networks + refreshes spaces (a join can create local spaces)
   }
 
-  private onJoinFailed(err: { error?: { error?: string } }): void {
+  /** Network id -> the name the invite showed for it (`networkSpaces` is index-aligned with `spaces`). */
+  private shownNames(): Map<string, string> {
+    const b = this.joinParsedBundle as { spaces?: unknown; networkSpaces?: unknown } | null;
+    const spaces = Array.isArray(b?.spaces) ? b!.spaces as string[] : [];
+    const ids = Array.isArray(b?.networkSpaces) && b!.networkSpaces.length === spaces.length ? b!.networkSpaces as string[] : spaces;
+    return new Map(ids.map((id, i) => [id, spaces[i]!]));
+  }
+
+  private onJoinFailed(err: { error?: { error?: string; code?: string } }): void {
     this.joining.set(false);
-    this.joinError.set(err.error?.error ?? this.transloco.translate('networks.error.joinFailed'));
+    // A refusal with a known code is shown in the reader's language; an unknown one as the server worded it (Q-133).
+    this.joinError.set(refusalText(this.transloco, err, 'networks.error.joinFailed'));
   }
 }

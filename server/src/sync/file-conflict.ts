@@ -19,6 +19,7 @@
  * its inputs and a test can assert the exact name.
  */
 import path from 'node:path';
+import { spillIdFromPath } from '../brain/spill-path.js';
 
 /** The minimum a manifest entry needs for this decision. */
 export interface ManifestEntry {
@@ -83,12 +84,15 @@ export function decideFilePush(
  *   an open conflict, and replicated it landed on the peer as a copy of the peer's own conflict;
  * - a SCHEMA SNAPSHOT, `schemas/<space>_<entity|fact|edge|chrono>_<type>.json` (`spaces/_shared.ts` syncSchemaFiles):
  *   each instance writes it from its OWN effective meta, so every schema change conflicted on every member.
+ * - a LEGACY READ SPILL, `_tmp/graph-<uuid>.json` / `_tmp/results-<uuid>.json` at the root (`Q-92`): one caller's
+ *   search result, written into the space by versions before 5.5.3. Spills now live outside every space; the copies
+ *   older versions wrote are swept locally, and the ones older peers still offer are refused here.
  * Matched by name, so a copy an older peer still offers is refused on pull as well.
  */
 const CONFLICT_COPY = /_\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z_[A-Za-z0-9_-]{1,20}(\.[^/]*)?$/;
 const SCHEMA_SNAPSHOT = /^schemas\/[a-z0-9][a-z0-9-]*_(entity|fact|edge|chrono)_[A-Za-z0-9_-]+\.json$/;
 export function isInstanceLocalFile(relPath: string): boolean {
-  return CONFLICT_COPY.test(relPath) || SCHEMA_SNAPSHOT.test(relPath);
+  return CONFLICT_COPY.test(relPath) || SCHEMA_SNAPSHOT.test(relPath) || spillIdFromPath(relPath) !== null;
 }
 
 export function safePeerLabel(label: string): string {

@@ -210,8 +210,9 @@ describe('both doors take it, and the REST envelope survives', () => {
 
   it('and MCP needs no such list, because its envelope is already outside `record`', () => {
     // Same rule, two shapes: the projection is applied to `toRecallRecord(...)` there, and `score`/`spaceId`
-    // sit beside it untouched. This asserts the application point rather than the absence of a list.
-    assert.match(mcp, /record: applyProjection\(toRecallRecord\(/,
+    // sit beside it untouched. This asserts the application point rather than the absence of a list. Since Q-90
+    // the record-meta rule wraps it, in the one builder every recall and similar row goes through.
+    assert.match(mcp, /record: stripRecordMeta\(applyProjection\(toRecallRecord\(/,
       'the projection must apply to the record, not to the result envelope');
   });
 });

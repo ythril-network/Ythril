@@ -12,7 +12,7 @@ import { RECORD_TYPES } from '../../config/types.js';
 import { UUID_V4_RE, formatRecallSummary, toRecallRecord, uuidSchema, unitScoreSchema } from './shared.js';
 import { MAX_RECALL_TRAVERSE } from '../../brain/recall-seed-traversal.js';
 import { mapGraphNodes, graphNodeRecord } from '../../brain/recall-graph.js';
-import { stripRecordMeta } from '../../brain/recall-record-meta.js';
+import { stripRecordMeta, stripGraphRecordMeta } from '../../brain/recall-record-meta.js';
 import { applyProjection, normaliseProjection } from '../../brain/projection.js';
 import {
   resolveBudget,
@@ -21,12 +21,14 @@ import {
   type BudgetRequest,
   defaultBudgetChars,
 } from '../../brain/result-budget.js';
-import { buildGraphWithSpill, spillResultSet, countGraphNodes } from '../../brain/graph-spill.js';
+import { spillResultSet } from '../../brain/graph-spill.js';
+import { traversedAnswer } from '../../brain/traversed-answer.js';
+import { deadlineFrom } from '../../brain/search-bounds.js';
 import { parseTraverseOption, traverseOptionSchema, echoTraverse } from '../../brain/traverse-option.js';
 import { type FilterExpression } from '../../brain/filter.js';
 import { resolveRecallFilter, type RawMongoFilter } from '../../brain/recall-filter.js';
 import { observeRecallPath } from '../../brain/recall.js';
-import { type RecallKnowledgeType, type RecallResult, findSimilar, recallGlobal } from '../../brain/recall.js';
+import { type RecallKnowledgeType, type RecallResult, findSimilar, recallGlobal, effectiveBudgetFor, RECALL_BUDGET_MS } from '../../brain/recall.js';
 import { memberSpacesWithin } from '../../spaces/proxy-scoped.js';
 import { NotFoundError } from '../../util/errors.js';
 // The SAME resolver the nine per-collection list routes use — not a second name lookup with its own cap
@@ -89,6 +91,46 @@ export function resolveFindSimilarScope(
   return { candidateBases: accessibleSpaceIds, searchIds: accessibleSpaceIds };
 }
 
+/**
+ * `includeRecordMeta`, declared ONCE for `recall` and `similar` (`Q-90`) — the two tools shape a hit with the same
+ * builder, so they take the flag with the same words and the same default.
+ */
+const INCLUDE_RECORD_META_SCHEMA = {
+  type: 'boolean',
+  default: false,
+  description: 'Add back the two fields that describe where a record SITS rather than what it says: `createdAt` and `updatedAt` (default false, and false is what you want almost always). It applies at every depth: to each match and to every node of its `_graph`. It no longer covers link ids: connections are link records since 5.0, so reach them with `traverse` or a `filter` over the `links` collection. Measured on a real corpus, only 30% of a recall answer was content and most of the rest was this. `createdAt` is the one to be careful of: it is when the RECORD was written, not when the remembered thing happened - that lives in the record\'s own properties, put there by whoever stored it. Turn this on when you need to act on the record\'s place in the store, not to read what it says. REST takes the same parameter with the same default.',
+} as const;
+
+/** How a caller asked hits to be shaped — the four flags every search row honours. */
+interface HitShape {
+  includeFileContent: boolean;
+  includeDiagnostics: boolean;
+  includeRecordMeta: boolean;
+  projection: ReturnType<typeof normaliseProjection>;
+}
+
+/**
+ * One search hit as `recall` and `similar` answer it, plain or traversed — ONE builder for all four branches (`Q-90`).
+ *
+ * The row was written out four times, and the record-meta rule was in one of them: the untraversed recall. So a
+ * traversed recall, and every `similar` answer, carried each record's `createdAt`/`updatedAt` and empty collections
+ * whatever `includeRecordMeta` said, on the match and on every neighbour.
+ */
+function hitRow(r: RecallResult, shape: HitShape, nodes?: Parameters<typeof mapGraphNodes>[0]): Record<string, unknown> {
+  const meta = { includeRecordMeta: shape.includeRecordMeta };
+  const nested = nodes ? mapGraphNodes(nodes, graphNodeRecord, shape.includeDiagnostics, shape.projection) : undefined;
+  return {
+    score: r.score,
+    ...rankingFields(r as unknown as Record<string, unknown>),
+    spaceId: r.spaceId,
+    type: r.type,
+    record: stripRecordMeta(applyProjection(toRecallRecord(r, {
+      includeFileContent: shape.includeFileContent, includeDiagnostics: shape.includeDiagnostics,
+    }), shape.projection), meta),
+    ...(nested ? { _graph: stripGraphRecordMeta(nested, meta) } : {}),
+  };
+}
+
 export const recallTool: ToolHandler = {
   name: 'recall',
   // recall / similar / filter fan out per space already, so a list costs them nothing but the parse.
@@ -100,9 +142,9 @@ export const recallTool: ToolHandler = {
     + '• WHAT THIS DOOR DOES NOT SEND YOU, so you do not go looking for a flag to switch it off: the embedding VECTOR (never returned by anything here, and no parameter can ask for it), `matchedText` (the pre-embedding source string — for a file chunk it is the passage a SECOND time), `embeddingModel` (identical for every record in a space), and `seq` (a sync counter that is not an input to any tool). Withheld on REST too, with the same default, since 3.1.0 — `includeDiagnostics: true` restores them on either door and applies recursively, so a `graph_traverse` answer\'s `_graph` follows it at every depth. Leave it off: each of these is multiplied by `topK` and paid for in your context, and you want them only to answer WHY something ranked where it did. The other size lever is `includeFileContent: false`, which drops file-passage bodies and keeps their locations.\n'
     + '• `count` — the number of MATCHES. Traversed nodes are NOT counted in it.\n'
     + '• `graphNodes` — an integer COUNT of what a traversal reached, not the content. The content is nested per-result under `_graph`, and a result with no edges simply has no `_graph` at all: reading `results[0]` and concluding the feature is absent is the mistake to avoid.\n'
-    + '• THE SIZE ANSWER, and it is a slope now rather than a cliff. `returned`, `count`, `truncated`, `budgetChars`, `budgetBytes`, `charsReturned` and `bytesReturned` are on EVERY response, so you never have to interpret an absence (`budgetBytes` is null unless you asked for a byte ceiling). `results` is a PREFIX of the ranked matches that fits BOTH ceilings you set, and every record in it is WHOLE — full body, full properties, its complete `_graph`, byte-identical to that record from an unbudgeted call. A match is counted together with its whole `_graph` subtree, so a deeper or wider traversal means fewer matches fit — they are absent, not shortened. When `truncated` is true, `nextSkip` says where to continue from — send it back as `skip` for the next prefix. The matches that did not fit are also written to the space as a JSON file (authenticated download, valid one day) and reported as `remainder`, but ONLY if you ask with `remainderDump: true`.\n'
+    + '• THE SIZE ANSWER, and it is a slope now rather than a cliff. `returned`, `count`, `truncated`, `budgetChars`, `budgetBytes`, `charsReturned` and `bytesReturned` are on EVERY response, so you never have to interpret an absence (`budgetBytes` is null unless you asked for a byte ceiling). `results` is a PREFIX of the ranked matches that fits BOTH ceilings you set, and every record in it is WHOLE — full body, full properties, its complete `_graph`, byte-identical to that record from an unbudgeted call. A match is counted together with its whole `_graph` subtree, so a deeper or wider traversal means fewer matches fit — they are absent, not shortened. When `truncated` is true, `nextSkip` says where to continue from — send it back as `skip` for the next prefix. The matches that did not fit are also kept as a SPILL and reported as `remainder` (`spillId`, `download`, `expiresAt`), but ONLY if you ask with `remainderDump: true`: readable with `read_spill` by your token alone, for up to one day (your own newer spills may evict it sooner), and never written into any space. A spill that cannot be kept says why in `spillRefused`, and `nextSkip` still reaches every record.\n'
     + '  Until 3.2.0 this was a record CAP that collapsed a large answer to three inline records plus a download of the whole set — including the three you already had. That roughly doubled what a caller had to read, so most abandoned the remainder. If you have logic keyed on `complete` or on a hard 25, it is `remainder` and a byte budget now.\n'
-    + '• `graphTruncated` + `graphComplete` — the same arrangement for an oversized neighbourhood, so a short graph is never silent either. `graphTruncated` can arrive ALONE: the link scans are bounded per hop, and a hop that spends its budget on already-visited records leaves a graph that is short with no complete copy to write, because the records missing from it were never read.',
+    + '• `incompleteRows`, `incompleteCount` and `graphTruncated` — the same rule for a neighbourhood: a match comes with its WHOLE `_graph` or not at all. One that cannot be walked whole is left out and named (`_id`, `spaceId`, `type`, `name`, `reason`), and `graphTruncated: true` means at least one was. `truncatedBy` says which bound stopped a truncated answer: `budget` (bytes), `walk_budget` or `deadline`.',
   inputSchema: (s: ToolSchemas) => ({
           type: 'object',
           properties: {
@@ -113,9 +155,9 @@ export const recallTool: ToolHandler = {
              * silently while this door accepted anything, so `topK: 500` returned 100 through one and 500
              * through the other. His question settled it: the byte budget already returns whole records
              * and reports truncation, so the answer never needed a cap, and the bound belongs on the WORK
-             * instead — see `MAX_PER_TYPE_CANDIDATES` and `MAX_GRAPH_NODES`.
+             * instead — see `MAX_PER_TYPE_CANDIDATES` and `brain/search-bounds.ts`.
              */
-            topK: { type: 'number', minimum: 1, default: 10, description: 'Max results to return. Default 10, and NO ceiling — the same on both doors since 4.0, where REST used to clamp to 100 silently. What comes back is bounded by the byte budget instead: every record whole, `truncated` on every response, and `nextSkip` when it bit. It is filled from records that SATISFY `filter` — never applied to an already-truncated shortlist — so a filtered recall cannot silently miss a matching record. Large values are slower, and every field of every result is paid for in tokens. Note the response cap, which is BYTES and not a count: the answer is a prefix that fits `maxBytes` (default 25000 on this door), `truncated` says whether it bit, and `nextSkip` is how you continue. So asking for 80 does not return 80 inline — how many it does return depends on how big they are, which is why the old sentence here saying "past roughly 25 results" was wrong from 3.2.0 onward.' },
+            topK: { type: 'number', minimum: 1, default: 10, description: 'Max results to return. Default 10, and NO ceiling — the same on both doors since 4.0, where REST used to clamp to 100 silently. With a `filter`, `topK` is filled from records that SATISFY it — every record that satisfies the filter, whatever its vector rank — so a filtered recall cannot silently miss a matching record; an answer that could not be completed says so in `degraded` (`filter_window`). What comes back is bounded by the answer budget instead: every record whole, `truncated` on every response, and `nextSkip` when it bit. That cap is a size, not a count — the answer is a prefix that fits `maxChars` (default 25000 on this door) — so asking for 80 does not return 80 inline; how many it does return depends on how big they are. Large values are slower, and every field of every result is paid for in tokens.' },
             tags: { type: 'array', items: { type: 'string' }, description: 'Optional tag filter — only results bearing ALL of these tags are returned (applies to facts, entities, chrono entries, and files).' },
             types: {
               type: 'array',
@@ -142,6 +184,14 @@ export const recallTool: ToolHandler = {
               description: 'Optional deadline for this recall, in milliseconds. It can only LOWER the instance budget, never raise it, and is clamped to a small floor so a tiny value is not a guaranteed empty answer. On expiry you get a PARTIAL answer rather than an error or a hang: whichever collections finished are returned, and the response says it degraded. Use it when a slow recall would cost more than a thin one — a fact that can only ever delay you by a known amount is one you can put in a workflow.',
             },
             minScore: unitScoreSchema('Minimum COSINE SIMILARITY (0.0–1.0). It filters on `score` ONLY — never on the fused or the reranked ordering — so it is a vector-side gate rather than a relevance gate, and a result the reranker would have promoted can be cut by it before the reranker sees it.'),
+            rerank: {
+              type: 'boolean',
+              default: true,
+              description: 'Whether the configured cross-encoder re-orders the answer (default true — the reranked answer '
+                + 'is the default and the better ranking). Send false when you are waiting on the answer as a user '
+                + 'types: the rerank can take seconds on a shared model, and the fused order is returned at once. A '
+                + 'skip you asked for is not reported in `degraded`. No effect on an instance with no reranker.',
+            },
             includeFileContent: {
               type: 'boolean',
               default: true,
@@ -157,11 +207,7 @@ export const recallTool: ToolHandler = {
                 + 'The general argument is still true and is why both exist: every field a result carries is '
                 + 'multiplied by topK and paid for in tokens, and passage bodies are by far the largest.',
             },
-            includeRecordMeta: {
-              type: 'boolean',
-              default: false,
-              description: 'Add back the two fields that describe where a record SITS rather than what it says: `createdAt` and `updatedAt` (default false, and false is what you want almost always). It no longer covers link ids: connections are link records since 5.0, so reach them with `traverse` or a `filter` over the `links` collection. Measured on a real corpus, only 30% of a recall answer was content and most of the rest was this. `createdAt` is the one to be careful of: it is when the RECORD was written, not when the remembered thing happened - that lives in the record\'s own properties, put there by whoever stored it. Turn this on when you need to act on the record\'s place in the store, not to read what it says. REST takes the same parameter with the same default.',
-            },
+            includeRecordMeta: INCLUDE_RECORD_META_SCHEMA,
             includeDiagnostics: {
               type: 'boolean',
               default: false,
@@ -193,18 +239,18 @@ export const recallTool: ToolHandler = {
             },
             remainderDump: {
               type: 'boolean',
-              description: 'Also WRITE the matches that did not fit to the space as a JSON file, and report it as `remainder` (default false). Only meaningful when the answer truncates. Leave it off unless you actually want the whole set as one artifact — the file is a write on a read path, it counts against space storage, and paging with `skip`/`nextSkip` reaches the same records without creating one. It used to happen unconditionally on every truncated call, which meant a caller that only wanted the next page paid for a download it never opened.',
+              description: 'Also KEEP the matches that did not fit as a spill, reported as `remainder` with a `spillId` for `read_spill` (default false). Only meaningful when the answer truncates. A spill is readable by your token alone, for up to one day, and is never written into any space; paging with `skip`/`nextSkip` reaches the same records without one. If it cannot be kept, `spillRefused` says why. It used to happen unconditionally on every truncated call, which meant a caller that only wanted the next page paid for a download it never opened.',
             },
             traverse: {
               // A depth, or a whole traversal minus its start node. Built from `TRAVERSE_OPTION_FIELDS` rather
               // than spelled out here — see `traverseOptionSchema`, which exists because these two tools each
               // held their own copy and both were left behind when the parser gained three flags.
               ...traverseOptionSchema(MAX_RECALL_TRAVERSE),
-              description: 'Optional graph expansion depth (integer 0–5, default 0). When > 0, each semantic match is expanded along knowledge-graph edges up to this many hops, and what the walk reached is NESTED under the match that reached it in a `_graph` array: {edges, node, paths} per node, where `edges` holds EVERY edge joining that node to the one it is nested under as whole documents (description and tags included) — one for an ordinary hop, more when two records are joined by more than one relationship and on a node that loops back to itself — `node` is the reached entity, and `paths` is every route to it as record ids, match first — so paths[0] is the nesting route and paths[0].length-1 is the hop count. A nested node carries its own `_graph`, so depth is a tree. `count` stays the number of MATCHES (traversed nodes are not in the ranked list and carry no score); `graphNodes` reports how many were reached. LINKS, since 3.6: a walk follows stored edges always, and the LINKS a fact, chrono entry or file carries naming what it is about only when you ask — `{depth: 2, includeChrono: true, includeMemories: true, includeFiles: true}`, one flag per kind. CHRONO AND FILES DEFAULT FALSE, and facts are the exception: with `includeMemories` unsaid a walk brings the ATTRIBUTED claims of what it reached and no other fact. An attributed claim is one an AI assistant originated rather than a person — it is stored with no vector so nothing can rank it, and this is how it reaches you at all. Say `includeMemories: true` for every linked fact, or `false` for none, attributed included. The rest are off by default because you asked for matches and the answer is budgeted: a match is counted with its whole `_graph` subtree, so every record admitted by default is paid for in matches that no longer fit — which is why the fact default is a narrowing and not the whole class. Turn one on and two things change. A linked node arrives carrying `kind` (chrono|fact|file) and the fields that say what it is — the title and type of a chrono, the fact of a fact, the path/description/tags of a file, NEVER file chunk text. And a NON-ENTITY SEED stops being a dead end: a matched fact has no edges of its own, so the walk starts from the entities its links name, at hop 1. The reaching edge is SYNTHETIC and is the single entry in `edges` — id `<label>:<from>:<to>`, label `chrono.entityIds`/`fact.entityIds`/`file.entityIds` — a frozen token naming the 4.x field these links replaced, and part of the link id — and no author/createdAt/seq because a derived edge has none; do not look one up by that id. `edgeLabels` filters them like any other label. AN EDGE HERE CARRIES NO `from`/`to`: every edge in one entry joins the same pair — this node and the one it is nested under — so repeating two UUIDs per edge restated what `node._id` and `paths[0]` already say. Each edge has `direction` instead: outbound (it runs from the parent to this node), inbound (the other way) or self (a record joined to itself). The far end is paths[0][paths[0].length-2]. With every flag off the behaviour is exactly what it was: a non-entity seed comes back with an empty `_graph` at any depth. If the neighbourhood is bigger than the inline cap the COMPLETE graph is written to the space as JSON and the response adds `graphTruncated: true` and `graphComplete: {nodes, path, download, expiresAt}` — an authenticated download, valid one day — so a short graph is never silent. `graphTruncated` WITHOUT `graphComplete` is a different and equally real case: the link scans are bounded per hop, and a hop can spend its budget on records it discards as already visited, leaving a graph that is short with nothing complete to write, because the records missing from it were never read. Narrow `edgeLabels` or ask for fewer hops. Use with filter/tags to narrow the seed set — traverse > 2 on dense graphs can be slow. Example: recall "auth token scoping" with traverse: 1 returns the matching records, each carrying everything one edge away. NARROWING, since 3.5: pass an OBJECT instead of a number to walk the graph the way the standalone `graph_traverse` tool does — `{depth, edgeLabels, direction}`, which is a traverse call without its start node because the matches ARE the start nodes. `edgeLabels` follows only those labels; `direction` is one of outbound, inbound or both (default both, which is what a bare number does) and it narrows STORED EDGES ONLY. A link is a record with a from and a to since 4.0, but which way it runs is fixed by the KINDS at its ends rather than by the data — a fact names entities and entities name nothing — so there is nothing for direction to select between, and both traversals reach the entity it names whatever direction says. `{direction: inbound, includeMemories: true}` on a matched fact still returns the entities that fact NAMES. Before this the expansion followed EVERY edge in BOTH directions with no way to say otherwise, so one hop off a well-connected node returned whichever neighbours the cap happened to keep — narrow it and you get the neighbourhood you asked for instead. `limit` is deliberately not accepted here: in a recall the node cap comes from topK and the byte budget, and a traverse that could raise it would overrule the budget governing the rest of the answer. Example: recall "the dog" with `traverse: {depth: 2, edgeLabels: [owns, lives_in], direction: outbound}`.',
+              description: 'Optional graph expansion depth (integer 0–5, default 0). When > 0, each semantic match is expanded along knowledge-graph edges up to this many hops, and what the walk reached is NESTED under the match that reached it in a `_graph` array: {edges, node, paths} per node, where `edges` holds EVERY edge joining that node to the one it is nested under as whole documents (description and tags included) — one for an ordinary hop, more when two records are joined by more than one relationship and on a node that loops back to itself — `node` is the reached entity, and `paths` is every route to it as record ids, match first — so paths[0] is the nesting route and paths[0].length-1 is the hop count. A nested node carries its own `_graph`, so depth is a tree. `count` stays the number of MATCHES (traversed nodes are not in the ranked list and carry no score); `graphNodes` reports how many were reached. LINKS, since 3.6: a walk follows stored edges always, and the LINKS a fact, chrono entry or file carries naming what it is about only when you ask — `{depth: 2, includeChrono: true, includeMemories: true, includeFiles: true}`, one flag per kind. CHRONO AND FILES DEFAULT FALSE, and facts are the exception: with `includeMemories` unsaid a walk brings the ATTRIBUTED claims of what it reached and no other fact. An attributed claim is one an AI assistant originated rather than a person — it is stored with no vector so nothing can rank it, and this is how it reaches you at all. Say `includeMemories: true` for every linked fact, or `false` for none, attributed included. The rest are off by default because you asked for matches and the answer is budgeted: a match is counted with its whole `_graph` subtree, so every record admitted by default is paid for in matches that no longer fit — which is why the fact default is a narrowing and not the whole class. Turn one on and two things change. A linked node arrives carrying `kind` (chrono|fact|file) and the fields that say what it is — the title and type of a chrono, the fact of a fact, the path/description/tags of a file, NEVER file chunk text. And a NON-ENTITY SEED stops being a dead end: a matched fact has no edges of its own, so the walk starts from the entities its links name, at hop 1. The reaching edge is SYNTHETIC and is the single entry in `edges` — id `<label>:<from>:<to>`, label `chrono.entityIds`/`fact.entityIds`/`file.entityIds` — a frozen token naming the 4.x field these links replaced, and part of the link id — and no author/createdAt/seq because a derived edge has none; do not look one up by that id. `edgeLabels` filters them like any other label. AN EDGE HERE CARRIES NO `from`/`to`: every edge in one entry joins the same pair — this node and the one it is nested under — so repeating two UUIDs per edge restated what `node._id` and `paths[0]` already say. Each edge has `direction` instead: outbound (it runs from the parent to this node), inbound (the other way) or self (a record joined to itself). The far end is paths[0][paths[0].length-2]. With every flag off the behaviour is exactly what it was: a non-entity seed comes back with an empty `_graph` at any depth. A MATCH IS RETURNED WITH ITS WHOLE GRAPH OR NOT AT ALL: its `_graph` holds every node the walk you asked for reaches and every route to each, and a graph is never shortened. A match whose neighbourhood cannot be walked whole — past the per-match node ceiling, a link scan past its bound, too many routes to one node, or out of time — is left out, named in `incompleteRows` ({_id, spaceId, type, name, reason}; reason walk_ceiling|link_scan|paths|deadline) and counted in `incompleteCount`, and `graphTruncated: true` says at least one was; the other matches are unaffected. When the whole call runs out of walk budget or time, the answer stops at the last whole match with `truncated: true`, `truncatedBy` (walk_budget|deadline) and `nextSkip`, exactly as the byte budget does. Nothing is written anywhere unless you send `remainderDump: true`, and then only the matches the byte budget cut. Narrow `edgeLabels` or ask for fewer hops to bring a left-out match back. Use with filter/tags to narrow the seed set — traverse > 2 on dense graphs can be slow. Example: recall "auth token scoping" with traverse: 1 returns the matching records, each carrying everything one edge away. NARROWING, since 3.5: pass an OBJECT instead of a number to walk the graph the way the standalone `graph_traverse` tool does — `{depth, edgeLabels, direction}`, which is a traverse call without its start node because the matches ARE the start nodes. `edgeLabels` follows only those labels; `direction` is one of outbound, inbound or both (default both, which is what a bare number does) and it narrows STORED EDGES ONLY. A link is a record with a from and a to since 4.0, but which way it runs is fixed by the KINDS at its ends rather than by the data — a fact names entities and entities name nothing — so there is nothing for direction to select between, and both traversals reach the entity it names whatever direction says. `{direction: inbound, includeMemories: true}` on a matched fact still returns the entities that fact NAMES. Before this the expansion followed EVERY edge in BOTH directions with no way to say otherwise, so one hop off a well-connected node returned whichever neighbours the cap happened to keep — narrow it and you get the neighbourhood you asked for instead. `limit` is deliberately not accepted here: in a recall the walk is bounded per match by the instance and the answer by the byte budget, and a traverse that could raise either would overrule the budget governing the rest of the answer. Example: recall "the dog" with `traverse: {depth: 2, edgeLabels: [owns, lives_in], direction: outbound}`.',
             },
             filter: {
               type: 'object',
-              description: 'Optional property filter, in EITHER of two grammars. RAW MONGODB is accepted — the same operators `filter` takes (`$or`, `$and`, `$not`, `$nor`, `$in`, `$regex`, `$elemMatch`, comparisons) nested to depth 8 — and so is the older one-operator-object-per-key form (`{"properties.status": {"eq": "x"}}`), which is ANDed across keys. A filter MIXING both is refused rather than resolved. Keys are allowlisted either way, including inside `$or`. A raw filter takes the exhaustive path (it cannot become a native index pre-filter), which is slower and returns the same records. **`topK` is filled from records that SATISFY the filter** — it is never applied to an already-truncated shortlist, so a filtered recall cannot silently miss a matching record. Two mechanisms deliver that: `tags`, `type`, `name`, `status`, `label` and schema-DECLARED `properties.<key>` with eq/in/gt/gte/lt/lte are pushed into the vector index as a native pre-filter, restricting the search to the matching subset; an undeclared `properties.*`, or `exists`/`ne`, falls back to scoring the whole space exhaustively and filtering after — slower, same results, still nothing dropped by `topK`. Declare a heavily-filtered property in the space schema to keep it on the fast path. Keys must use dot-notation and start with "properties.", "tags", "type", "name", "status", or "label" (any other key is rejected). Each value is an operator object with one or more of: eq, ne, in (array), exists (boolean), gt, gte, lt, lte. Example: { "properties.status": { "eq": "accepted" }, "properties.count": { "gt": 10 } }. Records not matching ALL filter conditions are excluded.',
+              description: 'Optional property filter, in EITHER of two grammars. RAW MONGODB is accepted — the same operators `filter` takes (`$or`, `$and`, `$not`, `$nor`, `$in`, `$regex`, `$elemMatch`, comparisons) nested to depth 8 — and so is the older one-operator-object-per-key form (`{"properties.status": {"eq": "x"}}`), which is ANDed across keys; its operators are eq, ne, in (array), exists (boolean), gt, gte, lt, lte. A filter MIXING both is refused rather than resolved. Any key is accepted. **`topK` is filled from every record that satisfies the filter, whatever its vector rank** — a filtered recall cannot silently miss a matching record, and an answer that could not be completed says so in `degraded` (`filter_window`). What differs is the cost. `tags`, `type`, `name`, `status`, `label` and schema-DECLARED `properties.<key>` (a flat conjunction, in either grammar) are applied by the vector index itself and cost what an unfiltered recall costs. Any other filter costs a pass over the matching records in the space, so declare a heavily filtered property in the space schema to keep it fast. `filterPath` in the response says which one this answer took. Combined with `tags`, both apply. Example: { "properties.status": { "eq": "accepted" }, "properties.count": { "gt": 10 } }. Records not matching ALL filter conditions are excluded.',
               /*
                * NO STRUCTURAL CONSTRAINT HERE, and that is the fix rather than an omission.
                *
@@ -239,7 +285,9 @@ export const recallTool: ToolHandler = {
           additionalProperties: false,
         }),
   async handle(ctx: ToolContext): Promise<ToolResult> {
-    const { args: a, callSpace, accessibleSpaceIds } = ctx;
+    // The ONE deadline this call runs under starts here: the search spends it first, the graph walk what is left.
+    const startedAt = Date.now();
+    const { args: a, accessibleSpaceIds } = ctx;
     const query = String(a['query'] ?? '');
     if (!query.trim()) throw new Error('query must not be empty');
     const topK = typeof a['topK'] === 'number' ? a['topK'] : 10;
@@ -252,7 +300,10 @@ export const recallTool: ToolHandler = {
     const includeFileContent = a['includeFileContent'] !== false;
     const includeDiagnostics = a['includeDiagnostics'] === true;
     const includeRecordMeta = a['includeRecordMeta'] === true;
+    // Only an explicit `false` skips the reranker (Q-88): absent keeps the configured, reranked answer.
+    const rerank = a['rerank'] === false ? false : undefined;
     const recallProjection = normaliseProjection(a['projection'] as Record<string, unknown> | undefined);
+    const shape: HitShape = { includeFileContent, includeDiagnostics, includeRecordMeta, projection: recallProjection };
     const budget = resolveBudget(a as BudgetRequest, defaultBudgetChars(ctx.transport));
     if (!budget.ok) throw new Error(budget.error);
     const paging = resolvePaging(a as { skip?: unknown; remainderDump?: unknown });
@@ -314,7 +365,8 @@ export const recallTool: ToolHandler = {
         throw new Error('filter must be an object');
       }
       // EITHER grammar, same resolver the REST route uses — the parity rule applies to the parameters, not only to the
-      // capability. The operator-object form keeps the native pre-filter path; raw MongoDB takes the exhaustive one.
+      // capability. Either grammar reaches the index when it is a flat conjunction of fields the index declares;
+      // anything else is completed from the collection (brain/predicate-recall.ts). Both answers are complete.
       const resolved = resolveRecallFilter(a['filter']);
       if (!resolved.ok) throw new Error(resolved.error);
       if (resolved.kind === 'expression') filter = resolved.expression;
@@ -340,7 +392,7 @@ export const recallTool: ToolHandler = {
        * set, which this branch did by hand.
        */
       seeds = await recallGlobal(memberIds, query, topK, tags, types, minPerType, minScore, filter,
-        { maxPerType, maxTimeMS: recallMaxTimeMS, degraded, observePath });
+        { maxPerType, maxTimeMS: recallMaxTimeMS, degraded, observePath, rerank });
       traverseSpaces = memberIds;
     } else {
       /*
@@ -352,7 +404,7 @@ export const recallTool: ToolHandler = {
        * where the space was in the path and this branch could not be reached.
        */
       seeds = await recallGlobal(accessibleSpaceIds, query, topK, tags, types, minPerType, minScore, filter,
-        { maxPerType, maxTimeMS: recallMaxTimeMS, degraded, observePath });
+        { maxPerType, maxTimeMS: recallMaxTimeMS, degraded, observePath, rerank });
       traverseSpaces = accessibleSpaceIds;
     }
 
@@ -360,23 +412,14 @@ export const recallTool: ToolHandler = {
       // A large answer spills with NO traversal too: `topK: 100` is a hundred records, and for a tool result
       // that is a model's context window rather than a page of JSON. The spill used to live in the graph branch
       // alone, which meant the plainest large call was the one that returned everything.
-      const plain = seeds.map(r => ({
-        score: r.score,
-        ...rankingFields(r as unknown as Record<string, unknown>),
-        spaceId: r.spaceId,
-        type: r.type,
-        record: stripRecordMeta(
-          applyProjection(toRecallRecord(r, { includeFileContent, includeDiagnostics }), recallProjection),
-          { includeRecordMeta },
-        ),
-      }));
+      const plain = seeds.map(r => hitRow(r, shape));
       const plainBudgeted = await budgetedEnvelope({
         results: plain,
         budget,
         skip: paging.skip,
         remainderDump: paging.remainderDump,
         spillRemainder: remainder => spillResultSet({
-          memberSpaceId: seeds[0]?.spaceId ?? traverseSpaces[0] ?? callSpace,
+          issuedTo: ctx.actor?.tokenId,
           results: remainder,
           request: { query, topK, traverse: 0, types: types ?? null },
         }),
@@ -394,40 +437,23 @@ export const recallTool: ToolHandler = {
       return { content: [{ type: 'text' as const, text: JSON.stringify(output) }], structuredContent: output };
     }
 
-    // Graph-augmented recall: expand seeds along edges, cap the traversed NODES, and nest each one under the
-    // seed that reached it. The envelope is the non-traverse one plus `_graph`, so `count` keeps meaning
-    // matches — it used to be matches plus neighbours, and `topK: 1` answered `count: 6`.
-    const totalCap = topK * (traverse + 1) * 4;
-    // Same spill as REST. The write space is chosen inside the builder, from a seed — `callSpace` can be a
-    // proxy, and a proxy space owns no file store.
-    const { graph, spill, truncated: graphTruncated } = await buildGraphWithSpill(
-      traverseSpaces,
-      seeds.map(s => ({ _id: s._id, spaceId: s.spaceId })),
-      traverse,
-      Math.max(0, totalCap - seeds.length),
-      traverseOpt,
-    );
-    const results = seeds.map(r => {
-      const nested = mapGraphNodes(graph.bySeed.get(r._id), graphNodeRecord, includeDiagnostics, recallProjection);
-      return {
-        score: r.score,
-        ...rankingFields(r as unknown as Record<string, unknown>),
-        spaceId: r.spaceId, type: r.type,
-        record: applyProjection(toRecallRecord(r, { includeFileContent, includeDiagnostics }), recallProjection),
-        ...(nested ? { _graph: nested } : {}),
-      };
-    });
-    // Same rule as REST, and it matters more here: a tool result is a model's context window, so returning a
-    // hundred matches with their graphs is the difference between an answer and an overflow.
-    const budgeted = await budgetedEnvelope({
-      results,
+    // Graph-augmented recall: every row with its WHOLE graph, nested under the seed that reached it, or left out
+    // and named (Q-126) — see `traversed-answer.ts`. The envelope is the non-traverse one plus `_graph`, so
+    // `count` keeps meaning matches. Budgeted because a tool result is a model's context window.
+    const budgeted = await traversedAnswer({
+      seeds,
+      memberIds: traverseSpaces,
+      maxDepth: traverse,
+      narrowing: traverseOpt,
+      deadline: deadlineFrom(startedAt, effectiveBudgetFor(recallMaxTimeMS)),
       budget,
       skip: paging.skip,
       remainderDump: paging.remainderDump,
-      spillRemainder: remainder => spillResultSet({
-        memberSpaceId: seeds[0]?.spaceId ?? traverseSpaces[0]!,
+      shapeRow: (r, nodes) => hitRow(r, shape, nodes),
+      spillRemainder: (remainder, about) => spillResultSet({
+        issuedTo: ctx.actor?.tokenId,
         results: remainder,
-        request: { query, topK, traverse, types: types ?? null },
+        request: { query, topK, traverse, types: types ?? null, ...about },
       }),
     });
     const output = {
@@ -444,19 +470,7 @@ export const recallTool: ToolHandler = {
        * cannot verify was applied, which is the whole reason the parameter exists.
        */
       traverse: echoTraverse(traverseOpt),
-      // Counted from the payload actually being sent, not from what the traversal REACHED.
-      //
-      // `graph.nodes` is the total across every seed the walk visited — including seeds the byte budget then
-      // evicted, so the number described an answer the caller did not receive. The integration guide already
-      // said this field is "how many traversed nodes came back", which was simply false.
-      //
-      // `countGraphNodes` walks the emitted structure, so it is correct for both doors' shapes by
-      // construction — flat with `_graph` alongside on REST, nested under `record` on MCP — and it is the
-      // same function the spill file uses to describe itself, for the same reason: a count passed in
-      // alongside a payload can describe a different set of records than the payload does.
-      graphNodes: countGraphNodes(budgeted.results),
-      ...(graphTruncated ? { graphTruncated: true } : {}),
-      ...(spill ? { graphComplete: spill } : {}),
+      // `graphNodes`, `graphTruncated`, `incompleteRows` and the one `spillRefused` come from `traversedAnswer`.
       ...(degraded.length > 0 ? { degraded } : {}),
       // The TRAVERSED branch reports it too. A graph-augmented recall runs the same search first,
       // so it pays the same scan — and a caller who only ever uses `traverse` would otherwise never
@@ -478,8 +492,8 @@ export const find_similarTool: ToolHandler = {
     + '• `results` — the matches, each {score, spaceId, type, record}, the SAME per-result shape `recall` returns. With `traverse > 0` each carries its own `_graph`.\n'
     + '• `count` — how many matches, and `traverseDepth` — the depth echoed back, present at every depth including 0.\n'
     + '• `graphNodes` — a COUNT of what a traversal reached, not its content, and only when one ran.\n'
-    + '• THE SIZE ANSWER, and it is the same envelope `recall` returns. `returned`, `count`, `truncated`, `budgetChars`, `budgetBytes`, `charsReturned` and `bytesReturned` are on EVERY response, so you never have to interpret an absence (`budgetBytes` is null unless you asked for a byte ceiling). `results` is a PREFIX of the ranked matches that fits both ceilings you set, and every record in it is WHOLE — a match is counted together with its whole `_graph` subtree, so a deeper or wider traversal means FEWER MATCHES fit: they are absent, not shortened. When `truncated` is true, `nextSkip` says where to continue from — send it back as `skip` for the next prefix. The matches that did not fit are also written to the space as a JSON file (authenticated download, valid one day) and reported as `remainder`, but ONLY if you ask with `remainderDump: true`. THIS PARAGRAPH USED TO NAME A `complete` FIELD — there is no such field, and has not been since the record cap became a byte budget, so a caller waiting for it waited for something nothing sends while `nextSkip` and `remainder` went unmentioned.\n'
-    + '• `graphTruncated` + `graphComplete` — the same arrangement for an oversized neighbourhood. `graphTruncated` alone means the graph is short and no complete copy exists, because a bounded link scan stopped reading.\n\n'
+    + '• THE SIZE ANSWER, and it is the same envelope `recall` returns. `returned`, `count`, `truncated`, `budgetChars`, `budgetBytes`, `charsReturned` and `bytesReturned` are on EVERY response, so you never have to interpret an absence (`budgetBytes` is null unless you asked for a byte ceiling). `results` is a PREFIX of the ranked matches that fits both ceilings you set, and every record in it is WHOLE — a match is counted together with its whole `_graph` subtree, so a deeper or wider traversal means FEWER MATCHES fit: they are absent, not shortened. When `truncated` is true, `nextSkip` says where to continue from — send it back as `skip` for the next prefix. The matches that did not fit are also kept as a SPILL and reported as `remainder` (`spillId`, `download`, `expiresAt`), but ONLY if you ask with `remainderDump: true`: readable with `read_spill` by your token alone, for up to one day (your own newer spills may evict it sooner), and never written into any space. A spill that cannot be kept says why in `spillRefused`, and `nextSkip` still reaches every record. THIS PARAGRAPH USED TO NAME A `complete` FIELD — there is no such field, and has not been since the record cap became a byte budget, so a caller waiting for it waited for something nothing sends while `nextSkip` and `remainder` went unmentioned.\n'
+    + '• `incompleteRows`, `incompleteCount` and `graphTruncated` — the same rule for a neighbourhood as on `recall`: a match comes with its WHOLE `_graph` or is left out and named, and `truncatedBy` says which bound stopped a truncated answer.\n\n'
     + 'IT ANSWERED PLAIN TEXT AT `traverse: 0` UNTIL 3.1.0, and JSON only above it. If you built against that, this is the break: parse JSON at every depth now. Two things arrive with it — the default depth gains the size cap it never had, and `includeFileContent`/`includeDiagnostics` start doing something there, having been accepted and unobservable on a summary line.\n\n'
     + 'Provide `space` to scope to one space, or omit it to search every space the token can reach. `score` is raw cosine similarity — the same number `recall` reports, but here it is the ONLY ranking, so `minScore` is a genuine relevance gate rather than the vector-side gate it is on `recall`.\n\n'
     + 'With `traverse: 0` the answer is a plain-text summary; above 0 it is JSON, because a graph does not summarise.',
@@ -499,6 +513,7 @@ export const find_similarTool: ToolHandler = {
               items: { type: 'string', enum: [...RECORD_TYPES] },
               description: 'Which knowledge types to search in. Omit to search all types.',
             },
+            includeRecordMeta: INCLUDE_RECORD_META_SCHEMA,
             includeDiagnostics: {
               type: 'boolean',
               default: false,
@@ -530,7 +545,7 @@ export const find_similarTool: ToolHandler = {
             },
             remainderDump: {
               type: 'boolean',
-              description: 'Also WRITE the matches that did not fit to the space as a JSON file, and report it as `remainder` (default false). Only meaningful when the answer truncates. Leave it off unless you actually want the whole set as one artifact — the file is a write on a read path, it counts against space storage, and paging with `skip`/`nextSkip` reaches the same records without creating one. It used to happen unconditionally on every truncated call, which meant a caller that only wanted the next page paid for a download it never opened.',
+              description: 'Also KEEP the matches that did not fit as a spill, reported as `remainder` with a `spillId` for `read_spill` (default false). Only meaningful when the answer truncates. A spill is readable by your token alone, for up to one day, and is never written into any space; paging with `skip`/`nextSkip` reaches the same records without one. If it cannot be kept, `spillRefused` says why. It used to happen unconditionally on every truncated call, which meant a caller that only wanted the next page paid for a download it never opened.',
             },
             topK: { type: 'number', minimum: 1, maximum: 100, default: 10, description: 'Max results to return (clamped to 1–100). Default 10.' },
             minScore: unitScoreSchema('Minimum cosine similarity (0.0–1.0). Results below it are excluded. Unlike on `recall`, this IS the relevance gate — cosine distance is the only ranking here, so raising it narrows the answer honestly rather than cutting candidates a reranker would have rescued. For deduplication, start high: near-duplicates sit well above 0.9 and everything below that is a topic match rather than a repeat.'),
@@ -539,7 +554,7 @@ export const find_similarTool: ToolHandler = {
               // thing on one search and something else on the next.
               ...traverseOptionSchema(MAX_RECALL_TRAVERSE),
               default: 0,
-              description: `Optional graph-expansion depth (integer 0–${MAX_RECALL_TRAVERSE}, default 0). When > 0, each similar match is expanded along knowledge-graph edges up to this many hops and what the walk reached is NESTED under the match that reached it in a \`_graph\` array — {edges, node, paths} per node, identical to \`recall\`'s shape: \`edges\` holds every edge joining that node to the one it is nested under as whole documents (more than one when a pair is joined twice, or when a node loops back to itself) and carries \`direction\` (outbound|inbound|self) in place of \`from\`/\`to\`, which the entry already states, \`node\` the reached record, \`paths\` every route to it as record ids with the match first. LINKS, since 3.6, and identical to \`recall\` here too: a walk follows stored edges always, and the \`entityIds\` field a fact, chrono entry or file carries naming what it is about only when you ask — \`{depth: 2, includeChrono: true, includeMemories: true, includeFiles: true}\`, one flag per kind. CHRONO AND FILES DEFAULT FALSE; with \`includeMemories\` unsaid a walk brings the ATTRIBUTED claims of what it reached — those an AI assistant originated, stored with no vector so nothing can rank them — and no other fact. \`true\` admits every linked fact, \`false\` none. Turn one on and two things change. A linked node arrives carrying \`kind\` (chrono|fact|file) and the fields that say what it is — a chrono's title and type, a fact's fact, a file's path/description/tags, NEVER file chunk text — so \`node\` is not always an entity. And its reaching edge is SYNTHETIC: id \`<label>:<from>:<to>\`, label \`chrono.entityIds\`/\`fact.entityIds\`/\`file.entityIds\` — a frozen token naming the 4.x field these links replaced, and part of the link id — and no author/createdAt/seq, because a derived edge has none — do not look one up by that id. \`direction\` narrows STORED EDGES ONLY, so an inbound walk still reaches the records that name an entity. \`count\` is the number of matches and \`graphNodes\` how many nodes were reached. A neighbourhood past the inline cap is written out in full and reported as \`graphTruncated\` + \`graphComplete\` (an authenticated download, valid one day), exactly as on \`recall\`. \`graphTruncated\` alone means a bounded link scan stopped reading, so the graph is short and no complete copy exists. With traverse > 0 the response is JSON instead of the plain text summary.`,
+              description: `Optional graph-expansion depth (integer 0–${MAX_RECALL_TRAVERSE}, default 0). When > 0, each similar match is expanded along knowledge-graph edges up to this many hops and what the walk reached is NESTED under the match that reached it in a \`_graph\` array — {edges, node, paths} per node, identical to \`recall\`'s shape: \`edges\` holds every edge joining that node to the one it is nested under as whole documents (more than one when a pair is joined twice, or when a node loops back to itself) and carries \`direction\` (outbound|inbound|self) in place of \`from\`/\`to\`, which the entry already states, \`node\` the reached record, \`paths\` every route to it as record ids with the match first. LINKS, since 3.6, and identical to \`recall\` here too: a walk follows stored edges always, and the \`entityIds\` field a fact, chrono entry or file carries naming what it is about only when you ask — \`{depth: 2, includeChrono: true, includeMemories: true, includeFiles: true}\`, one flag per kind. CHRONO AND FILES DEFAULT FALSE; with \`includeMemories\` unsaid a walk brings the ATTRIBUTED claims of what it reached — those an AI assistant originated, stored with no vector so nothing can rank them — and no other fact. \`true\` admits every linked fact, \`false\` none. Turn one on and two things change. A linked node arrives carrying \`kind\` (chrono|fact|file) and the fields that say what it is — a chrono's title and type, a fact's fact, a file's path/description/tags, NEVER file chunk text — so \`node\` is not always an entity. And its reaching edge is SYNTHETIC: id \`<label>:<from>:<to>\`, label \`chrono.entityIds\`/\`fact.entityIds\`/\`file.entityIds\` — a frozen token naming the 4.x field these links replaced, and part of the link id — and no author/createdAt/seq, because a derived edge has none — do not look one up by that id. \`direction\` narrows STORED EDGES ONLY, so an inbound walk still reaches the records that name an entity. \`count\` is the number of matches and \`graphNodes\` how many nodes were reached. A match is returned with its WHOLE graph or not at all, exactly as on \`recall\`: one whose neighbourhood cannot be walked whole is left out and named in \`incompleteRows\` and \`incompleteCount\`, with \`graphTruncated: true\`, and a call that runs out of walk budget or time stops at the last whole match with \`truncatedBy\` and \`nextSkip\`. Nothing is written unless you send \`remainderDump: true\`. With traverse > 0 the response is JSON instead of the plain text summary.`,
             },
             crossSpace: { type: 'boolean', default: false, description: 'Forces a cross-space search even when `space` is given. On MCP the idiomatic form is to OMIT `space`, which does the same thing; this flag exists because the REST route takes the space in its PATH and has no way to omit it, and both doors must accept the same parameters. Not slated for removal.' },
           },
@@ -547,6 +562,7 @@ export const find_similarTool: ToolHandler = {
           additionalProperties: false,
         }),
   async handle(ctx: ToolContext): Promise<ToolResult> {
+    const startedAt = Date.now();
     const { args: a, accessibleSpaceIds } = ctx;
     const entryId = String(a['entryId'] ?? '').trim();
     if (!entryId) throw new Error('entryId must not be empty');
@@ -590,7 +606,9 @@ export const find_similarTool: ToolHandler = {
 
     const includeFileContent = a['includeFileContent'] !== false;
     const includeDiagnostics = a['includeDiagnostics'] === true;
+    const includeRecordMeta = a['includeRecordMeta'] === true;
     const recallProjection = normaliseProjection(a['projection'] as Record<string, unknown> | undefined);
+    const shape: HitShape = { includeFileContent, includeDiagnostics, includeRecordMeta, projection: recallProjection };
     const budget = resolveBudget(a as BudgetRequest, defaultBudgetChars(ctx.transport));
     if (!budget.ok) throw new Error(budget.error);
     const paging = resolvePaging(a as { skip?: unknown; remainderDump?: unknown });
@@ -610,20 +628,14 @@ export const find_similarTool: ToolHandler = {
       //
       // The shape is `recall`'s plain branch plus `source`, which is this tool's own — you asked about a
       // specific entry and the answer names it back.
-      const plain = result.results.map(r => ({
-        score: r.score,
-        ...rankingFields(r as unknown as Record<string, unknown>),
-        spaceId: r.spaceId,
-        type: r.type,
-        record: applyProjection(toRecallRecord(r, { includeFileContent, includeDiagnostics }), recallProjection),
-      }));
+      const plain = result.results.map(r => hitRow(r, shape));
       const plainBudgeted = await budgetedEnvelope({
         results: plain,
         budget,
         skip: paging.skip,
         remainderDump: paging.remainderDump,
         spillRemainder: remainder => spillResultSet({
-          memberSpaceId: result.results[0]?.spaceId ?? usedBase,
+          issuedTo: ctx.actor?.tokenId,
           results: remainder,
           request: { entryId, entryType, topK, traverse: 0 },
         }),
@@ -637,35 +649,24 @@ export const find_similarTool: ToolHandler = {
       return { content: [{ type: 'text' as const, text: JSON.stringify(output) }], structuredContent: output };
     }
 
-    // Graph-augmented: expand the similar seeds along edges (mirrors recall's traverse).
+    // Graph-augmented: every similar match with its WHOLE graph, or left out and named — the same answer
+    // recall's traverse gives, through the same module (`traversed-answer.ts`).
     const traverseSpaces = searchIds ?? [usedBase];
-    const totalCap = topK * (traverse + 1) * 4;
-    const { graph, spill, truncated: graphTruncated } = await buildGraphWithSpill(
-      traverseSpaces,
-      result.results.map(sd => ({ _id: sd._id, spaceId: sd.spaceId })),
-      traverse,
-      Math.max(0, totalCap - result.results.length),
-      fsTraverseOpt,
-    );
-    const results = result.results.map(r => {
-      const nested = mapGraphNodes(graph.bySeed.get(r._id), graphNodeRecord, includeDiagnostics, recallProjection);
-      return {
-        score: r.score,
-        ...rankingFields(r as unknown as Record<string, unknown>),
-        spaceId: r.spaceId, type: r.type,
-        record: applyProjection(toRecallRecord(r, { includeFileContent, includeDiagnostics }), recallProjection),
-        ...(nested ? { _graph: nested } : {}),
-      };
-    });
-    const itemsBudgeted = await budgetedEnvelope({
-      results,
+    const itemsBudgeted = await traversedAnswer({
+      seeds: result.results,
+      memberIds: traverseSpaces,
+      maxDepth: traverse,
+      narrowing: fsTraverseOpt,
+      // similar has no `maxTimeMS` of its own; its walk runs under the instance's recall budget.
+      deadline: deadlineFrom(startedAt, RECALL_BUDGET_MS),
       budget,
       skip: paging.skip,
       remainderDump: paging.remainderDump,
-      spillRemainder: remainder => spillResultSet({
-        memberSpaceId: result.results[0]?.spaceId ?? usedBase,
+      shapeRow: (r, nodes) => hitRow(r, shape, nodes),
+      spillRemainder: (remainder, about) => spillResultSet({
+        issuedTo: ctx.actor?.tokenId,
         results: remainder,
-        request: { entryId, entryType, topK, traverse },
+        request: { entryId, entryType, topK, traverse, ...about },
       }),
     });
     const output = {
@@ -673,19 +674,6 @@ export const find_similarTool: ToolHandler = {
       results: itemsBudgeted.results,
       ...itemsBudgeted.fields,
       traverseDepth: traverse,
-      // Counted from the payload actually being sent, not from what the traversal REACHED.
-      //
-      // `graph.nodes` is the total across every seed the walk visited — including seeds the byte budget then
-      // evicted, so the number described an answer the caller did not receive. The integration guide already
-      // said this field is "how many traversed nodes came back", which was simply false.
-      //
-      // `countGraphNodes` walks the emitted structure, so it is correct for both doors' shapes by
-      // construction — flat with `_graph` alongside on REST, nested under `record` on MCP — and it is the
-      // same function the spill file uses to describe itself, for the same reason: a count passed in
-      // alongside a payload can describe a different set of records than the payload does.
-      graphNodes: countGraphNodes(itemsBudgeted.results),
-      ...(graphTruncated ? { graphTruncated: true } : {}),
-      ...(spill ? { graphComplete: spill } : {}),
     };
     return { content: [{ type: 'text' as const, text: JSON.stringify(output) }], structuredContent: output };
   },

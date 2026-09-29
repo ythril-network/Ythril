@@ -44,6 +44,9 @@ Storage shows **megabytes** below 1 GiB, so a small space reads `40 MB` rather t
 
 ### Creating a space
 
+You need a token that **may create new spaces** (or an instance administrator). The space you create is then
+yours to administer.
+
 Click **Create New Space**. Fill in:
 
 - **Display Name** — the human-readable label shown everywhere in the UI.
@@ -172,7 +175,10 @@ Each space row carries only a gear/configure (⚙) button — there is no pencil
 
 ### Renaming a space
 
-Open the space's settings panel and go to the **Danger** tab to rename its ID. All data, files, token scopes, and network sync mappings are updated automatically.
+Open the space's settings panel and go to the **Danger** tab to rename its ID. All data, files, token scopes, and network sync mappings are updated automatically. An agent
+administering the space can do the same over MCP with the `space_rename` tool.
+
+A space in a network keeps syncing under the name the network knows it by, so members that joined before the rename see no change. A name another space already syncs under, in any network this instance belongs to, is refused before anything moves — the message names that space and the network; pick another name.
 
 ### Deleting a space
 
@@ -240,6 +246,10 @@ Then **Create token** — the value is shown **once**. Copy it immediately.
 > **The two instance-level checkboxes are the widest thing this dialog can grant.** **Instance
 > administrator** and **May create new spaces** are not rungs on a space: the dialog says so itself —
 > *"these apply to the whole instance. A space-restricted administrator cannot grant them."*
+>
+> **May create new spaces is enough to create one**, from this page, over the API, with the `save_space` tool, or by
+> joining a network — no instance administrator needed. The token that creates a space becomes its administrator,
+> and that grant is written to the audit log (`token.creator_grant`).
 
 The matrix is the whole permission model. A spaces list and a three-way Read-only / Standard / Admin level
 describe the same access in an older vocabulary, and the server refuses a request that uses both those and
@@ -549,6 +559,11 @@ generated for you, follow these steps:
    deleted, and a peer can never delete a record your instance wrote.
 5. Click **Confirm and join**.
 
+The joined network syncs on its own from then on: on the inviter's schedule, or every 15 minutes when the inviter
+syncs only by hand. Change it on the network card (see [Sync schedule](#sync-schedule)).
+
+**Two of the network's spaces cannot go into one of yours.** The dialog marks both rows and says which space they collide on; change one of them. Joining with a key (rather than an invite code) has no mapping rows, so a collision there is refused with a pointer to the invite code instead.
+
 **Spaces the network adds later wait for you unless your token could have joined them.** When a publisher, a
 parent or a passed vote adds a space you do not have, your instance creates it here only if the token you joined
 with could have: the right to create spaces, and that token still valid (not deleted, not expired). A space whose
@@ -557,6 +572,15 @@ its name. Waiting spaces appear on the network card under **Announced, waiting f
 **Accept** to add it, optionally typing a local id to carry it under, or **Dismiss** to say no: a dismissed space is
 not proposed again (to change your mind, accept it by its id through the API or the `network_pending_space` tool). Networks joined or created before 5.4 have no record
 of the joining token, so everything they announce waits here.
+
+### A space that shows up twice
+
+Before 5.5.3 a space the publisher had renamed reached a new member under the publisher's local name AND under the network's name, so the member held it twice (for example `y-twin` next to `y-project-template`). Upgrading stops it happening again. For a member that already has the duplicate:
+
+- **On a pub/sub network or a tree, it heals by itself** once both sides run 5.5.3: the publisher tells the member which name it means, and the member's copy syncs under the network's name again. Each repair is in the audit log as `network.space_alias.heal`. The now-idle duplicate stays until you remove it: take it out of the network (**not** Dismiss, which would stop the real one being repaired), then delete the space.
+- **On a club, closed or democratic network**, press **Accept** on the waiting space and type the name of the space you already carry: that records the network's name for it instead of creating a second one.
+
+Open votes name a space as this instance calls it, so a round about a renamed space shows your name, not the proposer's.
 
 ### Sync schedule
 

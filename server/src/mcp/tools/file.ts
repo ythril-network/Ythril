@@ -13,6 +13,7 @@ import { memberSpacesWithin } from '../../spaces/proxy-scoped.js';
 import { emitWebhookEvent } from '../../webhooks/dispatcher.js';
 import { log } from '../../util/log.js';
 import { StoredFileUnreadable } from '../../files/stored-bytes.js';
+import { readSpillByPath } from '../../brain/read-spill-act.js';
 import { linkInputSchemasFor, linkInputError, linkFieldsFrom } from '../../brain/write-connections.js';
 
 export const read_fileTool: ToolHandler = {
@@ -35,6 +36,15 @@ export const read_fileTool: ToolHandler = {
     const { args: a, callSpace , accessibleSpaceIds } = ctx;
     const filePath = String(a['path'] ?? '');
     if (!filePath.trim()) throw new Error('path must not be empty');
+    // A spill's deprecated `path` (Q-92): read from the spill store under its own rule, as the files GET does.
+    const spill = await readSpillByPath(filePath, {
+      tokenId: ctx.actor?.tokenId, rights: ctx.rights, accessibleSpaceIds, transport: ctx.transport,
+    });
+    if (spill) {
+      if (spill.status !== 200) throw new Error(String(spill.body['error']));
+      return { content: [{ type: 'text' as const, text: JSON.stringify(spill.body) }],
+        structuredContent: { path: filePath, content: spill.body } };
+    }
     const memberIds = memberSpacesWithin(callSpace, accessibleSpaceIds);
     let content: string | null = null;
     for (const mid of memberIds) {

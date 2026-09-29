@@ -1,16 +1,20 @@
 import { ChangeDetectionStrategy, Component, ViewChild, computed, inject, input, output, signal } from '@angular/core';
 import { SupersededBadgeComponent } from '../../shared/superseded-badge.component';
 import { groupRecallResults, chunkLabel, passageText, relatedOf, orderingOf } from './recall-grouping';
+import { recordOf } from './recall-hits';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
-import { QueryCollection, QueryResult, RecallResult, RecallResponse, RECORD_TYPES, BRAIN_COLLECTIONS } from '../../core/api.types';
+import { QueryCollection, QueryResult, RecallResult, RECORD_TYPES, BRAIN_COLLECTIONS } from '../../core/api.types';
 import { BrainApi } from '../../core/brain-api.service';
 import { PhIconComponent } from '../../shared/ph-icon.component';
 import { RecallFormComponent, type RecallFormState, type RecallTypeOpt } from './recall-form.component';
 import { JsonTreeComponent } from '../../shared/json-tree.component';
 import { recallRequestFrom } from './recall-request';
 import { BrainStore } from './brain-store.service';
+import { type ResultSpillLink } from '../../core/read-spill';
+import { type IncompleteRow } from '../../core/recall-graph-report';
+import { SpillEndingComponent } from './spill-ending.component';
 
 /**
  * The brain page's Query tab — advanced (MongoDB-style) query + semantic recall.
@@ -26,7 +30,7 @@ import { BrainStore } from './brain-store.service';
   selector: 'app-query-tab',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [CommonModule, FormsModule, TranslocoPipe, PhIconComponent, RecallFormComponent, JsonTreeComponent, SupersededBadgeComponent],
+  imports: [CommonModule, FormsModule, TranslocoPipe, PhIconComponent, RecallFormComponent, JsonTreeComponent, SupersededBadgeComponent, SpillEndingComponent],
   styles: [`
     .query-panel {
       display: flex;
@@ -239,34 +243,42 @@ import { BrainStore } from './brain-store.service';
                 <div class="alert alert-warning" style="margin-top:12px;">
                   <div><strong>{{ 'brain.query.truncated.title' | transloco: { returned: t.returned, count: t.count } }}</strong></div>
                   <div style="font-size:12px; margin-top:4px;">{{ 'brain.query.truncated.body' | transloco }}</div>
-                  <div style="font-size:12px; margin-top:4px;">{{ 'brain.query.truncated.what' | transloco }}</div>
+                  <!-- WHICH bound stopped it, when it was the graph walk rather than the byte budget: the remedy
+                       differs (a shallower walk, not a bigger answer). -->
+                  @if (t.by === 'walk_budget' || t.by === 'deadline') {
+                    <div style="font-size:12px; margin-top:4px;">{{ 'brain.query.truncated.by.' + t.by | transloco }}</div>
+                  }
+                  <!-- ONE ENDING, never two that disagree (see SpillEndingComponent). -->
+                  <app-spill-ending [link]="recallRemainder()" [refused]="spillRefused()"
+                    labelKey="brain.query.remainder.download" [labelParams]="{ matches: recallRemainder()?.matches }"
+                    fallbackKey="brain.query.truncated.what" />
                 </div>
               }
 
               <!-- A SEARCH THAT MATCHED NOTHING SAYS SO. Without this the panel showed exactly what it
                    shows before the first search — nothing — so a reader could not tell an answered question
                    from an unasked one, and the natural reading is that the button did not work. -->
-              <!-- THE WALK STOPPED SHORT, which is a different fact from the answer being shortened: what is
-                   missing here are records the traversal never read. Placed beside the truncation notice and
-                   above the results for the same reason — a reader who reaches the end has already concluded
-                   the neighbourhood was complete. The download is offered only when there IS one: a bounded
-                   link scan leaves nothing complete to write. -->
-              @if (graphShort(); as g) {
-                <div class="alert alert-warning" style="margin-top:12px;">
-                  <div><strong>{{ 'brain.query.graphShort.title' | transloco: { nodes: g.nodes } }}</strong></div>
-                  <div style="font-size:12px; margin-top:4px;">{{ 'brain.query.graphShort.body' | transloco }}</div>
-                  @if (g.complete; as c) {
-                    <div style="font-size:12px; margin-top:4px;">
-                      <a [href]="c.download" target="_blank" rel="noopener">{{ 'brain.query.graphShort.download' | transloco: { nodes: c.nodes } }}</a>
-                      @if (c.ceilingHit) {
-                        <span style="margin-left:6px;">{{ 'brain.query.graphShort.ceilingHit' | transloco }}</span>
-                      }
-                    </div>
+              <!-- MATCHES LEFT OUT, because their graph could not be read whole (Q-126). A match is shown with
+                   its WHOLE graph or not at all, so nothing above is short — but a match that exists and is not
+                   shown must be named, or a reader concludes it does not exist. Placed above the results for the
+                   same reason as the truncation notice. -->
+              @if (leftOut(); as lo) {
+                <div class="alert alert-warning" role="status" aria-live="polite" style="margin-top:12px;">
+                  <div><strong>{{ 'brain.query.leftOut.title' | transloco: { count: lo.count } }}</strong></div>
+                  <div style="font-size:12px; margin-top:4px;">{{ 'brain.query.leftOut.body' | transloco }}</div>
+                  <ul class="left-out" style="font-size:12px; margin:6px 0 0 18px;">
+                    @for (row of lo.rows; track row._id) {
+                      <li>{{ row.name }} ({{ row.type }}, {{ row.spaceId }}) — {{ 'brain.query.leftOut.reason.' + row.reason | transloco }}</li>
+                    }
+                  </ul>
+                  @if (lo.count > lo.rows.length) {
+                    <div style="font-size:12px; margin-top:4px;">{{ 'brain.query.leftOut.more' | transloco: { more: lo.count - lo.rows.length } }}</div>
                   }
                 </div>
               }
 
-              @if (recallRan() && !recallResults().length && !recallError()) {
+              <!-- Not when matches were LEFT OUT: those are matches, so "no matches" would be false. -->
+              @if (recallRan() && !recallResults().length && !recallError() && !leftOut()) {
                 <div class="query-empty">{{ 'brain.query.noMatches' | transloco }}</div>
               }
 
@@ -556,7 +568,7 @@ export class QueryTabComponent {
    */
   recallForm: RecallFormState = {
     query: '', topK: 10, minScore: 0, filter: '', projection: '', tags: '', type: '',
-    maxPerType: 0, includeFileContent: true, includeDiagnostics: false, includeRecordMeta: false,
+    maxPerType: 0, includeFileContent: true, rerank: true, includeDiagnostics: false, includeRecordMeta: false,
     depth: 0, edgeLabels: '', direction: '',
     includeChrono: false, includeMemories: false, includeFiles: false,
     maxTimeMS: 0, maxBytes: 0, maxChars: 0, maxTokens: 0,
@@ -574,7 +586,7 @@ export class QueryTabComponent {
    * left out: they are for a caller tuning a request programmatically, and a byte count in the interface is a
    * number nobody can do anything with.
    */
-  recallTruncated = signal<{ returned: number; count: number } | null>(null);
+  recallTruncated = signal<{ returned: number; count: number; by: string | null } | null>(null);
 
   /** Type names offered by the recall "filter by type" dropdown (F5): schema type
    *  names for the space UNION the distinct `type` values present in the loaded
@@ -614,8 +626,12 @@ export class QueryTabComponent {
   /** The response as it arrived, for the JSON view. Never read by the rendered view. */
   recallRaw = signal<unknown>(null);
 
-  /** Set when the traversal stopped short, with the download link if the instance could write one. */
-  graphShort = signal<{ nodes: number; complete: RecallResponse['graphComplete'] | null } | null>(null);
+  /** Set when the traversal stopped short, with the spill if the instance kept one. */
+  leftOut = signal<{ count: number; rows: IncompleteRow[] } | null>(null);
+  /** The matches that did not fit, kept for this token when the search asked (`remainderDump`). */
+  recallRemainder = signal<ResultSpillLink | null>(null);
+  /** Why the answer's spill was NOT kept, as the server said it. */
+  spillRefused = signal<string | null>(null);
 
   /**
    * Which view of the answer is showing.
@@ -664,24 +680,20 @@ export class QueryTabComponent {
 
   /** A match's neighbourhood, grouped by kind — rendered under the match, never beside it in the ranking. */
   relatedOf(hit: RecallResult) { return relatedOf(hit); }
-  orderingOf(hit: RecallResult) { return orderingOf(hit as Record<string, unknown>); }
+  orderingOf(hit: RecallResult) { return orderingOf(hit as unknown as Record<string, unknown>); }
 
   /**
    * Whether this match is a record that is no longer true.
    *
-   * A method rather than `hit.record?.superseded` in the template, because `RecallResult` is an index
-   * signature: everything read off it through the template is `unknown` and reaching into it there gives
-   * a build error or, worse, a cast that hides the next shape change. The nesting — the record sits under
-   * `record`, and the ranking fields sit beside it — is knowledge about the wire shape, and it belongs in
-   * one method rather than in the markup.
+   * A method rather than `hit.record?.superseded` in the template: the nesting — the record sits under `record`,
+   * the ranking fields beside it — is knowledge about the wire shape, and it goes through `recordOf`, the one reader
+   * of it (`Q-87`; this was a second hand copy).
    *
    * Strictly `true`. Absent and `false` both mean current, and a badge on a current record retires a real
    * fact in the reader's mind with nothing to contradict it.
    */
   supersededOf(hit: RecallResult): boolean | undefined {
-    const record = (hit as Record<string, unknown>)['record'];
-    if (record === null || typeof record !== 'object') return undefined;
-    return (record as Record<string, unknown>)['superseded'] === true ? true : undefined;
+    return recordOf(hit)['superseded'] === true ? true : undefined;
   }
 
   /** The heading a passage sits under, when the chunker recorded one. */
@@ -752,6 +764,7 @@ export class QueryTabComponent {
     this.recallError.set('');
     this.recallResults.set([]);
     this.recallTruncated.set(null);
+    this.resetSpill();
     this.recallRan.set(false);   // a stale "no matches" must not describe the search now running
     this.brainApi.recallBrain(this.spaceId(), body).subscribe({
       /*
@@ -777,24 +790,22 @@ export class QueryTabComponent {
         // and showing only the results is what made this panel teach a shape the product does not have.
         this.recallRaw.set(res);
         /*
-         * A SHORT GRAPH IS ITS OWN FACT, not a shade of `truncated`.
+         * A LEFT-OUT MATCH IS ITS OWN FACT, not a shade of `truncated`.
          *
-         * `truncated` is the byte budget dropping whole matches off the end of the ranking. This is the WALK
-         * stopping, so what is missing are records it never read — and the panel showed `graphNodes` with
-         * nothing to say whether that was the whole neighbourhood or the first few of forty.
-         *
-         * `graphComplete` may be absent while this is true: a bounded link scan leaves nothing complete to
-         * write, because the missing records are precisely the ones never read. So the link is optional and
-         * its absence is not an error.
+         * `truncated` is the answer stopping before the end of the ranking. These are matches CONSUMED and not
+         * shown, because their graph could not be read whole — the rows after them are still here. Keyed on
+         * the count, not on `graphTruncated`, which means the same thing and carries nothing to show.
          */
-        this.graphShort.set(res.graphTruncated === true
-          ? { nodes: res.graphNodes ?? 0, complete: res.graphComplete ?? null }
+        this.leftOut.set((res.incompleteCount ?? 0) > 0
+          ? { count: res.incompleteCount!, rows: res.incompleteRows ?? [] }
           : null);
         // `=== true` rather than truthy: the field is optional on the type (an older server sends none), and an
         // absent one must read as "not truncated" rather than as "unknown".
         this.recallTruncated.set(res.truncated === true
-          ? { returned: res.returned ?? res.results.length, count: res.count }
+          ? { returned: res.returned ?? res.results.length, count: res.count, by: res.truncatedBy ?? null }
           : null);
+        this.recallRemainder.set(res.remainder ?? null);
+        this.spillRefused.set(res.spillRefused ?? null);
       },
       // NOT `recallRan` on an error: a failed search did not find nothing, it did not finish. Saying "no
       // matches" beside an error message would tell the reader two different things about one click.
@@ -806,9 +817,17 @@ export class QueryTabComponent {
     this.recallRan.set(false);
     this.recallResults.set([]);
     this.recallRaw.set(null);
-    this.graphShort.set(null);
+    this.leftOut.set(null);
     this.recallError.set('');
     this.recallTruncated.set(null);
+    this.resetSpill();
+  }
+
+  /** A spill and its refusal describe ONE answer; neither may outlive it (a failed download lives and dies with
+   *  the notice's ending component, which a new answer re-creates). */
+  private resetSpill(): void {
+    this.recallRemainder.set(null);
+    this.spillRefused.set(null);
   }
 
   /**
@@ -819,7 +838,9 @@ export class QueryTabComponent {
    * have no node, and get no button rather than one that lands on an empty graph.
    */
   graphTargetOf(hit: RecallResult): string | null {
-    const id = hit.type === 'entity' ? hit['_id'] : hit.type === 'edge' ? hit['from'] : undefined;
+    // The record's own id or edge end (Q-87) — read off the hit these were undefined, so "view in graph" never showed.
+    const rec = recordOf(hit);
+    const id = hit.type === 'entity' ? rec['_id'] : hit.type === 'edge' ? rec['from'] : undefined;
     return typeof id === 'string' && id.length > 0 ? id : null;
   }
 }

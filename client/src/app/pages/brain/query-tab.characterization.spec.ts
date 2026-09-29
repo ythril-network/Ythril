@@ -172,6 +172,18 @@ describe('QueryTabComponent — the recall request (characterization for U-1)', 
     expect(sent[1]['includeFileContent']).toBe(false);
   });
 
+  it('rerank is sent only when switched OFF — the reranked answer is the default (Q-88)', () => {
+    // The Query tab is where a request is tested before an agent sends it, so it keeps the reranked default and
+    // offers the switch the type-ahead searches use, rather than skipping the reranker the way they do.
+    const c = create();
+    c.runRecall();
+    expect(sent[0]['rerank']).toBeUndefined();
+
+    (c.recallForm as { rerank: boolean }).rerank = false;
+    c.runRecall();
+    expect(sent[1]['rerank']).toBe(false);
+  });
+
   // ── the two lists derived from the same rows ─────────────────────────────────────────────────────────────
 
   it('types comes from the ticked rows, and no ticks means the key is absent rather than empty', () => {

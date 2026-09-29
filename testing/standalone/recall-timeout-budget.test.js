@@ -100,11 +100,17 @@ describe('the deadline is threaded through the pipeline', () => {
     // answered are returned, and the response carries `search_timeout` so the caller knows the answer is
     // thin. Partial and labelled beats unbounded.
     const phase2 = recall.slice(recall.indexOf('// Phase 2:'), recall.indexOf('// Phase 3'));
-    assert.match(phase2, /searchDeadline\(\)/,
-      'the per-type searches must receive a deadline, or a per-call maxTimeMS bounds nothing that matters');
+    // Since Q-102 the searches get the budget ITSELF — `remaining` read before every round trip, because one
+    // filtered search can make several — not a number computed once when the search starts.
+    assert.match(recall, /remaining: searchDeadline/,
+      'the budget handed to the searches must read what is left of the deadline');
+    assert.match(phase2, /recallByType\([^)]*\bbudget\)/,
+      'the per-type searches must receive the budget, or a per-call maxTimeMS bounds nothing that matters');
 
-    assert.match(recall, /\.maxTimeMS\(maxTimeMS\)/,
+    assert.match(recall, /cursor\.maxTimeMS\(ms\)/,
       'the deadline must reach the Mongo aggregation, not merely be computed');
+    assert.match(readFileSync('server/src/brain/predicate-recall.ts', 'utf8'), /\.maxTimeMS\(remaining\(\)\)/,
+      'and every round trip of a filtered search must carry what is left of it');
     assert.match(recall, /settleSearches/,
       'a timed-out collection must not discard the collections that answered');
     assert.match(recall, /search_timeout/,

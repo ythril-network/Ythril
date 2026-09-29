@@ -39,10 +39,14 @@ export const MAX_RECALL_TRAVERSE = 5;
  *
  * A dense graph can reach one node dozens of ways, and every one of them is a small array copied per hop. The
  * cap is reported (`altPathsTruncated`) rather than silent: a caller that cannot tell "these are all the
- * routes" from "these are the first eight" can conclude something false from the shape, which is the defect
- * B-19 was filed for one function over.
+ * routes" from "these are the first N" can conclude something false from the shape, which is the defect
+ * B-19 was filed for one function over. A row carrying a node over the cap is not returned at all since Q-126
+ * (`row-graphs.ts`), because it would not be what the caller asked for.
+ *
+ * 32, measured (Q-126): once a route can no longer visit a node twice, 32 leaves 100% of real depth-3 rows and
+ * 99.3% of depth-5 rows complete on a dense 1244-entity graph. 8 left 32% and 3%, most of it the counting defect.
  */
-export const MAX_ALT_PATHS_PER_NODE = 8;
+export const MAX_ALT_PATHS_PER_NODE = 32;
 
 /**
  * The edge a hop reports when there is no stored edge to report.
@@ -140,8 +144,26 @@ export async function traverseFromSeeds(
   maxDepth: number,
   limit: number,
   narrowing?: TraverseNarrowing,
+  /**
+   * Milliseconds left of the caller's deadline, read before every query (Q-126). Each read carries it as its
+   * own `maxTimeMS`, so one slow hub query cannot hold a request past its deadline, and the walk throws
+   * `WalkDeadlineExceeded` between hops once it is spent. Absent means unbounded, as the standalone callers were.
+   */
+  deadline?: () => number,
 ): Promise<SeedTraverse> {
   if (seedIds.length === 0 || maxDepth < 1 || limit < 1) return { neighbours: [], scanCapped: false };
+  /** The deadline as a query's own `maxTimeMS`, or none. Throws once nothing is left. */
+  const timeLeft = (): number | undefined => {
+    if (!deadline) return undefined;
+    const ms = deadline();
+    if (ms <= 0) throw new WalkDeadlineExceeded();
+    return Math.max(1, Math.floor(ms));
+  };
+  /** Apply what is left of the deadline to one find cursor. */
+  const bounded = <C extends { maxTimeMS(ms: number): C }>(cursor: C): C => {
+    const ms = timeLeft();
+    return ms === undefined ? cursor : cursor.maxTimeMS(ms);
+  };
 
   // Set by either link scan when it stopped reading rather than running out of matches. Carried out rather
   // than returned early: unlike the standalone traversal this one has a pre-pass whose results are still
@@ -157,6 +179,8 @@ export async function traverseFromSeeds(
   // Routes to a node OTHER than the one it is nested under. The old loop skipped a visited neighbour outright,
   // so a node reachable two ways was attributed to whichever edge won the race and the other link was invisible.
   const altPathTo = new Map<string, string[][]>();
+  /** Every route to a node already recorded, as a key — so a route is compared once, not re-joined per edge. */
+  const routeKeys = new Map<string, Set<string>>();
   const altTruncated = new Set<string>();
   const reachedBy = new Map<string, { parentId: string; edges: EdgeDoc[] }>();
   /**
@@ -198,9 +222,9 @@ export async function traverseFromSeeds(
     if (seedScanCapped) capped = true;
     const wanted = outbound.filter(l => !visited.has(l.to));
     if (wanted.length > 0) {
-      const linkedEntities = await col<EntityDoc>(spaceCollection(spaceId, 'entities'))
+      const linkedEntities = await bounded(col<EntityDoc>(spaceCollection(spaceId, 'entities'))
         .find(asFilter<EntityDoc>({ _id: { $in: [...new Set(wanted.map(l => l.to))] } }))
-        .project(NEVER_RETURNED_PROJECTION)
+        .project(NEVER_RETURNED_PROJECTION))
         .toArray() as EntityDoc[];
       const byId = new Map(linkedEntities.map(e => [e._id, e]));
       for (const link of wanted) {
@@ -228,7 +252,7 @@ export async function traverseFromSeeds(
 
   while (frontier.length > 0 && depth < maxDepth) {
     const hopBudget = Math.max(0, limit - results.length);
-    const edges = await col<EdgeDoc>(spaceCollection(spaceId, 'edges'))
+    const edges = await bounded(col<EdgeDoc>(spaceCollection(spaceId, 'edges'))
       // An EDGE is a searchable record with a vector of its own, and this query fetched it whole: the edge
       // document is returned verbatim as `_graph[].edge`, so a `recall(traverse: n)` shipped a full float
       // array per hop, on both doors. Nothing consumes it — `nestNeighbours` only nests the document — so
@@ -255,7 +279,7 @@ export async function traverseFromSeeds(
       // unbounded, one hub read its whole edge set per hop, and the node cap counts hydrated rows rather than
       // documents. The rule belongs on BOTH paths — these two have drifted before, twenty lines apart, which is
       // why `frontierEdgeQuery` exists at all.
-      .limit(hopBudget + 1)
+      .limit(hopBudget + 1))
       .toArray() as EdgeDoc[];
     if (edges.length > hopBudget) {
       capped = true;
@@ -293,7 +317,20 @@ export async function traverseFromSeeds(
       const frontierEnd = frontierSet.has(edge.from) ? edge.from : edge.to;
       const neighborId = frontierEnd === edge.from ? edge.to : edge.from;
       neighborKinds.set(neighborId, edgeEndpointKind(frontierEnd === edge.from ? edge.toKind : edge.fromKind));
-      const routeHere = [...(idPathTo.get(frontierEnd) ?? [frontierEnd]), neighborId];
+      const routeToFrontier = idPathTo.get(frontierEnd) ?? [frontierEnd];
+      /*
+       * AN EDGE BACK TO A NODE ALREADY ON THIS ROUTE is not a route (Q-126). A frontier node's edge to its own
+       * parent — or to any ancestor — reads as `[…, X, child, X]`, which visits X twice. It was recorded as an
+       * alternative path, so every node with more than a handful of children carried a capped `paths` list of
+       * routes that do not exist. The same-parent case still joins the node's `edges` below: it is a second
+       * relationship between one pair, not a route.
+       */
+      if (routeToFrontier.includes(neighborId)) {
+        const already = reachedBy.get(neighborId);
+        if (already && already.parentId === frontierEnd) addEdge(already.edges, edge);
+        continue;
+      }
+      const routeHere = [...routeToFrontier, neighborId];
       if (visited.has(neighborId)) {
         /*
          * A SECOND EDGE to a node already reached, and the two cases go to different places.
@@ -312,10 +349,15 @@ export async function traverseFromSeeds(
         // duplicating it under each parent would make a caller counting rows double-count the same record.
         const alts = altPathTo.get(neighborId);
         if (alts) {
-          const known = [idPathTo.get(neighborId)?.join('>'), ...alts.map(p => p.join('>'))];
-          if (!known.includes(routeHere.join('>'))) {
+          let keys = routeKeys.get(neighborId);
+          if (!keys) {
+            keys = new Set([idPathTo.get(neighborId)?.join('>') ?? '', ...alts.map(p => p.join('>'))]);
+            routeKeys.set(neighborId, keys);
+          }
+          const key = routeHere.join('>');
+          if (!keys.has(key)) {
             if (alts.length >= MAX_ALT_PATHS_PER_NODE) altTruncated.add(neighborId);
-            else alts.push(routeHere); // the live array — see where it is created
+            else { alts.push(routeHere); keys.add(key); } // the live array — see where it is created
           }
         }
         continue;
@@ -360,9 +402,9 @@ export async function traverseFromSeeds(
     // EDGE was found but its neighbour ENTITY was silently dropped, so a traversal returned
     // half a graph with no error. Filtering on a redundant, denormalised field is what made
     // a space rename hide data in the first place.
-    const entities = await col<EntityDoc>(spaceCollection(spaceId, 'entities'))
+    const entities = await bounded(col<EntityDoc>(spaceCollection(spaceId, 'entities'))
       .find(asFilter<EntityDoc>({ _id: { $in: newNeighborIds } }))
-      .project(NEVER_RETURNED_PROJECTION)
+      .project(NEVER_RETURNED_PROJECTION))
       .toArray() as EntityDoc[];
     const entityMap = new Map<string, EntityDoc>();
     for (const e of entities) entityMap.set(e._id, e);
@@ -412,8 +454,8 @@ export async function traverseFromSeeds(
       selfLoopsAtSeed.delete(seedId);
       const kind = edgeEndpointKind(loops[0].fromKind);
       const entity = kind === 'entity'
-        ? (await col<EntityDoc>(spaceCollection(spaceId, 'entities'))
-            .find(asFilter<EntityDoc>({ _id: seedId })).project(NEVER_RETURNED_PROJECTION).toArray() as EntityDoc[])[0]
+        ? (await bounded(col<EntityDoc>(spaceCollection(spaceId, 'entities'))
+            .find(asFilter<EntityDoc>({ _id: seedId })).project(NEVER_RETURNED_PROJECTION)).toArray() as EntityDoc[])[0]
         : undefined;
       const other = entity ? undefined : (await endpointRecordsByKind([spaceId], [{ id: seedId, kind }])).get(seedId);
       // The edge outlived the record, or the seed lives somewhere this walk cannot read. Same `continue` and
@@ -465,6 +507,8 @@ export async function traverseFromSeeds(
     frontier = nextFrontier;
     frontierSet = new Set<string>(frontier);
     depth++;
+    // Between hops too: the link-scan and endpoint reads above carry no deadline of their own.
+    if (frontier.length > 0 && depth < maxDepth) timeLeft();
   }
 
   return { neighbours: stampTruncation(results, altTruncated), scanCapped: capped };
@@ -483,41 +527,16 @@ function stampTruncation(results: SeedTraverseNeighbor[], truncated: Set<string>
 }
 
 /**
- * Expand a set of recall seeds into their graph neighbours across the caller's
- * authorized spaces. Seeds are grouped by space (only spaces in `memberIds` are
- * traversed — the cross-space access guard), each space is BFS-expanded via
- * `traverseFromSeeds`, and the merged neighbours are truncated to `limit` with
- * lower-hop results preferred. Never touches a space outside `memberIds`.
+ * The walk ran out of the caller's deadline. Thrown rather than returned so no half-walked neighbourhood can
+ * be mistaken for a whole one — `row-graphs.ts` turns it into a row named `deadline`, never a short graph.
+ *
+ * `traverseRecallSeeds` — the multi-seed walk that merged every seed's neighbourhood and cut it with
+ * `slice(0, limit)` — was here and is gone (Q-126): that global slice is what returned rows with part of their
+ * graph. Each row is now walked on its own and is whole or absent.
  */
-export async function traverseRecallSeeds(
-  memberIds: string[],
-  seeds: { _id: string; spaceId: string }[],
-  maxDepth: number,
-  limit: number,
-  narrowing?: TraverseNarrowing,
-): Promise<SeedTraverse> {
-  if (seeds.length === 0 || maxDepth < 1 || limit < 1) return { neighbours: [], scanCapped: false };
-  const allowed = new Set(memberIds);
-  const bySpace = new Map<string, string[]>();
-  for (const s of seeds) {
-    if (!allowed.has(s.spaceId)) continue;
-    const arr = bySpace.get(s.spaceId) ?? [];
-    arr.push(s._id);
-    bySpace.set(s.spaceId, arr);
+export class WalkDeadlineExceeded extends Error {
+  constructor() {
+    super('graph walk: the deadline ran out');
+    this.name = 'WalkDeadlineExceeded';
   }
-
-  const collected: SeedTraverseNeighbor[] = [];
-  // Any member space whose scan stopped early makes the WHOLE answer short — the caller sees one merged
-  // neighbourhood and cannot tell which space came back partial.
-  let scanCapped = false;
-  for (const [sid, ids] of bySpace) {
-    const walk = await traverseFromSeeds(sid, ids, maxDepth, limit, narrowing);
-    collected.push(...walk.neighbours);
-    if (walk.scanCapped) scanCapped = true;
-  }
-  collected.sort((a, b) => a.hops - b.hops); // prefer lower-hop neighbours when truncating
-  // Dropping the tail here is itself a truncation, and it was already reported by length downstream. Saying
-  // it explicitly costs nothing and stops that reporting depending on a comparison made in another file.
-  if (collected.length > limit) scanCapped = true;
-  return { neighbours: collected.slice(0, limit), scanCapped };
 }

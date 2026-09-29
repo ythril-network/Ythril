@@ -82,12 +82,16 @@ const RETRIEVAL_GUIDE = `Three retrieval modes exist and they are easy to confus
 
 3. **recall with tags/types/filter** — semantic ranking WITHIN a structured
    subset. tags requires ALL listed tags; types restricts knowledge types; filter
-   is an operator object per key (eq, ne, in, exists, gt, gte, lt, lte).
-   Filter keys must start with: properties., tags, type, name, status, or label.
-   Performance: tags, type, name, status, label — and, on spaces whose schema
-   declares them, properties.<key> — take a fast pre-filtered vector-search path.
-   Other filters (undeclared properties.*, exists) are still correct but scan
-   exhaustively, so prefer declared fields on large spaces.
+   takes raw MongoDB (the operators query takes, nested to depth 8) or an
+   operator object per key (eq, ne, in, exists, gt, gte, lt, lte), never both
+   in one filter. Any key is accepted, and tags and a filter both apply.
+   The promise: topK is filled from every record that satisfies the filter,
+   whatever its vector rank; an answer that could not be completed says so
+   in its degraded reasons. The cost: tags, type, name, status, label and,
+   on spaces whose schema declares them, properties.<key> are applied by the
+   vector index itself; any other filter costs a pass over the matching
+   records, so declare heavily filtered properties on large spaces.
+   filterPath in the answer says which it took.
 
 KEEPING A READ CHEAP -- the answer to "how do I avoid fetching the internal
 fields":

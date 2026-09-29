@@ -95,8 +95,11 @@ DEBUG=1 docker compose up
 | `MONGO_CONNECT_RETRY_MS` | `30000` | How long the **first** MongoDB connection may spend retrying before boot gives up. A container orchestrator's healthcheck can report MongoDB healthy while it is still finishing startup, so the first driver connection can have its socket reset mid-handshake — which used to kill the process outright. Only "not up yet" failures are retried (network errors, server selection, topology closed); bad credentials and a malformed URI fail immediately, because waiting cannot help and retrying would turn a clear error into a boot that appears to hang. Backoff is jittered so several instances starting together do not retry in lockstep. |
 | `SHUTDOWN_DRAIN_MS` | `8000` | How long in-flight HTTP requests get to finish after SIGTERM before their connections are forced shut. On SIGTERM the server stops accepting new connections, waits for the running ones, then flushes config and closes MongoDB. The default is sized for **Docker's 10 s stop grace period** — the whole drain plus the flush has to fit inside it or the container is SIGKILLed mid-write anyway. Kubernetes allows 30 s by default, so raise this if your orchestrator gives you longer. |
 | `SHUTDOWN_READY_GRACE_MS` | `2000` | How long to keep serving after `/ready` starts returning **503**, before the drain begins. On SIGTERM the server reports not-ready immediately so an orchestrator takes it out of rotation; this is the window for a readiness probe to notice. Kubernetes' default probe period is 10 s, so some probes will miss a 2 s window — raise it if your rolling updates still drop requests. **Set it to `0` on a single-instance deployment**: there is no load balancer to inform and the wait is pure delay. Comes out of the same stop-grace budget as `SHUTDOWN_DRAIN_MS`. `/health` (liveness) keeps returning 200 throughout — a liveness probe that fails on SIGTERM invites a SIGKILL mid-drain. |
-| `RECALL_BUDGET_MS` | `25000` | End-to-end budget for one recall call. Every hop runs in series — embed the query, the per-type vector searches, the lexical channel, the cross-encoder — and each has its own timeout with nothing watching the total. This sits under the ~30 s a typical MCP client waits, so the server stops working before the caller stops listening. It is a **budget, not a hard abort**: the only hop it can cancel is the reranker, because that is the only optional one. |
+| `RECALL_BUDGET_MS` | `25000` | End-to-end budget for one recall call. Every hop runs in series — embed the query, the per-type vector searches, the lexical channel, the cross-encoder — and each has its own timeout with nothing watching the total. This sits under the ~30 s a typical MCP client waits, so the server stops working before the caller stops listening. It is a **budget, not a hard abort**: the only hop it can cancel is the reranker, because that is the only optional one. **It is also the deadline of a traversal** (`traverse > 0`) on `recall` and `similar`: every walk query runs under what is left of it, and a walk that runs out ends the answer at the last whole match with `truncatedBy: "deadline"` and `nextSkip`. |
 | `RERANK_MIN_BUDGET_MS` | `3000` | Below this much remaining budget the reranker is **skipped** rather than started, and recall returns the fused order. Starting a cross-encoder pass that cannot finish burns time that was needed to return the answer; a slightly worse ranking delivered beats a perfect one the caller has already given up on. The skip is logged. |
+| `READ_SPILL_TOKEN_MAX_MB` | `64` | How many megabytes of read spills one token may hold — the part of a `recall` or `similar` answer that did not fit, kept for the token that asked (see [Reading a spill](04a-recall-api.md#reading-a-spill-get-apibrainspillsid-and-mcp-read_spill)). Measured as **raw JSON**, not as stored, because the decompressed size is what a reader pays. Past it a token's **own** oldest spills are evicted to make room; a single spill larger than the whole share is refused (`spillRefused: over-share`) and the answer keeps `nextSkip`. `1`–`16384`. |
+| `READ_SPILL_TOKEN_MAX_COUNT` | `50` | How many read spills one token may hold. Past it, the token's own oldest spill is evicted — reading it then answers `410`. `1`–`100000`. |
+| `READ_SPILL_INSTANCE_MAX_MB` | `1024` | How many megabytes of read spills the whole instance holds, raw JSON. At the ceiling a new spill is **refused** (`spillRefused: instance-ceiling`) rather than evicting another caller's — a busy token cannot push out somebody else's results. Spills live outside every space: they count toward no space's storage and no quota, and no backup carries them. `1`–`1048576`. |
 | `METRICS_TOKEN` | (unset) | When set, `GET /metrics` requires this exact value as a Bearer token — the recommended path for Prometheus scrape configs. If unset, the endpoint falls back to requiring a valid admin PAT. |
 | `TRUST_PROXY` | `false` | Express `trust proxy` setting (overrides the `trustProxy` config key). Default `false` — `req.ip` comes from the socket. **Set this when running behind a reverse proxy**, to the exact number of proxy hops (e.g. `1`), *not* `true` (which trusts the whole `X-Forwarded-For` chain and is client-spoofable). Also accepts `loopback` or a comma-separated CIDR/IP list. Rate limiting and the audit log key on `req.ip`, so a wrong value here is a security setting. |
 | `SYNC_ALLOW_PRIVATE_PEERS` | `false` | Allow sync **peer URLs** to resolve to private/reserved addresses (RFC-1918, CGNAT, IPv6 ULA) — for same-host or LAN networks (overrides the `allowPrivatePeers` config key). Default `false`: sync connects only to public peers, and any peer that tries to move its URL onto a private address is refused. Even when `true`, crown-jewel addresses (loopback, link-local / cloud IMDS `169.254.169.254`, unspecified) stay blocked. |
@@ -760,7 +763,28 @@ Named volumes persist across upgrades. The server applies any pending MongoDB in
 
 **Breaking changes**, when they occur, will be listed in `CHANGELOG.md` with migration steps.
 
+**Upgrading to 5.5.3 or later deletes the read spills older versions wrote into spaces, and that cannot be
+undone.** Before it, a `recall` or `similar` answer too large to return inline was saved as a file at the root
+of the seed's space — `_tmp/graph-<id>.json` or `_tmp/results-<id>.json` — which replicated to every peer and
+never expired there. They are one caller's search results, not content, and spills now live outside every
+space. From the first boot, a sweep inside the retention pass (every few minutes) removes every such file and its record,
+whether it was written here or pulled from a peer, with no tombstone and no webhook; each space it cleans gets one
+log line and one audit entry, `file.legacy_spill.sweep`, naming the space. Only that exact root path is
+touched: a `_tmp` folder of your own deeper in the tree, and any other file under the root `_tmp`, are left
+alone. Copy the root `_tmp/` out of a space's file store first if you want to keep one.
+
+**Upgrading to 5.5.3 or later rebuilds every vector index once, with no gap in search.** Each index gains `_id` as a
+filter field, which is what lets a filtered recall complete its answer. Where the database can change an index in
+place (Atlas) it does; where it cannot (`mongodb-atlas-local`), the new definition is built under a second name,
+searches move to it, the original is rebuilt, and searches move back. Until an index is done, a filtered recall that
+needs completing returns what it found and says `filter_window` in `degraded`; every other search is unaffected. On
+a large instance this takes as long as building every index twice, in the background.
+
 ### Rolling Back
+
+**A rollback from 5.5.3 rebuilds the vector indexes once more**, to the previous version's filter fields. Search
+keeps working meanwhile, except on `mongodb-atlas-local`, where the older build drops and recreates each index and
+recall on it answers empty until it is ready. Nothing is lost; the records are untouched.
 
 **The first boot on a new version rewrites `config.json`, and some of those rewrites drop a field an older
 build reads.** So a rollback is not simply "run the previous image": that path exists, but it needs the copy of
@@ -773,6 +797,7 @@ moved. They are listed here so the consequence of going back is not a surprise:
 |---|---|---|
 | `mediaEmbedding.enabled` → per-class `levels` | `enabled` | defaults it back to **`true`**: an instance where media embedding was deliberately **off** starts sending uploads to the vision and speech models again |
 | a space's `description` → `meta.purpose` | `description` | reads no space instructions, because the field it serves to MCP clients is gone |
+| a network's schema layer or membership origin kept under a renamed space's OLD name → the space's current name (`migrateNetworkSpaceKeys`) | the entry under the old name (moved, not deleted; an entry with no space to move to is left where it is) | looks the network's layer up under the old name again and finds nothing, so the space's effective schema loses that network's layer until the network next sends it (the next meta pull on a pub/sub or tree; the next round on a voted network), and a token that joined the network can no longer be told apart as its establisher for the leave rule. **New in 5.5.3.** Nothing about the records changes |
 | a provider API key in `mediaEmbedding.<vision\|stt\|nli\|rerank>.apiKey` → `secrets.json` | `apiKey` | sends no `Authorization` header to that provider, so an external vision / speech-to-text / NLI / rerank endpoint returns 401 and the feature stops. The key is NOT lost — it is in `secrets.json` (`0o600`) and can be pasted back into `config.json` for the older build. **New in 3.0**, and the reason is that `config.json` is the file operators copy, paste into issues, and mount as a ConfigMap. |
 | `mediaEmbedding.ollamaUrl` / `visionModel` / `whisperUrl` / `whisperModel` → `vision.*` / `stt.*` | `ollamaUrl`, `visionModel`, `whisperUrl`, `whisperModel` | stops finding those four names and falls back to its BUILT-IN defaults — `http://ollama:11434` and `http://whisper:8000` — so it captions and transcribes against whatever answers there, with no error. The values are not lost: they are on `vision.*` / `stt.*`, which the older build also reads. **New in 3.0.** The env vars are a separate matter and 4.0 REMOVED the legacy spellings: `VISION_BASE_URL`, `STT_BASE_URL` and `STT_MODEL` are the names, and `OLLAMA_URL` / `WHISPER_URL` / `WHISPER_MODEL` now refuse the boot rather than resolving — see the rename note in the media-embedding guide for why refusing beats ignoring. **This matters for a rollback in one direction only:** the current names resolve in every 3.x build, so a manifest written for 4.0 runs on 3.x unchanged. A manifest still using the legacy names runs on 3.x and will not start on 4.0. |
 | `mediaEmbedding.faceRecognition.enabled` → the image ladder | `faceRecognition.enabled` | applies its own default for face recognition rather than the choice that was recorded |
@@ -819,6 +844,12 @@ docker compose up -d
 UI ignore ones they do not know, so an older build reads newer records — it simply does not show the newer fields.
 The exception is anything created by a feature the old version lacks: a record whose `type` has no schema in the
 old build is still stored and still returned, just unvalidated.
+
+**Rolling back past 5.5.3 leaves the read-spill store behind, and it empties itself.** The `_read_spills` and
+`_read_spill_pages` collections are unknown to an older build, which neither reads nor removes them; their
+MongoDB TTL index keeps running, so every spill in them is gone within a day. Until then an older build's
+backups include them, because it does not know to leave them out. The legacy spills the upgrade swept are not
+restored, and an older build goes back to writing new spills into the space.
 
 **Vector indexes are rebuilt on boot**, so a rollback that changes the embedding model or its dimensions costs a
 reindex, not data. Check `GET /ready` before sending traffic — see [Runtime Model Downloads](#runtime-model-downloads)

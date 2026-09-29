@@ -74,13 +74,14 @@ message is rarely textually similar to the message's subject.
 ## Combining them: the two-call pattern that beats one clever call
 
 **Filter first, rank second — in one call.** `recall`'s `filter` accepts the same grammar `query` does, including
-`$or` and `$regex` nested to depth 8. **`topK` is filled from records that satisfy the filter**, never applied to
-an already-cut shortlist — so a filtered `topK: 10` still returns ten, and nothing matching is silently dropped.
+`$or` and `$regex` nested to depth 8. **`topK` is filled from every record that satisfies the filter, whatever its
+vector rank** — so a filtered `topK: 10` returns ten when ten match, and nothing matching is silently dropped. An
+answer that could not be completed says `filter_window` in `degraded`.
 
-That promise holds however the filter is written; only the speed differs. A simple condition on an allowlisted
-key becomes a native pre-filter inside the vector index. **Raw MongoDB — including the `$or` above — cannot**, so
-the whole space is scored and then filtered: slower, same records. Declaring a heavily-filtered property in the
-space schema is what keeps it on the fast path.
+That promise holds however the filter is written; only the cost differs. A flat condition on `tags`, `type`,
+`name`, `status`, `label` or a declared property is applied by the vector index itself. Anything else — including
+the `$or` above — costs a pass over the matching records. Declaring a heavily filtered property in the space
+schema is what keeps it on the fast path.
 
 ```json
 { "query": "who owns the vault service",
@@ -112,7 +113,8 @@ question you are actually asking.
 ### "I want context around an answer"
 
 `recall` with `traverse: 1`. Depth 2 is occasionally right; depth 3+ on a dense graph is almost never what someone
-meant — the node budget is `topK × (traverse + 1) × 4`, and the response itself is bounded by **`maxBytes`**
+meant — each match comes with its whole graph or is left out and named in `incompleteRows`, the walk has one
+budget and one deadline per call, and the response itself is bounded by **`maxBytes`**
 (default 50 000 characters over REST and 25 000 over MCP — the parameter is `maxChars`; `maxBytes` exists and has no
 default), so a deep traversal comes back as the matches that fit plus a `nextSkip` to page through the
 rest. `truncated: true` on a call you expected to be small is a signal you asked a bigger question than you
@@ -152,8 +154,9 @@ has to be one.
 |---|---|---|
 | counts that keep growing | paging `recall` with `topK`/an unsupported `offset` | `query` with `skip` and `total` |
 | a phrase search finds nothing | `$regex` over prose | `recall` |
-| "this record has no relationships" | a truncated traversal, before the spill | check `truncated` / `graphTruncated`, fetch `complete` |
-| a filtered recall returns fewer than `topK` | assuming a post-filter | `topK` is filled from records that SATISFY the filter, so nothing matching was dropped — the candidates genuinely ran out |
+| "this record is not in the results" | a match left out because its graph could not be read whole | check `incompleteRows` — it names the match and the `reason`; a narrower `edgeLabels` or a lower `traverse` brings it back whole |
+| "there are no more matches" | a budgeted answer read as the whole result | check `truncated` and page with `nextSkip` as `skip`; `remainder.spillId` is the same records kept in one spill |
+| a filtered recall returns fewer than `topK` | assuming a post-filter | `topK` is filled from every record that satisfies the filter, whatever its rank, so nothing matching was dropped — the matches genuinely ran out. The exception says so: `degraded` carries `filter_window` |
 | slow, wide answers | `traverse` 2+ with a large `topK` | narrow the seeds first |
 
 ---

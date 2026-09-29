@@ -5,7 +5,7 @@ import { registerReembedRoute } from './spaces-reembed.js';
 import { registerActivityResetRoute } from './spaces-activity.js';
 import {
   requireAuth, requireSpaceAuthScoped, requireSpaceAuthMfaScoped, requireAdminMfa, requireAdminMfaScoped,
-  requireAdminOrSpaceAdminMfaScoped, denyReadOnly,
+  requireAdminOrSpaceAdminMfaScoped, denyReadOnly, requireCreateSpacesMfa,
 } from '../auth/middleware.js';
 import { globalRateLimit } from '../rate-limit/middleware.js';
 import { editorScopeFor } from '../auth/editor-scope.js';
@@ -14,7 +14,8 @@ import { needsReindex } from '../spaces/_shared.js';
 import { removeSpace } from '../spaces/lifecycle.js';
 import { openRoundHere } from '../networks/round-local-state.js';
 import { makeSignedOwnCast } from '../util/signing.js';
-import { renameSpace } from '../spaces/rename.js';
+import { localToRemote } from '../sync/space-map.js';
+import { renameSpaceAct } from '../spaces/rename.js';
 import { reorderSpaces } from '../spaces/spaces.js';
 import { checkMetaPrecondition, preconditionErrorBody } from '../spaces/meta-precondition.js';
 import { gatherCompletenessFacts, scoreCompleteness } from '../spaces/completeness.js';
@@ -89,26 +90,14 @@ spacesRouter.patch('/:id/rename', globalRateLimit, requireAdminOrSpaceAdminMfaSc
     res.status(400).json({ error: parsed.error.message });
     return;
   }
-
   // The rename IS the change, so the snapshot is just the two ids. Set before the attempt and only read
   // by the audit middleware on a <400 response, so a failed rename records nothing.
   req.auditSnapshots = { before: { id: oldId }, after: { id: parsed.data.newId } };
 
-  try {
-    const space = await renameSpace(oldId, parsed.data.newId);
-    res.json({ space });
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    if (msg.includes('not found')) {
-      res.status(404).json({ error: msg });
-    } else if (msg.includes('already exists')) {
-      res.status(409).json({ error: msg });
-    } else if (msg.includes('built-in')) {
-      res.status(400).json({ error: msg });
-    } else {
-      res.status(500).json({ error: msg });
-    }
-  }
+  // One mapping from a failed rename to its status, shared with the `space_rename` tool (Q-139).
+  const r = await renameSpaceAct(oldId, parsed.data);
+  if (r.status === 200) { res.json({ space: r.space }); return; }
+  res.status(r.status).json(r.code ? { error: r.error, code: r.code } : { error: r.error });
 });
 
 // POST /api/spaces/reorder
@@ -270,14 +259,16 @@ spacesRouter.get('/', globalRateLimit, requireAuth, async (req, res) => {
 //
 // `space-create-contract.test.js` pins that chain, including that a refusal leaves NO SPACE BEHIND, and it was proven
 // against this handler before the move.
-spacesRouter.post('/', globalRateLimit, requireAdminMfa, async (req, res) => {
+// The createSpaces right, not instance admin (Q-134): the one predicate every creating door asks. MFA stays — it is a
+// per-token policy, not an admin property.
+spacesRouter.post('/', globalRateLimit, requireCreateSpacesMfa, async (req, res) => {
   const decision = planSpaceCreate(req.body);
   if (!decision.ok) {
     res.status(decision.refusal.status).json(decision.refusal.body);
     return;
   }
 
-  const result = await applySpaceCreate(decision.plan);
+  const result = await applySpaceCreate(decision.plan, { tokenId: req.authToken?.id ?? null });
   if (result.outcome === 'conflict') {
     res.status(409).json({ error: result.error });
     return;
@@ -842,6 +833,8 @@ spacesRouter.delete('/:id', globalRateLimit, requireAdminMfaScoped('id'), async 
       openedAt: now,
       votes: [],
       spaceId: id,
+      // The network's id for it (Q-133): a member that calls the space something else resolves this one.
+      networkSpaceId: localToRemote(net, id),
     });
     // The proposer is a voter like any member (S-7): its yes is required and cast here, SIGNED, so a relayed copy of
     // it survives — a bare cast is taken only from the voter itself.

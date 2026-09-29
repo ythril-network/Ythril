@@ -141,6 +141,8 @@ const WRITE_GUARDS = [
   'requireAdminMfaScoped',
   'requireAdminMfa',
   'requireAdmin',
+  // Refuses any token without the createSpaces right (Q-134); a legacy read-only token never holds it.
+  'requireCreateSpacesMfa',
 ];
 
 /**

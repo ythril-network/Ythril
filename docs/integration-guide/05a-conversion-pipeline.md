@@ -49,6 +49,11 @@ than its name:
 > generated. A `PATCH` that sets `description` without declaring a source clears the field, because the
 > words are then the caller's own.
 >
+> **Only the instance that authored a file derives its description.** A file that arrived from a network peer
+> gets the author's description by sync; a receiver that wrote its own could not send it anywhere, and would
+> either outrank the author's next edit or disagree with the author for ever. The `excerpt` is derived on every
+> instance, because it never leaves the instance that computed it.
+>
 > The text is sent to the local document model, or to the assist model **only when its egress host is
 > acknowledged** — the same gate the repair pass applies, re-checked at call time. Neither slot receives
 > anything it would not already receive on the repair path.

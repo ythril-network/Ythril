@@ -14,7 +14,7 @@ Since F-34 a token below instance admin acts on a network through the **`network
 | `PATCH /api/networks/:id` | `admin` — the settings are shared by every space |
 | `DELETE /api/networks/:id` | `write` for a membership you established, `admin` for anyone's (or one with no recorded establisher) |
 | `POST /api/networks/:id/spaces` | `admin` on every space it already carries, and `write` on the space being added — or administering each of them. On club, closed and democratic networks it opens a vote |
-| `POST /api/networks/join-remote` | `write` on every existing local space the join maps to; a space it would create needs `createSpaces` and a floor of `write` too. Checked after the handshake's apply and before finalize — refused, nothing is written and the handshake expires |
+| `POST /api/networks/join-remote` | `write` on every existing local space the join maps to; a space it would create needs `createSpaces` and a floor of `write` too, and the joining token becomes the administrator of each space the join creates. Checked after the handshake's apply and before finalize — refused, nothing is written and the handshake expires |
 
 **A space admin needs no Networks column for its own spaces** (F-37). A token that administers every space an act touches may create a network carrying them, join one mapped onto them (onto a NEW space too, when it also holds `createSpaces`), see the network, and generate its invite (`POST /api/invite/generate`, `POST /api/networks/:id/invite`) — which is what makes a network it created joinable. A space it does not administer still needs the column, and the refusal names it.
 
@@ -102,7 +102,7 @@ POST /api/networks
 
 **Network types**: `closed` (unanimous vote), `democratic` (majority), `club` (proposer only), `braintree` (tree hierarchy), `pubsub` (auto-join publisher/subscriber, push-only).
 
-**`requireSignedVotes`** (optional, default `false`): when `true`, governance vote casts must carry a valid Ed25519 signature from the voting member (strict mode). Leave it off until every member has synced at least once so their signing keys are published; then enable it (also settable via `PATCH`) to reject any unsigned or forged vote. See [Sync Protocol → Signed vote casts](../sync-protocol.md).
+**`requireSignedVotes`** (optional, default `false`): when `true`, governance vote casts must carry a valid Ed25519 signature from the voting member (strict mode). Leave it off until every member has synced at least once so their signing keys are published; then enable it (also settable via `PATCH`) to reject any unsigned or forged vote. Since 5.5.3 every cast also signs the round's type and target (`bsig`), so a member relaying a space deletion or wipe cannot re-aim it at another space; see [Sync Protocol → Signed vote casts](../sync-protocol.md#signed-vote-casts) for the transition while older members remain.
 
 **`syncSchedule`** (optional): how often this network syncs automatically. Give a standard **cron expression** (e.g. `"*/5 * * * *"` = every 5 minutes, `"0 * * * *"` = hourly) — the same node-cron engine the backup scheduler uses. Omit it (or set it empty) for manual-sync only.
 
@@ -171,12 +171,18 @@ answer in `dismissedSpaces`, so neither an announcement nor a passed round propo
 `networks: admin` on every space the network carries. A dismissed space can still be accepted by its id. Answers `200` with the network. MCP:
 `network_pending_space` with `{ "id", "spaceId", "action", "mapTo"? }`.
 
+**Accepting onto a space the network already carries is a repair, not a second join.** When `mapTo` names a local
+space this network carries and that space has no network id recorded yet, the accept records `spaceId` as its
+network id in `spaceMap` and drops the pending entry — no space is created and nothing is re-synced. It is how a
+club, closed or democratic network fixes a space it holds twice (Q-133): there is no upstream to heal it. The
+accept is priced like any other, and it clears a dismissal of `spaceId`.
+
 | status | when |
 |---|---|
 | `400` | a malformed body, or a `mapTo` that is not a space id |
 | `403` | the token is short on the right the action needs; the refusal names what |
 | `404` | no such network, or nothing pending under `spaceId` |
-| `409` | the network already carries the local id |
+| `409` | the network already carries the local id, and it already has a network id of its own |
 | `500` | the space could not be added; the pending entry is kept, so the accept can be retried |
 
 ### Add a Space to a Network
@@ -214,6 +220,7 @@ Adds one of this instance's spaces to a network. Answers `200` with the network 
 | `403` | the token is short on a right above; the refusal names what |
 | `404` | no network with this id that the token may see |
 | `409` | the network already carries the space, a vote to add it is already open, or this instance is not the publisher, root or organiser the type requires |
+| `409` with `code: "space_name_in_use"` | the network still calls ANOTHER space by this name — the old name of a space renamed here. A second space under it would be announced twice and every peer request for it sent to the renamed one, so it would never reach anybody. Choose another name. **New in 5.5.3**; `PATCH /api/spaces/:id/rename` refuses renaming a networked space onto such a name the same way |
 
 ---
 
@@ -293,6 +300,10 @@ that expired is concluded but not passed, and deletes nothing — and only on th
 member and carried by the round's own network. Each member applies it once; gossip re-delivering the round does not
 re-apply it.
 
+**A space round names its space twice** since 5.5.3: `spaceId`, the proposer's own name for it (as before — a 5.0 or
+5.1 member applies that field as it is), and `networkSpaceId`, what the network calls it. A member resolves
+`networkSpaceId` when it is present, so a round reaches the right space on a member that calls it something else.
+
 **A passed `space_deletion` never deletes a member's space.** It takes the space out of the network on every member,
 which keeps its copy and data as a local space; only the proposer deletes its own copy, once no other network carries
 it. `DELETE /api/spaces/:id` on a networked space still answers `202` with the rounds it opened.
@@ -325,7 +336,10 @@ GET /api/networks/:id/votes
 }
 ```
 
-Only non-concluded rounds are returned.
+Only non-concluded rounds are returned. A round about a space carries `localSpaceId` (since 5.5.3): what THIS
+instance calls the space, which after a rename is neither the network's id nor the proposer's name. It is absent for a
+space not carried here yet (a `space_addition` round), and on this route only — the peer-facing votes route serves
+rounds as they travel. MCP: `network_votes`.
 
 ---
 
@@ -341,7 +355,7 @@ POST /api/networks/join-by-key
 
 Called on the JOINING instance. Joins a pub/sub network with nothing but its publisher's URL and its published invite
 key: this instance redeems the key at the publisher (below), then runs the same handshake as
-[Join Remote](#join-remote-rsa-handshake), so the answer, the optional `spaceMap` and the rights are the same. `networks: write` (or
+[Join Remote](#join-remote-rsa-handshake), so the answer, the optional `spaceMap` and `syncSchedule`, and the rights are the same. `networks: write` (or
 administering the space) on every existing local space the join maps to, and `createSpaces` for any it creates; the
 joining token is also what later decides which announced spaces the network may add ([Pending Spaces](#pending-spaces)).
 MCP: `network_join_by_key` with the same fields.
@@ -416,7 +430,27 @@ POST /api/networks/join-remote
 
 Executes the full 3-step RSA handshake server-side. No plaintext tokens cross the wire.
 
-**`spaceMap`** (optional) — a `Record<string, string>` that maps remote space IDs to local space IDs. Use this when a remote space name collides with an existing local space and you want to alias it to a different local name instead of merging. If omitted, remote space IDs are used as-is (identity mapping). The map is persisted on the `NetworkConfig` and used by the sync engine to translate space IDs during pull and push.
+**`spaceMap`** (optional) — a `Record<string, string>` from a space of the network to the local space id it goes into. Use this when a space name collides with an existing local space and you want it under a different local name instead of merging. **Key it by the name the invite shows for the space** (`spaces` in the bundle); the network's id for it (`networkSpaces`) is accepted too. A space not named keeps the name the invite shows. The recorded aliases are persisted on the `NetworkConfig`, and the sync engine translates through them in both directions.
+
+**A space the inviter renamed.** A rename keeps the space's old id as the **network's** id for it, so every peer keeps reaching it. The invite answers therefore carry two index-aligned lists: `spaces`, the inviter's current names (what the join dialog shows, and what an older joiner reads), and `networkSpaces`, what the network calls each one. The join creates the space under its current name and records the alias from the network's id, so everything the network sends later — records, schema layers, proposals, votes — reaches that one space. An answer without `networkSpaces` (an inviter older than 5.5.3) is read as before: the shown name is taken as the network's id.
+
+**Refused before anything is written**, with `400` and a `code` beside the sentence, on this route and `network_join_remote` / `network_join_by_key` alike:
+
+| `code` | when |
+|---|---|
+| `join_mapping_collision` | two of the network's spaces would land on one local space, or a `spaceMap` key is one space's shown name and another space's network id, so it could mean either |
+| `network_id_aliased` | joining a network this instance already carries would move one of its spaces: a network id already reaching a different local space, or a local space already syncing under another of the network's ids |
+| `invalid_answer` | the inviter named a space with an id no space can have |
+
+The answer's `spaceMap` lists every alias the join recorded — the ones you asked for and the ones a renamed space needed. **Changed in 5.5.3**: it used to list only the ones you asked for.
+
+**`syncSchedule`** (optional) — the cron schedule this instance syncs the joined network on; `""` means manual sync
+only. Left out, the join adopts the inviter's own schedule, which its apply answer carries as `syncSchedule` (absent
+when the inviter syncs manually), and falls back to every 15 minutes (`*/15 * * * *`) when the inviter offers none
+it could run. A value the scheduler cannot run is refused `400` before the handshake, in the sentence
+`POST /api/networks` gives. Only a network the join creates is scheduled; one this instance already carries keeps its
+own. **Changed in 5.5.3**: a joined network used to get no schedule, which is manual-only, so a joiner never pulled
+on its own. Change it later on the network card or with `PATCH /api/networks/:id`.
 
 ### Join Troubleshooting: private or local URLs rejected
 
@@ -698,9 +732,15 @@ Optional fields:
   "inviteUrl": "https://me.example.com/api/invite/apply",
   "rsaPublicKeyPem": "-----BEGIN PUBLIC KEY-----\n...",
   "expiresAt": "2026-03-25T15:00:00.000Z",
+  "spaces": ["general", "y-project-template"],
+  "networkSpaces": ["general", "y-twin"],
   "inviteCode": "ythril1_eyJoYW5kc2hha2VJZCI6..."
 }
 ```
+
+`spaces` is what this instance calls each space the network carries, `networkSpaces` (index-aligned, since 5.5.3)
+what the network calls it; they differ for a space renamed here. The redeem answer (`POST /api/invite/redeem`) has
+the same two fields.
 
 #### `inviteCode` — the same bundle as one line, and the thing to give a person
 
@@ -765,9 +805,14 @@ POST /api/invite/apply
   "networkId": "net-uuid",
   "networkLabel": "Team Sync",
   "networkType": "closed",
-  "spaces": ["general"]
+  "spaces": ["general", "y-project-template"],
+  "networkSpaces": ["general", "y-twin"]
 }
 ```
+
+`spaces` is what the inviter calls each space; `networkSpaces`, index-aligned, is what the network calls it — they
+differ for a space the inviter renamed (here `y-twin` → `y-project-template`). See
+[Join Remote](#join-remote-rsa-handshake) for what a joiner does with the pair.
 
 All tokens are RSA-OAEP-SHA256 encrypted — never plaintext over the wire.
 

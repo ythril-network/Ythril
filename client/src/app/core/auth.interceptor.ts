@@ -3,6 +3,7 @@ import { inject } from '@angular/core';
 import { catchError, throwError } from 'rxjs';
 import { Router } from '@angular/router';
 import { AuthService } from './auth.service';
+import { tokenMayReach } from './token-may-reach';
 
 export const authInterceptor: HttpInterceptorFn = (req, next) => {
   const auth = inject(AuthService);
@@ -11,9 +12,9 @@ export const authInterceptor: HttpInterceptorFn = (req, next) => {
   const token = auth.token();
   let out = req;
   // Only attach the bearer to same-origin requests — never leak credentials to
-  // cross-origin endpoints (e.g. the OIDC IdP discovery/token endpoints).
-  const sameOrigin = req.url.startsWith('/') || req.url.startsWith(location.origin);
-  if (token && sameOrigin) {
+  // cross-origin endpoints (e.g. the OIDC IdP discovery/token endpoints). The rule is
+  // `tokenMayReach`, shared with the download helper so the two cannot differ.
+  if (token && tokenMayReach(req.url)) {
     out = req.clone({ setHeaders: { Authorization: `Bearer ${token}` } });
   }
 

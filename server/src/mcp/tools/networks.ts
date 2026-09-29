@@ -21,7 +21,14 @@ export const callerOf = (ctx: ToolContext) => ({ ...(ctx.rights ? { rights: ctx.
 
 /** An act's answer as a tool result: the status travels in the text, as on every other tool that mirrors a route. */
 export function toResult(r: NetworkActResult, done: string): ToolResult {
-  if ('error' in r) return { content: [{ type: 'text' as const, text: `Error (${r.status}): ${r.error}` }], isError: true };
+  if ('error' in r) {
+    // The refusal code rides in structuredContent, as it rides in the REST body (Q-133); the text is unchanged.
+    const code = 'code' in r && r.code ? r.code : undefined;
+    return {
+      content: [{ type: 'text' as const, text: `Error (${r.status}): ${r.error}` }], isError: true,
+      ...(code ? { structuredContent: { error: r.error, code } } : {}),
+    };
+  }
   if (r.status === 204) return { content: [{ type: 'text' as const, text: done }], structuredContent: { ok: true } };
   return { content: [{ type: 'text' as const, text: JSON.stringify(r.body) }], structuredContent: r.body };
 }

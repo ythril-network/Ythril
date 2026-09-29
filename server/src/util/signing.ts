@@ -21,6 +21,7 @@
 import crypto from 'node:crypto';
 import { getConfig, saveConfig, getSecrets, saveSecrets } from '../config/loader.js';
 import { log } from '../util/log.js';
+import { comparePeerVersions } from '../sync/peer-floor.js';
 import type { NetworkConfig, NetworkMember, VoteRound, VoteCast } from '../config/types.js';
 
 export interface InstanceKeypair {
@@ -57,6 +58,63 @@ export function voteCastMessage(params: {
     params.instanceId,
     params.vote,
   ].join('|');
+}
+
+/**
+ * The version from which a voter signs `bsig` (`Q-138`). A cast WITHOUT one from a voter known to run this or later
+ * is refused: a relayer that strips the bound signature must not be able to fall back to the v1 check that it
+ * defeats. From an older or unknown voter the v1 check stands — the transition, until every member upgrades.
+ */
+export const BOUND_CASTS_SINCE = '5.5.3';
+
+/**
+ * What a round would DO, as a cast's bound signature covers it (`Q-138`): its type and its target. `pendingMeta` is
+ * not here: a sender inlines library references into it on the way out (`roundForPeer`), so honest copies differ.
+ * `wipeTypes` is sorted, because its order is not content.
+ */
+function roundTargetFields(round: Pick<VoteRound, 'type' | 'spaceId' | 'networkSpaceId' | 'wipeTypes'>): string[] {
+  return [round.type, round.spaceId ?? '', round.networkSpaceId ?? '', [...(round.wipeTypes ?? [])].sort().join(',')];
+}
+
+/**
+ * The message a cast's `bsig` signs: the v1 fields, then the round's type and target (`Q-138`). A v1 signature binds
+ * the round's id, so a relayer could rewrite what the round deletes or wipes and every honest cast still verified.
+ */
+export function voteCastBoundMessage(params: {
+  networkId: string;
+  roundId: string;
+  subjectInstanceId: string;
+  instanceId: string;
+  vote: string;
+  round: Pick<VoteRound, 'type' | 'spaceId' | 'networkSpaceId' | 'wipeTypes'>;
+}): string {
+  return ['ythril-vote:v2', params.networkId, params.roundId, params.subjectInstanceId, params.instanceId, params.vote,
+    ...roundTargetFields(params.round)].join('|');
+}
+
+/**
+ * A cast as it crosses the wire, and back — ONE shape for the push, the relay route and the merge, so a signature
+ * field added later cannot be dropped by one of three hand-written copies (it was three, and `bsig` would have been
+ * lost by each).
+ */
+export function castForWire(cast: VoteCast): VoteCast {
+  return {
+    instanceId: cast.instanceId, vote: cast.vote, castAt: cast.castAt,
+    ...(cast.sig ? { sig: cast.sig } : {}), ...(cast.bsig ? { bsig: cast.bsig } : {}),
+  };
+}
+
+/** A cast read from a request body or a peer's round, or `null` when it is not one. */
+export function castFromBody(body: unknown): VoteCast | null {
+  const b = body as Record<string, unknown> | null;
+  if (!b || typeof b !== 'object') return null;
+  if (typeof b['instanceId'] !== 'string' || !b['instanceId'] || (b['vote'] !== 'yes' && b['vote'] !== 'veto')) return null;
+  return {
+    instanceId: b['instanceId'], vote: b['vote'],
+    castAt: typeof b['castAt'] === 'string' ? b['castAt'] : new Date().toISOString(),
+    ...(typeof b['sig'] === 'string' && b['sig'] ? { sig: b['sig'] } : {}),
+    ...(typeof b['bsig'] === 'string' && b['bsig'] ? { bsig: b['bsig'] } : {}),
+  };
 }
 
 /** Sign a message with an Ed25519 private key PEM; returns base64. Empty on failure. */
@@ -152,16 +210,16 @@ export function signOwnVoteCast(params: {
   return signMessage(kp.privateKeyPem, voteCastMessage(params));
 }
 
-/** Build this instance's own vote cast, signed when a signing key is available. */
+/**
+ * Build this instance's own vote cast, signed when a signing key is available: the v1 `sig` every version checks, and
+ * `bsig` over the round's type and target (`Q-138`), which a 5.5.3 receiver requires of a voter it knows is current.
+ */
 export function makeSignedOwnCast(networkId: string, round: VoteRound, instanceId: string, vote: 'yes' | 'veto'): VoteCast {
-  const sig = signOwnVoteCast({
-    networkId,
-    roundId: round.roundId,
-    subjectInstanceId: round.subjectInstanceId,
-    instanceId,
-    vote,
-  });
-  return { instanceId, vote, castAt: new Date().toISOString(), ...(sig ? { sig } : {}) };
+  const base = { networkId, roundId: round.roundId, subjectInstanceId: round.subjectInstanceId, instanceId, vote };
+  const sig = signOwnVoteCast(base);
+  const kp = getInstanceKeypair();
+  const bsig = kp ? signMessage(kp.privateKeyPem, voteCastBoundMessage({ ...base, round })) : '';
+  return { instanceId, vote, castAt: new Date().toISOString(), ...(sig ? { sig } : {}), ...(bsig ? { bsig } : {}) };
 }
 
 // ── Key rotation ─────────────────────────────────────────────────────────────
@@ -291,18 +349,36 @@ function voterPublicKey(net: NetworkConfig, voterInstanceId: string): string | u
   return net.members.find(m => m.instanceId === voterInstanceId)?.signingPublicKey;
 }
 
-/** True if the cast carries a valid signature from its claimed voter. */
+/**
+ * Whether this instance knows `voterInstanceId` runs a version that signs `bsig` (`Q-138`): itself, or a member whose
+ * reported version is `BOUND_CASTS_SINCE` or later. An absent or unparseable version is NOT known — it falls back.
+ */
+function voterSignsBound(net: NetworkConfig, voterInstanceId: string): boolean {
+  let selfId: string | undefined;
+  try { selfId = getConfig().instanceId; } catch { selfId = undefined; }
+  if (voterInstanceId === selfId) return true;
+  const v = net.members.find(m => m.instanceId === voterInstanceId)?.version;
+  if (!v || !/^\d+\.\d+\.\d+/.test(v.trim())) return false;
+  return comparePeerVersions(v, BOUND_CASTS_SINCE) >= 0;
+}
+
+/**
+ * True if the cast carries a valid signature from its claimed voter, over the round it is being applied to.
+ *
+ * A cast with `bsig` must verify it against THIS round's type and target — a relayed round re-aimed at another space
+ * fails here although its v1 `sig` still verifies (`Q-138`). A cast without `bsig` is refused from a voter known to sign
+ * one, so stripping it is not a downgrade; from an older or unknown voter the v1 check stands. A cast a voter made
+ * before it upgraded is therefore accepted only by a peer that does not yet know it upgraded — the transition.
+ */
 export function isVoteCastSignatureValid(net: NetworkConfig, round: VoteRound, cast: VoteCast): boolean {
   if (!cast.sig) return false;
   const pub = voterPublicKey(net, cast.instanceId);
   if (!pub) return false;
-  return verifyMessage(pub, voteCastMessage({
-    networkId: net.id,
-    roundId: round.roundId,
-    subjectInstanceId: round.subjectInstanceId,
-    instanceId: cast.instanceId,
-    vote: cast.vote,
-  }), cast.sig);
+  const base = { networkId: net.id, roundId: round.roundId, subjectInstanceId: round.subjectInstanceId,
+    instanceId: cast.instanceId, vote: cast.vote };
+  if (cast.bsig) return verifyMessage(pub, voteCastBoundMessage({ ...base, round }), cast.bsig);
+  if (voterSignsBound(net, cast.instanceId)) return false;
+  return verifyMessage(pub, voteCastMessage(base), cast.sig);
 }
 
 /**

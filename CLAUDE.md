@@ -79,13 +79,18 @@ The fleet integrator read *"filter applied after vector search"* on `recall`, be
 filtered recall — because a post-filter behind `topK` could silently drop results. Our own `help()` said the opposite,
 correctly, at the same time: two surfaces describing one behaviour, and the wrong one was the one being read.
 
-**What the caller needed was the GUARANTEE, and the mechanism is what made the sentence rot.** `topK` is filled from
-records that satisfy the filter, so a filtered recall cannot silently miss a matching record — that is the promise, and
-it has held throughout. *"It is a pre-filter"* was the true-at-the-time explanation of why, and it is no longer the
-whole answer: allowlisted keys with declared schema properties become a native index pre-filter, while an undeclared
-property or `exists`/`ne` scores the space exhaustively and filters after. **Both paths keep the guarantee; only one is
-fast.** Write the promise into a description and the performance note beside it — a description that states the
-mechanism has to be revisited every time the mechanism gains a case, and nobody does.
+**What the caller needed was the GUARANTEE, and the mechanism is what made the sentence rot.** The promise: `topK` is
+filled from every record that satisfies the filter, whatever its vector rank, so a filtered recall cannot silently miss
+a matching record. The cost, in its own sentence: a filter the index cannot apply costs a pass over the matching
+records, so a heavily filtered property should be declared in the space schema. Write those two into a description and
+nothing about how — a description that states the mechanism has to be revisited every time the mechanism gains a case,
+and nobody does.
+
+**And this section is its own proof.** Its previous version explained the promise by the mechanism ("the undeclared
+path scores the space exhaustively and filters after"). That path scored only the nearest window, so the promise was
+broken for months while every sentence describing it read as true — found by `Q-102`, 2026-09-28, when 39 of 40
+single-record filters on an undeclared property answered `count: 0`. The promise is now tested at a seed larger than
+the window; the mechanism is written in `brain/predicate-recall.ts` and nowhere a caller reads.
 
 ## Reuse a module, or build one worth reusing
 

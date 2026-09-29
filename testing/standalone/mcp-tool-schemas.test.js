@@ -109,7 +109,13 @@ describe('MCP tool schemas — universal invariants', () => {
     // 69 -> 70: `network_change_notes` (`F-42`), a door onto `changeNotesAct` like `GET /api/networks/:id/change-notes`;
     // read-only and instance-admin (`admin: true`) as the route is, listed among the read-only tools in `16-mcp.md`
     // and in both of its tables.
-    assert.equal(ALL_TOOLS.length, 70);
+    // 70 -> 71: `read_spill` (Q-92), the door onto `readSpillAct` like `GET /api/brain/spills/:id`. Prerequisites done:
+    // a `TOOL_RIGHTS` row at knowledge read, an audit-map entry under the route's operation (`brain.spill.read`),
+    // the route's `NOT_AREA_SCOPED` row saying where the check really is, and `16-mcp.md` rows.
+    // 71 -> 72: `space_rename` (Q-139), the door onto `renameSpaceAct` like `PATCH /api/spaces/:id/rename`:
+    // `spaceAdmin: true` as the route's space-admin guard, an audit-map entry under `space.rename`, the route moved
+    // from NOT_A_CAPABILITY to CAPABILITIES, and `16-mcp.md` rows plus the read-only list.
+    assert.equal(ALL_TOOLS.length, 72);
   });
 
   it('every tool advertises a closed object schema (type:object, additionalProperties:false)', () => {
@@ -124,10 +130,15 @@ describe('MCP tool schemas — universal invariants', () => {
 });
 
 describe('MCP tool schemas — high-value enrichments', () => {
-  it('filter.filter documents the MongoDB operator allowlist + regex/depth rules', () => {
+  it('filter.filter documents the refused operators, every guarded regex operator, and the depth cap', async () => {
+    // There is no allowlist any more: every query operator is accepted except the ones that run JavaScript. This case
+    // listed six allowed operators, so it pinned a description that was wrong (Q-118). Derived from the module the
+    // sanitizer enforces, so the description cannot drop an operator the sanitizer adds.
+    const { REFUSED_OPERATORS, REGEX_OPERATORS } = await import('../../server/dist/brain/filter-sanitizer.js');
+    assert.ok(REFUSED_OPERATORS.size > 0 && REGEX_OPERATORS.size > 0, 'the operator sets are empty — nothing is checked');
     const filter = schemaOf('filter').properties.filter;
-    for (const op of ['$eq', '$in', '$regex', '$options', '$elemMatch', '$mod']) {
-      assert.ok(filter.description.includes(op), `filter.filter description must list ${op}`);
+    for (const op of [...REFUSED_OPERATORS, ...REGEX_OPERATORS, '$options']) {
+      assert.ok(filter.description.includes(op), `filter.filter description must name ${op}`);
     }
     assert.ok(/depth 8/.test(filter.description), 'filter.filter must document the depth-8 cap');
   });

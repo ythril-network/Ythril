@@ -141,15 +141,18 @@ export async function embedStoredRecord(
   // Absent at a tier means NOT STATED and falls through — it is not `false`. Reading it as `false` would make
   // the space-wide switch do nothing for any type that had a schema at all, which is every type worth
   // suppressing.
+  const text = await buildEmbedText(spaceId, recordType, doc);
+
+  // `matchedText` is what the lexical channel searches, so it is rewritten on EVERY outcome, not only when a vector is
+  // stored (`Q-94`). Left as it was, a suppressed record kept matching the text it held when suppression began — a
+  // deleted property went on being found, and shown as the record's matched text.
   if (embeddingSuppressedFor(spaceId, recordType, doc)) {
     await col(collName).updateOne(
       asFilter({ _id: recordId }),
-      { $unset: { embedding: '', embeddingModel: '' } },
+      { $set: { matchedText: text }, $unset: { embedding: '', embeddingModel: '' } },
     );
     return 'excluded';
   }
-
-  const text = await buildEmbedText(spaceId, recordType, doc);
 
   // Every successful update enqueues an embed job, unconditionally and for good reasons — the enqueue is also
   // how the `suppressEmbeddings` toggle takes effect, and how a stale inline embed was eliminated. But most
@@ -168,7 +171,20 @@ export async function embedStoredRecord(
     return 'unchanged';
   }
 
-  const result = await embed(text);
+  let result: Awaited<ReturnType<typeof embed>>;
+  try {
+    result = await embed(text);
+  } catch (err) {
+    // The failed path, and the one retries and a dead letter end on (`Q-94`). The current text is written so the
+    // lexical channel stops matching what the record no longer says, and the vector is DROPPED with it: that vector
+    // is of text that is gone, and `matchedText` doubles as the "unchanged" fingerprint above — written beside a
+    // stale vector, the next attempt would take the vector as current and never call the model again.
+    await col(collName).updateOne(
+      asFilter({ _id: recordId }),
+      { $set: { matchedText: text }, $unset: { embedding: '', embeddingModel: '' } },
+    );
+    throw err;
+  }
 
   // `seq` is deliberately NOT advanced. An embedding is a DERIVED field — `merkle.ts` excludes it from
   // replication precisely because each peer computes its own — so bumping `seq` here would broadcast a

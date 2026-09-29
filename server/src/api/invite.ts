@@ -52,7 +52,7 @@ import { getConfig, saveConfig, getSecrets, saveSecrets } from '../config/loader
 import { createToken, setTokenExpiry } from '../auth/tokens.js';
 import { peerTokenSpaces } from '../auth/peer-token-scope.js';
 import { claimedPeerIsProven } from '../auth/peer-identity.js';
-import { widenPeerTokensOf } from '../networks/network-spaces.js';
+import { announcedSpaces, widenPeerTokensOf } from '../networks/network-spaces.js';
 import { concludeRoundIfReady } from '../sync/governance.js';
 import { buildBraintreeAncestors } from '../util/braintree.js';
 import { makeSignedOwnCast } from '../util/signing.js';
@@ -233,7 +233,10 @@ async function openHandshakeSession(
     inviteUrl: `${baseUrl}/api/invite/apply`,
     rsaPublicKeyPem: publicKey as string,
     expiresAt: new Date(expiresAt).toISOString(),
+    // What this instance calls each space (the names a joiner is shown), and — index-aligned — what the network
+    // calls it (Q-133). After a rename the two differ, and only the second is what every later exchange uses.
     spaces: freshNet.spaces,
+    networkSpaces: announcedSpaces(freshNet),
   };
   /*
    * `inviteCode` is the SAME bundle as one opaque line, and it is what an operator is meant to send.
@@ -391,7 +394,13 @@ inviteRouter.post('/apply', authRateLimit, async (req, res) => {
     networkId,
     networkLabel: net.label,
     networkType: net.type,
+    // As in the bundle: this instance's names, and the network's ids beside them (Q-133). `spaces` keeps its meaning
+    // for an older joiner, which reads nothing else.
     spaces: net.spaces,
+    networkSpaces: announcedSpaces(net),
+    // This instance's schedule, an offer the joiner adopts when it states none (Q-137). Absent when it syncs manually.
+    // In the answer and not the bundle: the bundle is passed whole to a join, where it would read as the caller's own.
+    ...(net.syncSchedule ? { syncSchedule: net.syncSchedule } : {}),
   });
 });
 

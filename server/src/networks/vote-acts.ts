@@ -20,6 +20,7 @@ import { applyConcludedSpaceRounds } from '../spaces/apply-wipe-round.js';
 import { makeSignedOwnCast } from '../util/signing.js';
 import { log } from '../util/log.js';
 import type { NetworkActResult } from './network-acts.js';
+import { roundSpaceLocalId } from '../sync/space-map.js';
 
 export const CastVoteBody = z.object({ vote: z.enum(['yes', 'veto']) });
 
@@ -29,7 +30,17 @@ const notFound = { status: 404 as const, error: 'Network not found' };
 export function listOpenVotesAct(id: string): NetworkActResult {
   const net = getConfig().networks.find(n => n.id === id);
   if (!net) return notFound;
-  return { status: 200, body: { rounds: net.pendingRounds.filter(r => !r.concluded) } };
+  /*
+   * `localSpaceId` (Q-133, additive): what THIS instance calls the space a round is about. A round names it by the
+   * network's id or by its proposer's local id, and after a rename neither is the name the operator here knows, so an
+   * operator asked to vote on deleting `y-project-template` would be shown `y-twin`. Operator-facing only: the peer
+   * route (`api/sync/votes.ts`) serves rounds as they travel.
+   */
+  const rounds = net.pendingRounds.filter(r => !r.concluded).map(r => {
+    const localSpaceId = r.spaceId ? roundSpaceLocalId(net, r) : null;
+    return localSpaceId ? { ...r, localSpaceId } : r;
+  });
+  return { status: 200, body: { rounds } };
 }
 
 /**

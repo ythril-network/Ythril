@@ -19,8 +19,16 @@
  *
  * Run: npm run test:client
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
+import { TestBed, type ComponentFixture } from '@angular/core/testing';
+import { provideHttpClient } from '@angular/common/http';
+import { HttpTestingController, provideHttpClientTesting, type TestRequest } from '@angular/common/http/testing';
+import { getTranslocoModule } from '../../testing/transloco-testing';
+import { BrainStore } from './brain-store.service';
+import { QueryTabComponent } from './query-tab.component';
+import { ToastService } from '../../core/toast.service';
+import { SPILL_REFUSAL_CODES } from '../../core/read-spill';
 
 /**
  * Comments STRIPPED, and this file is why the rule exists.
@@ -215,6 +223,450 @@ describe('the size ceiling is reachable from the form', () => {
     for (const k of ['brain.query.truncated.body', 'brain.query.recallMaxBytes.tooltip']) {
       expect(locale('de')[k]).not.toBe(locale('en')[k]);
       expect(locale('pl')[k]).not.toBe(locale('en')[k]);
+    }
+  });
+});
+
+/*
+ * ─── Q-92: a search never writes, and what did not fit is fetched by the caller's own token ─────────────────
+ *
+ * A spill is no longer a file in the space. It lives in an instance store, is read back page by page through
+ * `GET /api/brain/spills/:id?skip=&maxBytes=` (items + `nextSkip`), and only the token that caused it may read
+ * it. Three consequences for this page, each a case below:
+ *
+ * - **The download is a BUTTON that fetches through HttpClient**, never an `<a [href]>` at the download URL.
+ *   A link cannot send the bearer, and the route pages — one GET is one window, not the file.
+ * - **It follows `nextSkip` until the spill is exhausted** and saves the whole thing, so "Download the whole
+ *   graph" stays true. Asked at the widest window the server allows (`maxBytes` = `MAX_MAX_BYTES`), so the
+ *   number of round trips is as small as it can be.
+ * - **Both kinds of spill get it** — the graph (`graphComplete`) and the results remainder (`remainder`) —
+ *   because two surfaces implementing one rule is where one of them ends up weaker. And a refused spill
+ *   (`spillRefused`) and a spill that is gone (404 unknown/expired, 410 evicted) each SAY so, distinctly.
+ *
+ * Driven through the real `BrainApi` over `HttpTestingController`: a request the controller never sees did
+ * not go through HttpClient, which is exactly the `fetch`-with-a-hand-built-header copy this replaces.
+ */
+
+/** What `MAX_MAX_BYTES` is on the server (`brain/result-budget.ts`): the widest window a caller may ask for. */
+const MAX_MAX_BYTES = 5_000_000;
+
+/** Rendered text for the keys these cases look for, so a match is on a sentence rather than an echoed key. */
+const T: Record<string, string> = {
+  'brain.query.leftOut.title': 'LEFTOUT-TITLE',
+  'brain.query.leftOut.more': 'LEFTOUT-MORE',
+  'brain.query.leftOut.reason.walk_ceiling': 'REASON-CEILING',
+  'brain.query.leftOut.reason.link_scan': 'REASON-SCAN',
+  'brain.query.truncated.by.walk_budget': 'BY-WALK',
+  'brain.query.truncated.by.deadline': 'BY-DEADLINE',
+  'brain.query.truncated.title': 'TRUNCATED-TITLE',
+  'brain.query.truncated.what': 'WHAT-ADVICE',
+  'brain.query.remainder.download': 'REMAINDER-DOWNLOAD',
+  'brain.query.remainder.expires': 'EXPIRES {{date}}',
+  'brain.query.spillRefused': 'SPILL-REFUSED {{reason}}',
+  ...Object.fromEntries(SPILL_REFUSAL_CODES.map(c => [`brain.query.spillRefused.reason.${c}`, `R-${c.toUpperCase()}-WORDS`])),
+  'brain.query.spill.notFound': 'SPILL-NOT-FOUND',
+  'brain.query.spill.gone': 'SPILL-GONE',
+};
+
+const EXPIRES = '2026-09-29T12:00:00.000Z';
+
+interface Mounted { fixture: ComponentFixture<QueryTabComponent>; http: HttpTestingController; c: QueryTabComponent }
+
+function mount(): Mounted {
+  TestBed.resetTestingModule();
+  TestBed.configureTestingModule({
+    imports: [QueryTabComponent, getTranslocoModule({ translation: { en: T } })],
+    providers: [BrainStore, provideHttpClient(), provideHttpClientTesting()],
+  });
+  const fixture = TestBed.createComponent(QueryTabComponent);
+  fixture.componentRef.setInput('spaceId', 'work');
+  fixture.detectChanges();
+  return { fixture, http: TestBed.inject(HttpTestingController), c: fixture.componentInstance };
+}
+
+/** Run a search and answer it with `response`, through the real recall request. */
+function answer(m: Mounted, response: Record<string, unknown>): void {
+  m.c.recallForm.query = 'vault';
+  m.c.runRecall();
+  const req = m.http.match(r => r.method === 'POST' && r.url === '/api/brain/recall');
+  expect(req, 'the search did not reach /api/brain/recall').toHaveLength(1);
+  req[0]!.flush({ results: [], count: 0, ...response });
+  m.fixture.detectChanges();
+}
+
+async function until(what: string, cond: () => boolean, ms = 3000): Promise<void> {
+  const t0 = Date.now();
+  while (!cond()) {
+    if (Date.now() - t0 > ms) throw new Error(`timed out waiting for ${what}`);
+    await new Promise(r => setTimeout(r, 10));
+  }
+}
+
+/** A query parameter, whether the caller put it in the URL string or in HttpParams. */
+const paramOf = (r: TestRequest, k: string) =>
+  new URL(r.request.urlWithParams, 'http://x').searchParams.get(k) ?? r.request.params.get(k);
+
+/** Pending GETs for one spill. `match` removes what it returns, so each call sees only requests made since. */
+function spillRequests(m: Mounted, id: string): TestRequest[] {
+  return m.http.match(r => r.method === 'GET'
+    && new URL(r.urlWithParams, 'http://x').pathname === `/api/brain/spills/${id}`);
+}
+
+function buttonWith(root: HTMLElement, text: string): HTMLButtonElement | null {
+  return [...root.querySelectorAll('button')].find(b => (b.textContent ?? '').includes(text)) ?? null;
+}
+
+function readBlob(blob: Blob): Promise<string> {
+  return new Promise((ok, fail) => {
+    const fr = new FileReader();
+    fr.onload = () => ok(String(fr.result));
+    fr.onerror = () => fail(fr.error);
+    fr.readAsText(blob);
+  });
+}
+
+/** Everything the user could read: the page, plus any toast. */
+function visibleText(m: Mounted): string {
+  m.fixture.detectChanges();
+  const toasts = TestBed.inject(ToastService).toasts().map(t => t.message).join('\n');
+  return `${(m.fixture.nativeElement as HTMLElement).textContent ?? ''}\n${toasts}`;
+}
+
+/**
+ * The kinds of spill an answer can offer, each with the response that offers it and the control that fetches it.
+ * One since Q-126: a graph is never spilled, because a match comes with its whole graph or not at all.
+ */
+const KINDS = [
+  {
+    kind: 'results',
+    control: 'REMAINDER-DOWNLOAD',
+    response: (id: string) => ({
+      truncated: true, returned: 1, count: 4, nextSkip: 1,
+      remainder: { matches: 3, records: 3, spillId: id, path: `_tmp/results-${id}.json`, download: `/api/brain/spills/${id}`, expiresAt: EXPIRES },
+    }),
+    item: (n: number) => ({ _id: `r${n}`, type: 'fact', spaceId: 'work', fact: `item-marker-${n}` }),
+  },
+] as const;
+
+describe('Q-92: the spill download is a button that pages the whole spill through HttpClient', () => {
+  let saved: Blob[];
+  const realCreate = (URL as unknown as { createObjectURL?: unknown }).createObjectURL;
+  const realRevoke = (URL as unknown as { revokeObjectURL?: unknown }).revokeObjectURL;
+
+  beforeEach(() => {
+    saved = [];
+    Object.defineProperty(URL, 'createObjectURL', {
+      configurable: true, writable: true, value: vi.fn((b: Blob) => { saved.push(b); return 'blob:spill'; }),
+    });
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, writable: true, value: vi.fn() });
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+  });
+  afterEach(() => {
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, writable: true, value: realCreate });
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, writable: true, value: realRevoke });
+    vi.restoreAllMocks();
+    TestBed.resetTestingModule();
+  });
+
+  it('the template binds no anchor to a download URL — a link cannot send the bearer', () => {
+    // Source-level half of the rule, so it holds for states the behavioural cases below do not render.
+    // Both files that render the notices: the tab, and the ending component the download moved into.
+    const ending = stripComments(readFileSync('src/app/pages/brain/spill-ending.component.ts', 'utf8'));
+    expect(ending, 'the spill ending no longer renders the download button — this check reads the wrong file').toMatch(/\(click\)="download\(/);
+    for (const src of [component, ending]) {
+      expect(src, 'an `<a [href]>` bound to a spill `download` is back').not.toMatch(/\[href\]\s*=\s*"[^"]*\.download\b/);
+    }
+  });
+
+  for (const k of KINDS) {
+    it(`${k.kind}: offers a button, not a link, and saves every item of every page, once each`, async () => {
+      const m = mount();
+      answer(m, k.response('sp-1'));
+      const root = m.fixture.nativeElement as HTMLElement;
+
+      const anchors = [...root.querySelectorAll('a')].filter(a => (a.getAttribute('href') ?? '').includes('/api/brain/spills/'));
+      expect(anchors, 'the spill is offered as a link, which cannot send the bearer and fetches one page').toHaveLength(0);
+      const button = buttonWith(root, k.control);
+      expect(button, `no <button> carrying ${k.control} — the ${k.kind} spill is not downloadable`).toBeTruthy();
+
+      button!.click();
+      // Page one, at the widest window, from the start.
+      let first: TestRequest[] = [];
+      await until('the first spill page request', () => (first = spillRequests(m, 'sp-1')).length > 0);
+      expect(first).toHaveLength(1);
+      expect(paramOf(first[0]!, 'skip') ?? '0', 'the first page starts at 0').toBe('0');
+      expect(paramOf(first[0]!, 'maxBytes'), 'asked at the widest window the server allows').toBe(String(MAX_MAX_BYTES));
+      first[0]!.flush({ kind: k.kind, items: [k.item(1), k.item(2)], skip: 0, nextSkip: 2, truncated: true, expiresAt: EXPIRES });
+
+      // Page two follows `nextSkip` — and it is the last, so nothing follows it.
+      let second: TestRequest[] = [];
+      await until('the request for the page at nextSkip', () => (second = spillRequests(m, 'sp-1')).length > 0);
+      expect(second).toHaveLength(1);
+      expect(paramOf(second[0]!, 'skip'), 'the second page must start where nextSkip said').toBe('2');
+      second[0]!.flush({ kind: k.kind, items: [k.item(3)], skip: 2, truncated: false, expiresAt: EXPIRES });
+
+      await until('the assembled spill to be saved', () => saved.length > 0);
+      expect(spillRequests(m, 'sp-1'), 'a page past the end was requested').toHaveLength(0);
+      expect(saved, 'saved more than one file for one spill').toHaveLength(1);
+      const text = await readBlob(saved[0]!);
+      expect(() => JSON.parse(text), 'the saved file is not JSON').not.toThrow();
+      for (const n of [1, 2, 3]) {
+        const hits = text.match(new RegExp(`item-marker-${n}\\b`, 'g')) ?? [];
+        expect(hits.length, `item ${n} appears ${hits.length} times in the saved file — every item exactly once`).toBe(1);
+      }
+    });
+
+    it(`${k.kind}: 404 and 410 say different things, both translated`, async () => {
+      const said: Record<number, string> = {};
+      for (const status of [404, 410]) {
+        const m = mount();
+        answer(m, k.response('sp-gone'));
+        const button = buttonWith(m.fixture.nativeElement as HTMLElement, k.control);
+        expect(button, `no <button> carrying ${k.control}`).toBeTruthy();
+        button!.click();
+        let reqs: TestRequest[] = [];
+        await until(`the spill request answered ${status}`, () => (reqs = spillRequests(m, 'sp-gone')).length > 0);
+        reqs[0]!.flush({ error: status === 404 ? 'not found' : 'evicted' }, { status, statusText: String(status) });
+        const want = status === 404 ? 'SPILL-NOT-FOUND' : 'SPILL-GONE';
+        await until(`the ${status} message`, () => visibleText(m).includes(want)).catch(() => undefined);
+        said[status] = visibleText(m);
+        expect(saved, `a ${status} saved a file`).toHaveLength(0);
+        TestBed.resetTestingModule();
+      }
+      expect(said[404], '404 (unknown or expired) must say the spill is not there').toContain('SPILL-NOT-FOUND');
+      expect(said[404], '404 must not claim eviction').not.toContain('SPILL-GONE');
+      expect(said[410], '410 (evicted) must say the spill was removed early').toContain('SPILL-GONE');
+      expect(said[410], '410 must not read as "unknown"').not.toContain('SPILL-NOT-FOUND');
+    });
+  }
+});
+
+describe('Q-92: the page renders `remainder` and `spillRefused`', () => {
+  afterEach(() => TestBed.resetTestingModule());
+
+  it('a remainder shows its expiry in the app\'s one timestamp format, not the browser\'s or the wire\'s', () => {
+    const m = mount();
+    answer(m, KINDS[0].response('sp-r'));
+    const text = visibleText(m);
+    expect(text, 'the remainder is not rendered at all').toContain('REMAINDER-DOWNLOAD');
+    // A FORMAT, not a rendering: CI runs in UTC and a laptop does not, so the day and hour differ by zone.
+    // The format is the one `formatTimestampParts` gives every other page — dd.MM.yyyy and a 24-hour time —
+    // so a sixth spelling of a date (the reason that module exists) cannot come back here.
+    expect(text).toMatch(/EXPIRES \d{2}\.\d{2}\.\d{4} \d{2}:\d{2}:\d{2}/);
+    expect(text, 'the expiry is printed as the raw wire value').not.toContain(EXPIRES);
+  });
+
+  it('a refused spill says so and why, in words', () => {
+    for (const response of [
+      { truncated: true, returned: 1, count: 4, nextSkip: 1, spillRefused: 'instance-ceiling' },
+      { truncated: true, returned: 1, count: 4, nextSkip: 1, spillRefused: 'over-share' },
+    ]) {
+      const m = mount();
+      answer(m, response);
+      const text = visibleText(m);
+      const words = T[`brain.query.spillRefused.reason.${response.spillRefused}`];
+      expect(text, `spillRefused "${response.spillRefused}" is not rendered in words`).toContain(`SPILL-REFUSED ${words}`);
+      expect(text, `the raw code "${response.spillRefused}" reaches the reader`).not.toContain(response.spillRefused);
+      const root = m.fixture.nativeElement as HTMLElement;
+      expect(buttonWith(root, 'REMAINDER-DOWNLOAD'), 'a refused spill still offers a download').toBeNull();
+      TestBed.resetTestingModule();
+    }
+  });
+
+  /*
+   * ONE NOTICE PER SHORT ANSWER, AND IT NEVER CONTRADICTS ITSELF. Found driving the page (Q-92 verify, 2026-09-28):
+   * with "Keep what did not fit" ticked and the keep refused, the shortened-answer notice still advised ticking it,
+   * and the refusal sat in a second box below. So each notice ends with exactly one of: the download (kept), the
+   * refusal (asked, not kept), or the advice (not asked) — the refusal lives in the notice whose copy is missing.
+   */
+  const alerts = (m: Mounted) => [...(m.fixture.nativeElement as HTMLElement).querySelectorAll('.alert')]
+    .map(a => a.textContent ?? '');
+
+  it('results: a refused keep replaces the advice inside the shortened-answer notice, and is said once', () => {
+    const m = mount();
+    answer(m, { truncated: true, returned: 1, count: 4, nextSkip: 1, spillRefused: 'over-share' });
+    const refusal = `SPILL-REFUSED ${T['brain.query.spillRefused.reason.over-share']}`;
+    const holding = alerts(m).filter(a => a.includes(refusal));
+    expect(holding, 'the refusal is not said exactly once').toHaveLength(1);
+    expect(holding[0], 'the refusal is not inside the shortened-answer notice').toContain('TRUNCATED-TITLE');
+    expect(visibleText(m), 'the notice still advises ticking a box that was ticked').not.toContain('WHAT-ADVICE');
+  });
+
+  it('results: a kept remainder offers the download instead of the advice', () => {
+    const m = mount();
+    answer(m, KINDS[0].response('sp-kept'));
+    expect(visibleText(m)).toContain('REMAINDER-DOWNLOAD');
+    expect(visibleText(m), 'the advice to tick "keep" is shown although the rest was kept').not.toContain('WHAT-ADVICE');
+  });
+
+  it('results: nothing asked, nothing refused — the advice is shown', () => {
+    const m = mount();
+    answer(m, { truncated: true, returned: 1, count: 4, nextSkip: 1 });
+    expect(visibleText(m)).toContain('WHAT-ADVICE');
+  });
+
+  /*
+   * Q-126: a match comes with its WHOLE graph or is left out and NAMED. The page has to say which matches were
+   * left out and why, or a reader concludes they do not exist — and it must never offer a graph download,
+   * because there is none.
+   */
+  it('left out: every named match is shown with its reason, in words, and the rest are counted', () => {
+    const m = mount();
+    answer(m, {
+      graphTruncated: true, graphNodes: 0, incompleteCount: 3,
+      incompleteRows: [
+        { _id: 'h1', spaceId: 'work', type: 'entity', name: 'hub-marker-1', reason: 'walk_ceiling' },
+        { _id: 'h2', spaceId: 'work', type: 'entity', name: 'hub-marker-2', reason: 'link_scan' },
+      ],
+    });
+    const holding = alerts(m).filter(a => a.includes('LEFTOUT-TITLE'));
+    expect(holding, 'the left-out notice is not shown exactly once').toHaveLength(1);
+    expect(holding[0]).toContain('hub-marker-1');
+    expect(holding[0]).toContain('REASON-CEILING');
+    expect(holding[0]).toContain('hub-marker-2');
+    expect(holding[0]).toContain('REASON-SCAN');
+    expect(holding[0], 'a raw reason code reaches the reader').not.toContain('walk_ceiling');
+    expect(holding[0], 'the unnamed third match is not counted').toContain('LEFTOUT-MORE');
+    const anchors = [...(m.fixture.nativeElement as HTMLElement).querySelectorAll('a')]
+      .filter(a => (a.getAttribute('href') ?? '').includes('/api/brain/spills/'));
+    expect(anchors, 'a graph download is offered, and there is no graph spill').toHaveLength(0);
+  });
+
+  it('left out: every match left out means the page does not claim there were no matches', () => {
+    const m = mount();
+    answer(m, { results: [], count: 1, graphTruncated: true, incompleteCount: 1,
+      incompleteRows: [{ _id: 'h1', spaceId: 'work', type: 'entity', name: 'hub-marker-1', reason: 'walk_ceiling' }] });
+    const root = m.fixture.nativeElement as HTMLElement;
+    expect(root.querySelector('.query-empty'), '"no matches" is shown beside a match that was left out').toBeNull();
+    expect(root.querySelector('.alert[role="status"]'), 'the left-out notice is not announced').toBeTruthy();
+  });
+
+  it('left out: nothing is said when no match was left out', () => {
+    const m = mount();
+    answer(m, { graphNodes: 4 });
+    expect(visibleText(m)).not.toContain('LEFTOUT-TITLE');
+  });
+
+  it('a truncation the graph walk caused says which bound stopped it; the byte budget adds nothing', () => {
+    for (const [by, want] of [['walk_budget', 'BY-WALK'], ['deadline', 'BY-DEADLINE']] as const) {
+      const m = mount();
+      answer(m, { truncated: true, returned: 1, count: 4, nextSkip: 1, truncatedBy: by });
+      const holding = alerts(m).filter(a => a.includes('TRUNCATED-TITLE'));
+      expect(holding[0], `${by} is not named inside the shortened-answer notice`).toContain(want);
+      TestBed.resetTestingModule();
+    }
+    const m = mount();
+    answer(m, { truncated: true, returned: 1, count: 4, nextSkip: 1, truncatedBy: 'budget' });
+    expect(visibleText(m)).not.toContain('BY-WALK');
+    expect(visibleText(m)).not.toContain('BY-DEADLINE');
+  });
+
+  it('every new left-out and walk-bound key exists in en, de and pl, and de/pl are not English', () => {
+    const keys = ['brain.query.leftOut.title', 'brain.query.leftOut.body', 'brain.query.leftOut.more',
+      ...['walk_ceiling', 'link_scan', 'paths', 'deadline'].map(r => `brain.query.leftOut.reason.${r}`),
+      'brain.query.truncated.by.walk_budget', 'brain.query.truncated.by.deadline'];
+    for (const k of keys) {
+      for (const l of LOCALES) expect(locale(l)[k], `${k} missing from ${l}.json`).toBeTruthy();
+      expect(locale('de')[k], `de ${k} is the English text`).not.toBe(locale('en')[k]);
+      expect(locale('pl')[k], `pl ${k} is the English text`).not.toBe(locale('en')[k]);
+    }
+    for (const l of LOCALES) {
+      expect(Object.keys(locale(l)).filter(k => k.startsWith('brain.query.graphShort.')), `${l} keeps graphShort keys`).toEqual([]);
+    }
+  });
+
+  it('a refusal reason this client does not know is shown as it arrived, not dropped', () => {
+    const m = mount();
+    answer(m, { truncated: true, returned: 1, count: 4, nextSkip: 1, spillRefused: 'a-newer-reason' });
+    expect(visibleText(m)).toContain('SPILL-REFUSED a-newer-reason');
+  });
+
+  it('an answer with no refusal shows no refusal', () => {
+    const m = mount();
+    answer(m, KINDS[0].response('sp-r'));
+    expect(visibleText(m)).not.toContain('SPILL-REFUSED');
+  });
+});
+
+describe('Q-92: the strings no longer say a search writes into the space', () => {
+  const NEW_KEYS = [
+    'brain.query.remainder.download', 'brain.query.remainder.expires', 'brain.query.spillRefused',
+    'brain.query.spill.notFound', 'brain.query.spill.gone',
+  ];
+
+  it('every new key exists in en, de and pl, with the placeholders the page fills', () => {
+    for (const l of LOCALES) {
+      const t = locale(l);
+      for (const k of NEW_KEYS) expect(t[k], `${k} missing from ${l}.json`).toBeTruthy();
+      expect(t['brain.query.remainder.expires'], `${l}: the expiry sentence has no {{date}}`).toContain('{{date}}');
+      expect(t['brain.query.spillRefused'], `${l}: the refusal sentence has no {{reason}}`).toContain('{{reason}}');
+    }
+  });
+
+  it('the client knows every refusal code the SERVER can send — read from the server, not from this list', () => {
+    // Derived from where the codes are produced: each `refused: '<code>: …'` in the store, plus the `failed` a
+    // throwing store degrades to. Checked against the client's own list would be the list agreeing with itself,
+    // and a code the server gained would reach the reader raw.
+    const store = readFileSync('../server/src/brain/read-spill-store.ts', 'utf8');
+    const spill = readFileSync('../server/src/brain/graph-spill.ts', 'utf8');
+    const server = new Set([
+      ...[...store.matchAll(/refused:\s*['`]([a-z][a-z-]*):/g)].map(m => m[1]!),
+      ...[...spill.matchAll(/spillRefused:\s*'([a-z][a-z-]*)'/g)].map(m => m[1]!),
+    ]);
+    expect(server.size, 'found no refusal codes in the server — the producing code moved').toBeGreaterThanOrEqual(2);
+    const known: readonly string[] = SPILL_REFUSAL_CODES;
+    expect([...server].filter(c => !known.includes(c)), 'server codes the client has no words for').toEqual([]);
+  });
+
+  it('every refusal code has its words in en, de and pl, and de/pl are not English', () => {
+    expect(SPILL_REFUSAL_CODES.length, 'no refusal codes found — the list moved or emptied').toBeGreaterThan(0);
+    for (const c of SPILL_REFUSAL_CODES) {
+      const k = `brain.query.spillRefused.reason.${c}`;
+      for (const l of LOCALES) expect(locale(l)[k], `${k} missing from ${l}.json`).toBeTruthy();
+      expect(locale('de')[k], `de ${k} is the English text`).not.toBe(locale('en')[k]);
+      expect(locale('pl')[k], `pl ${k} is the English text`).not.toBe(locale('en')[k]);
+    }
+  });
+
+  it('404 and 410 are different sentences in every locale, and de/pl are not copied English', () => {
+    for (const l of LOCALES) {
+      const t = locale(l);
+      expect(t['brain.query.spill.notFound'], `${l}: brain.query.spill.notFound missing`).toBeTruthy();
+      expect(t['brain.query.spill.notFound'], `${l}: 404 and 410 read the same`).not.toBe(t['brain.query.spill.gone']);
+    }
+    for (const k of ['brain.query.spill.notFound', 'brain.query.spill.gone', 'brain.query.spillRefused']) {
+      expect(locale('de')[k], `de ${k} is the English text`).not.toBe(locale('en')[k]);
+      expect(locale('pl')[k], `pl ${k} is the English text`).not.toBe(locale('en')[k]);
+    }
+  });
+
+  it('the "this WRITES into the space" warning is gone, key and reference both', () => {
+    for (const l of LOCALES) {
+      expect(Object.keys(locale(l)), `${l}.json still carries the writes warning`).not.toContain('brain.query.remainderDump.writes');
+    }
+    expect(form, 'the recall form still renders the writes warning').not.toContain('brain.query.remainderDump.writes');
+  });
+
+  it('no brain.query string, in any locale, says the result is written into the space', () => {
+    /*
+     * Derived over every `brain.query.*` key rather than the handful Q-92 rewrote (`remainderDump`, its tooltip,
+     * `graphShort.download`/`.ceilingHit`, `truncated.what`): a sentence claiming a search writes somewhere is
+     * wrong wherever it sits, and the next one would be written under a key nobody thought to list.
+     *
+     * One pattern per language, each the verb "write / save as a file" next to "this space" — the claim itself,
+     * not every mention of a space.
+     */
+    const CLAIM: Record<(typeof LOCALES)[number], RegExp> = {
+      en: /\b(writes?|written|saved?)\b[^.]*\b(in|into|to)\s+(this|the)\s+space\b|\bfile\b[^.]*\b(in|into)\s+(this|the)\s+space\b/i,
+      de: /\b(schreibt|geschrieben|gespeichert|speichert)\b[^.]*\bin\s+(diesen|diesem|den|dem)\s+Space\b|\bDatei\b[^.]*\bin\s+(diesen|diesem)\s+Space\b/i,
+      pl: /\b(zapisuje|zapisany|zapisane|zapisywany)\b[^.]*\bw\s+tej\s+przestrzeni\b|\bplik\w*\b[^.]*\bw\s+tej\s+przestrzeni\b/i,
+    };
+    for (const l of LOCALES) {
+      const t = locale(l);
+      const keys = Object.keys(t).filter(k => k.startsWith('brain.query.'));
+      expect(keys.length, `${l}: no brain.query keys found — the derivation read nothing`).toBeGreaterThan(20);
+      const offenders = keys.filter(k => CLAIM[l].test(t[k]!)).map(k => `${k}: ${t[k]}`);
+      expect(offenders, `${l}: these still say a search writes into the space`).toEqual([]);
     }
   });
 });

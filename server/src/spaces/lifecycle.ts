@@ -24,6 +24,9 @@ import { LINK_INDEXES } from '../brain/link-adjacency.js';
 import { envInt } from '../config/env-num.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { mapLimit } from '../util/map-limit.js';
+import { grantCreatorAdmin } from '../auth/creator-grant.js';
+import { logAuditEntry } from '../audit/audit.js';
+import { CREATOR_GRANT_OPERATION } from '../audit/middleware.js';
 
 export async function initSpace(
   spaceId: string,
@@ -151,6 +154,9 @@ export async function initSpace(
   // Chunk records point at their file through `parentFileId`. Both the chunk-grouping reads and
   // completeness' "was this file ever chunked" join go through it.
   await filesColl.createIndex({ parentFileId: 1 });
+  // The face gallery reads the LABELLED faces' ids to complete its search (Q-102, `gallerySearch`). Partial, so it
+  // indexes the few labelled faces and none of the unlabelled crowd — or any record that is not a face at all.
+  await filesColl.createIndex({ faceEntityId: 1 }, { partialFilterExpression: { faceEntityId: { $exists: true } } });
 
   // ── The media job queue: the most-polled collection in the product, and it had no index at all ──
   //
@@ -357,7 +363,16 @@ export async function ensureGeneralSpace(): Promise<void> {
   await initSpace('general');
 }
 
-/** Create a new space and persist to config */
+/**
+ * Who a created space is credited to (`Q-134`) — REQUIRED, so a door cannot leave it out by accident. `tokenId: null`
+ * says out loud, at the call, that nobody is credited; a reviewer sees it there.
+ */
+export interface SpaceCreator { tokenId: string | null }
+
+/**
+ * Create a new space and persist to config. The creating token is made admin of it in the same config write
+ * (`grantCreatorAdmin`), and the grant is audited — owner, 2026-09-28: *"Creator of a space gets space admin."*
+ */
 export async function createSpace(opts: {
   id: string;
   label: string;
@@ -367,7 +382,7 @@ export async function createSpace(opts: {
   meta?: SpaceMeta;
   /** Face descriptor width for this space. Create-only — see `SpaceConfig.faceDescriptorDims`. */
   faceDescriptorDims?: number;
-}): Promise<SpaceConfig> {
+}, creator: SpaceCreator): Promise<SpaceConfig> {
   const cfg = getConfig();
   if (cfg.spaces.some(s => s.id === opts.id)) {
     throw new Error(`Space '${opts.id}' already exists`);
@@ -412,7 +427,17 @@ export async function createSpace(opts: {
   // (one entry out of `cfg.spaces`) across an await and then mutating it; see `renameSpace` and
   // `reconcilePendingSpaceOp`, which both re-resolve by id inside the write for that reason.
   cfg.spaces.push(space);
+  const grant = grantCreatorAdmin(cfg, creator.tokenId, opts.id);
   saveConfig(cfg);
+  if (grant === 'granted') {
+    logAuditEntry({
+      ip: 'internal', method: 'CREATE', path: 'internal:creator-grant', spaceId: opts.id, tokenId: creator.tokenId,
+      operation: CREATOR_GRANT_OPERATION, status: 200, durationMs: 0,
+    });
+  } else if (grant === 'not-stored') {
+    // An OIDC session: its rights come from the identity provider's mapping, so the grant has nowhere to live.
+    log.warn(`Space '${opts.id}' was created by a session with no stored rights; its creator reaches it only if its identity mapping does`);
+  }
   if (!opts.proxyFor) {
     void finalizeSpaceIndexReady(opts.id);
   }
@@ -476,6 +501,17 @@ export async function dropSpaceData(spaceId: string): Promise<string[]> {
     if (purged > 0) log.debug(`Purged ${purged} activity bucket(s) for space '${spaceId}'`);
   } catch (err) {
     const msg = `Could not purge activity for '${spaceId}': ${err}`;
+    log.warn(msg);
+    errors.push(msg);
+  }
+
+  // 2c. Drop every read spill holding this space's records (Q-92). The prefix drop cannot reach them either:
+  // the spill store is instance-wide. Here rather than in `removeSpace`, so a resumed delete does it too.
+  try {
+    const { dropSpillsForSpace } = await import('../brain/read-spill-store.js');
+    await dropSpillsForSpace(spaceId);
+  } catch (err) {
+    const msg = `Could not drop read spills for '${spaceId}': ${err}`;
     log.warn(msg);
     errors.push(msg);
   }
@@ -672,6 +708,11 @@ export async function wipeSpace(spaceId: string, types?: WipeCollectionType[]): 
    * A full wipe takes the files too, so this matters most for `types: ['entities']`.
    */
   if (targets.has('entities')) await unlabelAllFaces(spaceId);
+
+  // A read spill holding this space's records outlives a wipe of them otherwise (Q-92): the one-day lifetime
+  // bounds it, but a wipe is an operator saying "gone now". Any wipe, since a spill mixes record kinds.
+  const { dropSpillsForSpace } = await import('../brain/read-spill-store.js');
+  await dropSpillsForSpace(spaceId);
 
   // Clear tombstones for the wiped types.
   // Full wipe: drop everything (single deleteMany with no filter).

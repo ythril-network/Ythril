@@ -28,10 +28,11 @@
  * |---|---|
  * | `cosine`     | `(1 + cos(a,b)) / 2` |
  * | `dotProduct` | `(1 + dot(a,b)) / 2` — Atlas requires normalised vectors for this metric |
- * | `euclidean`  | `1 / (1 + d(a,b))` |
+ * | `euclidean`  | `1 / (1 + d(a,b)²)` — the SQUARED distance |
  *
- * These are stated rather than derived, which is exactly why nothing here is trusted on faith: the
- * agreement check is the load-bearing part, not the table.
+ * The table follows `a-local-vector-score-is-the-engines-db.test.js`, which compares this mapping with
+ * `vectorSearchScore` for all three metrics against a real engine (`Q-117`). It used to be stated rather than
+ * derived, and euclidean was stated wrong — `1 / (1 + d)` — while the agreement check ran on cosine only.
  */
 
 /** Dot product. Callers guarantee equal length. */
@@ -111,8 +112,10 @@ export function atlasScoreFromParts(
       // SCORE_AGREEMENT_EPSILON and far inside any threshold anyone sets, and it buys a single
       // implementation of the mapping. Stated because the alternative is someone re-deriving it later and
       // reasonably assuming exactness.
+      // The engine scores euclidean on the SQUARED distance (`Q-117`, measured against mongodb-atlas-local), so no
+      // root is taken — taking one put every euclidean score up to 0.09 off the engine's.
       const sq = Math.max(0, normA * normA + normB * normB - 2 * dotProduct);
-      return 1 / (1 + Math.sqrt(sq));
+      return 1 / (1 + sq);
     }
     default:
       return null;

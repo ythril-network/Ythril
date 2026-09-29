@@ -106,6 +106,9 @@ export interface VoteCast {
    *  (see util/signing.ts). Present on casts created by signing-capable brains;
    *  absent on legacy/unsigned casts (accepted only via the own-cast path). */
   sig?: string;
+  /** Base64 Ed25519 signature over the v2 message, which also binds the round's type and target (`Q-138`,
+   *  `voteCastBoundMessage`). Required of a voter known to run 5.5.3 or later; absent from older casts. */
+  bsig?: string;
 }
 
 export interface VoteRound {
@@ -122,6 +125,11 @@ export interface VoteRound {
   passed?: boolean;          // true if concluded and the motion carried; false if vetoed/expired
   pendingMember?: NetworkMember;  // stored on join rounds; added to members when vote passes
   spaceId?: string;              // populated for space_deletion, space_wipe, meta_change and space_addition rounds (space_addition: the NETWORK's id for it)
+  /**
+   * The network's id for the space of a space_deletion or space_wipe round (`Q-133`). `spaceId` stays the proposer's
+   * local id because a 5.0/5.1 peer applies it raw; a receiver prefers this one (`roundSpaceLocalId`).
+   */
+  networkSpaceId?: string;
   /**
    * Which collections a `space_wipe` round will empty, or absent for all five.
    *

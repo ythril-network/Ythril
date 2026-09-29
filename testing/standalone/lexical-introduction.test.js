@@ -81,9 +81,11 @@ describe('reproducing the engine score', () => {
     assert.ok(Math.abs(atlasVectorScore([0.5, 0], [1, 0], 'dotProduct') - 0.75) < 1e-12);
   });
 
-  it('euclidean maps to 1/(1+distance)', () => {
+  it('euclidean maps to 1/(1+distance²)', () => {
+    // The SQUARED distance, as the engine reports it (Q-117, measured in a-local-vector-score-is-the-engines-db).
+    // This case used to pin 1/(1+d), the wrong mapping, so it agreed with the code while both disagreed with Atlas.
     assert.equal(atlasVectorScore([0, 0], [0, 0], 'euclidean'), 1);
-    assert.equal(atlasVectorScore([0, 0], [3, 4], 'euclidean'), 1 / 6);
+    assert.equal(atlasVectorScore([0, 0], [3, 4], 'euclidean'), 1 / 26);
   });
 
   it('every mapping lands in (0, 1]', () => {
@@ -139,7 +141,7 @@ describe('the mapping has one implementation, reachable two ways', () => {
     // SCORE_AGREEMENT_EPSILON, and the price of one implementation instead of two.
     for (const [a, b] of PAIRS) {
       const viaParts = atlasScoreFromParts(dot(a, b), norm(a), norm(b), 'euclidean');
-      assert.ok(Math.abs(viaParts - 1 / (1 + euclideanDistance(a, b))) < 1e-7);
+      assert.ok(Math.abs(viaParts - 1 / (1 + euclideanDistance(a, b) ** 2)) < 1e-7);
     }
   });
 
@@ -252,8 +254,9 @@ describe('introduction is gated on evidence', () => {
   });
 
   it('applies the caller eligibility to the fetch', () => {
-    // A channel that skipped tags/filter would resurrect records the caller excluded.
-    assert.match(fn, /\$match: \{ \.\.\.eligibility/);
+    // A channel that skipped tags/filter would resurrect records the caller excluded. ANDed with the id
+    // restriction, never spread beside it: a spread let a caller's own `_id` clause replace the restriction (Q-102).
+    assert.match(fn, /\$match: andPredicates\(eligibility, \{ _id: \{ \$in:/);
   });
 
   it('is capped, so a broad lexical match cannot flood the pool', () => {

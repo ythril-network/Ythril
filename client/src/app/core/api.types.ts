@@ -6,6 +6,8 @@
  * this file is types only, so any component or service can import a DTO without pulling in a service.
  */
 import type { RecallGraphReport } from './recall-graph-report';
+import type { ResultSpillLink, SpillReport } from './read-spill';
+import type { RecallHit } from './recall-hit';
 
 // ── Shared types ─────────────────────────────────────────────────────────────
 
@@ -578,15 +580,14 @@ export interface ReembedResult {
 
 export type RecallKnowledgeType = 'fact' | 'entity' | 'edge' | 'chrono' | 'file';
 
-export interface RecallResult {
-  type: RecallKnowledgeType;
-  score?: number;
-  [key: string]: unknown;
-}
+/** One recall hit, the ranking beside the record — see `recall-hit.ts`, and the same hit under the older name. */
+export type { RecallHit };
+export type RecallResult = RecallHit;
 
 // The graph half lives in `recall-graph-report.ts` — its own module because this file is frozen by the
-// god-file ratchet, whose instruction is to put new behaviour BESIDE a large file rather than inside it.
-export interface RecallResponse extends RecallGraphReport {
+// god-file ratchet, whose instruction is to put new behaviour BESIDE a large file rather than inside it. The
+// spill half (`remainder`'s shape, `spillRefused`) lives in `read-spill.ts` for the same reason.
+export interface RecallResponse extends RecallGraphReport, SpillReport {
   results: RecallResult[];
   /** The number of MATCHES. Traversed nodes are nested inside a result, never counted here. */
   count: number;
@@ -633,19 +634,13 @@ export interface RecallResponse extends RecallGraphReport {
    */
   nextSkip?: number;
   /**
-   * Where the matches that did NOT fit were written — present only when the request asked for it with
-   * `remainderDump: true` AND the answer truncated.
+   * The matches that did NOT fit, kept for the caller's own token (see `read-spill.ts`) — present only when
+   * the request asked for it with `remainderDump: true`, the answer truncated, and the spill was not refused
+   * (`spillRefused` then says why).
    *
-   * A continuation, not a copy: the records in `results` are not repeated in the file. `matches` and `records`
-   * describe the file — matches in it, and matches plus their traversed nodes.
+   * A continuation, not a copy: the records in `results` are not repeated in the spill.
    */
-  remainder?: {
-    matches: number;
-    records: number;
-    path: string;
-    download: string;
-    expiresAt: string;
-  };
+  remainder?: ResultSpillLink;
   /** Present only when `traverse > 0` was asked for. */
   traverseDepth?: number;
   /** How many traversed nodes the `_graph` trees hold in total. Present only with `traverse > 0`. */

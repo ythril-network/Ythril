@@ -222,7 +222,9 @@ const ADMIN_DOMAINS = [
  * polling an ingest run: one start is polled many times, so counting the polls would read one import as dozens
  * of questions asked of the space. The start itself counts, as a write.
  */
-const NON_USAGE_SUFFIXES = ['.ticket', '.ingest.status'] as const;
+// `.spill.read` (Q-92): reading a spill is the rest of an answer whose `recall`/`similar` was already counted —
+// counting it again would score a space twice for one question, once per page of a large one.
+const NON_USAGE_SUFFIXES = ['.ticket', '.ingest.status', '.spill.read'] as const;
 
 /**
  * Verbs that mean something changed. `retry_embed_file` and `mkdir` are here because they are mutations whose

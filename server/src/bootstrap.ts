@@ -43,6 +43,15 @@ export async function startConfiguredInstanceServices(): Promise<void> {
     log.error(`Sweeping orphaned peer tokens failed: ${err}`);
   }
 
+  // The read-spill TTL index in its OWN try, ahead of phase 1 (Q-92): a failure below would otherwise skip it,
+  // and the read-time expiry check would hide the missing index until the instance ceiling refused every spill.
+  try {
+    const { ensureReadSpillIndexes } = await import('./brain/read-spill-store.js');
+    await ensureReadSpillIndexes();
+  } catch (err) {
+    log.error(`Read-spill indexes could not be ensured (spills will not expire until they are): ${err}`);
+  }
+
   // ── Phase 1: DB initialisation (best-effort) ──────────────────────────────
   try {
     // Ensure the built-in general space exists BEFORE initAllSpaces() so its

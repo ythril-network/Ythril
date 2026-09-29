@@ -19,6 +19,7 @@ import { isSeqImplausible, MAX_INGEST_SEQ } from '../../util/seq.js';
 import { isStrictLinkage } from '../../spaces/proxy.js';
 import type { FileMetaDoc } from '../../config/types.js';
 import { emitWebhookEvent } from '../../webhooks/dispatcher.js';
+import { spillIdFromPath } from '../../brain/spill-path.js';
 import type { FactDoc, EdgeDoc, LinkViolationDoc, BrainEmbedRecordType } from '../../config/types.js';
 
 export const UUID_V4_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -249,7 +250,10 @@ export const IncomingFileMetaDoc = z.object({
  * Embedding is enqueued only when this instance HOLDS the blob; metadata can arrive first, and the file
  * transfer path enqueues via `upsertFileMeta` when the bytes land.
  */
-export async function ingestFileMeta(spaceId: string, incoming: z.infer<typeof IncomingFileMetaDoc>): Promise<void> {
+export async function ingestFileMeta(spaceId: string, incoming: z.infer<typeof IncomingFileMetaDoc>): Promise<boolean> {
+  // A legacy read spill (Q-92) is one caller's search result an older peer wrote into the space. It travels in
+  // neither direction now, and this is the one function both push and pull write file metadata through.
+  if (spillIdFromPath(String(incoming._id))) return false;
   const $set: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(incoming)) {
     if (v !== undefined) $set[k] = v;
@@ -266,6 +270,7 @@ export async function ingestFileMeta(spaceId: string, incoming: z.infer<typeof I
 
   const haveBytes = existing?.sha256 !== undefined || existing?.sizeBytes !== undefined;
   if (haveBytes) await enqueueIngestedRecord(spaceId, 'file', incoming);
+  return true;
 }
 /**
  * Apply a whole PAGE of arriving file metadata on pull, through the same merge as push (`ingestFileMeta`)

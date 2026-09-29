@@ -25,6 +25,7 @@ import { MongoClient } from 'mongodb';
 import { EJSON } from 'bson';
 import { log } from '../util/log.js';
 import { dbNameFromUri } from './db-name.js';
+import { READ_SPILL_COLLECTIONS } from '../brain/read-spill-store.js';
 
 const MANIFEST_VERSION = 1 as const;
 const CURSOR_BATCH_SIZE = 500;
@@ -116,9 +117,12 @@ export async function dumpDatabase(uri: string, destDir: string, opts: DumpOptio
     const db = client.db(dbNameFromUri(uri));
 
     const collectionInfos = await db.listCollections().toArray();
+    // Read spills (Q-92) stay out: a spill lives up to a day for the token that caused it, and a backup
+    // would keep a copy — of records since deleted or redacted — for as long as backups are kept. Left out
+    // of the dump, they are also left alone by a restore, which drops only what its dump names.
     const collectionNames = collectionInfos
       .map(c => c.name)
-      .filter(n => !n.startsWith('system.'))
+      .filter(n => !n.startsWith('system.') && !READ_SPILL_COLLECTIONS.includes(n))
       .sort();
 
     const manifestCollections: DumpManifest['collections'] = [];

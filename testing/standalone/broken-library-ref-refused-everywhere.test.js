@@ -145,9 +145,11 @@ describe('a broken schema-library $ref is refused on every route that accepts on
     assert.ok(effectiveChecker(create.body), 'the create route must reach the checker, directly or by delegation');
 
     const planner = readFileSync(join(ROOT, 'server/src/spaces/space-create.ts'), 'utf8');
-    assert.match(planner, /export async function applySpaceCreate\(plan: SpaceCreatePlan\)/,
+    // The second argument is who the space is credited to (Q-134) — it carries no body, so the plan is still the
+    // only way in.
+    assert.match(planner, /export async function applySpaceCreate\(plan: SpaceCreatePlan, creator: SpaceCreator\)/,
       'apply must take a SpaceCreatePlan and nothing looser, or a caller could assemble one without the checks');
-    assert.match(planner, /await createSpace\(plan\.args\)/, 'and it must create from the PLAN, not from a body');
+    assert.match(planner, /await createSpace\(plan\.args, creator\)/, 'and it must create from the PLAN, not from a body');
 
     const planFn = planner.slice(planner.indexOf('export function planSpaceCreate'));
     const check = planFn.indexOf('findBrokenLibraryRefs(');

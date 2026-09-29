@@ -18,7 +18,7 @@ import { log } from '../util/log.js';
 import { buildFileManifest } from '../files/manifest.js';
 import { readStored, writeStored, deleteStored } from '../files/stored-bytes.js';
 import { resolveSafePathChecked } from '../files/sandbox.js';
-import { deleteFileMeta, upsertFileMeta } from '../files/file-meta.js';
+import { deleteFileMeta, recordArrivedFile } from '../files/file-meta.js';
 import { peerSafeFetch, transferInit, PEER_TRANSFER_TIMEOUT_MS } from './peer-fetch.js';
 import { recordFileTombstoneAck, ackedPositionFrom } from './file-tombstone-ack.js';
 import { decideFilePull, decideFilePush, conflictCopyPath, isInstanceLocalFile } from './file-conflict.js';
@@ -164,7 +164,9 @@ export async function syncFiles(
           // The bytes on the wire are plaintext; the receiver stores them by its OWN rules — encrypted at rest
           // when it has a master secret — under the path lock the migration job also takes (F-43).
           await writeStored(absPath, buf);
-          await upsertFileMeta(spaceId, remote.path, buf.length).catch(() => { /* best-effort */ });
+          // An ARRIVAL, not an upload: size and hash only, and no seq stamp that would outrank the peer's metadata (Q-143).
+          await recordArrivedFile(spaceId, remote.path, buf.length, sha, { instanceId: member.instanceId, instanceLabel: member.label })
+            .catch(() => { /* best-effort */ });
           await recordSyncBase(spaceId, remote.path, member.instanceId, remote.sha256);
           if (action === 'replace') log.info(`FILE_REPLACED: '${remote.path}' changed only on peer '${member.label}' since the last agreed version; took theirs.`);
           pulledPaths.push(remote.path);

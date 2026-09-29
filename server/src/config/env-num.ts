@@ -89,6 +89,12 @@ export const NUMERIC_SETTINGS: readonly NumericSetting[] = [
   // is a slower way to fail than not checking at all.
   { name: 'DUPE_FRESH_WINDOW_MS', min: 0, max: 600_000, what: 'how far back the duplicate check reads the collection (0 = index only)' },
   { name: 'DUPE_FRESH_SCAN_CAP', min: 0, max: 5_000, what: 'the most records one duplicate check scores outside the index' },
+  // A read spill (Q-92) is paid for by the token that caused it. The share bounds one token; the ceiling bounds
+  // the instance, and it refuses rather than evicting somebody else's spill. Megabytes of RAW JSON, not gzip:
+  // the cost a read pays is the decompressed size.
+  { name: 'READ_SPILL_TOKEN_MAX_MB', min: 1, max: 16_384, what: 'the raw megabytes of read spills one token may hold' },
+  { name: 'READ_SPILL_TOKEN_MAX_COUNT', min: 1, max: 100_000, what: 'how many read spills one token may hold' },
+  { name: 'READ_SPILL_INSTANCE_MAX_MB', min: 1, max: 1_048_576, what: 'the raw megabytes of read spills the instance holds in all' },
 ] as const;
 
 const BY_NAME = new Map(NUMERIC_SETTINGS.map(s => [s.name, s]));
@@ -148,6 +154,14 @@ export function validateNumericEnv(): { ok: boolean; problems: string[] } {
   for (const s of NUMERIC_SETTINGS) {
     const r = parse(s.name);
     if ('problem' in r) problems.push(r.problem);
+  }
+  // A pair that is valid alone and wrong together: an instance ceiling below one token's share refuses every
+  // spill that token is entitled to, and each value on its own passes its range.
+  const share = envInt('READ_SPILL_TOKEN_MAX_MB', 64);
+  const ceiling = envInt('READ_SPILL_INSTANCE_MAX_MB', 1024);
+  if (ceiling < share) {
+    problems.push(`READ_SPILL_INSTANCE_MAX_MB=${ceiling} is below READ_SPILL_TOKEN_MAX_MB=${share} — the instance `
+      + 'ceiling for read spills must be at least one token\'s share, or that share can never be used.');
   }
   return { ok: problems.length === 0, problems };
 }

@@ -11,6 +11,8 @@ import { spacePurpose } from '../../spaces/spaces.js';
 import { SPACE_PURPOSE_MAX, needsReindex } from '../../spaces/_shared.js';
 import { measureSpaceUsage } from '../../spaces/space-usage.js';
 import { spaceCollection } from '../../db/space-collection.js';
+import { renameSpaceAct } from '../../spaces/rename.js';
+import { toResult } from './networks.js';
 
 export const list_spacesTool: ToolHandler = {
   name: 'list_spaces',
@@ -231,6 +233,45 @@ export const space_metaTool: ToolHandler = {
       }],
       structuredContent: metaResult,
     };
+  },
+};
+
+/**
+ * Rename a space — the MCP door of `PATCH /api/spaces/:id/rename` (`Q-139`).
+ *
+ * It was classified as kept off the agent surface, a judgement no owner ruling stood behind, while the rule is that
+ * every capability has both doors and the rights matrix decides who uses it. Same caller (`spaceAdmin: true` is the
+ * dispatcher's per-space twin of the route's `requireAdminOrSpaceAdminMfaScoped`), same body, and the same answer
+ * and refusals, because both call `renameSpaceAct`.
+ */
+export const space_renameTool: ToolHandler = {
+  name: 'space_rename',
+  description: 'Rename the space named in `space` to `newId`: every collection, file and index moves, token rights for '
+    + 'the space move with it, and each network that carries it keeps syncing it under the name the network knows. '
+    + 'Needs instance-admin rights OR administering the space named in `space`. Same answer and refusals as '
+    + '`PATCH /api/spaces/:id/rename`: 409 when `newId` exists, or (with `code: space_name_in_use`) when another space '
+    + 'already syncs under that name in one of this instance\'s networks; 400 for a built-in space or an invalid id; '
+    + '404 for an unknown space. A connection opened before the rename still lists the old id until it reconnects.',
+  mutating: true,
+  spaceAdmin: true,
+  spaceRequired: true,
+  inputSchema: (s: ToolSchemas) => ({
+    type: 'object',
+    properties: {
+      space: s.requiredSpace,
+      newId: {
+        type: 'string', minLength: 1, maxLength: 40, pattern: '^[a-z0-9-]+$',
+        description: 'The new space id: lowercase letters, digits and hyphens, at most 40.',
+      },
+    },
+    required: ['space', 'newId'],
+    additionalProperties: false,
+  }),
+  async handle(ctx: ToolContext): Promise<ToolResult> {
+    const { args: a, callSpace } = ctx;
+    const r = await renameSpaceAct(callSpace, { newId: a['newId'] });
+    if (r.status === 200) ctx.recordChanges?.({ id: callSpace }, { id: r.space.id });
+    return toResult(r.status === 200 ? { status: 200, body: { space: r.space } } : r, `Space '${callSpace}' renamed.`);
   },
 };
 
@@ -553,14 +594,15 @@ export const schema_updateTool: ToolHandler = {
  */
 export const save_spaceTool: ToolHandler = {
   name: 'save_space',
-  description: 'Create a new space. Requires an admin token. The id is derived from the label when omitted. '
+  description: 'Create a new space. Needs the createSpaces right (or instance admin), and the token that creates it '
+    + 'becomes its administrator. The id is derived from the label when omitted. '
     + 'A new space is seeded with a fully strict schema posture (validationMode: strict, strictLinkage: true) '
     + 'unless you pass meta saying otherwise — with no typeSchemas defined yet that accepts every type, so it does '
     + 'not block an empty space. A proxy space (proxyFor) holds no data of its own and is left un-seeded. '
     + 'Set `faceDescriptorDims` HERE if you are bringing your own recogniser: it can be changed later with `update_space`, but ONLY while the space has never held a face descriptor, so getting it right at creation is the reliable path. Refusals match POST /api/spaces exactly, including 422 for a $ref to a schema-library entry that '
     + 'does not exist and 409 when the id is taken.',
   mutating: true,
-  admin: true,
+  createsSpaces: true,
   inputSchema: (_s: ToolSchemas) => ({
     type: 'object',
     properties: {
@@ -639,7 +681,8 @@ export const save_spaceTool: ToolHandler = {
       };
     }
 
-    const result = await applySpaceCreate(decision.plan);
+    // The calling token is credited, so it administers what it created (Q-134) — as the REST door credits its caller.
+    const result = await applySpaceCreate(decision.plan, { tokenId: ctx.actor?.tokenId ?? null });
     if (result.outcome === 'conflict') {
       // 409, and reported as its own thing rather than as a generic failure: the id being taken is often a successful
       // retry of a request whose response was lost, and an agent that can tell the two apart stops retrying.

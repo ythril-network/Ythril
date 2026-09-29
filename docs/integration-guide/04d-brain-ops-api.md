@@ -663,27 +663,29 @@ subtree, so a deeper or wider traversal means fewer matches fit — they are abs
 `null` unless you asked for a byte ceiling. `nextSkip` is there exactly when `truncated` is.
 `count` stays the FULL total on a skipped page rather than shrinking as you advance.
 
-**`remainderDump: true`** additionally writes what did not fit to the space's `_tmp/` as JSON and reports it as
-`remainder: {matches, records, path, download, expiresAt}`. It is off by default because writing a file on a
-read path counts against space storage and most callers want the next page rather than an artifact. `remainder`
-carries **only** what did not fit — a continuation, not a copy. The file carries no embedding vectors and
-expires after one day.
+**`remainderDump: true`** additionally keeps what did not fit as a **read spill** and reports it as
+`remainder: {matches, records, spillId, path, download, expiresAt}`. It is off by default because most callers
+want the next page rather than a download. `remainder` carries **only** what did not fit — a continuation, not a
+copy. A search never writes into a space: the spill is kept outside every space, for your token alone, carries
+no embedding vectors, and lives up to one day — it may be evicted earlier by your token's own newer spills. Read
+it with `GET /api/brain/spills/:id` or MCP `read_spill`. A spill that cannot be kept leaves `remainder` out and
+names the reason in `spillRefused`; `truncated` and `nextSkip` are unchanged.
 
 > The full treatment is in [Prefiltered Recall and the byte budget](04a-recall-api.md).
 
-`recall` and `similar` with `traverse > 0` cap the traversed nodes they return inline. Past that cap the
-**complete** graph is written to the space's file store under `_tmp/` as JSON, and the response carries
-`graphTruncated: true` with `graphComplete: {nodes, path, download, expiresAt}`. The download is the normal
-authenticated `GET /api/files/:spaceId?path=…`, the file expires after one day, and it is hidden from browsing
-and never embedded.
+`recall` and `similar` with `traverse > 0` return each match with its **whole** graph, or leave it out. A match
+whose neighbourhood cannot be read whole — past the per-match node ceiling, a link scan past its bound, too many
+routes to one node, or out of time — is named in `incompleteRows` and counted in `incompleteCount`, and
+`graphTruncated: true` says at least one was; no returned graph is ever short. When the call's walk bound or its
+deadline runs out, the answer stops at the last whole match with `truncatedBy` (`walk_budget` or `deadline`)
+and `nextSkip`, the way the byte budget stops it. Nothing is written unless `remainderDump: true` is sent.
 
-The alternative — a `truncated` flag alone — tells a caller their graph was cut and leaves them no way to get
-the rest, which on a neighbourhood is a dead end: there is no `total` to page against.
+> The rule, the reasons and the bounds: [Graph-augmented recall](04h-graph-augmented-recall.md). The one spill
+> left, its paging and its refusals: [Reading a spill](04a-recall-api.md#reading-a-spill-get-apibrainspillsid-and-mcp-read_spill).
 
-**A `truncated` flag alone is still the right answer in one case.** The link scans that follow a
-record's links are bounded per hop, and a hop can spend its budget on records it discards as already
-visited — so the graph is short and there is no complete copy to write, because the missing records were never
-read. `graphTruncated: true` arrives on its own. Read the flag, and treat `graphComplete` as optional.
+Until 5.5.3 a large neighbourhood was cut to an inline cap and the whole graph kept as a spill behind
+`graphComplete`. A caller then held a row whose graph was part of what it asked for, and had to fetch and merge
+the rest; a row is now what was asked for or it is not there.
 
 #### Unknown body fields are refused
 
@@ -693,9 +695,9 @@ keys:
 | Route | Accepted fields |
 |---|---|
 | `POST /filter` | `space`, `collection`, `filter`, `projection`, `limit`, `skip`, `sort`, `dir`, `maxTimeMS`, `entityName`, `fromName`, `toName`, `path`, `tag`, `type`, `description`, `properties`, `search`, `includeDiagnostics`, `deriveStatus`, `maxChars`, `maxBytes`, `maxTokens` |
-| `POST /recall` | `space`, `query`, `topK`, `types`, `minScore`, `filter`, `traverse`, `tags`, `minPerType`, `maxPerType`, `maxTimeMS`, `includeFileContent`, `includeDiagnostics`, `includeRecordMeta`, `projection`, `maxChars`, `maxBytes`, `maxTokens`, `skip`, `remainderDump` |
+| `POST /recall` | `space`, `query`, `topK`, `types`, `minScore`, `filter`, `traverse`, `tags`, `minPerType`, `maxPerType`, `maxTimeMS`, `rerank`, `includeFileContent`, `includeDiagnostics`, `includeRecordMeta`, `projection`, `maxChars`, `maxBytes`, `maxTokens`, `skip`, `remainderDump` |
 | `POST /traverse` | `startId`, `direction`, `edgeLabels`, `maxDepth`, `limit`, `includeChrono`, `includeMemories`, `includeFiles`, `includeEdges`, `projection`, `includeDiagnostics` |
-| `POST /similar` | `space`, `entryId`, `entryType`, `topK`, `minScore`, `targetTypes`, `traverse`, `includeFileContent`, `includeDiagnostics`, `projection`, `maxChars`, `maxBytes`, `maxTokens`, `skip`, `remainderDump`, `crossSpace` *(not deprecated: `space` pins the seed ENTRY here, `crossSpace` widens the SEARCH)* |
+| `POST /similar` | `space`, `entryId`, `entryType`, `topK`, `minScore`, `targetTypes`, `traverse`, `includeFileContent`, `includeDiagnostics`, `includeRecordMeta`, `projection`, `maxChars`, `maxBytes`, `maxTokens`, `skip`, `remainderDump`, `crossSpace` *(not deprecated: `space` pins the seed ENTRY here, `crossSpace` widens the SEARCH)* |
 
 ```json
 {

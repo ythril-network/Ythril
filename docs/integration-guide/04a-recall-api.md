@@ -21,24 +21,25 @@ Available as both — REST `POST /api/brain/recall`, MCP tool `recall`:
 |-------|----------|---------|-------------|
 | `space` | — | every space you can read | Which space to search. **One name**, **a LIST of names**, or omitted. A list searches exactly those spaces; omitting it runs across every space this token holds `knowledge: read` in, ranked together. The two are not the same, and the difference is paid in the byte budget: a list of three does not spend it on the other nine. **A space you NAMED and cannot read refuses the whole call** — filtering would answer with fewer results, and a caller cannot tell a filtered answer from a small one. A space you did not name and cannot read is simply not searched. An empty list `[]` is refused rather than read as "all". |
 | `query` | ✅ | — | Natural-language search text (non-empty string) |
-| `topK` | — | `10` | Max returned results, minimum 1 and **no ceiling** — the same on both doors. What comes back is bounded by the byte budget instead: every record whole, `truncated` on every response, `nextSkip` when it bit |
+| `topK` | — | `10` | Max returned results, minimum 1 and **no ceiling** — the same on both doors. What comes back is bounded by the byte budget instead: every record whole, `truncated` on every response, `nextSkip` when it bit. The WORK is bounded too: a recall considers at most 2000 records of each knowledge type, and a `topK` past that on a type that fills it answers `degraded: ["candidate_cap"]` |
 | `types` | — | all types | Restrict result knowledge types |
 | `minScore` | — | none | Filter out low-similarity matches |
-| `filter` | — | none | Property equality/comparison filter (see below) |
+| `filter` | — | none | Hard filter, in raw MongoDB or the operator-object grammar (see [Filtered Recall](#filtered-recall-filter-parameter)). `topK` is filled from every record that satisfies it, whatever its vector rank |
 | `tags` | — | none | Array of strings — restrict to records carrying these tags |
-| `minPerType` | — | none | Object mapping knowledge type → minimum hits, e.g. `{ "entity": 2 }`. Guarantees at least that many results of the type; each value is clamped to `topK` |
+| `minPerType` | — | none | Object mapping knowledge type → minimum hits, e.g. `{ "entity": 2 }`. Guarantees at least that many results of the type; each value is clamped to `topK` and to the 2000-per-type bound |
 | `maxPerType` | — | none | Object mapping knowledge type → **maximum** hits, e.g. `{ "file": 2 }` — the ceiling to `minPerType`'s floor. A slot the cap frees goes to another type. Each value must be at least `1` and is clamped to `topK`; a value below `minPerType` for the same type is a `400` (see below) |
-| `maxTimeMS` | — | the instance budget | Deadline for this recall, in ms. **Can only lower the instance's `RECALL_BUDGET_MS`, never raise it** — a larger value is clamped to it, and a very small one is clamped up to a 250 ms floor. On expiry you get a **partial** answer with a `degraded` field, not an error and not a hang |
+| `maxTimeMS` | — | the instance budget | Deadline for this recall, in ms. **Can only lower the instance's `RECALL_BUDGET_MS`, never raise it** — a larger value is clamped to it, and a very small one is clamped up to a 250 ms floor. On expiry you get a **partial** answer with a `degraded` field, not an error and not a hang. `degraded` names one or more of `search_timeout`, `rerank_skipped_budget`, `rerank_unavailable`, `filter_window` and `candidate_cap` — see the reason table below |
 | `traverse` | — | `0` | Graph expansion: an integer depth `0`–`5`, **or an object `{depth, edgeLabels, direction}`** — a `traverse` call without its start node, because the matches *are* the start nodes. `0` = classic recall. See [Graph-Augmented Recall](04h-graph-augmented-recall.md#graph-augmented-recall-traverse-parameter) |
+| `rerank` | — | `true` | Whether the configured cross-encoder re-orders the answer. `false` skips it — no over-fetch for it and no rerank pass, on a single space and across spaces alike — and returns the fused order at once; nothing is reported in `degraded`, because it is a skip you chose. For a caller waiting on the answer as a user types; the reranked answer stays the default. No effect on an instance without a reranker |
 | `includeFileContent` | — | `true` | Whether file-chunk results carry `content` — the passage body. `false` returns locations and metadata only (path, heading, chunk index, tags, properties). **File chunks ONLY** — it does nothing on a search returning entities, facts, edges or chrono entries; use `projection` to trim those. A non-boolean is a `400`, never coerced |
-| `includeRecordMeta` | — | `false` | Add back the fields that describe where a record SITS rather than what it says: `createdAt`, `updatedAt` and the link-id arrays. Measured on a real corpus only **30%** of a recall answer was content and most of the rest was this, which at a tight `maxChars` is evidence you paid for and did not get. `createdAt` is the one to be careful of — it is when the RECORD was written, not when the remembered thing happened, which lives in the record's own properties. **Applies recursively**, so a `traverse` answer's `_graph` follows it at every depth. MCP takes the same parameter with the same default. A non-boolean is a `400`, never coerced |
+| `includeRecordMeta` | — | `false` | Add back the fields that describe where a record SITS rather than what it says: `createdAt` and `updatedAt` (link ids are link records since 5.0 — reach them with `traverse`). Measured on a real corpus only **30%** of a recall answer was content and most of the rest was this, which at a tight `maxChars` is evidence you paid for and did not get. `createdAt` is the one to be careful of — it is when the RECORD was written, not when the remembered thing happened, which lives in the record's own properties. **Applies recursively**, so a `traverse` answer's `_graph` follows it at every depth. MCP takes the same parameter with the same default. A non-boolean is a `400`, never coerced |
 | `includeDiagnostics` | — | `false` | Add back the three fields a result carries for the SYSTEM rather than for you: `matchedText` (the exact pre-embedding source string — for a file chunk, the passage a SECOND time), `embeddingModel` and `seq`. **Applies recursively**, so a `traverse` answer's `_graph` nodes and edges follow it at every depth. Off by default on both doors. **It does NOT gate the per-stage scores.** `lexicalScore`, `fusedScore` and `rerankScore` are returned unconditionally on both doors, because the one that decided a result's position must not be the one you cannot read — and three floats are not a cost worth a flag. The embedding VECTOR is not among them and is never returned by anything. A non-boolean is a `400`, never coerced |
 | `projection` | — | none | Fields to include (1) or exclude (0), the same grammar `POST /api/filter` takes, applied to each result's record. Dotted paths work: `{"name": 1, "properties.status": 1}`. **Applies recursively** — a `traverse` answer's `_graph` nodes and edges are projected at every depth, which is where a large answer's size actually comes from. Inclusion and exclusion cannot be mixed (the non-`_id` fields decide which you meant); `_id` survives an inclusion projection unless you send `_id: 0`; and the embedding VECTOR can never be projected back in — an explicit `embedding: 1` is dropped rather than honoured. The ranking envelope (`score`, `spaceId`, `type`, `_graph`) always survives, so a projection cannot lose the score you searched for |
 | `maxChars` | — | `50000` REST / `25000` MCP | Ceiling on the serialised response body, in **characters**, and the ceiling that carries the defaults. **The default differs by DOOR: 50000 over REST, 25000 over MCP.** Both doors accept this parameter identically — same floor, same ceiling, same refusal — and only the number applied when you send nothing differs, because an MCP tool result meets a hard per-result ceiling inside the client that the caller cannot raise while a REST body lands in a buffer its caller allocated. Raise it if yours can take more. Characters equal bytes only for ASCII; for a byte ceiling use `maxBytes`. **The answer is a PREFIX of the ranked results and every record in it is WHOLE** — full body, full properties, complete `_graph`, byte-identical to that record from an unbudgeted call. Truncation is atomic at the match: the first match whose subtree would not fit is omitted and so is everything after it, so no answer has a gap and none carries a record with half its graph. **That is what the guarantee costs** — the budgeted unit is a match TOGETHER WITH its subtree, so a deeper or wider `traverse` means fewer matches fit, and the ones that do not are absent rather than shortened. `returned`, `count`, `truncated`, `budgetChars`, `budgetBytes`, `charsReturned` and `bytesReturned` are on EVERY response, so absence never has to be interpreted; a truncated one adds `nextSkip`, which you send back as `skip` |
 | `maxBytes` | — | **none** | Ceiling on the serialised response body, in **real UTF-8 bytes**. `Grüße aus Köln — ąćę` counts 31 characters against 39 bytes; three emoji count 17 against 23. A transport or client limit IS in bytes. **Before 3.7 this bounded characters** — to keep that behaviour, send the same number as `maxChars`. **It has no default**, deliberately: bytes are always ≥ characters, so a byte default equal to the character one would silently become the binding constraint on every non-ASCII answer. **When you set both, both apply** — the answer stops at whichever ceiling it reaches first |
 | `maxTokens` | — | none | A convenience onto **`maxChars`**, converted at a fixed 3.5 characters per token. The ratio is not configurable (`charsPerToken` was removed in 5.0); a caller who needs the ceiling exact should state `maxChars`. If both are sent the **smaller** resulting character figure applies. It is an approximation — the server does not know your tokeniser |
 | `skip` | — | `0` | How many of the ranked matches to skip before filling the byte budget. **This is how you read a truncated answer**: a response with `truncated: true` carries `nextSkip`, and sending it back gets you the next prefix — no match repeated, none missed. The ranking is recomputed per call, so it is a continuation over one ordered answer rather than a cursor over a snapshot |
-| `remainderDump` | — | `false` | Also write the matches that did not fit to the space as JSON and report it as `remainder`. Only meaningful when the answer truncates. Off by default because it is a write on a read path that counts against space storage — page with `skip` to reach the same records without one |
+| `remainderDump` | — | `false` | Also KEEP the matches that did not fit as a read spill and report it as `remainder`, with a `spillId` you read through [`GET /api/brain/spills/:id` or MCP `read_spill`](#reading-a-spill-get-apibrainspillsid-and-mcp-read_spill). Only meaningful when the answer truncates. A spill is readable by your token alone, for up to one day, and is never written into any space. Off by default because most callers want the next page, not a download — page with `skip` to reach the same records without one. A spill that cannot be kept is named in `spillRefused` |
 
 **A hit is `{score, spaceId, type, record}` on both doors.** The record's own fields are under `hit.record`;
 `score`, `spaceId`, `type`, `_graph` and the per-stage scores sit on the hit itself. A REST client written
@@ -81,6 +82,10 @@ one that ran out of time contributes nothing and the response gains a `degraded`
 | `search_timeout` | at least one collection's vector search hit the deadline, so the answer is **partial** — fewer results than the corpus holds, not fewer results because the corpus is empty |
 | `rerank_skipped_budget` | the cross-encoder was configured but not run: too little budget was left. The order is the hybrid-fusion order, which is a slightly worse ranking, delivered |
 | `rerank_unavailable` | the cross-encoder was configured and did not answer (unreachable, non-2xx, unreadable body) |
+| `filter_window` | a filtered answer could not be completed, so it **may be missing records that satisfy the filter**: the vector index was still being updated to a definition that can complete it, the index did not yet hold matching records the collection has had for longer than the fresh-write window, or more than 500 000 records matched a filter the index cannot apply. What was found is returned |
+| `candidate_cap` | `topK` asked for more of one knowledge type than a recall considers — at most 2000 per type, however large `topK` is — and that type filled the bound, so it **may hold matches the recall never looked at**. Narrow the query or add a `filter` rather than raising `topK` |
+
+The set grows between releases: **treat an unknown reason as "degraded"**, never as an error.
 
 **`degraded` is absent when nothing degraded** — it is not an empty array on every healthy response, because a
 field that is almost always empty is one readers stop looking at. Treat its presence as "this answer is
@@ -275,7 +280,7 @@ Read in the order the server applies them:
 | `query` | Ranked semantically **and** lexically. `NMK-SI-11` is the reason the lexical channel matters — its embedding carries almost no meaning. |
 | `types` | Restricts which collections are searched at all. Edges are excluded. |
 | `tags` | Hard filter, **AND** semantics — a record must carry *both* `auth` and `postmortem`. |
-| `filter` | Hard filter. Keys must start with `properties.`, `tags`, `type`, `name`, `status` or `label`; any other key is rejected. Operators: `eq`, `ne`, `in`, `exists`, `gt`, `gte`, `lt`, `lte`. All conditions must match. |
+| `filter` | Hard filter, in raw MongoDB or the operator-object grammar (`eq`, `ne`, `in`, `exists`, `gt`, `gte`, `lt`, `lte`). Any key. All conditions must match, and with `tags` both apply. |
 | `minPerType` | Guarantees a floor per type *if that many exist*, so a flood of file passages cannot crowd out every entity. Each value is clamped to `topK`. |
 | `maxPerType` | The ceiling to that floor, and the other half of the same problem: one long file passage that scores well can take slots several one-line records would have answered more cheaply. A candidate whose type is already at its cap is **skipped and the walk continues**, so the freed slot goes to another type rather than shortening the list. |
 | `minScore` | Applied **last**, on the vector score, and it can drop a `minPerType`-guaranteed result — a floor is a request for coverage, not a licence to return matches you called too weak. |
@@ -322,7 +327,6 @@ off the match that reached it:
 | `edges` | **every** edge joining this node to the one it is nested under, as whole documents including `description` and `tags` — but **without `from`/`to`**, which the entry already states. Each carries `direction`: `outbound`, `inbound` or `self`. One for an ordinary hop; more when two records are joined by more than one relationship, and on a node that loops back to itself |
 | `node` | the reached record |
 | `paths` | **every** route from a match to this node, record ids, match first. `paths[0]` is the route it is nested under, so `paths[0].length - 1` is the hop count |
-| `pathsTruncated` | present and `true` only when a node had more routes than were recorded |
 | `_graph` | on a nested node too — depth is a tree, so a two-hop node hangs off the one-hop node that reached it |
 
 A traversed node carries **no score**. It was reached structurally, not matched: it has no similarity to the
@@ -356,9 +360,9 @@ The MCP `recall` tool takes the same parameters, plus `space` — one name, a li
 }
 ```
 
-**Performance note.** `tags`, `type`, `name`, `status`, `label` — and, on spaces whose schema declares
-them, `properties.<key>` — are pushed into the vector index as native pre-filters. Undeclared
-`properties.*` and `exists` are still correct but scan exhaustively, so prefer declared fields on large
+**Performance note.** Every filter returns every matching record it has room for. `tags`, `type`, `name`,
+`status`, `label` — and, on spaces whose schema declares them, `properties.<key>` — are applied by the vector
+index itself. Any other filter costs a pass over the matching records, so prefer declared fields on large
 spaces. `traverse` above 2 on a dense graph is slow; narrow the seed set with `tags`/`filter` first.
 
 #### A large answer comes back as a prefix, and you page through the rest
@@ -410,41 +414,125 @@ carries no `nextSkip` and is the last one. Skipping past the end returns zero re
 
 **This is a continuation over one ranked answer, not a cursor over a snapshot.** Each call re-runs the search,
 so a write landing between two pages can shift what falls where — the same caveat `/query`'s `skip` carries. For
-a set that must be internally consistent, ask for the remainder as a file instead.
+a set that must be internally consistent, ask for the remainder as a spill instead: it is kept as it stood when
+the search ran.
 
 **The ranking itself is deterministic, though**, which is what makes paging usable in the ordinary case: results
 on the same score are ordered by `_id` ascending, so an unchanged corpus always produces the same order.
 
-##### `remainderDump`: the whole remainder as one file (opt-in)
+##### `remainderDump`: the whole remainder as one spill (opt-in)
 
-Send **`remainderDump: true`** and the matches that did not fit are also written to the space's `_tmp/` as JSON,
-reachable through an authenticated download, and reported as `remainder`:
+Send **`remainderDump: true`** and the matches that did not fit are also kept as a **read spill** — for your
+token, outside every space — and reported as `remainder`:
 
 ```json
 {
   "remainder": {
     "matches": 78,
     "records": 264,
+    "spillId": "9f1c…",
     "path": "_tmp/results-9f1c….json",
-    "download": "/api/files/dev-apps?path=_tmp%2Fresults-9f1c….json",
+    "download": "/api/brain/spills/9f1c…",
     "expiresAt": "2026-08-14T20:11:00.000Z"
   }
 }
 ```
 
-- **It defaults to off.** Writing a file is a write on a read path: it
-  counts against space storage and shows up in an operator's usage figures. The common caller wants the next
-  page, not an artifact, and now says so by omission.
+- **It defaults to off.** The common caller wants the next page, not a download, and says so by omission.
+- **A search never writes into a space**, with or without this flag. The spill is not a file, is not in the
+  space's storage or usage figures, never syncs to a peer, and no backup carries it.
 - **`remainder` holds ONLY what did not fit.** It is a continuation, not a copy: the records already in
   `results` are not repeated in it.
-- **`remainder.matches` and `remainder.records` describe the FILE** — matches in it, and matches plus their
-  traversed nodes. Both are counted from what was actually written, so neither can disagree with the download.
-- **`nextSkip` is still there when you ask for the file**, so wanting the artifact never costs you the ability
-  to page.
-- The file is **self-describing**: it repeats the request that produced it, the counts, and its own expiry.
-- **No embedding vectors are written**, at any depth — a result set serialised verbatim is the one place they
-  would otherwise land in a file an operator opens.
-- Same authenticated download and same **one-day** expiry as the graph spill below.
+- **`remainder.matches` and `remainder.records` describe the SPILL** — matches in it, and matches plus their
+  traversed nodes. Both are counted from what was actually kept, so neither can disagree with what you read.
+- **`nextSkip` is still there when you ask for the spill**, so wanting it never costs you the ability to page.
+- **When the spill cannot be kept, the answer says why and loses nothing else.** `remainder` is absent, a
+  top-level `spillRefused` names the reason (see [Reading a spill](#reading-a-spill-get-apibrainspillsid-and-mcp-read_spill)),
+  and `truncated` and `nextSkip` are exactly what they would have been — paging still reaches every record.
+- **No embedding vectors are kept**, at any depth.
+- `path` is **deprecated** — see [Reading a spill](#reading-a-spill-get-apibrainspillsid-and-mcp-read_spill).
+  Read the spill by `spillId`.
+
+#### Reading a spill: `GET /api/brain/spills/:id` and MCP `read_spill`
+
+An answer hands you a spill as `remainder` above, only when you sent `remainderDump: true`. Before 5.5.3 a
+traversal past its inline node cap also spilled its whole graph behind `graphComplete`; no answer does that now
+([a match comes with its whole graph or not at all](04h-graph-augmented-recall.md)), and a `graphComplete.spillId`
+you still hold is read the same way until it expires. Either is read on either door, with the same parameters:
+
+```http
+GET /api/brain/spills/:id?skip=0&maxChars=50000
+```
+
+```json
+{ "tool": "read_spill", "arguments": { "id": "9f1c…", "skip": 0 } }
+```
+
+| Parameter | Default | Description |
+|---|---|---|
+| `id` | — | The `spillId` the answer named (a path segment on REST) |
+| `skip` | `0` | Items to skip — send the previous page's `nextSkip` |
+| `maxChars` | `50000` REST / `25000` MCP | Ceiling on the window in characters — the same budget, and the same sanctioned difference between the doors, as on `recall` |
+| `maxBytes` | none | Ceiling on the window in UTF-8 bytes |
+| `maxTokens` | none | Converted to characters at 3.5 per token; the smaller figure applies |
+
+**Response** `200`: `kind` (`results` or `graph`), `request` (what the search asked for, so the spill describes
+itself), `total` (items in the whole spill), `expiresAt`, `ceilingHit` (graph spills only, when present),
+`items` (a window of whole items), `returned`, `skip`, `truncated`, `nextSkip` (present exactly when
+`truncated` is), `charsReturned`, `bytesReturned`, `budgetChars` and `budgetBytes`. Loop while `truncated`,
+feeding `nextSkip` back as `skip`, exactly as you page a recall. An item is never split between two windows, and
+the first item of a window is returned even when it alone passes the budget.
+
+- **A results spill's items are the matches**, each whole, with its complete `_graph`. A match that could not be
+  read whole is not in it; the spill's `request` names it in `incompleteRows` and counts it in `incompleteCount`.
+- **An older graph spill** (`graphComplete.spillId`, from an answer made before 5.5.3) is still read the same way
+  until it expires; its items are the traversed nodes, flat.
+
+**Who can read it.** Only the token that ran the search, and only while that token still holds knowledge read on
+**every** space whose records are in the spill — checked when you read, not when the spill was made. On MCP every
+one of those spaces must also be inside the connection's accessible spaces. The route needs no other right and
+takes no `space`: the spill knows which spaces it holds.
+
+**How long it lives.** Up to one day, and it may be evicted earlier: each token has a share of spills, by count
+and by size, and past it the token's **own** oldest spills make room for its newer ones. Another caller's spills
+never evict yours. A spill belongs to the token id, so an OAuth connector that re-consents gets a new token and
+loses the spills its old one made.
+
+**It is a snapshot.** A spill holds the records as they were when the search ran, so a record deleted or redacted
+afterwards stays readable **in that token's spill** until the spill expires — at most a day later — and nowhere
+else. Deleting or wiping a space drops every spill holding its records at once, and renaming a space carries them
+to the new id.
+
+| Status | Meaning |
+|---|---|
+| `404` | Unknown id, expired, or not issued to this token — **one answer for all three**, on both doors, so no token can learn that another's spill exists |
+| `410` | Evicted by this token's own newer spills. Only the owner ever sees it. Repeat the search to make a new one |
+| `400` | A malformed `skip` or budget, with the same wording `recall` uses |
+
+**`spillRefused`.** A search that could not keep its spill still answers in full, as if it had not asked for
+one, and adds a top-level `spillRefused` with one of these codes:
+
+| Code | Why |
+|---|---|
+| `over-share` | The spill alone is larger than one token's share (`READ_SPILL_TOKEN_MAX_MB`) |
+| `instance-ceiling` | The instance already holds its maximum of spills (`READ_SPILL_INSTANCE_MAX_MB`). The ceiling refuses; it never evicts another caller's spill |
+| `no-token` | The call carried no token id, so there is nobody to keep the spill for |
+| `unattributed` | A record names no space, so who may read the spill cannot be decided |
+| `empty` | There was nothing to keep |
+| `failed` | The store failed; the instance log says why |
+
+The caps are operator settings — see [Environment Variables](02-hosting.md#environment-variables).
+
+**`path` is deprecated.** `remainder.path` is still sent, as `_tmp/results-<spillId>.json` (and an older
+`graphComplete.path` was `_tmp/graph-<spillId>.json`), because before 5.5.3 a spill was a file in the
+space and an MCP agent's only road to it was `read_file`. No such file exists now: `read_file` and
+[`GET /api/files/:spaceId?path=…`](05-files-api.md) resolve that exact path against the spill store, under the
+same rule as above (the issuing token only, the same `404` and `410`), and return the spill's first window under
+that door's default budget — `truncated` and `nextSkip` say when that was not all of it, and `read_spill` (or the
+spill route) continues from `nextSkip`.
+Both the field and that resolution are removed at the next major. Read by `spillId`.
+
+Reading a spill is audited as `brain.spill.read` — a read, so it is recorded only when the instance logs reads.
 
 #### Recall without passage bodies (`includeFileContent`)
 
@@ -483,9 +571,20 @@ records straight from each collection** — write a fact and search for it in th
   reports the same lag (ANN 1088 ms, ENN 1083 ms on the same insert). `ythril_recall_fresh_writes_found_total`
   counts what the scan found — zero means the index is keeping up on this instance.
 
-#### Prefiltered Recall (`filter` parameter)
+#### Filtered Recall (`filter` parameter)
 
 Use `filter` to restrict results to records where specific properties match a condition.
+
+**The promise: `topK` is filled from every record that satisfies the filter, whatever its vector rank.** A
+filtered recall cannot silently miss a matching record. If an answer could not be completed, `degraded` says
+`filter_window` and what was found is returned.
+
+**The cost is what differs.** A filter on `tags`, `type`, `name`, `status`, `label` or a schema-declared
+`properties.<key>`, written as a flat conjunction in either grammar, is applied by the vector index itself and
+costs what an unfiltered recall costs. Any other filter — an undeclared property, `exists`, `ne`, `$or`,
+`$regex` — costs a pass over the space's matching records. Declare a heavily filtered property in the space
+schema to keep it fast. `filterPath` in the response says which this answer took: `prefilter` (the index
+applied it) or `exhaustive` (the index could not; the answer is still complete).
 
 **Two grammars are accepted.** The operator-object form below takes one operator object per key, AND-ed across
 keys. **Raw MongoDB is also accepted** — the same operators `query` takes (`$or`, `$and`, `$not`, `$nor`, `$in`, `$regex`,
@@ -508,19 +607,15 @@ predicate in one call:
 }
 ```
 
-**Both doors accept and refuse the same filters**, including the refusals: an out-of-allowlist key and a MIXED
-filter fail identically on REST and on the MCP `recall` tool.
+**Both doors accept and refuse the same filters**, including the refusals: a MIXED filter and an operator the
+parser refuses fail identically on REST and on the MCP `recall` tool.
 
 Three rules apply to both grammars:
 
 - **A filter that MIXES them is a `400`** naming the offending keys, rather than one half quietly winning.
-- **The key allowlist still applies**, recursively — including inside `$or`. Keys must start with `properties.`, `tags`,
-  `type`, `name`, `status` or `label`. The raw grammar does not widen the keys, because a recall filter that could name
-  any field would be a way to filter a vector search on fields the index cannot serve.
-- **A raw filter takes the exhaustive path.** `$or` and `$regex` cannot be pushed into `$vectorSearch` as a native
-  pre-filter, so the whole space is scored and then filtered — slower, same records, and still nothing dropped by `topK`.
-
-The operator-object form keeps the native pre-filter path where the fields are declared.
+- **Any key is accepted.** A key decides only whether the index can apply the filter, never whether it is allowed.
+- **`tags` and a filter naming `tags` both apply.** A record must carry the `tags` AND satisfy the filter; the
+  filter narrows the parameter, never replaces it.
 
 ```json
 {
@@ -552,8 +647,6 @@ Multiple operators on the same key are AND-ed (range queries):
 { "properties.score": { "gte": 50, "lt": 100 } }
 ```
 
-**Allowed filter key prefixes:** `properties.`, `tags`, `type`, `name`, `status`, `label`. Any other key returns `400`. This prevents filter-key injection attacks.
-
 **Examples:**
 
 ```json
@@ -570,7 +663,7 @@ Multiple operators on the same key are AND-ed (range queries):
 { "filter": { "properties.domain": { "exists": true } } }
 ```
 
-> **Performance note:** A filter that references only declared index fields — `tags`, `type`, `name`, `status`, `label`, and any schema-declared `properties.<key>` — using the operators `eq`, `in`, `gt`, `gte`, `lt`, or `lte` is pushed into a native `$vectorSearch` `filter` and runs as `exact:true` search restricted to the matching subset, so cost is proportional to the number of matching records rather than the whole collection. Only undeclared dynamic `properties.*` keys, `exists`, and `ne` fall back to the exhaustive ENN path, which scores every document in the space before applying the filter. To keep a heavily-filtered property on the fast path, declare it in the space schema rather than adding a standalone MongoDB index.
+> **Performance note:** A filter that references only declared index fields — `tags`, `type`, `name`, `status`, `label`, and any schema-declared `properties.<key>` — using the operators `eq`, `in`, `gt`, `gte`, `lt`, or `lte` is applied by the vector index, so its cost is proportional to the number of matching records rather than the whole collection. Any other filter is answered from the nearest records first and, when those cannot prove they hold the answer, completed by reading the matching records' ids from the collection and scoring them — complete either way, and slower on a large space with many matches. To keep a heavily filtered property on the fast path, declare it in the space schema rather than adding a standalone MongoDB index.
 
 **What is vector-indexed:**
 
@@ -625,14 +718,14 @@ Given an existing entry's `_id`, find other entries with high vector similarity.
 | `minScore` | — | `0.0` | Minimum cosine similarity threshold |
 | `traverse` | — | `0` | Graph-expansion depth (0–5). With `traverse > 0` each match is expanded along edges and the connected entities come back alongside it — see the response shape below |
 | `includeFileContent` | — | `true` | Whether file-chunk results carry their passage `content`. `false` returns locations and metadata only, exactly as on `recall` |
-| `includeRecordMeta` | — | `false` | Add back the fields that describe where a record SITS rather than what it says: `createdAt`, `updatedAt` and the link-id arrays. Measured on a real corpus only **30%** of a recall answer was content and most of the rest was this, which at a tight `maxChars` is evidence you paid for and did not get. `createdAt` is the one to be careful of — it is when the RECORD was written, not when the remembered thing happened, which lives in the record's own properties. **Applies recursively**, so a `traverse` answer's `_graph` follows it at every depth. MCP takes the same parameter with the same default. A non-boolean is a `400`, never coerced |
+| `includeRecordMeta` | — | `false` | Add back the fields that describe where a record SITS rather than what it says: `createdAt` and `updatedAt` (link ids are link records since 5.0 — reach them with `traverse`). Measured on a real corpus only **30%** of a recall answer was content and most of the rest was this, which at a tight `maxChars` is evidence you paid for and did not get. `createdAt` is the one to be careful of — it is when the RECORD was written, not when the remembered thing happened, which lives in the record's own properties. **Applies recursively**, so a `traverse` answer's `_graph` follows it at every depth. MCP takes the same parameter with the same default. A non-boolean is a `400`, never coerced |
 | `includeDiagnostics` | — | `false` | Add back the three fields a result carries for the SYSTEM rather than for you: `matchedText` (the exact pre-embedding source string — for a file chunk, the passage a SECOND time), `embeddingModel` and `seq`. **Applies recursively**, so a `traverse` answer's `_graph` nodes and edges follow it at every depth. Off by default on both doors. **It does NOT gate the per-stage scores.** `lexicalScore`, `fusedScore` and `rerankScore` are returned unconditionally on both doors, because the one that decided a result's position must not be the one you cannot read — and three floats are not a cost worth a flag. The embedding VECTOR is not among them and is never returned by anything. A non-boolean is a `400`, never coerced |
 | `projection` | — | none | Fields to include (1) or exclude (0), the same grammar `POST /api/filter` takes, applied to each result's record. Dotted paths work: `{"name": 1, "properties.status": 1}`. **Applies recursively** — a `traverse` answer's `_graph` nodes and edges are projected at every depth, which is where a large answer's size actually comes from. Inclusion and exclusion cannot be mixed (the non-`_id` fields decide which you meant); `_id` survives an inclusion projection unless you send `_id: 0`; and the embedding VECTOR can never be projected back in — an explicit `embedding: 1` is dropped rather than honoured. The ranking envelope (`score`, `spaceId`, `type`, `_graph`) always survives, so a projection cannot lose the score you searched for |
 | `maxChars` | — | `50000` REST / `25000` MCP | Ceiling on the serialised response body, in **characters**, and the ceiling that carries the defaults. **The default differs by DOOR: 50000 over REST, 25000 over MCP.** Both doors accept this parameter identically — same floor, same ceiling, same refusal — and only the number applied when you send nothing differs, because an MCP tool result meets a hard per-result ceiling inside the client that the caller cannot raise while a REST body lands in a buffer its caller allocated. Raise it if yours can take more. Characters equal bytes only for ASCII; for a byte ceiling use `maxBytes`. **The answer is a PREFIX of the ranked results and every record in it is WHOLE** — full body, full properties, complete `_graph`, byte-identical to that record from an unbudgeted call. Truncation is atomic at the match: the first match whose subtree would not fit is omitted and so is everything after it, so no answer has a gap and none carries a record with half its graph. **That is what the guarantee costs** — the budgeted unit is a match TOGETHER WITH its subtree, so a deeper or wider `traverse` means fewer matches fit, and the ones that do not are absent rather than shortened. `returned`, `count`, `truncated`, `budgetChars`, `budgetBytes`, `charsReturned` and `bytesReturned` are on EVERY response, so absence never has to be interpreted; a truncated one adds `nextSkip`, which you send back as `skip` |
 | `maxBytes` | — | **none** | Ceiling on the serialised response body, in **real UTF-8 bytes**. `Grüße aus Köln — ąćę` counts 31 characters against 39 bytes; three emoji count 17 against 23. A transport or client limit IS in bytes. **Before 3.7 this bounded characters** — to keep that behaviour, send the same number as `maxChars`. **It has no default**, deliberately: bytes are always ≥ characters, so a byte default equal to the character one would silently become the binding constraint on every non-ASCII answer. **When you set both, both apply** — the answer stops at whichever ceiling it reaches first |
 | `maxTokens` | — | none | A convenience onto **`maxChars`**, converted at a fixed 3.5 characters per token. The ratio is not configurable (`charsPerToken` was removed in 5.0); a caller who needs the ceiling exact should state `maxChars`. If both are sent the **smaller** resulting character figure applies. It is an approximation — the server does not know your tokeniser |
 | `skip` | — | `0` | How many of the ranked matches to skip before filling the byte budget. **This is how you read a truncated answer**: a response with `truncated: true` carries `nextSkip`, and sending it back gets you the next prefix — no match repeated, none missed. The ranking is recomputed per call, so it is a continuation over one ordered answer rather than a cursor over a snapshot |
-| `remainderDump` | — | `false` | Also write the matches that did not fit to the space as JSON and report it as `remainder`. Only meaningful when the answer truncates. Off by default because it is a write on a read path that counts against space storage — page with `skip` to reach the same records without one |
+| `remainderDump` | — | `false` | Also keep the matches that did not fit as a read spill and report it as `remainder`, exactly as on `recall` — see [Reading a spill](#reading-a-spill-get-apibrainspillsid-and-mcp-read_spill). Never written into any space. Off by default — page with `skip` to reach the same records without one |
 | `crossSpace` | — | `false` | If `true`, search across all spaces the token can access |
 
 **Response** `200`:

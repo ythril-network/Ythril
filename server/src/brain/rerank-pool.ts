@@ -18,6 +18,7 @@
 import { rerank, MAX_CANDIDATES } from './rerank-client.js';
 import { rerankTextOf } from './recall-shape.js';
 import type { RecallResult } from './recall.js';
+import type { DegradedReason } from './degraded-reasons.js';
 
 /** The scorer's contract: `null` means no opinion. Injectable so the one-request property can be tested. */
 export type RerankScorer = typeof rerank;
@@ -34,7 +35,7 @@ export async function rerankPool(
    * back `413` from a stock text-embeddings-inference server while `degraded` was null and the results
    * looked fine.
    */
-  noteDegraded: (reason: string) => void,
+  noteDegraded: (reason: DegradedReason) => void,
   score: RerankScorer = rerank,
   /**
    * Which key picks the candidates the cap keeps, and only the CALLER can say. `fused` when one fusion ranked

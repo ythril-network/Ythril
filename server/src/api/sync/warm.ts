@@ -11,6 +11,7 @@ import { getConfig } from '../../config/loader.js';
 import { requireAuth } from '../../auth/middleware.js';
 import { log } from '../../util/log.js';
 import { spaceCollection } from '../../db/space-collection.js';
+import { carriedLocalId } from '../../sync/space-map.js';
 
 export const syncWarmRouter = Router();
 
@@ -39,14 +40,26 @@ syncWarmRouter.post('/warm', syncRateLimit, requireAuth, async (req, res) => {
 
     const cfg = getConfig();
     const net = cfg.networks.find(n => n.id === body.networkId);
-    if (!net) { res.status(404).json({ error: 'Network not found' }); return; }
+    // A peer token warms only a network it is a member of — the same "not found" as a network that does not exist,
+    // so a caller learns nothing about networks it is not in (Q-133).
+    const peerId = (req.authToken as { peerInstanceId?: string } | undefined)?.peerInstanceId;
+    if (!net || (peerId && !net.members.some(m => m.instanceId === peerId))) {
+      res.status(404).json({ error: 'Network not found' });
+      return;
+    }
+
+    // The caller names spaces by the NETWORK's ids (Q-133). Each is resolved to this instance's space, and one the
+    // network does not carry here is dropped — so the list is bounded by what this network carries, deduped, and
+    // never reaches a collection outside it.
+    const targets = [...new Set(body.spaces.slice(0, net.spaces.length).map(sid => carriedLocalId(net, sid)))]
+      .filter((sid): sid is string => sid !== null);
 
     // Warm embedding model and MongoDB collections in parallel
     await Promise.all([
       warmEmbeddingModel().catch(err =>
         log.warn(`Warm: embedding model failed: ${err}`),
       ),
-      ...body.spaces.flatMap(sid => [
+      ...targets.flatMap(sid => [
         col(spaceCollection(sid, 'facts')).findOne(asFilter({}), { projection: { _id: 1 } }).catch(() => {}),
         col(spaceCollection(sid, 'entities')).findOne(asFilter({}), { projection: { _id: 1 } }).catch(() => {}),
         col(spaceCollection(sid, 'edges')).findOne(asFilter({}), { projection: { _id: 1 } }).catch(() => {}),

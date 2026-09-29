@@ -3,6 +3,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { type AuditLogEntry, type AuditLogParams, type Space } from '../../core/api.types';
 import { AdminApi } from '../../core/admin-api.service';
+import { saveBlob } from '../../core/authenticated-download';
 import { SpacesApi } from '../../core/spaces-api.service';
 import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
 import { StatusPillComponent, type StatusVariant } from '../../shared/status-pill.component';
@@ -639,7 +640,7 @@ export class AuditLogComponent implements OnInit, OnDestroy {
    */
   exportJson(): void {
     const blob = new Blob([JSON.stringify(this.entries(), null, 2)], { type: 'application/json' });
-    this.downloadBlob(blob, 'audit-log-page.json');
+    saveBlob(blob, 'audit-log-page.json');
   }
 
   /**
@@ -658,7 +659,7 @@ export class AuditLogComponent implements OnInit, OnDestroy {
     this.adminApi.exportAuditLog(params).subscribe({
       next: (blob) => {
         const stamp = new Date().toISOString().slice(0, 10);
-        this.downloadBlob(blob, `audit-log-${stamp}.ndjson`);
+        saveBlob(blob, `audit-log-${stamp}.ndjson`);
         this.exportingAll.set(false);
       },
       error: (err) => {
@@ -684,16 +685,7 @@ export class AuditLogComponent implements OnInit, OnDestroy {
     );
     const csv = [headers.join(','), ...rows].join('\n');
     const blob = new Blob([csv], { type: 'text/csv' });
-    this.downloadBlob(blob, 'audit-log-page.csv');
-  }
-
-  private downloadBlob(blob: Blob, filename: string): void {
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    a.click();
-    URL.revokeObjectURL(url);
+    saveBlob(blob, 'audit-log-page.csv');
   }
 
   // ── Server Log ─────────────────────────────────────────────────────────────

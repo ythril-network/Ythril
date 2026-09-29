@@ -350,6 +350,17 @@ export function loadConfig(): Config {
     }
   }
 
+  // A network's schema layer and membership origin left under a space's OLD local id by a rename before Q-133 move
+  // to the space the alias names; an orphan is left and logged, never dropped (`migrate-network-space-keys.ts`).
+  if (migrateNetworkSpaceKeys(_config)) {
+    try {
+      saveConfig(_config);
+      log.info('Re-keyed network schema layers / membership origins left under renamed spaces\' old ids');
+    } catch (err) {
+      log.warn(`Could not persist the network space-key migration (will retry next boot): ${err}`);
+    }
+  }
+
   // Same shape, for the face-recognition switch: the image ladder is the gate now, so an instance that had
   // faces off must have its image ceiling lowered rather than silently gaining a biometric store.
   if (migrateFaceRecognitionSwitch(_config)) {
@@ -934,6 +945,7 @@ export function getDataRoot(): string {
 import type { MediaEmbeddingConfig, MediaProviderConfig, FaceRecognitionConfig, DocumentProcessingConfig, EmbeddingConfig, RerankConfig } from './types.js';
 import { migrateProviderApiKeysOnBoot } from './migrate-provider-keys.js';
 import { migrateMediaAliasesOnBoot } from './migrate-media-aliases.js';
+import { migrateNetworkSpaceKeys } from './migrate-network-space-keys.js';
 import { migrateSyncScheduleShorthands } from '../sync/schedule.js';
 
 const MEDIA_EMBEDDING_DEFAULTS: Required<Omit<MediaEmbeddingConfig, 'vision' | 'stt' | 'nli' | 'rerank' | 'ollamaUrl' | 'visionModel' | 'whisperUrl' | 'whisperModel' | 'lockedByInfra' | 'pinnedUnknown' | 'infraManaged' | 'faceRecognition' | 'documentProcessing'>> = {

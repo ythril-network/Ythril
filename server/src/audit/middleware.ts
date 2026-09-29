@@ -285,6 +285,8 @@ export const ROUTE_RULES: RouteRule[] = [
   // `spaceId` falls back to the spaces the guard authorised — see the entry builder below.
   { method: 'POST',   pattern: /^\/api\/brain\/filter$/,                            operation: 'brain.filter',         read: true },
   { method: 'POST',   pattern: /^\/api\/brain\/similar$/,                           operation: 'brain.similar',        read: true },
+  // A read spill (Q-92) names no space in its path: the spaces it touches are the spill's own record.
+  { method: 'GET',    pattern: /^\/api\/brain\/spills\/[^/]+$/,                     operation: 'brain.spill.read',     read: true },
   { method: 'GET',    pattern: /^\/api\/brain\/(?:spaces\/)?([^/]+)\/stats$/,      operation: 'brain.stats',          spaceGroup: 1, read: true },
 
   // ── Bulk write ───────────────────────────────────────────────────────────
@@ -472,6 +474,27 @@ export const CONFIG_RELOAD_OPERATIONS = {
   removed: 'space.reload_removed',
   kept: 'space.reload_kept',
 } as const;
+
+/**
+ * The recurring sweep (every TTL sweep cycle) of read spills older versions wrote into spaces (Q-92, `files/legacy-spill-sweep.ts`): one entry
+ * per space it cleaned. Written directly, outside the route rules, so named here like the two above.
+ */
+export const LEGACY_SPILL_SWEEP_OPERATION = 'file.legacy_spill.sweep';
+
+/**
+ * A member's missing alias for a network space, restored from its upstream's announcement (Q-133,
+ * `networks/network-spaces.ts` `healAnnouncedAliases`): one entry per alias it recorded. It re-points which local
+ * space a network id's traffic lands in, so it is audited though no request asked for it. Written directly, like the
+ * sweep above.
+ */
+export const SPACE_ALIAS_HEAL_OPERATION = 'network.space_alias.heal';
+
+/**
+ * A token given admin of the space it just created (`Q-134`, `auth/creator-grant.ts`). It widens a token's rights with
+ * no request to the token routes, so it is audited separately from the create that caused it: the entry names the
+ * token and the space. Written directly by `createSpace`.
+ */
+export const CREATOR_GRANT_OPERATION = 'token.creator_grant';
 
 /** Log a failed auth attempt — called explicitly from auth middleware when needed. */
 export function logAuthFailure(req: Request): void {

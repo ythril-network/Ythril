@@ -28,6 +28,7 @@ import { ToastService } from '../../core/toast.service';
 import { KnowledgeType, KNOWLEDGE_TYPES, PropertySchema, SchemaLibraryEntry, TypeSchema, recordTtlWindows } from '../../core/api.types';
 import { ErrorStateComponent } from '../../shared/error-state.component';
 import { httpErrorReason } from '../../core/http-error';
+import { saveBlob } from '../../core/authenticated-download';
 
 import { SCHEMA_MD_STYLES } from './schema-styles';
 import { SchemaTypeEditorComponent } from './schema-type-editor.component';
@@ -475,12 +476,7 @@ export class SpaceSchemaTabComponent implements OnInit {
       typeSchemas: meta.typeSchemas ?? {},
     };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
-    const url  = URL.createObjectURL(blob);
-    const a    = document.createElement('a');
-    a.href     = url;
-    a.download = `${space.id}_schemas.json`;
-    a.click();
-    URL.revokeObjectURL(url);
+    saveBlob(blob, `${space.id}_schemas.json`);
   }
 
   triggerImportSchema(): void {
@@ -650,12 +646,7 @@ export class SpaceSchemaTabComponent implements OnInit {
     const schema = typeSchemaFromState(kt, this.state.typeState(kt, name));
     const payload = { knowledgeType: kt, typeName: name, schema };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
-    const url  = URL.createObjectURL(blob);
-    const a    = document.createElement('a');
-    a.href     = url;
-    a.download = `${space.id}_${kt}_${name}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
+    saveBlob(blob, `${space.id}_${kt}_${name}.json`);
   }
 
   /** Open the file picker for per-type schema import (existing type replacement). */

@@ -366,7 +366,11 @@ it — a duplicate check needs the vector before the insert so the new record ca
 **A `PATCH` re-embeds through the same queue**, and always — you do not have to work out whether the fields
 you sent were the ones the vector is built from. The record keeps its previous vector until the worker
 catches up, which is a moment later; unlike a create, an updated record is never *absent* from `recall` in
-the meantime, it is briefly ranked on its previous text.
+the meantime, it is briefly ranked on its previous text. **If the embed then fails** (the embedder is down), the
+previous vector is dropped rather than kept: it describes text the record no longer holds. Until a retry succeeds
+the record is found by its current words and not ranked by meaning, and `list_embed_jobs` shows the failed job.
+Its matched text is the current text on every path, embedded, suppressed or failed, so text you removed stops
+matching at once.
 
 That is deliberate and it is the correctness argument, not a convenience: the worker rebuilds the text from
 the record **as stored**, so it sees every concurrent edit. An update that computed the vector itself could

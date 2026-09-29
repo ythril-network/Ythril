@@ -12,7 +12,10 @@ import { getConfig, saveConfig, getDataRoot, mutateConfig } from '../config/load
 import { log } from '../util/log.js';
 import type { Config, SpaceConfig } from '../config/types.js';
 import { PER_SPACE_WATERMARKS } from '../config/types-networks.js';
+import { retargetSpaceAliases, spaceNameInUseRefusal, SpaceNameInUseError } from '../sync/space-map.js';
 import { repairStaleSpaceIds, pendingOpConflictMessage, beginSpaceOp, endSpaceOp } from './_shared.js';
+import { RenameSpaceBody } from './body-schemas.js';
+import type { NetworkRefusalCode } from '../networks/refusal-codes.js';
 
 /** Physically move a space's MongoDB collections and file directories from
  *  {oldId}_* / files/oldId to {newId}_* / files/newId. Idempotent — after a partial
@@ -60,6 +63,17 @@ export async function moveSpaceData(oldId: string, newId: string): Promise<strin
     if (repaired > 0) log.debug(`Rewrote spaceId on ${repaired} document(s) for renamed space ${newId}`);
   } catch (err) {
     const msg = `Could not rewrite spaceId field for renamed space ${newId}: ${err}`;
+    log.warn(msg);
+    errors.push(msg);
+  }
+
+  // 1b'. Read spills name their member spaces (Q-92): the renamed one follows, or its owner's read check
+  // would name a space that no longer exists and refuse the spill. Idempotent on a resumed rename.
+  try {
+    const { renameSpillsForSpace } = await import('../brain/read-spill-store.js');
+    await renameSpillsForSpace(oldId, newId);
+  } catch (err) {
+    const msg = `Could not move read spills from ${oldId} to ${newId}: ${err}`;
     log.warn(msg);
     errors.push(msg);
   }
@@ -171,18 +185,21 @@ export function applySpaceRenameToConfig(cfg: Config, space: SpaceConfig, oldId:
     const idx = net.spaces.indexOf(oldId);
     if (idx !== -1) {
       net.spaces[idx] = newId;
-      // Record in spaceMap so peers using the old ID can still sync.
-      if (!net.spaceMap) net.spaceMap = {};
-      // Update any existing mapping whose target was oldId (rare: chained renames)
-      for (const [remote, local] of Object.entries(net.spaceMap)) {
-        if (local === oldId) {
-          net.spaceMap[remote] = newId;
-        }
+      // The network keeps calling the space by its network id; only the local end of each alias moves, and oldId stays
+      // reachable for a member that joined while this instance called the space that (Q-133).
+      retargetSpaceAliases(net, oldId, newId);
+
+      // What this network keeps keyed by the LOCAL id follows the space, or the network's layer drops out of the
+      // effective meta, the leave rule loses who established the membership, and a pending offer points at nothing.
+      if (net.schemaLayers?.[oldId] !== undefined && net.schemaLayers[newId] === undefined) {
+        net.schemaLayers[newId] = net.schemaLayers[oldId]!;
+        delete net.schemaLayers[oldId];
       }
-      // Add direct mapping oldId → newId (a peer spoke may still reference the old ID)
-      if (!net.spaceMap[oldId] || net.spaceMap[oldId] === oldId) {
-        net.spaceMap[oldId] = newId;
+      if (net.spaceOrigins?.[oldId] !== undefined && net.spaceOrigins[newId] === undefined) {
+        net.spaceOrigins[newId] = net.spaceOrigins[oldId]!;
+        delete net.spaceOrigins[oldId];
       }
+      for (const p of net.pendingSpaces ?? []) if (p.localId === oldId) p.localId = newId;
     }
 
     // Update member watermark keys (lastSeqReceived / lastSeqPushed / lastSeqServed /
@@ -281,12 +298,42 @@ export async function renameSpace(oldId: string, newId: string): Promise<SpaceCo
   }
 }
 
+/** A rename's answer as both doors give it: the renamed space, or the status and sentence of the refusal. */
+export type RenameSpaceResult =
+  | { status: 200; space: SpaceConfig }
+  | { status: 400 | 404 | 409 | 500; error: string; code?: NetworkRefusalCode };
+
+/**
+ * Rename a space from a request body — the ONE mapping from what `renameSpace` throws to what a caller is told
+ * (`Q-139`). `PATCH /api/spaces/:id/rename` and the `space_rename` tool both call this, so a refusal cannot answer
+ * 409 on one door and 500 on the other. Authorisation is each door's own guard, which runs before this.
+ */
+export async function renameSpaceAct(oldId: string, body: unknown): Promise<RenameSpaceResult> {
+  const parsed = RenameSpaceBody.safeParse(body);
+  if (!parsed.success) return { status: 400, error: parsed.error.message };
+  try {
+    return { status: 200, space: await renameSpace(oldId, parsed.data.newId) };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    // Typed, not matched on wording (Q-133): a refusal whose sentence changes must not fall through to a 500.
+    if (err instanceof SpaceNameInUseError) return { status: 409, error: msg, code: err.code };
+    if (msg.includes('not found')) return { status: 404, error: msg };
+    if (msg.includes('already exists')) return { status: 409, error: msg };
+    if (msg.includes('built-in')) return { status: 400, error: msg };
+    return { status: 500, error: msg };
+  }
+}
+
 async function renameSpaceInner(oldId: string, newId: string): Promise<SpaceConfig> {
   const cfg = getConfig();
   const space = cfg.spaces.find(s => s.id === oldId);
   if (!space) throw new Error(`Space '${oldId}' not found`);
   if (space.builtIn) throw new Error(`Cannot rename built-in space '${oldId}'`);
   if (cfg.spaces.some(s => s.id === newId)) throw new Error(`Space '${newId}' already exists`);
+  // A network may still call ANOTHER space by `newId` — its name before a rename (Q-133). Taking it would make this
+  // space indistinguishable from that one to every peer. Checked before anything moves.
+  const inUse = spaceNameInUseRefusal(cfg.networks.filter(n => n.spaces.includes(oldId)), newId);
+  if (inUse) throw new SpaceNameInUseError(inUse);
 
   const resuming = cfg.pendingSpaceOp?.type === 'rename'
     && cfg.pendingSpaceOp.spaceId === oldId

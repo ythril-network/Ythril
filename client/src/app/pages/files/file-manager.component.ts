@@ -19,7 +19,7 @@ import { FormsModule } from '@angular/forms';
 import { ActivatedRoute } from '@angular/router';
 import { Space, FileEntry } from '../../core/api.types';
 import { SpacesApi } from '../../core/spaces-api.service';
-import { AuthService } from '../../core/auth.service';
+import { AuthenticatedDownload } from '../../core/authenticated-download';
 import { PhIconComponent } from '../../shared/ph-icon.component';
 import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
@@ -254,7 +254,7 @@ import { ModalDirective } from '../../shared/modal.directive';
 })
 export class FileManagerComponent implements OnInit, OnDestroy {
   private spacesApi = inject(SpacesApi);
-  private auth = inject(AuthService);
+  private download = inject(AuthenticatedDownload);
   private route = inject(ActivatedRoute);
   private transloco = inject(TranslocoService);
   private toast = inject(ToastService);
@@ -782,24 +782,13 @@ export class FileManagerComponent implements OnInit, OnDestroy {
 
   /**
    * Download a file. A plain `<a href download>` can't send the auth header, and
-   * the file endpoint no longer honours a `?token=` query param (#134), so fetch
-   * the bytes with the token and save them via a temporary blob URL.
+   * the file endpoint no longer honours a `?token=` query param (#134), so the
+   * shared download fetches the bytes with the session and saves them. The URL is
+   * released ten seconds later rather than at once: the bytes may be large.
    */
   async downloadFile(entry: FileEntry): Promise<void> {
-    const token = this.auth.token();
     try {
-      const res = await fetch(this.fileApiUrl(entry), {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const objUrl = URL.createObjectURL(await res.blob());
-      const a = document.createElement('a');
-      a.href = objUrl;
-      a.download = entry.name;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(() => URL.revokeObjectURL(objUrl), 10_000);
+      await this.download.save(this.fileApiUrl(entry), entry.name, { revokeAfterMs: 10_000 });
     } catch (e) {
       this.toast.error(`${this.transloco.translate('files.downloadFailed')} ${httpErrorReason(e)}`.trim());
     }

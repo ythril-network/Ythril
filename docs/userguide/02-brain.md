@@ -298,6 +298,11 @@ So there is no single number to expect. **If your records are long and you want 
 handful of results, ask your administrator to raise the reranking time limit** (`modelSlots.rerank.timeoutMs`,
 described in the hosting guide's model-slot table).
 
+**The search bars in the Entities, Facts, Edges and Chrono tabs, and the entity pickers, skip reranking.** You are
+waiting on them as you type, and on a busy model the reranking can take seconds for an order you will not read before
+the next keystroke. Only the newest search is kept: typing again cancels the one before. The **Query** tab reranks, as
+the API does by default, and has a **Rerank** switch to see the order without it.
+
 **If nothing is ever reranked, the cause may not be the time limit.** Some reranking servers refuse a request
 carrying more than a few dozen passages outright, and the search then falls back to ranking by meaning every
 single time — which looks identical to a search with no reranker configured. Ythril sends them in batches
@@ -323,9 +328,8 @@ same as a reranker scoring nothing. The reranking model scores the top 100 candi
 the rest after them, labelled with the score that placed them, because a reranked result always ranks above
 one the model did not read.
 
-**If a graph walk stops short, the panel says so** and offers the whole graph as a download where the
-instance was able to write one. What is missing from a short graph are records the walk never read; the
-results themselves are unaffected.
+**If a match's graph could not be read whole, the panel names the match** and why, instead of showing it with
+part of its graph. Every match that is shown carries all of its graph.
 
 **You can create a record and its relationships in one go.** Anything that writes a fact, an entity or a
 timeline entry — the app, the API, or an AI assistant — can attach it to other records in the same action,
@@ -361,7 +365,7 @@ describe is a search you can run without writing a request by hand:
 - **Tags** — a tag filter applied to results.
 - **Fields returned** — a JSON object choosing which fields each result carries, e.g. `{ "description": 1 }`; it can exclude as well as include. Leave it empty for whole records. Worth being careful with rather than clever: a selection that omits the field you are reading gives you a result that looks complete and is missing the answer.
 - **Skip results** — start further down the ranking. When an answer is shortened it tells you where to continue from; that number goes here. It counts from the top of the ranking, not from the last page, so it replaces the previous value rather than adding to it.
-- **Save what did not fit** — the one setting on this form that WRITES. It puts the matches that were cut off into this space as a JSON file, downloadable for a day, and the form says so as soon as you tick it.
+- **Save what did not fit** — keep the matches that were cut off, so you can download them as one JSON file. They are kept for **you alone** — the sign-in or token that ran the search — for up to a day, and may go sooner if you run many large searches, because each caller's newest saved results make room by removing its own oldest. **A search never changes a space**, with this ticked or not: what is kept is not a file in the space, does not appear in its file manager or storage figures, never reaches another instance in a network, and is not in any backup. If the results could not be kept — you already hold as much as one caller may, or the instance holds its maximum — the answer says why, and **Skip results** still reaches every one of them.
 
 **The request this would send** sits beside the form and updates as you type. It is the exact body the
 **Search** button sends, with a **Copy** button — paste it into a `recall` call over MCP or REST and you get
@@ -372,7 +376,7 @@ the same answer. Two uses, and the second is the reason it is there:
   a second time — the panel and the preview call the same code, so a request you can see is a request you can
   send. If one of the two JSON boxes above is not a valid object it says so and shows nothing, rather than
   leaving the last good request on screen.
-- **Filter** — a JSON object of extra field constraints, validated before the search runs. The recall filter accepts fields such as `status` and `label`, which are applied as native `$vectorSearch` pre-filters (they narrow the candidate set inside the vector index rather than filtering afterwards). It also accepts **raw MongoDB** — `$or`, `$and`, `$in`, `$regex` and the comparisons — for conditions the simple form cannot express, such as *"status is open OR kind is ask"*. A raw filter is slower (the whole space is scored, then filtered) and returns the same records.
+- **Filter** — a JSON object of extra field constraints, validated before the search runs. Every record that satisfies the filter competes for the results, however far down the meaning ranking it sits — a filtered search never quietly misses a match, and if one could not be completed the answer says so. The filter accepts any field, and **raw MongoDB** — `$or`, `$and`, `$in`, `$regex` and the comparisons — for conditions the simple form cannot express, such as *"status is open OR kind is ask"*. Filters on `tags`, `type`, `name`, `status`, `label` and on properties the space schema declares are fast; any other filter reads through the matching records first, so on a large space declare the properties you filter on often. The answer's filter path says which: `prefilter` (fast) or `exhaustive` (slower, still complete).
 - **Graph hops** — follow the knowledge graph outward from each match, 0–5 hops. Connected entities come back **grouped under the match that reached them**, each carrying the relationship that connects it and every route back to the match, so you can ask "what surrounds this answer" in one search and still see which answer it surrounds. The result count stays the number of matches. Leave it at 0 for an ordinary search; deep values on a densely connected space are slow, so narrow the matches with a filter or tags first.
 
   **You can narrow the walk**, and once the hops are above 0 the controls for it appear beside them:
@@ -381,17 +385,16 @@ the same answer. Two uses, and the second is the reason it is there:
   - **Only these edge labels** — follow just these relationship types, comma-separated. This matters most on a space where a few records are connected to almost everything: an unnarrowed hop off one of those returns whichever neighbours fitted, and nothing distinguishes that from a deliberate answer.
 
   **The walk follows edges only, unless you ask for more.** A fact, timeline entry or file that names an entity is related to it — but that link is a field on the record, not an edge, so the hops above do not follow it. Three checkboxes turn each kind on: **Also return chrono entries / facts / files reached**. They are off by default because a search answer has a size budget and each match is counted together with everything hanging off it, so records nobody asked for are paid for in answers that no longer fit. With one on, a match that is itself a fact also stops coming back with an empty neighbourhood — the walk starts from the entities that fact names.
-- **When the surroundings do not fit** — a search that reaches more connected records than it can show returns
-  the ones nearest your matches and writes the *whole* neighbourhood to a downloadable file in the space, valid
-  for a day. The result says both: how many it showed, and where the complete set is. A short graph would
-  otherwise read as "this record has few relationships", which is a statement about your data rather than about
-  the search.
+- **When the surroundings do not fit** — every match you get comes with its *whole* neighbourhood, to the
+  number of hops you asked for, or it does not come at all. A match whose neighbourhood is too large to walk,
+  whose links could not all be read, or that ran out of time is **left out**, and the panel names it above the
+  results with the reason — so you know it exists, and a short graph never reads as "this record has few
+  relationships". Narrowing the edge labels or asking for fewer hops brings it back whole. The other matches
+  are unaffected.
 
-  **Sometimes there is no complete set to offer, and the result says that too.** Following the records that
-  merely *name* an entity is bounded per hop, so a dense space can use up a hop's budget on records it has
-  already shown. The neighbourhood is then genuinely partial — the rest was never read, so there is nothing to
-  write to a file — and the result is marked short with no download beside it. Narrowing the search, or asking
-  for fewer hops, is what makes it whole.
+  **A search also has one walk budget and one time limit.** When a search runs out of either, it stops at the
+  last whole match and says so in the shortened-answer notice, the same way it does when the answer is too big.
+  Nothing is written anywhere unless you tick **Keep what did not fit**.
 - **When the answer itself does not fit** — a search result is also bounded by SIZE, not only by `topK`. Ask
   for a hundred matches with their surroundings and the answer can be larger than anything that should arrive
   in one piece, so what fits comes back in full and the answer says where to carry on from. Two things are
@@ -425,9 +428,10 @@ the same answer. Two uses, and the second is the reason it is there:
       keep a character ceiling.
   - Narrowing the search — fewer results, fewer graph hops, a tighter filter — does the same job from the other
     end, and a search that comes back shortened is usually a sign the question was broader than intended.
-  - **Getting the whole tail as one file is a request you make, not something that happens to you.** An API
-    caller can add `remainderDump` to have everything that did not fit written to a downloadable file in the
-    space, valid for a day. Nothing is written unless it was asked for.
+  - **Getting the whole tail in one piece is a request you make, not something that happens to you.** Tick
+    **Save what did not fit**, or as an API caller add `remainderDump`, and everything that did not fit is kept
+    for the caller that asked, for up to a day, to download or page through. Nothing is kept unless it was
+    asked for, and nothing is ever written into the space.
 - **maxTimeMS** — a time limit for this one search. It can only make the search stricter than the instance's own budget, never looser. When the limit is reached you get a **partial** answer rather than an error or a hang: whatever finished is returned, and the result says it was cut short.
 - **Something you wrote seconds ago is findable, with nothing to switch on.** Meaning-matching
   reads an index, and that index takes a few seconds to catch up after a write — measured here at about

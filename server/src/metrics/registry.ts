@@ -18,6 +18,7 @@ import {
 } from 'prom-client';
 import { COLLECTION_SUFFIX } from '../config/types-knowledge.js';
 import { POSTURE_LEVELS } from '../config/posture-levels.js';
+import { DEGRADED_REASONS } from '../brain/degraded-reasons.js';
 import { col } from '../db/mongo.js';
 import { getConfig, getStorageConfig } from '../config/loader.js';
 import { peekUsage, refreshUsageInBackground, usageMeasurementCount, usageIsComplete, USAGE_AREAS } from '../quota/quota.js';
@@ -866,7 +867,9 @@ embedChunksTotal.labels({ space: '' }).inc(0);
  * degraded the whole time. A counter turns "is my reranker actually being used?" into a question the
  * operator can answer, and alert on.
  *
- * `reason` is a closed set, deliberately: an unbounded label is a cardinality bomb.
+ * `reason` is a closed set, deliberately: an unbounded label is a cardinality bomb. The set is
+ * `DEGRADED_REASONS` in `brain/degraded-reasons.ts`, and the series below are pre-declared from it:
+ *  - `filter_window`         — a filtered answer could not be completed and may be missing matching records
  *  - `rerank_unavailable`    — configured, but it did not answer (unreachable, non-2xx, unreadable body)
  *  - `rerank_skipped_budget` — not attempted; the end-to-end budget was already spent (see RECALL_BUDGET_MS)
  *  - `search_timeout`        — one collection's vector search hit its `maxTimeMS` deadline, so the answer is
@@ -904,6 +907,23 @@ export const recallFreshWritesFoundTotal = new Counter({
 });
 recallFreshWritesFoundTotal.inc(0);
 
+/**
+ * Fresh-write scans whose window held more records than the scan's cap, so the oldest of them were not compared.
+ *
+ * The scan is what makes a record written a moment ago findable before the index ingests it (see
+ * `brain/fresh-writes.ts`), and it reads only the newest `DUPE_FRESH_SCAN_CAP`. Past that, a just-written record
+ * can be missing from a search or a duplicate check. That was a log line only — rate-limited now, because a busy
+ * space hit it on every recall — so this is where an operator sees how often.
+ *
+ * Zero is meaningful: the cap has never cut a window off on this instance.
+ */
+export const recallFreshScanCappedTotal = new Counter({
+  name: 'ythril_recall_fresh_scan_capped_total',
+  help: 'Fresh-write scans whose window held more records than DUPE_FRESH_SCAN_CAP',
+  registers: [register],
+});
+recallFreshScanCappedTotal.inc(0);
+
 export const recallDegradedTotal = new Counter({
   name: 'ythril_recall_degraded_total',
   help: 'Recalls answered with a weaker pipeline than configured, by reason',
@@ -912,7 +932,7 @@ export const recallDegradedTotal = new Counter({
 });
 // Pre-declare every series so a scrape before the first degradation reports 0 rather than nothing at
 // all — "absent" and "zero" look identical in a graph and mean opposite things.
-for (const reason of ['rerank_unavailable', 'rerank_skipped_budget', 'search_timeout']) {
+for (const reason of DEGRADED_REASONS) {
   recallDegradedTotal.labels({ reason }).inc(0);
 }
 

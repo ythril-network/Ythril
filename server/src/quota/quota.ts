@@ -35,6 +35,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { getDataRoot, getStorageConfig } from '../config/loader.js';
 import { getDb } from '../db/mongo.js';
+import { READ_SPILL_COLLECTIONS } from '../brain/read-spill-store.js';
 import { log } from '../util/log.js';
 
 const GiB = 1024 ** 3;
@@ -275,6 +276,21 @@ export async function measureUsage(maxAgeMs = 0): Promise<UsageGiB> {
 }
 
 /**
+ * What the read-spill store occupies (data + indexes), to leave out of the brain figure. A collection that does
+ * not exist yet, or a refused `collStats`, counts as 0 — which leaves the brain figure as it always was.
+ */
+async function readSpillFootprint(db: ReturnType<typeof getDb>): Promise<number> {
+  let total = 0;
+  for (const name of READ_SPILL_COLLECTIONS) {
+    try {
+      const s = await db.command({ collStats: name }) as { size?: number; totalIndexSize?: number };
+      total += (s.size ?? 0) + (s.totalIndexSize ?? 0);
+    } catch { /* absent or refused: nothing to subtract */ }
+  }
+  return total;
+}
+
+/**
  * Measure current storage usage synchronously (uncached).
  *
  * Each half reports its own completeness. A half that could not be read fully contributes what it did read and
@@ -298,7 +314,10 @@ async function measureUsageUncached(): Promise<UsageGiB> {
           dataSize?: number;
           indexSize?: number;
         };
-        return { bytes: (stats.dataSize ?? 0) + (stats.indexSize ?? 0), unreadable: [] };
+        // Read spills (Q-92) are not brain data: a search's leftovers, capped by their own ceiling and gone in
+        // a day. Counted here they could trip the brain hard limit on writes, with no way to see why.
+        const spills = await readSpillFootprint(db);
+        return { bytes: Math.max(0, (stats.dataSize ?? 0) + (stats.indexSize ?? 0) - spills), unreadable: [] };
       } catch (err) {
         // A refused or unreachable `dbStats` used to read as 0 GiB of brain data, which is what a genuinely
         // empty instance also reads as. A restricted database user without the command, or a transient driver

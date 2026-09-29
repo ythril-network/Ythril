@@ -18,7 +18,7 @@
  */
 import { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.js';
 import { BRAIN_COLLECTIONS, type BrainCollection } from '../../config/types.js';
-import { QUERY_FILTER_OPERATORS } from './shared.js';
+import { REFUSED_OPERATORS, REGEX_OPERATORS } from '../../brain/filter-sanitizer.js';
 import { resolveBudget, applyBudget, budgetFields, type BudgetRequest, defaultBudgetChars } from '../../brain/result-budget.js';
 import {
   queryBrain, countBrain, compareBySort, DEFAULT_QUERY_SORT, DEFAULT_QUERY_LIMIT, PROXY_PAGE_CEILING,
@@ -73,7 +73,9 @@ export const queryTool: ToolHandler = {
             },
             filter: {
               type: 'object',
-              description: `MongoDB filter document. Only these operators are allowed (any other $-operator is rejected): ${QUERY_FILTER_OPERATORS.join(', ')}. Nesting is capped at depth 8. $regex must be a string, length-limited, and rejected if it risks catastrophic backtracking; $options is allowed only alongside $regex and only with flags i, m, s, x. Results are ordered seq/updatedAt/createdAt descending — there is no sort parameter, but 'skip' pages through that order.`,
+              // Built from the sets that ENFORCE it (Q-118): this said "only these operators are allowed" over a list
+              // nothing enforced, while every query operator but the JavaScript ones was accepted.
+              description: `MongoDB filter document. Every MongoDB query operator is accepted except the ones that run JavaScript in the database, which are refused: ${[...REFUSED_OPERATORS].join(', ')}. Nesting is capped at depth 8. Every regex the filter would run — ${[...REGEX_OPERATORS].join(', ')}, the last three inside $expr — must be a literal string pattern (not a field path or an expression), length-limited, and is rejected if it risks catastrophic backtracking; $options is allowed only alongside $regex and only with flags i, m, s, x. Results are ordered seq/updatedAt/createdAt descending — there is no sort parameter, but 'skip' pages through that order.`,
             },
             projection: {
               type: 'object',

@@ -135,11 +135,16 @@ describe('a version travels, in both directions of one exchange', () => {
      * piggybacks its own identity in `self` so the caller can update its record. A floor enforced on
      * only one of those is a floor one instance can see and the other cannot.
      */
-    const src = code(MEMBERS);
-    const at = src.indexOf('const selfRecord');
-    assert.ok(at > 0, 'the piggybacked self-record is gone — re-point this gate');
-    const block = src.slice(at, src.indexOf('res.status(200)', at));
-    assert.match(block, /SERVER_VERSION|version/,
+    // Both directions build the record in `networks/self-record.ts` (Q-133), so the version is held there, and each
+    // door is held to calling it rather than to a literal of its own.
+    for (const f of [MEMBERS, ENGINE]) {
+      assert.match(code(f), /selfRecordFor\(/,
+        `${f} no longer builds its self-record with selfRecordFor — re-point this gate at what it does instead`);
+    }
+    const builder = code('server/src/networks/self-record.ts');
+    const at = builder.indexOf('export function selfRecordFor');
+    assert.ok(at > 0, 'selfRecordFor is gone — re-point this gate');
+    assert.match(builder.slice(at), /version:\s*SERVER_VERSION/,
       'our own version is missing from the self-record, so a peer can never learn what we run');
   });
 

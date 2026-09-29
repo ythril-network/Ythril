@@ -67,8 +67,12 @@ export async function embedImage(
   // still complete if face detection fails. Non-fatal.
   const mediaCfg = getMediaEmbeddingConfig();
   if (mediaCfg.faceRecognition?.enabled) {
-    const { embedFaces } = await import('./face-embedder.js');
+    const { embedFaces, GalleryIncompleteError } = await import('./face-embedder.js');
     await embedFaces(spaceId, fileId, imageBytes).catch((err: unknown) => {
+      // The one failure that must NOT be absorbed: the gallery could not answer, and absorbing it writes the
+      // face unlabelled for good. Rethrown, the job retries like any other transient failure; the caption chunk
+      // above is an upsert, so the retry rewrites it rather than duplicating it.
+      if (err instanceof GalleryIncompleteError) throw err;
       log.warn(`Face recogniser: embedFaces failed for ${spaceId}/${fileId}: ${err instanceof Error ? err.message : String(err)}`);
     });
   }

@@ -12,7 +12,7 @@ import { log } from '../../util/log.js';
 import { reportServerFailure } from '../../util/report-failure.js';
 import { applyConcludedSpaceRounds } from '../../spaces/apply-wipe-round.js';
 import { roundForPeer } from '../../networks/round-local-state.js';
-import { acceptVoteCast } from '../../util/signing.js';
+import { acceptVoteCast, castFromBody } from '../../util/signing.js';
 import { concludeRoundIfReady, sendMemberRemovedNotify } from '../../sync/governance.js';
 
 export const syncVotesRouter = Router();
@@ -71,8 +71,9 @@ syncVotesRouter.post('/networks/:networkId/votes/:roundId', syncRateLimit, requi
       return;
     }
 
-    const body = req.body as { vote: string; instanceId: string; sig?: string; castAt?: string };
-    if (!body?.vote || !body?.instanceId || !['yes', 'veto'].includes(body.vote)) {
+    // The one reading of a cast off the wire (Q-138), so the bound signature is not dropped here.
+    const cast = castFromBody(req.body);
+    if (!cast) {
       res.status(400).json({ error: 'vote (yes|veto) and instanceId required' });
       return;
     }
@@ -99,13 +100,7 @@ syncVotesRouter.post('/networks/:networkId/votes/:roundId', syncRateLimit, requi
      * The relay is authorised above, so `admin` is a caller this route has established rather than the
      * shape of a token it could not identify. `members.ts` asks the same question through the same predicate.
      */
-    const cast = {
-      instanceId: body.instanceId,
-      vote: body.vote as 'yes' | 'veto',
-      castAt: typeof body.castAt === 'string' ? body.castAt : new Date().toISOString(),
-      ...(typeof body.sig === 'string' && body.sig ? { sig: body.sig } : {}),
-    };
-    const reporter = caller.kind === 'peer' ? caller.peerInstanceId : body.instanceId;
+    const reporter = caller.kind === 'peer' ? caller.peerInstanceId : cast.instanceId;
     const decision = acceptVoteCast(net, round, cast, reporter);
     if (!decision.accept) {
       res.status(403).json({ error: `Vote rejected: ${decision.reason}` });
@@ -113,7 +108,7 @@ syncVotesRouter.post('/networks/:networkId/votes/:roundId', syncRateLimit, requi
     }
 
     // Deduplicate: replace existing vote from this instance if present
-    const existing = round.votes.findIndex(v => v.instanceId === body.instanceId);
+    const existing = round.votes.findIndex(v => v.instanceId === cast.instanceId);
     if (existing >= 0) { round.votes[existing] = cast; }
     else { round.votes.push(cast); }
 

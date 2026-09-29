@@ -1,255 +1,110 @@
 /**
- * A truncated graph traversal used to be indistinguishable from a complete one. Now it is never truncated
- * silently: the caller either gets the whole neighbourhood inline, or gets a link to the whole neighbourhood.
+ * The remainder of a search answer, kept as a read spill — only when the caller asked for it.
  *
- * ## The defect
+ * ## What used to be here, and why it went (Q-126)
  *
- * `traverseRecallSeeds` ends with `collected.slice(0, limit)` and the response said nothing about it. Sorting
- * by hops before truncating is right — near neighbours survive — but `graphNodes: 7` at `topK: 1, traverse: 1`
- * might be the whole neighbourhood or the first 7 of 40, and no field distinguished them.
+ * This file also held `buildGraphWithSpill`, which walked every matched record's neighbourhood together, cut
+ * it to an inline node cap and — on every call whose neighbourhood was larger — wrote the complete graph to a
+ * spill and returned a SHORTENED `_graph` beside a `graphComplete` link. That was the owner's ruling of
+ * 2026-08-13: *"write the whole thing to the space's tmp files as JSON and hand back a download link with a
+ * 1-day TTL instead of truncating it"*.
  *
- * `degraded` does not cover it: that reports recall-stage degradation, a member that failed or timed out, not
- * the traversal cap.
+ * The owner reversed it on 2026-09-28: *"i only want whole results and the rest gets truncated except if a flag
+ * is set that says rest goes to a file"*, and *"if the requested graph doesnt fit the whole resultrow including
+ * the root should be not returned"*. So a traversing answer now carries every row with its WHOLE graph or names
+ * the row as left out (`row-graphs.ts`, `traversed-answer.ts`), and nothing is written unless
+ * `remainderDump: true` — the one spill below. Graph spills issued before the change stay readable until they
+ * expire; the store still knows the `graph` kind.
  *
- * **Worse here than on a list.** A caller paging a list can compare against `total`. There is no total for a
- * neighbourhood, and the natural reading of a short graph is *"this record has few relationships"* — a wrong
- * conclusion about the DATA rather than about the request. The cap, `topK * (traverse + 1) * 4`, is also not
- * something a caller can predict from the parameters they set.
+ * ## What stands from the earlier decisions
  *
- * ## Owner ruling, 2026-08-13 — a flag is not the answer
- *
- * *"Report the SIZE, and when a result exceeds a threshold, write the whole thing to the space's tmp files as
- * JSON and hand back a download link with a 1-day TTL instead of truncating it."*
- *
- * And that is the better answer: a flag tells a caller their graph was cut and leaves them no way to get the
- * rest, which on a neighbourhood is the same dead end the paging cap was on a list.
- *
- * ## The four decisions, and what each is grounded in
- *
- * - **The threshold is the ROW COUNT**, using the existing cap formula, so today's truncation point becomes
- *   the spill point. It is the number the caller reasoned about when they set `topK` and `traverse`; a byte
- *   size is not.
- * - **The file lives in `_tmp/` inside the space's own store**, so it inherits the space's access control
- *   rather than needing new rules, and it joins `_converted/`/`_extracted/` in `DERIVED_TREES` so it is hidden
- *   from browsing. It is not a thing a person put there.
- * - **TTL one day, through the record TTL machinery that already exists.** `upsertFileMeta`'s `ttlDays` stamps
- *   `_expireAt`, and the TTL sweep's `files` handler runs the full `deleteFileCascade` — so the blob goes with
- *   the record and no new sweeper exists to forget about.
- * - **The link is the ordinary authenticated download.** `GET /api/files/:spaceId?path=…` behind
- *   `requireSpaceAuth`. A URL that worked without the caller's token would be a way to read a space's records
- *   with no auth, which is the one thing this must not become.
- *
- * ## The ceiling, which is the part a spill could get wrong
- *
- * "Write the whole thing" cannot be unbounded — one hub with a hundred thousand edges would turn a bounded
- * read into an unbounded one. So the walk is bounded at `SPILL_CEILING_MULTIPLE ×` the inline cap, and when
- * even that is reached the spill file and the response BOTH say so (`ceilingHit`). A second silent truncation
- * hiding inside the fix for the first one is the failure this file exists to avoid.
+ * - **The spill lives in the instance's read-spill store, never in a space** (Q-92). It used to be a file under
+ *   the space's `_tmp/`, which made a SEARCH a write. `read-spill-store.ts` holds it outside every space, for
+ *   the token that caused it, for a day — and derives who may read it from the records inside.
+ * - **The link is the spill route**, `GET /api/brain/spills/:id` (MCP `read_spill`), which checks the issuer and
+ *   knowledge read on every member space.
+ * - **A spill never fails the read.** A refusal or a store failure is reported as `spillRefused: <reason>`; the
+ *   caller still has everything that fit, and `nextSkip` still reaches the rest.
  */
-import { randomUUID } from 'node:crypto';
-import { writeFile } from '../files/files.js';
-import { upsertFileMeta } from '../files/file-meta.js';
-import { traverseRecallSeeds } from './recall-seed-traversal.js';
-import { type TraverseNarrowing } from './frontier-query.js';
-import { nestNeighbours, type RecallGraph } from './recall-graph.js';
-import { SPILL_DIR } from './spill-path.js';
+import { spillPathFor } from './spill-path.js';
+import {
+  putSpill, type PutSpillInput, type PutSpillResult, SPILL_TTL_DAYS, suppressEmbeddings,
+} from './read-spill-store.js';
+import { log } from '../util/log.js';
 
-/** How many days a spill lives. The owner's ruling, expressed as the record TTL the sweep already honours. */
-export const SPILL_TTL_DAYS = 1;
+// Re-exported: the lifetime and the vector strip belong to the store, which applies both itself.
+export { SPILL_TTL_DAYS, suppressEmbeddings };
 
-/**
- * How far past the inline cap a spill is allowed to walk.
- *
- * 20× turns a cap of 8 into 160 rows and a cap of 200 into 4000 — large enough that the spill is the complete
- * neighbourhood in every graph anyone has, small enough that one dense hub cannot make a read unbounded.
- */
-export const SPILL_CEILING_MULTIPLE = 20;
-
-/** Where the complete graph went, for a caller who received a truncated one inline. */
-export interface GraphSpill {
-  /** How many traversed nodes the FILE holds. */
-  nodes: number;
-  /** Path within the space's file store. */
-  path: string;
-  /** Authenticated download URL — the caller's own token is required, as for any file in the space. */
-  download: string;
-  /** ISO timestamp after which the file and its record are gone. */
-  expiresAt: string;
-  /** Present and true when even the spill walk hit its ceiling, so the file itself is not the whole graph. */
-  ceilingHit?: boolean;
+/** The spill route for one spill. The one spelling of the link. */
+export function spillDownload(id: string): string {
+  return `/api/brain/spills/${encodeURIComponent(id)}`;
 }
 
-export interface GraphWithSpill {
-  /** The tree to return inline — capped exactly as before. */
-  graph: RecallGraph;
-  /** Present only when the inline tree is short of the real neighbourhood AND the complete one was written. */
-  spill: GraphSpill | null;
-  /**
-   * The inline tree is short of the real neighbourhood, whether or not a complete copy exists.
-   *
-   * **These are two different facts and only one of them used to be reported.** A spill implies truncation,
-   * so before this the flag could be derived from `spill` — but a link scan that stopped reading produces a
-   * short graph with NO complete version to write, because the records it did not read are exactly the ones
-   * missing. Deriving the flag from the file meant that case was reported as complete.
-   */
-  truncated: boolean;
+/** A refusal's short code (`over-share`, `instance-ceiling`, ...), which is what an answer carries. */
+function refusalCode(refused: string): string {
+  return refused.split(':')[0]!.trim();
 }
 
 /**
- * Expand the seeds, and if the neighbourhood is bigger than the inline cap, write the whole thing out.
- *
- * ONE walk, at the ceiling: a small graph exhausts itself long before the higher limit matters, so the extra
- * budget costs nothing on the calls that do not need it, and the calls that do are precisely the ones the
- * owner ruled must come back complete.
+ * Hand one spill to the store, and never let it fail the read: a refusal is returned as its code, and a store
+ * that THROWS is logged and reported as `failed`. The caller keeps its answer either way.
  */
-export async function buildGraphWithSpill(
-  memberIds: string[],
-  seeds: { _id: string; spaceId: string }[],
-  maxDepth: number,
-  inlineCap: number,
-  /**
-   * Which labels to follow and which way — a recall's expansion narrows exactly as the standalone `traverse`
-   * does. Absent means every label, both directions, which is what this always did.
-   */
-  narrowing?: TraverseNarrowing,
-): Promise<GraphWithSpill> {
-  const seedIds = seeds.map(s => s._id);
-  if (inlineCap < 1 || maxDepth < 1 || seeds.length === 0) {
-    return { graph: nestNeighbours([], seedIds), spill: null, truncated: false };
+async function keepSpill(
+  kind: PutSpillInput['kind'],
+  pending: Promise<PutSpillResult>,
+): Promise<{ id: string; expiresAt: string } | { spillRefused: string }> {
+  try {
+    const r = await pending;
+    if ('refused' in r) {
+      log.info(`Read spill (${kind}) not kept: ${r.refused}`);
+      return { spillRefused: refusalCode(r.refused) };
+    }
+    return r;
+  } catch (err) {
+    log.warn(`Read spill (${kind}) failed: ${err instanceof Error ? err.message : String(err)}`);
+    return { spillRefused: 'failed' };
   }
-
-  const ceiling = inlineCap * SPILL_CEILING_MULTIPLE;
-  const { neighbours: flat, scanCapped } = await traverseRecallSeeds(memberIds, seeds, maxDepth, ceiling, narrowing);
-
-  if (flat.length <= inlineCap) {
-    /*
-     * The whole neighbourhood fits — UNLESS a link scan stopped reading, in which case it fits only because
-     * records were never read. There is no complete copy to write: the missing records are precisely the ones
-     * the scan did not reach, so a spill file would be the same short graph under a name that promises
-     * otherwise. `graphTruncated` alone is the honest answer, and it is why that flag no longer implies
-     * `graphComplete`.
-     */
-    return { graph: nestNeighbours(flat, seedIds), spill: null, truncated: scanCapped };
-  }
-
-  const graph = nestNeighbours(flat.slice(0, inlineCap), seedIds);
-  const complete = nestNeighbours(flat, seedIds);
-  // The file goes to the space a SEED came from, never to the space the call was addressed to.
-  //
-  // A proxy space is a lens, not a store: `resolveWriteTarget` refuses a write to one without an explicit
-  // `targetSpace`, precisely because it owns no files of its own. Addressing the spill at the request's space
-  // would have created a file tree and a `{proxy}_files` record for a space that is supposed to have neither —
-  // and the download would then be served, or not, depending on how the merged listing resolved a path nobody
-  // put there. A seed's `spaceId` is always a concrete member, so taking it removes the whole question.
-  const spill = await writeSpill(seeds[0]!.spaceId, complete, flat.length, flat.length >= ceiling || scanCapped);
-  return { graph, spill, truncated: true };
 }
 
 /**
- * Serialise a complete graph into the space's `_tmp/`, with a one-day record TTL.
- *
- * `memberSpaceId`, not `spaceId`: the parameter being called after the request's space is what let a proxy id
- * reach a write in the first version of this file. A proxy owns no store, so only a member may be named here.
- */
-async function writeSpill(
-  memberSpaceId: string,
-  complete: RecallGraph,
-  nodes: number,
-  ceilingHit: boolean,
-): Promise<GraphSpill> {
-  const path = `${SPILL_DIR}/graph-${randomUUID()}.json`;
-  const expiresAt = new Date(Date.now() + SPILL_TTL_DAYS * 86_400_000).toISOString();
-  const body = JSON.stringify({
-    kind: 'graph-traversal',
-    generatedFor: memberSpaceId,
-    nodes,
-    expiresAt,
-    // Stated in the FILE as well as the response: whoever opens this a day later has only the file, and a
-    // partial graph that does not say so is the defect this whole module is about.
-    ...(ceilingHit ? { ceilingHit: true, ceiling: nodes } : {}),
-    // A Map does not survive JSON, and a caller wants the seed id anyway.
-    graph: [...complete.bySeed.entries()].map(([seedId, graph]) => ({ seedId, graph })),
-  });
-
-  const { sha256 } = await writeFile(memberSpaceId, path, body);
-  void sha256;
-  await upsertFileMeta(memberSpaceId, path, Buffer.byteLength(body, 'utf8'), {
-    description: `Complete graph traversal (${nodes} nodes), expires ${expiresAt}`,
-    tags: ['graph-spill'],
-    ttlDays: SPILL_TTL_DAYS,
-  });
-
-  return {
-    nodes,
-    path,
-    download: `/api/files/${encodeURIComponent(memberSpaceId)}?path=${encodeURIComponent(path)}`,
-    expiresAt,
-    ...(ceilingHit ? { ceilingHit: true } : {}),
-  };
-}
-
-/**
- * WHO DECIDES A RESULT SET IS TOO BIG — and it is no longer this file.
+ * WHO DECIDES A RESULT SET IS TOO BIG — and it is not this file.
  *
  * `SPILL_INLINE_RESULTS = 3` and `SPILL_RECORD_THRESHOLD = 25` used to live here: past 25 records a response
  * collapsed to three inline matches plus a download of the WHOLE set. X-17 replaced that with the byte budget
  * in `result-budget.ts`, and both constants are gone rather than kept for reference, because a threshold left
  * in the file that writes the spill is a second rule about size that can disagree with the first — this
- * codebase's most-produced defect, and it did disagree: the guard `if (records <= 25) return null` was still
- * here after the budget started deciding, so a response truncated at twenty records with five left over said
- * `truncated: true` and carried NO link to the five. The caller was told there was more and given no way to
- * reach it.
+ * codebase's most-produced defect, and it did disagree. The graph node cap that lived here until Q-126 was the
+ * same defect again, one layer down: a second size rule, below the budget, that shortened rows the budget had
+ * promised were whole.
  *
- * So `spillResultSet` no longer asks whether to spill. It is called only when the budget has already cut
- * something, and it always writes what it is handed.
+ * So `spillResultSet` does not ask whether to spill. It is called only when the budget has already cut
+ * something and the caller asked for the remainder, and it always writes what it is handed.
  */
-
-/** Where a spilled result set went. */
-export interface ResultSpill {
-  /** Matches in the file — the ones that did not fit the budget, never the ones already returned inline. */
-  matches: number;
-  /** Every record in the file, matches and their traversed nodes together. */
-  records: number;
-  path: string;
-  download: string;
-  expiresAt: string;
-}
 
 /**
- * Keys whose values are vectors, removed at every depth before anything is written.
- *
- * The owner asked for this by name. Recall's own projections already exclude `embedding`, and
- * `traverseFromSeeds` projects it away too — so this is the belt to that braces: a spill is the one place where a
- * whole result set is serialised verbatim to a file an operator can open, and one future field that forgets the
- * projection would put thousands of floats into it. Stripping by key at write time cannot be forgotten by a
- * caller who did not know the rule.
+ * Where a spilled result set went — or, when it could not be kept, why. The refused form still says how much
+ * was cut, and the answer beside it still carries `truncated` and `nextSkip`, so the caller can page instead.
  */
-const VECTOR_KEYS = new Set(['embedding', 'embeddings', 'vector', 'vectors', 'contentEmbedding']);
-
-/** Deep copy without any vector field, and without touching the caller's objects. */
-export function suppressEmbeddings<T>(value: T): T {
-  if (Array.isArray(value)) return value.map(v => suppressEmbeddings(v)) as unknown as T;
-  if (value === null || typeof value !== 'object') return value;
-  const out: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-    if (VECTOR_KEYS.has(k)) continue;
-    out[k] = suppressEmbeddings(v);
+export type ResultSpill =
+  | {
+    /** Matches in the spill — the ones that did not fit the budget, never the ones already returned inline. */
+    matches: number;
+    /** Every record in the spill, matches and their traversed nodes together. */
+    records: number;
+    spillId: string;
+    /** Deprecated `_tmp/results-<spillId>.json`. No such file exists; kept additively, removed at the next major. */
+    path: string;
+    download: string;
+    expiresAt: string;
   }
-  return out as unknown as T;
-}
+  | { matches: number; records: number; spillRefused: string };
 
 /**
  * Count the traversed nodes a payload actually carries, at every depth and on either door.
  *
- * **This replaces a `graphNodes` number the routes passed in, and the difference is the whole point.** That
- * number was the node total for the WHOLE result set. Under the byte budget the file holds only the matches
- * that did not fit, so the figure described a different set of records from the one being written — and
- * `records` is what a caller sizes the download by. A twenty-node answer truncated at its last match would
- * have advertised a file of twenty-odd records holding one.
- *
- * A count taken from the payload cannot disagree with the payload. It walks for `_graph` at any depth, which
- * is also what makes it work on both doors without knowing either shape: REST puts `_graph` beside the
- * record's own fields, MCP beside `record`, and a nested node carries its own `_graph` again.
+ * A count taken from the payload cannot disagree with the payload. It walks for `_graph` at any depth, which is
+ * also what makes it work on both doors without knowing either shape: REST puts `_graph` beside the record's
+ * own fields, MCP beside `record`, and a nested node carries its own `_graph` again.
  */
 export function countGraphNodes(value: unknown): number {
   if (Array.isArray(value)) return value.reduce<number>((n, v) => n + countGraphNodes(v), 0);
@@ -266,48 +121,35 @@ export function countGraphNodes(value: unknown): number {
  * Write out the matches that did not fit the budget, and say where they went.
  *
  * **It does not decide anything.** The byte budget in `result-budget.ts` decides, and calls this only with a
- * non-empty remainder — so there is no "it fits" branch here and no `null` return. See the note above the
- * `ResultSpill` interface for the guard that used to be here and what it silently cost.
+ * non-empty remainder the caller asked for — so there is no "it fits" branch here and no `null` return.
  *
- * `memberSpaceId` and not the addressed space: a proxy owns no file store. See `writeSpill`.
+ * No space is named: the store derives who may read the spill from the `spaceId` every match carries, so a
+ * cross-space or proxy recall is read-checked against every space its remainder came from.
  */
 export async function spillResultSet(opts: {
-  memberSpaceId: string;
-  /** The matches that did not fit, with their `_graph` trees attached. */
+  /** The calling token's id. The spill is readable by it alone; none means no spill. */
+  issuedTo: string | null | undefined;
+  /** The matches that did not fit, with their whole `_graph` trees attached. */
   results: unknown[];
-  /** What the caller asked for, echoed into the file so it is self-describing a day later. */
+  /** What the caller asked for, echoed into the spill so it is self-describing a day later. */
   request: Record<string, unknown>;
 }): Promise<ResultSpill> {
   const graphNodes = countGraphNodes(opts.results);
   const records = opts.results.length + graphNodes;
 
-  const path = `${SPILL_DIR}/results-${randomUUID()}.json`;
-  const expiresAt = new Date(Date.now() + SPILL_TTL_DAYS * 86_400_000).toISOString();
-  const body = JSON.stringify(suppressEmbeddings({
-    kind: 'recall-results',
-    generatedFor: opts.memberSpaceId,
-    request: opts.request,
-    matches: opts.results.length,
-    graphNodes,
-    records,
-    expiresAt,
-    results: opts.results,
+  const kept = await keepSpill('results', putSpill({
+    kind: 'results',
+    issuedTo: opts.issuedTo,
+    items: opts.results,
+    request: { ...opts.request, matches: opts.results.length, graphNodes, records },
   }));
-
-  await writeFile(opts.memberSpaceId, path, body);
-  await upsertFileMeta(opts.memberSpaceId, path, Buffer.byteLength(body, 'utf8'), {
-    // "Remainder", not "complete": the file is the continuation of an answer, and the old wording would have
-    // an operator opening it expecting the records their caller already had.
-    description: `Recall result remainder (${records} records), expires ${expiresAt}`,
-    tags: ['result-spill'],
-    ttlDays: SPILL_TTL_DAYS,
-  });
-
+  if ('spillRefused' in kept) return { matches: opts.results.length, records, spillRefused: kept.spillRefused };
   return {
     matches: opts.results.length,
     records,
-    path,
-    download: `/api/files/${encodeURIComponent(opts.memberSpaceId)}?path=${encodeURIComponent(path)}`,
-    expiresAt,
+    spillId: kept.id,
+    path: spillPathFor('results', kept.id),
+    download: spillDownload(kept.id),
+    expiresAt: kept.expiresAt,
   };
 }
