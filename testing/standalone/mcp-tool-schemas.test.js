@@ -130,10 +130,15 @@ describe('MCP tool schemas — universal invariants', () => {
 });
 
 describe('MCP tool schemas — high-value enrichments', () => {
-  it('filter.filter documents the MongoDB operator allowlist + regex/depth rules', () => {
+  it('filter.filter documents the refused operators, every guarded regex operator, and the depth cap', async () => {
+    // There is no allowlist any more: every query operator is accepted except the ones that run JavaScript. This case
+    // listed six allowed operators, so it pinned a description that was wrong (Q-118). Derived from the module the
+    // sanitizer enforces, so the description cannot drop an operator the sanitizer adds.
+    const { REFUSED_OPERATORS, REGEX_OPERATORS } = await import('../../server/dist/brain/filter-sanitizer.js');
+    assert.ok(REFUSED_OPERATORS.size > 0 && REGEX_OPERATORS.size > 0, 'the operator sets are empty — nothing is checked');
     const filter = schemaOf('filter').properties.filter;
-    for (const op of ['$eq', '$in', '$regex', '$options', '$elemMatch', '$mod']) {
-      assert.ok(filter.description.includes(op), `filter.filter description must list ${op}`);
+    for (const op of [...REFUSED_OPERATORS, ...REGEX_OPERATORS, '$options']) {
+      assert.ok(filter.description.includes(op), `filter.filter description must name ${op}`);
     }
     assert.ok(/depth 8/.test(filter.description), 'filter.filter must document the depth-8 cap');
   });

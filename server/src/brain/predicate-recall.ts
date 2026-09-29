@@ -39,13 +39,15 @@
  *
  * A stage-2 failure keeps what stage 1 found and reports why: `search_timeout` when the budget ran out,
  * `filter_window` when the answer could not be completed — the index refusing the `_id` filter (an index still
- * on the definition shipped before `_id` joined it), or the id cap reached. Never an empty type, and never an
+ * on the definition shipped before `_id` joined it), the index holding fewer of the matching records than the
+ * collection does, or the id cap reached. Never an empty type, and never an
  * incomplete answer with nothing saying so.
  */
 import { col } from '../db/mongo.js';
 import { isMaxTimeExpired } from '../db/max-time.js';
 import { log } from '../util/log.js';
 import { andPredicates } from './recall-filter.js';
+import { FRESH_WINDOW_MS } from './fresh-writes.js';
 import type { DegradedReason } from './degraded-reasons.js';
 
 /** Ids per stage-2 search. A native `_id $in` over 40k ids measured 79–92 ms; this keeps each call well under. */
@@ -155,20 +157,66 @@ export async function predicateRecall(args: PredicateRecallArgs): Promise<Predic
   }
 }
 
+/**
+ * Did the index answer a batch for fewer records than the collection holds? (`Q-142`)
+ *
+ * Stage 2's ids are read from the COLLECTION, every one carrying a vector, so an exact search over them that
+ * comes back short of `min(topK, ids)` means the index lacks some of them — an in-place definition update that
+ * began serving before it caught up was seen doing exactly this, and the answer read as complete. A record
+ * written inside the fresh-write window is excused: the index has not ingested it YET, and the recall's
+ * fresh-write scan adds it, so flagging it would put `filter_window` on every filtered recall in a busy space
+ * and teach callers to ignore it. Anything older the index should hold, and the answer must say it may be
+ * missing records.
+ *
+ * Only a SHORT batch is checked, and only then is this read made: a batch that filled `topK` proves nothing
+ * either way about records the index lacks, and checking it would cost every stage 2 a second pass.
+ */
+async function indexIsBehind(collName: string, vectorPath: string, ids: string[], seen: Set<string>, maxTimeMS: number): Promise<boolean> {
+  const missing = ids.filter(id => !seen.has(id));
+  if (missing.length === 0) return false;
+  const cutoff = new Date(Date.now() - FRESH_WINDOW_MS).toISOString();
+  const stale = await col(collName).findOne(
+    { _id: { $in: missing } as never, [vectorPath]: { $type: 'array' }, updatedAt: { $not: { $gte: cutoff } } },
+    { projection: { _id: 1 }, maxTimeMS },
+  );
+  return stale !== null;
+}
+
+/**
+ * Force stage 2's deadline for a test, or restore it with `null` (`Q-142`). A test that squeezed the WHOLE recall to
+ * 250 ms could not tell "stage 1 kept its hits when stage 2 ran out" from "stage 1 never finished" on a loaded machine,
+ * and failed there for a reason that was not the defect. Expiring stage 2 alone makes the case deterministic.
+ */
+let stageTwoDeadlineOverride: number | null = null;
+export function overrideStageTwoDeadlineForTest(ms: number | null): void {
+  stageTwoDeadlineOverride = ms;
+}
+
 async function stageTwo(args: PredicateRecallArgs, stageOneHits: Record<string, unknown>[]): Promise<PredicateRecallResult> {
-  const { collName, indexName, vectorPath, queryVector, topK, predicate, shape, remaining, memo } = args;
+  const { collName, indexName, vectorPath, queryVector, topK, predicate, shape, memo } = args;
+  const forced = stageTwoDeadlineOverride;
+  const remaining = forced === null ? args.remaining : () => forced;
   const best = new Map(stageOneHits.map(d => [String(d['_id']), d]));
   const answer = (degraded: DegradedReason[]): PredicateRecallResult =>
     ({ docs: [...best.values()].sort(byScoreThenId).slice(0, topK), degraded, stage: 2 });
 
+  /** Set when the index answered a batch for fewer records than the collection holds — see `indexIsBehind`. */
+  let behind = false;
   const scoreBatch = async (ids: string[]): Promise<void> => {
-    const docs = await col(collName).aggregate<Record<string, unknown>>([
+    const [facet] = await col(collName).aggregate<{ seen: Array<{ _id: unknown }>; docs: Record<string, unknown>[] }>([
       { $vectorSearch: { index: indexName, path: vectorPath, queryVector, exact: true, filter: { _id: { $in: ids } }, limit: topK } },
       { $addFields: { score: { $meta: 'vectorSearchScore' } } },
-      // AGAIN: the ids were read a moment ago, and a record that stopped matching since must not return.
-      { $match: predicate },
-      ...shape,
+      { $facet: {
+        seen: [{ $project: { _id: 1 } }],
+        // AGAIN: the ids were read a moment ago, and a record that stopped matching since must not return.
+        docs: [{ $match: predicate }, ...shape],
+      } },
     ]).maxTimeMS(remaining()).toArray();
+    const docs = facet?.docs ?? [];
+    const seen = facet?.seen ?? [];
+    if (!behind && seen.length < Math.min(topK, ids.length)) {
+      behind = await indexIsBehind(collName, vectorPath, ids, new Set(seen.map(d => String(d._id))), remaining());
+    }
     for (const d of docs) best.set(String(d['_id']), d);
     // Keep only the running top-K, so a million-id pass holds topK records and never the whole answer.
     if (best.size > topK) {
@@ -185,7 +233,7 @@ async function stageTwo(args: PredicateRecallArgs, stageOneHits: Record<string, 
       const ids = await known;
       if (ids === null) return answer(['filter_window']);
       for (let i = 0; i < ids.length; i += ID_CHUNK) await scoreBatch(ids.slice(i, i + ID_CHUNK));
-      return answer([]);
+      return answer(behind ? ['filter_window'] : []);
     }
 
     // Streamed, and scored batch by batch as they arrive: an index that refuses the `_id` filter says so on the
@@ -222,7 +270,7 @@ async function stageTwo(args: PredicateRecallArgs, stageOneHits: Record<string, 
       }
       if (batch.length > 0) await scoreBatch(batch);
       settle(collected);
-      return answer(collected === null ? ['filter_window'] : []);
+      return answer(collected === null || behind ? ['filter_window'] : []);
     } catch (err) {
       memo?.delete(key);
       settle(null);

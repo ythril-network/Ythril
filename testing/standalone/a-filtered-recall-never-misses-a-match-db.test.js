@@ -199,6 +199,9 @@ describe('a filtered recall never misses a matching record', { skip }, () => {
         + 'recall that scores only the nearest window and filters after drops every one of them — count 0, '
         + 'truncated false, nothing telling the caller');
       assert.equal(p, 'exhaustive', 'an undeclared property cannot be applied by the index');
+      const { degraded } = await filteredRecall(FAR, { 'properties.marker': 'target' }, 10);
+      assert.ok(!degraded.includes('filter_window'),
+        `degraded [${degraded.join(', ')}] on a complete answer: the index holds every matching record`);
     });
 
     it('10500 records, topK 100: the 10000-record ceiling on the window is not a ceiling on the answer', async () => {
@@ -262,25 +265,62 @@ describe('a filtered recall never misses a matching record', { skip }, () => {
       assert.ok(!paths.includes('_id'), 'fixture check: this index must be the old definition, without _id');
       const { ids, degraded } = await filteredRecall(OLDDEF, { 'properties.marker': 'x' }, 10);
       assert.ok(['near-0', 'near-1', 'near-2'].every(id => ids.includes(id)),
-        `got [${ids.join(', ')}]: what stage 1 found must survive stage 2 failing — never an empty answer`);
+        `got [${ids.join(', ')}], degraded [${degraded.join(', ')}]: what stage 1 found must survive stage 2 failing — never an empty answer`);
       assert.ok(degraded.includes('filter_window'),
         `degraded is [${degraded.join(', ')}]: far-target satisfies the filter and was not returned, and the `
         + 'caller must be told the answer may be missing matching records');
     });
 
-    it('a stage-2 deadline keeps the stage-1 hits and says search_timeout, or completes', async () => {
-      // The floor budget. Whether stage 2 fits inside it depends on the machine, so this asserts the PROMISE
-      // either way: complete, or partial and disclosed — never partial and silent.
-      const { ids, degraded } = await filteredRecall(CHUNK, { 'properties.kind': 'm' }, 10, { maxTimeMS: 250 });
-      const matching = fixtures.chunk.filter(d => d.properties.kind === 'm').map(d => d._id);
-      const complete = JSON.stringify(ids) === JSON.stringify(expectedTop(matching, 10));
-      assert.ok(complete || degraded.includes('search_timeout') || degraded.includes('filter_window'),
-        `got [${ids.slice(0, 5).join(', ')}…] with degraded [${degraded.join(', ')}]: an incomplete filtered `
-        + 'answer with nothing saying so is the defect');
-      if (!complete) {
-        assert.ok(['a-near-0', 'a-near-1', 'a-near-2'].every(id => ids.includes(id)),
-          'a timed-out stage 2 must keep what stage 1 found, never empty the type');
+    it('an index that does not hold a matching record the collection has: filter_window', async () => {
+      // The silent miss seen during an in-place index update (Q-142): the index accepted the `_id` filter and
+      // answered for fewer records than the collection holds. A vector of the wrong dimension is one the index
+      // never holds, which makes the same state deterministic. Older than the fresh-write window, so it is not a
+      // record the index merely has not ingested yet.
+      await mongo.col(`${FAR}_entities`).insertOne(
+        { ...entity(FAR, 'unindexed', 5, { marker: 'unindexed' }), embedding: unitAt(5, DIMS * 2), seq: 30000 });
+      try {
+        const { ids, degraded } = await filteredRecall(FAR, { 'properties.marker': 'unindexed' }, 10);
+        assert.deepEqual(ids, []);
+        assert.ok(degraded.includes('filter_window'),
+          `degraded [${degraded.join(', ')}]: a record satisfies the filter and the index could not score it, `
+          + 'so the answer may be missing matching records and must say so');
+      } finally {
+        await mongo.col(`${FAR}_entities`).deleteOne({ _id: 'unindexed' });
       }
+    });
+
+    it('a record inside the fresh-write window the index has not ingested yet: no filter_window', async () => {
+      // The same short batch, for a record written moments ago: the index is behind by design, and flagging it
+      // would put filter_window on every filtered recall in a busy space.
+      const now = new Date().toISOString();
+      await mongo.col(`${FAR}_entities`).insertOne({ ...entity(FAR, 'just-written', 5, { marker: 'just-written' }),
+        embedding: unitAt(5, DIMS * 2), seq: 30001, createdAt: now, updatedAt: now });
+      try {
+        const { degraded } = await filteredRecall(FAR, { 'properties.marker': 'just-written' }, 10);
+        assert.ok(!degraded.includes('filter_window'),
+          `degraded [${degraded.join(', ')}]: a record inside the fresh-write window is not evidence of a lagging index`);
+      } finally {
+        await mongo.col(`${FAR}_entities`).deleteOne({ _id: 'just-written' });
+      }
+    });
+
+    it('a stage-2 deadline keeps the stage-1 hits and says search_timeout', async () => {
+      // Stage 2 ALONE is made to run out (Q-142). This squeezed the whole recall to 250 ms instead, and on a loaded
+      // machine stage 1 itself ran out, so the case read "stage 1 never finished" as "stage 1's hits were dropped".
+      // With stage 1 given its normal budget and stage 2 an expired one, the promise is tested and nothing else.
+      const { overrideStageTwoDeadlineForTest } = await import('../../server/dist/brain/predicate-recall.js');
+      overrideStageTwoDeadlineForTest(1);
+      let result;
+      try {
+        result = await filteredRecall(CHUNK, { 'properties.kind': 'm' }, 10);
+      } finally {
+        overrideStageTwoDeadlineForTest(null);
+      }
+      const { ids, degraded } = result;
+      assert.ok(degraded.includes('search_timeout'),
+        `stage 2 ran out and the answer does not say so: degraded [${degraded.join(', ')}]`);
+      assert.ok(['a-near-0', 'a-near-1', 'a-near-2'].every(id => ids.includes(id)),
+        `a timed-out stage 2 must keep what stage 1 found, never empty the type: got [${ids.slice(0, 5).join(', ')}], degraded [${degraded.join(', ')}]`);
     });
 
     it('NOT raised on a healthy filtered recall across all five types, four of them empty', async () => {
@@ -299,7 +339,7 @@ describe('a filtered recall never misses a matching record', { skip }, () => {
       const during = await filteredRecall(OLDDEF, { 'properties.marker': 'x' }, 10);
       assert.ok(during.ids.includes('far-target') || during.degraded.includes('filter_window'),
         `during the update: [${during.ids.join(', ')}], degraded [${during.degraded.join(', ')}]`);
-      assert.ok(['near-0', 'near-1', 'near-2'].every(id => during.ids.includes(id)), 'and never emptier than stage 1');
+      assert.ok(['near-0', 'near-1', 'near-2'].every(id => during.ids.includes(id)), `and never emptier than stage 1: degraded [${during.degraded.join(', ')}]`);
 
       const deadline = Date.now() + 120_000;
       let paths = [];

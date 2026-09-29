@@ -128,6 +128,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A filtered recall no longer reads as complete when the vector index is behind the collection** (Q-142). While
+  an index definition was updated in place, the index could accept the search and answer for fewer of the matching
+  records than the collection holds, and the answer carried no `degraded` reason. It now says `filter_window` when
+  a record that satisfies the filter, older than the fresh-write window, is missing from the index's answer. See
+  [Recall API](docs/integration-guide/04a-recall-api.md).
 - **On an instance whose vector index uses `euclidean`, locally computed scores match the engine's** (Q-117). The
   engine scores euclidean as `1 / (1 + d²)` and Ythril computed `1 / (1 + d)`, up to 0.09 apart, so the fresh-write
   duplicate threshold acted on the wrong scale and the lexical channel's agreement check never passed. Cosine and

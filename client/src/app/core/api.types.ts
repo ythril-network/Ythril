@@ -7,6 +7,7 @@
  */
 import type { RecallGraphReport } from './recall-graph-report';
 import type { ResultSpillLink, SpillReport } from './read-spill';
+import type { RecallHit } from './recall-hit';
 
 // ── Shared types ─────────────────────────────────────────────────────────────
 
@@ -579,26 +580,8 @@ export interface ReembedResult {
 
 export type RecallKnowledgeType = 'fact' | 'entity' | 'edge' | 'chrono' | 'file';
 
-/**
- * One recall hit: the ranking beside the record, never mixed into it (`Q-87`).
- *
- * No index signature, ON PURPOSE: the type is the gate. It declared `[key: string]: unknown` and so let four
- * consumers read `r['_id']`, `r['name']` off the hit itself for a year after the record moved under `record` — every
- * semantic search in the Graph picker and the tabs rendered blank rows with an undefined id, and nothing failed to
- * compile. A record field is read through `recordOf` (`pages/brain/recall-hits.ts`), which throws on a hit without one.
- */
-export interface RecallHit {
-  type: RecallKnowledgeType;
-  spaceId?: string;
-  score?: number;
-  lexicalScore?: number;
-  fusedScore?: number;
-  rerankScore?: number;
-  record: Record<string, unknown>;
-  _graph?: unknown[];
-}
-
-/** The same hit, under the name the rest of the client already imports. */
+/** One recall hit, the ranking beside the record — see `recall-hit.ts`, and the same hit under the older name. */
+export type { RecallHit };
 export type RecallResult = RecallHit;
 
 // The graph half lives in `recall-graph-report.ts` — its own module because this file is frozen by the
