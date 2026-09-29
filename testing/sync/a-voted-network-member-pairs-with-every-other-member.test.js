@@ -70,8 +70,8 @@ describe('a voted network member pairs with every other member', () => {
     await waitFor(async () => {
       await syncAll();
       const rounds = (await get(INSTANCES.b, tokenB, `/api/networks/${networkId}/votes`)).body?.rounds ?? [];
-      // C's is the only join round still open on this network: B's passed on A's word alone.
-      roundId = rounds.find(r => r.type === 'join' && r.status === 'open')?.id;
+      // The list holds OPEN rounds as stored: C's join is the one naming C.
+      roundId = rounds.find(r => r.type === 'join' && r.subjectInstanceId === idC)?.roundId;
       return !!roundId;
     }, 90_000, 2_000, () => 'B never learned C\'s join round');
     const yes = await post(INSTANCES.b, tokenB, `/api/networks/${networkId}/votes/${roundId}`, { vote: 'yes' });
