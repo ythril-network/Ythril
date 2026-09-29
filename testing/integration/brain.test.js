@@ -2666,13 +2666,19 @@ describe('Brain — find-similar', () => {
       topK: 5,
     }) });
     assert.equal(r.status, 200, JSON.stringify(r.body));
+    // The `similar` tool's shape since Q-89, the same on both doors: `source` is {type, id, summary}, and each hit is
+    // {score, spaceId, type, record}. It used to be the whole source record and flat hits on REST alone.
     assert.ok(r.body.source, 'Response must include source entry');
-    assert.equal(r.body.source._id, sourceId, 'Source _id must match');
-    assert.equal(r.body.source.score, 1.0, 'Source score must be 1.0');
+    assert.equal(r.body.source.id, sourceId, 'source.id names the entry that was asked about');
+    assert.equal(r.body.source.type, 'fact');
     assert.ok(Array.isArray(r.body.results), 'Results must be an array');
-    // The self-match should be excluded from results
-    const selfMatch = r.body.results.find(e => e._id === sourceId);
-    assert.equal(selfMatch, undefined, 'Self-match must be excluded from results');
+    assert.ok(r.body.results.length > 0, 'a second, near-identical memory exists, so something must be similar');
+    for (const hit of r.body.results) {
+      assert.equal(typeof hit.score, 'number', `a hit carries its score beside the record: ${JSON.stringify(hit)}`);
+      assert.ok(hit.record && typeof hit.record._id === 'string', `a hit nests its record: ${JSON.stringify(hit)}`);
+    }
+    // The self-match is excluded — read where the record now is, so this cannot pass by looking in the wrong place.
+    assert.equal(r.body.results.find(e => e.record._id === sourceId), undefined, 'Self-match must be excluded from results');
   });
 
   it('POST /find-similar respects targetTypes filter', async () => {

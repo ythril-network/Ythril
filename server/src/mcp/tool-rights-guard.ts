@@ -5,6 +5,25 @@ import { isSpaceAdminFor } from '../auth/editor-scope.js';
 import type { TokenRights } from '../config/rights-shape.js';
 
 /**
+ * The spaces a tool's HANDLER is given to work across: its reach, narrowed to where the token holds the tool's
+ * area, for a tool that only reads (`Q-89`).
+ *
+ * `toolRightsRefusal` checks a space the call NAMES. A search that names none — `recall` or `similar` without
+ * `space`, `similar` with `crossSpace` — has nothing to check, and searched every space the token could reach;
+ * reach is not the area, so a token holding only `files: read` in a space had that space's knowledge ranked. The
+ * REST `/similar` route narrowed its own set, and moving it onto the tool is what showed the tool never did.
+ *
+ * Read rows only. A write tool's named space is already checked at the rung it needs, and narrowing the members
+ * a proxy write may reach by that rung is a separate decision this function must not make on the way past.
+ */
+export function toolReach(toolName: string, rights: TokenRights | undefined, reachable: readonly string[]): string[] {
+  const need = TOOL_RIGHTS.find(r => r.tool === toolName);
+  if (!need || need.needs !== 'read') return [...reachable];
+  if (!rights) return [];
+  return reachable.filter(id => satisfies(effectiveRung(rights, id, need.area), 'read'));
+}
+
+/**
  * Does this token hold the rung this tool needs, in this space?
  *
  * Returns the refusal TEXT, or `null` to allow — so the dispatcher's job is one line and this decision can

@@ -169,8 +169,8 @@ describe('REST: the four read routes refuse a key they cannot honour', () => {
       // variable is why the bulk rewriter could not see this site — it matched a literal path.
       /*
        * THREE PREFIXES NOW, not two, and the third is what `B-9` step 3c added. `/filter` is served by
-       * the generic tool door at `/api/<tool-name>`; `/recall` and `/similar` still have hand-written
-       * routes under `/api/brain`; `/traverse` never left the space path, because it walks FROM an entity
+       * the generic tool door at `/api/<tool-name>`; `/recall` and `/similar` keep their routes under
+       * `/api/brain`, and both answer through their tools; `/traverse` never left the space path, because it walks FROM an entity
        * and an entity lives in exactly one space.
        *
        * Building the URL from a variable is why the bulk rewriter could not see this site — it matched a
@@ -186,7 +186,7 @@ describe('REST: the four read routes refuse a key they cannot honour', () => {
       assert.ok(JSON.stringify(r.body).includes(offender), `the 400 must name '${offender}': ${JSON.stringify(r.body)}`);
       /*
        * `unrecognized_keys` comes from `unknownBodyFields`, which a route uses when it parses its own body.
-       * `/recall` stopped doing that at 5.0 and `/filter` followed it at `B-9` step 3c — both hand their
+       * `/recall` stopped doing that at 5.0, `/filter` followed it at `B-9` step 3c and `/similar` at `Q-89` — each hands its
        * body to `callTool`, whose schema validation refuses the key and names it in the message. The
        * machine-readable list is not produced there, and synthesising one by parsing the prose would be
        * worse than not having it.
@@ -199,7 +199,7 @@ describe('REST: the four read routes refuse a key they cannot honour', () => {
        * offending key, which is what shortens the caller's search to zero. The array is asserted only where
        * the route still builds it, so this case cannot pass by the field quietly disappearing everywhere.
        */
-      if (route === '/recall' || route === '/filter') {
+      if (route === '/recall' || route === '/filter' || route === '/similar') {
         assert.match(r.body.error, new RegExp(`unexpected property '${offender}'`),
           'the shared dispatcher must name the key it refused');
       } else {

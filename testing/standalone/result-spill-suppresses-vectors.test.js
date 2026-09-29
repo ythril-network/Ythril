@@ -215,7 +215,7 @@ describe('the remainder is written out, with a TTL', () => {
     }
   });
 
-  it('every result path passes the paging through — all eight, on both doors', () => {
+  it('every result path passes the paging through, on both doors', () => {
     /*
      * THE SAME SHAPE AS THE DEFECT THAT MADE THIS FILE, one clause later.
      *
@@ -224,9 +224,21 @@ describe('the remainder is written out, with a TTL', () => {
      * `remainderDump` are now the same kind of thing: eight sites, one rule, and a site that forgets them
      * silently serves page one to a caller asking for page two and writes a file nobody wanted.
      */
+    /*
+     * `Q-89`: REST now has NO budgeted path of its own. `/recall` and `/similar` delegate to their tools, so their
+     * paging is the tool's sites below; the standalone traverse pages through `pageTraversal`, which resolves
+     * `skip` and `remainderDump` itself. So the shared-validator demand is per MECHANISM, not per file: a door with
+     * a budgeted path resolves through `resolvePaging`, a door that pages a walk does it through a module that
+     * does, and the floor is on the paths found across both doors, so an empty scan cannot pass.
+     */
+    const pager = read('server/src/brain/traverse-page.ts');
+    assert.match(bodyOf(pager, 'pageTraversal', 'the walk pager'), /resolvePaging\(/,
+      'pageTraversal must resolve paging through the shared validator, or the traverse route pages by its own rule');
+    let found = 0;
     for (const [name, src] of [['REST', read('server/src/api/brain/search.ts')],
                                ['MCP', read('server/src/mcp/tools/search.ts')]]) {
       const envelopes = budgetedPaths(src);
+      found += envelopes;
       const skips = (src.match(/skip: paging\.skip,/g) ?? []).length;
       const dumps = (src.match(/remainderDump: paging\.remainderDump,/g) ?? []).length;
       assert.equal(skips, envelopes,
@@ -238,10 +250,11 @@ describe('the remainder is written out, with a TTL', () => {
       // Validated in ONE place, not parsed per route: a `skip` that 400s on one door and floors to zero on
       // the other is this codebase's most-produced defect, and both doors call the same resolver for that
       // reason.
-      assert.match(src, /resolvePaging\(/, `${name} must resolve paging through the shared validator`);
+      if (envelopes > 0) assert.match(src, /resolvePaging\(/, `${name} must resolve paging through the shared validator`);
       assert.doesNotMatch(src, /Number\(\s*(req\.body|a)\[['"]skip['"]\]/,
         `${name} parses \`skip\` itself — the second implementation is the one that ends up weaker`);
     }
+    assert.ok(found >= 2, `only ${found} budgeted result path(s) across both doors — the scan is broken, not the code`);
   });
 
   it('the continuation and the opt-in dump cannot be separated', () => {

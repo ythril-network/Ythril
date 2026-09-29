@@ -48,10 +48,10 @@ describe('a lexical rank is its own type\'s rank', () => {
   });
 
   it('both doors carry the ranks beside the scores, surviving any projection', async () => {
-    const { RECALL_RANKING_DIAGNOSTICS, RECALL_ENVELOPE_KEYS } = await import('../../server/dist/brain/recall-shape.js');
+    // Ranking fields sit beside `record` on both doors, so no projection of the record can reach them.
+    const { RECALL_RANKING_DIAGNOSTICS } = await import('../../server/dist/brain/recall-shape.js');
     for (const k of ['vectorRank', 'lexicalRank']) {
       assert.ok(RECALL_RANKING_DIAGNOSTICS.includes(k), `${k} is a ranking field`);
-      assert.ok(RECALL_ENVELOPE_KEYS.includes(k), `${k} survives a REST projection`);
     }
   });
 

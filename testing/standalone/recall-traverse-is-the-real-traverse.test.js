@@ -80,8 +80,19 @@ describe('ONE query builder, so the two traversals cannot drift again', () => {
 
 describe('ONE parser, so the two doors cannot disagree about a narrowing', () => {
   it('both doors call it', () => {
-    for (const [name, src] of [['REST', REST], ['MCP', MCP]]) {
-      assert.match(src, /parseTraverseOption\(/, `${name} parses traverse itself instead of using the shared parser`);
+    /*
+     * MCP calls it in every search tool that takes `traverse`; REST reaches it only THROUGH those tools now.
+     * `/recall` and then `/similar` (`Q-89`) collapsed onto `callTool`, so REST's own `parseTraverseOption`
+     * call went with the `/similar` handler — demanding it in the REST file would be demanding the duplicate
+     * back. The rule per REST route: it delegates cleanly, or it parses with the shared parser.
+     */
+    const mcpCalls = (MCP.match(/parseTraverseOption\(/g) ?? []).length;
+    assert.ok(mcpCalls >= 2, `MCP parses traverse at ${mcpCalls} site(s); recall and similar both take it`);
+    for (const p of ['/recall', '/similar']) {
+      const body = routeBody(REST, p);
+      assert.ok(body, `POST ${p} is not in search.ts — re-anchor this gate`);
+      assert.ok(delegatesCleanly(body, `POST ${p}`) || /parseTraverseOption\(/.test(body),
+        `POST ${p} neither delegates to its tool nor uses the shared parser, so it reads traverse by its own rule`);
     }
   });
 

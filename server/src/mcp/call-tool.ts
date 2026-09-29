@@ -35,13 +35,14 @@
 import { getConfig } from '../config/loader.js';
 import { log, currentRequestId } from '../util/log.js';
 import { reachableSpaceIds } from '../auth/space-reach.js';
-import { toolRightsRefusal, spaceAdminRefusal } from './tool-rights-guard.js';
+import { toolRightsRefusal, spaceAdminRefusal, toolReach } from './tool-rights-guard.js';
 import { toolIsVisible } from './tool-visibility.js';
 import { createSpacesRefusal } from '../auth/create-spaces.js';
 import type { TokenRights } from '../config/rights-shape.js';
 import { memberSpacesWithin } from '../spaces/proxy-scoped.js';
 import { classifyReadFailure } from '../brain/store-failure.js';
 import { SchemaViolationError } from '../brain/write-validation.js';
+import { NotFoundError } from '../util/errors.js';
 import { TOOLS_BY_NAME, type ToolResult } from './tools/index.js';
 import { makeArgsValidator } from './validate-args.js';
 import { toolSchemasFor } from './tool-schema.js';
@@ -267,6 +268,7 @@ export async function callTool(req: ToolCallRequest): Promise<ToolCallOutcome> {
     }
     const startedAt = Date.now();
     let snapshots: AuditSnapshots | undefined;
+    const handlerSpaceIds = toolReach(name, rights, accessibleSpaceIds);
     const result = await tool.handle({
       args: a,
       callSpace,
@@ -279,8 +281,9 @@ export async function callTool(req: ToolCallRequest): Promise<ToolCallOutcome> {
       transport: caller.transport,
       rateKey,
       cfg,
-      accessibleSpaces,
-      accessibleSpaceIds,
+      // Narrowed to the tool's area for a read tool, so a search that names no space reads only where it may (Q-89).
+      accessibleSpaces: accessibleSpaces.filter(sp => handlerSpaceIds.includes(sp.id)),
+      accessibleSpaceIds: handlerSpaceIds,
       // Populated, not merely declared. `toolIsVisible(t, undefined)` hides every mutating and admin tool,
       // so an unpopulated `rights` here would empty `help`'s listing while `tools/list` stayed correct.
       rights,
@@ -312,6 +315,13 @@ export async function callTool(req: ToolCallRequest): Promise<ToolCallOutcome> {
      * the truncated prose that told fourteen personas nothing, while a REST caller alongside it got a 503
      * and a reason.
      */
+    /*
+     * A record the call names and cannot find is a 404 on REST, as the routes answered before a tool served them
+     * (`Q-89`: `similar` for an entry that does not exist). The prose is the tool's either way.
+     */
+    if (err instanceof NotFoundError) {
+      return { result: { content: [{ type: 'text' as const, text: `Error: ${message}` }], isError: true }, status: 404, callSpace };
+    }
     const readFailure = classifyReadFailure(err);
     if (readFailure.retryable) {
       return {

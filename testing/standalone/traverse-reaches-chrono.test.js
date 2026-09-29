@@ -231,8 +231,27 @@ describe('both surfaces take the same flag with the same default', () => {
   });
 
   it('both default to ON — the defect was discoverability, not the absence of a flag', () => {
-    for (const [name, src] of [['REST', rest], ['MCP', mcp]]) {
-      assert.match(src, /includeChrono[^\n]*!== false|!== false/, `${name} must treat only an explicit false as opt-out`);
-    }
+    /*
+     * Each door by its own mechanism, because they differ and a shared regex hid that. This asserted
+     * `/includeChrono[^\n]*!== false|!== false/` against both files, and the second alternative matched ANY
+     * `!== false` — on REST it was satisfied by `includeFileContentRaw !== false` in the old `/similar`
+     * handler, so the REST half checked nothing about traverse. Deleting that handler (`Q-89`) is what showed it.
+     *
+     * REST: the traverse route starts from an object of defaults with `includeChrono: true`, skips an absent
+     * flag, refuses a non-boolean, and only then assigns — so only an explicit `false` opts out.
+     * MCP: the handler passes `includeChrono !== false`.
+     */
+    const at = rest.indexOf("searchRouter.post('/spaces/:spaceId/traverse'");
+    assert.ok(at >= 0, 'the REST traverse route is no longer registered — re-anchor this gate');
+    const route = rest.slice(at, rest.indexOf('searchRouter.', at + 20));
+    const defaults = route.slice(route.indexOf('const inclusions = {'), route.indexOf('};', route.indexOf('const inclusions = {')));
+    assert.match(defaults, /includeChrono:\s*true/, 'REST must default includeChrono ON in its defaults object');
+    const skip = route.indexOf('if (raw === undefined) continue;');
+    const refuse = route.indexOf("if (typeof raw !== 'boolean')");
+    const assign = route.indexOf('inclusions[flag] = raw;');
+    assert.ok(skip >= 0 && refuse > skip && assign > refuse,
+      'REST must keep the default for an absent flag and refuse a non-boolean BEFORE assigning, so only an explicit false opts out');
+
+    assert.match(mcp, /a\['includeChrono'\] !== false/, 'MCP must treat only an explicit false as opt-out');
   });
 });

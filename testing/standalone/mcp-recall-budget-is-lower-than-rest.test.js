@@ -36,7 +36,9 @@
 import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { statementFrom } from './_structural-window.mjs';
+import { statementFrom, bodyOf } from './_structural-window.mjs';
+import { routeBody, delegatesCleanly } from './_delegating-routes.mjs';
+import { stripComments } from './_strip-comments.mjs';
 
 const MCP = readFileSync('server/src/mcp/tools/search.ts', 'utf8');
 const REST = readFileSync('server/src/api/brain/search.ts', 'utf8');
@@ -122,11 +124,35 @@ describe('every call site uses its own door\'s default', () => {
   });
 
   it('REST keeps the operator default, and does not reach for the MCP one', () => {
-    // `POST /api/brain/recall` delegates to `callTool` and resolves nothing of its own, so the count is
-    // lower than it was. The claim is unchanged: no REST handler may name the agent's number.
-    assert.ok([...REST.matchAll(/resolveBudget\(/g)].length >= 1, 'the REST door must still resolve a budget');
-    assert.doesNotMatch(REST, /MCP_DEFAULT_MAX_CHARS/,
+    /*
+     * The claim is unchanged: no REST handler may name the agent's number. What changed is where REST gets
+     * its own. This asserted at least one `resolveBudget(` in the REST file, and `Q-89` took the last one:
+     * `/recall` and `/similar` both delegate to `callTool`, so their budget is the tool's, resolved from
+     * `ctx.transport` (the case above) — and that transport is `'rest'` only if the route says who called.
+     * The standalone traverse names its door directly. So every REST route that budgets an answer does it one
+     * of those two ways, and the floor is on the routes found doing so.
+     */
+    const src = stripComments(REST);
+    assert.doesNotMatch(src, /MCP_DEFAULT_MAX_CHARS|defaultBudgetChars\(\s*'mcp'\s*\)/,
       'the REST door must not take the MCP default — 100 KB is unremarkable in a REST body');
+    const caller = stripComments(readFileSync('server/src/api/rest-tool-caller.ts', 'utf8'));
+    assert.match(bodyOf(caller, 'restToolCaller'), /transport: 'rest'/,
+      'restToolCaller must say the call came through REST, or a delegating route answers at the agent\'s budget');
+    const call = stripComments(readFileSync('server/src/mcp/call-tool.ts', 'utf8'));
+    assert.match(call, /transport: caller\.transport/, 'callTool must hand the handler the caller\'s transport');
+    const starts = [...src.matchAll(/searchRouter\.post\('([^']+)'/g)];
+    let budgeting = 0;
+    for (const m of starts) {
+      const body = routeBody(src, m[1]);
+      if (delegatesCleanly(body, `POST ${m[1]}`)) {
+        assert.match(body, /caller: restToolCaller\(req\)/, `POST ${m[1]} delegates without saying it is REST`);
+        budgeting++;
+      } else if (/defaultBudgetChars\(/.test(body)) {
+        assert.match(body, /defaultBudgetChars\(\s*'rest'\s*\)/, `POST ${m[1]} budgets at a default other than REST's`);
+        budgeting++;
+      }
+    }
+    assert.ok(budgeting >= 2, `only ${budgeting} REST route(s) budget an answer — the scan is broken, not the code`);
   });
 });
 
