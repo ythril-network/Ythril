@@ -4,41 +4,27 @@
  * Split out of the api/brain.ts monolith (A17.3); handlers are unchanged.
  */
 import { Router } from 'express';
-import { requireSpaceAuth, requireBodyScopedSpace, denyReadOnly, requireAuth } from '../../auth/middleware.js';
+import { requireSpaceAuth, denyReadOnly, requireAuth } from '../../auth/middleware.js';
 import { callTool } from '../../mcp/call-tool.js';
 import { restToolCaller } from '../rest-tool-caller.js';
-import { spacesWhereTokenMay } from '../../auth/reachable-spaces.js';
-import type { TokenRights } from '../../config/rights-shape.js';
 import { summariseActivity } from '../../metrics/space-activity-store.js';
 import { globalRateLimit } from '../../rate-limit/middleware.js';
-import { NotFoundError } from '../../util/errors.js';
 import { countFacts } from '../../brain/fact.js';
 import { getEmbedJobCounts } from '../../brain/embed-queue.js';
-import { TRAVERSE_BODY_FIELDS, FIND_SIMILAR_BODY_FIELDS, unknownBodyFields } from '../../brain/query.js';
-import { findSimilar, RECALL_BUDGET_MS, type RecallKnowledgeType, type RecallResult } from '../../brain/recall.js';
+import { TRAVERSE_BODY_FIELDS, unknownBodyFields } from '../../brain/query.js';
 import { traverseGraph } from '../../brain/edges.js';
-import { MAX_RECALL_TRAVERSE } from '../../brain/recall-seed-traversal.js';
 import { spillResultSet } from '../../brain/graph-spill.js';
-import { traversedAnswer } from '../../brain/traversed-answer.js';
-import { deadlineFrom } from '../../brain/search-bounds.js';
-import { parseTraverseOption } from '../../brain/traverse-option.js';
 import { getConfig } from '../../config/loader.js';
 import { col } from '../../db/mongo.js';
 import { needsReindex } from '../../spaces/_shared.js';
 import { planReindex, startReindex } from '../../brain/reindex.js';
 import { memberSpacesForRequest } from '../../spaces/proxy-scoped.js';
-import { RECORD_TYPES } from '../../config/types.js';
-import { UUID_V4_RE } from './_shared.js';
-import {
-  withoutDiagnostics, RECALL_ENVELOPE_KEYS, rankOf,
-} from '../../brain/recall-shape.js';
-import { mapGraphNodes, graphNodeRecord } from '../../brain/recall-graph.js';
-import { stripRecordMeta } from '../../brain/recall-record-meta.js';
-import { applyProjection, normaliseProjection, type NormalisedProjection } from '../../brain/projection.js';
+import { rankOf } from '../../brain/recall-shape.js';
+import { normaliseProjection } from '../../brain/projection.js';
 import { withTraverseBodies } from '../../brain/traverse-bodies.js';
-import { resolveBudget, resolvePaging, budgetedEnvelope, defaultBudgetChars, type BudgetRequest } from '../../brain/result-budget.js';
+import { defaultBudgetChars } from '../../brain/result-budget.js';
 import { requestActor } from '../../auth/request-actor.js';
-import { sendReadFailure, statesRetryability } from './_read-failure.js';
+import { statesRetryability } from './_read-failure.js';
 import { spaceCollection } from '../../db/space-collection.js';
 import { pageTraversal } from '../../brain/traverse-page.js';
 
@@ -118,54 +104,6 @@ searchRouter.get('/spaces/:spaceId/activity', globalRateLimit, requireSpaceAuth,
   res.json({ spaceId, hours, spaces: rows });
 });
 
-
-/**
- * Drop the passage body from file chunks when the caller asked not to receive it.
- *
- * A file result's `content` is the largest field a recall returns, and it is returned `topK` times. Omitting
- * it leaves everything a caller needs to decide WHICH passage to fetch — path, heading, chunk index, tags —
- * which is the two-phase flow MCP callers have had all along.
- *
- * Only `content`, and only on file results: the flag is about the passage body, not about thinning a result.
- * Copies rather than mutating, because `seeds` is also handed to the traverse builder and to the audit
- * outcome — deleting a field in place would change what those saw.
- */
-/**
- * Apply a caller's projection to flat recall results, keeping the envelope.
- *
- * `RECALL_ENVELOPE_KEYS` is why this is not just `applyProjection`: a REST result flattens the record and the
- * ranking envelope into one object, so projecting `{name: 1}` without this would drop the `score` the search
- * was for. On MCP the same parameter reaches only `record`, which is the same rule expressed against a shape
- * that already separates them.
- */
-function projectResults(results: RecallResult[], norm: NormalisedProjection | undefined): unknown[] {
-  if (!norm) return results;
-  return results.map(r => {
-    const src = r as unknown as Record<string, unknown>;
-    const out = applyProjection(src, norm);
-    for (const k of RECALL_ENVELOPE_KEYS) if (k in src) out[k] = src[k];
-    return out;
-  });
-}
-
-/** Read and validate `projection` from a recall-shaped body. Shared by both routes so they cannot diverge. */
-function projectionFromBody(body: unknown): { ok: true; norm: NormalisedProjection | undefined } | { ok: false; error: string } {
-  const raw = (body as { projection?: unknown } | null | undefined)?.projection;
-  if (raw === undefined || raw === null) return { ok: true, norm: undefined };
-  if (typeof raw !== 'object' || Array.isArray(raw)) {
-    return { ok: false, error: '`projection` must be a plain object mapping field paths to 1 or 0' };
-  }
-  return { ok: true, norm: normaliseProjection(raw as Record<string, unknown>) };
-}
-
-function stripContentIfAsked(results: RecallResult[], includeFileContent: boolean): RecallResult[] {
-  if (includeFileContent) return results;
-  return results.map(r => {
-    if (r.type !== 'file' || r.content === undefined) return r;
-    const { content: _dropped, ...rest } = r;
-    return rest as RecallResult;
-  });
-}
 
 // POST /api/brain/spaces/:spaceId/traverse — graph traversal (BFS)
 searchRouter.post('/spaces/:spaceId/traverse', globalRateLimit, requireSpaceAuth, async (req, res) => {
@@ -343,204 +281,27 @@ searchRouter.post('/recall', globalRateLimit, requireAuth, statesRetryability, a
  * than on `recall`: it says WHERE THE SEED ENTRY IS, not where to search. Omit it and the entry is located
  * across every space this token can read.
  */
-const VALID_ENTRY_TYPES = new Set<string>(RECORD_TYPES);
-
-searchRouter.post('/similar', globalRateLimit, requireBodyScopedSpace('knowledge', 'read'), statesRetryability, async (req, res) => {
-  const startedAt = Date.now();
-  const authorised = req.authorisedSpaces ?? [];
-  const namedSpace = req.resolvedSpaceId;
-  const spaceId = namedSpace ?? authorised[0] ?? '';
-
-  const body = (req.body ?? {}) as Record<string, unknown>;
-  // `crossSpace` is ALLOWED here, permanently, so this refusal does not reject a body that is correct.
-  //
-  // THE REASON RECORDED HERE WAS ABOUT TO EXPIRE, AND CHECKING IT FOUND A BETTER ONE. It read: the space
-  // arrives in the PATH, so "omit the space" cannot be expressed, and `crossSpace: true` is REST's only
-  // route to a cross-space find_similar. At 5.0 the space moved into the body and omitting it became
-  // expressible — which by that reasoning would have retired the flag.
-  //
-  // It does not, because the two are not the same question HERE. On `recall` the space says where to
-  // search. On this route it says where the SEED ENTRY lives, and the search is a separate axis: naming a
-  // space to locate the entry and then looking for similar records in every other space is a real request,
-  // and omission cannot express it — omitting the space locates the entry anywhere too.
-  //
-  // So the flag stays, and the tool's schema description still correctly says "Not slated for removal".
-  // The earlier version of this comment said "deprecated … before we have removed it", which pointed the
-  // next reader at a change that must not happen.
-  //
-  // Refusing a key we still accept elsewhere would in any case be a worse contract than the permissive body
-  // it replaces.
-  const badSimilar = unknownBodyFields(body, FIND_SIMILAR_BODY_FIELDS);
-  if (badSimilar) { res.status(400).json(badSimilar); return; }
-  const entryId = typeof body['entryId'] === 'string' ? body['entryId'].trim() : '';
-  const entryType = typeof body['entryType'] === 'string' ? body['entryType'].trim() : '';
-  const topK = typeof body['topK'] === 'number' ? Math.min(Math.max(body['topK'], 1), 100) : 10;
-  const minScore = typeof body['minScore'] === 'number' ? body['minScore'] : undefined;
-  const crossSpace = body['crossSpace'] === true;
-  const targetTypes = Array.isArray(body['targetTypes'])
-    ? (body['targetTypes'] as unknown[]).filter((t): t is RecallKnowledgeType => typeof t === 'string' && VALID_ENTRY_TYPES.has(t))
-    : undefined;
-
-  // `traverse` and `includeFileContent`: MCP `find_similar` has implemented both since it shipped — the tool schema
-  // advertises them and the handler reads them — while this route read neither. Same shape as the `includeFileContent`
-  // asymmetry an integrator reported on `recall`, one route over.
-  //
-  // Strictness is what made it visible: before the body was strict, sending `traverse: 2` here returned an unexpanded
-  // answer with a 200. It is a 400 now, which is better and still wrong — the parameter is supposed to work.
-  //
-  // Validated by the SAME parser recall uses, so the two routes cannot disagree about what a bad value is —
-  // and so `find_similar` gained the object form in the same commit rather than a release later. A parameter
-  // that means one thing on one search and another on the next is the asymmetry this comment is about.
-  const parsedFsTraverse = parseTraverseOption(body['traverse'], MAX_RECALL_TRAVERSE);
-  if (!parsedFsTraverse.ok) {
-    res.status(400).json({ error: parsedFsTraverse.error });
+searchRouter.post('/similar', globalRateLimit, requireAuth, statesRetryability, async (req, res) => {
+  /*
+   * The `similar` tool's answer, as `/recall` gives the `recall` tool's (`Q-89`). This route built its own: flat hits
+   * and the whole source record, while the tool answered `{score, spaceId, type, record}` per hit and `source` as
+   * `{type, id, summary}` — one capability, two shapes by door. Owner ruling 2026-09-29: REST takes the nested
+   * shape, as a breaking change named in the CHANGELOG.
+   *
+   * `crossSpace` stays a real parameter here: `space` says where the SEED entry lives, and searching every other
+   * space from a seed in one is a request that omitting `space` cannot express.
+   */
+  const outcome = await callTool({
+    name: 'similar',
+    args: (req.body ?? {}) as Record<string, unknown>,
+    caller: restToolCaller(req),
+  });
+  const text = outcome.result.content.map(c => c.text).join('\n');
+  if (outcome.result.isError) {
+    res.status(outcome.status).json({ error: text, ...(outcome.result.structuredContent ?? {}) });
     return;
   }
-  const fsTraverseOpt = parsedFsTraverse.value;
-  const safeTraverse = fsTraverseOpt.depth;
-  const includeFileContentRaw = body['includeFileContent'];
-  if (includeFileContentRaw !== undefined && typeof includeFileContentRaw !== 'boolean') {
-    res.status(400).json({ error: '`includeFileContent` must be a boolean' });
-    return;
-  }
-  const safeIncludeFileContent = includeFileContentRaw !== false;
-  // The same flag, on the same rule: find-similar returns recall RESULTS, so it carried the same six
-  // system fields REST's recall did while MCP's `find_similar` — which builds its records through
-  // `toRecallRecord` — has never sent any of them. Fixing recall alone would leave the identical
-  // asymmetry one route to the left.
-  const similarDiagRaw = body['includeDiagnostics'];
-  if (similarDiagRaw !== undefined && typeof similarDiagRaw !== 'boolean') {
-    res.status(400).json({ error: '`includeDiagnostics` must be a boolean' });
-    return;
-  }
-  const safeIncludeDiagnostics = similarDiagRaw === true;
-  // `includeRecordMeta`, as `recall` and the `similar` tool take it (Q-90): the rule at every depth, same default.
-  const similarMetaRaw = body['includeRecordMeta'];
-  if (similarMetaRaw !== undefined && typeof similarMetaRaw !== 'boolean') {
-    res.status(400).json({ error: '`includeRecordMeta` must be a boolean' });
-    return;
-  }
-  const recordMeta = { includeRecordMeta: similarMetaRaw === true };
-
-  // Same parameter, same parser. find-similar returns recall RESULTS, so a projection that reached one route
-  // and not the other would be the asymmetry this whole area has spent two releases removing.
-  const simProjParse = projectionFromBody(body);
-  if (!simProjParse.ok) { res.status(400).json({ error: simProjParse.error }); return; }
-  const safeProjection = simProjParse.norm;
-
-  // Same budget, same resolver. find-similar returns recall RESULTS, so a cap that applied to one route and
-  // not the other would be the asymmetry this area has spent three releases removing.
-  const budget = resolveBudget(body as BudgetRequest);
-  const paging = resolvePaging(body as { skip?: unknown; remainderDump?: unknown });
-  if (!budget.ok) { res.status(400).json({ error: budget.error }); return; }
-  if (!paging.ok) { res.status(400).json({ error: paging.error }); return; }
-
-
-  if (!entryId || !UUID_V4_RE.test(entryId)) {
-    res.status(400).json({ error: 'entryId must be a valid UUID v4' });
-    return;
-  }
-  if (!VALID_ENTRY_TYPES.has(entryType)) {
-    res.status(400).json({ error: `entryType must be one of: ${[...VALID_ENTRY_TYPES].join(', ')}` });
-    return;
-  }
-
-  // Determine cross-space search scope
-  let crossSpaceIds: string[] | undefined;
-  if (crossSpace) {
-    // THE MATRIX DECIDES THE CROSS-SPACE SET. There is no fallback, and this line said there was one —
-    // *"with the legacy allowlist only as a fallback"* — directly above the paragraph explaining that the
-    // allowlist read was the defect and is gone. `spacesWhereTokenMay` returns `[]` for a record with no
-    // matrix, deliberately.
-    //
-    // This read the allowlist alone, and `spaces` is `undefined` on every token minted since the matrix —
-    // the rights editor writes `rights.perSpace` and nothing writes that array. So `!tokenSpaces` was true
-    // for a modern token and the filter kept EVERY space: a cross-space recall from a token scoped to one
-    // space searched the whole instance. Same shape as the sync-scope hole, one route over, and the same
-    // fix — `spacesWhereTokenMay` makes the absent/empty distinction explicitly instead of by truthiness.
-    //
-    // `knowledge: read` because that is what a recall is. A token holding files-only in a space has no
-    // business having its records ranked here.
-    crossSpaceIds = spacesWhereTokenMay(
-      (req.authToken as { rights?: TokenRights } | undefined)?.rights,
-      'knowledge',
-      'read',
-    );
-  }
-
-  try {
-    const result = await findSimilar(
-      spaceId,
-      entryId,
-      entryType as RecallKnowledgeType,
-      topK,
-      targetTypes,
-      minScore,
-      crossSpaceIds,
-    );
-    if (safeTraverse === 0) {
-      const plainItems = projectResults(withoutDiagnostics(
-        stripContentIfAsked(result.results, safeIncludeFileContent), safeIncludeDiagnostics), safeProjection)
-        .map(item => stripRecordMeta(item as object, recordMeta));
-      const plainItemsBudgeted = await budgetedEnvelope({
-        results: plainItems,
-        budget,
-        skip: paging.skip,
-        remainderDump: paging.remainderDump,
-        spillRemainder: remainder => spillResultSet({
-          issuedTo: requestActor(req).tokenId,
-          results: remainder,
-          request: { entryId, entryType, topK, traverse: 0 },
-        }),
-      });
-      res.json({
-        ...result,
-        results: plainItemsBudgeted.results,
-        ...plainItemsBudgeted.fields,
-      });
-      return;
-    }
-
-    // Graph-augmented: the SAME answer `recall`'s traverse gives, through the same module — every row with its
-    // WHOLE graph, or left out and named (Q-126). A caller who can read one response can read the other.
-    const traverseSpaces = crossSpaceIds ?? [spaceId];
-    const shaped = new Map(withoutDiagnostics(
-      stripContentIfAsked(result.results, safeIncludeFileContent), safeIncludeDiagnostics).map(r => [r._id, r]));
-    const itemsBudgeted = await traversedAnswer({
-      seeds: result.results,
-      memberIds: traverseSpaces,
-      maxDepth: safeTraverse,
-      narrowing: fsTraverseOpt,
-      // similar has no `maxTimeMS` of its own; its walk runs under the instance's recall budget.
-      deadline: deadlineFrom(startedAt, RECALL_BUDGET_MS),
-      budget,
-      skip: paging.skip,
-      remainderDump: paging.remainderDump,
-      shapeRow: (seed, nodes) => {
-        const base = shaped.get(seed._id) ?? seed;
-        const nested = mapGraphNodes(nodes, graphNodeRecord, safeIncludeDiagnostics, safeProjection);
-        // stripRecordMeta recurses into `_graph`, so the neighbours follow the flag too (Q-90).
-        return stripRecordMeta(projectResults([(nested ? { ...base, _graph: nested } : base) as RecallResult], safeProjection)[0] as object, recordMeta);
-      },
-      spillRemainder: (remainder, about) => spillResultSet({
-        issuedTo: requestActor(req).tokenId,
-        results: remainder,
-        request: { entryId, entryType, topK, traverse: safeTraverse, ...about },
-      }),
-    });
-    res.json({
-      source: result.source,
-      results: itemsBudgeted.results,
-      ...itemsBudgeted.fields,
-      traverseDepth: safeTraverse,
-    });
-  } catch (err: unknown) {
-    if (err instanceof NotFoundError) {
-      res.status(404).json({ error: err.message });
-    } else {
-      sendReadFailure(res, err);
-    }
-  }
+  res.status(outcome.status).json(JSON.parse(text));
 });
 
 

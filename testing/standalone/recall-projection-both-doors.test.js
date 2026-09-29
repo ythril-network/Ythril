@@ -39,12 +39,11 @@ import { readFileSync } from 'node:fs';
 import { MCP_SEARCH_FAMILY, doorSources } from '../_shared/search-doors.mjs';
 
 let normaliseProjection, applyProjection, toMongoProjection, NEVER_PROJECTABLE;
-let mapGraphNodes, graphNodeRecord, RECALL_ENVELOPE_KEYS, mergeEmbeddingExclusion;
+let mapGraphNodes, graphNodeRecord, mergeEmbeddingExclusion;
 before(async () => {
   ({ normaliseProjection, applyProjection, toMongoProjection, NEVER_PROJECTABLE } =
     await import('../../server/dist/brain/projection.js'));
   ({ mapGraphNodes, graphNodeRecord } = await import('../../server/dist/brain/recall-graph.js'));
-  ({ RECALL_ENVELOPE_KEYS } = await import('../../server/dist/brain/recall-shape.js'));
   ({ mergeEmbeddingExclusion } = await import('../../server/dist/brain/query.js'));
 });
 
@@ -166,28 +165,17 @@ describe('both doors take it, and the REST envelope survives', () => {
   // case is about every door that parses a projection.
   const mcp = doorSources(MCP_SEARCH_FAMILY).join('\n');
 
-  it('every REST route that still reads a body parses the projection through one parser', () => {
+  it('no REST search route reads the projection itself: each answers through its tool', () => {
     /*
-     * The count was `>= 3` — recall, find-similar and query — and `POST /api/brain/recall` stopped reading
-     * its body at all when it collapsed onto `callTool`. So the floor comes from how many of those routes
-     * still build their own response, which is the question the claim was always making.
-     *
-     * The rule is unchanged and is the point: whoever DOES read a projection reads it through the shared
-     * parser. Two doors inlining the same check is how they start disagreeing about what a projection means.
-     *
-     * **`/filter` came off the list at 3c**, and the floor came down with it — from two to one. That is
-     * the direction this whole row moves in: a route that stops building its own response stops being
-     * able to disagree with the tool, so a SHRINKING floor here is the rule succeeding rather than
-     * coverage being lost. What holds the shrink honest is `one-capability-is-one-shape`, which fails if
-     * a second implementation appears again.
+     * This asked that every route still reading a body parse the projection through one parser, with a floor that
+     * shrank as routes collapsed onto `callTool` — `/recall`, then `/filter` at 3c, then `/similar` at Q-89. The
+     * floor reaching zero is the rule succeeding: a route that answers through its tool cannot disagree with it
+     * about what a projection means, so the claim is now that none builds its own answer.
      */
     const readers = ['/recall', '/similar']
-      .filter(p => { const b = routeBody(rest, p); return b && !delegatesCleanly(b, `POST ${p}`); });
-    assert.ok(readers.length >= 1,
-      `only ${readers.length} REST read routes still build their own response — the scan is broken, not the code`);
-    assert.ok((rest.match(/projectionFromBody\(/g) ?? []).length >= readers.length,
-      `${readers.length} route(s) read a body and fewer parse the projection through the shared parser `
-      + '— an inlined check is how the two doors start disagreeing about what a projection means');
+      .filter(p => { const b = routeBody(rest, p); assert.ok(b, `${p} not found in search.ts`); return !delegatesCleanly(b, `POST ${p}`); });
+    assert.deepEqual(readers, [], `these REST search routes build their own response instead of the tool's: ${readers.join(', ')}`);
+    assert.doesNotMatch(rest, /projectionFromBody\(/, 'a REST route parses a projection itself again');
   });
 
   it('MCP advertises it on all three tools and reads it in both new handlers', () => {
@@ -200,17 +188,10 @@ describe('both doors take it, and the REST envelope survives', () => {
       'recall and find_similar must each READ it — query builds a Mongo projection instead, in the route');
   });
 
-  it('the envelope keys are named, so a projection cannot drop the score', () => {
-    // A flat REST result merges the record and the ranking envelope. Without this list, `{name: 1}` would
-    // return a record with no score — the one field the search existed to produce.
-    for (const k of ['score', 'spaceId', 'type', '_graph']) {
-      assert.ok(RECALL_ENVELOPE_KEYS.includes(k), `${k} must survive a projection on the flat REST shape`);
-    }
-  });
-
-  it('and MCP needs no such list, because its envelope is already outside `record`', () => {
-    // Same rule, two shapes: the projection is applied to `toRecallRecord(...)` there, and `score`/`spaceId`
-    // sit beside it untouched. This asserts the application point rather than the absence of a list. Since Q-90
+  it('no door needs a list of envelope keys, because the envelope is outside `record` on both', () => {
+    // REST returned flat hits, so it kept a list of the keys a projection must not drop. Since Q-89 both searches
+    // answer REST through their tools, and the hit is `{score, spaceId, type, record}` on both doors.
+    // The projection is applied to `toRecallRecord(...)`, and `score`/`spaceId` sit beside it untouched. This asserts the application point rather than the absence of a list. Since Q-90
     // the record-meta rule wraps it, in the one builder every recall and similar row goes through.
     assert.match(mcp, /record: stripRecordMeta\(applyProjection\(toRecallRecord\(/,
       'the projection must apply to the record, not to the result envelope');

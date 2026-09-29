@@ -42,6 +42,7 @@ import type { TokenRights } from '../config/rights-shape.js';
 import { memberSpacesWithin } from '../spaces/proxy-scoped.js';
 import { classifyReadFailure } from '../brain/store-failure.js';
 import { SchemaViolationError } from '../brain/write-validation.js';
+import { NotFoundError } from '../util/errors.js';
 import { TOOLS_BY_NAME, type ToolResult } from './tools/index.js';
 import { makeArgsValidator } from './validate-args.js';
 import { toolSchemasFor } from './tool-schema.js';
@@ -312,6 +313,13 @@ export async function callTool(req: ToolCallRequest): Promise<ToolCallOutcome> {
      * the truncated prose that told fourteen personas nothing, while a REST caller alongside it got a 503
      * and a reason.
      */
+    /*
+     * A record the call names and cannot find is a 404 on REST, as the routes answered before a tool served them
+     * (`Q-89`: `similar` for an entry that does not exist). The prose is the tool's either way.
+     */
+    if (err instanceof NotFoundError) {
+      return { result: { content: [{ type: 'text' as const, text: `Error: ${message}` }], isError: true }, status: 404, callSpace };
+    }
     const readFailure = classifyReadFailure(err);
     if (readFailure.retryable) {
       return {

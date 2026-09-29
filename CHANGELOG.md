@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Breaking
+
+- **REST `POST /api/brain/similar` answers in the `similar` tool's shape (`Q-89`).** Each hit is now
+  `{score, spaceId, type, record}` and `source` is `{type, id, summary}`, as MCP has always answered — the route
+  used to return flat hits (`{_id, name, …, score}`) and the whole source record with `score: 1.0`, so one
+  capability had two shapes by door. **Who is affected:** a REST client of `/similar` reads `hit.record.<field>`
+  where it read `hit.<field>`, and `source.id` where it read `source._id`. MCP callers and the web UI see no change.
+  The route now answers through the tool, as `/recall` does, so its refusals are the tool's words too; an entry that
+  does not exist is still a `404`.
+
 ### Fixed
 
 - **Every list that stopped at a number now says so and can be read to the end** (bundle-34). Owner rule: *"if i
