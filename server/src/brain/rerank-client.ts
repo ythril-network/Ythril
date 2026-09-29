@@ -22,6 +22,7 @@ import { slotTimeoutMs } from '../config/model-slots.js';
 import { boundedJson } from '../util/bounded-read.js';
 import { modelFetch } from '../util/model-fetch.js';
 import { log } from '../util/log.js';
+import { endpointCooldown, endpointUnavailable } from '../util/endpoint-cooldown.js';
 
 /**
  * The reranker's own ceiling, resolved per call.
@@ -178,12 +179,52 @@ export function parseScores(body: unknown, count: number): RerankScore[] | null 
 }
 
 /**
+ * The reranker's cool-down (`Q-157`, `util/endpoint-cooldown.ts`): after a pass fails, runs out its own timeout, or
+ * answers too slowly for someone waiting on it, the reranker is passed over — 30 s, doubling to 5 min — and every
+ * recall in between keeps the fused order at once instead of paying the timeout again.
+ *
+ * Measured on the instance this was written from: every recall took 20 s and was served in fused order anyway, and
+ * the successful passes of the week before took 1.5–19.8 s, most of them over 15. A cross-encoder that answers in
+ * fifteen seconds is not improving an interactive search, it is holding it.
+ */
+export const rerankCooldown = endpointCooldown('reranker', { baseMs: 30_000, maxMs: 5 * 60_000 });
+
+/**
+ * A pass slower than this cools the reranker down even though it answered, and a probe must answer inside it to
+ * reopen: HALF the reranker's own time limit. Derived rather than fixed, because the limit is the operator's
+ * statement of how long a pass may take — raised for long records on purpose (userguide, Brain → reranking) — and a
+ * fixed line would override it silently. At the default 20 s a pass over 10 s is too slow for a person waiting;
+ * a GPU-served `bge-reranker-v2-m3` scores a hundred short passages well inside one.
+ */
+export const rerankSlowMs = (): number => rerankTimeout() / 2;
+
+let probeTimer: NodeJS.Timeout | null = null;
+
+/** After a failure, a probe — never a user's search — decides when the reranker is back. */
+function scheduleProbe(): void {
+  if (probeTimer) return;
+  const at = rerankCooldown.until();
+  if (at === undefined) return;
+  probeTimer = setTimeout(() => {
+    probeTimer = null;
+    const startedAt = Date.now();
+    runPass('probe', ['probe'], rerankSlowMs())
+      .then(({ scores }) => {
+        if (scores && Date.now() - startedAt <= rerankSlowMs()) rerankCooldown.succeeded();
+        else { rerankCooldown.failed(); scheduleProbe(); }
+      })
+      .catch(() => { rerankCooldown.failed(); scheduleProbe(); });
+  }, Math.max(0, at - Date.now()));
+  probeTimer.unref?.();
+}
+
+/**
  * Score `passages` against `query` with the configured cross-encoder.
  *
  * Returns `null` — never throws, never guesses — when there is no opinion to be had: unconfigured,
- * unreachable, non-2xx, or an unreadable body. The caller must read `null` as "keep the vector order",
- * not as "these passages are irrelevant". Silently zeroing an unreachable reranker would reorder every
- * result set by nothing at all and look exactly like a working search.
+ * unreachable, non-2xx, an unreadable body, or cooling down after one of those. The caller must read `null` as
+ * "keep the vector order", not as "these passages are irrelevant". Silently zeroing an unreachable reranker
+ * would reorder every result set by nothing at all and look exactly like a working search.
  */
 export async function rerank(
   query: string,
@@ -195,9 +236,30 @@ export async function rerank(
    */
   budgetMs?: number,
 ): Promise<RerankScore[] | null> {
+  if (!rerankConfigured() || passages.length === 0) return null;
+  if (rerankCooldown.coolingDown()) return null;
+
+  const slot = rerankTimeout();
+  const callerBound = Number.isFinite(budgetMs) && budgetMs! > 0 && budgetMs! < slot;
+  const startedAt = Date.now();
+  const { scores, unavailable, timedOut } = await runPass(query, passages, callerBound ? budgetMs! : slot);
+  const tookMs = Date.now() - startedAt;
+
+  // A caller's short budget running out is not the reranker's fault, so only its OWN timeout cools it down.
+  if (unavailable || (timedOut && !callerBound)) { rerankCooldown.failed(); scheduleProbe(); }
+  else if (scores && tookMs > rerankSlowMs()) {
+    log.warn(`Rerank: a pass took ${Math.round(tookMs / 1000)} s — too slow for a search someone is waiting on`);
+    rerankCooldown.failed(); scheduleProbe();
+  } else if (scores) rerankCooldown.succeeded();
+  return scores;
+}
+
+/** One pass, every batch under one deadline; says whether a failure means the endpoint is unavailable. */
+async function runPass(
+  query: string, passages: string[], timeoutMs: number,
+): Promise<{ scores: RerankScore[] | null; unavailable: boolean; timedOut: boolean }> {
   const cfg = getMediaEmbeddingConfig().rerank;
-  if (!rerankConfigured() || !cfg?.baseUrl || !cfg.model) return null;
-  if (passages.length === 0) return null;
+  if (!cfg?.baseUrl || !cfg.model) return { scores: null, unavailable: false, timedOut: false };
 
   const { url, dialect } = resolveEndpoint(cfg.baseUrl);
   /*
@@ -207,15 +269,14 @@ export async function rerank(
    * four batches each allowed the full slot budget could spend four times it. The signal is built once and
    * every request takes it, so the pass as a whole is bounded exactly as the single request was.
    */
-  const signal = AbortSignal.timeout(
-    Number.isFinite(budgetMs) && budgetMs! > 0 ? Math.min(rerankTimeout(), budgetMs!) : rerankTimeout(),
-  );
+  const signal = AbortSignal.timeout(timeoutMs);
   const headers = {
     'content-type': 'application/json',
     ...(cfg.apiKey ? { authorization: `Bearer ${cfg.apiKey}` } : {}),
   };
 
   const batches = planBatches(passages.length, maxPassagesPerRequest());
+  let unavailable = false;
 
   const one = async ({ start, end }: { start: number; end: number }): Promise<RerankScore[] | null> => {
     const slice = passages.slice(start, end);
@@ -227,6 +288,7 @@ export async function rerank(
     };
     const res = await modelFetch(url, init, 'rerank');
     if (!res.ok) {
+      if (endpointUnavailable(res.status)) unavailable = true;
       log.warn(`Rerank: HTTP ${res.status} from the reranker — keeping the vector order`);
       return null;
     }
@@ -250,12 +312,14 @@ export async function rerank(
      * plausible wrong answer, and this file's whole contract is that a reranker may make search worse but
      * never silently wrong. `null` means "keep the vector order", which is one ordering and an honest one.
      */
-    if (results.some(r => r === null)) return null;
-    return results.flat() as RerankScore[];
+    if (results.some(r => r === null)) return { scores: null, unavailable, timedOut: false };
+    return { scores: results.flat() as RerankScore[], unavailable: false, timedOut: false };
   } catch (err) {
     // Deliberately logs neither the query nor the passages: both are user content and this line goes to
     // the log. The same rule the NLI client follows.
     log.warn(`Rerank failed — keeping the vector order: ${err instanceof Error ? err.message : String(err)}`);
-    return null;
+    // Unreachable is unavailable; a timeout is judged by the caller, which knows whose deadline it was.
+    const timedOut = signal.aborted;
+    return { scores: null, unavailable: !timedOut, timedOut };
   }
 }

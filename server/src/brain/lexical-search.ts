@@ -150,9 +150,16 @@ export interface FusableResult {
  * rank and every copy the same score.
  */
 export function stampFusion(
-  pool: FusableResult[], floors: readonly FusableResult[], lexicalRanked: readonly string[],
+  pool: FusableResult[], floors: readonly FusableResult[],
+  /**
+   * ONE LEXICAL RANKING PER RECORD TYPE, each its own RRF channel (`Q-159`). Each type's text index scores against
+   * its own collection's field lengths and is unbounded, so sorting every type's hits together by raw text score was
+   * the cross-scale comparison RRF exists to avoid: a fact outranked an entity only because facts are longer. A
+   * record appears in one type's list, so its lexical term is `1/(k + its rank within its type)`.
+   */
+  lexicalPerType: ReadonlyArray<readonly string[]>,
 ): boolean {
-  if (lexicalRanked.length === 0) return false;
+  if (!lexicalPerType.some(l => l.length > 0)) return false;
   const refsById = new Map<string, FusableResult[]>();
   for (const r of [...pool, ...floors]) {
     const refs = refsById.get(r._id);
@@ -160,9 +167,9 @@ export function stampFusion(
   }
   const vectorRanked = [...refsById.values()].map(refs => refs[0]!)
     .sort((a, b) => (b.score ?? 0) - (a.score ?? 0) || byIdAsc(a, b)).map(r => r._id);
-  // Ranks are the LEXICAL ranks, not re-numbered after dropping out-of-pool ids: a document that placed
-  // 5th lexically genuinely placed 5th, and compressing the ranks would overstate it.
-  const fused = rrfFuse([vectorRanked, lexicalRanked]);
+  // Ranks are the LEXICAL ranks within each type, not re-numbered after dropping out-of-pool ids: a document that
+  // placed 5th among its type genuinely placed 5th, and compressing the ranks would overstate it.
+  const fused = rrfFuse([vectorRanked, ...lexicalPerType]);
   for (const [id, refs] of refsById) {
     const f = fused.get(id);
     if (f !== undefined) for (const r of refs) r.fusedScore = f;

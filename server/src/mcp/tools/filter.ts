@@ -268,8 +268,10 @@ export const queryTool: ToolHandler = {
     // And the diagnostics projection, read from the tool argument rather than a query string.
     const docs = withoutListDiagnostics(decorated, a['includeDiagnostics'] === true);
 
+    // Counted with the SAME per-member predicate the rows were read with (`Q-160`). It was the bare `filter`, so a
+    // name join answered `count: 2, total: 86` on a space of 86 edges, and a pager comparing the two read on for ever.
     let total = 0;
-    for (const mid of members) total += await countBrain(mid, coll, filter, maxTimeMS);
+    for (const mid of members) total += await countBrain(mid, coll, await filterFor(mid), maxTimeMS);
 
     // `content` stays the bare array it has always been, so a client parsing the text is unaffected. Without `total`
     // a caller sweeping with `skip` cannot tell a short last page from a truncated one, which is the number the fleet integrator

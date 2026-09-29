@@ -34,6 +34,7 @@ import { assistConsented, type AssistUse } from './egress-consent.js';
 import { isLocalModelEndpoint } from './model-egress-policy.js';
 import { getDataRoot, getDocumentProcessingConfig, getDocAssistApiKey, getDocAssistFallbackApiKey } from './loader.js';
 import { log } from '../util/log.js';
+import { endpointCooldown, endpointUnavailable } from '../util/endpoint-cooldown.js';
 
 /** One assist endpoint as the config holds it. */
 export interface AssistSlotConfig {
@@ -112,7 +113,9 @@ export function pickAssistBackend(input: {
 // ── State: the window's usage and the primary's cooldown ─────────────────────────────────────────────────────────
 
 let usage: UsageEntry[] | null = null;
-let primaryDownUntil: number | undefined;
+// The shared cool-down (`util/endpoint-cooldown.ts`, Q-157), fixed at one window: the fallback answers meanwhile, so
+// there is no timeout to save by doubling it.
+const primaryCooldown = endpointCooldown('assist model primary', { baseMs: PRIMARY_COOLDOWN_MS, maxMs: PRIMARY_COOLDOWN_MS });
 let flushTimer: NodeJS.Timeout | null = null;
 
 const usageFile = () => path.join(getDataRoot(), 'assist-usage.json');
@@ -151,15 +154,13 @@ export function assistBackend(use: AssistUse, now = Date.now()): AssistEndpoint 
   const a = getDocumentProcessingConfig().assistModel;
   const picked = pickAssistBackend({
     primary: a, fallback: a?.fallback, ...(a?.budget ? { budget: a.budget } : {}),
-    usage: loadUsage(), ...(primaryDownUntil !== undefined ? { primaryDownUntil } : {}), now, use,
+    usage: loadUsage(), ...(primaryCooldown.until() !== undefined ? { primaryDownUntil: primaryCooldown.until()! } : {}), now, use,
   });
   if (!picked) return null;
   const apiKey = picked.which === 'primary' ? getDocAssistApiKey() : getDocAssistFallbackApiKey();
   return { ...picked, ...(apiKey ? { apiKey } : {}) };
 }
 
-/** A failure that means the primary cannot answer NOW, as opposed to a request it will never accept. */
-const unavailable = (status: number | undefined) => status === undefined || status === 429 || status === 529 || status === 402 || status >= 500;
 
 /**
  * What a call to `endpoint` came to. A success is charged to the budget (the primary's only); a failure that means
@@ -179,8 +180,8 @@ export function recordAssistOutcome(
     return;
   }
   const s = outcome.status;
-  if (unavailable(s)) {
-    primaryDownUntil = now + PRIMARY_COOLDOWN_MS;
+  if (endpointUnavailable(s)) {
+    primaryCooldown.failed(now);
     log.warn(`assist model: the primary ${s === undefined ? 'could not be reached' : `answered ${s}`} — the fallback answers for ${PRIMARY_COOLDOWN_MS / 1000}s`);
   }
 }
@@ -210,7 +211,7 @@ export async function viaAssist<T>(
     // primary is not cooled down for it.
     const refused = (err as { refused?: unknown } | null)?.refused === true;
     if (!refused) recordAssistOutcome(first, { ok: false, ...(status !== undefined ? { status } : {}) });
-    if (first.which !== 'primary' || !(refused || unavailable(status))) throw err;
+    if (first.which !== 'primary' || !(refused || endpointUnavailable(status))) throw err;
     const next = assistBackend(use);
     if (!next || next.which !== 'fallback') throw err;
     log.info(`assist model: answering on the fallback ${next.model} after the primary ${refused ? 'declined' : 'failed'}`);
@@ -250,6 +251,6 @@ export function assistBudgetStatus(now = Date.now()): { spent: number; budget?: 
   return {
     spent: spentInWindow(loadUsage(), now, budget?.perHours ?? 24),
     ...(budget ? { budget } : {}),
-    primaryCoolingDown: primaryDownUntil !== undefined && primaryDownUntil > now,
+    primaryCoolingDown: primaryCooldown.coolingDown(now),
   };
 }

@@ -183,7 +183,7 @@ Remove it and the link goes. There is no separate box to tick and no extra step.
 Every kind of attachment is followed, including a timeline entry pointing at a **fact**, and a file pointing
 at a **fact** or at a **timeline entry** — so a graph from a fact reaches the timeline entry about it.
 
-**Where to see them:** the **Query** tab, Advanced mode, with the collection picker set to **links** — one
+**Where to see them:** the **Query** tab, Filter mode, with the collection picker set to **links** — one
 row per connection, showing which record it hangs off and which record it names.
 
 > **A link is not an edge and cannot become one.** It carries no label, no weight and no properties, on
@@ -261,7 +261,7 @@ tabs. Title, type, dates, status, tags, description and properties can all be ch
 
 ### Query
 
-The Query tab has two modes, switched with the buttons at the top: **Semantic Search** and **Advanced Query**.
+The Query tab has two modes, switched with the buttons at the top: **Semantic Search** and **Filter**. Filter is the same query the `filter` tool and `POST /api/filter` run, which is why it carries their name (it was called *Advanced Query* before).
 
 #### Semantic Search
 
@@ -298,6 +298,13 @@ So there is no single number to expect. **If your records are long and you want 
 handful of results, ask your administrator to raise the reranking time limit** (`modelSlots.rerank.timeoutMs`,
 described in the hosting guide's model-slot table).
 
+**A reranker that fails or crawls is set aside for a while, so a search does not keep waiting for it.** When a
+reranking pass fails, runs out its time limit, or takes more than half of it, the searches after it skip reranking
+straight away — for 30 seconds at first, doubling each time it happens again, up to 5 minutes — and answer in the
+order by meaning, in well under a second instead of the full time limit. Ythril checks the reranker in the
+background and uses it again as soon as it answers within that half. Each search in between says the reranker did
+not run (`rerank_unavailable`), so a quiet reranker is never mistaken for a working one.
+
 **The search bars in the Entities, Facts, Edges and Chrono tabs, and the entity pickers, skip reranking.** You are
 waiting on them as you type, and on a busy model the reranking can take seconds for an order you will not read before
 the next keystroke. Only the newest search is kept: typing again cancels the one before. The **Query** tab reranks, as
@@ -308,6 +315,11 @@ carrying more than a few dozen passages outright, and the search then falls back
 single time — which looks identical to a search with no reranker configured. Ythril sends them in batches
 small enough for a standard server by default; an administrator can raise the batch size
 (`mediaEmbedding.rerank.maxPassagesPerRequest`) on a server that accepts more.
+
+**Once a search answers, the form folds to one line** that still holds your question — press Enter to search again,
+or **More options** to open every setting. The answer's header says how long the search took, measured from the
+moment you pressed Search, and **Expand all** / **Collapse all** open or fold every record in the answer at once,
+in either view.
 
 **The answer arrives in its own card, and you can read it two ways.** *Rendered* is the default: one card
 per result with its score, its neighbourhood underneath it, and the record itself as a tree you can fold. Any
@@ -478,7 +490,7 @@ set that way through the API. It is meant for records that are **state rather th
 numbers are updated constantly, which would otherwise be re-embedded on every write for no gain.
 
 What it does is remove the record's embedding, not hide the record. So a suppressed record is still returned by
-**Advanced Query**, still opens from its tab, still exports, and is still reached by **Graph hops** from a match
+**Filter**, still opens from its tab, still exports, and is still reached by **Graph hops** from a match
 next to it — it simply stops competing on meaning. If a record you know exists never appears in a search, check
 these three levels before treating it as a fault.
 
@@ -530,7 +542,7 @@ The three levels above are read **here** as well, so this instance decides what 
 one part that travels with the record is the per-record setting: if the author of a record marked it *"keep this
 out of semantic search"*, that mark arrives with it and is respected on every other instance.
 
-#### Advanced Query
+#### Filter
 
 Runs a structured MongoDB-style query against one collection. Select a collection (`facts`, `entities`, `edges`, `chrono`, `files`, or `links`), optionally set a **limit** and **max time (ms)**, enter a filter as JSON, and click **Run**. Results appear below.
 
