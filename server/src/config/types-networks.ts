@@ -107,7 +107,7 @@ export interface VoteCast {
    *  absent on legacy/unsigned casts (accepted only via the own-cast path). */
   sig?: string;
   /** Base64 Ed25519 signature over the v2 message, which also binds the round's type and target (`Q-138`,
-   *  `voteCastBoundMessage`). Required of a voter known to run 5.5.3 or later; absent from older casts. */
+   *  `voteCastBoundMessage`). Required of a voter known to run 5.6.0 or later; absent from older casts. */
   bsig?: string;
 }
 

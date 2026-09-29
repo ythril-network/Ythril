@@ -157,7 +157,7 @@ counting rows never double-counts a record, and no relationship is invisible.
   So a returned match is exactly what you asked for. A short graph read as *"this record has few
   relationships"* is a wrong conclusion about the data, and there is no `total` for a neighbourhood a caller
   could compare against to notice — which is why a short row is withheld and named rather than returned.
-  Until 5.5.3 a large neighbourhood was cut to an inline node cap and the whole graph kept as a spill behind
+  Until 5.6.0 a large neighbourhood was cut to an inline node cap and the whole graph kept as a spill behind
   `graphComplete`; that field is gone, and a `graphComplete.spillId` you still hold is readable until it expires.
 - **The call has one walk budget and one deadline.** Every match walked counts against the call's walk bound
   (50000 nodes, matches that turn out incomplete included), and the whole call runs under one deadline —

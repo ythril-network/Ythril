@@ -261,7 +261,7 @@ field, from, to. Two things are worth reading carefully:
   what a request contained, the resource's own history or your reverse proxy's logs are the place to look;
   the audit log deliberately does not keep it.
 
-**Old saved search results removed from spaces.** Versions before 5.5.3 kept a search's cut-off results as a
+**Old saved search results removed from spaces.** Versions before 5.6.0 kept a search's cut-off results as a
 file inside the space, under a hidden `_tmp` folder, and those files travelled to every other instance in a
 network. Since then nothing is written into a space by a search, and a clean-up every few minutes removes the old files —
 the ones written here and the ones that arrived from other instances. For each space it cleans, the log shows
@@ -269,7 +269,7 @@ one entry, operation `file.legacy_spill.sweep`, with the space named and no toke
 itself. It sends no webhook and tells no other instance, and it cannot be undone. Reading kept results
 appears as `brain.spill.read`, and only when the instance is set to log reads.
 
-**A network space's name repaired from its upstream.** An instance that joined a network before 5.5.3 could hold a
+**A network space's name repaired from its upstream.** An instance that joined a network before 5.6.0 could hold a
 space the publisher had renamed without knowing the network still calls it by its old name — so the space arrived a
 second time under that old name. When this instance's upstream (its publisher, or its parent in a tree) now names
 the space both ways, the instance records the missing link itself and logs one entry per space, operation

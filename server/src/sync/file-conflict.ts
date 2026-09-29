@@ -85,7 +85,7 @@ export function decideFilePush(
  * - a SCHEMA SNAPSHOT, `schemas/<space>_<entity|fact|edge|chrono>_<type>.json` (`spaces/_shared.ts` syncSchemaFiles):
  *   each instance writes it from its OWN effective meta, so every schema change conflicted on every member.
  * - a LEGACY READ SPILL, `_tmp/graph-<uuid>.json` / `_tmp/results-<uuid>.json` at the root (`Q-92`): one caller's
- *   search result, written into the space by versions before 5.5.3. Spills now live outside every space; the copies
+ *   search result, written into the space by versions before 5.6.0. Spills now live outside every space; the copies
  *   older versions wrote are swept locally, and the ones older peers still offer are refused here.
  * Matched by name, so a copy an older peer still offers is refused on pull as well.
  */

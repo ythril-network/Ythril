@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.6.0] — 2026-09-29
+
+**A minor release: a filtered recall returns every record that matches, a search never writes into a space, and a
+token can be allowed to create spaces without being an instance admin.** It also closes a way for a relaying member
+to re-aim a vote, makes joined networks sync on their own, and delivers published file descriptions to subscribers
+that had already processed the file. Upgrade every member of a network; older members keep working during the
+transition.
+
+| What changes on upgrade | What to do |
+|---|---|
+| The read spills older versions wrote into spaces (`_tmp/results-*.json`, `_tmp/graph-*.json`) are deleted, once | Nothing. A caller that kept a spill path reads the answer's `remainder` instead; see [Recall API](docs/integration-guide/04a-recall-api.md) |
+| Every vector index is rebuilt once in the background, with no gap in search | Nothing. Until it finishes, a filtered recall that needs completing says `filter_window`; see [Hosting](docs/integration-guide/02-hosting.md) |
+| `POST /api/spaces` needs the `createSpaces` right instead of instance admin | Grant `createSpaces` to any non-admin token that should create spaces; instance admins are unaffected |
+| Vote casts carry a second signature, and 5.6.0 voters must send it | Upgrade every member; a cast from an older member is still checked the old way |
+| A network you join syncs on the inviter's schedule, or every 15 minutes | Pass `syncSchedule` on the join to choose another |
+
 ### Added
 
 - **`npm run docker:compact` can run without a UAC prompt** (Q-119, development tooling). `npm run
@@ -112,7 +128,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Backups and the storage quota leave read spills out.** A backup would have kept a copy — of records since
   deleted or redacted — for as long as backups are kept, and counting them could have tripped the brain quota on
   writes with nothing to show why. A restore leaves the current spills alone.
-- **The read spills versions before 5.5.3 wrote into spaces are removed, and never sync again.** A root
+- **The read spills versions before 5.6.0 wrote into spaces are removed, and never sync again.** A root
   `_tmp/graph-<uuid>.json` or `_tmp/results-<uuid>.json` is left out of the manifest and the space hash, its bytes
   are never pulled and its metadata is dropped on push and pull (counted as `skipped`, so an older peer's push still
   succeeds), and the retention sweep, every few minutes, deletes every copy on this instance — written here or pulled from a peer — with no
@@ -185,7 +201,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   answers now carry `networkSpaces`, index-aligned with `spaces`, and the joiner records each space under it. A
   member that already has the duplicate heals from its publisher or tree parent once both run this version
   (audited as `network.space_alias.heal`); on a club, closed or democratic network, accept the waiting space with
-  `mapTo` naming the space you carry. The idle duplicate is left for you to remove. A pre-5.5.3 joiner of an
+  `mapTo` naming the space you carry. The idle duplicate is left for you to remove. A pre-5.6.0 joiner of an
   upgraded publisher still gets the duplicate until it upgrades too. See
   [Networks API](docs/integration-guide/08-networks-api.md) and
   [A space that shows up twice](docs/userguide/04-settings.md#a-space-that-shows-up-twice).
@@ -228,7 +244,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   what it does, so a member relaying a `space_deletion` or `space_wipe` round could rewrite its target space or wiped
   types and every honest cast still verified on the instance that learned the round from it. A cast now also carries
   `bsig`, signed over the round's type, `spaceId`, `networkSpaceId` and `wipeTypes` and checked against the round it
-  is applied to. A cast without it is refused from a voter known to run 5.5.3 or later; from an older member the old
+  is applied to. A cast without it is refused from a voter known to run 5.6.0 or later; from an older member the old
   check stands until it upgrades. See [Signed vote casts](docs/sync-protocol.md#signed-vote-casts).
 - **`POST /api/sync/warm` warms only a network the calling peer belongs to, and only the spaces that network
   carries** (Q-133). It opened collection handles for any space id in the body.

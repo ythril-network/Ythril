@@ -11,7 +11,7 @@
  * |-------------------------------|----------------------|-----------------|----------|
  * | `sig` + `bsig`                | any                  | yes             | yes      |
  * | `sig` + `bsig`                | any                  | re-aimed        | NO       |
- * | `sig` only                    | 5.5.3 or later       | either          | NO — a stripped `bsig` is not a downgrade |
+ * | `sig` only                    | 5.6.0 or later       | either          | NO — a stripped `bsig` is not a downgrade |
  * | `sig` only                    | older, or not known  | yes             | yes — the transition, until every member upgrades |
  *
  * Run: node --test testing/standalone/a-relayed-round-cannot-be-re-aimed.test.js (after the server build)
@@ -46,11 +46,13 @@ function castFor(r, { bound = true } = {}) {
   return cast;
 }
 const valid = (n, r, c) => signing.isVoteCastSignatureValid(n, r, c);
+/** The first version that signs bound casts, read from the module so the table follows the release it shipped in. */
+const SINCE = signing.BOUND_CASTS_SINCE;
 
 describe('a bound cast verifies only against the round it was cast on', () => {
   it('the honest round', () => {
     const r = round();
-    assert.equal(valid(net('5.5.3'), r, castFor(r)), true);
+    assert.equal(valid(net(SINCE), r, castFor(r)), true);
   });
 
   for (const [field, value] of [['spaceId', 'payroll'], ['networkSpaceId', 'payroll'], ['type', 'space_wipe'], ['wipeTypes', ['entities']]]) {
@@ -60,7 +62,7 @@ describe('a bound cast verifies only against the round it was cast on', () => {
       const reaimed = { ...honest, [field]: value };
       assert.equal(signing.verifyMessage(keys.publicKeyPem, signing.voteCastMessage({ networkId: NET, roundId: 'r1',
         subjectInstanceId: 'subject', instanceId: VOTER, vote: 'yes' }), cast.sig), true, 'the v1 signature should still verify — that is the hole');
-      assert.equal(valid(net('5.5.3'), reaimed, cast), false, `a cast verified on a round whose ${field} was rewritten`);
+      assert.equal(valid(net(SINCE), reaimed, cast), false, `a cast verified on a round whose ${field} was rewritten`);
       assert.equal(valid(net(undefined), reaimed, cast), false, 'a bound cast must bind whatever version its voter is known to run');
     });
   }
@@ -68,20 +70,23 @@ describe('a bound cast verifies only against the round it was cast on', () => {
   it('the order of wipeTypes is not content', () => {
     const r = { ...round(), type: 'space_wipe', wipeTypes: ['facts', 'entities'] };
     const cast = castFor(r);
-    assert.equal(valid(net('5.5.3'), { ...r, wipeTypes: ['entities', 'facts'] }, cast), true);
+    assert.equal(valid(net(SINCE), { ...r, wipeTypes: ['entities', 'facts'] }, cast), true);
   });
 });
 
 describe('a cast without the bound signature', () => {
-  it('from a voter known to run 5.5.3 or later is refused — stripping bsig is not a downgrade', () => {
+  it('from a voter known to run the first bound version or later is refused — stripping bsig is not a downgrade', () => {
+    assert.equal(SINCE, '5.6.0', 'bound casts shipped in 5.6.0; a later patch of an older line must not be read as signing them');
     const r = round();
-    assert.equal(valid(net('5.5.3'), r, castFor(r, { bound: false })), false);
+    assert.equal(valid(net(SINCE), r, castFor(r, { bound: false })), false);
     assert.equal(valid(net('6.0.0'), r, castFor(r, { bound: false })), false);
   });
 
   it('from an older voter, or one whose version is not known, falls back to the v1 check (the transition)', () => {
     const r = round();
     assert.equal(valid(net('5.5.2'), r, castFor(r, { bound: false })), true);
+    // A patch on the 5.5 line carries no bsig, so it is older whatever its patch number.
+    assert.equal(valid(net('5.5.9'), r, castFor(r, { bound: false })), true);
     assert.equal(valid(net(undefined), r, castFor(r, { bound: false })), true);
   });
 });

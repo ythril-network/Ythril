@@ -683,7 +683,7 @@ and `nextSkip`, the way the byte budget stops it. Nothing is written unless `rem
 > The rule, the reasons and the bounds: [Graph-augmented recall](04h-graph-augmented-recall.md). The one spill
 > left, its paging and its refusals: [Reading a spill](04a-recall-api.md#reading-a-spill-get-apibrainspillsid-and-mcp-read_spill).
 
-Until 5.5.3 a large neighbourhood was cut to an inline cap and the whole graph kept as a spill behind
+Until 5.6.0 a large neighbourhood was cut to an inline cap and the whole graph kept as a spill behind
 `graphComplete`. A caller then held a row whose graph was part of what it asked for, and had to fetch and merge
 the rest; a row is now what was asked for or it is not there.
 

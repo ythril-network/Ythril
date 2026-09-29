@@ -382,7 +382,7 @@ row survives its own tool being built, so the list cannot keep advertising a gap
 >
 > **`save_space` needs the `createSpaces` right** (or instance admin) — the same predicate as `POST /api/spaces`
 > and a network join, refused in the same sentence. It is listed to any token holding it, and the token that
-> creates a space becomes its administrator. **Changed in 5.5.3**: it used to be instance-admin only.
+> creates a space becomes its administrator. **Changed in 5.6.0**: it used to be instance-admin only.
 >
 > **`delete_space_data` is SPACE-admin, not instance-admin** (5.0). It empties one named space, so
 > "administers that space" is the honest requirement, and demanding the instance was the old flag showing

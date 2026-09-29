@@ -132,7 +132,7 @@ Active-content types that can execute script when rendered in the browser (`.htm
 
 **A read spill's `path` is not a file here — deprecated, and removed at the next major.** `recall` and
 `similar` still send `path` on `remainder`, shaped `_tmp/results-<spillId>.json` (an older answer's
-`graphComplete.path` was `_tmp/graph-<spillId>.json`), because before 5.5.3 a spill was a file at the space root. Since then no search
+`graphComplete.path` was `_tmp/graph-<spillId>.json`), because before 5.6.0 a spill was a file at the space root. Since then no search
 writes into a space, and exactly that path at the root is answered from the spill store instead of the file
 store: JSON, `Cache-Control: no-store`, for the **token that ran the search alone**, under the same rule and the
 same `404` / `410` as `GET /api/brain/spills/:id` — `files: read` on the space is not enough. It returns the
@@ -171,7 +171,7 @@ A directory's `size` is the recursive sum of everything beneath it. Files carry 
 
 **The root `_converted/`, `_extracted/` and `_tmp/` directories are left out of a listing** unless you send
 `?includeDerived=true`. The first two are the conversion pipeline's output
-([Conversion Pipeline](05a-conversion-pipeline.md)). `_tmp/` is where versions before 5.5.3 wrote read spills;
+([Conversion Pipeline](05a-conversion-pipeline.md)). `_tmp/` is where versions before 5.6.0 wrote read spills;
 nothing writes spills there now, and the ones that remain are swept away by the retention pass every few minutes — anything else under it is
 yours and is kept. Only at the root: a directory of your own with one of these names deeper in the tree is
 listed like any other.

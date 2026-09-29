@@ -65,7 +65,7 @@ export function voteCastMessage(params: {
  * is refused: a relayer that strips the bound signature must not be able to fall back to the v1 check that it
  * defeats. From an older or unknown voter the v1 check stands — the transition, until every member upgrades.
  */
-export const BOUND_CASTS_SINCE = '5.5.3';
+export const BOUND_CASTS_SINCE = '5.6.0';
 
 /**
  * What a round would DO, as a cast's bound signature covers it (`Q-138`): its type and its target. `pendingMeta` is
@@ -212,7 +212,7 @@ export function signOwnVoteCast(params: {
 
 /**
  * Build this instance's own vote cast, signed when a signing key is available: the v1 `sig` every version checks, and
- * `bsig` over the round's type and target (`Q-138`), which a 5.5.3 receiver requires of a voter it knows is current.
+ * `bsig` over the round's type and target (`Q-138`), which a 5.6.0 receiver requires of a voter it knows is current.
  */
 export function makeSignedOwnCast(networkId: string, round: VoteRound, instanceId: string, vote: 'yes' | 'veto'): VoteCast {
   const base = { networkId, roundId: round.roundId, subjectInstanceId: round.subjectInstanceId, instanceId, vote };

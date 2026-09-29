@@ -763,7 +763,7 @@ Named volumes persist across upgrades. The server applies any pending MongoDB in
 
 **Breaking changes**, when they occur, will be listed in `CHANGELOG.md` with migration steps.
 
-**Upgrading to 5.5.3 or later deletes the read spills older versions wrote into spaces, and that cannot be
+**Upgrading to 5.6.0 or later deletes the read spills older versions wrote into spaces, and that cannot be
 undone.** Before it, a `recall` or `similar` answer too large to return inline was saved as a file at the root
 of the seed's space — `_tmp/graph-<id>.json` or `_tmp/results-<id>.json` — which replicated to every peer and
 never expired there. They are one caller's search results, not content, and spills now live outside every
@@ -773,7 +773,7 @@ log line and one audit entry, `file.legacy_spill.sweep`, naming the space. Only 
 touched: a `_tmp` folder of your own deeper in the tree, and any other file under the root `_tmp`, are left
 alone. Copy the root `_tmp/` out of a space's file store first if you want to keep one.
 
-**Upgrading to 5.5.3 or later rebuilds every vector index once, with no gap in search.** Each index gains `_id` as a
+**Upgrading to 5.6.0 or later rebuilds every vector index once, with no gap in search.** Each index gains `_id` as a
 filter field, which is what lets a filtered recall complete its answer. Where the database can change an index in
 place (Atlas) it does; where it cannot (`mongodb-atlas-local`), the new definition is built under a second name,
 searches move to it, the original is rebuilt, and searches move back. Until an index is done, a filtered recall that
@@ -782,7 +782,7 @@ a large instance this takes as long as building every index twice, in the backgr
 
 ### Rolling Back
 
-**A rollback from 5.5.3 rebuilds the vector indexes once more**, to the previous version's filter fields. Search
+**A rollback from 5.6.0 rebuilds the vector indexes once more**, to the previous version's filter fields. Search
 keeps working meanwhile, except on `mongodb-atlas-local`, where the older build drops and recreates each index and
 recall on it answers empty until it is ready. Nothing is lost; the records are untouched.
 
@@ -797,7 +797,7 @@ moved. They are listed here so the consequence of going back is not a surprise:
 |---|---|---|
 | `mediaEmbedding.enabled` → per-class `levels` | `enabled` | defaults it back to **`true`**: an instance where media embedding was deliberately **off** starts sending uploads to the vision and speech models again |
 | a space's `description` → `meta.purpose` | `description` | reads no space instructions, because the field it serves to MCP clients is gone |
-| a network's schema layer or membership origin kept under a renamed space's OLD name → the space's current name (`migrateNetworkSpaceKeys`) | the entry under the old name (moved, not deleted; an entry with no space to move to is left where it is) | looks the network's layer up under the old name again and finds nothing, so the space's effective schema loses that network's layer until the network next sends it (the next meta pull on a pub/sub or tree; the next round on a voted network), and a token that joined the network can no longer be told apart as its establisher for the leave rule. **New in 5.5.3.** Nothing about the records changes |
+| a network's schema layer or membership origin kept under a renamed space's OLD name → the space's current name (`migrateNetworkSpaceKeys`) | the entry under the old name (moved, not deleted; an entry with no space to move to is left where it is) | looks the network's layer up under the old name again and finds nothing, so the space's effective schema loses that network's layer until the network next sends it (the next meta pull on a pub/sub or tree; the next round on a voted network), and a token that joined the network can no longer be told apart as its establisher for the leave rule. **New in 5.6.0.** Nothing about the records changes |
 | a provider API key in `mediaEmbedding.<vision\|stt\|nli\|rerank>.apiKey` → `secrets.json` | `apiKey` | sends no `Authorization` header to that provider, so an external vision / speech-to-text / NLI / rerank endpoint returns 401 and the feature stops. The key is NOT lost — it is in `secrets.json` (`0o600`) and can be pasted back into `config.json` for the older build. **New in 3.0**, and the reason is that `config.json` is the file operators copy, paste into issues, and mount as a ConfigMap. |
 | `mediaEmbedding.ollamaUrl` / `visionModel` / `whisperUrl` / `whisperModel` → `vision.*` / `stt.*` | `ollamaUrl`, `visionModel`, `whisperUrl`, `whisperModel` | stops finding those four names and falls back to its BUILT-IN defaults — `http://ollama:11434` and `http://whisper:8000` — so it captions and transcribes against whatever answers there, with no error. The values are not lost: they are on `vision.*` / `stt.*`, which the older build also reads. **New in 3.0.** The env vars are a separate matter and 4.0 REMOVED the legacy spellings: `VISION_BASE_URL`, `STT_BASE_URL` and `STT_MODEL` are the names, and `OLLAMA_URL` / `WHISPER_URL` / `WHISPER_MODEL` now refuse the boot rather than resolving — see the rename note in the media-embedding guide for why refusing beats ignoring. **This matters for a rollback in one direction only:** the current names resolve in every 3.x build, so a manifest written for 4.0 runs on 3.x unchanged. A manifest still using the legacy names runs on 3.x and will not start on 4.0. |
 | `mediaEmbedding.faceRecognition.enabled` → the image ladder | `faceRecognition.enabled` | applies its own default for face recognition rather than the choice that was recorded |
@@ -845,7 +845,7 @@ UI ignore ones they do not know, so an older build reads newer records — it si
 The exception is anything created by a feature the old version lacks: a record whose `type` has no schema in the
 old build is still stored and still returned, just unvalidated.
 
-**Rolling back past 5.5.3 leaves the read-spill store behind, and it empties itself.** The `_read_spills` and
+**Rolling back past 5.6.0 leaves the read-spill store behind, and it empties itself.** The `_read_spills` and
 `_read_spill_pages` collections are unknown to an older build, which neither reads nor removes them; their
 MongoDB TTL index keeps running, so every spill in them is gone within a day. Until then an older build's
 backups include them, because it does not know to leave them out. The legacy spills the upgrade swept are not
