@@ -42,6 +42,7 @@ import { log } from '../util/log.js';
 import { recallDegradedTotal } from '../metrics/registry.js';
 import { envInt } from '../config/env-num.js';
 import { spaceCollection } from '../db/space-collection.js';
+import { MAX_PER_TYPE_CANDIDATES, perTypeFetch, floorFetch, annCandidates } from './search-bounds.js';
 
 /**
  * End-to-end budget for one recall call.
@@ -354,7 +355,7 @@ export async function recall(
     const floorSearches = Object.entries(minPerType)
       .filter(([t, floor]) => activeTypes.includes(t as RecallKnowledgeType) && (floor ?? 0) > 0)
       .map(([t, floor]) =>
-        recallByType(spaceId, t as RecallKnowledgeType, embResult.vector, floor!, tags, filter, pathObs, budget),
+        recallByType(spaceId, t as RecallKnowledgeType, embResult.vector, floorFetch(floor!, topK), tags, filter, pathObs, budget),
       );
     const floorResults = (await settleSearches(floorSearches, noteDegraded)).flat();
     for (const r of floorResults) {
@@ -374,9 +375,15 @@ export async function recall(
   // Bounded absolutely as well as by `topK`. The over-fetch IS the reranking mechanism, so the multiplier
   // stays — but `topK` has no ceiling of its own since `P-34`, and a per-type fetch that scales without
   // one is how an oversized request becomes an oversized query rather than a slow answer.
-  const perTypeK = Math.min(Math.ceil(topK * (reranking ? candidateMultiplier() : 1.5)), MAX_PER_TYPE_CANDIDATES);
+  const perTypeK = perTypeFetch(topK, reranking ? candidateMultiplier() : 1.5);
   const searches = activeTypes.map(t => recallByType(spaceId, t, embResult.vector, perTypeK, tags, filter, pathObs, budget));
-  const allResults = (await settleSearches(searches, noteDegraded)).flat();
+  const perTypeResults = await settleSearches(searches, noteDegraded);
+  const allResults = perTypeResults.flat();
+  // P-34: nothing is silently rewritten. A `topK` past the per-type bound, on a type that filled that bound, may have
+  // more matches than the recall could consider — so the answer says so rather than reading as complete (Q-103).
+  if (topK > MAX_PER_TYPE_CANDIDATES && perTypeResults.some(r => r.length >= MAX_PER_TYPE_CANDIDATES)) {
+    noteDegraded('candidate_cap');
+  }
 
   /*
    * Phase 2a: the records the INDEX has not ingested yet, read straight from each collection.
@@ -846,7 +853,7 @@ async function recallByType(
 
   /** ANN: approximate nearest-neighbour, no filtering. Used when nothing is filtered. */
   const annStage = () => ({
-    $vectorSearch: { index: indexName, path: 'embedding', queryVector, numCandidates: Math.min(topK * 15, 1000), limit: topK },
+    $vectorSearch: { index: indexName, path: 'embedding', queryVector, ...annCandidates(topK) },
   });
 
   /**
@@ -1087,21 +1094,10 @@ async function enrichFileChunksWithParent(spaceId: string, results: RecallResult
   }
 }
 
-/** Semantic recall across multiple spaces (parallel) */
-/**
- * The most candidates one TYPE may be fetched for a single recall, however large `topK` is.
- *
- * `topK` has no ceiling of its own since `P-34` — the owner's reasoning being that the byte budget already
- * returns whole records and reports truncation, so the ANSWER never needed a cap. What still needs one is
- * the WORK: the per-type over-fetch is the reranking mechanism and scales with `topK`, so without this a
- * `topK: 100000` becomes a query for a million candidates rather than a slow answer.
- *
- * 2000 because the vector search's own `numCandidates` is already bounded at 1000 and its ENN fallback at
- * 10000, so this sits between them: high enough that no realistic request meets it, low enough that an
- * unrealistic one is bounded rather than refused.
- */
-export const MAX_PER_TYPE_CANDIDATES = 2000;
+/** The per-type bound lives with the other search bounds (`Q-103`); re-exported for the callers that read it here. */
+export { MAX_PER_TYPE_CANDIDATES };
 
+/** Semantic recall across multiple spaces (parallel) */
 export async function recallGlobal(
   spaceIds: string[],
   query: string,

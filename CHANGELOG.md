@@ -116,6 +116,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A large `topK` is served, not a 500** (Q-103). The vector stage was handed a per-type limit that followed `topK`
+  while its candidate count stopped at 1000, and the index refuses a limit above its candidates — so a recall asking
+  for more than about 666 of a type answered a 500 labelled retryable, as did a `minPerType` floor above 1000. The
+  sizing lives in `brain/search-bounds.ts` with the per-type bound (2000), a floor is clamped to both `topK` and that
+  bound, and a `topK` past the bound on a type that fills it answers `degraded: ["candidate_cap"]` rather than
+  reading as complete. `topK` still has no ceiling.
 - **A joined network syncs on its own** (Q-137). The join registered the network with no schedule, which is manual
   only, so a joiner never pulled and a subscriber depended on its publisher pushing everything. The join now adopts
   the inviter's schedule, carried as `syncSchedule` in the invite apply answer, or every 15 minutes when the inviter

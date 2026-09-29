@@ -45,6 +45,39 @@ export function overrideWalkBoundsForTest(bounds: Partial<WalkBounds> | null): v
   override = bounds;
 }
 
+/**
+ * The most candidates one TYPE may be fetched for a single recall, however large `topK` is (moved here from
+ * `recall.ts`, `Q-103`).
+ *
+ * The per-type over-fetch is the reranking mechanism and scales with `topK`, so without this a `topK: 100000` becomes
+ * a query for a million candidates rather than a slow answer. 2000 sits between the vector search's own candidate
+ * default (1000) and its ceiling (10000): no realistic request meets it, and an unrealistic one is bounded, not refused.
+ */
+export const MAX_PER_TYPE_CANDIDATES = 2000;
+
+/** How many of one type a recall fetches: `topK` over-fetched by `multiplier`, never past the per-type bound. */
+export function perTypeFetch(topK: number, multiplier: number): number {
+  return Math.min(Math.ceil(topK * multiplier), MAX_PER_TYPE_CANDIDATES);
+}
+
+/**
+ * How many of one type a `minPerType` floor fetches. The guide promises the floor is clamped to `topK`, and without the
+ * per-type bound as well a floor of 1001 was a second route to the vector stage's `limit > numCandidates` failure.
+ */
+export function floorFetch(floor: number, topK: number): number {
+  return Math.min(floor, topK, MAX_PER_TYPE_CANDIDATES);
+}
+
+/**
+ * The vector stage's sizing for `limit` results (`Q-103`). The index refuses `limit > numCandidates`, and the
+ * candidate count stopped at 1000 while `limit` followed `topK` — so any per-type fetch above 1000 answered a 500
+ * labelled retryable. 15x oversampling up to 1000 as before, and never fewer candidates than the limit asks for; with
+ * `limit` bounded by `MAX_PER_TYPE_CANDIDATES` this stays well inside the index's 10000.
+ */
+export function annCandidates(limit: number): { numCandidates: number; limit: number } {
+  return { limit, numCandidates: Math.max(limit, Math.min(limit * 15, 1000)) };
+}
+
 /** Milliseconds left of a deadline that started at `startedAt` and lasts `budgetMs`. Negative once spent. */
 export function deadlineFrom(startedAt: number, budgetMs: number): () => number {
   return () => budgetMs - (Date.now() - startedAt);

@@ -20,6 +20,11 @@ export const DEGRADED_REASONS = [
   'search_timeout',
   /** A filtered answer could not be completed, so it may be missing records that satisfy the filter. */
   'filter_window',
+  /**
+   * `topK` asked for more of one type than a recall fetches (`MAX_PER_TYPE_CANDIDATES`), and that type filled the
+   * bound — so it may hold matches the recall never considered (`Q-103`).
+   */
+  'candidate_cap',
 ] as const;
 
 export type DegradedReason = typeof DEGRADED_REASONS[number];
