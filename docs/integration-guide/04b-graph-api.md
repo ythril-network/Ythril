@@ -499,8 +499,8 @@ POST /api/brain/spaces/:spaceId/traverse
 | `startId` | ✅ | — | UUID of the starting entity |
 | `direction` | — | `"outbound"` | `"outbound"` follows edges from the node, `"inbound"` follows edges to it, `"both"` follows in either direction. **Stored edges only** — it does not narrow links; see below |
 | `edgeLabels` | — | all labels | Filter traversal to specific edge labels only |
-| `maxDepth` | — | `3` | Maximum hops from `startId`; hard-capped at `10` |
-| `limit` | — | `100` | How many nodes the **walk** may visit, **clamped to 1–1000 on both doors** — `limit: 5000` silently becomes 1000. A walk that hit it answers `limitReached: true`: a partial graph only a larger `limit` reaches |
+| `maxDepth` | — | `3` | Maximum hops from `startId`, 1–10 on both doors; outside that is a `400`. **Changed** (`Q-109`): REST used to clamp it |
+| `limit` | — | `100` | How many nodes the **walk** may visit, **1–1000 on both doors, and outside that is a `400`** — REST used to clamp `limit: 5000` to 1000 silently (`Q-109`). A walk that hit it answers `limitReached: true`: a partial graph only a larger `limit` reaches |
 | `includeChrono` | — | `true` | Also reach chrono entries LINKED to a traversed node. Set `false` for entity-only results. A non-boolean is a `400`, never coerced |
 | `includeMemories` | — | `false` | Also reach facts LINKED to a traversed node, marked `kind: "fact"`. **Opt-in, unlike `includeChrono`** — see the note below. A non-boolean is a `400`. **This door's `false` is a real default**, so an unsaid flag brings no facts: recall's expansion differs and brings ATTRIBUTED claims when the flag is unsaid, because its caller asked a question rather than asked to explore — see [the recall page](04a-recall-api.md) |
 | `includeFiles` | — | `false` | Also reach files LINKED to a traversed node, marked `kind: "file"` and carrying **file meta only**. Opt-in. A non-boolean is a `400` |
