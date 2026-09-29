@@ -1,6 +1,6 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { EMPTY, Observable, of } from 'rxjs';
+import { EMPTY, Observable, forkJoin, of } from 'rxjs';
 import { expand, map, reduce, switchMap } from 'rxjs/operators';
 import { SPILL_PAGE_MAX, type SpillPage, type WholeSpill } from './read-spill';
 import { filterCall } from './filter-call';
@@ -166,6 +166,9 @@ export interface RecallRequestBody {
        */
       remainderDump?: boolean;
 }
+
+/** Ids per request when resolving a set of entities: every `$in` stays bounded, and every id is still asked for (Q-131). */
+const ENTITY_ID_BATCH = 100;
 
 @Injectable({ providedIn: 'root' })
 export class BrainApi {
@@ -512,19 +515,22 @@ export class BrainApi {
   }
 
   /**
-   * Entities for a set of ids, in one request.
+   * Entities for a set of ids — EVERY one of them (`Q-131`).
    *
    * The `$in` is why this is not a loop over `filterOne`: a picker resolving twenty references would
-   * otherwise make twenty round trips, and the route it replaces made one. The 100-id ceiling was the
-   * route's and is kept here — an unbounded `$in` is a page with no limit on it.
+   * otherwise make twenty round trips. It used to slice the ids at 100, so a view resolving more showed the rest
+   * as unresolved with nothing saying so. Now the ids go in batches of `ENTITY_ID_BATCH`, requested together and
+   * merged: each `$in` stays bounded, and the answer is the whole set asked for.
    */
   getEntitiesByIds(spaceId: string, ids: string[]): Observable<{ entities: Entity[] }> {
-    if (!ids.length) return new Observable(o => { o.next({ entities: [] }); o.complete(); });
-    const unique = [...new Set(ids)].slice(0, 100);
-    return filterCall<{ results: Entity[] }>(this.http, {
-      space: spaceId, collection: 'entities', filter: { _id: { $in: unique } }, limit: unique.length,
-    })
-      .pipe(map(r => ({ entities: r.results ?? [] })));
+    const unique = [...new Set(ids)];
+    if (!unique.length) return of({ entities: [] });
+    const batches: string[][] = [];
+    for (let i = 0; i < unique.length; i += ENTITY_ID_BATCH) batches.push(unique.slice(i, i + ENTITY_ID_BATCH));
+    return forkJoin(batches.map(batch => filterCall<{ results: Entity[] }>(this.http, {
+      space: spaceId, collection: 'entities', filter: { _id: { $in: batch } }, limit: batch.length,
+    })))
+      .pipe(map(pages => ({ entities: pages.flatMap(r => r.results ?? []) })));
   }
 
   getEntity(spaceId: string, id: string): Observable<Entity> {
