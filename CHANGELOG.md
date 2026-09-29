@@ -195,6 +195,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **Every regex a filter can run passes the catastrophic-pattern guard** (Q-118). The guard read only `$regex`,
+  while `$expr` is accepted, so `$regexMatch`, `$regexFind` and `$regexFindAll` ran any pattern — `(a+)+$` pinned
+  MongoDB's CPU for the whole `maxTimeMS`, per member space on a proxy, on the filter tool, recall's `filter` and
+  `/query` alike. They are now guarded like `$regex`, and their pattern must be a literal: one read from a field is
+  refused, since no guard can inspect it. The filter tool's description no longer promises an allowlist nothing
+  enforced; it names what is refused, from the sets that refuse it.
 - **A relaying member cannot re-aim a vote round** (Q-138). A vote cast's signature covered the round's id but not
   what it does, so a member relaying a `space_deletion` or `space_wipe` round could rewrite its target space or wiped
   types and every honest cast still verified on the instance that learned the round from it. A cast now also carries

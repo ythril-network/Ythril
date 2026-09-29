@@ -76,6 +76,44 @@ export const REFUSED_OPERATORS: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * Every operator that makes MongoDB evaluate a regular expression (`Q-118`) — the set the pattern guard covers.
+ *
+ * It covered `$regex` alone, while `$expr` is allowed: `{$expr: {$regexMatch: {input: '$name', regex: '(a+)+$'}}}`
+ * ran a catastrophic pattern past the guard on every filter door. A regex operator added to MongoDB later belongs
+ * here, and the filter tool's description is built from this set, so what it says is guarded is what is.
+ */
+export const REGEX_OPERATORS: ReadonlySet<string> = new Set(['$regex', '$regexMatch', '$regexFind', '$regexFindAll']);
+
+/** Refuse a pattern the guard cannot approve: not a literal, too long, or at risk of catastrophic backtracking. */
+function guardPattern(op: string, pattern: unknown): void {
+  if (typeof pattern !== 'string') {
+    throw new Error(`'${op}' must be a string pattern: a literal, not an expression — an expression cannot be checked`);
+  }
+  if (op !== '$regex' && pattern.startsWith('$')) {
+    // In an aggregation expression a string starting with `$` is a FIELD PATH: the pattern would be read out of
+    // stored data at run time, where no guard can inspect it — so only a literal pattern is accepted.
+    throw new Error(`'${op}' needs a literal pattern — '${pattern}' is a field path, read from stored data where it cannot be checked`);
+  }
+  if (pattern.length > MAX_PATTERN_LENGTH) throw new Error(`'${op}' pattern exceeds ${MAX_PATTERN_LENGTH} characters`);
+  if (hasReDoSRisk(pattern)) {
+    throw new Error(`'${op}' pattern rejected: potential catastrophic backtracking (nested or alternating quantifiers)`);
+  }
+}
+
+/** The guard for one regex-evaluating operator: `$regex` takes the pattern itself, the others `{ input, regex, options }`. */
+function guardRegex(op: string, val: unknown): void {
+  if (op === '$regex') { guardPattern(op, val); return; }
+  if (val === null || typeof val !== 'object' || Array.isArray(val)) {
+    throw new Error(`'${op}' takes an object: { input, regex, options }`);
+  }
+  const spec = val as Record<string, unknown>;
+  guardPattern(op, spec['regex']);
+  if (spec['options'] !== undefined && (typeof spec['options'] !== 'string' || !VALID_OPTIONS_RE.test(spec['options']))) {
+    throw new Error(`'${op}' options must be a string of valid regex flags (i, m, s, x)`);
+  }
+}
+
+/**
  * Keys no filter may use in EITHER grammar, whatever fields it is otherwise allowed to reach.
  *
  * Not fields — the names that make a plain-object assignment do something other than add a key:
@@ -159,20 +197,9 @@ export function sanitizeFilter(filter: unknown, depth = 0): unknown {
         throw new Error(`Operator '${key}' is not allowed: it executes JavaScript in the database process. `
           + 'Every other MongoDB query operator is accepted.');
       }
-      // `$regex` must be a plain string and pass the shared ReDoS heuristic — a catastrophic pattern would
-      // otherwise pin Mongo CPU for the full maxTimeMS budget per call, multiplied per member space on
-      // proxies.
-      if (key === '$regex') {
-        if (typeof val !== 'string') {
-          throw new Error("'$regex' must be a string pattern");
-        }
-        if (val.length > MAX_PATTERN_LENGTH) {
-          throw new Error(`'$regex' pattern exceeds ${MAX_PATTERN_LENGTH} characters`);
-        }
-        if (hasReDoSRisk(val)) {
-          throw new Error("'$regex' pattern rejected: potential catastrophic backtracking (nested or alternating quantifiers)");
-        }
-      }
+      // Every regex MongoDB would run passes the shared ReDoS heuristic — a catastrophic pattern would otherwise pin
+      // Mongo CPU for the full maxTimeMS budget per call, multiplied per member space on proxies (Q-118).
+      if (REGEX_OPERATORS.has(key)) guardRegex(key, val);
       out[key] = sanitizeFilter(val, depth + 1);
     }
     // `$options` must only appear alongside `$regex` and contain valid flags.

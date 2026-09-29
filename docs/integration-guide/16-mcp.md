@@ -863,7 +863,7 @@ Works with any valid token (including read-only). For proxy spaces, returns aggr
 | `limit` | `number` | — | Max documents, default `200`, no maximum. The schema carries no `maximum` on purpose: the MCP dispatcher enforces it before the handler, so one would refuse a page the REST door serves |
 | `maxTimeMS` | `number` | — | Query timeout in ms (max `30000`) |
 
-**Security**: The `query` tool rejects `$where`, `$function`, and deeply nested filters (>8 levels). Only safe read-only operators are allowed.
+**Security**: The `filter` tool — and recall's `filter` and `POST /query`, which run the same guard — refuses the three operators that execute JavaScript in the database (`$where`, `$function`, `$accumulator`) and filters nested deeper than 8 levels; every other query operator is accepted. Every regex a filter would run — `$regex`, and `$regexMatch`, `$regexFind` or `$regexFindAll` inside `$expr` — must be a literal pattern (not a field path or an expression), is length-limited, and is refused if it risks catastrophic backtracking.
 
 ### MCP Client Configuration
 

@@ -190,11 +190,12 @@ export function recurrenceSchema(lead: string) {
   } as const;
 }
 
-/** MongoDB operators the structured `query` filter accepts — mirrors `ALLOWED_OPERATORS` (brain/query.ts). */
-export const QUERY_FILTER_OPERATORS = [
-  '$eq', '$ne', '$gt', '$gte', '$lt', '$lte', '$in', '$nin', '$and', '$or', '$nor', '$not',
-  '$exists', '$type', '$regex', '$options', '$all', '$elemMatch', '$size', '$mod',
-] as const;
+/*
+ * `QUERY_FILTER_OPERATORS` WAS HERE, an allowlist "mirroring `ALLOWED_OPERATORS` (brain/query.ts)" — which no longer
+ * existed: every query operator but the three that run JavaScript is accepted (`REFUSED_OPERATORS`). The filter tool
+ * published it as "only these operators are allowed", a promise nothing enforced. Deleted in Q-118; the description
+ * is now built from the sets in `brain/filter-sanitizer.ts` that do the enforcing.
+ */
 
 /*
  * `RECALL_FILTER_KEY_PATTERN` WAS HERE AND IS DELETED, not merely left unreferenced.
