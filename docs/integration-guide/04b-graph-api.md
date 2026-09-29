@@ -496,9 +496,9 @@ POST /api/brain/spaces/:spaceId/traverse
 
 | Field | Required | Default | Description |
 |-------|----------|---------|-------------|
-| `startId` | ✅ | — | UUID of the starting entity |
-| `direction` | — | `"outbound"` | `"outbound"` follows edges from the node, `"inbound"` follows edges to it, `"both"` follows in either direction. **Stored edges only** — it does not narrow links; see below |
-| `edgeLabels` | — | all labels | Filter traversal to specific edge labels only |
+| `startId` | ✅ | — | UUID of the starting record — usually an entity; a fact or chrono entry works too. Blank is a `400` |
+| `direction` | — | `"outbound"` | `"outbound"` follows edges from the node, `"inbound"` follows edges to it, `"both"` follows in either direction. **Stored edges only** — it does not narrow links; see below. Any other value is a `400`; REST used to fall back to `outbound` (`Q-109`) |
+| `edgeLabels` | — | all labels | Filter traversal to specific edge labels only. Every entry must be a string, or the call is a `400`; REST used to read a list with a non-string in it as ALL labels (`Q-109`) |
 | `maxDepth` | — | `3` | Maximum hops from `startId`, 1–10 on both doors; outside that is a `400`. **Changed** (`Q-109`): REST used to clamp it |
 | `limit` | — | `100` | How many nodes the **walk** may visit, **1–1000 on both doors, and outside that is a `400`** — REST used to clamp `limit: 5000` to 1000 silently (`Q-109`). A walk that hit it answers `limitReached: true`: a partial graph only a larger `limit` reaches |
 | `includeChrono` | — | `true` | Also reach chrono entries LINKED to a traversed node. Set `false` for entity-only results. A non-boolean is a `400`, never coerced |
