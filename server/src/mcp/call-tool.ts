@@ -35,7 +35,7 @@
 import { getConfig } from '../config/loader.js';
 import { log, currentRequestId } from '../util/log.js';
 import { reachableSpaceIds } from '../auth/space-reach.js';
-import { toolRightsRefusal, spaceAdminRefusal } from './tool-rights-guard.js';
+import { toolRightsRefusal, spaceAdminRefusal, toolReach } from './tool-rights-guard.js';
 import { toolIsVisible } from './tool-visibility.js';
 import { createSpacesRefusal } from '../auth/create-spaces.js';
 import type { TokenRights } from '../config/rights-shape.js';
@@ -268,6 +268,7 @@ export async function callTool(req: ToolCallRequest): Promise<ToolCallOutcome> {
     }
     const startedAt = Date.now();
     let snapshots: AuditSnapshots | undefined;
+    const handlerSpaceIds = toolReach(name, rights, accessibleSpaceIds);
     const result = await tool.handle({
       args: a,
       callSpace,
@@ -280,8 +281,9 @@ export async function callTool(req: ToolCallRequest): Promise<ToolCallOutcome> {
       transport: caller.transport,
       rateKey,
       cfg,
-      accessibleSpaces,
-      accessibleSpaceIds,
+      // Narrowed to the tool's area for a read tool, so a search that names no space reads only where it may (Q-89).
+      accessibleSpaces: accessibleSpaces.filter(sp => handlerSpaceIds.includes(sp.id)),
+      accessibleSpaceIds: handlerSpaceIds,
       // Populated, not merely declared. `toolIsVisible(t, undefined)` hides every mutating and admin tool,
       // so an unpopulated `rights` here would empty `help`'s listing while `tools/list` stayed correct.
       rights,
