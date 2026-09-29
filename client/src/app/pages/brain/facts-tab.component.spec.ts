@@ -82,7 +82,7 @@ describe('FactsTabComponent', () => {
     api.recallBrain.mockReturnValueOnce(of({ count: 1, results: [{
       type: 'fact', score: 0.9, spaceId: 'work',
       record: { _id: 'f1', fact: 'the deadline is Friday', tags: ['ops'], linkEntities: [], properties: {}, createdAt: '2026-09-01T00:00:00Z', seq: 4 },
-    }] } as never));
+    }] }) as never);
     vi.useFakeTimers();
     c.onMemorySearch('deadline');
     vi.advanceTimersByTime(300);

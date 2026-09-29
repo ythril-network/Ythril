@@ -118,7 +118,7 @@ describe('ChronoTabComponent', () => {
     api.recallBrain.mockReturnValueOnce(of({ count: 1, results: [{
       type: 'chrono', score: 0.7, spaceId: 'work',
       record: { _id: 'c1', title: 'Launch', type: 'milestone', status: 'completed', startsAt: '2026-10-01T00:00:00Z', tags: [], createdAt: '2026-09-01T00:00:00Z' },
-    }] } as never));
+    }] }) as never);
     vi.useFakeTimers();
     c.onChronoSearch('launch');
     vi.advanceTimersByTime(300);

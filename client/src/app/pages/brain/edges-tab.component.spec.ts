@@ -77,7 +77,7 @@ describe('EdgesTabComponent', () => {
     api.recallBrain.mockReturnValueOnce(of({ count: 1, results: [{
       type: 'edge', score: 0.8, spaceId: 'work',
       record: { _id: 'e1', from: 'a', fromName: 'Ada', to: 'b', toName: 'Babbage', label: 'mentored_by', tags: [], properties: {}, createdAt: '2026-09-01T00:00:00Z' },
-    }] } as never));
+    }] }) as never);
     vi.useFakeTimers();
     c.onEdgeSearch('mentor');
     vi.advanceTimersByTime(300);
