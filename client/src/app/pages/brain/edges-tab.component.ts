@@ -5,7 +5,7 @@ import { FormsModule } from '@angular/forms';
 import { TranslocoPipe } from '@jsverse/transloco';
 import { catchError, of } from 'rxjs';
 import { Edge, Entity } from '../../core/api.types';
-import { recordOf } from './recall-hits';
+import { recordOf, interactiveRecallBody, LatestWins, INTERACTIVE_DEBOUNCE_MS } from './recall-hits';
 import { BrainApi } from '../../core/brain-api.service';
 import { httpErrorReason } from '../../core/http-error';
 import { TagInputComponent } from '../../shared/tag-input.component';
@@ -293,7 +293,6 @@ export class EdgesTabComponent extends RecordTabBase {
   edgeForm = { from: '', fromDisplay: '', to: '', toDisplay: '', label: '', weight: null as number | null, tags: [] as string[], description: '', properties: {} as Record<string, string | number | boolean> };
   editEdge = { from: '', to: '', fromName: undefined as string | undefined, toName: undefined as string | undefined, label: '', weight: null as number | null, tags: [] as string[], description: '', properties: {} as Record<string, string | number | boolean> };
 
-  private _edgeSemTimer: ReturnType<typeof setTimeout> | null = null;
 
   protected override resetOnSpaceChange(): void {
     this.recordFilter.set({ type: '', tag: '', description: '', properties: '', fromName: '', toName: '', entityName: '' });
@@ -324,18 +323,18 @@ export class EdgesTabComponent extends RecordTabBase {
    */
   onEdgeSearch(q: string): void {
     this.store.edgeSearch.set(q);
-    if (this._edgeSemTimer) clearTimeout(this._edgeSemTimer);
-    if (!q.trim()) { this.skip.set(0); this.load(); return; }
-    this._edgeSemTimer = setTimeout(() => this.runSemanticEdgeSearch(), 300);
+    if (!q.trim()) { this.semanticSearch.cancel(); this.skip.set(0); this.load(); return; }
+    this.semanticSearch.after(INTERACTIVE_DEBOUNCE_MS, () => this.runSemanticEdgeSearch());
   }
 
   runSemanticEdgeSearch(): void {
     const q = this.store.edgeSearch().trim();
     const spaceId = this.spaceId();
-    if (!q || !spaceId) { this.store.edges.set([]); return; }
-    this.brainApi.recallBrain(spaceId, { query: q, types: ['edge'], topK: 20 }).pipe(
+    if (!q || !spaceId) { this.semanticSearch.cancel(); this.store.edges.set([]); return; }
+    // Latest wins (Q-88): this search cancels the one before it.
+    this.semanticSearch.run(this.brainApi.recallBrain(spaceId, interactiveRecallBody(q, 'edge', 20)).pipe(
       catchError(() => of({ results: [], count: 0 })),
-    ).subscribe(res => {
+    ), res => {
       // The fields are the RECORD's, not the hit's (Q-87): read off the hit they were all undefined.
       this.store.edges.set(res.results.filter(r => r.type === 'edge').map(recordOf).map(r => ({
         _id: r['_id'] as string,
@@ -352,6 +351,8 @@ export class EdgesTabComponent extends RecordTabBase {
       } as Edge)));
     });
   }
+
+  private readonly semanticSearch = new LatestWins();
 
   openEdgeForm(): void {
     const firstLabel = Object.keys(this.store.spaceMeta()?.typeSchemas?.edge ?? {})[0] ?? '';

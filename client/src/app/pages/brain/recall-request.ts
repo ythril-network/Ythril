@@ -109,6 +109,8 @@ export function recallRequestFrom(form: RecallFormState, typeOpts: readonly Reca
       ...(filter ? { filter } : {}),
       ...(form.maxPerType > 0 ? { maxPerType: form.maxPerType } : {}),
       ...(form.includeFileContent ? {} : { includeFileContent: false }),
+      // Like includeFileContent: on is the server's default, so only switching it off says anything (Q-88).
+      ...(form.rerank === false ? { rerank: false } : {}),
       ...(form.includeDiagnostics ? { includeDiagnostics: true } : {}),
       ...(form.includeRecordMeta ? { includeRecordMeta: true } : {}),
       ...(traverse ? { traverse } : {}),

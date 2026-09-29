@@ -501,6 +501,8 @@
   "brain.query.includeRecordMeta.tooltip": "Dodaje pola mówiące, GDZIE leży rekord, a nie co zawiera: kiedy został zapisany, kiedy ostatnio zmieniony oraz identyfikatory wszystkiego, z czym jest powiązany. Domyślnie wyłączone, bo w pomiarze na prawdziwym zbiorze tylko 30% odpowiedzi stanowiła treść, a większość reszty to właśnie te pola. Uwaga na datę utworzenia: to moment ZAPISU rekordu, a nie moment zapamiętanego zdarzenia — ten znajduje się we własnościach samego rekordu.",
   "brain.query.includeFileContent": "Uwzględnij treść fragmentu",
   "brain.query.includeFileContent.tooltip": "Czy trafienia w plikach zawierają pasujący fragment tekstu. Wyłączenie zwraca tylko lokalizacje i metadane — znacznie mniejsze odpowiedzi, ale bez pasującego tekstu.",
+  "brain.query.rerank": "Ponowne szeregowanie",
+  "brain.query.rerank.tooltip": "Czy model rerankingu ustala nową kolejność wyników — lepszą, i domyślną. Wyłączenie pokazuje kolejność sprzed rerankingu, znacznie szybciej przy obciążonym modelu. Wyszukiwania w pozostałych kartach i w polach wyboru zawsze go pomijają, bo czekasz na nie podczas pisania.",
   "brain.query.includeDiagnostics": "Uwzględnij pola diagnostyczne",
   "brain.query.includeDiagnostics.tooltip": "Dodaje pola używane wewnętrznie: dokładny tekst poddany osadzeniu, model osadzania, licznik synchronizacji oraz wyniki poszczególnych etapów rankingu. Obejmuje także skoki po grafie, na każdej głębokości. Włącz, aby ustalić, dlaczego coś znalazło się na danej pozycji; poza tym zostaw wyłączone, bo każde pole wraca przy każdym wyniku. Sam wektor osadzenia nigdy nie jest zwracany.",
   "brain.query.showAdvanced": "Więcej opcji",

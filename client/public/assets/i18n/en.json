@@ -501,6 +501,8 @@
   "brain.query.includeRecordMeta.tooltip": "Adds back the fields that say where a record SITS rather than what it says: when it was written, when it was last changed, and the ids of everything it links to. Off by default because on a measured corpus only 30% of an answer was content and most of the rest was this. Careful with the creation date: it is when the RECORD was written, not when the remembered thing happened — that lives in the record's own properties.",
   "brain.query.includeFileContent": "Include passage text",
   "brain.query.includeFileContent.tooltip": "Whether file results carry the matching passage body. Turn it off to get locations and metadata only — much smaller responses, but you will not see the text that matched.",
+  "brain.query.rerank": "Rerank",
+  "brain.query.rerank.tooltip": "Whether the reranking model re-orders the results — the better order, and the default. Turn it off to see the order before reranking, much faster on a busy model. The searches in the other tabs and the pickers always skip it, because you are waiting on them as you type.",
   "brain.query.includeDiagnostics": "Include diagnostic fields",
   "brain.query.includeDiagnostics.tooltip": "Adds the fields the system uses internally: the exact text that was embedded, the embedding model, the sync counter, and the per-stage ranking scores. Follows graph hops too, at every depth. Turn it on to work out why something ranked where it did; leave it off otherwise, because each field is returned once per result. The embedding vector itself is never returned.",
   "brain.query.showAdvanced": "More options",

@@ -501,6 +501,8 @@
   "brain.query.includeRecordMeta.tooltip": "Liefert die Felder mit, die sagen, WO ein Datensatz liegt statt was er aussagt: wann er geschrieben wurde, wann er zuletzt geändert wurde, und die IDs von allem, womit er verknüpft ist. Standardmäßig aus, denn in einer Messung an echten Daten waren nur 30% einer Antwort Inhalt und der größte Teil des Rests genau das. Vorsicht beim Erstellungsdatum: es ist der Zeitpunkt des SCHREIBENS, nicht der des erinnerten Ereignisses — das steht in den Eigenschaften des Datensatzes selbst.",
   "brain.query.includeFileContent": "Textstellen einbeziehen",
   "brain.query.includeFileContent.tooltip": "Ob Datei-Treffer die passende Textstelle mitliefern. Abschalten liefert nur Fundort und Metadaten — deutlich kleinere Antworten, aber ohne den passenden Text.",
+  "brain.query.rerank": "Neu ordnen",
+  "brain.query.rerank.tooltip": "Ob das Reranking-Modell die Treffer neu ordnet — die bessere Reihenfolge und der Standard. Abschalten zeigt die Reihenfolge vor dem Reranking, bei ausgelastetem Modell deutlich schneller. Die Suchen in den anderen Tabs und in den Auswahlfeldern überspringen es immer, weil Sie beim Tippen darauf warten.",
   "brain.query.includeDiagnostics": "Diagnosefelder einbeziehen",
   "brain.query.includeDiagnostics.tooltip": "Liefert die intern genutzten Felder mit: den tatsächlich eingebetteten Text, das Embedding-Modell, den Sync-Zähler und die Bewertungen der einzelnen Ranking-Stufen. Gilt auch für Graph-Sprünge, in jeder Tiefe. Einschalten, um nachzuvollziehen, warum etwas so platziert wurde; sonst ausgelassen, da jedes Feld pro Treffer mitkommt. Der Embedding-Vektor selbst wird nie zurückgegeben.",
   "brain.query.showAdvanced": "Mehr Optionen",

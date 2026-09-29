@@ -144,6 +144,14 @@ export const recallTool: ToolHandler = {
               description: 'Optional deadline for this recall, in milliseconds. It can only LOWER the instance budget, never raise it, and is clamped to a small floor so a tiny value is not a guaranteed empty answer. On expiry you get a PARTIAL answer rather than an error or a hang: whichever collections finished are returned, and the response says it degraded. Use it when a slow recall would cost more than a thin one — a fact that can only ever delay you by a known amount is one you can put in a workflow.',
             },
             minScore: unitScoreSchema('Minimum COSINE SIMILARITY (0.0–1.0). It filters on `score` ONLY — never on the fused or the reranked ordering — so it is a vector-side gate rather than a relevance gate, and a result the reranker would have promoted can be cut by it before the reranker sees it.'),
+            rerank: {
+              type: 'boolean',
+              default: true,
+              description: 'Whether the configured cross-encoder re-orders the answer (default true — the reranked answer '
+                + 'is the default and the better ranking). Send false when you are waiting on the answer as a user '
+                + 'types: the rerank can take seconds on a shared model, and the fused order is returned at once. A '
+                + 'skip you asked for is not reported in `degraded`. No effect on an instance with no reranker.',
+            },
             includeFileContent: {
               type: 'boolean',
               default: true,
@@ -256,6 +264,8 @@ export const recallTool: ToolHandler = {
     const includeFileContent = a['includeFileContent'] !== false;
     const includeDiagnostics = a['includeDiagnostics'] === true;
     const includeRecordMeta = a['includeRecordMeta'] === true;
+    // Only an explicit `false` skips the reranker (Q-88): absent keeps the configured, reranked answer.
+    const rerank = a['rerank'] === false ? false : undefined;
     const recallProjection = normaliseProjection(a['projection'] as Record<string, unknown> | undefined);
     const budget = resolveBudget(a as BudgetRequest, defaultBudgetChars(ctx.transport));
     if (!budget.ok) throw new Error(budget.error);
@@ -345,7 +355,7 @@ export const recallTool: ToolHandler = {
        * set, which this branch did by hand.
        */
       seeds = await recallGlobal(memberIds, query, topK, tags, types, minPerType, minScore, filter,
-        { maxPerType, maxTimeMS: recallMaxTimeMS, degraded, observePath });
+        { maxPerType, maxTimeMS: recallMaxTimeMS, degraded, observePath, rerank });
       traverseSpaces = memberIds;
     } else {
       /*
@@ -357,7 +367,7 @@ export const recallTool: ToolHandler = {
        * where the space was in the path and this branch could not be reached.
        */
       seeds = await recallGlobal(accessibleSpaceIds, query, topK, tags, types, minPerType, minScore, filter,
-        { maxPerType, maxTimeMS: recallMaxTimeMS, degraded, observePath });
+        { maxPerType, maxTimeMS: recallMaxTimeMS, degraded, observePath, rerank });
       traverseSpaces = accessibleSpaceIds;
     }
 

@@ -3,9 +3,9 @@ import { SupersededBadgeComponent } from '../../shared/superseded-badge.componen
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { TranslocoPipe } from '@jsverse/transloco';
-import { catchError, of } from 'rxjs';
+import { catchError, of, switchMap } from 'rxjs';
 import { ChronoEntry, ChronoType, ChronoStatus } from '../../core/api.types';
-import { recordOf } from './recall-hits';
+import { recordOf, interactiveRecallBody, LatestWins, INTERACTIVE_DEBOUNCE_MS } from './recall-hits';
 import { BrainApi } from '../../core/brain-api.service';
 import { httpErrorReason } from '../../core/http-error';
 import { TagInputComponent } from '../../shared/tag-input.component';
@@ -291,7 +291,6 @@ export class ChronoTabComponent extends RecordTabBase {
   chronoForm = { title: '', kind: 'event' as string, startsAt: '', endsAt: '', description: '', tags: [] as string[], linkEntities: '', linkFacts: [] as string[], properties: {} as Record<string, string | number | boolean> };
   editChrono = { title: '', kind: '' as string, status: '' as string, startsAt: '', endsAt: '', description: '', tags: [] as string[], linkEntities: '', linkFacts: [] as string[], properties: {} as Record<string, string | number | boolean> };
 
-  private _chronoSemTimer: ReturnType<typeof setTimeout> | null = null;
 
   /** Docked Status header filter. Its own signal: `status` is chrono-only, not part of RecordFilter. */
   statusFilter = signal('');
@@ -338,18 +337,18 @@ export class ChronoTabComponent extends RecordTabBase {
    */
   onChronoSearch(q: string): void {
     this.store.chronoSearch.set(q);
-    if (this._chronoSemTimer) clearTimeout(this._chronoSemTimer);
-    if (!q.trim()) { this.skip.set(0); this.load(); return; }
-    this._chronoSemTimer = setTimeout(() => this.runSemanticChronoSearch(), 300);
+    if (!q.trim()) { this.semanticSearch.cancel(); this.skip.set(0); this.load(); return; }
+    this.semanticSearch.after(INTERACTIVE_DEBOUNCE_MS, () => this.runSemanticChronoSearch());
   }
 
   runSemanticChronoSearch(): void {
     const q = this.store.chronoSearch().trim();
     const spaceId = this.spaceId();
-    if (!q || !spaceId) { this.store.chrono.set([]); return; }
-    this.brainApi.recallBrain(spaceId, { query: q, types: ['chrono'], topK: 20 }).pipe(
+    if (!q || !spaceId) { this.semanticSearch.cancel(); this.store.chrono.set([]); return; }
+    // Latest wins (Q-88): this search cancels the one before it, hydration included.
+    this.semanticSearch.run(this.brainApi.recallBrain(spaceId, interactiveRecallBody(q, 'chrono', 20)).pipe(
       catchError(() => of({ results: [], count: 0 })),
-    ).subscribe(res => {
+      switchMap(res => {
       // The fields are the RECORD's, not the hit's (Q-87). Read off the hit, the row was blank and its type was the
       // envelope's 'chrono'; the status was hard-coded to 'upcoming' whatever the entry said.
       const rows = res.results.filter(r => r.type === 'chrono').map(recordOf).map(r => ({
@@ -372,9 +371,12 @@ export class ChronoTabComponent extends RecordTabBase {
       } as ChronoEntry));
       // The chips again: a ranked answer carries no links, so they come from the same hydration the
       // list path uses — see `record-links.ts`.
-      this.brainApi.withLinks(spaceId, 'chrono', rows).subscribe(hydrated => this.store.chrono.set(hydrated));
-    });
+      return this.brainApi.withLinks(spaceId, 'chrono', rows);
+      }),
+    ), hydrated => this.store.chrono.set(hydrated));
   }
+
+  private readonly semanticSearch = new LatestWins();
 
   /** Effective chrono type for schema lookup. */
   chronoFormKind(): string {

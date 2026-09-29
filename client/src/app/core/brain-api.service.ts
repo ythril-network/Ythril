@@ -63,6 +63,11 @@ export interface RecallRequestBody {
        */
       includeFileContent?: boolean;
       /**
+       * `false` skips the cross-encoder (`Q-88`) — the type-ahead searches send it, because the rerank dominated
+       * their latency. Absent keeps the reranked answer, which stays the default.
+       */
+      rerank?: boolean;
+      /**
        * Add back the fields a result carries for the SYSTEM: `matchedText`, `embeddingModel`, `seq` and the
        * per-stage scores. Recursive — a `traverse` answer's `_graph` follows it at every depth.
        *

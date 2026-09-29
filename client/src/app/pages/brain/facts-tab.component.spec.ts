@@ -5,7 +5,7 @@
  */
 import { TestBed } from '@angular/core/testing';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { of } from 'rxjs';
+import { of, Subject } from 'rxjs';
 import type { Fact } from '../../core/api.types';
 import { getTranslocoModule } from '../../testing/transloco-testing';
 import { BrainApi } from '../../core/brain-api.service';
@@ -68,7 +68,8 @@ describe('FactsTabComponent', () => {
     c.onMemorySearch('deadline');
     vi.advanceTimersByTime(300);
     vi.useRealTimers();
-    expect(api.recallBrain).toHaveBeenCalledWith('work', { query: 'deadline', types: ['fact'], topK: 20 });
+    // rerank: false — a search bar the owner types into skips the cross-encoder (Q-88).
+    expect(api.recallBrain).toHaveBeenCalledWith('work', { query: 'deadline', types: ['fact'], topK: 20, rerank: false });
     expect(api.listFacts).not.toHaveBeenCalled();
   });
 
@@ -88,6 +89,26 @@ describe('FactsTabComponent', () => {
     vi.useRealTimers();
     const rows = TestBed.inject(BrainStore).facts();
     expect(rows.map(r => [r._id, r.fact, r.tags])).toEqual([['f1', 'the deadline is Friday', ['ops']]]);
+  });
+
+  // Q-88: latest wins. A slow answer to an earlier keystroke must not overwrite the answer to a later one.
+  it('a superseded search is cancelled, so its late answer never replaces the newer one', () => {
+    const fixture = make();
+    const c = fixture.componentInstance;
+    (api as Record<string, unknown>)['withLinks'] = vi.fn((_s: string, _k: string, rows: unknown[]) => of(rows));
+    const first = new Subject<unknown>();
+    const second = new Subject<unknown>();
+    api.recallBrain.mockReturnValueOnce(first as never).mockReturnValueOnce(second as never);
+    const hit = (id: string) => ({ count: 1, results: [{ type: 'fact', spaceId: 'work', record: { _id: id, fact: id } }] });
+    vi.useFakeTimers();
+    c.onMemorySearch('dead');
+    vi.advanceTimersByTime(300);
+    c.onMemorySearch('deadline');
+    vi.advanceTimersByTime(300);
+    vi.useRealTimers();
+    second.next(hit('newer')); second.complete();
+    first.next(hit('older')); first.complete();
+    expect(TestBed.inject(BrainStore).facts().map(r => r._id)).toEqual(['newer']);
   });
 
   // Clearing the semantic bar restores the normal paginated list (a plain list call, no recall).

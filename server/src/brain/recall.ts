@@ -272,6 +272,13 @@ export async function recall(
      * than the top `topK` so the one pass can still promote a candidate from outside a space's own top.
      */
     deferRerank?: boolean;
+    /**
+     * `false` skips the cross-encoder for THIS call (`Q-88`): no over-fetch for it and no rerank pass, the fused order
+     * returned. For a caller that is waiting on the answer as the user types — a type-ahead — where the rerank
+     * dominated the latency (16-25 s on a shared GPU) and bought an ordering nobody reads before the next keystroke.
+     * A skip the caller chose is not degradation, so nothing is noted. Absent means the configured behaviour.
+     */
+    rerank?: boolean;
     /*
      * `includeFreshWrites` WAS HERE, AND IT IS NOT A PARAMETER ANY MORE — the scan always runs.
      *
@@ -371,7 +378,7 @@ export async function recall(
   // With a reranker configured, cast a WIDER net first. A cross-encoder can only re-order what the
   // vector search already found, so reranking exactly the results you would have returned anyway buys
   // nothing — the over-fetch is the whole mechanism.
-  const reranking = rerankConfigured();
+  const reranking = rerankConfigured() && opts?.rerank !== false;
   // Bounded absolutely as well as by `topK`. The over-fetch IS the reranking mechanism, so the multiplier
   // stays — but `topK` has no ceiling of its own since `P-34`, and a per-type fetch that scales without
   // one is how an oversized request becomes an oversized query rather than a slow answer.
@@ -1119,6 +1126,8 @@ export async function recallGlobal(
      * most likely to be searching several spaces.
      */
     observePath?: RecallPathObservation & { path(): 'prefilter' | 'exhaustive' | undefined };
+    /** `false` skips the cross-encoder on BOTH branches — the per-space calls and the merged pass (`Q-88`). */
+    rerank?: boolean;
   },
 ): Promise<RecallResult[]> {
   // Embed ONCE for the whole fan-out. Every space below searches the same text, so without this the query is
@@ -1131,7 +1140,7 @@ export async function recallGlobal(
   // otherwise send its own pass to the same model — 13 concurrent requests for one recall on the platform
   // operator's instance, ten of them killed by the shared deadline. One space needs no merge, so it keeps
   // the ordinary path.
-  const deferRerank = spaceIds.length > 1 && rerankConfigured();
+  const deferRerank = spaceIds.length > 1 && rerankConfigured() && opts?.rerank !== false;
   const results = await Promise.all(spaceIds.map(
     id => recall(id, query, topK, tags, types, minPerType, minScore, filter, { ...opts, embedded, deferRerank }),
   ));

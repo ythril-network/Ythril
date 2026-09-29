@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`rerank: false` on `recall`** (Q-88), on both doors: skips the configured cross-encoder — no over-fetch for it and
+  no rerank pass, on one space and across many — and returns the fused order at once; nothing is reported in
+  `degraded`, since it is a skip the caller chose. The reranked answer stays the default. The search bars in the
+  Entities, Facts, Edges and Chrono tabs and the entity pickers now send it, because the rerank dominated their
+  latency (16-25 s on a shared GPU), and keep only the newest search, cancelling the one before; the Query tab keeps
+  reranking and gains a **Rerank** switch. See [Recall API](docs/integration-guide/04a-recall-api.md).
 - **`space_rename` renames a space over MCP** (Q-139), the door `PATCH /api/spaces/:id/rename` lacked: instance admin
   or administering the space, the same `{ space }` answer, and the same refusals — including `409` with
   `code: space_name_in_use`. See [MCP → tools](docs/integration-guide/16-mcp.md).

@@ -29,6 +29,8 @@ export interface RecallFormState {
   type: string;
   maxPerType: number;
   includeFileContent: boolean;
+  /** Whether the cross-encoder re-orders the answer. On by default, like the API; sent only when switched off (Q-88). */
+  rerank: boolean;
   includeDiagnostics: boolean;
   /** Storage bookkeeping — when a record was written and what it links to. Off by default; see the tooltip. */
   includeRecordMeta: boolean;
@@ -377,6 +379,11 @@ export interface RecallTypeOpt {
       <input type="checkbox" [(ngModel)]="form().includeFileContent" name="recallIncludeContent" />
       <span>{{ 'brain.query.includeFileContent' | transloco }}</span>
       <span class="rf-hint" [attr.title]="'brain.query.includeFileContent.tooltip' | transloco"><ph-icon name="info" [size]="11"/></span>
+    </label>
+    <label class="rf-check">
+      <input type="checkbox" [(ngModel)]="form().rerank" name="recallRerank" />
+      <span>{{ 'brain.query.rerank' | transloco }}</span>
+      <span class="rf-hint" [attr.title]="'brain.query.rerank.tooltip' | transloco"><ph-icon name="info" [size]="11"/></span>
     </label>
     <label class="rf-check">
       <input type="checkbox" [(ngModel)]="form().includeDiagnostics" name="recallIncludeDiagnostics" />

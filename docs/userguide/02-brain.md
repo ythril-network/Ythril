@@ -298,6 +298,11 @@ So there is no single number to expect. **If your records are long and you want 
 handful of results, ask your administrator to raise the reranking time limit** (`modelSlots.rerank.timeoutMs`,
 described in the hosting guide's model-slot table).
 
+**The search bars in the Entities, Facts, Edges and Chrono tabs, and the entity pickers, skip reranking.** You are
+waiting on them as you type, and on a busy model the reranking can take seconds for an order you will not read before
+the next keystroke. Only the newest search is kept: typing again cancels the one before. The **Query** tab reranks, as
+the API does by default, and has a **Rerank** switch to see the order without it.
+
 **If nothing is ever reranked, the cause may not be the time limit.** Some reranking servers refuse a request
 carrying more than a few dozen passages outright, and the search then falls back to ranking by meaning every
 single time — which looks identical to a search with no reranker configured. Ythril sends them in batches

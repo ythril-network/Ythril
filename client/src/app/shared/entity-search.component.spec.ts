@@ -72,7 +72,8 @@ describe('EntitySearchComponent — a semantic hit', () => {
     f.componentInstance.onInput('mathematician');
     vi.advanceTimersByTime(2000);
     vi.useRealTimers();
-    expect(recallBrain).toHaveBeenCalled();
+    // A picker the owner types into skips the cross-encoder (Q-88).
+    expect(recallBrain).toHaveBeenCalledWith('work', { query: 'mathematician', types: ['entity'], topK: 10, rerank: false });
     expect(f.componentInstance.results().map(e => [e._id, e.name, e.type])).toEqual([['ent-1', 'Ada Lovelace', 'person']]);
   });
 });

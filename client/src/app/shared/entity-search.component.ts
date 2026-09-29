@@ -42,7 +42,7 @@ import { Subject, Subscription, of } from 'rxjs';
 import { debounceTime, distinctUntilChanged, switchMap, catchError, map } from 'rxjs/operators';
 import { Entity, RecallResult } from '../core/api.types';
 import { BrainApi } from '../core/brain-api.service';
-import { recordOf } from '../pages/brain/recall-hits';
+import { recordOf, interactiveRecallBody } from '../pages/brain/recall-hits';
 import { TranslocoPipe } from '@jsverse/transloco';
 
 @Component({
@@ -300,7 +300,7 @@ export class EntitySearchComponent implements OnInit, OnDestroy, OnChanges {
           }
           this.loading.set(true);
           if (this.searchMode() === 'semantic') {
-            return this.brainApi.recallBrain(this.spaceId, { query: q, types: ['entity'], topK: 10 }).pipe(
+            return this.brainApi.recallBrain(this.spaceId, interactiveRecallBody(q, 'entity', 10)).pipe(
               catchError(() => of({ results: [] as RecallResult[], count: 0 })),
               map(res => ({
                 // The fields are the RECORD's, not the hit's (Q-87): read off the hit, every semantic result in the

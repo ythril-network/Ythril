@@ -104,7 +104,8 @@ describe('ChronoTabComponent', () => {
     c.onChronoSearch('launch');
     vi.advanceTimersByTime(300);
     vi.useRealTimers();
-    expect(api.recallBrain).toHaveBeenCalledWith('work', { query: 'launch', types: ['chrono'], topK: 20 });
+    // rerank: false — a search bar the owner types into skips the cross-encoder (Q-88).
+    expect(api.recallBrain).toHaveBeenCalledWith('work', { query: 'launch', types: ['chrono'], topK: 20, rerank: false });
     expect(api.listChrono).not.toHaveBeenCalled();
   });
 

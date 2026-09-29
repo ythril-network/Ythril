@@ -65,7 +65,8 @@ describe('EdgesTabComponent', () => {
     c.onEdgeSearch('mentor');
     vi.advanceTimersByTime(300);
     vi.useRealTimers();
-    expect(api.recallBrain).toHaveBeenCalledWith('work', { query: 'mentor', types: ['edge'], topK: 20 });
+    // rerank: false — a search bar the owner types into skips the cross-encoder (Q-88).
+    expect(api.recallBrain).toHaveBeenCalledWith('work', { query: 'mentor', types: ['edge'], topK: 20, rerank: false });
     expect(api.listEdges).not.toHaveBeenCalled();
   });
 

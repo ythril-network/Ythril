@@ -3,9 +3,9 @@ import { SupersededBadgeComponent } from '../../shared/superseded-badge.componen
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { TranslocoPipe } from '@jsverse/transloco';
-import { catchError, of } from 'rxjs';
+import { catchError, of, switchMap } from 'rxjs';
 import { Fact } from '../../core/api.types';
-import { recordOf } from './recall-hits';
+import { recordOf, interactiveRecallBody, LatestWins, INTERACTIVE_DEBOUNCE_MS } from './recall-hits';
 import { BrainApi } from '../../core/brain-api.service';
 import { httpErrorReason } from '../../core/http-error';
 import { TagInputComponent } from '../../shared/tag-input.component';
@@ -285,7 +285,6 @@ export class FactsTabComponent extends RecordTabBase {
   memoryForm = { fact: '', type: '', tags: [] as string[], linkEntities: '', description: '', properties: {} as Record<string, string | number | boolean> };
   editMemory = { fact: '', tags: [] as string[], linkEntities: '', description: '', properties: {} as Record<string, string | number | boolean> };
 
-  private _memSemTimer: ReturnType<typeof setTimeout> | null = null;
 
   protected override resetOnSpaceChange(): void {
     this.recordFilter.set({ type: '', tag: '', description: '', properties: '', fromName: '', toName: '', entityName: '' });
@@ -322,18 +321,18 @@ export class FactsTabComponent extends RecordTabBase {
    */
   onMemorySearch(q: string): void {
     this.store.memorySearch.set(q);
-    if (this._memSemTimer) clearTimeout(this._memSemTimer);
-    if (!q.trim()) { this.skip.set(0); this.load(); return; }
-    this._memSemTimer = setTimeout(() => this.runSemanticMemorySearch(), 300);
+    if (!q.trim()) { this.semanticSearch.cancel(); this.skip.set(0); this.load(); return; }
+    this.semanticSearch.after(INTERACTIVE_DEBOUNCE_MS, () => this.runSemanticMemorySearch());
   }
 
   runSemanticMemorySearch(): void {
     const q = this.store.memorySearch().trim();
     const spaceId = this.spaceId();
-    if (!q || !spaceId) { this.store.facts.set([]); return; }
-    this.brainApi.recallBrain(spaceId, { query: q, types: ['fact'], topK: 20 }).pipe(
+    if (!q || !spaceId) { this.semanticSearch.cancel(); this.store.facts.set([]); return; }
+    // Latest wins (Q-88): this search cancels the one before it, hydration included.
+    this.semanticSearch.run(this.brainApi.recallBrain(spaceId, interactiveRecallBody(q, 'fact', 20)).pipe(
       catchError(() => of({ results: [], count: 0 })),
-    ).subscribe(res => {
+      switchMap(res => {
       // The fields are the RECORD's, not the hit's (Q-87): read off the hit they were all undefined.
       const rows = res.results.filter(r => r.type === 'fact').map(recordOf).map(r => ({
         _id: r['_id'] as string,
@@ -349,9 +348,12 @@ export class FactsTabComponent extends RecordTabBase {
       // A ranked answer carries no links — they are records of their own — so the chips come from the
       // same one-call hydration the list path uses. Without it a search shows none where the list shows
       // them, which reads as the links having been lost.
-      this.brainApi.withLinks(spaceId, 'fact', rows).subscribe(hydrated => this.store.facts.set(hydrated));
-    });
+      return this.brainApi.withLinks(spaceId, 'fact', rows);
+      }),
+    ), hydrated => this.store.facts.set(hydrated));
   }
+
+  private readonly semanticSearch = new LatestWins();
 
   applyFilter(type: 'tag' | 'entity', value: string): void {
     if (type === 'tag') this.recordFilter.set({ ...this.recordFilter(), tag: value });

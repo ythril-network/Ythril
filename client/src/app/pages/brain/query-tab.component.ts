@@ -568,7 +568,7 @@ export class QueryTabComponent {
    */
   recallForm: RecallFormState = {
     query: '', topK: 10, minScore: 0, filter: '', projection: '', tags: '', type: '',
-    maxPerType: 0, includeFileContent: true, includeDiagnostics: false, includeRecordMeta: false,
+    maxPerType: 0, includeFileContent: true, rerank: true, includeDiagnostics: false, includeRecordMeta: false,
     depth: 0, edgeLabels: '', direction: '',
     includeChrono: false, includeMemories: false, includeFiles: false,
     maxTimeMS: 0, maxBytes: 0, maxChars: 0, maxTokens: 0,
