@@ -20,6 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   an entity only because facts are longer — the comparison reciprocal rank fusion exists to avoid. The Query tab
   now says what `fusedScore` is: a rank score, `1/(60 + rank by meaning) + 1/(60 + rank by text)`, about 0.016 to
   0.033, never a similarity.
+- **`filter`'s `total` counts what a name join matches (`Q-160`).** With `fromName`, `toName` or `entityName`, the
+  rows were right and `total` counted the whole collection — `count: 2, total: 86` on a space of 86 edges — so a
+  caller comparing the two, as the tool tells it to, read on for pages that did not exist. Reported by the platform
+  operator; both doors.
 - **The Query tab's structured mode is called Filter (`Q-156`)**, the name it has as the `filter` tool and
   `POST /api/filter`; it was *Advanced Query*.
 - **The Query tab folds its search to one line once results arrive, says how long the search took, and expands or
