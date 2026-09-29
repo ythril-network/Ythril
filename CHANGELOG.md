@@ -116,6 +116,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Text removed from a record stops matching searches, whatever became of its embedding** (Q-94). The lexical
+  channel reads the record's matched text, and only a successful embed rewrote it — so on a record with embeddings
+  suppressed, a deleted property went on matching and was shown as the matched text, and a failed embed left both the
+  old text and the old vector. Every embed outcome now writes the current text; a failed one also drops the vector,
+  which described text that is gone, so a retry re-embeds instead of taking the stale vector as current. See
+  [Brain API](docs/integration-guide/04-brain-api.md).
 - **A large `topK` is served, not a 500** (Q-103). The vector stage was handed a per-type limit that followed `topK`
   while its candidate count stopped at 1000, and the index refuses a limit above its candidates — so a recall asking
   for more than about 666 of a type answered a 500 labelled retryable, as did a `minPerType` floor above 1000. The
