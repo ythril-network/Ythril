@@ -1,6 +1,7 @@
 import { ChangeDetectionStrategy, Component, ViewChild, computed, inject, input, output, signal } from '@angular/core';
 import { SupersededBadgeComponent } from '../../shared/superseded-badge.component';
 import { groupRecallResults, chunkLabel, passageText, relatedOf, orderingOf } from './recall-grouping';
+import { recordOf } from './recall-hits';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
@@ -679,24 +680,20 @@ export class QueryTabComponent {
 
   /** A match's neighbourhood, grouped by kind — rendered under the match, never beside it in the ranking. */
   relatedOf(hit: RecallResult) { return relatedOf(hit); }
-  orderingOf(hit: RecallResult) { return orderingOf(hit as Record<string, unknown>); }
+  orderingOf(hit: RecallResult) { return orderingOf(hit as unknown as Record<string, unknown>); }
 
   /**
    * Whether this match is a record that is no longer true.
    *
-   * A method rather than `hit.record?.superseded` in the template, because `RecallResult` is an index
-   * signature: everything read off it through the template is `unknown` and reaching into it there gives
-   * a build error or, worse, a cast that hides the next shape change. The nesting — the record sits under
-   * `record`, and the ranking fields sit beside it — is knowledge about the wire shape, and it belongs in
-   * one method rather than in the markup.
+   * A method rather than `hit.record?.superseded` in the template: the nesting — the record sits under `record`,
+   * the ranking fields beside it — is knowledge about the wire shape, and it goes through `recordOf`, the one reader
+   * of it (`Q-87`; this was a second hand copy).
    *
    * Strictly `true`. Absent and `false` both mean current, and a badge on a current record retires a real
    * fact in the reader's mind with nothing to contradict it.
    */
   supersededOf(hit: RecallResult): boolean | undefined {
-    const record = (hit as Record<string, unknown>)['record'];
-    if (record === null || typeof record !== 'object') return undefined;
-    return (record as Record<string, unknown>)['superseded'] === true ? true : undefined;
+    return recordOf(hit)['superseded'] === true ? true : undefined;
   }
 
   /** The heading a passage sits under, when the chunker recorded one. */
@@ -841,7 +838,9 @@ export class QueryTabComponent {
    * have no node, and get no button rather than one that lands on an empty graph.
    */
   graphTargetOf(hit: RecallResult): string | null {
-    const id = hit.type === 'entity' ? hit['_id'] : hit.type === 'edge' ? hit['from'] : undefined;
+    // The record's own id or edge end (Q-87) — read off the hit these were undefined, so "view in graph" never showed.
+    const rec = recordOf(hit);
+    const id = hit.type === 'entity' ? rec['_id'] : hit.type === 'edge' ? rec['from'] : undefined;
     return typeof id === 'string' && id.length > 0 ? id : null;
   }
 }

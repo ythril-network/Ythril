@@ -116,6 +116,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Semantic search in the Graph picker, the entity pickers and the Facts, Edges and Chrono tabs shows its results**
+  (Q-87). A recall hit carries its record under `record`, and these read the record's fields off the hit itself, so
+  every result rendered as a blank row with no id, and a chrono entry showed `chrono` as its type and always
+  `upcoming` as its status. The client reads a hit through one accessor that refuses a hit without a record, and its
+  hit type no longer lets a flat read compile. The Query tab's traversed neighbours show the label of the edge that
+  reached them again, and "view in graph" is offered on entity and edge hits again.
 - **Text removed from a record stops matching searches, whatever became of its embedding** (Q-94). The lexical
   channel reads the record's matched text, and only a successful embed rewrote it — so on a record with embeddings
   suppressed, a deleted property went on matching and was shown as the matched text, and a failed embed left both the

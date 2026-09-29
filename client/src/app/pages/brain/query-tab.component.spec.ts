@@ -57,11 +57,13 @@ describe('QueryTabComponent', () => {
      * back the same shape, or the panel teaches a contract the product does not have.
      */
     TestBed.resetTestingModule();
+    // The wire shape (Q-87): the record under `record`, the graph beside it, and `edges` — every edge that reached
+    // a neighbour — not one `edge`. This fixture was the old flat shape, so it pinned the defect in place.
     const match = {
-      _id: 'e1', type: 'entity', name: 'Vault', score: 0.9,
+      type: 'entity', score: 0.9, spaceId: 'work', record: { _id: 'e1', name: 'Vault', type: 'place' },
       _graph: [
-        { node: { _id: 'm1', kind: 'fact', fact: 'a note' }, edge: { label: 'fact.entityIds' }, paths: [['e1', 'm1']] },
-        { node: { _id: 'c1', kind: 'chrono', title: 'an event' }, edge: { label: 'chrono.entityIds' }, paths: [['e1', 'c1']] },
+        { node: { _id: 'm1', kind: 'fact', fact: 'a note' }, edges: [{ label: 'fact.entityIds' }], paths: [['e1', 'm1']] },
+        { node: { _id: 'c1', kind: 'chrono', title: 'an event' }, edges: [{ label: 'chrono.entityIds' }], paths: [['e1', 'c1']] },
       ],
     };
     TestBed.configureTestingModule({
@@ -84,13 +86,15 @@ describe('QueryTabComponent', () => {
     fixture.detectChanges();
 
     expect(c.recallResults().length, 'two neighbours were counted as matches').toBe(1);
-    expect(c.recallResults()[0]!['_id']).toBe('e1');
+    expect(c.recallResults()[0]!.record['_id']).toBe('e1');
 
     // …and the record keeps its own graph, so what the panel shows is what the API returned.
     const rel = c.relatedOf(c.recallResults()[0]!);
     expect(rel.total).toBe(2);
     expect(rel.facts.map(r => r.record['_id'])).toEqual(['m1']);
     expect(rel.chronos.map(r => r.record['_id'])).toEqual(['c1']);
+    // The label comes from the first of `edges` — reading a singular `edge` showed none on any neighbour.
+    expect(rel.facts.map(r => r.label)).toEqual(['fact.entityIds']);
   });
 
   it('a search that matched nothing SAYS so, and an unasked one stays quiet', () => {
@@ -227,17 +231,24 @@ describe('QueryTabComponent — recall parameter coverage', () => {
 
   it('graphTargetOf gives entities their own id and edges the entity they start from', () => {
     const c = create().componentInstance;
-    expect(c.graphTargetOf({ type: 'entity', _id: 'e1' } as never)).toBe('e1');
-    expect(c.graphTargetOf({ type: 'edge', from: 'e2', _id: 'edge1' } as never)).toBe('e2');
+    // Hits in the wire shape (Q-87): the ids live on the record, not the envelope.
+    expect(c.graphTargetOf({ type: 'entity', record: { _id: 'e1' } } as never)).toBe('e1');
+    expect(c.graphTargetOf({ type: 'edge', record: { from: 'e2', _id: 'edge1' } } as never)).toBe('e2');
   });
 
   it('graphTargetOf refuses a hit with no node, so no button is offered', () => {
     const c = create().componentInstance;
-    expect(c.graphTargetOf({ type: 'fact', _id: 'm1' } as never)).toBe(null);
-    expect(c.graphTargetOf({ type: 'chrono', _id: 'c1' } as never)).toBe(null);
-    expect(c.graphTargetOf({ type: 'file', _id: 'f1' } as never)).toBe(null);
-    expect(c.graphTargetOf({ type: 'entity' } as never)).toBe(null);      // no id at all
-    expect(c.graphTargetOf({ type: 'entity', _id: '' } as never)).toBe(null);
+    expect(c.graphTargetOf({ type: 'fact', record: { _id: 'm1' } } as never)).toBe(null);
+    expect(c.graphTargetOf({ type: 'chrono', record: { _id: 'c1' } } as never)).toBe(null);
+    expect(c.graphTargetOf({ type: 'file', record: { _id: 'f1' } } as never)).toBe(null);
+    expect(c.graphTargetOf({ type: 'entity', record: {} } as never)).toBe(null);      // no id at all
+    expect(c.graphTargetOf({ type: 'entity', record: { _id: '' } } as never)).toBe(null);
+  });
+
+  it('a hit with no record is refused loudly, not rendered blank', () => {
+    // The tolerant reader is what hid Q-87 for a year: a flat hit read as "no id" and rendered an empty row.
+    const c = create().componentInstance;
+    expect(() => c.graphTargetOf({ type: 'entity', _id: 'e1' } as never)).toThrow(/carries no record/);
   });
 
   it('an entity hit renders the view-in-graph button and emits the id', () => {
@@ -245,7 +256,7 @@ describe('QueryTabComponent — recall parameter coverage', () => {
     const c = fixture.componentInstance;
     let emitted: string | null = null;
     c.viewInGraph.subscribe((id: string) => { emitted = id; });
-    c.recallResults.set([{ type: 'entity', score: 0.9, _id: 'e1', name: 'Ada' } as never]);
+    c.recallResults.set([{ type: 'entity', score: 0.9, record: { _id: 'e1', name: 'Ada' } } as never]);
     fixture.detectChanges();
     const btn = fixture.nativeElement.querySelector('button[aria-label="common.viewInGraph"]');
     expect(btn, 'an entity recall hit should offer the graph jump').toBeTruthy();
@@ -255,7 +266,7 @@ describe('QueryTabComponent — recall parameter coverage', () => {
 
   it('a memory hit renders NO view-in-graph button', () => {
     const fixture = create();
-    fixture.componentInstance.recallResults.set([{ type: 'fact', score: 0.9, _id: 'm1', fact: 'f' } as never]);
+    fixture.componentInstance.recallResults.set([{ type: 'fact', score: 0.9, record: { _id: 'm1', fact: 'f' } } as never]);
     fixture.detectChanges();
     expect(fixture.nativeElement.querySelector('button[aria-label="common.viewInGraph"]')).toBeNull();
   });

@@ -5,6 +5,7 @@ import { FormsModule } from '@angular/forms';
 import { TranslocoPipe } from '@jsverse/transloco';
 import { catchError, of } from 'rxjs';
 import { Fact } from '../../core/api.types';
+import { recordOf } from './recall-hits';
 import { BrainApi } from '../../core/brain-api.service';
 import { httpErrorReason } from '../../core/http-error';
 import { TagInputComponent } from '../../shared/tag-input.component';
@@ -333,7 +334,8 @@ export class FactsTabComponent extends RecordTabBase {
     this.brainApi.recallBrain(spaceId, { query: q, types: ['fact'], topK: 20 }).pipe(
       catchError(() => of({ results: [], count: 0 })),
     ).subscribe(res => {
-      const rows = res.results.filter(r => r.type === 'fact').map(r => ({
+      // The fields are the RECORD's, not the hit's (Q-87): read off the hit they were all undefined.
+      const rows = res.results.filter(r => r.type === 'fact').map(recordOf).map(r => ({
         _id: r['_id'] as string,
         fact: (r['fact'] as string) ?? '',
         tags: (r['tags'] as string[]) ?? [],

@@ -69,6 +69,22 @@ describe('EdgesTabComponent', () => {
     expect(api.listEdges).not.toHaveBeenCalled();
   });
 
+  // Q-87: the hit carries the edge as `record`; reading its fields off the envelope rendered blank rows.
+  it('a semantic hit renders the edge it carries, not the envelope around it', () => {
+    const fixture = make();
+    const c = fixture.componentInstance;
+    api.recallBrain.mockReturnValueOnce(of({ count: 1, results: [{
+      type: 'edge', score: 0.8, spaceId: 'work',
+      record: { _id: 'e1', from: 'a', fromName: 'Ada', to: 'b', toName: 'Babbage', label: 'mentored_by', tags: [], properties: {}, createdAt: '2026-09-01T00:00:00Z' },
+    }] } as never));
+    vi.useFakeTimers();
+    c.onEdgeSearch('mentor');
+    vi.advanceTimersByTime(300);
+    vi.useRealTimers();
+    const rows = TestBed.inject(BrainStore).edges();
+    expect(rows.map(r => [r._id, r.from, r.label, r.toName])).toEqual([['e1', 'a', 'mentored_by', 'Babbage']]);
+  });
+
   // Clearing the semantic bar restores the normal paginated list (a plain list call, no recall).
   it('clearing the semantic bar reloads the plain list', () => {
     const fixture = make();

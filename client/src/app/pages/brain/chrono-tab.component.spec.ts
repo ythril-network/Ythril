@@ -108,6 +108,24 @@ describe('ChronoTabComponent', () => {
     expect(api.listChrono).not.toHaveBeenCalled();
   });
 
+  // Q-87: the hit carries the entry as `record`. Read off the envelope, the row was blank and its type was the
+  // envelope's `chrono` rather than the entry's own type.
+  it('a semantic hit renders the entry it carries, with the entry\'s own type and status', () => {
+    const fixture = make();
+    const c = fixture.componentInstance;
+    (api as Record<string, unknown>)['withLinks'] = vi.fn((_s: string, _k: string, rows: unknown[]) => of(rows));
+    api.recallBrain.mockReturnValueOnce(of({ count: 1, results: [{
+      type: 'chrono', score: 0.7, spaceId: 'work',
+      record: { _id: 'c1', title: 'Launch', type: 'milestone', status: 'completed', startsAt: '2026-10-01T00:00:00Z', tags: [], createdAt: '2026-09-01T00:00:00Z' },
+    }] } as never));
+    vi.useFakeTimers();
+    c.onChronoSearch('launch');
+    vi.advanceTimersByTime(300);
+    vi.useRealTimers();
+    const rows = TestBed.inject(BrainStore).chrono();
+    expect(rows.map(r => [r._id, r.title, r.type, r.status])).toEqual([['c1', 'Launch', 'milestone', 'completed']]);
+  });
+
   // Clearing the semantic bar restores the normal paginated list (a plain list call, no recall).
   it('clearing the semantic bar reloads the plain list', () => {
     const fixture = make();

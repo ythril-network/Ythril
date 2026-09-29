@@ -1,0 +1,29 @@
+/**
+ * What a recall hit holds (`Q-87`).
+ *
+ * A hit is `{type, score, spaceId, record: {...}}` — the ranking beside the record, not mixed into it — on both doors
+ * since 5.0. Four consumers (the entity pickers, including the Graph picker, and the Facts, Edges and Chrono tab
+ * searches) still read `_id`, `name`, `title` and `from` off the hit itself, so every semantic search rendered blank
+ * rows with an undefined id, and the chrono tab read the envelope's `chrono` as each entry's type.
+ *
+ * `recordOf` was private to `recall-grouping.ts` with a second hand copy in the Query tab; it lives here so every
+ * consumer reads a hit the same way. It THROWS on a hit without a record rather than returning `{}`: a tolerant reader
+ * keeps rendering against either shape and hides the day the server stops sending one — which is exactly how this
+ * defect shipped. `RecallHit` has no index signature, so a flat read does not compile.
+ */
+import type { RecallHit } from '../../core/api.types';
+
+/** The record a hit carries. Throws on a hit that carries none — a changed shape must fail loudly, not render blank. */
+export function recordOf(hit: RecallHit): Record<string, unknown> {
+  const record = (hit as { record?: unknown }).record;
+  if (record === null || typeof record !== 'object' || Array.isArray(record)) {
+    throw new Error(`A recall hit of type '${String(hit?.type)}' carries no record — the answer's shape has changed`);
+  }
+  return record as Record<string, unknown>;
+}
+
+/** A string field of a hit's record, or `undefined`. */
+export function recordString(hit: RecallHit, field: string): string | undefined {
+  const v = recordOf(hit)[field];
+  return typeof v === 'string' ? v : undefined;
+}

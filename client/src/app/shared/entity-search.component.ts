@@ -42,6 +42,7 @@ import { Subject, Subscription, of } from 'rxjs';
 import { debounceTime, distinctUntilChanged, switchMap, catchError, map } from 'rxjs/operators';
 import { Entity, RecallResult } from '../core/api.types';
 import { BrainApi } from '../core/brain-api.service';
+import { recordOf } from '../pages/brain/recall-hits';
 import { TranslocoPipe } from '@jsverse/transloco';
 
 @Component({
@@ -302,13 +303,17 @@ export class EntitySearchComponent implements OnInit, OnDestroy, OnChanges {
             return this.brainApi.recallBrain(this.spaceId, { query: q, types: ['entity'], topK: 10 }).pipe(
               catchError(() => of({ results: [] as RecallResult[], count: 0 })),
               map(res => ({
+                // The fields are the RECORD's, not the hit's (Q-87): read off the hit, every semantic result in the
+                // Graph picker and every entity picker was a blank row with an undefined id. The record calls its type
+                // `type`; `entityType` was the old flat shape's rename.
                 entities: res.results
-                  .filter(r => r['type'] === 'entity')
+                  .filter(r => r.type === 'entity')
+                  .map(recordOf)
                   .map(r => ({
                     _id: r['_id'] as string,
                     spaceId: this.spaceId,
                     name: (r['name'] as string) || '',
-                    type: (r['entityType'] as string) || '',
+                    type: (r['type'] as string) || '',
                     description: r['description'] as string | undefined,
                     tags: (r['tags'] as string[]) ?? [],
                     properties: (r['properties'] as Record<string, string | number | boolean>) ?? {},

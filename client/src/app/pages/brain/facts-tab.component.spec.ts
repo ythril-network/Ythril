@@ -72,6 +72,24 @@ describe('FactsTabComponent', () => {
     expect(api.listFacts).not.toHaveBeenCalled();
   });
 
+  // Q-87: a recall hit is {score, spaceId, type, record}. The tab read the record's fields off the hit itself, so
+  // every search result rendered as a blank row with no id.
+  it('a semantic hit renders the record it carries, not the envelope around it', () => {
+    const fixture = make();
+    const c = fixture.componentInstance;
+    (api as Record<string, unknown>)['withLinks'] = vi.fn((_s: string, _k: string, rows: unknown[]) => of(rows));
+    api.recallBrain.mockReturnValueOnce(of({ count: 1, results: [{
+      type: 'fact', score: 0.9, spaceId: 'work',
+      record: { _id: 'f1', fact: 'the deadline is Friday', tags: ['ops'], linkEntities: [], properties: {}, createdAt: '2026-09-01T00:00:00Z', seq: 4 },
+    }] } as never));
+    vi.useFakeTimers();
+    c.onMemorySearch('deadline');
+    vi.advanceTimersByTime(300);
+    vi.useRealTimers();
+    const rows = TestBed.inject(BrainStore).facts();
+    expect(rows.map(r => [r._id, r.fact, r.tags])).toEqual([['f1', 'the deadline is Friday', ['ops']]]);
+  });
+
   // Clearing the semantic bar restores the normal paginated list (a plain list call, no recall).
   it('clearing the semantic bar reloads the plain list', () => {
     const fixture = make();

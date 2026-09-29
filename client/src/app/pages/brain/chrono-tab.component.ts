@@ -5,6 +5,7 @@ import { FormsModule } from '@angular/forms';
 import { TranslocoPipe } from '@jsverse/transloco';
 import { catchError, of } from 'rxjs';
 import { ChronoEntry, ChronoType, ChronoStatus } from '../../core/api.types';
+import { recordOf } from './recall-hits';
 import { BrainApi } from '../../core/brain-api.service';
 import { httpErrorReason } from '../../core/http-error';
 import { TagInputComponent } from '../../shared/tag-input.component';
@@ -349,7 +350,9 @@ export class ChronoTabComponent extends RecordTabBase {
     this.brainApi.recallBrain(spaceId, { query: q, types: ['chrono'], topK: 20 }).pipe(
       catchError(() => of({ results: [], count: 0 })),
     ).subscribe(res => {
-      const rows = res.results.filter(r => r.type === 'chrono').map(r => ({
+      // The fields are the RECORD's, not the hit's (Q-87). Read off the hit, the row was blank and its type was the
+      // envelope's 'chrono'; the status was hard-coded to 'upcoming' whatever the entry said.
+      const rows = res.results.filter(r => r.type === 'chrono').map(recordOf).map(r => ({
         _id: r['_id'] as string,
         spaceId: (r['spaceId'] as string) ?? spaceId,
         title: (r['title'] as string) ?? '',
@@ -357,7 +360,7 @@ export class ChronoTabComponent extends RecordTabBase {
         type: ((r['type'] as string) ?? 'event') as ChronoType,
         startsAt: (r['startsAt'] as string) ?? '',
         endsAt: r['endsAt'] as string | undefined,
-        status: 'upcoming' as ChronoStatus,
+        status: ((r['status'] as string) ?? 'upcoming') as ChronoStatus,
         confidence: r['confidence'] as number | undefined,
         tags: (r['tags'] as string[]) ?? [],
         linkEntities: (r['linkEntities'] as string[]) ?? [],

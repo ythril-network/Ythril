@@ -579,11 +579,27 @@ export interface ReembedResult {
 
 export type RecallKnowledgeType = 'fact' | 'entity' | 'edge' | 'chrono' | 'file';
 
-export interface RecallResult {
+/**
+ * One recall hit: the ranking beside the record, never mixed into it (`Q-87`).
+ *
+ * No index signature, ON PURPOSE: the type is the gate. It declared `[key: string]: unknown` and so let four
+ * consumers read `r['_id']`, `r['name']` off the hit itself for a year after the record moved under `record` — every
+ * semantic search in the Graph picker and the tabs rendered blank rows with an undefined id, and nothing failed to
+ * compile. A record field is read through `recordOf` (`pages/brain/recall-hits.ts`), which throws on a hit without one.
+ */
+export interface RecallHit {
   type: RecallKnowledgeType;
+  spaceId?: string;
   score?: number;
-  [key: string]: unknown;
+  lexicalScore?: number;
+  fusedScore?: number;
+  rerankScore?: number;
+  record: Record<string, unknown>;
+  _graph?: unknown[];
 }
+
+/** The same hit, under the name the rest of the client already imports. */
+export type RecallResult = RecallHit;
 
 // The graph half lives in `recall-graph-report.ts` — its own module because this file is frozen by the
 // god-file ratchet, whose instruction is to put new behaviour BESIDE a large file rather than inside it. The

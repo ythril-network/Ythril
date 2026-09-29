@@ -5,6 +5,7 @@ import { FormsModule } from '@angular/forms';
 import { TranslocoPipe } from '@jsverse/transloco';
 import { catchError, of } from 'rxjs';
 import { Edge, Entity } from '../../core/api.types';
+import { recordOf } from './recall-hits';
 import { BrainApi } from '../../core/brain-api.service';
 import { httpErrorReason } from '../../core/http-error';
 import { TagInputComponent } from '../../shared/tag-input.component';
@@ -335,7 +336,8 @@ export class EdgesTabComponent extends RecordTabBase {
     this.brainApi.recallBrain(spaceId, { query: q, types: ['edge'], topK: 20 }).pipe(
       catchError(() => of({ results: [], count: 0 })),
     ).subscribe(res => {
-      this.store.edges.set(res.results.filter(r => r.type === 'edge').map(r => ({
+      // The fields are the RECORD's, not the hit's (Q-87): read off the hit they were all undefined.
+      this.store.edges.set(res.results.filter(r => r.type === 'edge').map(recordOf).map(r => ({
         _id: r['_id'] as string,
         from: (r['from'] as string) ?? '',
         fromName: r['fromName'] as string | undefined,

@@ -51,3 +51,28 @@ describe('EntitySearchComponent — mode pill gating', () => {
     expect(f.componentInstance.searchMode()).toBe('name');
   });
 });
+
+// Q-87: a recall hit is {score, spaceId, type, record}; the picker read name and id off the envelope, so every
+// semantic hit in the Graph picker and every entity picker was a blank row with an undefined id.
+describe('EntitySearchComponent — a semantic hit', () => {
+  it('shows the entity the hit carries: its id, name and type', () => {
+    vi.useFakeTimers();
+    const recallBrain = vi.fn(() => of({ count: 1, results: [{
+      type: 'entity', score: 0.9, spaceId: 'work',
+      record: { _id: 'ent-1', name: 'Ada Lovelace', type: 'person', tags: [], properties: {}, createdAt: '2026-09-01T00:00:00Z' },
+    }] }));
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({
+      imports: [EntitySearchComponent, getTranslocoModule()],
+      providers: [{ provide: BrainApi, useValue: { recallBrain, searchEntitiesByName: vi.fn(() => of({ entities: [] })) } }],
+    });
+    const f = TestBed.createComponent(EntitySearchComponent);
+    Object.assign(f.componentInstance, { spaceId: 'work', mode: 'bar', showModeToggle: false, defaultMode: 'semantic' });
+    f.detectChanges();
+    f.componentInstance.onInput('mathematician');
+    vi.advanceTimersByTime(2000);
+    vi.useRealTimers();
+    expect(recallBrain).toHaveBeenCalled();
+    expect(f.componentInstance.results().map(e => [e._id, e.name, e.type])).toEqual([['ent-1', 'Ada Lovelace', 'person']]);
+  });
+});
