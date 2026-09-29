@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A closed or democratic network connects every member too, on its own votes (`Q-154`).** Only the member that
+  held a newcomer's credentials used to admit it; every other member concluded the join vote and connected to
+  nobody. Now a passed join round introduces the newcomer on every member and the two pair as club members do, and
+  a newcomer trusts the list of the member that admitted it. A roster entry anyone else proposes — on a network
+  whose members joined before this, with their votes long pruned — waits under **Connecting** for the operator's
+  **Accept** (`POST /api/networks/:id/introductions/:instanceId/accept`, MCP `network_introduction_accept`,
+  instance-admin), because a member of a voted network votes and one member's word must not let it in.
 - **A club is a mesh: every member connects to every other member, not only to whoever admitted it (`Q-135`).**
   An admission landed on the admitting instance alone, so two members admitted by the organiser never learned of
   each other and the club stopped when the organiser did. Now each member learns the others from its peers'

@@ -2206,6 +2206,8 @@
   "networks.network.connecting.title": "Łączenie",
   "networks.network.connecting.pending": "przedstawiony przez członka, połączenie przy następnej synchronizacji",
   "networks.network.connecting.failed": "ostatnia próba nie powiodła się:",
+  "networks.network.connecting.waitingOk": "zaproponowany przez innego członka, czeka na Twoją zgodę",
+  "networks.network.connecting.accept": "Akceptuj",
   "networks.dialog.join.error.invalidCode": "To nie wygląda na kod zaproszenia. Skopiuj całą linię wygenerowaną przez drugi brain — zaczyna się od ythril1_.",
   "brain.cascade.title": "Usunąć tę encję i to, co na nią wskazuje?",
   "brain.cascade.intro": "Coś odwołuje się do tej encji, więc nie można jej usunąć samodzielnie. Usunięcie jej spowoduje również usunięcie:",

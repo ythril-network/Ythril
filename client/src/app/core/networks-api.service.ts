@@ -72,6 +72,11 @@ export class NetworksApi {
     return this.http.delete<void>(`/api/networks/${networkId}/members/${instanceId}`);
   }
 
+  /** The operator's OK on a member a voted network's roster only proposed (Q-154). */
+  acceptIntroduction(networkId: string, instanceId: string): Observable<{ status: string; instanceId: string }> {
+    return this.http.post<{ status: string; instanceId: string }>(`/api/networks/${networkId}/introductions/${instanceId}/accept`, {});
+  }
+
   /** Add one of this instance's spaces to a network (F-38.3, F-38.4): the network as it now is, or the vote it opened. */
   addNetworkSpace(networkId: string, spaceId: string): Observable<Network | { status: 'vote_pending'; round: unknown }> {
     return this.http.post<Network | { status: 'vote_pending'; round: unknown }>(`/api/networks/${networkId}/spaces`, { spaceId });

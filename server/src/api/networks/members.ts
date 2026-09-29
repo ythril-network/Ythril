@@ -8,7 +8,7 @@ import { Router } from 'express';
 import { requireAdmin } from '../../auth/middleware.js';
 import { globalRateLimit } from '../../rate-limit/middleware.js';
 import { log } from '../../util/log.js';
-import { AddMemberBody, SigningKeyBody, addMemberAct, removeMemberAct, setSigningKeyAct } from '../../networks/member-acts.js';
+import { AddMemberBody, SigningKeyBody, addMemberAct, removeMemberAct, setSigningKeyAct, acceptIntroductionAct } from '../../networks/member-acts.js';
 import { sendAct } from './_shared.js';
 
 export const membersRouter = Router();
@@ -42,4 +42,10 @@ membersRouter.post('/:id/members', globalRateLimit, requireAdmin, async (req, re
 
 membersRouter.delete('/:id/members/:instanceId', globalRateLimit, requireAdmin, (req, res) => {
   sendAct(res, removeMemberAct(String(req.params['id']), String(req.params['instanceId'])));
+});
+
+// ── POST /api/networks/:id/introductions/:instanceId/accept ────────────────
+// The operator's OK on a member a voted network's roster only proposed (Q-154). MCP `network_introduction_accept`.
+membersRouter.post('/:id/introductions/:instanceId/accept', globalRateLimit, requireAdmin, (req, res) => {
+  sendAct(res, acceptIntroductionAct(String(req.params['id']), String(req.params['instanceId'])));
 });

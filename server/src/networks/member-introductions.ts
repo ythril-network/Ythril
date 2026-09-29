@@ -18,9 +18,22 @@
  * ## Why a peer's roster may introduce at all
  *
  * A club member already holds every space the club carries, with a token that writes to them. So an introduction
- * hands nobody data or reach a member could not already relay — which is also why this is club-only. On a voted
- * network (`Q-154`) an admission is the network's decision, and one member's roster must not stand in for a vote;
- * a pub/sub subscriber peers with its publisher alone, and a tree node with its parent and children, by design.
+ * hands nobody data or reach a member could not already relay. A pub/sub subscriber peers with its publisher alone,
+ * and a tree node with its parent and children, by design, so neither meshes.
+ *
+ * ## A voted network meshes on its own votes (`Q-154`)
+ *
+ * Closed and democratic networks mesh too, but a roster is not the authority there: an admitted instance VOTES, so
+ * one member's roster introducing an instance would be one member admitting a voter. So on a voted network
+ * (`rosterIsAuthority` false):
+ *
+ * - a PASSED join round introduces its subject on every member that concludes it (`introduceFromPassedJoin`);
+ * - the roster of the member that admitted this instance (`admittedVia`, recorded at join) introduces without an OK,
+ *   which is how a newcomer learns the members voted in before it;
+ * - any other roster entry only PROPOSES: it waits with `needsApproval` until this instance's operator accepts it
+ *   (`acceptIntroduction`), and nothing pairs with it before. That is where a network admitted before this shipped,
+ *   whose rounds are long pruned, heals;
+ * - a roster's removals are not applied, because a passed remove round already removes on every member.
  *
  * ## Why the pairing is safe with an anonymous first call
  *
@@ -49,8 +62,16 @@ const PAIRING_TOKEN_TTL_MS = 10 * 60_000;
 /** Removals kept per network. Oldest dropped first: a removal older than every admission it could beat is inert. */
 export const MAX_REMOVALS = 1000;
 
-/** Whether members of this network pair with each other. Club only — see the module docblock for why. */
+/** Whether members of this network pair with each other: every type but the star (pub/sub) and the tree. */
 export function isMeshNetwork(net: Pick<NetworkConfig, 'type'>): boolean {
+  return net.type === 'club' || net.type === 'closed' || net.type === 'democratic';
+}
+
+/**
+ * Whether a peer's roster is AUTHORITY here — introduces without an OK and carries removals. A club only: on a voted
+ * network the votes are the authority (`Q-154`, module docblock).
+ */
+export function rosterIsAuthority(net: Pick<NetworkConfig, 'type'>): boolean {
   return net.type === 'club';
 }
 
@@ -59,7 +80,7 @@ const nowIso = (): string => new Date().toISOString();
 
 /** Stamp an admission made HERE, and forget any removal and introduction of the same instance it supersedes. */
 export function stampAdmission(net: NetworkConfig, member: NetworkMember, at: string = nowIso()): void {
-  if (!isMeshNetwork(net)) return;
+  if (!rosterIsAuthority(net)) return;
   member.admittedAt ??= at;
   net.removedMembers = (net.removedMembers ?? []).filter(r => r.instanceId !== member.instanceId);
   net.introductions = (net.introductions ?? []).filter(i => i.instanceId !== member.instanceId);
@@ -67,7 +88,7 @@ export function stampAdmission(net: NetworkConfig, member: NetworkMember, at: st
 
 /** Record a removal, so it is answered to peers beside the roster and a stale roster cannot bring the member back. */
 export function recordRemoval(net: NetworkConfig, instanceId: string, at: string = nowIso()): void {
-  if (!isMeshNetwork(net)) return;
+  if (!rosterIsAuthority(net)) return;
   const kept = (net.removedMembers ?? []).filter(r => r.instanceId !== instanceId);
   kept.push({ instanceId, removedAt: at });
   net.removedMembers = kept.slice(-MAX_REMOVALS);
@@ -95,8 +116,11 @@ export function mergePeerRoster(
 ): { changed: boolean; removed: string[] } {
   const out = { changed: false, removed: [] as string[] };
   if (!isMeshNetwork(net)) return out;
+  const authority = rosterIsAuthority(net);
+  // On a voted network only the member that admitted us vouches without an OK (`Q-154`).
+  const vouched = authority || (net.admittedVia !== undefined && net.admittedVia === fromId);
 
-  for (const r of readRemovals(peerRemoved)) {
+  for (const r of authority ? readRemovals(peerRemoved) : []) {
     // Never ourselves (an ejection has its own notice), and never the peer that is answering.
     if (r.instanceId === selfId || r.instanceId === fromId) continue;
     const idx = net.members.findIndex(m => m.instanceId === r.instanceId);
@@ -129,12 +153,68 @@ export function mergePeerRoster(
     const intro: MemberIntroduction = {
       instanceId: id, label: rec.label, url: rec.url, introducedBy: fromId, introducedAt: nowIso(),
       ...(rec.admittedAt ? { admittedAt: rec.admittedAt } : {}),
+      ...(vouched ? {} : { needsApproval: true }),
     };
     (net.introductions ??= []).push(intro);
     out.changed = true;
-    log.info(`Club ${net.id}: ${fromId} introduced ${rec.label} (${id}); pairing follows`);
+    log.info(`Network ${net.id}: ${fromId} introduced ${rec.label} (${id}); ${vouched ? 'pairing follows' : 'waiting for this instance\'s operator to accept it'}`);
   }
   return out;
+}
+
+/**
+ * A join round that PASSED here introduces its subject, on a voted network (`Q-154`): the vote is the authority, so
+ * no OK is needed. The member that admitted the subject adds it as a member itself, holding its credentials; every
+ * other member pairs with it through this. Returns whether it introduced anyone; the caller saves.
+ */
+export function introduceFromPassedJoin(net: NetworkConfig, selfId: string, round: import('../config/types.js').VoteRound): boolean {
+  if (!isMeshNetwork(net) || rosterIsAuthority(net)) return false;
+  if (round.type !== 'join' || !round.concluded || !round.passed) return false;
+  const id = round.subjectInstanceId;
+  if (!id || id === selfId || net.members.some(m => m.instanceId === id)) return false;
+  if (!round.subjectUrl || !isPeerUrlAllowed(round.subjectUrl)) return false;
+  const existing = (net.introductions ?? []).find(i => i.instanceId === id);
+  if (existing) {
+    if (!existing.needsApproval) return false;
+    delete existing.needsApproval;   // the vote settles what a roster only proposed
+    return true;
+  }
+  (net.introductions ??= []).push({
+    instanceId: id, label: round.subjectLabel || id, url: round.subjectUrl, introducedBy: `round:${round.roundId}`,
+    introducedAt: nowIso(),
+  });
+  log.info(`Network ${net.id}: join round ${round.roundId} passed — pairing with ${round.subjectLabel} (${id}) follows`);
+  return true;
+}
+
+/**
+ * What a join round that just PASSED here does to this instance's roster — the one rule for both places a passed round
+ * lands (the gossip pull and the vote relay), which carried it as two copies.
+ *
+ * The instance holding the joiner's credentials (its pending member carries a token hash; gossip copies have it
+ * stripped) admits it as a member. In a braintree only the direct parent does. Every other member of a voted network
+ * INTRODUCES it, so the two pair (`Q-154`). Returns what it did; the caller saves.
+ */
+export function applyPassedJoin(
+  net: NetworkConfig, selfId: string, round: import('../config/types.js').VoteRound,
+): 'admitted' | 'introduced' | null {
+  if (round.type !== 'join' || !round.concluded || !round.passed) return null;
+  if (round.votes.some(v => v.vote === 'veto')) return null;
+  if (net.members.some(m => m.instanceId === round.subjectInstanceId)) return null;
+  const pm = round.pendingMember;
+  const mayAdmit = !!pm && (net.type === 'braintree'
+    ? (!pm.parentInstanceId || pm.parentInstanceId === selfId)
+    : Boolean(pm.tokenHash));
+  if (mayAdmit) { net.members.push(pm!); return 'admitted'; }
+  return introduceFromPassedJoin(net, selfId, round) ? 'introduced' : null;
+}
+
+/** The operator's OK on an introduction that only proposed (`Q-154`). Returns false when there is none to accept. */
+export function acceptIntroduction(net: NetworkConfig, instanceId: string): boolean {
+  const intro = (net.introductions ?? []).find(i => i.instanceId === instanceId);
+  if (!intro?.needsApproval) return false;
+  delete intro.needsApproval;
+  return true;
 }
 
 /** Revoke what removed members held here, once the removal is saved. Never throws. */
@@ -215,6 +295,7 @@ export async function pairIntroduced(networkId: string): Promise<void> {
   for (const intro of [...(net.introductions ?? [])]) {
     // The lower id opens, so two members never open towards each other at once.
     if (!(cfg.instanceId < intro.instanceId)) continue;
+    if (intro.needsApproval) continue;   // proposed, not accepted (`Q-154`)
     if (Date.now() - time(intro.lastAttemptAt) < PAIR_RETRY_MS) continue;
     await openPairing(networkId, intro.instanceId).catch(err => log.warn(`Club ${networkId}: pairing with ${intro.instanceId}: ${err}`));
   }
@@ -263,10 +344,11 @@ export async function answerPairing(networkId: string, b: { instanceId: string; 
   const cfg = getConfig();
   const net = cfg.networks.find(n => n.id === networkId);
   // One answer for a network that is missing and one that is not a club: neither tells a stranger what exists.
-  if (!net || !isMeshNetwork(net)) return { status: 404, body: { error: 'No club with this id pairs here' } };
+  if (!net || !isMeshNetwork(net)) return { status: 404, body: { error: 'No network with this id pairs here' } };
   if (net.members.some(m => m.instanceId === instanceId)) return { status: 409, body: { error: 'Already a member here' } };
   const intro = net.introductions?.find(i => i.instanceId === instanceId);
-  if (!intro) return { status: 403, body: { error: 'No member of this club has introduced that instance here yet' } };
+  if (!intro) return { status: 403, body: { error: 'No member of this network has introduced that instance here yet' } };
+  if (intro.needsApproval) return { status: 403, body: { error: 'That instance is waiting for this instance\'s operator to accept it' } };
   const key = `${networkId}:${instanceId}`;
   if (inFlight.has(key)) return { status: 409, body: { error: 'A pairing with that instance is already in progress' } };
   inFlight.add(key);
@@ -307,7 +389,7 @@ export async function confirmPairing(
 ): Promise<Answer> {
   const net = getConfig().networks.find(n => n.id === networkId);
   const intro = net && isMeshNetwork(net) ? net.introductions?.find(i => i.instanceId === b.instanceId) : undefined;
-  if (!intro?.pairingTokenId || caller?.id !== intro.pairingTokenId || caller.peerInstanceId !== b.instanceId) {
+  if (intro?.needsApproval || !intro?.pairingTokenId || caller?.id !== intro.pairingTokenId || caller.peerInstanceId !== b.instanceId) {
     return { status: 403, body: { error: 'This token opened no pairing with that instance' } };
   }
   const admitted = await admitIntroduced(networkId, b.instanceId, b.token, intro.pairingTokenId);

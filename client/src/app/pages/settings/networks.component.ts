@@ -294,7 +294,7 @@ import { NetworkEnableWizardComponent } from './network-enable-wizard.component'
                 }
               }
               <!-- Club members a peer introduced, not connected to yet (Q-135) -->
-              <app-network-connecting [network]="net" />
+              <app-network-connecting [network]="net" (accepted)="load()" />
               <!-- Open votes -->
               @if (openVotes(net.id).length > 0) {
                 <div style="margin-top:16px;">

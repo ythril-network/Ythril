@@ -115,7 +115,10 @@ describe('MCP tool schemas — universal invariants', () => {
     // 71 -> 72: `space_rename` (Q-139), the door onto `renameSpaceAct` like `PATCH /api/spaces/:id/rename`:
     // `spaceAdmin: true` as the route's space-admin guard, an audit-map entry under `space.rename`, the route moved
     // from NOT_A_CAPABILITY to CAPABILITIES, and `16-mcp.md` rows plus the read-only list.
-    assert.equal(ALL_TOOLS.length, 72);
+    // 72 -> 73: `network_introduction_accept` (Q-154), the door onto `acceptIntroductionAct` like
+    // `POST /api/networks/:id/introductions/:instanceId/accept`: `admin: true` as the route's `requireAdmin`, an
+    // audit-map entry under `network.introduction.accept`, a capability-map row, and a `16-mcp.md` row.
+    assert.equal(ALL_TOOLS.length, 73);
   });
 
   it('every tool advertises a closed object schema (type:object, additionalProperties:false)', () => {

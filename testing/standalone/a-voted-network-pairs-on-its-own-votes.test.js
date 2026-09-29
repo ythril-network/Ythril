@@ -1,0 +1,81 @@
+/**
+ * A closed or democratic network pairs its members on the authority of its own votes, never on one member's word
+ * (`Q-154`).
+ *
+ * `Q-135` made a club a mesh: a peer's roster introduces the members it lists. On a voted network that would let one
+ * member admit an instance nobody voted for — and an admitted instance votes. So here the authority is the vote:
+ *
+ * - a PASSED join round introduces its subject on every member that concludes it, and pairing follows;
+ * - a newcomer trusts the roster of the member that admitted it, which is how it learns the members voted in before it;
+ * - any other roster entry — a network whose admissions predate this, whose rounds are long pruned — waits for this
+ *   instance's operator to accept it, and nothing pairs with it until then;
+ * - a roster's removals are not applied on a voted network: a passed remove round already removes on every member.
+ *
+ * Run: npm run build -w server && node --test testing/standalone/a-voted-network-pairs-on-its-own-votes.test.js
+ */
+import { describe, it } from 'node:test';
+import assert from 'node:assert/strict';
+import { mergePeerRoster, introduceFromPassedJoin, acceptIntroduction } from '../../server/dist/networks/member-introductions.js';
+
+const SELF = 'aaaa-self';
+const ADMITTER = 'bbbb-admitter';
+const OTHER = 'dddd-other';
+const T2 = '2026-09-02T00:00:00.000Z';
+
+const member = id => ({ instanceId: id, label: id, url: `https://${id}.example`, tokenHash: '', direction: 'both' });
+const voted = (type, over = {}) => ({ id: 'n', type, members: [member(ADMITTER), member(OTHER)], pendingRounds: [], ...over });
+const listed = id => ({ instanceId: id, label: id, url: `https://${id}.example` });
+const passedJoin = id => ({ roundId: 'r1', type: 'join', subjectInstanceId: id, subjectLabel: id, subjectUrl: `https://${id}.example`,
+  deadline: T2, openedAt: T2, votes: [], concluded: true, passed: true });
+
+describe('a voted network pairs on its own votes', () => {
+  for (const type of ['closed', 'democratic']) {
+    it(`${type}: a passed join round introduces its subject, ready to pair`, () => {
+      const net = voted(type);
+      assert.equal(introduceFromPassedJoin(net, SELF, passedJoin('cccc')), true);
+      const intro = net.introductions.find(i => i.instanceId === 'cccc');
+      assert.ok(intro, 'the newcomer is introduced');
+      assert.equal(intro.needsApproval, undefined, 'a passed vote needs nobody\'s further OK');
+      assert.equal(intro.url, 'https://cccc.example');
+    });
+
+    it(`${type}: a round that did not pass, or names this instance or a member, introduces nothing`, () => {
+      const net = voted(type);
+      assert.equal(introduceFromPassedJoin(net, SELF, { ...passedJoin('cccc'), passed: false }), false);
+      assert.equal(introduceFromPassedJoin(net, SELF, passedJoin(SELF)), false);
+      assert.equal(introduceFromPassedJoin(net, SELF, passedJoin(OTHER)), false);
+      assert.equal((net.introductions ?? []).length, 0);
+    });
+
+    it(`${type}: the member that admitted this instance introduces without an OK`, () => {
+      const net = voted(type, { admittedVia: ADMITTER });
+      mergePeerRoster(net, SELF, ADMITTER, [listed('eeee')], []);
+      assert.equal(net.introductions.find(i => i.instanceId === 'eeee')?.needsApproval, undefined);
+    });
+
+    it(`${type}: any other member's roster only proposes, and waits for the operator`, () => {
+      const net = voted(type, { admittedVia: ADMITTER });
+      mergePeerRoster(net, SELF, OTHER, [listed('ffff')], []);
+      const intro = net.introductions.find(i => i.instanceId === 'ffff');
+      assert.equal(intro?.needsApproval, true, 'one member\'s word must not admit a voter');
+      assert.equal(acceptIntroduction(net, 'ffff'), true);
+      assert.equal(intro.needsApproval, undefined, 'accepted, it pairs like any other');
+    });
+
+    it(`${type}: a roster's removals are left to the network's own remove vote`, () => {
+      const net = voted(type, { admittedVia: ADMITTER, members: [member(ADMITTER), { ...member(OTHER), admittedAt: '2026-09-01T00:00:00.000Z' }] });
+      const r = mergePeerRoster(net, SELF, ADMITTER, [], [{ instanceId: OTHER, removedAt: T2 }]);
+      assert.deepEqual(r.removed, []);
+      assert.ok(net.members.some(m => m.instanceId === OTHER));
+    });
+  }
+
+  it('pub/sub and trees stay out of it', () => {
+    for (const type of ['pubsub', 'braintree']) {
+      const net = voted(type);
+      assert.equal(introduceFromPassedJoin(net, SELF, passedJoin('cccc')), false, type);
+      mergePeerRoster(net, SELF, ADMITTER, [listed('eeee')], []);
+      assert.equal(net.introductions, undefined, type);
+    }
+  });
+});

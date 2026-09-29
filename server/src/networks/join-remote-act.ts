@@ -338,6 +338,8 @@ export async function joinRemoteAct(caller: Caller, input: unknown): Promise<Net
       lastSeqReceived: {},
     });
   }
+  // Q-154: who admitted this instance, so a voted network trusts that member's roster and no other one's.
+  net.admittedVia ??= applyData.instanceId;
   // Q-135: on a club the inviter's roster introduces every other member, so pairing starts on the first cycle.
   if (Array.isArray(finalizeData.members)) {
     mergePeerRoster(net, freshCfg.instanceId, applyData.instanceId, finalizeData.members, []);

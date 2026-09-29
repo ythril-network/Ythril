@@ -180,6 +180,7 @@ export const ROUTE_RULES: RouteRule[] = [
   { method: 'POST',   pattern: /^\/api\/networks\/([^/]+)\/pending-spaces$/,        operation: 'network.space.pending' },
   { method: 'POST',   pattern: /^\/api\/networks\/([^/]+)\/members$/,               operation: 'network.member.add' },
   { method: 'DELETE', pattern: /^\/api\/networks\/([^/]+)\/members\/([^/]+)$/,      operation: 'network.member.remove' },
+  { method: 'POST',   pattern: /^\/api\/networks\/([^/]+)\/introductions\/([^/]+)\/accept$/, operation: 'network.introduction.accept' },
 
   // ── The invite handshake ──────────────────────────────────────────────────
   //

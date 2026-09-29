@@ -2206,6 +2206,8 @@
   "networks.network.connecting.title": "Connecting",
   "networks.network.connecting.pending": "introduced by a member, connecting on the next sync",
   "networks.network.connecting.failed": "last attempt failed:",
+  "networks.network.connecting.waitingOk": "proposed by another member, waiting for your OK",
+  "networks.network.connecting.accept": "Accept",
   "networks.dialog.join.error.invalidCode": "That does not look like an invite code. Copy the whole line the other brain produced — it starts with ythril1_.",
   "brain.cascade.title": "Delete this entity and what points at it?",
   "brain.cascade.intro": "Something references this entity, so it cannot be deleted on its own. Deleting it will also remove:",
