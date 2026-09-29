@@ -63,14 +63,35 @@ async function viaMcp(tool, args) {
  * Returns the two answers so a caller can assert on the content as well, but the equality of the prose is
  * asserted HERE — so a new case cannot forget the assertion that is the entire point of the file.
  */
+/**
+ * An answer with the ONE field the doors may disagree on taken out: the byte budget a budgeted tool applied.
+ *
+ * CLAUDE.md's sanctioned divergence — MCP defaults lower than REST (`MCP_DEFAULT_MAX_CHARS` against
+ * `DEFAULT_MAX_CHARS`), and both doors DISCLOSE the number they used as `budgetChars`. So that number is checked
+ * against each door's own default in `bothDoors`, and everything else must still match exactly. Anything that is not
+ * an object, or carries no `budgetChars`, comes back as it went in.
+ */
+function sansBudget(v) {
+  if (!v || typeof v !== 'object' || Array.isArray(v) || !('budgetChars' in v)) return v;
+  const { budgetChars: _door, ...rest } = v;
+  return rest;
+}
+const parsedOrText = t => { try { return JSON.parse(t); } catch { return t; } };
+
 async function bothDoors(tool, args) {
   const rest = await viaRest(tool, args);
   const mcpAnswer = await viaMcp(tool, args);
-  assert.equal(rest.text, mcpAnswer.text,
+  assert.deepEqual(sansBudget(parsedOrText(rest.text)), sansBudget(parsedOrText(mcpAnswer.text)),
     `${tool} answers differently depending on the door:\n  REST: ${rest.text}\n  MCP:  ${mcpAnswer.text}`);
   assert.equal(rest.ok, !mcpAnswer.isError,
     `${tool} succeeded on one door and failed on the other`);
-  assert.deepEqual(rest.data, mcpAnswer.data, `${tool} returns different structured data per door`);
+  assert.deepEqual(sansBudget(rest.data), sansBudget(mcpAnswer.data), `${tool} returns different structured data per door`);
+  // The budget is not ignored, it is checked against the rule: each door states the default it applied. Q-132 gave
+  // graph_traverse a budget, which is how this helper learned the difference is sanctioned rather than a defect.
+  if (rest.data && typeof rest.data === 'object' && 'budgetChars' in rest.data && args.maxChars === undefined) {
+    assert.equal(rest.data.budgetChars, 50000, `${tool} over REST must state REST's default budget`);
+    assert.equal(mcpAnswer.data?.budgetChars, 25000, `${tool} over MCP must state MCP's default budget`);
+  }
   /*
    * AND THE ANSWER IS ACTUALLY IN THERE, which the equality above cannot tell you.
    *
