@@ -15,6 +15,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
+import { balancedFrom } from './_structural-window.mjs';
 
 const search = stripComments(readFileSync('server/src/api/brain/search.ts', 'utf8'));
 const routeBody = (path) => {
@@ -39,7 +40,11 @@ describe('a search answers REST through its tool', () => {
 
   it('an entry the tool cannot find is a 404 on REST, as the route answered before', () => {
     const call = stripComments(readFileSync('server/src/mcp/call-tool.ts', 'utf8'));
-    assert.match(call, /err instanceof NotFoundError[\s\S]{0,300}status: 404/,
+    // The `if` block itself, bounded by its own closing brace rather than a character cap.
+    const at = call.indexOf('if (err instanceof NotFoundError) {');
+    assert.ok(at >= 0, 'callTool no longer branches on NotFoundError — re-anchor this gate');
+    const branch = balancedFrom(call, call.indexOf('{', at), 'the NotFoundError branch');
+    assert.match(branch, /status: 404/,
       'callTool classifies NotFoundError as a 400, so REST /similar would answer 400 for a missing entry');
   });
 });

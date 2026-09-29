@@ -36,13 +36,21 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
 import { statementAround } from './_structural-window.mjs';
+import { trackedSources } from './_sources.mjs';
+import { routeBody, delegatesCleanly } from './_delegating-routes.mjs';
 
 const { countGraphNodes } = await import('../../server/dist/brain/graph-spill.js');
 
-/** REST first: the derivation below subtracts the REST routes that no longer build their own response. */
-const DOORS = ['server/src/api/brain/search.ts', 'server/src/mcp/tools/search.ts'];
 /** Where every traversing answer is built, and so where its count is taken (Q-126). */
 const BUILDER = 'server/src/brain/traversed-answer.ts';
+/**
+ * Every source that answers through the builder or emits a count of its own — DERIVED, never listed. This was
+ * `[REST search.ts, MCP search.ts]`, and after `Q-89` the REST file does neither: `/recall` and `/similar` delegate
+ * to their tools. A hand list keeps checking a file with nothing in it and misses a third door the day one is written.
+ */
+const DOORS = trackedSources('server/src')
+  .filter(f => f.endsWith('.ts') && f !== BUILDER)
+  .filter(f => /traversedAnswer\(|graphNodes:/.test(stripComments(readFileSync(f, 'utf8'))));
 /** Every file that emits a count: the builder, plus any door that still does it itself. */
 const EMITTERS = [...DOORS, BUILDER];
 
@@ -75,11 +83,21 @@ describe('every door counts what it sent', () => {
      */
     const builder = stripComments(readFileSync(BUILDER, 'utf8'));
     assert.equal((builder.match(/graphNodes:/g) ?? []).length, 1, 'the builder must emit the count exactly once');
-    const doors = DOORS.filter(d => /traversedAnswer\(/.test(stripComments(readFileSync(d, 'utf8'))));
-    assert.ok(doors.length >= 2, `only ${doors.length} door(s) answer through the builder; REST and MCP are the minimum`);
-    for (const d of doors) {
+    // The floor is on the CALL SITES — recall and similar each answer through it — because the files collapsed
+    // to one when REST delegated (`Q-89`), and a floor of two files would have to be lowered to where it proves nothing.
+    const sites = DOORS.reduce((n, d) => n + (stripComments(readFileSync(d, 'utf8')).match(/traversedAnswer\(/g) ?? []).length, 0);
+    assert.ok(sites >= 2, `only ${sites} site(s) answer through the builder; recall and similar are the minimum`);
+    for (const d of DOORS) {
       assert.doesNotMatch(stripComments(readFileSync(d, 'utf8')), /graphNodes:/,
         `${d} emits a graphNodes of its own beside the builder's`);
+    }
+    // And REST's traversing searches reach the builder through their tools, not around them.
+    const rest = stripComments(readFileSync('server/src/api/brain/search.ts', 'utf8'));
+    for (const p of ['/recall', '/similar']) {
+      const body = routeBody(rest, p);
+      assert.ok(body, `POST ${p} is not in search.ts — re-anchor this gate`);
+      assert.ok(delegatesCleanly(body, `POST ${p}`) || DOORS.includes('server/src/api/brain/search.ts'),
+        `POST ${p} neither delegates to its tool nor answers through the builder, so its count is nobody's`);
     }
   });
 

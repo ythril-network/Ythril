@@ -252,25 +252,38 @@ describe('both doors, and all three routes', () => {
       'a body that already states retryable must be left alone, so the classifier always wins over the default');
   });
 
-  it('every read route that catches its own failures answers through the one helper', () => {
+  it('every search route answers a failure through one classifier — its own catch via the helper, or through callTool', () => {
     /*
      * Counted, not spot-checked: separate two-line catches are how one route keeps the old behaviour.
      *
-     * The count is DERIVED rather than written down, because `/recall` stopped catching anything when it
-     * collapsed onto `callTool` — which classifies the failure itself and hands back a status. Pinning the
-     * number at three turned that into a red gate about a route that had got safer, and the obvious repair
-     * (change 3 to 2) would have to be made again after the next collapse. So the subject is *every route
-     * that still has a `catch`*, and the rule is that none of them rolls its own answer.
+     * The subject is the ROUTES, not the catches. This counted `catch` blocks with a floor of one, and every
+     * search route that could fail on the store has since collapsed onto `callTool` — `/filter` at 3c,
+     * `/recall`, then `/similar` at `Q-89` — which classifies the failure itself and hands back a status. So
+     * the file has no catch left, and a floor on catches would have to be lowered to zero, where an empty scan
+     * passes. A floor on the routes found cannot be satisfied by a scan that read nothing.
+     *
+     * The rule, per route: a route that catches answers through `sendReadFailure`; a route that delegates to
+     * `callTool` forwards the classifier's structured body. Neither rolls its own 400.
      */
     const src = stripComments(readFileSync('server/src/api/brain/search.ts', 'utf8'));
-    const catches = (src.match(/\}\s*catch\s*\(/g) ?? []).length;
-    const delegated = (src.match(/sendReadFailure\(res, err\)/g) ?? []).length;
-    // A floor of ONE, down from two at 3c: `/filter`'s hand-written twin caught its own failures and is
-    // gone. The floor exists so an empty scan cannot pass the equality below — it is not a count of the
-    // routes, and lowering it as the surface collapses onto `callTool` is this rule succeeding.
-    assert.ok(catches >= 1, `only ${catches} catch blocks on the search router — the scan is broken, not the code`);
-    assert.equal(delegated, catches,
-      `${catches} routes catch a failure and only ${delegated} answer through sendReadFailure`);
+    const starts = [...src.matchAll(/searchRouter\.(?:get|post|put|patch|delete)\(/g)].map(m => m.index);
+    assert.ok(starts.length >= 2, `only ${starts.length} route(s) found on the search router — the scan is broken, not the code`);
+    const routes = starts.map((at, i) => src.slice(at, starts[i + 1] ?? src.length));
+    let delegating = 0;
+    for (const body of routes) {
+      const name = body.slice(0, body.indexOf(','));
+      const catches = (body.match(/\}\s*catch\s*\(/g) ?? []).length;
+      const delegated = (body.match(/sendReadFailure\(res, err\)/g) ?? []).length;
+      assert.equal(delegated, catches,
+        `${name} catches ${catches} failure(s) and only ${delegated} answer through sendReadFailure`);
+      if (/callTool\(/.test(body)) {
+        delegating++;
+        assert.match(body, /\.\.\.\(outcome\.result\.structuredContent \?\? \{\}\)/,
+          `${name} delegates to callTool and drops its structured error body, so the classification never reaches the caller`);
+      }
+    }
+    // The routes that used to catch are the delegating ones now; none found means the anchor moved, not that they left.
+    assert.ok(delegating >= 1, 'no search route delegates to callTool — re-anchor this gate');
     assert.doesNotMatch(src, /res\.status\(400\)\.json\(\{ error: msg \}\)/,
       'a surviving hand-rolled 400 catch is the drift this replaced');
   });
