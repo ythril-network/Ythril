@@ -34,7 +34,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   type's matches together by raw MongoDB text score, whose scale is each collection's own, so a fact could outrank
   an entity only because facts are longer — the comparison reciprocal rank fusion exists to avoid. The Query tab
   now says what `fusedScore` is: a rank score, `1/(60 + rank by meaning) + 1/(60 + rank by text)`, about 0.016 to
-  0.033, never a similarity.
+  0.033, never a similarity. Every fused result also carries the two ranks it came from, `vectorRank` and
+  `lexicalRank` (absent when the text search missed it), on both doors, and the Query tab shows them beside the
+  figure — so the score can be checked rather than taken on trust.
 - **`filter`'s `total` counts what a name join matches (`Q-160`).** With `fromName`, `toName` or `entityName`, the
   rows were right and `total` counted the whole collection — `count: 2, total: 86` on a space of 86 edges — so a
   caller comparing the two, as the tool tells it to, read on for pages that did not exist. Reported by the platform

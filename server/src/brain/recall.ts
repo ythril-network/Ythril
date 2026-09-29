@@ -139,6 +139,9 @@ interface RecallBase {
    * written against vector similarity.
    */
   fusedScore?: number;
+  /** The two ranks `fusedScore` came from — see `FusableResult` (`Q-159`). */
+  vectorRank?: number;
+  lexicalRank?: number;
   createdAt?: string;
   updatedAt?: string;
   seq?: number;

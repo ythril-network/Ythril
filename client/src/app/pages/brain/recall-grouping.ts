@@ -267,6 +267,11 @@ export interface Ordering {
   value: number;
   /** Every stage that ran, deciding one first, for the reader who wants the rest. */
   stages: Array<{ name: string; value: number }>;
+  /**
+   * The two ranks `fusedScore` was computed from (`Q-159`) — by meaning, and by text among records of its own type,
+   * `lexical` absent when the text search did not find it. Present only when the result was fused.
+   */
+  ranks?: { vector: number; lexical?: number };
 }
 
 /**
@@ -304,5 +309,10 @@ export function orderingOf(hit: Record<string, unknown>): Ordering | null {
     const v = num(k);
     if (v !== null) stages.push({ name: k, value: v });
   }
-  return { by: decider, value: num(decider)!, stages };
+  const vector = num('vectorRank');
+  const lexical = num('lexicalRank');
+  const ranks = num('fusedScore') !== null && vector !== null
+    ? { vector, ...(lexical !== null ? { lexical } : {}) }
+    : undefined;
+  return { by: decider, value: num(decider)!, stages, ...(ranks ? { ranks } : {}) };
 }

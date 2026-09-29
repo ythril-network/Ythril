@@ -34,6 +34,27 @@ describe('a lexical rank is its own type\'s rank', () => {
     assert.ok(b1.fusedScore > a3.fusedScore, 'the order no longer follows the other collection\'s scale');
   });
 
+  it('every fused result carries the two ranks its fused score came from', () => {
+    // A fused score alone cannot be checked by a reader; the ranks it was computed from can (`Q-159`).
+    const pool = [{ _id: 'a1', score: 0.9 }, { _id: 'a2', score: 0.8 }, { _id: 'b1', score: 0.6 }];
+    const floors = [{ _id: 'a2', score: 0.8 }];
+    stampFusion(pool, floors, [['a2'], ['b1']]);
+    for (const r of [...pool, ...floors]) {
+      const lexical = r.lexicalRank === undefined ? 0 : rrf(r.lexicalRank);
+      assert.equal(r.fusedScore, rrf(r.vectorRank) + lexical, `${r._id}: fusedScore is its two ranks, and nothing else`);
+    }
+    assert.deepEqual(pool.map(r => [r._id, r.vectorRank, r.lexicalRank]), [['a1', 1, undefined], ['a2', 2, 1], ['b1', 3, 1]]);
+    assert.equal(floors[0].lexicalRank, 1, 'a floor copy carries the same ranks as its pool copy');
+  });
+
+  it('both doors carry the ranks beside the scores, surviving any projection', async () => {
+    const { RECALL_RANKING_DIAGNOSTICS, RECALL_ENVELOPE_KEYS } = await import('../../server/dist/brain/recall-shape.js');
+    for (const k of ['vectorRank', 'lexicalRank']) {
+      assert.ok(RECALL_RANKING_DIAGNOSTICS.includes(k), `${k} is a ranking field`);
+      assert.ok(RECALL_ENVELOPE_KEYS.includes(k), `${k} survives a REST projection`);
+    }
+  });
+
   it('no lexical hit in any type fuses nothing', () => {
     const pool = [{ _id: 'a1', score: 0.9 }];
     assert.equal(stampFusion(pool, [], [[], []]), false);

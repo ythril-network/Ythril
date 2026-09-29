@@ -33,6 +33,13 @@ describe('which score ordered this result', () => {
     expect(o?.value).toBe(0.7);
   });
 
+  it('a fused score comes with the two ranks it was computed from (Q-159)', () => {
+    expect(orderingOf({ score: 0.9, fusedScore: 0.0325, vectorRank: 1, lexicalRank: 2 })?.ranks).toEqual({ vector: 1, lexical: 2 });
+    // Not found by text: the lexical rank is absent, and must not read as a rank of zero.
+    expect(orderingOf({ score: 0.9, fusedScore: 0.0164, vectorRank: 1 })?.ranks).toEqual({ vector: 1 });
+    expect(orderingOf({ score: 0.9 })?.ranks, 'no fusion, no ranks to show').toBeUndefined();
+  });
+
   it('a result with no score at all is not an ordering', () => {
     // A traversed neighbour has none: it did not answer the question, so there is nothing to explain.
     expect(orderingOf({ _id: 'x' })).toBeNull();

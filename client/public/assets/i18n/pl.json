@@ -522,6 +522,8 @@
   "brain.query.searchButton": "Szukaj",
   "brain.query.orderedBy": "Uporządkowane wg {{by}}",
   "brain.query.fusedExplained": "Wynik rankingu, nie podobieństwo: 1/(60 + pozycja wg znaczenia) + 1/(60 + pozycja wg tekstu wśród rekordów tego typu). Od ok. 0,016 (pierwszy tylko w jednym rankingu) do 0,033 (pierwszy w obu); wyższy jest wyżej.",
+  "brain.query.fusedRanks": "pozycja {{vector}} wg znaczenia · {{lexical}} wg tekstu",
+  "brain.query.fusedRanksNoText": "pozycja {{vector}} wg znaczenia · nie znaleziono wg tekstu",
   "brain.query.leftOut.title": "Pominięto trafienia ({{count}}): ich grafu nie dało się odczytać w całości",
   "brain.query.leftOut.body": "Każde pokazane trafienie zawiera swój cały graf. Te są wymienione, zamiast być pokazane z jego częścią. Zawęź etykiety krawędzi albo poproś o mniej kroków, aby je przywrócić.",
   "brain.query.leftOut.more": "…i jeszcze {{more}}",
