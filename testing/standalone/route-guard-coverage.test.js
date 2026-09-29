@@ -174,6 +174,10 @@ const EXEMPT_ROUTE = new Map([
   ['POST /apply', 'the joining leg of the invite handshake. Authenticated by the invite KEY in the body — '
     + 'the caller has no token on this instance yet, which is what the handshake is for.'],
   ['POST /finalize', 'the completing leg of the same handshake, authenticated by the same key.'],
+  ['POST /networks/:networkId/pair', 'a club member opening a pairing with a member another peer introduced (Q-135). The '
+    + 'caller has no token here yet, which is what the pairing is for; it is answered only for an instance this '
+    + 'instance\'s own peers introduced, and the caller is proven by calling back the address that introduction '
+    + 'vouched for, where only the token minted for that pairing is accepted (`networks/member-introductions.ts`).'],
   ['POST /redeem', 'a pub/sub\'s published invite key opening a handshake (F-41). The key IS the credential — the '
     + 'caller has no token here, which is the point — and the route answers only for a network this instance publishes.'],
   ['POST /mcp-oauth/consent', 'the OAuth consent form POST. It carries no bearer header by design — the '

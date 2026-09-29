@@ -30,6 +30,7 @@ import { applyConcludedSpaceRounds } from '../spaces/apply-wipe-round.js';
 import { bumpSeq, isSeqImplausible } from '../util/seq.js';
 import { adoptAnnouncedSpaces, announcedSpaces, healAnnouncedAliases } from '../networks/network-spaces.js';
 import { selfRecordFor } from '../networks/self-record.js';
+import { mergePeerRoster, revokeRemoved, pairIntroduced } from '../networks/member-introductions.js';
 import { pullSpaceMetaFromUpstream } from './space-meta-pull.js';
 import { peerSafeFetch, isPeerUrlAllowed } from './peer-fetch.js';
 import { concludeRoundIfReady, sendMemberRemovedNotify } from './governance.js';
@@ -234,6 +235,9 @@ async function _runSyncForNetworkImpl(networkId: string): Promise<{ synced: numb
       }
     }
   }
+
+  // Q-135: pair with every club member a peer introduced this cycle (or earlier, and not yet paired). Never throws.
+  await pairIntroduced(networkId);
 
   log.info(`Sync cycle complete for '${net.label}': ${synced} ok, ${errors} errors`);
   syncTimer();
@@ -614,7 +618,7 @@ async function gossipWithPeer(
       log.warn(`Gossip pull from ${member.label}: HTTP ${resp.status}`);
       return;
     }
-    const { members: peerView } = await boundedJson<{ members: Partial<NetworkMember>[] }>(resp, 'sync peer');
+    const { members: peerView, removed: peerRemoved } = await boundedJson<{ members: Partial<NetworkMember>[]; removed?: unknown }>(resp, 'sync peer');
     if (!Array.isArray(peerView)) return;
 
     const fresh = getConfig();
@@ -649,7 +653,11 @@ async function gossipWithPeer(
         changed = true;
       }
     }
-    if (changed) saveConfig(fresh);
+    // Q-135: on a club the loop above ignores an unknown member, and this is where it is not ignored — it becomes
+    // an introduction to pair with, and the peer's removals are applied here too.
+    const merged = mergePeerRoster(freshNet, fresh.instanceId, member.instanceId, peerView, peerRemoved);
+    if (changed || merged.changed) saveConfig(fresh);
+    revokeRemoved(merged.removed);
   } catch (err) {
     log.warn(`Gossip pull from ${member.label}: ${err}`);
   }

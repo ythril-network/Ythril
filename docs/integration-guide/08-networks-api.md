@@ -81,6 +81,13 @@ holds instance ids into `members`:
 A club network stored before 5.2 has no record of which instance created it and reads as `member`. MCP
 `network_get` returns the same field.
 
+**On a club, `introductions` lists members a peer introduced that this instance has not paired with yet**
+(`Q-135`): `{ instanceId, label, url, introducedBy, introducedAt, admittedAt?, lastAttemptAt?, lastError? }`. A
+club is a mesh: every member learns the others from its peers' rosters each sync cycle and pairs with them
+directly, so records keep flowing between members when the organiser is down. Absent when nothing is pending;
+`lastError` says why the last attempt failed. A member admitted before 5.6.1 carries no `admittedAt`. MCP
+`network_get` returns the same field.
+
 ---
 
 ### Create a Network
@@ -587,7 +594,7 @@ The fork gets a fresh UUID, no members, no pending rounds. You become the root.
 DELETE /api/networks/:id/members/:instanceId
 ```
 
-In `closed`/`democratic` networks this opens a removal voting round (**202**). In `club` networks the member is removed immediately (**204**). In `braintree` networks the ancestor path must vote; if the subject is a direct child, the round auto-concludes.
+In `closed`/`democratic` networks this opens a removal voting round (**202**). In `club` networks the member is removed immediately (**204**), and the removal reaches every other member on their next sync cycle (`Q-135`). In `braintree` networks the ancestor path must vote; if the subject is a direct child, the round auto-concludes.
 
 **Response** `204` (immediate removal) or `202`:
 

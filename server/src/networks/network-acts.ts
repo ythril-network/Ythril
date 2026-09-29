@@ -35,6 +35,7 @@ import { MIN_PEER_VERSION, peerFloorRefusal } from '../sync/peer-floor.js';
 import { peerSafeFetch } from '../sync/peer-fetch.js';
 import { log } from '../util/log.js';
 import { networkRole } from './network-role.js';
+import { introductionView } from './member-introductions.js';
 import { addSpacesToNetwork, widenPeerTokens } from './network-spaces.js';
 import { concludeRoundIfReady } from '../sync/governance.js';
 import { localToRemote, remoteToLocal, spaceNameInUseRefusal, reverseSpaceMap, recordSpaceAlias } from '../sync/space-map.js';
@@ -80,7 +81,7 @@ export const UpdateNetworkBody = z.object({
 
 /** A network as any caller may see it: no credential of any kind, and each member's version verdict. */
 export function networkView(net: NetworkConfig): Record<string, unknown> {
-  const { inviteKeyHash: _ikh, ...rest } = net;
+  const { inviteKeyHash: _ikh, introductions, ...rest } = net;
   // What this instance is in the network, and who that role acts on (F-38.1), by instance id into `members`.
   const role = networkRole(net);
   const myRole = {
@@ -98,6 +99,8 @@ export function networkView(net: NetworkConfig): Record<string, unknown> {
       belowFloor: peerFloorRefusal(m.version, m.versionCheckedAt),
       minPeerVersion: MIN_PEER_VERSION,
     })),
+    // Q-135: club members a peer introduced and this instance has not paired with yet, each with why if it failed.
+    ...(introductions?.length ? { introductions: introductions.map(introductionView) } : {}),
   };
 }
 

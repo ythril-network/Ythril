@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A club is a mesh: every member connects to every other member, not only to whoever admitted it (`Q-135`).**
+  An admission landed on the admitting instance alone, so two members admitted by the organiser never learned of
+  each other and the club stopped when the organiser did. Now each member learns the others from its peers'
+  rosters during the gossip every sync cycle already runs, and the two pair directly with a new two-call exchange
+  on the peer protocol (`POST /api/sync/networks/:id/pair` and `/pair/confirm`), so an existing club heals on its
+  next cycle without re-joining. A club removal travels to every member the same way. `GET /api/networks/:id` and
+  MCP `network_get` answer `introductions` — members still being connected to, with why an attempt failed — and the
+  network card lists them under **Connecting**. Club only: pub/sub and trees are star and tree by design, and voted
+  networks follow in `Q-154`, because a peer's roster must not stand in for a vote.
+
 - **The Graph tab says why it is slow instead of spinning with nothing on it (`Q-155`).** After three seconds of
   waiting it says the server has not answered yet and names what the space is doing — search indexes being built,
   records waiting to be embedded — and after thirty seconds the wait ends in the error state with those reasons
