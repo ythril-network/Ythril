@@ -316,6 +316,11 @@ single time — which looks identical to a search with no reranker configured. Y
 small enough for a standard server by default; an administrator can raise the batch size
 (`mediaEmbedding.rerank.maxPassagesPerRequest`) on a server that accepts more.
 
+**Once a search answers, the form folds to one line** that still holds your question — press Enter to search again,
+or **More options** to open every setting. The answer's header says how long the search took, measured from the
+moment you pressed Search, and **Expand all** / **Collapse all** open or fold every record in the answer at once,
+in either view.
+
 **The answer arrives in its own card, and you can read it two ways.** *Rendered* is the default: one card
 per result with its score, its neighbourhood underneath it, and the record itself as a tree you can fold. Any
 nested part — a properties bag, a tag list — starts collapsed with a count beside it (`{…} 4 keys`), so a

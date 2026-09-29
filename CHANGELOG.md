@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A slow or failing reranker no longer holds every search (`Q-157`).** Measured on a 5.6.0 instance: every
+  recall took 20 s — the reranker's time limit — and was answered in fused order anyway, while the same recall
+  without reranking took 90 ms. A reranker pass that fails, runs out its own time limit, or takes more than half of
+  it now sets the reranker aside for 30 s, doubling to 5 min; searches in between skip it at once and still report
+  `degraded: ["rerank_unavailable"]`. A background probe, never a user's search, brings it back. The assist
+  model's fallback rule and this one are now one module.
+- **A record's text rank is its rank among records of its own type (`Q-159`).** The text channel sorted every
+  type's matches together by raw MongoDB text score, whose scale is each collection's own, so a fact could outrank
+  an entity only because facts are longer — the comparison reciprocal rank fusion exists to avoid. The Query tab
+  now says what `fusedScore` is: a rank score, `1/(60 + rank by meaning) + 1/(60 + rank by text)`, about 0.016 to
+  0.033, never a similarity.
+- **The Query tab's structured mode is called Filter (`Q-156`)**, the name it has as the `filter` tool and
+  `POST /api/filter`; it was *Advanced Query*.
+- **The Query tab folds its search to one line once results arrive, says how long the search took, and expands or
+  collapses every result at once (`Q-158`).**
+
 - **The Graph tab says why it is slow instead of spinning with nothing on it (`Q-155`).** After three seconds of
   waiting it says the server has not answered yet and names what the space is doing — search indexes being built,
   records waiting to be embedded — and after thirty seconds the wait ends in the error state with those reasons

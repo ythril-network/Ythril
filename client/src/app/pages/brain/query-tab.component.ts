@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, ViewChild, computed, inject, input, output, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, QueryList, ViewChildren, computed, inject, input, output, signal } from '@angular/core';
 import { SupersededBadgeComponent } from '../../shared/superseded-badge.component';
 import { groupRecallResults, chunkLabel, passageText, relatedOf, orderingOf } from './recall-grouping';
 import { recordOf } from './recall-hits';
@@ -136,6 +136,9 @@ import { SpillEndingComponent } from './spill-ending.component';
       overflow: hidden;
       margin-top: 12px;
     }
+    .recall-form-collapsed { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
+    .recall-form-collapsed input { flex: 1; min-width: 0; }
+    .query-answer-duration { color: var(--text-muted); }
     .query-answer-head {
       display: flex;
       align-items: center;
@@ -224,6 +227,15 @@ import { SpillEndingComponent } from './spill-ending.component';
                  room for them comes first. The request built from that form stays here — 19 characterization
                  cases pin it, and not one of their assertions changed. -->
             @if (queryMode() === 'search') {
+              <!-- Q-158: once a search has answered, the eleven-field form folds to ONE line that still holds the
+                   question, so the answer starts where the reader is looking. More options reopens it. -->
+              @if (!recallFormOpen() && recallResults().length) {
+                <div class="recall-form-collapsed">
+                  <input type="text" [value]="recallForm.query" [attr.aria-label]="'brain.query.searchButton' | transloco"
+                         (input)="recallForm.query = $any($event.target).value" (keydown.enter)="runRecall()" />
+                  <button class="btn btn-ghost btn-sm recall-form-expand" type="button" (click)="recallFormOpen.set(true)">{{ 'brain.query.moreOptions' | transloco }}</button>
+                </div>
+              } @else {
               <app-recall-form
                 [form]="recallForm"
                 [typeOpts]="recallTypeOpts"
@@ -233,6 +245,7 @@ import { SpillEndingComponent } from './spill-ending.component';
                 [hasResults]="recallResults().length > 0"
                 (run)="runRecall()"
                 (clear)="clearRecall()" />
+              }
 
               <!-- THE ANSWER WAS SHORTENED, and until now the page did not say so.
                    Placed above the results rather than below them: a reader who scrolls to the end has already
@@ -302,11 +315,14 @@ import { SpillEndingComponent } from './spill-ending.component';
                     @if (answerSize(); as size) {
                       <span>{{ size }}</span>
                     }
+                    @if (recallTookMs() !== null) {
+                      <span class="query-answer-duration">{{ 'brain.query.took' | transloco: { seconds: (recallTookMs()! / 1000).toFixed(2) } }}</span>
+                    }
                     <div class="query-answer-tools">
-                      @if (answerView() === 'json') {
-                        <button class="btn btn-ghost btn-sm" type="button" (click)="tree?.expandAll()">{{ 'brain.query.expandAll' | transloco }}</button>
-                        <button class="btn btn-ghost btn-sm" type="button" (click)="tree?.collapseAll()">{{ 'brain.query.collapseAll' | transloco }}</button>
-                      }
+                      <!-- Both views (Q-158): the rendered one holds a folded tree per record, which is where
+                           opening everything at once is most use. -->
+                      <button class="btn btn-ghost btn-sm query-answer-expand" type="button" (click)="expandAllTrees()">{{ 'brain.query.expandAll' | transloco }}</button>
+                      <button class="btn btn-ghost btn-sm" type="button" (click)="collapseAllTrees()">{{ 'brain.query.collapseAll' | transloco }}</button>
                       <button class="btn btn-sm" type="button"
                         [class.btn-primary]="answerView() === 'rendered'" [class.btn-secondary]="answerView() !== 'rendered'"
                         (click)="answerView.set('rendered')">{{ 'brain.query.view.rendered' | transloco }}</button>
@@ -509,8 +525,8 @@ import { SpillEndingComponent } from './spill-ending.component';
                     <span><strong>{{ res.count }}</strong> {{ 'brain.query.resultsFrom' | transloco: { count: res.count, collection: res.collection } }}</span>
                     @if (res.results.length) {
                       <div class="query-answer-tools">
-                        <button class="btn btn-ghost btn-sm" type="button" (click)="tree?.expandAll()">{{ 'brain.query.expandAll' | transloco }}</button>
-                        <button class="btn btn-ghost btn-sm" type="button" (click)="tree?.collapseAll()">{{ 'brain.query.collapseAll' | transloco }}</button>
+                        <button class="btn btn-ghost btn-sm" type="button" (click)="expandAllTrees()">{{ 'brain.query.expandAll' | transloco }}</button>
+                        <button class="btn btn-ghost btn-sm" type="button" (click)="collapseAllTrees()">{{ 'brain.query.collapseAll' | transloco }}</button>
                       </div>
                     }
                   </div>
@@ -642,15 +658,20 @@ export class QueryTabComponent {
    */
   answerView = signal<'rendered' | 'json'>('rendered');
 
-  @ViewChild(JsonTreeComponent) tree?: JsonTreeComponent;
+  /** Every record tree on screen: one in the JSON view and in Filter mode, one per record in the rendered view (Q-158). */
+  @ViewChildren(JsonTreeComponent) trees?: QueryList<JsonTreeComponent>;
+  expandAllTrees(): void { this.trees?.forEach(t => t.expandAll()); }
+  collapseAllTrees(): void { this.trees?.forEach(t => t.collapseAll()); }
 
-  /**
-   * The tree currently on screen, so the header's expand/collapse buttons can drive it.
-   *
-   * ONE handle for both modes, and it cannot be ambiguous: the modes are mutually exclusive, so at most one
-   * tree exists at a time. A template reference per tree was the first attempt and does not compile — a
-   * reference does not cross an `@if` boundary, and the buttons live in the card header while the tree
-   * lives in its body. The AOT build is what said so; the spec transpile had passed.
+  /** How long the last search took, measured here — what the person waited, network included (Q-158). */
+  recallTookMs = signal<number | null>(null);
+  /** Whether the full search form shows; it folds to one line once a search has answered with results (Q-158). */
+  recallFormOpen = signal(true);
+
+  /*
+   * `trees` above is a QUERY, not a template reference, for a reason the AOT build gave: a reference does not
+   * cross an `@if` boundary, and the buttons live in the card header while the trees live in its body. It was one
+   * `@ViewChild` while only the JSON view had buttons; the rendered view holds a tree per record (Q-158).
    */
 
   /**
@@ -766,6 +787,8 @@ export class QueryTabComponent {
     this.recallTruncated.set(null);
     this.resetSpill();
     this.recallRan.set(false);   // a stale "no matches" must not describe the search now running
+    this.recallTookMs.set(null);
+    const startedAt = performance.now();
     this.brainApi.recallBrain(this.spaceId(), body).subscribe({
       /*
        * STORED AS THE SERVER SENT IT. Not flattened, and that is the fix rather than a refactor.
@@ -784,7 +807,9 @@ export class QueryTabComponent {
       next: (res) => {
         this.recallRunning.set(false);
         this.recallRan.set(true);
+        this.recallTookMs.set(Math.round(performance.now() - startedAt));
         this.recallResults.set(res.results);
+        if (res.results.length) this.recallFormOpen.set(false);
         // THE WHOLE RESPONSE, kept for the JSON view. The rendered view reads the result list; the JSON view
         // has to show `count`, the budget fields and every `_graph` — those are what a caller reasons about,
         // and showing only the results is what made this panel teach a shape the product does not have.
@@ -809,12 +834,14 @@ export class QueryTabComponent {
       },
       // NOT `recallRan` on an error: a failed search did not find nothing, it did not finish. Saying "no
       // matches" beside an error message would tell the reader two different things about one click.
-      error: (err) => { this.recallRunning.set(false); this.recallError.set(err.error?.error ?? 'Search failed'); },
+      error: (err) => { this.recallRunning.set(false); this.recallTookMs.set(null); this.recallError.set(err.error?.error ?? 'Search failed'); },
     });
   }
 
   clearRecall(): void {
     this.recallRan.set(false);
+    this.recallFormOpen.set(true);
+    this.recallTookMs.set(null);
     this.recallResults.set([]);
     this.recallRaw.set(null);
     this.leftOut.set(null);

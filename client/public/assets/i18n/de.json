@@ -532,6 +532,8 @@
   "brain.query.truncated.by.walk_budget": "Die Suche endete hier, weil sie so viel Graph durchlaufen hat, wie eine Suche darf.",
   "brain.query.truncated.by.deadline": "Die Suche endete hier, weil die Zeit abgelaufen ist.",
   "brain.query.expandAll": "Alle ausklappen",
+  "brain.query.took": "in {{seconds}} s",
+  "brain.query.moreOptions": "Weitere Optionen",
   "brain.query.collapseAll": "Alle einklappen",
   "brain.query.view.rendered": "Lesbar",
   "brain.query.view.json": "JSON",

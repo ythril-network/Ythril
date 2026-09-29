@@ -532,6 +532,8 @@
   "brain.query.truncated.by.walk_budget": "The search stopped here because it reached the most graph it may walk in one search.",
   "brain.query.truncated.by.deadline": "The search stopped here because it ran out of time.",
   "brain.query.expandAll": "Expand all",
+  "brain.query.took": "in {{seconds}} s",
+  "brain.query.moreOptions": "More options",
   "brain.query.collapseAll": "Collapse all",
   "brain.query.view.rendered": "Rendered",
   "brain.query.view.json": "JSON",

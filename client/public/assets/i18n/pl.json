@@ -532,6 +532,8 @@
   "brain.query.truncated.by.walk_budget": "Wyszukiwanie zatrzymało się tutaj, bo przeszło tyle grafu, ile wolno w jednym wyszukiwaniu.",
   "brain.query.truncated.by.deadline": "Wyszukiwanie zatrzymało się tutaj, bo zabrakło czasu.",
   "brain.query.expandAll": "Rozwiń wszystko",
+  "brain.query.took": "w {{seconds}} s",
+  "brain.query.moreOptions": "Więcej opcji",
   "brain.query.collapseAll": "Zwiń wszystko",
   "brain.query.view.rendered": "Czytelnie",
   "brain.query.view.json": "JSON",
