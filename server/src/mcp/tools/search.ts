@@ -51,12 +51,10 @@ import { rankingFields } from '../../brain/recall-shape.js';
  * arrive as one type. A `string | string[]` parameter here would put the normalising step at each door,
  * and the doors are exactly where one of them gets it wrong.
  *
- * **`crossSpace` is NOT deprecated, and this docblock called it that in both bullets** — the word was
- * removed from the tool's own schema description on purpose, and left standing here. It looked like a pure
- * duplicate of omitting `space`, and removing it from the tool turned the MCP/REST parity gate's
- * `find-similar ↔ find_similar` case red: **the REST route takes the space in its PATH**, so *"omit the
- * space"* is not expressible there and `crossSpace: true` is REST's only route to the same capability.
- * Dropping it on one door alone is exactly the parameter-level divergence that gate exists to catch.
+ * **`crossSpace` is NOT deprecated.** It looks like a duplicate of omitting `space`, and is not: `space` says where
+ * the SOURCE entry lives, so naming it and setting `crossSpace` searches every other space from a source in one — a
+ * request omitting `space` cannot express, because omitting it also looks for the source everywhere. (Its earlier
+ * reason, a REST route with the space in its path, stopped being true at 5.0; REST answers through this tool now.)
  *
  * Pure (proxy resolver injected) so the scope logic is unit-testable without a database.
  */
@@ -547,7 +545,9 @@ export const find_similarTool: ToolHandler = {
               type: 'boolean',
               description: 'Also KEEP the matches that did not fit as a spill, reported as `remainder` with a `spillId` for `read_spill` (default false). Only meaningful when the answer truncates. A spill is readable by your token alone, for up to one day, and is never written into any space; paging with `skip`/`nextSkip` reaches the same records without one. If it cannot be kept, `spillRefused` says why. It used to happen unconditionally on every truncated call, which meant a caller that only wanted the next page paid for a download it never opened.',
             },
-            topK: { type: 'number', minimum: 1, maximum: 100, default: 10, description: 'Max results to return (clamped to 1–100). Default 10.' },
+            // No `maximum`: the handler CLAMPS to 100, as REST always did, and a schema ceiling turned `topK: 200` into
+            // a 400 on both doors while this description promised a clamp (found collapsing REST onto the tool, Q-89).
+            topK: { type: 'number', minimum: 1, default: 10, description: 'Max results to return, clamped to 100. Default 10.' },
             minScore: unitScoreSchema('Minimum cosine similarity (0.0–1.0). Results below it are excluded. Unlike on `recall`, this IS the relevance gate — cosine distance is the only ranking here, so raising it narrows the answer honestly rather than cutting candidates a reranker would have rescued. For deduplication, start high: near-duplicates sit well above 0.9 and everything below that is a topic match rather than a repeat.'),
             traverse: {
               // Literally `recall`'s, not merely the same shape: one builder, so a parameter cannot mean one

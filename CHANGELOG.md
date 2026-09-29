@@ -16,6 +16,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   where it read `hit.<field>`, and `source.id` where it read `source._id`. MCP callers and the web UI see no change.
   The route now answers through the tool, as `/recall` does, so its refusals are the tool's words too; an entry that
   does not exist is still a `404`.
+- **A search that names no space reads only where the token may read (`Q-89`).** `recall` or `similar` without
+  `space`, or `similar` with `crossSpace: true`, searched every space the token could reach — and reaching a space is
+  not holding its knowledge, so a token with only `files: read` somewhere had that space's records ranked. The REST
+  `/similar` route narrowed its own set; moving it onto the tool showed the tool never did, on either door. Every read
+  tool now searches only the spaces where the token holds the tool's area.
 
 ### Fixed
 
