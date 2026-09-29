@@ -103,9 +103,37 @@ if (-not $AssumeStopped) {
 }
 
 # -- Compact, elevated -------------------------------------------------------------------------------
-# diskpart needs administrator. Rather than telling a human to open another shell, elevate just this step:
-# a UAC prompt appears and the script waits for the result.
+# diskpart needs administrator. With the task `scripts/docker-compact-install.ps1` registers, that is the task's
+# job and there is no prompt (Q-119): it runs a protected copy of docker-compact-elevated.ps1 that only an
+# administrator can change. Without it, elevate just this step: a UAC prompt appears and the script waits.
+$taskName = 'Ythril Docker Compact'
+$task = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+if ($task) {
+  Section 'Compacting (elevated through the installed task - no prompt)'
+  $taskLog = Join-Path $env:ProgramData 'Ythril\docker-compact.log'
+  $before = if (Test-Path $taskLog) { (Get-Item $taskLog).LastWriteTimeUtc } else { [DateTime]::MinValue }
+  Start-ScheduledTask -TaskName $taskName
+  # Wait for it to start writing, then for it to finish; the log's last line is the exit code.
+  $deadline = (Get-Date).AddHours(2)
+  do {
+    Start-Sleep -Seconds 2
+    $state = (Get-ScheduledTask -TaskName $taskName).State
+    $written = (Test-Path $taskLog) -and ((Get-Item $taskLog).LastWriteTimeUtc -gt $before)
+  } while (((-not $written) -or $state -eq 'Running') -and (Get-Date) -lt $deadline)
+  $lines = if (Test-Path $taskLog) { @(Get-Content $taskLog) } else { @() }
+  foreach ($l in $lines) { Write-Host "  $l" }
+  $last = $lines | Where-Object { $_ -like 'EXIT *' } | Select-Object -Last 1
+  $code = if ($last) { [int]($last -replace '^EXIT ', '') } else { 1 }
+  if ($code -ne 0) {
+    Write-Host ''
+    Write-Host "  The compaction task exited $code. If the disk was left ATTACHED, detach it from an elevated shell:"
+    Write-Host '     diskpart'
+    Write-Host "     select vdisk file=`"$vhdx`""
+    Write-Host '     detach vdisk'
+  }
+} else {
 Section 'Compacting (elevated - accept the UAC prompt)'
+Write-Host '  (scripts\docker-compact-install.ps1, run once elevated, makes this run without the prompt)'
 $script = Join-Path $env:TEMP ("ythril-compact-{0}.txt" -f [Guid]::NewGuid().ToString('N'))
 @(
   "select vdisk file=`"$vhdx`"",
@@ -140,6 +168,7 @@ if ($code -ne 0) {
   Write-Host '     diskpart'
   Write-Host "     select vdisk file=`"$vhdx`""
   Write-Host '     detach vdisk'
+}
 }
 
 # -- Result ------------------------------------------------------------------------------------------

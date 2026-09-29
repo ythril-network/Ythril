@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`npm run docker:compact` can run without a UAC prompt** (Q-119, development tooling). `npm run
+  docker:compact:install`, run once from an elevated shell, copies the compaction step to
+  `C:\ProgramData\Ythril\` where only Administrators and SYSTEM may write, and registers an on-demand task that runs
+  that copy with highest privileges; `docker:compact` then starts the task instead of asking UAC, and asks UAC as
+  before when it is not installed. The task runs only the protected copy, takes no arguments, and attaches the disk
+  read-only. `-Uninstall` removes both.
 - **`rerank: false` on `recall`** (Q-88), on both doors: skips the configured cross-encoder — no over-fetch for it and
   no rerank pass, on one space and across many — and returns the fused order at once; nothing is reported in
   `degraded`, since it is a skip the caller chose. The reranked answer stays the default. The search bars in the
