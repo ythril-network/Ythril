@@ -724,7 +724,7 @@ Given an existing entry's `_id`, find other entries with high vector similarity.
 | `entryId` | ✅ | — | UUID of the entry to use as the query vector |
 | `entryType` | ✅ | — | Knowledge type of the source entry (`fact`, `entity`, `edge`, `chrono`, `file`) |
 | `targetTypes` | — | all types | Which knowledge types to search in |
-| `topK` | — | `10` | Maximum results, minimum 1, clamped to 100 on both doors |
+| `topK` | — | `10` | Maximum results, 1–100 on both doors; outside that is a `400`. **Changed** (`Q-89`): REST used to clamp it |
 | `minScore` | — | `0.0` | Minimum cosine similarity threshold |
 | `traverse` | — | `0` | Graph-expansion depth (0–5). With `traverse > 0` each match is expanded along edges and the connected entities come back alongside it — see the response shape below |
 | `includeFileContent` | — | `true` | Whether file-chunk results carry their passage `content`. `false` returns locations and metadata only, exactly as on `recall` |

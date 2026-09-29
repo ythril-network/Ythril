@@ -545,9 +545,9 @@ export const find_similarTool: ToolHandler = {
               type: 'boolean',
               description: 'Also KEEP the matches that did not fit as a spill, reported as `remainder` with a `spillId` for `read_spill` (default false). Only meaningful when the answer truncates. A spill is readable by your token alone, for up to one day, and is never written into any space; paging with `skip`/`nextSkip` reaches the same records without one. If it cannot be kept, `spillRefused` says why. It used to happen unconditionally on every truncated call, which meant a caller that only wanted the next page paid for a download it never opened.',
             },
-            // No `maximum`: the handler CLAMPS to 100, as REST always did, and a schema ceiling turned `topK: 200` into
-            // a 400 on both doors while this description promised a clamp (found collapsing REST onto the tool, Q-89).
-            topK: { type: 'number', minimum: 1, default: 10, description: 'Max results to return, clamped to 100. Default 10.' },
+            // Refused above 100, not clamped: the validator's range IS the contract (`mcp-args-validation`), so the
+            // description says so. It said "clamped", which REST did until it answered through this tool (Q-89).
+            topK: { type: 'number', minimum: 1, maximum: 100, default: 10, description: 'Max results to return, 1–100; a value outside that is refused, never clamped. Default 10.' },
             minScore: unitScoreSchema('Minimum cosine similarity (0.0–1.0). Results below it are excluded. Unlike on `recall`, this IS the relevance gate — cosine distance is the only ranking here, so raising it narrows the answer honestly rather than cutting candidates a reranker would have rescued. For deduplication, start high: near-duplicates sit well above 0.9 and everything below that is a topic match rather than a repeat.'),
             traverse: {
               // Literally `recall`'s, not merely the same shape: one builder, so a parameter cannot mean one
