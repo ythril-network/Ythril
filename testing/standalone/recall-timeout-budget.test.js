@@ -72,15 +72,19 @@ describe('the deadline is threaded through the pipeline', () => {
     // `rerankTimeout()` rather than a `TIMEOUT_MS` constant: the reranker's own ceiling became
     // operator-settable, so it is resolved per call. A module constant would ignore a config reload, and this
     // assertion is about the CAP still being applied, not about where the number comes from.
-    assert.match(client, /Math\.min\(rerankTimeout\(\), budgetMs!\)/,
+    // Spelled as a choice since `Q-157`, because WHOSE deadline bound the pass decides whether a timeout cools the
+    // reranker down: the caller's budget when it is the shorter, the reranker's own slot timeout otherwise.
+    assert.match(client, /const callerBound = Number\.isFinite\(budgetMs\) && budgetMs! > 0 && budgetMs! < slot;/,
       'the reranker must cap its own timeout to what is left, never exceed it');
+    assert.match(client, /callerBound \? budgetMs! : slot/, 'the pass must run under the shorter of the two');
   });
 
   it('an absent budget still gets the full timeout — the parameter is optional', () => {
     // `rerank()` is called from find_similar too, which has no budget of its own. It must not
     // accidentally get a zero-length timeout.
     const client = readFileSync('server/src/brain/rerank-client.ts', 'utf8');
-    assert.match(client, /Number\.isFinite\(budgetMs\) && budgetMs! > 0 \? .* : rerankTimeout\(\)/);
+    assert.match(client, /const slot = rerankTimeout\(\);/);
+    assert.match(client, /callerBound \? budgetMs! : slot/);
   });
 
   it('the searches DO carry a deadline now, and a partial answer says so', () => {
