@@ -97,7 +97,7 @@ describe('NetworksComponent (characterization)', () => {
   it('a club card lists the members it is still connecting to, with why an attempt failed (Q-135)', () => {
     make();
     api.listNetworks.mockReturnValue(of({ networks: [net({ id: 'n1', type: 'club', introductions: [
-      { instanceId: 'i-b', label: 'breituai', url: 'https://b', introducedBy: 'i-o', introducedAt: '2026-09-29T10:00:00Z' },
+      { instanceId: 'i-b', label: 'member-b', url: 'https://b', introducedBy: 'i-o', introducedAt: '2026-09-29T10:00:00Z' },
       { instanceId: 'i-c', label: 'home', url: 'https://c', introducedBy: 'i-o', introducedAt: '2026-09-29T10:00:00Z', lastError: 'HTTP 404' },
     ] } as any)] }));
     const fixture = TestBed.createComponent(NetworksComponent);

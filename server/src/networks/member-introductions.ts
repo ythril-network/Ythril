@@ -1,7 +1,7 @@
 /**
  * A club is a mesh: every member peers with every other, not only with whoever admitted it (`Q-135`).
  *
- * Owner, 2026-09-28: *"on club breituai and home dont see each other - wrong in a club"*. An admission landed on the
+ * Owner, 2026-09-28: two members of one club did not see each other, which is wrong in a club. An admission landed on the
  * admitting instance alone, so two members admitted by one organiser never learned of each other: every record
  * between them travelled through the organiser, and the club stopped when it did. A removal landed the same way.
  *
@@ -38,6 +38,7 @@ import { peerSafeFetch, isPeerUrlAllowed } from '../sync/peer-fetch.js';
 import { widenPeerTokensOf } from './network-spaces.js';
 import { BCRYPT_ROUNDS } from '../api/networks/_shared.js';
 import { log } from '../util/log.js';
+import { boundedErrorText } from '../util/bounded-read.js';
 import type { NetworkConfig, NetworkMember } from '../config/types.js';
 import type { MemberIntroduction, MemberRemoval } from '../config/types-networks.js';
 
@@ -199,7 +200,7 @@ const inFlight = new Set<string>();
 type Answer = { status: number; body: Record<string, unknown> };
 
 async function errorText(r: Response): Promise<string> {
-  const text = await r.text().catch(() => '');
+  const text = await boundedErrorText(r);
   try { return (JSON.parse(text) as { error?: string }).error ?? `HTTP ${r.status}`; } catch { return `HTTP ${r.status}`; }
 }
 

@@ -1,7 +1,7 @@
 /**
  * A club is a mesh, not a star around whoever admitted each member (`Q-135`).
  *
- * Owner, 2026-09-28: *"on club breituai and home dont see each other - wrong in a club"*. An admission used to land
+ * Owner, 2026-09-28: two members of one club did not see each other, which is wrong in a club. An admission used to land
  * on the admitting instance alone: B and C, both admitted by A, never learned of each other, so every record between
  * them travelled through A and the club stopped when A did.
  *
