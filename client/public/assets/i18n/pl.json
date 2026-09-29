@@ -429,7 +429,7 @@
   "brain.tab.chrono": "Chrono",
   "brain.tab.fileMeta": "Plik Meta",
   "brain.query.mode.semanticSearch": "Wyszukiwanie semantyczne",
-  "brain.query.mode.advancedQuery": "Zaawansowane zapytanie",
+  "brain.query.mode.advancedQuery": "Filtr",
   "brain.query.search.label": "Przeszukaj swoją bazę wiedzy",
   "brain.query.search.placeholder": "Co chcesz znaleźć?",
   "brain.query.group.question": "Pytanie",

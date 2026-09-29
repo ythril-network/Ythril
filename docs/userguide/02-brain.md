@@ -183,7 +183,7 @@ Remove it and the link goes. There is no separate box to tick and no extra step.
 Every kind of attachment is followed, including a timeline entry pointing at a **fact**, and a file pointing
 at a **fact** or at a **timeline entry** — so a graph from a fact reaches the timeline entry about it.
 
-**Where to see them:** the **Query** tab, Advanced mode, with the collection picker set to **links** — one
+**Where to see them:** the **Query** tab, Filter mode, with the collection picker set to **links** — one
 row per connection, showing which record it hangs off and which record it names.
 
 > **A link is not an edge and cannot become one.** It carries no label, no weight and no properties, on
@@ -261,7 +261,7 @@ tabs. Title, type, dates, status, tags, description and properties can all be ch
 
 ### Query
 
-The Query tab has two modes, switched with the buttons at the top: **Semantic Search** and **Advanced Query**.
+The Query tab has two modes, switched with the buttons at the top: **Semantic Search** and **Filter**. Filter is the same query the `filter` tool and `POST /api/filter` run, which is why it carries their name (it was called *Advanced Query* before).
 
 #### Semantic Search
 
@@ -485,7 +485,7 @@ set that way through the API. It is meant for records that are **state rather th
 numbers are updated constantly, which would otherwise be re-embedded on every write for no gain.
 
 What it does is remove the record's embedding, not hide the record. So a suppressed record is still returned by
-**Advanced Query**, still opens from its tab, still exports, and is still reached by **Graph hops** from a match
+**Filter**, still opens from its tab, still exports, and is still reached by **Graph hops** from a match
 next to it — it simply stops competing on meaning. If a record you know exists never appears in a search, check
 these three levels before treating it as a fault.
 
@@ -537,7 +537,7 @@ The three levels above are read **here** as well, so this instance decides what 
 one part that travels with the record is the per-record setting: if the author of a record marked it *"keep this
 out of semantic search"*, that mark arrives with it and is respected on every other instance.
 
-#### Advanced Query
+#### Filter
 
 Runs a structured MongoDB-style query against one collection. Select a collection (`facts`, `entities`, `edges`, `chrono`, `files`, or `links`), optionally set a **limit** and **max time (ms)**, enter a filter as JSON, and click **Run**. Results appear below.
 
