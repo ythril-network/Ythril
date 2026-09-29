@@ -41,6 +41,8 @@ import { routeBody, delegatesCleanly } from './_delegating-routes.mjs';
 import { stripComments } from './_strip-comments.mjs';
 
 const MCP = readFileSync('server/src/mcp/tools/search.ts', 'utf8');
+const { TOOLS_BY_NAME } = await import('../../server/dist/mcp/tools/index.js');
+const { toolSchemasFor, materialisedSchema } = await import('../../server/dist/mcp/tool-schema.js');
 const REST = readFileSync('server/src/api/brain/search.ts', 'utf8');
 
 let DEFAULT_MAX_CHARS, MCP_DEFAULT_MAX_CHARS, MIN_MAX_BYTES, MAX_MAX_BYTES, resolveBudget;
@@ -166,14 +168,19 @@ describe('both doors say so, in the surface a caller reads', () => {
      */
     // The default lives on `maxChars` now — it is the ceiling that carries one, and `maxBytes` deliberately
     // has none, so a per-door default stated on `maxBytes` would be naming a number that does not exist.
-    const hits = [...MCP.matchAll(/DEFAULT 25000 ON THIS DOOR/g)];
-    assert.ok(hits.length >= 2,
-      `both maxChars descriptions must state this door's default; found ${hits.length}`);
-    assert.match(MCP, /50000 on REST/, 'and name the other door\'s, so the difference is discoverable');
-    assert.match(MCP, /NO DEFAULT/,
-      '`maxBytes` must say it has none — a caller who assumes one designs around a ceiling that is not there');
-    assert.match(MCP, /RAISE IT IF YOUR CLIENT CAN TAKE MORE/,
-      'and say what to do about it — a limit with no lever reads as a product ceiling');
+    // Read from the SCHEMA a caller is shown, not from a source file: since Q-161 the sentence lives in one module
+    // that every budgeted tool takes its ceilings from, so a source grep would be looking in the wrong place.
+    const tools = ['recall', 'similar'].map(n => TOOLS_BY_NAME.get(n));
+    for (const tool of tools) {
+      const props = materialisedSchema(tool, toolSchemasFor(['a', 'b']), ['a', 'b']).properties;
+      const chars = String(props.maxChars?.description ?? '');
+      assert.match(chars, /25000 on MCP/, `${tool.name}.maxChars must state this door's default`);
+      assert.match(chars, /50000 on REST/, 'and name the other door\'s, so the difference is discoverable');
+      assert.match(chars, /RAISE IT IF YOUR CLIENT CAN TAKE MORE/,
+        'and say what to do about it — a limit with no lever reads as a product ceiling');
+      assert.match(String(props.maxBytes?.description ?? ''), /NO DEFAULT/,
+        '`maxBytes` must say it has none — a caller who assumes one designs around a ceiling that is not there');
+    }
   });
 
   it('the integration guide states both numbers', () => {

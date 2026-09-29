@@ -21,6 +21,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   not holding its knowledge, so a token with only `files: read` somewhere had that space's records ranked. The REST
   `/similar` route narrowed its own set; moving it onto the tool showed the tool never did, on either door. Every read
   tool now searches only the spaces where the token holds the tool's area.
+- **Every budgeted MCP tool states its size ceilings from one schema (`Q-161`).** `recall`, `similar`, `filter` and
+  `read_spill` each carried their own copy of `maxChars`/`maxBytes`/`maxTokens`, and the copies had drifted from the
+  rule they all resolve through: MCP refused a `maxBytes` under 1000 and (except `read_spill`) a `maxChars` under 1000,
+  where the resolver honours any `maxBytes` and raises a small `maxChars` to 1000. The schema now follows the
+  resolver, so MCP accepts what REST always did; `recall`'s `maxTokens` text no longer says it converts onto bytes.
 
 ### Fixed
 
