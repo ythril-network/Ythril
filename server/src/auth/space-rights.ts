@@ -410,6 +410,7 @@ export const NOT_AREA_SCOPED: readonly { route: string; why: string }[] = [
   { route: '/api/networks/:id/fork', why: 'creates a new network from an existing one\'s topology: a network-wide act — instance-admin' },
   { route: '/api/networks/:id/members', why: 'adds a peer INSTANCE to the network: who this instance trusts, not which spaces are shared — instance-admin' },
   { route: '/api/networks/:id/members/:instanceId', why: 'removes a peer INSTANCE: the instance\'s trust relationships — instance-admin' },
+  { route: '/api/networks/:id/introductions/:instanceId/accept', why: 'accepts a peer INSTANCE a voted network\'s roster proposed (Q-154): who this instance trusts, not which spaces are shared — instance-admin' },
   { route: '/api/networks/:id/members/:instanceId/signing-key', why: 'a peer\'s vote-signing key: the network\'s trust, not a space\'s data — instance-admin' },
   { route: '/api/networks/:id/reparent-self', why: 'braintree topology: where this instance sits in the tree — instance-admin' },
   { route: '/api/networks/:id/members/:instanceId/adopt', why: 'braintree topology — instance-admin' },

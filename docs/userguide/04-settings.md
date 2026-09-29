@@ -494,6 +494,12 @@ admits a new member, the others learn of it on their next sync and connect to it
 syncing when the organiser is offline. Until a connection is made the card lists that member under **Connecting**,
 with the reason if an attempt failed. Removing a member from a club removes it on every member.
 
+**A closed or democratic network connects its members too, on its own votes.** When a join vote passes, every
+member connects to the newcomer by itself, and a newcomer connects to the members its inviter knows. A member that
+only another member's list names — typically on a network whose members joined before this version — appears under
+**Connecting** as **waiting for your OK**, with an **Accept** button: a member of a voted network votes, so one
+member's word must not let it in. Accept it and the two connect on the next sync.
+
 **Adding a space to a network.** The card's Spaces list has an **Add space** picker offering your spaces the
 network does not carry yet, where your position allows it: the publisher of a pub/sub network, the root of a tree or
 a club's organiser, which all add it at once, or any member of a closed or democratic network, where it opens a vote

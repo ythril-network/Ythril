@@ -119,6 +119,7 @@ export const MCP_TOOL_OPERATIONS: Record<string, string | string[] | null> = {
   network_join_by_key: 'network.join_by_key',
   network_member_add: 'network.member.add',
   network_member_remove: 'network.member.remove',
+  network_introduction_accept: 'network.introduction.accept',
   network_member_admit: 'network.join',
   network_member_signing_key: 'network.member.signing_key',
   network_reparent_self: 'network.reparent_self',

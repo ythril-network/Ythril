@@ -9,7 +9,7 @@
  */
 import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.js';
 import { joinByInviteKeyAct, joinRemoteAct } from '../../networks/join-remote-act.js';
-import { addMemberAct, removeMemberAct } from '../../networks/member-acts.js';
+import { addMemberAct, removeMemberAct, acceptIntroductionAct } from '../../networks/member-acts.js';
 import { uuidSchema } from './shared.js';
 import { DEFAULT_JOIN_SYNC_SCHEDULE } from '../../sync/schedule.js';
 import { callerOf, networkIdSchema, toResult } from './networks.js';
@@ -120,6 +120,30 @@ export const network_member_addTool: ToolHandler = {
   async handle(ctx: ToolContext): Promise<ToolResult> {
     const { id, ...body } = ctx.args;
     return toResult(await addMemberAct(String(id), body), '');
+  },
+};
+
+export const network_introduction_acceptTool: ToolHandler = {
+  name: 'network_introduction_accept',
+  description: 'Accept a member another member\'s roster only PROPOSED, on a closed or democratic network. Same as '
+    + '`POST /api/networks/:id/introductions/:instanceId/accept`. On a voted network a roster is not the authority, '
+    + 'because an admitted instance votes: a member introduced by a passed join round, or by the member that admitted '
+    + 'this instance, pairs on its own; any other introduction waits in `network_get`\'s `introductions` with '
+    + '`needsApproval: true` until accepted here. Pairing follows on the next sync. A 404 when nothing of that id is '
+    + 'waiting. Requires instance-admin rights.',
+  admin: true,
+  mutating: true,
+  inputSchema: (_s: ToolSchemas) => ({
+    type: 'object',
+    properties: {
+      id: networkIdSchema,
+      instanceId: { type: 'string', minLength: 1, description: 'The waiting introduction\'s instance id, as `network_get` lists it under `introductions`.' },
+    },
+    required: ['id', 'instanceId'],
+    additionalProperties: false,
+  }),
+  async handle(ctx: ToolContext): Promise<ToolResult> {
+    return toResult(acceptIntroductionAct(String(ctx.args['id']), String(ctx.args['instanceId'])), 'Introduction accepted.');
   },
 };
 

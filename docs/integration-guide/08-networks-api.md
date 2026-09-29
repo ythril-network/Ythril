@@ -20,7 +20,7 @@ Since F-34 a token below instance admin acts on a network through the **`network
 
 Everything else on this router — members, signing keys, topology (including a reparent invite), votes, sync and sync history — acts on the network as a whole and stays **instance-admin**. Invites do too, except for the space admin above. MCP `network_peers` lists the peers of the networks you may see, through the same filter as `GET /api/networks`.
 
-**On MCP** (F-36): `network_get`, `network_create`, `network_update`, `network_leave` and `network_add_space` are the same acts as `GET /api/networks/:id`, `POST /api/networks`, `PATCH /api/networks/:id`, `DELETE /api/networks/:id` and `POST /api/networks/:id/spaces` — same parameters (the network is `id`), the same rights, the same refusal sentences and the same body. `network_votes`, `network_vote` and `network_sync_history` are `GET /api/networks/:id/votes`, `POST /api/networks/:id/votes/:roundId` and `GET /api/networks/:id/sync-history`, instance-admin on both doors. `network_invite` and `network_fork` are `POST /api/networks/:id/invite` (instance admin, or administering every space) and `POST /api/networks/:id/fork` (instance admin). `network_join_remote` is `POST /api/networks/join-remote` — the same handshake, the same Networks rung checked between apply and finalize, and an inviter's refusal relayed with its own sentence. `network_member_add` and `network_member_remove` are `POST /api/networks/:id/members` and `DELETE /api/networks/:id/members/:instanceId`, instance-admin on both doors, with the same vote-or-direct answer per network type. `network_member_admit` is `POST /api/networks/:id/join` (the inviter's half of a join by invite key), `network_member_signing_key` is `PUT /api/networks/:id/members/:instanceId/signing-key`, and `network_reparent_self`, `network_member_adopt` and `network_member_revert_parent` are the three braintree topology routes — all instance-admin on both doors. Every network route now has its tool.
+**On MCP** (F-36): `network_get`, `network_create`, `network_update`, `network_leave` and `network_add_space` are the same acts as `GET /api/networks/:id`, `POST /api/networks`, `PATCH /api/networks/:id`, `DELETE /api/networks/:id` and `POST /api/networks/:id/spaces` — same parameters (the network is `id`), the same rights, the same refusal sentences and the same body. `network_votes`, `network_vote` and `network_sync_history` are `GET /api/networks/:id/votes`, `POST /api/networks/:id/votes/:roundId` and `GET /api/networks/:id/sync-history`, instance-admin on both doors. `network_invite` and `network_fork` are `POST /api/networks/:id/invite` (instance admin, or administering every space) and `POST /api/networks/:id/fork` (instance admin). `network_join_remote` is `POST /api/networks/join-remote` — the same handshake, the same Networks rung checked between apply and finalize, and an inviter's refusal relayed with its own sentence. `network_member_add` and `network_member_remove` are `POST /api/networks/:id/members` and `DELETE /api/networks/:id/members/:instanceId`, instance-admin on both doors, with the same vote-or-direct answer per network type. `network_introduction_accept` is `POST /api/networks/:id/introductions/:instanceId/accept`, instance-admin on both doors. `network_member_admit` is `POST /api/networks/:id/join` (the inviter's half of a join by invite key), `network_member_signing_key` is `PUT /api/networks/:id/members/:instanceId/signing-key`, and `network_reparent_self`, `network_member_adopt` and `network_member_revert_parent` are the three braintree topology routes — all instance-admin on both doors. Every network route now has its tool.
 
 ## Networks API
 
@@ -81,12 +81,27 @@ holds instance ids into `members`:
 A club network stored before 5.2 has no record of which instance created it and reads as `member`. MCP
 `network_get` returns the same field.
 
-**On a club, `introductions` lists members a peer introduced that this instance has not paired with yet**
+**On a club, and on a closed or democratic network, `introductions` lists members this instance has not paired with yet**
 (`Q-135`): `{ instanceId, label, url, introducedBy, introducedAt, admittedAt?, lastAttemptAt?, lastError? }`. A
 club is a mesh: every member learns the others from its peers' rosters each sync cycle and pairs with them
 directly, so records keep flowing between members when the organiser is down. Absent when nothing is pending;
 `lastError` says why the last attempt failed. A member admitted before 5.6.1 carries no `admittedAt`. MCP
 `network_get` returns the same field.
+
+**On a closed or democratic network the vote is the authority, not a roster** (`Q-154`): an admitted instance
+votes, so one member's roster must not admit one. A **passed join round** introduces its subject on every member
+that concludes it, and the **member that admitted this instance** (`admittedVia`, recorded at join) introduces
+without an OK — that is how a newcomer learns the members voted in before it. Any other roster entry carries
+`needsApproval: true` and pairs with nothing until this instance's operator accepts it:
+
+```http
+POST /api/networks/:id/introductions/:instanceId/accept
+```
+
+`200 { "status": "accepted", "instanceId" }`, or `404` when nothing of that id is waiting. Instance-admin; MCP
+`network_introduction_accept`. This is how a voted network whose members were admitted before 5.6.1 — its join
+rounds long pruned — connects every member. A voted network does not apply a roster's removals: a passed remove
+round already removes on every member.
 
 ---
 

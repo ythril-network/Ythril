@@ -2214,6 +2214,8 @@
   "networks.network.connecting.title": "Verbindung wird hergestellt",
   "networks.network.connecting.pending": "von einem Mitglied vorgestellt, Verbindung beim nächsten Sync",
   "networks.network.connecting.failed": "letzter Versuch fehlgeschlagen:",
+  "networks.network.connecting.waitingOk": "von einem anderen Mitglied vorgeschlagen, wartet auf deine Zustimmung",
+  "networks.network.connecting.accept": "Annehmen",
   "networks.dialog.join.error.invalidCode": "Das sieht nicht nach einem Einladungscode aus. Kopiere die ganze Zeile, die das andere Brain erzeugt hat — sie beginnt mit ythril1_.",
   "brain.cascade.title": "Diese Entität und was auf sie verweist löschen?",
   "brain.cascade.intro": "Etwas verweist auf diese Entität, daher kann sie nicht allein gelöscht werden. Beim Löschen wird außerdem entfernt:",
