@@ -269,7 +269,11 @@ export const FROZEN = {
   // NO DECOMPOSITION: this is the opposite of the growth this list exists to catch — a local duplicate of a
   // shared vocabulary became a reference to it, and the file is 8 lines over a ceiling it was already over.
   // Splitting a page for one import would cost a reader more than it saves.
-  'client/src/app/pages/graph/graph.component.ts': 642,
+  // 642 -> 619 (Q-162). Three questions left the page, each to its own module: whether a load is in flight and
+  // slow enough to explain (`graph-load-watch.ts`), which linked records the panel's filter leaves showing
+  // (`graph-detail-filter.ts`), and what a node or an edge lists (`graph-linked-fetch.ts`, one fetch where the
+  // node and edge panels each carried a copy). Lowered to the real number, as the ratchet asks.
+  'client/src/app/pages/graph/graph.component.ts': 619,
   // 753 -> 764: `backfillTokenRights`. This file is where config migrations already live — the media
   // master-switch and space-description ones are both here — so a fourth belongs beside them rather than in
   // a module only the loader would ever call.
