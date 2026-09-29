@@ -64,10 +64,10 @@ are hidden from browsing. Nothing in it is new data; every part is a record conv
 
 | field | what it is |
 |---|---|
-| `converted` | `{ path, markdown, truncated, sizeBytes }` for the `_converted/<id>.md` sidecar, or `null` when the format needed no conversion (`.md`/`.txt`). Capped at 256 KB — `truncated` says so, and the full file downloads through the file store. `unreadable` is present, holding the reason, when the sidecar exists but cannot be decrypted (a foreign master secret, altered bytes, or no secret for an encrypted file); an absent sidecar reads as empty `markdown` without it |
+| `converted` | `{ path, markdown, truncated, sizeBytes, markdownSkip, markdownChars, markdownNextSkip? }` for the `_converted/<id>.md` sidecar, or `null` when the format needed no conversion (`.md`/`.txt`). **Whole, or in whole paragraphs** (`Q-128`): a document over 256K characters comes back as a window of whole paragraphs from `markdownSkip` (a character offset, default 0), `markdownNextSkip` is where the next window starts, and the windows joined are the document character for character — never a cut mid-sentence. `markdownChars` is the document's length. `unreadable` is present, holding the reason, when the sidecar exists but cannot be decoded. |
 | `chunks[]` | one page, always ordered by `chunkIndex`: `{ id, index, headingText, content, chunkOffsetMs, chunkDurationMs, embeddingStatus }`. Audio and video chunks carry the offset/duration; documents carry the heading they opened |
 | `chunkTotal` | total across all pages — page with `limit` (default 100, max 500) and `skip` |
-| `images[]` | the `_extracted/` images with `{ path, description, descriptionSource, sizeBytes, embeddingStatus }` |
+| `images[]` | the `_extracted/` images with `{ path, description, descriptionSource, sizeBytes, embeddingStatus }`, in numeric path order. Paged through the shared list rule under its own names (`Q-128`): `imagesLimit` (default and ceiling 200), `imagesSkip`, and `imagesTotal`, `imagesTruncated`, `imagesNextSkip` in the answer — it used to stop at 200 with no flag. |
 | `description` · `descriptionSource` · `excerpt` | the parent's own, so one request answers the whole question |
 
 A chunk is identified by **carrying a `chunkIndex`**, not by the shape of its id — text chunks are

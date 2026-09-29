@@ -727,7 +727,13 @@ export interface FileExtract {
   excerpt?: string | null;
   /** The `_converted/<id>.md` sidecar. Absent for formats that need no conversion (.md/.txt). */
   /** `unreadable` carries the reason when the sidecar exists but cannot be decrypted (F-43). */
-  converted?: { path: string; markdown: string; truncated: boolean; sizeBytes: number; unreadable?: string } | null;
+  converted?: { path: string; markdown: string; truncated: boolean; sizeBytes: number; unreadable?: string;
+    /** Q-128: the window's start, the document's length and where the next window starts (whole paragraphs). */
+    markdownSkip?: number; markdownChars?: number; markdownNextSkip?: number } | null;
+  /** Q-128: the image list's own page. */
+  imagesTotal?: number;
+  imagesTruncated?: boolean;
+  imagesNextSkip?: number;
   chunks: Array<{
     id: string;
     index: number | null;

@@ -73,6 +73,9 @@ import { msRange } from './file-format';
       @if (x.images.length > 0) {
         <section>
           <h4>{{ 'files.extract.images' | transloco: { count: x.images.length } }}</h4>
+          @if (x.imagesTruncated) {
+            <div class="muted xtr-images-cut">{{ 'files.extract.imagesCut' | transloco: { shown: x.images.length, total: x.imagesTotal } }}</div>
+          }
           @for (img of x.images; track img.path) {
             <div class="xtr-image">
               <span class="xtr-path">{{ img.path }}</span>
@@ -96,12 +99,15 @@ import { msRange } from './file-format';
           <h4>{{ 'files.extract.converted' | transloco }}</h4>
           <div class="muted xtr-path">{{ conv.path }}</div>
           @if (conv.truncated) {
-            <div class="muted">{{ 'files.extract.truncated' | transloco }}</div>
+            <div class="muted">{{ 'files.extract.truncatedAt' | transloco: { shown: conv.markdown.length, total: conv.markdownChars ?? conv.markdown.length } }}</div>
           }
           @if (conv.unreadable) {
             <div class="muted">{{ 'files.extract.unreadable' | transloco: { reason: conv.unreadable } }}</div>
           }
           <pre class="xtr-md">{{ conv.markdown }}</pre>
+          @if (conv.markdownNextSkip !== undefined) {
+            <button class="btn btn-sm btn-secondary xtr-md-more" type="button" (click)="moreMarkdown.emit()">{{ 'files.extract.moreMarkdown' | transloco }}</button>
+          }
         </section>
       }
     }
@@ -115,6 +121,8 @@ export class FileExtractViewComponent {
 
   /** Load the next page of chunks. The page owns the cursor, so this only says the button was pressed. */
   readonly more = output<void>();
+  /** The next window of the converted Markdown (Q-128). */
+  readonly moreMarkdown = output<void>();
   readonly retry = output<void>();
 
   /**
