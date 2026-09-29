@@ -16,7 +16,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { mergePeerRoster, introduceFromPassedJoin, acceptIntroduction, applyPassedJoin } from '../../server/dist/networks/member-introductions.js';
+import { mergePeerRoster, introduceFromPassedJoin, acceptIntroduction, applyPassedJoin, pairRetryDue, PAIR_RETRY_MS } from '../../server/dist/networks/member-introductions.js';
 import { trackedSources, REPO_ROOT } from './_sources.mjs';
 
 const SELF = 'aaaa-self';
@@ -113,5 +113,27 @@ describe('a passed join lands through one rule, wherever it concludes', () => {
     const offenders = trackedSources(['server/src'], { untracked: true, exclude: owners })
       .filter(f => /members\.push\(\s*\w*\.?pendingMember/.test(readFileSync(`${REPO_ROOT}/${f}`, 'utf8')));
     assert.deepEqual(offenders, [], `these admit a passed join themselves instead of through applyPassedJoin: ${offenders.join(', ')}`);
+  });
+});
+
+describe('a refused pairing is retried soon, then less often', () => {
+  /*
+   * Every member of a voted network learns of a passed join at about the same moment, so the opener's first call
+   * can reach a member that has not concluded the round yet and be refused as "not introduced". On a flat five-minute
+   * retry that race cost five minutes per pair (#1455's second red run); a failure that is not a race is still
+   * retried at most every five minutes.
+   */
+  const at = ms => new Date(ms).toISOString();
+  it('a pairing never tried is due at once', () => {
+    assert.equal(pairRetryDue({}, 0), true);
+  });
+  it('the first retry comes within half a minute, and the wait doubles to the ceiling', () => {
+    const t0 = 1_000_000;
+    assert.equal(pairRetryDue({ attempts: 1, lastAttemptAt: at(t0) }, t0 + 29_000), false);
+    assert.equal(pairRetryDue({ attempts: 1, lastAttemptAt: at(t0) }, t0 + 30_000), true);
+    assert.equal(pairRetryDue({ attempts: 2, lastAttemptAt: at(t0) }, t0 + 30_000), false);
+    assert.equal(pairRetryDue({ attempts: 2, lastAttemptAt: at(t0) }, t0 + 60_000), true);
+    assert.equal(pairRetryDue({ attempts: 20, lastAttemptAt: at(t0) }, t0 + PAIR_RETRY_MS - 1), false);
+    assert.equal(pairRetryDue({ attempts: 20, lastAttemptAt: at(t0) }, t0 + PAIR_RETRY_MS), true);
   });
 });

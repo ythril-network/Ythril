@@ -55,8 +55,22 @@ import { boundedErrorText } from '../util/bounded-read.js';
 import type { NetworkConfig, NetworkMember } from '../config/types.js';
 import type { MemberIntroduction, MemberRemoval } from '../config/types-networks.js';
 
-/** How long an opener waits before trying a pairing that failed again. The sync cycle is the clock. */
+/** The longest an opener waits before trying a pairing that failed again. The sync cycle is the clock. */
 export const PAIR_RETRY_MS = 5 * 60_000;
+/** The first retry's wait, doubling per failed attempt up to `PAIR_RETRY_MS`. */
+export const PAIR_FIRST_RETRY_MS = 30_000;
+
+/**
+ * Whether an opener should try this pairing now. Soon after a first failure, then less often: every member of a voted
+ * network learns of a passed join at about the same moment, so the first call can reach a member that has not
+ * concluded the round yet and be refused as "not introduced" — a race, which a flat five-minute wait turned into five
+ * minutes per pair.
+ */
+export function pairRetryDue(intro: Pick<MemberIntroduction, 'attempts' | 'lastAttemptAt'>, now: number): boolean {
+  if (!intro.lastAttemptAt) return true;
+  const wait = Math.min(PAIR_RETRY_MS, PAIR_FIRST_RETRY_MS * 2 ** Math.max(0, (intro.attempts ?? 1) - 1));
+  return now - time(intro.lastAttemptAt) >= wait;
+}
 /** How long a token minted for a pairing lives before the pairing completes and lifts the expiry. */
 const PAIRING_TOKEN_TTL_MS = 10 * 60_000;
 /** Removals kept per network. Oldest dropped first: a removal older than every admission it could beat is inert. */
@@ -296,7 +310,7 @@ export async function pairIntroduced(networkId: string): Promise<void> {
     // The lower id opens, so two members never open towards each other at once.
     if (!(cfg.instanceId < intro.instanceId)) continue;
     if (intro.needsApproval) continue;   // proposed, not accepted (`Q-154`)
-    if (Date.now() - time(intro.lastAttemptAt) < PAIR_RETRY_MS) continue;
+    if (!pairRetryDue(intro, Date.now())) continue;
     await openPairing(networkId, intro.instanceId).catch(err => log.warn(`Club ${networkId}: pairing with ${intro.instanceId}: ${err}`));
   }
 }
@@ -314,7 +328,7 @@ async function openPairing(networkId: string, instanceId: string): Promise<void>
     const { record, plaintext } = await mintPairingToken(net, intro);
     tokenId = record.id;
     // Recorded BEFORE the call: the newcomer confirms by calling back while this request is still open.
-    noteAttempt(networkId, instanceId, { pairingTokenId: record.id, lastAttemptAt: nowIso(), lastError: undefined });
+    noteAttempt(networkId, instanceId, { pairingTokenId: record.id, lastAttemptAt: nowIso(), attempts: (intro.attempts ?? 0) + 1, lastError: undefined });
     const r = await peerSafeFetch(`${intro.url}/api/sync/networks/${encodeURIComponent(networkId)}/pair`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

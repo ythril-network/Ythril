@@ -104,6 +104,8 @@ export interface MemberIntroduction {
   /** The token this instance minted for the newcomer while it opens a pairing; the confirm call must present it. */
   pairingTokenId?: string;
   lastAttemptAt?: string;
+  /** How many times this instance has opened the pairing; the retry wait doubles with each (`pairRetryDue`). */
+  attempts?: number;
   lastError?: string;
 }
 
