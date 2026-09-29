@@ -739,7 +739,7 @@ spacesRouter.post('/:id/validate-schema', globalRateLimit, requireSpaceAuthMfaSc
    * so. Now every answer says what was checked against what exists, and `complete` is true only when that is all.
    */
   const checked: Record<string, { checked: number; total: number }> = {};
-  const note = async (mid: string, collection: 'entities' | 'edges' | 'facts' | 'chrono', read: number) => {
+  const note = async (mid: string, collection: Parameters<typeof spaceCollection>[1], read: number) => {
     const total = await col(spaceCollection(mid, collection)).countDocuments();
     const c = (checked[collection] ??= { checked: 0, total: 0 });
     c.checked += Math.min(read, total);
