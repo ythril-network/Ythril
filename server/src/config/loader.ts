@@ -327,6 +327,20 @@ export function loadConfig(): Config {
       log.warn(`Could not persist space description migration (will retry next boot): ${err}`);
     }
   }
+  // A joined network that never stated a schedule — joined before the join default existed — gets the default, or it
+  // syncs only when its peer starts a cycle and nothing says so. Manual chosen is stored as '' and left alone.
+  {
+    const scheduled = defaultUnstatedJoinedSchedules(_config);
+    if (scheduled.length > 0) {
+      try {
+        saveConfig(_config);
+        log.info(`Scheduled ${scheduled.length} joined network(s) that had no sync schedule on '${DEFAULT_JOIN_SYNC_SCHEDULE}': `
+          + `${scheduled.join(', ')} — clear the schedule under Settings → Networks for manual sync`);
+      } catch (err) {
+        log.warn(`Could not persist the join sync schedule default (will retry next boot): ${err}`);
+      }
+    }
+  }
   // A stored `syncSchedule` shorthand becomes the cron expression it always translated to. The shorthands
   // are refused at input since 4.0, and a config written under the old rule must keep syncing at the rate
   // it was given rather than be refused for a value that was valid when it was saved.
@@ -946,7 +960,7 @@ import type { MediaEmbeddingConfig, MediaProviderConfig, FaceRecognitionConfig, 
 import { migrateProviderApiKeysOnBoot } from './migrate-provider-keys.js';
 import { migrateMediaAliasesOnBoot } from './migrate-media-aliases.js';
 import { migrateNetworkSpaceKeys } from './migrate-network-space-keys.js';
-import { migrateSyncScheduleShorthands } from '../sync/schedule.js';
+import { migrateSyncScheduleShorthands, defaultUnstatedJoinedSchedules, DEFAULT_JOIN_SYNC_SCHEDULE } from '../sync/schedule.js';
 
 const MEDIA_EMBEDDING_DEFAULTS: Required<Omit<MediaEmbeddingConfig, 'vision' | 'stt' | 'nli' | 'rerank' | 'ollamaUrl' | 'visionModel' | 'whisperUrl' | 'whisperModel' | 'lockedByInfra' | 'pinnedUnknown' | 'infraManaged' | 'faceRecognition' | 'documentProcessing'>> = {
   // Media embedding is always on (no master switch). Each class is gated by its `levels` entry, which

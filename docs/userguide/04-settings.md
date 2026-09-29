@@ -593,6 +593,8 @@ Open votes name a space as this instance calls it, so a round about a renamed sp
 
 Enter a cron expression on the network card (e.g. `*/5 * * * *` for every 5 minutes). Click **Sync now** to trigger an immediate sync without waiting. Leave the field empty for manual-sync only — that is a real setting, not an omission.
 
+**A network you joined before 5.6 had no schedule** and synced only when the other instance started a sync. It gets the every-15-minutes default the next time your instance starts, and the server log names each network it scheduled. A network you set to manual yourself keeps manual — but one cleared before this change cannot be told apart from one never set, so check the card after upgrading and clear it again if you meant manual.
+
 **A value the scheduler cannot run is refused, and the message tells you what to send instead.** A short form such as `every 5m` or `*/2 hours` is refused with the cron expression it means, so the fix is a copy and paste. Short forms already saved are converted on upgrade, so an existing network keeps its schedule.
 
 Upgrading: a saved short form outside cron's range, such as `every 90m`, cannot be converted, so that network syncs only when you press **Sync now**. Each one is listed by name in the server log at startup and left as it is rather than rounded to something you did not choose.
