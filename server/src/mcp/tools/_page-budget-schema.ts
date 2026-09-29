@@ -1,4 +1,4 @@
-import { MIN_MAX_BYTES, MAX_MAX_BYTES, DEFAULT_MAX_CHARS, MCP_DEFAULT_MAX_CHARS, DEFAULT_CHARS_PER_TOKEN } from '../../brain/result-budget.js';
+import { MIN_MAX_BYTES, MAX_MAX_BYTES, DEFAULT_CHARS_PER_TOKEN, budgetDefaultsSentence } from '../../brain/result-budget.js';
 
 /**
  * The input schema of the size ceilings every budgeted tool takes: `maxChars`, `maxBytes`, `maxTokens` (`Q-161`).
@@ -16,14 +16,12 @@ export function budgetSizeSchema(unit: string): Record<string, Record<string, un
     maxChars: {
       type: 'integer', minimum: 1,
       description: `Ceiling on the serialised answer, in CHARACTERS: whole ${unit}s only, the rest reached with \`nextSkip\`. `
-        + `Default ${MCP_DEFAULT_MAX_CHARS} on MCP and ${DEFAULT_MAX_CHARS} on REST — the one default the two doors deliberately `
-        + 'differ on, because an MCP result meets a ceiling inside your client that you cannot raise. Held between '
-        + `${MIN_MAX_BYTES} and ${MAX_MAX_BYTES}: a smaller value is raised to ${MIN_MAX_BYTES}, not refused. Characters equal `
+        + `${budgetDefaultsSentence()} Held between ${MIN_MAX_BYTES} and ${MAX_MAX_BYTES}: a smaller value is raised to ${MIN_MAX_BYTES}, not refused. Characters equal `
         + 'bytes only for ASCII — for a byte ceiling use `maxBytes`.',
     },
     maxBytes: {
       type: 'integer', minimum: 1,
-      description: 'Ceiling on the serialised answer in real UTF-8 BYTES — what a transport or buffer limit is. No default, '
+      description: 'Ceiling on the serialised answer in real UTF-8 BYTES — what a transport or buffer limit is. NO DEFAULT, '
         + 'deliberately: bytes are always at least characters, so a byte default would silently bind on every non-ASCII '
         + `answer. No floor either — a caller who states 500 bytes has a reason. Up to ${MAX_MAX_BYTES}. When both are set, `
         + 'the answer stops at whichever it reaches first.',
