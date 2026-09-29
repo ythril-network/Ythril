@@ -133,6 +133,8 @@ export const FIND_SIMILAR_BODY_FIELDS: ReadonlySet<string> = new Set([
   // neither. Found by the gate that compares every declared surface against these sets, not by a report — the
   // strict body turned a silently-ignored parameter into a 400, which is how it surfaced at all.
   'traverse', 'includeFileContent', 'includeDiagnostics', 'projection',
+  // As on `recall` (Q-90): the record-meta rule at every depth, same name and default on both doors.
+  'includeRecordMeta',
   ...BUDGET_REQUEST_FIELDS,
   'skip', 'remainderDump',
 ]);

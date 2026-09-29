@@ -33,6 +33,7 @@ import {
   withoutDiagnostics, RECALL_ENVELOPE_KEYS, rankOf,
 } from '../../brain/recall-shape.js';
 import { mapGraphNodes, graphNodeRecord } from '../../brain/recall-graph.js';
+import { stripRecordMeta } from '../../brain/recall-record-meta.js';
 import { applyProjection, normaliseProjection, type NormalisedProjection } from '../../brain/projection.js';
 import { withTraverseBodies } from '../../brain/traverse-bodies.js';
 import { resolveBudget, resolvePaging, budgetedEnvelope, type BudgetRequest } from '../../brain/result-budget.js';
@@ -402,6 +403,13 @@ searchRouter.post('/similar', globalRateLimit, requireBodyScopedSpace('knowledge
     return;
   }
   const safeIncludeDiagnostics = similarDiagRaw === true;
+  // `includeRecordMeta`, as `recall` and the `similar` tool take it (Q-90): the rule at every depth, same default.
+  const similarMetaRaw = body['includeRecordMeta'];
+  if (similarMetaRaw !== undefined && typeof similarMetaRaw !== 'boolean') {
+    res.status(400).json({ error: '`includeRecordMeta` must be a boolean' });
+    return;
+  }
+  const recordMeta = { includeRecordMeta: similarMetaRaw === true };
 
   // Same parameter, same parser. find-similar returns recall RESULTS, so a projection that reached one route
   // and not the other would be the asymmetry this whole area has spent two releases removing.
@@ -461,7 +469,8 @@ searchRouter.post('/similar', globalRateLimit, requireBodyScopedSpace('knowledge
     );
     if (safeTraverse === 0) {
       const plainItems = projectResults(withoutDiagnostics(
-        stripContentIfAsked(result.results, safeIncludeFileContent), safeIncludeDiagnostics), safeProjection);
+        stripContentIfAsked(result.results, safeIncludeFileContent), safeIncludeDiagnostics), safeProjection)
+        .map(item => stripRecordMeta(item as object, recordMeta));
       const plainItemsBudgeted = await budgetedEnvelope({
         results: plainItems,
         budget,
@@ -499,7 +508,8 @@ searchRouter.post('/similar', globalRateLimit, requireBodyScopedSpace('knowledge
       shapeRow: (seed, nodes) => {
         const base = shaped.get(seed._id) ?? seed;
         const nested = mapGraphNodes(nodes, graphNodeRecord, safeIncludeDiagnostics, safeProjection);
-        return projectResults([(nested ? { ...base, _graph: nested } : base) as RecallResult], safeProjection)[0]!;
+        // stripRecordMeta recurses into `_graph`, so the neighbours follow the flag too (Q-90).
+        return stripRecordMeta(projectResults([(nested ? { ...base, _graph: nested } : base) as RecallResult], safeProjection)[0] as object, recordMeta);
       },
       spillRemainder: (remainder, about) => spillResultSet({
         issuedTo: requestActor(req).tokenId,

@@ -122,6 +122,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`includeRecordMeta` holds at every depth, and on `similar`** (Q-90). A traversed recall carried every match's and
+  every neighbour's `createdAt`/`updatedAt` whatever the flag said, and `similar` accepted no such flag although the
+  guide documented it. Both doors of both searches now drop the bookkeeping unless asked, on the match and every
+  node of its graph; the four ways a search row was built are one builder.
 - **Semantic search in the Graph picker, the entity pickers and the Facts, Edges and Chrono tabs shows its results**
   (Q-87). A recall hit carries its record under `record`, and these read the record's fields off the hit itself, so
   every result rendered as a blank row with no id, and a chrono entry showed `chrono` as its type and always

@@ -12,7 +12,7 @@ import { RECORD_TYPES } from '../../config/types.js';
 import { UUID_V4_RE, formatRecallSummary, toRecallRecord, uuidSchema, unitScoreSchema } from './shared.js';
 import { MAX_RECALL_TRAVERSE } from '../../brain/recall-seed-traversal.js';
 import { mapGraphNodes, graphNodeRecord } from '../../brain/recall-graph.js';
-import { stripRecordMeta } from '../../brain/recall-record-meta.js';
+import { stripRecordMeta, stripGraphRecordMeta } from '../../brain/recall-record-meta.js';
 import { applyProjection, normaliseProjection } from '../../brain/projection.js';
 import {
   resolveBudget,
@@ -91,6 +91,46 @@ export function resolveFindSimilarScope(
   return { candidateBases: accessibleSpaceIds, searchIds: accessibleSpaceIds };
 }
 
+/**
+ * `includeRecordMeta`, declared ONCE for `recall` and `similar` (`Q-90`) — the two tools shape a hit with the same
+ * builder, so they take the flag with the same words and the same default.
+ */
+const INCLUDE_RECORD_META_SCHEMA = {
+  type: 'boolean',
+  default: false,
+  description: 'Add back the two fields that describe where a record SITS rather than what it says: `createdAt` and `updatedAt` (default false, and false is what you want almost always). It applies at every depth: to each match and to every node of its `_graph`. It no longer covers link ids: connections are link records since 5.0, so reach them with `traverse` or a `filter` over the `links` collection. Measured on a real corpus, only 30% of a recall answer was content and most of the rest was this. `createdAt` is the one to be careful of: it is when the RECORD was written, not when the remembered thing happened - that lives in the record\'s own properties, put there by whoever stored it. Turn this on when you need to act on the record\'s place in the store, not to read what it says. REST takes the same parameter with the same default.',
+} as const;
+
+/** How a caller asked hits to be shaped — the four flags every search row honours. */
+interface HitShape {
+  includeFileContent: boolean;
+  includeDiagnostics: boolean;
+  includeRecordMeta: boolean;
+  projection: ReturnType<typeof normaliseProjection>;
+}
+
+/**
+ * One search hit as `recall` and `similar` answer it, plain or traversed — ONE builder for all four branches (`Q-90`).
+ *
+ * The row was written out four times, and the record-meta rule was in one of them: the untraversed recall. So a
+ * traversed recall, and every `similar` answer, carried each record's `createdAt`/`updatedAt` and empty collections
+ * whatever `includeRecordMeta` said, on the match and on every neighbour.
+ */
+function hitRow(r: RecallResult, shape: HitShape, nodes?: Parameters<typeof mapGraphNodes>[0]): Record<string, unknown> {
+  const meta = { includeRecordMeta: shape.includeRecordMeta };
+  const nested = nodes ? mapGraphNodes(nodes, graphNodeRecord, shape.includeDiagnostics, shape.projection) : undefined;
+  return {
+    score: r.score,
+    ...rankingFields(r as unknown as Record<string, unknown>),
+    spaceId: r.spaceId,
+    type: r.type,
+    record: stripRecordMeta(applyProjection(toRecallRecord(r, {
+      includeFileContent: shape.includeFileContent, includeDiagnostics: shape.includeDiagnostics,
+    }), shape.projection), meta),
+    ...(nested ? { _graph: stripGraphRecordMeta(nested, meta) } : {}),
+  };
+}
+
 export const recallTool: ToolHandler = {
   name: 'recall',
   // recall / similar / filter fan out per space already, so a list costs them nothing but the parse.
@@ -167,11 +207,7 @@ export const recallTool: ToolHandler = {
                 + 'The general argument is still true and is why both exist: every field a result carries is '
                 + 'multiplied by topK and paid for in tokens, and passage bodies are by far the largest.',
             },
-            includeRecordMeta: {
-              type: 'boolean',
-              default: false,
-              description: 'Add back the two fields that describe where a record SITS rather than what it says: `createdAt` and `updatedAt` (default false, and false is what you want almost always). It no longer covers link ids: connections are link records since 5.0, so reach them with `traverse` or a `filter` over the `links` collection. Measured on a real corpus, only 30% of a recall answer was content and most of the rest was this. `createdAt` is the one to be careful of: it is when the RECORD was written, not when the remembered thing happened - that lives in the record\'s own properties, put there by whoever stored it. Turn this on when you need to act on the record\'s place in the store, not to read what it says. REST takes the same parameter with the same default.',
-            },
+            includeRecordMeta: INCLUDE_RECORD_META_SCHEMA,
             includeDiagnostics: {
               type: 'boolean',
               default: false,
@@ -267,6 +303,7 @@ export const recallTool: ToolHandler = {
     // Only an explicit `false` skips the reranker (Q-88): absent keeps the configured, reranked answer.
     const rerank = a['rerank'] === false ? false : undefined;
     const recallProjection = normaliseProjection(a['projection'] as Record<string, unknown> | undefined);
+    const shape: HitShape = { includeFileContent, includeDiagnostics, includeRecordMeta, projection: recallProjection };
     const budget = resolveBudget(a as BudgetRequest, defaultBudgetChars(ctx.transport));
     if (!budget.ok) throw new Error(budget.error);
     const paging = resolvePaging(a as { skip?: unknown; remainderDump?: unknown });
@@ -375,16 +412,7 @@ export const recallTool: ToolHandler = {
       // A large answer spills with NO traversal too: `topK: 100` is a hundred records, and for a tool result
       // that is a model's context window rather than a page of JSON. The spill used to live in the graph branch
       // alone, which meant the plainest large call was the one that returned everything.
-      const plain = seeds.map(r => ({
-        score: r.score,
-        ...rankingFields(r as unknown as Record<string, unknown>),
-        spaceId: r.spaceId,
-        type: r.type,
-        record: stripRecordMeta(
-          applyProjection(toRecallRecord(r, { includeFileContent, includeDiagnostics }), recallProjection),
-          { includeRecordMeta },
-        ),
-      }));
+      const plain = seeds.map(r => hitRow(r, shape));
       const plainBudgeted = await budgetedEnvelope({
         results: plain,
         budget,
@@ -421,16 +449,7 @@ export const recallTool: ToolHandler = {
       budget,
       skip: paging.skip,
       remainderDump: paging.remainderDump,
-      shapeRow: (r, nodes) => {
-        const nested = mapGraphNodes(nodes, graphNodeRecord, includeDiagnostics, recallProjection);
-        return {
-          score: r.score,
-          ...rankingFields(r as unknown as Record<string, unknown>),
-          spaceId: r.spaceId, type: r.type,
-          record: applyProjection(toRecallRecord(r, { includeFileContent, includeDiagnostics }), recallProjection),
-          ...(nested ? { _graph: nested } : {}),
-        };
-      },
+      shapeRow: (r, nodes) => hitRow(r, shape, nodes),
       spillRemainder: (remainder, about) => spillResultSet({
         issuedTo: ctx.actor?.tokenId,
         results: remainder,
@@ -494,6 +513,7 @@ export const find_similarTool: ToolHandler = {
               items: { type: 'string', enum: [...RECORD_TYPES] },
               description: 'Which knowledge types to search in. Omit to search all types.',
             },
+            includeRecordMeta: INCLUDE_RECORD_META_SCHEMA,
             includeDiagnostics: {
               type: 'boolean',
               default: false,
@@ -586,7 +606,9 @@ export const find_similarTool: ToolHandler = {
 
     const includeFileContent = a['includeFileContent'] !== false;
     const includeDiagnostics = a['includeDiagnostics'] === true;
+    const includeRecordMeta = a['includeRecordMeta'] === true;
     const recallProjection = normaliseProjection(a['projection'] as Record<string, unknown> | undefined);
+    const shape: HitShape = { includeFileContent, includeDiagnostics, includeRecordMeta, projection: recallProjection };
     const budget = resolveBudget(a as BudgetRequest, defaultBudgetChars(ctx.transport));
     if (!budget.ok) throw new Error(budget.error);
     const paging = resolvePaging(a as { skip?: unknown; remainderDump?: unknown });
@@ -606,13 +628,7 @@ export const find_similarTool: ToolHandler = {
       //
       // The shape is `recall`'s plain branch plus `source`, which is this tool's own — you asked about a
       // specific entry and the answer names it back.
-      const plain = result.results.map(r => ({
-        score: r.score,
-        ...rankingFields(r as unknown as Record<string, unknown>),
-        spaceId: r.spaceId,
-        type: r.type,
-        record: applyProjection(toRecallRecord(r, { includeFileContent, includeDiagnostics }), recallProjection),
-      }));
+      const plain = result.results.map(r => hitRow(r, shape));
       const plainBudgeted = await budgetedEnvelope({
         results: plain,
         budget,
@@ -646,16 +662,7 @@ export const find_similarTool: ToolHandler = {
       budget,
       skip: paging.skip,
       remainderDump: paging.remainderDump,
-      shapeRow: (r, nodes) => {
-        const nested = mapGraphNodes(nodes, graphNodeRecord, includeDiagnostics, recallProjection);
-        return {
-          score: r.score,
-          ...rankingFields(r as unknown as Record<string, unknown>),
-          spaceId: r.spaceId, type: r.type,
-          record: applyProjection(toRecallRecord(r, { includeFileContent, includeDiagnostics }), recallProjection),
-          ...(nested ? { _graph: nested } : {}),
-        };
-      },
+      shapeRow: (r, nodes) => hitRow(r, shape, nodes),
       spillRemainder: (remainder, about) => spillResultSet({
         issuedTo: ctx.actor?.tokenId,
         results: remainder,

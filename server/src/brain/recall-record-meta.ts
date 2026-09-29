@@ -79,6 +79,18 @@ export function stripRecordMeta<T extends object>(
   return out;
 }
 
+/**
+ * The same rule over a `_graph` array on its own — for a door that builds a hit's graph beside its record rather than
+ * inside it (`Q-90`: the traversed recall branch and `similar` never applied the rule, so every neighbour kept its
+ * bookkeeping whatever the flag said).
+ */
+export function stripGraphRecordMeta(
+  graph: unknown[],
+  opts: { includeRecordMeta?: boolean | undefined },
+): unknown[] {
+  return graph.map(entry => stripGraphEntry(entry as Record<string, unknown>, opts));
+}
+
 /** One `{ edges, node, paths, _graph }` wrapper, with the same rule applied to the node and its children. */
 function stripGraphEntry(
   entry: Record<string, unknown>,
