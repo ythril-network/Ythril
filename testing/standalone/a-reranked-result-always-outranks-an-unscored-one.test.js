@@ -138,7 +138,7 @@ describe('floor results are fused with the pool', () => {
   it('a floor copy of a pool record, and a floor record outside the pool, both carry a fused score', () => {
     const pool = [fact('p1', 0.9), fact('p2', 0.8)];
     const floors = [fact('p1', 0.9), fact('f1', 0.3)];
-    const fused = stampFusion(pool, floors, ['f1', 'p2']);
+    const fused = stampFusion(pool, floors, [['f1', 'p2']]);
     assert.equal(fused, true);
     for (const r of [...pool, ...floors]) {
       assert.equal(typeof r.fusedScore, 'number', `${r._id} kept only a vector score, so it competes on another scale`);
@@ -148,7 +148,7 @@ describe('floor results are fused with the pool', () => {
 
   it('stamps nothing when the lexical channel found nothing', () => {
     const pool = [fact('p1', 0.9)];
-    assert.equal(stampFusion(pool, [], []), false);
+    assert.equal(stampFusion(pool, [], [[]]), false);
     assert.equal(pool[0].fusedScore, undefined);
   });
 });

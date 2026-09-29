@@ -521,6 +521,7 @@
   "brain.query.filterMustBeObject": "Filter must be a JSON object.",
   "brain.query.searchButton": "Search",
   "brain.query.orderedBy": "Ordered by {{by}}",
+  "brain.query.fusedExplained": "Rank score, not a similarity: 1/(60 + rank by meaning) + 1/(60 + rank by text among records of its type). About 0.016 (first in one ranking only) to 0.033 (first in both); higher ranks first.",
   "brain.query.leftOut.title": "{{count}} matches left out: their graph could not be read whole",
   "brain.query.leftOut.body": "Every match shown carries its whole graph. These are named instead of shown with part of theirs. Narrow the edge labels or ask for fewer hops to bring them back.",
   "brain.query.leftOut.more": "…and {{more}} more",
