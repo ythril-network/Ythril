@@ -53,11 +53,14 @@ const boundedPaths = src => budgetedPaths(src) + (src.match(/pageTraversal\(/g) 
 
 function expectedSites(name, src) {
   if (name === 'MCP') return 4;
-  return 2 * ['/recall', '/similar']
-    .filter(p => { const b = routeBody(src, p); return b && !delegatesCleanly(b, `POST ${p}`); }).length
-    // `Q-132`: the traverse route pages its walk and keeps a remainder only on `remainderDump` — ONE branch, since a
-    // walk has no plain-versus-traversing split. (Its MCP twin, `graph_traverse`, lives in edge.ts, not search.ts.)
-    + (/spillResultSet\(\{/.test(routeBody(src, '/spaces/:spaceId/traverse') ?? '') ? 1 : 0);
+  const handWritten = p => { const b = routeBody(src, p); return b && !delegatesCleanly(b, `POST ${p}`); };
+  return 2 * ['/recall', '/similar'].filter(handWritten).length
+    // `Q-132`: a traverse route that pages its own walk keeps a remainder only on `remainderDump` — ONE branch, since
+    // a walk has no plain-versus-traversing split. Since `Q-109` the route hands its body to `graph_traverse`
+    // (edge.ts), which spills through the same `pageTraversal`, so it expects none here. Decided by whether the
+    // route DELEGATES, never by whether `spillResultSet` appears — that read the expectation off the thing it
+    // checks, so a hand-written handler that dropped its spill expected zero and passed.
+    + (handWritten('/spaces/:spaceId/traverse') ? 1 : 0);
 }
 
 describe('vectors never reach the file', () => {

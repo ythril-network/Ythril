@@ -11,22 +11,14 @@ import { summariseActivity } from '../../metrics/space-activity-store.js';
 import { globalRateLimit } from '../../rate-limit/middleware.js';
 import { countFacts } from '../../brain/fact.js';
 import { getEmbedJobCounts } from '../../brain/embed-queue.js';
-import { TRAVERSE_BODY_FIELDS, unknownBodyFields } from '../../brain/query.js';
-import { traverseGraph } from '../../brain/edges.js';
-import { spillResultSet } from '../../brain/graph-spill.js';
 import { getConfig } from '../../config/loader.js';
 import { col } from '../../db/mongo.js';
 import { needsReindex } from '../../spaces/_shared.js';
 import { planReindex, startReindex } from '../../brain/reindex.js';
 import { memberSpacesForRequest } from '../../spaces/proxy-scoped.js';
 import { rankOf } from '../../brain/recall-shape.js';
-import { normaliseProjection } from '../../brain/projection.js';
-import { withTraverseBodies } from '../../brain/traverse-bodies.js';
-import { defaultBudgetChars } from '../../brain/result-budget.js';
-import { requestActor } from '../../auth/request-actor.js';
 import { statesRetryability } from './_read-failure.js';
 import { spaceCollection } from '../../db/space-collection.js';
-import { pageTraversal } from '../../brain/traverse-page.js';
 
 /*
  * `MAX_GRAPH_NODES` lived here, private to this file, with a comment saying recall shared it. It did not: only
@@ -106,83 +98,25 @@ searchRouter.get('/spaces/:spaceId/activity', globalRateLimit, requireSpaceAuth,
 
 
 // POST /api/brain/spaces/:spaceId/traverse — graph traversal (BFS)
-searchRouter.post('/spaces/:spaceId/traverse', globalRateLimit, requireSpaceAuth, async (req, res) => {
-  const spaceId = req.params['spaceId'] as string;
-  const cfg = getConfig();
-  if (!cfg.spaces.some(s => s.id === spaceId)) {
-    res.status(404).json({ error: `Space '${spaceId}' not found` });
-    return;
-  }
-  // Same refusal as /query, for the same reason: a mistyped `maxDepth` here returns a shallower graph with a 200.
-  const badTraverse = unknownBodyFields((req.body ?? {}) as Record<string, unknown>, TRAVERSE_BODY_FIELDS);
-  if (badTraverse) { res.status(400).json(badTraverse); return; }
-  const { startId, direction, edgeLabels, maxDepth, limit } = req.body ?? {};
-  if (!startId || typeof startId !== 'string') {
-    res.status(400).json({ error: '`startId` string required' });
-    return;
-  }
-  const validDirections = new Set(['outbound', 'inbound', 'both']);
-  const effectiveDirection: 'outbound' | 'inbound' | 'both' =
-    typeof direction === 'string' && validDirections.has(direction)
-      ? (direction as 'outbound' | 'inbound' | 'both')
-      : 'outbound';
-  const effectiveEdgeLabels: string[] | undefined =
-    Array.isArray(edgeLabels) && edgeLabels.every((l: unknown) => typeof l === 'string')
-      ? edgeLabels
-      : undefined;
-  if (edgeLabels !== undefined && !Array.isArray(edgeLabels)) {
-    res.status(400).json({ error: '`edgeLabels` must be an array of strings' });
-    return;
-  }
-  const rawDepth = typeof maxDepth === 'number' ? maxDepth : 3;
-  const effectiveDepth = Math.min(Math.max(1, rawDepth), 10);
-  const rawLimit = typeof limit === 'number' ? limit : 100;
-  const effectiveLimit = Math.min(Math.max(1, rawLimit), 1000);
-
-  // What the answer CONTAINS, as three flags rather than one. Chrono entries are reachable by default; a
-  // client that assumed every node is an entity opts out. Facts are opt-IN — they are usually the most
-  // numerous record type and every node counts against `limit`, so on by default they would truncate away the
-  // entities the caller traversed for. Edges are always FOLLOWED (they are the graph); the flag only decides
-  // whether the edge list rides along in the response.
-  //
-  // Each is rejected rather than coerced: `includeChrono: "false"` is a truthy string, and a flag that
-  // silently turns itself on is worse than one that errors.
-  const inclusions = { includeChrono: true, includeMemories: false, includeFiles: false, includeEdges: true };
-  for (const flag of Object.keys(inclusions) as (keyof typeof inclusions)[]) {
-    const raw = (req.body as Record<string, unknown>)[flag];
-    if (raw === undefined) continue;
-    if (typeof raw !== 'boolean') {
-      res.status(400).json({ error: `\`${flag}\` must be a boolean` });
-      return;
-    }
-    inclusions[flag] = raw;
-  }
-
-  const memberIds = memberSpacesForRequest(req, spaceId);
-  // `F-32`: the same two parameters, the same refusal of a wrong type, and the same module as the MCP tool.
-  const { projection, includeDiagnostics } = req.body as Record<string, unknown>;
-  if (projection !== undefined && (projection === null || typeof projection !== 'object' || Array.isArray(projection))) {
-    res.status(400).json({ error: '`projection` must be an object' });
-    return;
-  }
-  if (includeDiagnostics !== undefined && typeof includeDiagnostics !== 'boolean') {
-    res.status(400).json({ error: '`includeDiagnostics` must be a boolean' });
-    return;
-  }
-  const result = await traverseGraph(memberIds, startId.trim(), effectiveDirection, effectiveEdgeLabels, effectiveDepth, effectiveLimit,
-    inclusions.includeChrono, inclusions.includeMemories, inclusions.includeFiles, inclusions.includeEdges);
-  const bodies = await withTraverseBodies(memberIds, result,
-    normaliseProjection(projection as Record<string, unknown> | undefined), includeDiagnostics === true);
-  // Q-132: whole nodes in hop order under the byte budget, the same function the MCP tool pages through.
-  const paged = await pageTraversal(bodies, req.body as Record<string, unknown>, {
-    budgetChars: defaultBudgetChars('rest'),
-    spillRemainder: remainder => spillResultSet({
-      issuedTo: requestActor(req).tokenId, results: remainder,
-      request: { startId, direction: effectiveDirection, maxDepth: effectiveDepth, limit: effectiveLimit },
-    }),
+searchRouter.post('/spaces/:spaceId/traverse', globalRateLimit, requireSpaceAuth, statesRetryability, async (req, res) => {
+  /*
+   * The `graph_traverse` tool's answer, as `/recall` and `/similar` give their tools' (`Q-109`). This route validated
+   * its own body and CLAMPED where the tool refuses: a `maxDepth` over 10 or a `limit` over 1000 became the ceiling,
+   * a bad `direction` became `outbound`, and a non-string `edgeLabels` entry was read as ALL labels — a widening.
+   * One capability, two sets of caps by door. The space stays in the path because a walk starts from one record,
+   * which lives in exactly one space; it is handed to the tool as `space`.
+   */
+  const outcome = await callTool({
+    name: 'graph_traverse',
+    args: { ...((req.body ?? {}) as Record<string, unknown>), space: req.params['spaceId'] as string },
+    caller: restToolCaller(req),
   });
-  if (!paged.ok) { res.status(400).json({ error: paged.error }); return; }
-  res.json(paged.body);
+  const text = outcome.result.content.map(c => c.text).join('\n');
+  if (outcome.result.isError) {
+    res.status(outcome.status).json({ error: text, ...(outcome.result.structuredContent ?? {}) });
+    return;
+  }
+  res.status(outcome.status).json(JSON.parse(text));
 });
 
 

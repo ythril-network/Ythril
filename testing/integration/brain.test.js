@@ -1749,11 +1749,18 @@ describe('Brain — graph traversal (/api/brain/spaces/:spaceId/traverse)', () =
     assert.equal(e.label, 'depends_on');
   });
 
-  it('maxDepth is capped at 10 and does not error with large value', async () => {
+  it('maxDepth over 10 is refused, never clamped', async () => {
+    /*
+     * INVERTED at `Q-109`, not deleted. This asserted a 200 for `maxDepth: 999` because the REST route
+     * clamped it to 10 while the `graph_traverse` tool refused the same value — one capability, two caps by
+     * door. The route now hands its body to the tool, so both doors answer the tool's refusal, and a caller
+     * asking for a depth it cannot have is told so rather than handed a shallower graph with a 200.
+     */
     const r = await post(INSTANCES.a, token(), '/api/brain/spaces/general/traverse', {
       startId: entA, direction: 'outbound', maxDepth: 999,
     });
-    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.equal(r.status, 400, JSON.stringify(r.body));
+    assert.match(String(r.body.error), /maxDepth/, 'the refusal must name the parameter it refused');
   });
 
   it('Unknown startId returns empty nodes and edges', async () => {

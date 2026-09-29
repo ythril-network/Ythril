@@ -13,7 +13,8 @@
  *    and `label` on an edge. A projection that could remove `from` would make the edge list unreadable.
  *  - The vector never comes back, and the diagnostics stay behind `includeDiagnostics`, as on every read door.
  *  - A link-derived edge has no stored document and is returned as it was.
- *  - Both doors take it — the MCP tool and the REST route — with the same field name.
+ *  - Both doors take it with the same field name: the MCP tool declares it, and the REST route hands its whole
+ *    body to that tool (`Q-109`), so there is one parameter list and one call site.
  *
  * Run: node --test testing/standalone/a-traverse-can-return-bodies.test.js
  * (requires a prior `npm run build` in server/)
@@ -22,6 +23,7 @@ import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
+import { routeBody, delegationOf, delegatesCleanly } from './_delegating-routes.mjs';
 
 let shapeTraverseBodies, normaliseProjection;
 before(async () => {
@@ -105,9 +107,19 @@ describe('both doors take it', () => {
     assert.match(toolBody, /withTraverseBodies\(/, 'graph_traverse must hand its answer to withTraverseBodies');
   });
 
-  it('the REST route accepts and uses projection', () => {
-    const r = route.slice(route.indexOf("'/spaces/:spaceId/traverse'"));
-    const routeBody = r.slice(0, r.indexOf('\n});'));
-    assert.match(routeBody, /withTraverseBodies\(/, 'the REST traverse must hand its answer to withTraverseBodies');
+  it('the REST route reaches the same projection by handing its body to the tool', () => {
+    /*
+     * The route no longer calls `withTraverseBodies` itself, and that is the stronger answer, not a lost one
+     * (`Q-109`): it hands its whole body to `graph_traverse` through `callTool`, so the case above IS the REST
+     * door's projection — same field name, same refusal of a non-object, same function — and there is no
+     * second call site left to drift. What can still go wrong is the delegation itself: forwarding to the
+     * wrong tool, or reading the body a second time beside it, which `delegatesCleanly` throws on.
+     */
+    const body = routeBody(route, '/spaces/:spaceId/traverse');
+    assert.ok(body, 'POST /spaces/:spaceId/traverse is not registered in search.ts');
+    assert.ok(delegatesCleanly(body, 'POST /spaces/:spaceId/traverse'),
+      'the REST traverse neither delegates to a tool nor hands its answer to withTraverseBodies');
+    assert.equal(delegationOf(body).tool, 'graph_traverse',
+      'the REST traverse must delegate to graph_traverse, the tool whose projection is asserted above');
   });
 });

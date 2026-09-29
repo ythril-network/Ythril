@@ -198,8 +198,14 @@ const TOTAL = 48;
  *   The expansion did not stop happening: the tool does it, on the same spaces, through the same
  *   narrowed path, and is already counted here. Two sites fewer because there is ONE implementation
  *   where there were two, which is the whole point of the row that removed it.
+ * - **14, at 5.0: `POST /api/brain/spaces/:spaceId/traverse`.** `Q-109` collapsed the route onto the
+ *   `graph_traverse` tool, and its `memberSpacesForRequest(req, spaceId)` went with the handler. The
+ *   expansion did not stop happening: the tool does it with `memberSpacesWithin(callSpace,
+ *   accessibleSpaceIds)` in `mcp/tools/edge.ts`, which is already counted as narrowed, and `callTool`
+ *   builds that reachable list from the same token rights the REST helper read. `api/brain/search.ts`
+ *   stays in NARROWED on its `stats` and `activity` routes — the case below still demands a real call there.
  */
-const REMOVED = 13;
+const REMOVED = 14;
 
 const GUARDS = {
   'server/src/auth/middleware.ts': 2,

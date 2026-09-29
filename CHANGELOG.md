@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking:** **REST traverse refuses what it used to clamp (`Q-109`).** `POST /api/brain/spaces/:spaceId/traverse` now
+  answers through the `graph_traverse` tool, as `/recall` and `/similar` answer through theirs, so the two doors share
+  one set of caps and refusals. What REST quietly adjusted is a `400` now, as it always was on MCP: `maxDepth` outside
+  1–10, `limit` outside 1–1000, a non-number for either, a `direction` other than `outbound`/`inbound`/`both` (it became
+  `outbound`), an `edgeLabels` list holding a non-string (it became ALL labels — a widening) and a blank `startId`.
+  Refusals carry the tool's wording, and an unknown key is named in the message rather than in `unrecognized_keys`.
+  **Who is affected:** a REST client that relied on a clamp or fallback.
+- **The Graph view draws the whole neighbourhood, not the first page of it (`Q-109`).** Since `graph_traverse` pages its
+  nodes under the byte budget, the view sent no `skip` and drew whatever the first page held; it now reads every page
+  and joins them. It still says the graph is partial when the walk itself stopped at its `limit`.
+
 - **Breaking:** **REST `POST /api/brain/similar` answers in the `similar` tool's shape (`Q-89`).** Each hit is now
   `{score, spaceId, type, record}` and `source` is `{type, id, summary}`, as MCP has always answered — the route
   used to return flat hits (`{_id, name, …, score}`) and the whole source record with `score: 1.0`, so one

@@ -579,7 +579,20 @@ export class BrainApi {
     includeFiles?: boolean;
     includeEdges?: boolean;
   }): Observable<TraverseResult> {
-    return this.http.post<TraverseResult>(`/api/brain/spaces/${spaceId}/traverse`, body);
+    /*
+     * EVERY page, joined (`Q-109`). The walk pages its nodes under the byte budget and says so with `nextSkip`; one
+     * POST was one page, so a large neighbourhood was drawn as its first part under a canvas that promises the whole.
+     * Each page carries the edges from its nodes back to nodes already sent, so joining them in order is the graph.
+     * `truncated` is then only the WALK's cut — `limitReached` — which reading on cannot reach.
+     */
+    type Page = TraverseResult & { nextSkip?: number; limitReached?: boolean };
+    return readEveryPage<Page>(skip => this.http.post<Page>(`/api/brain/spaces/${spaceId}/traverse`, skip ? { ...body, skip } : body)).pipe(
+      map(pages => ({
+        nodes: pages.flatMap(p => p.nodes),
+        edges: pages.flatMap(p => p.edges),
+        truncated: pages.some(p => p.limitReached === true),
+      })),
+    );
   }
 
   // ── Brain — chrono ──────────────────────────────────────────────────────
