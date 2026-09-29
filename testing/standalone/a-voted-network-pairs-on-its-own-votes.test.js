@@ -15,7 +15,9 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { mergePeerRoster, introduceFromPassedJoin, acceptIntroduction } from '../../server/dist/networks/member-introductions.js';
+import { readFileSync } from 'node:fs';
+import { mergePeerRoster, introduceFromPassedJoin, acceptIntroduction, applyPassedJoin } from '../../server/dist/networks/member-introductions.js';
+import { trackedSources, REPO_ROOT } from './_sources.mjs';
 
 const SELF = 'aaaa-self';
 const ADMITTER = 'bbbb-admitter';
@@ -77,5 +79,39 @@ describe('a voted network pairs on its own votes', () => {
       mergePeerRoster(net, SELF, ADMITTER, [listed('eeee')], []);
       assert.equal(net.introductions, undefined, type);
     }
+  });
+});
+
+describe('a passed join lands through one rule, wherever it concludes', () => {
+  for (const type of ['closed', 'democratic']) {
+    it(`${type}: a member without the joiner's credentials introduces it rather than admitting it`, () => {
+      // The copy a member learns by gossip has its token hash stripped. Admitted from that, the joiner is a member here
+      // with no credential either way — listed, never paired, and every pairing it asks for refused (#1455's red run).
+      const net = voted(type);
+      const round = { ...passedJoin('cccc'), pendingMember: { ...member('cccc'), tokenHash: '' } };
+      assert.equal(applyPassedJoin(net, SELF, round), 'introduced');
+      assert.ok(!net.members.some(m => m.instanceId === 'cccc'));
+      assert.ok(net.introductions.some(i => i.instanceId === 'cccc'));
+    });
+
+    it(`${type}: the member holding them admits`, () => {
+      const net = voted(type);
+      const round = { ...passedJoin('cccc'), pendingMember: { ...member('cccc'), tokenHash: '$2b$hash' } };
+      assert.equal(applyPassedJoin(net, SELF, round), 'admitted');
+      assert.ok(net.members.some(m => m.instanceId === 'cccc'));
+    });
+  }
+
+  it('nothing outside the rule adds a round\'s pending member to a roster', () => {
+    /*
+     * The rule had three copies — the gossip pull, the vote relay and the local vote — and converting two left the
+     * third admitting on a stripped copy. Derived over the tree, so a fourth site is visible on the commit adding it.
+     * The one other site is the joiner's poll, answered only by the instance that holds the invite key's hash: the
+     * credential holder, re-adding a member whose admission a crash lost.
+     */
+    const owners = ['server/src/networks/member-introductions.ts', 'server/src/networks/member-acts.ts'];
+    const offenders = trackedSources(['server/src'], { untracked: true, exclude: owners })
+      .filter(f => /members\.push\(\s*\w*\.?pendingMember/.test(readFileSync(`${REPO_ROOT}/${f}`, 'utf8')));
+    assert.deepEqual(offenders, [], `these admit a passed join themselves instead of through applyPassedJoin: ${offenders.join(', ')}`);
   });
 });
