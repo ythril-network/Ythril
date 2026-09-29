@@ -257,11 +257,7 @@ async function openPairing(networkId: string, instanceId: string): Promise<void>
  * The newcomer's half: `POST /api/sync/networks/:id/pair`, called by an instance with no credential here yet.
  * Answered only for an instance this instance was introduced to, and proven by calling back its introduced address.
  */
-export async function answerPairing(networkId: string, body: unknown): Promise<Answer> {
-  const b = (body ?? {}) as { instanceId?: unknown; token?: unknown };
-  if (typeof b.instanceId !== 'string' || typeof b.token !== 'string' || !b.token.startsWith('ythril_')) {
-    return { status: 400, body: { error: 'instanceId and token are required' } };
-  }
+export async function answerPairing(networkId: string, b: { instanceId: string; token: string }): Promise<Answer> {
   const instanceId = b.instanceId;
   const cfg = getConfig();
   const net = cfg.networks.find(n => n.id === networkId);
@@ -306,12 +302,8 @@ export async function answerPairing(networkId: string, body: unknown): Promise<A
 export async function confirmPairing(
   networkId: string,
   caller: { id?: string; peerInstanceId?: string } | undefined,
-  body: unknown,
+  b: { instanceId: string; token: string },
 ): Promise<Answer> {
-  const b = (body ?? {}) as { instanceId?: unknown; token?: unknown };
-  if (typeof b.instanceId !== 'string' || typeof b.token !== 'string' || !b.token.startsWith('ythril_')) {
-    return { status: 400, body: { error: 'instanceId and token are required' } };
-  }
   const net = getConfig().networks.find(n => n.id === networkId);
   const intro = net && isMeshNetwork(net) ? net.introductions?.find(i => i.instanceId === b.instanceId) : undefined;
   if (!intro?.pairingTokenId || caller?.id !== intro.pairingTokenId || caller.peerInstanceId !== b.instanceId) {
