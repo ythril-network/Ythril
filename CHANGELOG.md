@@ -128,6 +128,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A published file's description and tag edits reach a subscriber that has already processed the file**
+  (Q-143). Three writes on the receiving instance stamped the file as if someone there had edited it: recording
+  the downloaded bytes, writing the converted document's excerpt, and deriving a description. The receiver's copy
+  then compared newer, and the publisher's next edit was skipped on arrival — with a false Merkle divergence
+  beside it. A file write now advances the record's `seq` only when it changes a field that replicates, and a
+  description is derived only on the instance that authored the file. Records already stamped heal after a few
+  more writes on the publisher. See [Conversion pipeline](docs/integration-guide/05a-conversion-pipeline.md).
+- **A network's sync schedule stops when the network is gone** (Q-144). Leaving, deleting or being ejected from
+  a network, or a config reload that drops it, left its cron task running, and each tick logged
+  `Scheduled sync failed … not found` at ERROR. Since joins arm a schedule by default, that was every network an
+  instance had left. The tick now stops itself when its network is no longer configured, and a reload stops the
+  tasks it no longer lists.
 - **A filtered recall no longer reads as complete when the vector index is behind the collection** (Q-142). While
   an index definition was updated in place, the index could accept the search and answer for fewer of the matching
   records than the collection holds, and the answer carried no `degraded` reason. It now says `filter_window` when

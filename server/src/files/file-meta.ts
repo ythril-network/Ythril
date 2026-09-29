@@ -43,7 +43,7 @@ export const DELETABLE_FILE_META_FIELDS: readonly string[] = [
   'description', 'excerpt', 'tags', 'properties',
 ];
 import { applyDeleteFields } from '../brain/delete-fields.js';
-import type { FileMetaDoc, EntityDoc } from '../config/types.js';
+import type { FileMetaDoc, EntityDoc, AuthorRef } from '../config/types.js';
 import { spaceCollection } from '../db/space-collection.js';
 
 
@@ -59,6 +59,16 @@ import { spaceCollection } from '../db/space-collection.js';
  * On first write `createdAt` is set; subsequent writes update `updatedAt` and
  * `sizeBytes`.  `description`, `tags`, and `properties` are only updated when supplied.
  */
+/**
+ * The fields this module writes that never replicate: derived from THIS instance's copy of the bytes (`Q-143`).
+ *
+ * A write that touches only these is not an authored write, so it advances neither `seq` nor `updatedAt`. Both are
+ * how a file's metadata replicates and both are hashed: stamping them for local machinery made a receiver's copy
+ * outrank the publisher's, so the publisher's next description edit was skipped on arrival, and it faked a Merkle
+ * divergence on the way. A gate derives the ingest schema's keys and holds this set disjoint from them.
+ */
+export const LOCAL_FILE_FIELDS: ReadonlySet<string> = new Set(['sizeBytes', 'sha256', 'excerpt']);
+
 export async function upsertFileMeta(
   spaceId: string,
   filePath: string,
@@ -130,6 +140,38 @@ export async function upsertFileMeta(
 }
 
 /**
+ * Record bytes a PEER sent for a file: the local machinery only, never an authored write (`Q-143`).
+ *
+ * The file-sync pull used `upsertFileMeta`, the upload writer, and so stamped this instance's next `seq` on a file it
+ * did not author — after which its copy outranked the publisher's, and the publisher's next description or tag edit
+ * was skipped on arrival. An upload is a person changing the content; bytes arriving are not.
+ *
+ * A known record gets its size and hash. A record the metadata has not reached yet is created at `seq` 0 and
+ * authored by the peer, so the first authored metadata to arrive replaces it whatever its `seq`.
+ */
+export async function recordArrivedFile(
+  spaceId: string,
+  filePath: string,
+  sizeBytes: number,
+  sha256: string,
+  from: AuthorRef,
+): Promise<void> {
+  const normalised = toDocId(filePath);
+  const now = new Date().toISOString();
+  await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).updateOne(
+    asFilter<FileMetaDoc>({ _id: normalised }),
+    asUpdate<FileMetaDoc>({
+      $set: { sizeBytes, sha256 },
+      $setOnInsert: {
+        spaceId, path: normalised, tags: [], author: from, createdAt: now, updatedAt: now, seq: 0,
+      },
+    } as never),
+    { upsert: true },
+  );
+  await enqueueEmbedJob(spaceId, 'file', normalised);
+}
+
+/**
  * Partially update the metadata record for a file (tags, description,
  * entity/chrono/fact linkage, properties).  Re-embeds the record on
  * every successful update.  Returns the updated document, or null if the
@@ -170,13 +212,22 @@ export async function setDerivedDescriptionIfUnset(
   const r = await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).updateOne(
     asFilter<FileMetaDoc>({
       _id,
-      $or: [
-        { description: { $exists: false } },
-        { description: null },
-        // Built from a RegExp rather than a string literal, because `'^\s*$'` in a JS string is `^s*$` — the backslash
-        // is dropped and the pattern matches "sss" instead of whitespace. It did exactly that here, and the
-        // whitespace-only assertion is what caught it. A RegExp literal cannot lose the escape.
-        { description: { $regex: /^\s*$/ } },
+      $and: [
+        { $or: [
+          { description: { $exists: false } },
+          { description: null },
+          // Built from a RegExp rather than a string literal, because `'^\s*$'` in a JS string is `^s*$` — the
+          // backslash is dropped and the pattern matches "sss" instead of whitespace. It did exactly that here, and
+          // the whitespace-only assertion is what caught it. A RegExp literal cannot lose the escape.
+          { description: { $regex: /^\s*$/ } },
+        ] },
+        /*
+         * Only on a file THIS instance authored (`Q-143`), or a legacy record that names no author. A description is
+         * hashed and replicates by `seq`: derived on a receiver, it either stamps a seq that outranks the publisher's
+         * next edit, or — unstamped — can never replicate and reports a divergence for ever. The publisher derives
+         * its own from the same bytes, and that one travels.
+         */
+        { $or: [{ 'author.instanceId': authorRef().instanceId ?? null }, { author: { $exists: false } }] },
       ],
     } as never),
     asUpdate<FileMetaDoc>({
@@ -325,12 +376,24 @@ export async function updateFileMeta(
   }
 
   // `P-32`: the only writer of a file's three link arrays, its tags, its description and its properties —
-  // every one of them authored, so this advances the space counter and pages the record to a peer.
-  $set['seq'] = await nextSeq(spaceId);
-  await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).updateOne(
-    asFilter<FileMetaDoc>({ _id: normalised }),
-    asUpdate<FileMetaDoc>(Object.keys($unset).length > 0 ? { $set, $unset } : { $set }),
-  );
+  // every one of them authored, so a write touching any of them advances the space counter and pages the record to
+  // a peer. A write touching only LOCAL_FILE_FIELDS (the media worker's excerpt) is not authored and stamps nothing:
+  // on a receiver, a stamp made its copy outrank the publisher's next edit (`Q-143`).
+  const linksGiven = opts.linkEntities !== undefined || opts.linkFacts !== undefined || opts.linkChronos !== undefined;
+  const authored = linksGiven
+    || [...Object.keys($set), ...Object.keys($unset)].some(k => k !== 'updatedAt' && !LOCAL_FILE_FIELDS.has(k));
+  if (authored) $set['seq'] = await nextSeq(spaceId);
+  else delete $set['updatedAt'];
+  const update = {
+    ...(Object.keys($set).length > 0 ? { $set } : {}),
+    ...(Object.keys($unset).length > 0 ? { $unset } : {}),
+  };
+  if (Object.keys(update).length > 0) {
+    await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).updateOne(
+      asFilter<FileMetaDoc>({ _id: normalised }),
+      asUpdate<FileMetaDoc>(update),
+    );
+  }
 
   // ONE enqueue, unconditionally, after the write. Not gated on which fields moved: any such condition
   // could only be computed from the read above, which is the stale value this change exists to stop using.
