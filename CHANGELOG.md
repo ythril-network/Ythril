@@ -16,6 +16,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   whose members joined before this, with their votes long pruned — waits under **Connecting** for the operator's
   **Accept** (`POST /api/networks/:id/introductions/:instanceId/accept`, MCP `network_introduction_accept`,
   instance-admin), because a member of a voted network votes and one member's word must not let it in.
+- **A slow or failing reranker no longer holds every search (`Q-157`).** Measured on a 5.6.0 instance: every
+  recall took 20 s — the reranker's time limit — and was answered in fused order anyway, while the same recall
+  without reranking took 90 ms. A reranker pass that fails, runs out its own time limit, or takes more than half of
+  it now sets the reranker aside for 30 s, doubling to 5 min; searches in between skip it at once and still report
+  `degraded: ["rerank_unavailable"]`. A background probe, never a user's search, brings it back. The assist
+  model's fallback rule and this one are now one module.
+- **A record's text rank is its rank among records of its own type (`Q-159`).** The text channel sorted every
+  type's matches together by raw MongoDB text score, whose scale is each collection's own, so a fact could outrank
+  an entity only because facts are longer — the comparison reciprocal rank fusion exists to avoid. The Query tab
+  now says what `fusedScore` is: a rank score, `1/(60 + rank by meaning) + 1/(60 + rank by text)`, about 0.016 to
+  0.033, never a similarity.
+- **`filter`'s `total` counts what a name join matches (`Q-160`).** With `fromName`, `toName` or `entityName`, the
+  rows were right and `total` counted the whole collection — `count: 2, total: 86` on a space of 86 edges — so a
+  caller comparing the two, as the tool tells it to, read on for pages that did not exist. Reported by the platform
+  operator; both doors.
+- **The Query tab's structured mode is called Filter (`Q-156`)**, the name it has as the `filter` tool and
+  `POST /api/filter`; it was *Advanced Query*.
+- **The Query tab folds its search to one line once results arrive, says how long the search took, and expands or
+  collapses every result at once (`Q-158`).**
 - **A club is a mesh: every member connects to every other member, not only to whoever admitted it (`Q-135`).**
   An admission landed on the admitting instance alone, so two members admitted by the organiser never learned of
   each other and the club stopped when the organiser did. Now each member learns the others from its peers'

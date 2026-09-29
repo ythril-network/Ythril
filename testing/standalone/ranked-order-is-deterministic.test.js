@@ -166,18 +166,19 @@ describe('no ranking sort is written by hand', () => {
           + 'that decides the order a caller sees must end in one, or `skip` can repeat a record.');
       }
       // Counted rather than listed, the same way `hybrid-retrieval.test.js` counts its raw-score sorts: a NEW
-      // inline comparator has to come here and justify itself. Four survive in `recall.ts`; the candidate
+      // inline comparator has to come here and justify itself. Three survive in `recall.ts`; the candidate
       // cap (5 below) moved to `rerank-pool.ts` with the rerank step (`P-35`), and the vector channel handed
       // to RRF moved to `stampFusion` in `lexical-search.ts` when fusion began ranking the floor results too
       // (`Q-79`). Each has a reason it cannot take the shared one —
       //   1-3. the pre-fusion sorts, the vector channel handed to RRF, and `findSimilar`, all of which must
       //        order by RAW score rather than by `rankOf` (see `hybrid-retrieval.test.js`, which counts them);
-      //     4. the lexical channel, ordered by `lexicalScore`;
+      //     (4, the lexical channel ordered by `lexicalScore` across every type, is GONE: it compared text scores
+      //        on each collection's own scale, which is what `Q-159` removed — each type now keeps its own order);
       //     5. the candidate cap in `rerank-pool.ts`, which sorts a list of ID STRINGS through a lookup, so
       //        there is no object to hand a comparator;
       //     6. the duplicate-match map, whose `score` is non-optional and not a `RecallResult`.
       // Everything that CAN take `byRankThenId` does, which is why the other three files have none.
-      const expected = f.endsWith('brain/recall.ts') ? 4 : 0;
+      const expected = f.endsWith('brain/recall.ts') ? 3 : 0;
       assert.equal(inline.length, expected,
         `${f} has ${inline.length} inline comparators, expected ${expected} — a new one needs a reason it `
         + 'cannot use byRankThenId, written down here');

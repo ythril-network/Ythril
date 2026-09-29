@@ -494,7 +494,9 @@ async function applyLexicalFusion(
   const perType = await Promise.all(
     activeTypes.map(t => lexicalSearch(spaceId, t, query, limit, match)),
   );
-  const lexical = perType.flat().sort((a, b) => b.lexicalScore - a.lexicalScore || byIdAsc(a, b));
+  // Each type stays in its own order (`lexicalSearch` sorts by its collection's text score): the hits of different
+  // types are never compared by raw score, whose scale is each collection's own (`Q-159`, see `stampFusion`).
+  const lexical = perType.flat();
   if (lexical.length === 0) return false; // no text index, or nothing matched — vector order stands
 
   const inPool = new Map(pool.map(r => [r._id, r]));
@@ -518,7 +520,7 @@ async function applyLexicalFusion(
     }
   }
 
-  return stampFusion(pool, floors, lexical.map(h => h._id));
+  return stampFusion(pool, floors, perType.map(hits => hits.map(h => h._id)));
 }
 
 /**
