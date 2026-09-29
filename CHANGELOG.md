@@ -19,6 +19,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   network card lists them under **Connecting**. Club only: pub/sub and trees are star and tree by design, and voted
   networks follow in `Q-154`, because a peer's roster must not stand in for a vote.
 
+- **The Graph tab says why it is slow instead of spinning with nothing on it (`Q-155`).** After three seconds of
+  waiting it says the server has not answered yet and names what the space is doing — search indexes being built,
+  records waiting to be embedded — and after thirty seconds the wait ends in the error state with those reasons
+  and Retry. Reported on 5.6.0 while an upgraded instance rebuilt every space's search indexes.
+
 ## [5.6.0] — 2026-09-29
 
 **A minor release: a filtered recall returns every record that matches, a search never writes into a space, and a
