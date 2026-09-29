@@ -35,6 +35,7 @@ import type { TokenRights } from '../../config/rights-shape.js';
 import { spaceCollection } from '../../db/space-collection.js';
 import { markdownWindow } from '../../files/markdown-window.js';
 import { pageList } from '../../brain/list-page.js';
+import { defaultBudgetChars } from '../../brain/result-budget.js';
 import { queryInt } from '../../brain/result-budget.js';
 
 /**
@@ -148,7 +149,7 @@ fileMetaRouter.get('/spaces/:spaceId/files/extract', globalRateLimit, requireSpa
       embeddingStatus: d.embeddingStatus ?? null,
     }));
   const imagePage = pageList(allImages, { limit: req.query['imagesLimit'], skip: req.query['imagesSkip'] },
-    { defaultLimit: 200, maxLimit: 200 });
+    { defaultLimit: 200, maxLimit: 200, budgetChars: defaultBudgetChars('rest') });
   if (!imagePage.ok) { res.status(400).json({ error: imagePage.error.replace(/`(limit|skip)`/, '`images$1`') }); return; }
 
   // The converted Markdown, read from the file store rather than from the record — the record carries

@@ -18,7 +18,7 @@
  * It pages an array the caller already holds. A list too large to hold pages at the database instead
  * (`spaces/page-across-members.ts`) and reports through `listPageFields`, so the fields stay one shape.
  */
-import { applyBudget, budgetFields, resolveBudget, queryInt, DEFAULT_MAX_CHARS, type BudgetRequest } from './result-budget.js';
+import { applyBudget, budgetFields, resolveBudget, queryInt, type BudgetRequest } from './result-budget.js';
 import { pageAcrossMembers } from '../spaces/page-across-members.js';
 
 export interface ListPageRequest extends BudgetRequest {
@@ -31,8 +31,11 @@ export interface ListPageOptions {
   defaultLimit: number;
   /** The largest page this list serves; a larger `limit` is held to it, and the answer says so. */
   maxLimit?: number;
-  /** The character budget when the caller states none — the door's default (`defaultBudgetChars`). */
-  budgetChars?: number;
+  /**
+   * The character budget when the caller states none: the DOOR's default, `defaultBudgetChars(transport)`. Required,
+   * because only the door knows which it is — a module falling back to one would hand an agent a script's page.
+   */
+  budgetChars: number;
 }
 
 export type ListPage<T> =
@@ -95,7 +98,7 @@ export async function pageMemberList<T>(opts: {
     ...(opts.req.maxChars !== undefined ? { maxChars: queryInt(opts.req.maxChars) } : {}),
     ...(opts.req.maxBytes !== undefined ? { maxBytes: queryInt(opts.req.maxBytes) } : {}),
     ...(opts.req.maxTokens !== undefined ? { maxTokens: queryInt(opts.req.maxTokens) } : {}),
-  } as BudgetRequest, opts.page.budgetChars ?? DEFAULT_MAX_CHARS);
+  } as BudgetRequest, opts.page.budgetChars);
   if (!budget.ok) return budget;
   const read = await pageAcrossMembers({
     members: opts.members, readMember: opts.readMember, compare: opts.compare,
@@ -123,7 +126,7 @@ export function pageList<T>(all: readonly T[], req: ListPageRequest, opts: ListP
     ...(req.maxChars !== undefined ? { maxChars: queryInt(req.maxChars) } : {}),
     ...(req.maxBytes !== undefined ? { maxBytes: queryInt(req.maxBytes) } : {}),
     ...(req.maxTokens !== undefined ? { maxTokens: queryInt(req.maxTokens) } : {}),
-  } as BudgetRequest, opts.budgetChars ?? DEFAULT_MAX_CHARS);
+  } as BudgetRequest, opts.budgetChars);
   if (!budget.ok) return budget;
   const page = all.slice(paging.skip, paging.skip + paging.limit);
   const outcome = applyBudget(page, budget);

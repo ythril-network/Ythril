@@ -32,6 +32,7 @@ import { webhookToken } from './brain/_shared.js';
 import type { ContradictionCandidateDoc } from '../config/types.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { pageMemberList } from '../brain/list-page.js';
+import { defaultBudgetChars } from '../brain/result-budget.js';
 
 export const contradictionsRouter = Router();
 
@@ -110,7 +111,7 @@ contradictionsRouter.get('/', globalRateLimit, requireAuth, async (req, res) => 
       countMember: spaceId => collectionFor(spaceId).countDocuments(asFilter<ContradictionCandidateDoc>(q(spaceId))),
       compare: (a, b) => (b.confidence - a.confidence) || b.detectedAt.localeCompare(a.detectedAt) || a._id.localeCompare(b._id),
       req: req.query as Record<string, unknown>,
-      page: { defaultLimit: 100, maxLimit: 500 },
+      page: { defaultLimit: 100, maxLimit: 500, budgetChars: defaultBudgetChars('rest') },
       ceiling: 5_000,
     });
     if (!page.ok) { res.status(400).json({ error: page.error }); return; }
