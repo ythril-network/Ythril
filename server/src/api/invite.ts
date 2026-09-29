@@ -57,7 +57,8 @@ import { concludeRoundIfReady } from '../sync/governance.js';
 import { buildBraintreeAncestors } from '../util/braintree.js';
 import { makeSignedOwnCast } from '../util/signing.js';
 import { log } from '../util/log.js';
-import { SSRF_SAFE_URL } from './networks/_shared.js';
+import { SSRF_SAFE_URL, safeMemberList } from './networks/_shared.js';
+import { stampAdmission, isMeshNetwork } from '../networks/member-introductions.js';
 import type { NetworkMember, VoteRound } from '../config/types.js';
 import { openRoundHere } from '../networks/round-local-state.js';
 import { networkRole } from '../networks/network-role.js';
@@ -542,6 +543,7 @@ inviteRouter.post('/finalize', authRateLimit, async (req, res) => {
 
     if (net.type === 'club' || net.type === 'pubsub') {
       // Direct join — documented behavior for these types.
+      stampAdmission(net, newMember);
       net.members.push(newMember);
       log.info(`Invite handshake complete: ${instanceLabel} (${instanceId}) joined network ${session.networkId}`);
       responseStatus = 'joined';
@@ -598,6 +600,8 @@ inviteRouter.post('/finalize', authRateLimit, async (req, res) => {
     networkId: session.networkId,
     temporary: session.reparentInstanceId != null,
     ...(pendingRoundId ? { roundId: pendingRoundId } : {}),
+    // Q-135: a club joiner pairs with every member, so it is handed the roster at once rather than a cycle later.
+    ...(isMeshNetwork(net) && responseStatus === 'joined' ? { members: safeMemberList(net, instanceId) } : {}),
   });
 });
 

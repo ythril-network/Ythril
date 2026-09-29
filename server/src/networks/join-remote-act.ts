@@ -24,7 +24,8 @@ import { createToken, revokeToken } from '../auth/tokens.js';
 import { peerTokenSpaces } from '../auth/peer-token-scope.js';
 import { createSpace } from '../spaces/lifecycle.js';
 import { log } from '../util/log.js';
-import type { NetworkConfig } from '../config/types.js';
+import type { NetworkConfig, NetworkMember } from '../config/types.js';
+import { mergePeerRoster } from './member-introductions.js';
 import { peerSafeFetch } from '../sync/peer-fetch.js';
 import { BCRYPT_ROUNDS, SSRF_SAFE_URL } from '../api/networks/_shared.js';
 import type { NetworkActResult } from './network-acts.js';
@@ -263,7 +264,7 @@ export async function joinRemoteAct(caller: Caller, input: unknown): Promise<Net
     return relay(finalizeRes);
   }
 
-  const finalizeData = await boundedJson<{ status: string }>(finalizeRes, 'network peer');
+  const finalizeData = await boundedJson<{ status: string; members?: Partial<NetworkMember>[] }>(finalizeRes, 'network peer');
 
   // ── Register network and peer locally ────────────────────────────────────
   // Store tokenForB so this brain can call Brain A's sync endpoints.
@@ -336,6 +337,10 @@ export async function joinRemoteAct(caller: Caller, input: unknown): Promise<Net
                : 'both',
       lastSeqReceived: {},
     });
+  }
+  // Q-135: on a club the inviter's roster introduces every other member, so pairing starts on the first cycle.
+  if (Array.isArray(finalizeData.members)) {
+    mergePeerRoster(net, freshCfg.instanceId, applyData.instanceId, finalizeData.members, []);
   }
 
   // Q-53, the joiner's half: every token kept for the inviter reaches this network's spaces, so a second handshake
