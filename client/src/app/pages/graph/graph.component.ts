@@ -16,8 +16,9 @@ import { CommonModule, Location } from '@angular/common';
 import { ProxySpaceBadgeComponent } from '../../shared/proxy-space-badge.component';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute } from '@angular/router';
-import { Subscription, forkJoin, of } from 'rxjs';
-import { catchError } from 'rxjs/operators';
+import { Subscription, TimeoutError, forkJoin, of } from 'rxjs';
+import { catchError, timeout } from 'rxjs/operators';
+import { readinessReasons, type ReadinessReason } from './graph-readiness';
 import { PhIconComponent } from '../../shared/ph-icon.component';
 import { ErrorStateComponent } from '../../shared/error-state.component';
 import { httpErrorReason } from '../../core/http-error';
@@ -41,7 +42,7 @@ import { GraphLinkedRecordsComponent } from './graph-linked-records.component';
 import { GraphNodeRecordCardComponent, GraphEdgeRecordCardComponent } from './graph-record-card.component';
 import { GraphPanelHeaderComponent } from './graph-panel-header.component';
 import { GraphToolbarComponent } from './graph-toolbar.component';
-import { TranslocoPipe } from '@jsverse/transloco';
+import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
 // The record drawer and its state are shared with the Brain page rather than forked here: this page
 // used to carry a copy that had drifted behind (no schema-driven properties, no confidence field, no
 // tag suggestions, and its own retired entity-picker flyout).
@@ -64,6 +65,11 @@ import { canWriteAnywhere } from '../../core/token-capability';
 import { lookupForNode, lookupForEdge } from './graph-record-lookup';
 
 
+
+/** How long a load may run before the tab says it is still waiting, and why (Q-155). */
+const WAIT_EXPLAIN_MS = 3_000;
+/** How long a load may run before it ends in the error state rather than spinning for ever (Q-155). */
+const WAIT_GIVE_UP_MS = 30_000;
 
 @Component({
   selector: 'app-graph-view',
@@ -123,12 +129,25 @@ import { lookupForNode, lookupForEdge } from './graph-record-lookup';
         }
 
         @if (loading()) {
-          <div class="loading-overlay"><div class="loading-spinner"></div></div>
+          <div class="loading-overlay">
+            <div class="loading-spinner"></div>
+            @if (waiting()) {
+              <div class="loading-waiting" role="status">
+                <p class="loading-waiting-title">{{ 'graph.waiting.title' | transloco }}</p>
+                @for (r of waitReasons(); track r.key) { <p class="loading-reason">{{ r.key | transloco: (r.params ?? {}) }}</p> }
+              </div>
+            }
+          </div>
         }
 
         @if (loadError() !== null && !loading()) {
           <div class="canvas-empty">
             <app-error-state [message]="'graph.error.load' | transloco" [reason]="loadError() ?? ''" (retry)="retryTraverse()" />
+            @if (waitReasons().length) {
+              <div class="wait-reasons">
+                @for (r of waitReasons(); track r.key) { <p class="loading-reason">{{ r.key | transloco: (r.params ?? {}) }}</p> }
+              </div>
+            }
           </div>
         } @else if (!rootEntity() && !loading()) {
           <div class="canvas-empty">
@@ -355,6 +374,15 @@ export class GraphComponent implements OnInit, AfterViewInit, OnDestroy {
    *  connections"). */
   loadError = signal<string | null>(null);
   private lastTraverse: { startId: string; maxDepth: number; direction: 'outbound' | 'inbound' | 'both' } | null = null;
+  /**
+   * Q-155: a wait past `WAIT_EXPLAIN_MS` says so, and says why from what the server reports for the space — its
+   * search indexes being built, records waiting to be embedded. An upgraded instance rebuilding its indexes left
+   * this tab spinning with nothing on it. `WAIT_GIVE_UP_MS` ends a request that never answers in the error state.
+   */
+  waiting = signal(false);
+  waitReasons = signal<ReadinessReason[]>([]);
+  private waitTimer: ReturnType<typeof setTimeout> | null = null;
+  private transloco = inject(TranslocoService);
 
   // ── Computed ────────────────────────────────────────────────────────────────
   allDetails = computed<DetailRow[]>(() => buildDetailRows(this.nodeMemories(), this.nodeChrono()));
@@ -471,6 +499,7 @@ export class GraphComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   ngOnDestroy(): void {
+    this.endWait();
     this.subs.unsubscribe();
     if (this.cy) {
       this.cy.destroy();
@@ -497,8 +526,13 @@ export class GraphComponent implements OnInit, AfterViewInit, OnDestroy {
     this.pendingFocusId = null;
     this.direction.set('both');
     this.depth.set(2);
-    this.brainApi.getEntity(spaceId, id).pipe(catchError(() => of(null))).subscribe(ent => {
-      if (ent) this.selectRoot(ent);
+    this.loading.set(true);
+    this.beginWait(spaceId);
+    this.brainApi.getEntity(spaceId, id).pipe(timeout(WAIT_GIVE_UP_MS), catchError(e => of(e instanceof TimeoutError ? e : null))).subscribe(ent => {
+      this.loading.set(false);
+      this.endWait();
+      if (ent instanceof TimeoutError) this.loadError.set(this.transloco.translate('graph.waiting.gaveUp', { seconds: WAIT_GIVE_UP_MS / 1000 }));
+      else if (ent) this.selectRoot(ent);
       else this.loadError.set(`Entity '${id}' could not be loaded in this space.`);
     });
   }
@@ -657,15 +691,47 @@ export class GraphComponent implements OnInit, AfterViewInit, OnDestroy {
     this.loading.set(true);
     this.loadError.set(null);
     this.lastTraverse = req;
-    this.brainApi.traverseGraph(spaceId, { startId, direction, maxDepth, limit: 200 }).subscribe({
-      error: (e) => { this.loading.set(false); this.loadError.set(httpErrorReason(e)); },
+    this.beginWait(spaceId);
+    this.brainApi.traverseGraph(spaceId, { startId, direction, maxDepth, limit: 200 }).pipe(timeout(WAIT_GIVE_UP_MS)).subscribe({
+      error: (e) => {
+        this.loading.set(false);
+        this.endWait();
+        this.loadError.set(e instanceof TimeoutError
+          ? this.transloco.translate('graph.waiting.gaveUp', { seconds: WAIT_GIVE_UP_MS / 1000 })
+          : httpErrorReason(e));
+      },
       next: (result) => {
         this.loading.set(false);
+        this.endWait();
+        this.waitReasons.set([]);
         this.cache = applyResult(this.cache, plan, req, result);
         this.truncated.set(result.truncated);
         this.applyDepthFilter(startId, maxDepth);
       },
     });
+  }
+
+  /** Start the clock that turns a long wait into words; the reasons are read only if the wait gets that long. */
+  private beginWait(spaceId: string): void {
+    this.endWait();
+    this.waitReasons.set([]);
+    this.waitTimer = setTimeout(() => {
+      this.waitTimer = null;
+      this.waiting.set(true);
+      forkJoin({
+        spaces: this.spacesApi.listSpaces().pipe(catchError(() => of(null))),
+        stats: this.spacesApi.getSpaceStats(spaceId).pipe(catchError(() => of(null))),
+      }).subscribe(({ spaces, stats }) => {
+        const space = spaces?.spaces.find(s => s.id === spaceId);
+        this.waitReasons.set(readinessReasons(space?.indexStatus, stats?.embedQueue));
+      });
+    }, WAIT_EXPLAIN_MS);
+  }
+
+  /** Stop the clock. The reasons stay, so an error state that follows can still show them. */
+  private endWait(): void {
+    if (this.waitTimer) { clearTimeout(this.waitTimer); this.waitTimer = null; }
+    this.waiting.set(false);
   }
 
   /** Re-run the last traversal — bound to the error state's Retry button. */

@@ -458,6 +458,8 @@ export interface SpaceStats {
   chrono: number;
   files: number;
   needsReindex?: boolean;
+  /** Records stored and not searchable YET, which the server answers beside the counts. */
+  embedQueue?: { pending: number; processing: number; failed: number };
 }
 
 /**
