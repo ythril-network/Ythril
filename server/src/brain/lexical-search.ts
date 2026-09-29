@@ -136,6 +136,13 @@ export interface FusableResult {
   _id: string;
   score?: number;
   fusedScore?: number;
+  /**
+   * The two ranks `fusedScore` was computed from, 1-based (`Q-159`): the result's place by meaning among the answer
+   * candidates, and by text among records of its own type — absent when the text search did not find it. A fused
+   * score alone cannot be checked by whoever reads it; `1/(60 + vectorRank) + 1/(60 + lexicalRank)` can.
+   */
+  vectorRank?: number;
+  lexicalRank?: number;
 }
 
 /**
@@ -170,9 +177,18 @@ export function stampFusion(
   // Ranks are the LEXICAL ranks within each type, not re-numbered after dropping out-of-pool ids: a document that
   // placed 5th among its type genuinely placed 5th, and compressing the ranks would overstate it.
   const fused = rrfFuse([vectorRanked, ...lexicalPerType]);
+  const vectorRank = new Map(vectorRanked.map((id, i) => [id, i + 1]));
+  const lexicalRank = new Map<string, number>();
+  for (const ranked of lexicalPerType) ranked.forEach((id, i) => { if (!lexicalRank.has(id)) lexicalRank.set(id, i + 1); });
   for (const [id, refs] of refsById) {
     const f = fused.get(id);
-    if (f !== undefined) for (const r of refs) r.fusedScore = f;
+    if (f === undefined) continue;
+    const lex = lexicalRank.get(id);
+    for (const r of refs) {
+      r.fusedScore = f;
+      r.vectorRank = vectorRank.get(id);
+      if (lex !== undefined) r.lexicalRank = lex;
+    }
   }
   return true;
 }

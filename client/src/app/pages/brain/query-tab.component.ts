@@ -1,6 +1,7 @@
 import { ChangeDetectionStrategy, Component, QueryList, ViewChildren, computed, inject, input, output, signal } from '@angular/core';
 import { SupersededBadgeComponent } from '../../shared/superseded-badge.component';
-import { groupRecallResults, chunkLabel, passageText, relatedOf, orderingOf } from './recall-grouping';
+import { groupRecallResults, chunkLabel, passageText, relatedOf } from './recall-grouping';
+import { ResultOrderingComponent } from './result-ordering.component';
 import { recordOf } from './recall-hits';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
@@ -30,7 +31,7 @@ import { SpillEndingComponent } from './spill-ending.component';
   selector: 'app-query-tab',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [CommonModule, FormsModule, TranslocoPipe, PhIconComponent, RecallFormComponent, JsonTreeComponent, SupersededBadgeComponent, SpillEndingComponent],
+  imports: [CommonModule, FormsModule, TranslocoPipe, PhIconComponent, RecallFormComponent, JsonTreeComponent, SupersededBadgeComponent, SpillEndingComponent, ResultOrderingComponent],
   styles: [`
     .query-panel {
       display: flex;
@@ -161,21 +162,6 @@ import { SpillEndingComponent } from './spill-ending.component';
       because they are values a reader compares between rows, and a proportional font makes 0.750 and 0.705
       the same width.
     */
-    .score-by {
-      font-family: var(--font-mono, monospace);
-      font-size: 11px;
-      color: var(--text-secondary);
-      background: var(--bg-subtle, rgba(127,127,127,0.10));
-      border-radius: var(--radius-sm);
-      padding: 1px 6px;
-      white-space: nowrap;
-    }
-    .score-also {
-      font-family: var(--font-mono, monospace);
-      font-size: 11px;
-      color: var(--text-muted);
-      white-space: nowrap;
-    }
   `],
   template: `
           <div class="query-panel">
@@ -351,16 +337,7 @@ import { SpillEndingComponent } from './spill-ending.component';
                           that ordered the answer, so the panel was labelling a figure that decided nothing.
                           The other stages follow it, dimmer, for a reader asking why.
                         -->
-                        @if (orderingOf(g.hits[0]); as ord) {
-                          <span class="score-by" [attr.title]="(ord.by === 'fusedScore' ? 'brain.query.fusedExplained' : 'brain.query.orderedBy') | transloco: { by: ord.by }">
-                            {{ ord.by }}: {{ ord.value.toFixed(3) }}
-                          </span>
-                          @for (st of ord.stages; track st.name) {
-                            @if (st.name !== ord.by) {
-                              <span class="score-also" [attr.title]="st.name === 'fusedScore' ? ('brain.query.fusedExplained' | transloco) : null">{{ st.name }}: {{ st.value.toFixed(3) }}</span>
-                            }
-                          }
-                        }
+                        <app-result-ordering [hit]="g.hits[0]" />
                         @if (g.hitCount > 1) {
                           <span class="badge">{{ 'brain.query.passages' | transloco: { count: g.hitCount } }}</span>
                         }
@@ -395,16 +372,7 @@ import { SpillEndingComponent } from './spill-ending.component';
                           that ordered the answer, so the panel was labelling a figure that decided nothing.
                           The other stages follow it, dimmer, for a reader asking why.
                         -->
-                        @if (orderingOf(g.hits[0]); as ord) {
-                          <span class="score-by" [attr.title]="(ord.by === 'fusedScore' ? 'brain.query.fusedExplained' : 'brain.query.orderedBy') | transloco: { by: ord.by }">
-                            {{ ord.by }}: {{ ord.value.toFixed(3) }}
-                          </span>
-                          @for (st of ord.stages; track st.name) {
-                            @if (st.name !== ord.by) {
-                              <span class="score-also" [attr.title]="st.name === 'fusedScore' ? ('brain.query.fusedExplained' | transloco) : null">{{ st.name }}: {{ st.value.toFixed(3) }}</span>
-                            }
-                          }
-                        }
+                        <app-result-ordering [hit]="g.hits[0]" />
                         <!-- A hit that HAS a node in the graph gets the same jump the entities and edges tabs
                              offer. Traverse results are entities too, so an expanded neighbour is reachable
                              from here without going back to a list. -->
@@ -701,7 +669,6 @@ export class QueryTabComponent {
 
   /** A match's neighbourhood, grouped by kind — rendered under the match, never beside it in the ranking. */
   relatedOf(hit: RecallResult) { return relatedOf(hit); }
-  orderingOf(hit: RecallResult) { return orderingOf(hit as unknown as Record<string, unknown>); }
 
   /**
    * Whether this match is a record that is no longer true.

@@ -78,8 +78,11 @@ export const RECALL_RECORD_DIAGNOSTICS = ['matchedText', 'embeddingModel', 'seq'
  * every scored one — see `byRankThenId`.
  *
  * Beside `score`, never inside `record`: a score describes how the result RANKED, not what the record is.
+ *
+ * `vectorRank` and `lexicalRank` travel with `fusedScore` (`Q-159`): the two ranks it was computed from, so a reader
+ * can check the figure instead of taking it on trust. `lexicalRank` is absent when the text search missed the record.
  */
-export const RECALL_RANKING_DIAGNOSTICS = ['lexicalScore', 'fusedScore', 'rerankScore'] as const;
+export const RECALL_RANKING_DIAGNOSTICS = ['lexicalScore', 'fusedScore', 'vectorRank', 'lexicalRank', 'rerankScore'] as const;
 
 /*
  * `RECALL_DIAGNOSTIC_FIELDS` WAS HERE — the union of both groups — AND IS DELETED.

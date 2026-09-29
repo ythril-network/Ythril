@@ -336,7 +336,9 @@ changed at the bottom of a long form does not send you back up to run it.
 Which one you see is which stage decided: if your administrator has configured a reranking model, that is
 the number the order came from and plain similarity is not. Any other stage that ran is shown beside it,
 dimmer. A stage that did not run is left out rather than shown as zero — no reranker configured is not the
-same as a reranker scoring nothing. The reranking model scores the top 100 candidates; a longer answer lists
+same as a reranker scoring nothing. A `fusedScore` comes with the two ranks it was computed from — *rank 1 by
+meaning · 2 by text*, or *not found by text* — so you can check the figure: it is `1/(60 + rank by meaning) +
+1/(60 + rank by text)`, and the text rank counts only records of the same type. The reranking model scores the top 100 candidates; a longer answer lists
 the rest after them, labelled with the score that placed them, because a reranked result always ranks above
 one the model did not read.
 
