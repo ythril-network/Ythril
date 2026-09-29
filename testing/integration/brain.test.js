@@ -2591,17 +2591,28 @@ describe('Brain — bulk write caps at 500 items per type', () => {
    * writer; and it asserts the cap BIT — exactly 500 of the 502 processed — because `<= 500` is satisfied by
    * zero, which is how this passed for as long as it did.
    */
-  it('Items beyond 500 are dropped, and the cap is what decides it', async () => {
+  /*
+   * AND SINCE Q-109 THE CAP REFUSES rather than drops: items 501 and 502 used to vanish behind the same 207 as a
+   * clean batch. A batch past the cap is a 400 naming the array, and NOTHING is written — the second half checks
+   * that, because a refusal that had already written the first 500 would be the same loss with a louder status.
+   */
+  it('A batch past 500 is refused whole, naming the array, and writes nothing', async () => {
     const facts = [];
     for (let i = 0; i < 502; i++) {
       facts.push({ fact: `BulkCap-${RUN}-${i}` });
     }
     const r = await post(INSTANCES.a, token(), `/api/brain/spaces/${testSpaceId}/bulk`, { facts });
+    assert.equal(r.status, 400, JSON.stringify(r.body));
+    assert.match(r.body.error, /facts/, 'the refusal must name the array that is too long');
+    const stored = await post(INSTANCES.a, token(), '/api/filter', { space: testSpaceId, collection: 'facts', filter: {}, limit: 1 });
+    assert.equal(stored.body?.data?.total ?? stored.body?.total, 0, `a refused batch wrote facts: ${JSON.stringify(stored.body)}`);
+  });
+
+  it('Exactly 500 is a batch', async () => {
+    const facts = Array.from({ length: 500 }, (_, i) => ({ fact: `BulkCapOk-${RUN}-${i}` }));
+    const r = await post(INSTANCES.a, token(), `/api/brain/spaces/${testSpaceId}/bulk`, { facts });
     assert.equal(r.status, 207, JSON.stringify(r.body));
-    const total = r.body.inserted.facts + r.body.errors.length;
-    assert.equal(total, 500,
-      `the cap must process exactly 500 of the 502 sent, got ${total} — `
-      + `${r.body.inserted.facts} inserted, ${r.body.errors.length} errored`);
+    assert.equal(r.body.inserted.facts + r.body.errors.length, 500);
   });
 });
 
