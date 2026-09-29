@@ -176,7 +176,9 @@ export function updateNetworkAct(caller: Caller, id: string, input: unknown): Ne
 
   const before = { label: net.label, syncSchedule: net.syncSchedule, requireSignedVotes: net.requireSignedVotes };
   if (parsed.data.syncSchedule !== undefined) {
-    net.syncSchedule = parsed.data.syncSchedule || undefined;
+    // `''` is stored, not dropped: manual chosen is a setting, and `undefined` means never stated, which the boot
+    // rule gives the join default (`defaultUnstatedJoinedSchedules`).
+    net.syncSchedule = parsed.data.syncSchedule.trim();
     import('../sync/scheduler.js').then(({ scheduleSyncForNetwork }) => {
       scheduleSyncForNetwork(net.id, net.syncSchedule);
     }).catch(err => log.warn(`Failed to reschedule sync for ${net.id}: ${err}`));

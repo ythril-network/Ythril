@@ -302,9 +302,10 @@ export async function joinRemoteAct(caller: Caller, input: unknown): Promise<Net
   let armSchedule: string | undefined;
   if (!net) {
     const schedule = joinedSyncSchedule(statedSchedule, applyData.syncSchedule);
-    armSchedule = schedule || undefined;
+    // Stored even when `''`: manual chosen at the join must not read as never stated at the next boot.
+    armSchedule = schedule;
     net = {
-      ...(armSchedule ? { syncSchedule: armSchedule } : {}),
+      syncSchedule: schedule,
       id: networkId,
       label: applyData.networkLabel ?? 'Remote network',
       type: (applyData.networkType as NetworkConfig['type']) ?? 'closed',

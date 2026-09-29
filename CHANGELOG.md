@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A network joined before the join default now syncs on its own.** 5.6.0 gave a new join a schedule (every 15
+  minutes, or the inviter's), but a network joined earlier kept none and pulled only when its peer started a cycle —
+  seen on an instance whose two joined networks had no schedule at all. It gets the default at the next start, named
+  in the log. Clearing a schedule now stores manual as a choice (`""`) rather than as nothing, so manual set on
+  purpose is never replaced; one cleared before this change reads as never set, so it is scheduled once.
+
 - **A peer keeps one token, not one per join (`Q-163`).** Every network joined with the same instance minted it a
   new token and left the previous one valid, though the peer keeps only the newest and could never present the
   others: an instance showed eight `peer:` tokens for one peer, seven of them last used minutes after they were made.
