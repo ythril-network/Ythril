@@ -83,8 +83,12 @@ describe('ChronoTabComponent', () => {
       startsAt: '2026-08-01T09:00:00Z', createdAt: '2026-01-15T10:00:00Z', updatedAt: '2026-01-15T10:00:00Z',
       tags: [], linkEntities: [], linkFacts: [],
     }] as unknown as ChronoEntry[] }));
-    const fixture = make();
-    expect((fixture.nativeElement as HTMLElement).textContent).toContain('15.01.2026');
+    // The viewer's date format decides the spelling (Q-146); pin one so the assertion does not depend on the runner.
+    localStorage.setItem('dateFormat', JSON.stringify({ style: 'dmy24', zone: 'utc' }));
+    try {
+      const fixture = make();
+      expect((fixture.nativeElement as HTMLElement).textContent).toContain('15.01.2026');
+    } finally { localStorage.removeItem('dateFormat'); }
   });
 
   it('self-loads on the spaceId input', () => {

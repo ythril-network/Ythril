@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Every date in the UI is shown in the format you choose, and dates follow the language you pick (`Q-146`,
+  `Q-100`).** **Settings → Preferences** has a new **Date and time** card: **Automatic** (the default: your
+  browser's locale when it speaks the interface language, otherwise the interface language), **ISO 8601**
+  (`2026-09-29 07:59:03`) or **Day.month.year, 24-hour**, with the time in **local time** or **UTC**. It is kept in
+  this browser, beside the language. Twenty places formatted their own dates in five spellings, and none of them
+  could follow a setting; the German interface showed change notes and token expiries in US English because the
+  app registers no Angular locale data, and "2 hours ago" stayed English after a switch to Deutsch. Every date now
+  goes through `core/date-format.ts`, hovering any date shows its exact ISO 8601 UTC value, and a client spec
+  fails when any other file formats a date itself. Stored and transmitted values are unchanged — ISO 8601 UTC. The
+  token table's Created, Last used and Expires columns now use the two-line date-over-time cell the other tables
+  use, where they showed one browser-formatted string.
+
 - **A space-meta read no longer rescans the space, and both doors build it with one function (`Q-95`).** `stats`
   and `actualSchema` were rebuilt on every `GET /api/spaces/:id/meta` and every MCP `space_meta` — an entity scan,
   an edge scan, three link scans and seven counts per member space — by two hand-written copies of the answer. They

@@ -25,6 +25,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { CLIENT_ROOT as CLIENT, trackedAppSources } from './tracked-sources';
+import { stripComments } from './strip-comments';
 
 /**
  * Components that render an empty state but are allowed not to distinguish a failure.
@@ -75,13 +76,6 @@ const EMPTY_MARKERS = /class="[^"]*\b(?:empty-state|empty-state-inner|sch-empty-
 /** A condition derived from something error-shaped. `false` and `x().length === 0` deliberately do not match. */
 const IS_FAILURE_COND = (cond: string): boolean => /(^|[^\w])[\w.$]*(error|fail)/i.test(cond);
 
-/** Strip line, block and HTML comments — a gate must not match its own documentation. */
-function stripComments(src: string): string {
-  return src
-    .replace(/<!--[\s\S]*?-->/g, ' ')
-    .replace(/\/\*[\s\S]*?\*\//g, ' ')
-    .replace(/(^|[^:])\/\/[^\n]*/g, '$1 ');
-}
 
 interface Block {
   /** `if` | `else if` | `else` | `for` | `empty` */

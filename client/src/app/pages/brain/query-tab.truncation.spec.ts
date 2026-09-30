@@ -444,16 +444,18 @@ describe('Q-92: the spill download is a button that pages the whole spill throug
 describe('Q-92: the page renders `remainder` and `spillRefused`', () => {
   afterEach(() => TestBed.resetTestingModule());
 
-  it('a remainder shows its expiry in the app\'s one timestamp format, not the browser\'s or the wire\'s', () => {
-    const m = mount();
-    answer(m, KINDS[0].response('sp-r'));
-    const text = visibleText(m);
-    expect(text, 'the remainder is not rendered at all').toContain('REMAINDER-DOWNLOAD');
-    // A FORMAT, not a rendering: CI runs in UTC and a laptop does not, so the day and hour differ by zone.
-    // The format is the one `formatTimestampParts` gives every other page — dd.MM.yyyy and a 24-hour time —
-    // so a sixth spelling of a date (the reason that module exists) cannot come back here.
-    expect(text).toMatch(/EXPIRES \d{2}\.\d{2}\.\d{4} \d{2}:\d{2}:\d{2}/);
-    expect(text, 'the expiry is printed as the raw wire value').not.toContain(EXPIRES);
+  it('a remainder shows its expiry in the viewer\'s date format, not the browser\'s or the wire\'s', () => {
+    // Pin the viewer's choice (Q-146) to day.month.year; the page must render THAT, whatever the machine says.
+    localStorage.setItem('dateFormat', JSON.stringify({ style: 'dmy24', zone: 'local' }));
+    try {
+      const m = mount();
+      answer(m, KINDS[0].response('sp-r'));
+      const text = visibleText(m);
+      expect(text, 'the remainder is not rendered at all').toContain('REMAINDER-DOWNLOAD');
+      // A FORMAT, not a rendering: CI runs in UTC and a laptop does not, so the day and hour differ by zone.
+      expect(text).toMatch(/EXPIRES \d{2}\.\d{2}\.\d{4} \d{2}:\d{2}:\d{2}/);
+      expect(text, 'the expiry is printed as the raw wire value').not.toContain(EXPIRES);
+    } finally { localStorage.removeItem('dateFormat'); }
   });
 
   it('a refused spill says so and why, in words', () => {

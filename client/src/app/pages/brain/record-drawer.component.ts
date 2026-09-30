@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { InstantComponent } from '../../shared/instant.component';
 import { FormsModule } from '@angular/forms';
 import { TranslocoPipe } from '@jsverse/transloco';
 import { ModalDirective } from '../../shared/modal.directive';
@@ -27,7 +28,7 @@ import { BRAIN_CHIP_STYLES, BRAIN_DRAWER_STYLES } from './brain-form.styles';
   selector: 'app-record-drawer',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [CommonModule, FormsModule, TranslocoPipe, TagInputComponent, PropertiesEditorComponent, EntityRefFieldComponent, FactRefFieldComponent, PhIconComponent, ModalDirective],
+  imports: [CommonModule, InstantComponent, FormsModule, TranslocoPipe, TagInputComponent, PropertiesEditorComponent, EntityRefFieldComponent, FactRefFieldComponent, PhIconComponent, ModalDirective],
   styles: [BRAIN_CHIP_STYLES, BRAIN_DRAWER_STYLES],
   template: `
       @if (state.drawerRecord(); as dr) {
@@ -116,7 +117,7 @@ import { BRAIN_CHIP_STYLES, BRAIN_DRAWER_STYLES } from './brain-form.styles';
                 }
                 <div class="drawer-field" style="margin-bottom:0;">
                   <div class="drawer-label">{{ 'common.createdAt' | transloco }}</div>
-                  <div class="drawer-readonly-value">{{ dr.record.createdAt | date:'yyyy-MM-dd HH:mm:ss' }}</div>
+                  <div class="drawer-readonly-value"><app-instant [value]="dr.record.createdAt" variant="datetimeSeconds"/></div>
                 </div>
               }
 
@@ -157,7 +158,7 @@ import { BRAIN_CHIP_STYLES, BRAIN_DRAWER_STYLES } from './brain-form.styles';
                 </div>
                 <div class="drawer-field" style="margin-bottom:0;">
                   <div class="drawer-label">{{ 'common.createdAt' | transloco }}</div>
-                  <div class="drawer-readonly-value">{{ dr.record.createdAt | date:'yyyy-MM-dd HH:mm:ss' }}</div>
+                  <div class="drawer-readonly-value"><app-instant [value]="dr.record.createdAt" variant="datetimeSeconds"/></div>
                 </div>
               }
 
@@ -210,7 +211,7 @@ import { BRAIN_CHIP_STYLES, BRAIN_DRAWER_STYLES } from './brain-form.styles';
                 </div>
                 <div class="drawer-field" style="margin-bottom:0;">
                   <div class="drawer-label">{{ 'common.createdAt' | transloco }}</div>
-                  <div class="drawer-readonly-value">{{ dr.record.createdAt | date:'yyyy-MM-dd HH:mm:ss' }}</div>
+                  <div class="drawer-readonly-value"><app-instant [value]="dr.record.createdAt" variant="datetimeSeconds"/></div>
                 </div>
               }
 
@@ -289,11 +290,11 @@ import { BRAIN_CHIP_STYLES, BRAIN_DRAWER_STYLES } from './brain-form.styles';
                 </div>
                 <div class="drawer-field">
                   <div class="drawer-label">{{ 'common.createdAt' | transloco }}</div>
-                  <div class="drawer-readonly-value">{{ dr.record.createdAt | date:'yyyy-MM-dd HH:mm:ss' }}</div>
+                  <div class="drawer-readonly-value"><app-instant [value]="dr.record.createdAt" variant="datetimeSeconds"/></div>
                 </div>
                 <div class="drawer-field" style="margin-bottom:0;">
                   <div class="drawer-label">{{ 'common.updatedAt' | transloco }}</div>
-                  <div class="drawer-readonly-value">{{ dr.record.updatedAt | date:'yyyy-MM-dd HH:mm:ss' }}</div>
+                  <div class="drawer-readonly-value"><app-instant [value]="dr.record.updatedAt" variant="datetimeSeconds"/></div>
                 </div>
               }
             </form>

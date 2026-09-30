@@ -1,5 +1,6 @@
 import { Component, inject, signal, OnInit } from '@angular/core';
-import { DatePipe, SlicePipe } from '@angular/common';
+import { SlicePipe } from '@angular/common';
+import { InstantComponent } from '../../shared/instant.component';
 import { FormsModule } from '@angular/forms';
 import { ConflictRecord } from '../../core/api.types';
 import { FilesApi } from '../../core/files-api.service';
@@ -18,7 +19,7 @@ type ResolveAction = 'keep-local' | 'keep-incoming' | 'keep-both' | 'save-to-spa
 @Component({
   selector: 'app-conflicts',
   standalone: true,
-  imports: [DatePipe, SlicePipe, RouterLink, FormsModule, PhIconComponent, TranslocoPipe, HscrollTopDirective, ErrorStateComponent],
+  imports: [InstantComponent, SlicePipe, RouterLink, FormsModule, PhIconComponent, TranslocoPipe, HscrollTopDirective, ErrorStateComponent],
   template: `
     <div style="display:flex; justify-content:flex-end; margin-bottom:12px;">
       <a routerLink="/files" class="btn-secondary btn btn-sm"><ph-icon name="arrow-left" [size]="14"/> {{ 'conflicts.backToFiles' | transloco }}</a>
@@ -98,7 +99,7 @@ type ResolveAction = 'keep-local' | 'keep-incoming' | 'keep-both' | 'save-to-spa
                   </span>
                 </td>
                 <td style="color:var(--text-muted); white-space:nowrap">
-                  {{ c.detectedAt | date:'dd.MM.yyyy HH:mm' }}
+                  <app-instant [value]="c.detectedAt" variant="datetime"/>
                 </td>
                 <td>
                   <select [(ngModel)]="conflictActions[c.id]"

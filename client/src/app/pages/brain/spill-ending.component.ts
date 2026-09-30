@@ -4,7 +4,7 @@ import { BrainApi } from '../../core/brain-api.service';
 import { saveBlob } from '../../core/authenticated-download';
 import { SPILL_FAILURE_KEYS, spillRefusalKey, type SpillLink } from '../../core/read-spill';
 import { httpErrorReason } from '../../core/http-error';
-import { formatTimestampParts } from '../../shared/timestamp.component';
+import { DateFormatService } from '../../core/date-format.service';
 
 /**
  * How a shortened answer's notice ENDS — the one question this answers, for the results notice and the graph
@@ -67,10 +67,11 @@ export class SpillEndingComponent {
   /** A refusal code's words, or null for a code from a newer server, which is shown as it arrived. */
   readonly refusalKey = spillRefusalKey;
 
-  /** A spill's expiry in the app's one timestamp format (dd.MM.yyyy HH:mm:ss, viewer's zone), not the browser's. */
+  private dates = inject(DateFormatService);
+
+  /** A spill's expiry in the viewer's chosen date format (Q-146), to the second. */
   expiresLabel(value: string): string {
-    const p = formatTimestampParts(value);
-    return p ? `${p.date} ${p.time}` : value;
+    return this.dates.format(value, 'datetimeSeconds') || value;
   }
 
   /** Save the WHOLE spill as one JSON file: every page, through HttpClient. */

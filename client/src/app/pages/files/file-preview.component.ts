@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component, input } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { InstantComponent } from '../../shared/instant.component';
 import { TranslocoPipe } from '@jsverse/transloco';
 import { SafeHtml, SafeResourceUrl } from '@angular/platform-browser';
 import { FileEntry } from '../../core/api.types';
@@ -72,7 +73,7 @@ export interface FilePreview {
   selector: 'app-file-preview',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [CommonModule, TranslocoPipe],
+  imports: [CommonModule, InstantComponent, TranslocoPipe],
   styles: [FILE_PREVIEW_STYLES],
   template: `
     @if (preview(); as p) {
@@ -107,7 +108,7 @@ export interface FilePreview {
             <dl class="preview-meta">
               <dt>{{ 'files.preview.name' | transloco }}</dt><dd>{{ p.file.name }}</dd>
               <dt>{{ 'files.preview.size' | transloco }}</dt><dd>{{ formatSize(p.file.size) }}</dd>
-              <dt>{{ 'files.preview.modified' | transloco }}</dt><dd>{{ p.file.modified | date:'dd.MM.yyyy HH:mm' }}</dd>
+              <dt>{{ 'files.preview.modified' | transloco }}</dt><dd><app-instant [value]="p.file.modified" variant="datetime"/></dd>
             </dl>
           }
         }

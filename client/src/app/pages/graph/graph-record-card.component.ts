@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component, computed, input } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { InstantComponent } from '../../shared/instant.component';
 import { TranslocoPipe } from '@jsverse/transloco';
 import { Entity, Edge, TraverseEdge, Fact, ChronoEntry } from '../../core/api.types';
 import { PropertiesViewComponent } from '../../shared/properties-view.component';
@@ -64,7 +65,7 @@ import { memoryText, chronoText } from './graph-details';
   selector: 'app-graph-node-record-card',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [CommonModule, TranslocoPipe, PropertiesViewComponent],
+  imports: [CommonModule, InstantComponent, TranslocoPipe, PropertiesViewComponent],
   styles: [GRAPH_RECORD_CARD_STYLES],
   host: { class: 'record-card' },
   template: `
@@ -117,7 +118,7 @@ import { memoryText, chronoText } from './graph-details';
       </div>
       <div class="drawer-field" style="margin-bottom:0;">
         <div class="drawer-label">{{ 'common.createdAt' | transloco }}</div>
-        <div class="drawer-readonly-value">{{ record()!.createdAt | date:'dd.MM.yyyy HH:mm' }}</div>
+        <div class="drawer-readonly-value"><app-instant [value]="record()!.createdAt" variant="datetime"/></div>
       </div>
     } @else {
       <div style="font-size:12px;color:var(--text-muted);padding:8px 0;">{{ 'common.loading' | transloco }}</div>
