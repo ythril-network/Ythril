@@ -648,6 +648,18 @@ export const toolCallsTotal = new Counter({
   registers: [register],
 });
 
+/**
+ * Tool-argument validators found (`hit`), built (`miss`) or dropped to stay inside the bound (`evict`) — `Q-114`.
+ * A validator is built once per reach a token can see; a rising `evict` rate means more distinct reaches are in
+ * rotation than the cache holds, so calls are paying the build cost again.
+ */
+export const toolValidatorCacheTotal = new Counter({
+  name: 'ythril_tool_validator_cache_total',
+  help: 'Tool-argument validator cache lookups by result (hit, miss, evict)',
+  labelNames: ['result'] as const,
+  registers: [register],
+});
+
 // ── Sync ─────────────────────────────────────────────────────────────────────
 
 export const syncCyclesTotal = new Counter({

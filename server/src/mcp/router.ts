@@ -11,7 +11,8 @@ import { log } from '../util/log.js';
 import { reachableSpaceIds } from '../auth/space-reach.js';
 import type { TokenRights } from '../config/rights-shape.js';
 import { ALL_TOOLS, type ToolSchemas } from './tools/index.js';
-import { callTool, toolSchemasFor, materialisedSchema } from './call-tool.js';
+import { callTool, materialisedSchema } from './call-tool.js';
+import { validatorFor } from './validate-args.js';
 import { spaceScopeSentence } from './space-scope-sentence.js';
 
 /** Create an MCP Server instance with tools operating across all accessible spaces.
@@ -82,10 +83,12 @@ function createGlobalMcpServer(tokenId?: string, tokenLabel?: string,
   // while HTTP used `reachesSpace`.
   const accessibleSpaceIds = reachableSpaceIds(rights, cfg.spaces.map(s => s.id));
   const accessibleSpaces = cfg.spaces.filter(s => accessibleSpaceIds.includes(s.id));
+  // The validator for this reach: built once per reach, so the schemas advertised here and the ones `callTool` enforces are the same objects (`Q-114`).
+  const reach = validatorFor(accessibleSpaceIds);
   const spacesLine = accessibleSpaces.length > 0
     ? accessibleSpaces.map(s => s.id + (s.label ? ` ("${s.label.replace(/[\x00-\x1f]/g, '').slice(0, 200)}")` : '')).join(', ')
     : '(none accessible)';
-  const instructions = `Ythril knowledge graph — global mode.\nAvailable spaces: ${spacesLine}.\n${spaceScopeSentence(ALL_TOOLS.filter(t => toolIsVisible(t, rights)), toolSchemasFor(accessibleSpaceIds))} Call list_spaces for details. Tool arguments are validated against each tool's inputSchema (from tools/list) — read it before calling.`;
+  const instructions = `Ythril knowledge graph — global mode.\nAvailable spaces: ${spacesLine}.\n${spaceScopeSentence(ALL_TOOLS.filter(t => toolIsVisible(t, rights)), reach.schemas)} Call list_spaces for details. Tool arguments are validated against each tool's inputSchema (from tools/list) — read it before calling.`;
 
   const server = new Server(
     { name: 'ythril', version: '0.1.0' },
@@ -95,7 +98,7 @@ function createGlobalMcpServer(tokenId?: string, tokenLabel?: string,
   // The `space` enum depends on this token's accessible spaces, so tool schemas are built per server
   // instance. From the SAME builder `callTool` validates against — two builders is a schema advertised
   // in `tools/list` that the validator does not enforce.
-  const schemas: ToolSchemas = toolSchemasFor(accessibleSpaceIds);
+  const schemas: ToolSchemas = reach.schemas;
 
   // Tools this token may see: read-only tokens lose mutating tools, non-admin
   // tokens lose instance-level tools. Both gates are re-enforced on dispatch.

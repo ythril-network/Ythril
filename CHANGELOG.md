@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **A tool call no longer builds a validator, and a media worker slot refills the moment it frees (`Q-114`).** Every
+  tool call, on both doors, built an Ajv and compiled the tool's schema before its handler ran: 4.3 ms of main
+  thread per call measured (`testing/bench/tool-call-setup-cost.mjs`, `recall`; `save_entity` 4.2 ms), against 1 us
+  for a validator that already exists. A tool's schema depends on exactly one thing, the list of spaces the token
+  reaches in order (the `space` enum keeps that order and is printed in the refusal), so the validator is now built
+  once per reach and kept in a bounded cache of 64 (`ythril_tool_validator_cache_total{result="hit|miss|evict"}`;
+  a steady `evict` rate means more distinct reaches are in rotation than it holds). `tools/list`, the server
+  instructions and the refusal text come from the same cached schemas, so both doors refuse with the same bytes as
+  before. The media worker claimed up to `workerConcurrency` jobs and awaited all of them before claiming again,
+  so one 30-minute document conversion beside a 2-second image left the second slot idle for 28 minutes with a
+  queue behind it; a slot now refills as soon as it frees, claims stay one at a time, and a raised
+  `workerConcurrency` starts a slot within one poll interval even while every slot is busy. Shutdown is unchanged:
+  a job claimed before stop runs to its end or is handed back, and one claimed after stop is handed back and not run.
 - **A space-meta read no longer rescans the space, and both doors build it with one function (`Q-95`).** `stats`
   and `actualSchema` were rebuilt on every `GET /api/spaces/:id/meta` and every MCP `space_meta` — an entity scan,
   an edge scan, three link scans and seven counts per member space — by two hand-written copies of the answer. They
