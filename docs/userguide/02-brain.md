@@ -423,20 +423,24 @@ the same answer. Two uses, and the second is the reason it is there:
   together with its whole graph, so asking for deeper or wider relationships means **fewer matches fit** — and
   the ones that do not fit are absent, not shortened. A search for a hundred matches that comes back with
   eleven has usually not found eleven things: it has found a hundred and spent the room on the relationships
-  around the first eleven. Turn the expansion down, or raise **Max response size**, and the rest appear. And **the page tells you when it happened** — a notice above the results says
-  how many of how many came back, states both guarantees, and says what to do about it.
-  - **Max response size**, under **the answer**, is the ceiling itself — the API calls it `maxChars`, and it
-    is counted in CHARACTERS. Raise it
-    to get more of a shortened answer in one go; leave it empty for the default. **The default here is the
+  around the first eleven. Turn the expansion down, or raise the size ceiling, and the rest appear. And **the page tells you when it happened** — a notice above the results says
+  how many of how many came back, states both guarantees, and says what to do about it — **naming the field
+  to raise**: the one whose ceiling the next match would have passed, or two of them when it would have passed
+  both. When the search stopped because its graph walk ran out rather than because of its size, the notice
+  says so and gives no size advice, because a bigger ceiling would not help: continue with **Skip results**,
+  or ask for fewer graph hops.
+  - **The size ceiling is on the form in three units, each its own field labelled Max response size.**
+    **Max response size (bytes)** sits under **The answer**; **(characters)** and **(tokens)** sit under
+    **Size and paging**. **Set more than one and the smallest wins** — which is the rule that makes offering all
+    three safe. Three is the honest number: the units are not interchangeable outside plain English, and tokens
+    is the one an agent's budget is actually written in. The API calls them `maxBytes`, `maxChars` and
+    `maxTokens`, and a shortened answer names the one to raise in `budgetBoundBy`.
+  - **Characters carry the default; bytes have none.** Leave the character and token fields empty for the
+    default character ceiling; leave the byte field empty for no byte ceiling at all. **The default here is the
     larger one.** An agent talking to this instance over MCP gets a smaller default than this page does, because an
     agent's tool result has to fit inside its own client and a browser's does not — so a search that comes back
     whole here can come back shortened for an agent asking the same question, and that is deliberate rather
     than a discrepancy.
-    - **The ceiling is one number in four currencies, and all four are on the form.** Bytes and characters
-      sit under **the answer** and **size and paging**; tokens is there too, with **characters per token**
-      appearing beside it once a token ceiling is set. **Set more than one and the smallest wins** — which
-      is the rule that makes offering all four safe. Four is the honest number: the units are not interchangeable outside plain
-      English, and tokens is the one an agent's budget is actually written in.
     - **Characters and bytes are not the same ceiling.** `maxChars` counts characters and `maxBytes` counts
       real bytes — the same thing for English, and not for German, Polish or anything with an emoji in it,
       where a character can take two or three bytes. Use the byte ceiling when your limit genuinely is in
@@ -445,7 +449,7 @@ the same answer. Two uses, and the second is the reason it is there:
   - Narrowing the search — fewer results, fewer graph hops, a tighter filter — does the same job from the other
     end, and a search that comes back shortened is usually a sign the question was broader than intended.
   - **Getting the whole tail in one piece is a request you make, not something that happens to you.** Tick
-    **Save what did not fit**, or as an API caller add `remainderDump`, and everything that did not fit is kept
+    **Keep what did not fit**, or as an API caller add `remainderDump`, and everything that did not fit is kept
     for the caller that asked, for up to a day, to download or page through. Nothing is kept unless it was
     asked for, and nothing is ever written into the space.
 - **maxTimeMS** — a time limit for this one search. It can only make the search stricter than the instance's own budget, never looser. When the limit is reached you get a **partial** answer rather than an error or a hang: whatever finished is returned, and the result says it was cut short.

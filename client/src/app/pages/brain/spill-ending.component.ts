@@ -37,9 +37,9 @@ import { DateFormatService } from '../../core/date-format.service';
       </div>
       @if (error(); as e) { <div class="alert alert-error note" role="alert">{{ e }}</div> }
     } @else if (refused(); as reason) {
-      <div class="note">{{ 'brain.query.spillRefused' | transloco: { reason: (refusalKey(reason) ? (refusalKey(reason)! | transloco) : reason) } }}</div>
+      <div class="note">{{ 'brain.query.spillRefused' | transloco: { reason: (refusalKey(reason) ? (refusalKey(reason)! | transloco) : reason), fields: fields() } }}</div>
     } @else {
-      <div class="note">{{ fallbackKey() | transloco }}</div>
+      <div class="note">{{ fallbackKey() | transloco: { fields: fields() } }}</div>
     }
   `,
 })
@@ -58,6 +58,11 @@ export class SpillEndingComponent {
   extraKey = input<string | null>(null);
   /** The notice's own last line when nothing was kept and nothing was refused. */
   fallbackKey = input.required<string>();
+  /**
+   * The form field(s) to raise, already in words ("Max response size (bytes)") — named in the advice and in the
+   * refusal, so neither says "the size" over a form with three size fields (`Q-116`). Empty when no size helps.
+   */
+  fields = input<string>('');
 
   /** A download in flight; the button is disabled until it ends. */
   readonly busy = signal(false);

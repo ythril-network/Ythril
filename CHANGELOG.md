@@ -20,6 +20,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fails when any other file formats a date itself. Stored and transmitted values are unchanged — ISO 8601 UTC. The
   token table's Created, Last used and Expires columns now use the two-line date-over-time cell the other tables
   use, where they showed one browser-formatted string.
+- **A shortened answer names the size parameter that shortened it (`Q-116`).** Every answer the size budget cuts
+  now carries `budgetBoundBy` — `maxChars`, `maxTokens` or `maxBytes`, the parameter whose ceiling the next match
+  would have passed (two of them when it would have passed both) — on both doors, on recall, find-similar, the
+  record lists, the query page, traversals and spill reads alike, from the one admission meter that decides it.
+  It is absent when the answer was not cut, or was cut by a walk that ran out. The Query tab's advice, which said
+  "raise Max response size" over a form with three fields of that name, now names the field by its label, and
+  after a walk ran out it gives no size advice at all. Three stale claims went with it: the byte field's tooltip
+  said it defaulted to 100000 with a floor of 1000 (it has neither — empty means no byte ceiling, and its
+  placeholder now says "none"); the Brain guide put `maxChars` under "The answer" (that field is `maxBytes`) and
+  described a characters-per-token field removed in 5.0; and the MCP `recall` description called a `budget` cut
+  "bytes" when the default ceiling is characters. Additive for a reader: a new field, present only on a cut.
 
 - **A space-meta read no longer rescans the space, and both doors build it with one function (`Q-95`).** `stats`
   and `actualSchema` were rebuilt on every `GET /api/spaces/:id/meta` and every MCP `space_meta` — an entity scan,

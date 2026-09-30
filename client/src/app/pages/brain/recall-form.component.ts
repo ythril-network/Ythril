@@ -359,14 +359,14 @@ export interface RecallTypeOpt {
   <div class="rf-group">
     <div class="rf-legend">{{ 'brain.query.group.answer' | transloco }}</div>
     <div class="rf-field">
-      <!-- ONE control for the size ceiling, not two. maxTokens is a convenience onto the same number and the
-           server applies whichever is smaller, so offering both would let an operator set two limits and then
-           have to work out which one won. -->
+      <!-- The BYTE ceiling. Its siblings, characters and tokens, are under "size and paging"; the server applies
+           whichever would be passed first and a shortened answer names it (Q-116). It has NO default — empty means
+           no byte ceiling, so its placeholder says "none" where the character fields say "default". -->
       <label>{{ 'brain.query.recallMaxBytes' | transloco }}
         <span class="rf-hint" [attr.title]="'brain.query.recallMaxBytes.tooltip' | transloco"><ph-icon name="info" [size]="11"/></span>
       </label>
       <input type="number" [(ngModel)]="form().maxBytes" name="recallMaxBytes" min="0" max="5000000" step="1000"
-        [placeholder]="'brain.query.recallMaxBytes.default' | transloco" />
+        [placeholder]="'brain.query.recallMaxBytes.none' | transloco" />
     </div>
     <div class="rf-field">
       <label>{{ 'brain.query.maxTimeMs' | transloco }}

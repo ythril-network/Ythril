@@ -8,6 +8,7 @@ import { NetworksApi } from '../../core/networks-api.service';
 import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
 import { PhIconComponent } from '../../shared/ph-icon.component';
 import { ModalDirective } from '../../shared/modal.directive';
+import { formatList } from '../../core/list-format';
 
 /**
  * Join-network dialog, extracted from the (large) NetworksComponent (PR-U3). Owns the invite-bundle
@@ -321,8 +322,7 @@ export class NetworkJoinDialogComponent {
 
   /** A list in the reader's language, not joined with a hard-coded comma. */
   private list(items: string[]): string {
-    try { return new Intl.ListFormat(this.transloco.getActiveLang(), { type: 'conjunction' }).format(items); }
-    catch { return items.join(', '); }
+    return formatList(items, this.transloco.getActiveLang());
   }
 
   private executeJoin(): void {

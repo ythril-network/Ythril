@@ -669,7 +669,9 @@ subtree, so a deeper or wider traversal means fewer matches fit — they are abs
 
 `returned`, `count`, `truncated`, `budgetChars`, `budgetBytes`, `charsReturned` and `bytesReturned` are on
 **every** response, whether the budget bit or not, so an absence never has to be interpreted — `budgetBytes` is
-`null` unless you asked for a byte ceiling. `nextSkip` is there exactly when `truncated` is.
+`null` unless you asked for a byte ceiling. `nextSkip` is there exactly when `truncated` is, and
+`budgetBoundBy` (`maxChars`, `maxTokens` and/or `maxBytes`) names the parameter to raise when the size budget is
+what cut the page — see the recall reference for how it is decided.
 `count` stays the FULL total on a skipped page rather than shrinking as you advance.
 
 **`remainderDump: true`** additionally keeps what did not fit as a **read spill** and reports it as
