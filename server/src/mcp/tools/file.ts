@@ -12,6 +12,7 @@ import { memberSpacesWithin } from '../../spaces/proxy-scoped.js';
 import { StoredFileUnreadable } from '../../files/stored-bytes.js';
 import { readSpillByPath } from '../../brain/read-spill-act.js';
 import { linkInputSchemasFor, linkInputError, linkFieldsFrom } from '../../brain/write-connections.js';
+import { MAX_TAGS, MAX_DELETE_FIELDS } from '../../util/request-bounds.js';
 
 export const read_fileTool: ToolHandler = {
   name: 'read_file',
@@ -98,7 +99,7 @@ export const write_fileTool: ToolHandler = {
             },
             description: { type: 'string', description: 'Optional human-readable summary stored as file metadata.' },
             tags: {
-              type: 'array', items: { type: 'string' },
+              type: 'array', maxItems: MAX_TAGS, items: { type: 'string' },
               description: 'Tags stored on the file\'s metadata record. REPLACES the stored list on a '
                 + 'rewrite; `update_file_meta` replaces too, unlike the brain update tools, which merge. '
                 + 'Filterable by `filter` on the `files` collection and by `recall`\'s own filter.',
@@ -489,7 +490,7 @@ export const update_file_metaTool: ToolHandler = {
       path: { type: 'string', minLength: 1, description: 'The file path within the space, as list_dir reports it.' },
       description: { type: 'string', description: 'Replaces the description. Omit to leave it unchanged.' },
       tags: {
-        type: 'array', items: { type: 'string' },
+        type: 'array', maxItems: MAX_TAGS, items: { type: 'string' },
         description: 'REPLACES the stored tag list — send the FULL list, because sending one tag drops the '
           + 'rest. This is the opposite of `update_entity` and `update_edge`, which MERGE the same field.',
       },
@@ -513,7 +514,7 @@ export const update_file_metaTool: ToolHandler = {
           + 'Removing one is `deleteFields`, never an omission. Values must be string, number, or boolean.',
       },
       deleteFields: {
-        type: 'array', items: { type: 'string' },
+        type: 'array', maxItems: MAX_DELETE_FIELDS, items: { type: 'string' },
         description: 'Dot-notation paths to REMOVE, applied after the merge — the only way to unset, since an '
           + 'omitted field means "leave alone" and `properties` merge. E.g. '
           + '`["properties.oldKey", "description"]`. Permanent, with no undo. Server-owned fields are REFUSED '

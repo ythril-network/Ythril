@@ -41,10 +41,10 @@ import { REF_KINDS } from '../config/types-knowledge.js';
 import type { RefKind } from '../config/types-knowledge.js';
 import { NEVER_RETURNED_PROJECTION } from './read-projection.js';
 import { spaceCollection } from '../db/space-collection.js';
+import { MAX_FACT_LENGTH } from '../util/request-bounds.js';
 // DERIVED. These five were written out here, in `brain/bulk.ts`, and in the shared write-shape table —
 // three copies of one product fact, and the third had two of them wrong.
 const CHRONO_STATUS_SET = new Set<ChronoStatus>(CHRONO_STATUSES);
-const MAX_FACT_LENGTH = 50_000;
 
 interface Counts { facts: number; entities: number; edges: number; chrono: number }
 

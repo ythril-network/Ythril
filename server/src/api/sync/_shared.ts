@@ -178,6 +178,7 @@ import { CHRONO_STATUSES } from '../../config/types.js';
 import { validateEntity, validateEdge, validateChrono, validateFact, getSpaceMeta, type SchemaViolation }
   from '../../spaces/schema-validation.js';
 import { spaceCollection } from '../../db/space-collection.js';
+import { MAX_FACT_LENGTH, MAX_TAGS } from '../../util/request-bounds.js';
 
 export const AuthorRefSchema = z.object({
   instanceId: z.string().min(1),
@@ -202,8 +203,8 @@ export const IncomingFactDoc = z.object({
   suppressEmbeddings: z.boolean().optional(),
   superseded: z.boolean().optional(),
   spaceId: z.string().min(1),
-  fact: z.string(),
-  tags: z.array(z.string()).max(100),
+  fact: z.string().max(MAX_FACT_LENGTH),
+  tags: z.array(z.string()).max(MAX_TAGS),
   description: z.string().optional(),
   properties: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional(),
   author: AuthorRefSchema,
@@ -228,7 +229,7 @@ export const IncomingFileMetaDoc = z.object({
   path: z.string().min(1),
   description: z.string().optional(),
   descriptionSource: z.enum(['generated', 'extracted']).optional(),
-  tags: z.array(z.string()).max(100),
+  tags: z.array(z.string()).max(MAX_TAGS),
   properties: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional(),
   /** See `IncomingFactDoc`: the record tier of suppression, which the receiver needs to honour it. */
   suppressEmbeddings: z.boolean().optional(),
@@ -295,7 +296,7 @@ export const IncomingEntityDoc = z.object({
   spaceId: z.string().min(1),
   name: z.string().min(1),
   type: z.string().min(1),
-  tags: z.array(z.string()).max(100),
+  tags: z.array(z.string()).max(MAX_TAGS),
   description: z.string().optional(),
   properties: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).default({}),
   author: AuthorRefSchema,
@@ -308,7 +309,7 @@ export const IncomingEntityDoc = z.object({
  * The kinds an edge endpoint may declare, built from `REF_KINDS` so a new kind is not refused on the push
  * door alone.
  */
-const RefKindSchema = z.enum(REF_KINDS);
+export const RefKindSchema = z.enum(REF_KINDS);
 
 export const IncomingEdgeDoc = z.object({
   _id: z.string().min(1),
@@ -327,7 +328,7 @@ export const IncomingEdgeDoc = z.object({
   label: z.string(),
   type: z.string().optional(),
   weight: z.number().optional(),
-  tags: z.array(z.string()).max(100).default([]),
+  tags: z.array(z.string()).max(MAX_TAGS).default([]),
   description: z.string().optional(),
   properties: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional(),
   author: AuthorRefSchema,
@@ -382,7 +383,7 @@ export const IncomingChronoDoc = z.object({
   // sync watermark on it.
   status: z.enum(CHRONO_STATUSES),
   confidence: z.number().min(0).max(1).optional(),
-  tags: z.array(z.string()).max(100).default([]),
+  tags: z.array(z.string()).max(MAX_TAGS).default([]),
   properties: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional(),
   recurrence: z.object({
     freq: z.enum(['daily', 'weekly', 'monthly', 'yearly']),

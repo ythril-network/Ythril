@@ -459,6 +459,11 @@ On a **proxy space** the page is computed over the merged set of member spaces, 
 means the same thing it does on a plain space. `skip + limit` is bounded there — a deep page needs that many
 rows from every member — and exceeding the bound is a `400` naming the ceiling.
 
+**`limit` has no maximum, and what is READ is bounded instead.** On a single space the rows are taken off the
+database cursor only until they are twice the answer budget (`maxChars` / `maxBytes`), and the answer is trimmed
+to the budget with `truncated: true` and `nextSkip` — so `limit: 1000000` costs one budget's worth of reading, not
+the collection. Page on with `nextSkip`; compare against `total` to know when you are done.
+
 ---
 
 > **A malformed optional field is REFUSED, not dropped.** Sending `"description": 12345` or
@@ -541,6 +546,10 @@ sent on connect and every 30 s as a keep-alive.
   space's stream. A non-browser client that can set headers should just use `Authorization` directly.
 - **Scope:** events fire for writes made through the REST and MCP APIs on this instance. Changes applied
   by the **sync engine** (pulled from a peer) are not emitted here — they appear on the next load.
+- **Bounds:** at most **200** streams of this kind are open at once, instance-wide; the next is a `503` with
+  `Retry-After`. A reader more than **256 KiB** behind is disconnected rather than buffered for. Reconnect with a
+  FRESH ticket (the old one is spent) and re-read — every message means "something changed, re-read", so the
+  re-read restores anything the gap missed. The Brain page does exactly this.
 
 ```js
 // Browser: mint a single-use ticket (token stays in the header), then open the stream with it.

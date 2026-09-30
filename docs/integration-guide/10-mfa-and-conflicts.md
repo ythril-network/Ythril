@@ -184,6 +184,10 @@ POST /api/conflicts/bulk-resolve
 
 Accepts the same `action`, `rename`, and `targetSpaceId` fields as single resolve. Applies the action to all listed conflicts.
 
+`ids` holds at most **2 000** — the most the conflict list returns — and every entry must be a non-empty string.
+More, or anything else, is a `400` naming `ids`: each id is looked up across every space you can write, one at a
+time, so the count is the cost.
+
 **Response** `200`:
 
 ```json

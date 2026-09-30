@@ -13,6 +13,7 @@ import { addMemberAct, removeMemberAct, acceptIntroductionAct } from '../../netw
 import { uuidSchema } from './shared.js';
 import { DEFAULT_JOIN_SYNC_SCHEDULE } from '../../sync/schedule.js';
 import { callerOf, networkIdSchema, toResult } from './networks.js';
+import { MAX_SPACE_IDS } from '../../util/request-bounds.js';
 
 const SPACE_ID = { type: 'string', minLength: 1, maxLength: 40, pattern: '^[a-z0-9-]+$' } as const;
 
@@ -52,8 +53,8 @@ export const network_join_remoteTool: ToolHandler = {
       expiresAt: { type: 'string', description: 'From the invite bundle; informational only.' },
       // The rest of the bundle, so it can be passed whole as the description says (Q-133). Informational: the join
       // reads the inviter's own answer, never these.
-      spaces: { type: 'array', items: SPACE_ID, description: 'From the invite bundle; informational only — the inviter\'s answer is what the join uses.' },
-      networkSpaces: { type: 'array', items: SPACE_ID, description: 'From the invite bundle; informational only.' },
+      spaces: { type: 'array', items: SPACE_ID, maxItems: MAX_SPACE_IDS, description: 'From the invite bundle; informational only — the inviter\'s answer is what the join uses.' },
+      networkSpaces: { type: 'array', items: SPACE_ID, maxItems: MAX_SPACE_IDS, description: 'From the invite bundle; informational only.' },
       inviteCode: { type: 'string', description: 'From the invite bundle; informational only.' },
       spaceMap: { type: 'object', additionalProperties: SPACE_ID, description: 'Optional: a space of the network → the local space id to put it in. Key it by the name the invite shows for the space (`spaces`); the network\'s id for it (`networkSpaces`) is accepted too. A space not named keeps the name the invite shows.' },
       syncSchedule: JOIN_SYNC_SCHEDULE,

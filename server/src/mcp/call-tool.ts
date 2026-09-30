@@ -237,10 +237,12 @@ export async function callTool(req: ToolCallRequest): Promise<ToolCallOutcome> {
   const callSpace = rawSpace;
 
   try {
-    toolCallsTotal.inc({ tool: name, space: callSpace || 'global', door: caller.transport });
+    // Refused BEFORE it is counted (`Q-108`): `name` is whatever the caller sent, and as a metric label an
+    // unknown one mints a new time series per spelling — unbounded cardinality from any authenticated caller.
     if (!tool) {
       return refuse(404, `Unknown tool: ${name}`, callSpace);
     }
+    toolCallsTotal.inc({ tool: name, space: callSpace || 'global', door: caller.transport });
     // Enforce the advertised inputSchema before the handler runs — except partial-success tools
     // (save_bulk), which report per-item errors in the result rather than rejecting the whole call.
     if (!tool.skipSchemaValidation) {

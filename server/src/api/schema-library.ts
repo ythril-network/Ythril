@@ -140,7 +140,7 @@ export const LibraryTypeSchemaZ = z.object({
 /** Name must be URL-safe and reasonably short. Allows uppercase, dots, dashes, underscores. */
 const LIBRARY_NAME_RE = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,199}$/;
 
-const LibraryEntryBodyZ = z.object({
+export const LibraryEntryBodyZ = z.object({
   name: z.string().min(1).max(200).regex(LIBRARY_NAME_RE, 'name must start with an alphanumeric character and contain only letters, digits, dots, dashes, or underscores'),
   knowledgeType: z.enum(KNOWLEDGE_TYPES),
   typeName: z.string().min(1).max(200),
@@ -153,7 +153,7 @@ const LibraryEntryBodyZ = z.object({
 });
 
 /** Body for PUT (name comes from the URL param). */
-const LibraryEntryPutBodyZ = z.object({
+export const LibraryEntryPutBodyZ = z.object({
   knowledgeType: z.enum(KNOWLEDGE_TYPES),
   typeName: z.string().min(1).max(200),
   schema: LibraryTypeSchemaZ,
@@ -179,7 +179,7 @@ const LibraryEntryPutBodyZ = z.object({
  * removal, so an integrator who has used `PATCH .../facts/:id` already knows this. Two vocabularies for
  * one operation is how they diverge.
  */
-const LibraryEntryPatchBodyZ = z.object({
+export const LibraryEntryPatchBodyZ = z.object({
   knowledgeType: z.enum(KNOWLEDGE_TYPES).optional(),
   typeName: z.string().min(1).max(200).optional(),
   schema: LibraryTypeSchemaZ.optional(),
@@ -193,13 +193,13 @@ const LibraryEntryPatchBodyZ = z.object({
 }).strict();
 
 /** Body for PATCH /:name/publish */
-const PublishPatchZ = z.object({
+export const PublishPatchZ = z.object({
   published: z.boolean(),
 });
 
 /** Body for POST /catalogs */
 const CATALOG_NAME_RE = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,99}$/;
-const CatalogBodyZ = z.object({
+export const CatalogBodyZ = z.object({
   name: z.string().min(1).max(100).regex(CATALOG_NAME_RE, 'catalog name must start with an alphanumeric character and contain only letters, digits, dots, dashes, or underscores'),
   url: z.string().url().max(2048)
     .refine(u => { try { return new URL(u).protocol === 'https:'; } catch { return false; } }, { message: 'Catalog URL must use HTTPS.' })
@@ -287,7 +287,7 @@ schemaLibraryRouter.get('/groups', globalRateLimit, requireAuth, (_req, res) => 
 //    <namePrefix|groupName>-<knowledgeType>-<typeName>   (sanitised)
 //  Returns the list of created/updated entries.
 
-const ExportSpaceBodyZ = z.object({
+export const ExportSpaceBodyZ = z.object({
   spaceId: z.string().min(1).max(200),
   groupName: z.string().min(1).max(200),
   namePrefix: z.string().min(1).max(200).optional(),
@@ -386,7 +386,7 @@ schemaLibraryRouter.post('/export-space', globalRateLimit, requireAdminMfa, (req
 //  for every library entry that belongs to the specified group.
 //  Existing type definitions for matching names are overwritten.
 
-const ApplyGroupBodyZ = z.object({
+export const ApplyGroupBodyZ = z.object({
   spaceId: z.string().min(1).max(200),
 });
 

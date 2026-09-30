@@ -234,6 +234,11 @@ Accept: application/json, text/event-stream
 The answer comes back as `application/json`, or as a single `text/event-stream` frame — the server chooses,
 so accept both.
 
+**Every array argument carries a `maxItems`** in the tool's `inputSchema` — `tags` 100, the `link*` fields 1 000,
+inline `edges` 500, `deleteFields` 100, `edgeLabels` 100 — and it is the same bound the REST route enforces, read
+from one place. A call past it is refused before the handler runs, naming the field. The whole list, and the few
+quantities left open on purpose, is in [Request bounds](03-auth-and-limits.md).
+
 ### Telling "absent" from "your token cannot see it"
 
 Two different situations look identical from outside: a tool that was never built, and a tool hidden from your

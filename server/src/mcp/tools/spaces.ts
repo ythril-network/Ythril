@@ -13,6 +13,7 @@ import { measureSpaceUsage } from '../../spaces/space-usage.js';
 import { spaceCollection } from '../../db/space-collection.js';
 import { renameSpaceAct } from '../../spaces/rename.js';
 import { toResult } from './networks.js';
+import { MAX_SPACE_IDS } from '../../util/request-bounds.js';
 
 export const list_spacesTool: ToolHandler = {
   name: 'list_spaces',
@@ -623,7 +624,7 @@ export const save_spaceTool: ToolHandler = {
       },
       maxGiB: { type: 'number', exclusiveMinimum: 0, description: 'Storage quota in GiB. Omit for unlimited.' },
       proxyFor: {
-        type: 'array', items: { type: 'string', minLength: 1, maxLength: 40 }, minItems: 1,
+        type: 'array', items: { type: 'string', minLength: 1, maxLength: 40 }, minItems: 1, maxItems: MAX_SPACE_IDS,
         description: 'Make this a PROXY space that reads across the listed member spaces, or ["*"] for all of them. '
           + 'Members must exist and must not themselves be proxies — nesting is refused. A proxy holds no data of '
           + 'its own.',
@@ -768,6 +769,7 @@ export const delete_space_dataTool: ToolHandler = {
             },
             types: {
               type: 'array',
+              maxItems: BRAIN_COLLECTIONS.length,
               items: { type: 'string', enum: [...BRAIN_COLLECTIONS] },
               description: 'Optional subset of collection types to wipe. Omit to wipe all.',
             },

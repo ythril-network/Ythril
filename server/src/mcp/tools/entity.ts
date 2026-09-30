@@ -15,6 +15,7 @@ import { resolveMetaRefs } from '../../spaces/schema-validation.js';
 import { parseRecordSuppression } from '../../brain/suppress-embeddings.js';
 import { parseRecordSuperseded } from '../../brain/record-flag.js';
 import { connectionSchemas, applyConnections, assertConnections, desiredLinksFrom, edgeInputsFrom } from '../../brain/write-connections.js';
+import { MAX_TAGS, MAX_DELETE_FIELDS } from '../../util/request-bounds.js';
 
 export const save_entityTool: ToolHandler = {
   name: 'save_entity',
@@ -41,7 +42,7 @@ export const save_entityTool: ToolHandler = {
             },
             type: { type: 'string', minLength: 1, description: 'Entity type (person, place, concept, …).' },
             tags: {
-              type: 'array', items: { type: 'string' },
+              type: 'array', maxItems: MAX_TAGS, items: { type: 'string' },
               description: 'Categorisation tags. MERGED over the stored tags when this upsert lands on an '
                 + 'existing record, so sending `["b"]` on an entity tagged `["a"]` leaves it `["a","b"]` — '
                 + 'there is no value here that removes a tag. Clearing them is `update_entity` with '
@@ -229,7 +230,7 @@ export const update_entityTool: ToolHandler = {
                 + '`deleteFields: ["description"]`.',
             },
             tags: {
-              type: 'array', items: { type: 'string' },
+              type: 'array', maxItems: MAX_TAGS, items: { type: 'string' },
               description: 'MERGED into the stored tags, never replacing them — sending `["b"]` on an entity '
                 + 'tagged `["a"]` leaves it `["a","b"]`, so no value here removes a tag. `update_fact` and '
                 + '`update_chrono` REPLACE the same field. Removing one is `deleteFields`, with `tags` for '
@@ -243,7 +244,7 @@ export const update_entityTool: ToolHandler = {
             suppressEmbeddings: SUPPRESS_EMBEDDINGS_SCHEMA,
             superseded: SUPERSEDED_SCHEMA,
             targetSpace: { type: 'string', description: 'Required for proxy spaces: the member space to write to.' },
-            deleteFields: { type: 'array', items: { type: 'string' }, description: 'Dot-notation paths to delete from the entity (e.g. ["properties.oldKey", "description"]). System fields (id, name, type, spaceId, createdAt, updatedAt) cannot be deleted. Deletions are permanent.' },
+            deleteFields: { type: 'array', maxItems: MAX_DELETE_FIELDS, items: { type: 'string' }, description: 'Dot-notation paths to delete from the entity (e.g. ["properties.oldKey", "description"]). System fields (id, name, type, spaceId, createdAt, updatedAt) cannot be deleted. Deletions are permanent.' },
             ttlDays: TTL_DAYS_SCHEMA,
             // `Q-30`: the same connection fields the CREATE tool takes, from the one builder both read —
             // a field on one verb and not the other is the gap this closes, and two hand-written copies

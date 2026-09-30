@@ -37,7 +37,7 @@ Facts are the core knowledge unit — plain-language statements you want to reme
 |-------|-------|
 | **Fact** | The statement to store. Required. |
 | **Description** | Optional context or rationale. Same size as Fact. |
-| **Tags** | Comma-separated keywords for filtering. |
+| **Tags** | Comma-separated keywords for filtering. At most 100 per record — the same on every door, and what a peer accepts when the space syncs. |
 | **Entities** | Type in the inline entity search to find one (name or semantic) and click a result to link it — add several in a row. Linked items appear as chips above the search; click a chip's × to unlink. |
 | **Properties** | Click to open the JSON editor. Enter any key-value pairs you want to attach. |
 

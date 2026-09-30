@@ -20,6 +20,7 @@ import { pageTraversal } from '../../brain/traverse-page.js';
 import { defaultBudgetChars } from '../../brain/result-budget.js';
 import { spillResultSet } from '../../brain/graph-spill.js';
 import { pageBudgetSchema } from './_page-budget-schema.js';
+import { MAX_TAGS, MAX_DELETE_FIELDS, MAX_EDGE_LABELS } from '../../util/request-bounds.js';
 
 export const save_edgeTool: ToolHandler = {
   name: 'save_edge',
@@ -56,7 +57,7 @@ export const save_edgeTool: ToolHandler = {
               + 'whatever you decide it means. The 0–1 bound is enforced HERE and not on `save_bulk`, whose '
               + 'per-item schemas are for discovery only.'),
             tags: {
-              type: 'array', items: { type: 'string' },
+              type: 'array', maxItems: MAX_TAGS, items: { type: 'string' },
               description: 'Categorisation tags. MERGED over the stored tags when the same triplet already '
                 + 'exists, so no value here removes one. They are part of what gets embedded, so a tag '
                 + 'affects how this edge ranks in a `recall` as well as being filterable.',
@@ -241,7 +242,7 @@ export const update_edgeTool: ToolHandler = {
                 + '`deleteFields: ["description"]`.',
             },
             tags: {
-              type: 'array', items: { type: 'string' },
+              type: 'array', maxItems: MAX_TAGS, items: { type: 'string' },
               description: 'MERGED into the stored tags, never replacing them — so no value here removes a '
                 + 'tag. `update_fact` and `update_chrono` REPLACE the same field; this tool and '
                 + '`update_entity` merge. Removing one is `deleteFields`, with `tags` for all of them.',
@@ -256,7 +257,7 @@ export const update_edgeTool: ToolHandler = {
             suppressEmbeddings: SUPPRESS_EMBEDDINGS_SCHEMA,
             superseded: SUPERSEDED_SCHEMA,
             targetSpace: { type: 'string', description: 'Required for proxy spaces: the member space to write to.' },
-            deleteFields: { type: 'array', items: { type: 'string' }, description: 'Dot-notation paths to delete from the edge (e.g. ["properties.oldKey", "description"]). System fields (id, name, type, spaceId, createdAt, updatedAt) cannot be deleted. Deletions are permanent.' },
+            deleteFields: { type: 'array', maxItems: MAX_DELETE_FIELDS, items: { type: 'string' }, description: 'Dot-notation paths to delete from the edge (e.g. ["properties.oldKey", "description"]). System fields (id, name, type, spaceId, createdAt, updatedAt) cannot be deleted. Deletions are permanent.' },
             ttlDays: TTL_DAYS_SCHEMA,
           },
           required: ['space', 'id'],
@@ -345,7 +346,7 @@ export const graph_traverseTool: ToolHandler = {
               description: 'Follow edges from the node (outbound), to the node (inbound), or both directions. Default: outbound. It narrows STORED EDGES ONLY. A link is a record with a from and a to since 4.0, but which way it runs is fixed by the KINDS at its ends, not by the data: a fact names entities and entities name nothing, so there is no second direction to choose. includeChrono/includeMemories/includeFiles reach the records naming this entity whatever direction says. The traverse expansion inside recall behaves identically.',
             },
             edgeLabels: {
-              type: 'array',
+              type: 'array', maxItems: MAX_EDGE_LABELS,
               items: { type: 'string' },
               description: 'Filter traversal to specific edge labels only. Omit to traverse all labels.',
             },

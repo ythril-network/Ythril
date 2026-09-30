@@ -177,8 +177,8 @@ const MAX_SCOPED_SPACES = 1000;
  * without breaking a caller who never heard of the area. A future area goes on this list for the same reason.
  */
 const AREAS_ADDED_LATER: readonly string[] = ['networks'];
-const rung = z.enum(RUNGS);
-const AreaRungsBody = z.object(
+export const rung = z.enum(RUNGS);
+export const AreaRungsBody = z.object(
   // Built from SPACE_AREAS, so a new area is validated the moment it exists; the cast is only for the compiler,
   // which cannot see a record's keys through `fromEntries` — every value parses to a rung either way.
   Object.fromEntries(SPACE_AREAS.map(a => [a, AREAS_ADDED_LATER.includes(a) ? rung.default('none') : rung])) as unknown as
@@ -187,7 +187,7 @@ const AreaRungsBody = z.object(
   // Strict, so an area NAME the server does not know is still refused rather than stored and granting nothing.
   .strict();
 
-const RightsMatrix = z.object({
+export const RightsMatrix = z.object({
   instanceAdmin: z.boolean(),
   createSpaces: z.boolean(),
   floor: AreaRungsBody.nullable(),
@@ -225,7 +225,7 @@ const RightsMatrix = z.object({
  * A permissive body schema is a silent failure anywhere. On the endpoint that mints CREDENTIALS it hands out
  * access nobody intended and reports success while doing it.
  */
-const CreateTokenBody = z.object({
+export const CreateTokenBody = z.object({
   name: z.string().min(1).max(200),
   expiresAt: z.string().datetime().nullish(),
   /*
@@ -521,7 +521,7 @@ export function isEcho(field: string, sent: unknown, stored: unknown): boolean {
   return JSON.stringify(sent ?? null) === JSON.stringify(stored ?? null);
 }
 
-const RenameTokenBody = z.object({
+export const RenameTokenBody = z.object({
   // Same bound as create's `name`, so a label can't be edited to something the create flow would reject.
   name: z.string().min(1).max(200).optional(),
   // `.strict()` for the same reason as create, and here the edge is sharper: this route once accepted a

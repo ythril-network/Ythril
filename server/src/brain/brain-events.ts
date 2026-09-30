@@ -18,7 +18,9 @@ export interface BrainChangeEvent {
 }
 
 const _emitter = new EventEmitter();
-// SSE fans out to potentially many concurrent browser tabs; lift the default 10-listener warning cap.
+// SSE fans out to many concurrent browser tabs, so the default 10-listener warning would fire on a normal day.
+// Lifted rather than removed: the COUNT is bounded where a listener is added — `util/sse-stream.ts` refuses a
+// stream past `MAX_SSE_CONNECTIONS` — so this is no longer the only thing between a caller and unbounded listeners.
 _emitter.setMaxListeners(0);
 
 /** Publish a brain change to in-process subscribers. Fire-and-forget; a bad subscriber never breaks a write. */

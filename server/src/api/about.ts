@@ -12,6 +12,7 @@ import { getLogLines, subscribeLogLines } from '../util/log.js';
 import { computeSecurityPosture, securityStrict } from '../config/security-posture.js';
 import { dirSizeBytes } from '../quota/quota.js';
 import { SERVER_VERSION } from '../util/server-version.js';
+import { openEventStream } from '../util/sse-stream.js';
 
 // One reader for the version, in `util/server-version.ts`. This file and `app.ts` each resolved their own
 // path to the same manifest, and a third was about to be added — a version string is exactly the kind of
@@ -173,30 +174,15 @@ aboutRouter.post('/logs/ticket', requireAdmin, (req, res) => {
 
 // SSE stream for real-time log tailing. Admin-only.
 aboutRouter.get('/logs/stream', requireAdmin, (req, res) => {
-  res.writeHead(200, {
-    'Content-Type': 'text/event-stream',
-    'Cache-Control': 'no-cache',
-    Connection: 'keep-alive',
-    'X-Accel-Buffering': 'no',
-  });
-  res.write(':\n\n'); // initial comment to establish connection
+  // Bounded in count and in what a slow reader may queue — see util/sse-stream.ts (`Q-108`). A log tail is the
+  // feed that most needs the byte bound: every log line is an event, and a stalled tab queued all of them.
+  const stream = openEventStream(req, res, { pool: 'log-stream' });
+  if (!stream) return;
 
   const unsubscribe = subscribeLogLines((line) => {
-    if (res.destroyed) { unsubscribe(); return; }
     // Escape newlines to preserve SSE protocol framing
     const escaped = line.replace(/\n/g, '\\n').replace(/\r/g, '\\r');
-    res.write(`data: ${escaped}\n\n`);
+    stream.send(`data: ${escaped}\n\n`);
   });
-
-  // Heartbeat: send SSE comment every 30s to keep the connection alive
-  // and detect dead clients early (write to destroyed socket triggers close).
-  const heartbeat = setInterval(() => {
-    if (res.destroyed) { clearInterval(heartbeat); unsubscribe(); return; }
-    res.write(':\n\n');
-  }, 30_000);
-
-  req.on('close', () => {
-    clearInterval(heartbeat);
-    unsubscribe();
-  });
+  stream.onClose(unsubscribe);
 });

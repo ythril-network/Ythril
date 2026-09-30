@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking:** **Every quantity a caller sends has a bound, the same on both doors, and past it is a `400` naming it
+  (`Q-108`).** `tags` 100 per record (what the sync door already refused, so a record with more could never be pushed),
+  `linkEntities` / `linkFacts` / `linkChronos` 1 000 each, inline `edges` 500, `deleteFields` 100, `edgeLabels` 100,
+  space-id lists (network `spaces`, `proxyFor`, webhook `spaces`, reorder `ids`) 1 000, space-create `folders` 100, an
+  array of a fixed set (`types`, `kinds`, webhook `events`) the size of the set, conflict bulk-resolve `ids` 2 000 (the
+  most the list shows), a notify event's `data` 8 KiB, and an `ingest` conversation 1 000 sessions and 20 000 turns.
+  Four `ingest` runs may be in progress at once (a fifth start is a `429`), and each live-event stream kind admits 200
+  connections (then `503` with `Retry-After`) and drops a reader 256 KiB behind rather than buffering for it. A
+  pushed fact over 50 000 characters is refused on the sync door as on every write door. `filter`'s `limit` stays
+  uncapped as documented: what is READ is bounded instead — a single-space read stops at twice the answer budget and
+  answers `truncated` with `nextSkip`. All in `util/request-bounds.ts`, listed in the integration guide's Request bounds.
+  **Who is affected:** a caller sending more than any of these in one request (none of the shipped clients does), a
+  peer on an older release pushing a fact over 50 000 characters, and an upload whose JSON `tags` was not an array
+  (it was ignored; it is refused now).
 - **A collection's search index exists only while the collection holds a record (`Q-165`).** mongot keeps one
   change-stream cursor per search index over the shared oplog, so mongod's cost grows with index count times write
   rate, and index freshness is one rotation of every index; measured on a production instance, half of the record
@@ -72,6 +86,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A space schema-change round reached no peer (`Q-108`).** `meta_change_pending` was sent to every member and was
+  not an event `POST /api/notify` accepted, so each peer answered `400` to a sender that does not read the answer.
+- **An unknown tool name no longer becomes a metric label (`Q-108`).** It was counted in `ythril_tool_calls_total`
+  before the `404`, so any caller could mint a time series per spelling.
+- **The notify event store is bounded by bytes, not only by count (`Q-108`).** 500 events of up to the JSON body
+  limit each could hold gigabytes; it now holds at most 1 MiB, oldest out first.
 - **Moving a file or folder leaves nothing at its old path, even while the file is still being processed.** A
   document's conversion that finished after the move wrote its chunk records under the path the file had just
   left — a folder that no longer existed, with nothing to ever delete them (caught on CI by `files.test.js`,
@@ -156,6 +176,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   waiting it says the server has not answered yet and names what the space is doing — search indexes being built,
   records waiting to be embedded — and after thirty seconds the wait ends in the error state with those reasons
   and Retry. Reported on 5.6.0 while an upgraded instance rebuilt every space's search indexes.
+
+### Internal
+
+- **A gate proves no read-rung door can reach a write into a space (`Q-97`).** `a-read-never-writes-a-space`
+  derives every door a `read` token may call — `TOOL_RIGHTS` and `ROUTE_RIGHTS` rows at `read`, every mounted GET
+  without a row or on a `NOT_AREA_SCOPED` path — walks what each call causes, and fails on any path to a space
+  write, printing it door to writer. The writers are derived alias-aware (`_space-writers.mjs`): a mutator through
+  `col()`, `.collection()`, a local binding of either or a helper that returns one, on a per-space collection or
+  the sequence counter, plus filesystem writes on the space file tree. `_call-graph.mjs` can now root an MCP tool
+  handler and a REST handler closure, and resolves method calls through namespace imports and exported objects. The
+  one exception is the `/api/sync/*` GETs rebuilding the file-hash cache, scoped to that collection. Its first run
+  found no read door writing a space; its first red run found that REST `recall`, `similar` and `traverse` answer
+  through a runtime tool lookup the walk could not see, now resolved.
 
 ## [5.6.0] — 2026-09-29
 

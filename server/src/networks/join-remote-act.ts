@@ -35,6 +35,7 @@ import { resolveJoinSpaces } from './join-spaces.js';
 import { recordSpaceAlias } from '../sync/space-map.js';
 import { joinedSyncSchedule, syncScheduleRefusal } from '../sync/schedule.js';
 import { scheduleSyncForNetwork } from '../sync/scheduler.js';
+import { MAX_SPACE_IDS } from '../util/request-bounds.js';
 
 /** How long the token minted for the inviter lives before the handshake completes and `adoptPeerToken` lifts it. */
 const JOIN_TOKEN_TTL_MS = 10 * 60_000;
@@ -73,8 +74,8 @@ export const JoinRemoteBody = z.object({
    * The rest of the invite bundle, informational only, so it can be passed whole on either door (Q-133). The join
    * reads the inviter's own apply answer for the spaces, never these — a bundle is not signed.
    */
-  spaces: z.array(z.string()).max(1000).optional(),
-  networkSpaces: z.array(z.string()).max(1000).optional(),
+  spaces: z.array(z.string()).max(MAX_SPACE_IDS).optional(),
+  networkSpaces: z.array(z.string()).max(MAX_SPACE_IDS).optional(),
   inviteCode: z.string().max(8192).optional(),
   /**
    * The schedule this instance syncs the joined network on (Q-137). Wins over the inviter's; `''` is manual on purpose;

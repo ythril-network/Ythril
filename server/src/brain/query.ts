@@ -297,6 +297,37 @@ export function compareBySort(sort: Record<string, 1 | -1>): (a: unknown, b: unk
 export const compareQueryOrder = compareBySort(DEFAULT_QUERY_SORT);
 
 /** Structured read-only query (operator whitelist enforced) */
+/**
+ * How far past the answer budget a single-space read may go before it stops — the READ bound (`Q-108`).
+ *
+ * `filter`'s `limit` is documented as NOT capped (a clamp made a page of 200 read as a correct page of 100), and
+ * the byte budget trims the ANSWER — but only after `limit` rows were read into the heap, so `limit: 1e6` held the
+ * whole collection to return a page of it. The bound is on what is read instead: rows are taken off the cursor until
+ * they are twice the budget, which the answer trims to the budget and hands back `nextSkip` for. Twice rather than
+ * once because the answer is decorated after the read, so a raw row is not exactly the size of what is returned.
+ */
+export const READ_BUDGET_SLACK = 2;
+
+/**
+ * Take rows off `docs` until they would outgrow `READ_BUDGET_SLACK` × the answer budget, then stop — leaving the
+ * iterator, so a cursor is closed rather than drained. `cut` says the read stopped before the rows ran out.
+ */
+export async function readWithinBound<T>(docs: AsyncIterable<T>, budget: { chars: number; bytes: number | null }): Promise<{ rows: T[]; cut: boolean }> {
+  const charCap = READ_BUDGET_SLACK * budget.chars;
+  const byteCap = budget.bytes === null ? null : READ_BUDGET_SLACK * budget.bytes;
+  const rows: T[] = [];
+  let chars = 0;
+  let bytes = 0;
+  for await (const doc of docs) {
+    rows.push(doc);
+    const text = JSON.stringify(doc) ?? '';
+    chars += text.length;
+    if (byteCap !== null) bytes += Buffer.byteLength(text, 'utf8');
+    if (chars > charCap || (byteCap !== null && bytes > byteCap)) return { rows, cut: true };
+  }
+  return { rows, cut: false };
+}
+
 export async function queryBrain(
   spaceId: string,
   collectionName: BrainCollection,
@@ -320,6 +351,11 @@ export async function queryBrain(
    * codebase keeps paying for.
    */
   sort: Record<string, 1 | -1> = DEFAULT_QUERY_SORT,
+  /**
+   * The answer budget, when the caller wants the READ bounded by it (`readWithinBound`), and what to call when the
+   * read stopped early. A proxy merge must NOT pass it: a member cut short would drop rows the merged order needs.
+   */
+  read?: { bound: { chars: number; bytes: number | null }; onCut: () => void },
 ) {
   if (!ALLOWED_COLLECTIONS.has(collectionName)) {
     throw new Error(`Unknown collection '${collectionName}'`);
@@ -351,7 +387,10 @@ export async function queryBrain(
     // replaces the first in the MongoDB driver, which previously discarded the
     // caller's projection entirely.
     .project(mergeEmbeddingExclusion(projection) as Record<string, never>);
-  return cursor.toArray();
+  if (!read) return cursor.toArray();
+  const { rows, cut } = await readWithinBound(cursor, read.bound);
+  if (cut) read.onCut();
+  return rows;
 }
 
 /**

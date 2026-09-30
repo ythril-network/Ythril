@@ -24,6 +24,7 @@ import { deliverToWebhook } from '../webhooks/dispatcher.js';
 import { ALL_WEBHOOK_EVENTS } from '../webhooks/types.js';
 import type { WebhookEventType } from '../webhooks/types.js';
 import { log } from '../util/log.js';
+import { MAX_SPACE_IDS } from '../util/request-bounds.js';
 
 export const webhooksRouter = Router();
 
@@ -32,24 +33,24 @@ webhooksRouter.use(globalRateLimit, requireAdminMfa);
 
 // ── Validation schemas ──────────────────────────────────────────────────────
 
-const CreateBody = z.object({
+export const CreateBody = z.object({
   url: z.string().url()
     .refine(u => u.startsWith('https://'), { message: 'Webhook URL must use HTTPS' })
     .refine(u => isSsrfSafeUrl(u), { message: 'Webhook URL must not target private or reserved IP ranges' }),
   secret: z.string().min(8, 'Secret must be at least 8 characters'),
-  spaces: z.array(z.string().min(1)).optional(),
-  events: z.array(z.string().refine(e => ALL_WEBHOOK_EVENTS.has(e), { message: 'Invalid event type' })).optional(),
+  spaces: z.array(z.string().min(1)).max(MAX_SPACE_IDS).optional(),
+  events: z.array(z.string().refine(e => ALL_WEBHOOK_EVENTS.has(e), { message: 'Invalid event type' })).max(ALL_WEBHOOK_EVENTS.size).optional(),
   enabled: z.boolean().optional(),
 });
 
-const UpdateBody = z.object({
+export const UpdateBody = z.object({
   url: z.string().url()
     .refine(u => u.startsWith('https://'), { message: 'Webhook URL must use HTTPS' })
     .refine(u => isSsrfSafeUrl(u), { message: 'Webhook URL must not target private or reserved IP ranges' })
     .optional(),
   secret: z.string().min(8, 'Secret must be at least 8 characters').optional(),
-  spaces: z.array(z.string().min(1)).optional(),
-  events: z.array(z.string().refine(e => ALL_WEBHOOK_EVENTS.has(e), { message: 'Invalid event type' })).optional(),
+  spaces: z.array(z.string().min(1)).max(MAX_SPACE_IDS).optional(),
+  events: z.array(z.string().refine(e => ALL_WEBHOOK_EVENTS.has(e), { message: 'Invalid event type' })).max(ALL_WEBHOOK_EVENTS.size).optional(),
   enabled: z.boolean().optional(),
 });
 

@@ -11,6 +11,8 @@
  */
 
 /** One turn as a caller sends it. */
+import { MAX_INGEST_SESSIONS, MAX_INGEST_TURNS, countError } from '../../util/request-bounds.js';
+
 export interface SourceTurn {
   /** Optional; assigned `<sessionKey>:<n>` when absent (1.4). */
   id?: string;
@@ -85,6 +87,12 @@ export function loadConversation(source: ConversationSource): LoadedConversation
   const problems: string[] = [];
   if (!source || !Array.isArray(source.sessions) || source.sessions.length === 0) {
     throw new ConversationSourceError(['`sessions` must be a non-empty array']);
+  }
+  const tooManySessions = countError('sessions', source.sessions, MAX_INGEST_SESSIONS);
+  if (tooManySessions) throw new ConversationSourceError([tooManySessions]);
+  const turnCount = source.sessions.reduce((n, s) => n + (Array.isArray(s?.turns) ? s.turns.length : 0), 0);
+  if (turnCount > MAX_INGEST_TURNS) {
+    throw new ConversationSourceError([`the sessions may hold at most ${MAX_INGEST_TURNS} turns between them (got ${turnCount})`]);
   }
 
   source.sessions.forEach((s, i) => {

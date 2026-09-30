@@ -19,9 +19,9 @@ import { reportServerFailure } from '../../util/report-failure.js';
 export const syncPairRouter = Router();
 
 /** A peer token, as every instance mints it. Anything else is refused before a pairing is looked at. */
-const PeerToken = z.string().startsWith('ythril_').max(200);
-const PairBody = z.object({ instanceId: z.string().min(1).max(100), label: z.string().max(200).optional(), token: PeerToken });
-const ConfirmBody = z.object({ instanceId: z.string().min(1).max(100), token: PeerToken });
+export const PeerToken = z.string().startsWith('ythril_').max(200);
+export const PairBody = z.object({ instanceId: z.string().min(1).max(100), label: z.string().max(200).optional(), token: PeerToken });
+export const ConfirmBody = z.object({ instanceId: z.string().min(1).max(100), token: PeerToken });
 
 // The ejection guard the member routes carry, for the same reason: an instance ejected from a network pairs in nothing.
 syncPairRouter.use('/networks/:networkId/pair', (req, res, next) => {

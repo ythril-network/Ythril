@@ -78,7 +78,7 @@ const liveInviteKeyHash = (networkId: string): string | undefined =>
 
 // ── Schemas ──────────────────────────────────────────────────────────────────
 
-const GenerateBody = z.object({
+export const GenerateBody = z.object({
   networkId: z.string().uuid(),
   /** When set, this invite is a braintree reparent — not a new join.
    *  The target must already be a member whose parent is offline. */
@@ -88,7 +88,7 @@ const GenerateBody = z.object({
   expectedInstanceId: z.string().uuid().optional(),
 });
 
-const ApplyBody = z.object({
+export const ApplyBody = z.object({
   handshakeId: z.string().uuid(),
   networkId: z.string().uuid(),
   instanceId: z.string().uuid(),
@@ -103,7 +103,7 @@ const ApplyBody = z.object({
   rsaPublicKeyPem: z.string().min(100),
 });
 
-const FinalizeBody = z.object({
+export const FinalizeBody = z.object({
   handshakeId: z.string().uuid(),
   /** B's PAT for A, RSA-OAEP encrypted with A's public key, base64-encoded */
   encryptedTokenForA: z.string().min(1),
@@ -259,7 +259,7 @@ async function openHandshakeSession(
 // braintree key never matches here, whatever it is.
 const MAX_REDEEMED_OPEN = 25;
 const MAX_REDEEMED_PER_CALLER = 3;
-const RedeemBody = z.object({ inviteKey: z.string().min(20).max(200) }).strict();
+export const RedeemBody = z.object({ inviteKey: z.string().min(20).max(200) }).strict();
 
 inviteRouter.post('/redeem', authRateLimit, async (req, res) => {
   const parsed = RedeemBody.safeParse(req.body);

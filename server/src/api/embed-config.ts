@@ -57,7 +57,7 @@ export const embedConfigRouter = Router();
  * are setting something. `POST {allowedOrigin: 'https://x'}` — singular — would otherwise answer 200 having
  * changed nothing.
  */
-const EmbedConfigBody = z.object({
+export const EmbedConfigBody = z.object({
   allowedOrigins: z.array(z.string()).max(64),
 }).strict();
 

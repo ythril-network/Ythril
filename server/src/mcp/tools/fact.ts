@@ -22,6 +22,7 @@ import { TTL_DAYS_SCHEMA, SUPPRESS_EMBEDDINGS_SCHEMA, SUPERSEDED_SCHEMA, ttlDays
 import { parseRecordSuppression } from '../../brain/suppress-embeddings.js';
 import { parseRecordSuperseded } from '../../brain/record-flag.js';
 import { connectionSchemas, applyConnections, assertConnections, desiredLinksFrom, edgeInputsFrom } from '../../brain/write-connections.js';
+import { MAX_TAGS, MAX_DELETE_FIELDS, MAX_FACT_LENGTH } from '../../util/request-bounds.js';
 
 export const save_factTool: ToolHandler = {
   name: 'save_fact',
@@ -37,7 +38,7 @@ export const save_factTool: ToolHandler = {
           properties: {
             id: uuidSchema('UUID v4 of an EXISTING record to update. It is not a way to choose an id: identity is server-generated, so an id that names nothing is ignored rather than adopted. To carry your own reference, use `name` or `description`.'),
             space: s.requiredSpace,
-            fact: { type: 'string', minLength: 1, maxLength: 50000, description: 'The fact, observation, or fact to store (1–50 000 characters).' },
+            fact: { type: 'string', minLength: 1, maxLength: MAX_FACT_LENGTH, description: 'The fact, observation, or fact to store (1–50 000 characters).' },
             /*
              * `F-27`: the one-call write. SPREAD from the shared builder rather than written out, so a
              * fifth kind gets its field here on the day it is declared — and because this tool's schema is
@@ -49,7 +50,7 @@ export const save_factTool: ToolHandler = {
             // by there being one implementation rather than six.
             ...connectionSchemas('fact'),
             tags: {
-              type: 'array',
+              type: 'array', maxItems: MAX_TAGS,
               items: { type: 'string' },
               description: 'Categorisation tags. They are part of what gets EMBEDDED, so a tag influences '
                 + 'meaning-ranking as well as being a filter — and they are filterable exactly, by `filter` on '
@@ -79,7 +80,7 @@ export const save_factTool: ToolHandler = {
     const { args: a, callSpace } = ctx;
     const fact = String(a['fact'] ?? '');
     if (!fact.trim()) throw new Error('fact must not be empty');
-    if (fact.length > 50_000) throw new Error('fact must not exceed 50 000 characters');
+    if (fact.length > MAX_FACT_LENGTH) throw new Error('fact must not exceed 50 000 characters');
     const tags = Array.isArray(a['tags']) ? (a['tags'] as string[]) : [];
     const description = typeof a['description'] === 'string' ? a['description'] : undefined;
     const props = (a['properties'] != null && typeof a['properties'] === 'object' && !Array.isArray(a['properties']))
@@ -252,7 +253,7 @@ export const update_factTool: ToolHandler = {
                 + 'field changes, so there is nothing to trigger by hand.',
             },
             tags: {
-              type: 'array', items: { type: 'string' },
+              type: 'array', maxItems: MAX_TAGS, items: { type: 'string' },
               description: 'REPLACES the stored tag list — send the FULL list you want the fact to end up '
                 + 'with, because sending one tag drops the rest. `update_entity` and `update_edge` MERGE tags '
                 + 'instead; this tool and `update_chrono` replace, and the split is not guessable from the '
@@ -272,7 +273,7 @@ export const update_factTool: ToolHandler = {
             suppressEmbeddings: SUPPRESS_EMBEDDINGS_SCHEMA,
             superseded: SUPERSEDED_SCHEMA,
             targetSpace: { type: 'string', description: 'Required for proxy spaces: the member space to write to.' },
-            deleteFields: { type: 'array', items: { type: 'string' }, description: 'Dot-notation paths to delete from the fact (e.g. ["properties.oldKey", "description"]). System fields (id, name, type, spaceId, createdAt, updatedAt) cannot be deleted. Deletions are permanent.' },
+            deleteFields: { type: 'array', maxItems: MAX_DELETE_FIELDS, items: { type: 'string' }, description: 'Dot-notation paths to delete from the fact (e.g. ["properties.oldKey", "description"]). System fields (id, name, type, spaceId, createdAt, updatedAt) cannot be deleted. Deletions are permanent.' },
             ttlDays: TTL_DAYS_SCHEMA,
             // `Q-30`: the same connection fields the CREATE tool takes, from the one builder both read —
             // a field on one verb and not the other is the gap this closes, and two hand-written copies

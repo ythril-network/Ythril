@@ -11,6 +11,7 @@ import { resolveSafePath, spaceRoot } from '../files/sandbox.js';
 import { deleteStored, moveStored } from '../files/stored-bytes.js';
 import type { ConflictDoc, LinkViolationDoc } from '../config/types.js';
 import { spaceCollection } from '../db/space-collection.js';
+import { MAX_CONFLICT_IDS, countError } from '../util/request-bounds.js';
 
 export const conflictsRouter = Router();
 
@@ -106,7 +107,8 @@ async function executeResolve(
 // to tell it was incomplete. We cap per space (fetch cap+1 to DETECT overflow) and bound the total,
 // and always report `truncated` + `returned` so the caller knows whether it saw everything.
 const PER_SPACE_CAP = 500;
-const MAX_TOTAL = 2000;
+// The same number a bulk-resolve may name: a caller selects from what this listing shows.
+const MAX_TOTAL = MAX_CONFLICT_IDS;
 
 // GET /api/conflicts — list unresolved conflicts for all accessible spaces
 conflictsRouter.get('/', globalRateLimit, requireAuth, async (req, res) => {
@@ -245,16 +247,31 @@ conflictsRouter.get('/:id', globalRateLimit, requireAuth, async (req, res) => {
 // conflict name, where it replicated to every member — a keep-both without the rename (removed 2026-09-27). A
 // conflict closes only through a resolution.
 
+/**
+ * Why a bulk-resolve body cannot be served, or null (`Q-108`).
+ *
+ * `ids` is a COUNT of cross-space lookups, one per id, so it is bounded — at `MAX_CONFLICT_IDS`, the most the
+ * conflict listing shows, which is what a caller selects from. It took any number, and any value per entry.
+ */
+export function bulkResolveBodyError(body: unknown): string | null {
+  const { ids, action } = (body ?? {}) as Record<string, unknown>;
+  if (!Array.isArray(ids) || ids.length === 0) return 'ids must be a non-empty array';
+  if (ids.some(id => typeof id !== 'string' || !id)) return 'ids must contain non-empty strings';
+  const tooMany = countError('ids', ids, MAX_CONFLICT_IDS);
+  if (tooMany) return tooMany;
+  if (!action || !VALID_ACTIONS.includes(action as typeof VALID_ACTIONS[number])) {
+    return `action must be one of: ${VALID_ACTIONS.join(', ')}`;
+  }
+  return null;
+}
+
 // POST /api/conflicts/bulk-resolve — resolve multiple conflicts at once
 conflictsRouter.post('/bulk-resolve', globalRateLimit, requireAuth, denyReadOnly, async (req, res) => {
   try {
     const { ids, action, rename, targetSpaceId } = req.body ?? {};
-    if (!Array.isArray(ids) || ids.length === 0) {
-      res.status(400).json({ error: 'ids must be a non-empty array' });
-      return;
-    }
-    if (!action || !VALID_ACTIONS.includes(action)) {
-      res.status(400).json({ error: `action must be one of: ${VALID_ACTIONS.join(', ')}` });
+    const bodyErr = bulkResolveBodyError({ ids, action });
+    if (bodyErr) {
+      res.status(400).json({ error: bodyErr });
       return;
     }
     if (action === 'save-to-space' && !targetSpaceId) {

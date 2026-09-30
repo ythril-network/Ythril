@@ -26,7 +26,7 @@ import { z } from 'zod';
 
 export const mfaRouter = Router();
 
-const VerifyBody = z.object({ code: z.string().min(4).max(8) });
+export const VerifyBody = z.object({ code: z.string().min(4).max(8) });
 
 // GET /api/mfa/status
 mfaRouter.get('/status', globalRateLimit, requireAdmin, (_req, res) => {

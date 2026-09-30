@@ -42,6 +42,7 @@ import { localToRemote, remoteToLocal, spaceNameInUseRefusal, reverseSpaceMap, r
 import { makeSignedOwnCast } from '../util/signing.js';
 import { openRoundHere } from './round-local-state.js';
 import type { NetworkRefusalCode } from './refusal-codes.js';
+import { MAX_SPACE_IDS } from '../util/request-bounds.js';
 
 type Caller = Parameters<typeof visibleNetworks>[0] & { id?: string };
 
@@ -65,7 +66,7 @@ export const CreateNetworkBody = z.object({
   id: z.string().uuid().optional(),  // optional pre-specified ID for cross-instance registration
   label: z.string().min(1).max(200),
   type: z.enum(['closed', 'democratic', 'club', 'braintree', 'pubsub']),
-  spaces: z.array(z.string().min(1)).min(1),
+  spaces: z.array(z.string().min(1)).min(1).max(MAX_SPACE_IDS),
   votingDeadlineHours: z.number().int().min(1).max(72).default(24),
   syncSchedule: z.string().optional(),
   merkle: z.boolean().optional(),
@@ -456,7 +457,7 @@ export const ForkNetworkBody = z.object({
   label: z.string().min(1).max(200),
   type: z.enum(['closed', 'club']).default('closed'),
   votingDeadlineHours: z.number().int().min(1).max(72).optional(),
-  spaces: z.array(z.string().min(1)).optional(),
+  spaces: z.array(z.string().min(1)).max(MAX_SPACE_IDS).optional(),
 });
 
 /**
