@@ -123,6 +123,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The Query tab's walk headings show their counts (`Q-101`).** "Reached by the walk", and the Entities, Facts,
+  Chrono and Files headings under it, rendered `({count})` literally in all three languages, and each reached record
+  read `{hops} hop(s)`: the values used single braces, which the translation layer does not interpolate. A client
+  spec now fails on a single-brace placeholder in any value of any locale, and on a German or Polish value that
+  interpolates different parameters from the English one.
+- **Buttons that name an action say it in German and Polish (`Q-115`).** "Clear results" read "Klare Ergebnisse"
+  (clear as in transparent) and the entity search's Clear read "Klar"; in Polish they read "Jasne", Reset read
+  "Nastawić" (to set a clock) and Close the infinitive "Zamknąć". They now read "Ergebnisse löschen" / "Leeren",
+  "Wyczyść wyniki" / "Wyczyść", "Zresetuj" and "Zamknij". The Query form's Projection field had the same fault
+  ("Vorsprung", "Występ") and now reads "Projektion" / "Projekcja". A client spec derives every English label that
+  starts with Clear, Reset or Close and fails when the German or Polish value does not contain a verb that does it.
 - **A space delete no longer loses a race with the media worker, and one unfinished delete no longer blocks every
   space operation until a restart.** Deleting a space while the worker was still converting one of its files failed
   `ENOTEMPTY` when removing the files directory — the worker was writing artifacts under it — and the delete kept
