@@ -62,7 +62,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   failed one never marks it down), and concurrent `/ready` requests share one probe. The retry delay rule moved into
   `backoffDelayMs` in `util/backoff.ts`, which the database connect loop and the embedding retry now use with
   identical delays. `YTHRIL_MONGO_MEM_LIMIT` (default 4g) is named in the hosting guide as the knob for a space of tens
-  of thousands of records, unmeasured at that size.
+  of thousands of records, unmeasured at that size. **In the UI:** Settings -> Spaces shows such a space as "Waiting
+  for search service" with a still dot (no spinner) and counts it apart from "Indexing"; the Brain Overview and the
+  Graph tab's slow-load note say the same; the page's index poll now starts from every list load, has no attempt
+  cap, asks every 3 seconds while a true build runs and every 30 seconds while every building space is only
+  waiting, skips its tick while the tab is hidden, and stops with the page.
 - **A space-meta read no longer rescans the space, and both doors build it with one function (`Q-95`).** `stats`
   and `actualSchema` were rebuilt on every `GET /api/spaces/:id/meta` and every MCP `space_meta` — an entity scan,
   an edge scan, three link scans and seven counts per member space — by two hand-written copies of the answer. They

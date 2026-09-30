@@ -100,7 +100,9 @@ import { HscrollTopDirective } from '../../shared/hscroll-top.directive';
                 <tr cdkDrag cdkDragLockAxis="y" [cdkDragDisabled]="sortMode() !== 'custom'">
                   <td><span class="drag-handle" cdkDragHandle [class.drag-handle-disabled]="sortMode() !== 'custom'" [attr.title]="'spaces.table.dragHandleTitle' | transloco"><ph-icon name="dots-three-vertical" [size]="16"/></span></td>
                   <td style="font-weight:500;">{{ s.label }}
-                    @if (s.indexStatus === 'building') {
+                    @if (s.indexStatus === 'building' && s.indexWaiting) {
+                      <span class="badge badge-yellow" style="margin-left:6px;font-weight:normal" [attr.title]="'spaces.indexWaitingTitle' | transloco" [attr.aria-label]="'spaces.indexWaitingTitle' | transloco"><span class="dot" style="width:7px;height:7px;border-radius:50%;background:currentColor;display:inline-block;vertical-align:middle;margin-right:4px;"></span>{{ 'spaces.indexWaiting' | transloco }}</span>
+                    } @else if (s.indexStatus === 'building') {
                       <span class="badge badge-blue" style="margin-left:6px;font-weight:normal" [attr.title]="'spaces.indexBuildingTitle' | transloco"><span class="spinner" style="width:8px;height:8px;border-width:1.5px;display:inline-block;vertical-align:middle;margin-right:3px;"></span>{{ 'spaces.indexBuilding' | transloco }}</span>
                     } @else if (s.indexStatus === 'failed') {
                       <span class="badge badge-red" style="margin-left:6px;font-weight:normal" [attr.title]="'spaces.indexFailedTitle' | transloco">{{ 'spaces.indexFailed' | transloco }}</span>
@@ -182,11 +184,15 @@ export class SpacesComponent implements OnInit {
   spacesSummary = computed<SummaryItem[]>(() => {
     const list = this.store.spaces();
     const totalUsed = list.reduce((n, s) => n + (s.usageGiB ?? 0), 0);
-    const attention = list.filter(s => s.indexStatus === 'building' || s.indexStatus === 'failed').length;
+    // A waiting space (late search service) is its own count: folding it into "Indexing" would say work is running.
+    const waiting = list.filter(s => s.indexStatus === 'building' && s.indexWaiting).length;
+    const attention = list.filter(s => (s.indexStatus === 'building' && !s.indexWaiting) || s.indexStatus === 'failed').length;
     return [
       { label: this.transloco.translate('spaces.summary.count'), value: String(list.length) },
       { label: this.transloco.translate('spaces.summary.storage'), value: `${totalUsed.toFixed(totalUsed < 10 ? 2 : 1)} GiB` },
       { label: this.transloco.translate('spaces.summary.indexing'), value: String(attention), variant: attention ? 'warn' : 'ok' },
+      { label: this.transloco.translate('spaces.summary.waiting'), value: String(waiting), variant: waiting ? 'warn' : undefined,
+        hint: waiting ? this.transloco.translate('spaces.summary.waitingHint') : undefined },
     ];
   });
 

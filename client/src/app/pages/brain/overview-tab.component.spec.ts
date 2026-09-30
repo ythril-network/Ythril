@@ -72,6 +72,18 @@ describe('OverviewTabComponent', () => {
     expect(none.c.indexVariant()).toBe('off');
   });
 
+  it('an indexWaiting space has its own pill label and variant, not "Building" (Q-113)', () => {
+    const waiting = setup({ space: space({ indexStatus: 'building', indexWaiting: true, indexWaitingSince: '2026-09-30T10:00:00.000Z' }) });
+    expect(waiting.c.indexState()).toBe('waiting');
+    expect(waiting.c.indexVariant()).toBe('warn');
+    waiting.fixture.detectChanges();
+    const text = (waiting.fixture.nativeElement as HTMLElement).textContent ?? '';
+    expect(text).toContain('brain.overview.idx.waiting');
+    expect(text).not.toContain('brain.overview.idx.building');
+    // a true build keeps its label
+    expect(setup({ space: space({ indexStatus: 'building' }) }).c.indexState()).toBe('building');
+  });
+
   it('Reindex emits only after the confirm is accepted', async () => {
     const ok = setup({ confirm: true });
     const spy = vi.fn(); ok.c.reindex.subscribe(spy);

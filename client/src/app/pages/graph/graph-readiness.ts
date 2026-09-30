@@ -21,9 +21,15 @@ export interface EmbedQueueCounts {
   failed: number;
 }
 
-export function readinessReasons(indexStatus: Space['indexStatus'], queue: EmbedQueueCounts | undefined): ReadinessReason[] {
+export function readinessReasons(
+  indexStatus: Space['indexStatus'],
+  queue: EmbedQueueCounts | undefined,
+  indexWaiting?: boolean,
+): ReadinessReason[] {
   const out: ReadinessReason[] = [];
-  if (indexStatus === 'building') out.push({ key: 'graph.waiting.indexBuilding' });
+  // A space waiting for a late search service is not being built; naming it a build would promise progress.
+  if (indexStatus === 'building' && indexWaiting) out.push({ key: 'graph.waiting.indexWaiting' });
+  else if (indexStatus === 'building') out.push({ key: 'graph.waiting.indexBuilding' });
   if (indexStatus === 'failed') out.push({ key: 'graph.waiting.indexFailed' });
   const waiting = (queue?.pending ?? 0) + (queue?.processing ?? 0);
   if (waiting > 0) out.push({ key: 'graph.waiting.embedding', params: { count: waiting } });

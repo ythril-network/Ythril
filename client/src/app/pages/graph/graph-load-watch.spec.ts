@@ -66,4 +66,12 @@ describe('GraphLoadWatch', () => {
     const { watch } = makeWatch();
     expect(watch.gaveUpMessage()).toBe('graph.waiting.gaveUp:30');
   });
+
+  it('reads the indexWaiting field: a late search service is named as such (Q-113)', () => {
+    const { watch, source } = makeWatch();
+    source.listSpaces.mockReturnValue(of({ spaces: [{ id: 's1', indexStatus: 'building', indexWaiting: true }] } as any));
+    watch.begin('s1');
+    vi.advanceTimersByTime(WAIT_EXPLAIN_MS);
+    expect(watch.reasons().map(r => r.key)).toEqual(['graph.waiting.indexWaiting', 'graph.waiting.embedding']);
+  });
 });

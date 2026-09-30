@@ -27,6 +27,8 @@ If the search index needs rebuilding (for example after the embedding model chan
 
 > **Reindex and rebuild are different repairs.** *Reindex* re-embeds your content against the current model. It does **not** help when the search index itself is missing or broken — the symptom there is search quietly returning nothing at all, with no error. That one needs **Rebuild search indexes** on the space's **Danger** tab (see below).
 
+> **A late search service heals by itself.** If the search service starts after Ythril, the space's Overview shows the index as *Waiting for search service* and semantic search returns nothing for it in the meantime. You do not need to reindex or rebuild: Ythril keeps asking, builds the missing indexes when the service answers, and the state changes without a reload. The Graph tab names the same wait when it is slow to load. Only if the state never clears, use **Rebuild search indexes** on the space's **Danger** tab.
+
 ### Facts
 
 Facts are the core knowledge unit — plain-language statements you want to remember.
