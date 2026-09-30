@@ -16,8 +16,10 @@ import { log } from '../util/log.js';
 import type { SpaceConfig, SpaceMeta, FactDoc } from '../config/types.js';
 import { VECTOR_INDEXED_COLLECTIONS, finalizeSpaceIndexReady } from './vector-index.js';
 import { armSearchIndexPresence, reconcileSpaceSearchIndexes } from './search-index-presence.js';
-import { SPACE_COLLECTIONS, repairStaleSpaceIds, dropLegacyPrefixedIndexes, dropSupersededEdgeIdentityIndex, pendingOpConflictMessage , setReindexNeeded, beginSpaceOp, endSpaceOp, spaceOpInFlight } from './_shared.js';
+import { SPACE_COLLECTIONS, repairStaleSpaceIds, dropLegacyPrefixedIndexes, dropSupersededEdgeIdentityIndex, pendingOpConflictMessage, pendingOpStillFailingMessage, setReindexNeeded, beginSpaceOp, endSpaceOp, spaceOpsInFlight } from './_shared.js';
 import { moveSpaceData, applySpaceRenameToConfig } from './rename.js';
+import { concreteSpaces, isProxy } from './proxy.js';
+import { removeTree } from '../files/remove-tree.js';
 import { unlabelAllFaces } from '../brain/entities.js';
 import { ensureMediaJobIndexes } from '../files/media/job-queue.js';
 import { ensureEmbedJobIndexes } from '../brain/embed-queue.js';
@@ -288,7 +290,11 @@ export async function initAllSpaces(): Promise<void> {
   // Collect ids, not space objects: a config reload during these awaits replaces cfg.spaces and every
   // held object becomes an orphan — status flips would then be written to detached records and lost,
   // leaving spaces stuck reporting 'building' forever with nothing to explain it.
-  const spaceIds = getConfig().spaces.map(s => s.id);
+  //
+  // Concrete spaces only (`Q-98`). This walked every configured space, so each boot created a proxy's
+  // collections — which its creation never made and its deletion (config-only) never drops — while the
+  // reload path, which initialises spaces added to the file, already skipped proxies.
+  const spaceIds = concreteSpaces().map(s => s.id);
 
   for (const spaceId of spaceIds) {
     log.debug(`Initialising space: ${spaceId}`);
@@ -413,7 +419,7 @@ export async function createSpace(opts: {
     // Omitted rather than defaulted when absent, so an existing space and a new one at the built-in width
     // are the same shape on disk — a stored `128` would read as a deliberate choice nobody made.
     ...(opts.faceDescriptorDims ? { faceDescriptorDims: opts.faceDescriptorDims } : {}),
-    ...(opts.proxyFor ? { proxyFor: opts.proxyFor } : {}),
+    ...(isProxy(opts) ? { proxyFor: opts.proxyFor } : {}),
     ...(opts.meta ? { meta: opts.meta } : {}),
   };
   // Initialize MongoDB collections/indexes before committing to config so the space
@@ -422,7 +428,7 @@ export async function createSpace(opts: {
   // instead of blocking up to minutes past the client timeout (B1): the indexes are
   // created here, the space is returned as indexStatus 'building', and a background
   // task flips it to 'ready'/'failed' once the builds finish.
-  if (!opts.proxyFor) {
+  if (!isProxy(opts)) {
     await initSpace(opts.id, { waitForVectorReady: false });
     space.indexStatus = 'building';
   }
@@ -444,7 +450,7 @@ export async function createSpace(opts: {
     // An OIDC session: its rights come from the identity provider's mapping, so the grant has nowhere to live.
     log.warn(`Space '${opts.id}' was created by a session with no stored rights; its creator reaches it only if its identity mapping does`);
   }
-  if (!opts.proxyFor) {
+  if (!isProxy(opts)) {
     void finalizeSpaceIndexReady(opts.id);
   }
   return space;
@@ -524,7 +530,9 @@ export async function dropSpaceData(spaceId: string): Promise<string[]> {
   // 3. Delete the space files directory
   const filesDir = path.resolve(getDataRoot(), 'files', spaceId);
   try {
-    await fs.rm(filesDir, { recursive: true, force: true });
+    // Through `removeTree`: a writer that started before this space stopped taking writes may still be adding
+    // entries, and a bare recursive rm loses that race with ENOTEMPTY (see the helper).
+    await removeTree(filesDir);
     log.debug(`Deleted files directory ${filesDir}`);
   } catch (err) {
     const msg = `Could not delete files directory ${filesDir}: ${err}`;
@@ -535,7 +543,7 @@ export async function dropSpaceData(spaceId: string): Promise<string[]> {
   // 4. Delete any stale chunked-upload directories for this space
   const chunksDir = path.resolve(getDataRoot(), '.chunks', spaceId);
   try {
-    await fs.rm(chunksDir, { recursive: true, force: true });
+    await removeTree(chunksDir);
     log.debug(`Deleted chunk uploads directory ${chunksDir}`);
   } catch (err) {
     const msg = `Could not delete chunk uploads directory ${chunksDir}: ${err}`;
@@ -572,7 +580,7 @@ async function removeSpaceInner(spaceId: string): Promise<boolean> {
 
   // Proxy spaces have no DB collections or files — a pure config removal, atomic
   // via the single saveConfig, so no write-ahead marker is needed.
-  if (space.proxyFor) {
+  if (isProxy(space)) {
     cfg.spaces = cfg.spaces.filter(s => s.id !== spaceId);
     saveConfig(cfg);
     return true;
@@ -580,7 +588,9 @@ async function removeSpaceInner(spaceId: string): Promise<boolean> {
 
   const resuming = cfg.pendingSpaceOp?.type === 'delete' && cfg.pendingSpaceOp.spaceId === spaceId;
   if (cfg.pendingSpaceOp && !resuming) {
-    throw new Error(pendingOpConflictMessage(cfg.pendingSpaceOp, `delete space '${spaceId}'`));
+    // Another op's marker: finish it first, or refuse with why it still cannot be finished.
+    await settlePendingSpaceOpBefore(`delete space '${spaceId}'`);
+    if (!getConfig().spaces.some(s => s.id === spaceId)) return false;   // the op it finished took this space too
   }
 
   // Write-ahead: record the intent (atomically) before touching MongoDB/fs.
@@ -769,7 +779,7 @@ export async function wipeSpace(spaceId: string, types?: WipeCollectionType[]): 
       throw new Error(`wipeSpace: resolved path '${filesDir}' escapes expected data root`);
     }
     try {
-      await fs.rm(filesDir, { recursive: true, force: true });
+      await removeTree(filesDir);
       await fs.mkdir(filesDir, { recursive: true });
     } catch (err) {
       log.warn(`wipeSpace: could not clear files directory for '${spaceId}': ${err}`);
@@ -797,9 +807,36 @@ export async function wipeSpace(spaceId: string, types?: WipeCollectionType[]): 
  *  step still fails, the marker is kept and a loud error is logged for the operator;
  *  the next boot tries again. */
 export async function reconcilePendingSpaceOp(): Promise<void> {
+  await resumePendingSpaceOp({ callerHoldsOp: false });
+}
+
+/**
+ * Before a rename or delete refuses because ANOTHER op's marker is pending, resume that op — and proceed if it
+ * completes (the caller's own op is already counted in flight, which `callerHoldsOp` accounts for).
+ *
+ * Why (Docker integration run of bundle-27, 13:30:47Z): one delete that failed on a racy file write kept its
+ * marker, and since the marker was only resumed at BOOT, every space rename and delete on the instance was refused
+ * behind it until a restart. The marker is forward-only — resuming a delete or a rename is always what was asked
+ * for — so the next space operation is as good a moment to finish it as a boot. Throws the refusal, with the
+ * reason, only when the resume still cannot complete.
+ */
+export async function settlePendingSpaceOpBefore(attempted: string): Promise<void> {
+  const pending = getConfig().pendingSpaceOp;
+  if (!pending) return;
+  const result = await resumePendingSpaceOp({ callerHoldsOp: true });
+  if (result.completed) return;
+  throw new Error(result.reason === 'in-flight'
+    ? pendingOpConflictMessage(pending, attempted)
+    : pendingOpStillFailingMessage(pending, attempted, result.reason));
+}
+
+/** What a resume did: finished (or found nothing to do), or did not, and why. */
+type ResumeResult = { completed: true } | { completed: false; reason: string };
+
+async function resumePendingSpaceOp(opts: { callerHoldsOp: boolean }): Promise<ResumeResult> {
   const cfg = getConfig();
   const op = cfg.pendingSpaceOp;
-  if (!op) return;
+  if (!op) return { completed: true };
 
   // A live operation in THIS process is not an interrupted one. The marker is written BEFORE the collection
   // work, and this function also runs on the config-reload path — so a reload during a rename would start a
@@ -807,9 +844,11 @@ export async function reconcilePendingSpaceOp(): Promise<void> {
   // `Source collection … does not exist` on a rename that actually succeeded. Nothing is lost by standing
   // aside: if the running op dies, its marker survives and the next boot recovers it, which is the only
   // situation this function exists for.
-  if (spaceOpInFlight()) {
+  //
+  // A caller that is itself a space op counts once; anything beyond that is the marker's own op, still running.
+  if (spaceOpsInFlight() > (opts.callerHoldsOp ? 1 : 0)) {
     log.debug(`Pending space ${op.type} for '${op.spaceId}' is being performed right now — recovery stands aside`);
-    return;
+    return { completed: false, reason: 'in-flight' };
   }
 
   const target = op.type === 'rename' ? `'${op.spaceId}' → '${op.newId}'` : `'${op.spaceId}'`;
@@ -824,12 +863,12 @@ export async function reconcilePendingSpaceOp(): Promise<void> {
         log.warn(`Pending rename target '${op.spaceId}' not found in config — clearing stale marker`);
         delete cfg.pendingSpaceOp;
         saveConfig(cfg);
-        return;
+        return { completed: true };
       }
       const errors = await moveSpaceData(op.spaceId, op.newId);
       if (errors.length > 0) {
-        log.error(`Could not complete pending rename ${target}; marker kept for next restart. Errors: ${errors.join('; ')}`);
-        return;
+        log.error(`Could not complete pending rename ${target}; marker kept for the next space op or restart. Errors: ${errors.join('; ')}`);
+        return { completed: false, reason: errors.join('; ') };
       }
       // Re-resolve inside the write. `space` was looked up before `moveSpaceData`, which renames
       // every collection and takes seconds; a config reload in that window replaces cfg.spaces and
@@ -845,11 +884,12 @@ export async function reconcilePendingSpaceOp(): Promise<void> {
         delete fresh.pendingSpaceOp;
       });
       log.info(`Completed interrupted rename ${target}`);
+      return { completed: true };
     } else if (op.type === 'delete') {
       const errors = await dropSpaceData(op.spaceId);
       if (errors.length > 0) {
-        log.error(`Could not complete pending delete ${target}; marker kept for next restart. Errors: ${errors.join('; ')}`);
-        return;
+        log.error(`Could not complete pending delete ${target}; marker kept for the next space op or restart. Errors: ${errors.join('; ')}`);
+        return { completed: false, reason: errors.join('; ') };
       }
       // Same treatment: `dropSpaceData` is slow, so re-read before committing rather than writing
       // a spaces array captured before it.
@@ -858,12 +898,15 @@ export async function reconcilePendingSpaceOp(): Promise<void> {
         delete fresh.pendingSpaceOp;
       });
       log.info(`Completed interrupted deletion ${target}`);
+      return { completed: true };
     } else {
       log.error(`Unknown pendingSpaceOp type '${op.type}' — clearing marker`);
       delete cfg.pendingSpaceOp;
       saveConfig(cfg);
+      return { completed: true };
     }
   } catch (err) {
-    log.error(`reconcilePendingSpaceOp for ${target} failed; marker kept for next restart: ${err}`);
+    log.error(`reconcilePendingSpaceOp for ${target} failed; marker kept for the next space op or restart: ${err}`);
+    return { completed: false, reason: err instanceof Error ? err.message : String(err) };
   }
 }

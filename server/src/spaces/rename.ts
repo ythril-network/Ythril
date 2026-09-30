@@ -13,8 +13,9 @@ import { log } from '../util/log.js';
 import type { Config, SpaceConfig } from '../config/types.js';
 import { PER_SPACE_WATERMARKS } from '../config/types-networks.js';
 import { retargetSpaceAliases, spaceNameInUseRefusal, SpaceNameInUseError } from '../sync/space-map.js';
-import { repairStaleSpaceIds, pendingOpConflictMessage, beginSpaceOp, endSpaceOp } from './_shared.js';
+import { repairStaleSpaceIds, beginSpaceOp, endSpaceOp } from './_shared.js';
 import { RenameSpaceBody } from './body-schemas.js';
+import { isProxy } from './proxy.js';
 import type { NetworkRefusalCode } from '../networks/refusal-codes.js';
 
 /** Physically move a space's MongoDB collections and file directories from
@@ -268,9 +269,9 @@ export function applySpaceRenameToConfig(cfg: Config, space: SpaceConfig, oldId:
 
   // Update proxy space references
   for (const s of cfg.spaces) {
-    if (s.proxyFor) {
-      const idx = s.proxyFor.indexOf(oldId);
-      if (idx !== -1) s.proxyFor[idx] = newId;
+    if (isProxy(s)) {
+      const idx = s.proxyFor!.indexOf(oldId);
+      if (idx !== -1) s.proxyFor![idx] = newId;
     }
   }
 }
@@ -339,7 +340,12 @@ async function renameSpaceInner(oldId: string, newId: string): Promise<SpaceConf
     && cfg.pendingSpaceOp.spaceId === oldId
     && cfg.pendingSpaceOp.newId === newId;
   if (cfg.pendingSpaceOp && !resuming) {
-    throw new Error(pendingOpConflictMessage(cfg.pendingSpaceOp, `rename space '${oldId}'`));
+    // Another op's marker: finish it first (`settlePendingSpaceOpBefore`), or refuse with why it cannot be. Imported
+    // at the call because `lifecycle.ts` imports this module — a static import back would close a cycle.
+    const { settlePendingSpaceOpBefore } = await import('./lifecycle.js');
+    await settlePendingSpaceOpBefore(`rename space '${oldId}'`);
+    if (!cfg.spaces.some(s => s.id === oldId)) throw new Error(`Space '${oldId}' not found`);
+    if (cfg.spaces.some(s => s.id === newId)) throw new Error(`Space '${newId}' already exists`);
   }
 
   // Write-ahead: record the intent (atomically) before touching MongoDB/fs.

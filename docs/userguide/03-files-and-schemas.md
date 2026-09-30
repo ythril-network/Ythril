@@ -266,6 +266,12 @@ rather than one, and they are the pair most people want after setting a space up
 - **Apply group to space** — the other direction: every library entry in a group is applied to a target
   space as a link, so the space follows the library rather than holding its own copy.
 
+**A linked type shows both its link and its fields.** Wherever the space's schema is read — the API, an AI
+assistant — a linked type carries the library link and the library entry's fields together. Saving it back keeps
+the link. To change a linked type's fields, edit its library entry here, or unlink the type in the space's Schema
+tab to give it its own copy; a changed field sent back beside the link is refused with the field named, because
+the change would otherwise be lost.
+
 Together they are how a space stops carrying its own definitions: export once to seed the group, then
 apply it back to that space and to every space that should match it. Doing this entry by entry is the
 same work with more clicks and more chances to miss one.

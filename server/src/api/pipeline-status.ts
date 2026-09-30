@@ -25,7 +25,8 @@
  */
 
 import { Router } from 'express';
-import { getConfig, getMediaEmbeddingConfig, getEmbeddingConfig, getEmbeddingApiKey, getDocumentProcessingConfig, getDocAssistApiKey, getDocAssistFallbackApiKey, getFaceRecognitionConfig, getRerankApiKey, getNliApiKey } from '../config/loader.js';
+import { concreteSpaces } from '../spaces/proxy.js';
+import { getConfig, isConfigLoaded, getMediaEmbeddingConfig, getEmbeddingConfig, getEmbeddingApiKey, getDocumentProcessingConfig, getDocAssistApiKey, getDocAssistFallbackApiKey, getFaceRecognitionConfig, getRerankApiKey, getNliApiKey } from '../config/loader.js';
 import { requireAdmin } from '../auth/middleware.js';
 import { globalRateLimit } from '../rate-limit/middleware.js';
 import { isSsrfSafeUrl } from '../util/ssrf.js';
@@ -468,8 +469,10 @@ export function isDrifted(stored: SpaceIndexStatus['stored'], live: SpaceIndexSt
 }
 
 async function indexStatus(): Promise<{ spaces: SpaceIndexStatus[]; unavailable?: string }> {
-  let spaces;
-  try { spaces = getConfig().spaces; } catch { return { spaces: [], unavailable: 'configuration is not loaded' }; }
+  if (!isConfigLoaded()) return { spaces: [], unavailable: 'configuration is not loaded' };
+  // Proxy spaces aggregate other spaces' reads and own no collections, so they have no indexes to
+  // be missing. Listing them would pin a permanent red dot on a space that is working correctly.
+  const spaces = concreteSpaces();
 
   // Face recognition is gated per space by the image ladder (its `recognition` rung) under the instance
   // ceiling, with `enabled` surviving only as the infra pin — so whether a space should HAVE a face index
@@ -479,9 +482,6 @@ async function indexStatus(): Promise<{ spaces: SpaceIndexStatus[]; unavailable?
   if (!db) return { spaces: [], unavailable: 'database is not connected' };
 
   const out = await Promise.all(spaces
-    // Proxy spaces aggregate other spaces' reads and own no collections, so they have no indexes to
-    // be missing. Listing them would pin a permanent red dot on a space that is working correctly.
-    .filter(s => !s.proxyFor)
     .map(async (space): Promise<SpaceIndexStatus> => {
       const expected: Array<{ collection: string; indexName: string; optional?: boolean }>
         = VECTOR_INDEXED_COLLECTIONS.map(suffix => ({

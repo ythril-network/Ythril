@@ -22,6 +22,7 @@
  */
 import { col, asFilter } from '../db/mongo.js';
 import { getConfig } from '../config/loader.js';
+import { concreteSpaces } from '../spaces/proxy.js';
 import { log } from '../util/log.js';
 import { runExclusive } from '../util/single-flight.js';
 import { tombstoneFloorForSpace } from '../sync/served-watermark.js';
@@ -75,12 +76,10 @@ export async function pruneTombstonesToFloor(spaceId: string, floor: TombstoneFl
  */
 export async function pruneAllTombstones(): Promise<TombstonePruneResult> {
   const result: TombstonePruneResult = { removed: 0, filesRemoved: 0, blocked: {} };
-  let cfg;
-  try { cfg = getConfig(); } catch { return result; }   // pre-setup
-
-  for (const s of cfg.spaces) {
-    if (s.proxyFor) continue;
-
+  for (const s of concreteSpaces()) {
+    // Read per space, not once before the loop: the prune awaits, and a floor must come from the networks as
+    // they are when this space is pruned.
+    const cfg = getConfig();
     const floor = tombstoneFloorForSpace(cfg, s.id);
     if (floor.prune) {
       const removed = await pruneTombstonesToFloor(s.id, floor);

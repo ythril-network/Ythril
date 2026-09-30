@@ -38,7 +38,7 @@
  * winning semantic searches over real knowledge, and a record with no vector cannot win one.
  */
 import { col, asFilter, asUpdate } from '../db/mongo.js';
-import { getConfig } from '../config/loader.js';
+import { concreteSpaces } from '../spaces/proxy.js';
 import { log } from '../util/log.js';
 import {
   recordExpiry, recordContentExpiry, needsContentRedaction, REDACTED_CHRONO_FIELDS, declaredRetention,
@@ -177,11 +177,7 @@ export async function redactLapsedChronoContent(spaceId: string, now: Date): Pro
 /** Both passes across every real space. Best-effort per space: one bad collection must not stop the rest. */
 export async function sweepChronoRetention(now: Date = new Date()): Promise<ChronoRetentionResult> {
   const result: ChronoRetentionResult = { stamped: 0, redacted: 0 };
-  let cfg;
-  try { cfg = getConfig(); } catch { return result; }   // pre-setup
-
-  for (const s of cfg.spaces) {
-    if (s.proxyFor?.length) continue;
+  for (const s of concreteSpaces()) {
     const space: RetentionSpace = { recordTtlDays: s.recordTtlDays, meta: s.meta };
     try {
       // All four typed collections, not just chrono. The schema tier is documented as reaching every one of

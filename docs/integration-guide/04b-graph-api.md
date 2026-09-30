@@ -697,8 +697,10 @@ Same parameters on MCP `graph_traverse`.
 GET /api/spaces/:spaceId/meta
 ```
 
-The space's entity-relationship model, derived from the schema **and** from what is stored. Read-only,
-nothing cached, every number a real count of records.
+The space's entity-relationship model, derived from the schema **and** from what is stored. Read-only, and
+every number a real count of records **as of the last committed write**: the stored half is kept between reads
+and replaced by the first read after any write to the space, and the declared half is read fresh each time, so
+a schema edit shows at once. A read is therefore cheap however large the space is.
 
 > **It arrives as `actualSchema` on the space meta**, beside the DECLARED schema. *Changed in 5.0:* the `er-model` route and the `er_model` tool are gone — read `actualSchema` instead. Both halves answer "what is this space like before I write to it", and having them together is what lets a type the space really holds be promoted into its declared schema. Same proxy rule (members reported separately),
 > and available to every token including read-only ones. It answers what a space *contains*, where

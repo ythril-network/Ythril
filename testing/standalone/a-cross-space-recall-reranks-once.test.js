@@ -97,7 +97,8 @@ describe('recallGlobal reranks the merged pool, and the spaces do not', () => {
   it('each space is asked for its pool with the rerank deferred', () => {
     // On the CALL, not anywhere in the function: a `const deferRerank` that never reaches `recall` would
     // satisfy a bare name match while every space still reranked.
-    assert.match(fn('recallGlobal'), /recall\(id,[^;]*\.\.\.opts, embedded, deferRerank \}/,
+    // `[ ,}]` after it: the call may carry more (`observeLexical`, `Q-82`), and the flag must still be on it.
+    assert.match(fn('recallGlobal'), /recall\(id,[^;]*\.\.\.opts, embedded, deferRerank[ ,}]/,
       'recallGlobal must tell the per-space calls not to rerank, or every space still asks the reranker itself');
   });
 

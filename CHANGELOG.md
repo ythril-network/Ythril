@@ -9,6 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **A space-meta read no longer rescans the space, and both doors build it with one function (`Q-95`).** `stats`
+  and `actualSchema` were rebuilt on every `GET /api/spaces/:id/meta` and every MCP `space_meta` — an entity scan,
+  an edge scan, three link scans and seven counts per member space — by two hand-written copies of the answer. They
+  are now kept per space and replaced by the first read after a write to that space's records (the record-write
+  observer reports every committed write; a restore empties them), and the declared schema is joined fresh on every
+  read. Measured on a space of 100 000 records (`testing/bench/space-meta-cost.mjs`): every read took a median
+  236 ms before; now the first read takes 238 ms, a read with nothing written since takes under 1 ms, and the first
+  read after a write takes 213 ms (then under 1 ms again). Same answer,
+  same fields. The record-write registry also stopped letting a second subscriber replace the first one's
+  collections, which this change would otherwise have done to the search-index lifecycle.
+- **A schema-library type reads with its reference AND its definition, the same on both doors, and writes back
+  whole (`Q-168`).** `GET /api/spaces/:id/meta` returned a library type as its bare `{ "$ref" }` unless asked
+  `?resolve=1`, and MCP `space_meta` returned the entry's definition in place of the reference — so an agent could not
+  see the link, and writing its answer back (`schema_update`) stored the definition inline and silently cut the type
+  loose from its library entry. Both doors now return `{ "$ref": "library:<name>", ...definition }` by default, and
+  `space_meta` takes `resolve` as REST does, with the same default; `resolve=false` returns the stored `{ $ref }`
+  alone on both. Every door that writes type schemas takes the definition beside a `$ref` back to the reference
+  when it is the entry's, and refuses an EDITED one with a `400` naming the field (change the library entry, or drop
+  `$ref` to define the type inline) rather than losing the edit. **Who could notice:** `GET /meta` without
+  `?resolve=` now includes the definition beside each `$ref` — additive for a reader, but a client asserting deep
+  equality on that response sees new keys; and a write sending a changed definition beside a `$ref`, which was
+  accepted and stored inline before, is now a `400`.
 - **Breaking:** **A tool answer crosses the wire once, within the budget it states (`Q-111`).** Every answer was
   carried twice — MCP `content` and `structuredContent`, the REST tool door's `text` and `data` — so a stated
   budget bounded half of what was sent. Measured on a 400-fact space: an MCP `filter` page at the 25 000 default was
@@ -101,6 +123,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A space delete no longer loses a race with the media worker, and one unfinished delete no longer blocks every
+  space operation until a restart.** Deleting a space while the worker was still converting one of its files failed
+  `ENOTEMPTY` when removing the files directory — the worker was writing artifacts under it — and the delete kept
+  its marker, as it must. But the marker was only ever resumed at boot, so every later rename and delete on the
+  instance answered `500 "… is still pending … It resumes automatically on restart"`. Three fixes: every removal of
+  a space's directories retries what a concurrent writer causes (one helper, `files/remove-tree.ts`); a space being
+  deleted or renamed away refuses new file writes at the file door, which the media worker treats as an abandonment,
+  like a moved file's; and the next rename or delete finishes a pending op before it proceeds, refusing only when
+  that fails again — with the reason. Found by a Docker integration run, where it cascaded into sixteen failures.
+- **A recall across spaces ranks by relevance, not by which spaces had a text match (`Q-82`).** Each space fused
+  its own candidates only when its text search found something, so a cross-space answer mixed rank scores near
+  0.03 with cosine scores near 0.3-0.9: without a reranker every result of a space whose text search missed came
+  before every result of one whose text search hit, whole spaces in blocks; with one, the rerank's unscored tail
+  did the same. `recallGlobal` now fuses the merged pool once — one ranking by meaning over every candidate, and
+  each space's per-type text ranking as its own channel — so every result carries a `fusedScore` from the same
+  fusion, spaces interleave by relevance, and the reranker picks its candidates by that order. **Who is affected:**
+  a `recall` naming several spaces, a proxy, or no space — the ORDER of its results, and the values of `fusedScore`
+  and `vectorRank` on them (now computed over the merged candidates). A recall over one space is unchanged.
+- **A proxy space no longer gets collections at boot, and a hand-edited `proxyFor: []` is a real space everywhere
+  (`Q-80`, `Q-98`).** `initAllSpaces` walked every configured space, so each boot created a proxy's collections —
+  which creating it never made and deleting it (a config-only removal) never dropped; the restore index rebuild
+  walked proxies too. And "is this a proxy" was answered about forty times in two spellings that disagreed on an
+  empty member list: such a space was served as a real space and skipped as a proxy by the embed worker, the
+  duplicate and contradiction scanners, the prunes and the metrics, and deleted as a proxy with its collections left
+  behind. The loader now removes an empty `proxyFor` on load and reload (with a warning), `isProxy` is the only
+  test, and every walk over the spaces that own collections iterates one `concreteSpaces()`, which also answers the
+  pre-setup case once. **Who is affected:** an instance with a proxy space (its boot stops creating collections for
+  it; ones already created are left as they are, empty), and one whose config was edited by hand to hold
+  `"proxyFor": []` (that space starts being embedded and scanned).
 - **A space schema-change round reached no peer (`Q-108`).** `meta_change_pending` was sent to every member and was
   not an event `POST /api/notify` accepted, so each peer answered `400` to a sender that does not read the answer.
 - **An unknown tool name no longer becomes a metric label (`Q-108`).** It was counted in `ythril_tool_calls_total`

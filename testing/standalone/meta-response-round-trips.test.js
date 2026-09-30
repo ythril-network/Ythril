@@ -37,17 +37,23 @@ const strip = s => s.replace(/(^|[^:])\/\/.*/gm, '$1').replace(/\/\*[\s\S]*?\*\/
 /** Fields that live outside `meta` in the response, which a caller peels off rather than sending back. */
 const ENVELOPE = new Set(['spaceId', 'spaceName', 'stats']);
 
-/** The `res.json({...})` the meta GET handler assembles, as a list of top-level keys. */
+/**
+ * The object the meta answer assembles, as a list of top-level keys.
+ *
+ * Read from `spaceMetaAnswer`, which both doors return since `Q-95` — the route itself is one line now, and
+ * `space-meta-is-one-answer-on-both-doors.test.js` holds it to calling this function.
+ */
 function metaResponseKeys() {
-  const src = strip(readFileSync('server/src/api/spaces.ts', 'utf8'));
-  const at = src.indexOf("spacesRouter.get('/:id/meta'");
-  assert.ok(at > -1, 'the meta route moved — this gate reads it by name');
-  // The handler's own res.json, not a later one.
-  const body = src.slice(at, src.indexOf('spacesRouter.', at + 30));
-  const json = body.slice(body.indexOf('res.json({'));
-  const close = json.indexOf('});');
+  const src = strip(readFileSync('server/src/spaces/space-meta-answer.ts', 'utf8'));
+  const at = src.indexOf('export async function spaceMetaAnswer');
+  assert.ok(at > -1, 'the meta answer moved — this gate reads it by name');
+  const body = src.slice(at);
+  const open = body.indexOf('return {');
+  assert.ok(open > 0, 'could not find the response object');
+  const json = body.slice(open);
+  const close = json.indexOf('\n  };');
   assert.ok(close > 0, 'could not find the end of the response object');
-  const literal = json.slice('res.json({'.length, close);
+  const literal = json.slice('return {'.length, close);
   return [...literal.matchAll(/^\s*(?:\.\.\.)?(\w+)\s*[:,]/gm)].map(m => m[1]);
 }
 

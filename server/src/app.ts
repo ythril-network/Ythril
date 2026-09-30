@@ -53,6 +53,7 @@ import { requireAdminMfa, requireAdminMfaScoped } from './auth/middleware.js';
 import { clearTokenCache } from './auth/tokens.js';
 import { clearOidcCache } from './auth/oidc.js';
 import { initSpace, ensureGeneralSpace, wipeSpace, reconcilePendingSpaceOp, WIPE_COLLECTION_TYPES, type WipeCollectionType } from './spaces/lifecycle.js';
+import { concreteSpaces } from './spaces/proxy.js';
 import { col } from './db/mongo.js';
 import { log, runWithRequestId } from './util/log.js';
 import { rearmCronSchedulers } from './schedulers.js';
@@ -564,10 +565,9 @@ export function createApp() {
     // gives operators a restart-free way to finish a stuck op. Runs before the
     // new-space init below so a rename isn't shadowed by re-creating its old id.
     await reconcilePendingSpaceOp();
-    // Initialise any spaces that were added to the config file
-    const newCfg = getConfig();
-    for (const space of newCfg.spaces) {
-      if (!oldSpaceIds.has(space.id) && !space.proxyFor) {
+    // Initialise any spaces that were added to the config file (a proxy owns no collections)
+    for (const space of concreteSpaces()) {
+      if (!oldSpaceIds.has(space.id)) {
         await initSpace(space.id);
       }
     }

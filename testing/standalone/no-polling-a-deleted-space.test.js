@@ -124,8 +124,9 @@ describe('the creation ordering this check depends on', () => {
 
     // `initSpace('general')` sits after the built-in space is pushed and saved.
     assert.ok(lifecycle.indexOf("await initSpace('general');") > lifecycle.indexOf("id: 'general',"));
-    // `app.ts` iterates the RELOADED config, so its space is committed by construction.
-    const iterates = app.indexOf('for (const space of newCfg.spaces)');
+    // `app.ts` iterates the RELOADED config, so its space is committed by construction — `concreteSpaces()` reads
+    // the live config, and is the concrete-space walk since `Q-98`.
+    const iterates = app.indexOf('for (const space of concreteSpaces())');
     assert.ok(iterates > -1 && app.indexOf('await initSpace(space.id);') > iterates,
       'the app.ts caller must still be iterating spaces read from config');
   });

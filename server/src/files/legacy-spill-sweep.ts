@@ -20,14 +20,13 @@
  */
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { getConfig } from '../config/loader.js';
 import { spaceRoot } from './sandbox.js';
 import { invalidateUsageCache } from '../quota/quota.js';
 import { col, asFilter } from '../db/mongo.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { deleteStored } from './stored-bytes.js';
 import { SPILL_DIR, spillIdFromPath } from '../brain/spill-path.js';
-import { isProxy } from '../spaces/proxy.js';
+import { concreteSpaces } from '../spaces/proxy.js';
 import { logAuditEntry } from '../audit/audit.js';
 import { LEGACY_SPILL_SWEEP_OPERATION } from '../audit/middleware.js';
 import { log } from '../util/log.js';
@@ -42,8 +41,7 @@ export interface LegacySpillSweep {
 
 export async function sweepLegacySpills(): Promise<LegacySpillSweep> {
   const out: LegacySpillSweep = { removed: 0, failed: [] };
-  for (const space of getConfig().spaces) {
-    if (isProxy(space)) continue;
+  for (const space of concreteSpaces()) {
     const spaceId = space.id;
     const started = Date.now();
     const found = new Set<string>();

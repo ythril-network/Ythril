@@ -28,7 +28,9 @@ import { loadBackupConfig, BACKUP_CONFIG_PATH, BackupConfigSchema } from '../db/
 import { startBackupScheduler } from '../db/backup-scheduler.js';
 import { dumpDatabase } from '../db/dump.js';
 import { restoreDatabase } from '../db/restore.js';
+import { reportDatabaseReplaced } from '../db/mongo.js';
 import { reconcileSpaceSearchIndexes } from '../spaces/search-index-presence.js';
+import { concreteSpaces } from '../spaces/proxy.js';
 import { testConnection } from '../db/conn-test.js';
 import { isSsrfSafeMongoUri } from '../util/ssrf.js';
 import { log } from '../util/log.js';
@@ -384,6 +386,9 @@ dataRouter.post('/restore', requireAdminMfa, async (req, res) => {
   setMaintenanceActive(true);
   try {
     await restoreDatabase(getMongoUri(), backupDir);
+    // The restore wrote through its own client, which the record-write observer never sees: tell every listener
+    // the database was replaced, so nothing keeps answering from the data as it was before (`Q-95`).
+    reportDatabaseReplaced();
 
     // Restoring DROPS every collection before reloading it, and dropping a collection destroys its
     // vector search index along with it. Without rebuilding here, semantic recall returns empty
@@ -400,7 +405,7 @@ dataRouter.post('/restore', requireAdminMfa, async (req, res) => {
     // indexes, seconds apiece, so a sequential loop grew this request by several seconds per space and
     // timed out on an instance with a few dozen of them — reporting a failed restore that had succeeded.
     // Bounded rather than all at once, so a large instance does not hand mongod every index build together.
-    const spaces = getConfig().spaces ?? [];
+    const spaces = concreteSpaces();   // a proxy owns no collections, so it has no indexes to rebuild
     const outcomes = await mapLimit(spaces, RESTORE_INDEX_CONCURRENCY, async (space) => {
       try {
         // The restore wrote through its own client, which the index lifecycle does not observe — so this forced

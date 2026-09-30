@@ -168,7 +168,12 @@ POST /api/spaces
 **Rules:**
 
 - All `proxyFor` members must be existing real spaces (not proxies — nesting is not allowed).
-- Proxy spaces are virtual: no DB collections or file directories are created.
+- Proxy spaces are virtual: no DB collections or file directories are created — not at creation, and not at a
+  later boot either (until the release after 5.6.0 every boot created a proxy's collections, which deleting the
+  proxy then left behind).
+- An **empty** member list is not a proxy. The API refuses `"proxyFor": []`; a `config.json` edited by hand to hold
+  one is read as a real space — the key is removed on load and on reload, with a warning naming the space — so it
+  is embedded, scanned, pruned and, when deleted, dropped like any other real space.
 - Creating the proxy is admin-gated (like any space creation); the create call validates only that each member exists and is not itself a proxy — it does **not** separately check the caller's space allowlist. (Per-space access is enforced at read/write time on the proxy's member spaces.)
 - The single-element wildcard `"proxyFor": ["*"]` creates an **all-spaces** proxy: it aggregates over every real space the caller can access (resolved dynamically), skipping per-member validation. The wildcard cannot be mixed with explicit member IDs.
 
@@ -229,6 +234,14 @@ The rename atomically:
 | `409`  | `newId` already exists |
 | `409`  | `code: "space_name_in_use"` — another space already syncs under `newId` in one of this instance's networks; nothing is moved. Pick another name |
 | `500`  | Partial rename failure (collections may be in an inconsistent state) |
+
+**A rename or delete that did not finish does not block the next one.** Each records its intent before it moves
+anything, and an interrupted one is finished forward (a delete is never undone). That used to happen only at
+restart, so until then every other rename and delete answered `500` *"… is still pending … It resumes
+automatically on restart"*. Now the next rename or delete on the instance finishes the pending op first and then
+proceeds; it is refused only when finishing it fails again, and the `500` then says *"resuming it just now did not
+complete: …"* followed by the reason. A space being deleted or renamed away also stops taking file writes at once, so the
+media worker cannot keep writing under a tree the delete is removing.
 
 ---
 
@@ -587,6 +600,26 @@ Authorization: Bearer <token>
 ```
 
 Returns the full schema definition for a space along with derived stats.
+
+| Parameter | Default | What it does |
+|---|---|---|
+| `resolve` | `true` on both doors | A type linked to the schema library comes back as its stored reference AND the library entry's definition, side by side: `{ "$ref": "library:service-v1", "description": …, "propertySchemas": { … } }`. `?resolve=0` (or `false`, or any value but `1`/`true`) returns the stored form alone, `{ "$ref": "library:service-v1" }`. MCP `space_meta` takes the same `resolve` (a boolean) with the same default. A reference this instance cannot resolve reads `{ "$ref": …, "_unresolvedRef": … }` |
+
+**A library type writes back whole.** Every door that accepts type schemas — `PATCH /api/spaces/:id` and MCP
+`schema_update`, `PUT /api/spaces/:id/schema`, the single-type `PUT`, `POST /api/spaces` and `save_space`, the
+dry-run validate — treats the definition beside a `$ref` as the server's: sent back exactly as the meta returned it,
+it is dropped and the reference is stored, so a `GET` → edit elsewhere → `PUT` round trip never cuts a type loose from
+its library entry. **An edited field beside a `$ref` is a `400`** naming the field: the type's definition is the
+library entry, so the edit would otherwise be lost. Change the entry (`PUT /api/schema-library/:name`), or drop
+`$ref` to define the type inline. The same `400` arrives if the entry itself changed after you read the meta — read
+it again.
+
+**`stats` and `actualSchema` are current as of the last committed write.** Both come from what the space holds,
+kept between reads and replaced by the first read after any write to the space's records, edges, links, chrono
+entries or files — so a meta read costs the same on a space of a hundred thousand records as on an empty one,
+and a read after a write shows that write. The declared schema is read fresh every time, so a schema edit shows at
+once. A restore (Settings → Database) empties the kept answers, as it does every other thing derived from the
+old database.
 
 **Requires the token to be scoped to that space.** A token whose `spaces` allowlist excludes the space is refused with
 `403` — as are `GET /api/spaces/:id/completeness` and the single-type

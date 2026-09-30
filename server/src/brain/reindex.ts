@@ -41,6 +41,7 @@ import { embed } from './embedding.js';
 import { embeddingSuppressedFor } from './suppress-embeddings.js';
 import { factEmbedText, entityEmbedText, edgeEmbedText, chronoEmbedText, fileEmbedText } from './embed-text.js';
 import { clearReindexFlag } from '../spaces/_shared.js';
+import { isProxy } from '../spaces/proxy.js';
 import { resolveEdgeEndpointNames } from './edge-endpoint-names.js';
 import { reindexInProgress } from '../metrics/registry.js';
 import { log } from '../util/log.js';
@@ -105,15 +106,16 @@ export function planReindex(input: {
    *
    * The members are named in the message so the remedy is the response rather than a second lookup.
    */
-  if (space.proxyFor && space.proxyFor.length > 0) {
+  if (isProxy(space)) {
+    const members = space.proxyFor!;
     return {
       ok: false,
       refusal: {
         status: 400,
         body: {
           error: `'${spaceId}' is a proxy space and has no index of its own. `
-            + `Reindex its members instead: ${space.proxyFor.join(', ')}.`,
-          proxyFor: space.proxyFor,
+            + `Reindex its members instead: ${members.join(', ')}.`,
+          proxyFor: members,
         },
       },
     };

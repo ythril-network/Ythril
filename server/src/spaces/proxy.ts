@@ -1,4 +1,4 @@
-import { getConfig } from '../config/loader.js';
+import { getConfig, isConfigLoaded } from '../config/loader.js';
 import type { SpaceConfig } from '../config/types.js';
 
 /**
@@ -6,10 +6,48 @@ import type { SpaceConfig } from '../config/types.js';
  *
  * Takes the record rather than an id so a caller already holding one (a loop over the configured spaces)
  * asks the same question without a second lookup, and so the rule can be exercised without a config. An
- * empty member list is a real space, which only a hand-edited config can produce — the API refuses one.
+ * empty member list is a real space, which only a hand-edited config can produce — the API refuses one, and
+ * the loader removes it (`normaliseLoadedConfig`), so no reader meets it.
+ *
+ * THE ONLY place `proxyFor` is tested (`Q-80`). It was tested about forty times in two spellings, truthy and
+ * non-empty, which disagree on exactly that empty list — so such a space was served as a real space and
+ * skipped as a proxy by the embed worker, the scanners, the prunes and the metrics, and deleted as a proxy
+ * with its collections left behind. `a-proxy-is-asked-one-way.test.js` reads the syntax tree and refuses a
+ * hand-written test anywhere else. Anything shaped `{ proxyFor?: string[] }` may be asked — a request body,
+ * a refusal body — because the question is the same one.
  */
 export function isProxy(space: { proxyFor?: string[] } | undefined): boolean {
   return !!(space?.proxyFor && space.proxyFor.length > 0);
+}
+
+/** Whether a space is the `['*']` proxy — a proxy over every concrete space, resolved at query time. */
+export function isWildcardProxy(space: { proxyFor?: string[] } | undefined): boolean {
+  return isProxy(space) && space!.proxyFor!.length === 1 && space!.proxyFor![0] === '*';
+}
+
+/**
+ * The configured spaces that OWN collections — every space that is not a proxy — as a fresh array.
+ *
+ * ## Why this exists (`Q-98`)
+ *
+ * *"For each configured space, skip the proxies"* was written by hand at every sweep, scanner, prune and metrics
+ * collector, each with its own proxy test and, in about half, its own `try { getConfig() } catch` for the
+ * pre-setup case. The loops that FORGOT were worse than the copies: `initAllSpaces` created every proxy's
+ * collections at every boot, the restore rebuild reconciled proxies' search indexes, and neither said so.
+ * `every-concrete-space-loop-uses-one-helper.test.js` refuses a hand-written skip in a walk over the
+ * configured spaces, and a walk that opens a space collection over anything but this.
+ *
+ * ## The two guards a hand-written copy dropped
+ *
+ *   - **Pre-setup is an empty list**, answered here once. Only the not-loaded case: any other failure of the
+ *     config still throws, because an empty answer where there should have been an error moves the bug.
+ *   - **A snapshot.** The array is new, so a reload during the caller's awaits cannot change what it walks. The
+ *     SpaceConfig objects in it are the live ones and become detached by a reload — read them freely, but a
+ *     caller that WRITES a space's config re-resolves it by id inside the write, as `renameSpace` does.
+ */
+export function concreteSpaces(): SpaceConfig[] {
+  if (!isConfigLoaded()) return [];
+  return getConfig().spaces.filter(s => !isProxy(s));
 }
 
 /** Returns true if the space is a proxy space (has proxyFor member list). */
@@ -26,20 +64,13 @@ export function findSpace(spaceId: string): SpaceConfig | undefined {
  * Resolve the member space IDs for a given space.
  * - Regular space  → [spaceId]
  * - Proxy space with specific IDs → those IDs
- * - Proxy space with ['*'] wildcard → all current non-proxy space IDs
+ * - Proxy space with ['*'] wildcard → all current concrete space IDs
  */
 export function resolveMemberSpaces(spaceId: string): string[] {
   const space = findSpace(spaceId);
   if (!space) return [];
-  if (space.proxyFor && space.proxyFor.length > 0) {
-    if (space.proxyFor.length === 1 && space.proxyFor[0] === '*') {
-      // Wildcard: proxy for all non-proxy spaces at query time
-      return getConfig().spaces
-        .filter(s => !s.proxyFor || s.proxyFor.length === 0)
-        .map(s => s.id);
-    }
-    return space.proxyFor;
-  }
+  if (isWildcardProxy(space)) return concreteSpaces().map(s => s.id);
+  if (isProxy(space)) return space.proxyFor!;
   return [spaceId];
 }
 
@@ -55,33 +86,33 @@ export function resolveWriteTarget(
   if (!space) return { ok: false, error: `Space '${spaceId}' not found` };
 
   // Regular space — ignore targetSpace, write directly
-  if (!space.proxyFor || space.proxyFor.length === 0) {
+  if (!isProxy(space)) {
     return { ok: true, target: spaceId };
   }
+  const members = space.proxyFor!;
 
   // Proxy space — targetSpace is required
   if (!targetSpace) {
-    const members = resolveMemberSpaces(spaceId);
     return {
       ok: false,
-      error: `This is a proxy space. Specify targetSpace (one of: ${members.join(', ')})`,
+      error: `This is a proxy space. Specify targetSpace (one of: ${resolveMemberSpaces(spaceId).join(', ')})`,
     };
   }
 
   // Wildcard proxy — any non-proxy space is a valid target
-  if (space.proxyFor.length === 1 && space.proxyFor[0] === '*') {
+  if (isWildcardProxy(space)) {
     const target = findSpace(targetSpace);
     if (!target) return { ok: false, error: `Target space '${targetSpace}' not found` };
-    if (target.proxyFor && target.proxyFor.length > 0) {
+    if (isProxy(target)) {
       return { ok: false, error: `'${targetSpace}' is itself a proxy space and cannot be a write target` };
     }
     return { ok: true, target: targetSpace };
   }
 
-  if (!space.proxyFor.includes(targetSpace)) {
+  if (!members.includes(targetSpace)) {
     return {
       ok: false,
-      error: `'${targetSpace}' is not a member of proxy space '${spaceId}' (members: ${space.proxyFor.join(', ')})`,
+      error: `'${targetSpace}' is not a member of proxy space '${spaceId}' (members: ${members.join(', ')})`,
     };
   }
 

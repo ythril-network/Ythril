@@ -32,7 +32,7 @@
 
 import { getConfig, getMediaEmbeddingConfig , getDocumentProcessingConfig } from '../../config/loader.js';
 import { toSafeRelPath } from '../../util/paths.js';
-import { isProxySpace } from '../../spaces/proxy.js';
+import { concreteSpaces } from '../../spaces/proxy.js';
 import type { MediaJobDoc } from '../../config/types.js';
 import { log } from '../../util/log.js';
 import { createMediaProviders } from './providers.js';
@@ -54,7 +54,7 @@ import {
 import type { ResolvedFormat } from '../converters/pipeline.js';
 import { ConversionUnavailableError } from '../converters/types.js';
 import type { StepProgress } from '../converters/types.js';
-import { isLeaseLost, holdsClaim, JobLeaseLostError, type JobClaim } from './lease.js';
+import { isLeaseLost, isAbandonment, holdsClaim, JobLeaseLostError, type JobClaim } from './lease.js';
 import { effectiveDocExtractionMode } from '../converters/extraction-level.js';
 import { effectiveTextLevel, effectiveVideoLevel, videoDoesKeyframes } from '../converters/media-level.js';
 import fs from 'fs/promises';
@@ -645,7 +645,14 @@ async function processJob(
     // Recovery is not the only thing that takes a claim: moving or deleting the file does too, and so does a
     // re-upload. The message names all of them, because naming only recovery sent the reader of a move's
     // abandonment looking for a slow job that never existed.
-    if (isLeaseLost(err)) {
+    //
+    // A space being deleted or renamed away is the same outcome, and says so: its file door refused the write
+    // (`spaces/space-write-gate.ts`), so the run stops before it adds anything under a tree being removed.
+    if (isAbandonment(err) && !isLeaseLost(err)) {
+      log.info(`Media worker: abandoning ${spaceId}/${fileId} — ${message}. Nothing more is written for it.`);
+      return;
+    }
+    if (isAbandonment(err)) {
       log.warn(`Media worker: abandoning ${spaceId}/${fileId} — its claim was taken while it was still running,`
         + ` and nothing it produced was written. Either the file was moved, deleted or re-uploaded (the job, if`
         + ` any, now belongs to wherever the file went), or stall recovery re-queued it because it was slower`
@@ -724,14 +731,7 @@ async function reconcileDeletedSource(spaceId: string, claim: JobClaim): Promise
 
 /** Return all local (non-proxy) space IDs. */
 function getLocalSpaceIds(): string[] {
-  try {
-    const cfg = getConfig();
-    return (cfg.spaces ?? [])
-      .map(s => s.id)
-      .filter(id => !isProxySpace(id));
-  } catch {
-    return [];
-  }
+  return concreteSpaces().map(s => s.id);
 }
 
 /** Resolve the absolute file path on disk for a given space + relative path. */

@@ -234,6 +234,14 @@ A space type definition can reference a library entry instead of embedding the s
 
 `resolveMetaRefs()` resolves all `$ref` pointers from the library before validation runs.
 
+**How a linked type reads, and how it writes back (`Q-168`).** `GET /api/spaces/:id/meta` and MCP `space_meta` return
+a linked type as its reference AND the entry's definition side by side —
+`{ "$ref": "library:service-v1", "description": …, "propertySchemas": { … } }` — unless asked `resolve=false`, which
+returns the stored `{ "$ref" }` alone. Every route that accepts `typeSchemas` takes that shape back: the definition
+beside a `$ref` is the server's, dropped when it matches the entry and the reference stored, so reading the meta and
+writing it back keeps the link. A definition beside a `$ref` that DIFFERS from the entry is a `400` naming the field —
+edit the entry here, or drop the `$ref` to give the type its own inline definition.
+
 **You cannot store an unresolvable ref.** Every route that accepts `typeSchemas` — `POST /api/spaces`,
 `PATCH /api/spaces/:id`, `PUT /api/spaces/:id/schema`, and the single-type
 `PUT /api/spaces/:id/meta/typeSchemas/:knowledgeType/:typeName` — answers **422** naming the missing library

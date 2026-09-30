@@ -78,18 +78,21 @@ describe('get_space_meta reports the reindex state the reindex tool points at', 
       'and the field, so the caller knows what to look at rather than diffing whole responses');
   });
 
+  // The OUTPUT, from source, because the description being right is exactly what was not enough last time.
+  // Both doors return `spaceMetaAnswer` since `Q-95` (`space-meta-is-one-answer-on-both-doors.test.js` holds
+  // them to it), so the field is asserted where the one answer is built, and each door is asserted to use it.
+  const answer = readFileSync('server/src/spaces/space-meta-answer.ts', 'utf8');
+
   it('and get_space_meta puts it in the response', () => {
-    // The OUTPUT, from source, because the description being right is exactly what was not enough last time.
-    const meta = source.slice(source.indexOf('const metaResult = {'));
-    assert.match(meta.slice(0, 900), /needsReindex: metaMemberIds\.some\(mid => needsReindex\(mid\)\)/,
-      'get_space_meta must report needsReindex, summed over the member spaces like every other proxy read');
+    assert.match(answer, /needsReindex: memberIds\.some\(mid => needsReindex\(mid\)\)/,
+      'the meta answer must report needsReindex, summed over the member spaces like every other proxy read');
+    assert.match(source, /spaceMetaAnswer\(/, 'space_meta must return the one meta answer');
   });
 
   it('REST reports the same field, computed the same way', () => {
     // One capability, two doors. A field on one door only is how this started.
     const rest = readFileSync('server/src/api/spaces.ts', 'utf8');
-    assert.match(rest, /const reindexNeeded = memberIds\.some\(mid => needsReindex\(mid\)\)/);
-    assert.match(rest, /needsReindex: reindexNeeded,/);
+    assert.match(rest, /res\.json\(await spaceMetaAnswer\(/, 'the REST meta route must return the one meta answer');
   });
 
   it('the dedicated status route still exists — this adds a field, it does not remove a route', () => {

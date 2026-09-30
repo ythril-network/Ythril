@@ -430,19 +430,31 @@ describe('$ref resolution — space references a library entry', () => {
     }).catch(() => {});
   });
 
-  it('the $ref typeSchema can be saved to a space (raw meta preserves the $ref for round-trip)', async () => {
+  it('the $ref typeSchema can be saved to a space (the meta keeps the $ref for round-trip, beside the definition)', async () => {
+    // The reference must survive a read: a caller that writes the meta back has to find the link to send. Since
+    // Q-168 (owner ruling D-6, one shape on both doors) the default answer carries the definition too, and
+    // `resolve=0` is the stored form alone — both halves of the round trip are asserted.
     const r = await get(INSTANCES.a, token(), `/api/spaces/${TEST_SPACE}/meta`);
     assert.equal(r.status, 200, JSON.stringify(r.body));
-    assert.deepEqual(r.body.typeSchemas?.entity?.service, { $ref: `library:${refLibName}` });
+    const t = r.body.typeSchemas?.entity?.service;
+    assert.equal(t?.$ref, `library:${refLibName}`, `the default meta dropped the reference: ${JSON.stringify(t)}`);
+    assert.ok(t.propertySchemas?.owner, `the default meta must carry the library definition beside the $ref: ${JSON.stringify(t)}`);
+    const stored = await get(INSTANCES.a, token(), `/api/spaces/${TEST_SPACE}/meta?resolve=0`);
+    assert.equal(stored.status, 200, JSON.stringify(stored.body));
+    assert.deepEqual(stored.body.typeSchemas?.entity?.service, { $ref: `library:${refLibName}` });
   });
 
-  it('GET /meta?resolve=1 expands the $ref to the library entry\'s effective schema (fixes empty entry-form props)', async () => {
+  it('GET /meta?resolve=1 carries the library entry\'s effective schema (fixes empty entry-form props)', async () => {
+    // The entry forms pre-fill a selected type's properties from this, and a bare `{ $ref }` carries none. Since
+    // Q-168 `resolve=1` IS the default, so it answers the same document, with the $ref kept beside the fields.
     const r = await get(INSTANCES.a, token(), `/api/spaces/${TEST_SPACE}/meta?resolve=1`);
     assert.equal(r.status, 200, JSON.stringify(r.body));
     const resolved = r.body.typeSchemas?.entity?.service;
-    assert.ok(resolved && !resolved.$ref, `expected the $ref resolved away, got ${JSON.stringify(resolved)}`);
+    assert.equal(resolved?.$ref, `library:${refLibName}`, `expected the $ref kept beside the definition, got ${JSON.stringify(resolved)}`);
     // The library schema defines `owner` — it must surface so the UI can pre-fill it on the add form.
     assert.ok(resolved.propertySchemas?.owner, `resolved type must carry the library propertySchemas (owner), got ${JSON.stringify(resolved.propertySchemas)}`);
+    const byDefault = await get(INSTANCES.a, token(), `/api/spaces/${TEST_SPACE}/meta`);
+    assert.deepEqual(resolved, byDefault.body.typeSchemas?.entity?.service, 'resolve=1 and the default must be one answer');
   });
 
   it('a write that satisfies the referenced schema succeeds', async () => {

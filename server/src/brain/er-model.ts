@@ -112,6 +112,27 @@ export interface ErInputs {
 }
 
 /**
+ * What the RECORDS say, with nothing the schema says — the half of the model that only a write can change.
+ *
+ * Split from the declared half (`Q-95`) so it can be cached: a space's records change only through writes the
+ * record-write observer reports, while its declared schema changes through a meta edit that writes no record.
+ * `brain/space-shape.ts` keeps this per space and joins the declared half at read time, so a schema edit shows
+ * at once and nothing has to remember to invalidate on one. Small by construction — one row per type and per
+ * relationship, never per record — which is what makes it cheap to keep.
+ */
+export interface ErObserved {
+  spaceId: string;
+  /** Records per entity type. */
+  counts: Record<string, number>;
+  relationships: ErRelationship[];
+  danglingEdges: number;
+  /** Per entity type, the records of the other three kinds that link to it. */
+  linkedFrom: Record<string, { facts: number; chrono: number; files: number }>;
+  truncated: ErModel['truncated'];
+  totals: { entities: number; edges: number };
+}
+
+/**
  * Turn what was read into the model. Pure — no I/O, no clock, no config.
  *
  * Split out because everything that can be WRONG here is arithmetic and set logic: which type a record
@@ -120,6 +141,12 @@ export interface ErInputs {
  * needs a container and a seeded space.
  */
 export function assembleErModel(input: ErInputs): ErModel {
+  const { declared, ...read } = input;
+  return joinDeclared(observeErShape(read), declared);
+}
+
+/** The observed half, from rows already read. Pure. */
+export function observeErShape(input: Omit<ErInputs, 'declared'>): ErObserved {
   const typeOf = new Map<string, string>();
   const observed = new Map<string, number>();
   for (const row of input.entities) {
@@ -161,13 +188,26 @@ export function assembleErModel(input: ErInputs): ErModel {
     }
   }
 
-  const names = new Set<string>([...observed.keys(), ...Object.keys(input.declared)]);
+  return {
+    spaceId: input.spaceId,
+    counts: Object.fromEntries(observed),
+    relationships: [...rel.values()].sort((a, b) => b.count - a.count || a.from.localeCompare(b.from)),
+    danglingEdges,
+    linkedFrom: Object.fromEntries(byType),
+    truncated: input.truncated,
+    totals: input.totals,
+  };
+}
+
+/** The model: the observed half joined with the declared schema. Pure, and cheap — one step per type. */
+export function joinDeclared(shape: ErObserved, declared: DeclaredTypes): ErModel {
+  const names = new Set<string>([...Object.keys(shape.counts), ...Object.keys(declared)]);
   const entityTypes: ErEntityType[] = [...names].map(type => {
-    const schema = input.declared[type];
+    const schema = declared[type];
     const props = schema?.propertySchemas ?? {};
     return {
       type,
-      count: observed.get(type) ?? 0,
+      count: shape.counts[type] ?? 0,
       declared: schema !== undefined,
       ...(schema?.namingPattern ? { namingPattern: schema.namingPattern } : {}),
       properties: Object.entries(props).map(([name, p]) => ({
@@ -176,7 +216,7 @@ export function assembleErModel(input: ErInputs): ErModel {
         required: p.required === true,
         ...(p.enum ? { enumValues: p.enum } : {}),
       })),
-      linkedFrom: byType.get(type) ?? { facts: 0, chrono: 0, files: 0 },
+      linkedFrom: { ...(shape.linkedFrom[type] ?? { facts: 0, chrono: 0, files: 0 }) },
     };
   });
 
@@ -186,22 +226,31 @@ export function assembleErModel(input: ErInputs): ErModel {
   entityTypes.sort((a, b) => b.count - a.count || a.type.localeCompare(b.type));
 
   return {
-    spaceId: input.spaceId,
+    spaceId: shape.spaceId,
     entityTypes,
-    relationships: [...rel.values()].sort((a, b) => b.count - a.count || a.from.localeCompare(b.from)),
-    danglingEdges,
-    truncated: input.truncated,
-    totals: input.totals,
+    relationships: shape.relationships.map(r => ({ ...r })),
+    danglingEdges: shape.danglingEdges,
+    truncated: shape.truncated,
+    totals: { ...shape.totals },
   };
 }
 
+/** The declared half, as the space's meta states it now. */
+export function declaredEntityTypes(spaceId: string): DeclaredTypes {
+  return (getSpaceMeta(spaceId)?.typeSchemas?.entity ?? {}) as DeclaredTypes;
+}
+
 /**
- * Build the ER model for one space.
+ * Read one space's records and return the OBSERVED half of its model.
  *
  * Every count is a real count of stored records. Nothing here is estimated, and nothing is hidden — a
  * capped read reports itself in `truncated`.
+ *
+ * **Called from `brain/space-shape.ts` and nowhere else** (`space-meta-is-one-answer-on-both-doors.test.js`):
+ * this is the expensive read the cache there exists to avoid repeating, and a caller reaching it directly pays
+ * the full scan on every call.
  */
-export async function buildErModel(spaceId: string): Promise<ErModel> {
+export async function readErShape(spaceId: string): Promise<ErObserved> {
   const entities = col<EntityDoc>(spaceCollection(spaceId, 'entities'));
   const edges = col<EdgeDoc>(spaceCollection(spaceId, 'edges'));
 
@@ -249,12 +298,11 @@ export async function buildErModel(spaceId: string): Promise<ErModel> {
         : linksTruncated ? { scan: 'links', limit: ER_ENTITY_SCAN_LIMIT }
           : null;
 
-  return assembleErModel({
+  return observeErShape({
     spaceId,
     entities: entityRows,
     edges: edgeRows,
     links,
-    declared: (getSpaceMeta(spaceId)?.typeSchemas?.entity ?? {}) as DeclaredTypes,
     totals: { entities: totalEntities, edges: totalEdges },
     truncated,
   });

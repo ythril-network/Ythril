@@ -15,6 +15,7 @@ import { col, asFilter, asUpdate } from '../db/mongo.js';
 import { spacesWhereTokenMay } from '../auth/reachable-spaces.js';
 import type { TokenRights, Rung } from '../config/rights-shape.js';
 import { getConfig } from '../config/loader.js';
+import { concreteSpaces } from '../spaces/proxy.js';
 import { log } from '../util/log.js';
 import { scanSpace, pairContentHash } from '../brain/dupe-scanner.js';
 import { computeMergePlan, applyResolutions, executeMerge } from '../brain/merge.js';
@@ -333,13 +334,12 @@ duplicatesRouter.post('/:id/merge', globalRateLimit, requireAuth, denyReadOnly, 
 duplicatesRouter.post('/scan', globalRateLimit, requireAuthMfa, denyReadOnly, async (req, res) => {
   try {
     const spaceFilter = typeof req.query['space'] === 'string' ? req.query['space'] : undefined;
-    const cfg = getConfig();
     // Intersect with the token's space allowlist — a space-restricted admin must
     // not be able to trigger destructive rules (automerge/notify) on spaces it
     // cannot access.
     const allowed = new Set(accessibleSpaces(req, 'write'));
-    const targets = cfg.spaces
-      .filter(s => !s.proxyFor && allowed.has(s.id) && (!spaceFilter || s.id === spaceFilter))
+    const targets = concreteSpaces()
+      .filter(s => allowed.has(s.id) && (!spaceFilter || s.id === spaceFilter))
       .map(s => s.id);
     if (spaceFilter && targets.length === 0) { res.status(404).json({ error: `Space '${spaceFilter}' not found or not accessible` }); return; }
 
