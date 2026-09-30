@@ -19,10 +19,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   read after a write takes 213 ms (then under 1 ms again). Same answer,
   same fields. The record-write registry also stopped letting a second subscriber replace the first one's
   collections, which this change would otherwise have done to the search-index lifecycle.
-- **MCP `space_meta` takes `resolve`, as REST always has (`Q-168`).** `false` returns a schema-library type as its
-  stored `{ $ref }`, which an agent could not see before. The defaults stay what each door has always done — `true`
-  on MCP, `false` on REST — because equalising either would break its readers silently (a REST round trip would
-  start writing expanded schemas back; an agent would start receiving bare `$ref`s); both descriptions state both.
+- **A schema-library type reads with its reference AND its definition, the same on both doors, and writes back
+  whole (`Q-168`).** `GET /api/spaces/:id/meta` returned a library type as its bare `{ "$ref" }` unless asked
+  `?resolve=1`, and MCP `space_meta` returned the entry's definition in place of the reference — so an agent could not
+  see the link, and writing its answer back (`schema_update`) stored the definition inline and silently cut the type
+  loose from its library entry. Both doors now return `{ "$ref": "library:<name>", ...definition }` by default, and
+  `space_meta` takes `resolve` as REST does, with the same default; `resolve=false` returns the stored `{ $ref }`
+  alone on both. Every door that writes type schemas takes the definition beside a `$ref` back to the reference
+  when it is the entry's, and refuses an EDITED one with a `400` naming the field (change the library entry, or drop
+  `$ref` to define the type inline) rather than losing the edit. **Who could notice:** `GET /meta` without
+  `?resolve=` now includes the definition beside each `$ref` — additive for a reader, but a client asserting deep
+  equality on that response sees new keys; and a write sending a changed definition beside a `$ref`, which was
+  accepted and stored inline before, is now a `400`.
 - **Breaking:** **A tool answer crosses the wire once, within the budget it states (`Q-111`).** Every answer was
   carried twice — MCP `content` and `structuredContent`, the REST tool door's `text` and `data` — so a stated
   budget bounded half of what was sent. Measured on a 400-fact space: an MCP `filter` page at the 25 000 default was

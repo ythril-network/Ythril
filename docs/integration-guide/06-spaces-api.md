@@ -595,7 +595,16 @@ Returns the full schema definition for a space along with derived stats.
 
 | Parameter | Default | What it does |
 |---|---|---|
-| `resolve` | `false` on REST; `true` on MCP `space_meta` | `?resolve=1` (or `true`) expands a type declared as a schema-library `{ "$ref": … }` into its effective schema. Without it the stored `$ref` comes back as written, which is what a `GET` → edit → `PUT` round trip must send back. MCP `space_meta` takes the same `resolve` (a boolean) and defaults the other way, because an agent reads the meta to shape a write rather than to edit it; pass `resolve: false` there to see the `$ref`. Both defaults are one decision (`Q-168`), stated in both tools' descriptions |
+| `resolve` | `true` on both doors | A type linked to the schema library comes back as its stored reference AND the library entry's definition, side by side: `{ "$ref": "library:service-v1", "description": …, "propertySchemas": { … } }`. `?resolve=0` (or `false`, or any value but `1`/`true`) returns the stored form alone, `{ "$ref": "library:service-v1" }`. MCP `space_meta` takes the same `resolve` (a boolean) with the same default. A reference this instance cannot resolve reads `{ "$ref": …, "_unresolvedRef": … }` |
+
+**A library type writes back whole.** Every door that accepts type schemas — `PATCH /api/spaces/:id` and MCP
+`schema_update`, `PUT /api/spaces/:id/schema`, the single-type `PUT`, `POST /api/spaces` and `save_space`, the
+dry-run validate — treats the definition beside a `$ref` as the server's: sent back exactly as the meta returned it,
+it is dropped and the reference is stored, so a `GET` → edit elsewhere → `PUT` round trip never cuts a type loose from
+its library entry. **An edited field beside a `$ref` is a `400`** naming the field: the type's definition is the
+library entry, so the edit would otherwise be lost. Change the entry (`PUT /api/schema-library/:name`), or drop
+`$ref` to define the type inline. The same `400` arrives if the entry itself changed after you read the meta — read
+it again.
 
 **`stats` and `actualSchema` are current as of the last committed write.** Both come from what the space holds,
 kept between reads and replaced by the first read after any write to the space's records, edges, links, chrono

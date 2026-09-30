@@ -148,10 +148,11 @@ export const space_metaTool: ToolHandler = {
         + 'The counts and `actualSchema` reflect every write the instance has committed, and a schema edit '
         + 'shows at once — so calling this again after writing is how you see what the write did, and it is '
         + 'cheap to call.\n\n'
-        + '`resolve` (default true here): a type declared as a schema-library `$ref` comes back as its effective '
-        + 'schema, with the library entry’s fields. Pass `resolve: false` to see the stored `$ref` itself — '
-        + 'what an edit writes back. REST takes the same `resolve` with the default false, because its reader '
-        + 'edits the meta and writes it back.\n\n'
+        + 'A TYPE LINKED TO THE SCHEMA LIBRARY comes back as `{ "$ref": "library:<name>", ...its definition }` — '
+        + 'the link and the fields side by side. Send it back as it came and the link is kept; to change such a '
+        + 'type’s fields, change its library entry or drop `$ref` and define the type inline — an edited '
+        + 'field beside a `$ref` is refused with the field named, because it would otherwise be lost. '
+        + '`resolve: false` returns only the stored `{ $ref }`.\n\n'
         + 'WHAT `validationMode` MEANS FOR YOUR WRITE: `off` accepts anything; `warn` accepts the write and '
         + 'reports violations; `strict` REFUSES a write that breaks a schema. With `strictLinkage` on, a '
         + 'reference that does not resolve is refused too. A space with no `typeSchemas` yet accepts every '
@@ -176,9 +177,9 @@ export const space_metaTool: ToolHandler = {
             space: s.requiredSpace,
             resolve: {
               type: 'boolean',
-              description: 'Expand schema-library `$ref` types to their effective schema (default true on this '
-                + 'tool). false returns each stored `{ $ref }` as written — what an edit writes back. REST '
-                + '`GET /api/spaces/:id/meta?resolve=` takes the same parameter, where the default is false.',
+              description: 'Default true: a schema-library type carries its stored `$ref` AND the library entry’s '
+                + 'definition beside it. false returns only the stored `{ $ref }`. REST '
+                + '`GET /api/spaces/:id/meta?resolve=` takes the same parameter with the same default true.',
             },
           },
           required: ['space'],
@@ -187,8 +188,8 @@ export const space_metaTool: ToolHandler = {
   async handle(ctx: ToolContext): Promise<ToolResult> {
     const { callSpace , accessibleSpaceIds, args } = ctx;
     const space = getConfig().spaces.find(s => s.id === callSpace);
-    // The door's default, from the one place both are written (`Q-168`); the answer, from the one function (`Q-95`).
-    const resolveRefs = typeof args['resolve'] === 'boolean' ? args['resolve'] : META_RESOLVE_DEFAULT.mcp;
+    // The default both doors share (`Q-168`); the answer, from the one function (`Q-95`).
+    const resolveRefs = typeof args['resolve'] === 'boolean' ? args['resolve'] : META_RESOLVE_DEFAULT;
     const metaResult = await spaceMetaAnswer({
       spaceId: callSpace, space, memberIds: memberSpacesWithin(callSpace, accessibleSpaceIds), resolveRefs,
     });
@@ -440,7 +441,10 @@ export const schema_updateTool: ToolHandler = {
     + 'MERGES by default: types you do not mention are preserved, so editing one type does not require resending '
     + 'the others. Pass `typeSchemasMode: "replace"` to make the payload authoritative — that is the only way to '
     + 'DELETE a type. Knowledge-type keys are singular: entity, fact, edge, chrono. A `$ref` to a schema-library '
-    + 'entry that does not exist is refused (422) rather than silently stored as an empty schema. On a space whose '
+    + 'entry that does not exist is refused (422) rather than silently stored as an empty schema. A linked type '
+    + 'may be sent back exactly as `space_meta` returned it — `$ref` beside the entry’s definition — and the '
+    + 'link is kept; a CHANGED definition beside a `$ref` is refused (400, naming the field), because the '
+    + 'type’s definition is its library entry: edit the entry, or drop `$ref` to define the type inline. On a space whose '
     + 'network votes on meta changes this opens a vote round instead of writing — the reply says so, and nothing is '
     + 'stored until the round concludes.',
   mutating: true,

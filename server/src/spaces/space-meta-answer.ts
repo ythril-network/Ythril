@@ -10,26 +10,22 @@
  * drifted on a parameter (below). `space-meta-is-one-answer-on-both-doors.test.js` holds both handlers to this
  * function, and the actual schema to `brain/space-shape.ts`, which caches it and is never behind a write.
  *
- * ## `resolve`, and why the two doors default differently (`Q-168`)
+ * ## `resolve`: one parameter, one default, one shape on both doors (`Q-168`, owner ruling D-6)
  *
- * With `resolve`, a type declared as a schema-library `{ $ref }` comes back as its effective schema; without it,
- * as the stored `$ref`. REST has taken `?resolve=` for years with a RAW default, and MCP had no parameter at all
- * and always resolved — so an agent could never see the stored `$ref`, and nothing compared the two.
- *
- * Both doors now take `resolve`. **Their defaults stay what each door has always done**, because either one
- * equalised breaks somebody silently: a REST integrator round-tripping `GET` → edit → `PUT` would start writing
- * expanded schemas and quietly detach every type from its library entry; an agent reading `space_meta` to
- * shape a write would start receiving a bare `$ref` where it read the fields. The difference is the door's USE,
- * not a scope: REST's reader edits and writes back, MCP's reads to act. Both defaults are written here, once, and
- * each door's description states its own and the other's.
+ * A type declared as a schema-library `{ $ref }` used to come back as the stored `$ref` on REST (unless
+ * `?resolve=1`) and as the entry's definition IN PLACE of the reference on MCP, so the two doors answered with two
+ * documents. The ruling — *"as always one module 2 doors... most capable and least destructive and least breaking"*
+ * — gives both the same answer: by default a library type reads `{ $ref, ...definition }` (`library-ref-expansion.ts`),
+ * which carries what either reader looked for, and which writes back whole because every type-schema write takes the
+ * definition beside a `$ref` back to the reference. `resolve: false` returns the stored form alone, on both doors.
  */
 import type { SpaceConfig } from '../config/types.js';
 import { needsReindex } from './_shared.js';
-import { resolveMetaRefs } from './schema-validation.js';
+import { withLibraryDefinitions } from './library-ref-expansion.js';
 import { actualSchemaOf, spaceStatsOf, type SpaceStats } from '../brain/space-shape.js';
 
-/** What `resolve` is when the caller does not say, per door — see the module docblock for why they differ. */
-export const META_RESOLVE_DEFAULT = Object.freeze({ rest: false, mcp: true });
+/** What `resolve` is when the caller does not say — the same on both doors: library types carry their definition. */
+export const META_RESOLVE_DEFAULT = true;
 
 /**
  * The space meta, as both doors return it.
@@ -46,7 +42,7 @@ export async function spaceMetaAnswer(input: {
 }): Promise<Record<string, unknown>> {
   const { spaceId, space, memberIds, resolveRefs } = input;
   const rawMeta = space?.meta ?? {};
-  const meta = resolveRefs ? resolveMetaRefs(rawMeta) : rawMeta;
+  const meta = resolveRefs ? withLibraryDefinitions(rawMeta) : rawMeta;
   // History is served by its own endpoint, never inline.
   const { previousVersions: _pv, ...metaPublic } = meta;
 

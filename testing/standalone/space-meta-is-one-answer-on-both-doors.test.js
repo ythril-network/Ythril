@@ -15,8 +15,9 @@
  *   1. Both door handlers call `spaceMetaAnswer`, and neither counts or builds the actual schema itself.
  *   2. The actual schema is built in exactly one module — derived over every tracked server source, so a third
  *      door written next year is held to it too.
- *   3. `resolve` exists on both doors, and each door's default comes from `META_RESOLVE_DEFAULT` — the one place
- *      the two defaults are written — and each door's description says what its default is.
+ *   3. `resolve` exists on both doors with ONE default, `META_RESOLVE_DEFAULT`, and the description and the guide
+ *      say what it is. (It was one default per door until the owner ruled, D-6: "as always one module 2 doors".
+ *      What each door's readers needed is now one shape — see `a-library-type-is-read-and-written-back-whole-db`.)
  *
  * Run: node --test testing/standalone/space-meta-is-one-answer-on-both-doors.test.js
  * (requires a prior `npm run build` in server/)
@@ -66,7 +67,7 @@ describe('the actual schema is built in one module', () => {
   });
 });
 
-describe('resolve is one parameter with a stated default on each door', () => {
+describe('resolve is one parameter with one default on both doors', () => {
   let tool, META_RESOLVE_DEFAULT;
   before(async () => {
     ({ space_metaTool: tool } = await import('../../server/dist/mcp/tools/spaces.js'));
@@ -78,21 +79,19 @@ describe('resolve is one parameter with a stated default on each door', () => {
     assert.equal(props.resolve?.type, 'boolean', 'space_meta has no `resolve` — REST has had `?resolve=` for years');
   });
 
-  it('each door takes its default from META_RESOLVE_DEFAULT', () => {
-    assert.equal(typeof META_RESOLVE_DEFAULT?.rest, 'boolean');
-    assert.equal(typeof META_RESOLVE_DEFAULT?.mcp, 'boolean');
-    assert.match(restHandler(), /META_RESOLVE_DEFAULT\.rest/, 'REST writes its own default');
-    assert.match(mcpHandler(), /META_RESOLVE_DEFAULT\.mcp/, 'MCP writes its own default');
+  it('both doors take the SAME default, from the one constant', () => {
+    // Owner ruling D-6: "as always one module 2 doors". A per-door default was the shape this replaced.
+    assert.equal(typeof META_RESOLVE_DEFAULT, 'boolean', 'META_RESOLVE_DEFAULT must be ONE default, not one per door');
+    assert.match(restHandler(), /META_RESOLVE_DEFAULT\b(?!\.)/, 'REST does not take the shared default');
+    assert.match(mcpHandler(), /META_RESOLVE_DEFAULT\b(?!\.)/, 'MCP does not take the shared default');
   });
 
-  it('each door says what its default is', () => {
-    const word = v => (v ? 'true' : 'false');
+  it('the description and the guide state the one default', () => {
+    const word = META_RESOLVE_DEFAULT ? 'true' : 'false';
     const props = tool.inputSchema({ requiredSpace: { type: 'string' } }).properties;
-    assert.match(props.resolve.description, new RegExp(`default ${word(META_RESOLVE_DEFAULT.mcp)}`, 'i'),
-      'the MCP description does not state its default');
-    assert.match(props.resolve.description, new RegExp(`REST[^.]*default[^.]*${word(META_RESOLVE_DEFAULT.rest)}`, 'i'),
-      'the MCP description does not state that REST defaults the other way');
+    assert.match(props.resolve.description, new RegExp(`default ${word}`, 'i'), 'the MCP description does not state its default');
+    assert.match(props.resolve.description, /same default/i, 'the MCP description does not say REST defaults the same way');
     const guide = readFileSync('docs/integration-guide/06-spaces-api.md', 'utf8');
-    assert.match(guide, /`resolve`[^\n]*MCP[^\n]*default/i, 'the integration guide does not state both defaults');
+    assert.match(guide, new RegExp(`\`resolve\` \\| \`${word}\` on both doors`), 'the integration guide does not state the one default');
   });
 });

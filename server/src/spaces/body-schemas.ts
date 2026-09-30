@@ -40,6 +40,7 @@
 import { z } from 'zod';
 import { MERGE_FNS } from '../config/types-knowledge.js';
 import { getSchemaLibrary } from '../config/loader.js';
+import { takeBackLibraryDefinition } from './library-ref-expansion.js';
 import { isSsrfSafeUrl, SSRF_SAFE_MESSAGE } from '../util/ssrf.js';
 import { SPACE_PURPOSE_MAX, SCHEMA_DESCRIPTION_MAX, PROPERTY_DESCRIPTION_MAX } from './_shared.js';
 import { DOC_EXTRACTION_MODES_IN, IMAGE_LEVELS, AUDIO_LEVELS, VIDEO_LEVELS, TEXT_LEVELS } from '../config/types.js';
@@ -124,7 +125,15 @@ export const EndpointMemberZ = z.string().min(1).max(200).refine(
   },
 );
 
-export const TypeSchemaZ = z.union([
+/*
+ * EVERY write of a type schema parses through here — the space meta PATCH and `schema_update`, `PUT .../schema`, the
+ * single-type PUT, space creation, the dry-run, a peer's replicated meta — so the preprocess below is the one place a
+ * library type's round trip is handled (`Q-168`). The meta returns a library type as `{ $ref, ...definition }`; the
+ * preprocess takes that back to `{ $ref }` when the definition is the entry's, and refuses it, naming the fields,
+ * when it was edited. It runs BEFORE the strict union because the strict union is what refused the round trip. See
+ * `library-ref-expansion.ts`.
+ */
+export const TypeSchemaZ = z.preprocess(takeBackLibraryDefinition, z.union([
   // Reference to a schema library entry
   z.object({
     $ref: z.string().regex(/^library:[a-zA-Z0-9][a-zA-Z0-9._-]{0,199}$/, '$ref must be in format "library:<name>"'),
@@ -180,7 +189,7 @@ export const TypeSchemaZ = z.union([
      */
     functional: z.boolean().optional(),
   }).strict(),
-]);
+]));
 
 /**
  * Type-schema fields that only mean something on ONE collection.

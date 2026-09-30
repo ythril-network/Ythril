@@ -436,11 +436,11 @@ spacesRouter.get('/:id/meta', globalRateLimit, requireSpaceAuthScoped('id'), asy
     return;
   }
 
-  // `resolve` expands library `$ref` types to their effective schema. The default is RAW on this door — the
-  // edit/round-trip view, and callers that verify the stored `$ref` — and resolved on MCP; both are written in
-  // `META_RESOLVE_DEFAULT`, which says why (`Q-168`). The one answer, for both doors, is `spaceMetaAnswer` (`Q-95`).
+  // `resolve` (default `META_RESOLVE_DEFAULT`, the same on MCP): a library type carries its `$ref` AND its definition,
+  // and a round trip keeps the reference (`Q-168`). `?resolve=0|false` (anything but `1`/`true`, as before) returns the
+  // stored form alone. The one answer, for both doors, is `spaceMetaAnswer` (`Q-95`).
   const q = req.query['resolve'];
-  const resolveRefs = q === undefined ? META_RESOLVE_DEFAULT.rest : (q === '1' || q === 'true');
+  const resolveRefs = q === undefined ? META_RESOLVE_DEFAULT : (q === '1' || q === 'true');
   res.json(await spaceMetaAnswer({ spaceId: id, space, memberIds: memberSpacesForRequest(req, id), resolveRefs }));
 });
 
