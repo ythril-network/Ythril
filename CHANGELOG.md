@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **A collection's search index exists only while the collection holds a record (`Q-165`).** mongot keeps one
+  change-stream cursor per search index over the shared oplog, so mongod's cost grows with index count times write
+  rate, and index freshness is one rotation of every index; measured on a production instance, half of the record
+  collections were empty and each still carried its index. A collection's vector index (and, on `files`, the face
+  gallery) is now built when its first record arrives and dropped when its last one goes — a minute after the last
+  delete of a burst, so a record deleted and replaced does not cost a rebuild. Every write reaches this through the one
+  door every write already used, so no write path can skip it, and a record written as the last one is deleted is
+  never left in a collection with no index. **Nothing changes for a caller:** a search on an empty collection answers
+  empty with no `degraded` reason, a first record is found at once through the fresh-write channel while its index
+  builds, and a space whose collections are empty reads *ready* — `GET /api/admin/pipeline-status` marks each such
+  collection `empty: true` and leaves it out of `live`. **On upgrade**, boot drops the indexes of every empty
+  collection and leaves every populated one's untouched; a new space starts with none. `SEARCH_INDEX_DROP_DELAY_MS`
+  (default `60000`) sets the delay before an emptied collection loses its index.
 - **A traversing recall walks its rows a window at a time, with every row exactly the graph it had before**
   (`Q-136`). `recall` and `similar` with `traverse > 0` walked each result row on its own, so a page cost about
   four queries per hop PER ROW — its edges, its link scan, the facts it named and the records it reached. Up to 16

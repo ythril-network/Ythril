@@ -37,6 +37,7 @@ import { resolveVlmEndpoint } from '../files/converters/vlm-endpoint.js';
 import { getDb } from '../db/mongo.js';
 import { faceRecognitionAllowed } from '../files/converters/media-level.js';
 import { VECTOR_INDEXED_COLLECTIONS } from '../spaces/vector-index.js';
+import { collectionHoldsRecord } from '../spaces/record-presence.js';
 import { log } from '../util/log.js';
 import { assistBackend, assistBudgetStatus, type AssistBudget } from '../config/assist-backend.js';
 import type { ChatWire } from '../util/model-chat.js';
@@ -97,6 +98,13 @@ export interface CollectionIndexStatus {
    * health. See `deriveLiveIndexState`.
    */
   optional?: boolean;
+  /**
+   * True when the collection holds no record, so it carries no search index BY DESIGN (Q-165): an index is
+   * built on a collection's first record and dropped when its last one goes. Such a collection is healthy
+   * and does not vote on `live` — without this, every empty collection would read as a missing index and a
+   * new space would be red until it held one record of every kind.
+   */
+  empty?: boolean;
 }
 
 export interface SpaceIndexStatus {
@@ -439,7 +447,11 @@ export function deriveLiveIndexState(collections: CollectionIndexStatus[], listi
    * A space with every search index READY and no face gallery is a healthy space. Its optional index is still
    * in `collections` with its own status, so nothing is hidden — it just does not get a vote.
    */
-  const deciding = collections.filter(c => !c.optional);
+  /*
+   * AN EMPTY COLLECTION DOES NOT VOTE EITHER (Q-165). It has no index because it has no record, which is the
+   * state the lifecycle aims for, not a loss — and a space whose every collection is empty is simply ready.
+   */
+  const deciding = collections.filter(c => !c.optional && !c.empty);
   if (deciding.some(c => c.status === null)) return 'missing';
   return deciding.every(c => c.status === 'READY') ? 'ready' : 'building';
 }
@@ -498,9 +510,15 @@ async function indexStatus(): Promise<{ spaces: SpaceIndexStatus[]; unavailable?
       }
       await Promise.all([...byCollection.entries()].map(async ([collection, entries]) => {
         try {
-          const all = await db.collection(`${space.id}_${collection}`).listSearchIndexes().toArray() as Array<{ name?: string; status?: string }>;
+          const collName = `${space.id}_${collection}`;
+          const [all, holds] = await Promise.all([
+            db.collection(collName).listSearchIndexes().toArray() as Promise<Array<{ name?: string; status?: string }>>,
+            // A failed read is taken as "holds records", so the collection keeps its vote rather than being
+            // excused from it on a guess.
+            collectionHoldsRecord(collName).catch(() => true),
+          ]);
           for (const e of entries) {
-            collections.push({ ...e, status: all.find(i => i.name === e.indexName)?.status ?? null });
+            collections.push({ ...e, status: all.find(i => i.name === e.indexName)?.status ?? null, ...(holds ? {} : { empty: true }) });
           }
         } catch (err) {
           listingFailed = true;
@@ -539,8 +557,14 @@ async function indexStatus(): Promise<{ spaces: SpaceIndexStatus[]; unavailable?
    * missing index and still reports as one. It is the total silence that means the question was not
    * answered — a working instance that has ever embedded anything has at least one.
    */
+  /*
+   * "Total silence" now means silence where an index is EXPECTED (Q-165). An instance whose every collection
+   * is empty has no index anywhere and has answered correctly; only a collection that holds a record should
+   * have one, so only those make the silence informative.
+   */
   const anyIndexSeen = out.some(s => s.collections.some(c => c.status !== null));
-  if (out.length > 0 && !anyIndexSeen) {
+  const anyIndexExpected = out.some(s => s.collections.some(c => !c.empty && !c.optional));
+  if (out.length > 0 && anyIndexExpected && !anyIndexSeen) {
     return {
       spaces: out.map(s => ({ ...s, live: 'unknown' as const, drifted: false })),
       unavailable: 'this deployment does not report search indexes — `listSearchIndexes` returned nothing '

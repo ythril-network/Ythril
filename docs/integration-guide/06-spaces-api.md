@@ -139,6 +139,12 @@ most current open models emit 512.
 ```
 
 > **Async vector-index build:** creating a real space returns immediately with `indexStatus: "building"`. The space is writable straight away, but semantic `recall` returns no results until the Atlas vector indexes finish building and `indexStatus` flips to `"ready"` (this can take up to a few minutes; a failed build reports `"failed"`). Poll the space via `GET /api/spaces` if you need to gate recall on readiness. Proxy spaces and spaces created before this behaviour have no `indexStatus` and should be treated as ready.
+>
+> **A collection has a search index only while it holds a record.** A new space starts with none and reads `ready`
+> as soon as the check runs; a collection's vector index (and, on `files`, the face gallery) is built when its first
+> record arrives and dropped a minute after its last one is deleted (`SEARCH_INDEX_DROP_DELAY_MS`). This is invisible to
+> a search: an empty collection answers empty with no `degraded` reason, and a first record is returned at once — the
+> fresh-write channel scores the newest records from the collection itself while their index builds.
 
 ---
 

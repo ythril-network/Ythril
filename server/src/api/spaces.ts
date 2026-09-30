@@ -28,7 +28,7 @@ import { spaceNetworkInfo } from '../spaces/network-status.js';
 import { z } from 'zod';
 import { v4 as uuidv4 } from 'uuid';
 import { log } from '../util/log.js';
-import { buildSpaceVectorIndexes } from '../spaces/vector-index.js';
+import { reconcileSpaceSearchIndexes } from '../spaces/search-index-presence.js';
 import { peerSafeFetch } from '../sync/peer-fetch.js';
 import type { SpaceMeta, KnowledgeType } from '../config/types.js';
 import { KNOWLEDGE_TYPES } from '../config/types.js';
@@ -72,7 +72,8 @@ spacesRouter.post('/:id/rebuild-indexes', globalRateLimit, requireSpaceAuthMfaSc
   try {
     // Not awaiting READY: a rebuild over a large space takes minutes and would time out the request.
     // Recall returns empty until the build completes — that gap is why this lives in the danger zone.
-    await buildSpaceVectorIndexes(spaceId, false, { force: true });
+    // Only the collections holding a record get indexes rebuilt; an empty one needs none (Q-165).
+    await reconcileSpaceSearchIndexes(spaceId, { waitForReady: false, force: true });
     res.json({ ok: true, spaceId, status: 'rebuilding' });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);

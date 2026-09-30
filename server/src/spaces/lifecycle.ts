@@ -14,7 +14,8 @@ import { ensureSpaceFilesDir } from '../files/files.js';
 import { invalidateUsageCache } from '../quota/quota.js';
 import { log } from '../util/log.js';
 import type { SpaceConfig, SpaceMeta, FactDoc } from '../config/types.js';
-import { VECTOR_INDEXED_COLLECTIONS, buildSpaceVectorIndexes, finalizeSpaceIndexReady } from './vector-index.js';
+import { VECTOR_INDEXED_COLLECTIONS, finalizeSpaceIndexReady } from './vector-index.js';
+import { armSearchIndexPresence, reconcileSpaceSearchIndexes } from './search-index-presence.js';
 import { SPACE_COLLECTIONS, repairStaleSpaceIds, dropLegacyPrefixedIndexes, dropSupersededEdgeIdentityIndex, pendingOpConflictMessage , setReindexNeeded, beginSpaceOp, endSpaceOp, spaceOpInFlight } from './_shared.js';
 import { moveSpaceData, applySpaceRenameToConfig } from './rename.js';
 import { unlabelAllFaces } from '../brain/entities.js';
@@ -34,6 +35,9 @@ export async function initSpace(
 ): Promise<void> {
   const waitForVectorReady = opts.waitForVectorReady ?? true;
   const db = getDb();
+  // Before anything reads a collection: from here on every write to a record collection is followed, so the
+  // reconcile below cannot miss one that lands while it runs. See `spaces/search-index-presence.ts`.
+  armSearchIndexPresence();
 
   // Ensure collections exist (MongoDB creates them lazily on first insert,
   // but we create them explicitly to enable index creation)
@@ -210,9 +214,11 @@ export async function initSpace(
     }
   }
 
-  // Vector search indexes (Atlas Local / Atlas). Created here; READY is polled unless
-  // the caller defers it (createSpace, so the API responds without waiting — B1).
-  await buildSpaceVectorIndexes(spaceId, waitForVectorReady);
+  // Vector search indexes (Atlas Local / Atlas) — only on the collections that hold a record (Q-165): a
+  // populated collection's are created or validated here, an empty one's are dropped, which is also how an
+  // existing space heals on upgrade. READY is polled unless the caller defers it (createSpace, so the API
+  // responds without waiting — B1).
+  await reconcileSpaceSearchIndexes(spaceId, { waitForReady: waitForVectorReady });
 
   // Ensure files directory exists
   await ensureSpaceFilesDir(spaceId);

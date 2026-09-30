@@ -71,7 +71,7 @@ describe('the face gallery finds a labelled face behind closer unlabelled ones',
       await insertAll(mongo, `${id}_files`, gallery(id));
       await mongo.col(`${id}_entities`).insertOne({ _id: 'person-1', spaceId: id, name: 'Ada', type: 'person', tags: [], properties: {} });
     }
-    await vectorIndex.buildSpaceVectorIndexes(GALLERY, true);
+    await (await import('../../server/dist/spaces/search-index-presence.js')).reconcileSpaceSearchIndexes(GALLERY, { waitForReady: true });
     // The old definition: the face index as production built it before, with no filter fields at all.
     await vectorIndex.ensureVectorSearchIndex(GALLERY_OLD, 'files', FACE_DIMS, 'cosine', 'faceEmbedding', 'faceEmbedding',
       true, [], { refuseWidthChange: true });

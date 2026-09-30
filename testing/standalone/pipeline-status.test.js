@@ -222,6 +222,16 @@ describe('deriveLiveIndexState — what the database actually says', () => {
     assert.equal(deriveLiveIndexState([coll('READY'), coll('PENDING')], false), 'building');
   });
 
+  it('an EMPTY collection with no index is healthy — it has none by design (Q-165)', () => {
+    // An index exists only while its collection holds a record, so a new space's four empty collections carry
+    // none. Voting them `missing` would paint every new space red until it held one record of every kind.
+    const empty = { ...coll(null), empty: true };
+    assert.equal(deriveLiveIndexState([coll('READY'), empty, empty], false), 'ready');
+    assert.equal(deriveLiveIndexState([empty, empty], false), 'ready', 'a space holding nothing is ready');
+    assert.equal(deriveLiveIndexState([coll(null), empty], false), 'missing',
+      'a collection that HOLDS records and has no index is still the loss this state exists to report');
+  });
+
   it('a failed listing is `unknown`, never `missing`', () => {
     // A MongoDB without Atlas Search support throws on every listing. Reporting that as `missing`
     // would paint every space on the instance red when nothing is wrong with any of them.

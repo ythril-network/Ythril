@@ -77,6 +77,9 @@ export const NUMERIC_SETTINGS: readonly NumericSetting[] = [
   dual('DOC_OCR_TIMEOUT_MS'),
   dual('DOC_DESCRIBE_TIMEOUT_MS'),
   { name: 'INDEX_READY_TIMEOUT_MS', min: 0, max: 3_600_000, what: 'how long boot waits for vector indexes' },
+  // Q-165. Zero is allowed and means "drop as soon as the check runs"; a day is the ceiling because past it the
+  // setting is keeping indexes on empty collections, which is the cost the rule exists to remove.
+  { name: 'SEARCH_INDEX_DROP_DELAY_MS', min: 0, max: 86_400_000, what: 'how long after its last delete an emptied collection keeps its search index' },
   { name: 'MCP_OAUTH_TOKEN_TTL_DAYS', min: 0, max: 3_650, what: 'the lifetime of a connector token (0 = never expires)' },
   { name: 'YTHRIL_CONNECTOR_PORT', min: 1, max: 65535, what: "the local agent connector's listen port" },
   // Infra's instance-wide request quota, and the CEILING a per-token value may not exceed. Registered here

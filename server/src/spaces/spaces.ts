@@ -7,7 +7,7 @@
 import { getConfig, saveConfig } from '../config/loader.js';
 import { log } from '../util/log.js';
 import type { SpaceConfig, SpaceMeta, DupeActionRule, DocExtractionMode, ImageLevel, AudioLevel, VideoLevel, TextLevel, RecordTtlWindows } from '../config/types.js';
-import { buildSpaceVectorIndexes } from './vector-index.js';
+import { reconcileSpaceSearchIndexes } from './search-index-presence.js';
 import { syncSchemaFiles, META_VERSION_CAP } from './_shared.js';
 
 /**
@@ -131,7 +131,7 @@ export function updateSpace(
     // changing so an unrelated meta edit (purpose, tag suggestions) does no index work.
     const schemaChanged = JSON.stringify(prev?.typeSchemas ?? null) !== JSON.stringify(updates.meta.typeSchemas ?? null);
     if (schemaChanged) {
-      buildSpaceVectorIndexes(spaceId, false).catch(err =>
+      reconcileSpaceSearchIndexes(spaceId, { waitForReady: false }).catch(err =>
         log.warn(`P6: vector filter-field rebuild after schema change on '${spaceId}': ${err}`));
     }
   }
