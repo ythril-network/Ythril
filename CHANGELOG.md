@@ -189,6 +189,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   one exception is the `/api/sync/*` GETs rebuilding the file-hash cache, scoped to that collection. Its first run
   found no read door writing a space; its first red run found that REST `recall`, `similar` and `traverse` answer
   through a runtime tool lookup the walk could not see, now resolved.
+- **A gate compares each tool's bounds with its route's (`Q-109`).** `a-tool-and-its-route-agree-on-bounds` pairs
+  every tool with its route through the capability map, reads the route's bounds from the zod schemas its handler
+  reaches (walking the call graph, so a schema parsed inside an act counts), and compares `min`/`max`/`minLength`/
+  `maxLength`/`minItems`/`maxItems`/`enum` and requiredness per shared parameter. A route that hands its body to
+  `callTool` agrees by construction and is detected, not listed; fields `BOUND_BY_FIELD` names are left to the
+  Q-108 gate, whose validator derivation both now share (`_validator-schemas.mjs`). Its first run found
+  `network_join_remote`'s schema silent on `inviteCode`'s 8 192-character limit, which the route and the act already
+  refused; the schema now states it from the same constant. Routes that validate by hand are counted, and may only
+  get fewer.
 
 ## [5.6.0] — 2026-09-29
 

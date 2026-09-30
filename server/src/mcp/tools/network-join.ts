@@ -8,7 +8,7 @@
  * instance-admin, as their routes are.
  */
 import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.js';
-import { joinByInviteKeyAct, joinRemoteAct } from '../../networks/join-remote-act.js';
+import { joinByInviteKeyAct, joinRemoteAct, INVITE_CODE_MAX_LENGTH } from '../../networks/join-remote-act.js';
 import { addMemberAct, removeMemberAct, acceptIntroductionAct } from '../../networks/member-acts.js';
 import { uuidSchema } from './shared.js';
 import { DEFAULT_JOIN_SYNC_SCHEDULE } from '../../sync/schedule.js';
@@ -55,7 +55,7 @@ export const network_join_remoteTool: ToolHandler = {
       // reads the inviter's own answer, never these.
       spaces: { type: 'array', items: SPACE_ID, maxItems: MAX_SPACE_IDS, description: 'From the invite bundle; informational only — the inviter\'s answer is what the join uses.' },
       networkSpaces: { type: 'array', items: SPACE_ID, maxItems: MAX_SPACE_IDS, description: 'From the invite bundle; informational only.' },
-      inviteCode: { type: 'string', description: 'From the invite bundle; informational only.' },
+      inviteCode: { type: 'string', maxLength: INVITE_CODE_MAX_LENGTH, description: 'From the invite bundle; informational only.' },
       spaceMap: { type: 'object', additionalProperties: SPACE_ID, description: 'Optional: a space of the network → the local space id to put it in. Key it by the name the invite shows for the space (`spaces`); the network\'s id for it (`networkSpaces`) is accepted too. A space not named keeps the name the invite shows.' },
       syncSchedule: JOIN_SYNC_SCHEDULE,
     },
