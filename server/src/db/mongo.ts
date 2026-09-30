@@ -4,7 +4,7 @@ import { log } from '../util/log.js';
 import { dbNameFromUri } from './db-name.js';
 import { withJitter } from '../util/backoff.js';
 import { envInt } from '../config/env-num.js';
-import { observeRecordWrites, type RecordWriteListener } from './record-write-observer.js';
+import { observeRecordWrites, EVERY_COLLECTION, type RecordWriteListener } from './record-write-observer.js';
 
 let _client: MongoClient | null = null;
 let _dbName = 'ythril';
@@ -206,16 +206,34 @@ export function getMongo(): MongoClient {
 /**
  * Who hears about writes to a space's record collections (Q-165) — see `db/record-write-observer.ts`.
  *
- * A registry rather than an import, so the db layer does not depend on the search-index lifecycle that listens:
- * `spaces/search-index-presence.ts` subscribes when it is loaded, and the boot path loads it.
+ * A registry rather than an import, so the db layer does not depend on the modules that listen:
+ * `spaces/search-index-presence.ts` and `brain/space-shape.ts` subscribe when they are loaded.
+ *
+ * **Each listener keeps its OWN collections** (`Q-95`). This held one predicate for the whole registry and each
+ * subscription overwrote it — invisible while there was one subscriber, and a silent re-scoping of the first the
+ * day a second arrived: the index lifecycle would have heard the collections the shape cache asked for, or missed
+ * its own, depending on which module loaded last. A write is observed if ANY listener wants its collection, and
+ * reported only to the listeners that do.
  */
-const recordWriteListeners: RecordWriteListener[] = [];
-let recordCollectionTest: (name: string) => boolean = () => false;
+const recordWriteListeners: { wants: (name: string) => boolean; listener: RecordWriteListener }[] = [];
 
 /** Subscribe to the writes `getDb()` observes, on the collections `isRecordCollection` names. */
 export function onRecordCollectionWrite(isRecordCollection: (name: string) => boolean, listener: RecordWriteListener): void {
-  recordCollectionTest = isRecordCollection;
-  recordWriteListeners.push(listener);
+  recordWriteListeners.push({ wants: isRecordCollection, listener });
+}
+
+/**
+ * Tell every listener that the database changed underneath the observer, so whatever it knew is void.
+ *
+ * For the one kind of write `getDb()` cannot see: a writer on its own client. The restore is the one that exists
+ * (`db/restore.ts`, exempted in `a-record-write-reaches-the-index-presence-observer.test.js`), and it drops and
+ * rewrites every collection. Reported as a `forget` on {@link EVERY_COLLECTION}, to every listener whatever its
+ * predicate — a listener that ignored it would keep answering from the database as it was before the restore.
+ */
+export function reportDatabaseReplaced(): void {
+  for (const { listener } of recordWriteListeners) {
+    try { listener(EVERY_COLLECTION, { forget: true }); } catch { /* a listener logs its own failures */ }
+  }
 }
 
 let observedDb: { client: MongoClient; name: string; db: Db } | null = null;
@@ -228,8 +246,8 @@ let observedDb: { client: MongoClient; name: string; db: Db } | null = null;
 export function getDb(): Db {
   const client = getMongo();
   if (observedDb && observedDb.client === client && observedDb.name === _dbName) return observedDb.db;
-  const db = observeRecordWrites(client.db(_dbName), name => recordCollectionTest(name), (name, effect) => {
-    for (const l of recordWriteListeners) l(name, effect);
+  const db = observeRecordWrites(client.db(_dbName), name => recordWriteListeners.some(l => l.wants(name)), (name, effect) => {
+    for (const l of recordWriteListeners) if (l.wants(name)) l.listener(name, effect);
   });
   observedDb = { client, name: _dbName, db };
   return db;

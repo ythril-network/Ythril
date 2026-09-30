@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **A space-meta read no longer rescans the space, and both doors build it with one function (`Q-95`).** `stats`
+  and `actualSchema` were rebuilt on every `GET /api/spaces/:id/meta` and every MCP `space_meta` — an entity scan,
+  an edge scan, three link scans and seven counts per member space — by two hand-written copies of the answer. They
+  are now kept per space and replaced by the first read after a write to that space's records (the record-write
+  observer reports every committed write; a restore empties them), and the declared schema is joined fresh on every
+  read. Measured on a space of 100 000 records (`testing/bench/space-meta-cost.mjs`): every read took a median
+  236 ms before; now the first read takes 238 ms, a read with nothing written since takes under 1 ms, and the first
+  read after a write takes 213 ms (then under 1 ms again). Same answer,
+  same fields. The record-write registry also stopped letting a second subscriber replace the first one's
+  collections, which this change would otherwise have done to the search-index lifecycle.
+- **MCP `space_meta` takes `resolve`, as REST always has (`Q-168`).** `false` returns a schema-library type as its
+  stored `{ $ref }`, which an agent could not see before. The defaults stay what each door has always done — `true`
+  on MCP, `false` on REST — because equalising either would break its readers silently (a REST round trip would
+  start writing expanded schemas back; an agent would start receiving bare `$ref`s); both descriptions state both.
+
 - **Breaking:** **Every quantity a caller sends has a bound, the same on both doors, and past it is a `400` naming it
   (`Q-108`).** `tags` 100 per record (what the sync door already refused, so a record with more could never be pushed),
   `linkEntities` / `linkFacts` / `linkChronos` 1 000 each, inline `edges` 500, `deleteFields` 100, `edgeLabels` 100,

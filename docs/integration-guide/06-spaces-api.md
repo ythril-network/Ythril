@@ -593,6 +593,17 @@ Authorization: Bearer <token>
 
 Returns the full schema definition for a space along with derived stats.
 
+| Parameter | Default | What it does |
+|---|---|---|
+| `resolve` | `false` on REST; `true` on MCP `space_meta` | `?resolve=1` (or `true`) expands a type declared as a schema-library `{ "$ref": … }` into its effective schema. Without it the stored `$ref` comes back as written, which is what a `GET` → edit → `PUT` round trip must send back. MCP `space_meta` takes the same `resolve` (a boolean) and defaults the other way, because an agent reads the meta to shape a write rather than to edit it; pass `resolve: false` there to see the `$ref`. Both defaults are one decision (`Q-168`), stated in both tools' descriptions |
+
+**`stats` and `actualSchema` are current as of the last committed write.** Both come from what the space holds,
+kept between reads and replaced by the first read after any write to the space's records, edges, links, chrono
+entries or files — so a meta read costs the same on a space of a hundred thousand records as on an empty one,
+and a read after a write shows that write. The declared schema is read fresh every time, so a schema edit shows at
+once. A restore (Settings → Database) empties the kept answers, as it does every other thing derived from the
+old database.
+
 **Requires the token to be scoped to that space.** A token whose `spaces` allowlist excludes the space is refused with
 `403` — as are `GET /api/spaces/:id/completeness` and the single-type
 `GET /api/spaces/:id/meta/typeSchemas/:knowledgeType/:typeName`. Before 2.8.0 these three answered `200` for any

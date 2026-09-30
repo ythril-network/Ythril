@@ -7,9 +7,10 @@ import { canWriteAnywhere } from '../../auth/write-anywhere.js';
 import type { TokenRights } from '../../config/rights-shape.js';
 import { memberSpacesWithin } from '../../spaces/proxy-scoped.js';
 import { isProxy } from '../../spaces/proxy.js';
+import { spaceMetaAnswer, META_RESOLVE_DEFAULT } from '../../spaces/space-meta-answer.js';
 import { deleteSpaceData, wipeTypesLabel } from '../../spaces/delete-space-data.js';
 import { spacePurpose } from '../../spaces/spaces.js';
-import { SPACE_PURPOSE_MAX, needsReindex } from '../../spaces/_shared.js';
+import { SPACE_PURPOSE_MAX } from '../../spaces/_shared.js';
 import { measureSpaceUsage } from '../../spaces/space-usage.js';
 import { spaceCollection } from '../../db/space-collection.js';
 import { renameSpaceAct } from '../../spaces/rename.js';
@@ -144,11 +145,13 @@ export const space_metaTool: ToolHandler = {
         + 'These were two tools until 5.0 and the split was the defect. Together they do something neither did '
         + 'alone: `actualSchema` comes back in the DECLARED schema\u2019s own format, so a type the space really '
         + 'holds can be PROMOTED into its declared schema without writing the JSON by hand.\n\n'
-        + 'This returns what MAY exist: the types somebody '
-        + 'defined, with their naming patterns and required properties. `space_meta` returns what DOES exist: '
-        + 'the types that actually hold records, and which edge labels really connect which types. A space '
-        + 'can declare twenty types and hold three, or hold records of a type nobody declared. Read this to '
-        + 'learn the rules, `space_meta` to learn the shape.\n\n'
+        + 'The counts and `actualSchema` reflect every write the instance has committed, and a schema edit '
+        + 'shows at once — so calling this again after writing is how you see what the write did, and it is '
+        + 'cheap to call.\n\n'
+        + '`resolve` (default true here): a type declared as a schema-library `$ref` comes back as its effective '
+        + 'schema, with the library entry’s fields. Pass `resolve: false` to see the stored `$ref` itself — '
+        + 'what an edit writes back. REST takes the same `resolve` with the default false, because its reader '
+        + 'edits the meta and writes it back.\n\n'
         + 'WHAT `validationMode` MEANS FOR YOUR WRITE: `off` accepts anything; `warn` accepts the write and '
         + 'reports violations; `strict` REFUSES a write that breaks a schema. With `strictLinkage` on, a '
         + 'reference that does not resolve is refused too. A space with no `typeSchemas` yet accepts every '
@@ -171,63 +174,24 @@ export const space_metaTool: ToolHandler = {
           type: 'object',
           properties: {
             space: s.requiredSpace,
+            resolve: {
+              type: 'boolean',
+              description: 'Expand schema-library `$ref` types to their effective schema (default true on this '
+                + 'tool). false returns each stored `{ $ref }` as written — what an edit writes back. REST '
+                + '`GET /api/spaces/:id/meta?resolve=` takes the same parameter, where the default is false.',
+            },
           },
           required: ['space'],
           additionalProperties: false,
         }),
   async handle(ctx: ToolContext): Promise<ToolResult> {
-    const { callSpace , accessibleSpaceIds } = ctx;
-    const metaCfg = getConfig();
-    const metaSpace = metaCfg.spaces.find(s => s.id === callSpace);
-    // Always resolve library `$ref` types so the agent sees the effective schema (propertySchemas from
-    // the linked library entry), not a bare `{ $ref }` — this is a read-for-use surface, like
-    // GET /api/spaces/:id/meta?resolve=1.
-    const { resolveMetaRefs } = await import('../../spaces/schema-validation.js');
-    const metaBlock = resolveMetaRefs(metaSpace?.meta ?? {});
-    const metaMemberIds = memberSpacesWithin(callSpace, accessibleSpaceIds);
-    const metaCounts = await Promise.all(metaMemberIds.map(async mid => ({
-      facts: await col(spaceCollection(mid, 'facts')).countDocuments(),
-      entities: await col(spaceCollection(mid, 'entities')).countDocuments(),
-      edges: await col(spaceCollection(mid, 'edges')).countDocuments(),
-      chrono: await col(spaceCollection(mid, 'chrono')).countDocuments(),
-      files: await col(spaceCollection(mid, 'files')).countDocuments(),
-    })));
-    const { buildErModel: buildMetaErModel } = await import('../../brain/er-model.js');
-    const metaActual = await Promise.all(metaMemberIds.map(mid => buildMetaErModel(mid)));
-    const { previousVersions: _pv, ...metaPublic } = metaBlock;
-    const metaResult = {
-      spaceId: callSpace,
-      spaceName: metaSpace?.label ?? callSpace,
-      ...metaPublic,
-      stats: {
-        facts: metaCounts.reduce((s, c) => s + c.facts, 0),
-        entities: metaCounts.reduce((s, c) => s + c.entities, 0),
-        edges: metaCounts.reduce((s, c) => s + c.edges, 0),
-        chrono: metaCounts.reduce((s, c) => s + c.chrono, 0),
-        files: metaCounts.reduce((s, c) => s + c.files, 0),
-      },
-      // The field `reindex`'s description has always told callers to poll for. It was only ever on the REST
-      // route, so an MCP-only client could START a multi-minute job and never learn it had finished. Same
-      // `.some()` over members the REST side uses: a proxy needs a reindex when any member does.
-      needsReindex: metaMemberIds.some(mid => needsReindex(mid)),
-      /*
-       * WHAT THE SPACE ACTUALLY HOLDS, beside what it declares. This was its own tool, `er_model`, and the
-       * split was the defect: both answer *"what is this space like before I write to it"*, and a caller
-       * needed both to get a true picture — a space can declare twenty types and hold three, or hold
-       * records of a type nobody declared.
-       *
-       * It comes back in the DECLARED schema's own format, which is the reason to merge rather than keep
-       * two tools: a caller who sees a type the space really holds can promote it into the declared schema
-       * without writing the JSON by hand.
-       *
-       * Per member on a proxy space, never merged. Merging would add up counts for two types that share a
-       * name and mean different things in different spaces, and invent relationships that can never be
-       * joined — an edge cannot cross a space. A union here would look richer and be false.
-       */
-      actualSchema: metaMemberIds.length === 1 && metaMemberIds[0] === callSpace
-        ? metaActual[0]
-        : { spaceId: callSpace, members: metaActual },
-    };
+    const { callSpace , accessibleSpaceIds, args } = ctx;
+    const space = getConfig().spaces.find(s => s.id === callSpace);
+    // The door's default, from the one place both are written (`Q-168`); the answer, from the one function (`Q-95`).
+    const resolveRefs = typeof args['resolve'] === 'boolean' ? args['resolve'] : META_RESOLVE_DEFAULT.mcp;
+    const metaResult = await spaceMetaAnswer({
+      spaceId: callSpace, space, memberIds: memberSpacesWithin(callSpace, accessibleSpaceIds), resolveRefs,
+    });
     return {
       content: [{
         type: 'text' as const,

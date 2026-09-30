@@ -288,6 +288,35 @@ describe('a tool and its route take the same parameters', () => {
     assert.deepEqual(fixed, [], `these gaps are closed — delete their KNOWN_GAP rows: ${fixed.join(', ')}`);
   });
 
+  it('a READ tool and its GET route take the same parameters, in BOTH directions', () => {
+    /*
+     * The pairing above joins through the audit `ROUTE_RULES`, and a read route has no audit rule — so every read
+     * tool whose REST twin is a GET was outside this gate. `space_meta` was one: REST took `?resolve=` and the
+     * tool had no `resolve` at all (`Q-168`), and nothing compared them because nothing could pair them.
+     *
+     * Both directions here, not just "the tool declares nothing the route drops": the Q-168 gap was the route
+     * accepting a parameter the TOOL lacked, which the check above cannot see by construction.
+     *
+     * A list, because the join has no registry to read for GET routes — so it carries a floor, and every row
+     * must still resolve to a readable route, or the row is stale rather than satisfied.
+     */
+    const READ_TWINS = new Map([
+      ['space_meta', { method: 'GET', route: '/api/spaces/:id/meta' }],
+    ]);
+    assert.ok(READ_TWINS.size >= 1);
+    const gaps = [];
+    for (const [toolName, twin] of READ_TWINS) {
+      const tool = ALL_TOOLS.find(t => t.name === toolName);
+      const row = rows.find(r => r.method === twin.method && r.route === twin.route);
+      if (!tool || !row || !row.keys) { gaps.push(`${toolName} ↔ ${twin.method} ${twin.route}: not readable`); continue; }
+      const routeKeys = new Set([...row.keys, ...(row.queryKeys ?? [])]);
+      const toolKeys = new Set(declared(tool));
+      for (const k of toolKeys) if (!routeKeys.has(k)) gaps.push(`${toolName} declares '${k}', the route does not`);
+      for (const k of routeKeys) if (!toolKeys.has(k)) gaps.push(`${twin.method} ${twin.route} accepts '${k}', ${toolName} does not`);
+    }
+    assert.deepEqual(gaps, [], `a read tool and its GET route disagree:\n  ${gaps.join('\n  ')}`);
+  });
+
   it('the routes whose parameters cannot be read only get FEWER', () => {
     /*
      * The rest state their parameters in a shape the parser cannot follow: the body read field by field, a

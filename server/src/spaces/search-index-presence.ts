@@ -69,7 +69,7 @@
  *   a mongot refusing every create is not asked again on every write.
  */
 import { onRecordCollectionWrite } from '../db/mongo.js';
-import type { MethodEffect } from '../db/record-write-observer.js';
+import { EVERY_COLLECTION, type MethodEffect } from '../db/record-write-observer.js';
 import { log } from '../util/log.js';
 import { envInt } from '../config/env-num.js';
 import {
@@ -200,6 +200,11 @@ function armDropCheck(name: string): void {
 /** The observer's listener. Synchronous and cheap — it runs after every write to a record collection. */
 function onRecordWrite(name: string, effect: MethodEffect): void {
   if (!armed) return;
+  if (effect.forget && name === EVERY_COLLECTION) {
+    // The database was replaced under the observer (a restore): nothing believed about any collection holds.
+    for (const [n] of states) onRecordWrite(n, { forget: true });
+    return;
+  }
   if (effect.forget) {
     const st = states.get(name);
     if (st?.dropCheck) clearTimeout(st.dropCheck);

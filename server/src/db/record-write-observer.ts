@@ -93,6 +93,12 @@ const UNKNOWN_EFFECT: MethodEffect = { write: true, delete: true };
 
 export type RecordWriteListener = (collectionName: string, effect: MethodEffect) => void;
 
+/**
+ * The collection name a listener receives when EVERY collection changed at once — `reportDatabaseReplaced()` in
+ * `db/mongo.ts`, after a writer the observer cannot see. Not a valid collection name, so it cannot collide.
+ */
+export const EVERY_COLLECTION = '*';
+
 interface SessionLike { inTransaction(): boolean; once(event: 'ended', fn: () => void): unknown }
 
 function transactionSessionOf(args: unknown[]): SessionLike | null {

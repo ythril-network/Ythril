@@ -28,6 +28,7 @@ import { loadBackupConfig, BACKUP_CONFIG_PATH, BackupConfigSchema } from '../db/
 import { startBackupScheduler } from '../db/backup-scheduler.js';
 import { dumpDatabase } from '../db/dump.js';
 import { restoreDatabase } from '../db/restore.js';
+import { reportDatabaseReplaced } from '../db/mongo.js';
 import { reconcileSpaceSearchIndexes } from '../spaces/search-index-presence.js';
 import { concreteSpaces } from '../spaces/proxy.js';
 import { testConnection } from '../db/conn-test.js';
@@ -385,6 +386,9 @@ dataRouter.post('/restore', requireAdminMfa, async (req, res) => {
   setMaintenanceActive(true);
   try {
     await restoreDatabase(getMongoUri(), backupDir);
+    // The restore wrote through its own client, which the record-write observer never sees: tell every listener
+    // the database was replaced, so nothing keeps answering from the data as it was before (`Q-95`).
+    reportDatabaseReplaced();
 
     // Restoring DROPS every collection before reloading it, and dropping a collection destroys its
     // vector search index along with it. Without rebuilding here, semantic recall returns empty

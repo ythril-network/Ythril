@@ -10,7 +10,6 @@ import {
 import { globalRateLimit } from '../rate-limit/middleware.js';
 import { editorScopeFor } from '../auth/editor-scope.js';
 import { getConfig, saveConfig, getSecrets, getDocumentProcessingConfig, getMediaEmbeddingConfig, getStorageConfig } from '../config/loader.js';
-import { needsReindex } from '../spaces/_shared.js';
 import { removeSpace } from '../spaces/lifecycle.js';
 import { openRoundHere } from '../networks/round-local-state.js';
 import { makeSignedOwnCast } from '../util/signing.js';
@@ -24,6 +23,7 @@ import { measureSpaceUsage } from '../spaces/space-usage.js';
 import { col } from '../db/mongo.js';
 import { memberSpacesForRequest } from '../spaces/proxy-scoped.js';
 import { isProxy } from '../spaces/proxy.js';
+import { spaceMetaAnswer, META_RESOLVE_DEFAULT } from '../spaces/space-meta-answer.js';
 import { isNetworkSyncing } from '../sync/engine.js';
 import { spaceNetworkInfo } from '../spaces/network-status.js';
 import { z } from 'zod';
@@ -436,72 +436,12 @@ spacesRouter.get('/:id/meta', globalRateLimit, requireSpaceAuthScoped('id'), asy
     return;
   }
 
-  // With `?resolve=1`, expand library `$ref` types to their effective schema (propertySchemas from the
-  // linked library entry) so consumers like the brain entry forms — which pre-fill properties from the
-  // selected type — see the real fields, not a bare `{ $ref }`. Default (raw) is preserved for the
-  // edit/round-trip view and existing callers that verify the stored `$ref`.
-  const resolveRefs = req.query['resolve'] === '1' || req.query['resolve'] === 'true';
-  const rawMeta = space.meta ?? {};
-  const meta = resolveRefs
-    ? (await import('../spaces/schema-validation.js')).resolveMetaRefs(rawMeta)
-    : rawMeta;
-  const memberIds = memberSpacesForRequest(req, id);
-  const counts = await Promise.all(memberIds.map(async mid => ({
-    facts: await col(spaceCollection(mid, 'facts')).countDocuments(),
-    entities: await col(spaceCollection(mid, 'entities')).countDocuments(),
-    edges: await col(spaceCollection(mid, 'edges')).countDocuments(),
-    chrono: await col(spaceCollection(mid, 'chrono')).countDocuments(),
-    files: await col(spaceCollection(mid, 'files')).countDocuments(),
-  })));
-
-  const stats = {
-    facts: counts.reduce((s, c) => s + c.facts, 0),
-    entities: counts.reduce((s, c) => s + c.entities, 0),
-    edges: counts.reduce((s, c) => s + c.edges, 0),
-    chrono: counts.reduce((s, c) => s + c.chrono, 0),
-    files: counts.reduce((s, c) => s + c.files, 0),
-  };
-
-  // Reindex state travels with the meta on BOTH doors. The `reindex` tool's own description tells a caller to
-  // "poll `space_meta` or the REST reindex-status route" after starting a job — and `space_meta` did not
-  // carry it, so for an MCP-only client (Claude Desktop, any agent with no HTTP door) the sentence named
-  // something unreachable. A schema description is read while arguments are being constructed; one that points
-  // at a door the reader does not have is worse than silence.
-  //
-  // `.some()` over the members, matching `GET /reindex-status`: a proxy needs a reindex when any member does.
-  const reindexNeeded = memberIds.some(mid => needsReindex(mid));
-
-  // Strip previousVersions from public response (available via dedicated endpoint if needed)
-  // (`needsReindex` is attached where the response is assembled, just below.)
-  const { previousVersions: _pv, ...metaPublic } = meta;
-
-  /*
-   * WHAT THE SPACE ACTUALLY HOLDS, beside what it declares — the other half of `GET /er-model`, which was
-   * folded in here at 5.0 along with its MCP twin.
-   *
-   * Both answer *"what is this space like before I write to it"*, and a caller needed both calls to get a
-   * true picture: a space can declare twenty types and hold three, or hold records of a type nobody
-   * declared. Together they do something neither did alone — `actualSchema` comes back in the DECLARED
-   * schema's own format, so a type the space really holds can be promoted into its declared schema without
-   * the JSON being written by hand.
-   *
-   * Per member on a proxy space, never merged: two types sharing a name mean different things in different
-   * spaces, and an edge cannot cross a space, so a union would invent relationships that cannot exist.
-   */
-  const { buildErModel } = await import('../brain/er-model.js');
-  const actualPerMember = await Promise.all(memberIds.map(mid => buildErModel(mid)));
-  const actualSchema = memberIds.length === 1 && memberIds[0] === id
-    ? actualPerMember[0]
-    : { spaceId: id, members: actualPerMember };
-
-  res.json({
-    spaceId: id,
-    spaceName: space.label,
-    ...metaPublic,
-    stats,
-    needsReindex: reindexNeeded,
-    actualSchema,
-  });
+  // `resolve` expands library `$ref` types to their effective schema. The default is RAW on this door — the
+  // edit/round-trip view, and callers that verify the stored `$ref` — and resolved on MCP; both are written in
+  // `META_RESOLVE_DEFAULT`, which says why (`Q-168`). The one answer, for both doors, is `spaceMetaAnswer` (`Q-95`).
+  const q = req.query['resolve'];
+  const resolveRefs = q === undefined ? META_RESOLVE_DEFAULT.rest : (q === '1' || q === 'true');
+  res.json(await spaceMetaAnswer({ spaceId: id, space, memberIds: memberSpacesForRequest(req, id), resolveRefs }));
 });
 
 // GET /api/spaces/:id/completeness — how much of what this space declared it would hold, it holds.
