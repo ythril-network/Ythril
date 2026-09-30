@@ -14,6 +14,7 @@ import { log } from '../util/log.js';
 import type { KnowledgeType } from '../config/types.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { collectionHoldsRecord } from './record-presence.js';
+import { searchAvailable, resetSearchReadyProbe } from './search-readiness.js';
 
 // Collections that have vector search indexes for semantic recall
 /*
@@ -107,66 +108,14 @@ export function vectorFilterFieldsFor(spaceId: string, collectionSuffix: string)
 
 interface SearchIndexField { type?: string; path?: string; numDimensions?: number }
 
-/**
- * Wait — ONCE per process — for the database's search component to answer.
- *
- * `mongot` (the search process inside mongodb-atlas-local) starts AFTER mongod accepts connections, and
- * compose's `depends_on: service_healthy` waits on mongod only. On a cold start, index calls can fail
- * purely because search is not listening yet. The old code treated any such failure as "not Atlas Local",
- * skipped index creation and never retried — permanent, silent loss of semantic recall for the life of
- * that deployment.
- *
- * This gate is deliberately shared and memoized. An earlier version of the fix retried inside
- * `ensureVectorSearchIndex`, which runs once per collection per space — so a cold boot paid the full
- * backoff five times per space and delayed startup enough to break crash-recovery. Waiting once bounds
- * the cost to a single window no matter how many spaces exist.
+/*
+ * Whether the database's search component is answering lives in `search-readiness.ts` (Q-113): the cold-start
+ * window, the watcher that finds a mongot that starts late, and the list of things waiting for it. It used to be
+ * a probe memoised here for the life of the process, FALSE included, so a mongot that lost the race with the app
+ * by thirteen seconds was never asked again. `resetSearchReadyProbe` is re-exported so the existing importers
+ * reach the same reset, not a second copy.
  */
-let searchReadyProbe: Promise<boolean> | null = null;
-
-export function resetSearchReadyProbe(): void { searchReadyProbe = null; }
-
-/**
- * Ask the database whether search is answering, retrying past a cold start.
- *
- * `probe` and `sleep` are injectable so the retry-and-cache contract can be tested without a
- * database and without waiting out 12 seconds of real backoff. Defaults are the production ones —
- * callers pass nothing.
- *
- * Exported for that test. The behaviour worth pinning is the CACHE: this used to be awaited from
- * `ensureVectorSearchIndex`, which runs once per collection per space, so an unmemoised probe made a
- * cold boot pay the full backoff five times per space and delayed startup enough to break crash
- * recovery. One probe per process, whatever the answer.
- */
-export async function searchAvailable(
-  probe: () => Promise<unknown> = () => getDb().collection('_vectorsearch_probe').listSearchIndexes().toArray(),
-  sleep: (ms: number) => Promise<void> = ms => new Promise(r => setTimeout(r, ms)),
-): Promise<boolean> {
-  if (searchReadyProbe) return searchReadyProbe;
-  searchReadyProbe = (async () => {
-    const ATTEMPTS = 6;
-    const BACKOFF_MS = 2_000;
-    let lastErr: unknown;
-    for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
-      try {
-        // Any collection will do — this asks "is search answering at all?", not "does this index exist".
-        await probe();
-        return true;
-      } catch (err) {
-        lastErr = err;
-        if (attempt < ATTEMPTS) await sleep(BACKOFF_MS);
-      }
-    }
-    log.warn(
-      `Database search (\`mongot\`) did not answer after ${ATTEMPTS} attempts ` +
-        `(${Math.round((ATTEMPTS * BACKOFF_MS) / 1000)}s): ${lastErr instanceof Error ? lastErr.message : String(lastErr)}. ` +
-        `SEMANTIC RECALL WILL RETURN EMPTY until vector indexes are built — rebuild them from ` +
-        `Settings → Space → Danger Zone, or POST /api/spaces/<space>/rebuild-indexes. ` +
-        `Use mongodb/mongodb-atlas-local for $vectorSearch support.`,
-    );
-    return false;
-  })();
-  return searchReadyProbe;
-}
+export { resetSearchReadyProbe };
 
 /**
  * Which index a search should query right now, by the index's own name.
@@ -187,7 +136,8 @@ const swapNameFor = (indexName: string): string => `${indexName}__swap`;
  * What `ensureVectorSearchIndex` left behind (Q-165), so the index lifecycle can tell "done" from "try again".
  *
  * - `ready` — the index exists with the wanted definition, or its build (or in-place change) has been started.
- * - `unavailable` — search is not answering on this deployment at all; nothing a retry per write could fix.
+ * - `unavailable` — search is not answering right now. A retry per write cannot fix that, so the presence module
+ *   records the collection as `deferred` and waits for the service itself (`search-readiness.ts`).
  * - `failed` — search answered and this index could not be listed or created; a later write should try again.
  *
  * It used to return nothing, which was enough while every index was built once at space creation and a failure
@@ -884,7 +834,15 @@ export async function dropCollectionSearchIndexes(spaceId: string, suffix: Vecto
 export async function waitForSpaceIndexesReady(
   spaceId: string,
   opts: { timeoutMs?: number } = {},
-): Promise<boolean> {
+): Promise<boolean | 'deferred'> {
+  /*
+   * SEARCH IS ASKED ABOUT FIRST (Q-113). Polling an index on a service that is not answering is a poll that cannot
+   * succeed: it used to run for up to INDEX_READY_TIMEOUT_MS (ten minutes) and then mark a healthy, merely early
+   * space `failed`. `deferred` is neither ready nor failed — the caller leaves the space `building` and asks again
+   * when the service is back. The face gallery's poll is below this line too, so the optional index cannot be
+   * blamed for an outage either.
+   */
+  if (!(await searchAvailable())) return 'deferred';
   // Poll CONCURRENTLY. These builds run independently inside the database, so waiting on them one after
   // another only adds up their timeouts: five collections at a 60s ceiling each meant a space could sit
   // at indexStatus='building' for five minutes when every index was in fact ready in seconds. That was
@@ -943,13 +901,16 @@ export async function waitForSpaceIndexesReady(
 export async function finalizeSpaceIndexReady(
   spaceId: string,
   opts: { timeoutMs?: number } = {},
-): Promise<boolean> {
-  let ok = false;
+): Promise<boolean | 'deferred'> {
+  let ok: boolean | 'deferred' = false;
   try {
     ok = await waitForSpaceIndexesReady(spaceId, opts);
   } catch (err) {
     log.warn(`Space '${spaceId}': error awaiting vector index readiness: ${err instanceof Error ? err.message : String(err)}`);
   }
+  // Search is not answering: there is nothing true to record. The space stays `building`, which is what it is, and
+  // the caller registers for the service's return. Returned BEFORE any write, so no status can be set for it.
+  if (ok === 'deferred') return 'deferred';
   // Re-read before writing: the poll above may have run for a minute, and saving the
   // snapshot we started with would erase anything written to config.json since — a
   // pendingSpaceOp crash marker being the case that bites, since losing it strands a

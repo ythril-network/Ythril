@@ -30,6 +30,7 @@ import { z } from 'zod';
 import { v4 as uuidv4 } from 'uuid';
 import { log } from '../util/log.js';
 import { reconcileSpaceSearchIndexes } from '../spaces/search-index-presence.js';
+import { searchReadinessSnapshot, isSearchDown } from '../spaces/search-readiness.js';
 import { peerSafeFetch } from '../sync/peer-fetch.js';
 import type { SpaceMeta, KnowledgeType } from '../config/types.js';
 import { KNOWLEDGE_TYPES } from '../config/types.js';
@@ -184,6 +185,11 @@ spacesRouter.get('/', globalRateLimit, requireAuth, async (req, res) => {
     }
   }
 
+  // Read once per request; applied per space below, inside the per-token visible-spaces map, so a scoped token is
+  // told about its own spaces only. Derived, never stored and never replicated: it would be stale the moment
+  // search returned.
+  const search = searchReadinessSnapshot();
+  const searchDown = isSearchDown(search);
   const spaces = visibleSpaces.map((space) => {
     const { id, label, builtIn, folders, maxGiB, flex, proxyFor, meta, dupeRules, dupeMergeSurvivor, dupeRulesOnInsert, recordTtlDays, documentExtraction, imageAnalysis, audioAnalysis, videoAnalysis, textAnalysis, indexStatus } = space;
     return {
@@ -196,6 +202,11 @@ spacesRouter.get('/', globalRateLimit, requireAuth, async (req, res) => {
       ? { usageIncomplete: usageBySpaceId.get(id)!.incomplete }
       : {}),
     ...(indexStatus ? { indexStatus } : {}),
+    // A space that is `building` because database search is not answering (Q-113): it is not failing and it is not
+    // slow, it is waiting. Says so, and since when, so the badge can say why it is not moving.
+    ...(searchDown && indexStatus === 'building'
+      ? { indexWaiting: true, ...(search.since !== null ? { indexWaitingSince: new Date(search.since).toISOString() } : {}) }
+      : {}),
     ...(isProxy(space) ? { proxyFor } : {}),
     // Network membership + status for the Brain space-chip indicator (F8).
     ...(spaceNetworkInfo(cfg.networks, id, isNetworkSyncing, cfg.instanceId) ?? {}),

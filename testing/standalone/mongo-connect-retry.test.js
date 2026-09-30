@@ -127,11 +127,18 @@ describe('the retry loop itself', () => {
     assert.match(bodyOf(SRC, 'connectMongo'), /await _client\.close\(\)\.catch\(/);
   });
 
-  it('backs off with jitter and a ceiling', () => {
+  it('backs off with jitter and a ceiling — through the shared helper, not a local copy', () => {
     // Jitter because four instances start together and would otherwise retry in lockstep against the
-    // database they are all waiting for — the exact herd `util/backoff.ts` exists to break up.
-    assert.match(SRC, /withJitter\(delay\)/);
-    assert.match(SRC, /Math\.min\(delay \* 2, 4_000\)/);
+    // database they are all waiting for — the exact herd util/backoff.ts exists to break up. The doubling and
+    // the ceiling used to be a local "delay" variable here; they are backoffDelayMs(attempt, 250, 4_000) now
+    // (Q-113: the third site to need the rule), and backoff-delay-grows-to-a-cap.test.js holds the two to the
+    // same delays for the same random.
+    const body = bodyOf(SRC, 'connectMongo');
+    assert.match(body, /backoffDelayMs\([^;]*?,\s*250,\s*4_000\s*\)/,
+      'the wait must come from backoffDelayMs(<attempt>, 250, 4_000)');
+    assert.doesNotMatch(body, /Math\.min\(delay \* 2, 4_000\)/, 'the hand-rolled doubling is back');
+    assert.doesNotMatch(body, /withJitter\(delay\)/, 'the hand-rolled jitter is back');
+    assert.doesNotMatch(body, /let delay\b/, 'a local delay variable means a second copy of the schedule');
   });
 
   it('says it recovered, so a slow start is not silently indistinguishable from a fast one', () => {

@@ -188,8 +188,9 @@ discovering this by trying.
 > **Reindexing does NOT repair "search returns nothing".** It re-computes the embeddings *stored on*
 > your records. Recall queries those vectors through a separate `$vectorSearch` index, and that index
 > can be missing while every record still holds a perfectly good embedding — after restoring a backup,
-> or if the database search process was not ready when the instance started. Reindexing every record
-> in the space will not create it. Use the rebuild endpoint below.
+> or after an index build that search refused. (A database search process that is merely late is not this case: the
+> instance finds it by itself and builds the indexes when it answers; see `indexWaiting` on `GET /api/spaces`.)
+> Reindexing every record in the space will not create it. Use the rebuild endpoint below.
 
 ### Reorder spaces
 
