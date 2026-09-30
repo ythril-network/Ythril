@@ -163,8 +163,12 @@ const RECLASSIFIED = 1;
  * match `memberSpacesForRequestAcross(` — the `\(` anchors it — so the new sites were invisible to the
  * count while being exactly what it counts. The conserved total is what noticed: 46 against a TOTAL of 45,
  * which is the whole reason this arithmetic exists.
+ *
+ * 48 -> 49 (`Q-109`): `list_embed_jobs` reads a proxy space's members. It read only the named space, so a proxy
+ * listed nothing of its members while its REST twin summed and paged them all; both now answer through
+ * `brain/embed-jobs-page.ts`, and the tool narrows with `memberSpacesWithin` — BORN narrowed.
  */
-const TOTAL = 48;
+const TOTAL = 49;
 
 /**
  * Fan-out sites that were REMOVED rather than converted, with the tool that owned them.
@@ -198,8 +202,14 @@ const TOTAL = 48;
  *   The expansion did not stop happening: the tool does it, on the same spaces, through the same
  *   narrowed path, and is already counted here. Two sites fewer because there is ONE implementation
  *   where there were two, which is the whole point of the row that removed it.
+ * - **14, at 5.0: `POST /api/brain/spaces/:spaceId/traverse`.** `Q-109` collapsed the route onto the
+ *   `graph_traverse` tool, and its `memberSpacesForRequest(req, spaceId)` went with the handler. The
+ *   expansion did not stop happening: the tool does it with `memberSpacesWithin(callSpace,
+ *   accessibleSpaceIds)` in `mcp/tools/edge.ts`, which is already counted as narrowed, and `callTool`
+ *   builds that reachable list from the same token rights the REST helper read. `api/brain/search.ts`
+ *   stays in NARROWED on its `stats` and `activity` routes — the case below still demands a real call there.
  */
-const REMOVED = 13;
+const REMOVED = 14;
 
 const GUARDS = {
   'server/src/auth/middleware.ts': 2,

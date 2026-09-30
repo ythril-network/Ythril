@@ -544,6 +544,9 @@ reached. A note the network drafted itself (a schema update it carried, a space 
 GET /api/networks/:id/sync-history?limit=20
 ```
 
+`limit` is 1–100, default 20, the same on `network_sync_history`. Anything else is a `400` — REST used to clamp 500 to 100
+without saying so and pass a negative through (`Q-109`).
+
 **Response** `200`:
 
 ```json

@@ -9,6 +9,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **A traversing recall walks its rows a window at a time, with every row exactly the graph it had before**
+  (`Q-136`). `recall` and `similar` with `traverse > 0` walked each result row on its own, so a page cost about
+  four queries per hop PER ROW — its edges, its link scan, the facts it named and the records it reached. Up to 16
+  rows are now walked together: one query of each kind per hop for the whole window, each row keeping its own
+  visited set, routes and bookkeeping. Measured on 20 rows of a 3 000-entity graph (MongoDB 8.2): depth 1 went
+  from 73 queries and 34.2 ms to 8 and 5.6 ms, depth 2 from 152 and 80.9 ms to 16 and 19.0 ms, depth 5 from 392
+  and 310.4 ms to 40 and 136.3 ms (`benchmarks/row-walk/`). Nothing in any answer changes: a row whose share of an
+  edge read would reach its own cap — a hub over the row ceiling — is read alone for that read, and the row
+  ceiling, `incompleteRows` reasons, the call's walk budget and the deadline behave as before. A differential
+  test walks every row both ways over hubs, cycles, self-loops, fact, chrono and file endpoints, linked records
+  and every narrowing, and requires them equal.
+- **Breaking:** **REST traverse refuses what it used to clamp (`Q-109`).** `POST /api/brain/spaces/:spaceId/traverse` now
+  answers through the `graph_traverse` tool, as `/recall` and `/similar` answer through theirs, so the two doors share
+  one set of caps and refusals. What REST quietly adjusted is a `400` now, as it always was on MCP: `maxDepth` outside
+  1–10, `limit` outside 1–1000, a non-number for either, a `direction` other than `outbound`/`inbound`/`both` (it became
+  `outbound`), an `edgeLabels` list holding a non-string (it became ALL labels — a widening) and a blank `startId`.
+  Refusals carry the tool's wording, and an unknown key is named in the message rather than in `unrecognized_keys`.
+  **Who is affected:** a REST client that relied on a clamp or fallback.
+- **A request past a cap is refused, not served smaller (`Q-109`).** A bulk write with more than 500 items in one array
+  refuses the whole batch with a `400` naming the array, before anything is written; it used to drop the items past
+  500 and answer with the same `207` as a clean batch. `network_sync_history`'s `limit` is refused outside 1–100 on both
+  doors (REST clamped 500 to 100 and let a negative through). The embed-queue listing's `limit` over 200 is a `400`
+  where REST echoed it and served 200. **Who is affected:** a caller that relied on the quiet cut.
+- **`list_embed_jobs` reaches every job, on a proxy too (`Q-109`).** It is now the act REST's embed-queue listing calls:
+  it takes `skip`, reads and sums a proxy space's members, and — on both doors — returns `transientFailures`, the field
+  its own description told callers to read and neither door sent.
+- **The Graph view draws the whole neighbourhood, not the first page of it (`Q-109`).** Since `graph_traverse` pages its
+  nodes under the byte budget, the view sent no `skip` and drew whatever the first page held; it now reads every page
+  and joins them. It still says the graph is partial when the walk itself stopped at its `limit`.
+
 - **Breaking:** **REST `POST /api/brain/similar` answers in the `similar` tool's shape (`Q-89`).** Each hit is now
   `{score, spaceId, type, record}` and `source` is `{type, id, summary}`, as MCP has always answered — the route
   used to return flat hits (`{_id, name, …, score}`) and the whole source record with `score: 1.0`, so one

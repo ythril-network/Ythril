@@ -9,7 +9,7 @@
 
 import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.js';
 import { TTL_DAYS_SCHEMA, SUPERSEDED_SCHEMA, SUPPRESS_EMBEDDINGS_SCHEMA, uuidSchema } from './shared.js';
-import { bulkWrite, bulkWriteTotal } from '../../brain/bulk.js';
+import { bulkWrite, bulkWriteTotal, BULK_MAX_PER_TYPE } from '../../brain/bulk.js';
 import { resolveWriteTarget } from '../../spaces/proxy.js';
 import { emitWebhookEvent } from '../../webhooks/dispatcher.js';
 import { edgeEndpointKindSchema } from '../../brain/entity-refs.js';
@@ -26,10 +26,10 @@ export const save_bulkTool: ToolHandler = {
     + '`inserted` and `errors` from the response — `inserted` counts what landed, per collection, and `errors` '
     + 'names each rejection by `type` and by its INDEX in the array you sent. Treating a returned result as '
     + 'proof of success is the mistake this tool most invites.\n\n'
-    + 'ANYTHING BEYOND 500 PER COLLECTION IS SILENTLY DROPPED. Not an error, not a warning, and not counted in '
-    + '`errors` — items 501 and beyond are discarded before validation, so `inserted` plus `errors` can be far '
-    + 'short of what you sent and nothing in the reply says so. The cap is per collection, so 500 facts AND '
-    + '500 entities in one call is fine. Split larger imports yourself and check the counts add up.\n\n'
+    + `AT MOST ${BULK_MAX_PER_TYPE} PER COLLECTION, AND A LONGER ARRAY REFUSES THE WHOLE BATCH — nothing is written, `
+    + 'and the refusal names the array and its size. Until Q-109 the items past the cap were silently dropped behind '
+    + 'a clean answer. The cap is per collection, so 500 facts AND 500 entities in one call is fine. Split larger '
+    + 'imports yourself.\n\n'
     + 'REFERENCES ARE CHECKED FOR SHAPE AND FOR EXISTENCE, exactly as the single-record tools check them. A '
     + 'reference resolving to nothing is refused here too. A resolved `$ref` exists by construction, so the '
     + 'correlation key never pays for it — what it catches is a literal id you invent, which is a well-formed '
@@ -66,8 +66,8 @@ export const save_bulkTool: ToolHandler = {
             space: s.requiredSpace,
             facts: {
               type: 'array',
-              maxItems: 500,
-              description: 'Fact entries to insert (max 500; excess entries are dropped). Same fields as the `saveFact` tool.',
+              maxItems: BULK_MAX_PER_TYPE,
+              description: `Fact entries to insert (at most ${BULK_MAX_PER_TYPE}; a longer array refuses the whole batch, before anything is written). ` + 'Same fields as the `saveFact` tool.',
               items: {
                 type: 'object',
                 additionalProperties: false,
@@ -112,8 +112,8 @@ export const save_bulkTool: ToolHandler = {
             },
             entities: {
               type: 'array',
-              maxItems: 500,
-              description: 'Entity entries to upsert (max 500; excess entries are dropped). Same fields as the `save_entity` tool.',
+              maxItems: BULK_MAX_PER_TYPE,
+              description: `Entity entries to upsert (at most ${BULK_MAX_PER_TYPE}; a longer array refuses the whole batch, before anything is written). ` + 'Same fields as the `save_entity` tool.',
               items: {
                 type: 'object',
                 additionalProperties: false,
@@ -148,8 +148,8 @@ export const save_bulkTool: ToolHandler = {
             },
             edges: {
               type: 'array',
-              maxItems: 500,
-              description: 'Edge entries to upsert (max 500; excess entries are dropped). Same fields as the `save_edge` tool.',
+              maxItems: BULK_MAX_PER_TYPE,
+              description: `Edge entries to upsert (at most ${BULK_MAX_PER_TYPE}; a longer array refuses the whole batch, before anything is written). ` + 'Same fields as the `save_edge` tool.',
               items: {
                 type: 'object',
                 additionalProperties: false,
@@ -206,8 +206,8 @@ export const save_bulkTool: ToolHandler = {
             },
             chrono: {
               type: 'array',
-              maxItems: 500,
-              description: 'Chrono entries to insert (max 500; excess entries are dropped). Same fields as the `save_chrono` tool.',
+              maxItems: BULK_MAX_PER_TYPE,
+              description: `Chrono entries to insert (at most ${BULK_MAX_PER_TYPE}; a longer array refuses the whole batch, before anything is written). ` + 'Same fields as the `save_chrono` tool.',
               items: {
                 type: 'object',
                 additionalProperties: false,

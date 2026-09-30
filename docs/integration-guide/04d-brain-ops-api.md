@@ -303,7 +303,7 @@ GET /api/brain/spaces/:spaceId/embedding-queue/records
 | Query param | Description |
 |-------------|-------------|
 | `status` | `pending`, `processing`, or `failed`. Omit for all three. An unknown value is a `400`, never a silently ignored filter |
-| `limit` | Default `50`, max `200`. `0`, a negative, or a non-integer is a `400` |
+| `limit` | Default `50`, max `200`. `0`, a negative, a non-integer, or more than `200` is a `400` — it used to be echoed back and served as 200 (`Q-109`) |
 | `skip` | Rows to discard before the page (default `0`). A negative or non-integer is a `400` |
 
 **Response** `200`:
@@ -319,6 +319,7 @@ GET /api/brain/spaces/:spaceId/embedding-queue/records
       "status": "failed",
       "attempts": 5,
       "maxAttempts": 5,
+      "transientFailures": 0,
       "lastError": "embedding model unreachable",
       "createdAt": "2026-08-13T09:12:04.311Z",
       "updatedAt": "2026-08-13T09:18:47.902Z"
@@ -336,6 +337,14 @@ Newest-first by `updatedAt`, with the record id breaking ties so the order is **
 will not retry on its own, and the record stays unfindable until you retry it or rewrite it. Each row carries its own
 `spaceId`, which for a **proxy space** is the member space the record actually lives in — that is the space to retry it
 in. `counts` is returned whether or not you filtered, so a caller can filter to `failed` and still see the whole picture.
+
+`transientFailures` counts the times the embedder did not answer at all — connection refused, a timeout, a 429 or 5xx —
+which hand the attempt back rather than spend it; `attempts` is spent only on errors a retry cannot fix. A high
+`transientFailures` with `attempts` at zero is an outage waiting itself out. It was described on the tool and returned by
+neither door until `Q-109`.
+
+**MCP `list_embed_jobs` is the same act** (`Q-109`): the same `status`, `limit` and `skip`, the same refusals, and a proxy
+space's members read and summed exactly as here. It used to read only the named space and take no `skip`.
 
 Requires `knowledge: read`. Deliberately readable by a token that cannot write: an operator who cannot fix the queue
 still needs to be able to see it.
