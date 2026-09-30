@@ -48,6 +48,7 @@ import { hasReDoSRisk, REDOS_REFUSAL } from '../util/redos.js';
 import type { KnowledgeType } from '../config/types.js';
 import { RECORD_TYPES } from '../config/types.js';
 import { DATE_PASSED_VALUES } from '../brain/chrono-date-policy.js';
+import { MAX_SPACE_IDS, MAX_CREATE_FOLDERS } from '../util/request-bounds.js';
 
 // ── Zod schema for PropertySchema ──────────────────────────────────────────
 /**
@@ -463,14 +464,15 @@ export function stripServerOwnedSpace(body: unknown, opts: { forUpdate?: boolean
 
 // proxyFor accepts either the wildcard sentinel ['*'] or a list of specific space IDs
 export const ProxyForZ = z.union([
-  z.tuple([z.literal('*')]),
-  z.array(z.string().min(1).max(40)).min(1),
+  // `['*']` exactly — an array of one literal rather than a tuple, so its bound is a count a validator can read.
+  z.array(z.literal('*')).length(1),
+  z.array(z.string().min(1).max(40)).min(1).max(MAX_SPACE_IDS),
 ]);
 
 export const CreateSpaceBody = z.object({
   id: z.string().min(1).max(40).regex(/^[a-z0-9-]+$/).optional(),
   label: z.string().min(1).max(200),
-  folders: z.array(z.string()).optional(),
+  folders: z.array(z.string()).max(MAX_CREATE_FOLDERS).optional(),
   maxGiB: z.number().positive().optional(),
   // Bounds rather than an enum — 128 (MobileFaceNet class) and 512 (ArcFace, AdaFace, FaceNet, EdgeFace) are
   // today's answers, and pinning an enum would make the next model a code change.
@@ -496,7 +498,7 @@ export const RenameSpaceBody = z.object({
 export const DupeActionRuleBody = z.object({
   minScore: z.number().min(0).max(1),
   action: z.enum(['flag', 'automerge', 'notify']),
-  types: z.array(z.enum(RECORD_TYPES)).optional(),
+  types: z.array(z.enum(RECORD_TYPES)).max(RECORD_TYPES.length).optional(),
   webhookUrl: z.string().url().refine(isSsrfSafeUrl, { message: SSRF_SAFE_MESSAGE }).optional(),
 }).strict();
 
@@ -592,7 +594,7 @@ export const UpdateSpaceBody = z.object({
 });
 
 export const ReorderSpacesBody = z.object({
-  ids: z.array(z.string().min(1).max(40)).min(1),
+  ids: z.array(z.string().min(1).max(40)).min(1).max(MAX_SPACE_IDS),
 }).strict();
 
 export const PutSchemaBody = z.object({

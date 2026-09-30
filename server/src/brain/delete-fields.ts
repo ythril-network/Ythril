@@ -8,6 +8,8 @@
 
 // ── System fields that cannot be deleted ────────────────────────────────────
 
+import { MAX_DELETE_FIELDS, countError } from '../util/request-bounds.js';
+
 const SYSTEM_FIELDS = new Set([
   'id', '_id', 'name', 'type', 'spaceId', 'createdAt', 'updatedAt',
   // Chrono's required fields, added with `deleteFields` support for chrono (X-4). They are here rather than
@@ -40,6 +42,8 @@ export function validateDeleteFields(
   if (!Array.isArray(deleteFields)) {
     return { ok: false, error: '`deleteFields` must be an array of strings' };
   }
+  const tooMany = countError('deleteFields', deleteFields, MAX_DELETE_FIELDS);
+  if (tooMany) return { ok: false, error: tooMany };
 
   for (const p of deleteFields) {
     if (typeof p !== 'string' || !p.trim()) {

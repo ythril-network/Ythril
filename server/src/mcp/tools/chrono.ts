@@ -35,6 +35,7 @@ import { validateDeleteFields } from '../../brain/delete-fields.js';
 import { parseRecordSuppression } from '../../brain/suppress-embeddings.js';
 import { parseRecordSuperseded } from '../../brain/record-flag.js';
 import { connectionSchemas, applyConnections, assertConnections, desiredLinksFrom, edgeInputsFrom } from '../../brain/write-connections.js';
+import { MAX_TAGS, MAX_DELETE_FIELDS } from '../../util/request-bounds.js';
 
 export const save_chronoTool: ToolHandler = {
   name: 'save_chrono',
@@ -85,7 +86,7 @@ export const save_chronoTool: ToolHandler = {
               + 'than records. Nothing derives it, nothing ranks on it and nothing requires it — it is stored '
               + 'and returned, and `filter` can sort and narrow on it.'),
             tags: {
-              type: 'array', items: { type: 'string' },
+              type: 'array', maxItems: MAX_TAGS, items: { type: 'string' },
               description: 'Categorisation tags. EMBEDDED along with the title, so a tag affects meaning '
                 + 'ranking as well as being an exact filter for `filter`.',
             },
@@ -327,7 +328,7 @@ export const update_chronoTool: ToolHandler = {
               + 'than records. Replaced when sent; nothing derives it, and nothing refuses a prediction that '
               + 'omits it.'),
             tags: {
-              type: 'array', items: { type: 'string' },
+              type: 'array', maxItems: MAX_TAGS, items: { type: 'string' },
               description: 'REPLACES the stored tag list — send the FULL list you want the entry to end up '
                 + 'with, because sending one tag drops the rest. `update_entity` and `update_edge` MERGE tags '
                 + 'instead; this tool and `update_fact` replace, and the split is not guessable from the '
@@ -347,7 +348,7 @@ export const update_chronoTool: ToolHandler = {
             suppressEmbeddings: SUPPRESS_EMBEDDINGS_SCHEMA,
             superseded: SUPERSEDED_SCHEMA,
             deleteFields: {
-              type: 'array', items: { type: 'string' },
+              type: 'array', maxItems: MAX_DELETE_FIELDS, items: { type: 'string' },
               description: 'Dot-notation paths to REMOVE from the entry, applied after the merge above — the '
                 + 'only way to unset anything, since an absent field means "leave alone" and `properties` '
                 + 'merge. E.g. `["properties.oldKey", "description"]`. Permanent, with no undo. The required '

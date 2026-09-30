@@ -332,6 +332,7 @@ export const space_reembedTool: ToolHandler = {
       space: s.requiredSpace,
       kinds: {
         type: 'array',
+        maxItems: REEMBED_KINDS.length,
         items: { type: 'string', enum: [...REEMBED_KINDS] },
         minItems: 1,
         description: 'Record types to sweep. Omit to sweep all of them.',

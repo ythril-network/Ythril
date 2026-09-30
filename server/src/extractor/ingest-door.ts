@@ -21,7 +21,7 @@ import { spaceEntitySearch } from './conversation/shortlist.js';
 import { extractConversation } from './conversation/extract.js';
 import { writeExtraction } from './conversation/write-extraction.js';
 import { parseIngestRequest, ingestRefusals, spaceContextFrom, startIngest, type IngestDeps, type IngestProbes } from './ingest.js';
-import { ingestRuns, type IngestRun } from './ingest-runs.js';
+import { ingestRuns, INGEST_BUSY, type IngestRun } from './ingest-runs.js';
 import { holdsRung } from '../auth/reachable-spaces.js';
 import type { TokenRights } from '../config/rights-shape.js';
 import { consumeHeavyToolCall, HEAVY_CALLS_PER_WINDOW } from '../rate-limit/heavy-tool.js';
@@ -67,6 +67,8 @@ export async function beginIngest(
   if (refusals.length) {
     return { status: 409, error: `ingest cannot run into '${wt.target}': ${refusals.join('; ')}`, refusals };
   }
+  // Before the rate limit, so a start refused for capacity costs the caller no slot.
+  if (!ingestRuns.hasRoom()) return { status: 429, error: INGEST_BUSY };
   if (!consumeHeavyToolCall(callerKey)) return { status: 429, error: INGEST_RATE_LIMITED };
   // Fails closed: no rights matrix means no second area, so no files.
   const transcripts = !!rights && holdsRung(rights, wt.target, 'files', 'write');

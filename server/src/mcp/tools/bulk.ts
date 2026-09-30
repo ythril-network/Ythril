@@ -16,6 +16,7 @@ import { edgeEndpointKindSchema } from '../../brain/entity-refs.js';
 import { CHRONO_STATUSES } from '../../config/types.js';
 import { refDeclareSchema } from '../../brain/batch-refs.js';
 import { connectionSchemas } from '../../brain/write-connections.js';
+import { MAX_TAGS, MAX_FACT_LENGTH } from '../../util/request-bounds.js';
 
 export const save_bulkTool: ToolHandler = {
   name: 'save_bulk',
@@ -73,9 +74,9 @@ export const save_bulkTool: ToolHandler = {
                 additionalProperties: false,
                 properties: {
                   '$ref': refDeclareSchema('fact'),
-                  fact:        { type: 'string', minLength: 1, maxLength: 50000, description: 'The fact or fact to store (1–50 000 characters).' },
+                  fact:        { type: 'string', minLength: 1, maxLength: MAX_FACT_LENGTH, description: 'The fact or fact to store (1–50 000 characters).' },
                   tags:        {
-                    type: 'array', items: { type: 'string' },
+                    type: 'array', maxItems: MAX_TAGS, items: { type: 'string' },
                     description: 'Categorisation tags. Every fact item is an INSERT, so there is nothing '
                       + 'to merge with. They are embedded along with the fact, so a tag affects ranking as '
                       + 'well as being an exact filter.',
@@ -123,7 +124,7 @@ export const save_bulkTool: ToolHandler = {
                   name:        { type: 'string', description: 'Entity name. Nothing deduplicates by name — an item with no `id` always INSERTS, even when a record of the same name already exists.' },
                   type:        { type: 'string', description: 'Entity type (person, place, concept, …). Validated against the space schema when the space validates.' },
                   tags:        {
-                    type: 'array', items: { type: 'string' },
+                    type: 'array', maxItems: MAX_TAGS, items: { type: 'string' },
                     description: 'Categorisation tags. MERGED over the stored tags when `id` names an '
                       + 'existing entity, exactly as `save_entity` merges — so no value here removes a tag.',
                   },
@@ -187,7 +188,7 @@ export const save_bulkTool: ToolHandler = {
                   },
                   description: { type: 'string', description: 'Optional prose description of why this relationship exists. Replaced when sent.' },
                   tags:        {
-                    type: 'array', items: { type: 'string' },
+                    type: 'array', maxItems: MAX_TAGS, items: { type: 'string' },
                     description: 'Categorisation tags. MERGED over the stored tags when the triplet already '
                       + 'exists, exactly as `save_edge` merges — so no value here removes a tag.',
                   },
@@ -238,7 +239,7 @@ export const save_bulkTool: ToolHandler = {
                   },
                   confidence:  { type: 'number', description: 'Confidence 0 to 1, for entries that are predictions. A non-number is dropped silently and does not appear in `errors`; unlike `save_chrono`, the 0–1 bound is not enforced on this door.' },
                   description: { type: 'string', description: 'Optional longer description of the entry.' },
-                  tags:        { type: 'array', items: { type: 'string' }, description: 'Categorisation tags. Every chrono item is an INSERT, so there is nothing to merge with.' },
+                  tags:        { type: 'array', maxItems: MAX_TAGS, items: { type: 'string' }, description: 'Categorisation tags. Every chrono item is an INSERT, so there is nothing to merge with.' },
                   // `Q-44`: the same two link classes a chrono entry has always held, plus `edges`, from the
                   // one builder — see the note on the `facts` item above for what the hand-written pair said.
                   ...connectionSchemas('chrono'),

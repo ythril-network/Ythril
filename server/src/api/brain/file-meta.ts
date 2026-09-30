@@ -37,6 +37,7 @@ import { markdownWindow } from '../../files/markdown-window.js';
 import { pageList } from '../../brain/list-page.js';
 import { defaultBudgetChars } from '../../brain/result-budget.js';
 import { queryInt } from '../../brain/result-budget.js';
+import { tagsError } from '../../util/request-bounds.js';
 
 /**
  * The rights off a token record. A cast, for the same reason the MCP router needs one: the record is a
@@ -351,7 +352,8 @@ fileMetaRouter.patch('/spaces/:spaceId/files', globalRateLimit, requireSpaceAuth
   const dfPaths: string[] | undefined = Array.isArray(deleteFields) && deleteFields.length > 0
     ? deleteFields as string[]
     : undefined;
-  if (tags !== undefined && !Array.isArray(tags)) { res.status(400).json({ error: '`tags` must be an array' }); return; }
+  // The same rule as every other record's tags, through the same function: strings, at most MAX_TAGS (`Q-108`).
+  if (tags !== undefined) { const tagErr = tagsError(tags); if (tagErr) { res.status(400).json({ error: tagErr }); return; } }
   // The bag's shape AND its values, in one call. This checked only the shape, so a nested value was
   // refused by `write_file` (which declares `additionalProperties`) and stored here — the entity defect
   // reported on 2026-09-02, surviving one record type over.

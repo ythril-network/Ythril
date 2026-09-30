@@ -162,6 +162,7 @@ and the action named, before anything happens.
 This matters after a sync that went wrong: a hundred conflicts is otherwise a hundred clicks, which is
 the point at which people start leaving them unresolved. If some of the batch cannot be resolved, the
 result says how many succeeded and how many failed rather than reporting the whole run as one outcome.
+One batch holds at most 2 000 conflicts — the most the list shows at once — so **Select all** always fits.
 
 ---
 

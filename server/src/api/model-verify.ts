@@ -99,7 +99,7 @@ export interface VerifyResult {
   detail?: string;
 }
 
-const VerifySchema = z.object({
+export const VerifySchema = z.object({
   target: z.enum(['vision', 'stt', 'embedding', 'assist']),
   // `F-33`: on the assist target, exercise its fallback instead of the primary.
   fallback: z.boolean().optional(),

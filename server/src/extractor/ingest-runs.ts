@@ -11,6 +11,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import type { WriteOutcome } from './conversation/write-extraction.js';
+import { MAX_ACTIVE_INGEST_RUNS } from '../util/request-bounds.js';
 
 export type IngestPhase = 'queued' | 'extracting' | 'writing' | 'done' | 'failed';
 
@@ -43,11 +44,28 @@ export interface IngestRun {
 
 const FINISHED: ReadonlySet<IngestPhase> = new Set(['done', 'failed']);
 
+/** The refusal when every ingest slot is taken — one sentence for both doors. */
+export const INGEST_BUSY = `at most ${MAX_ACTIVE_INGEST_RUNS} ingest runs may be in progress at once; try again when one finishes`;
+
 export class IngestRuns {
   private readonly runs = new Map<string, IngestRun>();
-  constructor(private readonly cap = 200) {}
+  /**
+   * @param cap          runs KEPT, finished ones evicted first — what `ingest_status` can still read.
+   * @param activeCap    runs UNFINISHED at once (`Q-108`). Each holds model calls for minutes, so the count is the
+   *                     axis that costs; the per-token rate limit alone let a fleet of tokens start any number.
+   */
+  constructor(private readonly cap = 200, private readonly activeCap = MAX_ACTIVE_INGEST_RUNS) {}
+
+  /** Whether a run can start now — asked by the door BEFORE it spends the caller's rate-limit slot. */
+  hasRoom(): boolean {
+    let active = 0;
+    for (const run of this.runs.values()) if (!FINISHED.has(run.phase)) active++;
+    return active < this.activeCap;
+  }
 
   create(spaceId: string): IngestRun {
+    // The guard lives HERE, not at the door: a door that forgot to ask `hasRoom` still cannot start a fifth run.
+    if (!this.hasRoom()) throw new Error(INGEST_BUSY);
     const run: IngestRun = { runId: randomUUID(), spaceId, phase: 'queued', startedAt: new Date().toISOString() };
     this.runs.set(run.runId, run);
     this.evict();

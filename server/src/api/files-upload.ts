@@ -30,6 +30,7 @@ import { resolveWriteTarget } from '../spaces/proxy.js';
 import { log } from '../util/log.js';
 import { primitivePropertyError } from '../brain/property-values.js';
 import { webhookToken, parseTtlDaysQuery, requireQueryPath, enforceSizeLimit } from './files-request.js';
+import { tagsError } from '../util/request-bounds.js';
 
 /**
  * Attach the upload route to the file-store router.
@@ -185,6 +186,11 @@ export function registerUploadRoute(router: Router): void {
         // content-type string that every comment stripper in the suite reads as a block-comment start.)
         const propErr = primitivePropertyError(req.body?.properties);
         if (propErr) { res.status(400).json({ error: propErr }); return; }
+        // Tags by the one rule every record's tags follow (Q-108), checked before anything is written.
+        if (req.body?.tags !== undefined) {
+          const tagErr = tagsError(req.body.tags);
+          if (tagErr) { res.status(400).json({ error: tagErr }); return; }
+        }
         const metaOpts: StoreFileMeta = {};
         if (typeof req.body?.description === 'string') metaOpts.description = req.body.description;
         if (Array.isArray(req.body?.tags)) metaOpts.tags = req.body.tags as string[];

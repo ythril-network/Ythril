@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking:** **Every quantity a caller sends has a bound, the same on both doors, and past it is a `400` naming it
+  (`Q-108`).** `tags` 100 per record (what the sync door already refused, so a record with more could never be pushed),
+  `linkEntities` / `linkFacts` / `linkChronos` 1 000 each, inline `edges` 500, `deleteFields` 100, `edgeLabels` 100,
+  space-id lists (network `spaces`, `proxyFor`, webhook `spaces`, reorder `ids`) 1 000, space-create `folders` 100, an
+  array of a fixed set (`types`, `kinds`, webhook `events`) the size of the set, conflict bulk-resolve `ids` 2 000 (the
+  most the list shows), a notify event's `data` 8 KiB, and an `ingest` conversation 1 000 sessions and 20 000 turns.
+  Four `ingest` runs may be in progress at once (a fifth start is a `429`), and each live-event stream kind admits 200
+  connections (then `503` with `Retry-After`) and drops a reader 256 KiB behind rather than buffering for it. A
+  pushed fact over 50 000 characters is refused on the sync door as on every write door. `filter`'s `limit` stays
+  uncapped as documented: what is READ is bounded instead — a single-space read stops at twice the answer budget and
+  answers `truncated` with `nextSkip`. All in `util/request-bounds.ts`, listed in the integration guide's Request bounds.
+  **Who is affected:** a caller sending more than any of these in one request (none of the shipped clients does), a
+  peer on an older release pushing a fact over 50 000 characters, and an upload whose JSON `tags` was not an array
+  (it was ignored; it is refused now).
 - **A traversing recall walks its rows a window at a time, with every row exactly the graph it had before**
   (`Q-136`). `recall` and `similar` with `traverse > 0` walked each result row on its own, so a page cost about
   four queries per hop PER ROW — its edges, its link scan, the facts it named and the records it reached. Up to 16
@@ -59,6 +73,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A space schema-change round reached no peer (`Q-108`).** `meta_change_pending` was sent to every member and was
+  not an event `POST /api/notify` accepted, so each peer answered `400` to a sender that does not read the answer.
+- **An unknown tool name no longer becomes a metric label (`Q-108`).** It was counted in `ythril_tool_calls_total`
+  before the `404`, so any caller could mint a time series per spelling.
+- **The notify event store is bounded by bytes, not only by count (`Q-108`).** 500 events of up to the JSON body
+  limit each could hold gigabytes; it now holds at most 1 MiB, oldest out first.
 - **Moving a file or folder leaves nothing at its old path, even while the file is still being processed.** A
   document's conversion that finished after the move wrote its chunk records under the path the file had just
   left — a folder that no longer existed, with nothing to ever delete them (caught on CI by `files.test.js`,

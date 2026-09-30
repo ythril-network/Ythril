@@ -52,6 +52,7 @@ import { upsertEdge } from './edges.js';
 import { retiredWriteFieldError } from './retired-write-fields.js';
 import type { AuthorRef } from '../config/types.js';
 import type { WebhookActor } from '../webhooks/dispatcher.js';
+import { MAX_TAGS, MAX_LINKS_PER_KIND, MAX_INLINE_EDGES, countError, tagsError } from '../util/request-bounds.js';
 
 /**
  * The write field for each kind — declared beside the kind vocabulary and re-exported here.
@@ -137,6 +138,8 @@ export function linkInputError(body: unknown, opts: { strict?: boolean } = {}): 
     const value = bag[field];
     if (value === null) continue;
     if (!Array.isArray(value)) return `${field} must be an array of ids`;
+    const tooMany = countError(field, value, MAX_LINKS_PER_KIND);
+    if (tooMany) return tooMany;
     for (const ref of value) {
       if (typeof ref !== 'string' || !ref.trim()) return `${field} must contain non-empty ids`;
     }
@@ -179,6 +182,7 @@ function linkInputSchemasForKinds(kinds: readonly RefKind[]): Record<string, unk
     const isPath = kind === 'file';
     out[LINK_INPUT_FIELDS[kind]] = {
       type: 'array',
+      maxItems: MAX_LINKS_PER_KIND,
       items: { type: 'string' },
       description:
         `Create links from this record to these ${kind} records, in the same call. `
@@ -240,6 +244,7 @@ export interface EdgeInput {
 export function edgeInputSchema(): Record<string, unknown> {
   return {
     type: 'array',
+    maxItems: MAX_INLINE_EDGES,
     description:
       'Create labelled relationships from this record, in the same call. Each entry needs `to` and '
       + '`label`; `toKind` defaults to entity. The other end must ALREADY EXIST — this is not a way to '
@@ -276,7 +281,7 @@ export function edgeInputSchema(): Record<string, unknown> {
             + 'sentence rather than a note to yourself.',
         },
         tags: {
-          type: 'array', items: { type: 'string' },
+          type: 'array', maxItems: MAX_TAGS, items: { type: 'string' },
           description: 'Tags on the EDGE, not on either end. They are embedded with it and filterable '
             + 'exactly, so they are how you find a class of relationship without knowing either record.',
         },
@@ -309,6 +314,8 @@ export function edgeInputError(body: unknown): string | null {
   const edges = edgeInputsFrom(body);
   if (edges === null) return null;
   if (!Array.isArray((body as Record<string, unknown>)['edges'])) return '`edges` must be an array';
+  const tooMany = countError('edges', edges, MAX_INLINE_EDGES);
+  if (tooMany) return tooMany;
 
   for (const [i, e] of edges.entries()) {
     const at = `edges[${i}]`;
@@ -330,6 +337,10 @@ export function edgeInputError(body: unknown): string | null {
     }
     if (e.weight !== undefined && (typeof e.weight !== 'number' || e.weight < 0 || e.weight > 1)) {
       return `${at}.weight must be a number between 0 and 1`;
+    }
+    if (e.tags !== undefined) {
+      const tagErr = tagsError(e.tags, `${at}.tags`);
+      if (tagErr) return tagErr;
     }
     const propErr = primitivePropertyError(e.properties);
     if (propErr) return `${at}.properties: ${propErr}`;

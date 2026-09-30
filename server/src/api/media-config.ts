@@ -110,7 +110,7 @@ mediaConfigRouter.get('/', requireAdmin, (_req, res) => {
 
 // ── PATCH /api/admin/media-config ─────────────────────────────────────────────
 
-const ProviderPatchSchema = z.object({
+export const ProviderPatchSchema = z.object({
   baseUrl: z.string().url().optional(),
   model: z.string().max(128).optional(),
   apiKey: z.string().max(512).optional().nullable(),
@@ -122,7 +122,7 @@ const ProviderPatchSchema = z.object({
 // F11-b — external assist model. `apiKey` is split into secrets.json (like vision/stt). `acknowledgedHost`
 // records the operator's egress consent; the handler requires it to match `baseUrl`'s host whenever the
 // extraction rung can actually reach the endpoint (mode `repair`/`auto`).
-const AssistModelPatchSchema = z.object({
+export const AssistModelPatchSchema = z.object({
   baseUrl: z.string().url().optional(),
   model: z.string().max(128).optional(),
   apiKey: z.string().max(512).optional().nullable(),
@@ -135,7 +135,7 @@ const AssistModelPatchSchema = z.object({
   fallback: AssistFallbackPatch,
 }).strict();
 
-const DocumentProcessingPatchSchema = z.object({
+export const DocumentProcessingPatchSchema = z.object({
   strategy: z.enum(['hi_res', 'auto', 'fast', 'ocr_only']).optional(),
   extractImages: z.boolean().optional(),
   // `max` accepted as the legacy spelling of `repair`; normalised before it is stored.
@@ -154,7 +154,7 @@ const DocumentProcessingPatchSchema = z.object({
 // Text-embedding provider. Lives at top-level `config.embedding` (not under mediaEmbedding), but is
 // surfaced/edited here so all model config sits on one page. `model`/`dimensions`/`similarity` changes
 // re-index every vector — the client gates those behind an explicit confirmation. `apiKey` → secrets.json.
-const EmbeddingPatchSchema = z.object({
+export const EmbeddingPatchSchema = z.object({
   provider: z.enum(['local', 'external']).optional(),
   baseUrl: z.string().url().optional().nullable(),
   model: z.string().min(1).max(256).optional(),
@@ -174,7 +174,7 @@ const EmbeddingPatchSchema = z.object({
 // other provider. `baseUrl` is nullable so the operator can turn reranking back OFF from the UI: the
 // feature is gated on being configured (no master toggle, matching `nli`), so clearing the URL is how it
 // gets switched off, and a field that can only ever be set would be a one-way door.
-const RerankPatchSchema = z.object({
+export const RerankPatchSchema = z.object({
   baseUrl: z.string().url().optional().nullable(),
   model: z.string().max(128).optional().nullable(),
   apiKey: z.string().max(512).optional().nullable(),
@@ -197,7 +197,7 @@ const RerankPatchSchema = z.object({
  * It was configurable by env and `config.json` from the start but never reachable from the admin API, so
  * the Models screen — the one page that claims to list what the pipeline calls — was silently missing it.
  */
-const NliPatchSchema = z.object({
+export const NliPatchSchema = z.object({
   baseUrl: z.string().url().optional().nullable(),
   model: z.string().max(128).optional().nullable(),
   apiKey: z.string().max(512).optional().nullable(),
@@ -215,7 +215,7 @@ const NliPatchSchema = z.object({
  * defaults an absent class to `auto` — so a whole-object replace would silently RAISE the ceiling on
  * every class the client did not mention.
  */
-const LevelsPatchSchema = z.object({
+export const LevelsPatchSchema = z.object({
   images: z.enum(IMAGE_LEVELS).optional(),
   audio: z.enum(AUDIO_LEVELS).optional(),
   video: z.enum(VIDEO_LEVELS).optional(),
@@ -231,7 +231,7 @@ const LevelsPatchSchema = z.object({
  * `reprocessSyncedImages` is likewise infra-shaped (it decides whether a network peer's images get
  * re-analysed locally) and is left where it is.
  */
-const FaceRecognitionPatchSchema = z.object({
+export const FaceRecognitionPatchSchema = z.object({
   // No `enabled` — face recognition is gated by the image ladder's `recognition` rung (a per-space choice
   // under an instance ceiling), and the surviving `faceRecognition.enabled` is an INFRA pin set by env
   // only. Accepting it here would hand the API back the switch the UI just lost.
@@ -259,7 +259,7 @@ const FaceRecognitionPatchSchema = z.object({
  *
  * `.strict()`, like every schema here, so an unknown slot is a 400 naming the body rather than a silent strip.
  */
-const SlotTuningPatchSchema = z.object({
+export const SlotTuningPatchSchema = z.object({
   timeoutMs: z.number().int().min(MODEL_TIMEOUT_MIN_MS).max(MODEL_TIMEOUT_MAX_MS).optional().nullable(),
   /*
    * The vocabulary is `llama-server`'s own, not a neutral three — see `REASONING_EFFORTS`. An enum rather
@@ -272,7 +272,7 @@ const SlotTuningPatchSchema = z.object({
 /** What one slot's patch may carry. `null` on a field CLEARS it; absent leaves it alone. */
 export type SlotTuningPatch = { timeoutMs?: number | null; reasoningEffort?: ReasoningEffort | null };
 
-const ModelSlotsPatchSchema = z.object({
+export const ModelSlotsPatchSchema = z.object({
   vision: SlotTuningPatchSchema.optional(),
   stt: SlotTuningPatchSchema.optional(),
   embedding: SlotTuningPatchSchema.optional(),
@@ -330,7 +330,7 @@ export function mergeModelSlots(
   return out;
 }
 
-const MediaConfigPatchSchema = z.object({
+export const MediaConfigPatchSchema = z.object({
   // No `enabled` — the media-embedding master switch was removed; each class is controlled via `levels`.
   levels: LevelsPatchSchema.optional(),
   faceRecognition: FaceRecognitionPatchSchema.optional(),
@@ -834,7 +834,7 @@ mediaConfigRouter.patch('/', requireAdminMfa, (req, res) => {
 // endpoints go through `ssrfSafeFetch`; local (trusted cluster) endpoints use a plain fetch, mirroring how
 // the media worker reaches them.
 
-const TestConnectionSchema = z.object({
+export const TestConnectionSchema = z.object({
   target: z.enum(['vision', 'stt', 'assist', 'embedding', 'nli', 'rerank']),
   // `F-33`: on the assist target, test its fallback instead of the primary.
   fallback: z.boolean().optional(),

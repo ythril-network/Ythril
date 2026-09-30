@@ -152,6 +152,36 @@ Requests with **no** credential (login, setup, an anonymous probe) key on the so
 identity they have — and IPv6 addresses are normalised to their `/64` so a client cannot rotate through
 addresses it already owns.
 
+### Request bounds — what one request may carry
+
+A rate limit bounds how OFTEN you call; these bound how much one call may ask for. Every one is the same number on
+the REST route and the MCP tool — both read it from one place — and a request past one is **refused with a `400`
+naming the field and the bound**, never served smaller. The wording is the same on every door:
+`` `tags` may hold at most 100 entries (got 101) ``.
+
+| What | Bound | Where it applies |
+|---|---|---|
+| `tags` on one record | 100 | every write of a fact, entity, edge, chrono entry or file, an inline edge's own `tags`, the `recall` tag filter, and the sync door |
+| `fact` text | 50 000 characters | every write door, and a fact pushed by a peer (`POST /api/sync/facts`) |
+| `linkEntities` / `linkFacts` / `linkChronos` | 1 000 each | every write that attaches links |
+| `edges` written inline with a record | 500 | every create and update that takes `edges` |
+| `deleteFields` | 100 paths | every update |
+| `edgeLabels` on a traversal | 100 | `graph_traverse`, and `traverse` on `recall` / `similar` |
+| a list of space ids | 1 000 | a network's `spaces`, a proxy's `proxyFor`, a webhook's `spaces`, a space reorder, the invite bundle's `spaces` / `networkSpaces` |
+| an array of a fixed set (`types`, `kinds`, webhook `events`) | the size of the set | a value may not repeat past it |
+| `folders` on a space create | 100 | `POST /api/spaces`, `save_space` |
+| `ids` in a conflict bulk-resolve | 2 000 — the most the conflict list shows | `POST /api/conflicts/bulk-resolve` |
+| a notify event's `data` | 8 KiB serialised | `POST /api/notify` |
+| `sessions` / turns in one `ingest` | 1 000 sessions, 20 000 turns between them | both doors of `ingest` |
+| `ingest` runs in progress at once | 4, instance-wide | a fifth start is a `429` until one finishes |
+| open live-event streams | 200 per stream kind | `GET /api/brain/spaces/:id/events`, `GET /api/about/logs/stream` — a `503` with `Retry-After` |
+
+**Left open on purpose, and why they cost nothing unbounded:** `skip` (it passes over rows; the query deadline or the
+answer's own window bounds it), `maxChars` / `maxBytes` / `maxTokens` (resolved into a fixed range and echoed back as
+`budgetChars` / `budgetBytes`), `recall`'s `topK` (documented "no ceiling"; the answer budget bounds what returns),
+and `filter`'s `limit` (documented "not capped" — what is **read** is bounded instead, see
+[the filter body](04-brain-api.md)). A property VALUE is a value, not a count.
+
 ### The per-token quota is settable, and there are two tiers
 
 Added in 3.3.0. The number a token gets is resolved in this order:

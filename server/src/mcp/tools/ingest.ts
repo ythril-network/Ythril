@@ -10,6 +10,7 @@ import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.
 import { beginIngest, ingestStatus } from '../../extractor/ingest-door.js';
 import { INGEST_KINDS } from '../../extractor/ingest.js';
 import { HEAVY_CALLS_PER_WINDOW } from '../../rate-limit/heavy-tool.js';
+import { MAX_INGEST_SESSIONS } from '../../util/request-bounds.js';
 
 const text = (t: string, isError = false): ToolResult => ({ content: [{ type: 'text' as const, text: t }], isError });
 
@@ -49,6 +50,7 @@ export const ingestTool: ToolHandler = {
       },
       sessions: {
         type: 'array',
+        maxItems: MAX_INGEST_SESSIONS,
         description: 'A raw conversation: sessions with a `date` each, and their turns in order.',
         items: { type: 'object' },
       },

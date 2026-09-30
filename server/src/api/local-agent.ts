@@ -17,11 +17,11 @@ export const localAgentRouter = Router();
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 let runtimeLocalAgentEnabled = false;
 
-const BootstrapLocalAgentBody = z.object({
+export const BootstrapLocalAgentBody = z.object({
   os: z.enum(['windows', 'linux']).optional(),
 });
 
-const ExecuteEnableNetworksBody = z.object({
+export const ExecuteEnableNetworksBody = z.object({
   // RFC 952 / RFC 1123: labels of [a-z0-9] separated by dots/hyphens; no leading/trailing hyphens.
   hostname: z.string().min(4).max(253).regex(
     /^[a-zA-Z0-9]([a-zA-Z0-9._-]*[a-zA-Z0-9])?$/,

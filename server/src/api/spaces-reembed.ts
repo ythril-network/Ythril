@@ -27,8 +27,8 @@ import { log } from '../util/log.js';
  * `.strict()` so a misspelled `kind` is a 400 rather than a silent full sweep. A caller who meant to narrow and
  * got everything would be told they had narrowed it, which is the failure mode worth a rejection.
  */
-const ReembedBody = z.object({
-  kinds: z.array(z.enum(RECORD_TYPES)).min(1).optional(),
+export const ReembedBody = z.object({
+  kinds: z.array(z.enum(RECORD_TYPES)).min(1).max(RECORD_TYPES.length).optional(),
   limit: z.number().int().positive().max(REEMBED_MAX_LIMIT).optional(),
 }).strict();
 

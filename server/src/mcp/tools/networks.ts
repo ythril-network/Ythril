@@ -15,6 +15,7 @@ import {
 import { castVoteAct, listOpenVotesAct, syncHistoryAct } from '../../networks/vote-acts.js';
 import { changeNotesAct } from '../../sync/change-notes.js';
 import { forkNetworkAct, inviteKeyAct } from '../../networks/network-acts.js';
+import { MAX_SPACE_IDS } from '../../util/request-bounds.js';
 
 /** The caller an act sees: this connection's matrix, and the token id memberships are recorded against. */
 export const callerOf = (ctx: ToolContext) => ({ ...(ctx.rights ? { rights: ctx.rights } : {}), ...(ctx.actor?.tokenId ? { id: ctx.actor.tokenId } : {}) });
@@ -68,7 +69,7 @@ export const network_createTool: ToolHandler = {
       type: { type: 'string', enum: ['closed', 'democratic', 'club', 'braintree', 'pubsub'],
         description: 'How joins and changes are governed: closed (unanimous), democratic (majority, any veto blocks), '
           + 'club (the inviter decides), braintree (every ancestor up to the root), pubsub (publisher pushes, anyone subscribes).' },
-      spaces: { type: 'array', items: { type: 'string', minLength: 1 }, minItems: 1, description: 'Local space ids it carries — each must exist, and you need the right on EVERY one, or the whole create is refused naming the short ones.' },
+      spaces: { type: 'array', items: { type: 'string', minLength: 1 }, minItems: 1, maxItems: MAX_SPACE_IDS, description: 'Local space ids it carries — each must exist, and you need the right on EVERY one, or the whole create is refused naming the short ones.' },
       votingDeadlineHours: { type: 'integer', minimum: 1, maximum: 72, default: 24, description: 'Hours a vote round stays open (1-72, default 24); a round nobody concludes by then fails.' },
       syncSchedule: { type: 'string', description: 'A cron expression, e.g. "*/15 * * * *". Omit for manual sync only. One the scheduler cannot run is refused.' },
       merkle: { type: 'boolean', description: 'Compare a Merkle root with each peer every cycle and warn on divergence.' },
@@ -313,7 +314,7 @@ export const network_forkTool: ToolHandler = {
       label: { type: 'string', minLength: 1, maxLength: 200, description: 'A display name for the new network, 1-200 characters.' },
       type: { type: 'string', enum: ['closed', 'club'], default: 'closed', description: 'The new network\'s governance: closed (unanimous) or club (the organiser decides). Default closed.' },
       votingDeadlineHours: { type: 'integer', minimum: 1, maximum: 72, description: 'Hours a vote stays open, 1-72; omitted, the source network\'s value, or 24.' },
-      spaces: { type: 'array', items: { type: 'string', minLength: 1 }, description: 'Local space ids it carries; omitted, the source network\'s. Required when the source is no longer here.' },
+      spaces: { type: 'array', items: { type: 'string', minLength: 1 }, maxItems: MAX_SPACE_IDS, description: 'Local space ids it carries; omitted, the source network\'s. Required when the source is no longer here.' },
     },
     required: ['id', 'label'],
     additionalProperties: false,

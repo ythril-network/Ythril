@@ -69,9 +69,13 @@ Everything that would make the run fail is checked first, and the answer lists e
   (`documentProcessing.assistModel.acknowledgedHostForConversations`, the card's **Allow conversations**), which a
   documents consent does not cover — and the `doc-nlp` sidecar (`NLP_SIDECAR_URL`) must all answer.
 
-`400` is a malformed body (with every problem the loader found); `404` a space that does not exist.
+`400` is a malformed body (with every problem the loader found); `404` a space that does not exist. A conversation
+holds at most **1 000 sessions** and **20 000 turns** between them; more is a `400` saying which.
 
 ## Rate limited — `429`
+
+**At most four runs are in progress at once, instance-wide** — each holds model calls for minutes. A fifth start is
+a `429` that says so, until one finishes, and it costs you no rate-limit slot.
 
 Starting runs is limited per token, at the same rate as the other heavy calls (five a minute), and the REST route
 and the MCP tool share one count — a token that used its starts over REST is refused over MCP too, in the same

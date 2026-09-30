@@ -17,6 +17,7 @@ import { requireSpaceAuth } from '../../auth/middleware.js';
 import { mintSseTicket } from '../../auth/sse-ticket.js';
 import { getConfig } from '../../config/loader.js';
 import { subscribeBrainChanges } from '../../brain/brain-events.js';
+import { openEventStream } from '../../util/sse-stream.js';
 
 export const brainEventsRouter = Router();
 
@@ -47,29 +48,14 @@ brainEventsRouter.get('/spaces/:spaceId/events', globalRateLimit, requireSpaceAu
     return;
   }
 
-  res.writeHead(200, {
-    'Content-Type': 'text/event-stream',
-    'Cache-Control': 'no-cache',
-    Connection: 'keep-alive',
-    'X-Accel-Buffering': 'no',
-  });
-  res.write(':\n\n'); // open the stream
+  // Bounded in count and in what a slow reader may queue — see util/sse-stream.ts (`Q-108`).
+  const stream = openEventStream(req, res, { pool: 'brain-events' });
+  if (!stream) return;
 
   const unsubscribe = subscribeBrainChanges(spaceId, (ev) => {
-    if (res.destroyed) { unsubscribe(); return; }
     const id = (ev.entry as { _id?: unknown })?._id;
     // Minimal payload — the client uses `event` (e.g. "fact.created") to refresh the right tab/badges.
-    res.write(`data: ${JSON.stringify({ event: ev.event, id: typeof id === 'string' ? id : undefined })}\n\n`);
+    stream.send(`data: ${JSON.stringify({ event: ev.event, id: typeof id === 'string' ? id : undefined })}\n\n`);
   });
-
-  const heartbeat = setInterval(() => {
-    if (res.destroyed) { clearInterval(heartbeat); unsubscribe(); return; }
-    res.write(':\n\n');
-  }, 30_000);
-  heartbeat.unref?.();
-
-  req.on('close', () => {
-    clearInterval(heartbeat);
-    unsubscribe();
-  });
+  stream.onClose(unsubscribe);
 });

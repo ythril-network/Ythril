@@ -240,6 +240,16 @@ export const queryTool: ToolHandler = {
       return per;
     };
 
+    // Resolved before the read, so a bad `maxBytes` is an error rather than a query that ran first — and because the
+    // READ is bounded by it: `limit` is not capped, so what bounds the heap is the budget (`Q-108`).
+    const queryBudget = resolveBudget(a as BudgetRequest, defaultBudgetChars(ctx.transport));
+    if (!queryBudget.ok) throw new Error(queryBudget.error);
+    // One member only: the database applies skip and limit there, so a read stopped early is simply a shorter page.
+    // A proxy merge reads a window from every member and is bounded by PROXY_PAGE_CEILING instead.
+    let readCut = false;
+    const read = members.length === 1
+      ? { bound: { chars: queryBudget.chars, bytes: queryBudget.bytes }, onCut: () => { readCut = true; } }
+      : undefined;
     const page = await pageAcrossMembers({
       members,
       limit,
@@ -247,12 +257,9 @@ export const queryTool: ToolHandler = {
       ceiling: PROXY_PAGE_CEILING,
       compare: compareBySort(order),
       readMember: async (mid, lim, sk) => decorateMemberRows(coll, mid,
-        (await queryBrain(mid, coll, await filterFor(mid), projection, lim, maxTimeMS, sk, order)) as Array<Record<string, unknown>>),
+        (await queryBrain(mid, coll, await filterFor(mid), projection, lim, maxTimeMS, sk, order, read)) as Array<Record<string, unknown>>),
     });
     if (!page.ok) throw new Error(page.error);
-    // Resolved before the read, so a bad `maxBytes` is an error rather than a query that ran first.
-    const queryBudget = resolveBudget(a as BudgetRequest, defaultBudgetChars(ctx.transport));
-    if (!queryBudget.ok) throw new Error(queryBudget.error);
     /*
      * The same two DECORATIONS the REST door applies, through the same module: an edge's endpoint names,
      * and a file's job step progress (joined per member above, before the page is merged). They were on
@@ -301,7 +308,10 @@ export const queryTool: ToolHandler = {
       * The offset goes in so `nextSkip` is ABSOLUTE. `query` has a real `skip`, so a continuation computed
       * from the page alone would send a caller back to the start of page two for ever.
       */
-    const budgeted = applyBudget(docs, { chars: queryBudget.chars, bytes: queryBudget.bytes });
+    const trimmed = applyBudget(docs, { chars: queryBudget.chars, bytes: queryBudget.bytes });
+    // A read that stopped at the bound is a truncated answer even when what it read happened to fit: more rows
+    // satisfy the page, and `nextSkip` is where they start.
+    const budgeted = readCut && !trimmed.truncated ? { ...trimmed, truncated: true } : trimmed;
     const rows = budgeted.returned;
 
     /*

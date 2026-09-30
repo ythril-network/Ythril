@@ -36,6 +36,7 @@ import { NotFoundError } from '../../util/errors.js';
 // disagreeing about which records a name matches.
 import { rankingFields } from '../../brain/recall-shape.js';
 import { pageBudgetSchema } from './_page-budget-schema.js';
+import { MAX_TAGS } from '../../util/request-bounds.js';
 
 /**
  * Space scope for find_similar — mirrors recall's omit-space idiom (F1 consistency).
@@ -157,9 +158,10 @@ export const recallTool: ToolHandler = {
              * instead — see `MAX_PER_TYPE_CANDIDATES` and `brain/search-bounds.ts`.
              */
             topK: { type: 'number', minimum: 1, default: 10, description: 'Max results to return. Default 10, and NO ceiling — the same on both doors since 4.0, where REST used to clamp to 100 silently. With a `filter`, `topK` is filled from records that SATISFY it — every record that satisfies the filter, whatever its vector rank — so a filtered recall cannot silently miss a matching record; an answer that could not be completed says so in `degraded` (`filter_window`). What comes back is bounded by the answer budget instead: every record whole, `truncated` on every response, and `nextSkip` when it bit. That cap is a size, not a count — the answer is a prefix that fits `maxChars` (default 25000 on this door) — so asking for 80 does not return 80 inline; how many it does return depends on how big they are. Large values are slower, and every field of every result is paid for in tokens.' },
-            tags: { type: 'array', items: { type: 'string' }, description: 'Optional tag filter — only results bearing ALL of these tags are returned (applies to facts, entities, chrono entries, and files).' },
+            tags: { type: 'array', maxItems: MAX_TAGS, items: { type: 'string' }, description: 'Optional tag filter — only results bearing ALL of these tags are returned (applies to facts, entities, chrono entries, and files).' },
             types: {
               type: 'array',
+              maxItems: RECORD_TYPES.length,
               items: { type: 'string', enum: [...RECORD_TYPES] },
               description: 'Optional knowledge-type filter — restrict results to one or more types. Omit to search all five. EDGES ARE SEARCHABLE RECORDS and compete for your topK: a topK 20 on a persona space came back with 2 of them, so structural relationships displace knowledge unless you exclude them here.',
             },
@@ -487,6 +489,7 @@ export const find_similarTool: ToolHandler = {
             includeFileContent: { type: 'boolean', default: true, description: 'Whether to return each file chunk’s `content` (default true). Same meaning as on `recall`, including the limit: it is FILE CHUNKS ONLY and does nothing on a search returning entities, facts, edges or chrono entries. Use `projection` to trim those.' },
             targetTypes: {
               type: 'array',
+              maxItems: RECORD_TYPES.length,
               items: { type: 'string', enum: [...RECORD_TYPES] },
               description: 'Which knowledge types to search in. Omit to search all types.',
             },

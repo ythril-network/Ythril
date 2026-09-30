@@ -29,6 +29,8 @@
  * budget that governs the rest of the answer.
  */
 
+import { MAX_EDGE_LABELS } from '../util/request-bounds.js';
+
 export interface TraverseOption {
   depth: number;
   edgeLabels?: string[] | undefined;
@@ -227,7 +229,7 @@ export function traverseOptionSchema(maxDepth: number): Record<string, unknown> 
         type: 'object',
         properties: {
           depth: { type: 'number', minimum: 0, maximum: maxDepth },
-          edgeLabels: { type: 'array', items: { type: 'string' } },
+          edgeLabels: { type: 'array', maxItems: MAX_EDGE_LABELS, items: { type: 'string' } },
           direction: {
             type: 'string',
             enum: ['outbound', 'inbound', 'both'],

@@ -277,7 +277,9 @@ the space both ways, the instance records the missing link itself and logs one e
 
 **Exporting:** Download the current filtered view as JSON or CSV.
 
-**Live server log:** the **Server Log** sub-tab streams the instance's log in real time over Server-Sent Events (SSE). It loads the recent lines and then appends new ones as they happen, colour-coded by level.
+**Live server log:** the **Server Log** sub-tab streams the instance's log in real time over Server-Sent Events (SSE). It loads the recent lines and then appends new ones as they happen, colour-coded by level. If the tab falls far
+behind — a sleeping laptop, a stalled connection — the server drops the stream rather than queue lines for it, and
+streaming stops; turn it on again to resume. At most 200 such streams are open on an instance at once.
 
 **Every line an API request's own work produces carries that request's id**, shown in square brackets after the level. It is the same id the response returned in its `X-Request-Id` header, so when somebody reports a failing call and quotes the id, searching for it here finds every line that request produced — the refusal, and anything a background step logged on its way. Lines that belong to no request (startup, the auto-delete sweep, the background storage measurement) carry no id, which is what keeps a search for a real one from matching them.
 

@@ -47,6 +47,7 @@ import { primitivePropertyError } from './property-values.js';
 import { REF_KINDS } from '../config/types-knowledge.js';
 import { CHRONO_STATUSES } from '../config/types.js';
 import type { KnowledgeType } from '../config/types-knowledge.js';
+import { tagsError, MAX_FACT_LENGTH } from '../util/request-bounds.js';
 
 /**
  * A record type this module holds a table for — the four knowledge types, DERIVED.
@@ -61,8 +62,8 @@ export type ShapedType = KnowledgeType;
 /** One field's rule: a refusal, or `null` when the value is acceptable. Never called with `undefined`. */
 type Check = (v: unknown) => string | null;
 
-/** The cap on a fact's `fact`. Declared once — it was written out at three sites and absent from two more. */
-export const MAX_FACT_LENGTH = 50_000;
+/** The cap on a fact's `fact`. Declared once, in `util/request-bounds.ts` — it was written out at six sites. */
+export { MAX_FACT_LENGTH };
 
 
 
@@ -74,13 +75,12 @@ const str = (field: string): Check => v =>
 const nonEmptyStr = (field: string): Check => v =>
   typeof v === 'string' && v.trim() ? null : `\`${field}\` must be a non-empty string`;
 
-const strArray = (field: string): Check => v =>
-  Array.isArray(v) && v.every(t => typeof t === 'string')
-    ? null : `\`${field}\` must be an array of strings`;
-
 const unit = (field: string): Check => v =>
   typeof v === 'number' && v >= 0 && v <= 1
     ? null : `\`${field}\` must be a number between 0 and 1`;
+
+/** An array of strings, at most `MAX_TAGS` — the bound the sync door has always held a record to. */
+const tags: Check = v => tagsError(v);
 
 const plainObject = (field: string): Check => v =>
   v !== null && typeof v === 'object' && !Array.isArray(v)
@@ -114,7 +114,7 @@ const SHAPE: Record<ShapedType, Record<string, Check>> = {
       ?? (typeof v === 'string' && v.length > MAX_FACT_LENGTH
         ? '`fact` must not exceed 50 000 characters' : null),
     type: str('type'),
-    tags: strArray('tags'),
+    tags: tags,
     description: str('description'),
     properties: plainObject('properties'),
   },
@@ -124,7 +124,7 @@ const SHAPE: Record<ShapedType, Record<string, Check>> = {
     endsAt: str('endsAt'),
     status: oneOf('status', [...CHRONO_STATUSES]),
     confidence: unit('confidence'),
-    tags: strArray('tags'),
+    tags: tags,
     description: str('description'),
     properties: plainObject('properties'),
   },
@@ -134,7 +134,7 @@ const SHAPE: Record<ShapedType, Record<string, Check>> = {
     // is here: three doors demand a non-empty type and the REST create defaulted it to `''`. A typeless
     // entity is one `validateEntity` can never check, because `type` is what selects the schema.
     type: nonEmptyStr('type'),
-    tags: strArray('tags'),
+    tags: tags,
     description: str('description'),
     properties: entityProperties,
   },
@@ -145,7 +145,7 @@ const SHAPE: Record<ShapedType, Record<string, Check>> = {
     weight: unit('weight'),
     type: str('type'),
     description: str('description'),
-    tags: strArray('tags'),
+    tags: tags,
     properties: plainObject('properties'),
     fromKind: oneOf('fromKind', REF_KINDS),
     toKind: oneOf('toKind', REF_KINDS),
