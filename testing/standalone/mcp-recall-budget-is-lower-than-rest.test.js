@@ -67,7 +67,8 @@ describe('the two defaults', () => {
     const resolved = resolveBudget({}, MCP_DEFAULT_MAX_CHARS);
     // The defaults are CHARACTER ceilings now, and `maxBytes` deliberately has none — see B-1. This used
     // to read `{ok: true, bytes: …}` because one number was doing both jobs, badly.
-    assert.deepEqual(resolved, { ok: true, chars: MCP_DEFAULT_MAX_CHARS, bytes: null },
+    // `stated` is what the answer discloses; `chars` is one carriage's share of it (`Q-111`), the whole of it here.
+    assert.deepEqual(resolved, { ok: true, chars: MCP_DEFAULT_MAX_CHARS, bytes: null, stated: { chars: MCP_DEFAULT_MAX_CHARS, bytes: null } },
       'the default must survive the clamp unchanged, or the documented number is not the applied one');
   });
 

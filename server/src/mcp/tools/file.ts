@@ -13,10 +13,13 @@ import { StoredFileUnreadable } from '../../files/stored-bytes.js';
 import { readSpillByPath } from '../../brain/read-spill-act.js';
 import { linkInputSchemasFor, linkInputError, linkFieldsFrom } from '../../brain/write-connections.js';
 import { MAX_TAGS, MAX_DELETE_FIELDS } from '../../util/request-bounds.js';
+import { markdownWindow, resolveTextWindow } from '../../files/markdown-window.js';
+import { carriagesFor, defaultBudgetChars } from '../../brain/result-budget.js';
+import { budgetSizeSchema } from './_page-budget-schema.js';
 
 export const read_fileTool: ToolHandler = {
   name: 'read_file',
-  description: 'Read the text contents of a file in the space file store. Whole file, no paging — a large document arrives entire and is paid for in tokens, so prefer `recall` with `includeFileContent: false` to find WHICH file and WHICH passage first, then read only if you need the rest.\n\n'
+  description: 'Read the text contents of a file in the space file store, a window at a time. The window is whole paragraphs from `markdownSkip` (a character offset, default 0) that fit the answer budget (`maxChars` / `maxBytes` / `maxTokens`); `truncated` says more follows and `markdownNextSkip` is where — send it back as `markdownSkip`, and the windows joined are the file, character for character. A paragraph larger than the budget is split at a line break. The same two parameters page the converted Markdown on `GET /api/brain/spaces/:spaceId/files/extract`. Prefer `recall` with `includeFileContent: false` to find WHICH file and WHICH passage first.\n\n'
     + 'It reads the STORED TEXT, which for an uploaded PDF or image is the extracted text rather than the original bytes. A file whose extraction has not finished, or whose type yields no text, reads as empty — that is a pending or unextractable document, not an empty file. `list_dir` shows what is present, and `list_embed_jobs` shows whether its indexing is still queued or failed.\n\n'
     + 'This is a path lookup, not a search: an unknown path is an error, not an empty result.',
   spaceRequired: true,
@@ -26,6 +29,11 @@ export const read_fileTool: ToolHandler = {
             space: s.requiredSpace,
             path: filePathSchema('This is a LOOKUP, not a search: an unknown path is an error rather '
               + 'than an empty result, and nothing here matches a partial name.'),
+            markdownSkip: {
+              type: 'integer', minimum: 0,
+              description: 'Character offset the window starts at (default 0). Send the previous answer\'s `markdownNextSkip`.',
+            },
+            ...budgetSizeSchema('character'),
           },
           required: ['space', 'path'],
           additionalProperties: false,
@@ -34,6 +42,9 @@ export const read_fileTool: ToolHandler = {
     const { args: a, callSpace , accessibleSpaceIds } = ctx;
     const filePath = String(a['path'] ?? '');
     if (!filePath.trim()) throw new Error('path must not be empty');
+    // Resolved before anything is read, so a bad offset or budget is an error rather than a read that ran first.
+    const window = resolveTextWindow(a as Record<string, unknown>, defaultBudgetChars(ctx.transport), carriagesFor(ctx.transport));
+    if (!window.ok) throw new Error(window.error);
     // A spill's deprecated `path` (Q-92): read from the spill store under its own rule, as the files GET does.
     const spill = await readSpillByPath(filePath, {
       tokenId: ctx.actor?.tokenId, rights: ctx.rights, accessibleSpaceIds, transport: ctx.transport,
@@ -53,8 +64,23 @@ export const read_fileTool: ToolHandler = {
       }
     }
     if (content === null) throw new Error(`File not found: ${filePath}`);
-    return { content: [{ type: 'text' as const, text: content }],
-      structuredContent: { path: filePath, content } };
+    /*
+     * A WINDOW, held to the stated budget across both carriages (`Q-111`). The whole file went into `content` AND
+     * `structuredContent`, unbudgeted: a 2 MB document crossed as 4.3 MB. A client reading only `content` must still
+     * learn that there is more, so a cut window ends with one line saying where it continues.
+     */
+    const w = markdownWindow(content, window.skip, window.budget.chars, window.budget.bytes);
+    const stated = window.budget.stated ?? window.budget;
+    const more = w.truncated ? `\n\n[read_file: ${w.skip + w.markdown.length} of ${w.totalChars} characters; `
+      + `continue with markdownSkip: ${w.nextSkip}]` : '';
+    return {
+      content: [{ type: 'text' as const, text: w.markdown + more }],
+      structuredContent: {
+        path: filePath, content: w.markdown, truncated: w.truncated, markdownSkip: w.skip, markdownChars: w.totalChars,
+        ...(w.nextSkip !== undefined ? { markdownNextSkip: w.nextSkip } : {}),
+        budgetChars: stated.chars, budgetBytes: stated.bytes,
+      },
+    };
   },
 };
 

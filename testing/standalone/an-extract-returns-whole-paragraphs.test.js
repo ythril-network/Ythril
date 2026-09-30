@@ -35,9 +35,28 @@ describe('an extract returns whole paragraphs', () => {
     for (const p of pages.slice(0, -1)) assert.match(p, /\n\n$/, 'a window ends at a paragraph boundary');
   });
 
-  it('a single paragraph larger than the cap still comes back whole, alone', () => {
-    const w = markdownWindow('a'.repeat(5_000) + '\n\nb', 0, 1_000);
-    assert.equal(w.markdown, 'a'.repeat(5_000) + '\n\n');
+  it('a single paragraph larger than the cap is split within it, and the windows still join into the document', () => {
+    // It was returned whole, past the cap, until `Q-111` made the cap the budget an answer is held to.
+    const doc = 'a'.repeat(5_000) + '\n\nb';
+    const w = markdownWindow(doc, 0, 1_000);
+    assert.equal(w.markdown.length, 1_000);
     assert.equal(w.truncated, true);
+    let at = 0;
+    let joined = '';
+    for (let i = 0; i < 20; i++) {
+      const page = markdownWindow(doc, at, 1_000);
+      joined += page.markdown;
+      if (!page.truncated) break;
+      at = page.nextSkip;
+    }
+    assert.equal(joined, doc);
+  });
+
+  it('a split prefers a line break, and a byte cap binds too', () => {
+    const doc = `${'x'.repeat(600)}\n${'y'.repeat(600)}\n\nz`;
+    assert.equal(markdownWindow(doc, 0, 1_000).markdown, `${'x'.repeat(600)}\n`);
+    const wide = 'é'.repeat(900);
+    const w = markdownWindow(wide, 0, 1_000, 1_000);
+    assert.ok(Buffer.byteLength(w.markdown, 'utf8') <= 1_000, 'a byte ceiling was exceeded');
   });
 });

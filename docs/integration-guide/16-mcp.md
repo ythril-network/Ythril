@@ -121,9 +121,16 @@ added tomorrow is reachable both ways on the day it is written, and the refusals
 | success | `200 {"ok": true, "text": "...", "data": {...}}` |
 | refusal | `4xx {"ok": false, "error": "...", "data": {...}}` |
 
-`text` is the prose an agent reads; `data` is the structured result (`null` for a tool that has none).
-**Both carry the whole answer** — `data` is the structured form of the result, never a summary of it — so
-pick whichever suits your client and do not merge them.
+**The answer crosses once.** When a tool gives a structured result, `data` IS the whole answer and `text` is one
+fixed sentence saying so (``The answer is in `data`; it is not repeated here.``); when it gives none, `text` is the
+answer and `data` is `null`. Until 5.x both carried it, so every page crossed the wire twice — a filter page at
+the 50 000-character default measured 102 KB, and measures 50 KB now. Read `data`.
+
+**Over MCP both halves stay, and the budget bounds them together.** A tool result is `content` text AND
+`structuredContent`, and a client may read either alone — so neither can be dropped, and each is held to half the
+stated budget. `budgetChars` still reports the budget you stated (or the default); a filter page at the 25 000
+default measured 50 KB on the wire before and 25 KB now, with correspondingly fewer rows per page — page on with
+`nextSkip`.
 
 `error` is word-for-word what MCP puts in `content` for the same refusal. The one thing this door adds is a
 status code, because HTTP has one and JSON-RPC does not: `400` malformed, `403` the token may not,
@@ -335,7 +342,7 @@ row survives its own tool being built, so the list cannot keep advertising a gap
 | `save_bulk` | Batch-upsert facts, entities, edges, and/or chrono entries in a single call (schema-validated) |
 | `ingest` | Turn a conversation into records — entities, claims, dated events, edges and transcripts. Answers at once with a `runId`; see [Ingest API](04i-ingest-api.md) |
 | `ingest_status` | Read an ingest run: its phase, what it wrote, what it dropped and why |
-| `read_file` | Read a text file from the space file store. Encryption at rest is invisible to it; a stored file this instance cannot decrypt is an error naming the file and the reason — the same refusal the REST download gives — never "not found" and never ciphertext. A spill's deprecated `path` (`_tmp/graph-<spillId>.json`, `_tmp/results-<spillId>.json`) is read from the spill store for the token that made it, under `read_spill`'s rule, until the next major; use `read_spill` |
+| `read_file` | Read a text file from the space file store, **a window at a time**: whole paragraphs from `markdownSkip` (a character offset) that fit the answer budget (`maxChars` / `maxBytes` / `maxTokens`, 25 000 characters by default, across both carriages); `truncated` and `markdownNextSkip` say where the next window starts, and the windows join into the file exactly. A paragraph larger than the budget is split at a line break. The same two parameters page the converted Markdown on `GET …/files/extract`. It returned the whole file, twice over, until 5.x. Encryption at rest is invisible to it; a stored file this instance cannot decrypt is an error naming the file and the reason — the same refusal the REST download gives — never "not found" and never ciphertext. A spill's deprecated `path` (`_tmp/graph-<spillId>.json`, `_tmp/results-<spillId>.json`) is read from the spill store for the token that made it, under `read_spill`'s rule, until the next major; use `read_spill` |
 | `write_file` | Write a file to the space file store, as text or as bytes. `content` is UTF-8 text by default; set `encoding: "base64"` for an image, a PDF or anything else that is not text, and base64 that is not base64 is refused rather than decoded as far as it goes. **The ceiling is the request, not the file store:** a tool call arrives as one JSON body capped at 10 MB and base64 costs a third more than the bytes it carries, so about 7 MB of file fits — larger goes through [`POST /api/files/:spaceId`](05-files-api.md), which takes a raw body and supports chunked upload. Optional `description` and `tags` are stored as metadata |
 | `list_dir` | List directory contents |
 | `delete_file` | Delete a file |

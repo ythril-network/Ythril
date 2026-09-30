@@ -72,6 +72,12 @@ const DIFFER_ON_PURPOSE = new Map([
   ['network_sync:networkId',
     'the same network under two spellings: the tool names it `networkId` beside `peerId`, and REST puts it in the '
     + 'path as `/networks/:id/sync`. The parser matches path parameters by name, and `id` is the path\'s generic name.'],
+  // `read_file`'s text window (`Q-111`). The audit pairing puts `read_file` beside `GET /api/files/:spaceId`, which
+  // downloads the BYTES — a download has no text window to page. The window's REST twin is the capability map's pair
+  // for `read_file`, `GET …/files/extract`, which takes all four through the same `resolveTextWindow`.
+  ...['markdownSkip', 'maxChars', 'maxBytes', 'maxTokens'].map(k => [`read_file:${k}`,
+    'the window pages TEXT; `GET /api/files/:spaceId` downloads bytes. The same parameters are accepted by '
+    + '`GET /api/brain/spaces/:spaceId/files/extract`, read_file\'s capability twin, through one resolver.']),
 ]);
 
 /**

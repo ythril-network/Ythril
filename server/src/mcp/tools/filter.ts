@@ -19,7 +19,7 @@
 import { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.js';
 import { BRAIN_COLLECTIONS, type BrainCollection } from '../../config/types.js';
 import { REFUSED_OPERATORS, REGEX_OPERATORS } from '../../brain/filter-sanitizer.js';
-import { resolveBudget, applyBudget, budgetFields, type BudgetRequest, defaultBudgetChars } from '../../brain/result-budget.js';
+import { resolveBudget, applyBudget, budgetFields, type BudgetRequest, defaultBudgetChars, carriagesFor } from '../../brain/result-budget.js';
 import {
   queryBrain, countBrain, compareBySort, DEFAULT_QUERY_SORT, DEFAULT_QUERY_LIMIT, PROXY_PAGE_CEILING,
   parseQueryPaging,
@@ -242,7 +242,7 @@ export const queryTool: ToolHandler = {
 
     // Resolved before the read, so a bad `maxBytes` is an error rather than a query that ran first — and because the
     // READ is bounded by it: `limit` is not capped, so what bounds the heap is the budget (`Q-108`).
-    const queryBudget = resolveBudget(a as BudgetRequest, defaultBudgetChars(ctx.transport));
+    const queryBudget = resolveBudget(a as BudgetRequest, defaultBudgetChars(ctx.transport), carriagesFor(ctx.transport));
     if (!queryBudget.ok) throw new Error(queryBudget.error);
     // One member only: the database applies skip and limit there, so a read stopped early is simply a shorter page.
     // A proxy merge reads a window from every member and is bounded by PROXY_PAGE_CEILING instead.
@@ -326,7 +326,7 @@ export const queryTool: ToolHandler = {
      * Stripped by NAME rather than fixed by spread order. Ordering works and is one careless reorder away from
      * silently coming back.
      */
-    const { count: _queryBudgetTotal, ...queryAccounting } = budgetFields(budgeted, total, { chars: queryBudget.chars, bytes: queryBudget.bytes }, skip);
+    const { count: _queryBudgetTotal, ...queryAccounting } = budgetFields(budgeted, total, queryBudget, skip);
 
     return {
       content: [

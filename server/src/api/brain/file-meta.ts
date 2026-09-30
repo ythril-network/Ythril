@@ -33,7 +33,7 @@ import { reachesSpace } from '../../auth/space-reach.js';
 import { canWriteAnywhere } from '../../auth/write-anywhere.js';
 import type { TokenRights } from '../../config/rights-shape.js';
 import { spaceCollection } from '../../db/space-collection.js';
-import { markdownWindow } from '../../files/markdown-window.js';
+import { markdownWindow, resolveTextWindow } from '../../files/markdown-window.js';
 import { pageList } from '../../brain/list-page.js';
 import { defaultBudgetChars } from '../../brain/result-budget.js';
 import { queryInt } from '../../brain/result-budget.js';
@@ -100,9 +100,17 @@ fileMetaRouter.get('/spaces/:spaceId/files/extract', globalRateLimit, requireSpa
   const parentId = toDocId(rawPath);
   const limit = parseLimit(req.query['limit'], 100, 500);
   const skip = parseSkip(req.query['skip']);
-  const markdownSkip = queryInt(req.query['markdownSkip']);
-  if (markdownSkip !== undefined && !(typeof markdownSkip === 'number' && Number.isInteger(markdownSkip) && markdownSkip >= 0)) {
-    res.status(400).json({ error: '`markdownSkip` must be a non-negative integer character offset' });
+  // The Markdown window: `markdownSkip` and the answer budget, resolved by the one function `read_file` resolves them
+  // with (`Q-111`), so the two doors that read a document's text take the same parameters and refuse the same values.
+  // Unstated, the window is `MAX_CONVERTED_CHARS`, as it always was.
+  const textWindow = resolveTextWindow({
+    markdownSkip: queryInt(req.query['markdownSkip']),
+    maxChars: queryInt(req.query['maxChars']),
+    maxBytes: queryInt(req.query['maxBytes']),
+    maxTokens: queryInt(req.query['maxTokens']),
+  }, MAX_CONVERTED_CHARS);
+  if (!textWindow.ok) {
+    res.status(400).json({ error: textWindow.error });
     return;
   }
 
@@ -163,7 +171,7 @@ fileMetaRouter.get('/spaces/:spaceId/files/extract', globalRateLimit, requireSpa
   if (convertedRecord) {
     try {
       const text = await readFile(member, convertedRecord.path);
-      const w = markdownWindow(text, typeof markdownSkip === 'number' ? markdownSkip : 0, MAX_CONVERTED_CHARS);
+      const w = markdownWindow(text, textWindow.skip, textWindow.budget.chars, textWindow.budget.bytes);
       converted = {
         path: convertedRecord.path,
         markdown: w.markdown,
