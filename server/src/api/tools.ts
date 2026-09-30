@@ -76,13 +76,30 @@ const serveTool: RequestHandler = async (req, res) => {
     caller: restToolCaller(req),
   });
 
+  res.status(outcome.status).json(restToolBody(outcome));
+};
+
+/**
+ * The REST tool door's body: the answer ONCE (`Q-111`).
+ *
+ * A tool result carries its answer twice — `content` text and `structuredContent` — because an MCP client may read
+ * either one alone. A REST caller reads one JSON body, so both copies were sent to a reader who needs one: a page
+ * held to 20 000 characters arrived as twice that. So when the tool gives a structured answer, `data` IS the answer
+ * and `text` is one sentence saying so; when it gives none, `text` is the answer and `data` is null. A refusal keeps
+ * its sentence in `error`, with whatever machine-readable detail the tool attached in `data`.
+ *
+ * The shape is unchanged — `ok`, `text`, `data` on every success — so a caller branching on the keys still finds
+ * them; what changed is that `text` no longer repeats `data`.
+ */
+export function restToolBody(outcome: Pick<Awaited<ReturnType<typeof callTool>>, 'result'>): Record<string, unknown> {
   const text = outcome.result.content.map(c => c.text).join('\n');
   const data = outcome.result.structuredContent ?? null;
-  if (outcome.result.isError) {
-    res.status(outcome.status).json({ ok: false, error: text, data });
-    return;
-  }
-  res.status(outcome.status).json({ ok: true, text, data });
-};
+  if (outcome.result.isError) return { ok: false, error: text, data };
+  if (data === null) return { ok: true, text, data };
+  return { ok: true, text: STRUCTURED_ANSWER_TEXT, data };
+}
+
+/** The `text` of a REST tool answer whose body is in `data` — fixed, so a caller can recognise it rather than parse it. */
+export const STRUCTURED_ANSWER_TEXT = 'The answer is in `data`; it is not repeated here.';
 
 toolsRouter.post('/:tool', onlyToolNames, globalRateLimit, requireAuth, serveTool);

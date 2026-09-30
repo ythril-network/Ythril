@@ -29,7 +29,7 @@ type Edge = TraverseResult['edges'][number];
 export async function pageTraversal(
   walk: TraverseResult,
   req: TraversePageRequest,
-  opts: { budgetChars: number; spillRemainder?: (remainder: Array<{ node: Node; edges: Edge[] }>) => Promise<unknown> },
+  opts: { budgetChars: number; /** `carriagesFor(transport)`; 1 when omitted. */ carriages?: number; spillRemainder?: (remainder: Array<{ node: Node; edges: Edge[] }>) => Promise<unknown> },
 ): Promise<{ ok: true; body: Record<string, unknown> } | { ok: false; error: string }> {
   const paging = resolvePaging({ skip: queryInt(req.skip), remainderDump: req.remainderDump });
   if (!paging.ok) return paging;
@@ -37,7 +37,7 @@ export async function pageTraversal(
     ...(req.maxChars !== undefined ? { maxChars: queryInt(req.maxChars) } : {}),
     ...(req.maxBytes !== undefined ? { maxBytes: queryInt(req.maxBytes) } : {}),
     ...(req.maxTokens !== undefined ? { maxTokens: queryInt(req.maxTokens) } : {}),
-  } as BudgetRequest, opts.budgetChars);
+  } as BudgetRequest, opts.budgetChars, opts.carriages ?? 1);
   if (!budget.ok) return budget;
 
   // Hop order, stable within a hop: the walk's own order breaks ties.

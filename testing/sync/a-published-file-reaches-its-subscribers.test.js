@@ -100,7 +100,8 @@ describe('a published file reaches the subscriber', () => {
     assert.ok(r.status < 300, `meta edit answered ${r.status}`);
     await syncUntil(async () => {
       const q = await post(INSTANCES.a, tokenA, '/api/filter', { space: SPACE, collection: 'files', filter: { path: FILE }, limit: 1 });
-      const rows = q.body?.results ?? (typeof q.body?.text === 'string' ? JSON.parse(q.body.text) : []);
+      // The tool door carries the page in `data` (`Q-111`), so `text` is not parsed.
+      const rows = q.body?.data?.results ?? q.body?.results ?? [];
       const doc = rows[0];
       return doc?.description === `described ${RUN}` && (doc.tags ?? []).includes('onboarding');
     }, 'the description and tags never reached the subscriber');

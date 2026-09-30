@@ -139,7 +139,12 @@ Once connected, your AI assistant can:
 - **Track time** — create and update events, deadlines, plans, and milestones in the chrono log.
 - **Work with files** — read, write, list, and move files in any accessible space, including pictures
   and PDFs. Roughly 7 MB is the most an assistant can save in one go; anything larger has to be uploaded
-  through the Files page or the upload API instead.
+  through the Files page or the upload API instead. A long document is **read a window at a time** — about
+  25 000 characters by default, whole paragraphs — and the assistant is told where the next window starts, so
+  a large file no longer lands in its context all at once.
+- **Answers cost what they say.** Every answer an assistant asks for is held to a size budget (25 000
+  characters unless it asks for more), and that budget is what actually reaches the assistant — the answer is
+  not sent twice any more. A search page therefore holds fewer records than it did; the assistant pages on.
 - **Query directly** — run structured MongoDB-style queries against any collection.
 - **Write a batch** — save up to 500 records of each kind in one call, **each with its own links and
   labelled relationships attached**. That matters for what it costs you: an assistant importing a hundred

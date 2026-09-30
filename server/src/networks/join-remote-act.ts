@@ -42,6 +42,12 @@ const JOIN_TOKEN_TTL_MS = 10 * 60_000;
 
 type Caller = Parameters<typeof networkJoinRefusal>[0] & { id?: string };
 
+/**
+ * The longest invite code either door accepts. Declared here and read by the tool schema too, because the tool
+ * said nothing and the route said 8192 — the tool-and-route bound gate found it (`Q-109`).
+ */
+export const INVITE_CODE_MAX_LENGTH = 8192;
+
 export const JoinRemoteBody = z.object({
   /** handshakeId returned by Brain A's POST /api/invite/generate */
   handshakeId: z.string().uuid(),
@@ -76,7 +82,7 @@ export const JoinRemoteBody = z.object({
    */
   spaces: z.array(z.string()).max(MAX_SPACE_IDS).optional(),
   networkSpaces: z.array(z.string()).max(MAX_SPACE_IDS).optional(),
-  inviteCode: z.string().max(8192).optional(),
+  inviteCode: z.string().max(INVITE_CODE_MAX_LENGTH).optional(),
   /**
    * The schedule this instance syncs the joined network on (Q-137). Wins over the inviter's; `''` is manual on purpose;
    * absent adopts the inviter's, or `DEFAULT_JOIN_SYNC_SCHEDULE`. Checked by `syncScheduleRefusal` like create's.

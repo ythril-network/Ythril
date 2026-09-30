@@ -33,54 +33,14 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { pathToFileURL } from 'node:url';
-import { z } from 'zod';
-import { ALL_TOOLS } from '../../server/dist/mcp/tools/index.js';
 import { REPO_ROOT, trackedSources } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
+import { toolValidators, zodValidators, quantities } from './_validator-schemas.mjs';
 
 const BOUNDS = await import('../../server/dist/util/request-bounds.js').catch(() => null);
 
-const SPACE_SCHEMAS = { requiredSpace: { type: 'string' }, optionalSpace: { type: 'string' } };
-
 /** Every validator, as `{ door, schema }` — the MCP tools and the exported zod schemas, one JSON-schema shape. */
-async function validators() {
-  const out = ALL_TOOLS.map(t => ({
-    door: `MCP ${t.name}`,
-    schema: typeof t.inputSchema === 'function' ? t.inputSchema(SPACE_SCHEMAS) : t.inputSchema,
-  }));
-  // The connector is a second process with its own port and two routes; this server does not serve them.
-  const zodModules = trackedSources('server/src', { untracked: true, exclude: ['server/src/local-agent-connector/index.ts'] })
-    .filter(f => /from ['"]zod['"]/.test(readFileSync(join(REPO_ROOT, f), 'utf8')));
-  for (const file of zodModules) {
-    const dist = join(REPO_ROOT, file.replace(/^server\/src\//, 'server/dist/').replace(/\.ts$/, '.js'));
-    const mod = await import(pathToFileURL(dist).href);
-    for (const [name, value] of Object.entries(mod)) {
-      if (!value || typeof value !== 'object' || !value._zod) continue;
-      out.push({ door: `REST ${file}:${name}`, schema: z.toJSONSchema(value, { unrepresentable: 'any' }) });
-    }
-  }
-  return out;
-}
-
-const VALIDATORS = await validators();
-
-/** Every array and number node, with its path. `seg` is the property it is declared under. */
-function quantities({ door, schema }) {
-  const out = [];
-  const walk = (node, path, seg) => {
-    if (!node || typeof node !== 'object') return;
-    const types = [node.type].flat();
-    if (types.includes('array')) out.push({ door, path, seg, kind: 'array', node });
-    if (types.includes('number') || types.includes('integer')) out.push({ door, path, seg, kind: 'number', node });
-    for (const [k, v] of Object.entries(node.properties ?? {})) walk(v, `${path}.${k}`, k);
-    if (node.items && !Array.isArray(node.items)) walk(node.items, `${path}[]`, seg);
-    for (const key of ['oneOf', 'anyOf', 'allOf']) (node[key] ?? []).forEach((v, i) => walk(v, `${path}|${i}`, seg));
-    if (node.additionalProperties && typeof node.additionalProperties === 'object') walk(node.additionalProperties, `${path}{*}`, seg);
-  };
-  walk(schema, '', '');
-  return out;
-}
+const VALIDATORS = [...toolValidators(), ...await zodValidators()];
 
 const ALL = VALIDATORS.flatMap(quantities);
 
@@ -93,9 +53,10 @@ const bounded = q => q.kind === 'array'
  * A rule that matches nothing fails the gate, so a ruling cannot outlive its subject.
  */
 const OPEN_BY_RULING = [
-  { name: 'an offset', test: q => q.seg === 'skip',
+  { name: 'an offset', test: q => q.seg === 'skip' || q.seg === 'markdownSkip',
     why: 'skip passes over rows rather than returning them: on `filter` the query deadline (`maxTimeMS`, capped at 10 s) '
-      + 'bounds it, and on recall, similar, traverse, read_spill and list_embed_jobs it pages an answer whose size is bounded elsewhere' },
+      + 'bounds it, and on recall, similar, traverse, read_spill and list_embed_jobs it pages an answer whose size is bounded elsewhere; '
+      + '`markdownSkip` is a character offset into a document whose window the answer budget bounds' },
   { name: 'an answer budget', test: q => ['maxChars', 'maxBytes', 'maxTokens'].includes(q.seg),
     why: 'resolved by `brain/result-budget.ts` into [MIN_MAX_BYTES, MAX_MAX_BYTES] and echoed back as budgetChars/budgetBytes, '
       + 'so the clamp is disclosed on every answer (Q-161); the cost is bounded by the resolver, not the request' },

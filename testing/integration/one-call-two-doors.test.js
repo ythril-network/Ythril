@@ -81,8 +81,14 @@ const parsedOrText = t => { try { return JSON.parse(t); } catch { return t; } };
 async function bothDoors(tool, args) {
   const rest = await viaRest(tool, args);
   const mcpAnswer = await viaMcp(tool, args);
-  assert.deepEqual(sansBudget(parsedOrText(rest.text)), sansBudget(parsedOrText(mcpAnswer.text)),
-    `${tool} answers differently depending on the door:\n  REST: ${rest.text}\n  MCP:  ${mcpAnswer.text}`);
+  // The REST door carries a structured answer ONCE, in `data`, and `text` then says so rather than repeating it
+  // (`Q-111`) — so the prose is compared only where there is no structured answer, and `data` is compared below.
+  if (!rest.ok || rest.data == null) {
+    assert.deepEqual(sansBudget(parsedOrText(rest.text)), sansBudget(parsedOrText(mcpAnswer.text)),
+      `${tool} answers differently depending on the door:\n  REST: ${rest.text}\n  MCP:  ${mcpAnswer.text}`);
+  } else {
+    assert.equal(rest.text, 'The answer is in `data`; it is not repeated here.', `${tool}: REST repeated a structured answer in \`text\``);
+  }
   assert.equal(rest.ok, !mcpAnswer.isError,
     `${tool} succeeded on one door and failed on the other`);
   assert.deepEqual(sansBudget(rest.data), sansBudget(mcpAnswer.data), `${tool} returns different structured data per door`);
@@ -140,11 +146,11 @@ describe('a read answers identically on both doors', () => {
   it('list_spaces, which takes no space at all', async () => {
     const { rest } = await bothDoors('list_spaces', {});
     assert.equal(rest.status, 200);
-    assert.match(rest.text, new RegExp(SPACE), 'the space created in setup must be listed');
-    // The text half is a bare ARRAY and the structured half must be an object, so the array is NAMED.
-    // That naming is the one place the two halves are allowed to differ in shape, and it is worth an
-    // assertion rather than an assumption.
+    // The structured half must be an object, so the array is NAMED — worth an assertion, not an assumption.
+    // Read from `data`: since Q-111 the REST door carries a structured answer ONCE, and `text` only says so.
     assert.ok(Array.isArray(rest.data?.spaces), `list_spaces must name its array: ${JSON.stringify(rest.data)}`);
+    assert.ok(rest.data.spaces.some(s => (s?.id ?? s) === SPACE),
+      `the space created in setup must be listed: ${JSON.stringify(rest.data.spaces).slice(0, 300)}`);
   });
 
   it('space_meta', async () => {

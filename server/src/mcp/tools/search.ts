@@ -20,6 +20,7 @@ import {
   budgetedEnvelope,
   type BudgetRequest,
   defaultBudgetChars,
+  carriagesFor,
 } from '../../brain/result-budget.js';
 import { spillResultSet } from '../../brain/graph-spill.js';
 import { traversedAnswer } from '../../brain/traversed-answer.js';
@@ -283,7 +284,7 @@ export const recallTool: ToolHandler = {
     const rerank = a['rerank'] === false ? false : undefined;
     const recallProjection = normaliseProjection(a['projection'] as Record<string, unknown> | undefined);
     const shape: HitShape = { includeFileContent, includeDiagnostics, includeRecordMeta, projection: recallProjection };
-    const budget = resolveBudget(a as BudgetRequest, defaultBudgetChars(ctx.transport));
+    const budget = resolveBudget(a as BudgetRequest, defaultBudgetChars(ctx.transport), carriagesFor(ctx.transport));
     if (!budget.ok) throw new Error(budget.error);
     const paging = resolvePaging(a as { skip?: unknown; remainderDump?: unknown });
     if (!paging.ok) throw new Error(paging.error);
@@ -569,7 +570,7 @@ export const find_similarTool: ToolHandler = {
     const includeRecordMeta = a['includeRecordMeta'] === true;
     const recallProjection = normaliseProjection(a['projection'] as Record<string, unknown> | undefined);
     const shape: HitShape = { includeFileContent, includeDiagnostics, includeRecordMeta, projection: recallProjection };
-    const budget = resolveBudget(a as BudgetRequest, defaultBudgetChars(ctx.transport));
+    const budget = resolveBudget(a as BudgetRequest, defaultBudgetChars(ctx.transport), carriagesFor(ctx.transport));
     if (!budget.ok) throw new Error(budget.error);
     const paging = resolvePaging(a as { skip?: unknown; remainderDump?: unknown });
     if (!paging.ok) throw new Error(paging.error);
