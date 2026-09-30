@@ -624,8 +624,10 @@ export async function renameFileMetaByPrefix(
   if (srcPrefix === dstPrefix) return;
 
   const escaped = escapeRegex(srcPrefix);
+  // The files themselves only. Their derived records (chunks, sidecars) are re-rooted by `parentFileId` in
+  // `move-cascade.ts`: renamed here by id, a chunk kept the `parentFileId` of a path that no longer existed.
   const docs = await col<FileMetaDoc>(spaceCollection(spaceId, 'files'))
-    .find(asFilter<FileMetaDoc>({ _id: { $regex: `^${escaped}` } }))
+    .find(asFilter<FileMetaDoc>({ _id: { $regex: `^${escaped}` }, parentFileId: { $exists: false } }))
     .toArray() as FileMetaDoc[];
 
   if (docs.length === 0) return;

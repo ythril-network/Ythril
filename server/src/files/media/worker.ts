@@ -54,7 +54,7 @@ import {
 import type { ResolvedFormat } from '../converters/pipeline.js';
 import { ConversionUnavailableError } from '../converters/types.js';
 import type { StepProgress } from '../converters/types.js';
-import { isLeaseLost } from './lease.js';
+import { isLeaseLost, holdsClaim, JobLeaseLostError, type JobClaim } from './lease.js';
 import { effectiveDocExtractionMode } from '../converters/extraction-level.js';
 import { effectiveTextLevel, effectiveVideoLevel, videoDoesKeyframes } from '../converters/media-level.js';
 import fs from 'fs/promises';
@@ -426,6 +426,7 @@ async function processJob(
   // `false` on the next beat. `leaseLost` is what the long phases poll to stop early — without it a
   // recovered job runs twice, both runs writing the same chunk ids and competing for the same CPU.
   let leaseLost = false;
+  const claim: JobClaim = { jobId: String(fileId), claimToken: job.claimToken };
   const heartbeat = (p?: StepProgress): void => {
     void touchJobProgress(spaceId, String(fileId), p, job.claimToken).then(stillOurs => {
       if (!stillOurs) leaseLost = true;
@@ -448,7 +449,7 @@ async function processJob(
         // never succeed, so this is TERMINAL, not a failure: reconcile to disk truth by
         // dropping the job and any orphaned metadata/artifacts, and stop (no retry, no
         // "exhausted retries" churn — that infinite loop is exactly what this avoids).
-        await reconcileDeletedSource(spaceId, fileId);
+        await reconcileDeletedSource(spaceId, claim);
         log.info(`Media worker: source file ${spaceId}/${fileId} no longer exists — removed job and orphaned metadata (no retry)`);
         return;
       }
@@ -533,8 +534,9 @@ async function processJob(
           const { chunkCount, convertedFileId, embedFailures } = await storeConversionResults(
             spaceId, filePath, chunks, convertedMarkdown, extractedImages,
             // Embedding is the longest phase and reported nothing, so a document with more than
-            // `stalledJobTimeoutMs` of chunks in it was recovered mid-flight every time.
-            { onProgress: heartbeat, shouldStop: () => leaseLost },
+            // `stalledJobTimeoutMs` of chunks in it was recovered mid-flight every time. `claim` fences the
+            // commit itself: a claim a move took away while this ran leaves nothing written under the old path.
+            { claim, onProgress: heartbeat, shouldStop: () => leaseLost },
           );
           const metaUpdate: Record<string, unknown> = { chunkCount };
           if (convertedFileId) metaUpdate['convertedFileId'] = convertedFileId;
@@ -600,7 +602,7 @@ async function processJob(
     // after those writes and not before, so either the delete's removal of the blob comes first and this
     // reconciles, or it comes after and the delete's own metadata cleanup follows it.
     if (!(await fs.stat(absolutePath).then(() => true, () => false))) {
-      await reconcileDeletedSource(spaceId, fileId);
+      await reconcileDeletedSource(spaceId, claim);
       log.info(`Media worker: source file ${spaceId}/${fileId} was deleted during its job — removed what the job wrote`);
       return;
     }
@@ -639,10 +641,15 @@ async function processJob(
     // attempt spent, and another claimant is on it: calling failJob here would spend a SECOND attempt and
     // write a `lastError` describing nothing that went wrong, and calling completeJob would report a
     // re-queued job as done. So this run simply stops, and says why at WARN so the pair is visible.
+    //
+    // Recovery is not the only thing that takes a claim: moving or deleting the file does too, and so does a
+    // re-upload. The message names all of them, because naming only recovery sent the reader of a move's
+    // abandonment looking for a slow job that never existed.
     if (isLeaseLost(err)) {
-      log.warn(`Media worker: abandoning ${spaceId}/${fileId} — its claim was recovered while it was still`
-        + ` running, and another attempt now owns it. This means the job was slower than`
-        + ` stalledJobTimeoutMs, not stuck: see the re-queue warning above for how long it was silent.`);
+      log.warn(`Media worker: abandoning ${spaceId}/${fileId} — its claim was taken while it was still running,`
+        + ` and nothing it produced was written. Either the file was moved, deleted or re-uploaded (the job, if`
+        + ` any, now belongs to wherever the file went), or stall recovery re-queued it because it was slower`
+        + ` than stalledJobTimeoutMs — in that case see the re-queue warning above for how long it was silent.`);
       mediaJobsRetriedTotal.labels({ space: spaceId, media_type: mediaType }).inc();
       return;
     }
@@ -688,8 +695,15 @@ async function processJob(
  * extracted). Disk is the source of truth for the file store, so a job pointing at
  * a file that no longer exists is stale and must be cleaned up, not retried.
  * Best-effort throughout — each step swallows its own error.
+ *
+ * Only while this run still holds its claim, and otherwise it throws `JobLeaseLostError` and touches nothing. A file
+ * gone from its path is not always a deleted file: a MOVE takes the claim first and then carries the file, its
+ * job and its derived records to the new path. Reconciling "the deleted source" in that window deleted the very job
+ * and records the move was about to carry — the moved file arrived with no job and nothing ever processed it.
  */
-async function reconcileDeletedSource(spaceId: string, fileId: string): Promise<void> {
+async function reconcileDeletedSource(spaceId: string, claim: JobClaim): Promise<void> {
+  if (!(await holdsClaim(spaceId, claim))) throw new JobLeaseLostError(spaceId, claim.jobId);
+  const fileId = claim.jobId;
   await cancelMediaJob(spaceId, fileId).catch(err =>
     log.warn(`reconcileDeletedSource: cancelMediaJob ${spaceId}/${fileId}: ${err instanceof Error ? err.message : String(err)}`),
   );

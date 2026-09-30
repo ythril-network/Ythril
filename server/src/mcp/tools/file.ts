@@ -1,17 +1,14 @@
 import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.js';
 import { TTL_DAYS_SCHEMA, filePathSchema, ttlDaysFromArgs } from './shared.js';
 import { type InputFormat } from '../../files/converters/pipeline.js';
-import { renameFileMeta, renameFileMetaByPrefix } from '../../files/file-meta.js';
+import { moveFileCascade } from '../../files/move-cascade.js';
 import { readEditAudit } from '../../brain/edit-audit.js';
-import { createDir, listDir, listFilesRecursive, moveFile, readFile } from '../../files/files.js';
+import { createDir, listDir, readFile } from '../../files/files.js';
 import { CONTENT_ENCODINGS, decodeContent } from '../../files/content-encoding.js';
 import { storeFile, type StoreFileMeta } from '../../files/store-file.js';
-import { writeFileTombstones } from '../../files/tombstones.js';
 import { deleteFileCascade } from '../../files/delete-cascade.js';
 import { resolveWriteTarget } from '../../spaces/proxy.js';
 import { memberSpacesWithin } from '../../spaces/proxy-scoped.js';
-import { emitWebhookEvent } from '../../webhooks/dispatcher.js';
-import { log } from '../../util/log.js';
 import { StoredFileUnreadable } from '../../files/stored-bytes.js';
 import { readSpillByPath } from '../../brain/read-spill-act.js';
 import { linkInputSchemasFor, linkInputError, linkFieldsFrom } from '../../brain/write-connections.js';
@@ -362,23 +359,8 @@ export const move_fileTool: ToolHandler = {
     if (!dst.trim()) throw new Error('dst must not be empty');
     const wt = resolveWriteTarget(callSpace, a['targetSpace'] as string | undefined);
     if (!wt.ok) throw new Error(wt.error);
-    // Tombstone the OLD path(s) before moving (sync has no rename detection, so the source
-    // would otherwise resurrect from a peer's manifest). Children for a dir move, else src.
-    const movedChildren = await listFilesRecursive(wt.target, src);
-    const oldPaths = movedChildren.length > 0 ? movedChildren : [src];
-
-    await moveFile(wt.target, src, dst);
-    // Re-root metadata: the file record at `src` AND, for a directory move, every child
-    // record under `src/` (renameFileMetaByPrefix). The HTTP PATCH route does both; MCP
-    // previously did only the single-file rename, orphaning child records on a dir move.
-    await Promise.all([
-      renameFileMeta(wt.target, src, dst),
-      renameFileMetaByPrefix(wt.target, src, dst),
-    ]).catch(err => {
-      log.warn(`move_file renameFileMeta error for ${wt.target}, ${src} → ${dst}: ${err instanceof Error ? err.message : String(err)}`);
-    });
-    await writeFileTombstones(wt.target, oldPaths);
-    emitWebhookEvent({ event: 'file.updated', spaceId: wt.target, entry: { path: dst, previousPath: src }, ...(ctx.actor ?? {}) });
+    // One cascade with the REST PATCH route: metadata, derived records, sidecars, jobs, tombstones, webhook.
+    await moveFileCascade(wt.target, src, dst, ctx.actor);
     return { content: [{ type: 'text' as const, text: `Moved '${src}' → '${dst}'.` }],
       structuredContent: { from: src, to: dst } };
   },
