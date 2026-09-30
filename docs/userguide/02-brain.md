@@ -279,7 +279,9 @@ means something different: the search did not finish, so it found nothing becaus
 themselves (so a part number, form id or clause name is found even though such a string carries almost no
 meaning for a language model). A record that scores on both ranks highest. If your administrator has
 configured a reranking model, the top candidates are then re-scored by a model that reads your question
-and each passage together.
+and each passage together. **Searching a proxy space ranks its members together:** the results of every member
+are combined into one ranking, so the best matches come first whichever space they live in — a member whose
+records matched your exact words is not pushed below one that only matched their meaning.
 
 None of that needs setting up, and none of it can make a search fail — a stage that is unavailable is
 simply skipped.

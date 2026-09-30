@@ -101,6 +101,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A recall across spaces ranks by relevance, not by which spaces had a text match (`Q-82`).** Each space fused
+  its own candidates only when its text search found something, so a cross-space answer mixed rank scores near
+  0.03 with cosine scores near 0.3-0.9: without a reranker every result of a space whose text search missed came
+  before every result of one whose text search hit, whole spaces in blocks; with one, the rerank's unscored tail
+  did the same. `recallGlobal` now fuses the merged pool once — one ranking by meaning over every candidate, and
+  each space's per-type text ranking as its own channel — so every result carries a `fusedScore` from the same
+  fusion, spaces interleave by relevance, and the reranker picks its candidates by that order. **Who is affected:**
+  a `recall` naming several spaces, a proxy, or no space — the ORDER of its results, and the values of `fusedScore`
+  and `vectorRank` on them (now computed over the merged candidates). A recall over one space is unchanged.
 - **A proxy space no longer gets collections at boot, and a hand-edited `proxyFor: []` is a real space everywhere
   (`Q-80`, `Q-98`).** `initAllSpaces` walked every configured space, so each boot created a proxy's collections —
   which creating it never made and deleting it (a config-only removal) never dropped; the restore index rebuild

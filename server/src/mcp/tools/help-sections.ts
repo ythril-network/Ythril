@@ -134,6 +134,10 @@ minScore filters on score ALONE -- so on an
 instance with a reranker configured, the number that decided a result's position
 is rerankScore and the number you can threshold on is a different one. Read the
 highest of the three that is present to know why something placed where it did.
+ACROSS SPACES (a list, a proxy, or no space) the merged candidates are fused
+ONCE, so every result carries a fusedScore from the same fusion and spaces
+interleave by relevance. Two separate recalls cannot be merged by their scores:
+ask for both spaces in one recall.
 
 Rule of thumb: exact criteria you can name as a FIELD → filter; meaning, or an
 exact TOKEN you can only find inside the text → recall; both → recall with its

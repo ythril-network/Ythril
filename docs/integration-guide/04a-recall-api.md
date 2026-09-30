@@ -207,6 +207,17 @@ unavailable, and **none of them can fail a search** — a stage that cannot answ
 actually knows — **and a result carrying a `rerankScore` ranks above every result without one**, whatever
 the numbers, because the three are on unrelated scales.
 
+**Across spaces, the merged answer is fused once.** A recall over several spaces — a list of spaces, a proxy, or
+no `space` at all — gathers each space's candidates and then fuses the MERGED pool: one ranking by meaning over
+every candidate (the cosine scores are comparable across spaces: one query, one model), and each space's text
+ranking per record type as a ranking of its own. So every merged result carries a `fusedScore` from the same
+fusion, `vectorRank` is its place by meaning among all the merged candidates, and a space whose text search found
+nothing is interleaved with one whose text search found something rather than ranked as a block above it. With a
+reranker, its candidates are chosen by that fused order. When no space's text search matched anything, nothing is
+fused and the answer is in vector order. A recall over ONE space is ranked by that space's own fusion, over its
+whole candidate pool. Merging two answers yourself will not reproduce the server's order — ask for both spaces in
+one recall instead.
+
 #### The per-stage scores are the ORDERING
 
 `lexicalScore`, `fusedScore` and `rerankScore` are on **every** recall and find-similar result, on **both**
@@ -215,7 +226,8 @@ doors, each present only when that stage actually ran. **No parameter removes th
 
 **Read the highest one present to know why a result placed where it did.** Precedence is
 `rerankScore > fusedScore > score`, and every result with a `rerankScore` comes before every result without
-one — so merge two answers the same way, or the merged order will differ from the server's. On an instance
+one. Two answers from separate recalls carry fused scores from separate fusions, so they cannot be merged by
+these numbers — recall the spaces together (above) to get one order. On an instance
 with a cross-encoder configured, `score` — plain vector
 similarity — is *not* the number that ordered the answer — and `minScore` (below) filters on `score` alone, so a
 threshold and the ordering can be different numbers.
