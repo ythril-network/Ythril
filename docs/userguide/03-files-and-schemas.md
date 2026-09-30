@@ -238,7 +238,8 @@ Open **Schema Library** from the sidebar (under Workspace).
 
 ### My Library tab
 
-This tab lists all schema definitions on this instance.
+This tab lists all schema definitions on this instance. An entry that spaces use shows how many space types
+reference it (for example **3 links**); the counts arrive with the list, so a large library opens with one request.
 
 **Browsing:** Use the search bar to filter by name or description. Use the type filter pills (entity / fact / edge / chrono) to narrow by knowledge type.
 

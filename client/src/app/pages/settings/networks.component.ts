@@ -1,5 +1,6 @@
 import { Component, inject, signal, computed, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { InstantComponent } from '../../shared/instant.component';
 import { FormsModule } from '@angular/forms';
 import { Network, Space, SyncHistoryRecord, VoteRound } from '../../core/api.types';
 import { roleCountKey, remoteOf, memberGroups } from './network-role-view';
@@ -28,7 +29,7 @@ import { NetworkEnableWizardComponent } from './network-enable-wizard.component'
 @Component({
   selector: 'app-networks',
   standalone: true,
-  imports: [CommonModule, FormsModule, TranslocoPipe, PhIconComponent, StatusPillComponent, SummaryStripComponent, RelativeTimeComponent, ErrorStateComponent, NetworkCreateDialogComponent, NetworkJoinDialogComponent, NetworkEnableWizardComponent, NetworkMemberRowComponent, NetworkInvitePanelComponent, NetworkAddSpaceComponent, NetworkPendingSpacesComponent, NetworkConnectingComponent, NetworkChangeNotesComponent],
+  imports: [CommonModule, InstantComponent, FormsModule, TranslocoPipe, PhIconComponent, StatusPillComponent, SummaryStripComponent, RelativeTimeComponent, ErrorStateComponent, NetworkCreateDialogComponent, NetworkJoinDialogComponent, NetworkEnableWizardComponent, NetworkMemberRowComponent, NetworkInvitePanelComponent, NetworkAddSpaceComponent, NetworkPendingSpacesComponent, NetworkConnectingComponent, NetworkChangeNotesComponent],
   styles: [`
     .network-card {
       background: var(--bg-surface);
@@ -241,7 +242,7 @@ import { NetworkEnableWizardComponent } from './network-enable-wizard.component'
                   } @else {
                     @for (rec of historyForNet(net.id); track rec._id) {
                       <div class="history-row">
-                        <span style="color:var(--text-muted);">{{ rec.completedAt | date:'dd.MM.yyyy HH:mm' }}</span>
+                        <span style="color:var(--text-muted);"><app-instant [value]="rec.completedAt" variant="datetime"/></span>
                         <span class="status-badge" [ngClass]="'status-' + rec.status">{{ rec.status }}</span>
                         <span>
                           ↓ {{ rec.pulled.facts + rec.pulled.entities + rec.pulled.edges }}

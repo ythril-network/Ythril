@@ -22,6 +22,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   queue behind it; a slot now refills as soon as it frees, claims stay one at a time, and a raised
   `workerConcurrency` starts a slot within one poll interval even while every slot is busy. Shutdown is unchanged:
   a job claimed before stop runs to its end or is handed back, and one claimed after stop is handed back and not run.
+- **Every date in the UI is shown in the format you choose, and dates follow the language you pick (`Q-146`,
+  `Q-100`).** **Settings → Preferences** has a new **Date and time** card: **Automatic** (the default: your
+  browser's locale when it speaks the interface language, otherwise the interface language), **ISO 8601**
+  (`2026-09-29 07:59:03`) or **Day.month.year, 24-hour**, with the time in **local time** or **UTC**. It is kept in
+  this browser, beside the language. Twenty places formatted their own dates in five spellings, and none of them
+  could follow a setting; the German interface showed change notes and token expiries in US English because the
+  app registers no Angular locale data, and "2 hours ago" stayed English after a switch to Deutsch. Every date now
+  goes through `core/date-format.ts`, hovering any date shows its exact ISO 8601 UTC value, and a client spec
+  fails when any other file formats a date itself. Stored and transmitted values are unchanged — ISO 8601 UTC. The
+  token table's Created, Last used and Expires columns now use the two-line date-over-time cell the other tables
+  use, where they showed one browser-formatted string.
+- **A shortened answer names the size parameter that shortened it (`Q-116`).** Every answer the size budget cuts
+  now carries `budgetBoundBy` — `maxChars`, `maxTokens` or `maxBytes`, the parameter whose ceiling the next match
+  would have passed (two of them when it would have passed both) — on both doors, on recall, find-similar, the
+  record lists, the query page, traversals and spill reads alike, from the one admission meter that decides it.
+  It is absent when the answer was not cut, or was cut by a walk that ran out. The Query tab's advice, which said
+  "raise Max response size" over a form with three fields of that name, now names the field by its label, and
+  after a walk ran out it gives no size advice at all. Three stale claims went with it: the byte field's tooltip
+  said it defaulted to 100000 with a floor of 1000 (it has neither — empty means no byte ceiling, and its
+  placeholder now says "none"); the Brain guide put `maxChars` under "The answer" (that field is `maxBytes`) and
+  described a characters-per-token field removed in 5.0; and the MCP `recall` description called a `budget` cut
+  "bytes" when the default ceiling is characters. Additive for a reader: a new field, present only on a cut.
+
 - **A space-meta read no longer rescans the space, and both doors build it with one function (`Q-95`).** `stats`
   and `actualSchema` were rebuilt on every `GET /api/spaces/:id/meta` and every MCP `space_meta` — an entity scan,
   an edge scan, three link scans and seven counts per member space — by two hand-written copies of the answer. They
@@ -136,6 +159,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The client never shows an answer older than the one you asked for last (`Q-112`).** The graph's depth slider
+  started a traversal on every step it passed and drew whichever answer arrived last, so a slow depth-3 answer
+  could land over depth 4 — and a depth drawn from the cache could be redrawn by a deeper request still in flight.
+  It now asks once the slider rests and cancels what it no longer needs. The record tabs (entities, edges, facts,
+  chrono) let a slow answer to an old filter replace the new filter's rows, and a list load could replace a
+  semantic search's rows or the reverse; every answer that writes a tab's rows now goes through one latest-wins
+  slot (`core/latest-wins.ts`, which the tab search bars had privately), and so do the graph's selected-record
+  card and linked records. Opening a record resolved each linked fact and chrono title with its own request; it
+  is one request per kind now. The schema library asked `…/usages` once per entry to show its link counts;
+  `GET /api/schema-library` now answers `usageCounts` beside the entries, counted by the function the per-entry
+  route uses. The Brain page's chunk was 292 kB against a 260 kB budget and the space settings dialog's 179 kB
+  against 175 kB; deferring the tabs that are not where each opens brings them to 194 kB and 42 kB, and the budgets
+  are tightened to hold that. The nine unused standalone imports the build warned about are gone, and an unused
+  one now fails the build.
+- **The Query tab's walk headings show their counts (`Q-101`).** "Reached by the walk", and the Entities, Facts,
+  Chrono and Files headings under it, rendered `({count})` literally in all three languages, and each reached record
+  read `{hops} hop(s)`: the values used single braces, which the translation layer does not interpolate. A client
+  spec now fails on a single-brace placeholder in any value of any locale, and on a German or Polish value that
+  interpolates different parameters from the English one.
+- **Buttons that name an action say it in German and Polish (`Q-115`).** "Clear results" read "Klare Ergebnisse"
+  (clear as in transparent) and the entity search's Clear read "Klar"; in Polish they read "Jasne", Reset read
+  "Nastawić" (to set a clock) and Close the infinitive "Zamknąć". They now read "Ergebnisse löschen" / "Leeren",
+  "Wyczyść wyniki" / "Wyczyść", "Zresetuj" and "Zamknij". The Query form's Projection field had the same fault
+  ("Vorsprung", "Występ") and now reads "Projektion" / "Projekcja". A client spec derives every English label that
+  starts with Clear, Reset or Close and fails when the German or Polish value does not contain a verb that does it.
+  The same fault on the product's noun: German called a space a "Leerzeichen" (the typed whitespace character) in
+  8 places — "Noch keine Leerzeichen" on the Brain page, "Leerzeichen erstellen/löschen" on the MFA card — and
+  Polish a "spacja" in 11; they now say "Space" / "przestrzeń" as the rest of each file does, and the same spec
+  fails on any value whose English names a space and whose German or Polish uses the whitespace word.
 - **A space delete no longer loses a race with the media worker, and one unfinished delete no longer blocks every
   space operation until a restart.** Deleting a space while the worker was still converting one of its files failed
   `ENOTEMPTY` when removing the files directory — the worker was writing artifacts under it — and the delete kept

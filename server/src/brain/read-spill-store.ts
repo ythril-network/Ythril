@@ -45,7 +45,7 @@ import { ensureExpiryIndex } from '../db/expiry-index.js';
 import { envInt } from '../config/env-num.js';
 import { UUID_V4_RE } from './entity-refs.js';
 import { NEVER_RETURNED_FIELDS } from './recall-shape.js';
-import { budgetMeter } from './result-budget.js';
+import { budgetMeter, type CeilingRefusal } from './result-budget.js';
 
 const gzipAsync = promisify(gzip);
 const gunzipAsync = promisify(gunzip);
@@ -311,6 +311,8 @@ export type ReadSpillPage =
     status: 200; kind: SpillKind; request: Record<string, unknown>; total: number; expiresAt: string;
     ceilingHit?: boolean; items: unknown[]; skip: number; nextSkip?: number; truncated: boolean;
     charsReturned: number; bytesReturned: number;
+    /** Which ceiling ended the window, when one did — named on the answer as `budgetBoundBy` (`Q-116`). */
+    refusedBy?: CeilingRefusal;
   }
   | { status: 404 }
   | { status: 410 };
@@ -358,11 +360,13 @@ export async function readSpillPage(req: ReadSpillRequest): Promise<ReadSpillPag
   }
 
   const truncated = next < h.items;
+  const refusedBy = meter.refusedBy();
   return {
     status: 200, kind: h.kind, request: h.request, total: h.items, expiresAt: h.expiresAt.toISOString(),
     ...(h.ceilingHit ? { ceilingHit: true } : {}),
     items, skip, ...(truncated ? { nextSkip: next } : {}), truncated,
     charsReturned: meter.chars(), bytesReturned: meter.bytes(),
+    ...(refusedBy ? { refusedBy } : {}),
   };
 }
 

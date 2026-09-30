@@ -2,7 +2,8 @@
  * RelativeTime — the pure formatter is the load-bearing bit (deterministic under a fixed `now`).
  */
 import { describe, it, expect } from 'vitest';
-import { formatRelativeTime, toEpochMs } from './relative-time.component';
+// The pure formatter moved to `core/date-format.ts` with every other date formatting (Q-146).
+import { formatRelativeTime, toEpochMs } from '../core/date-format';
 
 const NOW = Date.parse('2026-07-19T12:00:00Z');
 

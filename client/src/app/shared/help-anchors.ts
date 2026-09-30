@@ -30,9 +30,9 @@ export const HELP_ANCHORS: { prefix: string; target: HelpTarget }[] = [
   { prefix: '/settings/audit-log', target: { doc: 'userguide', anchor: 'settings--audit-log' } },
   { prefix: '/settings/webhooks', target: { doc: 'userguide', anchor: 'settings--webhooks' } },
   { prefix: '/settings/embedding', target: { doc: 'userguide', anchor: 'settings--embedding' } },
-  // MFA has no page of its own — `<app-mfa/>` is embedded in Preferences, so that is the page whose Help
-  // control should open the MFA section. The entry used to read `/settings/mfa`, which nothing routes to.
-  { prefix: '/settings/preferences', target: { doc: 'userguide', anchor: 'multi-factor-authentication-mfa' } },
+  // Preferences got its own section when it gained the Date and time setting (Q-146); MFA, embedded on the same
+  // page, is the section right after it. The entry used to read `/settings/mfa`, which nothing routes to.
+  { prefix: '/settings/preferences', target: { doc: 'userguide', anchor: 'settings--preferences' } },
   // `/schema-library`, NOT `/settings/schema-library`: the latter was never a route. A dead duplicate of the
   // page under pages/settings/ made it look like one, so the real page had no Help target at all while the
   // table looked complete. The route-coverage test below is what stops that recurring.

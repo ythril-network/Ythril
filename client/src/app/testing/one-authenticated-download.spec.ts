@@ -31,11 +31,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { CLIENT_ROOT, trackedAppSources } from './tracked-sources';
-
-const stripComments = (src: string): string => src
-  .replace(/<!--[\s\S]*?-->/g, ' ')
-  .replace(/\/\*[\s\S]*?\*\//g, ' ')
-  .replace(/(^|[^:])\/\/[^\n]*/g, '$1 ');
+import { stripComments } from './strip-comments';
 
 const sources = new Map(trackedAppSources()
   .map(p => [p, stripComments(readFileSync(resolve(CLIENT_ROOT, p), 'utf8'))] as const));

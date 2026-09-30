@@ -13,6 +13,7 @@ import { TranslocoService } from '@jsverse/transloco';
 import { getTranslocoModule } from '../../testing/transloco-testing';
 import { PreferencesComponent } from './preferences.component';
 import { AuthApi } from '../../core/auth-api.service';
+import { DateFormatService } from '../../core/date-format.service';
 
 function make() {
   TestBed.resetTestingModule();
@@ -40,6 +41,24 @@ describe('PreferencesComponent — language switch', () => {
     expect(spy).toHaveBeenCalledWith('de');
     expect(c.activeLang()).toBe('de');
     expect(localStorage.getItem('lang')).toBe('de');
+  });
+
+  it('Date and time: picking a format and a zone sets the one preference every date reads (Q-146)', () => {
+    const { fixture } = make();
+    fixture.detectChanges();
+    const el = fixture.nativeElement as HTMLElement;
+    const styles = el.querySelectorAll<HTMLInputElement>('.date-style input[type=radio]');
+    const zones = el.querySelectorAll<HTMLInputElement>('.date-zone input[type=radio]');
+    expect([...styles].map(i => i.value)).toEqual(['auto', 'iso', 'dmy24']);
+    expect([...zones].map(i => i.value)).toEqual(['local', 'utc']);
+    expect(styles[0]!.checked).toBe(true);   // Automatic, local: the default
+
+    styles[1]!.click();
+    zones[1]!.click();
+    fixture.detectChanges();
+    expect(TestBed.inject(DateFormatService).preference()).toEqual({ style: 'iso', zone: 'utc' });
+    // Each option shows what picking it does, in the zone chosen.
+    expect(el.querySelectorAll('.date-style .example')[1]!.textContent).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} UTC$/);
   });
 
   // U12 arrangement: language on a SettingsCard, MFA under a Security section.

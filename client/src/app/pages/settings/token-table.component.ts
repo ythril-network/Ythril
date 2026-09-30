@@ -8,6 +8,7 @@ import { StatusPillComponent } from '../../shared/status-pill.component';
 import { SortableHeaderComponent } from '../brain/sortable-header.component';
 import { RightsGlyphComponent } from './rights-glyph.component';
 import { TokenQuotaCellComponent } from './token-quota-cell.component';
+import { TimestampComponent } from '../../shared/timestamp.component';
 import { isExpired, isExpiringSoon } from './token-table';
 import type { TokenSortField, SortDir } from './token-table';
 import type { TokenRecord } from '../../core/api.types';
@@ -50,7 +51,7 @@ import type { TokenRecord } from '../../core/api.types';
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
     FormsModule, TranslocoPipe, PhIconComponent, StatusPillComponent,
-    SortableHeaderComponent, RightsGlyphComponent, TokenQuotaCellComponent, HscrollTopDirective,
+    SortableHeaderComponent, RightsGlyphComponent, TokenQuotaCellComponent, HscrollTopDirective, TimestampComponent,
   ],
   /*
    * `BRAIN_RECORD_TABLE_STYLES` carries `.col-filter-input`, which is what makes the two docked search boxes look
@@ -152,10 +153,10 @@ import type { TokenRecord } from '../../core/api.types';
                   <ph-icon name="pencil-simple" [size]="13"/>
                 </button>
               </td>
-              <td>{{ stamp(t.createdAt) }}</td>
+              <td><app-timestamp [value]="t.createdAt"/></td>
               <td>
                 @if (t.lastUsed) {
-                  {{ stamp(t.lastUsed) }}
+                  <app-timestamp [value]="t.lastUsed"/>
                 } @else {
                   <span style="font-style:italic;color:var(--text-muted);">{{ 'tokens.table.neverUsed' | transloco }}</span>
                 }
@@ -165,7 +166,7 @@ import type { TokenRecord } from '../../core/api.types';
                   <span style="display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap;">
                     @if (expired(t)) { <app-status-pill variant="error">{{ 'tokens.table.expired' | transloco }}</app-status-pill> }
                     @else if (expiringSoon(t)) { <app-status-pill variant="warn" [dot]="true">{{ 'tokens.table.expiringSoon' | transloco }}</app-status-pill> }
-                    {{ stamp(t.expiresAt) }}
+                    <app-timestamp [value]="t.expiresAt"/>
                   </span>
                 } @else {
                   <app-status-pill variant="ok">{{ 'tokens.table.noExpiry' | transloco }}</app-status-pill>
@@ -253,10 +254,4 @@ export class TokenTableComponent {
   /** Shared with the page's rollup — see `token-table.ts`, where both read one definition. */
   expired = isExpired;
   expiringSoon = isExpiringSoon;
-
-  stamp(v: string | null | undefined): string {
-    if (!v) return '—';
-    const d = new Date(v);
-    return isNaN(d.getTime()) ? String(v) : d.toLocaleString();
-  }
 }

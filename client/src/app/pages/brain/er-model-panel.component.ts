@@ -39,7 +39,6 @@ import { ChangeDetectionStrategy, Component, ElementRef, computed, effect, injec
   viewChild } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { TranslocoPipe } from '@jsverse/transloco';
-import { PhIconComponent } from '../../shared/ph-icon.component';
 import { SkeletonLinesComponent } from '../../shared/skeleton-lines.component';
 import { ErrorStateComponent } from '../../shared/error-state.component';
 import { BrainApi } from '../../core/brain-api.service';
@@ -51,7 +50,7 @@ import { layoutErModel } from './er-layout';
   selector: 'app-er-model-panel',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [RouterLink, TranslocoPipe, PhIconComponent, SkeletonLinesComponent, ErrorStateComponent],
+  imports: [RouterLink, TranslocoPipe, SkeletonLinesComponent, ErrorStateComponent],
   styles: [`
     :host { display: block; }
     .stage { padding: 16px; overflow-x: auto; }

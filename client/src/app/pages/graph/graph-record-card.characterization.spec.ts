@@ -107,6 +107,8 @@ describe('the node card, populated', () => {
 
   it('renders every field an entity carries, in template order', () => {
     // The whole point of the file: this is the first test that has ever rendered this branch.
+    // The viewer's date format decides the spelling (Q-146); pin day.month.year so the pattern below is stable.
+    localStorage.setItem('dateFormat', JSON.stringify({ style: 'dmy24', zone: 'local' }));
     const { f } = openWith({
       _id: 'e-1', name: 'Ada Lovelace', type: 'person', description: 'the first programmer',
       tags: ['maths', 'history'], properties: { born: 1815 }, createdAt: '2026-08-30T09:05:00.000Z',
@@ -124,6 +126,7 @@ describe('the node card, populated', () => {
      * disappearing or changing, and that is what this catches.
      */
     const stamped = values.find(v => /^\d{2}\.\d{2}\.\d{4} \d{2}:\d{2}$/.test(v));
+    localStorage.removeItem('dateFormat');
     expect(stamped, `no dd.MM.yyyy HH:mm value rendered; got ${JSON.stringify(values)}`).toBeTruthy();
   });
 

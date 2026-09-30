@@ -103,6 +103,32 @@ export interface ResolvedBudget {
    * answer DISCLOSES as `budgetChars` / `budgetBytes`. Absent on a hand-built budget, which then discloses its own.
    */
   stated?: { chars: number; bytes: number | null };
+  /**
+   * The parameter that SET the character ceiling — `maxTokens` when its conversion was the lower, `maxChars`
+   * otherwise. Absent when neither was sent: the door's default, which a caller raises by stating `maxChars`.
+   * What `budgetBoundBy` names when the character ceiling is the one that cut an answer (`Q-116`).
+   */
+  charsFrom?: 'maxChars' | 'maxTokens';
+}
+
+/** The size parameters a budget-truncated answer can name as the one to raise (`budgetBoundBy`). */
+export type BudgetParameter = 'maxChars' | 'maxTokens' | 'maxBytes';
+
+/** Which of the two ceilings refused the row that ended an answer. */
+export interface CeilingRefusal { chars: boolean; bytes: boolean }
+
+/**
+ * The PARAMETERS to raise for an answer the budget cut, named from the ceilings that refused the next row
+ * (`Q-116`). A form with three "Max response size" fields, or an agent with three parameters, cannot act on
+ * "truncated: budget" alone; only the meter knows which ceiling it was, so it is said here rather than inferred
+ * from `budgetChars`/`budgetBytes` by every reader — an inference that cannot tell when both are set and the byte
+ * ceiling is the larger. Both are named when the row would have passed both: raising one would not admit it.
+ */
+export function budgetBoundBy(refusal: CeilingRefusal, budget: ResolvedBudget): BudgetParameter[] {
+  const out: BudgetParameter[] = [];
+  if (refusal.chars) out.push(budget.charsFrom ?? 'maxChars');
+  if (refusal.bytes) out.push('maxBytes');
+  return out;
 }
 
 /** What a caller's budget arguments resolve to, or the refusal text if they do not. */
@@ -150,6 +176,9 @@ export function resolveBudget(
   if (charCandidates.length === 0) charCandidates.push(operatorDefault);
 
   const chosenChars = Math.min(...charCandidates);
+  // A tie is named `maxChars`: it is the unit the ceiling is counted in.
+  const charsFrom: ResolvedBudget['charsFrom'] = mt !== null && (mc === null || Math.floor(mt * ratio) < mc)
+    ? 'maxTokens' : mc !== null ? 'maxChars' : undefined;
   const mb = posInt(maxBytes);
   const stated = {
     chars: clampBudget(chosenChars),
@@ -163,6 +192,7 @@ export function resolveBudget(
     chars: Math.floor(stated.chars / share),
     bytes: stated.bytes === null ? null : Math.floor(stated.bytes / share),
     stated,
+    ...(charsFrom ? { charsFrom } : {}),
   };
 }
 
@@ -238,6 +268,8 @@ export interface BudgetOutcome<T> {
   bytesReturned: number;
   /** True when at least one match was omitted. */
   truncated: boolean;
+  /** Which ceiling refused the first omitted match — present exactly when the METER cut the answer. */
+  refusedBy?: CeilingRefusal;
 }
 
 /**
@@ -263,12 +295,14 @@ export function applyBudget<T>(results: readonly T[], budget: ResolvedBudget): B
     if (!meter.admit(results[i])) break;
     returned.push(results[i]!);
   }
+  const refusedBy = meter.refusedBy();
   return {
     returned,
     remainder: results.slice(i) as T[],
     charsReturned: meter.chars(),
     bytesReturned: meter.bytes(),
     truncated: i < results.length,
+    ...(refusedBy ? { refusedBy } : {}),
   };
 }
 
@@ -281,10 +315,13 @@ export function applyBudget<T>(results: readonly T[], budget: ResolvedBudget): B
  */
 export function budgetMeter(budget: { chars: number; bytes: number | null }): {
   admit(item: unknown): boolean; charge(item: unknown): void; chars(): number; bytes(): number;
+  /** Which ceiling(s) refused the last refused item, or null when nothing was refused (`Q-116`). */
+  refusedBy(): CeilingRefusal | null;
 } {
   let usedChars = 2;
   let usedBytes = 2;
   let admitted = 0;
+  let refused: CeilingRefusal | null = null;
   return {
     /**
      * Count something the answer carries that is NOT a row — a named left-out row (Q-126). Never refused: it
@@ -302,7 +339,10 @@ export function budgetMeter(budget: { chars: number; bytes: number | null }): {
       const addBytes = Buffer.byteLength(serialised, 'utf8') + 1;
       const overChars = usedChars + addChars > budget.chars;
       const overBytes = budget.bytes !== null && usedBytes + addBytes > budget.bytes;
-      if (admitted > 0 && (overChars || overBytes)) return false;
+      if (admitted > 0 && (overChars || overBytes)) {
+        refused = { chars: overChars, bytes: overBytes };
+        return false;
+      }
       usedChars += addChars;
       usedBytes += addBytes;
       admitted++;
@@ -310,6 +350,7 @@ export function budgetMeter(budget: { chars: number; bytes: number | null }): {
     },
     chars: () => usedChars,
     bytes: () => usedBytes,
+    refusedBy: () => refused,
   };
 }
 
@@ -334,6 +375,9 @@ export function budgetFields<T>(
     budgetBytes: budget.stated ? budget.stated.bytes : budget.bytes,
     charsReturned: outcome.charsReturned,
     bytesReturned: outcome.bytesReturned,
+    // WHICH size parameter to raise, when the meter is what cut it (`Q-116`) — never on a page that stopped for
+    // another reason (a row limit, a walk that ran out), where raising a size would not help.
+    ...(outcome.refusedBy ? { budgetBoundBy: budgetBoundBy(outcome.refusedBy, budget) } : {}),
     /*
      * WHERE TO CONTINUE FROM, present exactly when there is somewhere to continue to. This is what makes the
      * remainder dump safe to make optional: an opt-in dump with no stated continuation strands a truncated
@@ -470,6 +514,8 @@ export async function budgetedRowsEnvelope<T, S>(opts: {
     charsReturned: meter.chars(),
     bytesReturned: meter.bytes(),
     ...(nextSkip !== undefined ? { nextSkip, truncatedBy } : {}),
+    // The same naming `budgetFields` gives, from the same meter, and only for a budget cut (`Q-116`).
+    ...(truncatedBy === 'budget' && meter.refusedBy() ? { budgetBoundBy: budgetBoundBy(meter.refusedBy()!, opts.budget) } : {}),
     ...(incompleteCount > 0 ? { incompleteCount, incompleteRows: named } : {}),
   };
 

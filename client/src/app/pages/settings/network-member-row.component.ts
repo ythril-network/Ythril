@@ -23,7 +23,7 @@
  * to the markup it replaces.
  */
 import { Component, ChangeDetectionStrategy, input, output } from '@angular/core';
-import { DatePipe } from '@angular/common';
+import { InstantComponent } from '../../shared/instant.component';
 import { TranslocoPipe } from '@jsverse/transloco';
 import { PhIconComponent } from '../../shared/ph-icon.component';
 import type { NetworkMember } from '../../core/api.types';
@@ -31,7 +31,7 @@ import type { NetworkMember } from '../../core/api.types';
 @Component({
   selector: 'app-network-member-row',
   standalone: true,
-  imports: [DatePipe, TranslocoPipe, PhIconComponent],
+  imports: [InstantComponent, TranslocoPipe, PhIconComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <span class="mono badge badge-gray" style="font-size:11px;">{{ member().instanceId.slice(0, 8) }}</span>
@@ -55,9 +55,9 @@ import type { NetworkMember } from '../../core/api.types';
       </span>
     }
 
-    <span class="member-sync" [attr.title]="member().lastSyncAt ? (member().lastSyncAt | date:'dd.MM.yyyy HH:mm') : ''">
+    <span class="member-sync">
       @if (member().lastSyncAt) {
-        {{ 'networks.member.synced' | transloco }} {{ member().lastSyncAt | date:'dd.MM.yyyy HH:mm' }}
+        {{ 'networks.member.synced' | transloco }} <app-instant [value]="member().lastSyncAt" variant="datetime"/>
       } @else {
         {{ 'networks.member.neverSynced' | transloco }}
       }

@@ -443,9 +443,43 @@ Your current session token is marked **(current session)** in the list.
 
 ---
 
+## Settings — Preferences
+
+**Settings → Preferences** holds the choices that belong to you in this browser rather than to the instance:
+the interface language, how dates and times are shown, and your second factor (see the next section). The first
+two are kept in this browser only — another browser, or a private window, starts from the defaults.
+
+### Language
+
+English, Deutsch or Polski. The switch takes effect at once, without a reload, and dates that follow the
+language (see below) switch with it.
+
+### Date and time
+
+Every date and time Ythril shows — a table's created column, a record's Created and Updated fields, a token's
+last use and expiry, a network member's last sync, a change note, a shortened search's download expiry — is shown
+in the format you pick here. What is **stored** does not change: every timestamp is kept, sent and synced as
+ISO 8601 in UTC, and this setting only decides how it reads on your screen.
+
+- **Format**
+  - **Automatic** (the default) — your locale decides the order and the clock. It is your browser's locale when
+    your browser speaks the interface language (English in a `en-GB` browser reads day first), and the interface
+    language itself when it does not: switch the interface to Deutsch in an English browser and dates read the
+    German way, `29.09.2026`. The option names the locale it is using.
+  - **ISO 8601** — `2026-09-29 07:59:03`, year first and a 24-hour clock, the same in every language.
+  - **Day.month.year, 24-hour** — `29.09.2026 07:59:03`.
+- **Time zone** — **Local time** shows your browser's zone (the option names it, for example `Europe/Berlin`);
+  **UTC** shows UTC and says so after the time.
+
+Each format option shows the current moment in that format, in the zone you have chosen, so you can see what
+picking it does before you pick it. **Hover over any date** to see its exact value, as the ISO 8601 UTC timestamp
+that is stored.
+
+---
+
 ## Multi-factor authentication (MFA)
 
-MFA adds a one-time code requirement for admin actions (creating tokens, managing spaces). Normal data operations are not affected. There is no separate "MFA" page — the MFA panel lives inside **Settings → Preferences**, under the **Security** heading (the language switcher sits above it).
+MFA adds a one-time code requirement for admin actions (creating tokens, managing spaces). Normal data operations are not affected. There is no separate "MFA" page — the MFA panel lives inside **Settings → Preferences**, under the **Security** heading (the language switcher and the date and time settings sit above it).
 
 **The switch is instance-wide, and that is the whole model.** It applies to admin actions, not to normal data
 operations, so a script or scheduler doing ordinary reads and writes is unaffected by turning it on. There is

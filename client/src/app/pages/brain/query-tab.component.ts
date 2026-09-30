@@ -16,6 +16,8 @@ import { BrainStore } from './brain-store.service';
 import { type ResultSpillLink } from '../../core/read-spill';
 import { type IncompleteRow } from '../../core/recall-graph-report';
 import { SpillEndingComponent } from './spill-ending.component';
+import { ceilingFieldKeys } from '../../core/ceiling-advice';
+import { formatList } from '../../core/list-format';
 
 /**
  * The brain page's Query tab — advanced (MongoDB-style) query + semantic recall.
@@ -247,10 +249,12 @@ import { SpillEndingComponent } from './spill-ending.component';
                   @if (t.by === 'walk_budget' || t.by === 'deadline') {
                     <div style="font-size:12px; margin-top:4px;">{{ 'brain.query.truncated.by.' + t.by | transloco }}</div>
                   }
-                  <!-- ONE ENDING, never two that disagree (see SpillEndingComponent). -->
+                  <!-- ONE ENDING, never two that disagree (see SpillEndingComponent). It names the field to raise,
+                       the one the server says cut the answer (Q-116), and gives no size advice after a walk ran out. -->
                   <app-spill-ending [link]="recallRemainder()" [refused]="spillRefused()"
                     labelKey="brain.query.remainder.download" [labelParams]="{ matches: recallRemainder()?.matches }"
-                    fallbackKey="brain.query.truncated.what" />
+                    [fallbackKey]="t.raise ? 'brain.query.truncated.what' : 'brain.query.truncated.whatNarrow'"
+                    [fields]="fieldNames(t.raise)" />
                 </div>
               }
 
@@ -570,7 +574,13 @@ export class QueryTabComponent {
    * left out: they are for a caller tuning a request programmatically, and a byte count in the interface is a
    * number nobody can do anything with.
    */
-  recallTruncated = signal<{ returned: number; count: number; by: string | null } | null>(null);
+  /** `raise`: the label keys of the size fields to raise, or null when no size ceiling cut it (Q-116). */
+  recallTruncated = signal<{ returned: number; count: number; by: string | null; raise: string[] | null } | null>(null);
+
+  /** The size fields to raise, by their labels, as one phrase in the reader's language. */
+  fieldNames(keys: string[] | null): string {
+    return keys ? formatList(keys.map(k => this.transloco.translate(k)), this.transloco.getActiveLang()) : '';
+  }
 
   /** Type names offered by the recall "filter by type" dropdown (F5): schema type
    *  names for the space UNION the distinct `type` values present in the loaded
@@ -794,7 +804,8 @@ export class QueryTabComponent {
         // `=== true` rather than truthy: the field is optional on the type (an older server sends none), and an
         // absent one must read as "not truncated" rather than as "unknown".
         this.recallTruncated.set(res.truncated === true
-          ? { returned: res.returned ?? res.results.length, count: res.count, by: res.truncatedBy ?? null }
+          ? { returned: res.returned ?? res.results.length, count: res.count, by: res.truncatedBy ?? null,
+              raise: ceilingFieldKeys(res.truncatedBy, res.budgetBoundBy) }
           : null);
         this.recallRemainder.set(res.remainder ?? null);
         this.spillRefused.set(res.spillRefused ?? null);

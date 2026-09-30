@@ -122,7 +122,8 @@ actually reached was the weaker.
 | `incompleteRows` | The matches left out because their graph could not be read whole: `{_id, spaceId, type, name, reason}`, at most 50 named. Present only when there were any |
 | `incompleteCount` | How many matches were left out that way — all of them, named or not |
 | `graphTruncated` | Present and `true` exactly when `incompleteCount` is. It never means a returned graph is short: none is |
-| `truncatedBy` | Beside `nextSkip`, which bound ended the answer: `budget` (the byte budget), `walk_budget` (the call's walk bound) or `deadline` |
+| `truncatedBy` | Beside `nextSkip`, which bound ended the answer: `budget` (the size budget — characters or bytes), `walk_budget` (the call's walk bound) or `deadline` |
+| `budgetBoundBy` | With `truncatedBy: budget` only: the parameter(s) whose ceiling the next match would have passed — `maxChars`, `maxTokens`, `maxBytes`. Raise that one |
 
 Note `adr-0088` above: it is reachable two ways and appears **once**, with both routes in `paths`. A caller
 counting rows never double-counts a record, and no relationship is invisible.

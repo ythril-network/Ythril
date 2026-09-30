@@ -4,7 +4,7 @@ import { BrainApi } from '../../core/brain-api.service';
 import { saveBlob } from '../../core/authenticated-download';
 import { SPILL_FAILURE_KEYS, spillRefusalKey, type SpillLink } from '../../core/read-spill';
 import { httpErrorReason } from '../../core/http-error';
-import { formatTimestampParts } from '../../shared/timestamp.component';
+import { DateFormatService } from '../../core/date-format.service';
 
 /**
  * How a shortened answer's notice ENDS — the one question this answers, for the results notice and the graph
@@ -37,9 +37,9 @@ import { formatTimestampParts } from '../../shared/timestamp.component';
       </div>
       @if (error(); as e) { <div class="alert alert-error note" role="alert">{{ e }}</div> }
     } @else if (refused(); as reason) {
-      <div class="note">{{ 'brain.query.spillRefused' | transloco: { reason: (refusalKey(reason) ? (refusalKey(reason)! | transloco) : reason) } }}</div>
+      <div class="note">{{ 'brain.query.spillRefused' | transloco: { reason: (refusalKey(reason) ? (refusalKey(reason)! | transloco) : reason), fields: fields() } }}</div>
     } @else {
-      <div class="note">{{ fallbackKey() | transloco }}</div>
+      <div class="note">{{ fallbackKey() | transloco: { fields: fields() } }}</div>
     }
   `,
 })
@@ -58,6 +58,11 @@ export class SpillEndingComponent {
   extraKey = input<string | null>(null);
   /** The notice's own last line when nothing was kept and nothing was refused. */
   fallbackKey = input.required<string>();
+  /**
+   * The form field(s) to raise, already in words ("Max response size (bytes)") — named in the advice and in the
+   * refusal, so neither says "the size" over a form with three size fields (`Q-116`). Empty when no size helps.
+   */
+  fields = input<string>('');
 
   /** A download in flight; the button is disabled until it ends. */
   readonly busy = signal(false);
@@ -67,10 +72,11 @@ export class SpillEndingComponent {
   /** A refusal code's words, or null for a code from a newer server, which is shown as it arrived. */
   readonly refusalKey = spillRefusalKey;
 
-  /** A spill's expiry in the app's one timestamp format (dd.MM.yyyy HH:mm:ss, viewer's zone), not the browser's. */
+  private dates = inject(DateFormatService);
+
+  /** A spill's expiry in the viewer's chosen date format (Q-146), to the second. */
   expiresLabel(value: string): string {
-    const p = formatTimestampParts(value);
-    return p ? `${p.date} ${p.time}` : value;
+    return this.dates.format(value, 'datetimeSeconds') || value;
   }
 
   /** Save the WHOLE spill as one JSON file: every page, through HttpClient. */

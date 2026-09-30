@@ -416,6 +416,14 @@ shortened:
 - **`count` is the real total**, never what was sent, and it stays the total on every page rather than shrinking
   as you advance. `returned` is what was sent, and it is `results.length` — read `returned` and you never have
   to count.
+- **`budgetBoundBy` names the parameter to raise** when the size budget is what cut the answer: `maxChars`,
+  `maxTokens` or `maxBytes` — the one whose ceiling the next match would have passed, or two of them when it
+  would have passed both (raising one alone would not bring it in). The character ceiling is named `maxTokens`
+  when your token figure was the lower, and `maxChars` otherwise, including when you sent neither: the default is
+  raised by stating `maxChars`. It is absent on an answer that was not cut, and on one that stopped for another
+  reason (`truncatedBy` `walk_budget` or `deadline`), where a bigger ceiling would not help. Only the server can
+  say this: working it out from `budgetChars` and `budgetBytes` fails whenever both are set and the byte ceiling
+  is the larger.
 - **`nextSkip` appears exactly when `truncated` is true.** Send it back as `skip` and you get the next prefix.
   It is stated rather than left as arithmetic on purpose: `skip + returned` is a sum a caller can get wrong,
   especially the second time round when `skip` was already non-zero.
@@ -501,7 +509,8 @@ GET /api/brain/spills/:id?skip=0&maxChars=50000
 **Response** `200`: `kind` (`results` or `graph`), `request` (what the search asked for, so the spill describes
 itself), `total` (items in the whole spill), `expiresAt`, `ceilingHit` (graph spills only, when present),
 `items` (a window of whole items), `returned`, `skip`, `truncated`, `nextSkip` (present exactly when
-`truncated` is), `charsReturned`, `bytesReturned`, `budgetChars` and `budgetBytes`. Loop while `truncated`,
+`truncated` is), `charsReturned`, `bytesReturned`, `budgetChars`, `budgetBytes`, and `budgetBoundBy` when the
+window's size ceiling is what ended it (the parameter to raise, as on `recall`). Loop while `truncated`,
 feeding `nextSkip` back as `skip`, exactly as you page a recall. An item is never split between two windows, and
 the first item of a window is returned even when it alone passes the budget.
 

@@ -10,6 +10,7 @@
 
 import { Component, inject, signal, computed, OnInit, ElementRef, ViewChild } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { InstantComponent } from '../../shared/instant.component';
 import { FormsModule } from '@angular/forms';
 import { finalize, forkJoin } from 'rxjs';
 import {
@@ -144,7 +145,7 @@ export function entriesFromTypeSchemas(
 @Component({
   selector: 'app-schema-library',
   standalone: true,
-  imports: [CommonModule, FormsModule, TranslocoPipe, PhIconComponent, PropSchemaTableComponent, ErrorStateComponent, ModalDirective],
+  imports: [CommonModule, InstantComponent, FormsModule, TranslocoPipe, PhIconComponent, PropSchemaTableComponent, ErrorStateComponent, ModalDirective],
   styles: [CHIP_STYLES, `
     /* chip inputs — same as spaces.component.ts */
     /* create / edit dialog */
@@ -303,7 +304,7 @@ export function entriesFromTypeSchemas(
                 @if (entry.description) { <div class="entry-description">{{ entry.description }}</div> }
                 <div class="entry-footer">
                   <span class="badge-type">{{ entry.typeName }}</span>
-                  <span class="updated">{{ entry.updatedAt | date:'dd.MM.yyyy HH:mm' }}</span>
+                  <span class="updated"><app-instant [value]="entry.updatedAt" variant="datetime"/></span>
                 </div>
               </div>
               <div class="entry-actions" (click)="$event.stopPropagation()">
@@ -801,20 +802,10 @@ export class SchemaLibraryComponent implements OnInit {
     this.schemaApi.listSchemaLibrary().pipe(
       finalize(() => this.loading.set(false)),
     ).subscribe({
-      next: ({ entries }) => {
+      next: ({ entries, usageCounts }) => {
         this.entries.set(entries);
-        if (entries.length === 0) return;
-        // Fetch usage counts for all entries (non-critical; errors silently ignored)
-        forkJoin(
-          entries.map(e => this.schemaApi.getSchemaLibraryUsages(e.name)),
-        ).subscribe({
-          next: (results) => {
-            const counts: Record<string, number> = {};
-            entries.forEach((e, i) => { counts[e.name] = results[i]?.usages?.length ?? 0; });
-            this.usageCounts.set(counts);
-          },
-          error: () => {}, // usage counts are non-critical
-        });
+        // The counts arrive WITH the list (Q-112) — it used to be one /usages request per entry, forkJoined.
+        this.usageCounts.set(usageCounts ?? {});
       },
       // Distinguish a failed load from a genuinely empty library (U3).
       error: (e) => { this.entries.set([]); this.loadError.set(httpErrorReason(e)); },
