@@ -298,7 +298,10 @@ let buildOut = '';
 try {
   // Captured, not inherited, so the chunk table below can be read — then printed, because a build whose
   // output vanishes is a build nobody can debug.
-  buildOut = execSync('npm run build:prod --workspace=client', { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  // `--verbose` because the gate below reads the chunk TABLE, and without it the table stops at the fifteen
+  // largest lazy chunks ("…and 158 more"). A budgeted chunk that SHRANK out of that top fifteen — the settings
+  // dialog, once its tabs were deferred (Q-112) — then read as "names no emitted chunk" although it was there.
+  buildOut = execSync('npm run build:prod --workspace=client -- --verbose', { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
   process.stdout.write(buildOut);
 } catch (e) {
   buildOut = `${e.stdout ?? ''}${e.stderr ?? ''}`;
