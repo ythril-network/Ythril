@@ -141,6 +141,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   records waiting to be embedded — and after thirty seconds the wait ends in the error state with those reasons
   and Retry. Reported on 5.6.0 while an upgraded instance rebuilt every space's search indexes.
 
+### Internal
+
+- **A gate proves no read-rung door can reach a write into a space (`Q-97`).** `a-read-never-writes-a-space`
+  derives every door a `read` token may call — `TOOL_RIGHTS` and `ROUTE_RIGHTS` rows at `read`, every mounted GET
+  without a row or on a `NOT_AREA_SCOPED` path — walks what each call causes, and fails on any path to a space
+  write, printing it door to writer. The writers are derived alias-aware (`_space-writers.mjs`): a mutator through
+  `col()`, `.collection()`, a local binding of either or a helper that returns one, on a per-space collection or
+  the sequence counter, plus filesystem writes on the space file tree. `_call-graph.mjs` can now root an MCP tool
+  handler and a REST handler closure, and resolves method calls through namespace imports and exported objects. The
+  one exception is the `/api/sync/*` GETs rebuilding the file-hash cache, scoped to that collection. Its first run
+  found no read door writing a space; its first red run found that REST `recall`, `similar` and `traverse` answer
+  through a runtime tool lookup the walk could not see, now resolved.
+
 ## [5.6.0] — 2026-09-29
 
 **A minor release: a filtered recall returns every record that matches, a search never writes into a space, and a
