@@ -163,8 +163,12 @@ const RECLASSIFIED = 1;
  * match `memberSpacesForRequestAcross(` — the `\(` anchors it — so the new sites were invisible to the
  * count while being exactly what it counts. The conserved total is what noticed: 46 against a TOTAL of 45,
  * which is the whole reason this arithmetic exists.
+ *
+ * 48 -> 49 (`Q-109`): `list_embed_jobs` reads a proxy space's members. It read only the named space, so a proxy
+ * listed nothing of its members while its REST twin summed and paged them all; both now answer through
+ * `brain/embed-jobs-page.ts`, and the tool narrows with `memberSpacesWithin` — BORN narrowed.
  */
-const TOTAL = 48;
+const TOTAL = 49;
 
 /**
  * Fan-out sites that were REMOVED rather than converted, with the tool that owned them.

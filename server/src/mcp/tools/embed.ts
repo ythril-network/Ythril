@@ -19,9 +19,10 @@ import { reembedSpace, REEMBED_KINDS, REEMBED_DEFAULT_LIMIT, REEMBED_MAX_LIMIT }
 import type { BrainEmbedRecordType } from '../../config/types.js';
 import { memberSpacesWithin } from '../../spaces/proxy-scoped.js';
 import {
-  listEmbedJobs, getEmbedJobCounts, retryEmbedJob, EMBED_RECORD_TYPES, isEmbedRecordType,
+  retryEmbedJob, EMBED_RECORD_TYPES, isEmbedRecordType,
 } from '../../brain/embed-queue.js';
 import type { ToolContext, ToolHandler, ToolResult, ToolSchemas } from './types.js';
+import { embedJobsPage, MAX_JOB_PAGE, DEFAULT_JOB_PAGE } from '../../brain/embed-jobs-page.js';
 
 const RECORD_TYPES = [...EMBED_RECORD_TYPES];
 
@@ -60,44 +61,36 @@ export const list_embed_jobsTool: ToolHandler = {
         enum: ['pending', 'processing', 'failed'],
         description: 'Only jobs in this state. Omit for all three. `failed` means it is done retrying and needs you.',
       },
-      limit: { type: 'number', minimum: 1, maximum: 200, description: 'Max jobs to return (default 50, cap 200).' },
+      limit: { type: 'integer', minimum: 1, maximum: MAX_JOB_PAGE, description: `Max jobs to return (default ${DEFAULT_JOB_PAGE}, ${MAX_JOB_PAGE} at most; more is refused, not served smaller).` },
+      skip: { type: 'integer', minimum: 0, description: 'Jobs to skip before the page, newest first — how you reach past the first page when the counts say there are more.' },
     },
     required: ['space'],
     additionalProperties: false,
   }),
   async handle(ctx: ToolContext): Promise<ToolResult> {
-    const { args: a, callSpace } = ctx;
-    const status = a['status'] as 'pending' | 'processing' | 'failed' | undefined;
-    const limit = a['limit'] === undefined ? undefined : Number(a['limit']);
-    if (limit !== undefined && (!Number.isFinite(limit) || limit < 1)) throw new Error('limit must be a positive number');
-
-    const counts = await getEmbedJobCounts(callSpace);
-    const jobs = (await listEmbedJobs(callSpace, {
-      ...(status ? { status } : {}),
-      ...(limit ? { limit } : {}),
-    })).map(j => ({
-      recordType: j.recordType,
-      recordId: j.recordId,
-      status: j.status,
-      attempts: j.attempts,
-      maxAttempts: j.maxAttempts,
-      lastError: j.lastError,
-      updatedAt: j.updatedAt,
-    }));
+    const { args: a, callSpace, accessibleSpaceIds } = ctx;
+    // The act REST calls, over the members of a proxy as REST reads them (Q-109): this read only `callSpace` and took
+    // no `skip`, so a proxy listed nothing of its members and failure #201 was out of reach beside `failed: 500`.
+    const page = await embedJobsPage(memberSpacesWithin(callSpace, accessibleSpaceIds), {
+      status: a['status'], limit: a['limit'], skip: a['skip'],
+    });
+    if (!page.ok) throw new Error(page.error);
+    const { counts, jobs, status } = page.body;
 
     const head = `Embed queue for '${callSpace}': ${counts.pending} pending, ${counts.processing} processing, ${counts.failed} failed.`;
     const body = jobs.length === 0
       ? status
-        ? ` No ${status} jobs.`
-        : ' Nothing queued — every record in this space has its vector.'
+        ? ` No ${status} jobs on this page.`
+        : ' Nothing queued on this page — every record reached has its vector.'
       : '\n' + jobs.map(j =>
-        `- ${j.recordType} ${j.recordId} — ${j.status}, attempt ${j.attempts}/${j.maxAttempts}`
+        `- ${j.recordType} ${j.recordId} in ${j.spaceId} — ${j.status}, attempt ${j.attempts}/${j.maxAttempts}`
+        + (j.transientFailures ? `, ${j.transientFailures} transient` : '')
         + (j.lastError ? `: ${j.lastError}` : ''),
       ).join('\n');
 
     return {
       content: [{ type: 'text' as const, text: head + body }],
-      structuredContent: { counts, jobs, ...(status ? { status } : {}) },
+      structuredContent: page.body,
     };
   },
 };

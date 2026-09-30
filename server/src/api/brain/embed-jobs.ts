@@ -32,39 +32,14 @@ import { getConfig } from '../../config/loader.js';
 import { memberSpacesForRequest } from '../../spaces/proxy-scoped.js';
 import { resolveWriteTarget } from '../../spaces/proxy.js';
 import {
-  listEmbedJobs, getEmbedJobCounts, retryEmbedJob, EMBED_RECORD_TYPES, isEmbedRecordType,
+  retryEmbedJob, EMBED_RECORD_TYPES, isEmbedRecordType,
 } from '../../brain/embed-queue.js';
-import { pageAcrossMembers } from '../../spaces/page-across-members.js';
-import { PROXY_PAGE_CEILING } from '../../brain/query.js';
+import { embedJobsPage } from '../../brain/embed-jobs-page.js';
 
-/** Page size when the caller names none. Matches `listEmbedJobs`'s own default, so one number governs. */
-const DEFAULT_JOB_PAGE = 50;
-import type { BrainEmbedJobDoc } from '../../config/types.js';
 
 export const embedJobsRouter = Router();
 
-/** Query-string `status`, or nothing. An unknown value is a 400 rather than a silently ignored filter. */
-const STATUSES = ['pending', 'processing', 'failed'] as const;
-type JobStatus = (typeof STATUSES)[number];
 
-/**
- * The wire shape. `claimToken` never leaves the server — it is a lease secret, and a caller that could read it could
- * steal a job from the worker holding it. Everything else the queue records is returned, because the whole point of
- * the endpoint is that the operator sees what the server sees.
- */
-function toWire(job: BrainEmbedJobDoc, spaceId: string) {
-  return {
-    recordType: job.recordType,
-    recordId: job.recordId,
-    spaceId,
-    status: job.status,
-    attempts: job.attempts,
-    maxAttempts: job.maxAttempts,
-    lastError: job.lastError,
-    createdAt: job.createdAt,
-    updatedAt: job.updatedAt,
-  };
-}
 
 // GET /api/brain/spaces/:spaceId/embedding-queue/records — the brain-record half of the queue: counts, plus the jobs.
 //
@@ -78,68 +53,18 @@ embedJobsRouter.get('/spaces/:spaceId/embedding-queue/records', globalRateLimit,
     return;
   }
 
-  const rawStatus = req.query['status'];
-  let status: JobStatus | undefined;
-  if (rawStatus !== undefined && rawStatus !== '') {
-    if (typeof rawStatus !== 'string' || !STATUSES.includes(rawStatus as JobStatus)) {
-      res.status(400).json({ error: `status must be one of ${STATUSES.join(', ')}` });
-      return;
-    }
-    status = rawStatus as JobStatus;
-  }
-
-  const rawLimit = req.query['limit'];
-  let limit: number | undefined;
-  if (rawLimit !== undefined && rawLimit !== '') {
-    const n = Number(rawLimit);
-    if (!Number.isFinite(n) || !Number.isInteger(n) || n < 1) {
-      res.status(400).json({ error: 'limit must be a positive integer' });
-      return;
-    }
-    limit = n;
-  }
-
-  const rawSkip = req.query['skip'];
-  let skip = 0;
-  if (rawSkip !== undefined && rawSkip !== '') {
-    const n = Number(rawSkip);
-    if (!Number.isFinite(n) || !Number.isInteger(n) || n < 0) {
-      res.status(400).json({ error: 'skip must be a non-negative integer' });
-      return;
-    }
-    skip = n;
-  }
-
-  const members = memberSpacesForRequest(req, spaceId);
-  const counts = { pending: 0, processing: 0, failed: 0 };
-  for (const mid of members) {
-    const c = await getEmbedJobCounts(mid);
-    counts.pending += c.pending; counts.processing += c.processing; counts.failed += c.failed;
-  }
-
-  // `counts` aggregates EVERY job while the listing returns a page, so without `skip` a caller could be told
-  // `failed: 500` and never reach failure #201 — an accurate total beside an unreachable tail, on the one surface whose
-  // justification is that its failures are actionable. Same asymmetry that cost the fleet integrator a fabricated number on `/query`,
-  // and paged here by the same function rather than by the same shape written twice.
-  const effectiveLimit = limit ?? DEFAULT_JOB_PAGE;
-  const page = await pageAcrossMembers<ReturnType<typeof toWire>>({
-    members,
-    limit: effectiveLimit,
-    skip,
-    ceiling: PROXY_PAGE_CEILING,
-    // Newest-first by `updatedAt`, with `_id` breaking every tie so the order is TOTAL and the pages cannot overlap.
-    compare: (a, b) => (a.updatedAt === b.updatedAt
-      ? (a.recordId < b.recordId ? 1 : a.recordId > b.recordId ? -1 : 0)
-      : (a.updatedAt < b.updatedAt ? 1 : -1)),
-    readMember: async (mid, lim, sk) =>
-      (await listEmbedJobs(mid, { ...(status ? { status } : {}), limit: lim, skip: sk })).map(j => toWire(j, mid)),
+  // The query string's text, turned into what the act validates: the caps and refusals are the act's, the same ones
+  // `list_embed_jobs` answers with (Q-109). An empty value is an absent one.
+  const q = (k: string): string | undefined => {
+    const v = req.query[k];
+    return typeof v === 'string' && v !== '' ? v : undefined;
+  };
+  const num = (v: string | undefined): number | undefined => (v === undefined ? undefined : Number(v));
+  const page = await embedJobsPage(memberSpacesForRequest(req, spaceId), {
+    status: q('status'), limit: num(q('limit')), skip: num(q('skip')),
   });
   if (!page.ok) { res.status(400).json({ error: page.error }); return; }
-
-  res.json({
-    counts, jobs: page.rows, limit: effectiveLimit, skip,
-    ...(status ? { status } : {}),
-  });
+  res.json(page.body);
 });
 
 // POST /api/brain/spaces/:spaceId/embedding-queue/records/retry — re-queue ONE record's embed job.

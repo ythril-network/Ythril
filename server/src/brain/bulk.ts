@@ -109,7 +109,26 @@ function bulkTtlDays(v: unknown): number | null | undefined | typeof TTL_INVALID
 }
 const TTL_INVALID_MSG = '`ttlDays` must be an integer number of days between 0 and 36500, or null to clear the expiry';
 function slice(v: unknown): Record<string, unknown>[] {
-  return Array.isArray(v) ? (v.slice(0, BULK_MAX_PER_TYPE) as Record<string, unknown>[]) : [];
+  return Array.isArray(v) ? (v as Record<string, unknown>[]) : [];
+}
+
+/**
+ * Why this batch is refused for its size, or `null` (`Q-109`).
+ *
+ * Every array past `BULK_MAX_PER_TYPE` used to be SLICED here: the items past 500 were dropped and the answer was the
+ * same 207 as a clean batch, listing no error for them — a caller writing 600 facts was told 500 were written and
+ * nothing about the rest. A batch is refused whole instead, naming the array and its size, before anything is
+ * written, so there is no half-applied batch to reconcile. Called by the REST door for a 400 and by `bulkWrite`
+ * itself, which throws, so no caller can reach the old silent cut.
+ */
+export function bulkSizeRefusal(input: Record<string, unknown>): string | null {
+  for (const key of BULK_BODY_KEYS) {
+    const v = input[key];
+    if (Array.isArray(v) && v.length > BULK_MAX_PER_TYPE) {
+      return `\`${key}\` holds ${v.length} items; a bulk write takes at most ${BULK_MAX_PER_TYPE} per array — split it into batches`;
+    }
+  }
+  return null;
 }
 
 /**
@@ -151,6 +170,8 @@ function itemConnectionError(item: unknown, strict: boolean): string | null {
  * inserted. Callers build a graph in two passes, taking ids from the first response's `refs`.
  */
 export async function bulkWrite(spaceId: string, input: BulkInput): Promise<BulkResult> {
+  const tooLarge = bulkSizeRefusal(input as unknown as Record<string, unknown>);
+  if (tooLarge) throw new Error(tooLarge);
   const metaRaw = getConfig().spaces.find(s => s.id === spaceId)?.meta;
   const meta = metaRaw ? resolveMetaRefs(metaRaw) : undefined;
   const mode = meta?.validationMode ?? 'off';
