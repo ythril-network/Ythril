@@ -9,8 +9,6 @@ import { TranslocoService } from '@jsverse/transloco';
 import { ToastService } from '../../core/toast.service';
 import { ConfirmDialogService } from '../../core/confirm-dialog.service';
 import { computed } from '@angular/core';
-import { PhIconComponent } from '../../shared/ph-icon.component';
-import { ModalDirective } from '../../shared/modal.directive';
 import { SummaryStripComponent, SummaryItem } from '../../shared/summary-strip.component';
 import { TokenCreateDialogComponent } from './token-create-dialog.component';
 import { TokenRightsDialogComponent } from './token-rights-dialog.component';
@@ -25,7 +23,7 @@ import type { TokenSortField, SortDir } from './token-table';
 @Component({
   selector: 'app-tokens',
   standalone: true,
-  imports: [CommonModule, FormsModule, TranslocoPipe, PhIconComponent, ModalDirective,
+  imports: [CommonModule, FormsModule, TranslocoPipe,
             SummaryStripComponent, ErrorStateComponent, TokenCreateDialogComponent,
             TokenRightsDialogComponent, OwnTokenRightsComponent, TokenTableComponent],
   styles: [TOKENS_PAGE_STYLES],

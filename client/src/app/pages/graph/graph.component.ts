@@ -11,6 +11,7 @@
   effect,
   viewChild,
   ElementRef,
+  DestroyRef,
 } from '@angular/core';
 import { CommonModule, Location } from '@angular/common';
 import { ProxySpaceBadgeComponent } from '../../shared/proxy-space-badge.component';
@@ -19,6 +20,10 @@ import { ActivatedRoute } from '@angular/router';
 import { Subscription, TimeoutError, of } from 'rxjs';
 import { catchError, timeout } from 'rxjs/operators';
 import { GraphLoadWatch, WAIT_GIVE_UP_MS } from './graph-load-watch';
+import { LatestWins } from '../../core/latest-wins';
+
+/** How long the depth slider must rest before the graph asks for its depth (Q-112). */
+const SLIDER_REST_MS = 200;
 import { GraphDetailFilter } from './graph-detail-filter';
 import { linkedToNode, linkedToEdge, type LinkedRecords } from './graph-linked-fetch';
 import { PhIconComponent } from '../../shared/ph-icon.component';
@@ -38,8 +43,6 @@ import { SpacesApi } from '../../core/spaces-api.service';
 import { BrainApi } from '../../core/brain-api.service';
 import { AuthApi } from '../../core/auth-api.service';
 import { EntryPopupComponent } from '../../shared/entry-popup.component';
-import { EntitySearchComponent } from '../../shared/entity-search.component';
-import { PropertiesViewComponent } from '../../shared/properties-view.component';
 import { GraphLinkedRecordsComponent } from './graph-linked-records.component';
 import { GraphNodeRecordCardComponent, GraphEdgeRecordCardComponent } from './graph-record-card.component';
 import { GraphPanelHeaderComponent } from './graph-panel-header.component';
@@ -79,7 +82,7 @@ import { lookupForNode, lookupForEdge } from './graph-record-lookup';
   // `openBrainDrawer` alongside the `drawerRecord` signal that guards the drawer's `@if`, the same
   // load-bearing coupling pinned by the brain spec.
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [ProxySpaceBadgeComponent, CommonModule, FormsModule, EntryPopupComponent, EntitySearchComponent, PropertiesViewComponent, PhIconComponent, ErrorStateComponent, TranslocoPipe, RecordDrawerComponent, GraphLinkedRecordsComponent, GraphNodeRecordCardComponent, GraphEdgeRecordCardComponent, GraphPanelHeaderComponent, GraphToolbarComponent],
+  imports: [ProxySpaceBadgeComponent, CommonModule, FormsModule, EntryPopupComponent, PhIconComponent, ErrorStateComponent, TranslocoPipe, RecordDrawerComponent, GraphLinkedRecordsComponent, GraphNodeRecordCardComponent, GraphEdgeRecordCardComponent, GraphPanelHeaderComponent, GraphToolbarComponent],
   // Its own drawer collaborators, so the standalone `/graph` route works with nothing above it. When
   // this page is embedded as Brain's Graph tab these SHADOW Brain's instances, which is deliberate:
   // the drawer then patches this page's per-node lists, exactly as the forked drawer did. The cost is
@@ -399,6 +402,15 @@ export class GraphComponent implements OnInit, AfterViewInit, OnDestroy {
   private cy: GraphInstance | null = null;
   private subs = new Subscription();
 
+  /**
+   * One slot per thing an answer draws (Q-112): the canvas, the selected record's card, and its linked records.
+   * Each new request cancels the one before it in the same slot, so a slow answer — to a depth the slider has left,
+   * or a node the user has clicked away from — can never replace a newer one.
+   */
+  private readonly traversal = new LatestWins(inject(DestroyRef));
+  private readonly selectedRecord = new LatestWins(inject(DestroyRef));
+  private readonly selectedLinked = new LatestWins(inject(DestroyRef));
+
   /** Palette read from CSS vars once the view exists; the default until then. */
   private theme: GraphTheme = DEFAULT_GRAPH_THEME;
 
@@ -561,11 +573,17 @@ export class GraphComponent implements OnInit, AfterViewInit, OnDestroy {
     this.resetGraph();
   }
 
+  /**
+   * The slider moved. The number updates at once; the traversal waits until the slider rests (Q-112), and then asks
+   * for the depth it rests on — a drag from 2 to 7 used to send six requests and draw whichever finished last.
+   */
   onDepthChange(val: number | string): void {
     this.depth.set(+val);
-    if (this.rootEntity()) {
-      this.traverse(this.rootEntity()!._id, +val, this.direction());
-    }
+    if (!this.rootEntity()) return;
+    this.traversal.after(SLIDER_REST_MS, () => {
+      const root = this.rootEntity();
+      if (root) this.traverse(root._id, this.depth(), this.direction());
+    });
   }
 
   setDirection(dir: 'outbound' | 'inbound' | 'both'): void {
@@ -634,8 +652,10 @@ export class GraphComponent implements OnInit, AfterViewInit, OnDestroy {
     const req = { startId, maxDepth, direction };
     const plan = decideFetch(this.cache, req);
 
-    // A shallower view is always a subset of what was already fetched — no request needed.
+    // A shallower view is always a subset of what was already fetched — no request needed. A deeper request still
+    // in flight is cancelled FIRST, or its answer would redraw its own depth over this one (Q-112).
     if (plan === 'from-cache') {
+      this.traversal.cancel();
       this.applyDepthFilter(startId, maxDepth);
       return;
     }
@@ -643,7 +663,9 @@ export class GraphComponent implements OnInit, AfterViewInit, OnDestroy {
     this.loadError.set(null);
     this.lastTraverse = req;
     this.loadWatch.begin(spaceId);
-    this.brainApi.traverseGraph(spaceId, { startId, direction, maxDepth, limit: 200 }).pipe(timeout(WAIT_GIVE_UP_MS)).subscribe({
+    // Through the traversal slot (Q-112): this request cancels the one before it, so only the answer to the depth
+    // the slider shows is drawn. The load clock stops when the request is over — unless a newer one replaced it.
+    this.traversal.run(this.brainApi.traverseGraph(spaceId, { startId, direction, maxDepth, limit: 200 }).pipe(timeout(WAIT_GIVE_UP_MS)), {
       error: (e) => {
         this.loadWatch.end();
         this.loadError.set(e instanceof TimeoutError
@@ -657,6 +679,7 @@ export class GraphComponent implements OnInit, AfterViewInit, OnDestroy {
         this.truncated.set(result.truncated);
         this.applyDepthFilter(startId, maxDepth);
       },
+      finally: (superseded) => { if (!superseded) this.loadWatch.end(); },
     });
   }
 
@@ -720,12 +743,13 @@ export class GraphComponent implements OnInit, AfterViewInit, OnDestroy {
     this.recordUnavailable.set(null);
 
     const want = lookupForNode(kind);
-    if ('unavailable' in want) { this.recordUnavailable.set(want.unavailable); return; }
-    this.brainApi.getRecord(spaceId, want.fetch, entityId).pipe(
+    if ('unavailable' in want) { this.selectedRecord.cancel(); this.selectedLinked.cancel(); this.recordUnavailable.set(want.unavailable); return; }
+    // Latest wins (Q-112): clicking B while A's record is still loading must not show A's card on B.
+    this.selectedRecord.run(this.brainApi.getRecord(spaceId, want.fetch, entityId).pipe(
       catchError(() => of(null)),
-    ).subscribe(rec => { if (rec) this.selectedEntityRecord.set(rec as Entity); });
+    ), rec => { if (rec) this.selectedEntityRecord.set(rec as Entity); });
 
-    linkedToNode(this.brainApi, spaceId, entityId).subscribe(linked => this.showLinked(linked));
+    this.selectedLinked.run(linkedToNode(this.brainApi, spaceId, entityId), linked => this.showLinked(linked));
   }
 
   openEntityPopup(node: TraverseNode): void {
@@ -751,15 +775,16 @@ export class GraphComponent implements OnInit, AfterViewInit, OnDestroy {
     // A synthetic edge is derived at render time and stored nowhere — see `lookupForEdge`.
     const want = lookupForEdge(te._id);
     if ('unavailable' in want) {
+      this.selectedRecord.cancel();
       this.recordUnavailable.set(want.unavailable);
     } else {
-      this.brainApi.getEdge(spaceId, te._id).pipe(
+      this.selectedRecord.run(this.brainApi.getEdge(spaceId, te._id).pipe(
         catchError(() => of(null)),
-      ).subscribe(edge => { if (edge) this.selectedEdgeRecord.set(edge); });
+      ), edge => { if (edge) this.selectedEdgeRecord.set(edge); });
     }
 
-    // Load memories/chronos linked to BOTH endpoints
-    linkedToEdge(this.brainApi, spaceId, te.from, te.to).subscribe(linked => this.showLinked(linked));
+    // Load memories/chronos linked to BOTH endpoints — through the same slot as a node's, since both fill one list.
+    this.selectedLinked.run(linkedToEdge(this.brainApi, spaceId, te.from, te.to), linked => this.showLinked(linked));
   }
 
   private showLinked({ facts, chrono }: LinkedRecords): void {

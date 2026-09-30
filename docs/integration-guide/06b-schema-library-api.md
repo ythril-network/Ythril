@@ -53,8 +53,13 @@ Authorization: Bearer <token>
 **Response** `200`:
 
 ```json
-{ "entries": [ { "name": "...", ... } ] }
+{ "entries": [ { "name": "person", ... } ], "usageCounts": { "person": 3 } }
 ```
+
+`usageCounts` says, per entry name, how many space type definitions reference it — the length of the
+`…/usages` list below, counted by the same rule, for every entry at once. It sits beside `entries` rather than
+on each one because an entry is also what a write takes back. Use it to show counts; use `…/usages` when you
+need to know which spaces.
 
 #### Get a single entry
 

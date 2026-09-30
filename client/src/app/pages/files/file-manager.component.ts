@@ -5,8 +5,7 @@ import { FilePreviewStore } from './file-preview.store';
 import { ChangeDetectionStrategy, Component, inject, signal, computed, effect, untracked, OnInit, OnDestroy, HostListener, viewChild, Input, Output, EventEmitter } from '@angular/core';
 import { FilePreviewComponent } from './file-preview.component';
 import { UploadQueueComponent, type UploadItem } from './upload-queue.component';
-import { FileMetaEditorComponent, type FileMetaModel } from './file-meta-editor.component';
-import { FileExtractViewComponent } from './file-extract-view.component';
+import type { FileMetaModel } from './file-meta-editor.component';
 import { FileListingComponent, type FileRow } from './file-listing.component';
 import { joinPath } from './file-format';
 import { FileTreeComponent, type TreeNode } from './file-tree.component';
@@ -53,7 +52,7 @@ import { ModalDirective } from '../../shared/modal.directive';
    * provider does for free.
    */
   providers: [FileTreeStore, FileListingStore, FileExtractStore, FileMetaStore, FileUploadStore, FilePreviewStore],
-  imports: [CommonModule, FormsModule, PhIconComponent, TranslocoPipe, ErrorStateComponent, ModalDirective, FilePreviewComponent, UploadQueueComponent, FileMetaEditorComponent, FileExtractViewComponent, FileListingComponent, FileTreeComponent, FileToolbarComponent, FileDetailPaneComponent],
+  imports: [CommonModule, FormsModule, PhIconComponent, TranslocoPipe, ErrorStateComponent, ModalDirective, FilePreviewComponent, UploadQueueComponent, FileListingComponent, FileTreeComponent, FileToolbarComponent, FileDetailPaneComponent],
   styles: [`
     /* A background refresh, as a 2px indeterminate hairline above the table. Deliberately NOT a spinner and
        deliberately not an overlay: the whole point is that nothing on screen moves or disappears while a poll

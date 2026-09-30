@@ -22,7 +22,8 @@ import { PhIconComponent } from '../../shared/ph-icon.component';
 import { StatusPillComponent, StatusVariant } from '../../shared/status-pill.component';
 import { SkeletonLinesComponent } from '../../shared/skeleton-lines.component';
 import { ConfirmDialogService } from '../../core/confirm-dialog.service';
-import { DatePipe } from '@angular/common';
+import { InstantComponent } from '../../shared/instant.component';
+import { InstantPipe } from '../../core/date-format.service';
 import { RouterLink } from '@angular/router';
 import { Space, SpaceStats, AboutInfo, EmbeddingQueue, VoteRound, TokenAccessEntry, CompletenessReport, CompletenessCheck, SpaceActivity } from '../../core/api.types';
 // Aliased: the class members below carry the same names, and a bare call that resolves to the import
@@ -36,7 +37,7 @@ import { ErModelPanelComponent } from './er-model-panel.component';
   selector: 'app-overview-tab',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [ErModelPanelComponent, TranslocoPipe, PhIconComponent, StatusPillComponent, SkeletonLinesComponent, RouterLink, DatePipe],
+  imports: [ErModelPanelComponent, TranslocoPipe, PhIconComponent, StatusPillComponent, SkeletonLinesComponent, RouterLink, InstantComponent, InstantPipe],
   styles: [`
     :host { display: block; }
 
@@ -517,7 +518,7 @@ import { ErModelPanelComponent } from './er-model-panel.component';
                 <li>
                   <div class="vote-top"><span class="vs" [title]="v.subject">{{ v.subject }}</span><span class="vt">{{ v.type }}</span></div>
                   <div class="vote-meta">
-                    <span>{{ 'brain.overview.gov.deadline' | transloco }}: {{ v.deadline | date:'dd.MM.yyyy HH:mm' }}</span>
+                    <span>{{ 'brain.overview.gov.deadline' | transloco }}: <app-instant [value]="v.deadline" variant="datetime"/></span>
                     <span class="tally">{{ tallyYes(v) }} {{ 'brain.overview.gov.yes' | transloco }} · {{ tallyVeto(v) }} {{ 'brain.overview.gov.veto' | transloco }}</span>
                   </div>
                 </li>
@@ -576,7 +577,7 @@ import { ErModelPanelComponent } from './er-model-panel.component';
                     <span class="tn">{{ t.name }}</span>
                     @if (t.peer) { <span class="tx">{{ 'brain.overview.tok.peer' | transloco }}</span> }
                     @if (t.allSpaces) { <span class="tx">{{ 'brain.overview.tok.allSpaces' | transloco }}</span> }
-                    @if (t.expiresAt) { <span class="tx">{{ 'brain.overview.tok.expires' | transloco: { date: (t.expiresAt | date:'mediumDate') } }}</span> }
+                    @if (t.expiresAt) { <span class="tx">{{ 'brain.overview.tok.expires' | transloco: { date: (t.expiresAt | instant:'dateLong') } }}</span> }
                   </li>
                 }
               </ul>

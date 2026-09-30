@@ -1,6 +1,6 @@
 import { Component, inject, input, signal } from '@angular/core';
 import { DomSanitizer, type SafeHtml } from '@angular/platform-browser';
-import { DatePipe } from '@angular/common';
+import { InstantComponent } from '../../shared/instant.component';
 import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
 import { Network } from '../../core/api.types';
 import type { ChangeNote } from '../../core/change-note.types';
@@ -26,7 +26,7 @@ const SENDING_ROLES = new Set(['publisher', 'root', 'node']);
 @Component({
   selector: 'app-network-change-notes',
   standalone: true,
-  imports: [TranslocoPipe, DatePipe, PhIconComponent, ErrorStateComponent],
+  imports: [TranslocoPipe, InstantComponent, PhIconComponent, ErrorStateComponent],
   styles: [`
     :host { display: block; margin-top: 16px; }
     .note { padding: 8px 10px; background: var(--bg-elevated); border-radius: var(--radius-sm); margin-bottom: 8px; font-size: 13px; }
@@ -71,7 +71,7 @@ const SENDING_ROLES = new Set(['publisher', 'root', 'node']);
         <div class="section-title" style="font-size:12px; margin-top:4px;">{{ 'networks.network.changeNotes.received' | transloco }}</div>
         @for (n of received(); track n._id) {
           <div class="note">
-            <span class="note-meta">{{ n.receivedAt | date:'medium' }} · {{ (n.generated ? 'networks.network.changeNotes.generated' : 'networks.network.changeNotes.by') | transloco: { author: n.author } }}{{ n.spaces.length ? ' · ' + n.spaces.join(', ') : '' }}</span>
+            <span class="note-meta"><app-instant [value]="n.receivedAt" variant="datetimeSeconds"/> · {{ (n.generated ? 'networks.network.changeNotes.generated' : 'networks.network.changeNotes.by') | transloco: { author: n.author } }}{{ n.spaces.length ? ' · ' + n.spaces.join(', ') : '' }}</span>
             @if (html()[n._id]; as h) { <div class="note-body md" [innerHTML]="h"></div> } @else { <span class="note-body">{{ n.note }}</span> }
           </div>
         } @empty {
@@ -81,7 +81,7 @@ const SENDING_ROLES = new Set(['publisher', 'root', 'node']);
           <div class="section-title" style="font-size:12px; margin-top:8px;">{{ 'networks.network.changeNotes.sent' | transloco }}</div>
           @for (n of sent(); track n._id) {
             <div class="note">
-              <span class="note-meta">{{ n.createdAt | date:'medium' }} · {{ n.pendingFor?.length ? ('networks.network.changeNotes.pending' | transloco: { count: n.pendingFor!.length }) : ('networks.network.changeNotes.delivered' | transloco) }}{{ n.spaces.length ? ' · ' + n.spaces.join(', ') : '' }}</span>
+              <span class="note-meta"><app-instant [value]="n.createdAt" variant="datetimeSeconds"/> · {{ n.pendingFor?.length ? ('networks.network.changeNotes.pending' | transloco: { count: n.pendingFor!.length }) : ('networks.network.changeNotes.delivered' | transloco) }}{{ n.spaces.length ? ' · ' + n.spaces.join(', ') : '' }}</span>
               @if (html()[n._id]; as h) { <div class="note-body md" [innerHTML]="h"></div> } @else { <span class="note-body">{{ n.note }}</span> }
             </div>
           } @empty {

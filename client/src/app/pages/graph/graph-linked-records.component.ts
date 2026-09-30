@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component, input, model, output } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { InstantComponent } from '../../shared/instant.component';
 import { FormsModule } from '@angular/forms';
 import { TranslocoPipe } from '@jsverse/transloco';
 import { Fact, ChronoEntry } from '../../core/api.types';
@@ -26,7 +27,7 @@ import { GRAPH_LINKED_RECORDS_STYLES } from './graph.styles';
   selector: 'app-graph-linked-records',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [CommonModule, FormsModule, TranslocoPipe],
+  imports: [CommonModule, InstantComponent, FormsModule, TranslocoPipe],
   styles: [GRAPH_LINKED_RECORDS_STYLES],
   template: `
     <div class="detail-filters">
@@ -48,7 +49,7 @@ import { GRAPH_LINKED_RECORDS_STYLES } from './graph.styles';
         @for (m of facts(); track m._id) {
           <div class="list-row" (click)="open.emit({ id: m._id, kind: 'fact' })">
             <span class="list-row-text" [title]="m.fact || m.description">{{ m.fact || m.description || '—' }}</span>
-            <span class="list-row-date">{{ m.createdAt | date:'dd.MM.yy' }}</span>
+            <span class="list-row-date"><app-instant [value]="m.createdAt" variant="date"/></span>
           </div>
         } @empty {
           <div class="list-empty">{{ emptyMemoriesKey() | transloco }}</div>
@@ -63,7 +64,7 @@ import { GRAPH_LINKED_RECORDS_STYLES } from './graph.styles';
         @for (c of chrono(); track c._id) {
           <div class="list-row" (click)="open.emit({ id: c._id, kind: 'chrono' })">
             <span class="list-row-text" [title]="c.title || c.description">{{ c.title || c.description || '—' }}</span>
-            <span class="list-row-date">{{ c.startsAt | date:'dd.MM.yy' }}</span>
+            <span class="list-row-date"><app-instant [value]="c.startsAt" variant="date"/></span>
           </div>
         } @empty {
           <div class="list-empty">{{ emptyChronoKey() | transloco }}</div>

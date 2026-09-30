@@ -34,7 +34,13 @@
     "enableI18nLegacyMessageIdFormat": false,
     "strictInjectionParameters": true,
     "strictInputAccessModifiers": true,
-    "strictTemplates": true
+    "strictTemplates": true,
+    "extendedDiagnostics": {
+      "checks": {
+        "unusedStandaloneImports": "error",
+        "nullishCoalescingNotNullable": "error"
+      }
+    }
   },
   "include": ["src/**/*.ts"]
 }

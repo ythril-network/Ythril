@@ -44,8 +44,15 @@ export interface RecallGraphReport {
   /** The left-out matches, at most a fixed number named; `incompleteCount` counts them all. */
   incompleteRows?: IncompleteRow[];
   /**
-   * Beside `truncated` and `nextSkip`: which bound ended the answer. `budget` is the byte budget; the other two
-   * are the graph walk's — the most one search may walk, and its deadline.
+   * Beside `truncated` and `nextSkip`: which bound ended the answer. `budget` is the size budget (characters or
+   * bytes — `budgetBoundBy` says which); the other two are the graph walk's — the most one search may walk, and
+   * its deadline.
    */
   truncatedBy?: 'budget' | 'walk_budget' | 'deadline' | string;
+  /**
+   * When the size budget cut the answer: the PARAMETERS whose ceiling refused the next match — `maxChars`,
+   * `maxTokens`, `maxBytes`, or two of them when it would have passed both (`Q-116`). The Query tab names the
+   * matching form field; see `ceiling-advice.ts`.
+   */
+  budgetBoundBy?: string[];
 }

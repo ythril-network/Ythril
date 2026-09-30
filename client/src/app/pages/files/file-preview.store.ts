@@ -14,6 +14,7 @@ import plaintext from 'highlight.js/lib/languages/plaintext';
 import { AuthenticatedDownload } from '../../core/authenticated-download';
 import { MarkdownRenderService } from '../../shared/markdown-render.service';
 import { httpErrorReason } from '../../core/http-error';
+import { DateFormatService } from '../../core/date-format.service';
 import type { FileEntry } from '../../core/api.types';
 import { PreviewObjectUrl } from './preview-object-url';
 // The view model and its vocabulary live with the component that RENDERS them, as `FileMetaModel` lives
@@ -93,9 +94,10 @@ export function previewKindOf(name: string): PreviewKind {
  * hyperlink with its label, rich text as runs, or an error. Six branches, and getting one wrong renders
  * `[object Object]` down a whole column without erroring, which looks like a sheet nobody filled in.
  */
-export function xlsxCellText(v: unknown): string {
+export function xlsxCellText(v: unknown, calendarDate: (d: Date) => string): string {
   if (v == null) return '';
-  if (v instanceof Date) return v.toLocaleDateString();
+  // A cell's date is a CALENDAR date (exceljs decodes it as midnight UTC): the viewer's format, read in UTC (Q-146).
+  if (v instanceof Date) return calendarDate(v);
   if (typeof v === 'object') {
     const o = v as Record<string, unknown>;
     if (Array.isArray(o['richText'])) return (o['richText'] as Array<{ text?: string }>).map(t => t.text ?? '').join('');
@@ -132,6 +134,7 @@ export class FilePreviewStore {
   private readonly download = inject(AuthenticatedDownload);
   private readonly sanitizer = inject(DomSanitizer);
   private readonly markdown = inject(MarkdownRenderService);
+  private readonly dates = inject(DateFormatService);
 
   /** The file the pane is showing, or `null` when nothing is open. */
   readonly file = signal<FileEntry | null>(null);
@@ -319,7 +322,7 @@ export class FilePreviewStore {
     for (let r = 1; r <= capRows; r++) {
       const row = ws.getRow(r);
       const cells: string[] = [];
-      for (let c = 1; c <= capCols; c++) cells.push(xlsxCellText(row.getCell(c).value));
+      for (let c = 1; c <= capCols; c++) cells.push(xlsxCellText(row.getCell(c).value, d => this.dates.calendarDate(d)));
       grid.push(cells);
     }
     const note = (totalRows > capRows || totalCols > capCols)

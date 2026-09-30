@@ -259,10 +259,14 @@ const T: Record<string, string> = {
   'brain.query.truncated.by.walk_budget': 'BY-WALK',
   'brain.query.truncated.by.deadline': 'BY-DEADLINE',
   'brain.query.truncated.title': 'TRUNCATED-TITLE',
-  'brain.query.truncated.what': 'WHAT-ADVICE',
+  'brain.query.truncated.what': 'WHAT-ADVICE RAISE[{{fields}}]',
+  'brain.query.truncated.whatNarrow': 'NARROW-ADVICE',
+  'brain.query.maxChars': 'F-CHARS',
+  'brain.query.maxTokens': 'F-TOKENS',
+  'brain.query.recallMaxBytes': 'F-BYTES',
   'brain.query.remainder.download': 'REMAINDER-DOWNLOAD',
   'brain.query.remainder.expires': 'EXPIRES {{date}}',
-  'brain.query.spillRefused': 'SPILL-REFUSED {{reason}}',
+  'brain.query.spillRefused': 'SPILL-REFUSED {{reason}} RAISE[{{fields}}]',
   ...Object.fromEntries(SPILL_REFUSAL_CODES.map(c => [`brain.query.spillRefused.reason.${c}`, `R-${c.toUpperCase()}-WORDS`])),
   'brain.query.spill.notFound': 'SPILL-NOT-FOUND',
   'brain.query.spill.gone': 'SPILL-GONE',
@@ -444,16 +448,18 @@ describe('Q-92: the spill download is a button that pages the whole spill throug
 describe('Q-92: the page renders `remainder` and `spillRefused`', () => {
   afterEach(() => TestBed.resetTestingModule());
 
-  it('a remainder shows its expiry in the app\'s one timestamp format, not the browser\'s or the wire\'s', () => {
-    const m = mount();
-    answer(m, KINDS[0].response('sp-r'));
-    const text = visibleText(m);
-    expect(text, 'the remainder is not rendered at all').toContain('REMAINDER-DOWNLOAD');
-    // A FORMAT, not a rendering: CI runs in UTC and a laptop does not, so the day and hour differ by zone.
-    // The format is the one `formatTimestampParts` gives every other page — dd.MM.yyyy and a 24-hour time —
-    // so a sixth spelling of a date (the reason that module exists) cannot come back here.
-    expect(text).toMatch(/EXPIRES \d{2}\.\d{2}\.\d{4} \d{2}:\d{2}:\d{2}/);
-    expect(text, 'the expiry is printed as the raw wire value').not.toContain(EXPIRES);
+  it('a remainder shows its expiry in the viewer\'s date format, not the browser\'s or the wire\'s', () => {
+    // Pin the viewer's choice (Q-146) to day.month.year; the page must render THAT, whatever the machine says.
+    localStorage.setItem('dateFormat', JSON.stringify({ style: 'dmy24', zone: 'local' }));
+    try {
+      const m = mount();
+      answer(m, KINDS[0].response('sp-r'));
+      const text = visibleText(m);
+      expect(text, 'the remainder is not rendered at all').toContain('REMAINDER-DOWNLOAD');
+      // A FORMAT, not a rendering: CI runs in UTC and a laptop does not, so the day and hour differ by zone.
+      expect(text).toMatch(/EXPIRES \d{2}\.\d{2}\.\d{4} \d{2}:\d{2}:\d{2}/);
+      expect(text, 'the expiry is printed as the raw wire value').not.toContain(EXPIRES);
+    } finally { localStorage.removeItem('dateFormat'); }
   });
 
   it('a refused spill says so and why, in words', () => {
@@ -503,6 +509,49 @@ describe('Q-92: the page renders `remainder` and `spillRefused`', () => {
     const m = mount();
     answer(m, { truncated: true, returned: 1, count: 4, nextSkip: 1 });
     expect(visibleText(m)).toContain('WHAT-ADVICE');
+  });
+
+  /*
+   * Q-116: the form has THREE fields called "Max response size" — characters, tokens, bytes — and the advice said
+   * "raise Max response size". The server now names the parameter the meter stopped at (`budgetBoundBy`), and the
+   * advice names that field by its label; a walk that ran out is not a size ceiling and gets no size advice at all.
+   */
+  const notice = (m: Mounted) => alerts(m).find(a => a.includes('TRUNCATED-TITLE')) ?? '';
+
+  it('Q-116: the advice names the field that cut the answer — bytes', () => {
+    const m = mount();
+    answer(m, { truncated: true, returned: 1, count: 4, nextSkip: 1, truncatedBy: 'budget', budgetBoundBy: ['maxBytes'] });
+    expect(notice(m)).toContain('WHAT-ADVICE RAISE[F-BYTES]');
+  });
+
+  it('Q-116: … tokens, when the token ceiling was the lower', () => {
+    const m = mount();
+    answer(m, { truncated: true, returned: 1, count: 4, nextSkip: 1, truncatedBy: 'budget', budgetBoundBy: ['maxTokens'] });
+    expect(notice(m)).toContain('WHAT-ADVICE RAISE[F-TOKENS]');
+  });
+
+  it('Q-116: … both, when the next match would pass both ceilings', () => {
+    const m = mount();
+    answer(m, { truncated: true, returned: 1, count: 4, nextSkip: 1, truncatedBy: 'budget', budgetBoundBy: ['maxChars', 'maxBytes'] });
+    const n = notice(m);
+    expect(n).toMatch(/WHAT-ADVICE RAISE\[F-CHARS.+F-BYTES\]/);
+  });
+
+  it('Q-116: a refused keep names the field too', () => {
+    const m = mount();
+    answer(m, { truncated: true, returned: 1, count: 4, nextSkip: 1, truncatedBy: 'budget', budgetBoundBy: ['maxBytes'], spillRefused: 'over-share' });
+    expect(notice(m)).toContain('RAISE[F-BYTES]');
+  });
+
+  it('Q-116: a walk that ran out gets no size advice — raising a size ceiling would not help', () => {
+    for (const by of ['walk_budget', 'deadline']) {
+      const m = mount();
+      answer(m, { truncated: true, returned: 1, count: 4, nextSkip: 1, truncatedBy: by });
+      const n = notice(m);
+      expect(n, `${by}: size advice shown`).not.toContain('WHAT-ADVICE');
+      expect(n, `${by}: no ending at all`).toContain('NARROW-ADVICE');
+      TestBed.resetTestingModule();
+    }
   });
 
   /*
@@ -559,6 +608,18 @@ describe('Q-92: the page renders `remainder` and `spillRefused`', () => {
     answer(m, { truncated: true, returned: 1, count: 4, nextSkip: 1, truncatedBy: 'budget' });
     expect(visibleText(m)).not.toContain('BY-WALK');
     expect(visibleText(m)).not.toContain('BY-DEADLINE');
+  });
+
+  it('Q-116: the advice takes the field from the answer, in every locale — no sentence names "the size" itself', () => {
+    for (const l of LOCALES) {
+      const t = locale(l);
+      for (const k of ['brain.query.truncated.what', 'brain.query.spillRefused']) {
+        expect(t[k], `${l} ${k} does not name the field it is given`).toContain('{{fields}}');
+      }
+      expect(t['brain.query.truncated.whatNarrow'], `${l} has no ending for a walk that ran out`).toBeTruthy();
+    }
+    expect(locale('de')['brain.query.truncated.whatNarrow']).not.toBe(locale('en')['brain.query.truncated.whatNarrow']);
+    expect(locale('pl')['brain.query.truncated.whatNarrow']).not.toBe(locale('en')['brain.query.truncated.whatNarrow']);
   });
 
   it('every new left-out and walk-bound key exists in en, de and pl, and de/pl are not English', () => {

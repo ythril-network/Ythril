@@ -99,20 +99,25 @@ import { SPACE_DIALOG_STYLES } from './space-dialog.styles';
               <app-space-settings-tab />
             }
 
+            <!-- The three tabs that are not where the dialog opens are DEFERRED (Q-112): their code loads the first
+                 time one is opened, which keeps this chunk inside its budget. Still gated on the tab, so leaving
+                 one unmounts it. -->
             <!-- SCHEMA TAB -->
             @if (state.settingsTab() === 'schema') {
-              <app-space-schema-layers [spaceId]="state.settingsSpace()!.id" />
-              <app-space-schema-tab />
+              @defer (on immediate) {
+                <app-space-schema-layers [spaceId]="state.settingsSpace()!.id" />
+                <app-space-schema-tab />
+              } @loading (minimum 200ms) { <span class="spinner"></span> }
             }
 
             <!-- DUPLICATES TAB -->
             @if (state.settingsTab() === 'duplicates') {
-              <app-space-duplicates-tab />
+              @defer (on immediate) { <app-space-duplicates-tab /> } @loading (minimum 200ms) { <span class="spinner"></span> }
             }
 
             <!-- DANGER ZONE TAB -->
             @if (state.settingsTab() === 'danger') {
-              <app-space-danger-tab />
+              @defer (on immediate) { <app-space-danger-tab /> } @loading (minimum 200ms) { <span class="spinner"></span> }
             }
           </div><!-- sp-body -->
 

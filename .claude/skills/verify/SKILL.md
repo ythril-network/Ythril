@@ -99,3 +99,16 @@ Routes to sweep: `/brain`, `/files/conflicts`, `/schema-library`, `/settings/{to
 - Collect page console errors; filter for `NG0`/zone patterns after change-detection work.
 - One benign 500 ("Config not loaded") is logged during first-run before setup completes — pre-existing server behavior, not a client bug.
 - On plain host mongod the server logs "Could not list search indexes" warnings — harmless in scratch runs.
+- **From a git worktree under `.claude/`, the server will not serve the SPA** (found 2026-09-30, bundle-32). Express's
+  `static` and `sendFile` refuse any path with a dot-folder in it, so every page answers `{"error":"Not found"}`
+  and the setup page never appears (Playwright times out waiting for `#label`). Copy the built bundle to a path
+  with no dot-folder and point `CLIENT_DIST` at it — copy again after every client rebuild:
+  ```bash
+  cp -r client/dist/browser <scratch>/dist-copy
+  CLIENT_DIST='<scratch>/dist-copy' PORT=3260 TRUST_PROXY=1 CONFIG_PATH='<scratch>/config/config.json' \
+    DATA_ROOT='<scratch>/data' MONGO_URI='mongodb://127.0.0.1:27047/ythril_scratch?directConnection=true' \
+    npx tsx src/index.ts   # from server/
+  ```
+- **The app has ONE theme.** There is no light/dark switch and no `prefers-color-scheme` rule in `styles.scss`, so a
+  "both themes" check does not apply — screenshot the one theme and say so rather than emulating a scheme the CSS
+  ignores.

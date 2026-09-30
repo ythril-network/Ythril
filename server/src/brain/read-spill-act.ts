@@ -98,7 +98,7 @@ export async function readSpillAct(input: ReadSpillActInput): Promise<ReadSpillA
   // whole spill), `truncated`, both budgets, both figures, and `nextSkip` exactly when there is more.
   const fields = budgetFields(
     { returned: page.items, remainder: [], charsReturned: page.charsReturned, bytesReturned: page.bytesReturned,
-      truncated: page.truncated },
+      truncated: page.truncated, ...(page.refusedBy ? { refusedBy: page.refusedBy } : {}) },
     page.total, budget, page.skip,
   );
   return {

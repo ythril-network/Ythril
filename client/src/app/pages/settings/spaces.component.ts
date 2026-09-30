@@ -16,17 +16,15 @@ import { SpaceSettingsState } from './space-settings-state.service';
 import { SpacesStore } from './spaces-store.service';
 import { SPACE_DIALOG_STYLES } from './space-dialog.styles';
 import { SpaceSettingsPopupComponent } from './space-settings-popup.component';
-import { ModalDirective } from '../../shared/modal.directive';
 import { SpaceCreateDialogComponent } from './space-create-dialog.component';
 import { HscrollTopDirective } from '../../shared/hscroll-top.directive';
-import { StatusPillComponent } from '../../shared/status-pill.component';
 
 @Component({
   selector: 'app-spaces',
   standalone: true,
   imports: [ProxySpaceBadgeComponent, CommonModule, FormsModule, TranslocoPipe, DragDropModule, PhIconComponent, SummaryStripComponent,
     SpaceSettingsPopupComponent,
-    SpaceCreateDialogComponent, ModalDirective, HscrollTopDirective, StatusPillComponent],
+    SpaceCreateDialogComponent, HscrollTopDirective],
   // Provided here (not root) so each mount gets its own settings state, with a lifetime tied to
   // this component rather than the app.
   providers: [SpacesStore, SpaceSettingsState],
