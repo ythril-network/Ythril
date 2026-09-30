@@ -217,7 +217,7 @@ function modelStages(): StageSpec[] {
   const emb = getEmbeddingConfig();
   const doc = getDocumentProcessingConfig();
   return [
-    // A blank embedding baseUrl means the bundled in-process ONNX model — no endpoint to reach.
+    // A blank embedding baseUrl means the bundled local ONNX model, run by the server's own inference child process — no endpoint to reach.
     { key: 'embedding', label: 'Text embedding', model: emb.model, baseUrl: emb.baseUrl ?? undefined, apiKey: getEmbeddingApiKey(), external: emb.provider === 'external' },
     // The only Ollama-protocol target: a LOCAL vision provider. Its base is a bare host and its routes
     // live under `/api/`; every other target here is OpenAI-compatible.
@@ -330,7 +330,8 @@ export function groupStagesByEndpoint(stages: StageSpec[]): Map<string, StageSpe
 export function classifyStage(s: StageSpec, res: ProbeOutcome | undefined): ModelStageStatus {
   const base = { key: s.key, label: s.label, model: s.model || null, endpoint: hostOf(s.baseUrl), external: s.external };
   if (!s.model) return { ...base, state: 'unconfigured' };
-  // No endpoint + a model name = the bundled in-process model. There is nothing to reach, and
+  // No endpoint + a model name = the bundled local model (in the server's inference child process; the `detail` value
+  // below is an API contract and keeps its name). There is nothing to reach, and
   // reporting it as `down` would put a red dot on the one component that cannot fail that way.
   if (!s.baseUrl) return { ...base, state: 'ok', detail: 'in-process' };
   if (!res) return { ...base, state: 'unconfigured' };

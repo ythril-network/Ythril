@@ -179,12 +179,12 @@ import { TestTarget } from './media-processing.types';
             {{ (s.testOf('embedding')?.loading ? 'mediaProcessing.action.testing' : 'mediaProcessing.action.test') | transloco }}
           </button>
           <!-- B.4: a dead button and a broken button look identical. With no endpoint the embedder IS the
-               bundled in-process model, so there is nothing to probe — a fact about the configuration,
+               bundled local model, so there is nothing to probe — a fact about the configuration,
                not a fault, and the same thing classifyStage reports as in-process on the health dot.
                Verify still works: it embeds the word ping locally. -->
           @if (!s.embedding.baseUrl) {
             <!-- Titled, because the row truncates it: the card is narrow enough that the reason reads
-                 "In-process mod…", and an explanation you cannot finish reading is the same failure this
+                 "Bundled local m…", and an explanation you cannot finish reading is the same failure this
                  line exists to fix. -->
             <span class="hint" [attr.title]="'mediaProcessing.test.inProcess' | transloco">{{ 'mediaProcessing.test.inProcess' | transloco }}</span>
           }

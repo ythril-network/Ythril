@@ -150,8 +150,8 @@ The worker-tuning fields — `workerConcurrency`, `workerPollIntervalMs`, `worke
 | Field | Env var | Default | Description |
 |---|---|---|---|
 | `embedding.provider` | `EMBEDDING_PROVIDER` | `local` | Text-embedding endpoint trust: `local` (bundled ONNX or an internal HTTP endpoint, plain fetch) or `external` (public endpoint, reached through the SSRF-guarded fetch). Config lives at top-level `config.embedding` but is edited on **Settings → Media Processing**. |
-| `embedding.baseUrl` | `EMBEDDING_URL` | — | Embedding HTTP endpoint (OpenAI-compatible `/v1/embeddings`). `…:8080` and `…:8080/v1` both work. Blank = the bundled in-process ONNX model. |
-| `embedding.embedConcurrency` | `EMBEDDING_CONCURRENCY` | 2 in-process / 8 external | How many chunk embeds run at once while converting one document. Defaults differ by embedder **on purpose**: the bundled model is CPU-bound and shares the event loop that answers `/health`, while an HTTP endpoint does the work elsewhere. Clamped to 1…32. See the note below before raising it. |
+| `embedding.baseUrl` | `EMBEDDING_URL` | — | Embedding HTTP endpoint (OpenAI-compatible `/v1/embeddings`). `…:8080` and `…:8080/v1` both work. Blank = the bundled local ONNX model, run in a child process of the server (see the note below). |
+| `embedding.embedConcurrency` | `EMBEDDING_CONCURRENCY` | 2 bundled / 8 external | How many chunk embeds run at once while converting one document. Defaults differ by embedder **on purpose**: the bundled model runs one embed at a time in its own process, so more only queues in front of every recall and write, while an HTTP endpoint does the work elsewhere and wants sockets in flight. Clamped to 1…32. See the note below before raising it. |
 | `embedding.model` | `EMBEDDING_MODEL` | `nomic-ai/nomic-embed-text-v1.5` | Embedding model. **Changing the model / `dimensions` / `similarity` / `prefixScheme` re-indexes every vector** (the UI requires an explicit confirmation; `POST /api/brain/spaces/:id/reindex` runs it). |
 | `embedding.prefixScheme` | `EMBEDDING_PREFIX_SCHEME` | `auto` | Task-prefix convention the model expects: `nomic` (`search_document:` / `search_query:` prefixes, trailing space included), `qwen` (instruction on the query only, passages bare), `none` (symmetric models — OpenAI `text-embedding-3-*`, bge-m3), or `auto`. **`auto` reproduces the behaviour this instance had before the field existed: `nomic` for the bundled model, `none` over HTTP — so upgrading changes no vector.** If you run nomic or Qwen behind an endpoint, set this explicitly and reindex — asymmetric models retrieve measurably worse without the prefix, and nothing errors when it is missing. |
 | `embedding.dimensions` | `EMBEDDING_DIMENSIONS` | `768` | Vector width the model emits. Must match the model — a mismatch is not detected at write time, it surfaces as recall that returns nothing. Listed with `model` above as a re-index trigger. |
@@ -175,22 +175,50 @@ The worker-tuning fields — `workerConcurrency`, `workerPollIntervalMs`, `worke
 | `maxFileSizeBytes` | `MAX_FILE_SIZE_BYTES` | `524288000` | Skip embedding for files above this size (500 MiB) |
 | `stalledJobTimeoutMs` | `STALLED_JOB_TIMEOUT_MS` | `300000` | Re-queue a job that has reported no progress for > N ms. **Raised automatically when a single step allows longer than this** — see the note under the document-processing table: a step longer than the stall timeout would be re-queued while it is still running. Measured from the last heartbeat, not from the claim, and re-queuing now withdraws the running claim so the previous holder stops rather than racing its replacement. Each re-queue logs one `warn` with the file, the silence, the size and the step. |
 
-> **Large documents, CPU limits and liveness probes.** With the **bundled in-process** embedder, one ~2 KB
-> chunk costs roughly 200 ms of CPU and blocks the event loop for most of it. A 350 KB document is hundreds
-> of chunks — minutes of work — and if enough of them run at once, HTTP stops being answered for seconds at a
-> time. A Kubernetes `livenessProbe` on `/health` then kills a container that is working correctly, the
-> persisted job resumes after the restart, and the result is a crash loop with **no error and no `failed`
-> status** to point at the document.
+> **Large documents, CPU limits and the inference process.** The bundled embedding model runs in a **child process
+> of the server**, started by the first embed and ended after ten idle minutes. It used to run inside the server
+> itself, and that was the cause of a crash loop with **no error and no `failed` status** to point at the document:
+> one text took about 40 ms of CPU and the event loop's lag *was* that inference (a batch of 16 blocked it for
+> 516 ms; a bulk import of 50 facts made `/health` take 1.6 s at the 95th percentile, against 3 ms idle), so on a
+> large document or a small CPU allocation a Kubernetes `livenessProbe` on `/health` killed a container that was
+> working correctly, and the persisted job resumed after the restart. Now the server's loop stays at the timer
+> floor while the model works, at any `embedConcurrency`, so inference no longer starves the probe.
 >
-> Measured inside the shipped image, 16 chunks: at concurrency 8 with no yielding, the loop was blocked for
-> **2.5 s at a stretch** (a 50 ms timer fired once in 4.7 s). At concurrency 2 with a yield between chunks it
-> was 0.5 s — and finished **22% faster**, because concurrent CPU-bound inferences thrash rather than
-> parallelise.
+> **What `embedConcurrency` bounds now is queue pressure.** The inference process runs one embed at a time. Giving
+> it several texts in one call was measured and is not used: on mixed-length text (the shape of real records) it
+> was slower, 161 to 215 ms per text against 96 one at a time, because every text in a call is padded to the
+> longest. So a higher `embedConcurrency` does not make a document faster, it only puts more of its chunks in
+> front of the queue that recall queries and brain writes share. A recall query goes ahead of queued chunks, and
+> never interrupts the embed that is already running. The default of 2 keeps the process fed while the previous
+> answer crosses the channel back to the server.
 >
-> The defaults above are chosen for that reason, and the pipeline yields between chunks. If you raise
-> `embedConcurrency`, raise the CPU allocation with it, and give the probes room:
-> `timeoutSeconds: 10` with `failureThreshold: 6` tolerates a slow answer far better than the defaults do.
-> An **external** embedding endpoint sidesteps the whole question — the CPU work happens on another host.
+> Things to plan for:
+>
+> - **The first embed after ten idle minutes pays the model load**, about one to two seconds; the process exits
+>   when idle so that its memory goes back to the operating system (the model's memory arena never gives any back
+>   while the process lives). `ythril_embed_process_state` shows whether it is running.
+> - **CPU and memory are shared, not doubled.** The inference process competes with the server for the
+>   container's cores (onnxruntime's thread count is not pinned), so a one-core limit is one core for both. A
+>   container `mem_limit` or a pod memory limit counts **both** processes; the server's own metrics do not include
+>   the child's resident memory.
+> - **A crash is survived.** A native fault in the model, an out-of-memory kill or a wedged inference no longer takes
+>   the server down: the process is replaced with a growing delay (`ythril_embed_process_restarts_total` counts it by
+>   reason), requests that arrive during the delay fail at once instead of hanging, and the embed queue waits the
+>   delay out before it claims. A record that **keeps killing the process fails after three** crashes, with the
+>   crash named in its job's `lastError`; `retry_embed_record` gives it a clean count.
+> - **The child gets a minimal environment**: the platform basics plus `MODEL_CACHE_DIR` and the three offline flags. It
+>   does not receive the MongoDB URI, the master key or any API token. A changed offline flag or cache directory
+>   restarts it at the next embed, and forgets a load failure that was about the old setting.
+> - **Shutting down** waits up to two seconds for the embed in flight, then ends the process. A server killed without a
+>   chance to say goodbye (`kill -9`, the out-of-memory killer) closes the channel, and the child exits on seeing it.
+> - **`/ready` does not depend on it.** The embedding model is an optional component that starts on demand, so a child
+>   that is down or backing off does not take the instance out of rotation; watch `ythril_embed_process_state` and the
+>   embed queue's `failed` count (`list_embed_jobs`).
+> - **A model that cannot be loaded stays failed** until the model or the offline flags change, or the server
+>   restarts: it is tried once, not on every embed, and its jobs end `failed` after their attempts as before.
+>
+> If you raise `embedConcurrency`, raise the CPU allocation with it. An **external** embedding endpoint sidesteps the
+> whole question: the work happens on another host and no local process is started.
 
 #### Step budgets and the stall detector
 

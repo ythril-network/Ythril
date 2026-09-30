@@ -1,13 +1,12 @@
-import fs from 'node:fs';
 import { boundedJson, boundedErrorText } from '../util/bounded-read.js';
-import path from 'node:path';
-import { getDataRoot, getEmbeddingConfig, getModelSlots } from '../config/loader.js';
+import { getEmbeddingConfig, getModelSlots } from '../config/loader.js';
 import { ssrfSafeFetch } from '../util/ssrf.js';
 import { allowPrivateForSlot } from '../config/model-egress-policy.js';
 import { embeddingsUrlFor } from '../files/converters/vlm-endpoint.js';
 import { log } from '../util/log.js';
 import { embeddingDurationSeconds, embeddingQueueDepth, embeddingRetryTotal } from '../metrics/registry.js';
 import { slotTimeoutMs } from '../config/model-slots.js';
+import { runLocalInference, warmLocalInference } from './local-inference.js';
 
 export interface EmbeddingResult {
   vector: number[];
@@ -72,112 +71,6 @@ export function prepareInput(
  * threshold, which the tokeniser owns) and comfortably past the point where averaging destroys the signal.
  */
 const MAX_LOCAL_EMBED_CHARS = 8_000;
-
-// ── Local ONNX pipeline singleton ─────────────────────────────────────────
-type LocalPipeline = (text: string, opts: Record<string, unknown>) => Promise<any>;
-
-let _pipelineInit: Promise<LocalPipeline> | null = null;
-let _pipelineModelId: string | null = null;
-
-/**
- * Is this instance forbidden from fetching a model at runtime?
- *
- * Reads the ECOSYSTEM names first on purpose. An operator air-gapping a stack sets `HF_HUB_OFFLINE=1`,
- * and `docker-compose.yml` already sets exactly that on the `unstructured` sidecar — so an operator has
- * every reason to believe the convention is honoured stack-wide. It was not: transformers.js does not
- * read those variables at all (they belong to Python's `huggingface_hub`), so the Node process ignored
- * them completely. `YTHRIL_MODELS_OFFLINE` is the explicit spelling for anyone who would rather not
- * borrow another project's variable.
- */
-function modelsOffline(): boolean {
-  const truthy = (v: string | undefined): boolean =>
-    v !== undefined && v !== '' && v !== '0' && v.toLowerCase() !== 'false' && v.toLowerCase() !== 'no';
-  return truthy(process.env['HF_HUB_OFFLINE'])
-    || truthy(process.env['TRANSFORMERS_OFFLINE'])
-    || truthy(process.env['YTHRIL_MODELS_OFFLINE']);
-}
-
-/**
- * Is `modelId` already in the on-disk cache, so that loading it needs no network?
- *
- * transformers.js keys its `FileCache` as `<cacheDir>/<model-id>/<file>` — verified against the cache the
- * Dockerfile bakes, which contains `nomic-ai/nomic-embed-text-v1.5/{config.json,tokenizer.json,onnx/…}`.
- * `config.json` is the first file every load asks for, so its presence is the cheap, accurate test for
- * "this load will stay local". Deliberately synchronous and best-effort: this only decides whether to
- * WARN, never whether to load.
- */
-function isCached(cacheDir: string, modelId: string): boolean {
-  try {
-    return fs.existsSync(path.join(cacheDir, ...modelId.split('/'), 'config.json'));
-  } catch {
-    return false;
-  }
-}
-
-function getLocalPipeline(modelId: string): Promise<LocalPipeline> {
-  // Re-init only if the configured model changes (rare: config reload)
-  if (_pipelineInit && _pipelineModelId === modelId) return _pipelineInit;
-  _pipelineModelId = modelId;
-  _pipelineInit = (async (): Promise<LocalPipeline> => {
-    const { pipeline, env } = await import('@huggingface/transformers');
-    // MODEL_CACHE_DIR: baked into Docker image at /app/model-cache (set in Dockerfile).
-    // Falls back to DATA_ROOT/.model-cache for local development.
-    const cacheDir = process.env['MODEL_CACHE_DIR'] ??
-                     path.join(getDataRoot(), '.model-cache');
-    env.cacheDir = cacheDir;
-
-    // A cache MISS reaches out to huggingface.co, and nothing used to say so.
-    //
-    // `env.allowRemoteModels` defaults to `true` in @huggingface/transformers, so `pipeline(…)` on a model
-    // that is not in `cacheDir` silently downloads it: the instance's IP and the model id it asked for,
-    // to a third party, with no configuration, from a product whose README says "works fully offline".
-    // The shipped image bakes exactly ONE model, `nomic-ai/nomic-embed-text-v1.5`, so every other id —
-    // and any id at all on a from-source install with an empty cache — was that request.
-    //
-    // Two changes, and neither of them can break the default:
-    //   1. the offline flag is honoured (see `modelsOffline`), and the published image sets it;
-    //   2. when remote IS allowed and the model is absent, the egress is ANNOUNCED before it happens.
-    //
-    // Measured rather than assumed, because the ordering inside `getModelFile` decides whether this is
-    // safe: the `FileCache` is consulted BEFORE any local-or-remote decision, so a populated `cacheDir`
-    // satisfies a load with remote fetching disabled. Loading the baked model against a real populated
-    // cache with `allowRemoteModels = false` succeeded; a different id under the same conditions failed.
-    const offline = modelsOffline();
-    const cached = isCached(cacheDir, modelId);
-    if (offline) env.allowRemoteModels = false;
-    else if (!cached) {
-      log.warn(
-        `Embedding model '${modelId}' is not in the local cache (${cacheDir}), so loading it will DOWNLOAD it `
-        + 'from huggingface.co — roughly 274 MB, and that request carries this instance\'s IP address and the '
-        + 'model id. Set HF_HUB_OFFLINE=1 (or YTHRIL_MODELS_OFFLINE=1) to forbid it, and bake the model into '
-        + 'your image instead. The published Ythril image already ships with the flag set.',
-      );
-    }
-
-    log.info(`Loading embedding model ${modelId} (cache: ${cacheDir}${offline ? ', offline' : ''})`);
-    let pipe: unknown;
-    try {
-      pipe = await pipeline('feature-extraction', modelId);
-    } catch (err) {
-      // The library's own message on a blocked miss names `node_modules/@huggingface/transformers/models/`,
-      // a path that has nothing to do with where Ythril keeps its models — so an operator would go looking
-      // in the wrong place for a file that was never meant to be there. Say what actually happened.
-      if (offline && !cached) {
-        throw new Error(
-          `Embedding model '${modelId}' is not in the model cache (${cacheDir}) and runtime downloads are `
-          + 'disabled by HF_HUB_OFFLINE / TRANSFORMERS_OFFLINE / YTHRIL_MODELS_OFFLINE. Either bake the model '
-          + 'into the image (see docs/integration-guide/02-hosting.md), point MODEL_CACHE_DIR at a cache that '
-          + 'has it, or unset the flag to allow a one-time download from huggingface.co. '
-          + `Underlying error: ${err instanceof Error ? err.message : String(err)}`,
-        );
-      }
-      throw err;
-    }
-    log.info(`Embedding model ready: ${modelId}`);
-    return pipe as LocalPipeline;
-  })();
-  return _pipelineInit;
-}
 
 // ── HTTP endpoint fallback ─────────────────────────────────────────────────
 /** `input` is already task-prefixed by `prepareInput` — do not prefix again here. */
@@ -338,14 +231,14 @@ async function embedViaHttp(
 }
 
 /**
- * Pre-load the local ONNX embedding pipeline without running an actual embed.
- * Returns immediately if the model is already loaded.
+ * Start the local inference process and load the model into it, without running an actual embed.
+ * Returns once the model is loaded (immediately if it already is).
  * No-op when an external HTTP embedding endpoint is configured.
  */
 export async function warmEmbeddingModel(): Promise<void> {
   const cfg = getEmbeddingConfig();
   if (cfg.baseUrl) return; // External endpoint — nothing local to warm
-  await getLocalPipeline(cfg.model);
+  await warmLocalInference({ modelId: cfg.model });
 }
 
 // ── Public API ─────────────────────────────────────────────────────────────
@@ -371,35 +264,37 @@ export async function embed(
   const input = prepareInput(text, task, cfg);
 
   embeddingQueueDepth.inc();
-  const end = embeddingDurationSeconds.startTimer();
   try {
     if (cfg.baseUrl) {
       // External HTTP endpoint configured — delegate entirely
       // Retried here rather than inside `embedViaHttp` so the whole request — including building it — is what
-      // gets re-attempted, and so the local-pipeline path below is untouched: an in-process model does not
-      // refuse you because it is busy.
-      return await embedViaHttpWithRetry(() => embedViaHttp(input, cfg));
+      // gets re-attempted, and so the local path below is untouched: a local model queues you rather than
+      // refusing you because it is busy.
+      const end = embeddingDurationSeconds.startTimer();
+      try {
+        return await embedViaHttpWithRetry(() => embedViaHttp(input, cfg));
+      } finally {
+        end();
+      }
     }
 
-    const pipe = await getLocalPipeline(cfg.model);
-    // `truncation: true` is not a nicety — without it a long input cost GIGABYTES and produced a worse vector.
-    //
-    // Self-attention is quadratic in sequence length. A customer's 57 KB Markdown file chunked to two ~28 KB
-    // chunks (the chunker had a minimum section size and no maximum, fixed in `section-chunker.ts`), which is
-    // ~7,000 tokens: ~196 MiB of attention scores per head in fp32, ~2.35 GiB for one layer's twelve. Their pod
-    // went 3.98 → 9.996 GiB inside a single 15-second scrape window, was OOMKilled at a 16 GiB limit, and then
-    // sat at 15.40 GiB at idle because the ONNX arena allocator never returns its high-water mark. Reducing
-    // embed concurrency had made it worse, because the peak is set by one chunk's size.
-    //
-    // It was also silently WRONG beyond the model's position count, so this is a correctness fix as much as a
-    // fact one — and the chunker's cap does not make it redundant: this is the path every caller shares,
-    // including `saveFact` with a large fact and a query nobody bounded.
+    // A vector over this much text averages away everything specific in it. The model truncates to its context
+    // window (in the inference process, `brain/embed-process.ts`, which owns why that matters), so this is not the
+    // truncation threshold: it is the point past which something upstream produced an unchunked body.
     if (input.length > MAX_LOCAL_EMBED_CHARS) {
       log.warn(`Embedding input is ${input.length} chars; the local model truncates to its context window. `
         + 'A vector over this much text averages away everything specific in it — chunk the source instead.');
     }
-    const output = await pipe(input, { pooling: 'mean', normalize: true, truncation: true });
-    const vector = Array.from(output.data as Float32Array) as number[];
+
+    // The model runs in another process (`brain/local-inference.ts`): this thread stays free while it works. The
+    // string handed over is the PREPARED one, and it is stamped with the model the process says it used, never
+    // `cfg.model` read above: config can change while a request is queued, and `embed-record.ts` treats the stamp
+    // as its "unchanged" fingerprint. A query goes ahead of queued documents.
+    const result = await runLocalInference({ input, lane: task === 'query' ? 'query' : 'document', modelId: cfg.model });
+    // The process's own timing, so the histogram keeps meaning "one embedding": around the round trip it would
+    // absorb the wait behind other requests (that wait is `ythril_embed_wait_seconds`).
+    embeddingDurationSeconds.observe(result.inferenceMs / 1000);
+    const vector = result.vector;
 
     if (vector.length !== cfg.dimensions) {
       log.warn(
@@ -407,9 +302,8 @@ export async function embed(
         `Update embedding.dimensions in config.json.`,
       );
     }
-    return { vector, model: cfg.model, dimensions: vector.length };
+    return { vector, model: result.modelId, dimensions: vector.length };
   } finally {
-    end();
     embeddingQueueDepth.dec();
   }
 }

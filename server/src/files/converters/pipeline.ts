@@ -419,10 +419,11 @@ export async function storeConversionResults(
   // to $vectorSearch — and counted, so the caller reports the job as partial/failed rather
   // than silently "complete".
   // Sized per embedder, because the two are different problems: an external endpoint is network-bound and
-  // wants sockets in flight, while the bundled in-process model is CPU-bound and eight at once simply
-  // saturates the machine. Measured: one in-process chunk embed blocks the event loop for ~200 ms, so eight
-  // concurrent ones on a small CPU allocation leave nothing for the thread that answers /health — which is
-  // how a 358 KB document turned into a liveness-probe crash loop with no error anywhere.
+  // wants sockets in flight, while the bundled local model is CPU-bound and runs one embed at a time in its own
+  // process, so eight at once only queue in front of every recall and write. (Before the model moved out of this
+  // process, one chunk embed blocked the event loop for ~200 ms and eight concurrent ones on a small CPU allocation
+  // left nothing for the thread that answers /health — a 358 KB document turned into a liveness-probe crash loop with
+  // no error anywhere. `embed-concurrency.ts` has the measurements.)
   const EMBED_CONCURRENCY = embedConcurrency(getEmbeddingConfig());
   const INSERT_BATCH = 200;
 
@@ -465,14 +466,12 @@ export async function storeConversionResults(
       log.warn(`Chunk embed failed for ${spaceId}/${chunkId}: ${err instanceof Error ? err.message : String(err)}`);
     }
 
-    // Hand the event loop a turn between chunks.
-    //
-    // An in-process embed blocks it for ~200 ms (measured), and a large document is hundreds of them
-    // back to back. `await` on a promise that is already settled does NOT yield to the macrotask queue —
-    // it resumes in the same tick's microtask drain — so without this, pending I/O callbacks (the ones
-    // that answer /health) can sit behind the whole run. `setImmediate` puts this worker behind them
-    // instead. Cheap: one macrotask per chunk against ~200 ms of work.
-    await new Promise<void>(resolve => setImmediate(resolve));
+    // There used to be a `setImmediate` yield here, to hand the event loop a turn between chunks. It existed because
+    // an embed ran INSIDE this process and blocked it for ~200 ms (measured), and `await` on an already-settled
+    // promise does not yield to the macrotask queue. The embed no longer runs here: the local model is in a child
+    // process (`brain/local-inference.ts`) and an external endpoint is a socket, so every `await embed(...)` above is
+    // a real I/O round trip that returns to the event loop before it resumes. What is left on this thread between
+    // two chunks is a few string operations and an awaited database write, so the yield bought nothing and is gone.
 
     // Say so, and check we are still the run that is allowed to. Both ride on the same tick: the
     // heartbeat is throttled to one write per 2 s, and the lease answer it returns is what `shouldStop`

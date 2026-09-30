@@ -21,10 +21,23 @@
  * exactly as before. That is why the in-process default is a conservative constant with an operator override,
  * and this file pins that reasoning as behaviour.
  *
+ * ## What changed in Q-99 part 1, and why the numbers did not
+ *
+ * The figures above are the REASON the in-process default was 2, and they describe a world in which an inference
+ * blocked the server's event loop. The local model now runs in a child process, one inference at a time behind a
+ * FIFO host, so the loop stays free at any concurrency and a higher setting can only add queue depth. The default
+ * stays 2 because two is what keeps the child fed while the IPC of the previous answer is in flight (pipelining),
+ * and the clamp stays because an operator typo must not become hundreds of queued requests. What CHANGED is the
+ * reasoning written beside the constant, and the last describe block of this file holds that: a comment that
+ * still says "leaves the event loop responsive" is an authoritative reference that is wrong, and nobody reports a
+ * sentence like that.
+ *
  * Run: node --test testing/standalone/embed-concurrency.test.js
  */
 import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { stripComments } from './_strip-comments.mjs';
 
 let embedConcurrency, IN_PROCESS_EMBED_CONCURRENCY, EXTERNAL_EMBED_CONCURRENCY, MAX_EMBED_CONCURRENCY;
 
@@ -34,7 +47,7 @@ describe('embedConcurrency', () => {
       await import('../../server/dist/files/converters/embed-concurrency.js'));
   });
 
-  it('is LOW for the bundled in-process model — it is CPU-bound and shares the loop', () => {
+  it('is LOW for the bundled model — one inference process runs one embed at a time, so more only queues', () => {
     assert.equal(embedConcurrency({}), IN_PROCESS_EMBED_CONCURRENCY);
     assert.equal(embedConcurrency({ baseUrl: '' }), IN_PROCESS_EMBED_CONCURRENCY);
     assert.equal(embedConcurrency({ baseUrl: '   ' }), IN_PROCESS_EMBED_CONCURRENCY,
@@ -73,5 +86,43 @@ describe('embedConcurrency', () => {
 
   it('floors a fractional override instead of passing it to a loop bound', () => {
     assert.equal(embedConcurrency({ embedConcurrency: 3.9 }), 3);
+  });
+});
+
+describe('the reasoning written beside the defaults describes the process that exists', () => {
+  const RAW = readFileSync('server/src/files/converters/embed-concurrency.ts', 'utf8');
+  const PIPELINE = readFileSync('server/src/files/converters/pipeline.ts', 'utf8');
+
+  it('no longer says the in-process default protects the event loop', () => {
+    assert.ok(!/leave the event loop responsive|blocks the event\s+loop for essentially all/.test(RAW),
+      'embed-concurrency.ts still gives "inference blocks the loop" as the reason for the default; since Q-99 '
+      + 'part 1 the model runs in a child process and that is no longer what the number is for');
+  });
+
+  it('says what the number bounds now: requests queued on the one inference process', () => {
+    assert.match(RAW, /inference process/i);
+    assert.match(RAW, /\bqueue/i);
+  });
+
+  it('keeps its code where it was: the constants and the clamp', () => {
+    const code = stripComments(RAW);
+    assert.match(code, /IN_PROCESS_EMBED_CONCURRENCY\s*=\s*2\b/);
+    assert.match(code, /Math\.min\(MAX_EMBED_CONCURRENCY/);
+  });
+
+  it('the document pipeline does not claim an embed blocks the event loop', () => {
+    // The `setImmediate` yield between chunks was written because an in-process embed blocked the loop for ~200 ms.
+    // Decided in this change, not left conditional: either the yield is gone or its comment says what it is for now.
+    const at = PIPELINE.indexOf('setImmediate(resolve)');
+    if (at < 0) return;   // removed: nothing to be wrong about
+    // The comment block DIRECTLY above the statement: contiguous `//` lines walking up from it, bounded by the
+    // first line that is not a comment rather than by a character count.
+    const above = PIPELINE.slice(0, at).split(/\r?\n/);
+    above.pop();   // the part of the statement's own line that precedes `setImmediate`
+    const comment = [];
+    for (let i = above.length - 1; i >= 0 && /^\s*\/\//.test(above[i]); i--) comment.unshift(above[i]);
+    assert.ok(comment.length > 0, 'the yield has lost its explanation — re-anchor this gate');
+    assert.ok(!/in-process embed blocks it|An in-process embed blocks/i.test(comment.join('\n')),
+      'pipeline.ts keeps its per-chunk yield with a comment that still says an embed blocks the event loop');
   });
 });

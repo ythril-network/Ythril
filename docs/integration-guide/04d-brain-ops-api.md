@@ -343,6 +343,17 @@ which hand the attempt back rather than spend it; `attempts` is spent only on er
 `transientFailures` with `attempts` at zero is an outage waiting itself out. It was described on the tool and returned by
 neither door until `Q-109`.
 
+**One transient failure does end a job: a lost embedding process.** The bundled embedding model runs in a child process
+of the server. When that process is lost (it crashed, was killed, or stopped answering) the embed that was in flight
+fails as transient: retried with backoff, the attempt handed back. But an input that crashes the model looks exactly
+like that for ever, so the third time a record is the one in flight when the process is lost, its job is left `failed`
+with `lastError` beginning `embedding process lost` and `attempts` **below** `maxAttempts` — that combination, and not
+`attempts === maxAttempts`, is how you recognise it. Fix or shorten the record's content (a rewrite gives the job a
+clean count), or retry it once the cause is understood (`POST /api/brain/spaces/:spaceId/embedding-queue/records/retry`,
+or the MCP `retry_embed_record`; a retry and a new server version also give it a clean count). One lost process never
+does this on its own, and a record queued behind a crashing one can be charged for it too: an unexplained
+`embedding process lost` on a record with ordinary content is worth retrying once before editing it.
+
 **MCP `list_embed_jobs` is the same act** (`Q-109`): the same `status`, `limit` and `skip`, the same refusals, and a proxy
 space's members read and summed exactly as here. It used to read only the named space and take no `skip`.
 

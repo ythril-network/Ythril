@@ -23,6 +23,7 @@ import {
 } from '../../brain/embed-queue.js';
 import type { ToolContext, ToolHandler, ToolResult, ToolSchemas } from './types.js';
 import { embedJobsPage, MAX_JOB_PAGE, DEFAULT_JOB_PAGE } from '../../brain/embed-jobs-page.js';
+import { LOST_MARKER } from '../../brain/embed-errors.js';
 
 const RECORD_TYPES = [...EMBED_RECORD_TYPES];
 
@@ -42,11 +43,15 @@ export const list_embed_jobsTool: ToolHandler = {
     + 'other. `attempts` is the PERMANENT-failure budget and is spent only on errors a retry cannot fix — a malformed '
     + 'input, a rejection from a reachable embedder. `transientFailures` counts the times the embedder simply did not '
     + 'answer (connection refused, DNS, a timeout, a 429 or 5xx); those hand the attempt back and back off instead, up '
-    + 'to half-hourly, and NEVER go terminal. So a high `transientFailures` with `attempts` at zero is an outage waiting '
+    + 'to half-hourly, and NEVER go terminal (the one exception is below). So a high `transientFailures` with `attempts` at zero is an outage waiting '
     + 'itself out and needs nothing from you; a `failed` job with `attempts` at its maximum is a record that cannot be '
     + 'embedded and needs the content fixed. `lastError` tells you which.\n\n'
     + 'A terminal `failed` job is also revived once per server VERSION at startup, so an upgrade retries everything that '
     + 'died under the old one without anybody asking.\n\n'
+    + 'THE ONE EXCEPTION: a `failed` job whose `lastError` begins `' + LOST_MARKER + '` has `attempts` BELOW its maximum. '
+    + 'The bundled embedding process was lost three times while that record was being embedded, which is how an input that '
+    + 'crashes the model looks; retrying it for ever would loop, so it is left for you. Shorten or fix the content, or '
+    + 'retry it with the per-record retry tool once the cause is understood. One lost process alone never does this.\n\n'
     + 'This tool only REPORTS. The per-record retry lives on its own mutating tool, and a read-only token is '
     + 'deliberately not shown one — `help()` lists what your token can actually reach, so if no retry appears there, '
     + 'the answer is that this token cannot retry rather than that no such tool exists.',
