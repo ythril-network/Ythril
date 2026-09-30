@@ -27,6 +27,7 @@ import { RECORD_COLLECTION as COLLECTION_SUFFIX } from '../config/types.js';
 import { schedule, validate, type ScheduledTask } from 'node-cron';
 import { col, asFilter, asUpdate, isVectorSearchAvailable } from '../db/mongo.js';
 import { getConfig } from '../config/loader.js';
+import { concreteSpaces, isProxy } from '../spaces/proxy.js';
 import { needsReindex } from '../spaces/_shared.js';
 import { ssrfSafeFetch } from '../util/ssrf.js';
 import { log } from '../util/log.js';
@@ -327,7 +328,7 @@ function effectiveThreshold(spaceId: string): number {
 export async function evaluateRecordForDuplicates(spaceId: string, type: DupeScanType, recordId: string): Promise<void> {
   const cfg = getConfig();
   const space = cfg.spaces.find(s => s.id === spaceId);
-  if (!space || space.proxyFor || !space.dupeRulesOnInsert) return;
+  if (!space || isProxy(space) || !space.dupeRulesOnInsert) return;
   if (!isVectorSearchAvailable() || needsReindex(spaceId)) return;
   try {
     await evalOneRecord(spaceId, type, recordId, effectiveThreshold(spaceId));
@@ -349,7 +350,7 @@ export async function scanSpace(spaceId: string, opts?: { reset?: boolean }): Pr
   const cfg = getConfig();
   const dc = cfg.dupeScanner ?? {};
   const space = cfg.spaces.find(s => s.id === spaceId);
-  if (!space || space.proxyFor) return { scanned: 0, pairs: 0 };
+  if (!space || isProxy(space)) return { scanned: 0, pairs: 0 };
   if (!isVectorSearchAvailable() || needsReindex(spaceId)) return { scanned: 0, pairs: 0 };
 
   const threshold = effectiveThreshold(spaceId);
@@ -391,9 +392,7 @@ export async function scanSpace(spaceId: string, opts?: { reset?: boolean }): Pr
 
 /** Scan every real (non-proxy) space once, incrementally. Used by the scheduled sweep. */
 export async function runDupeScanAllSpaces(): Promise<void> {
-  const cfg = getConfig();
-  for (const s of cfg.spaces) {
-    if (s.proxyFor) continue;
+  for (const s of concreteSpaces()) {
     try {
       const r = await scanSpace(s.id);
       if (r.scanned > 0) log.info(`Dupe scan '${s.id}': scanned ${r.scanned}, pairs ${r.pairs}`);

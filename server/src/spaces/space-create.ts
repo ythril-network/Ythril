@@ -27,6 +27,7 @@ import { slugify } from './_shared.js';
 import { createSpace, type SpaceCreator } from './lifecycle.js';
 import { CreateSpaceBody, TypeSchemasZ, findBrokenLibraryRefs, brokenRefsError, stripServerOwnedSpace } from './body-schemas.js';
 import { refuseRemovedDescription } from './spaces.js';
+import { isProxy, isWildcardProxy } from './proxy.js';
 
 /** A refusal, carrying the status the contract suite pins. */
 export type SpaceCreateRefusal = {
@@ -74,14 +75,14 @@ export function planSpaceCreate(body: unknown): SpaceCreateDecision {
   // `['*']` is the wildcard SENTINEL, not a member list, so per-member validation is skipped for it. Treating it as
   // an id would refuse every wildcard proxy space with "space '*' not found" — pinned in the contract suite for
   // exactly that reason.
-  if (proxyFor && !(proxyFor.length === 1 && proxyFor[0] === '*')) {
+  if (isProxy({ proxyFor }) && !isWildcardProxy({ proxyFor })) {
     const cfg = getConfig();
-    for (const memberId of proxyFor) {
+    for (const memberId of proxyFor!) {
       const member = cfg.spaces.find(s => s.id === memberId);
       if (!member) {
         return { ok: false, refusal: { status: 400, body: { error: `Proxy member space '${memberId}' not found` } } };
       }
-      if (member.proxyFor) {
+      if (isProxy(member)) {
         return {
           ok: false,
           refusal: { status: 400, body: { error: `Proxy member '${memberId}' is itself a proxy space (nesting not allowed)` } },
@@ -111,7 +112,7 @@ export function planSpaceCreate(body: unknown): SpaceCreateDecision {
   // they are left un-defaulted. The federation-join path calls `createSpace` directly and is intentionally NOT
   // affected — defaulting strict there would reject incoming off-schema federated records on ingest. With no
   // typeSchemas yet defined, 'strict' still accepts every type/label, so this never blocks a brand-new empty space.
-  const seededMeta: SpaceMeta | undefined = proxyFor
+  const seededMeta: SpaceMeta | undefined = isProxy({ proxyFor })
     ? requestMeta
     : { validationMode: 'strict', strictLinkage: true, ...(requestMeta ?? {}) };
 

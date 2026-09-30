@@ -29,7 +29,7 @@ import { col } from '../db/mongo.js';
 import { COLLECTION_SUFFIX } from '../config/types-knowledge.js';
 import { LINK_INDEXES } from '../brain/link-adjacency.js';
 import { spaceCollection } from '../db/space-collection.js';
-import { getConfig } from '../config/loader.js';
+import { concreteSpaces } from './proxy.js';
 import { log } from '../util/log.js';
 
 /**
@@ -65,12 +65,8 @@ const TYPE_FILTERED = Object.values(COLLECTION_SUFFIX);
  * than trusting that it did. Best-effort per space: a failure on one must not stop the others or the boot.
  */
 export async function ensureQueryIndexes(): Promise<number> {
-  let cfg;
-  try { cfg = getConfig(); } catch { return 0; }   // pre-setup: nothing to index yet
-
   let issued = 0;
-  for (const space of cfg.spaces ?? []) {
-    if (space.proxyFor?.length) continue;
+  for (const space of concreteSpaces()) {   // pre-setup: none, so nothing to index yet
     for (const name of TYPE_FILTERED) {
       try {
         await col(`${space.id}_${name}`).createIndex({ type: 1 });

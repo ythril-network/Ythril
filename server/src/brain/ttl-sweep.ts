@@ -8,7 +8,7 @@
  * own copy and the tombstones converge.
  */
 import { col, asFilter } from '../db/mongo.js';
-import { getConfig } from '../config/loader.js';
+import { concreteSpaces } from '../spaces/proxy.js';
 import { log } from '../util/log.js';
 import type { WebhookActor } from '../webhooks/dispatcher.js';
 import { TTL_COLLECTIONS, ensureTtlIndex } from './ttl.js';
@@ -44,11 +44,8 @@ const SWEEP_FILTER: Partial<Record<(typeof TTL_COLLECTIONS)[number], Record<stri
 
 /** Delete all records past their `_expireAt`, across every space. Returns the number deleted. */
 export async function sweepExpired(now: Date = new Date()): Promise<number> {
-  let cfg;
-  try { cfg = getConfig(); } catch { return 0; } // pre-setup
   let total = 0;
-  for (const space of cfg.spaces) {
-    if (space.proxyFor?.length) continue; // proxy spaces own no collections
+  for (const space of concreteSpaces()) {
     for (const c of TTL_COLLECTIONS) {
       let expired;
       try {
@@ -88,10 +85,7 @@ let _sweepTimer: ReturnType<typeof setInterval> | null = null;
  * setting-change time) or a per-record `ttlDays`. Idempotent; best-effort per space.
  */
 async function ensureSweepIndexes(): Promise<void> {
-  let cfg;
-  try { cfg = getConfig(); } catch { return; } // pre-setup
-  for (const space of cfg.spaces) {
-    if (space.proxyFor?.length) continue;
+  for (const space of concreteSpaces()) {
     await ensureTtlIndex(space.id).catch(err => log.warn(`TTL sweep: ensureTtlIndex ${space.id}: ${err}`));
   }
 }

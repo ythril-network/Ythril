@@ -13,7 +13,7 @@
  * lastError, claim fields) is a state machine, and a second copy of a state machine is the copy nobody watches when it
  * drifts. What these handlers own is the MCP-shaped part: argument validation and text a model can act on.
  */
-import { resolveWriteTarget } from '../../spaces/proxy.js';
+import { resolveWriteTarget, isProxy } from '../../spaces/proxy.js';
 import { getConfig } from '../../config/loader.js';
 import { reembedSpace, REEMBED_KINDS, REEMBED_DEFAULT_LIMIT, REEMBED_MAX_LIMIT } from '../../brain/reembed.js';
 import type { BrainEmbedRecordType } from '../../config/types.js';
@@ -279,7 +279,8 @@ export const space_reindexTool: ToolHandler = {
       return {
         content: [{ type: 'text' as const, text: `Error (${decision.refusal.status}): ${decision.refusal.body.error}` }],
         isError: true,
-        ...(decision.refusal.body.proxyFor ? { structuredContent: { proxyFor: decision.refusal.body.proxyFor } } : {}),
+        // `isProxy` of the refusal body is the question "does it name members" — the same one, so the same answer.
+        ...(isProxy(decision.refusal.body) ? { structuredContent: { proxyFor: decision.refusal.body.proxyFor } } : {}),
       };
     }
 

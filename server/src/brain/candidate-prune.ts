@@ -33,7 +33,7 @@
  */
 import { col, asFilter } from '../db/mongo.js';
 import { RECORD_COLLECTION as COLLECTION_SUFFIX } from '../config/types.js';
-import { getConfig } from '../config/loader.js';
+import { concreteSpaces } from '../spaces/proxy.js';
 import { log } from '../util/log.js';
 import type { DupeScanType } from '../config/types.js';
 import { runExclusive } from '../util/single-flight.js';
@@ -148,11 +148,8 @@ export async function pruneSpaceCandidates(spaceId: string): Promise<PruneResult
 
 /** Prune every real (non-proxy) space. */
 export async function pruneAllSpaces(): Promise<void> {
-  let cfg;
-  try { cfg = getConfig(); } catch { return; }   // pre-setup
   let merged = 0, orphaned = 0;
-  for (const s of cfg.spaces) {
-    if (s.proxyFor) continue;
+  for (const s of concreteSpaces()) {
     const r = await pruneSpaceCandidates(s.id);
     merged += r.merged; orphaned += r.orphaned;
   }

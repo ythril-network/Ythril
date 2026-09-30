@@ -18,6 +18,7 @@ import { VECTOR_INDEXED_COLLECTIONS, finalizeSpaceIndexReady } from './vector-in
 import { armSearchIndexPresence, reconcileSpaceSearchIndexes } from './search-index-presence.js';
 import { SPACE_COLLECTIONS, repairStaleSpaceIds, dropLegacyPrefixedIndexes, dropSupersededEdgeIdentityIndex, pendingOpConflictMessage , setReindexNeeded, beginSpaceOp, endSpaceOp, spaceOpInFlight } from './_shared.js';
 import { moveSpaceData, applySpaceRenameToConfig } from './rename.js';
+import { concreteSpaces, isProxy } from './proxy.js';
 import { unlabelAllFaces } from '../brain/entities.js';
 import { ensureMediaJobIndexes } from '../files/media/job-queue.js';
 import { ensureEmbedJobIndexes } from '../brain/embed-queue.js';
@@ -288,7 +289,11 @@ export async function initAllSpaces(): Promise<void> {
   // Collect ids, not space objects: a config reload during these awaits replaces cfg.spaces and every
   // held object becomes an orphan — status flips would then be written to detached records and lost,
   // leaving spaces stuck reporting 'building' forever with nothing to explain it.
-  const spaceIds = getConfig().spaces.map(s => s.id);
+  //
+  // Concrete spaces only (`Q-98`). This walked every configured space, so each boot created a proxy's
+  // collections — which its creation never made and its deletion (config-only) never drops — while the
+  // reload path, which initialises spaces added to the file, already skipped proxies.
+  const spaceIds = concreteSpaces().map(s => s.id);
 
   for (const spaceId of spaceIds) {
     log.debug(`Initialising space: ${spaceId}`);
@@ -413,7 +418,7 @@ export async function createSpace(opts: {
     // Omitted rather than defaulted when absent, so an existing space and a new one at the built-in width
     // are the same shape on disk — a stored `128` would read as a deliberate choice nobody made.
     ...(opts.faceDescriptorDims ? { faceDescriptorDims: opts.faceDescriptorDims } : {}),
-    ...(opts.proxyFor ? { proxyFor: opts.proxyFor } : {}),
+    ...(isProxy(opts) ? { proxyFor: opts.proxyFor } : {}),
     ...(opts.meta ? { meta: opts.meta } : {}),
   };
   // Initialize MongoDB collections/indexes before committing to config so the space
@@ -422,7 +427,7 @@ export async function createSpace(opts: {
   // instead of blocking up to minutes past the client timeout (B1): the indexes are
   // created here, the space is returned as indexStatus 'building', and a background
   // task flips it to 'ready'/'failed' once the builds finish.
-  if (!opts.proxyFor) {
+  if (!isProxy(opts)) {
     await initSpace(opts.id, { waitForVectorReady: false });
     space.indexStatus = 'building';
   }
@@ -444,7 +449,7 @@ export async function createSpace(opts: {
     // An OIDC session: its rights come from the identity provider's mapping, so the grant has nowhere to live.
     log.warn(`Space '${opts.id}' was created by a session with no stored rights; its creator reaches it only if its identity mapping does`);
   }
-  if (!opts.proxyFor) {
+  if (!isProxy(opts)) {
     void finalizeSpaceIndexReady(opts.id);
   }
   return space;
@@ -572,7 +577,7 @@ async function removeSpaceInner(spaceId: string): Promise<boolean> {
 
   // Proxy spaces have no DB collections or files — a pure config removal, atomic
   // via the single saveConfig, so no write-ahead marker is needed.
-  if (space.proxyFor) {
+  if (isProxy(space)) {
     cfg.spaces = cfg.spaces.filter(s => s.id !== spaceId);
     saveConfig(cfg);
     return true;

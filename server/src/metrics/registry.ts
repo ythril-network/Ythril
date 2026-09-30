@@ -21,6 +21,7 @@ import { POSTURE_LEVELS } from '../config/posture-levels.js';
 import { DEGRADED_REASONS } from '../brain/degraded-reasons.js';
 import { col } from '../db/mongo.js';
 import { getConfig, getStorageConfig } from '../config/loader.js';
+import { concreteSpaces } from '../spaces/proxy.js';
 import { peekUsage, refreshUsageInBackground, usageMeasurementCount, usageIsComplete, USAGE_AREAS } from '../quota/quota.js';
 import { spaceCollection } from '../db/space-collection.js';
 
@@ -353,8 +354,7 @@ export const factsTotal = new Gauge({
   registers: [register],
   async collect() {
     await withCollectBudget('facts_total', async () => {
-      const cfg = getConfig();
-      for (const space of cfg.spaces.filter(s => !s.proxyFor)) {
+      for (const space of concreteSpaces()) {
         const count = await col(spaceCollection(space.id, 'facts')).estimatedDocumentCount();
         this.set({ space: space.id }, count);
       }
@@ -369,8 +369,7 @@ export const entitiesTotal = new Gauge({
   registers: [register],
   async collect() {
     await withCollectBudget('entities_total', async () => {
-      const cfg = getConfig();
-      for (const space of cfg.spaces.filter(s => !s.proxyFor)) {
+      for (const space of concreteSpaces()) {
         const count = await col(spaceCollection(space.id, 'entities')).estimatedDocumentCount();
         this.set({ space: space.id }, count);
       }
@@ -385,8 +384,7 @@ export const edgesTotal = new Gauge({
   registers: [register],
   async collect() {
     await withCollectBudget('edges_total', async () => {
-      const cfg = getConfig();
-      for (const space of cfg.spaces.filter(s => !s.proxyFor)) {
+      for (const space of concreteSpaces()) {
         const count = await col(spaceCollection(space.id, 'edges')).estimatedDocumentCount();
         this.set({ space: space.id }, count);
       }
@@ -401,8 +399,7 @@ export const chronoEntriesTotal = new Gauge({
   registers: [register],
   async collect() {
     await withCollectBudget('chrono_entries_total', async () => {
-      const cfg = getConfig();
-      for (const space of cfg.spaces.filter(s => !s.proxyFor)) {
+      for (const space of concreteSpaces()) {
         const count = await col(spaceCollection(space.id, 'chrono')).estimatedDocumentCount();
         this.set({ space: space.id }, count);
       }
@@ -729,8 +726,7 @@ export const mediaJobsPending = new Gauge({
   registers: [register],
   async collect() {
     await withCollectBudget('media_jobs_pending', async () => {
-      const cfg = getConfig();
-      for (const space of cfg.spaces.filter(s => !s.proxyFor)) {
+      for (const space of concreteSpaces()) {
         const count = await col(spaceCollection(space.id, 'mediaJobs')).countDocuments({ status: 'pending' });
         this.set({ space: space.id }, count);
       }
@@ -745,8 +741,7 @@ export const mediaJobsProcessing = new Gauge({
   registers: [register],
   async collect() {
     await withCollectBudget('media_jobs_processing', async () => {
-      const cfg = getConfig();
-      for (const space of cfg.spaces.filter(s => !s.proxyFor)) {
+      for (const space of concreteSpaces()) {
         const count = await col(spaceCollection(space.id, 'mediaJobs')).countDocuments({ status: 'processing' });
         this.set({ space: space.id }, count);
       }
@@ -761,8 +756,7 @@ export const mediaJobsFailed = new Gauge({
   registers: [register],
   async collect() {
     await withCollectBudget('media_jobs_failed', async () => {
-      const cfg = getConfig();
-      for (const space of cfg.spaces.filter(s => !s.proxyFor)) {
+      for (const space of concreteSpaces()) {
         const count = await col(spaceCollection(space.id, 'mediaJobs')).countDocuments({ status: 'failed' });
         this.set({ space: space.id }, count);
       }
@@ -813,8 +807,7 @@ export const mediaJobPhase = new Gauge({
   registers: [register],
   async collect() {
     await withCollectBudget('media_job_phase', async () => {
-      const cfg = getConfig();
-      for (const space of cfg.spaces.filter(s => !s.proxyFor)) {
+      for (const space of concreteSpaces()) {
         const rows = await col(spaceCollection(space.id, 'mediaJobs'))
           .find({ status: 'processing' }, { projection: { progress: 1 } })
           .toArray() as Array<{ progress?: { step?: string } }>;

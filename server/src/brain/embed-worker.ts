@@ -19,7 +19,7 @@ import {
 } from './embed-queue.js';
 import { SERVER_VERSION } from '../util/server-version.js';
 import { embedStoredRecord } from './embed-record.js';
-import { getConfig } from '../config/loader.js';
+import { concreteSpaces } from '../spaces/proxy.js';
 import { log } from '../util/log.js';
 
 /** Idle sleep. Work announces itself, so this is only the backstop for a missed announcement. */
@@ -35,7 +35,7 @@ let stallTimer: NodeJS.Timeout | null = null;
 
 function spaceIds(): string[] {
   // Proxy spaces hold no records of their own — their members do — so they are never probed.
-  return getConfig().spaces.filter(s => !s.proxyFor).map(s => s.id);
+  return concreteSpaces().map(s => s.id);
 }
 
 /**

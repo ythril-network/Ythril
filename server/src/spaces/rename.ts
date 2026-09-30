@@ -15,6 +15,7 @@ import { PER_SPACE_WATERMARKS } from '../config/types-networks.js';
 import { retargetSpaceAliases, spaceNameInUseRefusal, SpaceNameInUseError } from '../sync/space-map.js';
 import { repairStaleSpaceIds, pendingOpConflictMessage, beginSpaceOp, endSpaceOp } from './_shared.js';
 import { RenameSpaceBody } from './body-schemas.js';
+import { isProxy } from './proxy.js';
 import type { NetworkRefusalCode } from '../networks/refusal-codes.js';
 
 /** Physically move a space's MongoDB collections and file directories from
@@ -268,9 +269,9 @@ export function applySpaceRenameToConfig(cfg: Config, space: SpaceConfig, oldId:
 
   // Update proxy space references
   for (const s of cfg.spaces) {
-    if (s.proxyFor) {
-      const idx = s.proxyFor.indexOf(oldId);
-      if (idx !== -1) s.proxyFor[idx] = newId;
+    if (isProxy(s)) {
+      const idx = s.proxyFor!.indexOf(oldId);
+      if (idx !== -1) s.proxyFor![idx] = newId;
     }
   }
 }

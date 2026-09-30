@@ -27,6 +27,7 @@ import { log } from '../util/log.js';
 import { resolveWatermark, truncationWarn, type TransferOutcome } from './watermark.js';
 import { pullTombstones, pushTombstones } from './tombstone-transfer.js';
 import { applyConcludedSpaceRounds } from '../spaces/apply-wipe-round.js';
+import { concreteSpaces } from '../spaces/proxy.js';
 import { bumpSeq, isSeqImplausible } from '../util/seq.js';
 import { adoptAnnouncedSpaces, announcedSpaces, healAnnouncedAliases } from '../networks/network-spaces.js';
 import { selfRecordFor } from '../networks/self-record.js';
@@ -459,8 +460,7 @@ async function runSyncForMember(
 
     // Skip spaces that don't exist in local config — prevents orphan data and collection access
     // for space IDs that were registered on the network but never created locally.
-    const cfg = getConfig();
-    if (!cfg.spaces.some(s => s.id === spaceId && !s.proxyFor)) {
+    if (!concreteSpaces().some(s => s.id === spaceId)) {
       log.warn(`Skipping sync for space '${spaceId}' in network '${net.label}': space not in local config`);
       continue;
     }

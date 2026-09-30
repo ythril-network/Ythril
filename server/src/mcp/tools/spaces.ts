@@ -6,6 +6,7 @@ import { col } from '../../db/mongo.js';
 import { canWriteAnywhere } from '../../auth/write-anywhere.js';
 import type { TokenRights } from '../../config/rights-shape.js';
 import { memberSpacesWithin } from '../../spaces/proxy-scoped.js';
+import { isProxy } from '../../spaces/proxy.js';
 import { deleteSpaceData, wipeTypesLabel } from '../../spaces/delete-space-data.js';
 import { spacePurpose } from '../../spaces/spaces.js';
 import { SPACE_PURPOSE_MAX, needsReindex } from '../../spaces/_shared.js';
@@ -701,7 +702,7 @@ export const save_spaceTool: ToolHandler = {
     return {
       content: [{ type: 'text' as const, text:
         `Created space '${s.id}' (${s.label})`
-        + `${s.proxyFor ? ` as a proxy over ${s.proxyFor.join(', ')}` : ''}`
+        + `${isProxy(s) ? ` as a proxy over ${s.proxyFor!.join(', ')}` : ''}`
         + `${s.meta?.validationMode ? `, validationMode: ${s.meta.validationMode}` : ''}.` }],
       structuredContent: { outcome: 'created', id: s.id, label: s.label },
     };

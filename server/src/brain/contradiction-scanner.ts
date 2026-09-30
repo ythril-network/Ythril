@@ -33,6 +33,7 @@ import { schedule, validate, type ScheduledTask } from 'node-cron';
 import { RECORD_COLLECTION as COLLECTION_SUFFIX } from '../config/types.js';
 import { col, asFilter, asUpdate, isVectorSearchAvailable } from '../db/mongo.js';
 import { getConfig } from '../config/loader.js';
+import { concreteSpaces, isProxy } from '../spaces/proxy.js';
 import { needsReindex } from '../spaces/_shared.js';
 import { log } from '../util/log.js';
 import { findSimilar, DEFAULT_DUPE_THRESHOLD, type RecallKnowledgeType, type RecallResult } from './recall.js';
@@ -298,7 +299,7 @@ export async function scanSpace(spaceId: string, opts?: { reset?: boolean }): Pr
   const cfg = getConfig();
   const empty: ContradictionScanResult = { scanned: 0, found: 0, nliStalled: false, judgedPairs: 0, modelCalls: 0, budgetExhausted: false };
   const space = cfg.spaces.find(s => s.id === spaceId);
-  if (!space || space.proxyFor) return empty;
+  if (!space || isProxy(space)) return empty;
   if (!isVectorSearchAvailable() || needsReindex(spaceId)) return empty;
 
   const tune = scanTuning(cfg.contradictionScanner, nliIsLocal());
@@ -389,8 +390,7 @@ export async function runContradictionScanAllSpaces(): Promise<void> {
   let modelCalls = 0;
   let stalled = false;
   let budgetOut = false;
-  for (const s of getConfig().spaces) {
-    if (s.proxyFor) continue;
+  for (const s of concreteSpaces()) {
     try {
       const r = await scanSpace(s.id);
       scanned += r.scanned; found += r.found; judgedPairs += r.judgedPairs; modelCalls += r.modelCalls;

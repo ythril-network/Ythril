@@ -86,6 +86,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A proxy space no longer gets collections at boot, and a hand-edited `proxyFor: []` is a real space everywhere
+  (`Q-80`, `Q-98`).** `initAllSpaces` walked every configured space, so each boot created a proxy's collections —
+  which creating it never made and deleting it (a config-only removal) never dropped; the restore index rebuild
+  walked proxies too. And "is this a proxy" was answered about forty times in two spellings that disagreed on an
+  empty member list: such a space was served as a real space and skipped as a proxy by the embed worker, the
+  duplicate and contradiction scanners, the prunes and the metrics, and deleted as a proxy with its collections left
+  behind. The loader now removes an empty `proxyFor` on load and reload (with a warning), `isProxy` is the only
+  test, and every walk over the spaces that own collections iterates one `concreteSpaces()`, which also answers the
+  pre-setup case once. **Who is affected:** an instance with a proxy space (its boot stops creating collections for
+  it; ones already created are left as they are, empty), and one whose config was edited by hand to hold
+  `"proxyFor": []` (that space starts being embedded and scanned).
 - **A space schema-change round reached no peer (`Q-108`).** `meta_change_pending` was sent to every member and was
   not an event `POST /api/notify` accepted, so each peer answered `400` to a sender that does not read the answer.
 - **An unknown tool name no longer becomes a metric label (`Q-108`).** It was counted in `ythril_tool_calls_total`

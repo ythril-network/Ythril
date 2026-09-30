@@ -32,7 +32,7 @@
 
 import { getConfig, getMediaEmbeddingConfig , getDocumentProcessingConfig } from '../../config/loader.js';
 import { toSafeRelPath } from '../../util/paths.js';
-import { isProxySpace } from '../../spaces/proxy.js';
+import { concreteSpaces } from '../../spaces/proxy.js';
 import type { MediaJobDoc } from '../../config/types.js';
 import { log } from '../../util/log.js';
 import { createMediaProviders } from './providers.js';
@@ -724,14 +724,7 @@ async function reconcileDeletedSource(spaceId: string, claim: JobClaim): Promise
 
 /** Return all local (non-proxy) space IDs. */
 function getLocalSpaceIds(): string[] {
-  try {
-    const cfg = getConfig();
-    return (cfg.spaces ?? [])
-      .map(s => s.id)
-      .filter(id => !isProxySpace(id));
-  } catch {
-    return [];
-  }
+  return concreteSpaces().map(s => s.id);
 }
 
 /** Resolve the absolute file path on disk for a given space + relative path. */

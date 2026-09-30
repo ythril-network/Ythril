@@ -284,15 +284,43 @@ export function migrateFaceRecognitionSwitch(config: Config): boolean {
   return true;
 }
 
+/**
+ * What every config read from disk goes through before anything else sees it — on load AND on reload.
+ *
+ * One function because the two paths each wrote it by hand, and a normalisation only one of them applies is
+ * a value the other path hands to the whole server. In memory only: `reloadConfig` must not rewrite a file a
+ * host-side edit may still be propagating into, and the next `saveConfig` writes the normalised form anyway.
+ *
+ * - The three arrays may be absent in a partial file written before first-run setup completes (e.g. a config
+ *   pre-seeded with only storage quotas).
+ * - **An empty `proxyFor` is removed** (`Q-80`). The API refuses one, so only a hand edit writes it, and it was
+ *   the one value the server's two spellings of "is this a proxy" disagreed on: served as a real space,
+ *   skipped as a proxy by everything that embeds, scans or prunes, and deleted as a proxy with its collections
+ *   left behind. `isProxy` already read it as a real space; removing the key makes that the only reading.
+ */
+function normaliseLoadedConfig(parsed: Config): void {
+  parsed.spaces ??= [];
+  parsed.tokens ??= [];
+  parsed.networks ??= [];
+  for (const space of parsed.spaces) {
+    if (Array.isArray(space.proxyFor) && space.proxyFor.length === 0) {
+      delete space.proxyFor;
+      log.warn(`config.json: space '${space.id}' has an empty proxyFor — treated as a real space. `
+        + 'A proxy names at least one member; remove the key to silence this.');
+    }
+  }
+}
+
+/** Whether a config has been loaded yet. False only before first-run setup or before boot has read the file. */
+export function isConfigLoaded(): boolean {
+  return _config !== null && _config !== undefined;
+}
+
 export function loadConfig(): Config {
   checkPermissions(CONFIG_PATH);
   const raw = fs.readFileSync(CONFIG_PATH, 'utf8');
   const parsed = JSON.parse(decodeStateFile(raw, 'config.json')) as Config;
-  // Normalise arrays that may be absent in partial config files written before
-  // first-run setup completes (e.g. a config pre-seeded with only storage quotas).
-  parsed.spaces ??= [];
-  parsed.tokens ??= [];
-  parsed.networks ??= [];
+  normaliseLoadedConfig(parsed);
   _config = parsed;
   validateOidcBlock(_config);
   // Derive the per-space rights matrix for any token that has none. IN MEMORY ONLY, and deliberately not
@@ -412,10 +440,7 @@ export function reloadConfig(): Config {
     log.error(`reloadConfig: config.json has invalid JSON — keeping current config: ${err}`);
     throw new Error('config.json contains invalid JSON; current configuration unchanged');
   }
-  // Normalise arrays that may be absent in partial config files.
-  parsed.spaces ??= [];
-  parsed.tokens ??= [];
-  parsed.networks ??= [];
+  normaliseLoadedConfig(parsed);
   validateOidcBlock(parsed);
   // Refresh the EXISTING object in place rather than swapping in a new one.
   //

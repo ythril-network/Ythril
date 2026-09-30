@@ -44,8 +44,10 @@ const handler = () => {
 describe('a proxy is refused', () => {
   it('the handler checks proxyFor and answers 400', () => {
     const h = handler();
-    assert.match(h, /space\.proxyFor && space\.proxyFor\.length > 0/,
-      'an empty proxyFor array is not a proxy — treating it as one would refuse a normal space');
+    // Through `isProxy`, the one answer (`Q-80`): an empty proxyFor array is not a proxy, and treating it as one
+    // would refuse a normal space. `a-proxy-is-asked-one-way.test.js` refuses a hand-written test here.
+    assert.match(h, /isProxy\(space\)/,
+      'the refusal must ask isProxy — an empty proxyFor array is not a proxy');
     assert.match(h, /status: 400/, 'a proxy must be refused, not started');
     // And the route must still send that status rather than inventing one.
     const route = strip(readFileSync('server/src/api/brain/search.ts', 'utf8'));
@@ -56,7 +58,7 @@ describe('a proxy is refused', () => {
   it('the message names the member spaces', () => {
     // A bare 400 sends the caller looking for a permissions problem. The remedy is the response itself, not a
     // second lookup — and they have to know WHICH spaces to reindex instead.
-    assert.match(handler(), /Reindex its members instead: \$\{space\.proxyFor\.join\(', '\)\}/,
+    assert.match(handler(), /Reindex its members instead: \$\{members\.join\(', '\)\}/,
       'the members must be named in the message');
   });
 
@@ -91,7 +93,7 @@ describe('the caller can already tell a proxy from a real space', () => {
   it('GET /api/spaces emits proxyFor', () => {
     // The half of the report that was wrong. Asserted so nobody "fixes" it by adding a second field that
     // means the same thing.
-    assert.match(spaces(), /\.\.\.\(proxyFor \? \{ proxyFor \} : \{\}\)/,
+    assert.match(spaces(), /\.\.\.\(isProxy\(space\) \? \{ proxyFor \} : \{\}\)/,
       'proxyFor is no longer on the list projection — a client has nothing to branch on, and the refusal '
       + 'above becomes something they can only discover by trying it');
   });

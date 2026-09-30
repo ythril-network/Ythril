@@ -23,6 +23,7 @@ import { measureUsage, usageIsComplete } from '../quota/quota.js';
 import { measureSpaceUsage } from '../spaces/space-usage.js';
 import { col } from '../db/mongo.js';
 import { memberSpacesForRequest } from '../spaces/proxy-scoped.js';
+import { isProxy } from '../spaces/proxy.js';
 import { isNetworkSyncing } from '../sync/engine.js';
 import { spaceNetworkInfo } from '../spaces/network-status.js';
 import { z } from 'zod';
@@ -118,7 +119,7 @@ spacesRouter.post('/reorder', globalRateLimit, requireAdminMfa, (req, res) => {
   res.json({ spaces: reordered.map(space => ({
     id: space.id, label: space.label, builtIn: space.builtIn, folders: space.folders,
     maxGiB: space.maxGiB, flex: space.flex,
-    ...(space.proxyFor ? { proxyFor: space.proxyFor } : {}),
+    ...(isProxy(space) ? { proxyFor: space.proxyFor } : {}),
   })) });
 });
 
@@ -195,7 +196,7 @@ spacesRouter.get('/', globalRateLimit, requireAuth, async (req, res) => {
       ? { usageIncomplete: usageBySpaceId.get(id)!.incomplete }
       : {}),
     ...(indexStatus ? { indexStatus } : {}),
-    ...(proxyFor ? { proxyFor } : {}),
+    ...(isProxy(space) ? { proxyFor } : {}),
     // Network membership + status for the Brain space-chip indicator (F8).
     ...(spaceNetworkInfo(cfg.networks, id, isNetworkSyncing, cfg.instanceId) ?? {}),
     ...(meta ? { meta: { ...meta, previousVersions: undefined } } : {}),
