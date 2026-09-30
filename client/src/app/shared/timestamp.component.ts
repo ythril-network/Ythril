@@ -33,10 +33,12 @@ export type TimestampValue = InstantValue;
   changeDetection: ChangeDetectionStrategy.OnPush,
   styles: [`
     :host { display: inline-block; font-variant-numeric: tabular-nums; line-height: 1.25; }
-    .d { display: block; }
+    /* nowrap: an ISO date breaks at its hyphens in a narrow column ("2026-09-" over "30"), found on the verify
+       screenshots of the Entities table (Q-146). A date is one token and wraps as one. */
+    .d { display: block; white-space: nowrap; }
     /* The time is secondary: an operator scans dates first and reads the time on the row they stopped at. Dimmed
        rather than smaller alone, because two lines of identical weight read as two separate values. */
-    .t { display: block; font-size: .85em; color: var(--text-muted); }
+    .t { display: block; white-space: nowrap; font-size: .85em; color: var(--text-muted); }
     .empty { color: var(--text-muted); }
   `],
   template: `

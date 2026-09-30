@@ -45,8 +45,10 @@ import { browserTimeZone, DATE_STYLES, DATE_ZONES, formatInstant, type DateStyle
     fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
     legend { padding: 0; margin: 0 0 6px; font-size: 12px; font-weight: 600; color: var(--text-secondary); }
     .opts { display: flex; flex-direction: column; gap: 6px; }
-    .opt { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; font-size: 13px; cursor: pointer; }
-    .opt input { margin: 0; accent-color: var(--accent); }
+    .opt { display: flex; align-items: baseline; gap: 8px; font-size: 13px; cursor: pointer; }
+    .opt input { margin: 0; accent-color: var(--accent); flex: none; }
+    /* The label and its example wrap TOGETHER, so on a phone the example lands under the label, not under the dot. */
+    .opt-text { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 8px; min-width: 0; }
     .example { font-variant-numeric: tabular-nums; color: var(--text-muted); font-size: 12px; }
     .hint { margin: 2px 0 0; font-size: 12px; color: var(--text-muted); }
   `],
@@ -73,8 +75,10 @@ import { browserTimeZone, DATE_STYLES, DATE_ZONES, formatInstant, type DateStyle
               @for (s of styles; track s) {
                 <label class="opt">
                   <input type="radio" name="date-style" [value]="s" [checked]="dates.preference().style === s" (change)="setStyle(s)" />
-                  <span>{{ ('prefs.dates.style.' + s) | transloco: { locale: dates.locale() } }}</span>
-                  <span class="example">{{ example(s) }}</span>
+                  <span class="opt-text">
+                    <span>{{ ('prefs.dates.style.' + s) | transloco: { locale: dates.locale() } }}</span>
+                    <span class="example">{{ example(s) }}</span>
+                  </span>
                 </label>
               }
             </div>
