@@ -12,7 +12,7 @@
  *
  * ## What this pins, and the traps each case avoids
  *
- * - Every index is built by production's `buildSpaceVectorIndexes` (or, for the old-definition case,
+ * - Every index is built by production's `reconcileSpaceSearchIndexes` (or, for the old-definition case,
  *   production's `ensureVectorSearchIndex` with production's field list minus `_id`), and its LIVE definition
  *   is asserted — a hand-written definition would test a copy.
  * - Records are inserted BEFORE the index is built and an unfiltered exact count is polled to N, so index lag
@@ -61,7 +61,7 @@ const CHUNK = 'chunk';    // more matches than one stage-2 id batch, best one in
 const OLDDEF = 'olddef';  // an index built with the definition shipped before `_id` joined it
 const SPACES = [FAR, TIE, SMALL, CHUNK, OLDDEF];
 
-let mongo, recallMod, resolveRecallFilter, vectorIndex, stub;
+let mongo, recallMod, resolveRecallFilter, vectorIndex, presence, stub;
 /** From the module the plan names; the fallback is the plan's own figure, and a case asserts the export. */
 let ID_CHUNK = null;
 
@@ -111,6 +111,7 @@ describe('a filtered recall never misses a matching record', { skip }, () => {
     const loader = await import('../../server/dist/config/loader.js');
     loader.loadConfig();
     vectorIndex = await import('../../server/dist/spaces/vector-index.js');
+    presence = await import('../../server/dist/spaces/search-index-presence.js');
     recallMod = await import('../../server/dist/brain/recall.js');
     ({ resolveRecallFilter } = await import('../../server/dist/brain/recall-filter.js'));
     try { ({ ID_CHUNK } = await import('../../server/dist/brain/predicate-recall.js')); } catch { /* asserted below */ }
@@ -152,7 +153,7 @@ describe('a filtered recall never misses a matching record', { skip }, () => {
     for (const [id, docs] of Object.entries(fixtures)) await insertAll(mongo, `${id}_entities`, docs);
 
     // Production's builder for the four current-definition spaces, concurrently: they are independent.
-    await Promise.all([FAR, TIE, SMALL, CHUNK].map(id => vectorIndex.buildSpaceVectorIndexes(id, true)));
+    await Promise.all([FAR, TIE, SMALL, CHUNK].map(id => presence.reconcileSpaceSearchIndexes(id, { waitForReady: true })));
     // OLDDEF: production's ensure, with production's field list minus `_id` — the definition an instance
     // upgraded from the previous image is still serving. Derived, so it tracks the real list either way.
     const oldFields = vectorIndex.vectorFilterFieldsFor(OLDDEF, 'entities').filter(f => f !== '_id');
@@ -335,7 +336,7 @@ describe('a filtered recall never misses a matching record', { skip }, () => {
     it('a real in-place update to the new definition: disclosed while pending, complete once it serves', async () => {
       // Production's builder against the OLD definition issues the in-place update. The old definition keeps
       // serving meanwhile, so the recall right after must be complete or say filter_window.
-      await vectorIndex.buildSpaceVectorIndexes(OLDDEF, false);
+      await presence.reconcileSpaceSearchIndexes(OLDDEF, { waitForReady: false });
       const during = await filteredRecall(OLDDEF, { 'properties.marker': 'x' }, 10);
       assert.ok(during.ids.includes('far-target') || during.degraded.includes('filter_window'),
         `during the update: [${during.ids.join(', ')}], degraded [${during.degraded.join(', ')}]`);

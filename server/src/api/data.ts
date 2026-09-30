@@ -28,7 +28,7 @@ import { loadBackupConfig, BACKUP_CONFIG_PATH, BackupConfigSchema } from '../db/
 import { startBackupScheduler } from '../db/backup-scheduler.js';
 import { dumpDatabase } from '../db/dump.js';
 import { restoreDatabase } from '../db/restore.js';
-import { buildSpaceVectorIndexes } from '../spaces/vector-index.js';
+import { reconcileSpaceSearchIndexes } from '../spaces/search-index-presence.js';
 import { testConnection } from '../db/conn-test.js';
 import { isSsrfSafeMongoUri } from '../util/ssrf.js';
 import { log } from '../util/log.js';
@@ -403,7 +403,9 @@ dataRouter.post('/restore', requireAdminMfa, async (req, res) => {
     const spaces = getConfig().spaces ?? [];
     const outcomes = await mapLimit(spaces, RESTORE_INDEX_CONCURRENCY, async (space) => {
       try {
-        await buildSpaceVectorIndexes(space.id, false, { force: true });
+        // The restore wrote through its own client, which the index lifecycle does not observe — so this forced
+        // reconcile is what gives each restored collection that holds a record its indexes (Q-165).
+        await reconcileSpaceSearchIndexes(space.id, { waitForReady: false, force: true });
         return { id: space.id, ok: true as const };
       } catch (err) {
         log.error(`restore: failed to rebuild vector indexes for space '${space.id}': ${err}`);

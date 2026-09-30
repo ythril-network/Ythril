@@ -23,6 +23,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   **Who is affected:** a caller sending more than any of these in one request (none of the shipped clients does), a
   peer on an older release pushing a fact over 50 000 characters, and an upload whose JSON `tags` was not an array
   (it was ignored; it is refused now).
+- **A collection's search index exists only while the collection holds a record (`Q-165`).** mongot keeps one
+  change-stream cursor per search index over the shared oplog, so mongod's cost grows with index count times write
+  rate, and index freshness is one rotation of every index; measured on a production instance, half of the record
+  collections were empty and each still carried its index. A collection's vector index (and, on `files`, the face
+  gallery) is now built when its first record arrives and dropped when its last one goes — a minute after the last
+  delete of a burst, so a record deleted and replaced does not cost a rebuild. Every write reaches this through the one
+  door every write already used, so no write path can skip it, and a record written as the last one is deleted is
+  never left in a collection with no index. **Nothing changes for a caller:** a search on an empty collection answers
+  empty with no `degraded` reason, a first record is found at once through the fresh-write channel while its index
+  builds, and a space whose collections are empty reads *ready* — `GET /api/admin/pipeline-status` marks each such
+  collection `empty: true` and leaves it out of `live`. **On upgrade**, boot drops the indexes of every empty
+  collection and leaves every populated one's untouched; a new space starts with none. `SEARCH_INDEX_DROP_DELAY_MS`
+  (default `60000`) sets the delay before an emptied collection loses its index.
 - **A traversing recall walks its rows a window at a time, with every row exactly the graph it had before**
   (`Q-136`). `recall` and `similar` with `traverse > 0` walked each result row on its own, so a page cost about
   four queries per hop PER ROW — its edges, its link scan, the facts it named and the records it reached. Up to 16
@@ -89,6 +102,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   file's chunks used to stay at the old path, a moved folder's chunks kept naming parents that no longer existed
   (so deleting the moved file removed none of them), and the `_converted/`/`_extracted/` sidecars moved for
   neither. REST `PATCH /api/files/:spaceId` and MCP `move_file` now run the same move (`files/move-cascade.ts`).
+  **And a moved folder keeps its files' links** (`Q-164`): renaming one file re-created its links under the new
+  path, but moving a folder re-rooted the records and left every link naming a path that was gone, so each file in
+  it silently lost what it was linked to. Both now carry links through one step.
 - **Every list that stopped at a number now says so and can be read to the end** (bundle-34). Owner rule: *"if i
   get a result i want to be sure i get what i asked for."* Each now pages through one rule (`brain/list-page.ts`):
   whole rows, `limit` and `skip` refused rather than floored when they are not numbers, the byte budget, and

@@ -67,7 +67,7 @@ describe('the fresh-write scan keeps its guards', { skip }, () => {
     await createSpaceCollections(mongo, SPACE);
     await insertAll(mongo, COLL, BASE);
     await mongo.col(COLL).createIndex({ seq: 1 });
-    await vectorIndex.buildSpaceVectorIndexes(SPACE, true);
+    await (await import('../../server/dist/spaces/search-index-presence.js')).reconcileSpaceSearchIndexes(SPACE, { waitForReady: true });
     await waitUntilServing(mongo, COLL, `${COLL}_embedding`, { dims: DIMS, n: BASE.length });
     await mongo.checkVectorSearchAvailability();
   });

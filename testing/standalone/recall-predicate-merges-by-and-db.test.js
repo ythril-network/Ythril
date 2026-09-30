@@ -66,7 +66,7 @@ describe('a recall predicate merges by $and', { skip }, () => {
     // The lexical channel's index, spelled as `initSpace` spells it (lifecycle.ts) — `initSpace` itself also
     // creates the space's file directory, which a CI runner cannot write.
     await mongo.col(COLL).createIndex({ matchedText: 'text' }, { name: 'lexical_text' });
-    await vectorIndex.buildSpaceVectorIndexes(SPACE, true);
+    await (await import('../../server/dist/spaces/search-index-presence.js')).reconcileSpaceSearchIndexes(SPACE, { waitForReady: true });
     await waitUntilServing(mongo, COLL, `${COLL}_embedding`, { dims: DIMS, n: FIXTURE.length });
     await mongo.checkVectorSearchAvailability();
   });

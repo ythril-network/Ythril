@@ -8,7 +8,7 @@
  *
  *  1. **No index, or the wrong one.** `$vectorSearch` against a missing index matches nothing, so a suite that
  *     hand-rolls an index definition measures its own copy of the definition rather than production's. The
- *     index here is always built by production's own `buildSpaceVectorIndexes` / `ensureVectorSearchIndex`.
+ *     index here is always built by production's own `reconcileSpaceSearchIndexes` / `ensureVectorSearchIndex`.
  *  2. **Index lag.** READY is not "has ingested every document". A recall issued the moment the index reports
  *     READY can still miss records, which reads exactly like the defect a completeness test is looking for.
  *     `waitUntilServing` polls an UNFILTERED exact count until it equals what was inserted, and THROWS if it

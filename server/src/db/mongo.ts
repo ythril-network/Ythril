@@ -4,6 +4,7 @@ import { log } from '../util/log.js';
 import { dbNameFromUri } from './db-name.js';
 import { withJitter } from '../util/backoff.js';
 import { envInt } from '../config/env-num.js';
+import { observeRecordWrites, type RecordWriteListener } from './record-write-observer.js';
 
 let _client: MongoClient | null = null;
 let _dbName = 'ythril';
@@ -202,8 +203,36 @@ export function getMongo(): MongoClient {
   return _client;
 }
 
+/**
+ * Who hears about writes to a space's record collections (Q-165) — see `db/record-write-observer.ts`.
+ *
+ * A registry rather than an import, so the db layer does not depend on the search-index lifecycle that listens:
+ * `spaces/search-index-presence.ts` subscribes when it is loaded, and the boot path loads it.
+ */
+const recordWriteListeners: RecordWriteListener[] = [];
+let recordCollectionTest: (name: string) => boolean = () => false;
+
+/** Subscribe to the writes `getDb()` observes, on the collections `isRecordCollection` names. */
+export function onRecordCollectionWrite(isRecordCollection: (name: string) => boolean, listener: RecordWriteListener): void {
+  recordCollectionTest = isRecordCollection;
+  recordWriteListeners.push(listener);
+}
+
+let observedDb: { client: MongoClient; name: string; db: Db } | null = null;
+
+/**
+ * The database every reader and writer in this process uses — and it reports the writes it carries.
+ *
+ * Built once per client and database name: the wrapper is a pair of proxies, and `getDb()` is on every query.
+ */
 export function getDb(): Db {
-  return getMongo().db(_dbName);
+  const client = getMongo();
+  if (observedDb && observedDb.client === client && observedDb.name === _dbName) return observedDb.db;
+  const db = observeRecordWrites(client.db(_dbName), name => recordCollectionTest(name), (name, effect) => {
+    for (const l of recordWriteListeners) l(name, effect);
+  });
+  observedDb = { client, name: _dbName, db };
+  return db;
 }
 
 export function col<T extends object>(name: string): Collection<T> {

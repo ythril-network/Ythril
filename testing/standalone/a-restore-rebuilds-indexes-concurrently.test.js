@@ -57,12 +57,12 @@ describe('the restore route', () => {
   const body = src.slice(at, src.indexOf('res.json({ ok: true, vectorIndexes', at));
 
   it('found the rebuild block', () => {
-    assert.ok(at > 0 && body.includes('buildSpaceVectorIndexes'), 'the restore rebuild block moved; re-point this gate');
+    assert.ok(at > 0 && body.includes('reconcileSpaceSearchIndexes'), 'the restore rebuild block moved; re-point this gate');
   });
 
   it('rebuilds the spaces through mapLimit, not one awaited space at a time', () => {
     assert.match(body, /mapLimit\(/, 'the restore rebuild no longer goes through the shared bounded helper');
-    assert.doesNotMatch(body, /for\s*\([^)]*\)\s*\{[^}]*await\s+buildSpaceVectorIndexes/s,
+    assert.doesNotMatch(body, /for\s*\([^)]*\)\s*\{[^}]*await\s+reconcileSpaceSearchIndexes/s,
       'a space-by-space awaited loop is back: the request grows with every space');
   });
 });

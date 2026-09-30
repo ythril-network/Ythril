@@ -13,6 +13,7 @@ import { resolveMetaRefs } from './schema-validation.js';
 import { log } from '../util/log.js';
 import type { KnowledgeType } from '../config/types.js';
 import { spaceCollection } from '../db/space-collection.js';
+import { collectionHoldsRecord } from './record-presence.js';
 
 // Collections that have vector search indexes for semantic recall
 /*
@@ -183,6 +184,19 @@ const swapsInFlight = new Set<string>();
 const swapNameFor = (indexName: string): string => `${indexName}__swap`;
 
 /**
+ * What `ensureVectorSearchIndex` left behind (Q-165), so the index lifecycle can tell "done" from "try again".
+ *
+ * - `ready` — the index exists with the wanted definition, or its build (or in-place change) has been started.
+ * - `unavailable` — search is not answering on this deployment at all; nothing a retry per write could fix.
+ * - `failed` — search answered and this index could not be listed or created; a later write should try again.
+ *
+ * It used to return nothing, which was enough while every index was built once at space creation and a failure
+ * was the operator's to rebuild. An index built on a collection's first record is built by a WRITE, and a write
+ * that cannot tell a failed build from a finished one would never try again.
+ */
+export type IndexOutcome = 'ready' | 'unavailable' | 'failed';
+
+/**
  * Create or validate the $vectorSearch index for a space collection.
  *
  * The index declares the vector field plus a set of `type:"filter"` fields (P6) so recall can
@@ -205,7 +219,7 @@ export async function ensureVectorSearchIndex(
   waitForReady: boolean = true,
   filterFields: string[] = [],
   opts: { force?: boolean; refuseWidthChange?: boolean } = {},
-): Promise<void> {
+): Promise<IndexOutcome> {
   const db = getDb();
   const coll = db.collection(`${spaceId}_${collectionSuffix}`);
   const indexName = `${spaceId}_${collectionSuffix}_${indexSuffix}`;
@@ -220,7 +234,7 @@ export async function ensureVectorSearchIndex(
   // List existing search indexes
   let indexes: Array<{ name: string; status?: string; latestDefinition?: { fields?: SearchIndexField[] } }> = [];
   // One shared wait for search to come up (see searchAvailable) rather than a backoff per collection.
-  if (!(await searchAvailable())) return;
+  if (!(await searchAvailable())) return 'unavailable';
   try {
     indexes = await coll.listSearchIndexes().toArray() as typeof indexes;
   } catch (err) {
@@ -232,7 +246,7 @@ export async function ensureVectorSearchIndex(
         `Semantic recall will return empty for it until the index is built — rebuild from ` +
         `Settings → Space → Danger Zone, or POST /api/spaces/${spaceId}/rebuild-indexes.`,
     );
-    return;
+    return 'failed';
   }
 
   const existing = indexes.find(i => i.name === indexName);
@@ -255,7 +269,7 @@ export async function ensureVectorSearchIndex(
     // forever. Measured: that is exactly what happened on the first attempt at the restore fix.
     if (dimsMatch && filtersMatch && !opts.force) {
       log.debug(`Vector search index ${indexName} already up to date`);
-      return;
+      return 'ready';
     }
 
     // Some indexes must NOT be silently re-dimensioned, and the face gallery is the one that exists today.
@@ -278,7 +292,7 @@ export async function ensureVectorSearchIndex(
         + `error reported. The index keeps its current width. To move a populated gallery, re-embed its `
         + `records at the new width first; to build a new space at ${numDimensions}, create it fresh.`,
       );
-      if (filtersMatch) return;
+      if (filtersMatch) return 'ready';
       // Filter fields may still legitimately need updating. Re-issue the definition at the width the
       // index ALREADY has, so the filter change lands without touching the part that would destroy data.
       definition.fields = [
@@ -300,7 +314,7 @@ export async function ensureVectorSearchIndex(
           { vectorPath, dims: numDimensions });
         if (!ready) log.warn(`Vector search index ${indexName} did not reach READY within 60s after update`);
       }
-      return;
+      return 'ready';
     } catch (err) {
       // A FILTER-ONLY change is never dropped and recreated. That blacks out every recall on the collection
       // until the new index has synced — for a change whose absence costs only speed, or, for `_id`, a
@@ -313,7 +327,7 @@ export async function ensureVectorSearchIndex(
         log.warn(`updateSearchIndex failed for ${indexName} (${err}); swapping the definition in without a gap`);
         const swap = swapIndexDefinition(spaceId, collectionSuffix, indexName, definition, vectorPath, keptWidth);
         if (waitForReady) await swap; else void swap;
-        return;
+        return 'ready';
       }
       // updateSearchIndex may be unsupported (older Atlas Local) or reject a dims change — fall
       // back to drop + recreate. This one path DOES leave a brief INITIAL_SYNC gap during which
@@ -338,7 +352,7 @@ export async function ensureVectorSearchIndex(
     }));
   } catch (err) {
     log.warn(`Failed to create vector search index ${indexName}: ${err}. Semantic recall will be unavailable.`);
-    return;
+    return 'failed';
   }
 
   // Poll for READY status (unless the caller will confirm asynchronously — B1).
@@ -347,6 +361,7 @@ export async function ensureVectorSearchIndex(
       { vectorPath, dims: numDimensions });
     if (!ready) log.warn(`Vector search index ${indexName} did not reach READY state within 60 seconds`);
   }
+  return 'ready';
 }
 
 /**
@@ -759,24 +774,33 @@ export async function pollVectorIndexReady(
   return false;
 }
 
-/** Create every $vectorSearch index a space needs (per-type embedding indexes plus
- *  the optional face index). `waitForReady` is threaded to each — false creates them
- *  and returns without polling (B1). */
-export async function buildSpaceVectorIndexes(
+/**
+ * Create (or validate) every $vectorSearch index ONE collection of a space carries: its embedding index, and on
+ * `files` the optional face gallery. `waitForReady` false creates them and returns without polling (B1).
+ *
+ * Per collection rather than per space since Q-165: whether a collection has indexes at all now follows whether
+ * it holds a record, which is a per-collection fact. The only caller that decides is
+ * `spaces/search-index-presence.ts` — calling this directly would build an index on an empty collection, which
+ * that module would then drop on its next look, and nothing in between would be wrong except the cost this
+ * change exists to remove.
+ *
+ * The collections always exist by the time this runs: initSpace() creates them explicitly. An earlier revision
+ * created any that were missing — which broke space RENAME, because MongoDB refuses renameCollection when the
+ * target namespace already exists.
+ *
+ * Returns the embedding index's outcome, which is the one the collection's search depends on; the face
+ * gallery's is logged and does not decide it, for the reason `waitForSpaceIndexesReady` gives.
+ */
+export async function ensureCollectionSearchIndexes(
   spaceId: string,
+  suffix: VectorIndexedCollection,
   waitForReady: boolean,
   opts: { force?: boolean } = {},
-): Promise<void> {
+): Promise<IndexOutcome> {
   const embCfg = getEmbeddingConfig();
-  // Iterate every vector-indexed collection unconditionally. They always exist by this point:
-  // initSpace() creates them explicitly precisely so indexes can be built on them. An earlier revision
-  // of this fix created any that were missing — which was redundant, and broke space RENAME, because
-  // MongoDB refuses renameCollection when the target namespace already exists. The collections were
-  // never the problem; the missing indexes came from the mongot cold-start race handled above.
-  for (const suffix of VECTOR_INDEXED_COLLECTIONS) {
-    const filterFields = deriveVectorFilterFields(spaceId, suffix);
-    await ensureVectorSearchIndex(spaceId, suffix, embCfg.dimensions, embCfg.similarity, 'embedding', 'embedding', waitForReady, filterFields, opts);
-  }
+  const filterFields = deriveVectorFilterFields(spaceId, suffix);
+  const outcome = await ensureVectorSearchIndex(spaceId, suffix, embCfg.dimensions, embCfg.similarity, 'embedding', 'embedding', waitForReady, filterFields, opts);
+  if (suffix !== 'files') return outcome;
   const faceCfg = getFaceRecognitionConfig();
   if (faceCfg.enabled) {
     // The width comes from the same constant the embedders check against. It was a literal here and a
@@ -791,6 +815,44 @@ export async function buildSpaceVectorIndexes(
       ?? FACE_DESCRIPTOR_DIMS;
     await ensureVectorSearchIndex(spaceId, 'files', configuredDims, 'cosine', 'faceEmbedding', 'faceEmbedding', waitForReady, FACE_VECTOR_FILTER_FIELDS, { ...opts, refuseWidthChange: true });
   }
+  return outcome;
+}
+
+/**
+ * Drop every search index ONE collection of a space carries — its embedding index, the face gallery, and any
+ * swap stand-in either left — and report whether the collection is now free of them.
+ *
+ * Only `spaces/search-index-presence.ts` calls this, and only after it has read the collection empty under the
+ * ordering its docblock proves. A swap still running on the collection is left alone and reported as not done:
+ * its next step would recreate what this dropped, and the lifecycle tries again later instead.
+ *
+ * Named by prefix and not by the two names known today, so a third index on a collection is dropped with the
+ * others rather than surviving as the one nobody listed.
+ */
+export async function dropCollectionSearchIndexes(spaceId: string, suffix: VectorIndexedCollection): Promise<boolean> {
+  const coll = getDb().collection(`${spaceId}_${suffix}`);
+  const prefix = `${spaceId}_${suffix}_`;
+  let listed: Array<{ name?: string }>;
+  try {
+    listed = await coll.listSearchIndexes().toArray() as Array<{ name?: string }>;
+  } catch (err) {
+    log.debug(`Could not list search indexes on ${spaceId}_${suffix} to drop them: ${err instanceof Error ? err.message : String(err)}`);
+    return false;
+  }
+  const names = listed.map(i => i.name ?? '').filter(n => n.startsWith(prefix));
+  if (names.some(n => swapsInFlight.has(n.replace(/__swap$/, '')))) return false;
+  let clean = true;
+  for (const name of names) {
+    try {
+      await coll.dropSearchIndex(name);
+      liveIndexNames.delete(name.replace(/__swap$/, ''));
+      log.debug(`Dropped search index ${name}: its collection holds no record`);
+    } catch (err) {
+      clean = false;
+      log.warn(`Could not drop search index ${name} from empty collection ${spaceId}_${suffix}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+  return clean;
 }
 
 /**
@@ -827,11 +889,22 @@ export async function waitForSpaceIndexesReady(
   // another only adds up their timeouts: five collections at a 60s ceiling each meant a space could sit
   // at indexStatus='building' for five minutes when every index was in fact ready in seconds. That was
   // masked for as long as only `facts` was ever indexed — fixing that made the serial wait visible.
-  const required = VECTOR_INDEXED_COLLECTIONS.map(suffix =>
+  /*
+   * ONLY THE COLLECTIONS THAT HOLD A RECORD have an index to wait for (Q-165). An empty collection carries none
+   * by design, and polling it would wait out the whole window for an index nothing is going to build — then
+   * mark a healthy space `failed`, which is exactly the red badge on a working system this function's
+   * docblock is about. An empty collection is READY in the only sense a caller has: a search on it answers,
+   * with nothing. A first record arriving after this check builds its index while the space stays `ready`,
+   * and the fresh-write channel answers for that record until it has.
+   */
+  const holding = await Promise.all(VECTOR_INDEXED_COLLECTIONS.map(async suffix =>
+    ({ suffix, holds: await collectionHoldsRecord(`${spaceId}_${suffix}`).catch(() => true) })));
+  const required = holding.filter(h => h.holds).map(({ suffix }) =>
     // The five text indexes: path `embedding`, at the configured embedding width.
     pollVectorIndexReady(spaceId, suffix, `${spaceId}_${suffix}_embedding`,
       { vectorPath: 'embedding', dims: getEmbeddingConfig().dimensions ?? 768 }, opts),
   );
+  const filesHold = holding.find(h => h.suffix === 'files')?.holds ?? true;
   // Started alongside the required ones so it costs no extra wall-clock, and awaited separately so its answer
   // cannot reach the verdict. Kicked off before the await below for that reason — sequencing it after would
   // add its window to the total.
@@ -841,7 +914,7 @@ export async function waitForSpaceIndexesReady(
   // index that indexes `faceEmbedding` at 128, so it could only ever report failure. See `ProbeTarget`.
   const faceDims = getConfig().spaces.find(sp => sp.id === spaceId)?.faceDescriptorDims
     ?? FACE_DESCRIPTOR_DIMS;
-  const face = getFaceRecognitionConfig().enabled
+  const face = getFaceRecognitionConfig().enabled && filesHold
     ? pollVectorIndexReady(spaceId, 'files', faceIndexName,
         { vectorPath: 'faceEmbedding', dims: faceDims }, opts)
     : null;
@@ -984,10 +1057,21 @@ export async function faceDescriptorDimsFor(spaceId: string): Promise<number> {
       faceDimsBySpace.set(spaceId, dims);
       return dims;
     }
-    log.debug(`Face index ${indexName} reports no dimension; using the built-in default this call only`);
+    log.debug(`Face index ${indexName} reports no dimension; using the space's configured width this call only`);
   } catch (err) {
     log.debug(`Could not read ${indexName} (${err instanceof Error ? err.message : String(err)}); `
-      + 'using the built-in default this call only');
+      + "using the space's configured width this call only");
   }
-  return FACE_DESCRIPTOR_DIMS;
+  /*
+   * The width the index WILL be built at, not the built-in constant. Since Q-165 a gallery has no index until
+   * its collection holds a record, so the first face descriptor of a space created at 512 is validated before
+   * any index exists to read a width from. Falling back to `FACE_DESCRIPTOR_DIMS` there would refuse every
+   * descriptor of the width the operator chose — the same `faceDescriptorDims ?? FACE_DESCRIPTOR_DIMS` that
+   * `ensureCollectionSearchIndexes` builds the index from, read from the same place.
+   */
+  try {
+    return getConfig().spaces.find(s => s.id === spaceId)?.faceDescriptorDims ?? FACE_DESCRIPTOR_DIMS;
+  } catch {
+    return FACE_DESCRIPTOR_DIMS;
+  }
 }
