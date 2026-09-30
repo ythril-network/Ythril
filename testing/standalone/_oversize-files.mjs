@@ -408,7 +408,10 @@ export const FROZEN = {
   // It is the ordering primitive `P-32` needed. A file's metadata did not replicate, so it had no place in
   // the seq order — and its absence was also the only lost-update race in the brain collections, since two
   // writers appending to a file's `entityIds` had nothing to order them.
-  'server/src/config/types.ts': 583,
+  //
+  // 583 -> 546 (`Q-166`): the two job-queue documents moved WHOLE to `types-jobs.ts`, each record with all its
+  // fields — the split the note above allows, by question rather than by size.
+  'server/src/config/types.ts': 546,
   'client/src/app/pages/settings/data.component.ts': 644,
   // RAISED 646 -> 647 by ONE line: the Q-6 narrowing swapped `resolveMemberSpaces` for `memberSpacesForRequest`,
   // and this file no longer needed the old import, so it gained an import line and lost none. Not growth in any

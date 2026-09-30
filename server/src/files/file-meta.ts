@@ -572,33 +572,33 @@ export async function renameFileMeta(
     updatedAt: now,
   }));
 
-  /*
-   * The link records move with it, and this is the path that hides them.
-   *
-   * A file's `_id` IS its path, so a rename changes the identity every `file.*` link hangs off. The three
-   * arrays ride across by object spread, so their field names never appear here — a grep for `entityIds`
-   * finds nothing in this function, in either spelling. Without this the links would still name the OLD
-   * path: a `from` pointing at a record that no longer exists.
-   *
-   * Removed from the old id first and created under the new one, because the id is derived from the `from`
-   * — so there is no rename of a link record either, only a delete and a create. The tombstone that the
-   * removal writes is what stops a peer restoring the links under the old path on the next pull.
-   */
-  /*
-   * READ THE LINK ROWS FIRST, because they are now the only record of what this file linked to.
-   *
-   * This used to take the desired set off the file's own `entityIds`/`memoryIds`/`chronoIds` arrays. 5.0
-   * removed them, and reading them after the removal would have been reading nothing — a move would have
-   * silently detached every link on the file it moved.
-   */
-  const carried = await linksStartingFrom(spaceId, [normSrc]);
+  await carryFileLinks(spaceId, normSrc, normDst, existing.author ?? authorRef());
+}
+
+/**
+ * Move every link a file holds from its old path to its new one — for a single rename and for each file of a
+ * directory move alike (`Q-164`).
+ *
+ * A file's `_id` IS its path, so a move changes the identity every `file.*` link hangs off, and without this the
+ * links would still name the OLD path: a `from` pointing at a record that no longer exists. The single-file rename
+ * carried them inline; the directory move re-rooted the records and did not, so every file in a moved directory
+ * lost its links in silence. One function now, so the next move path cannot forget the step.
+ *
+ * READ THE LINK ROWS FIRST: since 5.0 they are the only record of what the file linked to. Removed from the old id
+ * and created under the new one, because a link's id is derived from its `from` — there is no rename of a link,
+ * only a delete and a create — and the tombstone the removal writes is what stops a peer restoring the links under
+ * the old path on the next pull.
+ */
+async function carryFileLinks(spaceId: string, fromId: string, toId: string, author: AuthorRef): Promise<void> {
+  const carried = await linksStartingFrom(spaceId, [fromId]);
+  if (carried.length === 0) return;
   const byKind = { entity: [] as string[], fact: [] as string[], chrono: [] as string[] };
   for (const row of carried) {
     const bucket = byKind[row.toKind as keyof typeof byKind];
     if (bucket) bucket.push(row.to);
   }
-  await removeLinksFrom(spaceId, normSrc, 'file');
-  await reconcileLinks(spaceId, normDst, 'file', byKind, existing.author ?? authorRef());
+  await removeLinksFrom(spaceId, fromId, 'file');
+  await reconcileLinks(spaceId, toId, 'file', byKind, author);
 }
 
 /**
@@ -645,4 +645,8 @@ export async function renameFileMetaByPrefix(
     updatedAt: now,
   }));
   await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).insertMany(updated.map(d => asDoc<FileMetaDoc>(d)));
+  // Each file's links follow it, exactly as a single rename carries them (Q-164).
+  for (let i = 0; i < docs.length; i++) {
+    await carryFileLinks(spaceId, docs[i]!._id, updated[i]!._id, docs[i]!.author ?? authorRef());
+  }
 }
