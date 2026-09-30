@@ -146,11 +146,11 @@ describe('a read answers identically on both doors', () => {
   it('list_spaces, which takes no space at all', async () => {
     const { rest } = await bothDoors('list_spaces', {});
     assert.equal(rest.status, 200);
-    assert.match(rest.text, new RegExp(SPACE), 'the space created in setup must be listed');
-    // The text half is a bare ARRAY and the structured half must be an object, so the array is NAMED.
-    // That naming is the one place the two halves are allowed to differ in shape, and it is worth an
-    // assertion rather than an assumption.
+    // The structured half must be an object, so the array is NAMED — worth an assertion, not an assumption.
+    // Read from `data`: since Q-111 the REST door carries a structured answer ONCE, and `text` only says so.
     assert.ok(Array.isArray(rest.data?.spaces), `list_spaces must name its array: ${JSON.stringify(rest.data)}`);
+    assert.ok(rest.data.spaces.some(s => (s?.id ?? s) === SPACE),
+      `the space created in setup must be listed: ${JSON.stringify(rest.data.spaces).slice(0, 300)}`);
   });
 
   it('space_meta', async () => {

@@ -606,10 +606,25 @@ describe('MCP: the same answer through the other door', () => {
       // id comparison here would be asserting a promise the feature does not make. What must hold on any
       // ranking is that skipping N leaves exactly the rest: see the REST paging test for the identity check
       // and the precondition it guards it with.
-      assert.equal(next.results.length, rankedLen - out.nextSkip,
+      //
+      // Paged to the END rather than asserted of one page: since Q-111 the stated budget bounds BOTH carriages
+      // of an MCP answer together, so a page holds about half the rows it did and the rest need not fit in one
+      // more page at the same budget. The rule is unchanged — skipping N leaves exactly the rest — and every
+      // page but the last must say there is more.
+      let served = next.results.length;
+      let page = next;
+      for (let guard = 0; page.truncated && guard < rankedLen; guard++) {
+        assert.equal(page.nextSkip, out.nextSkip + served, 'each page continues exactly where the last stopped');
+        page = JSON.parse((await session.callTool('recall', {
+          space: SPACE, query: QUERY, types: ['entity'], topK: COUNT,
+          maxBytes: tightBytes, skip: page.nextSkip,
+        }))?.content?.[0]?.text ?? '{}');
+        assert.ok(page.results.length > 0, 'a page that claims more must serve some');
+        served += page.results.length;
+      }
+      assert.equal(served, rankedLen - out.nextSkip,
         `skipping ${out.nextSkip} of ${rankedLen} ranked positions must leave ${rankedLen - out.nextSkip} to serve`);
-      assert.equal(next.truncated, false,
-        'and the remaining matches fit, so the last page must not still claim more');
+      assert.equal(page.truncated, false, 'and the last page must not still claim more');
 
       // A tool result is a model's context window: the budget is the promise, so hold it to the budget.
       assert.ok(text.length <= tightBytes * 1.5,
