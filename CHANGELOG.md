@@ -123,6 +123,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A space delete no longer loses a race with the media worker, and one unfinished delete no longer blocks every
+  space operation until a restart.** Deleting a space while the worker was still converting one of its files failed
+  `ENOTEMPTY` when removing the files directory — the worker was writing artifacts under it — and the delete kept
+  its marker, as it must. But the marker was only ever resumed at boot, so every later rename and delete on the
+  instance answered `500 "… is still pending … It resumes automatically on restart"`. Three fixes: every removal of
+  a space's directories retries what a concurrent writer causes (one helper, `files/remove-tree.ts`); a space being
+  deleted or renamed away refuses new file writes at the file door, which the media worker treats as an abandonment,
+  like a moved file's; and the next rename or delete finishes a pending op before it proceeds, refusing only when
+  that fails again — with the reason. Found by a Docker integration run, where it cascaded into sixteen failures.
 - **A recall across spaces ranks by relevance, not by which spaces had a text match (`Q-82`).** Each space fused
   its own candidates only when its text search found something, so a cross-space answer mixed rank scores near
   0.03 with cosine scores near 0.3-0.9: without a reranker every result of a space whose text search missed came

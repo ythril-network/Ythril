@@ -235,6 +235,14 @@ The rename atomically:
 | `409`  | `code: "space_name_in_use"` — another space already syncs under `newId` in one of this instance's networks; nothing is moved. Pick another name |
 | `500`  | Partial rename failure (collections may be in an inconsistent state) |
 
+**A rename or delete that did not finish does not block the next one.** Each records its intent before it moves
+anything, and an interrupted one is finished forward (a delete is never undone). That used to happen only at
+restart, so until then every other rename and delete answered `500` *"… is still pending … It resumes
+automatically on restart"*. Now the next rename or delete on the instance finishes the pending op first and then
+proceeds; it is refused only when finishing it fails again, and the `500` then says *"resuming it just now did not
+complete: …"* followed by the reason. A space being deleted or renamed away also stops taking file writes at once, so the
+media worker cannot keep writing under a tree the delete is removing.
+
 ---
 
 ### Re-embed backfill
