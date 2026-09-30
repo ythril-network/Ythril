@@ -171,6 +171,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   "Wyczyść wyniki" / "Wyczyść", "Zresetuj" and "Zamknij". The Query form's Projection field had the same fault
   ("Vorsprung", "Występ") and now reads "Projektion" / "Projekcja". A client spec derives every English label that
   starts with Clear, Reset or Close and fails when the German or Polish value does not contain a verb that does it.
+  The same fault on the product's noun: German called a space a "Leerzeichen" (the typed whitespace character) in
+  8 places — "Noch keine Leerzeichen" on the Brain page, "Leerzeichen erstellen/löschen" on the MFA card — and
+  Polish a "spacja" in 11; they now say "Space" / "przestrzeń" as the rest of each file does, and the same spec
+  fails on any value whose English names a space and whose German or Polish uses the whitespace word.
 - **A space delete no longer loses a race with the media worker, and one unfinished delete no longer blocks every
   space operation until a restart.** Deleting a space while the worker was still converting one of its files failed
   `ENOTEMPTY` when removing the files directory — the worker was writing artifacts under it — and the delete kept
