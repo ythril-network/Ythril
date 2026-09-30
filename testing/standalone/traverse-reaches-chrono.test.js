@@ -24,7 +24,8 @@
  *  - the chrono node does NOT join the next frontier, or a depth-2 walk would bounce back through every
  *    entity the chrono mentions;
  *  - **both surfaces take the same flag with the same default.** A rule that reaches one door and not the
- *    other is the defect four brain-API fixes were about.
+ *    other is the defect four brain-API fixes were about. Since `Q-109` that is one tool the REST route
+ *    delegates to, so it is pinned on the tool's schema, its validator and the delegation.
  *
  * ## Re-pointed in 3.6, and the reason is the thing this file is about
  *
@@ -46,6 +47,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { bodyOf, blockAfter } from './_structural-window.mjs';
+import { routeBody, delegationOf, delegatesCleanly } from './_delegating-routes.mjs';
 
 const ROOT = process.cwd();
 const read = (p) => readFileSync(join(ROOT, p), 'utf8');
@@ -213,26 +215,62 @@ const nodes = strip(read('server/src/brain/edge-endpoint-names.ts'));
 });
 
 describe('both surfaces take the same flag with the same default', () => {
+  /*
+   * ONE implementation since `Q-109`, and this block follows it there.
+   *
+   * REST held its own copy of the flag: an object of defaults with `includeChrono: true`, a loop that skipped
+   * an absent flag, refused a non-boolean and only then assigned. That handler is deleted — the route hands
+   * its whole body to `graph_traverse` through `callTool` — so "both surfaces" is now one schema, one
+   * validator and one handler, and the thing that could still diverge is the DELEGATION. Each half is read
+   * where it now lives: the route is checked to delegate cleanly to this tool, the default and the refusal
+   * are read off the tool's MATERIALISED schema and its compiled validator (what `tools/list` advertises
+   * and `callTool` enforces on both doors), and the opt-out rule off the handler.
+   */
   const rest = read('server/src/api/brain/search.ts');
   const mcp = read('server/src/mcp/tools/edge.ts');
-
-  it('REST accepts includeChrono, defaults it ON, and validates its type', () => {
-    // The three inclusion flags are now validated by one loop over an object of defaults, so the rejection
-    // message is templated rather than spelled out per flag. What matters is unchanged: the flag is known,
-    // its default is on, and a non-boolean is refused — coercing a string would make a "false" mean true.
-    assert.match(rest, /includeChrono:\s*true/, 'includeChrono must still default to ON');
-    assert.match(rest, /must be a boolean/, 'a non-boolean must be rejected, not coerced');
-    assert.match(rest, /typeof raw !== 'boolean'|typeof includeChronoRaw !== 'boolean'/,
-      'the type check must be a real typeof test');
+  let tool, schema, validator;
+  before(async () => {
+    const { ALL_TOOLS } = await import('../../server/dist/mcp/tools/index.js');
+    const { toolSchemasFor, materialisedSchema } = await import('../../server/dist/mcp/tool-schema.js');
+    const { makeArgsValidator } = await import('../../server/dist/mcp/validate-args.js');
+    tool = ALL_TOOLS.find(t => t.name === 'graph_traverse');
+    assert.ok(tool, 'the graph_traverse tool is not in the registry — re-anchor this gate');
+    schema = materialisedSchema(tool, toolSchemasFor(['general']), ['general']);
+    validator = makeArgsValidator(toolSchemasFor(['general']), ['general']);
   });
 
-  it('MCP advertises it in the tool schema, so an agent can discover it', () => {
-    assert.match(mcp, /includeChrono: \{ type: 'boolean', default: true/);
+  it('REST reaches the flag by handing its whole body to graph_traverse', () => {
+    const body = routeBody(rest, '/spaces/:spaceId/traverse');
+    assert.ok(body, 'the REST traverse route is no longer registered — re-anchor this gate');
+    assert.ok(delegatesCleanly(body, 'POST /spaces/:spaceId/traverse'),
+      'the REST traverse no longer delegates — its own includeChrono default and type check need asserting again');
+    assert.equal(delegationOf(body).tool, 'graph_traverse',
+      'the REST traverse must delegate to graph_traverse, the tool whose flag is asserted below');
   });
 
-  it('both default to ON — the defect was discoverability, not the absence of a flag', () => {
-    for (const [name, src] of [['REST', rest], ['MCP', mcp]]) {
-      assert.match(src, /includeChrono[^\n]*!== false|!== false/, `${name} must treat only an explicit false as opt-out`);
-    }
+  it('the schema advertises includeChrono, defaults it ON, and the validator refuses a non-boolean', () => {
+    const flag = schema.properties?.includeChrono;
+    assert.ok(flag, 'graph_traverse no longer declares includeChrono, so an agent cannot discover it');
+    assert.equal(flag.type, 'boolean');
+    assert.equal(flag.default, true, 'includeChrono must still default to ON');
+    // Coercing a string would make "false" mean true. Refused before the handler runs, on both doors.
+    const refusal = validator.validate(tool, { space: 'general', startId: 'x', includeChrono: 'false' });
+    assert.ok(refusal && /includeChrono/.test(refusal) && /boolean/.test(refusal),
+      `a non-boolean includeChrono must be refused, got: ${refusal ?? 'accepted'}`);
+    assert.equal(validator.validate(tool, { space: 'general', startId: 'x', includeChrono: false }), null,
+      'and a real boolean must be accepted, or the refusal above proves nothing');
+  });
+
+  it('only an explicit false opts out — the defect was discoverability, not the absence of a flag', () => {
+    /*
+     * Ajv is built without `useDefaults`, so the schema's `default: true` is advertised and NOT applied: an
+     * absent flag reaches the handler as undefined. The handler's own test is therefore what makes the
+     * default true, and it must be `!== false`, not truthiness.
+     *
+     * This once asserted `/includeChrono[^\n]*!== false|!== false/` against both files, and the second
+     * alternative matched ANY `!== false` — on REST it was satisfied by an unrelated line in the old
+     * `/similar` handler, so the REST half checked nothing about traverse (`Q-89`). Anchored on the key.
+     */
+    assert.match(mcp, /a\['includeChrono'\] !== false/, 'graph_traverse must treat only an explicit false as opt-out');
   });
 });

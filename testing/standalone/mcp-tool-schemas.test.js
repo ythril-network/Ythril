@@ -250,11 +250,20 @@ describe('MCP tool schemas — high-value enrichments', () => {
     // So the flag is KEPT on both doors, and the schema description must stop promising a removal that
     // cannot happen — a caller reading "DEPRECATED" builds around an absence that will never arrive, and
     // an `inputSchema` description is what they read while constructing arguments.
+    //
+    // The REASON moved at `Q-89`, and the flag survived the move. REST `/similar` takes `space` in the body
+    // since 5.0, so "the route has it in its PATH" no longer holds. What does: `space` says where the SOURCE
+    // entry lives, and naming it while searching everywhere is a request that omitting `space` cannot make,
+    // because omitting it also looks for the source everywhere. The description says that now, and the
+    // assertions pin the reason rather than the old sentence.
     const desc = fs.properties.crossSpace.description;
     assert.ok(!/DEPRECATED/i.test(desc),
-      'crossSpace is kept for REST parity — calling it deprecated tells a caller to avoid a supported flag');
-    assert.match(desc, /OMIT `space`/i, 'the description must still name the idiomatic MCP form');
-    assert.match(desc, /PATH/, 'and say WHY the flag exists, or the next reader files it as a duplicate again');
+      'crossSpace is a supported flag — calling it deprecated tells a caller to avoid it');
+    assert.match(desc, /Not slated for removal/, 'and it must say it stays, or the next reader files it as a duplicate again');
+    assert.match(desc, /omitting `space`/i, 'the description must still name the omit-space form it is compared with');
+    assert.match(desc, /SOURCE entry lives/,
+      'and say WHY the flag exists — `space` locates the seed — or the next reader files it as a duplicate again');
+    assert.match(desc, /cannot express/, 'and that omitting `space` is not the same request');
   });
 
   it('id fields carry a UUID-v4 pattern', () => {

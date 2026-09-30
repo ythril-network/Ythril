@@ -169,8 +169,8 @@ describe('REST: the four read routes refuse a key they cannot honour', () => {
       // variable is why the bulk rewriter could not see this site — it matched a literal path.
       /*
        * THREE PREFIXES NOW, not two, and the third is what `B-9` step 3c added. `/filter` is served by
-       * the generic tool door at `/api/<tool-name>`; `/recall` and `/similar` still have hand-written
-       * routes under `/api/brain`; `/traverse` never left the space path, because it walks FROM an entity
+       * the generic tool door at `/api/<tool-name>`; `/recall` and `/similar` keep their routes under
+       * `/api/brain`, and both answer through their tools; `/traverse` never left the space path, because it walks FROM an entity
        * and an entity lives in exactly one space.
        *
        * Building the URL from a variable is why the bulk rewriter could not see this site — it matched a
@@ -186,25 +186,21 @@ describe('REST: the four read routes refuse a key they cannot honour', () => {
       assert.ok(JSON.stringify(r.body).includes(offender), `the 400 must name '${offender}': ${JSON.stringify(r.body)}`);
       /*
        * `unrecognized_keys` comes from `unknownBodyFields`, which a route uses when it parses its own body.
-       * `/recall` stopped doing that at 5.0 and `/filter` followed it at `B-9` step 3c — both hand their
-       * body to `callTool`, whose schema validation refuses the key and names it in the message. The
-       * machine-readable list is not produced there, and synthesising one by parsing the prose would be
-       * worse than not having it.
+       * `/recall` stopped doing that at 5.0, `/filter` followed it at `B-9` step 3c, `/similar` at `Q-89` and
+       * `/traverse` at `Q-109` — each hands its body to `callTool`, whose schema validation refuses the key and
+       * names it in the message. The machine-readable list is not produced there, and synthesising one by
+       * parsing the prose would be worse than not having it.
        *
-       * **The set of routes in this branch only grows**, which is the direction the whole row moves in:
-       * every collapse onto the shared dispatcher moves one more route from its own body parse to the
-       * tool's schema. A route LEAVING this branch would mean somebody wrote a second body parse.
+       * **All four are in one branch now, so there is no branch.** Every collapse onto the shared dispatcher
+       * moved one route from its own body parse to the tool's schema, and `/traverse` was the last. A route
+       * that wrote a second body parse again would answer `unrecognized_keys` without the dispatcher's
+       * sentence, and fail here rather than pass on the array.
        *
-       * The claim above survives either way and is the one with the value in it: the refusal NAMES the
-       * offending key, which is what shortens the caller's search to zero. The array is asserted only where
-       * the route still builds it, so this case cannot pass by the field quietly disappearing everywhere.
+       * The claim above is the one with the value in it: the refusal NAMES the offending key, which is what
+       * shortens the caller's search to zero.
        */
-      if (route === '/recall' || route === '/filter') {
-        assert.match(r.body.error, new RegExp(`unexpected property '${offender}'`),
-          'the shared dispatcher must name the key it refused');
-      } else {
-        assert.deepEqual(r.body.unrecognized_keys, [offender]);
-      }
+      assert.match(r.body.error, new RegExp(`unexpected property '${offender}'`),
+        'the shared dispatcher must name the key it refused');
     });
   }
 

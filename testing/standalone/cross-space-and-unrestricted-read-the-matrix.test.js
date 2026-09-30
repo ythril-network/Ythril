@@ -22,7 +22,8 @@
  * ## Why these use two different helpers
  *
  * They ask different questions. Cross-space recall wants the SET of spaces to search, at `knowledge: read` —
- * `spacesWhereTokenMay`. Rotation wants a yes/no about being unrestricted — `editorScopeFor`, which returns
+ * once `spacesWhereTokenMay` in the REST route, now `toolReach` in the MCP dispatcher, which both search doors
+ * delegate to (`Q-89`). Rotation wants a yes/no about being unrestricted — `editorScopeFor`, which returns
  * `undefined` for a token that reaches everything and a list for one that does not. Using the set-builder for
  * the boolean would have meant comparing lengths against the config, making the answer depend on how many
  * spaces happen to exist.
@@ -78,17 +79,60 @@ describe('"unrestricted" is answered from the matrix', () => {
 });
 
 describe('cross-space recall searches only what the token reaches', () => {
-  it('the route builds its set from the matrix helper', () => {
-    const src = stripComments(readFileSync('server/src/api/brain/search.ts', 'utf8'));
-    assert.match(src, /spacesWhereTokenMay\(/, 'not a hand-rolled filter over cfg.spaces');
-    assert.doesNotMatch(src, /!tokenSpaces \|\| tokenSpaces\.includes/,
-      'the truthiness filter must be gone — it kept every space for a modern token');
+  /*
+   * The set used to be built in the REST route, with `spacesWhereTokenMay(rights, 'knowledge', 'read')`. Both
+   * search routes now delegate to `callTool` (`/recall`, then `/similar` at `Q-89`), and the dispatcher builds
+   * the set once for every door: `toolReach` narrows the handler's spaces to where the token holds the tool's
+   * area at `read`, read from the matrix through `effectiveRung`. So the property is asserted where it lives.
+   */
+  const guard = () => stripComments(readFileSync('server/src/mcp/tool-rights-guard.ts', 'utf8'));
+  const bodyOfToolReach = () => {
+    const src = guard();
+    const at = src.indexOf('export function toolReach(');
+    assert.ok(at >= 0, 'toolReach is gone from tool-rights-guard.ts — re-anchor this gate');
+    return src.slice(at, src.indexOf('\nexport ', at + 1));
+  };
+
+  it('the set is built from the matrix, in the dispatcher, for both doors', () => {
+    const body = bodyOfToolReach();
+    assert.match(body, /effectiveRung\(rights, id, need\.area\)/, 'not a hand-rolled filter over cfg.spaces');
+    assert.doesNotMatch(body, /\.spaces\b/, 'the dead allowlist must not be consulted — it kept every space for a modern token');
+    assert.match(body, /if \(!rights\) return \[\];/, 'a token with no matrix reaches nothing, not everything');
+    const call = stripComments(readFileSync('server/src/mcp/call-tool.ts', 'utf8'));
+    assert.match(call, /accessibleSpaceIds: handlerSpaceIds/, 'callTool must hand the handler the narrowed set');
+    // And the REST doors take it: a route that searched on its own would need its own narrowing again.
+    const routes = stripComments(readFileSync('server/src/api/brain/search.ts', 'utf8'));
+    for (const [path, tool] of [['/recall', 'recall'], ['/similar', 'similar']]) {
+      const at = routes.indexOf(`searchRouter.post('${path}'`);
+      assert.ok(at >= 0, `${path} is no longer registered — re-anchor this gate`);
+      const body = routes.slice(at, routes.indexOf('searchRouter.', at + 20));
+      assert.match(body, new RegExp(`callTool\\(\\{\\s*name: '${tool}'`),
+        `${path} no longer delegates to the ${tool} tool, so the dispatcher's narrowing does not reach it`);
+    }
   });
 
-  it('and asks for knowledge:read, which is what a recall is', () => {
-    const src = stripComments(readFileSync('server/src/api/brain/search.ts', 'utf8'));
-    assert.match(src, /'knowledge',\s*'read',/,
-      'a token holding files-only in a space should not have its records ranked here');
+  it('and asks for knowledge:read, which is what a recall is — and every read tool asks for its own area', async () => {
+    const { TOOL_RIGHTS } = await import('../../server/dist/auth/space-rights.js');
+    const { SPACE_AREAS } = await import('../../server/dist/config/rights-shape.js');
+    const { effectiveRung } = await import('../../server/dist/auth/mint-cap.js');
+    const { toolReach } = await import('../../server/dist/mcp/tool-rights-guard.js');
+    for (const tool of ['recall', 'similar']) {
+      const row = TOOL_RIGHTS.find(r => r.tool === tool);
+      assert.deepEqual(row && { area: row.area, needs: row.needs }, { area: 'knowledge', needs: 'read' },
+        `${tool} must need knowledge:read — a token holding files-only in a space should not have its records ranked`);
+    }
+    // The rule, over every read row rather than the two searches: a space held for some OTHER area only is dropped.
+    const reads = TOOL_RIGHTS.filter(r => r.needs === 'read');
+    assert.ok(reads.length >= 2, `only ${reads.length} read rows in TOOL_RIGHTS — the derivation is broken`);
+    const none = Object.fromEntries(SPACE_AREAS.map(a => [a, 'none']));
+    for (const row of reads) {
+      const other = SPACE_AREAS.find(a => a !== row.area
+        && effectiveRung(rights({ perSpace: { x: { ...none, [a]: 'read' } } }), 'x', row.area) === 'none');
+      assert.ok(other, `no area leaves ${row.area} unheld — the fixture cannot express this row`);
+      const r = rights({ perSpace: { k: { ...none, [row.area]: 'read' }, x: { ...none, [other]: 'read' } } });
+      assert.deepEqual(toolReach(row.tool, r, ['k', 'x']), ['k'],
+        `${row.tool} searches a space held only for ${other}, not ${row.area}`);
+    }
   });
 
   // That the helper it uses has no allowlist left, and closes the absent-matrix case explicitly, is asserted

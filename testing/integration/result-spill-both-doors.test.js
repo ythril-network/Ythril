@@ -441,7 +441,15 @@ describe('REST: a tight budget returns a prefix and a way to reach the rest', ()
     const seen = [];
     let skip = 0;
     let pages = 0;
+    /*
+     * Checked BEFORE EVERY PAGE, not only around the loop. CI (#1460, 2026-09-30) served 27 slots with 25 distinct
+     * records while `before` and `after` agreed: the ranking moved between two pages and moved back — a record
+     * leaving the fresh-write channel for the index mid-loop — so an order checked only at the ends certified a
+     * stretch it never looked at. A page is only comparable to the others if the ranking it was cut from is.
+     */
+    let movedDuringPaging = false;
     for (;;) {
+      if (skip > 0 && (await orderOf()) !== before) movedDuringPaging = true;
       const r = await recall({ query: QUERY, types: ['entity'], topK: COUNT, maxBytes: tightBytes, skip });
       assert.equal(r.status, 200, JSON.stringify(r.body).slice(0, 300));
       assert.equal(r.body.count, total, 'count stays the FULL total on every page, never the post-skip total');
@@ -456,7 +464,7 @@ describe('REST: a tight budget returns a prefix and a way to reach the rest', ()
     assert.ok(pages > 1, `the budget must actually bite or this proves nothing — ${pages} page(s)`);
 
     const after = await orderOf();
-    if (before === null || after === null || before !== after) {
+    if (before === null || after === null || before !== after || movedDuringPaging) {
       t.diagnostic('the ranking moved while paging (the index was still ingesting) — the identity assertions '
         + 'below do not apply, and the feature does not promise a snapshot. The arithmetic above still passed.');
       return;

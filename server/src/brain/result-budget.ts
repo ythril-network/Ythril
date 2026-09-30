@@ -33,6 +33,16 @@ export const DEFAULT_MAX_CHARS = 50_000;
 export const MCP_DEFAULT_MAX_CHARS = 25_000;
 
 /**
+ * The sentence a tool schema states the two defaults in — here, so no schema module names either constant (`Q-161`).
+ * The door decides which applies; a caller reading one door's schema still has to learn the other's number.
+ */
+export function budgetDefaultsSentence(): string {
+  return `Default ${MCP_DEFAULT_MAX_CHARS} on MCP and ${DEFAULT_MAX_CHARS} on REST — the one default the two doors `
+    + 'deliberately differ on, because an MCP result meets a ceiling inside your client that you cannot raise. RAISE IT '
+    + 'IF YOUR CLIENT CAN TAKE MORE.';
+}
+
+/**
  * Which default a call gets, decided from the door that received it — the ONE place that is decided.
  *
  * The TRANSPORT decides, not the module: tool modules are also served as plain HTTP (`POST /api/<tool-name>`),

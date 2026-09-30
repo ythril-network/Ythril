@@ -26,101 +26,127 @@ import assert from 'node:assert/strict';
 import { routeBody, delegatesCleanly } from './_delegating-routes.mjs';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { stripComments } from './_strip-comments.mjs';
+import { balancedFrom, bodyOf } from './_structural-window.mjs';
+import { ALL_TOOLS } from '../../server/dist/mcp/tools/index.js';
+import { makeArgsValidator } from '../../server/dist/mcp/validate-args.js';
+import { toRecallRecord } from '../../server/dist/mcp/tools/shared.js';
 
 const ROOT = process.cwd();
 const read = (p) => readFileSync(join(ROOT, p), 'utf8');
 const REST = 'server/src/api/brain/search.ts';
 const MCP = 'server/src/mcp/tools/search.ts';
+const schemas = {
+  requiredSpace: { type: 'string', enum: ['general'], description: 'Space ID.' },
+  optionalSpace: { type: 'string', enum: ['general'], description: 'Optional space ID.' },
+};
+const schemaOf = (name) => ALL_TOOLS.find(t => t.name === name).inputSchema(schemas);
+const toolNamed = (name) => ALL_TOOLS.find(t => t.name === name);
+const validator = makeArgsValidator(schemas, ['general']);
+const UUID = '3b241101-e2bb-4255-8caf-4136c566a962';
+const FILE_HIT = { _id: 'c1', type: 'file', score: 0.9, spaceId: 'general', path: 'doc.md', parentFileId: 'f1',
+  chunkIndex: 2, headingText: 'Intro', content: 'the passage' };
+const FACT_HIT = { _id: 'm1', type: 'fact', score: 0.8, spaceId: 'general', fact: 'a fact', content: 'not a passage' };
 
 describe('recall exposes includeFileContent on both surfaces', () => {
-  const rest = read(REST);
-  const mcp = read(MCP);
+  const rest = stripComments(read(REST));
+  const mcp = stripComments(read(MCP));
 
   it('MCP still has it — otherwise this gate is comparing REST to nothing', () => {
     assert.match(mcp, /includeFileContent/, `${MCP} no longer mentions includeFileContent`);
     assert.match(mcp, /includeFileContent: \{/, 'the MCP tool must still ADVERTISE it in its schema');
   });
 
-  it('REST accepts it', () => {
-    assert.match(rest, /includeFileContent/, `${REST} does not accept includeFileContent — the asymmetry is back`);
+  /*
+   * ## Where REST's half lives now (`Q-89`)
+   *
+   * REST held its own copy: `stripContentIfAsked`, its own `includeFileContentRaw !== false` default, its own
+   * "must be a boolean" refusal, and the strip applied again on each traverse branch. `/recall` and then
+   * `/similar` collapsed onto `callTool`, so REST takes the flag by handing the body to the tool, and the
+   * tool's single row builder — `hitRow` → `toRecallRecord` — is the one implementation both doors answer
+   * through. The cases below assert each property where it now lives, and that REST reaches it.
+   */
+  it('REST accepts it — by handing the body to a tool that advertises it', () => {
+    for (const [path, tool] of [['/recall', 'recall'], ['/similar', 'similar']]) {
+      const body = routeBody(rest, path);
+      assert.ok(body, `POST ${path} is not in ${REST} — re-anchor this gate`);
+      assert.ok(delegatesCleanly(body, `POST ${path}`),
+        `POST ${path} no longer delegates to the ${tool} tool, so it must take includeFileContent itself — the asymmetry is back`);
+      assert.ok(schemaOf(tool).properties.includeFileContent,
+        `the ${tool} tool does not advertise includeFileContent, so neither door takes it`);
+    }
   });
 
   it('both default to TRUE, so neither surface silently thins an existing caller’s results', () => {
-    // The default is the compatibility guarantee: only an explicit `false` opts out.
-    assert.match(mcp, /a\['includeFileContent'\] !== false/, 'MCP must treat only an explicit false as opt-out');
-    // Matched on the SHAPE — `<something>Raw !== false` — rather than on the variable's exact name, which
-    // is a detail of the handler rather than the rule. The literal name was pinned here and went red on the
-    // `includeContent` → `includeFileContent` rename, which is a gate objecting to a rename it should not
-    // have an opinion about.
-    assert.match(rest, /\w*[Rr]aw !== false/, 'REST must treat only an explicit false as opt-out');
+    // The default is the compatibility guarantee: only an explicit `false` opts out. One per search tool,
+    // and the count is a floor on sites found rather than a total.
+    const sites = (mcp.match(/a\['includeFileContent'\] !== false/g) ?? []).length;
+    assert.ok(sites >= 2, `only ${sites} tool site(s) treat only an explicit false as opt-out; recall and similar both must`);
+    for (const tool of ['recall', 'similar']) {
+      assert.equal(schemaOf(tool).properties.includeFileContent.default, true, `${tool} must advertise the default as true`);
+    }
+    // And the builder keeps content when the flag is absent, so a caller that never sends it loses nothing.
+    assert.equal(toRecallRecord(FILE_HIT).content, 'the passage', 'an absent flag must keep the passage');
   });
 
-  it('REST refuses a non-boolean rather than coercing it', () => {
+  it('a non-boolean is refused rather than coerced, on both tools and so on both doors', () => {
     // `"false"` is truthy. An opt-out that silently does nothing is worse than one that errors — and this is
-    // the flag whose whole purpose is to make a response smaller.
-    assert.match(rest, /`includeFileContent` must be a boolean/);
+    // the flag whose whole purpose is to make a response smaller. Exercised through the dispatcher's own
+    // validator, which is what refuses it for a REST caller now.
+    for (const [tool, args] of [['recall', { query: 'x' }], ['similar', { entryId: UUID, entryType: 'entity' }]]) {
+      assert.equal(validator.validate(toolNamed(tool), { ...args, includeFileContent: false }), null,
+        `${tool} must accept a boolean includeFileContent — otherwise the refusal below proves nothing`);
+      assert.notEqual(validator.validate(toolNamed(tool), { ...args, includeFileContent: 'false' }), null,
+        `${tool} coerces a string includeFileContent instead of refusing it`);
+    }
   });
 
   it('drops only `content`, and only on file results', () => {
     // The flag is about the passage body. Thinning anything else would make it a different feature with the
     // same name on the two surfaces — which is the defect class this gate exists for, one level in.
-    assert.match(rest, /r\.type !== 'file'/, 'the strip must be scoped to file results');
-    assert.match(rest, /const \{ content: _dropped, \.\.\.rest \} = r/, 'and drop `content` alone');
+    const kept = toRecallRecord(FILE_HIT, { includeFileContent: true });
+    const thinned = toRecallRecord(FILE_HIT, { includeFileContent: false });
+    assert.equal(kept.content, 'the passage', 'the fixture must carry a passage, or the drop below proves nothing');
+    assert.equal(thinned.content, undefined, 'includeFileContent: false must drop the passage');
+    const { content: _dropped, ...others } = kept;
+    assert.deepEqual(thinned, others, 'and drop `content` alone — path, chunk index and heading are the point of the flag');
+    assert.deepEqual(toRecallRecord(FACT_HIT, { includeFileContent: false }), toRecallRecord(FACT_HIT),
+      'the strip must be scoped to file results');
   });
 
   it('every traverse path honours it too', () => {
     // A caller who asked not to be sent passage bodies did not stop meaning it because they also asked for
     // graph expansion. An option that lapses on one code path is the same defect one level down.
     //
-    // Anchored on `buildGraphWithSpill(`, which is what a graph-augmented response is BUILT with, rather than on
-    // one implementation's variable name. The previous anchor was `const results: RecallTraverseItem[]`, and
-    // when the flat item type was deleted this gate failed against code that still did the right thing —
-    // demanding the old lines back rather than the property.
-    //
-    // Both routes, not one: `/recall` and `/find-similar` each expand a graph, and the flag has to survive on
-    // both. `similar`'s traverse existed on MCP alone for a while, so this is the site where the two
-    // surfaces most recently disagreed.
-    // The window used to be `at + 900`, and a comment added above the strip pushed the call out of it — the
-    // gate went red against code that still did the right thing, for the second time in this file's life. A
-    // character count is the wrong bound twice over: it also spans different LINES on a CRLF working copy
-    // than in CI's LF checkout. So the window now ends at the next `res.json(` — the structural end of the
-    // response this branch is building — and the assertion is about what happens inside it.
-    /*
-     * ONE site now, and the count is derived rather than written down. `POST /api/brain/recall` hands its
-     * body to `callTool` and builds no response at all, so it expands no graph and needs no flag survival
-     * check — the tool's site, checked below, is the only implementation there is. Pinning `2` turned a
-     * collapse that removed a duplicate into a red gate; pinning `1` would break on the next one.
-     */
-    const restBuilders = ['/recall', '/similar']
-      .filter(p => { const b = routeBody(rest, p); return b && !delegatesCleanly(b, `POST ${p}`); });
-    // Anchored on `traversedAnswer(` since Q-126 — the one builder every traversing answer goes through. The
-    // strip runs on the rows BEFORE they are handed to it, so the window opens at the end of the plain branch
-    // (its `return;`) and closes at the response this branch builds.
-    const sites = [...rest.matchAll(/traversedAnswer\(/g)].map(m => m.index);
-    assert.equal(sites.length, restBuilders.length,
-      `${restBuilders.length} REST route(s) still build their own response (${restBuilders.join(', ') || 'none'}) `
-      + `but ${sites.length} expand a graph`);
+    // Anchored on `traversedAnswer(` — the one builder every traversing answer goes through (Q-126) — and on
+    // the row it is handed. REST's own traverse branches went with its handlers (`/recall`, then `/similar` at
+    // `Q-89`); this case measured those windows, and after the collapse it found none and looped over
+    // nothing while passing. So it measures the tool's sites, which are the only implementation there is,
+    // with a floor so an empty sweep fails.
+    const sites = [...mcp.matchAll(/traversedAnswer\(/g)].map(m => m.index);
+    assert.ok(sites.length >= 2, `only ${sites.length} traversing answer(s) in ${MCP}; recall and similar both expand a graph`);
     for (const at of sites) {
-      const responseAt = rest.indexOf('res.json(', at);
-      const branchAt = rest.lastIndexOf('return;', at);
-      assert.ok(responseAt > at && branchAt > -1,
-        'no plain branch before, or no `res.json(` after, a graph build — the handler changed shape, so this gate measures nothing');
-      const window = rest.slice(branchAt, responseAt);
-      assert.match(window, /stripContentIfAsked\([^)]*safeInclude\w*\)/,
-        'a traverse response must apply the same strip as the plain one');
-      // The same question for the flag that arrived beside it. `includeDiagnostics` is recursive by the
-      // owner's ruling — the `_graph` subtree follows it at every depth — and the only way a traverse branch
-      // can honour that is by nesting through `mapGraphNodes`, which takes the flag. Attaching
-      // `graph.bySeed` raw is how REST used to return the whole edge document, vector included.
-      assert.match(window, /mapGraphNodes\([^;]*safeIncludeDiagnostics(, safeProjection)?\)/,
-        'a traverse response must nest through mapGraphNodes and pass the diagnostics flag down');
+      const args = balancedFrom(mcp, mcp.indexOf('(', at), 'a traversedAnswer call');
+      assert.match(args, /shapeRow: \(r, nodes\) => hitRow\(r, shape, nodes\)/,
+        'a traverse response must shape its rows through the same builder, with the same shape, as the plain one');
     }
+    // The same builder on the plain branches, so the flag cannot mean one thing plain and another traversed.
+    assert.ok((mcp.match(/\.map\(r => hitRow\(r, shape\)\)/g) ?? []).length >= 2,
+      'a plain search branch shapes its rows without hitRow, so the flag has two implementations again');
+    const row = bodyOf(mcp, 'hitRow');
+    assert.match(row, /includeFileContent: shape\.includeFileContent/, 'hitRow must pass the flag to the record builder');
+    // `includeDiagnostics` is recursive by the owner's ruling — the `_graph` subtree follows it at every depth — and
+    // the only way a traverse branch can honour that is by nesting through `mapGraphNodes`, which takes the flag.
+    assert.match(row, /mapGraphNodes\(nodes, graphNodeRecord, shape\.includeDiagnostics, shape\.projection\)/,
+      'a traverse response must nest through mapGraphNodes and pass the diagnostics flag down');
   });
 
   it('does not mutate the results it was given', () => {
-    // `seeds` is also handed to the traverse builder and to the audit outcome; deleting a field in place
+    // The seeds are also handed to the traverse builder and to the audit outcome; deleting a field in place
     // would change what those saw.
-    assert.match(rest, /return results\.map\(/, 'the strip must copy rather than delete in place');
+    const input = structuredClone(FILE_HIT);
+    toRecallRecord(input, { includeFileContent: false });
+    assert.deepEqual(input, FILE_HIT, 'the strip must copy rather than delete in place');
   });
 
   it('both surfaces document it', () => {

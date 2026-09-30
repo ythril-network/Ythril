@@ -1,5 +1,6 @@
 import type { ToolHandler, ToolContext, ToolResult } from './types.js';
 import { readSpillAct } from '../../brain/read-spill-act.js';
+import { budgetSizeSchema } from './_page-budget-schema.js';
 
 /**
  * `read_spill` — the MCP half of `GET /api/brain/spills/:id` (Q-92). Same act, same parameters, same refusals.
@@ -31,12 +32,8 @@ export const read_spillTool: ToolHandler = {
           + 'spill your own token made: any other id answers "not found", exactly like one that never existed.',
       },
       skip: { type: 'integer', minimum: 0, description: 'Items to skip — send the previous page\'s `nextSkip`.' },
-      maxChars: {
-        type: 'integer', minimum: 1,
-        description: 'Ceiling on the window in characters. Default 25000 on this door, 50000 on REST.',
-      },
-      maxBytes: { type: 'integer', minimum: 1, description: 'Ceiling on the window in UTF-8 bytes. No default.' },
-      maxTokens: { type: 'integer', minimum: 1, description: 'Converted to characters at 3.5 per token; the lower of this and `maxChars` applies.' },
+      // From the one schema every budgeted tool takes (Q-161); a spill keeps no spill of its own, so no remainderDump.
+      ...budgetSizeSchema('item'),
     },
     required: ['id'],
     additionalProperties: false,

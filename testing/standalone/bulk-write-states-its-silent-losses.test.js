@@ -3,11 +3,10 @@
  *
  * ## Two silent losses and one asymmetry
  *
- * **1. Items past 500 per collection vanish.** `slice(v, 0, BULK_MAX_PER_TYPE)` runs before validation, so
- * entry 501 is not rejected — it is never seen. It appears in neither `inserted` nor `errors`, and nothing in
- * the reply hints that the payload was truncated. The old description mentioned the cap inside one
- * parameter's own text ("excess entries are dropped") where a caller reading the tool summary would not meet
- * it, and never said the loss was unreported.
+ * **1. Items past 500 per collection USED to vanish, and are refused now (`Q-109`).** A slice before validation
+ * dropped entry 501 unseen, in neither `inserted` nor `errors`, and this gate held the description to saying so.
+ * The loss is gone: `bulkWrite` refuses a batch with any array past the cap, whole and before writing, and the
+ * description says that instead. The cases below pin the refusal the way they pinned the loss.
  *
  * **2. A successful call may have written nothing.** Partial success is the contract, so there is no failure
  * status: every rejection lands in `errors` and the call still returns normally. A caller who treats the
@@ -47,28 +46,26 @@ const DESC = (() => {
   return TOOL.slice(d, d + end);
 })();
 
-describe('the 500 cap is described as the silent loss it is', () => {
-  it('says it is SILENT, not merely that a cap exists', () => {
-    assert.match(DESC, /SILENTLY DROPPED/,
-      'a cap a caller can see in `errors` is survivable; one they cannot is not');
-  });
-
-  it('says the drop appears in neither counter', () => {
-    assert.match(DESC, /not counted in\s*'?\s*\+?\s*'?`errors`|not counted in `errors`/,
-      'the reply gives no way to detect the truncation, which is the actionable half');
+describe('the 500 cap is described as the refusal it is', () => {
+  it('says a longer array refuses the whole batch, and writes nothing', () => {
+    assert.match(DESC, /REFUSES THE WHOLE BATCH/, 'a cap has to say what happens past it');
+    assert.match(DESC, /nothing is written/, 'and that there is no half-applied batch to reconcile');
+    assert.doesNotMatch(DESC, /SILENTLY DROPPED/, 'the description still describes the loss the refusal replaced');
   });
 
   it('says the cap is PER COLLECTION, so a caller does not split unnecessarily', () => {
     assert.match(DESC, /per collection/i, '500 memories and 500 entities in one call is fine');
   });
 
-  it('and the truncation really happens before validation', () => {
-    // Pinned to the implementation: if the slice ever moved after validation, or started reporting, this
-    // description would be overstating the danger.
+  it('and the refusal really happens in the writer, before anything is written', () => {
+    // Pinned to the implementation: inside `bulkWrite` itself, so no door can reach a write without it.
     assert.match(CORE, /export const BULK_MAX_PER_TYPE = 500/, 'the cap');
-    assert.match(CORE, /v\.slice\(0, BULK_MAX_PER_TYPE\)/, 'applied by a plain slice');
-    assert.doesNotMatch(CORE, /truncated|droppedCount/,
-      'a truncation report appeared — say so in the description instead of calling it silent');
+    const sig = 'export async function bulkWrite(';
+    const writer = CORE.slice(CORE.indexOf(sig) + sig.length);
+    const check = writer.indexOf('bulkSizeRefusal(');
+    const firstWrite = writer.search(/insertOne|insertMany|upsert|bulkWrite\(/);
+    assert.ok(check > 0 && (firstWrite < 0 || check < firstWrite), 'bulkWrite no longer refuses before it writes');
+    assert.doesNotMatch(CORE, /\.slice\(0, BULK_MAX_PER_TYPE\)/, 'the silent slice is back');
   });
 });
 

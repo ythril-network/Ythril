@@ -33,6 +33,7 @@ import { memberSpacesWithin } from '../../spaces/proxy-scoped.js';
 import { pageAcrossMembers } from '../../spaces/page-across-members.js';
 import { resolveEntityIdsByName } from '../../brain/entities.js';
 import { attachedToEntityNamed } from '../../brain/entity-name-scope.js';
+import { budgetSizeSchema } from './_page-budget-schema.js';
 
 export const queryTool: ToolHandler = {
   name: 'filter',
@@ -109,9 +110,8 @@ export const queryTool: ToolHandler = {
               type: 'string',
               description: 'Only edges whose TO end is an entity whose name contains this. For `edges` only.',
             },
-            maxChars: { type: 'integer', minimum: 1000, description: 'Ceiling on the serialised response body, in CHARACTERS. **DEFAULT 25000 ON THIS DOOR, and 50000 on REST.** `limit` caps ROWS and says nothing about how big one is, so a page of file records or of long-described entities had no size bound at all before 3.7 — on the read tool you are most likely to page through. When the budget bites, `results` is a PREFIX of the page, `truncated` says so, and `nextSkip` is where to continue: send it back as `skip`. `count` is what you were actually given and still matches `results.length`; `total` is unchanged and still the whole match.' },
-            maxBytes: { type: 'integer', minimum: 1000, description: 'Ceiling on the serialised response body, in real UTF-8 BYTES. **NO DEFAULT — opt-in.** Set it when your limit is genuinely a byte limit. Bytes are always >= characters, so a byte default equal to the character one would silently bind on every non-ASCII answer. When you set both, BOTH apply: the page stops at whichever ceiling it reaches first.' },
-            maxTokens: { type: 'integer', minimum: 1, description: 'A convenience onto `maxChars`, converted at a fixed 3.5 characters per token — the conversion produces characters. If both are sent the SMALLER resulting character figure applies. An approximation: the server does not know your tokeniser.' },
+            // From the one schema every budgeted tool takes (Q-161). `skip` stays its own: it pages rows with `limit`.
+            ...budgetSizeSchema('row'),
             maxTimeMS: { type: 'number', minimum: 1, maximum: 10000, default: 5000, description: 'Server-side query timeout in ms. Default 5000, hard-capped at 10000.' },
             // The five list conveniences, declared beside the module that assembles them — see
             // `CONVENIENCE_SCHEMA` in `brain/list-conveniences.ts`. Spread rather than spelled so the

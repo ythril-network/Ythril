@@ -171,7 +171,8 @@ existence check instead, which is why that check is not optional.
 #### A batch that connects what it creates
 
 `POST /api/brain/spaces/:spaceId/bulk` and `save_bulk` take facts, entities, chrono entries and edges in
-one payload. Identities are minted server-side, so an id you invent for a record in the payload is not the id
+one payload, at most 500 of each. A longer array refuses the whole batch with a `400` naming it, before anything is
+written — it used to be cut at 500 and answered with the same `207` as a clean batch (`Q-109`). Identities are minted server-side, so an id you invent for a record in the payload is not the id
 it gets, and an edge naming it would point at nothing.
 
 Put `"$ref"` on an item and name it later in the same call:

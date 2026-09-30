@@ -34,7 +34,7 @@ Available as both — REST `POST /api/brain/recall`, MCP tool `recall`:
 | `includeFileContent` | — | `true` | Whether file-chunk results carry `content` — the passage body. `false` returns locations and metadata only (path, heading, chunk index, tags, properties). **File chunks ONLY** — it does nothing on a search returning entities, facts, edges or chrono entries; use `projection` to trim those. A non-boolean is a `400`, never coerced |
 | `includeRecordMeta` | — | `false` | Add back the fields that describe where a record SITS rather than what it says: `createdAt` and `updatedAt` (link ids are link records since 5.0 — reach them with `traverse`). Measured on a real corpus only **30%** of a recall answer was content and most of the rest was this, which at a tight `maxChars` is evidence you paid for and did not get. `createdAt` is the one to be careful of — it is when the RECORD was written, not when the remembered thing happened, which lives in the record's own properties. **Applies recursively**, so a `traverse` answer's `_graph` follows it at every depth. MCP takes the same parameter with the same default. A non-boolean is a `400`, never coerced |
 | `includeDiagnostics` | — | `false` | Add back the three fields a result carries for the SYSTEM rather than for you: `matchedText` (the exact pre-embedding source string — for a file chunk, the passage a SECOND time), `embeddingModel` and `seq`. **Applies recursively**, so a `traverse` answer's `_graph` nodes and edges follow it at every depth. Off by default on both doors. **It does NOT gate the per-stage scores.** `lexicalScore`, `fusedScore` (with `vectorRank` and `lexicalRank`, the two ranks it came from) and `rerankScore` are returned unconditionally on both doors, because the one that decided a result's position must not be the one you cannot read — and a handful of numbers is not a cost worth a flag. The embedding VECTOR is not among them and is never returned by anything. A non-boolean is a `400`, never coerced |
-| `projection` | — | none | Fields to include (1) or exclude (0), the same grammar `POST /api/filter` takes, applied to each result's record. Dotted paths work: `{"name": 1, "properties.status": 1}`. **Applies recursively** — a `traverse` answer's `_graph` nodes and edges are projected at every depth, which is where a large answer's size actually comes from. Inclusion and exclusion cannot be mixed (the non-`_id` fields decide which you meant); `_id` survives an inclusion projection unless you send `_id: 0`; and the embedding VECTOR can never be projected back in — an explicit `embedding: 1` is dropped rather than honoured. The ranking envelope (`score`, `spaceId`, `type`, `_graph`) always survives, so a projection cannot lose the score you searched for |
+| `projection` | — | none | Fields to include (1) or exclude (0), the same grammar `POST /api/filter` takes, applied to each hit's `record`. Dotted paths work: `{"name": 1, "properties.status": 1}`. **Applies recursively** — a `traverse` answer's `_graph` nodes and edges are projected at every depth, which is where a large answer's size actually comes from. Inclusion and exclusion cannot be mixed (the non-`_id` fields decide which you meant); `_id` survives an inclusion projection unless you send `_id: 0`; and the embedding VECTOR can never be projected back in — an explicit `embedding: 1` is dropped rather than honoured. `score`, `spaceId`, `type` and `_graph` sit on the hit beside `record`, so a projection cannot lose the score you searched for |
 | `maxChars` | — | `50000` REST / `25000` MCP | Ceiling on the serialised response body, in **characters**, and the ceiling that carries the defaults. **The default differs by DOOR: 50000 over REST, 25000 over MCP.** Both doors accept this parameter identically — same floor, same ceiling, same refusal — and only the number applied when you send nothing differs, because an MCP tool result meets a hard per-result ceiling inside the client that the caller cannot raise while a REST body lands in a buffer its caller allocated. Raise it if yours can take more. Characters equal bytes only for ASCII; for a byte ceiling use `maxBytes`. **The answer is a PREFIX of the ranked results and every record in it is WHOLE** — full body, full properties, complete `_graph`, byte-identical to that record from an unbudgeted call. Truncation is atomic at the match: the first match whose subtree would not fit is omitted and so is everything after it, so no answer has a gap and none carries a record with half its graph. **That is what the guarantee costs** — the budgeted unit is a match TOGETHER WITH its subtree, so a deeper or wider `traverse` means fewer matches fit, and the ones that do not are absent rather than shortened. `returned`, `count`, `truncated`, `budgetChars`, `budgetBytes`, `charsReturned` and `bytesReturned` are on EVERY response, so absence never has to be interpreted; a truncated one adds `nextSkip`, which you send back as `skip` |
 | `maxBytes` | — | **none** | Ceiling on the serialised response body, in **real UTF-8 bytes**. `Grüße aus Köln — ąćę` counts 31 characters against 39 bytes; three emoji count 17 against 23. A transport or client limit IS in bytes. **Before 3.7 this bounded characters** — to keep that behaviour, send the same number as `maxChars`. **It has no default**, deliberately: bytes are always ≥ characters, so a byte default equal to the character one would silently become the binding constraint on every non-ASCII answer. **When you set both, both apply** — the answer stops at whichever ceiling it reaches first |
 | `maxTokens` | — | none | A convenience onto **`maxChars`**, converted at a fixed 3.5 characters per token. The ratio is not configurable (`charsPerToken` was removed in 5.0); a caller who needs the ceiling exact should state `maxChars`. If both are sent the **smaller** resulting character figure applies. It is an approximation — the server does not know your tokeniser |
@@ -43,8 +43,8 @@ Available as both — REST `POST /api/brain/recall`, MCP tool `recall`:
 
 **A hit is `{score, spaceId, type, record}` on both doors.** The record's own fields are under `hit.record`;
 `score`, `spaceId`, `type`, `_graph` and the per-stage scores sit on the hit itself. A REST client written
-before 5.0 must read `hit.record.<field>` where it read `hit.<field>`. `POST /api/brain/similar` returns flat
-hits.
+before 5.0 must read `hit.record.<field>` where it read `hit.<field>`. `POST /api/brain/similar` returns the same
+nested hits since `Q-89`; it returned flat ones until then.
 
 **Response** `200`:
 
@@ -700,9 +700,9 @@ POST /api/brain/similar
 
 Given an existing entry's `_id`, find other entries with high vector similarity. Unlike `recall` (which re-embeds a text query), `similar` uses the entry's **stored embedding vector** directly — no re-embedding step. Ideal for deduplication, "more like this", and merge detection.
 
-> **Also available as MCP tool:** `similar` — note the MCP tool makes `space` optional (omit it to search all accessible spaces, like `recall`); its `crossSpace` flag is deprecated in favour of omitting `space`. This REST endpoint keeps `spaceId` in the path and the `crossSpace` body flag. Every other parameter, including `traverse`, `includeFileContent` and `includeDiagnostics`, is identical on both doors.
+> **Also available as MCP tool:** `similar`, and this endpoint answers THROUGH it (`Q-89`), exactly as `POST /api/brain/recall` answers through `recall`: the same parameters, the same refusals in the same words, the same JSON. `space` is optional on both and says where the SOURCE entry lives; omit it to find the entry in any space you can read. `crossSpace: true` searches every space you can read even when `space` is given — naming the source's space and searching all the others is a request omitting `space` cannot express.
 >
-> **The MCP tool returns JSON at every depth**, with the same per-result shape `recall` uses plus a `source` naming the entry you asked about. This REST endpoint returns JSON at every depth too.
+> **Breaking, since `Q-89`:** hits used to come back FLAT here (`{_id, name, …, score}`) and `source` as the whole record with `score: 1.0`, while MCP answered in the shape below. A REST client reads `hit.record.<field>` where it read `hit.<field>`, and `source.id` where it read `source._id`.
 
 **Request body:**
 
@@ -724,13 +724,13 @@ Given an existing entry's `_id`, find other entries with high vector similarity.
 | `entryId` | ✅ | — | UUID of the entry to use as the query vector |
 | `entryType` | ✅ | — | Knowledge type of the source entry (`fact`, `entity`, `edge`, `chrono`, `file`) |
 | `targetTypes` | — | all types | Which knowledge types to search in |
-| `topK` | — | `10` | Maximum results, minimum 1, no ceiling (see the note on the recall table above) |
+| `topK` | — | `10` | Maximum results, 1–100 on both doors; outside that is a `400`. **Changed** (`Q-89`): REST used to clamp it |
 | `minScore` | — | `0.0` | Minimum cosine similarity threshold |
 | `traverse` | — | `0` | Graph-expansion depth (0–5). With `traverse > 0` each match is expanded along edges and the connected entities come back alongside it — see the response shape below |
 | `includeFileContent` | — | `true` | Whether file-chunk results carry their passage `content`. `false` returns locations and metadata only, exactly as on `recall` |
 | `includeRecordMeta` | — | `false` | Add back the fields that describe where a record SITS rather than what it says: `createdAt` and `updatedAt` (link ids are link records since 5.0 — reach them with `traverse`). Measured on a real corpus only **30%** of a recall answer was content and most of the rest was this, which at a tight `maxChars` is evidence you paid for and did not get. `createdAt` is the one to be careful of — it is when the RECORD was written, not when the remembered thing happened, which lives in the record's own properties. **Applies recursively**, so a `traverse` answer's `_graph` follows it at every depth. MCP takes the same parameter with the same default. A non-boolean is a `400`, never coerced |
 | `includeDiagnostics` | — | `false` | Add back the three fields a result carries for the SYSTEM rather than for you: `matchedText` (the exact pre-embedding source string — for a file chunk, the passage a SECOND time), `embeddingModel` and `seq`. **Applies recursively**, so a `traverse` answer's `_graph` nodes and edges follow it at every depth. Off by default on both doors. **It does NOT gate the per-stage scores.** `lexicalScore`, `fusedScore` (with `vectorRank` and `lexicalRank`, the two ranks it came from) and `rerankScore` are returned unconditionally on both doors, because the one that decided a result's position must not be the one you cannot read — and a handful of numbers is not a cost worth a flag. The embedding VECTOR is not among them and is never returned by anything. A non-boolean is a `400`, never coerced |
-| `projection` | — | none | Fields to include (1) or exclude (0), the same grammar `POST /api/filter` takes, applied to each result's record. Dotted paths work: `{"name": 1, "properties.status": 1}`. **Applies recursively** — a `traverse` answer's `_graph` nodes and edges are projected at every depth, which is where a large answer's size actually comes from. Inclusion and exclusion cannot be mixed (the non-`_id` fields decide which you meant); `_id` survives an inclusion projection unless you send `_id: 0`; and the embedding VECTOR can never be projected back in — an explicit `embedding: 1` is dropped rather than honoured. The ranking envelope (`score`, `spaceId`, `type`, `_graph`) always survives, so a projection cannot lose the score you searched for |
+| `projection` | — | none | Fields to include (1) or exclude (0), the same grammar `POST /api/filter` takes, applied to each hit's `record`. Dotted paths work: `{"name": 1, "properties.status": 1}`. **Applies recursively** — a `traverse` answer's `_graph` nodes and edges are projected at every depth, which is where a large answer's size actually comes from. Inclusion and exclusion cannot be mixed (the non-`_id` fields decide which you meant); `_id` survives an inclusion projection unless you send `_id: 0`; and the embedding VECTOR can never be projected back in — an explicit `embedding: 1` is dropped rather than honoured. `score`, `spaceId`, `type` and `_graph` sit on the hit beside `record`, so a projection cannot lose the score you searched for |
 | `maxChars` | — | `50000` REST / `25000` MCP | Ceiling on the serialised response body, in **characters**, and the ceiling that carries the defaults. **The default differs by DOOR: 50000 over REST, 25000 over MCP.** Both doors accept this parameter identically — same floor, same ceiling, same refusal — and only the number applied when you send nothing differs, because an MCP tool result meets a hard per-result ceiling inside the client that the caller cannot raise while a REST body lands in a buffer its caller allocated. Raise it if yours can take more. Characters equal bytes only for ASCII; for a byte ceiling use `maxBytes`. **The answer is a PREFIX of the ranked results and every record in it is WHOLE** — full body, full properties, complete `_graph`, byte-identical to that record from an unbudgeted call. Truncation is atomic at the match: the first match whose subtree would not fit is omitted and so is everything after it, so no answer has a gap and none carries a record with half its graph. **That is what the guarantee costs** — the budgeted unit is a match TOGETHER WITH its subtree, so a deeper or wider `traverse` means fewer matches fit, and the ones that do not are absent rather than shortened. `returned`, `count`, `truncated`, `budgetChars`, `budgetBytes`, `charsReturned` and `bytesReturned` are on EVERY response, so absence never has to be interpreted; a truncated one adds `nextSkip`, which you send back as `skip` |
 | `maxBytes` | — | **none** | Ceiling on the serialised response body, in **real UTF-8 bytes**. `Grüße aus Köln — ąćę` counts 31 characters against 39 bytes; three emoji count 17 against 23. A transport or client limit IS in bytes. **Before 3.7 this bounded characters** — to keep that behaviour, send the same number as `maxChars`. **It has no default**, deliberately: bytes are always ≥ characters, so a byte default equal to the character one would silently become the binding constraint on every non-ASCII answer. **When you set both, both apply** — the answer stops at whichever ceiling it reaches first |
 | `maxTokens` | — | none | A convenience onto **`maxChars`**, converted at a fixed 3.5 characters per token. The ratio is not configurable (`charsPerToken` was removed in 5.0); a caller who needs the ceiling exact should state `maxChars`. If both are sent the **smaller** resulting character figure applies. It is an approximation — the server does not know your tokeniser |
@@ -742,17 +742,19 @@ Given an existing entry's `_id`, find other entries with high vector similarity.
 
 ```json
 {
-  "source": { "_id": "...", "type": "entity", "name": "auth-service", "score": 1.0 },
+  "source": { "type": "entity", "id": "...", "summary": "auth-service (service)" },
   "results": [
-    { "_id": "...", "type": "entity", "name": "auth-gateway", "spaceId": "dev-apps", "score": 0.91 },
-    { "_id": "...", "type": "fact", "fact": "Auth service uses PKCE...", "spaceId": "dev-apps", "score": 0.84 }
-  ]
+    { "score": 0.91, "spaceId": "dev-apps", "type": "entity", "record": { "_id": "...", "name": "auth-gateway" } },
+    { "score": 0.84, "spaceId": "dev-apps", "type": "fact", "record": { "_id": "...", "fact": "Auth service uses PKCE..." } }
+  ],
+  "count": 2,
+  "traverseDepth": 0
 }
 ```
 
-- `source` echoes the input entry with `score: 1.0` (self-match) — excluded from `results`
-- Results sorted by `score` descending
-- `spaceId` included on each result when `crossSpace: true`
+- `source` names the entry you asked about as `{type, id, summary}` — it is never among `results`
+- Results sorted by `score` descending; `spaceId` is on every hit
+- The size answer (`returned`, `truncated`, `budgetChars`, `charsReturned`, …) is on every response, as on `recall`
 
 **With `traverse > 0`** the response carries the same graph-augmented shape `recall` uses: each match gains a `_graph`
 array of `{edges, node, paths}`, nested nodes carry their own `_graph`, and the envelope adds `traverseDepth` and
@@ -763,10 +765,10 @@ absolute figure is what keeps an uncapped `topK` from turning a walk into an unb
 
 ```json
 {
-  "source": { "_id": "...", "type": "entity", "name": "auth-service", "score": 1.0 },
+  "source": { "type": "entity", "id": "...", "summary": "auth-service (service)" },
   "results": [
     {
-      "_id": "...", "type": "entity", "name": "auth-gateway", "spaceId": "dev-apps", "score": 0.91,
+      "score": 0.91, "spaceId": "dev-apps", "type": "entity", "record": { "_id": "...", "name": "auth-gateway" },
       "_graph": [
         {
           "edge": { "_id": "...", "from": "...", "to": "...", "label": "depends_on", "description": "gateway calls it on every login", "tags": [] },

@@ -20,6 +20,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ceiling, `incompleteRows` reasons, the call's walk budget and the deadline behave as before. A differential
   test walks every row both ways over hubs, cycles, self-loops, fact, chrono and file endpoints, linked records
   and every narrowing, and requires them equal.
+- **Breaking:** **REST traverse refuses what it used to clamp (`Q-109`).** `POST /api/brain/spaces/:spaceId/traverse` now
+  answers through the `graph_traverse` tool, as `/recall` and `/similar` answer through theirs, so the two doors share
+  one set of caps and refusals. What REST quietly adjusted is a `400` now, as it always was on MCP: `maxDepth` outside
+  1–10, `limit` outside 1–1000, a non-number for either, a `direction` other than `outbound`/`inbound`/`both` (it became
+  `outbound`), an `edgeLabels` list holding a non-string (it became ALL labels — a widening) and a blank `startId`.
+  Refusals carry the tool's wording, and an unknown key is named in the message rather than in `unrecognized_keys`.
+  **Who is affected:** a REST client that relied on a clamp or fallback.
+- **A request past a cap is refused, not served smaller (`Q-109`).** A bulk write with more than 500 items in one array
+  refuses the whole batch with a `400` naming the array, before anything is written; it used to drop the items past
+  500 and answer with the same `207` as a clean batch. `network_sync_history`'s `limit` is refused outside 1–100 on both
+  doors (REST clamped 500 to 100 and let a negative through). The embed-queue listing's `limit` over 200 is a `400`
+  where REST echoed it and served 200. **Who is affected:** a caller that relied on the quiet cut.
+- **`list_embed_jobs` reaches every job, on a proxy too (`Q-109`).** It is now the act REST's embed-queue listing calls:
+  it takes `skip`, reads and sums a proxy space's members, and — on both doors — returns `transientFailures`, the field
+  its own description told callers to read and neither door sent.
+- **The Graph view draws the whole neighbourhood, not the first page of it (`Q-109`).** Since `graph_traverse` pages its
+  nodes under the byte budget, the view sent no `skip` and drew whatever the first page held; it now reads every page
+  and joins them. It still says the graph is partial when the walk itself stopped at its `limit`.
+
+- **Breaking:** **REST `POST /api/brain/similar` answers in the `similar` tool's shape (`Q-89`).** Each hit is now
+  `{score, spaceId, type, record}` and `source` is `{type, id, summary}`, as MCP has always answered — the route
+  used to return flat hits (`{_id, name, …, score}`) and the whole source record with `score: 1.0`, so one
+  capability had two shapes by door. **Who is affected:** a REST client of `/similar` reads `hit.record.<field>`
+  where it read `hit.<field>`, and `source.id` where it read `source._id`. MCP callers and the web UI see no change.
+  The route now answers through the tool, as `/recall` does, so its refusals are the tool's words too; an entry that
+  does not exist is still a `404`. And `topK` above 100 is a `400` there, as it always was on MCP, where REST clamped.
+- **A search that names no space reads only where the token may read (`Q-89`).** `recall` or `similar` without
+  `space`, or `similar` with `crossSpace: true`, searched every space the token could reach — and reaching a space is
+  not holding its knowledge, so a token with only `files: read` somewhere had that space's records ranked. The REST
+  `/similar` route narrowed its own set; moving it onto the tool showed the tool never did, on either door. Every read
+  tool now searches only the spaces where the token holds the tool's area.
+- **Every budgeted MCP tool states its size ceilings from one schema (`Q-161`).** `recall`, `similar`, `filter` and
+  `read_spill` each carried their own copy of `maxChars`/`maxBytes`/`maxTokens`, and the copies had drifted from the
+  rule they all resolve through: MCP refused a `maxBytes` under 1000 and (except `read_spill`) a `maxChars` under 1000,
+  where the resolver honours any `maxBytes` and raises a small `maxChars` to 1000. The schema now follows the
+  resolver, so MCP accepts what REST always did; `recall`'s `maxTokens` text no longer says it converts onto bytes.
 
 ### Fixed
 

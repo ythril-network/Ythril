@@ -22,6 +22,7 @@ import { trackedSources } from './_sources.mjs';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { balancedFrom } from './_structural-window.mjs';
+import { routeBody, delegatesCleanly } from './_delegating-routes.mjs';
 
 const { isSpillPath, SPILL_DIR } = await import('../../server/dist/brain/spill-path.js');
 const { SPILL_TTL_DAYS, SPILL_CEILING_MULTIPLE } = await import('../../server/dist/brain/graph-spill.js');
@@ -92,8 +93,23 @@ describe('every door that traverses answers through one builder, and none writes
     .filter(f => /parseTraverseOption\(/.test(read(f)));
 
   it('both doors are found, or this whole block is about nothing', () => {
-    assert.ok(doors.length >= 2,
-      `only ${doors.length} door(s) parse a traverse option; REST and MCP are the minimum, so the scan is wrong`);
+    /*
+     * The floor is on the SITES that parse a traverse option, not on the files. It read "REST and MCP are the
+     * minimum" in files, and `Q-89` made that false without anything getting worse: REST `/recall` and
+     * `/similar` both delegate to their tools, so the only file that parses one is the tool module, at one
+     * site per traversing tool. REST reaches `traversedAnswer` through the tool — asserted below per route,
+     * so a REST route that walked on its own again would have to parse `traverse` and join `doors`.
+     */
+    const sites = doors.reduce((n, f) => n + (read(f).match(/parseTraverseOption\(/g) ?? []).length, 0);
+    assert.ok(doors.length >= 1 && sites >= 2,
+      `${sites} site(s) in ${doors.length} file(s) parse a traverse option; recall and similar are the minimum, so the scan is wrong`);
+    const rest = read('server/src/api/brain/search.ts');
+    for (const p of ['/recall', '/similar']) {
+      const body = routeBody(rest, p);
+      assert.ok(body, `POST ${p} is not in search.ts — re-anchor this gate`);
+      assert.ok(delegatesCleanly(body, `POST ${p}`) || doors.includes('server/src/api/brain/search.ts'),
+        `POST ${p} neither delegates to its tool nor is found as a door, so its traverse is answered by nobody this gate reads`);
+    }
   });
 
   for (const door of doors) {

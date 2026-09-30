@@ -130,7 +130,8 @@ describe('REST find-similar refuses a bad value rather than coercing it', () => 
   it('traverse above the cap is a 400 naming the bound', async () => {
     const r = await findSimilar({ entryId: sourceId, entryType: 'entity', traverse: 6 });
     assert.equal(r.status, 400, JSON.stringify(r.body));
-    assert.match(r.body.error, /traverse must be an integer between 0 and \d+/);
+    // The tool's refusal since Q-89 — REST answers through it, so both doors refuse in the same words.
+    assert.match(r.body.error, /traverse/);
   });
 
   it('a non-integer traverse is a 400', async () => {
@@ -143,18 +144,20 @@ describe('REST find-similar refuses a bad value rather than coercing it', () => 
     // nothing, and the message is recall's verbatim so the two routes cannot disagree about a bad value.
     const r = await findSimilar({ entryId: sourceId, entryType: 'entity', includeFileContent: 'no' });
     assert.equal(r.status, 400, JSON.stringify(r.body));
-    assert.match(r.body.error, /`includeFileContent` must be a boolean/);
+    assert.match(r.body.error, /includeFileContent: must be boolean/);
   });
 });
 
 describe('REST find-similar traverse actually expands', () => {
-  it('traverse: 0 keeps the original response shape', async (t) => {
+  it('traverse: 0 answers in the tool\'s shape, the same JSON as at every depth', async (t) => {
     if (!embeddingAvailable || !sourceId) return t.skip('embedding unavailable');
     const r = await findSimilar({ entryId: sourceId, entryType: 'entity', topK: 5 });
     assert.equal(r.status, 200, JSON.stringify(r.body));
-    assert.equal(r.body.source?._id, sourceId);
+    // Q-89: `source` is {type, id, summary} and each hit {score, spaceId, type, record}, as on MCP.
+    assert.equal(r.body.source?.id, sourceId);
     assert.ok(Array.isArray(r.body.results));
-    assert.equal(r.body.traverseDepth, undefined, 'an unasked-for traverse must not change the shape');
+    assert.ok(r.body.results.some(x => x.record?._id === matchId), `the match is a nested hit: ${JSON.stringify(r.body.results)}`);
+    assert.equal(r.body.traverseDepth, 0, 'the depth is echoed at every depth, 0 included');
   });
 
   it('traverse: 1 nests the unembedded neighbour under the match that reached it', async (t) => {
@@ -164,8 +167,8 @@ describe('REST find-similar traverse actually expands', () => {
     assert.equal(r.body.traverseDepth, 1);
     assert.equal(r.body.count, r.body.results.length, 'count is the matches');
 
-    const match = r.body.results.find(x => x._id === matchId);
-    assert.ok(match, `the similarity match must be a result: ${JSON.stringify(r.body.results.map(x => x._id))}`);
+    const match = r.body.results.find(x => x.record?._id === matchId);
+    assert.ok(match, `the similarity match must be a result: ${JSON.stringify(r.body.results.map(x => x.record?._id))}`);
     assert.equal(typeof match.score, 'number', 'a match keeps its real similarity score');
 
     // The neighbour is not embedded, so vector search cannot have found it. Its presence IS the traversal —

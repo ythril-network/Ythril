@@ -35,6 +35,7 @@ import { NotFoundError } from '../../util/errors.js';
 // and its own idea of what 'contains' means. Two spellings of one join is how the doors start
 // disagreeing about which records a name matches.
 import { rankingFields } from '../../brain/recall-shape.js';
+import { pageBudgetSchema } from './_page-budget-schema.js';
 
 /**
  * Space scope for find_similar — mirrors recall's omit-space idiom (F1 consistency).
@@ -51,12 +52,10 @@ import { rankingFields } from '../../brain/recall-shape.js';
  * arrive as one type. A `string | string[]` parameter here would put the normalising step at each door,
  * and the doors are exactly where one of them gets it wrong.
  *
- * **`crossSpace` is NOT deprecated, and this docblock called it that in both bullets** — the word was
- * removed from the tool's own schema description on purpose, and left standing here. It looked like a pure
- * duplicate of omitting `space`, and removing it from the tool turned the MCP/REST parity gate's
- * `find-similar ↔ find_similar` case red: **the REST route takes the space in its PATH**, so *"omit the
- * space"* is not expressible there and `crossSpace: true` is REST's only route to the same capability.
- * Dropping it on one door alone is exactly the parameter-level divergence that gate exists to catch.
+ * **`crossSpace` is NOT deprecated.** It looks like a duplicate of omitting `space`, and is not: `space` says where
+ * the SOURCE entry lives, so naming it and setting `crossSpace` searches every other space from a source in one — a
+ * request omitting `space` cannot express, because omitting it also looks for the source everywhere. (Its earlier
+ * reason, a REST route with the space in its path, stopped being true at 5.0; REST answers through this tool now.)
  *
  * Pure (proxy resolver injected) so the scope logic is unit-testable without a database.
  */
@@ -217,30 +216,8 @@ export const recallTool: ToolHandler = {
               type: 'object',
               description: 'Fields to include (1) or exclude (0), the same grammar `filter` takes and applied to each result\'s `record` — dotted paths work, so `{"name": 1, "properties.status": 1}` is valid. REACH FOR THIS RATHER THAN SKIPPING IT: it is the difference between an answer you can read inline and one that overruns your context. Measured by an integrator before this existed — a search for fifteen names, a `from`, a `kind` and a `status` returned 100,547 characters where the wanted data was about 1.5 KB, and their client refused the response outright. IT APPLIES RECURSIVELY: a `traverse` answer\'s `_graph` nodes and edges are projected at every depth, which is where a large answer actually comes from. Inclusion and exclusion cannot be mixed (the non-`_id` fields decide which you meant), `_id` survives an inclusion projection unless you send `_id: 0`, and the embedding VECTOR can never be projected back in — an explicit `embedding: 1` is dropped rather than honoured. The ranking envelope (`score`, `spaceId`, `type`) sits outside `record` here and is never projected away, so you cannot lose the score you searched for.',
             },
-            maxChars: {
-              type: 'integer',
-              minimum: 1000,
-              description: 'Ceiling on the serialised response body, in CHARACTERS. **DEFAULT 25000 ON THIS DOOR, and 50000 on REST — the one place the two doors deliberately differ.** Both accept the same parameter with the same floor, the same ceiling and the same refusal; only the number applied when you say nothing differs, because an MCP tool result meets a hard per-result ceiling inside YOUR client that you cannot raise, while a REST body lands in a buffer its caller allocated. Measured: a caller received a 98356-character answer that was correct, in budget and fully specified, and their client refused it outright. 25000 is about 6 whole records at ~4 KB each, roughly 7000 tokens. RAISE IT IF YOUR CLIENT CAN TAKE MORE — up to 5000000. THIS IS THE PARAMETER THAT USED TO BE CALLED `maxBytes`: it always counted characters, which equal bytes only for ASCII. If your limit is really in bytes, use `maxBytes` — it counts real UTF-8 bytes now, and both apply when you set both.',
-            },
-            maxBytes: {
-              type: 'integer',
-              minimum: 1000,
-              description: 'Ceiling on the serialised response body, in real UTF-8 BYTES. **NO DEFAULT — opt-in.** Set it when your limit is genuinely a byte limit, which a transport or buffer limit is. It is not defaulted because bytes are always ≥ characters, so a byte default equal to the character one would silently become the binding constraint on every non-ASCII answer. WHEN YOU SET BOTH, BOTH APPLY: the answer stops at whichever ceiling it reaches first, which for German or Polish content is about 26% sooner in bytes than the same number of characters suggests, and about 35% sooner for emoji. **THIS PARAMETER CHANGED MEANING IN 3.7** — it used to bound characters while its name, its refusal and its response field all said bytes. If you set it before and want the old behaviour, send the same number as `maxChars`.',
-            },
-            maxTokens: {
-              type: 'integer',
-              minimum: 1,
-              description: 'A convenience onto `maxBytes`, converted at a fixed 3.5 characters per token. If you send both, the SMALLER resulting byte figure applies — stating two ceilings means you meant both. It is an approximation and cannot be anything else, because the server does not know your tokeniser: the realistic span across these payloads is 3.0–3.9 chars/token, and 3.5 was chosen because the customary 4.0 UNDER-counts tokens and is worst exactly on graph-heavy responses. Undershooting costs one more page; overshooting costs a blown context, and those are not symmetric.',
-            },
-            skip: {
-              type: 'integer',
-              minimum: 0,
-              description: 'How many of the ranked matches to skip before filling the byte budget (default 0). THIS IS HOW YOU READ A TRUNCATED ANSWER: a response with `truncated: true` also carries `nextSkip`, and sending that back gets you the next prefix — no match repeated, none missed. The ranking is recomputed per call, so this is a continuation over one ordered answer rather than a cursor over a snapshot; a write between two pages can shift what lands where. Skipping past the end returns zero results with `truncated: false`, which is how a loop knows it is done.',
-            },
-            remainderDump: {
-              type: 'boolean',
-              description: 'Also KEEP the matches that did not fit as a spill, reported as `remainder` with a `spillId` for `read_spill` (default false). Only meaningful when the answer truncates. A spill is readable by your token alone, for up to one day, and is never written into any space; paging with `skip`/`nextSkip` reaches the same records without one. If it cannot be kept, `spillRefused` says why. It used to happen unconditionally on every truncated call, which meant a caller that only wanted the next page paid for a download it never opened.',
-            },
+            // The size ceilings and the paging pair, from the one schema every budgeted tool takes (Q-161).
+            ...pageBudgetSchema('match'),
             traverse: {
               // A depth, or a whole traversal minus its start node. Built from `TRAVERSE_OPTION_FIELDS` rather
               // than spelled out here — see `traverseOptionSchema`, which exists because these two tools each
@@ -496,7 +473,7 @@ export const find_similarTool: ToolHandler = {
     + '• `incompleteRows`, `incompleteCount` and `graphTruncated` — the same rule for a neighbourhood as on `recall`: a match comes with its WHOLE `_graph` or is left out and named, and `truncatedBy` says which bound stopped a truncated answer.\n\n'
     + 'IT ANSWERED PLAIN TEXT AT `traverse: 0` UNTIL 3.1.0, and JSON only above it. If you built against that, this is the break: parse JSON at every depth now. Two things arrive with it — the default depth gains the size cap it never had, and `includeFileContent`/`includeDiagnostics` start doing something there, having been accepted and unobservable on a summary line.\n\n'
     + 'Provide `space` to scope to one space, or omit it to search every space the token can reach. `score` is raw cosine similarity — the same number `recall` reports, but here it is the ONLY ranking, so `minScore` is a genuine relevance gate rather than the vector-side gate it is on `recall`.\n\n'
-    + 'With `traverse: 0` the answer is a plain-text summary; above 0 it is JSON, because a graph does not summarise.',
+    + 'REST `POST /api/brain/similar` answers through this tool, so it returns exactly this JSON — the same hits and the same `source`.',
   spaceRequired: false,
   // recall / similar / filter fan out per space already, so a list costs them nothing but
   // the parse. Every other tool acts on exactly one space and refuses a list.
@@ -523,40 +500,20 @@ export const find_similarTool: ToolHandler = {
               type: 'object',
               description: 'Fields to include (1) or exclude (0), the same grammar `filter` takes and applied to each result\'s `record` — dotted paths work, so `{"name": 1, "properties.status": 1}` is valid. REACH FOR THIS RATHER THAN SKIPPING IT: it is the difference between an answer you can read inline and one that overruns your context. Measured by an integrator before this existed — a search for fifteen names, a `from`, a `kind` and a `status` returned 100,547 characters where the wanted data was about 1.5 KB, and their client refused the response outright. IT APPLIES RECURSIVELY: a `traverse` answer\'s `_graph` nodes and edges are projected at every depth, which is where a large answer actually comes from. Inclusion and exclusion cannot be mixed (the non-`_id` fields decide which you meant), `_id` survives an inclusion projection unless you send `_id: 0`, and the embedding VECTOR can never be projected back in — an explicit `embedding: 1` is dropped rather than honoured. The ranking envelope (`score`, `spaceId`, `type`) sits outside `record` here and is never projected away, so you cannot lose the score you searched for.',
             },
-            maxChars: {
-              type: 'integer',
-              minimum: 1000,
-              description: 'Ceiling on the serialised response body, in CHARACTERS. **DEFAULT 25000 ON THIS DOOR, and 50000 on REST — the one place the two doors deliberately differ.** Both accept the same parameter with the same floor, the same ceiling and the same refusal; only the number applied when you say nothing differs, because an MCP tool result meets a hard per-result ceiling inside YOUR client that you cannot raise, while a REST body lands in a buffer its caller allocated. Measured: a caller received a 98356-character answer that was correct, in budget and fully specified, and their client refused it outright. 25000 is about 6 whole records at ~4 KB each, roughly 7000 tokens. RAISE IT IF YOUR CLIENT CAN TAKE MORE — up to 5000000. THIS IS THE PARAMETER THAT USED TO BE CALLED `maxBytes`: it always counted characters, which equal bytes only for ASCII. If your limit is really in bytes, use `maxBytes` — it counts real UTF-8 bytes now, and both apply when you set both.',
-            },
-            maxBytes: {
-              type: 'integer',
-              minimum: 1000,
-              description: 'Ceiling on the serialised response body, in real UTF-8 BYTES. **NO DEFAULT — opt-in.** Set it when your limit is genuinely a byte limit, which a transport or buffer limit is. It is not defaulted because bytes are always ≥ characters, so a byte default equal to the character one would silently become the binding constraint on every non-ASCII answer. WHEN YOU SET BOTH, BOTH APPLY: the answer stops at whichever ceiling it reaches first, which for German or Polish content is about 26% sooner in bytes than the same number of characters suggests, and about 35% sooner for emoji. **THIS PARAMETER CHANGED MEANING IN 3.7** — it used to bound characters while its name, its refusal and its response field all said bytes. If you set it before and want the old behaviour, send the same number as `maxChars`.',
-            },
-            maxTokens: {
-              type: 'integer',
-              minimum: 1,
-              description: 'A convenience onto `maxBytes`, converted at a fixed 3.5 characters per token. If you send both, the SMALLER resulting byte figure applies — stating two ceilings means you meant both. It is an approximation and cannot be anything else, because the server does not know your tokeniser: the realistic span across these payloads is 3.0–3.9 chars/token, and 3.5 was chosen because the customary 4.0 UNDER-counts tokens and is worst exactly on graph-heavy responses. Undershooting costs one more page; overshooting costs a blown context, and those are not symmetric.',
-            },
-            skip: {
-              type: 'integer',
-              minimum: 0,
-              description: 'How many of the ranked matches to skip before filling the byte budget (default 0). THIS IS HOW YOU READ A TRUNCATED ANSWER: a response with `truncated: true` also carries `nextSkip`, and sending that back gets you the next prefix — no match repeated, none missed. The ranking is recomputed per call, so this is a continuation over one ordered answer rather than a cursor over a snapshot; a write between two pages can shift what lands where. Skipping past the end returns zero results with `truncated: false`, which is how a loop knows it is done.',
-            },
-            remainderDump: {
-              type: 'boolean',
-              description: 'Also KEEP the matches that did not fit as a spill, reported as `remainder` with a `spillId` for `read_spill` (default false). Only meaningful when the answer truncates. A spill is readable by your token alone, for up to one day, and is never written into any space; paging with `skip`/`nextSkip` reaches the same records without one. If it cannot be kept, `spillRefused` says why. It used to happen unconditionally on every truncated call, which meant a caller that only wanted the next page paid for a download it never opened.',
-            },
-            topK: { type: 'number', minimum: 1, maximum: 100, default: 10, description: 'Max results to return (clamped to 1–100). Default 10.' },
+            // The size ceilings and the paging pair, from the one schema every budgeted tool takes (Q-161).
+            ...pageBudgetSchema('match'),
+            // Refused above 100, not clamped: the validator's range IS the contract (`mcp-args-validation`), so the
+            // description says so. It said "clamped", which REST did until it answered through this tool (Q-89).
+            topK: { type: 'number', minimum: 1, maximum: 100, default: 10, description: 'Max results to return, 1–100; a value outside that is refused, never clamped. Default 10.' },
             minScore: unitScoreSchema('Minimum cosine similarity (0.0–1.0). Results below it are excluded. Unlike on `recall`, this IS the relevance gate — cosine distance is the only ranking here, so raising it narrows the answer honestly rather than cutting candidates a reranker would have rescued. For deduplication, start high: near-duplicates sit well above 0.9 and everything below that is a topic match rather than a repeat.'),
             traverse: {
               // Literally `recall`'s, not merely the same shape: one builder, so a parameter cannot mean one
               // thing on one search and something else on the next.
               ...traverseOptionSchema(MAX_RECALL_TRAVERSE),
               default: 0,
-              description: `Optional graph-expansion depth (integer 0–${MAX_RECALL_TRAVERSE}, default 0). When > 0, each similar match is expanded along knowledge-graph edges up to this many hops and what the walk reached is NESTED under the match that reached it in a \`_graph\` array — {edges, node, paths} per node, identical to \`recall\`'s shape: \`edges\` holds every edge joining that node to the one it is nested under as whole documents (more than one when a pair is joined twice, or when a node loops back to itself) and carries \`direction\` (outbound|inbound|self) in place of \`from\`/\`to\`, which the entry already states, \`node\` the reached record, \`paths\` every route to it as record ids with the match first. LINKS, since 3.6, and identical to \`recall\` here too: a walk follows stored edges always, and the \`entityIds\` field a fact, chrono entry or file carries naming what it is about only when you ask — \`{depth: 2, includeChrono: true, includeMemories: true, includeFiles: true}\`, one flag per kind. CHRONO AND FILES DEFAULT FALSE; with \`includeMemories\` unsaid a walk brings the ATTRIBUTED claims of what it reached — those an AI assistant originated, stored with no vector so nothing can rank them — and no other fact. \`true\` admits every linked fact, \`false\` none. Turn one on and two things change. A linked node arrives carrying \`kind\` (chrono|fact|file) and the fields that say what it is — a chrono's title and type, a fact's fact, a file's path/description/tags, NEVER file chunk text — so \`node\` is not always an entity. And its reaching edge is SYNTHETIC: id \`<label>:<from>:<to>\`, label \`chrono.entityIds\`/\`fact.entityIds\`/\`file.entityIds\` — a frozen token naming the 4.x field these links replaced, and part of the link id — and no author/createdAt/seq, because a derived edge has none — do not look one up by that id. \`direction\` narrows STORED EDGES ONLY, so an inbound walk still reaches the records that name an entity. \`count\` is the number of matches and \`graphNodes\` how many nodes were reached. A match is returned with its WHOLE graph or not at all, exactly as on \`recall\`: one whose neighbourhood cannot be walked whole is left out and named in \`incompleteRows\` and \`incompleteCount\`, with \`graphTruncated: true\`, and a call that runs out of walk budget or time stops at the last whole match with \`truncatedBy\` and \`nextSkip\`. Nothing is written unless you send \`remainderDump: true\`. With traverse > 0 the response is JSON instead of the plain text summary.`,
+              description: `Optional graph-expansion depth (integer 0–${MAX_RECALL_TRAVERSE}, default 0). When > 0, each similar match is expanded along knowledge-graph edges up to this many hops and what the walk reached is NESTED under the match that reached it in a \`_graph\` array — {edges, node, paths} per node, identical to \`recall\`'s shape: \`edges\` holds every edge joining that node to the one it is nested under as whole documents (more than one when a pair is joined twice, or when a node loops back to itself) and carries \`direction\` (outbound|inbound|self) in place of \`from\`/\`to\`, which the entry already states, \`node\` the reached record, \`paths\` every route to it as record ids with the match first. LINKS, since 3.6, and identical to \`recall\` here too: a walk follows stored edges always, and the \`entityIds\` field a fact, chrono entry or file carries naming what it is about only when you ask — \`{depth: 2, includeChrono: true, includeMemories: true, includeFiles: true}\`, one flag per kind. CHRONO AND FILES DEFAULT FALSE; with \`includeMemories\` unsaid a walk brings the ATTRIBUTED claims of what it reached — those an AI assistant originated, stored with no vector so nothing can rank them — and no other fact. \`true\` admits every linked fact, \`false\` none. Turn one on and two things change. A linked node arrives carrying \`kind\` (chrono|fact|file) and the fields that say what it is — a chrono's title and type, a fact's fact, a file's path/description/tags, NEVER file chunk text — so \`node\` is not always an entity. And its reaching edge is SYNTHETIC: id \`<label>:<from>:<to>\`, label \`chrono.entityIds\`/\`fact.entityIds\`/\`file.entityIds\` — a frozen token naming the 4.x field these links replaced, and part of the link id — and no author/createdAt/seq, because a derived edge has none — do not look one up by that id. \`direction\` narrows STORED EDGES ONLY, so an inbound walk still reaches the records that name an entity. \`count\` is the number of matches and \`graphNodes\` how many nodes were reached. A match is returned with its WHOLE graph or not at all, exactly as on \`recall\`: one whose neighbourhood cannot be walked whole is left out and named in \`incompleteRows\` and \`incompleteCount\`, with \`graphTruncated: true\`, and a call that runs out of walk budget or time stops at the last whole match with \`truncatedBy\` and \`nextSkip\`. Nothing is written unless you send \`remainderDump: true\`.`,
             },
-            crossSpace: { type: 'boolean', default: false, description: 'Forces a cross-space search even when `space` is given. On MCP the idiomatic form is to OMIT `space`, which does the same thing; this flag exists because the REST route takes the space in its PATH and has no way to omit it, and both doors must accept the same parameters. Not slated for removal.' },
+            crossSpace: { type: 'boolean', default: false, description: 'Search every space you can read even when `space` is given. `space` says where the SOURCE entry lives, so naming it and setting this finds records like it in every other space — a request omitting `space` cannot express, because omitting it also looks for the source everywhere. Not slated for removal.' },
           },
           required: ['entryId', 'entryType'],
           additionalProperties: false,
