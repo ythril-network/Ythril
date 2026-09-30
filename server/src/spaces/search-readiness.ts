@@ -169,7 +169,16 @@ export function createSearchReadiness(deps: SearchReadinessDeps) {
   let overflowWarned = false;
   const waiters = new Map<string, () => unknown>();
 
-  function setState(next: SearchState): void { state = next; stateSince = now(); }
+  /**
+   * `down` and `absent` are one outage to everyone who reads `since` (`indexWaitingSince`): the moment search
+   * stopped answering, not the moment the watcher finished counting refusals. So the moment is kept across a move
+   * between them and starts over only when the state leaves that pair.
+   */
+  function setState(next: SearchState): void {
+    const notAnswering = (s: SearchState) => s === 'down' || s === 'absent';
+    if (!(notAnswering(state) && notAnswering(next))) stateSince = now();
+    state = next;
+  }
 
   /** One ask, bounded at both ends: `maxTimeMS` on the server (in `probe`) and this race on ours. */
   function probeOnce(): Promise<unknown> {

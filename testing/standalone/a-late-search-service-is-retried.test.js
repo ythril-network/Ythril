@@ -226,6 +226,28 @@ describe('absent: a database with no search component at all', () => {
     assert.equal(b.cap.lines.warn.length, warnsThen, 'an absent search service warned again on a later probe');
   });
 
+  it('the moment search first stopped answering is kept when `down` becomes `absent`', async () => {
+    // `since` is what GET /api/spaces reports as indexWaitingSince: it must say when the service STOPPED answering,
+    // not when the watcher finished counting refusals. A live drive saw it move from :41 to :04 on the first read
+    // after the change of state.
+    const b = build(failing(noMongotError));
+    await intoDown(b);
+    const first = b.r.snapshot();
+    assert.equal(first.state, 'down');
+    assert.ok(typeof first.since === 'number');
+    await b.vt.advance(20 * MIN);
+    const later = b.r.snapshot();
+    assert.equal(later.state, 'absent');
+    assert.equal(later.since, first.since, 'since moved when down became absent');
+    // and it starts over only once search has really been up: a new outage is a new moment
+    b.state.behaviour = ok;
+    await b.vt.advance(2 * HOUR);
+    assert.equal(b.r.snapshot().state, 'up');
+    b.state.behaviour = failing(noMongotError);
+    b.r.reset();
+    assert.equal(b.r.snapshot().since, null);
+  });
+
   it('absent heals too: the day a mongot is added, the waiters run', async () => {
     const b = build(failing(noMongotError));
     await intoDown(b);

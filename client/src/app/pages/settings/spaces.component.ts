@@ -101,9 +101,9 @@ import { HscrollTopDirective } from '../../shared/hscroll-top.directive';
                   <td><span class="drag-handle" cdkDragHandle [class.drag-handle-disabled]="sortMode() !== 'custom'" [attr.title]="'spaces.table.dragHandleTitle' | transloco"><ph-icon name="dots-three-vertical" [size]="16"/></span></td>
                   <td style="font-weight:500;">{{ s.label }}
                     @if (s.indexStatus === 'building' && s.indexWaiting) {
-                      <span class="badge badge-yellow" style="margin-left:6px;font-weight:normal" [attr.title]="'spaces.indexWaitingTitle' | transloco" [attr.aria-label]="'spaces.indexWaitingTitle' | transloco"><span class="dot" style="width:7px;height:7px;border-radius:50%;background:currentColor;display:inline-block;vertical-align:middle;margin-right:4px;"></span>{{ 'spaces.indexWaiting' | transloco }}</span>
+                      <span class="badge badge-yellow" style="margin-left:6px;font-weight:normal;white-space:nowrap" [attr.title]="'spaces.indexWaitingTitle' | transloco" [attr.aria-label]="'spaces.indexWaitingTitle' | transloco"><span class="dot" style="width:7px;height:7px;flex:none;border-radius:50%;background:currentColor;display:inline-block;vertical-align:middle;margin-right:4px;"></span>{{ 'spaces.indexWaiting' | transloco }}</span>
                     } @else if (s.indexStatus === 'building') {
-                      <span class="badge badge-blue" style="margin-left:6px;font-weight:normal" [attr.title]="'spaces.indexBuildingTitle' | transloco"><span class="spinner" style="width:8px;height:8px;border-width:1.5px;display:inline-block;vertical-align:middle;margin-right:3px;"></span>{{ 'spaces.indexBuilding' | transloco }}</span>
+                      <span class="badge badge-blue" style="margin-left:6px;font-weight:normal;white-space:nowrap" [attr.title]="'spaces.indexBuildingTitle' | transloco"><span class="spinner" style="width:8px;height:8px;flex:none;border-width:1.5px;display:inline-block;vertical-align:middle;margin-right:3px;"></span>{{ 'spaces.indexBuilding' | transloco }}</span>
                     } @else if (s.indexStatus === 'failed') {
                       <span class="badge badge-red" style="margin-left:6px;font-weight:normal" [attr.title]="'spaces.indexFailedTitle' | transloco">{{ 'spaces.indexFailed' | transloco }}</span>
                     }
