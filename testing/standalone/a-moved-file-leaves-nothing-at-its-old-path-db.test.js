@@ -149,6 +149,25 @@ describe('a moved file leaves nothing at its old path (real MongoDB)', { skip },
       'a chunk still naming the old parent is invisible to the delete of the file it belongs to');
   });
 
+  it('moving a DIRECTORY carries the links of every file in it, as renaming one file does (Q-164)', async () => {
+    // A file's `_id` is its path, so every link it holds hangs off that path. The single-file rename re-created them
+    // under the new one; the directory move re-rooted the records and left the links naming paths that were gone.
+    const links = await import('../../server/dist/brain/links.js');
+    const adjacency = await import('../../server/dist/brain/link-adjacency.js');
+    await mongo.col(`${SPACE}_entities`).insertOne({ _id: '7f1c2a3b-4d5e-4f60-8a71-92b3c4d5e6f7', spaceId: SPACE, name: 'Ada', type: 'person', tags: [], properties: {} });
+    await uploaded('src/x.txt', 'run-links');
+    await links.reconcileLinks(SPACE, 'src/x.txt', 'file', { entity: ['7f1c2a3b-4d5e-4f60-8a71-92b3c4d5e6f7'] }, { instanceId: 'test', instanceLabel: 'test' });
+    assert.equal((await adjacency.linksStartingFrom(SPACE, ['src/x.txt'])).length, 1, 'precondition: the file holds a link');
+
+    await cascade.moveFileCascade(SPACE, 'src', 'dst');
+
+    assert.deepEqual(await adjacency.linksStartingFrom(SPACE, ['src/x.txt']), [], 'a link still names the path the file left');
+    const carried = await adjacency.linksStartingFrom(SPACE, ['dst/x.txt']);
+    assert.deepEqual(carried.map(l => l.to), ['7f1c2a3b-4d5e-4f60-8a71-92b3c4d5e6f7'], 'the moved file lost its link');
+    await mongo.col(`${SPACE}_links`).deleteMany({});
+    await mongo.col(`${SPACE}_entities`).deleteMany({});
+  });
+
   it('renaming one file carries its chunks and its converted sidecar, on disk and in the metadata', async () => {
     // No race at all: the rename re-rooted only the file's own id, and a chunk id is `<path>#chunk<n>`.
     const claim = await uploaded('notes/a.txt', 'run-a');
