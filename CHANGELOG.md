@@ -82,6 +82,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   file's chunks used to stay at the old path, a moved folder's chunks kept naming parents that no longer existed
   (so deleting the moved file removed none of them), and the `_converted/`/`_extracted/` sidecars moved for
   neither. REST `PATCH /api/files/:spaceId` and MCP `move_file` now run the same move (`files/move-cascade.ts`).
+  **And a moved folder keeps its files' links** (`Q-164`): renaming one file re-created its links under the new
+  path, but moving a folder re-rooted the records and left every link naming a path that was gone, so each file in
+  it silently lost what it was linked to. Both now carry links through one step.
 - **Every list that stopped at a number now says so and can be read to the end** (bundle-34). Owner rule: *"if i
   get a result i want to be sure i get what i asked for."* Each now pages through one rule (`brain/list-page.ts`):
   whole rows, `limit` and `skip` refused rather than floored when they are not numbers, the byte budget, and
