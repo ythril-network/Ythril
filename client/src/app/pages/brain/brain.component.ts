@@ -357,11 +357,26 @@ interface SpaceView {
               (resetUsage)="resetSpaceUsage()" />
           }
         }
-        @if (activeTab() === 'query') { <app-query-tab [spaceId]="activeSpaceId()" (viewInGraph)="viewInGraph($event)" /> }
+        <!-- Query and Review are DEFERRED like Graph and Files (Q-112): neither is the landing tab. Measured: this
+             chunk was 292 kB against a 260 kB budget and is 194 kB with them split out (query-tab 59 kB, review-tab
+             41 kB, each loaded the first time its tab opens). Same shape — gated on activeTab() so leaving unmounts. -->
+        @if (activeTab() === 'query') {
+          @defer (on immediate) {
+            <app-query-tab [spaceId]="activeSpaceId()" (viewInGraph)="viewInGraph($event)" />
+          } @loading (minimum 200ms) {
+            <div class="loading-overlay loading-overlay--float" data-tab-defer="query"><span class="spinner"></span></div>
+          }
+        }
 
         <!-- Review (F-REVIEW): duplicate pairs for THIS space. Was a global Settings page; a duplicate
              pair only ever means something inside one space, so it belongs beside the space's data. -->
-        @if (activeTab() === 'review') { <app-review-tab [spaceId]="activeSpaceId()" (openTab)="setTab($event)" /> }
+        @if (activeTab() === 'review') {
+          @defer (on immediate) {
+            <app-review-tab [spaceId]="activeSpaceId()" (openTab)="setTab($event)" />
+          } @loading (minimum 200ms) {
+            <div class="loading-overlay loading-overlay--float" data-tab-defer="review"><span class="spinner"></span></div>
+          }
+        }
       </div>
 
       <!-- Detail Drawer -->

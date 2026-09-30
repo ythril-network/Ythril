@@ -34,8 +34,9 @@ export class SchemaApi {
 
   // ── Schema Library ─────────────────────────────────────────────────────────
 
-  listSchemaLibrary(): Observable<{ entries: SchemaLibraryEntry[] }> {
-    return this.http.get<{ entries: SchemaLibraryEntry[] }>('/api/schema-library');
+  /** Every entry, and how many space types reference each (`usageCounts`, by entry name — Q-112). */
+  listSchemaLibrary(): Observable<{ entries: SchemaLibraryEntry[]; usageCounts?: Record<string, number> }> {
+    return this.http.get<{ entries: SchemaLibraryEntry[]; usageCounts?: Record<string, number> }>('/api/schema-library');
   }
 
   getSchemaLibraryEntry(name: string): Observable<{ entry: SchemaLibraryEntry }> {

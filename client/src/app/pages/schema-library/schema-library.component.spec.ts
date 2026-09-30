@@ -81,6 +81,21 @@ function create() {
   return { fixture, toasts, schemaApi };
 }
 
+describe('SchemaLibraryComponent — usage counts arrive with the list (Q-112)', () => {
+  beforeEach(() => TestBed.resetTestingModule());
+
+  it('makes no per-entry request, and shows the count the list carried', () => {
+    const { fixture, schemaApi } = create();
+    schemaApi.listSchemaLibrary.mockReturnValue(of({ entries: [ENTRY], usageCounts: { [ENTRY.name]: 3 } }) as never);
+    (fixture.componentInstance as any).load();
+    fixture.detectChanges();
+    // The page opened once on construction and once here: neither may fan out one /usages request per entry.
+    expect(schemaApi.getSchemaLibraryUsages, 'a /usages request per entry').not.toHaveBeenCalled();
+    expect((fixture.nativeElement as HTMLElement).textContent).toContain('3');
+    expect((fixture.componentInstance as any).usageCounts()[ENTRY.name]).toBe(3);
+  });
+});
+
 describe('SchemaLibraryComponent — exporting an entry (characterization for Q-92)', () => {
   beforeEach(() => TestBed.resetTestingModule());
 

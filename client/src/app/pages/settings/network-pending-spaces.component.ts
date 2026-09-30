@@ -60,7 +60,8 @@ export class NetworkPendingSpacesComponent {
 
   /** In-flight accept/dismiss per space, and the optional local id typed for an accept. */
   resolving: Record<string, boolean> = {};
-  mapTo: Record<string, string> = {};
+  // `| undefined` because a network with nothing typed yet has no entry — the template's `?? ''` depends on it.
+  mapTo: Record<string, string | undefined> = {};
 
   resolve(spaceId: string, action: 'accept' | 'dismiss'): void {
     const mapTo = action === 'accept' ? (this.mapTo[spaceId] ?? '').trim() : '';

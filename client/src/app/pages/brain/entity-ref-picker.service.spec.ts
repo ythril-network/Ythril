@@ -140,3 +140,50 @@ describe('EntityRefPicker (characterization)', () => {
     expect(getEntitiesByIds).not.toHaveBeenCalled();
   });
 });
+
+/*
+ * Q-112: opening a record resolved each linked fact's and chrono entry's title with its OWN request — one getMemory
+ * or getChrono per id — where the entity chips already used one batched `$in` read. Now every kind is one request.
+ */
+describe('EntityRefPicker — linked titles in one request per kind (Q-112)', () => {
+  const getRecordsByIds = vi.fn((_s: string, collection: string, ids: string[]) =>
+    of(ids.map(id => collection === 'facts' ? { _id: id, fact: `fact ${id}` } : { _id: id, title: `chrono ${id}` })));
+  const getMemory = vi.fn(), getChrono = vi.fn();
+
+  function create(): EntityRefPicker {
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({
+      providers: [EntityRefPicker, BrainStore, { provide: BrainApi, useValue: { getRecordsByIds, getMemory, getChrono } }],
+    });
+    const picker = TestBed.inject(EntityRefPicker);
+    picker.spaceId.set('work');
+    return picker;
+  }
+
+  beforeEach(() => { getRecordsByIds.mockClear(); getMemory.mockReset(); getChrono.mockReset(); });
+
+  it('three linked facts are one request, and their titles land in the cache', () => {
+    const picker = create();
+    picker.resolveMemoryTitles(['f1', 'f2', 'f3']);
+    expect(getMemory).not.toHaveBeenCalled();
+    expect(getRecordsByIds).toHaveBeenCalledOnce();
+    expect(getRecordsByIds.mock.calls[0]!.slice(1)).toEqual(['facts', ['f1', 'f2', 'f3']]);
+    expect(picker.memoryRefTitle('f2')).toBe('fact f2');
+  });
+
+  it('three linked chrono entries are one request, and their titles land in the cache', () => {
+    const picker = create();
+    picker.resolveChronoTitles(['c1', 'c2', 'c3']);
+    expect(getChrono).not.toHaveBeenCalled();
+    expect(getRecordsByIds).toHaveBeenCalledOnce();
+    expect(getRecordsByIds.mock.calls[0]!.slice(1)).toEqual(['chrono', ['c1', 'c2', 'c3']]);
+    expect(picker.chronoRefTitle('c3')).toBe('chrono c3');
+  });
+
+  it('asks only for the ids it does not already know', () => {
+    const picker = create();
+    picker.resolveMemoryTitles(['f1']);
+    picker.resolveMemoryTitles(['f1', 'f2']);
+    expect(getRecordsByIds.mock.calls[1]![2]).toEqual(['f2']);
+  });
+});

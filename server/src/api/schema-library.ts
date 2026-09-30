@@ -41,6 +41,7 @@ import rateLimit from 'express-rate-limit';
 import type { SchemaLibraryEntry, SchemaCatalog } from '../config/types.js';
 import { KNOWLEDGE_TYPES } from '../config/types.js';
 import { EndpointMemberZ } from '../spaces/body-schemas.js';
+import { libraryUsages } from '../spaces/library-usages.js';
 
 export const schemaLibraryRouter = Router();
 
@@ -212,7 +213,11 @@ export const CatalogBodyZ = z.object({
 // ── GET / — list all library entries ──────────────────────────────────────
 
 schemaLibraryRouter.get('/', globalRateLimit, requireAuth, (_req, res) => {
-  res.json({ entries: getSchemaLibrary() });
+  // `usageCounts` beside the entries rather than on them: an entry is also what a client sends back on a write,
+  // and a derived count on it would be a field the write has to refuse or strip (Q-112).
+  const used = libraryUsages(getConfig().spaces);
+  const entries = getSchemaLibrary();
+  res.json({ entries, usageCounts: Object.fromEntries(entries.map(e => [e.name, used.get(e.name)?.length ?? 0])) });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -680,24 +685,8 @@ schemaLibraryRouter.patch('/:name', globalRateLimit, requireAdminMfa, (req, res)
 
 schemaLibraryRouter.get('/:name/usages', globalRateLimit, requireAuth, (req, res) => {
   const name = req.params['name'] as string;
-  const refValue = `library:${name}`;
-  const kts = KNOWLEDGE_TYPES;
-
-  const usages: { spaceId: string; spaceLabel: string; knowledgeType: string; typeName: string }[] = [];
-  for (const space of getConfig().spaces) {
-    const ts = space.meta?.typeSchemas;
-    if (!ts) continue;
-    for (const kt of kts) {
-      const ktMap = ts[kt];
-      if (!ktMap) continue;
-      for (const [typeName, schema] of Object.entries(ktMap)) {
-        if ((schema as { $ref?: string }).$ref === refValue) {
-          usages.push({ spaceId: space.id, spaceLabel: space.label, knowledgeType: kt, typeName });
-        }
-      }
-    }
-  }
-  res.json({ usages });
+  // The same function the list's `usageCounts` comes from, so the two cannot disagree (Q-112).
+  res.json({ usages: libraryUsages(getConfig().spaces).get(name) ?? [] });
 });
 
 // ── DELETE /:name — remove a library entry ─────────────────────────────────

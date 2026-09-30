@@ -132,16 +132,16 @@ export class EntityRefPicker {
     return full ? full.slice(0, 40) + (full.length > 40 ? '…' : '') : id.slice(0, 8) + '…';
   }
 
-  /** Resolve the uncached facts of a linkFacts list (opening a record for editing). Small N → per-id. */
+  /** Resolve the uncached facts of a linkFacts list (opening a record for editing) — one request (Q-112). */
   resolveMemoryTitles(ids: string[]): void {
     const spaceId = this.spaceId();
     if (!spaceId) return;
-    for (const id of ids.filter(i => !this.memoryTitleCache()[i])) {
-      this.brainApi.getMemory(spaceId, id).subscribe({
-        next: (m) => this.memoryTitleCache.update(c => ({ ...c, [m._id]: m.fact })),
-        error: () => {},
-      });
-    }
+    const unknown = ids.filter(i => !this.memoryTitleCache()[i]);
+    if (!unknown.length) return;
+    this.brainApi.getRecordsByIds<{ _id: string; fact: string }>(spaceId, 'facts', unknown).subscribe({
+      next: (facts) => this.memoryTitleCache.update(c => ({ ...c, ...Object.fromEntries(facts.map(m => [m._id, m.fact])) })),
+      error: () => {},
+    });
   }
 
   // ── Inline chrono picker (file-meta; slice 4d "linkChronos searchable like memories") ──────────
@@ -186,15 +186,15 @@ export class EntityRefPicker {
     return full ? full.slice(0, 40) + (full.length > 40 ? '…' : '') : id.slice(0, 8) + '…';
   }
 
-  /** Resolve the uncached titles of a linkChronos list (opening a record for editing). Small N → per-id. */
+  /** Resolve the uncached titles of a linkChronos list (opening a record for editing) — one request (Q-112). */
   resolveChronoTitles(ids: string[]): void {
     const spaceId = this.spaceId();
     if (!spaceId) return;
-    for (const id of ids.filter(i => !this.chronoTitleCache()[i])) {
-      this.brainApi.getChrono(spaceId, id).subscribe({
-        next: (c) => this.chronoTitleCache.update(t => ({ ...t, [c._id]: c.title })),
-        error: () => {},
-      });
-    }
+    const unknown = ids.filter(i => !this.chronoTitleCache()[i]);
+    if (!unknown.length) return;
+    this.brainApi.getRecordsByIds<{ _id: string; title: string }>(spaceId, 'chrono', unknown).subscribe({
+      next: (entries) => this.chronoTitleCache.update(t => ({ ...t, ...Object.fromEntries(entries.map(c => [c._id, c.title])) })),
+      error: () => {},
+    });
   }
 }

@@ -597,6 +597,17 @@ describe('GET /api/schema-library/:name/usages — link counter', () => {
     assert.ok(ids.includes(usageSpaceB), `Expected ${usageSpaceB} in usages: ${JSON.stringify(ids)}`);
   });
 
+  it('the list answers the same count in usageCounts, with no per-entry request (Q-112)', async () => {
+    const one = await get(INSTANCES.a, token(), `/api/schema-library/${encodeURIComponent(usageLibName)}/usages`);
+    const list = await get(INSTANCES.a, token(), '/api/schema-library');
+    assert.equal(list.status, 200, JSON.stringify(list.body));
+    assert.equal(list.body?.usageCounts?.[usageLibName], one.body.usages.length,
+      `usageCounts disagrees with /usages: ${JSON.stringify(list.body?.usageCounts)}`);
+    assert.ok(list.body.usageCounts[usageLibName] >= 2, 'both spaces reference the entry');
+    // Beside the entries, never on them: an entry is what a write takes back.
+    assert.ok(list.body.entries.every(e => !('usageCount' in e) && !('usageCounts' in e)));
+  });
+
   it('each usage has the expected fields', async () => {
     const r = await get(INSTANCES.a, token(), `/api/schema-library/${encodeURIComponent(usageLibName)}/usages`);
     for (const u of r.body.usages) {

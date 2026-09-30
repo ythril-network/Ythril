@@ -7,7 +7,6 @@ import { TranslocoPipe } from '@jsverse/transloco';
 import { Entity } from '../../core/api.types';
 import { CascadePreview } from '../../core/cascade-preview.types';
 import { BrainApi } from '../../core/brain-api.service';
-import { httpErrorReason } from '../../core/http-error';
 import { TagInputComponent } from '../../shared/tag-input.component';
 import { PropertiesViewComponent } from '../../shared/properties-view.component';
 import { PropertiesEditorComponent } from '../../shared/properties-editor.component';
@@ -312,17 +311,14 @@ export class EntitiesTabComponent extends RecordTabBase {
   protected override load(): void {
     const spaceId = this.spaceId();
     if (!spaceId) return;
-    this.recordList.loading.set(true);
-    this.recordList.loadError.set(null);
     const ef: { type?: string; tag?: string; description?: string; properties?: string } = {};
     if (this.recordFilter().type) ef.type = this.recordFilter().type;
     if (this.recordFilter().tag) ef.tag = this.recordFilter().tag;
     if (this.recordFilter().description) ef.description = this.recordFilter().description;
     if (this.recordFilter().properties) ef.properties = this.recordFilter().properties;
-    this.brainApi.listEntities(spaceId, this.pageSize, this.skip(), ef, this.sortParam(), this.searchParam()).subscribe({
-      next: ({ entities }) => { this.store.entities.set(entities); this.recordList.loading.set(false); },
-      error: (e) => { this.recordList.loadError.set(httpErrorReason(e)); this.recordList.loading.set(false); },
-    });
+    // Through the tab's rows slot (Q-112): a newer filter's request cancels this one.
+    this.loadRows(this.brainApi.listEntities(spaceId, this.pageSize, this.skip(), ef, this.sortParam(), this.searchParam()),
+      ({ entities }) => this.store.entities.set(entities));
   }
 
   // The top bar is a SEMANTIC finder now (2b-iii-d): its A–Z half was removed since the docked Name

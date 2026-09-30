@@ -146,6 +146,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The client never shows an answer older than the one you asked for last (`Q-112`).** The graph's depth slider
+  started a traversal on every step it passed and drew whichever answer arrived last, so a slow depth-3 answer
+  could land over depth 4 — and a depth drawn from the cache could be redrawn by a deeper request still in flight.
+  It now asks once the slider rests and cancels what it no longer needs. The record tabs (entities, edges, facts,
+  chrono) let a slow answer to an old filter replace the new filter's rows, and a list load could replace a
+  semantic search's rows or the reverse; every answer that writes a tab's rows now goes through one latest-wins
+  slot (`core/latest-wins.ts`, which the tab search bars had privately), and so do the graph's selected-record
+  card and linked records. Opening a record resolved each linked fact and chrono title with its own request; it
+  is one request per kind now. The schema library asked `…/usages` once per entry to show its link counts;
+  `GET /api/schema-library` now answers `usageCounts` beside the entries, counted by the function the per-entry
+  route uses. The Brain page's chunk was 292 kB against a 260 kB budget and the space settings dialog's 179 kB
+  against 175 kB; deferring the tabs that are not where each opens brings them to 194 kB and 42 kB, and the budgets
+  are tightened to hold that. The nine unused standalone imports the build warned about are gone, and an unused
+  one now fails the build.
 - **The Query tab's walk headings show their counts (`Q-101`).** "Reached by the walk", and the Entities, Facts,
   Chrono and Files headings under it, rendered `({count})` literally in all three languages, and each reached record
   read `{hops} hop(s)`: the values used single braces, which the translation layer does not interpolate. A client

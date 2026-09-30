@@ -626,7 +626,7 @@ edges between the same pair**, both are drawn side by side instead of one standi
 | Control | What it does |
 |---------|-------------|
 | **Search** | Find and load an entity as the root node |
-| **Depth** | How many hops out from the root to show (1–10) |
+| **Depth** | How many hops out from the root to show (1–10). The graph asks for the depth once the slider comes to rest, so dragging across several steps is one request for where you stopped, and the canvas always shows the depth the slider reads — never a slower answer for a step you dragged past |
 | **Direction** | Show outbound edges, inbound edges, or both. It applies to the edges you drew between entities — not to the facts, timeline entries and files that merely MENTION an entity. A mention runs one way, from the record to the entity, so there is no second direction to choose and those are always reached the same way |
 | **Labels** | Toggle edge labels. The pill is lit when labels are SHOWN, so switching it off hides them. By default a label is shown only on the edges of the node you have selected, and on an edge you hover — labelling every edge at once is unreadable on a dense graph, because the labels overlap each other and the nodes |
 | **Fit** | Zoom to fit the whole graph in view |
