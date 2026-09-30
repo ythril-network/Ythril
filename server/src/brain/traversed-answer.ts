@@ -36,6 +36,8 @@ export async function traversedAnswer<T, S>(opts: {
 }): Promise<{ results: T[]; fields: Record<string, unknown> }> {
   const walk = rowGraphWalker({
     memberIds: opts.memberIds, maxDepth: opts.maxDepth, narrowing: opts.narrowing, deadline: opts.deadline,
+    // The page's rows, so the walker can walk a window of them in step (Q-136).
+    seeds: opts.seeds,
   });
   const out = await budgetedRowsEnvelope<T, S>({
     total: opts.seeds.length,

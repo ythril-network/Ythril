@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **A traversing recall walks its rows a window at a time, with every row exactly the graph it had before**
+  (`Q-136`). `recall` and `similar` with `traverse > 0` walked each result row on its own, so a page cost about
+  four queries per hop PER ROW — its edges, its link scan, the facts it named and the records it reached. Up to 16
+  rows are now walked together: one query of each kind per hop for the whole window, each row keeping its own
+  visited set, routes and bookkeeping. Measured on 20 rows of a 3 000-entity graph (MongoDB 8.2): depth 1 went
+  from 73 queries and 34.2 ms to 8 and 5.6 ms, depth 2 from 152 and 80.9 ms to 16 and 19.0 ms, depth 5 from 392
+  and 310.4 ms to 40 and 136.3 ms (`benchmarks/row-walk/`). Nothing in any answer changes: a row whose share of an
+  edge read would reach its own cap — a hub over the row ceiling — is read alone for that read, and the row
+  ceiling, `incompleteRows` reasons, the call's walk budget and the deadline behave as before. A differential
+  test walks every row both ways over hubs, cycles, self-loops, fact, chrono and file endpoints, linked records
+  and every narrowing, and requires them equal.
 - **Breaking:** **REST traverse refuses what it used to clamp (`Q-109`).** `POST /api/brain/spaces/:spaceId/traverse` now
   answers through the `graph_traverse` tool, as `/recall` and `/similar` answer through theirs, so the two doors share
   one set of caps and refusals. What REST quietly adjusted is a `400` now, as it always was on MCP: `maxDepth` outside

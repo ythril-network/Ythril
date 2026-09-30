@@ -27,6 +27,26 @@ import {
 import type { ChronoEntry, FactDoc, FileMetaDoc } from '../config/types.js';
 
 /**
+ * The three reads a link scan makes, as one object a caller may replace.
+ *
+ * Replaceable for ONE reason (Q-136): recall's row walker walks a window of rows together and answers each
+ * row's scan from one shared read (`walk-in-step.ts`). The scan itself — the classes, the probe, the visited
+ * set, the chunk scope — stays here, written once; only where the rows come from changes. The default is the
+ * three `link-adjacency.ts` readers, so a caller that passes nothing reads exactly as it always did.
+ */
+export interface LinkReads {
+  linksPointingAt(spaceId: string, ids: readonly string[], limit?: number): Promise<LinkEnd[]>;
+  linksStartingFrom(spaceId: string, ids: readonly string[], limit?: number): Promise<LinkEnd[]>;
+  docsFromCollection<T extends { _id: string }>(
+    spaceId: string, collection: LinkClass['collection'], ids: readonly string[],
+    projection?: Record<string, 1>, extra?: Record<string, unknown>,
+  ): Promise<T[]>;
+}
+
+/** The link readers themselves — what every scan reads through unless its caller batches. */
+export const STORED_LINK_READS: LinkReads = { linksPointingAt, linksStartingFrom, docsFromCollection };
+
+/**
  * The shape both scans read a FROM record as: an id plus whichever of the three arrays the class names.
  *
  * Indexed rather than three optional fields, because the field is chosen by `cls.field` at run time and a
@@ -142,6 +162,7 @@ interface FoundRecords {
 async function linkedRecordsFromRows(
   mid: string, rows: readonly LinkEnd[], wanted: readonly LinkClass[], remaining: number | undefined,
   attributedOnly: ReadonlySet<LinkClass>,
+  reads: LinkReads,
 ): Promise<FoundRecords> {
   // A cursor that came back PAST the budget is the case that hides: the database had more behind it — and that is
   // true however many of these survive the class filter and the visited set. The caller asks for one row more
@@ -182,7 +203,7 @@ async function linkedRecordsFromRows(
     // its records silently withheld.
     const claiming = wanted.filter(c => c.collection === collection);
     const narrowed = claiming.length > 0 && claiming.every(c => attributedOnly.has(c));
-    for (const doc of await docsFromCollection<LinkRow>(mid, collection, [...ids], undefined,
+    for (const doc of await reads.docsFromCollection<LinkRow>(mid, collection, [...ids], undefined,
       narrowed ? { ...ATTRIBUTED_ONLY } : undefined)) {
       for (const cls of classOfId.get(doc._id) ?? []) {
         found.push({ cls, doc, via: viaOf.get(`${doc._id}>${cls.kind}>${cls.toKind}`) as string });
@@ -229,6 +250,8 @@ export async function linkedRecordsAtFrontier(
    * flagged complete. Hence `scanCapped` below.
    */
   limit?: number,
+  /** Where the rows come from — see `LinkReads`. */
+  reads: LinkReads = STORED_LINK_READS,
 ): Promise<ScanResult<LinkedRecord>> {
   const out: LinkedRecord[] = [];
   let scanCapped = false;
@@ -261,8 +284,8 @@ export async function linkedRecordsAtFrontier(
     // One row MORE than the budget is the probe (Q-126): a cursor that stops at exactly `remaining` cannot tell
     // "there were exactly that many" from "there were more", and a walk that reports the first as cut drops a
     // whole result row that was complete.
-    const pointing = await linksPointingAt(mid, frontier, remaining === undefined ? undefined : remaining + 1);
-    const rows = await linkedRecordsFromRows(mid, pointing, wanted, remaining, attributedOnly);
+    const pointing = await reads.linksPointingAt(mid, frontier, remaining === undefined ? undefined : remaining + 1);
+    const rows = await linkedRecordsFromRows(mid, pointing, wanted, remaining, attributedOnly, reads);
     if (rows.capped) scanCapped = true;
 
     for (const { cls, doc, via } of rows.found) {
@@ -330,6 +353,8 @@ export async function entitiesLinkedFromRecords(
   edgeLabels?: readonly string[] | undefined,
   /** The walk's own cap — see `linkedRecordsAtFrontier`'s. */
   limit?: number,
+  /** Where the rows come from — see `LinkReads`. */
+  reads: LinkReads = STORED_LINK_READS,
 ): Promise<ScanResult<OutboundLink>> {
   const out: OutboundLink[] = [];
   let scanCapped = false;
@@ -363,7 +388,7 @@ export async function entitiesLinkedFromRecords(
        * Per class it was six queries plus six scope reads. See `linksPointingAt` for what that measured.
        */
       // `+ 1` is the probe, as in `linkedRecordsAtFrontier`: exactly `remaining` rows is a complete read.
-      let rows = await linksStartingFrom(mid, recordIds, remaining === undefined ? undefined : remaining + 1);
+      let rows = await reads.linksStartingFrom(mid, recordIds, remaining === undefined ? undefined : remaining + 1);
       if (remaining !== undefined && rows.length > remaining) { scanCapped = true; rows = rows.slice(0, remaining); }
 
       const byPair = new Map<string, LinkClass>();
@@ -382,7 +407,7 @@ export async function entitiesLinkedFromRecords(
 
       const admitted = new Set<string>();
       for (const [collection, ids] of idsPerCollection) {
-        for (const d of await docsFromCollection<{ _id: string }>(mid, collection, [...ids])) {
+        for (const d of await reads.docsFromCollection<{ _id: string }>(mid, collection, [...ids])) {
           admitted.add(d._id);
         }
       }
