@@ -30,7 +30,11 @@ export const outageError = () => Object.assign(
  * @param mongo the live `db/mongo.js` namespace (from `openTestMongo`)
  * @returns controls: `setDown(bool)`, `flipAfterMicrotasks(n)`, `calls(method, collection?)`, `restore()`
  */
-export function installSearchOutage(mongo) {
+export function installSearchOutage(mongo, { instantAnswers = false } = {}) {
+  // `instantAnswers`: while NOT down, a readiness probe (an underscore collection) is answered at once with an empty
+  // list instead of asking the real database. A test about what the server does WITH a successful probe must not
+  // depend on how fast a cold mongot on a shared CI runner answers it: `/ready` times its probe out at 2 s, and the
+  // same test went red in CI on exactly that, with the code under test correct.
   const proto = Object.getPrototypeOf(mongo.getMongo().db().collection('_outage_probe'));
   const realList = proto.listSearchIndexes;
   const realFindOne = proto.findOne;
@@ -61,6 +65,7 @@ export function installSearchOutage(mongo) {
       };
       return cursor;
     }
+    if (instantAnswers && this.collectionName.startsWith('_')) return { toArray: async () => [] };
     return realList.apply(this, args);
   };
   proto.findOne = function patchedFindOne(...args) {

@@ -47,7 +47,7 @@ describe('/ready and the search watcher', { skip }, () => {
     (await import('../../server/dist/config/loader.js')).loadConfig();
     readiness = await import('../../server/dist/spaces/search-readiness.js');
     ready = await import('../../server/dist/ready.js');
-    outage = installSearchOutage(mongo);
+    outage = installSearchOutage(mongo, { instantAnswers: true });
   });
 
   after(async () => {
