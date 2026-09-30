@@ -186,7 +186,8 @@ results.push(await time('traverse depth 2, links OFF', () =>
   edges.traverseGraph([SPACE], startEntity, 'both', undefined, 2, 500, false, false, false)));
 results.push(await time('backlink scan (blocks a delete)', () =>
   entities.findEntityReferences(SPACE, startEntity)));
-results.push(await time('er_model', () => erModel.buildErModel(SPACE)));
+// The uncached read — what the space-meta cache (`Q-95`) pays on the first read after a write — not the cached answer.
+results.push(await time('er_model', () => erModel.readErShape(SPACE)));
 
 await closeMongo();
 

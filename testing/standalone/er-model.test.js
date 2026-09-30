@@ -8,7 +8,7 @@
  * means. None of that needs a container or a seeded space — and a test that needed one would run rarely
  * enough that the arithmetic would go unchecked between releases.
  *
- * `assembleErModel` is pure for exactly this reason: `buildErModel` does the reads, this does the thinking.
+ * `assembleErModel` is pure for exactly this reason: `readErShape` does the reads, this does the thinking.
  *
  * ## The three cases the feature exists for
  *
