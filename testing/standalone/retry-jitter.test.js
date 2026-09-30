@@ -17,6 +17,7 @@ import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { bodyOf } from './_structural-window.mjs';
+import { stripComments } from './_strip-comments.mjs';
 
 let withJitter;
 before(async () => { ({ withJitter } = await import('../../server/dist/util/backoff.js')); });
@@ -83,5 +84,23 @@ describe('both retry queues use it', () => {
     for (let i = 1; i < delays.length; i++) {
       assert.ok(delays[i] > delays[i - 1], `webhook delays must increase: ${delays.join(', ')}`);
     }
+  });
+});
+
+describe('the other retry loops share the one helper instead of carrying a copy (Q-113)', () => {
+  // Three sites wanted "exponential, capped, equal jitter": the connect loop in db/mongo.ts, the embedding
+  // endpoint's retry, and the search-readiness watcher. The second site is where it is extracted, not the third.
+  it('the embedding retry has no private jitter formula', () => {
+    const src = stripComments(readFileSync('server/src/brain/embedding.ts', 'utf8'));
+    assert.doesNotMatch(src, /function jittered\b/, 'a private jittered() is a second copy of the jitter rule');
+    assert.doesNotMatch(src, /Math\.random\(\)/, 'embedding.ts rolls its own jitter again');
+    assert.match(src, /backoffDelayMs\(|withJitter\(/, 'the retry delay must come from util/backoff.ts');
+    assert.match(src, /from '\.\.\/util\/backoff\.js'/);
+  });
+
+  it('the connect loop in db/mongo.ts has no private jitter or doubling', () => {
+    const src = stripComments(readFileSync('server/src/db/mongo.ts', 'utf8'));
+    assert.match(bodyOf(src, 'connectMongo'), /backoffDelayMs\(/);
+    assert.doesNotMatch(src, /delay \* 2/, 'a doubling written by hand is the copy this extraction removed');
   });
 });

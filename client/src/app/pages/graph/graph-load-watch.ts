@@ -60,7 +60,7 @@ export class GraphLoadWatch {
         stats: this.source.getSpaceStats(spaceId).pipe(catchError(() => of(null))),
       }).subscribe(({ spaces, stats }) => {
         const space = spaces?.spaces.find(s => s.id === spaceId);
-        this.reasons.set(readinessReasons(space?.indexStatus, stats?.embedQueue));
+        this.reasons.set(readinessReasons(space?.indexStatus, stats?.embedQueue, space?.indexWaiting));
       });
     }, WAIT_EXPLAIN_MS);
   }

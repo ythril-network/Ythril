@@ -100,6 +100,42 @@ describe('startup does not block on index readiness', () => {
   });
 });
 
+describe('a search service that is down defers the confirmation instead of failing it (Q-113)', () => {
+  const fn = bodyOf(LIFECYCLE, 'confirmSpaceIndexesInBackground', 'the background pass');
+
+  it('the boot pass registers for the service\'s return and re-runs the SAME confirmation, bounded the same way', () => {
+    // "The same confirm" is the point: building and then polling is ONE function, so a space confirmed late
+    // goes through the same `mapLimit(…, FINALIZE_CONCURRENCY, …)` as one confirmed at boot. A second copy that
+    // confirmed late would need its own bound, and would be the unbounded poll the concurrency exists to prevent.
+    assert.match(fn, /afterSearchUp\(/, 'a deferred space is never revisited: nothing waits for the service to come back');
+    const at = fn.indexOf('afterSearchUp(');
+    const registered = balancedFrom(fn, at + 'afterSearchUp'.length - 1, 'the afterSearchUp call');
+    assert.match(registered, /confirmSpaceIndexesInBackground\(/,
+      'the late confirmation must be the same function as the boot one, so it runs under the same concurrency bound');
+  });
+
+  it('the summary counts deferred spaces on their own line of accounting', () => {
+    assert.match(fn, /deferred/i, 'the summary has no deferred count — it would call a waiting space failed or confirmed');
+    // Never filed under the failures: that array is what the warn line prints as "did not reach ready".
+    assert.doesNotMatch(fn, /verdict === 'deferred'[^;]*failed\.push/, 'a deferred space was pushed onto the failed list');
+  });
+
+  it('the registration is keyed by space, so a deleted or renamed space can be forgotten', () => {
+    assert.match(LIFECYCLE, /forgetSearchWaiter\(/,
+      'deleting a space leaves its waiter behind, to confirm a space that no longer exists when the service returns');
+  });
+
+  it('the readiness timeout is measured from the confirmation, not from boot', () => {
+    // The 10 minute ceiling belongs to a BUILD. Started at boot, a service that returned after eleven minutes would
+    // find every waiting space already past its window and mark each failed for being late.
+    assert.match(LIFECYCLE, /finalizeSpaceIndexReady\(spaceId, \{ timeoutMs: STARTUP_INDEX_READY_TIMEOUT_MS \}\)/);
+    const from = fn.indexOf('afterSearchUp(');
+    assert.ok(from > -1, 'the late confirmation is gone — re-anchor this gate');
+    const late = fn.slice(from);
+    assert.doesNotMatch(late, /Date\.now\(\)\s*[-+]|deadline|bootedAt/, 'the late confirmation computes its window from an earlier moment');
+  });
+});
+
 describe('the readiness timeout is a parameter, and generous off the boot path', () => {
   it('pollVectorIndexReady accepts a timeout instead of hard-coding 60 attempts', () => {
     assert.match(VECTOR, /opts:\s*\{\s*timeoutMs\?:\s*number\s*\}\s*=\s*\{\s*\}/);

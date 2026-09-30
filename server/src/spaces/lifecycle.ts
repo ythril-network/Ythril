@@ -15,7 +15,8 @@ import { invalidateUsageCache } from '../quota/quota.js';
 import { log } from '../util/log.js';
 import type { SpaceConfig, SpaceMeta, FactDoc } from '../config/types.js';
 import { VECTOR_INDEXED_COLLECTIONS, finalizeSpaceIndexReady } from './vector-index.js';
-import { armSearchIndexPresence, reconcileSpaceSearchIndexes } from './search-index-presence.js';
+import { armSearchIndexPresence, reconcileSpaceSearchIndexes, forgetSpaceSearchIndexWaiters } from './search-index-presence.js';
+import { afterSearchUp, forgetSearchWaiter } from './search-readiness.js';
 import { SPACE_COLLECTIONS, repairStaleSpaceIds, dropLegacyPrefixedIndexes, dropSupersededEdgeIdentityIndex, pendingOpConflictMessage, pendingOpStillFailingMessage, setReindexNeeded, beginSpaceOp, endSpaceOp, spaceOpsInFlight } from './_shared.js';
 import { moveSpaceData, applySpaceRenameToConfig } from './rename.js';
 import { concreteSpaces, isProxy } from './proxy.js';
@@ -257,6 +258,9 @@ const STARTUP_INDEX_READY_TIMEOUT_MS = envInt('INDEX_READY_TIMEOUT_MS', 10 * 60_
 /** How many spaces confirm their index builds at once, once boot has already finished. */
 const FINALIZE_CONCURRENCY = 3;
 
+/** The key a space's deferred confirmation waits under (`afterSearchUp`): one per space, removed with the space. */
+const confirmWaiterKey = (spaceId: string): string => `confirm-space:${spaceId}`;
+
 /**
  * Initialise all spaces defined in config.
  *
@@ -330,16 +334,35 @@ export async function initAllSpaces(): Promise<void> {
  */
 async function confirmSpaceIndexesInBackground(spaceIds: readonly string[]): Promise<void> {
   const failed: string[] = [];
+  const deferred: string[] = [];
   await mapLimit(spaceIds, FINALIZE_CONCURRENCY, async (spaceId) => {
     try {
-      if (!await finalizeSpaceIndexReady(spaceId, { timeoutMs: STARTUP_INDEX_READY_TIMEOUT_MS })) {
-        failed.push(spaceId);
-      }
+      const verdict = await finalizeSpaceIndexReady(spaceId, { timeoutMs: STARTUP_INDEX_READY_TIMEOUT_MS });
+      if (verdict === 'deferred') deferred.push(spaceId);
+      else if (!verdict) failed.push(spaceId);
     } catch (err) {
       failed.push(spaceId);
       log.warn(`Space '${spaceId}': index readiness check failed: ${err instanceof Error ? err.message : String(err)}`);
     }
   });
+
+  /*
+   * A space whose confirmation was DEFERRED (database search was not answering, Q-113) is neither confirmed nor
+   * failed: it stays `building` and is confirmed again when the service returns. The late run is THIS function,
+   * so it goes through the same `mapLimit(…, FINALIZE_CONCURRENCY, …)` and, as a waiter, the same three at a
+   * time; it runs on the same `STARTUP_INDEX_READY_TIMEOUT_MS`, which therefore starts at the confirmation and
+   * not at boot (a service back after eleven minutes must not find every waiting space already past its window).
+   * It builds first — boot's `initSpace` could not, search was down — and the polling that follows would
+   * otherwise wait for an index nobody is going to create.
+   */
+  for (const spaceId of deferred) {
+    if (!getConfig().spaces.some(s => s.id === spaceId)) continue;   // deleted while the verdict was coming
+    afterSearchUp(confirmWaiterKey(spaceId), async () => {
+      if (!getConfig().spaces.some(s => s.id === spaceId)) return;
+      await reconcileSpaceSearchIndexes(spaceId);
+      await confirmSpaceIndexesInBackground([spaceId]);
+    });
+  }
 
   // Say what happened, rather than announcing success unconditionally.
   //
@@ -347,7 +370,13 @@ async function confirmSpaceIndexesInBackground(spaceIds: readonly string[]): Pro
   // and on a deployment where every space failed it printed IMMEDIATELY AFTER the lines saying so. A
   // reporter quoted all three together. Two log lines a paragraph apart that contradict each other do
   // not just fail to inform; they teach an operator that this log is not worth reading.
-  if (failed.length === 0) {
+  if (deferred.length > 0) {
+    log.warn(
+      `Vector index readiness is deferred for ${deferred.length} of ${spaceIds.length} space(s): database search is `
+      + 'not answering yet. They stay "building" and are confirmed by themselves when it returns.'
+      + (failed.length > 0 ? ` ${failed.length} other(s) did not reach ready: ${failed.join(', ')}.` : ''),
+    );
+  } else if (failed.length === 0) {
     log.info(`Vector index readiness confirmed for all ${spaceIds.length} space(s).`);
   } else {
     log.warn(
@@ -451,7 +480,9 @@ export async function createSpace(opts: {
     log.warn(`Space '${opts.id}' was created by a session with no stored rights; its creator reaches it only if its identity mapping does`);
   }
   if (!isProxy(opts)) {
-    void finalizeSpaceIndexReady(opts.id);
+    // The same confirmation boot runs: a space created while search is down is deferred, not failed, and is
+    // confirmed when the service returns.
+    void confirmSpaceIndexesInBackground([opts.id]);
   }
   return space;
 }
@@ -614,6 +645,9 @@ async function removeSpaceInner(spaceId: string): Promise<boolean> {
   cfg.spaces = cfg.spaces.filter(s => s.id !== spaceId);
   delete cfg.pendingSpaceOp;
   saveConfig(cfg);
+  // Nothing is waiting for a space that no longer exists: its deferred confirmation and its collections' index waiters.
+  forgetSearchWaiter(confirmWaiterKey(spaceId));
+  forgetSpaceSearchIndexWaiters(spaceId);
   return true;
 }
 

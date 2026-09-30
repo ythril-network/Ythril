@@ -17,6 +17,9 @@ export interface SummaryItem {
   value: string | number;
   /** Optional emphasis — colours the value when it's a state worth noticing (e.g. warn/error). */
   variant?: StatusVariant;
+  /** Optional sentence saying what the number means. Rendered as text and as the item's aria-label, never as a
+   *  tooltip alone: a `title` reaches a mouse and nobody else. */
+  hint?: string;
 }
 
 @Component({
@@ -42,6 +45,7 @@ export interface SummaryItem {
     .v.error { color: var(--error); }
     .v.pending { color: var(--info); }
     .l { font-size: 11.5px; color: var(--text-secondary); }
+    .h { font-size: 11px; color: var(--text-muted); max-width: 26ch; line-height: 1.3; }
     .extra { margin-left: auto; display: flex; align-items: center; gap: 12px; flex: 1; min-width: 180px; justify-content: flex-end; }
     @media (max-width: 560px) { .items { gap: 12px 20px; } .extra { margin-left: 0; justify-content: flex-start; } }
   `],
@@ -50,9 +54,10 @@ export interface SummaryItem {
       @if (heading()) { <div class="summary-h">{{ heading() }}</div> }
       <div class="items">
         @for (it of items(); track it.label) {
-          <div class="item">
+          <div class="item" [attr.aria-label]="it.hint ? it.label + ': ' + it.hint : null" [attr.role]="it.hint ? 'group' : null">
             <span class="v" [class]="it.variant ?? ''">{{ it.value }}</span>
             <span class="l">{{ it.label }}</span>
+            @if (it.hint) { <span class="h">{{ it.hint }}</span> }
           </div>
         }
         <div class="extra"><ng-content/></div>

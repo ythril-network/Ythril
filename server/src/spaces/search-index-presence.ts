@@ -62,7 +62,17 @@
  *
  * ## Decisions taken conservatively, and why
  *
- * - **Deployments where search is unavailable** are left alone: nothing is created or dropped, as before.
+ * - **Search that is not answering RIGHT NOW** defers rather than gives up (Q-113). An `unavailable` outcome records
+ *   the collection as `deferred` and registers ONE waiter for the service's return (`afterSearchUp`, keyed by the
+ *   collection, so ten thousand writes leave one entry). Until then a write costs a map lookup and schedules
+ *   nothing, exactly as for an indexed collection. On the return the waiter runs a forced reconcile, and the index
+ *   appears. It used to record `indexed` "on purpose", on the argument that the probe behind it was memoised for
+ *   the process and nothing a write did could change the answer; both halves were true and together they meant a
+ *   mongot that came up thirteen seconds late left semantic recall empty until a restart. A deployment with no
+ *   search component at all is the same state with a one-hour watcher: nothing is created or dropped there.
+ *   The registration comes BEFORE the belief is recorded, and the waiter's reconcile queues behind this one on the
+ *   collection's chain, so a service that returns between "answered unavailable" and "recorded deferred" is still
+ *   found: the waiter ran at once, and its reconcile starts when this one ends.
  * - **The face gallery follows its collection (`files`)**, not whether a face vector exists — the same
  *   condition that governed it before, narrowed only by "the collection holds a record".
  * - **An index that failed to build is retried by a later write**, at most once per {@link RETRY_AFTER_MS}, so
@@ -74,21 +84,29 @@ import { log } from '../util/log.js';
 import { envInt } from '../config/env-num.js';
 import {
   VECTOR_INDEXED_COLLECTIONS, type VectorIndexedCollection,
-  ensureCollectionSearchIndexes, dropCollectionSearchIndexes, searchAvailable,
+  ensureCollectionSearchIndexes, dropCollectionSearchIndexes,
 } from './vector-index.js';
+import { searchAvailable, afterSearchUp, forgetSearchWaiter, SEARCH_RETRY_BASE_MS } from './search-readiness.js';
 import { collectionHoldsRecord } from './record-presence.js';
 
 /** How long after the last delete of a burst the collection is checked for emptiness. */
 export const DROP_CHECK_DELAY_MS = envInt('SEARCH_INDEX_DROP_DELAY_MS', 60_000);
 
-/** How long a failed index build waits before a write may try it again. */
-export const RETRY_AFTER_MS = 30_000;
+/**
+ * How long a failed index build waits before a write may try it again: six beats of the search watcher, so the two
+ * retry rhythms scale together and there is one number to change (30 s at the watcher's 5 s).
+ */
+export const RETRY_AFTER_MS = 6 * SEARCH_RETRY_BASE_MS;
 
 /**
  * What this process last established about a collection's search indexes.
- * `settling` = a reconcile is reading it now; absent = never established (a restart, a dropped collection).
+ * `settling` = a reconcile is reading it now; `deferred` = it holds a record and search was not answering, so a
+ * waiter will reconcile it when the service returns; absent = never established (a restart, a dropped collection).
  */
-type Belief = 'indexed' | 'unindexed' | 'settling';
+type Belief = 'indexed' | 'unindexed' | 'settling' | 'deferred';
+
+/** The key a collection's waiter is registered under: one per collection, replaced rather than stacked. */
+const waiterKey = (name: string): string => `search-index:${name}`;
 
 interface CollectionState {
   belief?: Belief;
@@ -168,8 +186,13 @@ async function reconcileNow(name: string, st: CollectionState, opts: ReconcileOp
         return (st.belief = undefined);
       }
       st.retryAt = undefined;
-      // `unavailable` is recorded as indexed on purpose: there is nothing a write could do about it, and the
-      // probe that decided it is memoised for the process. Boot and the rebuild route ask again.
+      if (outcome === 'unavailable') {
+        // Search is not answering now. Register for its return BEFORE recording the belief (see the module docblock):
+        // the waiter's forced reconcile queues behind this one, so a flip at any point is found. A write to a
+        // `deferred` collection schedules nothing, so the wait costs a map lookup per write.
+        afterSearchUp(waiterKey(name), () => schedule(name, { explicit: true }));
+        return (st.belief = 'deferred');
+      }
       return (st.belief = 'indexed');
     }
 
@@ -210,10 +233,11 @@ function onRecordWrite(name: string, effect: MethodEffect): void {
     if (st?.dropCheck) clearTimeout(st.dropCheck);
     // Keep the chain (a reconcile may be running on it); forget only what was believed.
     if (st) { st.belief = undefined; st.retryAt = undefined; }
+    forgetSearchWaiter(waiterKey(name));
     return;
   }
   const st = stateOf(name);
-  if (effect.write && st.belief !== 'indexed') void schedule(name);
+  if (effect.write && st.belief !== 'indexed' && st.belief !== 'deferred') void schedule(name);
   if (effect.delete) armDropCheck(name);
 }
 
@@ -242,6 +266,19 @@ export async function reconcileSpaceSearchIndexes(
 ): Promise<void> {
   for (const suffix of VECTOR_INDEXED_COLLECTIONS) {
     await schedule(`${spaceId}_${suffix}`, { explicit: true, ...opts });
+  }
+}
+
+/** What this process believes about a collection's indexes. For tests. */
+export function _presenceBeliefOf(name: string): Belief | undefined { return states.get(name)?.belief; }
+
+/** A deleted space's collections are not waited for: remove their waiters (and what was believed about them). */
+export function forgetSpaceSearchIndexWaiters(spaceId: string): void {
+  for (const suffix of VECTOR_INDEXED_COLLECTIONS) {
+    const name = `${spaceId}_${suffix}`;
+    forgetSearchWaiter(waiterKey(name));
+    const st = states.get(name);
+    if (st?.belief === 'deferred') st.belief = undefined;
   }
 }
 

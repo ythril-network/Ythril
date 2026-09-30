@@ -44,8 +44,7 @@ import { classifyReadFailure } from '../brain/store-failure.js';
 import { SchemaViolationError } from '../brain/write-validation.js';
 import { NotFoundError } from '../util/errors.js';
 import { TOOLS_BY_NAME, type ToolResult } from './tools/index.js';
-import { makeArgsValidator } from './validate-args.js';
-import { toolSchemasFor } from './tool-schema.js';
+import { validatorFor } from './validate-args.js';
 import { consumeHeavyToolCall } from '../rate-limit/heavy-tool.js';
 import { logAuditEntry } from '../audit/audit.js';
 import { auditChanges } from '../audit/audit-changes.js';
@@ -246,7 +245,7 @@ export async function callTool(req: ToolCallRequest): Promise<ToolCallOutcome> {
     // Enforce the advertised inputSchema before the handler runs — except partial-success tools
     // (save_bulk), which report per-item errors in the result rather than rejecting the whole call.
     if (!tool.skipSchemaValidation) {
-      const argErr = makeArgsValidator(toolSchemasFor(accessibleSpaceIds), accessibleSpaceIds).validate(tool, a);
+      const argErr = validatorFor(accessibleSpaceIds).validate(tool, a);
       if (argErr) return refuse(400, `Error: ${argErr}`, callSpace);
     }
     /*

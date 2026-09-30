@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **A tool call no longer builds a validator, and a media worker slot refills the moment it frees (`Q-114`).** Every
+  tool call, on both doors, built an Ajv and compiled the tool's schema before its handler ran: 4.3 ms of main
+  thread per call measured (`testing/bench/tool-call-setup-cost.mjs`, `recall`; `save_entity` 4.2 ms), against 1 us
+  for a validator that already exists. A tool's schema depends on exactly one thing, the list of spaces the token
+  reaches in order (the `space` enum keeps that order and is printed in the refusal), so the validator is now built
+  once per reach and kept in a bounded cache of 64 (`ythril_tool_validator_cache_total{result="hit|miss|evict"}`;
+  a steady `evict` rate means more distinct reaches are in rotation than it holds). `tools/list`, the server
+  instructions and the refusal text come from the same cached schemas, so both doors refuse with the same bytes as
+  before. The media worker claimed up to `workerConcurrency` jobs and awaited all of them before claiming again,
+  so one 30-minute document conversion beside a 2-second image left the second slot idle for 28 minutes with a
+  queue behind it; a slot now refills as soon as it frees, claims stay one at a time, and a raised
+  `workerConcurrency` starts a slot within one poll interval even while every slot is busy. Shutdown is unchanged:
+  a job claimed before stop runs to its end or is handed back, and one claimed after stop is handed back and not run.
 - **Every date in the UI is shown in the format you choose, and dates follow the language you pick (`Q-146`,
   `Q-100`).** **Settings → Preferences** has a new **Date and time** card: **Automatic** (the default: your
   browser's locale when it speaks the interface language, otherwise the interface language), **ISO 8601**
@@ -32,6 +45,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   described a characters-per-token field removed in 5.0; and the MCP `recall` description called a `budget` cut
   "bytes" when the default ceiling is characters. Additive for a reader: a new field, present only on a cut.
 
+- **A search service that starts late is found and used, and a space waiting for it is no longer marked `failed`
+  (`Q-113`).** `mongot` (the search process next to `mongod`) can start after the app. The app used to wait twelve
+  seconds for it once, remember "no" for the life of the process, and at boot poll every populated collection for up
+  to ten minutes against a service that was not there, then write `indexStatus: "failed"` on a healthy space; a record
+  written while search was down was then never indexed, and semantic recall stayed empty until a restart or the rebuild
+  button. Now the app keeps asking in the background, backing off from 5 seconds to 5 minutes for as long as it runs
+  (once an hour on a database that has no search component at all), builds every missing index when search answers,
+  and confirms the waiting spaces by itself. **What operators see:** while search is down a space stays `building`
+  and `GET /api/spaces` adds `indexWaiting: true` and `indexWaitingSince` to it (derived when the list is read, never
+  stored, not on MCP `list_spaces`, which carries no `indexStatus`); the admin pipeline status says search is down,
+  since when and how often it was checked; one warn line an hour names the error class and code, never the message,
+  and one info line says search is back. **`failed` now means only a build that really failed or timed out, so an
+  alert keyed on `failed` for a late service stops firing.** `INDEX_READY_TIMEOUT_MS` starts when the indexes are
+  confirmed, not at boot. `GET /ready` and the watcher agree (its own successful probe marks search up at once; a
+  failed one never marks it down), and concurrent `/ready` requests share one probe. The retry delay rule moved into
+  `backoffDelayMs` in `util/backoff.ts`, which the database connect loop and the embedding retry now use with
+  identical delays. `YTHRIL_MONGO_MEM_LIMIT` (default 4g) is named in the hosting guide as the knob for a space of tens
+  of thousands of records, unmeasured at that size. **In the UI:** Settings -> Spaces shows such a space as "Waiting
+  for search service" with a still dot (no spinner) and counts it apart from "Indexing"; the Brain Overview and the
+  Graph tab's slow-load note say the same; the page's index poll now starts from every list load, has no attempt
+  cap, asks every 3 seconds while a true build runs and every 30 seconds while every building space is only
+  waiting, skips its tick while the tab is hidden, and stops with the page.
 - **A space-meta read no longer rescans the space, and both doors build it with one function (`Q-95`).** `stats`
   and `actualSchema` were rebuilt on every `GET /api/spaces/:id/meta` and every MCP `space_meta` — an entity scan,
   an edge scan, three link scans and seven counts per member space — by two hand-written copies of the answer. They

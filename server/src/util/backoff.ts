@@ -29,8 +29,34 @@
  * Returns 0 for a non-positive delay, so "retry immediately" stays immediate rather than becoming a
  * random tiny wait.
  */
-export function withJitter(delayMs: number): number {
+export function withJitter(delayMs: number, random: () => number = Math.random): number {
   if (!Number.isFinite(delayMs) || delayMs <= 0) return 0;
   const half = delayMs / 2;
-  return Math.round(half + Math.random() * half);
+  return Math.round(half + random() * half);
+}
+
+/**
+ * The wait before retry number `attempt` (0-based): `baseMs` doubling per attempt up to `capMs`, then equal-jittered.
+ *
+ * ## Why this is a function and not a loop variable
+ *
+ * Three sites wanted "exponential, capped, half of it random": the connect loop in `db/mongo.ts`, the embedding
+ * endpoint's retry, and the search-readiness watcher (`spaces/search-readiness.ts`, which retries for as long
+ * as the process lives). Written three times, one of them ends up with full jitter, or with no cap, or with an
+ * exponent that overflows — and the last of those is silent: a watcher at attempt 1 100 has `2 ** attempt ===
+ * Infinity`, and `Infinity * 0` is NaN, and a NaN timer fires at once. So the exponent is clamped HERE, and the
+ * cap is what a caller gets for any attempt however large.
+ *
+ * Attempt 0 is the base itself, so a caller that never retries twice (`backoffDelayMs(0, base, base)`) is a
+ * single jitter of `base`. A NaN, negative or non-positive input never yields NaN or a negative wait: an
+ * unusable base stays "immediate" exactly as {@link withJitter} does, and an unusable cap is ignored.
+ */
+export function backoffDelayMs(
+  attempt: number, baseMs: number, capMs: number, random: () => number = Math.random,
+): number {
+  if (!Number.isFinite(baseMs) || baseMs <= 0) return 0;
+  // 2 ** 50 times any base a caller would pass is past every cap, and stays a finite number.
+  const exponent = Number.isFinite(attempt) && attempt > 0 ? Math.min(attempt, 50) : (attempt === Infinity ? 50 : 0);
+  const nominal = baseMs * 2 ** exponent;
+  return withJitter(Number.isFinite(capMs) && capMs > 0 ? Math.min(nominal, capMs) : nominal, random);
 }

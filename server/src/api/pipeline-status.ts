@@ -39,6 +39,7 @@ import { getDb } from '../db/mongo.js';
 import { faceRecognitionAllowed } from '../files/converters/media-level.js';
 import { VECTOR_INDEXED_COLLECTIONS } from '../spaces/vector-index.js';
 import { collectionHoldsRecord } from '../spaces/record-presence.js';
+import { searchReadinessSnapshot, isSearchDown, type SearchReadinessSnapshot } from '../spaces/search-readiness.js';
 import { log } from '../util/log.js';
 import { assistBackend, assistBudgetStatus, type AssistBudget } from '../config/assist-backend.js';
 import type { ChatWire } from '../util/model-chat.js';
@@ -468,6 +469,19 @@ export function isDrifted(stored: SpaceIndexStatus['stored'], live: SpaceIndexSt
   return stored === 'ready' && (live === 'missing' || live === 'building');
 }
 
+/**
+ * What `index.unavailable` says while database search is down (Q-113): built from the readiness snapshot, which is
+ * an enum and numbers, so nothing a driver said can reach this admin-only route. `null` when search is not down.
+ */
+export function searchOutageNote(snapshot: SearchReadinessSnapshot): string | null {
+  if (!isSearchDown(snapshot)) return null;
+  const since = snapshot.since !== null ? ` since ${new Date(snapshot.since).toISOString()}` : '';
+  const next = snapshot.nextProbeAt !== null ? `, next check ${new Date(snapshot.nextProbeAt).toISOString()}` : '';
+  const what = snapshot.state === 'absent' ? 'has no search component' : 'is not answering';
+  return `database search ${what}${since} (${snapshot.attempts} check(s)${next}). Indexes are built by themselves when it returns; `
+    + 'spaces stay "building" until then. To force a rebuild afterwards: POST /api/spaces/<space>/rebuild-indexes.';
+}
+
 async function indexStatus(): Promise<{ spaces: SpaceIndexStatus[]; unavailable?: string }> {
   if (!isConfigLoaded()) return { spaces: [], unavailable: 'configuration is not loaded' };
   // Proxy spaces aggregate other spaces' reads and own no collections, so they have no indexes to
@@ -562,18 +576,19 @@ async function indexStatus(): Promise<{ spaces: SpaceIndexStatus[]; unavailable?
    * is empty has no index anywhere and has answered correctly; only a collection that holds a record should
    * have one, so only those make the silence informative.
    */
+  const outage = searchOutageNote(searchReadinessSnapshot());
   const anyIndexSeen = out.some(s => s.collections.some(c => c.status !== null));
   const anyIndexExpected = out.some(s => s.collections.some(c => !c.empty && !c.optional));
   if (out.length > 0 && anyIndexExpected && !anyIndexSeen) {
     return {
       spaces: out.map(s => ({ ...s, live: 'unknown' as const, drifted: false })),
-      unavailable: 'this deployment does not report search indexes — `listSearchIndexes` returned nothing '
+      unavailable: outage ?? ('this deployment does not report search indexes — `listSearchIndexes` returned nothing '
         + 'for every collection, which a native `$vectorSearch` server does. Recall is unaffected and is the '
-        + 'thing to check: if it returns ranked results, the vectors are there.',
+        + 'thing to check: if it returns ranked results, the vectors are there.'),
     };
   }
 
-  return { spaces: out };
+  return { spaces: out, ...(outage ? { unavailable: outage } : {}) };
 }
 
 // ── Assembly, cached and single-flighted ──────────────────────────────────────

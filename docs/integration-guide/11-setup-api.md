@@ -28,6 +28,8 @@ Returns process readiness based on dependency checks (MongoDB + vector search av
 
 **Response** `200` when ready, `503` when not ready.
 
+`/ready` and the instance's own search watcher agree: when the search probe here succeeds, the watcher that finds a late `mongot` is told at once and the spaces waiting for search are resumed. A failed probe here never marks search as down, because this route is public and unauthenticated; only the watcher decides that. Concurrent requests share one probe.
+
 Example:
 
 ```json
@@ -83,6 +85,7 @@ ythril_http_requests_total{method="GET",route="/health",status_code="200"} 42
 | `ythril_auth_attempts_total` | counter | Auth attempts by result (success, invalid) |
 | `ythril_tokens_active` | gauge | Number of active (non-expired) tokens |
 | `ythril_tool_calls_total` | counter | Tool invocations by tool name, space and `door` (`mcp` or `rest`). A call naming an unknown tool is refused before it is counted, so the `tool` label only ever holds a real tool's name |
+| `ythril_tool_validator_cache_total` | counter | Tool-argument validator lookups by `result`: `hit`, `miss` (one built for a reach not seen before) or `evict` (the oldest dropped to stay inside 64). A validator is built once per set of spaces a token reaches, so a steady `evict` rate means more distinct reaches are in rotation than the cache holds and calls are paying the build cost again |
 | `ythril_sync_cycles_total` | counter | Sync cycles by `network` and `status` — `success`, `partial`, `error`. |
 | `ythril_sync_items_pulled_total` | counter | Items received by `type` — `facts`, `entities`, `edges`, `files`, `chrono`. |
 | `ythril_sync_items_pushed_total` | counter | Items sent by `type` — same set as pulled. |

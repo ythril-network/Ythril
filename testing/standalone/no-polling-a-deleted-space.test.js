@@ -97,7 +97,9 @@ describe('the creation ordering this check depends on', () => {
   it('and finalizeSpaceIndexReady is kicked off only AFTER the commit', () => {
     // That one DOES poll, so it must never start before the space is visible in config.
     const push = lifecycle.indexOf('cfg.spaces.push(space);');
-    const finalize = lifecycle.indexOf('void finalizeSpaceIndexReady(opts.id);');
+    // Q-113: createSpace runs the SAME background confirmation boot runs, so a space created while search is down is
+    // deferred and confirmed on the service's return instead of being left `building` for ever.
+    const finalize = lifecycle.indexOf('void confirmSpaceIndexesInBackground([opts.id]);');
     assert.ok(finalize > push, 'the polling finalizer must start after the space is committed');
   });
 

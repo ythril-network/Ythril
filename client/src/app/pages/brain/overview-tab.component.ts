@@ -760,14 +760,18 @@ export class OverviewTabComponent {
   tallyVeto(v: VoteRound): number { return v.votes.filter(x => x.vote === 'veto').length; }
 
   /** Space.indexStatus is optional (proxy/legacy spaces have none) → 'none'. */
-  indexState(): 'ready' | 'building' | 'failed' | 'none' {
-    return this.space().indexStatus ?? 'none';
+  indexState(): 'ready' | 'building' | 'waiting' | 'failed' | 'none' {
+    const s = this.space();
+    // `waiting` is a building space whose search service is late (`Q-113`): it heals by itself, nothing is being built.
+    if (s.indexStatus === 'building' && s.indexWaiting) return 'waiting';
+    return s.indexStatus ?? 'none';
   }
 
   indexVariant(): StatusVariant {
     switch (this.indexState()) {
       case 'ready': return 'ok';
       case 'building': return 'warn';
+      case 'waiting': return 'warn';
       case 'failed': return 'error';
       default: return 'off';
     }

@@ -8,7 +8,7 @@
  * - Worker starts unconditionally at process start (never gated on `enabled`)
  * - Enqueueing is skipped at write_file time when `enabled: false`
  * - Exponential idle backoff: double poll interval on empty queue, cap at max
- * - Concurrency: up to `workerConcurrency` jobs processed in parallel per tick
+ * - Concurrency: up to `workerConcurrency` jobs run at once; a slot is refilled as soon as it frees (`slot-pool.ts`)
  * - Stalled job recovery: reset "processing" jobs older than `stalledJobTimeoutMs`
  *
  * Behaviour when a media class is turned off (its `levels` entry → `off`):
@@ -74,9 +74,14 @@ import { getModelSlots } from '../../config/loader.js';
 import { assistHopMs } from '../../config/assist-backend.js';
 import { AUDIO_STEPS, VIDEO_STEPS } from './progress.js';
 import { spaceCollection } from '../../db/space-collection.js';
+import { runSlotPool } from './slot-pool.js';
 import { readStored, StoredFileUnreadable } from '../stored-bytes.js';
 
 let running = false;
+/** Bumped by every start, so a pool left over from a stop that raced this start sees it is no longer the current one and winds down. */
+let generation = 0;
+/** The pool's `drained`: start awaits the previous one, so a stop-then-start never runs two pools at once. */
+let poolDrained: Promise<void> = Promise.resolve();
 let stalledSweepTimer: NodeJS.Timeout | null = null;
 let providerRefreshTimer: NodeJS.Timeout | null = null;
 
@@ -172,9 +177,10 @@ export function startMediaEmbeddingWorker(): void {
   void workerLoop();
 }
 
-/** Stop the worker loop gracefully (completes the in-flight batch). */
+/** Stop the worker loop gracefully (jobs already running finish; nothing new is claimed). */
 /** Claims this process currently holds. Small by construction: bounded by `workerConcurrency`. */
-const _heldJobs = new Set<{ spaceId: string; jobId: string; claimToken?: string | null }>();
+type HeldJob = { spaceId: string; jobId: string; claimToken?: string | null };
+const _heldJobs = new Set<HeldJob>();
 
 /**
  * Hand back every claim this process holds, for a PLANNED shutdown.
@@ -271,6 +277,10 @@ export function getActiveProviderSignature(): string {
 }
 
 async function workerLoop(): Promise<void> {
+  const myGeneration = ++generation;
+  // A stop that has not finished draining leaves its pool running its last jobs: wait for it, so two pools never claim at once.
+  await poolDrained;
+  if (!running || generation !== myGeneration) return;
   const startupCfg = getMediaEmbeddingConfig();
   // Floored by the longest single hop a job may take: a step longer than the stall timeout reports no
   // progress while it runs, so the job would be re-queued mid-step and reach the same step again forever.
@@ -283,8 +293,6 @@ async function workerLoop(): Promise<void> {
     startupCfg.stalledJobTimeoutMs ?? 300_000,
     hopBudgets(),
   );
-
-  let currentPollMs = startupCfg.workerPollIntervalMs ?? 1_000;
 
   // On startup: reset any stalled jobs (crash recovery)
   const spaceIds = getLocalSpaceIds();
@@ -328,84 +336,59 @@ async function workerLoop(): Promise<void> {
   }, PROVIDER_REFRESH_MS);
   if (typeof providerRefreshTimer.unref === 'function') providerRefreshTimer.unref();
 
-  while (running) {
-    // A6: re-read the worker-tuning config every tick so an admin change via
-    // PATCH /api/admin/media-config takes effect WITHOUT a restart. This is an
-    // in-memory config read, not a network call, so it is cheap. (Provider config
-    // is applied by the refresh timer above, not here.)
-    const mediaCfg = getMediaEmbeddingConfig();
-    const workerConcurrency = mediaCfg.workerConcurrency ?? 2;
-    const workerPollIntervalMs = mediaCfg.workerPollIntervalMs ?? 1_000;
-    const workerMaxPollIntervalMs = mediaCfg.workerMaxPollIntervalMs ?? 30_000;
+  // A claim this process holds, recorded the instant the pool's claim resolves (`onClaimed`) and dropped when the
+  // job is done or handed back. A planned shutdown hands back whatever is still here. Looked up by job object so
+  // `run` and `release` remove exactly what `onClaimed` added.
+  const heldOf = new WeakMap<MediaJobDoc, HeldJob>();
+  const dropHeld = (job: MediaJobDoc): void => {
+    const held = heldOf.get(job);
+    if (held) _heldJobs.delete(held);
+  };
 
-    // Snapshot the current provider bundle for this tick's jobs. A job therefore
-    // always runs against ONE stable provider set for its whole duration — a config
-    // change mid-job can never swap the provider out from under it. The bundle is
-    // guaranteed non-null: refreshProviders() ran before the loop and the timer only
-    // ever replaces it.
-    const jobProviders = activeProviders ?? buildProviders(mediaCfg);
-
-    // A lowered max must take effect immediately, not only after the next reset.
-    currentPollMs = Math.min(currentPollMs, workerMaxPollIntervalMs);
-
-    // Re-read space list on each tick (handles dynamic space creation/removal)
-    const activeSpaceIds = getLocalSpaceIds();
-
-    if (activeSpaceIds.length === 0) {
-      await sleep(currentPollMs);
-      continue;
-    }
-
-    // Sample the work epoch BEFORE claiming. If something is enqueued while we are claiming
-    // (or between the failed claim and the sleep below), the epoch moves and waitForWork()
-    // returns immediately instead of letting that job wait out the whole backoff.
-    const epochBeforeClaim = currentWorkEpoch();
-
-    // Claim up to `workerConcurrency` jobs
-    const claimed: MediaJobDoc[] = [];
-    for (let i = 0; i < workerConcurrency; i++) {
-      const job = await claimNextJob(activeSpaceIds).catch(err => {
-        log.warn(`Media worker: claim error: ${err instanceof Error ? err.message : String(err)}`);
-        return null;
-      });
-      if (!job) break;
-      claimed.push(job);
-    }
-
-    if (claimed.length === 0) {
-      // Exponential backoff on an empty queue — but INTERRUPTIBLE.
-      //
-      // The backoff is right for CPU and wrong for latency: it stretches to
-      // workerMaxPollIntervalMs (30s by default), so an upload into an idle system used to
-      // wait up to 30 SECONDS before embedding even started, with the file sitting in
-      // "pending" the whole time. Every path that creates claimable work already announces
-      // it, so that announcement now wakes us.
-      currentPollMs = Math.min(currentPollMs * 2, workerMaxPollIntervalMs);
-      const wokenByWork = await waitForWork(currentPollMs, epochBeforeClaim);
-      if (wokenByWork) {
-        // Real work arrived — drop straight back to the fast poll interval rather than
-        // carrying the idle backoff into a now-busy queue.
-        currentPollMs = workerPollIntervalMs;
-      }
-      continue;
-    }
-
-    // Reset backoff — we have work
-    currentPollMs = workerPollIntervalMs;
-
-    // Process jobs concurrently
-    // Track what this process holds, so a planned shutdown can hand the claims back instead of leaving
-    // them to time out. Removed in a `finally` per job — a leaked entry would make shutdown try to release a
-    // job that has already completed, which the token guard would refuse anyway, but noisily.
-    await Promise.allSettled(claimed.map(job => {
+  // `Q-114`: one supervisor refills a slot the moment it frees, instead of claiming a batch and awaiting all of
+  // it (a half-hour document conversion used to idle the other slot for its whole duration). `limits` is a
+  // function the pool calls on every pass, so `workerConcurrency` and the poll intervals stay hot-reloadable.
+  poolDrained = runSlotPool({
+    limits: () => {
+      const mediaCfg = getMediaEmbeddingConfig();
+      return {
+        concurrency: mediaCfg.workerConcurrency ?? 2,
+        pollMs: mediaCfg.workerPollIntervalMs ?? 1_000,
+        maxPollMs: mediaCfg.workerMaxPollIntervalMs ?? 30_000,
+      };
+    },
+    // Re-read the space list on each claim (handles dynamic space creation/removal). No spaces is an empty
+    // claim, which the pool answers with its idle backoff.
+    claim: (): Promise<MediaJobDoc | null> => {
+      const activeSpaceIds = getLocalSpaceIds();
+      return activeSpaceIds.length === 0 ? Promise.resolve(null) : claimNextJob(activeSpaceIds);
+    },
+    onClaimError: err => log.warn(`Media worker: claim error: ${err instanceof Error ? err.message : String(err)}`),
+    // Track what this process holds, so a planned shutdown can hand the claims back instead of leaving them to
+    // time out. Synchronous with the claim: the pool calls this with nothing in between.
+    onClaimed: job => {
       const held = { spaceId: job.spaceId, jobId: String(job._id), claimToken: job.claimToken };
+      heldOf.set(job, held);
       _heldJobs.add(held);
-      return processJob(job, jobProviders).finally(() => { _heldJobs.delete(held); });
-    }));
-
-    // Brief pause to prevent tight loop when constantly finding work
-    await sleep(currentPollMs);
-  }
+    },
+    run: job => {
+      // Snapshot the provider bundle when the job STARTS: it always runs against ONE stable provider set for its
+      // whole duration, a config change mid-job can never swap it out from under it. Never null: refreshProviders()
+      // ran before the pool started and the timer only ever replaces it.
+      const jobProviders = activeProviders ?? buildProviders(getMediaEmbeddingConfig());
+      // Removed in a `finally` per job: a leaked entry would make shutdown try to release a job that has already
+      // completed, which the token guard would refuse anyway, but noisily.
+      return processJob(job, jobProviders).finally(() => dropHeld(job));
+    },
+    // A claim that resolved after stop: pending again now, rather than after a stall timeout.
+    release: job => {
+      return releaseClaimedJob(job.spaceId, String(job._id), job.claimToken).finally(() => dropHeld(job));
+    },
+    sampleEpoch: currentWorkEpoch,
+    waitForWork,
+    isRunning: () => running && generation === myGeneration,
+  }).drained;
+  await poolDrained;
 }
 
 async function processJob(
@@ -740,8 +723,4 @@ function resolveFilePath(spaceId: string, filePath: string): string {
   // Prevent path traversal: only forward-slash paths, no `..` segments
   const safe = toSafeRelPath(filePath);
   return path.join(base, safe);
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
 }
