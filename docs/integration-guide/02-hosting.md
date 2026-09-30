@@ -780,6 +780,14 @@ searches move to it, the original is rebuilt, and searches move back. Until an i
 needs completing returns what it found and says `filter_window` in `degraded`; every other search is unaffected. On
 a large instance this takes as long as building every index twice, in the background.
 
+**Upgrading past 5.6.0 drops the search indexes of every empty collection, once, at boot.** A collection's search
+index now exists only while the collection holds a record: mongot keeps one change-stream cursor per index over the
+oplog, so an index on an empty collection costs the database on every write anywhere and answers nothing. A populated
+collection keeps the index it has, untouched. Expect the instance's index count to fall by the number of empty record
+collections — about half, on a measured production instance. An index comes back by itself with its collection's
+first record, and goes a minute after its last one is deleted (`SEARCH_INDEX_DROP_DELAY_MS`, default `60000`). A
+rollback needs nothing: the older build recreates every index at boot.
+
 ### Rolling Back
 
 **A rollback from 5.6.0 rebuilds the vector indexes once more**, to the previous version's filter fields. Search

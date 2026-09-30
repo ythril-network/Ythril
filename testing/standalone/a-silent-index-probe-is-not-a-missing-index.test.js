@@ -60,8 +60,12 @@ test('total silence across the instance is reported as unknown, not missing', ()
    */
   assert.match(source, /const anyIndexSeen = out\.some\(s => s\.collections\.some\(c => c\.status !== null\)\)/,
     'the instance-wide check is gone; every space would be declared missing again on a native deployment');
-  assert.match(source, /if \(out\.length > 0 && !anyIndexSeen\)/,
+  assert.match(source, /if \(out\.length > 0 && anyIndexExpected && !anyIndexSeen\)/,
     'the guard must require at least one space, or an instance with no spaces reports a fault it does not have');
+  // Q-165: an index exists only while its collection holds a record, so silence is informative only where one is
+  // EXPECTED. An instance whose collections are all empty has no index anywhere and has answered correctly.
+  assert.match(source, /const anyIndexExpected = out\.some\(s => s\.collections\.some\(c => !c\.empty && !c\.optional\)\)/,
+    'silence over empty collections would read as a deployment that cannot report search indexes');
 
   const guard = source.slice(source.indexOf('const anyIndexSeen'));
   assert.match(guard.slice(0, 700), /live: 'unknown' as const, drifted: false/,

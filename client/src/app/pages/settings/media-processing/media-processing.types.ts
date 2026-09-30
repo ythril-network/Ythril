@@ -289,6 +289,8 @@ export interface CollectionIndexStatus {
   collection: string; indexName: string; status: string | null;
   /** An index the space's search does not depend on (the face gallery). Excluded from `live`. */
   optional?: boolean;
+  /** The collection holds no record, so it has no index by design (Q-165). Excluded from `live`. */
+  empty?: boolean;
 }
 
 export interface SpaceIndexStatus {
