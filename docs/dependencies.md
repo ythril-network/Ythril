@@ -359,6 +359,9 @@ DOC_OFFICE_MEM_LIMIT=4g    # default 2g  / DOC_OFFICE_PIDS_LIMIT 512    / DOC_OF
 DOC_NLP_MEM_LIMIT=4g       # default 3g  / DOC_NLP_PIDS_LIMIT 256       / DOC_NLP_CPUS 2.0
 ```
 
+`YTHRIL_MONGO_MEM_LIMIT` is the one to raise as spaces grow: a space of tens of thousands of records needs more database
+memory than a small limit gives, and the `4g` default has not been measured at that size.
+
 The last two are the document sidecars: `doc-render` turns PDF pages into images, and `doc-office`
 (the `office` profile) converts Word and similar through LibreOffice. Their ceilings used to be fixed in
 `docker-compose.yml`, so raising them meant editing that file -- dense or very large documents are exactly

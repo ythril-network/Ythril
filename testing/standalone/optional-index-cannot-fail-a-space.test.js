@@ -100,6 +100,31 @@ describe('the face gallery is polled but gets no vote on the space status', () =
   });
 });
 
+describe('a search service that is not answering cannot condemn a space either (Q-113)', () => {
+  // The behavioural half — that `deferred` never writes `failed`, the optional face index included — is
+  // a-space-waiting-for-search-is-never-marked-failed-db.test.js, against a real database. These are the two
+  // properties of the SOURCE that make it true, and each is a reordering a refactor would do without noticing.
+  const waitBody = bodyIn('waitForSpaceIndexesReady');
+  const finalizeBody = bodyIn('finalizeSpaceIndexReady');
+
+  it('search is asked about BEFORE any index is polled, the optional face one included', () => {
+    const asked = waitBody.indexOf('searchAvailable(');
+    const firstPoll = waitBody.indexOf('pollVectorIndexReady(');
+    assert.ok(asked > -1, 'waitForSpaceIndexesReady never asks whether search is answering — it polls a service that may not be there');
+    assert.ok(firstPoll > -1, 'fixture check: the poll is gone — re-anchor this gate');
+    assert.ok(asked < firstPoll, 'a poll starts before the question is asked: the optional face poll would run against a dead service and be blamed for it');
+    assert.match(waitBody, /'deferred'/, 'there is no deferred verdict to return');
+  });
+
+  it('a deferred verdict returns before the status is written, so nothing can be recorded for it', () => {
+    const deferred = finalizeBody.indexOf("'deferred'");
+    const write = finalizeBody.indexOf('mutateConfig(');
+    assert.ok(deferred > -1, 'finalizeSpaceIndexReady does not know the deferred verdict');
+    assert.ok(write > -1, 'fixture check: the status write is gone — re-anchor this gate');
+    assert.ok(deferred < write, 'the status is written before the deferred verdict is handled — a late service would be recorded as failed');
+  });
+});
+
 describe('an index that does not exist is a terminal state, not a slow one', () => {
   const body = bodyIn('pollVectorIndexReady');
 

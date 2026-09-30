@@ -28,6 +28,8 @@ Returns process readiness based on dependency checks (MongoDB + vector search av
 
 **Response** `200` when ready, `503` when not ready.
 
+`/ready` and the instance's own search watcher agree: when the search probe here succeeds, the watcher that finds a late `mongot` is told at once and the spaces waiting for search are resumed. A failed probe here never marks search as down, because this route is public and unauthenticated; only the watcher decides that. Concurrent requests share one probe.
+
 Example:
 
 ```json

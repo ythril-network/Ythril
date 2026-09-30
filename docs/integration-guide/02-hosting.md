@@ -474,6 +474,21 @@ into a crashloop, which then looks like a failure to start rather than a probe t
 > newly-created space has always had. `INDEX_READY_TIMEOUT_MS` (default 10 minutes) bounds how long the
 > background check waits before marking a space `failed`; raise it for very large collections.
 >
+> **A search service that starts late heals by itself.** `mongot` (the search process next to `mongod`) can start
+> after the app. The app keeps asking for it, backing off from 5 seconds to 5 minutes for as long as it runs, and
+> builds the missing indexes when it answers: no restart and no rebuild is needed. Until then the affected spaces stay
+> `building` (`GET /api/spaces` adds `indexWaiting: true` to them), and `INDEX_READY_TIMEOUT_MS` does not run against
+> a service that is not there: it starts when the indexes are confirmed after the service is back, not at boot. A
+> space is marked `failed` only for a build that really failed or timed out, never for a late service, so an alert
+> keyed on `failed` no longer fires for that case. `GET /ready` agrees with this: its own search probe marks the
+> service up at once when it succeeds, and a failed probe there never marks it down. A database with no search
+> component at all (plain MongoDB Community) is checked once an hour instead.
+>
+> **Database memory.** The memory of the database container is `YTHRIL_MONGO_MEM_LIMIT` (default `4g`; the database
+> cache is sized from it). Building and serving the vector indexes of a space of tens of thousands of records needs
+> more memory than a small limit gives. The figure at `4g` for a given record count has not been measured, so watch
+> `docker stats` as a space grows and raise the limit before it is reached.
+>
 > **If you are upgrading a 2.0.x instance with many spaces, upgrade straight to 2.1** rather than
 > restarting 2.0.x, and there is no need to raise the startup budget for it.
 

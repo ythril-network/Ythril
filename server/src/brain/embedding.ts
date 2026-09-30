@@ -6,6 +6,7 @@ import { ssrfSafeFetch } from '../util/ssrf.js';
 import { allowPrivateForSlot } from '../config/model-egress-policy.js';
 import { embeddingsUrlFor } from '../files/converters/vlm-endpoint.js';
 import { log } from '../util/log.js';
+import { withJitter } from '../util/backoff.js';
 import { embeddingDurationSeconds, embeddingQueueDepth, embeddingRetryTotal } from '../metrics/registry.js';
 import { slotTimeoutMs } from '../config/model-slots.js';
 
@@ -220,11 +221,6 @@ const RETRYABLE_EMBED_STATUS = new Set([429, 502, 503, 504]);
  */
 const EMBED_RETRY_DELAYS_MS = [120, 360] as const;
 
-/** Half the delay as fixed floor, half as jitter — so N concurrent callers do not retry in lockstep. */
-function jittered(baseMs: number): number {
-  return Math.round(baseMs / 2 + Math.random() * (baseMs / 2));
-}
-
 function retryAfterMs(response: Response): number | null {
   const raw = response.headers.get('retry-after');
   if (!raw) return null;
@@ -271,7 +267,7 @@ export async function embedViaHttpWithRetry(
         log.warn(`Embedding endpoint asked for ${asked}ms via Retry-After; longer than this request will wait.`);
         break;
       }
-      const delay = jittered(asked !== null && asked > 0 ? Math.min(asked, base * 4) : base);
+      const delay = withJitter(asked !== null && asked > 0 ? Math.min(asked, base * 4) : base);
       embeddingRetryTotal.labels({ status: String((err as EmbeddingHttpError).status) }).inc();
       log.warn(`Embedding endpoint refused (HTTP ${(err as EmbeddingHttpError).status}); `
         + `retrying in ${delay}ms (attempt ${i + 2} of ${EMBED_RETRY_DELAYS_MS.length + 1}).`);

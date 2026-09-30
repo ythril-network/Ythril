@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **A search service that starts late is found and used, and a space waiting for it is no longer marked `failed`
+  (`Q-113`).** `mongot` (the search process next to `mongod`) can start after the app. The app used to wait twelve
+  seconds for it once, remember "no" for the life of the process, and at boot poll every populated collection for up
+  to ten minutes against a service that was not there, then write `indexStatus: "failed"` on a healthy space; a record
+  written while search was down was then never indexed, and semantic recall stayed empty until a restart or the rebuild
+  button. Now the app keeps asking in the background, backing off from 5 seconds to 5 minutes for as long as it runs
+  (once an hour on a database that has no search component at all), builds every missing index when search answers,
+  and confirms the waiting spaces by itself. **What operators see:** while search is down a space stays `building`
+  and `GET /api/spaces` adds `indexWaiting: true` and `indexWaitingSince` to it (derived when the list is read, never
+  stored, not on MCP `list_spaces`, which carries no `indexStatus`); the admin pipeline status says search is down,
+  since when and how often it was checked; one warn line an hour names the error class and code, never the message,
+  and one info line says search is back. **`failed` now means only a build that really failed or timed out, so an
+  alert keyed on `failed` for a late service stops firing.** `INDEX_READY_TIMEOUT_MS` starts when the indexes are
+  confirmed, not at boot. `GET /ready` and the watcher agree (its own successful probe marks search up at once; a
+  failed one never marks it down), and concurrent `/ready` requests share one probe. The retry delay rule moved into
+  `backoffDelayMs` in `util/backoff.ts`, which the database connect loop and the embedding retry now use with
+  identical delays. `YTHRIL_MONGO_MEM_LIMIT` (default 4g) is named in the hosting guide as the knob for a space of tens
+  of thousands of records, unmeasured at that size.
 - **A space-meta read no longer rescans the space, and both doors build it with one function (`Q-95`).** `stats`
   and `actualSchema` were rebuilt on every `GET /api/spaces/:id/meta` and every MCP `space_meta` — an entity scan,
   an edge scan, three link scans and seven counts per member space — by two hand-written copies of the answer. They

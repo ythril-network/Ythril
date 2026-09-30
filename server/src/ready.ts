@@ -6,11 +6,16 @@
  *   - vectorSearch: mongot availability via listSearchIndexes
  *
  * Results are cached for CACHE_TTL_MS to avoid hammering MongoDB on every
- * Kubernetes probe interval.
+ * Kubernetes probe interval, and a burst of concurrent requests shares ONE probe (see `getReadiness`).
+ *
+ * The vector-search check tells `spaces/search-readiness.ts` when it succeeds, so `/ready` and the watcher that
+ * finds a late mongot answer the same question the same way. It never tells it the opposite: this route is
+ * public and unauthenticated, and whoever could make it fail would otherwise start the watcher's slow-down.
  */
 
 import { getMongo } from './db/mongo.js';
 import { log } from './util/log.js';
+import { noteSearchUp } from './spaces/search-readiness.js';
 
 const TIMEOUT_MS = 2_000;
 const CACHE_TTL_MS = 2_000;
@@ -154,6 +159,8 @@ async function checkVectorSearch(): Promise<CheckResult> {
       db.collection('_ready_probe').listSearchIndexes().toArray(),
       TIMEOUT_MS,
     );
+    // Search answers: if the readiness state still said otherwise, it is stale, and waiters are owed a call.
+    noteSearchUp();
     logTransition('vectorSearch', 'ok');
     return { status: 'ok' };
   } catch (err) {
@@ -165,12 +172,17 @@ async function checkVectorSearch(): Promise<CheckResult> {
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
-export async function getReadiness(): Promise<ReadinessResult> {
-  const now = Date.now();
-  if (_cached && now - _cachedAt < CACHE_TTL_MS) {
-    return _cached;
-  }
+/**
+ * The probe in flight, shared by every caller that arrives while it runs.
+ *
+ * The cache above is written only AFTER the checks finish, so N concurrent unauthenticated requests arriving
+ * inside one slow probe used to run N probes against the database (each a `listSearchIndexes` plus an admin
+ * ping). An orchestrator's probe interval and a curious client are both that burst.
+ */
+let _inFlight: Promise<ReadinessResult> | null = null;
 
+async function probeReadiness(): Promise<ReadinessResult> {
+  const now = Date.now();
   const [mongodb, vectorSearch] = await Promise.all([
     checkMongoDB(),
     checkVectorSearch(),
@@ -184,4 +196,13 @@ export async function getReadiness(): Promise<ReadinessResult> {
   _cached = result;
   _cachedAt = now;
   return result;
+}
+
+export async function getReadiness(): Promise<ReadinessResult> {
+  const now = Date.now();
+  if (_cached && now - _cachedAt < CACHE_TTL_MS) {
+    return _cached;
+  }
+  _inFlight ??= probeReadiness().finally(() => { _inFlight = null; });
+  return _inFlight;
 }
