@@ -25,7 +25,7 @@
 import type { TokenRights } from '../config/rights-shape.js';
 import { holdsRungOnEvery } from '../auth/reachable-spaces.js';
 import { readSpillPage } from './read-spill-store.js';
-import { budgetFields, defaultBudgetChars, resolveBudget, resolvePaging } from './result-budget.js';
+import { budgetFields, carriagesFor, defaultBudgetChars, resolveBudget, resolvePaging } from './result-budget.js';
 import { spillIdFromPath } from './spill-path.js';
 
 /** The two refusals a spill read can give, identical on both doors. */
@@ -78,6 +78,7 @@ export async function readSpillAct(input: ReadSpillActInput): Promise<ReadSpillA
   const budget = resolveBudget(
     { maxChars: input.maxChars, maxBytes: input.maxBytes, maxTokens: input.maxTokens },
     defaultBudgetChars(input.transport),
+    carriagesFor(input.transport),
   );
   if (!budget.ok) return { status: 400, body: { error: budget.error } };
 

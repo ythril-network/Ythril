@@ -260,8 +260,8 @@ describe('recall filters what filter filters', () => {
     assert.equal(viaLegacy.status, 200, JSON.stringify(viaLegacy.body).slice(0, 200));
     assert.equal(viaTool.status, 200, JSON.stringify(viaTool.body).slice(0, 200));
 
-    // The tool door serialises the whole answer into `text`; the legacy route returns it as the body.
-    const toolBody = JSON.parse(viaTool.body.text);
+    // The tool door carries the whole answer in `data` (once — `Q-111`); the legacy route returns it as the body.
+    const toolBody = viaTool.body.data;
     assert.ok(viaLegacy.body.budgetChars > 0, 'the legacy route must report the budget it used');
     assert.equal(toolBody.budgetChars, viaLegacy.body.budgetChars,
       `the same capability on the same transport must not answer to two budgets: `

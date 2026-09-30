@@ -42,9 +42,11 @@ const READ = tool('read_file');
 const WRITE = tool('write_file');
 
 describe('read_file states the cost and points at the cheaper flow', () => {
-  it('says it is the whole file with no paging', () => {
-    assert.match(READ, /Whole file, no paging/,
-      'a caller sizing a request needs to know there is no window');
+  it('says it reads a window, and how to reach the next one', () => {
+    // It said "Whole file, no paging" until `Q-111` gave it a window; a caller sizing a request needs to know which.
+    assert.match(READ, /a window at a time/, 'a caller sizing a request needs to know the answer is a window');
+    assert.match(READ, /markdownSkip/, 'and which parameter moves it');
+    assert.match(READ, /markdownNextSkip/, 'and which field says where the next one starts');
   });
 
   it('names the two-phase alternative rather than just warning', () => {

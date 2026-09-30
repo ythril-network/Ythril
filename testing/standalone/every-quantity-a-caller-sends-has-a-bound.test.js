@@ -53,9 +53,10 @@ const bounded = q => q.kind === 'array'
  * A rule that matches nothing fails the gate, so a ruling cannot outlive its subject.
  */
 const OPEN_BY_RULING = [
-  { name: 'an offset', test: q => q.seg === 'skip',
+  { name: 'an offset', test: q => q.seg === 'skip' || q.seg === 'markdownSkip',
     why: 'skip passes over rows rather than returning them: on `filter` the query deadline (`maxTimeMS`, capped at 10 s) '
-      + 'bounds it, and on recall, similar, traverse, read_spill and list_embed_jobs it pages an answer whose size is bounded elsewhere' },
+      + 'bounds it, and on recall, similar, traverse, read_spill and list_embed_jobs it pages an answer whose size is bounded elsewhere; '
+      + '`markdownSkip` is a character offset into a document whose window the answer budget bounds' },
   { name: 'an answer budget', test: q => ['maxChars', 'maxBytes', 'maxTokens'].includes(q.seg),
     why: 'resolved by `brain/result-budget.ts` into [MIN_MAX_BYTES, MAX_MAX_BYTES] and echoed back as budgetChars/budgetBytes, '
       + 'so the clamp is disclosed on every answer (Q-161); the cost is bounded by the resolver, not the request' },

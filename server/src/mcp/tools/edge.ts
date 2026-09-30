@@ -17,7 +17,7 @@ import { parseRecordSuperseded } from '../../brain/record-flag.js';
 import { withTraverseBodies } from '../../brain/traverse-bodies.js';
 import { normaliseProjection } from '../../brain/projection.js';
 import { pageTraversal } from '../../brain/traverse-page.js';
-import { defaultBudgetChars } from '../../brain/result-budget.js';
+import { defaultBudgetChars, carriagesFor } from '../../brain/result-budget.js';
 import { spillResultSet } from '../../brain/graph-spill.js';
 import { pageBudgetSchema } from './_page-budget-schema.js';
 import { MAX_TAGS, MAX_DELETE_FIELDS, MAX_EDGE_LABELS } from '../../util/request-bounds.js';
@@ -392,6 +392,7 @@ export const graph_traverseTool: ToolHandler = {
     // Q-132: whole nodes in hop order under the byte budget, the same function the REST route pages through.
     const paged = await pageTraversal(bodies, a, {
       budgetChars: defaultBudgetChars(ctx.transport),
+      carriages: carriagesFor(ctx.transport),
       spillRemainder: remainder => spillResultSet({
         issuedTo: ctx.actor?.tokenId, results: remainder, request: { startId, direction, maxDepth, limit },
       }),

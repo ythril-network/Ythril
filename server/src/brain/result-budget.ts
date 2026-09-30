@@ -95,8 +95,14 @@ export const BUDGET_REQUEST_FIELDS: readonly string[] = Object.freeze([
 
 /** The two ceilings a response is held to. `bytes` is `null` when the caller did not ask for one. */
 export interface ResolvedBudget {
+  /** What ONE carriage of the answer may hold — the stated budget divided by `carriagesFor(transport)`. */
   chars: number;
   bytes: number | null;
+  /**
+   * The budget as the caller stated it (or the door's default), before it was shared between carriages — what an
+   * answer DISCLOSES as `budgetChars` / `budgetBytes`. Absent on a hand-built budget, which then discloses its own.
+   */
+  stated?: { chars: number; bytes: number | null };
 }
 
 /** What a caller's budget arguments resolve to, or the refusal text if they do not. */
@@ -114,7 +120,16 @@ const posInt = (v: unknown): number | null =>
  * carried and `applyBudget` stops when EITHER would be exceeded. Within one unit a minimum is meaningful, so
  * `maxTokens` (converted to characters) and `maxChars` resolve to their minimum.
  */
-export function resolveBudget(req: BudgetRequest, operatorDefault = DEFAULT_MAX_CHARS): BudgetResolution {
+export function resolveBudget(
+  req: BudgetRequest,
+  operatorDefault = DEFAULT_MAX_CHARS,
+  /**
+   * How many times the door carries the body — `carriagesFor(transport)`. The stated budget bounds what crosses the
+   * wire, so a door that sends the rows twice holds each copy to its share (`Q-111`). The answer still DISCLOSES the
+   * stated figure (`stated`), which is what the caller asked for and what `budgetChars` reports.
+   */
+  carriages = 1,
+): BudgetResolution {
   const { maxChars, maxBytes, maxTokens } = req;
 
   if (maxChars !== undefined && posInt(maxChars) === null) {
@@ -136,13 +151,35 @@ export function resolveBudget(req: BudgetRequest, operatorDefault = DEFAULT_MAX_
 
   const chosenChars = Math.min(...charCandidates);
   const mb = posInt(maxBytes);
-  return {
-    ok: true,
+  const stated = {
     chars: clampBudget(chosenChars),
     // No default, and no clamp to a MINIMUM either: a caller who states 500 bytes has a reason, and raising
     // it to 1000 on their behalf would defeat the ceiling they asked for. The upper bound still applies.
     bytes: mb === null ? null : Math.min(mb, MAX_MAX_BYTES),
   };
+  const share = Math.max(1, Math.floor(carriages));
+  return {
+    ok: true,
+    chars: Math.floor(stated.chars / share),
+    bytes: stated.bytes === null ? null : Math.floor(stated.bytes / share),
+    stated,
+  };
+}
+
+/**
+ * How many times a door carries an answer's body (`Q-111`), which is what the stated budget is divided by.
+ *
+ * **MCP carries it twice, and cannot carry it once.** A tool result is `content` text AND `structuredContent`, and a
+ * client may read either alone: the specification asks for the JSON in `content` for clients that do not read
+ * structured results, and a client that SURFACES `structuredContent` showed a page with no rows when only `content`
+ * held them (the rule in `mcp/tools/types.ts`). Dropping either loses the answer for some client, so both stay and
+ * each is held to half — a 25 000-character budget used to arrive as about 52 KB.
+ *
+ * **REST carries it once.** The tool door answers `data` and a one-line `text` (`api/tools.ts`), and every dedicated
+ * route answers one JSON body.
+ */
+export function carriagesFor(transport: 'mcp' | 'rest'): number {
+  return transport === 'mcp' ? 2 : 1;
 }
 
 /** The floor and ceiling every stated CHARACTER budget is held between. */
@@ -292,8 +329,9 @@ export function budgetFields<T>(
     count: totalMatches,
     truncated: outcome.truncated,
     // BOTH ceilings and BOTH figures, always; `budgetBytes` is `null` (present, not omitted) when unstated.
-    budgetChars: budget.chars,
-    budgetBytes: budget.bytes,
+    // The STATED budget — what the caller asked for, whichever share of it one carriage was held to.
+    budgetChars: budget.stated?.chars ?? budget.chars,
+    budgetBytes: budget.stated ? budget.stated.bytes : budget.bytes,
     charsReturned: outcome.charsReturned,
     bytesReturned: outcome.bytesReturned,
     /*
@@ -427,8 +465,8 @@ export async function budgetedRowsEnvelope<T, S>(opts: {
     returned: returned.length,
     count: opts.total,
     truncated: nextSkip !== undefined,
-    budgetChars: opts.budget.chars,
-    budgetBytes: opts.budget.bytes,
+    budgetChars: opts.budget.stated?.chars ?? opts.budget.chars,
+    budgetBytes: opts.budget.stated ? opts.budget.stated.bytes : opts.budget.bytes,
     charsReturned: meter.chars(),
     bytesReturned: meter.bytes(),
     ...(nextSkip !== undefined ? { nextSkip, truncatedBy } : {}),

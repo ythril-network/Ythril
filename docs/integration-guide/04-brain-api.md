@@ -503,7 +503,7 @@ Content-Type: application/json
 omitted `types` is not a safe default. A partial wipe clears only the tombstones and review findings
 belonging to the types you named.
 
-**Response** `200` `{ "ok": true, "text": "...", "data": { "facts": 12, "entities": 3, ... } }` — the
+**Response** `200` `{ "ok": true, "text": "The answer is in data…", "data": { "facts": 12, "entities": 3, ... } }` — the
 [tool-door envelope](16-mcp.md#the-same-tools-over-plain-http), because this path IS the `delete_space_data`
 tool. Zeroes mean the space was already empty, not that anything refused. Throttled to 5 calls a minute per
 token **on both doors**, and rejected on a proxy space (`400`) — target member spaces individually.

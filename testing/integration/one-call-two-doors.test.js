@@ -81,8 +81,14 @@ const parsedOrText = t => { try { return JSON.parse(t); } catch { return t; } };
 async function bothDoors(tool, args) {
   const rest = await viaRest(tool, args);
   const mcpAnswer = await viaMcp(tool, args);
-  assert.deepEqual(sansBudget(parsedOrText(rest.text)), sansBudget(parsedOrText(mcpAnswer.text)),
-    `${tool} answers differently depending on the door:\n  REST: ${rest.text}\n  MCP:  ${mcpAnswer.text}`);
+  // The REST door carries a structured answer ONCE, in `data`, and `text` then says so rather than repeating it
+  // (`Q-111`) — so the prose is compared only where there is no structured answer, and `data` is compared below.
+  if (!rest.ok || rest.data == null) {
+    assert.deepEqual(sansBudget(parsedOrText(rest.text)), sansBudget(parsedOrText(mcpAnswer.text)),
+      `${tool} answers differently depending on the door:\n  REST: ${rest.text}\n  MCP:  ${mcpAnswer.text}`);
+  } else {
+    assert.equal(rest.text, 'The answer is in `data`; it is not repeated here.', `${tool}: REST repeated a structured answer in \`text\``);
+  }
   assert.equal(rest.ok, !mcpAnswer.isError,
     `${tool} succeeded on one door and failed on the other`);
   assert.deepEqual(sansBudget(rest.data), sansBudget(mcpAnswer.data), `${tool} returns different structured data per door`);

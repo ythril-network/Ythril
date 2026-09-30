@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking:** **A tool answer crosses the wire once, within the budget it states (`Q-111`).** Every answer was
+  carried twice — MCP `content` and `structuredContent`, the REST tool door's `text` and `data` — so a stated
+  budget bounded half of what was sent. Measured on a 400-fact space: an MCP `filter` page at the 25 000 default was
+  50 247 bytes and is 25 053; the REST tool door's page at 50 000 was 102 296 bytes and is 50 124; a 2.16 MB
+  `read_file` over MCP was 4 336 090 bytes and is 24 139. **REST** now carries the answer once: `data` holds it,
+  and `text` is one fixed sentence saying so (`text` is still the answer when a tool has no structured result).
+  **MCP** keeps both halves, because a client may read either alone (the rule in `mcp/tools/types.ts`), and holds
+  each to half the stated budget — so a page holds about half the rows it did, and `nextSkip` reaches the rest;
+  `budgetChars` still reports the budget as stated. **`read_file` is budgeted and paged**: whole paragraphs from
+  `markdownSkip` within `maxChars` / `maxBytes` / `maxTokens`, `truncated` and `markdownNextSkip` saying where to go
+  on — the parameters `GET …/files/extract` now takes for its Markdown window too, resolved by one function. A
+  paragraph larger than a window is split at a line break rather than returned whole past the budget, on both.
+  **Who is affected:** a script calling `POST /api/<tool>` that parses `text` instead of reading `data`; an MCP
+  client that expected a whole file from one `read_file`, or a page's old row count at a given `maxChars`.
+
 - **Breaking:** **Every quantity a caller sends has a bound, the same on both doors, and past it is a `400` naming it
   (`Q-108`).** `tags` 100 per record (what the sync door already refused, so a record with more could never be pushed),
   `linkEntities` / `linkFacts` / `linkChronos` 1 000 each, inline `edges` 500, `deleteFields` 100, `edgeLabels` 100,
