@@ -3,11 +3,12 @@
  *
  * ## Why a module
  *
- * The write commit read the seqs it would guard against (`brain/write-plan/commit.ts`), the pull engine read the
- * seqs of a page before applying it, and the arrival writer (`sync/arrivals.ts`) reads the receiver's own fields
- * it must carry across a replace. Three hand-written `find({ _id: { $in } })` loops, and the copy that goes wrong
- * is the one that forgets the chunk: an unbounded `$in` over a 50 000-record import is one enormous query, and
- * the chunk is the line that looks like boilerplate.
+ * Its callers: the write commit's read-back of the seqs it guards against (`brain/write-plan/commit.ts`), the
+ * arrival writer's read of the stored copies of a page (`sync/arrivals.ts`, `batchUpsertBySeq` and the duplicate
+ * read-back), and the push door's reads of tombstones, stored copies and fork ancestors (`sync/push-reads.ts`).
+ * The copy that goes wrong is the one that forgets the chunk: an unbounded `$in` over a 50 000-record import is
+ * one enormous query, and the chunk is the line that looks like boilerplate. Other `_id: { $in }` reads in the
+ * tree predate this module and are not yet on it.
  *
  * ## What it guarantees
  *
