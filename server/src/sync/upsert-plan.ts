@@ -99,6 +99,16 @@ export function isNewerCopy(incoming: number | undefined, held: number | undefin
 export const MAX_FORK_DEPTH = 10;
 
 /**
+ * The indexes on a space's FACTS collection the fork caps read through — declared once, as `LINK_INDEXES` is, and
+ * created by `initSpace` for a new space and by `ensureQueryIndexes` for every existing one. Without it the push
+ * door's sibling count was a `countDocuments({ forkOf })` per candidate over the whole collection. Sparse: most
+ * facts are no fork. Local, like every index — nothing about it replicates.
+ */
+export const FORK_INDEXES: readonly { keys: Record<string, 1>; sparse: true }[] = Object.freeze([
+  { keys: { forkOf: 1 }, sparse: true as const },
+]);
+
+/**
  * The push families the planner decides — NOT ALL BRAIN COLLECTIONS: file metadata is merged per document, not
  * planned (`Q-107` part 2), so `files` is absent on purpose.
  */

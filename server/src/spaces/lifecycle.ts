@@ -25,6 +25,7 @@ import { unlabelAllFaces } from '../brain/entities.js';
 import { ensureMediaJobIndexes } from '../files/media/job-queue.js';
 import { ensureEmbedJobIndexes } from '../brain/embed-queue.js';
 import { LINK_INDEXES } from '../brain/link-adjacency.js';
+import { FORK_INDEXES } from '../sync/upsert-plan.js';
 import { envInt } from '../config/env-num.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { mapLimit } from '../util/map-limit.js';
@@ -92,10 +93,8 @@ export async function initSpace(
 
   await memoriesColl.createIndex({ seq: 1 });
   await memoriesColl.createIndex({ tags: 1 });
-  // The push door's fork fan-out cap counts a parent's forks per page in one aggregate (`sync/push-reads.ts`).
-  // Without this it was a `countDocuments({ forkOf })` per fork candidate over the whole collection. Sparse: most
-  // facts are no fork. Local, like every index here — nothing about it replicates.
-  await memoriesColl.createIndex({ forkOf: 1 }, { sparse: true });
+  // The fork caps' indexes (`FORK_INDEXES`, `sync/upsert-plan.ts`) — the same list `ensureQueryIndexes` creates.
+  for (const ix of FORK_INDEXES) await memoriesColl.createIndex(ix.keys, { sparse: ix.sparse });
   // `{ type: 1 }` on all four record collections. MEASURED, not assumed: every list endpoint exposes a `type`
   // filter and `total` counts with it, and `explain()` on a live instance returned COLLSCAN for
   // `{type: …}` on facts, entities, edges and chrono. Entities looked covered by `{ name: 1, type: 1 }` and

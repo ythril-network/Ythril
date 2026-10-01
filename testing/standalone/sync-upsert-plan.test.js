@@ -172,6 +172,22 @@ describe('one accept rule: isNewerCopy', () => {
   });
 });
 
+describe('the fork caps\' index is declared once', () => {
+  it('initSpace and ensureQueryIndexes both create FORK_INDEXES, and nobody spells the index', async () => {
+    // Dup pass: `{ forkOf: 1 }, { sparse: true }` was written in both. Seen red by mutation, restored by hand: the
+    // literal put back in ensure-query-indexes.ts.
+    const { readFileSync } = await import('node:fs');
+    const { stripComments } = await import('./_strip-comments.mjs');
+    const { readTrackedSources } = await import('./_sources.mjs');
+    for (const f of ['server/src/spaces/lifecycle.ts', 'server/src/spaces/ensure-query-indexes.ts']) {
+      assert.match(stripComments(readFileSync(f, 'utf8')), /for \(const ix of FORK_INDEXES\)/, `${f} no longer creates FORK_INDEXES`);
+    }
+    const spelled = readTrackedSources('server/src', { ext: ['.ts'], floor: 200, specs: false, untracked: true })
+      .filter(s => /createIndex\(\s*\{\s*forkOf\b/.test(stripComments(s.text))).map(s => s.file);
+    assert.deepEqual(spelled, [], 'the forkOf index is spelled out again instead of read from FORK_INDEXES');
+  });
+});
+
 describe('one fork rule: divergesFrom', () => {
   it('the candidate read and the planner both ask it, and no fact-text comparison is written beside it', async () => {
     // Dup pass: `seq === … && fact !== …` was written in forkCandidates twice and in the planner once. Seen red

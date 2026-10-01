@@ -28,6 +28,7 @@
 import { col } from '../db/mongo.js';
 import { COLLECTION_SUFFIX } from '../config/types-knowledge.js';
 import { LINK_INDEXES } from '../brain/link-adjacency.js';
+import { FORK_INDEXES } from '../sync/upsert-plan.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { concreteSpaces } from './proxy.js';
 import { log } from '../util/log.js';
@@ -83,12 +84,14 @@ export async function ensureQueryIndexes(): Promise<number> {
         log.warn(`ensureQueryIndexes: ${space.id} links ${Object.keys(ix.keys).join(',')} index: ${err}`);
       }
     }
-    // The fork fan-out count of the push door (`sync/push-reads.ts`), for a space `initSpace` never revisits.
-    try {
-      await col(spaceCollection(space.id, 'facts')).createIndex({ forkOf: 1 }, { sparse: true });
-      issued++;
-    } catch (err) {
-      log.warn(`ensureQueryIndexes: ${space.id} facts forkOf index: ${err}`);
+    // The fork caps' indexes, for a space `initSpace` never revisits — the same list it creates (`FORK_INDEXES`).
+    for (const ix of FORK_INDEXES) {
+      try {
+        await col(spaceCollection(space.id, 'facts')).createIndex(ix.keys, { sparse: ix.sparse });
+        issued++;
+      } catch (err) {
+        log.warn(`ensureQueryIndexes: ${space.id} facts ${Object.keys(ix.keys).join(',')} index: ${err}`);
+      }
     }
   }
   return issued;
