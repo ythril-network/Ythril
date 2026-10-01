@@ -26,12 +26,15 @@ import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
 import { bodyOf, balancedFrom } from './_structural-window.mjs';
 
-const EDGES = 'server/src/brain/edges.ts';
+// The edge write DECIDES in its planner since `Q-99` part 3 — `upsertEdge` and the bulk door both plan through
+// `planEdge` and the commit writes — so the planner is "the function that reaches the collection" for this rule.
+const EDGES = 'server/src/brain/write-plan/plan-edge.ts';
+const FN = 'planEdge';
 const edges = stripComments(readFileSync(EDGES, 'utf8'));
 
 describe('the write function validates, not its callers', () => {
   it('upsertEdge classifies the record it will produce', () => {
-    const body = bodyOf(edges, 'upsertEdge');
+    const body = bodyOf(edges, FN);
     assert.match(
       body, /classifyEdgeUpsertAgainst\(/,
       'upsertEdge does not validate, so every caller must remember to — and two did not. The rule belongs in '
@@ -40,7 +43,7 @@ describe('the write function validates, not its callers', () => {
   });
 
   it('and REFUSES rather than merely reporting', () => {
-    const body = bodyOf(edges, 'upsertEdge');
+    const body = bodyOf(edges, FN);
     assert.match(
       body, /blocked/,
       'the classification must be acted on: computing it and writing anyway is the defect with extra steps',
@@ -72,10 +75,12 @@ describe('the write function validates, not its callers', () => {
   });
 
   it('validation happens BEFORE the collection is touched', () => {
-    const body = bodyOf(edges, 'upsertEdge');
+    // A planner writes nothing (`a-write-planner-touches-no-collection`); what it must not do is DECIDE before
+    // validating — record the plan in the read set, after which a later batch item treats the edge as written.
+    const body = bodyOf(edges, FN);
     const checkAt = body.indexOf('classifyEdgeUpsertAgainst(');
-    const writeAt = body.search(/collection\.(insertOne|updateOne|replaceOne|findOneAndUpdate)/);
-    assert.notEqual(writeAt, -1, 'no write found in upsertEdge — re-point this gate');
+    const writeAt = body.indexOf('noteWritten(');
+    assert.notEqual(writeAt, -1, `no decision found in ${FN} — re-point this gate`);
     assert.ok(
       checkAt !== -1 && checkAt < writeAt,
       'validating after the write would refuse a record the store already holds',

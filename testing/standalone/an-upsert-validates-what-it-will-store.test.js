@@ -132,9 +132,13 @@ describe('the doors reach the WRITER, and the writer holds the rule', () => {
      * whole reason the check moved inside the writer (`Q-6`, 2026-09-07).
      *
      * The writer's own module is the one place allowed to, and it is excluded by name for that reason —
-     * everything else in the server is asked.
+     * everything else in the server is asked. Since Q-99 part 3 the writer is two modules: `chrono.ts` keeps
+     * the update, and the create/converge decision is the planner `write-plan/plan-chrono.ts`, which
+     * `createChrono` and the bulk importer both run — so the planner is the writer for that half, not a door.
      */
-    const OWNS_IT = ['server/src/brain/write-validation.ts', 'server/src/brain/chrono.ts'];
+    const OWNS_IT = [
+      'server/src/brain/write-validation.ts', 'server/src/brain/chrono.ts', 'server/src/brain/write-plan/plan-chrono.ts',
+    ];
     const files = trackedSources('server/src', { exclude: OWNS_IT });
 
     const copies = files.filter(f => /classifyChrono\w*\(/.test(stripComments(readFileSync(f, 'utf8'))));

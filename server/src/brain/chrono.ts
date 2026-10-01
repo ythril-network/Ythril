@@ -1,35 +1,30 @@
-import { applyRecordFlags } from './record-flag.js';
-import { v4 as uuidv4 } from 'uuid';
 import { reconcileLinks, removeLinksFrom, assertDesiredLinks } from './links.js';
 import { brainWriteSeqTotal } from '../metrics/registry.js';
-import { authorRef } from '../config/author.js';
-import { col, asFilter, asDoc, asUpdate } from '../db/mongo.js';
-import { nextSeq } from '../util/seq.js';
+import { col, asFilter, asUpdate } from '../db/mongo.js';
+import { withSeq } from '../util/seq.js';
+import { writeTombstone } from './tombstones.js';
 import { PROPERTIES_SCAN_MAX_MS } from './tag-filter.js';
 import { parseLimit, parseSkip } from '../util/pagination.js';
 import { toMongoSort, type SortSpec } from './list-sort.js';
 import { NEVER_RETURNED_PROJECTION, withoutVector } from './read-projection.js';
 import { conveniencePredicate } from './list-conveniences.js';
-import { embed } from './embedding.js';
-import { chronoEmbedText } from './embed-text.js';
-import { SimilarMatch, checkDuplicates } from './recall.js';
+import { SimilarMatch } from './recall.js';
 import type { DupeCheckOpts } from './write-options.js';
-import { findInsertContradictions, type ContradictionWarning } from './insert-contradictions.js';
+import { type ContradictionWarning } from './insert-contradictions.js';
 import { deriveChronoStatus } from './chrono-status.js';
 import { datePassedPolicy, typesWhereDatePassedMeansNothing } from './chrono-date-policy.js';
-import { getConfig } from '../config/loader.js';
-import { stampExpiryOnCreate, applyExpiryToUpdate } from './ttl.js';
-import { stampSkewOnCreate } from './stamp-skew.js';
-import { getSpaceMeta, applyPropertyDefaults } from '../spaces/schema-validation.js';
+import { applyExpiryToUpdate } from './ttl.js';
+import { getSpaceMeta } from '../spaces/schema-validation.js';
 import { classifyChronoUpsertAgainst, SchemaViolationError, type UpdateValidation } from './write-validation.js';
-import { mergeTags, mergeProperties, mergePropertiesOrKeep } from './merge-fields.js';
+import { mergePropertiesOrKeep } from './merge-fields.js';
 import { applyDeleteFields } from './delete-fields.js';
 import { enqueueEmbedJob, retireEmbedJob, EMBED_PRIORITY } from './embed-queue.js';
-import { embeddingSuppressedFor } from './suppress-embeddings.js';
 import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';
-import type { ChronoEntry, ChronoType, ChronoStatus, TombstoneDoc } from '../config/types.js';
+import type { ChronoEntry } from '../config/types.js';
 import { writeFilterFor, writeOutcome } from './write-precondition.js';
 import { spaceCollection } from '../db/space-collection.js';
+import { planChrono, chronoWant, type ChronoInput, type ChronoFields } from './write-plan/plan-chrono.js';
+import { planAndCommitOne } from './write-plan/plan-and-commit.js';
 
 // Re-exported so existing importers (and the C5 tests) keep reaching it here; it lives in its own leaf
 // module only to keep chrono.ts ↔ recall.ts from importing each other. See chrono-status.ts.
@@ -117,189 +112,28 @@ export function parseRecurrence(
  */
 export async function createChrono(
   spaceId: string,
-  fields: {
-    title: string;
-    type: ChronoType;
-    startsAt: string;
-    description?: string;
-    endsAt?: string;
-    status?: ChronoStatus;
-    confidence?: number;
-    tags?: string[];
-    /**
-     * The entities and facts this entry links to — DESIRED LINK SETS, never stored fields.
-     *
-     * They were `entityIds` and `memoryIds`, and they were both: written onto the record AND handed to
-     * `reconcileLinks`, so the record and the link rows were two spellings of one fact. 5.0 removes the
-     * arrays, so these are the input and the link records are the storage.
-     */
-    linkEntities?: string[];
-    linkFacts?: string[];
-    properties?: Record<string, string | number | boolean>;
-    recurrence?: ChronoEntry['recurrence'];
-    /**
-     * A caller-supplied UUID v4, which makes this write idempotent — see `saveFact()` for the full reasoning.
-     *
-     * A retried create that names an existing entry CONVERGES on the same content instead of producing a
-     * second calendar entry. Chrono is the type where the same thing most often gets logged twice even
-     * without a retry, which is why the opt-in duplicate check below exists; this closes the mechanical case.
-     */
-    id?: string;
-  },
+  /** The entry, its desired link sets and an optional idempotency id — see `ChronoFields`. */
+  fields: ChronoFields,
   actor?: WebhookActor,
   ttlDays?: number | null,
   /** `onValidation` rides in `opts` rather than becoming another positional. See `upsertEdge`'s. */
   opts?: DupeCheckOpts & { onValidation?: (check: UpdateValidation) => void },
 ): Promise<ChronoEntry & { similar?: SimilarMatch[]; contradicts?: ContradictionWarning[] }> {
-  // THE LINKS ARE REFUSED BEFORE THE ENTRY IS WRITTEN — see `saveFact` for why the reconcile's own check
-  // is not enough on its own.
-  await assertDesiredLinks(spaceId, 'chrono',
-    { entity: fields.linkEntities ?? [], fact: fields.linkFacts ?? [] });
-
-  // When an id is supplied, look for the entry it names first — the same shape as `upsertEntity` and
-  // `saveFact`.
-  const existing: ChronoEntry | null = fields.id
-    ? (await col<ChronoEntry>(spaceCollection(spaceId, 'chrono')).findOne(
-      asFilter<ChronoEntry>({ _id: fields.id, spaceId }),
-      { projection: NEVER_RETURNED_PROJECTION }) as ChronoEntry | null)
-    : null;
-
   /*
-   * THE SCHEMA IS ENFORCED HERE, so that no caller can reach the collection around it.
-   *
-   * Owner's ruling, 2026-08-29. The classifier already existed (#1067) and was called by the doors alone —
-   * three copies for create and two for update, each reachable only if remembered.
+   * The DOOR, and nothing else. Every rule a chrono write applies is in `write-plan/plan-chrono.ts`, decided
+   * against a read set; the write is the commit's. A batch asks for the same plans in bulk (`Q-99` part 3).
    */
-  const meta = getSpaceMeta(spaceId);
-  const withDefaults = existing
-    ? fields.properties
-    : applyPropertyDefaults(meta?.typeSchemas?.chrono?.[fields.type], fields.properties);
-  {
-    const check = classifyChronoUpsertAgainst(meta, existing, { type: fields.type, properties: withDefaults });
-    if (check.blocked) throw new SchemaViolationError(check);
-    opts?.onValidation?.(check);
+  const input: ChronoInput = { fields, ttlDays, opts };
+  const done = await planAndCommitOne(spaceId, chronoWant(input), view => planChrono(spaceId, input, view));
+  const entry = { ...done.plan.result, seq: done.seq } as unknown as ChronoEntry;
+  // `chrono.updated`, not `created`, on a converge — a subscriber must be able to tell a retry from a new entry.
+  if (actor) {
+    emitWebhookEvent({ event: done.plan.op === 'insert' ? 'chrono.created' : 'chrono.updated', spaceId,
+      entry: { ...entry, embedding: undefined }, ...actor });
   }
-  fields = { ...fields, properties: withDefaults };
-
-  const seq = await nextSeq(spaceId);
-  const now = new Date().toISOString();
-  const status = fields.status ?? 'upcoming';
-  const tags = fields.tags ?? [];
-
-  // Embed kind + status + title + description + tags + properties (best-effort)
-  // Queued by default — see the note in `upsertEntity`. `matchedText` is stored either way.
-  const embedText = chronoEmbedText(fields.title, fields.type, status, fields.description, tags, fields.properties);
-  let embeddingFields: { embedding?: number[]; embeddingModel?: string; matchedText?: string } = { matchedText: embedText };
-  // Suppression wins over `waitForEmbedding` — see `embeddingSuppressedFor`. `matchedText` is stored either
-  // way, which is the point: a suppressed record stays findable lexically and stops competing on meaning.
-  //
-  // Hoisted, because the enqueue below consults the same answer. The RECORD tier is stated here, which it was
-  // not until 2026-09-02 — see `DupeCheckOpts`.
-  const suppressed = embeddingSuppressedFor(spaceId, 'chrono',
-    { type: fields.type, suppressEmbeddings: opts?.suppressEmbeddings });
-  if (opts?.waitForEmbedding === true && !suppressed) {
-    const embResult = await embed(embedText);
-    embeddingFields = { embedding: embResult.vector, embeddingModel: embResult.model, matchedText: embedText };
-  }
-
-  // Opt-in insert-time duplicate / contradiction checks, using the freshly computed vector BEFORE insert so
-  // it can never self-match. ONE neighbour search serves both flags. A calendar is where the same thing most
-  // often gets logged twice, and where two entries most often disagree about what became of it — the
-  // structured judge compares the stored `status`, not the dates (see structured-claims.ts for why).
-  let similar: SimilarMatch[] | undefined;
-  let contradicts: ContradictionWarning[] | undefined;
-  if ((opts?.checkDuplicates || opts?.checkContradictions) && embeddingFields.embedding) {
-    const hits = await checkDuplicates(spaceId, 'chrono', embeddingFields.embedding, opts.dupeThreshold, opts.dupeTopK);
-    if (opts.checkDuplicates && hits.length > 0) similar = hits;
-    if (opts.checkContradictions && hits.length > 0) {
-      const found = await findInsertContradictions(spaceId, 'chrono', { properties: fields.properties, status }, hits);
-      if (found.length > 0) contradicts = found;
-    }
-  }
-
-  // ── The idempotent branch: a supplied id that already names an entry converges rather than duplicating.
-  if (existing) {
-    const mergedTags = mergeTags(existing.tags, tags);
-    const mergedProps = mergeProperties(existing.properties, fields.properties);
-    const $set: Record<string, unknown> = {
-      title: fields.title,
-      type: fields.type,
-      startsAt: fields.startsAt,
-      status,
-      tags: mergedTags,
-      updatedAt: now,
-      seq,
-      ...embeddingFields,
-    };
-    if (fields.endsAt !== undefined) $set['endsAt'] = fields.endsAt;
-    if (fields.description !== undefined) $set['description'] = fields.description;
-    if (fields.confidence !== undefined) $set['confidence'] = fields.confidence;
-    if (fields.properties !== undefined) $set['properties'] = mergedProps;
-    if (fields.recurrence !== undefined) $set['recurrence'] = fields.recurrence;
-    const $unset: Record<string, unknown> = {};
-    applyExpiryToUpdate(spaceId, ttlDays, existing._expireAt != null, $set, $unset,
-      { collection: 'chrono', existing: existing as unknown as Record<string, unknown> });
-    const updateOp: Record<string, unknown> = { $set };
-    if (Object.keys($unset).length > 0) updateOp['$unset'] = $unset;
-    await col<ChronoEntry>(spaceCollection(spaceId, 'chrono')).updateOne(
-      asFilter<ChronoEntry>({ _id: existing._id }), asUpdate<ChronoEntry>(updateOp),
-    );
-    const converged = { ...existing, ...($set as Partial<ChronoEntry>) } as ChronoEntry;
-    if ('_expireAt' in $unset) delete (converged as { _expireAt?: unknown })._expireAt;
-    // Both classes, from the CONVERGED document rather than the parameters: this branch merges, so what
-    // the entry now says is the only correct input to a reconcile.
-    await reconcileLinks(spaceId, converged._id, 'chrono',
-      { entity: fields.linkEntities ?? [], fact: fields.linkFacts ?? [] }, converged.author);
-    // `chrono.updated`, not `created` — a subscriber must be able to tell a converged retry from a new entry.
-    if (actor) emitWebhookEvent({ event: 'chrono.updated', spaceId, entry: { ...converged, embedding: undefined }, ...actor });
-    return withoutVector((similar || contradicts)
-      ? { ...converged, ...(similar ? { similar } : {}), ...(contradicts ? { contradicts } : {}) }
-      : converged);
-  }
-
-  const doc: ChronoEntry = {
-    // ID IS ID (owner ruling, 2026-08-12): the identity is ours to mint, always. A supplied id may
-    // ADDRESS an existing record — the update path above — but it never becomes a new record's identity.
-    // It used to: a supplied id that named nothing was adopted, which made the caller a co-author of our
-    // primary key and, across a sync, let two instances deriving ids from the same key collide by design.
-    // A caller wanting to carry their own reference puts it in `name` or `description`, which are for that.
-    _id: uuidv4(),
-    spaceId,
-    title: fields.title,
-    type: fields.type,
-    startsAt: fields.startsAt,
-    status,
-    tags,
-    author: authorRef(),
-    createdAt: now,
-    updatedAt: now,
-    seq,
-    ...embeddingFields,
-  };
-  // Stored, not merely consulted — see the note in `saveFact`.
-  applyRecordFlags(doc, opts);
-  if (fields.description !== undefined) doc.description = fields.description;
-  if (fields.endsAt !== undefined) doc.endsAt = fields.endsAt;
-  if (fields.confidence !== undefined) doc.confidence = fields.confidence;
-  if (fields.properties !== undefined) doc.properties = fields.properties;
-  if (fields.recurrence !== undefined) doc.recurrence = fields.recurrence;
-
-  // The collection+type is passed so the SCHEMA tier applies (record > schema > space): a telemetry space
-  // prunes deploy `event`s while keeping `health-snapshot`/`metrics-snapshot` for trending, which one
-  // space-wide TTL cannot express.
-  stampExpiryOnCreate(spaceId, doc, ttlDays, { collection: 'chrono', type: doc.type });
-  // Warn-not-refuse: a caller's own stamp checked against ours. Stored only when it disagrees beyond the space's
-  // threshold, so presence is the signal. The write proceeds either way -- a backdated import is legitimate.
-  stampSkewOnCreate(doc, getSpaceMeta(spaceId));
-  await col<ChronoEntry>(spaceCollection(spaceId, 'chrono')).insertOne(asDoc<ChronoEntry>(doc));
-  if (!embeddingFields.embedding && !suppressed) await enqueueEmbedJob(spaceId, 'chrono', doc._id, { priority: EMBED_PRIORITY.write });
-  // A chrono entry is the only record kind that holds TWO classes, and they are told apart by the to-kind
-  // rather than by a field name — which is why one reconcile call takes both.
-  await reconcileLinks(spaceId, doc._id, 'chrono',
-    { entity: fields.linkEntities ?? [], fact: fields.linkFacts ?? [] }, doc.author);
-  if (actor) emitWebhookEvent({ event: 'chrono.created', spaceId, entry: { ...doc, embedding: undefined }, ...actor });
   // Advisory only — the entry is stored either way.
-  return withoutVector((similar || contradicts) ? { ...doc, ...(similar ? { similar } : {}), ...(contradicts ? { contradicts } : {}) } : doc);
+  return withoutVector({ ...entry, ...(done.similar ? { similar: done.similar } : {}),
+    ...(done.contradicts ? { contradicts: done.contradicts } : {}) });
 }
 
 export async function updateChrono(
@@ -325,9 +159,9 @@ export async function updateChrono(
     ...(updates.linkFacts !== undefined ? { fact: updates.linkFacts } : {}),
   });
 
-  const seq = await nextSeq(spaceId);
+  // The seq is taken AT the write (`withSeq` below), not here (`Q-196`).
   const now = new Date().toISOString();
-  const $set: Record<string, unknown> = { updatedAt: now, seq };
+  const $set: Record<string, unknown> = { updatedAt: now };
   const $unset: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(updates)) {
     if (v !== undefined) $set[k] = v;
@@ -412,17 +246,20 @@ export async function updateChrono(
 
   applyExpiryToUpdate(spaceId, ttlDays, existing._expireAt != null, $set, $unset,
     { collection: 'chrono', existing: existing as unknown as Record<string, unknown> }); // F10
-  const updateOp: Record<string, unknown> = { $set };
-  if (Object.keys($unset).length > 0) updateOp['$unset'] = $unset;
   // Lost-update detection, identical to `updateFact` and for the same reason: `returnDocument: "before"`
   // hands back the record as it was at WRITE time, so comparing its seq with the one read at the top of this
   // function is exactly the test for another writer landing in the window. Observation only — no write that
   // previously succeeded is now rejected.
-  const beforeWrite = await col<ChronoEntry>(spaceCollection(spaceId, 'chrono')).findOneAndUpdate(
-    asFilter<ChronoEntry>(writeFilterFor(id, ifMatchSeq)),
-    asUpdate<ChronoEntry>(updateOp),
-    { returnDocument: 'before' },
-  ) as ChronoEntry | null;
+  const beforeWrite = await withSeq(spaceId, (seq) => {
+    $set['seq'] = seq;
+    const updateOp: Record<string, unknown> = { $set };
+    if (Object.keys($unset).length > 0) updateOp['$unset'] = $unset;
+    return col<ChronoEntry>(spaceCollection(spaceId, 'chrono')).findOneAndUpdate(
+      asFilter<ChronoEntry>(writeFilterFor(id, ifMatchSeq)),
+      asUpdate<ChronoEntry>(updateOp),
+      { returnDocument: 'before' },
+    );
+  }) as ChronoEntry | null;
   brainWriteSeqTotal.labels({
     collection: 'chrono',
     outcome: writeOutcome(!!beforeWrite, ifMatchSeq !== undefined, !!beforeWrite && beforeWrite.seq !== existing.seq),
@@ -742,7 +579,6 @@ export async function deleteChrono(
 ): Promise<boolean> {
   const existing = await col<ChronoEntry>(spaceCollection(spaceId, 'chrono'))
     .findOne(asFilter<ChronoEntry>({ _id: chronoId, spaceId }), { projection: { seq: 1 } }) as { seq?: number } | null;
-  const seq = await nextSeq(spaceId);
   const result = await col<ChronoEntry>(spaceCollection(spaceId, 'chrono')).deleteOne({
     _id: chronoId,
     spaceId,
@@ -754,20 +590,7 @@ export async function deleteChrono(
   // that 404s.
   await retireEmbedJob(spaceId, 'chrono', chronoId);
 
-  const tombstone: TombstoneDoc = {
-    _id: chronoId,
-    type: 'chrono',
-    spaceId,
-    deletedAt: new Date().toISOString(),
-    instanceId: getConfig().instanceId,
-    seq,
-    ...(existing?.seq !== undefined ? { originalSeq: existing.seq } : {}),
-  };
-  await col<TombstoneDoc>(spaceCollection(spaceId, 'tombstones')).replaceOne(
-    asFilter<TombstoneDoc>({ _id: chronoId }),
-    asDoc<TombstoneDoc>(tombstone),
-    { upsert: true },
-  );
+  await writeTombstone(spaceId, { _id: chronoId, type: 'chrono', originalSeq: existing?.seq });
   // The cascade — see `removeLinksFrom`. Links pointing AT this entry belong to the readers' slice.
   await removeLinksFrom(spaceId, chronoId, 'chrono');
   if (actor) emitWebhookEvent({ event: 'chrono.deleted', spaceId, entry: { _id: chronoId }, ...actor });

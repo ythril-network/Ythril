@@ -46,9 +46,21 @@ export async function findEdgeByTriplet(
   fromKind?: RefKind, toKind?: RefKind,
 ): Promise<EdgeDoc | null> {
   return await col<EdgeDoc>(spaceCollection(spaceId, 'edges'))
-    .findOne(asFilter<EdgeDoc>({
-      spaceId, from, to, label,
-      fromKind: storedEdgeKind(fromKind) ?? null,
-      toKind: storedEdgeKind(toKind) ?? null,
-    } as never), { projection: NEVER_RETURNED_PROJECTION }) as EdgeDoc | null;
+    .findOne(asFilter<EdgeDoc>({ spaceId, ...tripletClause({ from, to, label, fromKind, toKind }) } as never),
+      { projection: NEVER_RETURNED_PROJECTION }) as EdgeDoc | null;
+}
+
+/**
+ * The exact match for one identity triplet, kinds included, as a filter clause. Shared with the write planners'
+ * batched read, which `$or`s one clause per triplet: the `?? null` below is the line a hand-written copy drops,
+ * and without it the clause matches an edge of ANY kind (see `findEdgeByTriplet`).
+ */
+export function tripletClause(
+  t: { from: string; to: string; label: string; fromKind?: RefKind; toKind?: RefKind },
+): Record<string, unknown> {
+  return {
+    from: t.from, to: t.to, label: t.label,
+    fromKind: storedEdgeKind(t.fromKind) ?? null,
+    toKind: storedEdgeKind(t.toKind) ?? null,
+  };
 }

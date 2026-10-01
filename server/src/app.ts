@@ -1,4 +1,5 @@
 import { ReferenceRefusal } from './brain/entity-refs.js';
+import { WriteConflict } from './brain/write-plan/types.js';
 import express from 'express';
 import compression from 'compression';
 import { shouldCompress, staticCacheControl } from './util/transfer.js';
@@ -714,6 +715,11 @@ export function createApp() {
      */
     if (err instanceof ReferenceRefusal) {
       res.status(400).json({ error: err.message });
+      return;
+    }
+    // Another write kept moving the record (`WriteConflict`): nothing was written and a retry is the remedy.
+    if (err instanceof WriteConflict) {
+      res.status(409).json({ error: err.message });
       return;
     }
     const message = err instanceof Error ? err.message : String(err);

@@ -45,10 +45,15 @@ const code = (f) => stripComments(readFileSync(join(REPO_ROOT, f), 'utf8'));
  * Named as the three writers rather than as a list of doors — a door is whoever calls one, which is the
  * property, and a seventh door is caught by having called one rather than by being remembered.
  */
-const CREATORS = /\b(?:await saveFact\(|await createChrono\(|await upsertEntity\()/;
+// A creator's PLANNER counts too since `Q-99` part 3: the batch door plans its records through them and the
+// commit writes, so it calls no creator at all — and is still the highest-volume create door there is.
+const CREATORS = /\b(?:await saveFact\(|await createChrono\(|await upsertEntity\(|(?<!function )plan(?:Fact|Chrono|Entity)\()/;
 
+// A file that DEFINES a creator is the writer, not a door — it calls its own planner, and that is not a door
+// asking for a write on somebody's behalf.
+const DEFINES_CREATOR = /export async function (?:saveFact|createChrono|upsertEntity)\(/;
 const doors = trackedSources(['server/src'], { floor: 100 })
-  .filter(f => CREATORS.test(code(f)));
+  .filter(f => CREATORS.test(code(f)) && !DEFINES_CREATOR.test(code(f)));
 
 describe('the create doors are found at all', () => {
   it('there are at least the seven known ones', () => {
@@ -70,7 +75,8 @@ describe('the create doors are found at all', () => {
 describe('every create door offers the connections, through the one module', () => {
   for (const door of doors) {
     it(`${door} applies them`, () => {
-      assert.match(code(door), /applyConnections\(/,
+      // `applyConnections` after a single write, or `connectionsOf` — the same mapping — planned into a batch.
+      assert.match(code(door), /applyConnections\(|connectionsOf\(/,
         `${door} creates a record and never applies the relationships the caller asked for, so a `
         + 'caller writing `linkEntities` or `edges` there is silently ignored — which is worse than a '
         + 'refusal, because nothing says it happened');

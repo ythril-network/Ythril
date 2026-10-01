@@ -121,32 +121,49 @@ describe('config.json write safety', () => {
     assert.ok(after.spaces.some(s => s.id === renamed), 'the rename should still have been applied');
   });
 
-  it('index-readiness finalisation does not erase an edit written while it polled', async () => {
-    // The exact CI failure, in miniature: create a space (readiness polling starts in the
-    // background), edit config.json while it runs, and assert the edit is still there once
-    // the space reports ready. Before the fix, that background write — which holds its
-    // snapshot for as long as the index builds take — silently reverted the edit.
-    const id = `cfgsafe-ready-${RUN_ID}`;
-    const createR = await post(INSTANCES.a, token, '/api/spaces', { id, label: 'Readiness Race' });
-    assert.equal(createR.status, 201, JSON.stringify(createR.body));
-    createdSpaceIds.push(id);
+  it('index-readiness finalisation does not erase an edit written before it', async () => {
+    // The CI failure this guards, in miniature: a background readiness write that holds a snapshot of
+    // config.json, rather than re-reading it, silently reverts an operator's edit on disk.
+    //
+    // ORDERED, not raced. The first version created a space and edited the file straight away, betting that its
+    // edit would land before the readiness write. An empty space is ready in a few hundred milliseconds (no index
+    // to wait for), so on CI the readiness write landed FIRST and the test's own edit — built from a read taken a
+    // moment before — erased the `ready` the server had just written, which read as the server's fault
+    // (2026-10-01, PR #1472: "vector indexes ready" at :02.453, the test's edit picked up at :03.265).
+    //
+    // So: wait for space S to be ready (its write has landed), edit S on disk, THEN create space T, whose readiness
+    // write is the background write under test and is guaranteed to come after the edit. Both S's edit and S's own
+    // status must survive T's write.
+    const waitReady = async (spaceId) => {
+      for (let i = 0; i < 60; i++) {
+        if (readConfig().spaces.find(s => s.id === spaceId)?.indexStatus === 'ready') return true;
+        await new Promise(r => setTimeout(r, 1000));
+      }
+      return false;
+    };
+    const s = `cfgsafe-ready-${RUN_ID}`;
+    const t = `cfgsafe-later-${RUN_ID}`;
+    const createS = await post(INSTANCES.a, token, '/api/spaces', { id: s, label: 'Readiness Race' });
+    assert.equal(createS.status, 201, JSON.stringify(createS.body));
+    createdSpaceIds.push(s);
+    assert.ok(await waitReady(s), `space '${s}' never reached indexStatus=ready`);
 
     const cfg = readConfig();
-    cfg.spaces.find(s => s.id === id).label = 'Relabelled Mid-Build';
+    cfg.spaces.find(sp => sp.id === s).label = 'Relabelled Before A Later Write';
     writeConfig(cfg);
+    // The same window the first case waits out: the bind mount propagates and the config watcher's 2 s stat poll
+    // reloads the edit. A server write inside that window is the documented gap the watcher narrows, not this
+    // case's subject, which is the readiness write holding a stale snapshot.
+    await new Promise(r => setTimeout(r, 4000));
 
-    // Wait for readiness to actually land (that write is the one under test).
-    let ready = false;
-    for (let i = 0; i < 60 && !ready; i++) {
-      await new Promise(r => setTimeout(r, 1000));
-      ready = readConfig().spaces.find(s => s.id === id)?.indexStatus === 'ready';
-    }
-    assert.ok(ready, `space '${id}' never reached indexStatus=ready`);
+    const createT = await post(INSTANCES.a, token, '/api/spaces', { id: t, label: 'Later Space' });
+    assert.equal(createT.status, 201, JSON.stringify(createT.body));
+    createdSpaceIds.push(t);
+    assert.ok(await waitReady(t), `space '${t}' never reached indexStatus=ready`);
 
-    assert.equal(
-      readConfig().spaces.find(s => s.id === id)?.label,
-      'Relabelled Mid-Build',
-      'the background index-readiness write erased an edit made while it was polling',
-    );
+    const after = readConfig().spaces.find(sp => sp.id === s);
+    assert.equal(after?.label, 'Relabelled Before A Later Write',
+      'a background index-readiness write erased an edit made on disk before it');
+    assert.equal(after?.indexStatus, 'ready', 'a later readiness write lost an earlier space\'s status');
   });
 });

@@ -2,37 +2,177 @@ import { col, asFilter, asUpdate } from '../db/mongo.js';
 import { getConfig, saveConfig } from '../config/loader.js';
 import { log } from './log.js';
 import type { SpaceCounterDoc } from '../config/types.js';
+import { spaceCollection, type SpacePart } from '../db/space-collection.js';
+
+/*
+ * ── Allocation carries its write (`Q-196`) ──────────────────────────────────────────────────────────────────
+ *
+ * A seq is allocated in one round trip and the record that carries it is written in another. Everything that
+ * pages by seq — the pull routes, the push loop, the tombstone pages, the scanners — serves `seq > cursor` and
+ * moves its cursor to the highest seq it saw. So a write that allocated 7 and has not committed yet, beside a
+ * write that allocated 8 and has, lets a reader take 8, move past 7, and never come back for it: a record lost
+ * to one peer for ever, with every later cycle reporting nothing to do.
+ *
+ * **The rule: no seq-paged reader is handed a seq at or above one that is allocated and not yet settled.**
+ * Two halves make it hold, and each is the half a hand-written copy would drop:
+ *
+ *   - `withAllocatedSeqs` takes the WRITE with the allocation and releases in a `finally`. A bare allocator
+ *     returning a number cannot know when its write settles, so it cannot be released — which is why there is
+ *     no exported `nextSeq` any more. A write that throws releases too, or the horizon would stick and every
+ *     pull of the space would stall below it.
+ *   - The registry is entered BEFORE the `$inc` is sent, as a bound rather than a number. The seq is unknown
+ *     until the reply arrives, and a reader asking in between must still stop below it. Any seq Mongo hands
+ *     this allocation is above every seq this process had seen when it asked, so `maxSeen + 1` is a safe floor.
+ *
+ * And `settledSeqRange` caps a reader at `maxSeen + 1` when nothing is in flight, because an allocation that
+ * starts after the reader computed its range, and a later one that commits before the reader's query runs,
+ * would otherwise slip a committed seq past an uncommitted one in exactly the same way.
+ *
+ * In-process, and that is sufficient: one server process owns a space's counter. `maxSeen` is seeded from the
+ * counter document on first use, and `bumpSeq` (an ingest moving the counter) advances it, so a record that
+ * arrived from a peer is not hidden behind a stale bound.
+ */
+interface SeqState {
+  /** The highest seq this process has seen allocated or bumped to; undefined until seeded. */
+  maxSeen: number | undefined;
+  /** Floors of allocations sent and not yet answered, and seqs answered and not yet settled. Multiset. */
+  inFlight: Map<number, number>;
+}
+const seqState = new Map<string, SeqState>();
+
+function stateOf(spaceId: string): SeqState {
+  let s = seqState.get(spaceId);
+  if (!s) { s = { maxSeen: undefined, inFlight: new Map() }; seqState.set(spaceId, s); }
+  return s;
+}
+
+function hold(s: SeqState, seq: number): void { s.inFlight.set(seq, (s.inFlight.get(seq) ?? 0) + 1); }
+function release(s: SeqState, seq: number): void {
+  const n = (s.inFlight.get(seq) ?? 0) - 1;
+  if (n > 0) s.inFlight.set(seq, n); else s.inFlight.delete(seq);
+}
 
 /**
- * Returns the next monotonic sequence number for a space.
- * Safe for concurrent callers — uses findOneAndUpdate with $inc.
+ * The collections whose records carry a space seq and are paged by it. The seeding below reads the highest seq
+ * stored in each, and `a-pull-never-passes-an-uncommitted-seq-db` derives the pull routes and fails on any
+ * route whose collection this misses.
  */
-export async function nextSeq(spaceId: string): Promise<number> {
-  const counters = col<SpaceCounterDoc>('ythril_counters');
-  const result = await counters.findOneAndUpdate(
-    { _id: spaceId },
-    { $inc: { seq: 1 } },
-    { upsert: true, returnDocument: 'after' },
-  );
-  if (!result) throw new Error(`Failed to increment sequence counter for space ${spaceId}`);
-  return result.seq;
+const SEQ_CARRYING: readonly SpacePart[] = ['facts', 'entities', 'edges', 'chrono', 'links', 'files', 'tombstones'];
+
+/**
+ * The highest seq stored in any of the space's seq-carrying collections — one read each, once per space per
+ * process. Indexed on every collection but `files`, which has no `seq` index (its pull pages without one too),
+ * so that one read scans the space's file metadata.
+ */
+async function highestStoredSeq(spaceId: string): Promise<number> {
+  const tops = await Promise.all(SEQ_CARRYING.map(c => col<{ seq?: number }>(spaceCollection(spaceId, c))
+    .find(asFilter<{ seq?: number }>({ seq: { $type: 'number' } }), { projection: { seq: 1 } })
+    .sort({ seq: -1 }).limit(1).toArray()));
+  return Math.max(0, ...tops.map(t => t[0]?.seq ?? 0));
+}
+
+/**
+ * Seeded from the counter AND from what is stored, because the two can disagree: a single-document sync push
+ * stores the sender's seq without moving the counter, and an older version did the same. Seeded from the
+ * counter alone, the bound hid every such record from every pull until the counter happened to pass it.
+ *
+ * It does NOT move the counter, though the store being ahead of it is its own defect (`Q-198`): a pull is a
+ * READ door, and `no-read-door-reaches-a-write` holds a read-only token to causing no write at all. Moving the
+ * counter belongs to the ingest that stored the record.
+ */
+async function seededState(spaceId: string): Promise<SeqState> {
+  const s = stateOf(spaceId);
+  if (s.maxSeen === undefined) {
+    const [counter, stored] = await Promise.all([currentSeq(spaceId), highestStoredSeq(spaceId)]);
+    // Another caller may have allocated while the reads were out; never move the bound backwards.
+    s.maxSeen = Math.max(s.maxSeen ?? 0, counter, stored);
+  }
+  return s;
+}
+
+/**
+ * A record was stored carrying this seq, from somewhere other than this process's allocator (an ingest): a
+ * reader may now be handed it. In memory only and synchronous, so the ingest helpers can call it on every
+ * document — the counter is `bumpSeq`'s, which the ingest routes call once per batch.
+ */
+export function noteSeqStored(spaceId: string, seq: number): void {
+  const s = stateOf(spaceId);
+  if (s.maxSeen !== undefined && seq > s.maxSeen) s.maxSeen = seq;
+}
+
+/**
+ * Allocate `n` consecutive seqs for one space and run `write` with the first. The block is registered as in
+ * flight before the allocation is sent and released when `write` settles, success or failure.
+ *
+ * `write` should be the record write and nothing else: everything awaited inside it holds every seq-paged
+ * reader of this space below the block (`a-seq-allocation-is-followed-by-its-write` holds the writers to it).
+ */
+export async function withAllocatedSeqs<T>(spaceId: string, n: number, write: (first: number) => Promise<T>): Promise<T> {
+  if (!Number.isInteger(n) || n < 1) throw new Error(`withAllocatedSeqs: n must be a positive integer, got ${n}`);
+  const s = await seededState(spaceId);
+  const floor = (s.maxSeen ?? 0) + 1;
+  hold(s, floor);
+  let first: number | undefined;
+  try {
+    const result = await col<SpaceCounterDoc>('ythril_counters').findOneAndUpdate(
+      { _id: spaceId },
+      { $inc: { seq: n } },
+      { upsert: true, returnDocument: 'after' },
+    );
+    if (!result) throw new Error(`Failed to increment sequence counter for space ${spaceId}`);
+    first = result.seq - n + 1;
+    hold(s, first);
+    release(s, floor);
+    if (result.seq > (s.maxSeen ?? 0)) s.maxSeen = result.seq;
+    return await write(first);
+  } finally {
+    if (first === undefined) release(s, floor);
+    else release(s, first);
+  }
+}
+
+/**
+ * Hold the horizon for the whole of `fn`: every seq allocated while it runs stays unsettled until it returns.
+ *
+ * For a TRANSACTION. Inside a session a write that returns has not committed — the commit is the session's —
+ * so `withAllocatedSeqs` releasing when its write returns would hand a reader a seq whose record is not yet
+ * visible, and the reader would step past it. Any seq allocated after this call starts is at or above the
+ * floor it registers, so holding the floor holds them all.
+ */
+export async function withSeqHorizonHeld<T>(spaceId: string, fn: () => Promise<T>): Promise<T> {
+  const s = await seededState(spaceId);
+  const floor = (s.maxSeen ?? 0) + 1;
+  hold(s, floor);
+  try { return await fn(); } finally { release(s, floor); }
+}
+
+/** One seq: `withAllocatedSeqs(spaceId, 1, write)`. */
+export function withSeq<T>(spaceId: string, write: (seq: number) => Promise<T>): Promise<T> {
+  return withAllocatedSeqs(spaceId, 1, write);
+}
+
+/** The lowest seq allocated (or being allocated) and not yet settled, or undefined when none is. */
+export function lowestUncommittedSeq(spaceId: string): number | undefined {
+  const s = seqState.get(spaceId);
+  if (!s || s.inFlight.size === 0) return undefined;
+  return Math.min(...s.inFlight.keys());
+}
+
+/**
+ * The seq range a seq-paged reader may be handed after `since`: `{ $gt: since, $lt: horizon }`. The horizon is
+ * the lowest unsettled seq, or one past the highest seq this process knows of when nothing is in flight.
+ * Every seq-paged read goes through this — a reader that builds `{ $gt }` by hand is the defect.
+ */
+export async function settledSeqRange(spaceId: string, since: number): Promise<{ $gt: number; $lt: number }> {
+  const s = await seededState(spaceId);
+  const lowest = lowestUncommittedSeq(spaceId);
+  return { $gt: since, $lt: lowest ?? (s.maxSeen ?? 0) + 1 };
 }
 
 /*
- * `reserveSeqBlock` WAS HERE, and it went with its only caller (5.0).
- *
- * It reserved a contiguous range in one `$inc` for the bulk-delete paths, which wrote one tombstone per
- * document and would otherwise have made a round trip each — 100k awaited round trips to wipe 100k facts,
- * before the delete even started. Those paths were the five per-collection `DELETE` routes; emptying a
- * space is one tool call now and `wipeSpace` does a `deleteMany` per collection, writing no tombstones.
- *
- * **No tombstones is correct here and the reason is the vote, not an omission.** A wipe that empties a
- * collection and writes none is one the next sync cycle would undo record by record from a peer's copy —
- * which is exactly why `delete_space_data` opens a governed round on a networked space instead: every
- * member wipes, so there is nothing for a peer to offer back. On a space in no network there is no peer.
- *
- * Deleted rather than kept for a future caller: an unused allocator with a subtle contract (gaps are safe,
- * REUSE is not) is the thing somebody reaches for without reading it.
+ * A block (`n > 1` above) keeps the contract the old `reserveSeqBlock` had and that is easy to get wrong:
+ * GAPS are safe — a write that fails leaves its seqs unused and nothing pages over a hole incorrectly — but
+ * REUSE is not, so a block is never handed out twice and a re-planned write allocates a fresh one.
  */
 /** Read the current counter for a space (0 when it does not exist yet). */
 export async function currentSeq(spaceId: string): Promise<number> {
@@ -56,7 +196,7 @@ export const MAX_SYNC_SEQ = 2 ** 50;
  * every peer: silent, unrecoverable write loss.
  *
  * The guard is absolute rather than relative to the current counter: legitimate
- * seqs are small monotonic counters (`nextSeq` increments by 1), so they sit far
+ * seqs are small monotonic counters (an allocation increments by its block size), so they sit far
  * below `MAX_SYNC_SEQ - SEQ_CEILING_RESERVE` regardless of a space's history,
  * while the poisoning value (near 2^50) is caught. A relative "max jump" guard
  * would instead false-positive on the initial sync of a high-volume space to a
@@ -100,6 +240,9 @@ export async function bumpSeq(spaceId: string, minSeq: number): Promise<void> {
     asUpdate<SpaceCounterDoc>({ $max: { seq: minSeq } }),
     { upsert: true },
   );
+  // A record that arrived at this seq is committed (ingest writes before it bumps); readers may be handed it.
+  const s = stateOf(spaceId);
+  if (s.maxSeen !== undefined && minSeq > s.maxSeen) s.maxSeen = minSeq;
 }
 
 /**

@@ -39,6 +39,7 @@ import { JobLeaseLostError, isLeaseLost, shouldHeartbeat, writeUnderClaim, type 
 import { embedChunksTotal } from '../../metrics/registry.js';
 import { spaceCollection } from '../../db/space-collection.js';
 import { mapLimit } from '../../util/map-limit.js';
+import { inChunks } from '../../util/chunks.js';
 
 export type InputFormat = 'pdf' | 'docx' | 'epub' | 'html' | 'md' | 'txt' | 'text' | 'auto';
 
@@ -505,8 +506,7 @@ export async function storeConversionResults(
   const files = col<FileMetaDoc>(spaceCollection(spaceId, 'files'));
   try {
     await writeUnderClaim(spaceId, opts.claim, async session => {
-      for (let i = 0; i < derivedDocs.length; i += INSERT_BATCH) {
-        const batch = derivedDocs.slice(i, i + INSERT_BATCH);
+      for (const batch of inChunks(derivedDocs, INSERT_BATCH)) {
         await files.deleteMany(asFilter<FileMetaDoc>({ _id: { $in: batch.map(d => d._id) } }), { session });
         await files.insertMany(batch.map(d => asDoc<FileMetaDoc>(d)), { session });
       }

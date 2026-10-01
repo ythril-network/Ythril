@@ -52,6 +52,7 @@ import { upsertEdge } from './edges.js';
 import { retiredWriteFieldError } from './retired-write-fields.js';
 import type { AuthorRef } from '../config/types.js';
 import type { WebhookActor } from '../webhooks/dispatcher.js';
+import type { EdgeInput as EdgeWriteInput } from './write-plan/plan-edge.js';
 import { MAX_TAGS, MAX_LINKS_PER_KIND, MAX_INLINE_EDGES, countError, tagsError } from '../util/request-bounds.js';
 
 /**
@@ -464,17 +465,36 @@ export async function applyConnections(
   author: AuthorRef,
   actor?: WebhookActor,
 ): Promise<{ links: number; edges: number }> {
-  const desired = desiredLinksFrom(body);
-  const links = desired ? (await reconcileLinks(spaceId, from, fromKind, desired, author)).added : 0;
+  const asked = connectionsOf(body, from, fromKind);
+  const links = asked.desired ? (await reconcileLinks(spaceId, from, fromKind, asked.desired, author)).added : 0;
 
   let edges = 0;
-  for (const e of edgeInputsFrom(body) ?? []) {
+  for (const e of asked.edges) {
     await upsertEdge(
-      spaceId, from, e.to, e.label, e.weight, e.type, e.description, e.properties, e.tags,
-      actor, undefined,
-      { fromKind, ...(e.toKind ? { toKind: e.toKind } : {}) },
+      spaceId, e.from, e.to, e.label, e.weight, e.type, e.description, e.properties, e.tags,
+      actor, undefined, e.opts,
     );
     edges++;
   }
   return { links, edges };
+}
+
+/**
+ * What a body's connection fields ask of a write from one record: the link set (REPLACE per class) and the
+ * edges (UPSERT), as the write inputs the edge planner takes.
+ *
+ * The one statement of both semantics. `applyConnections` writes them after a single-record write; a batch
+ * plans them beside the record it hangs them off, in the same commit. Two doors mapping a body's `edges`
+ * into an edge write separately is how the two would come to disagree about, say, an omitted `toKind`.
+ */
+export function connectionsOf(body: unknown, from: string, fromKind: RefKind): { desired: DesiredLinks | null; edges: EdgeWriteInput[] } {
+  return {
+    desired: desiredLinksFrom(body),
+    edges: (edgeInputsFrom(body) ?? []).map(e => ({
+      from, to: e.to, label: e.label, weight: e.weight, type: e.type, description: e.description,
+      properties: e.properties, tags: e.tags,
+      // An omitted `toKind` is an entity, and is left unstated so the stored edge carries none.
+      opts: { fromKind, ...(e.toKind ? { toKind: e.toKind } : {}) },
+    })),
+  };
 }

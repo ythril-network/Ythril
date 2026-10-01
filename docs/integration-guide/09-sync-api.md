@@ -504,6 +504,14 @@ reader rather than merely non-conforming, and nothing else in the pipeline would
   - **And a watermark shared across several transfers may only reach where ALL of them are complete.** A cycle that fetches tombstones plus four collections under one `sinceSeq` must limit its next `sinceSeq` to the lowest position among the transfers that stopped early — a non-`2xx`, or a page cap. Taking the maximum instead claims a position the stopped transfer never reached, and its unserved records then sit behind your watermark permanently while every later cycle looks successful. Our own engine had this defect until 3.2.0.
 - **A peer that never pulls tombstones blocks pruning for its spaces** — deliberately, since "has not pulled" and "has caught up" must not look alike.
 
+**A page never gets ahead of a write that has not finished.** Every seq-paged route (the five record
+families, `filemeta` and `tombstones`) serves only seqs below the lowest seq this instance has allocated and
+not yet committed. A write takes its seq a moment before it stores the record, so without that horizon a page
+could hand you a later seq while an earlier one was still being written — and a watermark moved to the later
+seq would never come back for the earlier record. So it is safe to move your watermark to the highest seq a
+page returned, and a page that seems shorter than expected during heavy writes is the horizon holding the rest
+back for a cycle, not a gap. The push side applies the same horizon to what it sends.
+
 ### File Sync Artifacts
 
 - `GET /api/sync/manifest?spaceId=general` returns file digest metadata for delta detection. The answer also names `spaceId`, the local id the responder resolved the request to, which a peer uses for the file transfers that follow.

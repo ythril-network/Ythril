@@ -57,14 +57,17 @@ import { bodyOf } from './_structural-window.mjs';
  * classifier, a schema key and a collection, so this is not the list that goes stale silently.
  */
 const WRITERS = [
-  { file: 'server/src/brain/entities.ts', fn: 'upsertEntity', classifier: /classifyEntityUpsertAgainst\(/ },
+  // The create/converge writers DECIDE in their planners since `Q-99` part 3 (the single door and the bulk
+  // door both plan through them; the commit writes), so the planner is the function the rule must live in.
+  { file: 'server/src/brain/write-plan/plan-entity.ts', fn: 'planEntity', classifier: /classifyEntityUpsertAgainst\(/ },
   { file: 'server/src/brain/entities.ts', fn: 'updateEntityById', classifier: /classifyEntityUpsertAgainst\(|classifyUpdateViolations\(/ },
-  { file: 'server/src/brain/fact.ts', fn: 'saveFact', classifier: /classifyFactUpsertAgainst\(/ },
+  { file: 'server/src/brain/write-plan/plan-fact.ts', fn: 'planFact', classifier: /classifyFactUpsertAgainst\(/ },
   { file: 'server/src/brain/fact.ts', fn: 'updateFact', classifier: /classifyFactUpsertAgainst\(|classifyUpdateViolations\(/ },
-  { file: 'server/src/brain/chrono.ts', fn: 'createChrono', classifier: /classifyChronoUpsertAgainst\(/ },
+  { file: 'server/src/brain/write-plan/plan-chrono.ts', fn: 'planChrono', classifier: /classifyChronoUpsertAgainst\(/ },
   { file: 'server/src/brain/chrono.ts', fn: 'updateChrono', classifier: /classifyChronoUpsertAgainst\(|classifyUpdateViolations\(/ },
-  { file: 'server/src/brain/edges.ts', fn: 'upsertEdge', classifier: /classifyEdgeUpsertAgainst\(/, resolvesEnds: true },
-  { file: 'server/src/brain/edges.ts', fn: 'updateEdgeById', classifier: /classifyEdgeUpsertAgainst\(|classifyUpdateViolations\(/, resolvesEnds: true },
+  // The planner resolves the ends from the read set (`resolvedEnds`), the update path from the store.
+  { file: 'server/src/brain/write-plan/plan-edge.ts', fn: 'planEdge', classifier: /classifyEdgeUpsertAgainst\(/, resolvesEnds: 'resolvedEnds' },
+  { file: 'server/src/brain/edges.ts', fn: 'updateEdgeById', classifier: /classifyEdgeUpsertAgainst\(|classifyUpdateViolations\(/, resolvesEnds: 'await resolveEdgeEndsForWrite' },
 ];
 
 /** Every surface that CALLS a writer — a door. None of them may hold its own copy of the rule. */
@@ -142,9 +145,10 @@ describe('an edge writer LOOKS UP what the endpoint rules need', () => {
    * product promises a refusal and the code declines to look.
    */
   for (const w of WRITERS.filter(x => x.resolvesEnds)) {
+    const resolver = w.resolvesEnds.replace(/^await /, '');
     it(`${w.fn} resolves the endpoints before it validates`, () => {
       const body = bodyOf(src(w.file), w.fn);
-      const at = body.indexOf('resolveEdgeEndsForWrite(');
+      const at = body.indexOf(`${resolver}(`);
       assert.ok(at > 0,
         `${w.fn} validates without resolving its endpoints, so \`endpoints\` and \`functional\` are accepted `
         + 'declarations that refuse nothing — the schema promises a rule the write path never checks');
@@ -160,8 +164,8 @@ describe('an edge writer LOOKS UP what the endpoint rules need', () => {
        * compiling. The variable has to reach the classifier's argument list.
        */
       const body = bodyOf(src(w.file), w.fn);
-      const assigned = /(?:const|let)\s+(\w+)\s*=\s*await\s+resolveEdgeEndsForWrite\(/.exec(body);
-      assert.ok(assigned, `${w.fn} does not keep what resolveEdgeEndsForWrite returned`);
+      const assigned = new RegExp(`(?:const|let)\\s+(\\w+)\\s*=\\s*${w.resolvesEnds.replace(/ /g, '\\s+')}\\(`).exec(body);
+      assert.ok(assigned, `${w.fn} does not keep what ${resolver} returned`);
       const at = body.indexOf('classifyEdgeUpsertAgainst(');
       const call = body.slice(at, body.indexOf(');', at));
       assert.ok(call.includes(assigned[1]),
@@ -169,28 +173,12 @@ describe('an edge writer LOOKS UP what the endpoint rules need', () => {
     });
   }
 
-  it('the bulk importer reports on the same facts it is enforced against', () => {
-    /*
-     * Bulk keeps its own `validateEdge` call, and correctly so: its contract is per-item, so it must say which
-     * index failed and carry on rather than let a throw end the batch. But that makes it the second
-     * implementation of one rule, which is the defect this repo produces most — and here the weaker copy loses
-     * something specific. Fed nothing, it reports the property violations and stays silent about the endpoint
-     * ones; the write underneath then throws, the catch flattens it to a summary naming the FIELD, and the
-     * item's reason no longer says which types are allowed.
-     *
-     * What bulk cannot do is resolve a reference to an entity created in the same payload: since the ID-IS-ID
-     * ruling a supplied id addresses an existing record but never becomes a new one's identity, so an id named
-     * by an edge in the same batch belongs to nothing. That end stays absent, and an absent end is never a
-     * violation — which is exactly how bulk keeps accepting the dangling references it accepts by design.
-     */
-    const body = bodyOf(src('server/src/brain/bulk.ts'), 'bulkWrite');
-    const at = body.indexOf('validateEdge(');
-    assert.ok(at > 0, 'bulk no longer validates an edge — if the reporting copy went away, drop this case');
-    const call = body.slice(at, body.indexOf('))', at));
-    assert.match(call, /resolve|Ends/,
-      'bulk reports edge violations from the payload alone, so an endpoint refusal reaches the caller as a '
-      + 'flattened message from the catch instead of a per-item reason naming what is allowed');
-  });
+  /*
+   * The bulk importer's REPORTING copy of `validateEdge` is gone (`Q-99` part 3): a batch plans every edge through
+   * `planEdge`, so it reports from the same classification it is enforced against, and an endpoint refusal
+   * names what is allowed because the refusal carries the classification. `bulk-keeps-no-reporting-copy-of-
+   * validation.test.js` holds that no copy comes back.
+   */
 });
 
 describe('and no door keeps its own copy of the rule', () => {
@@ -244,18 +232,20 @@ describe('applying defaults must not manufacture properties nobody sent', () => 
    * every integrator over both doors. Asserted here rather than only in the integration suite because that
    * suite needs Docker and does not run in preflight: the defect was pushed, not caught.
    */
+  // The planners, where the defaults are applied since `Q-99` part 3. Every one of them applies defaults, so a
+  // missing call is a failure rather than a skip — the early return this used to have made a moved call vacuous.
   const CALLS = [
-    { file: 'server/src/brain/fact.ts', fn: 'saveFact' },
-    { file: 'server/src/brain/chrono.ts', fn: 'createChrono' },
-    { file: 'server/src/brain/entities.ts', fn: 'upsertEntity' },
-    { file: 'server/src/brain/edges.ts', fn: 'upsertEdge' },
+    { file: 'server/src/brain/write-plan/plan-fact.ts', fn: 'planFact' },
+    { file: 'server/src/brain/write-plan/plan-chrono.ts', fn: 'planChrono' },
+    { file: 'server/src/brain/write-plan/plan-entity.ts', fn: 'planEntity' },
+    { file: 'server/src/brain/write-plan/plan-edge.ts', fn: 'planEdge' },
   ];
 
   for (const c of CALLS) {
     it(`${c.fn} passes the caller's properties through untouched`, () => {
       const body = bodyOf(src(c.file), c.fn);
       const at = body.indexOf('applyPropertyDefaults(');
-      if (at === -1) return;   // a writer whose record kind has no property schemas
+      assert.notEqual(at, -1, `${c.fn} applies no property defaults — re-point this gate to where they are applied`);
       const call = body.slice(at, body.indexOf(')', at) + 1);
       assert.doesNotMatch(call, /\?\?\s*\{\s*\}/,
         `${c.fn} coerces an absent \`properties\` to {} before applyPropertyDefaults can preserve it, so the `

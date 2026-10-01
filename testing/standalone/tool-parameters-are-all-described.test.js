@@ -36,6 +36,7 @@ import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
+import { between, statementFrom } from './_structural-window.mjs';
 
 let ALL_TOOLS;
 before(async () => {
@@ -139,22 +140,31 @@ describe('the claims those descriptions make are still true', () => {
     // LF, so 200 characters covers a different number of LINES in each. The window reached the NEXT
     // statement's `errors.push` only on the machine with the shorter line endings. A count bounds distance;
     // what the assertion is about is one statement, and nothing in the diff shows the difference.
+    //
+    // Q-99 part 3: the chrono item is checked in `prepareItems`, and a per-item refusal there is a `reject(...)`
+    // call (the reporter that lands in `errors`) rather than an inline `errors.push`. So "reported" means
+    // either spelling, and the window it is looked for in is the chrono item loop — from its head to the plan
+    // it pushes — whose OTHER checks do report, which is what proves the reporter is recognised at all.
     const src = stripComments(readFileSync('server/src/brain/bulk.ts', 'utf8'));
-    const start = src.indexOf('const status = ');
+    const REPORTS = /\breject\(|errors\.push/;
+    const loop = between(src, 'of slice(input.chrono).entries())', 'out.push(', 'the bulk chrono item loop');
+    const start = loop.indexOf('const status = ');
     assert.ok(start > 0, 'the status normalisation was not found — the scanner is wrong, not the code');
-    const stmt = src.slice(start, src.indexOf(';', start) + 1);
+    const stmt = statementFrom(loop, start, 'the status normalisation');
     // `CHRONO_STATUS_SET` since the five status names became one tuple in `config/types.ts` — they were
     // written out FIVE times (here, the REST route, and three MCP schemas) and the sixth copy had two of
     // them wrong. The local Set derives from the tuple now; the rule this asserts is unchanged.
     assert.match(stmt, /CHRONO_STATUS_SET\.has/, 'and this is the statement that normalises it');
     assert.match(stmt, /:\s*undefined/,
       'an unrecognised status must fall back rather than throw — the description says so');
-    assert.doesNotMatch(stmt, /errors\.push/,
+    assert.doesNotMatch(stmt, REPORTS,
       'and it must NOT be reported; if it starts being reported, `chrono[].status` stops being a silent drop');
-    // The next statement DOES report, which is the contrast the description draws — and proves this window
-    // really stops where it says it does rather than swallowing the neighbour.
-    assert.match(src.slice(start, start + stmt.length + 200), /errors\.push/,
-      'the ttlDays check right after it is reported; if it were not, the slice is not bounded where it claims');
+    // Nor anywhere else in the item's checks: no refusal in the loop names `status`.
+    const refusals = loop.split(/\r?\n/).filter(l => REPORTS.test(l));
+    assert.ok(refusals.length >= 3,
+      `only ${refusals.length} reported checks in the chrono loop — the reporter is not being recognised, so the absence above proves nothing`);
+    assert.deepEqual(refusals.filter(l => /status/.test(l)), [],
+      'a chrono item check reports the status; the description says an unknown one is DISCARDED');
   });
 
   it('nothing expands a recurrence rule into further entries', () => {

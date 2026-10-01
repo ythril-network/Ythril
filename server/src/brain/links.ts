@@ -38,15 +38,14 @@
  * still holds it — the delete would appear to work locally and undo itself within minutes. `TOMBSTONE_TYPES`
  * includes `link` for exactly this, and it is the reason that tuple exists rather than the knowledge one.
  */
-import { col, asFilter, asDoc } from '../db/mongo.js';
-import { getConfig } from '../config/loader.js';
-import { nextSeq } from '../util/seq.js';
-import { edgeIdFor } from './edge-id.js';
-import { legacyField, linksStartingFrom } from './link-adjacency.js';
-import { assertRefsResolve, ReferenceRefusal } from './entity-refs.js';
+import { col, asFilter } from '../db/mongo.js';
+import { reconcileLinkRows } from './write-plan/commit.js';
+import { linkLabel, linkIdFor } from './link-id.js';
+import { linksStartingFrom } from './link-adjacency.js';
+import { assertRefs, missingRefs, missingRefsRefusal, ReferenceRefusal } from './entity-refs.js';
 import { isStrictLinkage } from '../spaces/proxy.js';
 import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';
-import type { AuthorRef, LinkDoc, TombstoneDoc } from '../config/types.js';
+import type { AuthorRef, LinkDoc } from '../config/types.js';
 // `RefKind` is re-exported by `types.ts` as a type only, so it comes from the leaf that DECLARES it —
 // the same import every other `brain/` module that needs it uses.
 import type { RefKind } from '../config/types-knowledge.js';
@@ -67,15 +66,8 @@ import { spaceCollection } from '../db/space-collection.js';
  * `link-adjacency.ts` next to `STORED_FIELD`, which is where the exception is written down.
  */
 
-/**
- * The label a link carries in a traverse result — DERIVED, never stored.
- *
- * `LINK_CLASSES` prints `fact.entityIds`, `chrono.entityIds` and `file.entityIds` today, and the three
- * classes with no reader yet extend the same pattern. Deriving it here means the label a reader shows and
- * the id a writer computes come from one expression: store it and the two can disagree, which is the defect
- * shape this migration exists to remove rather than to reproduce.
- */
-export const linkLabel = (fromKind: RefKind, toKind: RefKind): string => `${fromKind}.${legacyField(toKind)}`;
+// `linkLabel` and `linkIdFor` live in `link-id.ts` (see why there); re-exported for their existing importers.
+export { linkLabel, linkIdFor } from './link-id.js';
 
 /**
  * Why a record of this kind cannot link to that kind, or `null`.
@@ -93,10 +85,6 @@ export function linkClassRefusal(fromKind: RefKind, toKind: RefKind): string | n
   }
   return null;
 }
-
-/** The id one connection always has. Exported so the conversion script derives it the same way. */
-export const linkIdFor = (from: string, fromKind: RefKind, to: string, toKind: RefKind): string =>
-  edgeIdFor(from, to, linkLabel(fromKind, toKind), fromKind, toKind);
 
 /** What a record says it concerns, by the kind of thing concerned. Absent means "leave that class alone". */
 export type DesiredLinks = Partial<Record<RefKind, readonly string[]>>;
@@ -124,6 +112,21 @@ export async function assertDesiredLinks(
   fromKind: RefKind,
   desired: DesiredLinks,
 ): Promise<void> {
+  await refuseDesiredLinks(spaceId, fromKind, desired, (kind, ids) => missingRefs(spaceId, kind, ids));
+}
+
+/**
+ * The refusals a desired link set earns, in the one order they are asked: the class first, then — only under
+ * `strictLinkage` — each id's shape, then its existence. Existence is asked through `missing`, because two
+ * callers answer it from two sources: `assertDesiredLinks` from the store, and the write planners from the
+ * read set they planned against. The ORDER and the sentences are what must not differ, so they live here once.
+ */
+export async function refuseDesiredLinks(
+  spaceId: string,
+  fromKind: RefKind,
+  desired: DesiredLinks,
+  missing: (kind: RefKind, ids: readonly string[]) => readonly string[] | Promise<readonly string[]>,
+): Promise<void> {
   const classes = Object.keys(desired) as RefKind[];
   for (const toKind of classes) {
     const refusal = linkClassRefusal(fromKind, toKind);
@@ -133,7 +136,12 @@ export async function assertDesiredLinks(
   // Named as the CALLER spells it. Built by hand this said `linkentity`, a field no door accepts, in the
   // one sentence somebody reads to find out what to send.
   for (const toKind of classes) {
-    await assertRefsResolve(spaceId, LINK_INPUT_FIELDS[toKind], toKind, desired[toKind]);
+    const ids = desired[toKind] ?? [];
+    const field = LINK_INPUT_FIELDS[toKind];
+    assertRefs(field, toKind, ids);
+    if (ids.length === 0) continue;
+    const refusal = missingRefsRefusal(spaceId, field, toKind, await missing(toKind, ids));
+    if (refusal) throw refusal;
   }
 }
 
@@ -179,60 +187,9 @@ export async function reconcileLinks(
    */
   if (!opts.additive) await assertDesiredLinks(spaceId, fromKind, desired);
 
-  const wanted = new Map<string, { to: string; toKind: RefKind }>();
-  for (const toKind of classes) {
-    for (const to of desired[toKind] ?? []) {
-      // A record naming the same id twice in one array is one connection, not two — the Map dedupes it by
-      // the derived id, so a caller's duplicate cannot produce a duplicate row.
-      wanted.set(linkIdFor(from, fromKind, to, toKind), { to, toKind });
-    }
-  }
-
-  // Only the classes this write TOUCHED. A `PATCH` that names `linkEntities` alone must not disturb the fact
-  // links, so the existing set is read per class rather than per `from`.
-  const existing = await col<LinkDoc>(spaceCollection(spaceId, 'links'))
-    .find(asFilter<LinkDoc>({ spaceId, from, fromKind, toKind: { $in: classes } }), { projection: { _id: 1 } })
-    .toArray() as Array<{ _id: string }>;
-
-  const now = new Date().toISOString();
-  const instanceId = getConfig().instanceId;
-  let added = 0;
-  let removed = 0;
-
-  for (const { _id } of existing) {
-    if (wanted.has(_id)) continue;
-    // See `opts.additive`: the conversion reads a desired set out of the arrays, and a link that is
-    // already a record has no array entry to be named by. Deleting on that basis is data loss.
-    if (opts.additive) continue;
-    const seq = await nextSeq(spaceId);
-    await col<LinkDoc>(spaceCollection(spaceId, 'links')).deleteOne(asFilter<LinkDoc>({ _id, spaceId }));
-    // The tombstone is not optional. A link deleted without one comes back on the next pull from any peer
-    // that still holds it, so the removal would undo itself and nothing would report that it had.
-    const tombstone: TombstoneDoc = { _id, type: 'link', spaceId, deletedAt: now, instanceId, seq };
-    await col<TombstoneDoc>(spaceCollection(spaceId, 'tombstones')).replaceOne(
-      asFilter<TombstoneDoc>({ _id }), asDoc<TombstoneDoc>(tombstone), { upsert: true },
-    );
-    removed++;
-  }
-
-  const have = new Set(existing.map(e => e._id));
-  for (const [_id, { to, toKind }] of wanted) {
-    if (have.has(_id)) continue;
-    const seq = await nextSeq(spaceId);
-    // A seq PER RECORD, not one for the batch. `pageBySeq` continues from the last item's seq with
-    // `seq > since`, so two rows sharing a seq at a page boundary would leave the rest of that group
-    // unreachable — the cursor would step straight over them.
-    const doc: LinkDoc = { _id, spaceId, from, fromKind, to, toKind, author, createdAt: now, updatedAt: now, seq };
-    await col<LinkDoc>(spaceCollection(spaceId, 'links')).replaceOne(
-      asFilter<LinkDoc>({ _id, spaceId }), asDoc<LinkDoc>(doc), { upsert: true },
-    );
-    // A re-created link clears the tombstone that retired it, or the next pull would delete it again on the
-    // strength of a deletion the caller has since reversed.
-    await col<TombstoneDoc>(spaceCollection(spaceId, 'tombstones')).deleteOne(asFilter<TombstoneDoc>({ _id }));
-    added++;
-  }
-
-  return { added, removed };
+  // The rows are written by the one link-row writer, which the create/converge commit uses too.
+  const [counts] = await reconcileLinkRows(spaceId, [{ from, fromKind, desired, author, minted: false }], opts);
+  return counts!;
 }
 
 

@@ -26,9 +26,10 @@ imports**, where records legitimately reference targets that are created later i
 deliberate per-space choice to accept dangling links, and it is **off by default** — you do not get lax
 linkage by saying nothing.
 
-Bulk writes (`POST /bulk`, `save_bulk`) check reference **format** but not existence even when strict,
-because a payload may reference a record created earlier in the same payload; rejecting those would
-break valid forward references within a batch.
+Bulk writes (`POST /bulk`, `save_bulk`) check references for **format and existence** under strict linkage,
+exactly as the single-record writes do. A record created earlier in the same payload is referenced by its
+`$ref` key, which always resolves; a literal id cannot name a record the payload creates, because ids are
+minted by the server.
 
 Restoring a space export is unaffected: import writes records directly rather than through these
 routes, so an export whose records reference each other round-trips regardless of the setting.

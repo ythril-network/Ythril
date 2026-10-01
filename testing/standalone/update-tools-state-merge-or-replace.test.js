@@ -98,8 +98,11 @@ describe('the store still behaves the way the descriptions claim', () => {
       `only ${writers.length} module(s) write a properties bag; the four record families are the minimum, `
       + 'so the scan is wrong rather than the code');
 
+    // Either spelling of the one merge (`brain/merge-fields.ts`): `mergePropertiesOrKeep` is `mergeProperties`
+    // with "absent leaves it alone" in front, and a converge path — the write planners since Q-99 part 3 — has
+    // already tested for an absent bag before it assigns, so it calls the merge directly.
     for (const f of writers) {
-      assert.match(stripComments(src(f)), /mergePropertiesOrKeep\(/,
+      assert.match(stripComments(src(f)), /\bmergeProperties(?:OrKeep)?\(/,
         `${f} sets a properties bag without merging — replacing it destroys keys the caller never named`);
     }
   });

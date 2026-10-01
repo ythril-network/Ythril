@@ -35,7 +35,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { stripComments } from './_strip-comments.mjs';
-import { bodyOf } from './_structural-window.mjs';
+import { bodyOf, blockAfter } from './_structural-window.mjs';
 
 const { REF_KINDS } = await import('../../server/dist/config/types-knowledge.js');
 const { edgeEndpointKindSchema, edgeEndpointKind, isWellFormedRef } = await import('../../server/dist/brain/entity-refs.js');
@@ -154,10 +154,13 @@ describe('the bulk importer reads them and passes them on', () => {
      * batch reference could name a chrono entry, that slice inverted and came back empty. A window bounded
      * by a NEIGHBOUR is a window that fails on the neighbour moving.
      */
-    const from = bulk.indexOf('const edges = slice(');
+    /*
+     * Since Q-99 part 3 a top-level edge item is shaped by `planTopLevelEdge`, a closure inside `batchRun`, and
+     * the window is that function's own balanced body — not a slice up to whatever follows it.
+     */
+    const from = bulk.indexOf('async function planTopLevelEdge(');
     assert.ok(from > 0, 'the bulk edge block is gone — re-anchor this gate');
-    const next = bulk.indexOf('\n  // ──', from);
-    const edgeBlock = bulk.slice(from, next > from ? next : undefined);
+    const edgeBlock = blockAfter(bulk, from, 'planTopLevelEdge');
     assert.ok(edgeBlock.length > 200, `the bulk edge block is ${edgeBlock.length} chars — re-anchor this gate`);
     assert.doesNotMatch(edgeBlock, /UUID_V4_RE\.test\((from|to)\)/,
       'bulk still tests an edge endpoint against the UUID pattern regardless of its kind, so a file-ended '

@@ -987,7 +987,7 @@ for (const reason of DEGRADED_REASONS) {
 /**
  * Writes that overwrote a record another writer had changed since it was read — a LOST UPDATE.
  *
- * Brain records have no `If-Match` yet. `updateFact` reads, awaits `nextSeq`, then `$set`s only the fields
+ * Brain records have no `If-Match` yet. `updateFact` reads, takes a seq at the write, and `$set`s only the fields
  * the caller supplied — so two clients editing DIFFERENT fields both succeed and lose nothing. What is exposed
  * is two clients editing the SAME field: the loser’s value disappears with a 200 and no trace anywhere.
  *

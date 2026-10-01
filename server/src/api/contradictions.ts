@@ -27,7 +27,7 @@ import { scanSpace } from '../brain/contradiction-scanner.js';
 import { nliConfigured } from '../brain/nli-client.js';
 import { upsertEdge } from '../brain/edges.js';
 import { retireRecord, canBeRetired } from '../brain/retire-record.js';
-import { REF_KINDS, type RefKind } from '../config/types-knowledge.js';
+import { isRefKind } from '../config/types-knowledge.js';
 import { webhookToken } from './brain/_shared.js';
 import type { ContradictionCandidateDoc } from '../config/types.js';
 import { spaceCollection } from '../db/space-collection.js';
@@ -278,8 +278,8 @@ contradictionsRouter.post('/:id/resolve', globalRateLimit, requireAuth, denyRead
          *
          * Omitting the kinds means both ends are entities, which is what every pre-5.0 caller meant.
          */
-        if ((REF_KINDS as readonly string[]).includes(doc.type)) {
-          const kind = doc.type === 'entity' ? undefined : (doc.type as RefKind);
+        if (isRefKind(doc.type)) {
+          const kind = doc.type === 'entity' ? undefined : doc.type;
           const e = await upsertEdge(spaceId, winnerId, loserId, SUPERSEDES_LABEL,
             undefined, undefined, undefined, undefined, undefined, webhookToken(req),
             undefined, { fromKind: kind, toKind: kind });

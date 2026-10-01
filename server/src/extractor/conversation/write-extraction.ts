@@ -37,6 +37,7 @@ import { storeFile } from '../../files/store-file.js';
 import { updateFileMeta } from '../../files/file-meta.js';
 import { assertWritable, type SchemaEntry } from '../validate-extraction.js';
 import type { Extraction } from './assemble.js';
+import { inChunks } from '../../util/chunks.js';
 
 export interface ExtractionWriters {
   bulk: (spaceId: string, input: BulkInput) => Promise<Pick<BulkResult, 'errors' | 'refs'>>;
@@ -84,8 +85,9 @@ export async function writeExtraction(
 
   /** One step through the door, split at its cap; `keyOf` names an item in an error. */
   const step = async (phase: WriteError['phase'], collection: keyof BulkInput, items: Item[], keyOf: (i: number) => string | undefined) => {
-    for (let at = 0; at < items.length; at += BULK_MAX_PER_TYPE) {
-      const r = await writers.bulk(spaceId, { [collection]: items.slice(at, at + BULK_MAX_PER_TYPE) });
+    for (const [k, chunk] of inChunks(items, BULK_MAX_PER_TYPE).entries()) {
+      const at = k * BULK_MAX_PER_TYPE;
+      const r = await writers.bulk(spaceId, { [collection]: chunk });
       for (const [key, ref] of Object.entries(r.refs ?? {})) ids[key] = ref.id;
       for (const e of r.errors) {
         const key = keyOf(at + e.index);

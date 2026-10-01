@@ -31,6 +31,7 @@ import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
+import { blockAfter, bodyOf } from './_structural-window.mjs';
 
 let ALL_TOOLS;
 before(async () => {
@@ -44,15 +45,22 @@ const STUB = {
 const saveFact = () => ALL_TOOLS.find(t => t.name === 'save_fact');
 
 describe('the code really does converge on a supplied id', () => {
-  const src = () => stripComments(readFileSync('server/src/brain/fact.ts', 'utf8'));
+  /*
+   * Q-99 part 3: `saveFact` is a DOOR now — it hands its input to `planFact` through `planAndCommitOne` — and the
+   * branch the description is held to lives in the planner. So the gate reads both: that the door plans through
+   * `planFact`, and that `planFact` has the converging branch. Reading only the planner would hold the
+   * description to code `save_fact` might no longer reach.
+   */
+  const read = (p) => stripComments(readFileSync(p, 'utf8'));
 
   it('there is an existing-record branch, and it merges rather than replacing', () => {
-    const s = src();
+    const door = bodyOf(read('server/src/brain/fact.ts'), 'saveFact', 'the saveFact door');
+    assert.match(door, /planAndCommitOne\([^;]*planFact\(/, 'saveFact no longer plans through planFact — re-anchor to where it writes');
+    const s = bodyOf(read('server/src/brain/write-plan/plan-fact.ts'), 'planFact', 'the fact planner');
     const at = s.indexOf('if (existing)');
     assert.ok(at > 0, 'the idempotent branch was not found — the scanner is wrong, not the code');
-    // Bounded by the branch's own closing brace at that indentation, not by a character count: a count
-    // spans different lines on a CRLF working copy than on CI's LF checkout.
-    const branch = s.slice(at, s.indexOf('\n  }', at));
+    // Bounded by the branch's own closing brace, not by a character count.
+    const branch = blockAfter(s, at, 'the idempotent branch');
     assert.match(branch, /mergeTags\(existing\.tags, tags\)/, 'tags are unioned');
     assert.match(branch, /mergeProperties\(existing\.properties, properties\)/, 'properties are shallow-merged');
   });

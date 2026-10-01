@@ -40,11 +40,13 @@ import { trackedSources } from './_sources.mjs';
  * happens.
  */
 const GUARDED = [
-  { file: 'server/src/brain/fact.ts', fn: 'saveFact' },
-  { file: 'server/src/brain/fact.ts', fn: 'updateFact' },
-  { file: 'server/src/brain/chrono.ts', fn: 'createChrono' },
-  { file: 'server/src/brain/chrono.ts', fn: 'updateChrono' },
-  { file: 'server/src/files/file-meta.ts', fn: 'updateFileMeta' },
+  // The create/converge writers DECIDE in their planners since `Q-99` part 3, so the planner is where the
+  // check has to be: `refuseLinks` asks the read set what `assertDesiredLinks` asks the store, in its words.
+  { file: 'server/src/brain/write-plan/plan-fact.ts', fn: 'planFact', check: 'refuseLinks(', decided: 'noteWritten(' },
+  { file: 'server/src/brain/fact.ts', fn: 'updateFact', check: 'assertDesiredLinks(' },
+  { file: 'server/src/brain/write-plan/plan-chrono.ts', fn: 'planChrono', check: 'refuseLinks(', decided: 'noteWritten(' },
+  { file: 'server/src/brain/chrono.ts', fn: 'updateChrono', check: 'assertDesiredLinks(' },
+  { file: 'server/src/files/file-meta.ts', fn: 'updateFileMeta', check: 'assertDesiredLinks(' },
 ];
 
 describe('write functions guard their own references', () => {
@@ -58,20 +60,26 @@ describe('write functions guard their own references', () => {
        * and `files/media/face-embedder.ts` reaches a writer directly, past every door there is.
        */
       const body = bodyOf(src(), target.fn);
-      assert.match(body, /assertDesiredLinks\(/,
+      assert.ok(body.includes(target.check),
         `${target.fn} writes a link set without asserting it. The check used to live only at the API `
         + 'doors, so the strict-linkage guarantee held only for callers who remembered it.');
     });
 
     it(`${target.fn} asserts BEFORE it writes`, () => {
       /*
-       * The half that makes it worth having. `reconcileLinks` asserts too and runs AFTER the record is
-       * stored, so a refusal there leaves the record written without the links it asked for: a `400` and
-       * a row the caller did not want, which is the silent unlinked write made noisy rather than fixed.
+       * The half that makes it worth having. The link rows are written AFTER the record is stored, so a
+       * refusal there leaves the record written without the links it asked for: a `400` and a row the
+       * caller did not want, which is the silent unlinked write made noisy rather than fixed.
+       *
+       * A planner writes nothing (`a-write-planner-touches-no-collection`), so for one the question is
+       * whether it refuses before it DECIDES — before it records the plan in the read set, after which a
+       * later item of the same batch treats the record as written.
        */
       const body = bodyOf(src(), target.fn);
-      const checkAt = body.indexOf('assertDesiredLinks(');
-      const writeAt = body.search(/\.(updateOne|replaceOne|insertOne|findOneAndUpdate)\(/);
+      const checkAt = body.indexOf(target.check);
+      const writeAt = target.decided
+        ? body.indexOf(target.decided)
+        : body.search(/\.(updateOne|replaceOne|insertOne|findOneAndUpdate)\(/);
       assert.notEqual(writeAt, -1, `no write found in ${target.fn} — re-point this gate`);
       assert.ok(checkAt !== -1 && checkAt < writeAt,
         'asserting after the write leaves a record stored without the links the same call was refused for');
@@ -88,7 +96,10 @@ describe('write functions guard their own references', () => {
      * DERIVED from the calls rather than from a list of doors: a seventh write door is covered on the
      * commit that adds it, which a list of six could never do.
      */
-    const doors = trackedSources(['server/src/api/brain', 'server/src/mcp/tools'], { floor: 8, untracked: true })
+    // Every CALLER of `applyConnections` under server/src, not two directories: the bulk door lived outside
+    // both and was outside this gate while it applied connections (the module that defines it is not a door).
+    const doors = trackedSources('server/src', { floor: 50, untracked: true })
+      .filter(f => !f.endsWith('brain/write-connections.ts'))
       .filter(f => /applyConnections\(/.test(stripComments(readFileSync(f, 'utf8'))));
     assert.ok(doors.length >= 3, `only ${doors.length} file(s) apply connections — the sweep has broken`);
 
@@ -111,13 +122,20 @@ describe('write functions guard their own references', () => {
      * The CLASS check is not that: a fact cannot link to a chrono entry whatever the space says, because
      * there is no such class and the id would be derived from a label nothing reads.
      */
-    const body = bodyOf(stripComments(readFileSync('server/src/brain/links.ts', 'utf8')), 'assertDesiredLinks');
+    // ONE implementation of the order, `refuseDesiredLinks`; the store's check (`assertDesiredLinks`) and the
+    // read set's (`refuseLinks`) differ only in where "which ids are missing" is answered.
+    const links = stripComments(readFileSync('server/src/brain/links.ts', 'utf8'));
+    const body = bodyOf(links, 'refuseDesiredLinks');
     const strictAt = body.indexOf('isStrictLinkage(');
     const classAt = body.indexOf('linkClassRefusal(');
-    assert.notEqual(strictAt, -1, 'the reference check must stay opt-out-able');
-    assert.notEqual(classAt, -1, 'the class check is missing, so a seventh class could be written');
+    assert.notEqual(strictAt, -1, 'refuseDesiredLinks: the reference check must stay opt-out-able');
+    assert.notEqual(classAt, -1, 'refuseDesiredLinks: the class check is missing, so a seventh class could be written');
     assert.ok(classAt < strictAt,
-      'the class check sits behind the linkage setting, so a lax space can store a link class that does '
-      + 'not exist — which no reader will ever follow');
+      'refuseDesiredLinks: the class check sits behind the linkage setting, so a lax space can store a link class '
+      + 'that does not exist — which no reader will ever follow');
+    for (const [file, fn] of [['server/src/brain/links.ts', 'assertDesiredLinks'], ['server/src/brain/write-plan/plan-links.ts', 'refuseLinks']]) {
+      assert.match(bodyOf(stripComments(readFileSync(file, 'utf8')), fn), /\brefuseDesiredLinks\(/,
+        `${fn} no longer goes through refuseDesiredLinks, so it is a second copy of the order and can drift from it`);
+    }
   });
 });

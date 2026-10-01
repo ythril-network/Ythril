@@ -50,20 +50,43 @@ function callsOf(code, file, name, lineBase = 0) {
   return out;
 }
 
-const CALLS = SOURCES.flatMap(s => callsOf(s.code, s.file, 'enqueueEmbedJob'));
+/*
+ * The ENQUEUE DOORS, derived: every exported `enqueue…EmbedJob(s)` of embed-queue.ts. Since Q-99 part 3 the brain
+ * writers no longer call `enqueueEmbedJob` one record at a time — the write commit queues a whole plan through
+ * `enqueueWriteEmbedJobs` — so a gate that scanned only the single-record door would conclude about every enqueue
+ * while reading fewer and fewer of them. Each door takes its lane in a trailing `{ priority }` options object.
+ * (`enqueueIngestedRecord` is not a door here: it fixes its own lane, asserted below.)
+ */
+const QUEUE_SRC = SOURCES.find(s => s.file === 'server/src/brain/embed-queue.ts');
+const DOORS = QUEUE_SRC
+  ? [...QUEUE_SRC.code.matchAll(/^export\s+async\s+function\s+(enqueue\w*EmbedJobs?)\(/gm)].map(m => m[1])
+  : [];
 
-/** The fourth argument carries the lane, by name. */
+const CALLS = SOURCES.flatMap(s => DOORS.flatMap(d => callsOf(s.code, s.file, d).map(c => ({ ...c, door: d }))));
+
+/** The trailing options argument carries the lane, by name. */
 const namesPriority = (arg) => arg !== undefined && /\bpriority\b|EMBED_PRIORITY\./.test(arg);
 
-describe('every enqueueEmbedJob call names its lane', () => {
-  it('the scan found the call sites (floor)', () => {
-    assert.ok(CALLS.length >= 15,
-      `found ${CALLS.length} enqueueEmbedJob( call site(s) in server/src; expected at least 15 — the scan is broken`);
+describe('every embed-job enqueue names its lane', () => {
+  it('the enqueue doors were found (floor)', () => {
+    for (const d of ['enqueueEmbedJob', 'enqueueEmbedJobs', 'enqueueWriteEmbedJobs']) {
+      assert.ok(DOORS.includes(d), `${d} is no longer an exported door of embed-queue.ts — re-anchor this gate`);
+    }
   });
 
-  it('every call passes a priority as its fourth argument', () => {
-    const missing = CALLS.filter(c => !namesPriority(c.args[3]));
-    assert.deepEqual(missing.map(c => `${c.file}:${c.line} (${c.args.length} args)`), [],
+  it('the scan found the call sites (floor)', () => {
+    // 15 before Q-99 part 3. Six single-record enqueues legitimately left: the create and converge paths of
+    // saveFact, upsertEntity (2), createChrono and upsertEdge (2) are now ONE `enqueueWriteEmbedJobs` call in
+    // write-plan/commit.ts, which this scan now also reads.
+    assert.ok(CALLS.length >= 12,
+      `found ${CALLS.length} call site(s) of ${DOORS.join('/')} in server/src; expected at least 12 — the scan is broken`);
+    assert.ok(CALLS.some(c => c.file === 'server/src/brain/write-plan/commit.ts' && c.door === 'enqueueWriteEmbedJobs'),
+      'the write commit no longer enqueues through enqueueWriteEmbedJobs — re-anchor this gate');
+  });
+
+  it('every call passes a priority as its last argument', () => {
+    const missing = CALLS.filter(c => !namesPriority(c.args[c.args.length - 1]));
+    assert.deepEqual(missing.map(c => `${c.file}:${c.line} ${c.door} (${c.args.length} args)`), [],
       'these enqueues do not say which lane they belong to; pass `{ priority: EMBED_PRIORITY.<lane> }`');
   });
 });

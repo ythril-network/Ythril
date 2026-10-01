@@ -112,10 +112,18 @@ describe('different relationships derive different ids', () => {
 
 describe('the creation path uses it', () => {
   it('no random id is minted for a new edge', () => {
-    const body = bodyOf(src('server/src/brain/edges.ts'), 'upsertEdge');
-    assert.doesNotMatch(body, /uuidv4\(\)/,
-      'a new edge still gets a random id, so two peers creating the same relationship still disagree');
-    assert.match(body, /edgeIdFor\(/, 'the creation path must derive the id from the triplet');
+    /*
+     * Since Q-99 part 3 the new edge's document is built by `planEdge`; `upsertEdge` is the door that commits
+     * it, and bulk plans through the same function. Both are read: the planner decides the id, and the door
+     * must not mint one around it.
+     */
+    const plan = bodyOf(src('server/src/brain/write-plan/plan-edge.ts'), 'planEdge');
+    const door = bodyOf(src('server/src/brain/edges.ts'), 'upsertEdge');
+    for (const [name, body] of [['planEdge', plan], ['upsertEdge', door]]) {
+      assert.doesNotMatch(body, /uuidv4\(\)|randomUUID\(\)/,
+        `${name}: a new edge still gets a random id, so two peers creating the same relationship still disagree`);
+    }
+    assert.match(plan, /_id:\s*edgeIdFor\(/, 'the creation path must derive the id from the triplet');
   });
 
   it('the derivation and the unique index are fed the SAME fields', () => {

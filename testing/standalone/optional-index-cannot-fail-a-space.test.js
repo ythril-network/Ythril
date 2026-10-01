@@ -118,7 +118,8 @@ describe('a search service that is not answering cannot condemn a space either (
 
   it('a deferred verdict returns before the status is written, so nothing can be recorded for it', () => {
     const deferred = finalizeBody.indexOf("'deferred'");
-    const write = finalizeBody.indexOf('mutateConfig(');
+    // Either spelling of the one status write: the finalisation retries a read a concurrent writer spoiled.
+    const write = finalizeBody.search(/\bmutateConfig(?:Retrying)?\(/);
     assert.ok(deferred > -1, 'finalizeSpaceIndexReady does not know the deferred verdict');
     assert.ok(write > -1, 'fixture check: the status write is gone — re-anchor this gate');
     assert.ok(deferred < write, 'the status is written before the deferred verdict is handled — a late service would be recorded as failed');

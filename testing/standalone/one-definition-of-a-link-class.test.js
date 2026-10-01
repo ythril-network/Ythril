@@ -215,7 +215,12 @@ describe('no reader re-derives a link class', () => {
   const NOT_A_LINK_READER = new Map(Object.entries({
     'server/src/brain/links.ts':
       'THE WRITER. It creates and removes link records, which is where the shape is decided rather than '
-      + 'read.',
+      + 'read. It still does so for one row at a time (a single link created or deleted by id); the row '
+      + 'RECONCILE moved to `write-plan/commit.ts`, below.',
+    'server/src/brain/write-plan/commit.ts':
+      'THE WRITER, since Q-99 part 3: `reconcileLinkRows` is the one link-row writer, which every create, '
+      + 'converge and batch commit and `links.ts reconcileLinks` call. It reads a record\'s existing rows only '
+      + 'to diff them against what the write says, which is the writer deciding the shape, not a reader asking it.',
     'server/src/brain/links-conversion.ts':
       'THE MIGRATION. It reads the 4.x arrays off disk and writes the records that replace them, so it is '
       + 'the one reader of a shape the types no longer declare.',

@@ -34,7 +34,9 @@
  * shared with the media queue. Only the job shape and the collection differ.
  */
 
-import { col, asFilter, asUpdate } from '../db/mongo.js';
+import { col, asFilter, asUpdate, asBulk } from '../db/mongo.js';
+import { log } from '../util/log.js';
+import { inChunks } from '../util/chunks.js';
 import { withJitter } from '../util/backoff.js';
 import { createWorkSignal } from '../util/work-signal.js';
 import { newClaimToken } from '../files/media/lease.js';
@@ -185,22 +187,10 @@ export async function enqueueEmbedJob(
   recordId: string,
   { priority }: { priority: EmbedPriority },
 ): Promise<void> {
-  if (!embeddable(recordType, recordId)) return;
-
-  const now = new Date().toISOString();
+  // The write lane's ops through the one runner, so a single write and a batch cannot queue differently.
   try {
-    await jobs(spaceId).updateOne(
-      asFilter<BrainEmbedJobDoc>({ _id: embedJobId(recordType, recordId) }),
-      asUpdate<BrainEmbedJobDoc>({
-        // Every field reset: a new write is new content, and it must not inherit a verdict — or a half-hour
-        // backoff earned by an outage that has since ended — reached on the old content.
-        $set: { ...freshJob(spaceId, recordType, recordId, now) },
-        $min: { priority },
-        $setOnInsert: { createdAt: now },
-      }),
-      { upsert: true },
-    );
-    _signal.markSpaceMayHaveWork(spaceId);
+    await runEmbedJobOps(spaceId, [{ recordType, recordId }],
+      (type, id, now) => writeJobOps(spaceId, type, id, now, { priority }));
   } catch {
     /* see the note above — a queue failure must never fail the write it was announcing */
   }
@@ -278,46 +268,109 @@ export async function enqueueEmbedJobs(
   recordIds: readonly string[],
   { priority, rebuild }: { priority: EmbedPriority; rebuild?: boolean },
 ): Promise<{ queued: number }> {
-  const ids = recordIds.filter(id => embeddable(recordType, id));
+  const queued = await runEmbedJobOps(spaceId, recordIds.map(recordId => ({ recordType, recordId })),
+    (recordType_, recordId, now) => sweepJobOps(spaceId, recordType_, recordId, now, { priority, rebuild }));
+  return { queued };
+}
+
+/**
+ * Queue the records a WRITE just stored — `enqueueEmbedJob`'s semantics for a batch, which the write commit uses.
+ *
+ * Every field is reset (a new write is new content, so it must not inherit a verdict or a backoff earned on the
+ * old one) and the priority only rises. **It never throws into the write** — the records are stored, and failing
+ * the write would trade a delayed search hit for lost data — but it does not swallow quietly either: a failed
+ * batch is many records missing from recall at once, so it warns with the count and the repair
+ * (`POST /api/spaces/:id/reembed`), and the count is returned for the caller to report.
+ */
+export async function enqueueWriteEmbedJobs(
+  spaceId: string,
+  records: ReadonlyArray<{ recordType: BrainEmbedRecordType; recordId: string }>,
+  { priority }: { priority: EmbedPriority },
+): Promise<{ queued: number; failed: number }> {
+  try {
+    const queued = await runEmbedJobOps(spaceId, records,
+      (recordType, recordId, now) => writeJobOps(spaceId, recordType, recordId, now, { priority }));
+    return { queued, failed: 0 };
+  } catch (err) {
+    const failed = records.length;
+    log.warn(`embed queue: ${failed} record(s) written to '${spaceId}' were NOT queued for embedding `
+      + `(${err instanceof Error ? err.message : String(err)}). They are stored and findable by text; `
+      + 'POST /api/spaces/:id/reembed queues every record that has no vector.');
+    return { queued: 0, failed };
+  }
+}
+
+/**
+ * THE one batched write onto the jobs collection. Each lane builds its own ops (`sweepJobOps`, `writeJobOps`);
+ * this applies them a batch at a time and throws on a failed write — whether that is swallowed is the lane's
+ * decision, made where its reason is written.
+ */
+async function runEmbedJobOps(
+  spaceId: string,
+  records: ReadonlyArray<{ recordType: BrainEmbedRecordType; recordId: string }>,
+  opsFor: (recordType: BrainEmbedRecordType, recordId: string, now: string) => object[],
+): Promise<number> {
+  const wanted = records.filter(r => embeddable(r.recordType, r.recordId));
   let queued = 0;
-  for (let i = 0; i < ids.length; i += SWEEP_BATCH) {
-    const batch = ids.slice(i, i + SWEEP_BATCH);
+  for (const batch of inChunks(wanted, SWEEP_BATCH)) {
     const now = new Date().toISOString();
-    const ops = batch.flatMap(recordId => {
-      const _id = embedJobId(recordType, recordId);
-      return [
-        {
-          updateOne: {
-            filter: { _id },
-            update: {
-              $setOnInsert: { ...freshJob(spaceId, recordType, recordId, now), createdAt: now },
-              $min: { priority },
-              ...(rebuild ? { $set: { rebuild: true } } : {}),
-            },
-            upsert: true,
-          },
-        },
-        {
-          // `lastError` is KEPT, as the version revive keeps it: whoever looks at the re-queued job can still see
-          // what it died of last time.
-          updateOne: {
-            filter: { _id, status: 'failed' },
-            update: { $set: { ...releasedClaim(now), ...freshBudget() } },
-          },
-        },
-        {
-          updateOne: {
-            filter: { _id, status: 'processing' },
-            update: { $set: releasedClaim(now) },
-          },
-        },
-      ];
-    });
-    await jobs(spaceId).bulkWrite(ops as unknown as Parameters<ReturnType<typeof jobs>['bulkWrite']>[0], { ordered: false });
+    const ops = batch.flatMap(r => opsFor(r.recordType, r.recordId, now));
+    await jobs(spaceId).bulkWrite(asBulk<BrainEmbedJobDoc>(ops), { ordered: false });
     queued += batch.length;
   }
   if (queued > 0) _signal.markSpaceMayHaveWork(spaceId);
-  return { queued };
+  return queued;
+}
+
+/** A sweep's ops for one record — see `enqueueEmbedJobs` for why each differs from a write's. */
+function sweepJobOps(
+  spaceId: string, recordType: BrainEmbedRecordType, recordId: string, now: string,
+  { priority, rebuild }: { priority: EmbedPriority; rebuild?: boolean },
+): object[] {
+  const _id = embedJobId(recordType, recordId);
+  return [
+    {
+      updateOne: {
+        filter: { _id },
+        update: {
+          $setOnInsert: { ...freshJob(spaceId, recordType, recordId, now), createdAt: now },
+          $min: { priority },
+          ...(rebuild ? { $set: { rebuild: true } } : {}),
+        },
+        upsert: true,
+      },
+    },
+    {
+      // `lastError` is KEPT, as the version revive keeps it: whoever looks at the re-queued job can still see
+      // what it died of last time.
+      updateOne: {
+        filter: { _id, status: 'failed' },
+        update: { $set: { ...releasedClaim(now), ...freshBudget() } },
+      },
+    },
+    {
+      updateOne: {
+        filter: { _id, status: 'processing' },
+        update: { $set: releasedClaim(now) },
+      },
+    },
+  ];
+}
+
+/** A write's op for one record — the write lane's, used by `enqueueEmbedJob` and `enqueueWriteEmbedJobs` alike. */
+function writeJobOps(
+  spaceId: string, recordType: BrainEmbedRecordType, recordId: string, now: string,
+  { priority }: { priority: EmbedPriority },
+): object[] {
+  return [{
+    updateOne: {
+      filter: { _id: embedJobId(recordType, recordId) },
+      // Every field reset: a new write is new content, and it must not inherit a verdict — or a half-hour
+      // backoff earned by an outage that has since ended — reached on the old content.
+      update: { $set: { ...freshJob(spaceId, recordType, recordId, now) }, $min: { priority }, $setOnInsert: { createdAt: now } },
+      upsert: true,
+    },
+  }];
 }
 
 /**

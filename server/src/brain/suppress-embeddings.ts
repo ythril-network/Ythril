@@ -91,6 +91,30 @@ export function recordSuppression(doc: Record<string, unknown> | undefined): tru
   return v === true ? true : undefined;
 }
 
+/**
+ * Would the record a write LEAVES be suppressed? The record tier from the write when it states one, and from
+ * the STORED record when it does not (`Q-194`).
+ *
+ * Asked with the payload alone, a write that did not restate the flag read as "not suppressed" and an inline
+ * embed stored a vector on a record its author had retired from meaning-ranked search — `upsertEntity`,
+ * `saveFact`, `createChrono`, `upsertEdge` and the merge each did. The stored flag is the forgettable half, so
+ * it is this function's to read, not each writer's.
+ *
+ * @param typed the fields the type tier keys on as the record will have them (`type`, or `label` for an edge).
+ */
+export function suppressedAfterWrite(
+  spaceId: string,
+  recordType: BrainEmbedRecordType,
+  stored: Record<string, unknown> | null | undefined,
+  typed: Record<string, unknown>,
+  stated: boolean | undefined,
+): boolean {
+  return embeddingSuppressedFor(spaceId, recordType, {
+    ...typed,
+    [RECORD_SUPPRESS_FIELD]: stated !== undefined ? stated : stored?.[RECORD_SUPPRESS_FIELD],
+  });
+}
+
 /** Mongo fragment matching the records the record tier does NOT suppress. */
 export function recordNotSuppressedFilter(): Record<string, unknown> {
   return { [RECORD_SUPPRESS_FIELD]: { $ne: true } };

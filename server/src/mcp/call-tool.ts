@@ -43,6 +43,7 @@ import { memberSpacesWithin } from '../spaces/proxy-scoped.js';
 import { classifyReadFailure } from '../brain/store-failure.js';
 import { SchemaViolationError } from '../brain/write-validation.js';
 import { NotFoundError } from '../util/errors.js';
+import { WriteConflict } from '../brain/write-plan/types.js';
 import { TOOLS_BY_NAME, type ToolResult } from './tools/index.js';
 import { validatorFor } from './validate-args.js';
 import { consumeHeavyToolCall } from '../rate-limit/heavy-tool.js';
@@ -322,6 +323,10 @@ export async function callTool(req: ToolCallRequest): Promise<ToolCallOutcome> {
      */
     if (err instanceof NotFoundError) {
       return { result: { content: [{ type: 'text' as const, text: `Error: ${message}` }], isError: true }, status: 404, callSpace };
+    }
+    // The same 409 the REST door answers: another write kept moving the record, nothing was written, retry.
+    if (err instanceof WriteConflict) {
+      return { result: { content: [{ type: 'text' as const, text: `Error: ${message}` }], isError: true }, status: 409, callSpace };
     }
     const readFailure = classifyReadFailure(err);
     if (readFailure.retryable) {

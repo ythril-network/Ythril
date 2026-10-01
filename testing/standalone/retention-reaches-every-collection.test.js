@@ -26,20 +26,44 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { trackedSources } from './_sources.mjs';
 import { join } from 'node:path';
 import { balancedFrom, blockAfter } from './_structural-window.mjs';
 
 const ROOT = process.cwd();
 
-/** file → the collection literal its TTL calls must pass. */
-const TYPED = {
+const read = (p) => readFileSync(join(ROOT, p), 'utf8');
+
+/**
+ * file → the collection literal its TTL calls must pass.
+ *
+ * Q-99 part 3 moved every create and converge stamp into the write PLANNERS (`brain/write-plan/plan-<kind>.ts`);
+ * the doors keep only their PATCH stamps. So the set is each kind's door AND its planner — and the planners are
+ * read out of the directory rather than listed, with a floor, so a fifth planner is gated the day it lands.
+ * `every caller of the stampers is one of these files` below is what stops a stamp moving a THIRD time into a
+ * file this map has never heard of, which is how this gate went from ten call sites to four.
+ */
+const DOORS = {
   'server/src/brain/entities.ts': 'entity',
   'server/src/brain/fact.ts':   'fact',
   'server/src/brain/edges.ts':    'edge',
   'server/src/brain/chrono.ts':   'chrono',
 };
+const COLLECTIONS = [...new Set(Object.values(DOORS))];
+const PLANNER_DIR = 'server/src/brain/write-plan';
+// A record kind's planner. `plan-links.ts` is the link HALF of every plan, not a collection, and stamps nothing —
+// if it ever does, the stamper-callers case below names it.
+const PLANNERS = Object.fromEntries(
+  trackedSources(PLANNER_DIR, { floor: COLLECTIONS.length, specs: false, untracked: true })
+    .map(f => [f, /\/plan-(\w+)\.ts$/.exec(f)?.[1]])
+    .filter(([, kind]) => COLLECTIONS.includes(kind)));
+const TYPED = { ...DOORS, ...PLANNERS };
 
-const read = (p) => readFileSync(join(ROOT, p), 'utf8');
+/** Every source under `server/src` that calls a stamper — the set the map above has to cover. */
+function stamperCallers() {
+  return trackedSources('server/src', { specs: false, untracked: true, exclude: ['server/src/brain/ttl.ts'] })
+    .filter(f => ttlCalls(read(f)).length > 0);
+}
 
 /** Every `stampExpiryOnCreate(` / `applyExpiryToUpdate(` call in a file, with its full argument text. */
 function ttlCalls(src) {
@@ -64,8 +88,24 @@ function ttlCalls(src) {
 
 describe('the schema retention tier reaches every typed collection', () => {
   it('found the call sites — the pattern still matches', () => {
+    // The planner derivation must have found one planner per typed collection, or every loop below is over less.
+    assert.deepEqual(Object.values(PLANNERS).sort(), [...COLLECTIONS].sort(),
+      `write-plan/ holds planners for ${Object.values(PLANNERS).join(', ') || 'nothing'} — expected one per typed collection`);
     const total = Object.keys(TYPED).reduce((n, f) => n + ttlCalls(read(f)).length, 0);
     assert.ok(total >= 10, `only found ${total} TTL call sites across the four typed collections`);
+    // Each collection both STAMPS a create and APPLIES an update, somewhere in its door or planner.
+    for (const kt of COLLECTIONS) {
+      const calls = Object.entries(TYPED).filter(([, k]) => k === kt).flatMap(([f]) => ttlCalls(read(f)));
+      for (const fn of ['stampExpiryOnCreate', 'applyExpiryToUpdate']) {
+        assert.ok(calls.some(c => c.fn === fn), `no ${fn} call found for the ${kt} collection in its door or planner`);
+      }
+    }
+  });
+
+  it('every caller of the stampers is a file this gate reads', () => {
+    const unread = stamperCallers().filter(f => !(f in TYPED));
+    assert.deepEqual(unread, [], `these files stamp retention and no case here reads them: ${unread.join(', ')} — `
+      + 'add them to DOORS (or name the planner `write-plan/plan-<kind>.ts`) so their collection is checked');
   });
 
   it('every create and update passes its collection', () => {
@@ -83,11 +123,14 @@ describe('the schema retention tier reaches every typed collection', () => {
   it('an edge keys on `label`, never on `type`', () => {
     // EdgeDoc has BOTH, and `validateEdgeWrite` looks the schema up by label. Reading `type` for an edge finds
     // a schema that is never there and looks like it worked, which is worse than not passing anything.
-    const src = read('server/src/brain/edges.ts');
-    for (const c of ttlCalls(src)) {
-      if (!c.args.includes("collection: 'edge'")) continue;
-      assert.ok(!/type:\s*doc\.type|type:\s*existing\.type/.test(c.args),
-        `edges.ts:${c.line} resolves its retention type from \`type\`; the schema is keyed by \`label\``);
+    // Every file of the edge collection — the door's PATCH and the planner's create and converge (Q-99 part 3).
+    for (const [file, kt] of Object.entries(TYPED)) {
+      if (kt !== 'edge') continue;
+      for (const c of ttlCalls(read(file))) {
+        if (!c.args.includes("collection: 'edge'")) continue;
+        assert.ok(!/type:\s*doc\.type|type:\s*existing\.type/.test(c.args),
+          `${file}:${c.line} resolves its retention type from \`type\`; the schema is keyed by \`label\``);
+      }
     }
     // A WINDOW, converted: the subject is the TYPE_FIELD map itself, bounded by the brace that closes it. 200
     // characters reached past the map into the functions below, where `'label'` appears for other reasons.

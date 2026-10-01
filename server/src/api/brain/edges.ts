@@ -6,7 +6,7 @@
 import { Router } from 'express';
 import { shapeError } from '../../brain/write-shape.js';
 import { assertRefsResolve, edgeEndpointKind } from '../../brain/entity-refs.js';
-import { REF_KINDS } from '../../config/types-knowledge.js';
+import { REF_KINDS, isRefKind } from '../../config/types-knowledge.js';
 import type { RefKind } from '../../config/types-knowledge.js';
 import { requireSpaceAuth, denyReadOnly } from '../../auth/middleware.js';
 import { unknownFieldWarnings } from './unknown-fields.js';
@@ -70,7 +70,7 @@ edgesRouter.post('/spaces/:spaceId/edges', globalRateLimit, requireSpaceAuth, de
    */
   for (const [field, value] of [['fromKind', fromKind], ['toKind', toKind]] as const) {
     if (value === undefined) continue;
-    if (typeof value !== 'string' || !(REF_KINDS as readonly string[]).includes(value)) {
+    if (!isRefKind(value)) {
       res.status(400).json({ error: `\`${field}\` must be one of: ${REF_KINDS.join(', ')}` });
       return;
     }
@@ -257,7 +257,7 @@ edgesRouter.patch('/spaces/:spaceId/edges/:id', globalRateLimit, requireSpaceAut
   // the caller picked.
   for (const [field, value] of [['fromKind', fromKind], ['toKind', toKind]] as const) {
     if (value === undefined) continue;
-    if (typeof value !== 'string' || !(REF_KINDS as readonly string[]).includes(value)) {
+    if (!isRefKind(value)) {
       res.status(400).json({ error: `\`${field}\` must be one of: ${REF_KINDS.join(', ')}` });
       return;
     }
