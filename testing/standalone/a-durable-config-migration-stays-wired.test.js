@@ -86,6 +86,9 @@ const DURABLE = [
   { call: 'migrateSyncScheduleShorthands', persists: true,
     why: 'deleting it leaves a stored shorthand unresolvable, so the network silently drops to manual sync — '
        + 'and the shorthands are refused at input now, so the operator cannot put the value back either' },
+  { call: 'defaultUnstatedJoinedSchedules', persists: true,
+    why: 'deleting it leaves a network joined before the join default on manual sync, pulling only when its peer '
+       + 'starts a cycle, with nothing in the log to say so' },
   { call: 'migrateNetworkSpaceKeys', persists: true,
     why: 'deleting it leaves a network\'s schema layer and membership origin under a renamed space\'s old id, so the '
        + 'space loses that network\'s schema and a joining token can no longer be told apart as its establisher' },

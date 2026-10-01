@@ -37,6 +37,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   before the `404`, so any caller could mint a time series per spelling.
 - **The notify event store is bounded by bytes, not only by count (`Q-108`).** 500 events of up to the JSON body
   limit each could hold gigabytes; it now holds at most 1 MiB, oldest out first.
+- **A network joined before the join default now syncs on its own.** 5.6.0 gave a new join a schedule (every 15
+  minutes, or the inviter's), but a network joined earlier kept none and pulled only when its peer started a cycle —
+  seen on an instance whose two joined networks had no schedule at all. It gets the default at the next start, named
+  in the log. Clearing a schedule now stores manual as a choice (`""`) rather than as nothing, so manual set on
+  purpose is never replaced; one cleared before this change reads as never set, so it is scheduled once.
 
 ## [5.6.0] — 2026-09-29
 

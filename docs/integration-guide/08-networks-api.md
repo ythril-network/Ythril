@@ -450,7 +450,10 @@ when the inviter syncs manually), and falls back to every 15 minutes (`*/15 * * 
 it could run. A value the scheduler cannot run is refused `400` before the handshake, in the sentence
 `POST /api/networks` gives. Only a network the join creates is scheduled; one this instance already carries keeps its
 own. **Changed in 5.6.0**: a joined network used to get no schedule, which is manual-only, so a joiner never pulled
-on its own. Change it later on the network card or with `PATCH /api/networks/:id`.
+on its own. Change it later on the network card or with `PATCH /api/networks/:id`. A network joined before that
+default existed gets it when the instance next starts, and the log names each one; `""` sent to the join or to
+`PATCH` is kept as manual sync chosen, and is never replaced by the default. **Changed**: `PATCH` with `""` used to
+store no schedule at all, which reads the same as one never stated.
 
 ### Join Troubleshooting: private or local URLs rejected
 

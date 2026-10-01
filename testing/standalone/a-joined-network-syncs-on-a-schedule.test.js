@@ -50,3 +50,43 @@ describe('the schedule a joiner syncs on', () => {
     }
   });
 });
+
+describe('a network joined before the default existed gets it at boot', () => {
+  /*
+   * The default only reached networks joined after it shipped. An instance that joined before carries no schedule,
+   * syncs only when its peer starts a cycle, and nothing says so — found on a real instance whose two joined networks
+   * had none. Manual chosen on purpose is stored as `''` and is left alone; `undefined` is "never stated".
+   */
+  const give = cfg => {
+    assert.equal(typeof schedule.defaultUnstatedJoinedSchedules, 'function', 'the boot rule has no home');
+    return schedule.defaultUnstatedJoinedSchedules(cfg);
+  };
+  it('a joined network with no schedule gets the default, and one of unknown origin too', () => {
+    const cfg = { networks: [{ id: 'j', origin: 'joined' }, { id: 'old' }] };
+    assert.deepEqual(give(cfg), ['j', 'old']);
+    for (const n of cfg.networks) assert.equal(n.syncSchedule, schedule.DEFAULT_JOIN_SYNC_SCHEDULE);
+  });
+  it('manual chosen on purpose, a stated schedule and a network this instance created are left alone', () => {
+    const cfg = { networks: [
+      { id: 'manual', origin: 'joined', syncSchedule: '' },
+      { id: 'stated', origin: 'joined', syncSchedule: '0 * * * *' },
+      { id: 'mine', origin: 'created' },
+    ] };
+    assert.deepEqual(give(cfg), []);
+    assert.deepEqual(cfg.networks.map(n => n.syncSchedule), ['', '0 * * * *', undefined]);
+  });
+  it('settles: a second boot changes nothing', () => {
+    const cfg = { networks: [{ id: 'j', origin: 'joined' }] };
+    give(cfg);
+    assert.deepEqual(give(cfg), []);
+  });
+  it('turning scheduling off stores manual as a choice, not as never-stated', async () => {
+    const { readFileSync } = await import('node:fs');
+    const acts = readFileSync('server/src/networks/network-acts.ts', 'utf8');
+    assert.doesNotMatch(acts, /net\.syncSchedule = parsed\.data\.syncSchedule \|\| undefined/,
+      'clearing the schedule stores undefined, so the boot rule would switch a deliberate manual network back on');
+    const join = readFileSync('server/src/networks/join-remote-act.ts', 'utf8');
+    assert.doesNotMatch(join, /armSchedule = schedule \|\| undefined/,
+      'a join that states manual stores undefined, which the boot rule reads as never stated');
+  });
+});
