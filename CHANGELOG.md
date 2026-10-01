@@ -68,6 +68,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   interleave by relevance, and the reranker picks its candidates by that order. **Who is affected:** a `recall`
   naming several spaces, a proxy, or no space — the ORDER of its results and the values of `fusedScore` on them.
   A recall over one space is unchanged.
+- **A bulk edge whose end was a `$ref` to a fact or chrono entry was stored as an entity end (`Q-193`)** when the
+  item did not state the kind: it was checked for existence as the fact it named and stored pointing at an entity
+  that did not exist, so a traversal from the fact never found it. The edge now stores the kind of the record the
+  key names.
 
 ## [5.6.0] — 2026-09-29
 

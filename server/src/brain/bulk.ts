@@ -523,8 +523,10 @@ export async function bulkWrite(spaceId: string, input: BulkInput): Promise<Bulk
         properties, optStrArray(item['tags']), undefined, ttlDays,
         {
           ...edgeFlags.flags,
-          ...(rawFromKind !== undefined ? { fromKind } : {}),
-          ...(rawToKind !== undefined ? { toKind } : {}),
+          // Always the RESOLVED kind (`Q-193`): a `$ref` end takes the kind of the array its key was declared
+          // in, so passing it only when the item stated one stored a fact or chrono end as an entity end.
+          // `upsertEdge` normalises 'entity' to absent, so passing it costs a plain-entity edge nothing.
+          fromKind, toKind,
         });
       if (existing) updated.edges++; else inserted.edges++;
     } catch (err) { errors.push({ type: 'edge', index: i, reason: err instanceof Error ? err.message : String(err) }); }
