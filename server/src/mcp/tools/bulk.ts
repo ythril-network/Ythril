@@ -9,7 +9,10 @@
 
 import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.js';
 import { TTL_DAYS_SCHEMA, SUPERSEDED_SCHEMA, SUPPRESS_EMBEDDINGS_SCHEMA, uuidSchema } from './shared.js';
-import { bulkWrite, bulkWriteTotal, BULK_MAX_PER_TYPE } from '../../brain/bulk.js';
+import { bulkWrite, bulkWriteTotal, bulkBodyRefusal, BULK_BODY_KEYS, BULK_MAX_PER_TYPE } from '../../brain/bulk.js';
+
+/** What this door accepts at the top level: the arrays, plus the space it is addressed to. */
+const MCP_BULK_KEYS: ReadonlySet<string> = new Set([...BULK_BODY_KEYS, 'space', 'targetSpace']);
 import { resolveWriteTarget } from '../../spaces/proxy.js';
 import { emitWebhookEvent } from '../../webhooks/dispatcher.js';
 import { edgeEndpointKindSchema } from '../../brain/entity-refs.js';
@@ -263,6 +266,10 @@ export const save_bulkTool: ToolHandler = {
         }),
   async handle(ctx: ToolContext): Promise<ToolResult> {
     const { args: a, callSpace } = ctx;
+    // Refused before anything else, exactly as the REST door refuses it (`Q-195`): this tool skips schema
+    // validation so it can report per-item errors, which left a retired or unknown key accepted and ignored.
+    const refusal = bulkBodyRefusal(a, MCP_BULK_KEYS);
+    if (refusal) throw new Error(refusal.error);
     const wt = resolveWriteTarget(callSpace, a['targetSpace'] as string | undefined);
     if (!wt.ok) throw new Error(wt.error);
     const ts = wt.target;

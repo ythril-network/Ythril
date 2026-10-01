@@ -42,6 +42,8 @@ import type { RefKind } from '../config/types-knowledge.js';
 import { NEVER_RETURNED_PROJECTION } from './read-projection.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { MAX_FACT_LENGTH } from '../util/request-bounds.js';
+import { retiredWriteFieldError } from './retired-write-fields.js';
+import { unknownBodyFields } from './query.js';
 // DERIVED. These five were written out here, in `brain/bulk.ts`, and in the shared write-shape table —
 // three copies of one product fact, and the third had two of them wrong.
 const CHRONO_STATUS_SET = new Set<ChronoStatus>(CHRONO_STATUSES);
@@ -110,6 +112,41 @@ function bulkTtlDays(v: unknown): number | null | undefined | typeof TTL_INVALID
 const TTL_INVALID_MSG = '`ttlDays` must be an integer number of days between 0 and 36500, or null to clear the expiry';
 function slice(v: unknown): Record<string, unknown>[] {
   return Array.isArray(v) ? (v as Record<string, unknown>[]) : [];
+}
+
+/**
+ * Why this body names something `bulkWrite` does not read, or `null` — the ONE check both doors run (`Q-41`,
+ * `Q-195`).
+ *
+ * A key `BulkInput` does not declare was never read by anything downstream, so `{"memories":[…]}` answered
+ * success with nothing written — the same answer a body that legitimately wrote nothing gives. The REST door
+ * refused it; the MCP tool, which skips schema validation so it can report per-item errors, did not, and the
+ * same payload was a clean success there. One function, so the two cannot drift again.
+ *
+ * The retired name is checked FIRST so `memories` is answered with `facts` rather than with the generic
+ * "unknown field" sentence — the one a caller migrating from 4.x needs. ITEMS are checked too: an item
+ * carrying `entityIds` was written without its connections, and a batch is where that costs most.
+ *
+ * @param allowed the top-level keys this door accepts — `BULK_BODY_KEYS` plus the door's own addressing
+ *   (`space`, `targetSpace` on MCP).
+ */
+export function bulkBodyRefusal(
+  body: Record<string, unknown>,
+  allowed: ReadonlySet<string>,
+): { error: string; unrecognized_keys?: string[] } | null {
+  const retired = retiredWriteFieldError(body);
+  if (retired) return { error: retired };
+  const unknown = unknownBodyFields(body, allowed);
+  if (unknown) return unknown;
+  for (const key of BULK_BODY_KEYS) {
+    const items = body[key];
+    if (!Array.isArray(items)) continue;
+    for (const item of items) {
+      const itemRetired = retiredWriteFieldError(item);
+      if (itemRetired) return { error: itemRetired };
+    }
+  }
+  return null;
 }
 
 /**
