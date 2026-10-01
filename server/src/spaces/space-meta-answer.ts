@@ -61,7 +61,8 @@ export async function spaceMetaAnswer(input: {
     stats,
     // Reindex state travels with the meta on BOTH doors: `space_reindex` tells a caller to poll `space_meta` after
     // starting a run. One function with `GET /reindex-status`, so the two report the same numbers.
-    ...reindexState,
+    needsReindex: reindexState.needsReindex,
+    reindex: reindexState.reindex,
     /*
      * WHAT THE SPACE ACTUALLY HOLDS, beside what it declares, in the declared schema's own format so a type the
      * space really holds can be promoted into it. Per member on a proxy, never merged: two types sharing a name

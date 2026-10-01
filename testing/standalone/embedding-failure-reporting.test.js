@@ -74,8 +74,21 @@ async function setEmbeddingAndReload(embedding) {
   if (embedding === undefined) delete cfg.embedding;
   else cfg.embedding = embedding;
   writeConfig(cfg);
-  // Let the Docker Desktop bind-mount propagate before the reload (see reload-config.test.js).
-  await new Promise(r => setTimeout(r, 600));
+  // Wait until the CONTAINER sees the file we wrote, then reload. A fixed pause was not enough on Docker Desktop:
+  // measured 2026-10-01, the bind mount showed the new config about three seconds later, so the reload read the old
+  // one, the upload embedded against a working model, and the file was reported `complete` — this test failing for
+  // its harness rather than for the product. Reading it back through the container is the propagation, not a guess.
+  const want = JSON.stringify(cfg.embedding ?? null);
+  const deadline = Date.now() + 15_000;
+  for (;;) {
+    let seen;
+    try {
+      seen = JSON.stringify(JSON.parse(execSync(`docker exec ${CONTAINER_A} cat /config/config.json`).toString('utf8')).embedding ?? null);
+    } catch { seen = undefined; }
+    if (seen === want) break;
+    if (Date.now() > deadline) throw new Error(`the container never saw the written embedding config: ${seen} vs ${want}`);
+    await new Promise(r => setTimeout(r, 250));
+  }
   const reload = await post(INSTANCES.a, token, '/api/admin/reload-config', {});
   assert.equal(reload.status, 200, `reload-config failed: ${JSON.stringify(reload.body)}`);
 }
