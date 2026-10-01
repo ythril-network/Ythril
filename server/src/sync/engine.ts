@@ -23,7 +23,7 @@ import { reportPushRefusals, refusedTransfers } from './push-refusals.js';
 import { deliverChangeNotes } from './change-notes.js';
 import { col, asFilter } from '../db/mongo.js';
 import { recordSyncResult, type SyncCounts } from './history.js';
-import { log } from '../util/log.js';
+import { log, logSafe } from '../util/log.js';
 import { resolveWatermark, truncationWarn, type TransferOutcome } from './watermark.js';
 import { pullTombstones, pushTombstones } from './tombstone-transfer.js';
 import { applyConcludedSpaceRounds } from '../spaces/apply-wipe-round.js';
@@ -880,8 +880,8 @@ async function pullFromPeer(
           { from: member.label ?? member.instanceId });
       } catch (err) {
         truncated = true;
-        log.warn(`Pull ${urlSuffix} from ${member.label ?? member.instanceId}: a record write failed in space `
-          + `'${spaceId}' (${err instanceof Error ? err.message : String(err)}). This is this instance's database, not `
+        log.warn(`Pull ${urlSuffix} from ${logSafe(member.label ?? member.instanceId)}: a record write failed in space `
+          + `'${spaceId}' (${logSafe(err instanceof Error ? err.message : String(err))}). This is this instance's database, not `
           + `the peer: the transfer holds at ${deliveredThrough} and the page is fetched again next cycle.`);
         break;
       }

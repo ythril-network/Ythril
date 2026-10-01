@@ -12,7 +12,7 @@ import { getAllowedChronoTypes } from '../../spaces/schema-validation.js';
 import { getConfig } from '../../config/loader.js';
 import { listTombstones } from '../../brain/tombstones.js';
 import { requireAuth, denyReadOnly } from '../../auth/middleware.js';
-import { log } from '../../util/log.js';
+import { log, logSafe } from '../../util/log.js';
 import { reportServerFailure } from '../../util/report-failure.js';
 import { bumpSeq, withAllocatedSeqs, settledSeqRange } from '../../util/seq.js';
 import type { FactDoc, EntityDoc, EdgeDoc, ChronoEntry, LinkDoc } from '../../config/types.js';
@@ -546,7 +546,7 @@ syncDocsRouter.post('/batch-upsert', syncRateLimit, requireAuth, denyReadOnly, a
       dropped[key] = overflow;
       if (overflow > 0) {
         log.warn(`batch-upsert: ${overflow} ${key} document(s) past the ${BATCH_FAMILY_CAP}-per-family cap for space `
-          + `'${spaceId}' from peer '${peer}' were REJECTED; the sender offers them again in its next page.`);
+          + `'${spaceId}' from peer '${logSafe(peer)}' were REJECTED; the sender offers them again in its next page.`);
       }
       const misfits: ArrivalRefusal[] = [];
       page[key] = raw[key].slice(0, BATCH_FAMILY_CAP).flatMap((d) => {

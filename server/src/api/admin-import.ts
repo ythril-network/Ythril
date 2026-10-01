@@ -51,7 +51,7 @@
  */
 import { KNOWLEDGE_TYPES, TOMBSTONE_TYPE_OF } from '../config/types.js';
 import type { BrainCollection, KnowledgeType } from '../config/types.js';
-import { log } from '../util/log.js';
+import { log, logSafe } from '../util/log.js';
 import type { SchemaViolation } from '../spaces/schema-validation.js';
 import { violationsAgainstLocalSchema } from './sync/_shared.js';
 import { writeArrivals, arrivalId, arrivalRefusal, ArrivalWriteError, NAMED_IN_SUMMARY, type ArrivalOutcome } from '../sync/arrivals.js';
@@ -152,7 +152,7 @@ export async function importDocuments(spaceId: string, payload: Record<string, u
     try {
       out = await writeArrivals(spaceId, t, RECORD_TYPE_OF[t], docs, { restore: true });
     } catch (err) {
-      log.warn(`Import into space '${spaceId}': ${t} could not be written: ${String(err)}`);
+      log.warn(`Import into space '${spaceId}': ${t} could not be written: ${logSafe(String(err))}`);
       if (!(err instanceof ArrivalWriteError) || !err.partial) {
         // Nothing of the family is vouched for, so every document is named.
         result.refused = docs.slice(0, NAMED_IN_SUMMARY).map(d => ({ _id: arrivalId(d), reason: familyFailed(err) }));

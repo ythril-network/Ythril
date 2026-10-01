@@ -103,6 +103,26 @@ export function redactSecrets(msg: string): string {
   return redact(msg);
 }
 
+/** Every character that can end, rewind or hide a log line: C0 controls, DEL, C1 controls, and U+2028/U+2029. */
+const LINE_BREAKING = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g;
+
+/** The escapes an operator reads at a glance; every other line-breaking character is written `\uXXXX`. */
+const SHORT_ESCAPE: Readonly<Record<string, string>> = { '\r': '\\r', '\n': '\\n', '\t': '\\t' };
+
+/**
+ * A value from OUTSIDE this instance — a peer's document id, a reason built from its content, a peer's label —
+ * made safe to interpolate into a log line: every control character is written as its JSON escape (`\r`, `\n`,
+ * `\u001b`), so a value can never start a line of its own or forge one. A document id `x\r\nFORGED ...` arriving
+ * by sync otherwise prints a second log line that reads exactly like this server's own.
+ *
+ * Escape rather than strip, so the operator still sees what was sent. Use it at the interpolation of any
+ * peer-supplied value; this server's own text needs nothing.
+ */
+export function logSafe(value: unknown): string {
+  const s = typeof value === 'string' ? value : (JSON.stringify(value) ?? String(value));
+  return s.replace(LINE_BREAKING, ch => SHORT_ESCAPE[ch] ?? `\\u${ch.charCodeAt(0).toString(16).padStart(4, '0')}`);
+}
+
 function redact(msg: string): string {
   return msg
     .replace(/Bearer\s+[A-Za-z0-9_.\-]+/gi, REDACTED)
