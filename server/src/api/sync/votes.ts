@@ -14,6 +14,7 @@ import { applyConcludedSpaceRounds } from '../../spaces/apply-wipe-round.js';
 import { roundForPeer } from '../../networks/round-local-state.js';
 import { acceptVoteCast, castFromBody } from '../../util/signing.js';
 import { concludeRoundIfReady, sendMemberRemovedNotify } from '../../sync/governance.js';
+import { admitPassedJoin } from '../../networks/admit-passed-join.js';
 
 export const syncVotesRouter = Router();
 
@@ -125,20 +126,8 @@ syncVotesRouter.post('/networks/:networkId/votes/:roundId', syncRateLimit, requi
     }
 
     // If a join round just passed via this vote relay, add the pending member.
-    if (round.concluded && round.type === 'join' && round.pendingMember) {
-      const alreadyAdded = net.members.some(m => m.instanceId === round.subjectInstanceId);
-      // Braintree: only the direct parent in the tree admits (ancestor-voters
-      // must not add the joiner to their own lists). Other vote-governed types:
-      // only the instance that holds the joiner's credentials admits — gossip-
-      // adopted round copies have pendingMember.tokenHash stripped.
-      const mayAdmit = net.type === 'braintree'
-        ? (!round.pendingMember.parentInstanceId || round.pendingMember.parentInstanceId === cfg.instanceId)
-        : Boolean(round.pendingMember.tokenHash);
-      const vetoed = round.votes.some(v => v.vote === 'veto');
-      if (!alreadyAdded && mayAdmit && !vetoed) {
-        net.members.push(round.pendingMember);
-        log.info(`Join round ${round.roundId} passed via vote relay — added ${round.subjectLabel} to network ${net.id}`);
-      }
+    if (admitPassedJoin(net, cfg.instanceId, round)) {
+      log.info(`Join round ${round.roundId} passed via vote relay — added ${round.subjectLabel} to network ${net.id}`);
     }
 
     saveConfig(cfg);
