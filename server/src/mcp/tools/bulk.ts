@@ -10,9 +10,6 @@
 import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.js';
 import { TTL_DAYS_SCHEMA, SUPERSEDED_SCHEMA, SUPPRESS_EMBEDDINGS_SCHEMA, uuidSchema } from './shared.js';
 import { bulkWrite, bulkWriteTotal, bulkBodyRefusal, BULK_BODY_KEYS, BULK_MAX_PER_TYPE } from '../../brain/bulk.js';
-
-/** What this door accepts at the top level: the arrays, plus the space it is addressed to. */
-const MCP_BULK_KEYS: ReadonlySet<string> = new Set([...BULK_BODY_KEYS, 'space', 'targetSpace']);
 import { resolveWriteTarget } from '../../spaces/proxy.js';
 import { emitWebhookEvent } from '../../webhooks/dispatcher.js';
 import { edgeEndpointKindSchema } from '../../brain/entity-refs.js';
@@ -20,6 +17,9 @@ import { CHRONO_STATUSES } from '../../config/types.js';
 import { refDeclareSchema } from '../../brain/batch-refs.js';
 import { connectionSchemas } from '../../brain/write-connections.js';
 import { MAX_TAGS, MAX_FACT_LENGTH } from '../../util/request-bounds.js';
+
+/** What this door accepts at the top level: the arrays, plus the space it is addressed to. */
+const MCP_BULK_KEYS: ReadonlySet<string> = new Set([...BULK_BODY_KEYS, 'space', 'targetSpace']);
 
 export const save_bulkTool: ToolHandler = {
   name: 'save_bulk',

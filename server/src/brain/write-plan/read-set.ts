@@ -80,7 +80,11 @@ export class ReadSet {
       }
     }
 
-    const tripletsWanted = (want.triplets ?? []).filter(t => !this.triplets.has(tripletKey(t)));
+    // An end this batch minted has no stored edge, so its triplet and its subject are answered without a read —
+    // the rule `triplet()` and `otherEdgesFromSubject()` apply. Reading them anyway costs one query per edge on
+    // the commonest batch: records and the edges between them in one call.
+    const tripletsWanted = (want.triplets ?? []).filter(t => !this.triplets.has(tripletKey(t))
+      && !this.mintedIds.has(t.from) && !this.mintedIds.has(t.to));
     const edges = col<EdgeDoc>(spaceCollection(this.spaceId, 'edges'));
     for (const chunk of inChunks(tripletsWanted, CHUNK)) {
       // Exact clauses, the same one `findEdgeByTriplet` reads by. One clause per triplet is one index key each.
@@ -91,7 +95,8 @@ export class ReadSet {
       for (const e of found) this.triplets.set(tripletKey(e), e);
     }
 
-    const subjectsWanted = (want.functional ?? []).filter(s => !this.subjectEdges.has(subjectKey(s.from, s.label)));
+    const subjectsWanted = (want.functional ?? []).filter(s => !this.subjectEdges.has(subjectKey(s.from, s.label))
+      && !this.mintedIds.has(s.from));
     for (const chunk of inChunks(subjectsWanted, CHUNK)) {
       const found = await edges.find(asFilter<EdgeDoc>({
         $or: chunk.map(s => ({ from: s.from, label: s.label })),

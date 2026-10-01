@@ -250,6 +250,34 @@ describe('bulkWrite answers what it did', { skip }, () => {
       assert.ok(seen.length <= CEILING,
         `${N} edges issued ${seen.length} commands (ceiling ${CEILING}): ${summarise(seen)}`);
     });
+
+    /*
+     * The ceiling holds for every SHAPE of edge the planner tells apart, not only the one measured first: the
+     * explicit-id case above passed while an edge to a record this batch mints was read back one triplet at a
+     * time — a record minted a moment ago has no stored edge, so that read can only answer "none" (found by the
+     * pre-ship lens sweep, 2026-10-01).
+     */
+    it(`${N} top-level edges between entities the same batch mints ($ref ends)`, async () => {
+      const entities = Array.from({ length: N + 1 }, (_, i) => ({ $ref: `m${i}`, name: `Minted ${i}`, type: 'person' }));
+      const edges = Array.from({ length: N }, (_, i) => ({ from: `$ref:m${i}`, to: `$ref:m${i + 1}`, label: 'knows' }));
+      let res;
+      const seen = await commandsDuring(async () => { res = await bulkMod.bulkWrite(SPACE, { entities, edges }); });
+      assert.equal(res.inserted.edges, N, JSON.stringify(res.errors.slice(0, 3)));
+      assert.ok(seen.length <= CEILING * 2,
+        `${N} $ref edges with their ${N + 1} entities issued ${seen.length} commands (ceiling ${CEILING * 2}): ${summarise(seen)}`);
+    });
+
+    it(`${N} entities each carrying its own edge`, async () => {
+      await coll(SPACE, 'entities').insertOne(person(SPACE, ALICE, 'Alice'));
+      const entities = Array.from({ length: N }, (_, i) => ({
+        name: `Carrier ${i}`, type: 'person', edges: [{ to: ALICE, label: 'knows' }],
+      }));
+      let res;
+      const seen = await commandsDuring(async () => { res = await bulkMod.bulkWrite(SPACE, { entities }); });
+      assert.equal(res.inserted.entities, N, JSON.stringify(res.errors.slice(0, 3)));
+      assert.ok(seen.length <= CEILING * 2,
+        `${N} entities with an edge each issued ${seen.length} commands (ceiling ${CEILING * 2}): ${summarise(seen)}`);
+    });
   });
 
   // ── PRESERVED: exactly 500 ───────────────────────────────────────────────────────────────────────────────

@@ -59,7 +59,11 @@ function release(s: SeqState, seq: number): void {
  */
 const SEQ_CARRYING: readonly SpacePart[] = ['facts', 'entities', 'edges', 'chrono', 'links', 'files', 'tombstones'];
 
-/** The highest seq stored in any of the space's seq-carrying collections — one indexed read each. */
+/**
+ * The highest seq stored in any of the space's seq-carrying collections — one read each, once per space per
+ * process. Indexed on every collection but `files`, which has no `seq` index (its pull pages without one too),
+ * so that one read scans the space's file metadata.
+ */
 async function highestStoredSeq(spaceId: string): Promise<number> {
   const tops = await Promise.all(SEQ_CARRYING.map(c => col<{ seq?: number }>(spaceCollection(spaceId, c))
     .find(asFilter<{ seq?: number }>({ seq: { $type: 'number' } }), { projection: { seq: 1 } })
