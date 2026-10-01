@@ -67,6 +67,8 @@ const CONFIG_PATH = path.join(tmpDir, 'config.json');
 process.env['CONFIG_PATH'] = CONFIG_PATH;
 
 const SPACE = 'general';
+/** A space nothing in this file touches before its one case — the in-process seq state of a fresh start. */
+const RESTARTED = 'restarted';
 const ENT_A = 'aaaaaaaa-0000-4000-8000-0000000000a1';
 const ENT_B = 'aaaaaaaa-0000-4000-8000-0000000000b2';
 const FACT_1 = 'bbbbbbbb-0000-4000-8000-000000000001';
@@ -196,7 +198,8 @@ describe('a pull never passes an uncommitted seq', { skip }, () => {
     mongo = await openTestMongo('pullhorizon');
     fs.writeFileSync(CONFIG_PATH, JSON.stringify({
       instanceId: 'pull-horizon-test', instanceLabel: 'test', tokens: [], networks: [],
-      spaces: [{ id: SPACE, label: 'General', builtIn: true, folders: [], meta: {} }],
+      spaces: [{ id: SPACE, label: 'General', builtIn: true, folders: [], meta: {} },
+        { id: RESTARTED, label: 'Restarted', folders: [], meta: {} }],
     }, null, 2), { mode: 0o600 });
     const loader = await import('../../server/dist/config/loader.js');
     loader.loadConfig();
@@ -332,6 +335,57 @@ describe('a pull never passes an uncommitted seq', { skip }, () => {
       const settled = delivered(await pull(factsRoute()));
       assert.ok(settled.seqs.includes(first) && settled.seqs.includes(first + 1) && settled.seqs.some(s => s > first + 1),
         `after the block settled, not everything was served: ${JSON.stringify(settled.seqs)}`);
+    });
+
+    it('a record that ARRIVED with a seq above the local counter is served — the horizon is not the counter', async () => {
+      /*
+       * Found by the sync suite (`full=true returns complete memory documents`): a single-document push stores
+       * the sender's seq and does not move this instance's counter, so a horizon capped at the highest seq the
+       * process had ALLOCATED hid the record from every pull. What is stored must be what can be served.
+       */
+      const above = (await seqMod.currentSeq(SPACE)) + 1000;
+      await shared.ingestBrainDoc(SPACE, 'fact', 'facts', {
+        _id: 'arrived-high', spaceId: SPACE, fact: 'arrived from a peer', tags: [], seq: above,
+        author: { instanceId: 'peer', instanceLabel: 'Peer' },
+        createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+      });
+      const page = delivered(await pull(factsRoute(), { sinceSeq: String(above - 1) }));
+      assert.ok(page.seqs.includes(above), `an ingested record at seq ${above} is not served: ${JSON.stringify(page.seqs)}`);
+    });
+
+    it('after a restart, records stored above the counter are served on every seq-paged route', async () => {
+      /*
+       * The in-process bound is seeded on first use. Seeded from the counter alone, it hides every record an
+       * older version stored above it — which a single-document push always did — for as long as the counter
+       * stays below. `RESTARTED` is a space this process has never touched, which is what a restart looks like.
+       */
+      const docs = {
+        facts: { fact: 'stored high', tags: [] },
+        entities: { name: 'Stored high', type: 'concept', tags: [] },
+        edges: { from: ENT_A, to: ENT_B, label: 'stored_high', tags: [] },
+        chrono: { title: 'stored high', type: 'event', startsAt: '2026-01-01T00:00:00.000Z', status: 'upcoming', tags: [] },
+        links: { from: FACT_1, fromKind: 'fact', to: ENT_A, toKind: 'entity', label: 'mentions' },
+        files: { path: 'stored-high.md', sizeBytes: 1 },
+        tombstones: { type: 'fact', deletedAt: new Date().toISOString(), instanceId: 'peer' },
+      };
+      let seq = 5000;
+      const expected = [];
+      for (const route of ROUTES) {
+        const c = CASES[route.path];
+        const doc = docs[c.coll];
+        assert.ok(doc, `no stored-high fixture for ${c.coll} — add one, or this route goes unchecked`);
+        seq += 1;
+        await mongo.col(`${RESTARTED}_${c.coll}`).insertOne({
+          _id: `stored-high-${c.coll}`, spaceId: RESTARTED, seq, createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(), author: { instanceId: 'peer', instanceLabel: 'Peer' }, ...doc,
+        });
+        expected.push({ route, seq });
+      }
+      for (const { route, seq: s } of expected) {
+        const page = delivered(await pull(route, { spaceId: RESTARTED, sinceSeq: String(s - 1) }));
+        assert.ok(page.seqs.includes(s),
+          `GET ${route.path}: a record stored at seq ${s} above the counter is hidden after a restart: ${JSON.stringify(page.seqs)}`);
+      }
     });
 
     it('a write that throws releases its block, so the horizon cannot stick', async () => {

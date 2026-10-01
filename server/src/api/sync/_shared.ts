@@ -15,7 +15,7 @@ import { enqueueIngestedRecord } from '../../brain/embed-queue.js';
 import { isWellFormedRef, collectionForRefKind, edgeEndpointKind } from '../../brain/entity-refs.js';
 import type { TokenRights } from '../../config/rights-shape.js';
 import { log } from '../../util/log.js';
-import { isSeqImplausible, MAX_INGEST_SEQ } from '../../util/seq.js';
+import { isSeqImplausible, MAX_INGEST_SEQ, noteSeqStored } from '../../util/seq.js';
 import { isStrictLinkage } from '../../spaces/proxy.js';
 import type { FileMetaDoc } from '../../config/types.js';
 import { emitWebhookEvent } from '../../webhooks/dispatcher.js';
@@ -142,6 +142,8 @@ export async function ingestBrainDoc<T extends { _id: string; suppressEmbeddings
     asDoc<T>(incoming),
     { upsert: true },
   );
+  // Stored at the sender's seq, which this process did not allocate: the pull horizon must cover it (`Q-196`).
+  noteSeqStored(spaceId, (incoming as { seq?: number }).seq ?? 0);
   /*
    * `null` means this record kind has NOTHING TO EMBED (a link carries no text) — not "skip the queue this
    * time". An explicit argument rather than a second ingest function, so a caller that embeds nothing has
@@ -268,6 +270,8 @@ export async function ingestFileMeta(spaceId: string, incoming: z.infer<typeof I
     asUpdate<FileMetaDoc>({ $set }),
     { upsert: true },
   );
+  // As `ingestBrainDoc`: a seq this process did not allocate, which the pull horizon must cover.
+  if (typeof incoming.seq === 'number') noteSeqStored(spaceId, incoming.seq);
 
   const haveBytes = existing?.sha256 !== undefined || existing?.sizeBytes !== undefined;
   if (haveBytes) await enqueueIngestedRecord(spaceId, 'file', incoming);

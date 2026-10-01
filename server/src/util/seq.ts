@@ -2,6 +2,7 @@ import { col, asFilter, asUpdate } from '../db/mongo.js';
 import { getConfig, saveConfig } from '../config/loader.js';
 import { log } from './log.js';
 import type { SpaceCounterDoc } from '../config/types.js';
+import { spaceCollection, type SpacePart } from '../db/space-collection.js';
 
 /*
  * ── Allocation carries its write (`Q-196`) ──────────────────────────────────────────────────────────────────
@@ -51,14 +52,46 @@ function release(s: SeqState, seq: number): void {
   if (n > 0) s.inFlight.set(seq, n); else s.inFlight.delete(seq);
 }
 
+/**
+ * The collections whose records carry a space seq and are paged by it. The seeding below reads the highest seq
+ * stored in each, and `a-pull-never-passes-an-uncommitted-seq-db` derives the pull routes and fails on any
+ * route whose collection this misses.
+ */
+const SEQ_CARRYING: readonly SpacePart[] = ['facts', 'entities', 'edges', 'chrono', 'links', 'files', 'tombstones'];
+
+/** The highest seq stored in any of the space's seq-carrying collections — one indexed read each. */
+async function highestStoredSeq(spaceId: string): Promise<number> {
+  const tops = await Promise.all(SEQ_CARRYING.map(c => col<{ seq?: number }>(spaceCollection(spaceId, c))
+    .find(asFilter<{ seq?: number }>({ seq: { $type: 'number' } }), { projection: { seq: 1 } })
+    .sort({ seq: -1 }).limit(1).toArray()));
+  return Math.max(0, ...tops.map(t => t[0]?.seq ?? 0));
+}
+
+/**
+ * Seeded from the counter AND from what is stored, because the two can disagree: a single-document sync push
+ * stores the sender's seq without moving the counter, and an older version did the same. Seeded from the
+ * counter alone, the bound hid every such record from every pull until the counter happened to pass it. When
+ * the store is ahead, the counter is moved up to it, so this space's next allocation is above it too.
+ */
 async function seededState(spaceId: string): Promise<SeqState> {
   const s = stateOf(spaceId);
   if (s.maxSeen === undefined) {
-    const seeded = await currentSeq(spaceId);
-    // Another caller may have allocated while the read was out; never move the bound backwards.
-    s.maxSeen = Math.max(s.maxSeen ?? 0, seeded);
+    const [counter, stored] = await Promise.all([currentSeq(spaceId), highestStoredSeq(spaceId)]);
+    if (stored > counter) await bumpSeq(spaceId, stored);
+    // Another caller may have allocated while the reads were out; never move the bound backwards.
+    s.maxSeen = Math.max(s.maxSeen ?? 0, counter, stored);
   }
   return s;
+}
+
+/**
+ * A record was stored carrying this seq, from somewhere other than this process's allocator (an ingest): a
+ * reader may now be handed it. In memory only and synchronous, so the ingest helpers can call it on every
+ * document — the counter is `bumpSeq`'s, which the ingest routes call once per batch.
+ */
+export function noteSeqStored(spaceId: string, seq: number): void {
+  const s = stateOf(spaceId);
+  if (s.maxSeen !== undefined && seq > s.maxSeen) s.maxSeen = seq;
 }
 
 /**
