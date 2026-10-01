@@ -64,6 +64,8 @@ const jobsFor = (id) => coll('embed_jobs').countDocuments({ recordId: id });
  */
 const WRITERS = {
   saveFact: {
+    // The function that DECIDES, and so holds the inline embed — the writer is its door (`Q-99` part 3).
+    planner: 'planFact',
     collection: 'facts',
     seed: async () => (await factMod.saveFact(SPACE, 'a retired fact', [], [], undefined, undefined, 'note',
       { suppressEmbeddings: true }))._id,
@@ -72,6 +74,7 @@ const WRITERS = {
     bulk: (id) => ({ facts: [{ id, fact: 'a retired fact, rewritten', tags: ['again'], type: 'note' }] }),
   },
   upsertEntity: {
+    planner: 'planEntity',
     collection: 'entities',
     seed: async () => (await entMod.upsertEntity(SPACE, 'Retired', 'concept', [], {}, undefined, undefined,
       { suppressEmbeddings: true })).entity._id,
@@ -79,6 +82,7 @@ const WRITERS = {
     bulk: (id) => ({ entities: [{ id, name: 'Retired', type: 'concept', tags: ['again'] }] }),
   },
   upsertEdge: {
+    planner: 'planEdge',
     collection: 'edges',
     seed: async () => (await edgeMod.upsertEdge(SPACE, A, B, 'knows', undefined, undefined, undefined, undefined,
       undefined, undefined, undefined, { suppressEmbeddings: true }))._id,
@@ -87,6 +91,7 @@ const WRITERS = {
     bulk: () => ({ edges: [{ from: A, to: B, label: 'knows', tags: ['again'] }] }),
   },
   createChrono: {
+    planner: 'planChrono',
     collection: 'chrono',
     seed: async () => (await chronoMod.createChrono(SPACE, {
       title: 'a retired event', type: 'event', startsAt: '2026-01-01T00:00:00.000Z',
@@ -135,7 +140,7 @@ describe('every inline-embed writer is covered (derived, not listed)', () => {
   it('each record-embedding call site is a writer exercised below, or a named exemption', () => {
     const sites = inlineEmbedSites();
     assert.ok(sites.length >= 5, `found only ${sites.length} inline embed sites — the derivation is reading nothing`);
-    const covered = new Set([...Object.keys(WRITERS), 'executeMerge', ...Object.keys(NOT_A_WRITER)]);
+    const covered = new Set([...Object.values(WRITERS).map(w => w.planner), 'executeMerge', ...Object.keys(NOT_A_WRITER)]);
     const unknown = sites.filter(s => !covered.has(s.fn)).map(s => `${s.file}:${s.fn}`);
     assert.deepEqual(unknown, [],
       'a function computes a record vector inline and is neither exercised here nor exempted with a reason — '

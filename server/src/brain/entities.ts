@@ -1,36 +1,30 @@
-import { applyRecordFlags } from './record-flag.js';
-import { v4 as uuidv4 } from 'uuid';
 import { brainWriteSeqTotal } from '../metrics/registry.js';
-import { authorRef } from '../config/author.js';
-import { findInsertContradictions, type ContradictionWarning } from './insert-contradictions.js';
-import { col, asFilter, asDoc, asUpdate } from '../db/mongo.js';
+import { type ContradictionWarning } from './insert-contradictions.js';
+import { col, asFilter, asUpdate } from '../db/mongo.js';
 import { withSeq } from '../util/seq.js';
 import { writeTombstone } from './tombstones.js';
 import { parseLimit, parseSkip } from '../util/pagination.js';
 import { toMongoSort, type SortSpec } from './list-sort.js';
 import { NEVER_RETURNED_PROJECTION, withoutVector } from './read-projection.js';
-import { embed } from './embedding.js';
-import { entityEmbedText } from './embed-text.js';
-import { getConfig } from '../config/loader.js';
-import { stampExpiryOnCreate, applyExpiryToUpdate } from './ttl.js';
-import { stampSkewOnCreate } from './stamp-skew.js';
-import { getSpaceMeta, applyPropertyDefaults } from '../spaces/schema-validation.js';
+import { applyExpiryToUpdate } from './ttl.js';
+import { getSpaceMeta } from '../spaces/schema-validation.js';
 import { classifyEntityUpsertAgainst, SchemaViolationError, type UpdateValidation } from './write-validation.js';
 import { writeFilterFor, writeOutcome } from './write-precondition.js';
 import { applyDeleteFields, setUnlessDeleted } from './delete-fields.js';
-import { mergeTagsAndProperties, mergePropertiesOrKeep, mergeTagsOrKeep } from './merge-fields.js';
+import { mergePropertiesOrKeep, mergeTagsOrKeep } from './merge-fields.js';
 import { enqueueEmbedJob, retireEmbedJob, EMBED_PRIORITY } from './embed-queue.js';
-import { embeddingSuppressedFor } from './suppress-embeddings.js';
 import { LINK_CLASSES, assertLinkRecords, linksPointingAt, docsFromCollection, type LinkClass }
   from './link-adjacency.js';
 import type { RefKind } from '../config/types-knowledge.js';
-import { checkDuplicates, type SimilarMatch } from './recall.js';
+import { type SimilarMatch } from './recall.js';
 import type { DupeCheckOpts } from './write-options.js';
 import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';
 import { log } from '../util/log.js';
 import type { EntityDoc, EdgeDoc, FileMetaDoc } from '../config/types.js';
 import { PROPERTIES_SCAN_MAX_MS, textContains } from './tag-filter.js';
 import { spaceCollection } from '../db/space-collection.js';
+import { planEntity, entityWant, type EntityInput } from './write-plan/plan-entity.js';
+import { planAndCommitOne } from './write-plan/plan-and-commit.js';
 
 /** An item that references a given entity, and — for an edge — which of its ends does. */
 export interface BacklinkEntry {
@@ -129,165 +123,19 @@ export async function upsertEntity(
    */
   onValidation?: (check: UpdateValidation) => void,
 ): Promise<UpsertResult> {
-  const collection = col<EntityDoc>(spaceCollection(spaceId, 'entities'));
-
-  // When an id is provided, attempt to find the existing record by primary key.
-  const existing: EntityDoc | null = id
-    ? (await collection.findOne(asFilter<EntityDoc>({ _id: id, spaceId }),
-      { projection: NEVER_RETURNED_PROJECTION }) as EntityDoc | null)
-    : null;
-
   /*
-   * THE SCHEMA IS ENFORCED HERE, so that no caller can reach the collection around it.
-   *
-   * Owner's ruling, 2026-08-29: *"all upsert/update/insert things must validate btw — i thought that was
-   * already fact."* It was fact for `upsertEdge` alone (#1046), and for the same reason it is now fact here:
-   * the rule lived in the two API routes, the MCP tool and `bulk.ts`, and `bulk.ts` enforced a DIFFERENT one —
-   * blocking on any violation with no `preExisting`/`introduced` split, so the same upsert was refused through
-   * `/bulk` and accepted through `/entities`.
-   *
-   * Declared defaults fill in what the caller omitted BEFORE validation and only on an INSERT: a property that
-   * is `required` and has a `default` must not be a violation, because the default is what satisfies the
-   * requirement — and on an update an absent property may be one the caller has just removed, so resurrecting
-   * it would undo a deliberate deletion.
+   * The DOOR, and nothing else. Every rule an entity write applies is in `write-plan/plan-entity.ts`, decided
+   * against a read set; the write is the commit's. A batch asks for the same plans in bulk (`Q-99` part 3).
    */
-  const meta = getSpaceMeta(spaceId);
-  const withDefaults = existing
-    ? properties
-    : applyPropertyDefaults(meta?.typeSchemas?.entity?.[type], properties);
-  const check = classifyEntityUpsertAgainst(meta, existing, { name, type, properties: withDefaults, tags });
-  if (check.blocked) throw new SchemaViolationError(check);
-  onValidation?.(check);
-  properties = withDefaults ?? properties;
-
-  const now = new Date().toISOString();
-
-  // Embed the entity text (best-effort — if embedding fails we still store the entity)
-  //
-  // Queued by default, so the write does not pay the model's latency. `matchedText` is stored either
-  // way: it is a pure string, it is exactly what the queued job will embed, and recording it now is what
-  // lets the stored vector be checked against the text it came from.
-  const forEmbed = mergeTagsAndProperties(existing, { tags, properties });
-  const embedText = entityEmbedText(name, type, forEmbed.tags, description ?? existing?.description, forEmbed.properties);
-  //
-  // The duplicate/contradiction checks below compare THIS record's vector against its neighbours, so they
-  // cannot run without one — and unlike the embedding itself, that question cannot be deferred and
-  // answered later in a response that has already been sent. So they imply the wait, exactly as they do
-  // in `saveFact`. Implied rather than rejected as an invalid combination: a caller asking "is this a
-  // duplicate?" would otherwise get a silent "no".
-  // Suppression wins over all three — see `embeddingSuppressedFor`. Computing a vector here and skipping the
-  // enqueue stored exactly what the flag forbids, with nothing to come back and remove it.
-  // The RECORD tier is stated here, which it was not until 2026-09-02 — see `DupeCheckOpts`.
-  const suppressed = embeddingSuppressedFor(spaceId, 'entity',
-    { type, suppressEmbeddings: opts?.suppressEmbeddings });
-  const needsVectorNow = !suppressed
-    && (opts?.waitForEmbedding === true
-      || opts?.checkDuplicates === true || opts?.checkContradictions === true);
-  let embeddingFields: { embedding?: number[]; embeddingModel?: string; matchedText?: string } = { matchedText: embedText };
-  if (needsVectorNow) {
-    // Unguarded on purpose: the caller asked for a record searchable when this returns, so falling back
-    // to "stored, not searchable" would answer a different question than the one asked.
-    const embResult = await embed(embedText);
-    embeddingFields = { embedding: embResult.vector, embeddingModel: embResult.model, matchedText: embedText };
+  const input: EntityInput = { name, type, tags, properties, description, id, opts, ttlDays, onValidation };
+  const done = await planAndCommitOne(spaceId, entityWant(input), view => planEntity(spaceId, input, view));
+  const entity = { ...done.plan.result, seq: done.seq } as unknown as EntityDoc;
+  if (actor) {
+    emitWebhookEvent({ event: done.plan.op === 'insert' ? 'entity.created' : 'entity.updated', spaceId,
+      entry: { ...entity, embedding: undefined }, ...actor });
   }
-
-  if (existing) {
-    const { tags: updatedTags, properties: mergedProps } = mergeTagsAndProperties(existing, { tags, properties });
-    const $set: Record<string, unknown> = { name, type, tags: updatedTags, properties: mergedProps, updatedAt: now, ...embeddingFields };
-    if (description !== undefined) $set['description'] = description;
-    const $unset: Record<string, unknown> = {};
-    applyExpiryToUpdate(spaceId, ttlDays, existing._expireAt != null, $set, $unset,
-      { collection: 'entity', existing: existing as unknown as Record<string, unknown> }); // F10
-    const seq = await withSeq(spaceId, async (s) => {
-      const updateOp: Record<string, unknown> = { $set: { ...$set, seq: s } };
-      if (Object.keys($unset).length > 0) updateOp['$unset'] = $unset;
-      await collection.updateOne(
-        asFilter<EntityDoc>({ _id: existing._id }),
-        asUpdate<EntityDoc>(updateOp),
-      );
-      return s;
-    });
-    const entity: EntityDoc = { ...existing, name, type, tags: updatedTags, properties: mergedProps, updatedAt: now, seq, ...embeddingFields, ...(description !== undefined ? { description } : {}) };
-    if ('_expireAt' in $set) entity._expireAt = $set['_expireAt'] as Date;
-    else if ('_expireAt' in $unset) delete (entity as { _expireAt?: unknown })._expireAt;
-    // After the write, never before: a job for a record that failed to store would be a job for nothing.
-    if (!embeddingFields.embedding && !suppressed) await enqueueEmbedJob(spaceId, 'entity', entity._id, { priority: EMBED_PRIORITY.write });
-    if (actor) emitWebhookEvent({ event: 'entity.updated', spaceId, entry: { ...entity, embedding: undefined }, ...actor });
-    return { entity: withoutVector(entity) };
-  }
-
-  // Warn when inserting without an explicit id and duplicates already exist
-  let warning: string | undefined;
-  if (!id) {
-    const existingCount = await collection.countDocuments(asFilter<EntityDoc>({ spaceId, name, type }));
-    if (existingCount > 0) {
-      warning = `${existingCount} existing entit${existingCount === 1 ? 'y' : 'ies'} with name '${name}' and type '${type}' already exist in this space. A new entity was created because no id was supplied. To update an existing entity, provide its id.`;
-    }
-  }
-
-  // Opt-in insert-time duplicate / contradiction checks, using the freshly computed vector BEFORE insert
-  // so it can never self-match. ONE neighbour search serves both flags.
-  let similar: SimilarMatch[] | undefined;
-  let contradicts: ContradictionWarning[] | undefined;
-  if ((opts?.checkDuplicates || opts?.checkContradictions) && embeddingFields.embedding) {
-    const hits = await checkDuplicates(spaceId, 'entity', embeddingFields.embedding, opts.dupeThreshold, opts.dupeTopK);
-    if (opts.checkDuplicates && hits.length > 0) similar = hits;
-    if (opts.checkContradictions && hits.length > 0) {
-      const found = await findInsertContradictions(spaceId, 'entity', { properties }, hits);
-      if (found.length > 0) contradicts = found;
-    }
-  }
-
-  const doc: EntityDoc = {
-    // ID IS ID (owner ruling, 2026-08-12): the identity is ours to mint, always. A supplied id may
-    // ADDRESS an existing record — the update path above — but it never becomes a new record's identity.
-    // It used to: a supplied id that named nothing was adopted, which made the caller a co-author of our
-    // primary key and, across a sync, let two instances deriving ids from the same key collide by design.
-    // A caller wanting to carry their own reference puts it in `name` or `description`, which are for that.
-    _id: uuidv4(),
-    spaceId,
-    name,
-    type,
-    tags,
-    properties,
-    author: authorRef(),
-    createdAt: now,
-    updatedAt: now,
-    seq: 0, // taken at the insert below
-    ...embeddingFields,
-  };
-  // Stored, not merely consulted — see the note in `saveFact`: everything that revisits a record later reads
-  // the tiers off the document.
-  applyRecordFlags(doc, opts);
-  if (description !== undefined) doc.description = description;
-  // `typed` is what makes the SCHEMA tier reachable. Omit it and the resolver silently falls through to the
-  // space default, so a window set on `typeSchemas.entity.<type>.retention` does nothing at all.
-  stampExpiryOnCreate(spaceId, doc, ttlDays, { collection: 'entity', type: doc.type });
-  // Warn-not-refuse: a caller's own stamp checked against ours. Stored only when it disagrees beyond the space's
-  // threshold, so presence is the signal. The write proceeds either way -- a backdated import is legitimate.
-  stampSkewOnCreate(doc, getSpaceMeta(spaceId));
-  await withSeq(spaceId, (seq) => {
-    doc.seq = seq;
-    return collection.insertOne(asDoc<EntityDoc>(doc));
-  });
-  // Not queued when suppressed, for the reason `saveFact` states: a queued job stores the vector the flag
-  // forbids moments later, and nothing revisits it.
-  if (!embeddingFields.embedding && !suppressed) await enqueueEmbedJob(spaceId, 'entity', doc._id, { priority: EMBED_PRIORITY.write });
-  // Real-time duplicate-rule evaluation (opt-in per space). Fire-and-forget; the
-  // dynamic import avoids a static cycle with dupe-scanner.js.
-  //
-  // Behind the embedding, not beside it. This evaluates the STORED record against its neighbours, and a
-  // stored record has no vector until the queue gets to it — firing here would compare nothing and find
-  // nothing, silently. Nothing is lost by the wait: this path is fire-and-forget and writes candidates to
-  // the Review surface rather than returning them, so no caller is holding a response open for it.
-  // Only when we embedded INLINE — otherwise the embed worker runs it once the vector exists, so this
-  // guard is what stops it running twice rather than what stops it running at all.
-  if (embeddingFields.embedding && getConfig().spaces.find(s => s.id === spaceId)?.dupeRulesOnInsert) {
-    import('./dupe-scanner.js').then(m => m.evaluateRecordForDuplicates(spaceId, 'entity', doc._id)).catch(() => { /* best-effort */ });
-  }
-  if (actor) emitWebhookEvent({ event: 'entity.created', spaceId, entry: { ...doc, embedding: undefined }, ...actor });
   // Advisory only — the entity is stored either way.
-  return { entity: withoutVector(doc), warning, similar, contradicts };
+  return { entity: withoutVector(entity), warning: done.warning, similar: done.similar, contradicts: done.contradicts };
 }
 
 /**

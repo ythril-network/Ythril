@@ -1,32 +1,24 @@
-import { applyRecordFlags, type RecordFlags } from './record-flag.js';
-import { edgeIdFor } from './edge-id.js';
+import { type RecordFlags } from './record-flag.js';
 import { rekeyEdge, embedQueueWorkFor, type EdgeRekey } from './edge-rekey.js';
 import { brainWriteSeqTotal } from '../metrics/registry.js';
-import { authorRef } from '../config/author.js';
-import { col, getMongo, asFilter, asDoc, asUpdate } from '../db/mongo.js';
+import { col, getMongo, asFilter, asUpdate } from '../db/mongo.js';
 import { withSeq, withSeqHorizonHeld } from '../util/seq.js';
 import { writeTombstone } from './tombstones.js';
 import { parseLimit, parseSkip } from '../util/pagination.js';
 import { toMongoSort, type SortSpec } from './list-sort.js';
 import { NEVER_RETURNED_PROJECTION, withoutVector } from './read-projection.js';
-import { findEdgeByTriplet } from './edge-lookup.js';
 import { classifyEdgeUpsertAgainst, SchemaViolationError, type UpdateValidation } from './write-validation.js';
-import { applyPropertyDefaults } from '../spaces/schema-validation.js';
 import { conveniencePredicate, conveniencesFrom } from './list-conveniences.js';
-import { embed } from './embedding.js';
-import { edgeEmbedText } from './embed-text.js';
-import { stampExpiryOnCreate, applyExpiryToUpdate } from './ttl.js';
-import { stampSkewOnCreate } from './stamp-skew.js';
+import { applyExpiryToUpdate } from './ttl.js';
 import { getSpaceMeta } from '../spaces/schema-validation.js';
 import { applyDeleteFields, setUnlessDeleted } from './delete-fields.js';
 import { mergePropertiesOrKeep, mergeTagsOrKeep } from './merge-fields.js';
 import { enqueueEmbedJob, retireEmbedJob, EMBED_PRIORITY } from './embed-queue.js';
-import { embeddingSuppressedFor } from './suppress-embeddings.js';
 import { linkClassFor, LINK_CLASSES } from './link-adjacency.js';
 import { frontierEdgeQuery } from './frontier-query.js';
 import { linkedRecordsAtFrontier, recordDisplayName, recordDisplayType }
   from './link-frontier.js';
-import { resolveEdgeEndpointNames, resolveEdgeEndsForWrite, neighbourNodes, startNode } from './edge-endpoint-names.js';
+import { resolveEdgeEndsForWrite, neighbourNodes, startNode } from './edge-endpoint-names.js';
 import { storedEdgeKind } from './entity-refs.js';
 import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';
 import type { EdgeDoc, FileMetaDoc } from '../config/types.js';
@@ -34,6 +26,8 @@ import type { RefKind } from '../config/types-knowledge.js';
 import { PROPERTIES_SCAN_MAX_MS } from './tag-filter.js';
 import { writeFilterFor, writeOutcome } from './write-precondition.js';
 import { spaceCollection } from '../db/space-collection.js';
+import { planEdge, edgeWant, type EdgeInput } from './write-plan/plan-edge.js';
+import { planAndCommitOne } from './write-plan/plan-and-commit.js';
 import { subgraphEdges } from './traverse-subgraph.js';
 // `syntheticEdgeId` moved to `edge-id.ts`, beside `edgeIdFor`: its own docblock says the id format is a
 // fact about EDGES rather than about either walk, and this file is frozen at its size.
@@ -98,19 +92,8 @@ export interface TraverseResult {
 // note there. Re-exported because it is part of this module's published surface and callers should not care.
 export { findEdgeByTriplet } from './edge-lookup.js';
 
-/**
- * A refused edge write, carrying the whole classification rather than a message.
- *
- * Both doors already answer with `{ error: 'schema_violation', message, violations, introduced, preExisting }`,
- * and neither should have to rebuild that from prose. Carrying `UpdateValidation` means the response shape is
- * unchanged by moving the check, which is the whole point: this is a relocation of one rule, not a new refusal.
- */
-export class EdgeSchemaViolation extends Error {
-  constructor(readonly check: UpdateValidation) {
-    super(check.message ?? 'schema_violation');
-    this.name = 'EdgeSchemaViolation';
-  }
-}
+// Raised by the planner, where the check runs; re-exported for the doors that catch it.
+export { EdgeSchemaViolation } from './write-plan/plan-edge.js';
 
 export async function upsertEdge(
   spaceId: string,
@@ -151,170 +134,16 @@ export async function upsertEdge(
     toKind?: RefKind;
   },
 ): Promise<EdgeDoc> {
-  const collection = col<EdgeDoc>(spaceCollection(spaceId, 'edges'));
-  const existing = await findEdgeByTriplet(spaceId, from, to, label, opts?.fromKind, opts?.toKind);
-
   /*
-   * THE SCHEMA IS ENFORCED HERE, so that no caller can reach the collection around it.
-   *
-   * It used to be enforced by the two API routes, each calling `classifyEdgeUpsert` before calling this
-   * function — one rule, written twice, and both copies reachable only if you remembered them. Two callers did
-   * not: `api/contradictions.ts` writes a `supersedes` edge straight through this function, so in a space whose
-   * `typeSchemas.edge` allowlist did not name `supersedes` the server wrote an edge that space forbids; and
-   * `brain/bulk.ts` carried its own third copy of the check.
-   *
-   * Owner's ruling, 2026-08-29: *"upsertEdge should validate of course."* So the door is the function, not the
-   * route. The routes keep their response shapes by catching `EdgeSchemaViolation` — which carries the whole
-   * classification, not just a message, precisely so neither door has to re-derive it.
+   * The DOOR, and nothing else. Every rule an edge write applies is in `write-plan/plan-edge.ts`, decided
+   * against a read set; the write is the commit's. A batch asks for the same plans in bulk (`Q-99` part 3).
    */
-  /*
-   * Declared defaults fill in what the caller omitted, before validation and only on an INSERT.
-   *
-   * Before validation because a property that is `required` and has a `default` must not be a violation — the
-   * default is what satisfies the requirement. Only on insert because on an update an absent property may be
-   * one the caller has just removed, and resurrecting a deliberate deletion is worse than a default that does
-   * not apply. See `applyPropertyDefaults`.
-   */
-  const meta = getSpaceMeta(spaceId);
-  const withDefaults = existing
-    ? properties
-    : applyPropertyDefaults(meta?.typeSchemas?.edge?.[label], properties);
-
-  /*
-   * The endpoint rules need what the payload does not carry: the TYPE of the entity at each end, and how many
-   * other edges share this subject. Resolved here because this function is async and already talks to the
-   * database; `classifyEdgeUpsertAgainst` is reached from paths that legitimately cannot look, so it takes what
-   * it is given and reports nothing about what it is not.
-   */
-  const resolvedEnds = await resolveEdgeEndsForWrite(spaceId, from, to, label, opts ?? {});
-  const check = classifyEdgeUpsertAgainst(meta, existing, { label, properties: withDefaults }, resolvedEnds);
-  if (check.blocked) throw new EdgeSchemaViolation(check);
-  opts?.onValidation?.(check);
-
-  const now = new Date().toISOString();
-
-  const effectiveDesc = description ?? (existing as EdgeDoc | null)?.description;
-  const effectiveType = type ?? (existing as EdgeDoc | null)?.type;
-  const effectiveTags = mergeTagsOrKeep((existing as EdgeDoc | null)?.tags, tags);
-  // `withDefaults`, not `properties` — the defaults were validated above and must be the values STORED.
-  // Validating one document and writing another is the shape that produced the fact-upsert defect.
-  const effectiveProps = mergePropertiesOrKeep((existing as EdgeDoc | null)?.properties, withDefaults);
-
-  // Embed the edge text (best-effort) — resolve entity names so the vector captures semantics
-  // Queued by default — see the note in `upsertEntity`. Resolving the endpoint NAMES is a database read,
-  // so it happens only on the inline path; the queued job resolves them itself from the stored edge.
-  let embeddingFields: { embedding?: number[]; embeddingModel?: string; matchedText?: string } = {};
-  // Suppression wins over `waitForEmbedding` — see `embeddingSuppressedFor`. An edge keys its schema on
-  // `label`, not `type`, which `schemaKeyFor` already encodes; passing `type` here would look up a schema
-  // that is never there and silently never suppress.
-  //
-  // Hoisted rather than asked inline, because the enqueue below has to consult the same answer: skipping the
-  // inline embed and queueing anyway stores the vector the flag forbids moments later. The RECORD tier is
-  // stated here, which it was not until 2026-09-02 — see `DupeCheckOpts`.
-  const suppressed = embeddingSuppressedFor(spaceId, 'edge',
-    { label, suppressEmbeddings: opts?.suppressEmbeddings });
-  if (opts?.waitForEmbedding === true && !suppressed) {
-    const [fromName, toName] = await resolveEdgeEndpointNames(spaceId, from, to, opts?.fromKind, opts?.toKind);
-    const embedText = edgeEmbedText(fromName, label, toName, effectiveTags, effectiveType, effectiveDesc, effectiveProps);
-    const embResult = await embed(embedText);
-    embeddingFields = { embedding: embResult.vector, embeddingModel: embResult.model, matchedText: embedText };
-  }
-
-  if (existing) {
-    const $set: Record<string, unknown> = { updatedAt: now, ...embeddingFields };
-    if (weight !== undefined) $set['weight'] = weight;
-    if (type !== undefined) $set['type'] = type;
-    if (description !== undefined) $set['description'] = description;
-    // When tags are provided, persist the merged result; otherwise leave existing tags unchanged
-    if (tags !== undefined) $set['tags'] = effectiveTags;
-    if (properties !== undefined) $set['properties'] = effectiveProps;
-    const $unset: Record<string, unknown> = {};
-    // Correcting a kind back to `entity` must UNSET it, not store the string: absent is the canonical form,
-    // and leaving `'entity'` behind would make this edge unfindable by its own triplet lookup.
-    for (const side of ['fromKind', 'toKind'] as const) {
-      const given = side === 'fromKind' ? opts?.fromKind : opts?.toKind;
-      if (given === undefined) continue;
-      const stored = storedEdgeKind(given);
-      if (stored) $set[side] = stored; else $unset[side] = '';
-    }
-    applyExpiryToUpdate(spaceId, ttlDays, (existing as EdgeDoc)._expireAt != null, $set, $unset,
-      { collection: 'edge', existing: existing as unknown as Record<string, unknown> }); // F10
-    const seq = await withSeq(spaceId, async (s) => {
-      const updateOp: Record<string, unknown> = { $set: { ...$set, seq: s } };
-      if (Object.keys($unset).length > 0) updateOp['$unset'] = $unset;
-      await collection.updateOne(
-        asFilter<EdgeDoc>({ _id: (existing as EdgeDoc)._id }),
-        asUpdate<EdgeDoc>(updateOp),
-      );
-      return s;
-    });
-    const updatedEdge: EdgeDoc = {
-      ...(existing as EdgeDoc),
-      seq,
-      updatedAt: now,
-      ...(weight !== undefined ? { weight } : {}),
-      ...(type !== undefined ? { type } : {}),
-      ...(description !== undefined ? { description } : {}),
-      ...(tags !== undefined ? { tags: effectiveTags } : {}),
-      ...(properties !== undefined ? { properties: effectiveProps } : {}),
-      ...embeddingFields,
-    };
-    if ('_expireAt' in $set) updatedEdge._expireAt = $set['_expireAt'] as Date;
-    else if ('_expireAt' in $unset) delete (updatedEdge as { _expireAt?: unknown })._expireAt;
-    if (!embeddingFields.embedding && !suppressed) await enqueueEmbedJob(spaceId, 'edge', updatedEdge._id, { priority: EMBED_PRIORITY.write });
-    if (actor) emitWebhookEvent({ event: 'edge.created', spaceId, entry: { ...updatedEdge, embedding: undefined }, ...actor });
-    return withoutVector(updatedEdge);
-  }
-
-  const doc: EdgeDoc = {
-    _id: edgeIdFor(from, to, label, opts?.fromKind, opts?.toKind),
-    spaceId,
-    from,
-    to,
-    /*
-     * Stored only when stated. Absent is the reading every edge already has, so an entity-to-entity edge
-     * written today is byte-identical to one written before the field existed — which is what keeps this off
-     * every peer's sync feed as a change.
-     *
-     * `edgeIdFor` deliberately does NOT take them: the id is derived from `(from, to, label)` and folding two
-     * more values in would change the id of every edge in every space, which is a rewrite of a replicated
-     * collection to buy protection against a collision between a UUID and a file path.
-     */
-    /*
-      * Normalised, so there is exactly ONE stored representation of an entity endpoint: absent. An explicit
-      * `'entity'` and an absent field describe the same edge and derive the same `_id`, so storing both is a
-      * duplicate key — while the unique index would see two different keys and the triplet lookup would match
-      * only one of them. `storedEdgeKind` is where that reasoning lives.
-      */
-     ...(storedEdgeKind(opts?.fromKind) ? { fromKind: storedEdgeKind(opts?.fromKind) } : {}),
-     ...(storedEdgeKind(opts?.toKind) ? { toKind: storedEdgeKind(opts?.toKind) } : {}),
-    label,
-    tags: tags ?? [],
-    ...(type !== undefined ? { type } : {}),
-    ...(weight !== undefined ? { weight } : {}),
-    ...(description !== undefined ? { description } : {}),
-    ...(properties !== undefined ? { properties } : {}),
-    author: authorRef(),
-    createdAt: now,
-    updatedAt: now,
-    seq: 0, // taken at the insert below
-    ...embeddingFields,
-  };
-  // Stored, not merely consulted — see the note in `saveFact`.
-  applyRecordFlags(doc, opts);
-  // `doc.label`, NOT `doc.type` — an edge has both, and the schema is keyed by label (see validateEdgeWrite).
-  // Passing `type` here would look right and read a schema that is never there.
-  stampExpiryOnCreate(spaceId, doc, ttlDays, { collection: 'edge', type: doc.label });
-  // Warn-not-refuse: a caller's own stamp checked against ours. Stored only when it disagrees beyond the space's
-  // threshold, so presence is the signal. The write proceeds either way -- a backdated import is legitimate.
-  stampSkewOnCreate(doc, getSpaceMeta(spaceId));
-  await withSeq(spaceId, (seq) => {
-    doc.seq = seq;
-    return collection.insertOne(asDoc<EdgeDoc>(doc));
-  });
-  if (!embeddingFields.embedding && !suppressed) await enqueueEmbedJob(spaceId, 'edge', doc._id, { priority: EMBED_PRIORITY.write });
-  if (actor) emitWebhookEvent({ event: 'edge.created', spaceId, entry: { ...doc, embedding: undefined }, ...actor });
-  return withoutVector(doc);
+  const input: EdgeInput = { from, to, label, weight, type, description, properties, tags, ttlDays, opts };
+  const done = await planAndCommitOne(spaceId, edgeWant(spaceId, input), view => planEdge(spaceId, input, view));
+  const edge = { ...done.plan.result, seq: done.seq } as unknown as EdgeDoc;
+  // `edge.created` on both branches, as it has always been answered.
+  if (actor) emitWebhookEvent({ event: 'edge.created', spaceId, entry: { ...edge, embedding: undefined }, ...actor });
+  return withoutVector(edge);
 }
 
 /** List edges for a space, optionally filtering by from/to entity */

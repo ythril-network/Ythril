@@ -41,7 +41,7 @@ import path from 'node:path';
 import { readFileSync } from 'node:fs';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
 import { stripComments } from './_strip-comments.mjs';
-import { bodyOf } from './_structural-window.mjs';
+import { bodyOf, statementFrom } from './_structural-window.mjs';
 
 const skip = await mongoSkipReason();
 
@@ -187,21 +187,25 @@ describe('every create path states the record tier', () => {
    * caller's flag has nowhere to be read from. That is a silent hole rather than an error, and it was open on
    * all four writers while the field was documented and worked on update.
    */
+  // The PLANNERS, which decide for the four create doors since `Q-99` part 3 — the door is not where the
+  // question is asked any more, so asking it of the door would pass on an empty body.
   const WRITERS = [
-    { file: 'server/src/brain/fact.ts', fn: 'saveFact' },
-    { file: 'server/src/brain/entities.ts', fn: 'upsertEntity' },
-    { file: 'server/src/brain/edges.ts', fn: 'upsertEdge' },
-    { file: 'server/src/brain/chrono.ts', fn: 'createChrono' },
+    { file: 'server/src/brain/write-plan/plan-fact.ts', fn: 'planFact' },
+    { file: 'server/src/brain/write-plan/plan-entity.ts', fn: 'planEntity' },
+    { file: 'server/src/brain/write-plan/plan-edge.ts', fn: 'planEdge' },
+    { file: 'server/src/brain/write-plan/plan-chrono.ts', fn: 'planChrono' },
   ];
 
   for (const w of WRITERS) {
     it(`${w.fn} hands the record's own flag to the resolver`, () => {
       const body = bodyOf(stripComments(readFileSync(w.file, 'utf8')), w.fn);
-      const at = body.indexOf('embeddingSuppressedFor(');
+      // `suppressedAfterWrite` states the record tier from the write's flag and the stored record (`Q-194`);
+      // the bare resolver must be handed the flag itself.
+      const at = Math.max(body.indexOf('suppressedAfterWrite('), body.indexOf('embeddingSuppressedFor('));
       assert.ok(at > 0, `${w.fn} never asks whether this record is suppressed`);
-      const call = body.slice(at, body.indexOf(')', body.indexOf('{', at)) + 1);
+      const call = statementFrom(body, at, w.fn);
       assert.match(call, /suppressEmbeddings/,
-        `${w.fn} asks the resolver with a type-only object, so the record tier is never stated and the `
+        `${w.fn} asks the resolver without the record's own flag, so the record tier is never stated and the `
         + 'caller\'s flag cannot be read — the schema tier answers instead, silently');
     });
   }
