@@ -24,9 +24,17 @@ export interface WriteFailure {
 
 type RawWriteError = { index?: number; code?: number; err?: { code?: number; index?: number } };
 
-function codeOf(w: RawWriteError): number | undefined {
-  return w.code ?? w.err?.code;
+/**
+ * The server's error code on a failed write — a single write's rejection or one entry of a bulk write's
+ * `writeErrors` — or undefined when it carries none. The one reader of the code, because it sits on the error
+ * itself or on its `err` depending on the driver path, and a reader that knows one shape misses the other.
+ */
+export function writeErrorCode(err: unknown): number | undefined {
+  const w = err as RawWriteError | null;
+  const c = w?.code ?? w?.err?.code;
+  return typeof c === 'number' ? c : undefined;
 }
+const codeOf = (w: RawWriteError): number | undefined => writeErrorCode(w);
 
 /** The per-operation failures a bulk write reported, or `null` when the error is not that shape (ambiguous). */
 export function bulkWriteFailures(err: unknown): WriteFailure[] | null {
@@ -86,7 +94,8 @@ const DOCUMENT_REFUSAL_NAMES = new Set(['MongoInvalidArgumentError', 'BSONError'
 /** Is this failure one document's, so refusing that document (and only it) is the right answer? */
 export function isDocumentRefusal(err: unknown): boolean {
   const e = err as { code?: unknown; name?: unknown } | null;
-  if (typeof e?.code === 'number' && DOCUMENT_REFUSAL_CODES.has(e.code)) return true;
+  const code = writeErrorCode(err);
+  if (code !== undefined && DOCUMENT_REFUSAL_CODES.has(code)) return true;
   return typeof e?.name === 'string' && DOCUMENT_REFUSAL_NAMES.has(e.name);
 }
 

@@ -106,6 +106,16 @@ describe('one duplicate key does not wedge a member', () => {
       'a code that is the collection\'s, the store\'s or a duplicate is in the document-refusal allowlist');
   });
 
+  it('the writer reads a failure\'s code through the shared reader, never by hand', () => {
+    // Dup pass: arrivals.ts carried its own `err.code` reader beside db/write-errors.ts's, and the two shapes a
+    // driver reports a code in (on the error, or on its `err`) were known to one of them. Seen red by mutation,
+    // restored by hand: the inline `(err as { code?: unknown })?.code` reader put back.
+    assert.match(writerSrc, /const codeOf = writeErrorCode;/, 'the writer no longer reads codes through writeErrorCode');
+    assert.doesNotMatch(writerSrc, /\?\.code\b|\.code\s*===|as \{ code\?/, 'the writer reads an error code by hand again');
+    const shared = stripComments(readFileSync('server/src/db/write-errors.ts', 'utf8'));
+    assert.match(shared, /export function writeErrorCode\(/, 'the shared code reader is gone');
+  });
+
   it('the pull holds its watermark on a failed page write instead of escalating it', () => {
     const write = engine.search(/=\s*await writeArrivals\(/);
     assert.ok(write > 0, `${ENGINE} no longer writes a pulled page through writeArrivals — re-point this gate`);

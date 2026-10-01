@@ -56,7 +56,7 @@
 import { col, asBulk } from '../db/mongo.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { readStoredById, READ_CHUNK } from '../db/read-by-id.js';
-import { bulkWriteFailures, DUPLICATE_KEY, isDocumentRefusal, isDocumentRefusalCode } from '../db/write-errors.js';
+import { bulkWriteFailures, DUPLICATE_KEY, isDocumentRefusal, isDocumentRefusalCode, writeErrorCode } from '../db/write-errors.js';
 import { bumpSeq, isSeqImplausible } from '../util/seq.js';
 import { inChunks } from '../util/chunks.js';
 import { log } from '../util/log.js';
@@ -227,10 +227,7 @@ function replacementFor(doc: Doc, defaults: Doc): unknown[] {
   return [{ $replaceWith: { $mergeObjects: [{ $literal: defaults }, carried, { $literal: doc }] } }];
 }
 
-const codeOf = (err: unknown): number | undefined => {
-  const c = (err as { code?: unknown } | null)?.code;
-  return typeof c === 'number' ? c : undefined;
-};
+const codeOf = writeErrorCode;
 const storeRefusal = (err: unknown): string =>
   `the store refused it (${codeOf(err) !== undefined ? `error code ${codeOf(err)}` : 'no error code'})`;
 
