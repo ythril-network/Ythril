@@ -285,7 +285,6 @@ export class FactsTabComponent extends RecordTabBase {
   memoryForm = { fact: '', type: '', tags: [] as string[], linkEntities: '', description: '', properties: {} as Record<string, string | number | boolean> };
   editMemory = { fact: '', tags: [] as string[], linkEntities: '', description: '', properties: {} as Record<string, string | number | boolean> };
 
-
   protected override resetOnSpaceChange(): void {
     this.recordFilter.set({ type: '', tag: '', description: '', properties: '', fromName: '', toName: '', entityName: '' });
     this.filterEntity.set('');
@@ -294,7 +293,7 @@ export class FactsTabComponent extends RecordTabBase {
   protected override load(): void {
     const spaceId = this.spaceId();
     if (!spaceId) return;
-    const filters:{ tag?: string; entity?: string; type?: string; description?: string; properties?: string; entityName?: string } = {};
+    const filters: { tag?: string; entity?: string; type?: string; description?: string; properties?: string; entityName?: string } = {};
     if (this.recordFilter().tag) filters.tag = this.recordFilter().tag;
     if (this.filterEntity()) filters.entity = this.filterEntity();
     if (this.recordFilter().type) filters.type = this.recordFilter().type;
@@ -348,7 +347,6 @@ export class FactsTabComponent extends RecordTabBase {
       }),
     ), hydrated => this.store.facts.set(hydrated));
   }
-
 
   applyFilter(type: 'tag' | 'entity', value: string): void {
     if (type === 'tag') this.recordFilter.set({ ...this.recordFilter(), tag: value });

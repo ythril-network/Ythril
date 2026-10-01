@@ -21,9 +21,6 @@ import { Subscription, TimeoutError, forkJoin, of } from 'rxjs';
 import { catchError, timeout } from 'rxjs/operators';
 import { readinessReasons, type ReadinessReason } from './graph-readiness';
 import { LatestWins } from '../../core/latest-wins';
-
-/** How long the depth slider must rest before the graph asks for its depth (Q-112). */
-const SLIDER_REST_MS = 200;
 import { PhIconComponent } from '../../shared/ph-icon.component';
 import { ErrorStateComponent } from '../../shared/error-state.component';
 import { httpErrorReason } from '../../core/http-error';
@@ -66,6 +63,9 @@ import {
 import { GRAPH_STYLES } from './graph.styles';
 import { canWriteAnywhere } from '../../core/token-capability';
 import { lookupForNode, lookupForEdge } from './graph-record-lookup';
+
+/** How long the depth slider must rest before the graph asks for its depth (Q-112). */
+const SLIDER_REST_MS = 200;
 
 
 
