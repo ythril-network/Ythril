@@ -245,9 +245,9 @@ export function edgeEndpointKind(kind: RefKind | undefined): RefKind {
  * batched `$in` per field, which is a fair price on a single-record write for the guarantee that a
  * stored reference resolves.
  *
- * Deliberately NOT used by the bulk path: a bulk payload may legitimately reference a record created
- * earlier in the same payload, so checking against the database would reject valid forward references.
- * Bulk keeps the format check, and the `strictLinkage: false` escape hatch covers staged imports.
+ * A batch answers the same question from its read set (`write-plan/read-set.ts`), which loaded every id the
+ * batch names in one read and also sees the records the batch itself is about to write — so a `$ref` to an
+ * earlier item resolves there without the database. Both say it in `missingRefsRefusal`'s words.
  */
 export async function assertRefsResolve(
   spaceId: string,
@@ -262,11 +262,18 @@ export async function assertRefsResolve(
     .find(asFilter<{ _id: string }>({ _id: { $in: unique } }), { projection: { _id: 1 } })
     .toArray();
   const found = new Set(docs.map(d => d._id));
-  const missing = unique.filter(id => !found.has(id));
-  if (missing.length === 0) return;
+  const refusal = missingRefsRefusal(spaceId, field, kind, unique.filter(id => !found.has(id)));
+  if (refusal) throw refusal;
+}
+
+/** The refusal for references that name nothing, or `null` when `missing` is empty — one sentence for every door. */
+export function missingRefsRefusal(
+  spaceId: string, field: string, kind: RefKind, missing: readonly string[],
+): ReferenceRefusal | null {
+  if (missing.length === 0) return null;
   const shown = missing.slice(0, 5).map(v => JSON.stringify(v)).join(', ');
   const more = missing.length > 5 ? ` (+${missing.length - 5} more)` : '';
-  throw new ReferenceRefusal(
+  return new ReferenceRefusal(
     `\`${field}\` references ${missing.length} ${REF_NOUN[kind]}${missing.length === 1 ? '' : 's'} that ` +
     `do${missing.length === 1 ? 'es' : ''} not exist in space '${spaceId}': ${shown}${more}. ` +
     `Create the record first, then link it — the write was refused rather than stored with a dead link.`,

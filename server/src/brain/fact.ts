@@ -5,36 +5,30 @@
  * surface in query.ts (A17.4). `saveFact` reaches into recall.ts for the optional insert-time
  * duplicate check; nothing here is imported back by those modules.
  */
-import { applyRecordFlags } from './record-flag.js';
-import { v4 as uuidv4 } from 'uuid';
 import { reconcileLinks, removeLinksFrom, assertDesiredLinks } from './links.js';
-import { authorRef } from '../config/author.js';
-import { findInsertContradictions, type ContradictionWarning } from './insert-contradictions.js';
-import { col, asFilter, asDoc, asUpdate } from '../db/mongo.js';
+import { type ContradictionWarning } from './insert-contradictions.js';
+import { col, asFilter, asUpdate } from '../db/mongo.js';
 import { withSeq } from '../util/seq.js';
 import { brainWriteSeqTotal } from '../metrics/registry.js';
 import { parseLimit, parseSkip } from '../util/pagination.js';
 import { toMongoSort, type SortSpec } from './list-sort.js';
-import { embed } from './embedding.js';
-import { factEmbedText } from './embed-text.js';
-import { getConfig } from '../config/loader.js';
-import { stampExpiryOnCreate, applyExpiryToUpdate } from './ttl.js';
-import { stampSkewOnCreate } from './stamp-skew.js';
-import { getSpaceMeta, applyPropertyDefaults } from '../spaces/schema-validation.js';
+import { applyExpiryToUpdate } from './ttl.js';
+import { getSpaceMeta } from '../spaces/schema-validation.js';
 import { classifyFactUpsertAgainst, SchemaViolationError, type UpdateValidation } from './write-validation.js';
 import { applyDeleteFields } from './delete-fields.js';
-import { mergeTags, mergeProperties, mergePropertiesOrKeep } from './merge-fields.js';
+import { mergePropertiesOrKeep } from './merge-fields.js';
 import { enqueueEmbedJob, retireEmbedJob, EMBED_PRIORITY } from './embed-queue.js';
-import { embeddingSuppressedFor } from './suppress-embeddings.js';
 import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';
 import type { FactDoc } from '../config/types.js';
 import { writeTombstone } from './tombstones.js';
-import { SimilarMatch, checkDuplicates } from './recall.js';
+import type { SimilarMatch } from './recall.js';
 import type { DupeCheckOpts } from './write-options.js';
 import { PROPERTIES_SCAN_MAX_MS } from './tag-filter.js';
 import { writeFilterFor, writeOutcome } from './write-precondition.js';
 import { NEVER_RETURNED_PROJECTION, withoutVector } from './read-projection.js';
 import { spaceCollection } from '../db/space-collection.js';
+import { planFact, factWant, type FactInput } from './write-plan/plan-fact.js';
+import { planAndCommitOne } from './write-plan/plan-and-commit.js';
 
 /** Store a new fact with semantic embedding */
 export async function saveFact(
@@ -91,208 +85,22 @@ export async function saveFact(
    */
   id?: string,
 ): Promise<FactDoc & { similar?: SimilarMatch[]; contradicts?: ContradictionWarning[] }> {
-  // When an id is supplied, look for the record it names first — the same shape as `upsertEntity`.
-  const existing: FactDoc | null = id
-    ? (await col<FactDoc>(spaceCollection(spaceId, 'facts')).findOne(asFilter<FactDoc>({ _id: id }),
-      { projection: NEVER_RETURNED_PROJECTION }) as FactDoc | null)
-    : null;
-
   /*
-   * THE SCHEMA IS ENFORCED HERE, so that no caller can reach the collection around it.
-   *
-   * Owner's ruling, 2026-08-29: *"all upsert/update/insert things must validate btw."* Fact was the record
-   * kind with no classifier at all, so both doors validated the INCOMING payload rather than the record the
-   * write would produce — the same defect the chrono classifier was written for, and it fails in both
-   * directions: a required property present on the stored record and absent from a converging write reads as
-   * a violation the merge would have supplied.
-   *
-   * Defaults on INSERT only, before validation, for the reason `upsertEdge` states: a property that is
-   * `required` and has a `default` must not be a violation, and on an update an absent property may be one
-   * the caller has just removed.
+   * The DOOR, and nothing else. Every rule a fact write applies is in `write-plan/plan-fact.ts`, decided
+   * against a read set; the write is the commit's (`write-plan/commit.ts`). A batch asks for the same plans
+   * in bulk, so this and `bulkWrite` cannot come to mean different things (`Q-99` part 3).
    */
-  /*
-   * THE LINKS ARE REFUSED BEFORE THE RECORD IS WRITTEN.
-   *
-   * `reconcileLinks` asserts them too, and it runs AFTER the insert — so a bad id there leaves the fact
-   * stored without the links it asked for: a `400` and a row the caller did not want, which is the
-   * silent unlinked write made noisy rather than fixed.
-   */
-  await assertDesiredLinks(spaceId, 'fact', { entity: linkEntities });
-
-  const meta = getSpaceMeta(spaceId);
-  const withDefaults = existing
-    ? properties
-    : applyPropertyDefaults(type ? meta?.typeSchemas?.fact?.[type] : undefined, properties);
-  const check = classifyFactUpsertAgainst(meta, existing, { type, properties: withDefaults });
-  if (check.blocked) throw new SchemaViolationError(check);
-  opts?.onValidation?.(check);
-  properties = withDefaults;
-
-  // No entity names: a fact embeds its own content. See `factEmbedText` for the measurement.
-  const embedText = factEmbedText(fact, tags, description, properties);
-
-  // ── Embed now, or hand it to the queue?
-  //
-  // An insert-time duplicate/contradiction check needs the vector BEFORE the insert — that is the whole
-  // reason it is computed here rather than after, so the new record cannot self-match. So those flags
-  // IMPLY waiting. Implied rather than rejected as an invalid combination: a caller asking "is this a
-  // duplicate?" is asking a question that cannot be answered later, so refusing it would be a puzzle
-  // where an answer was available.
-  //
-  // Suppression wins over all three. `suppressEmbeddings` IS the absence of a vector — there is no read-time
-  // filter — so computing one here and skipping the enqueue below stored exactly what the flag forbids, with
-  // nothing to come back and remove it. `checkDuplicates` defaults to `true` on the MCP tool, so this was the
-  // ORDINARY write into a suppressed space rather than an edge case.
-  //
-  // The duplicate and contradiction checks consequently do not run for a suppressed record. That is not a
-  // loss: every record of a suppressed type lacks a vector, so a neighbour search had nothing to find them
-  // with in the first place — it would have reported "no duplicates" over a space it could not see.
-  // The RECORD tier is stated here, which it was not until 2026-09-02: this asked with `{ type }` alone, so
-  // a caller's own flag had nowhere to be read from and the type schema answered instead. `undefined` still
-  // means "not stated" and falls through, which is what makes passing it unconditionally safe.
-  const suppressed = embeddingSuppressedFor(spaceId, 'fact',
-    { type, suppressEmbeddings: opts?.suppressEmbeddings });
-  const needsVectorNow = !suppressed
-    && (opts?.waitForEmbedding === true || opts?.checkDuplicates === true || opts?.checkContradictions === true);
-
-  let embResult: { vector: number[]; model: string } | null = null;
-  if (needsVectorNow) {
-    // Unguarded on purpose: the caller asked for a record that is searchable when this returns. A
-    // silent fallback to "stored, not searchable" would answer a different question than the one asked.
-    embResult = await embed(embedText);
+  const input: FactInput = { fact, linkEntities, tags, description, properties, type, opts, ttlDays, id };
+  const done = await planAndCommitOne(spaceId, factWant(input), view => planFact(spaceId, input, view));
+  const stored = { ...done.plan.result, seq: done.seq } as unknown as FactDoc;
+  // `fact.updated`, not `created`, on a converge — a subscriber must be able to tell a retry from a new record.
+  if (actor) {
+    emitWebhookEvent({ event: done.plan.op === 'insert' ? 'fact.created' : 'fact.updated', spaceId,
+      entry: { ...stored, embedding: undefined }, ...actor });
   }
-
-  // Opt-in insert-time duplicate / contradiction checks, using the freshly computed vector BEFORE insert
-  // so it can never self-match. ONE neighbour search serves both flags — the second question is free once
-  // the first has paid for the vector search.
-  let similar: SimilarMatch[] | undefined;
-  let contradicts: ContradictionWarning[] | undefined;
-  if (embResult && (opts?.checkDuplicates || opts?.checkContradictions)) {
-    const hits = await checkDuplicates(spaceId, 'fact', embResult.vector, opts.dupeThreshold, opts.dupeTopK);
-    if (opts.checkDuplicates && hits.length > 0) similar = hits;
-    if (opts.checkContradictions && hits.length > 0) {
-      const found = await findInsertContradictions(spaceId, 'fact', { properties }, hits);
-      if (found.length > 0) contradicts = found;
-    }
-  }
-
-  const now = new Date().toISOString();
-
-  // ── The idempotent branch: a supplied id that already names a record CONVERGES rather than duplicating.
-  //
-  // Merge semantics match `upsertEntity` deliberately — tags union, properties shallow-merge — so a caller has one
-  // rule to learn across all four record types. A retry sends the identical payload, so merge and replace are
-  // indistinguishable for the case this exists for; the difference only shows when the id is reused with different
-  // content, which is a deliberate update and behaves like the entity path does.
-  if (existing) {
-    const mergedTags = mergeTags(existing.tags, tags);
-    const mergedProps = mergeProperties(existing.properties, properties);
-    const $set: Record<string, unknown> = {
-      fact,
-      tags: mergedTags,
-      matchedText: embedText,
-      updatedAt: now,
-    };
-    // Only when a vector was actually computed. When it was not, the PREVIOUS vector stays: it
-    // describes the record as it was a moment ago, which is a better answer than none while the
-    // queued job catches up. `matchedText` above is always current, so the two can be compared.
-    if (embResult) {
-      $set['embedding'] = embResult.vector;
-      $set['embeddingModel'] = embResult.model;
-    }
-    if (type !== undefined) $set['type'] = type;
-    if (description !== undefined) $set['description'] = description;
-    if (properties !== undefined) $set['properties'] = mergedProps;
-    const $unset: Record<string, unknown> = {};
-    applyExpiryToUpdate(spaceId, ttlDays, existing._expireAt != null, $set, $unset,
-      { collection: 'fact', existing: existing as unknown as Record<string, unknown> });
-    await withSeq(spaceId, (seq) => {
-      $set['seq'] = seq;
-      const updateOp: Record<string, unknown> = { $set };
-      if (Object.keys($unset).length > 0) updateOp['$unset'] = $unset;
-      return col<FactDoc>(spaceCollection(spaceId, 'facts')).updateOne(
-        asFilter<FactDoc>({ _id: existing._id }), asUpdate<FactDoc>(updateOp),
-      );
-    });
-    const converged = { ...existing, ...($set as Partial<FactDoc>) } as FactDoc;
-    if ('_expireAt' in $unset) delete (converged as { _expireAt?: unknown })._expireAt;
-    // After the write, never before: a job for a record that failed to store would be a job for
-    // nothing. Enqueued even when the vector is already current — the content just changed, so the
-    // stored vector is now stale, and the queue is what makes it catch up.
-    // Not queued when suppressed: skipping the inline embed and queueing anyway stores the vector the flag
-    // forbids a few seconds later, with nothing to come back and remove it.
-    if (!embResult && !suppressed) await enqueueEmbedJob(spaceId, 'fact', converged._id, { priority: EMBED_PRIORITY.write });
-    /*
-     * The link records, after the write and before the event.
-     *
-     * This branch writes the link set UNCONDITIONALLY, from a parameter that defaults to `[]` — so a
-     * retried `saveFact` carrying the id and no entities WIPES the stored links. Whether that is right is not this
-     * change's question; what matters is that the link records follow it either way, because a link left
-     * behind describes a connection the fact itself no longer claims. `createChrono`'s equivalent branch
-     * is guarded and does not clear, and that asymmetry is recorded on the `M-2` row rather than smoothed
-     * over here.
-     */
-    await reconcileLinks(spaceId, converged._id, 'fact', { entity: linkEntities }, converged.author);
-    // `fact.updated`, not `created` — a subscriber must be able to tell a converged retry from a new record.
-    if (actor) emitWebhookEvent({ event: 'fact.updated', spaceId, entry: { ...converged, embedding: undefined }, ...actor });
-    return withoutVector((similar || contradicts)
-      ? { ...converged, ...(similar ? { similar } : {}), ...(contradicts ? { contradicts } : {}) }
-      : converged);
-  }
-
-  const doc: FactDoc = {
-    // A supplied id that named nothing becomes the record's identity, so the caller's retry finds it next time.
-    // ID IS ID (owner ruling, 2026-08-12): the identity is ours to mint, always. A supplied id may
-    // ADDRESS an existing record — the update path above — but it never becomes a new record's identity.
-    // It used to: a supplied id that named nothing was adopted, which made the caller a co-author of our
-    // primary key and, across a sync, let two instances deriving ids from the same key collide by design.
-    // A caller wanting to carry their own reference puts it in `name` or `description`, which are for that.
-    _id: uuidv4(),
-    spaceId,
-    fact,
-    tags,
-    matchedText: embedText,
-    author: authorRef(),
-    createdAt: now,
-    updatedAt: now,
-    seq: 0, // taken at the insert below
-    ...(embResult ? { embedding: embResult.vector, embeddingModel: embResult.model } : {}),
-  };
-  /*
-   * The flag is STORED, not merely consulted.
-   *
-   * Everything that revisits a record later resolves the tiers from the DOCUMENT — the embed queue, a reindex,
-   * a retry. A create that skipped the embedding without recording WHY would be re-embedded by the first of
-   * those to come past, and the caller would never learn that their flag lasted one write.
-   *
-   * `false` is stored too, and means the same as it does anywhere else: this record does not suppress, which
-   * still does not override a type or a space that does. Only `undefined` — not stated — is left off.
-   */
-  applyRecordFlags(doc, opts);
-  if (type !== undefined) doc.type = type;
-  if (description !== undefined) doc.description = description;
-  if (properties !== undefined) doc.properties = properties;
-  // See entities.ts: without `typed` the schema tier is unreachable and the space default applies instead.
-  stampExpiryOnCreate(spaceId, doc, ttlDays, { collection: 'fact', type: doc.type });
-  // Warn-not-refuse: a caller's own stamp checked against ours. Stored only when it disagrees beyond the space's
-  // threshold, so presence is the signal. The write proceeds either way -- a backdated import is legitimate.
-  stampSkewOnCreate(doc, getSpaceMeta(spaceId));
-  await withSeq(spaceId, (seq) => {
-    doc.seq = seq;
-    return col<FactDoc>(spaceCollection(spaceId, 'facts')).insertOne(asDoc<FactDoc>(doc));
-  });
-  if (!embResult && !suppressed) await enqueueEmbedJob(spaceId, 'fact', doc._id, { priority: EMBED_PRIORITY.write });
-  // The link records for a new fact. One call whether the array is empty or not: `reconcileLinks` is a
-  // reconcile, so "nothing to do" is a cheap answer rather than a decision this site has to make.
-  await reconcileLinks(spaceId, doc._id, 'fact', { entity: linkEntities }, doc.author);
-  // Real-time duplicate-rule evaluation (opt-in per space). Fire-and-forget; the
-  // dynamic import avoids a static cycle with dupe-scanner.js.
-  if (getConfig().spaces.find(s => s.id === spaceId)?.dupeRulesOnInsert) {
-    import('./dupe-scanner.js').then(m => m.evaluateRecordForDuplicates(spaceId, 'fact', doc._id)).catch(() => { /* best-effort */ });
-  }
-  if (actor) emitWebhookEvent({ event: 'fact.created', spaceId, entry: { ...doc, embedding: undefined }, ...actor });
   // Advisory only — the record is stored either way.
-  return withoutVector((similar || contradicts) ? { ...doc, ...(similar ? { similar } : {}), ...(contradicts ? { contradicts } : {}) } : doc);
+  return withoutVector({ ...stored, ...(done.similar ? { similar: done.similar } : {}),
+    ...(done.contradicts ? { contradicts: done.contradicts } : {}) });
 }
 
 /** Update an existing fact's text, tags, links, description, or properties. Re-embeds when content fields change. */

@@ -628,26 +628,8 @@ export function violationsAgainstLocalSchema(
   }
 }
 
-/**
- * Is this write failure ONLY duplicate-key rejections — the shape two peers produce independently?
- *
- * Two peers creating the same edge independently produce one `{ from, to, label }` triplet under two ids, so
- * the receiver's upsert hits the unique index. Answering that with a 500 would stall the sender's edges
- * channel permanently (its watermark never advances past the batch).
- *
- * Only duplicates: any other write fault still throws, or genuine corruption would be hidden.
- *
- * Both shapes reach here: a single `replaceOne` rejects with `code: 11000`, while a `bulkWrite` collects
- * them into `writeErrors` with no top-level code.
- */
-export function isDuplicateKeyOnly(err: unknown): boolean {
-  const e = err as { code?: number; writeErrors?: Array<{ code?: number; err?: { code?: number } }> };
-  const writeErrors = e?.writeErrors;
-  if (Array.isArray(writeErrors) && writeErrors.length > 0) {
-    return writeErrors.every(w => (w.code ?? w.err?.code) === 11000);
-  }
-  return e?.code === 11000;
-}
+// Moved to `db/write-errors.ts`, which every reader of a write failure now shares; re-exported for the routes.
+export { isDuplicateKeyOnly } from '../../db/write-errors.js';
 
 /**
  * Attach the violations to a single-record ingest response — the one spelling of that rule, so every

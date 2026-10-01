@@ -29,6 +29,7 @@ import { pullTombstones, pushTombstones } from './tombstone-transfer.js';
 import { applyConcludedSpaceRounds } from '../spaces/apply-wipe-round.js';
 import { concreteSpaces } from '../spaces/proxy.js';
 import { bumpSeq, isSeqImplausible, settledSeqRange } from '../util/seq.js';
+import { bulkWriteFailures, isDuplicateKeyOnly } from '../db/write-errors.js';
 import { adoptAnnouncedSpaces, announcedSpaces, healAnnouncedAliases } from '../networks/network-spaces.js';
 import { selfRecordFor } from '../networks/self-record.js';
 import { mergePeerRoster, revokeRemoved, pairIntroduced, applyPassedJoin } from '../networks/member-introductions.js';
@@ -1235,11 +1236,9 @@ async function batchUpsertBySeq<T extends { _id: string; seq: number }>(
       toWrite.map(doc => ({ replaceOne: { filter: { _id: doc._id }, replacement: doc, upsert: true } })),
     ), { ordered: false });
   } catch (err) {
-    const writeErrors = (err as { writeErrors?: Array<{ code?: number; err?: { code?: number; op?: unknown } }> })?.writeErrors;
-    if (!Array.isArray(writeErrors) || writeErrors.length === 0) throw err;
-    const codeOf = (w: { code?: number; err?: { code?: number } }) => w.code ?? w.err?.code;
-    const nonDuplicate = writeErrors.filter(w => codeOf(w) !== 11000);
-    if (nonDuplicate.length > 0) throw err;
+    // Duplicate-key rejections only, read the shared way (`db/write-errors.ts`); anything else is a real fault.
+    if (!bulkWriteFailures(err) || !isDuplicateKeyOnly(err)) throw err;
+    const writeErrors = (err as { writeErrors: Array<{ err?: { op?: unknown } }> }).writeErrors;
     log.warn(
       `sync: ${writeErrors.length} duplicate-key rejection(s) applying '${collName}' for space `
       + `'${localSpaceId}'. Every other document in the page was applied. A duplicate means two peers created `

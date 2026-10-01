@@ -58,7 +58,8 @@ function subjects() {
   return out;
 }
 
-const IS_RECORD_WRITE = /\.(?:insertOne|insertMany|updateOne|updateMany|replaceOne|bulkWrite)\s*(?:<[^>]*>)?\s*\(/;
+// A delete is a record write too: a link removal deletes its rows and writes their tombstones in one block.
+const IS_RECORD_WRITE = /\.(?:insertOne|insertMany|updateOne|updateMany|replaceOne|deleteOne|deleteMany|bulkWrite)\s*(?:<[^>]*>)?\s*\(/;
 
 /**
  * Each allocation in a subject, with what it awaits before (or instead of) its write.

@@ -1,0 +1,284 @@
+/**
+ * The ONE place a create/converge write reaches a record collection (`Q-99` part 3).
+ *
+ * A planner (`plan-*.ts`) has decided everything; this writes what was decided. One plan for a single-record
+ * door, hundreds for a batch — the same code, so the two doors cannot mean different things. Per kind, in the
+ * order `PLAN_KINDS` states, a stage is:
+ *
+ *  1. **one seq block and one `bulkWrite`** — the block is allocated immediately before the write that carries
+ *     it (`withAllocatedSeqs`), so the seq-paged readers' horizon is held for one round trip, not for a batch;
+ *  2. **what landed**, read back when the write could not say: a per-operation failure maps to its item, an
+ *     ambiguous one (a dropped connection) is settled by reading the minted ids, and a converge whose record moved
+ *     since it was planned is reported STALE rather than overwritten (`expectSeq` is in the update's filter);
+ *  3. **the landed items' link rows and embed jobs**, straight after their stage — never for an item whose own
+ *     record did not land, and never left to the end where a later stage's failure would lose them.
+ *
+ * ## It does not throw once anything has landed
+ *
+ * A record that is stored and reported as failed is invited to be resent, and a resend without an id
+ * duplicates it. So a failure past the first write becomes an item outcome or a warning, and the caller is told
+ * what actually happened. A failure BEFORE anything landed (the seq block itself) still throws: nothing was
+ * written and there is nothing to report but the error.
+ *
+ * ## What it is not
+ *
+ * Not the update or delete paths, not merge, re-key, redaction, sync ingest or file metadata — those keep their
+ * own writes (`a-create-converge-write-lives-in-the-commit.test.js` names each). The link-row reconcile below is
+ * the exception that proves the rule: the update paths call it too (`reconcileLinks`), so there is one writer of
+ * link rows rather than two.
+ */
+import { col, asFilter, asBulk } from '../../db/mongo.js';
+import { spaceCollection } from '../../db/space-collection.js';
+import { withAllocatedSeqs } from '../../util/seq.js';
+import { inChunks } from '../../util/chunks.js';
+import { mapLimit } from '../../util/map-limit.js';
+import { log } from '../../util/log.js';
+import { bulkWriteFailures, phraseWriteFailure, DUPLICATE_KEY } from '../../db/write-errors.js';
+import { enqueueWriteEmbedJobs, EMBED_PRIORITY } from '../embed-queue.js';
+import { linkIdFor } from '../link-id.js';
+import { tombstoneDoc } from '../tombstones.js';
+import type { AuthorRef, LinkDoc, TombstoneDoc } from '../../config/types.js';
+import type { RefKind } from '../../config/types-knowledge.js';
+import type { DesiredLinks } from '../links.js';
+import { COMMIT_ORDER, PLAN_KINDS, type CommitOutcome, type PlanKind, type WritePlan } from './types.js';
+
+/** Insert-time duplicate rules run at most this many at once — each is a vector search. */
+const DUPE_RULE_CONCURRENCY = 4;
+
+/** Ids per read-back and per link-row read. */
+const READ_CHUNK = 500;
+
+/** Write `plans` (all for `spaceId`) and say what happened to each, in the order given. */
+export async function commitPlans(spaceId: string, plans: readonly WritePlan[]): Promise<CommitOutcome[]> {
+  for (const p of plans) {
+    if (p.spaceId !== spaceId) {
+      throw new Error(`commitPlans: a plan decided for space '${p.spaceId}' was handed to a commit for '${spaceId}'`);
+    }
+  }
+  const outcomes = new Array<CommitOutcome | undefined>(plans.length);
+  const landed: number[] = [];
+
+  for (const kind of COMMIT_ORDER) {
+    const ready: number[] = [];
+    for (let i = 0; i < plans.length; i++) {
+      if (plans[i]!.kind !== kind) continue;
+      const failedDep = (plans[i]!.dependsOn ?? []).map(d => outcomes[d]).find(o => o !== undefined && !o.ok);
+      if (failedDep && !failedDep.ok) {
+        outcomes[i] = { ok: false, reason: `it depends on an item of this request that was not written: ${failedDep.reason}` };
+      } else {
+        ready.push(i);
+      }
+    }
+    if (ready.length === 0) continue;
+    const stageLanded = await writeStage(spaceId, kind, plans, ready, outcomes, landed.length > 0);
+    landed.push(...stageLanded);
+    await afterStage(spaceId, plans, stageLanded);
+  }
+
+  runDupeRules(spaceId, landed.map(i => plans[i]!).filter(p => p.dupeRules));
+  return outcomes.map(o => o ?? { ok: false, reason: 'not written' });
+}
+
+/** One kind's block write. Returns the indexes whose record landed; sets every index's outcome. */
+async function writeStage(
+  spaceId: string, kind: PlanKind, plans: readonly WritePlan[], ready: readonly number[],
+  outcomes: Array<CommitOutcome | undefined>, somethingLanded: boolean,
+): Promise<number[]> {
+  const coll = col<{ _id: string; seq?: number }>(spaceCollection(spaceId, PLAN_KINDS[kind].collection));
+  let first = 0;
+  let failures: ReturnType<typeof bulkWriteFailures> = null;
+  let ambiguous = false;
+  let matched = 0;
+  try {
+    await withAllocatedSeqs(spaceId, ready.length, async (block) => {
+      first = block;
+      try {
+        const res = await coll.bulkWrite(asBulk(ready.map((i, k) => opFor(plans[i]!, block + k))), { ordered: false });
+        matched = res.matchedCount;
+      } catch (err) {
+        failures = bulkWriteFailures(err);
+        if (!failures) ambiguous = true;
+        log.warn(`write commit: the ${kind} write to '${spaceId}' reported a failure: `
+          + `${failures ? `${failures.length} item(s)` : 'no per-item detail'}`);
+      }
+    });
+  } catch (err) {
+    // The seq block itself failed: nothing of this stage was written.
+    if (!somethingLanded) throw err;
+    for (const i of ready) outcomes[i] = { ok: false, reason: phraseWriteFailure(undefined) };
+    log.warn(`write commit: the ${kind} stage for '${spaceId}' could not start after earlier stages landed: ${String(err)}`);
+    return [];
+  }
+
+  const seqOf = (k: number) => first + k;
+  const failedAt = new Map<number, number | undefined>();
+  for (const f of (failures ?? []) as Array<{ index: number; code: number | undefined }>) failedAt.set(f.index, f.code);
+
+  const converges = ready.map((i, k) => ({ i, k })).filter(({ i }) => plans[i]!.op === 'converge');
+  // Read back what a write could not vouch for: everything after an ambiguous failure, and a converge that may
+  // have matched nothing because its record moved since it was planned.
+  const mustRead = ambiguous ? ready.map((i, k) => ({ i, k }))
+    : converges.filter(({ k }) => !failedAt.has(k)).length > matched ? converges.filter(({ k }) => !failedAt.has(k)) : [];
+  const storedSeq = await readSeqs(coll, mustRead.map(({ i }) => plans[i]!.id));
+
+  const landed: number[] = [];
+  ready.forEach((i, k) => {
+    const plan = plans[i]!;
+    if (failedAt.has(k)) {
+      const code = failedAt.get(k);
+      outcomes[i] = { ok: false, reason: phraseWriteFailure(code), ...(code === DUPLICATE_KEY ? { stale: true } : {}) };
+      return;
+    }
+    if (mustRead.some(m => m.k === k)) {
+      if (storedSeq.get(plan.id) !== seqOf(k)) {
+        outcomes[i] = plan.op === 'converge' && !ambiguous
+          ? { ok: false, reason: 'the record was changed by another write while this one was being applied; nothing was written for this item — retry it', stale: true }
+          : { ok: false, reason: phraseWriteFailure(undefined) };
+        return;
+      }
+    }
+    outcomes[i] = { ok: true, seq: seqOf(k) };
+    landed.push(i);
+  });
+  return landed;
+}
+
+/** The driver operation for one plan, stamped with its seq. */
+function opFor(plan: WritePlan, seq: number): object {
+  if (plan.op === 'insert') return { insertOne: { document: { ...plan.doc, seq } } };
+  const filter = plan.expectSeq === undefined ? { _id: plan.id }
+    : plan.expectSeq === null ? { _id: plan.id, seq: { $exists: false } }
+      : { _id: plan.id, seq: plan.expectSeq };
+  const update: Record<string, unknown> = { $set: { ...plan.set, seq } };
+  if (plan.unset && Object.keys(plan.unset).length > 0) update['$unset'] = plan.unset;
+  return { updateOne: { filter, update } };
+}
+
+async function readSeqs(coll: ReturnType<typeof col<{ _id: string; seq?: number }>>, ids: readonly string[]): Promise<Map<string, number | undefined>> {
+  const out = new Map<string, number | undefined>();
+  for (const chunk of inChunks(ids, READ_CHUNK)) {
+    const docs = await coll.find(asFilter<{ _id: string; seq?: number }>({ _id: { $in: chunk } }), { projection: { _id: 1, seq: 1 } }).toArray();
+    for (const d of docs) out.set(String(d._id), d.seq);
+  }
+  return out;
+}
+
+/** A landed stage's link rows and embed jobs. Never throws: the records are stored, and saying otherwise lies. */
+async function afterStage(spaceId: string, plans: readonly WritePlan[], landed: readonly number[]): Promise<void> {
+  if (landed.length === 0) return;
+  const withLinks = landed.filter(i => plans[i]!.links);
+  if (withLinks.length > 0) {
+    try {
+      await reconcileLinkRows(spaceId, withLinks.map(i => ({
+        from: plans[i]!.id, minted: plans[i]!.minted, ...plans[i]!.links!,
+      })));
+    } catch (err) {
+      // The records are stored, so their outcomes stay `ok`: reporting them failed would invite a resend that
+      // duplicates. What did not land is the links, and this is what says so.
+      log.warn(`write commit: ${withLinks.length} record(s) in '${spaceId}' were written but their link rows were not: `
+        + `${err instanceof Error ? err.message : String(err)}. Re-sending the same write (with its id) repairs them.`);
+    }
+  }
+  const toQueue = landed.filter(i => plans[i]!.enqueue).map(i => ({ recordType: plans[i]!.kind, recordId: plans[i]!.id }));
+  if (toQueue.length > 0) await enqueueWriteEmbedJobs(spaceId, toQueue, { priority: EMBED_PRIORITY.write });
+}
+
+/** Insert-time duplicate rules for the landed records that asked for them — bounded, and never awaited by the write. */
+function runDupeRules(spaceId: string, plans: readonly WritePlan[]): void {
+  if (plans.length === 0) return;
+  // The dynamic import avoids a static cycle with dupe-scanner.js.
+  void import('../dupe-scanner.js').then(m => mapLimit(plans, DUPE_RULE_CONCURRENCY, async (p) => {
+    try { await m.evaluateRecordForDuplicates(spaceId, p.kind as Parameters<typeof m.evaluateRecordForDuplicates>[1], p.id); }
+    catch { /* best-effort: a duplicate rule never fails the write it follows */ }
+  })).catch(() => { /* best-effort */ });
+}
+
+/** One record's link reconcile: what it should link to, and whether it was minted this instant. */
+export interface LinkReconcile {
+  from: string;
+  fromKind: RefKind;
+  desired: DesiredLinks;
+  author: AuthorRef;
+  /** Minted by the write that is reconciling it: it can have no link rows yet, so none are read. */
+  minted: boolean;
+}
+
+/**
+ * Make each record's link rows equal what its write says — the one writer of link rows.
+ *
+ * `desired` names only the classes the caller wrote; a class it omits is left alone, an empty array removes.
+ * Existing rows are read in one query for every record that was not minted this instant, and the removals and
+ * the additions are each one seq block: a seq PER ROW, because `pageBySeq` continues from the last item's seq
+ * with `seq > since`, so two rows sharing one at a page boundary would leave the rest unreachable.
+ *
+ * A removal writes its TOMBSTONE — a link deleted without one comes back on the next pull from any peer that
+ * still holds it — and a re-created link clears the tombstone that retired it, or the next pull would delete it
+ * again on the strength of a deletion the caller has since reversed.
+ *
+ * @param opts.additive create and never delete — the link conversion's question, see `reconcileLinks`.
+ */
+export async function reconcileLinkRows(
+  spaceId: string, records: readonly LinkReconcile[], opts: { additive?: boolean } = {},
+): Promise<Array<{ added: number; removed: number }>> {
+  const wantedBy = records.map(r => {
+    const wanted = new Map<string, { to: string; toKind: RefKind }>();
+    for (const toKind of Object.keys(r.desired) as RefKind[]) {
+      // A record naming the same id twice is one connection — the Map dedupes it by the derived id.
+      for (const to of r.desired[toKind] ?? []) wanted.set(linkIdFor(r.from, r.fromKind, to, toKind), { to, toKind });
+    }
+    return wanted;
+  });
+
+  const linksColl = col<LinkDoc>(spaceCollection(spaceId, 'links'));
+  const existingBy = records.map(() => [] as string[]);
+  const toRead = records.map((r, i) => ({ r, i })).filter(({ r }) => !r.minted && Object.keys(r.desired).length > 0);
+  for (const chunk of inChunks(toRead, READ_CHUNK)) {
+    const rows = await linksColl.find(asFilter<LinkDoc>({
+      spaceId,
+      // Only the classes each write TOUCHED: a patch naming `linkEntities` alone must not disturb fact links.
+      $or: chunk.map(({ r }) => ({ from: r.from, fromKind: r.fromKind, toKind: { $in: Object.keys(r.desired) } })),
+    }), { projection: { _id: 1, from: 1, fromKind: 1, toKind: 1 } }).toArray() as Array<Pick<LinkDoc, '_id' | 'from' | 'fromKind' | 'toKind'>>;
+    for (const { r, i } of chunk) {
+      const classes = new Set(Object.keys(r.desired));
+      existingBy[i] = rows.filter(row => row.from === r.from && row.fromKind === r.fromKind && classes.has(row.toKind)).map(row => row._id);
+    }
+  }
+
+  const removals: string[] = [];
+  const additions: Array<{ _id: string; r: LinkReconcile; to: string; toKind: RefKind }> = [];
+  const counts = records.map((r, i) => {
+    const have = new Set(existingBy[i]);
+    const removed = opts.additive ? [] : existingBy[i]!.filter(id => !wantedBy[i]!.has(id));
+    const added = [...wantedBy[i]!].filter(([id]) => !have.has(id));
+    removals.push(...removed);
+    for (const [_id, { to, toKind }] of added) additions.push({ _id, r, to, toKind });
+    return { added: added.length, removed: removed.length };
+  });
+
+  const tombstones = col<TombstoneDoc>(spaceCollection(spaceId, 'tombstones'));
+  const now = new Date().toISOString();
+  if (removals.length > 0) {
+    await withAllocatedSeqs(spaceId, removals.length, async (first) => {
+      await linksColl.deleteMany(asFilter<LinkDoc>({ _id: { $in: removals }, spaceId }));
+      await tombstones.bulkWrite(asBulk(removals.map((_id, i) => ({
+        replaceOne: { filter: { _id }, replacement: tombstoneDoc(spaceId, first + i, { _id, type: 'link', deletedAt: now }), upsert: true },
+      }))), { ordered: false });
+    });
+  }
+  if (additions.length > 0) {
+    await withAllocatedSeqs(spaceId, additions.length, async (first) => {
+      await linksColl.bulkWrite(asBulk(additions.map(({ _id, r, to, toKind }, i) => ({
+        replaceOne: {
+          filter: { _id, spaceId },
+          replacement: {
+            _id, spaceId, from: r.from, fromKind: r.fromKind, to, toKind, author: r.author,
+            createdAt: now, updatedAt: now, seq: first + i,
+          } satisfies LinkDoc,
+          upsert: true,
+        },
+      }))), { ordered: false });
+      await tombstones.deleteMany(asFilter<TombstoneDoc>({ _id: { $in: additions.map(a => a._id) } }));
+    });
+  }
+  return counts;
+}

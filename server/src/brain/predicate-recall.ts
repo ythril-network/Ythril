@@ -46,6 +46,7 @@
 import { col } from '../db/mongo.js';
 import { isMaxTimeExpired } from '../db/max-time.js';
 import { log } from '../util/log.js';
+import { inChunks } from '../util/chunks.js';
 import { andPredicates } from './recall-filter.js';
 import { FRESH_WINDOW_MS } from './fresh-writes.js';
 import type { DegradedReason } from './degraded-reasons.js';
@@ -232,7 +233,7 @@ async function stageTwo(args: PredicateRecallArgs, stageOneHits: Record<string, 
     if (known) {
       const ids = await known;
       if (ids === null) return answer(['filter_window']);
-      for (let i = 0; i < ids.length; i += ID_CHUNK) await scoreBatch(ids.slice(i, i + ID_CHUNK));
+      for (const chunk of inChunks(ids, ID_CHUNK)) await scoreBatch(chunk);
       return answer(behind ? ['filter_window'] : []);
     }
 
