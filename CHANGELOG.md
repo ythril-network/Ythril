@@ -78,6 +78,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   flag (`Q-194`)** — on every create endpoint with `waitForEmbedding` or `checkDuplicates`, through a batch, and on
   the survivor of a merge. The write now decides suppression on the record it leaves: the stored flag unless the
   write states one.
+- **`save_bulk` on MCP accepted a retired or unknown key and wrote nothing (`Q-195`)**: `{"memories": […]}`
+  answered success while the REST door refused it with a `400` naming `facts`. Both doors now run the same check
+  and refuse the same keys with the same message.
 
 ## [5.6.0] — 2026-09-29
 
