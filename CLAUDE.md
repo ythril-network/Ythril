@@ -280,9 +280,11 @@ every record whose stamp has passed, across every space, through the normal dele
 stamp let one instance decide when another deleted its data** — an operator who configured a year of
 retention losing records after the sender's seven days, with nothing logged on either side.
 
-**The list is `sync/local-only-fields.ts`, with two consumers and one reason.** `merkle.ts` excludes them
-from the hash; the pull path strips them before the write. The equivalence that makes it ONE list is the
-rule two sections above — a field that is hashed must replicate — read backwards: a field that must not
+**The list is `sync/local-only-fields.ts`, with one reason.** `merkle.ts` excludes them from the hash; the
+arrival writer drops them from whatever arrives, by push or by pull, and CARRIES the receiver's own values across
+the replace — a peer's edit used to erase this instance's vector and retention stamps. A restore keeps the
+record-tier half (`RESTORED_LOCAL_FIELDS`: the stamps and `syncBase`) and never the derived half. The
+equivalence that makes it ONE list is the rule two sections above — a field that is hashed must replicate — read backwards: a field that must not
 replicate must not be hashed, or every cycle reports a divergence for a space where nothing is wrong.
 
 **What to take from it, because the shape recurs:** the gate protecting this asserted that the receiver
@@ -294,22 +296,28 @@ Whether to embed is then `embeddingSuppressedFor`, resolving `record > schema > 
 configuration — **except for a file, which has two tiers and not three.** A file has no `type`, so it has no
 type schema to consult; it is governed by its own record flag or by the space setting, and nothing in between.
 
-**Two functions in `api/sync/_shared.ts` may write an arriving brain document, and neither queues
-unconditionally.** This paragraph claimed one function queueing every document, and both halves have since
-stopped being true:
+**One writer stores every arriving record: `writeArrivals` in `sync/arrivals.ts` (`Q-107` part 1).** The push
+routes (batch and single), the pulled page and the admin import all go through it, and it owns every
+precondition a door used to hold a subset of: per-document shape and seq refusal, the retag to the local space,
+a repeated id collapsed to its highest seq, the local-only fields dropped and the receiver's own carried, the
+receiver's retention stamped, the seq write guard, failures classified per document, and — per landed chunk, in a
+`finally` — the awaited counter bump, then the embed enqueue (`enqueueIngestedRecords`). It used to be two
+functions (`ingestBrainDoc` and the pull's `batchUpsertBySeq`) plus a raw `$setOnInsert`, which is how a pulled
+record was never queued and a new entity pushed singly was never embedded.
+`an-arrival-is-written-by-one-writer.test.js` holds that no door writes a record collection anywhere else.
 
-- **`ingestBrainDoc`** takes the record type as an explicit argument, and `null` means *this kind has nothing to
-  embed*. Links pass `null` — a link is a pair of ids, so there is no text. **A missing embed job on an arriving
-  link is correct, not a bug.**
-- **`ingestFileMeta`** is the second site, and it exists because file metadata is the one collection that cannot
-  be replaced wholesale: it merges the authored keys with `$set` and never `$unset`s, or the receiver would
-  publish the sender's `sizeBytes` and `sha256` for bytes it does not have. It queues **only when this instance
-  holds the blob**, because metadata can arrive before the file does.
-
-**So "a new ingest site cannot be written without the queue" is no longer structurally guaranteed** — it was a
-property of there being one function, and there are two. What holds instead is the argument that made
-`ingestBrainDoc` take its type explicitly: a caller that embeds nothing has to say `null` out loud, at the call,
-where a reviewer sees it. A third ingest site would have to make the same decision visible the same way.
+- **The record type is an EXPLICIT argument at every call**, and `null` means *this kind has nothing to embed*.
+  Links pass `null` — a link is a pair of ids, so there is no text. **A missing embed job on an arriving link is
+  correct, not a bug.** A caller that embeds nothing has to say so out loud, at the call, where a reviewer sees it.
+- **File metadata is merged, not replaced**: the writer hands it to `ingestFileMeta`, which `$set`s the authored
+  keys and never `$unset`s, or the receiver would publish the sender's `sizeBytes` and `sha256` for bytes it does
+  not have. A peer's file is queued **only when this instance holds the blob**; a restore queues every file.
+- **D-9, owner decision 2026-10-01: an arrival takes this instance's retention.** A record that carries no
+  receiver stamp is stamped from its OWN `createdAt` by this instance's `schema > space` windows — never from now,
+  never the sender's. A stamp already on the stored copy is carried, never recomputed. So an arrival older than
+  the window is due at once, and the sweep deletes it through the normal path, whose tombstone travels to peers.
+- **An import is a restore, not a peer**: unguarded (a restore replaces), and it keeps the export's stamps and
+  `syncBase`, because those ARE the record's own state here.
 
 - **The record tier has to cross the wire for that to be true.** Both spellings of the suppression mark
   replicate. Stripped, a record its author retired from meaning-ranked search would re-enter it on every peer.

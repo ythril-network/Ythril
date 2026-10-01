@@ -152,6 +152,14 @@ Together this prevents a member from forging a tombstone with `instanceId` set t
 
 All document `_id` values (`facts`, `entities`, `edges`, `chrono`, `links`) are **UUIDv4** — 122 bits of cryptographic randomness from Node.js `uuid` v4. The probability of two independent instances generating the same `_id` is astronomically low (~2.7 × 10⁻²⁰ after 1 billion documents). In practice, a publisher's tombstone targeting `_id = X` will never match a subscriber-created document because the subscriber's documents will always have different UUIDv4 identifiers. The tombstone deletion-authorisation checks are a defence-in-depth layer on top of this structural guarantee.
 
+### How a pulled page is stored
+
+A pulled page is written by the same arrival writer as a push (`Q-107`): a document whose `_id` is not a string or whose seq is not a non-negative integer within the ingest ceiling is refused on its own; the page is retagged to the local space id; an id repeated in one page is collapsed to its highest seq; the sender's local-only fields are dropped and the receiver's own carried; the receiver's retention is stamped ([receiver retention](#receiver-retention-applies-to-arrivals)); a stored copy at or above the incoming seq is kept; and every landed record is **queued for embedding** by the receiver's suppression rules, in the background lane (`Q-203` — a pulled record used to be stored and never queued). The local seq counter is bumped after **each** landed page, so a local write never takes a seq below a record already stored.
+
+**A failed write is a record-write failure, not an unreachable peer.** A write the store cannot do for a reason that is not one document's (the collection unavailable, a dropped connection) stops that family's transfer, holds its position below the page, logs the space and family, and fetches the page again next cycle. It does not count toward `PEER UNREACHABLE`.
+
+**Records pulled before this release** were stored without an embed job and stay without a vector until queued: `POST /api/spaces/:id/reembed` queues every record of a space that has none.
+
 ### `lastSeqReceived` update
 
 After all five document types (facts, entities, edges, chrono, links) are pulled, `lastSeqReceived[spaceId]` is advanced to the highest `seq` seen **among documents authored by the peer** (`doc.author.instanceId === member.instanceId`) and written to config. On the next cycle the watermark is passed as `sinceSeq` so the peer returns only documents newer than that point.
@@ -208,18 +216,32 @@ If the peer has never been synced (`lastSeqPushed` = 0), the full history is sen
 
 ### `POST /batch-upsert`
 
-Accepts `{ facts?: FactDoc[], entities?: EntityDoc[], edges?: EdgeDoc[], chrono?: ChronoEntry[], links?: LinkDoc[], filemeta?: FileMetaDoc[] }` in a single request. **An array the receiver does not read is dropped with a `200`**, so a peer built without `filemeta` loses every file description, tag and link array at the boundary — and nothing says so at either end. Up to 500 documents per type per request. The server applies the same conflict rules as the individual `POST /facts`, `POST /entities`, `POST /edges`, `POST /chrono` endpoints:
+Accepts `{ facts?: FactDoc[], entities?: EntityDoc[], edges?: EdgeDoc[], chrono?: ChronoEntry[], links?: LinkDoc[], filemeta?: FileMetaDoc[] }` in a single request. **An array the receiver does not read is dropped with a `200`**, so a peer built without `filemeta` loses every file description, tag and link array at the boundary — and nothing says so at either end. Up to 500 documents per type per request; what is sent past that is counted in `rejected` and offered again in the sender's next page. The batch and the individual `POST /facts`, `POST /entities`, `POST /edges`, `POST /chrono` endpoints are one code path — a single route is a page of one — so they apply exactly the same rules:
 
 | Type | Rule |
 |------|------|
-| Facts | `incoming.seq > existing.seq` → overwrite; equal seq + different fact → **fork** (new `_id`); else skip |
-| Entities | `incoming.seq > existing.seq` → overwrite (upsert); else skip |
-| Edges | same as entities |
-| Chrono | same as entities |
+| Facts | no stored copy → `inserted`; `incoming.seq > stored.seq` → `updated`; equal seq and different `fact` text → **fork**; anything else (a lower seq, or an equal seq with equal text) → `skipped` |
+| Entities | no stored copy or `incoming.seq > stored.seq` → `upserted`; else `skipped`. An equal seq never forks |
+| Edges | same as entities. Another id already holding the edge's `(from, to, label, fromKind, toKind)` → `duplicateTriplets`, and the local copy is kept |
+| Chrono | same as entities, after the vocabulary check (an unknown `type` → `unknownType`) |
+| Links | same as entities. Another id already holding the link's endpoints is that same link → `skipped` |
+| File metadata | `incoming.seq > stored.seq` (or no stored seq) → merged (`$set` of the authored keys) → `upserted`; else `skipped` |
 
-Response: `{ status: 'ok', facts: {inserted,updated,forked,skipped,forkDepthRefused,tombstoned,schemaViolations}, entities: {upserted,skipped,tombstoned,schemaViolations}, edges: {upserted,skipped,tombstoned,schemaViolations,duplicateTriplets}, chrono: {upserted,skipped,tombstoned,schemaViolations,unknownType}, links: {upserted,skipped,tombstoned}, filemeta: {upserted,skipped} }`
+Every family checks a tombstone first: one at or above the incoming seq → `tombstoned`. A stale tombstone below it is deleted **only once the record has landed**, so a write that fails keeps the deletion.
 
-**One of those counters is the sender's only report of a PERMANENT loss.** `skipped` means the peer was already current, which is benign. `forkDepthRefused` means a record was DROPPED and will not be retried — the push path reads exactly that field to report a refusal, so a receiver that does not emit it makes the loss silent at both ends. `schemaViolations` counts documents stored despite failing the RECEIVER's schema (validated, counted and let in — see the ingest rule below); `duplicateTriplets` counts edges the unique index rejected; `unknownType` counts the case below.
+**What the counters count.** Each counts ITEMS of the request, as processing them in order would count them. When one page carries the same `_id` more than once, the copies are decided in order against each other (`[seq 5, seq 6]` for an entity is `upserted: 2`; `[seq 9, seq 3]` is one `upserted`/`inserted` and one `skipped`) and only the final winner is written, so the stored copy is the highest seq. If that final write fails (a unique-index duplicate, or a document the store refuses), the version the page accepted before it is written instead, and the counters follow what landed.
+
+**Every document a push carries is stored by the receiver's rules** (`Q-107`): retagged to the receiver's local space id under a `spaceMap` alias; written with the receiver's own `embedding`, `embeddingModel`, `matchedText`, retention stamps and `syncBase` carried over from its stored copy (so a peer's edit does not erase them); stamped with the receiver's retention policy when the record carries no receiver stamp (see [receiver retention](#receiver-retention-applies-to-arrivals)); and queued for embedding by the receiver's suppression rules, in the background lane.
+
+**The write guard.** Each write replaces only a stored copy whose seq is below the incoming one (or that has none). A copy written locally between the read and the write is therefore kept, and the document counts as `skipped`.
+
+Response: `{ status: 'ok', facts: {inserted,updated,forked,skipped,forkDepthRefused,tombstoned,schemaViolations,rejected}, entities: {upserted,skipped,tombstoned,schemaViolations,rejected}, edges: {upserted,skipped,tombstoned,schemaViolations,duplicateTriplets,rejected}, chrono: {upserted,skipped,tombstoned,schemaViolations,unknownType,rejected}, links: {upserted,skipped,tombstoned,rejected}, filemeta: {upserted,skipped,rejected} }`
+
+**One of those counters is the sender's only report of a PERMANENT loss.** `skipped` means the peer was already current, which is benign. `forkDepthRefused` means a record was DROPPED and will not be retried — the push path reads exactly that field to report a refusal, so a receiver that does not emit it makes the loss silent at both ends. `schemaViolations` counts documents stored despite failing the RECEIVER's schema (validated, counted and let in — see the ingest rule below); `duplicateTriplets` counts edges the unique index rejected; `unknownType` counts the case below. **`rejected`** is everything the sender must not count as delivered: a document that fails its `Incoming*` schema, one past the 500 cap, one with a `_id` that is not a string or a seq outside the ingest ceiling, one the receiver's store refuses (named by id in the receiver's log), a fork refused at its cap, and an unknown chrono type.
+
+**A failed write that is not one document's answers 500.** A fault with no per-document cause (the collection unavailable, a dropped connection, a step-down) fails the page with a `500`, so the sender holds its watermark and offers the page again. Re-sending is safe: records that landed before the fault come back `skipped`, and a fork that landed comes back as the same fork (below).
+
+**The counter moves before the answer.** Before it answers, the receiver awaits a bump of its seq counter past every plausible seq the request carried — written or not, so a tombstoned, skipped or refused-as-unknown document moves it too. A seq the receiver refuses as implausible does not. A fork the request causes is then written with a LOCAL seq allocated above all of them, so it sorts after the arrival that caused it.
 
 **`filemeta` reports its counters like every other family.** Six arrays in, six sets of counters out. A peer older than 4.0 returns no `filemeta` counters.
 
@@ -252,7 +274,15 @@ Brain A:  { _id: "abc", seq: 5, fact: "The sky is blue" }
 Brain B:  { _id: "abc", seq: 5, fact: "The sky is cerulean" }   ← concurrent edit
 ```
 
-The receiving brain detects `incoming.seq === existing.seq && incoming.fact !== existing.fact` and creates a **fork**: a new fact with a fresh UUID, `forkOf: "abc"`, and the next available `seq`. Both versions coexist and can be reviewed by the user.
+The receiving brain detects `incoming.seq === existing.seq && incoming.fact !== existing.fact` and creates a **fork**: a new fact with `forkOf: "abc"` and the next available local `seq`. Both versions coexist and can be reviewed by the user.
+
+**The fork's id is derived** from the parent's id, the shared seq and the incoming text (a v4-shaped UUID). So a push whose response was lost and is re-sent upserts the fork it already made instead of forking again, and an identical divergence forks once.
+
+**Two caps, on both push doors.** A fork is refused when the parent's `forkOf` chain is already 10 deep, or when the parent already has 10 forks — stored ones and the ones the same request is creating, counted together. `POST /facts` answers `400 Fork depth limit (10) exceeded for _id '…'`; `batch-upsert` counts it in `forkDepthRefused` and `rejected`. **Mixed versions:** the fan-out cap on `batch-upsert` is new in this release — an older receiver accepts an eleventh fork of one parent that a newer one refuses, so a network mixing the two can hold different fork sets for such a record.
+
+### Receiver retention applies to arrivals
+
+A record that arrives — by push, by pull, or by an admin import — and carries no retention stamp of this instance is stamped by **this instance's** retention policy (type schema over space), counted from the record's own `createdAt`, never from the moment it arrived. A record older than the window is stamped in the past, and the TTL sweep deletes it through the normal delete path, which writes a tombstone that travels to peers. A stamp this instance already holds for the record is carried across the peer's update, never recomputed. The sender's own stamps never cross the wire.
 
 ### Entities and edges — last-writer-wins
 
@@ -428,12 +458,12 @@ There is no dedicated identity endpoint — a peer that needs the instance's ide
 
 | Method | Path | Body | Returns |
 |--------|------|------|---------|
-| `POST` | `/api/sync/facts` | `FactDoc` | `200 { status: 'inserted'\|'updated'\|'forked'\|'skipped'\|'tombstoned' }` — the `'forked'` case also returns `forkId` (the new fork document's `_id`) |
-| `POST` | `/api/sync/entities` | `EntityDoc` | `200 { status:'ok' }` (or `'tombstoned'`) |
-| `POST` | `/api/sync/edges` | `EdgeDoc` | `200 { status:'ok' }`, `'tombstoned'`, or **`'duplicate'`** when the unique `(from, fromKind, to, toKind)` index rejects the insert |
-| `POST` | `/api/sync/chrono` | `ChronoEntry` | `200 { status:'ok' }` (or `'tombstoned'`) |
+| `POST` | `/api/sync/facts` | `FactDoc` | `200 { status: 'inserted'\|'updated'\|'forked'\|'skipped'\|'tombstoned' }` — the `'forked'` case also returns `forkId` (the new fork document's `_id`, derived, so a re-sent push answers the same id); `400` for a fork at either cap, or a document the receiver's store refuses |
+| `POST` | `/api/sync/entities` | `EntityDoc` | `200 { status:'ok' }` (or `'tombstoned'`); `400` for a document the receiver's store refuses |
+| `POST` | `/api/sync/edges` | `EdgeDoc` | `200 { status:'ok' }`, `'tombstoned'`, or **`'duplicate'`** when the unique `(from, to, label, fromKind, toKind)` index already holds the edge under another id (an insert, or an update moving onto it); `400` for a document the store refuses |
+| `POST` | `/api/sync/chrono` | `ChronoEntry` | `200 { status:'ok' }` (or `'tombstoned'`); `400` for a `type` outside this space's vocabulary, or a document the store refuses |
 | `POST` | `/api/sync/batch-upsert` | `{ facts?, entities?, edges?, chrono?, links?, filemeta? }` | `200 { status:'ok', facts:{…}, entities:{…}, edges:{…}, chrono:{…}, links:{…}, filemeta:{…} }` — six arrays in, six sets of counters out |
-| `POST` | `/api/sync/tombstones` | `{ tombstones[] }` | `200 { applied: N }` |
+| `POST` | `/api/sync/tombstones` | `{ tombstones[] }` | `200 { applied: N }` — `N` is the tombstones with a plausible seq; one inside the ingest ceiling is refused on its own (logged), never the page. The counter is bumped past the highest one, awaited, before the answer |
 | `POST` | `/api/sync/file-tombstones` | **`{ spaceId, tombstones[] }`** — `spaceId` in the BODY, not the query; absent it answers `400 { error: 'spaceId required' }` | `200 { applied: N }` |
 | `POST` | `/api/sync/warm` | `{ networkId, spaces[] }` | `200` once the embedding model, token cache and collection handles are warm. It touches `facts`, `entities`, `edges` and `chrono` only, and results are discarded |
 
@@ -443,14 +473,14 @@ There is no dedicated identity endpoint — a peer that needs the instance's ide
 
 **There is no single-document route for `links` or `filemeta`.** Both arrive only through `batch-upsert`, so a peer implementation that only wires the per-type `POST` endpoints replicates neither.
 
-`POST /batch-upsert` is the primary push path used by the engine. The individual `POST /facts`, `/entities`, `/edges` endpoints remain for backwards compatibility and direct API usage.
+`POST /batch-upsert` is the primary push path used by the engine. The individual `POST /facts`, `/entities`, `/edges`, `/chrono` endpoints remain for backwards compatibility and direct API usage; they are the same page accept with one document, so every rule above holds on them too — the counter bump before the answer included.
 
-All incoming documents are validated against Zod schemas before any database write. Invalid documents are rejected with `400` (single endpoints) or silently filtered out (batch-upsert). Key constraints: `tags` max 100 items, all string fields validated for type safety. Unknown fields are stripped.
+All incoming documents are validated against Zod schemas before any database write. Invalid documents are rejected with `400` (single endpoints) or counted in `rejected` and named in a warning (batch-upsert). Key constraints: `tags` max 100 items, all string fields validated for type safety. Unknown fields are stripped.
 
 Two additional ingest safety caps protect the local seq counter and fork chains from a malicious or corrupted peer:
 
 - **Implausible seq** — the schema bound on `seq` is 2^50, but ingest applies a stricter ceiling of `2^50 − 2^40` (`rejectImplausibleSeq`); a document above it is refused so a poisoned seq can never exhaust the counter's headroom.
-- **Fork limits** — fork chain depth is capped at 10 on both paths: exceeding it returns `400` on the single `POST /facts` endpoint and is silently skipped in `batch-upsert`. The additional per-document **fan-out** cap (no more than 10 forks pointing at the same parent) is enforced **only on the single endpoint** — `batch-upsert` checks chain depth alone, not sibling fan-out.
+- **Fork limits** — fork chain depth and fan-out (no more than 10 forks pointing at the same parent, the request's own new forks counted) are each capped at 10 on both paths: exceeding either returns `400` on the single `POST /facts` endpoint and counts `forkDepthRefused` (and `rejected`) in `batch-upsert`, with the refused ids in the receiver's log.
 
 ### Gossip endpoints
 

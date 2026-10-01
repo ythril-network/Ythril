@@ -407,7 +407,7 @@ Ythril is designed for ISO 27001-class environments. Security is not a phase —
 The codebase targets production deployments with large datasets and high concurrency. Single-instance convenience must never create a scalability ceiling.
 
 - **No unbounded queries.** Every database query that could return an arbitrary number of documents uses a `limit`. Pagination is the default; fetching "all" is the exception and must be explicitly justified.
-- **No unbounded recursion or chain walks.** Any traversal (graphs, fork chains, nested structures) must have a hard depth cap with a visited-set cycle guard. The `forkChainDepth()` pattern in `sync.ts` is the reference implementation.
+- **No unbounded recursion or chain walks.** Any traversal (graphs, fork chains, nested structures) must have a hard depth cap with a visited-set cycle guard. The `forkDepth()` walk in `server/src/sync/upsert-plan.ts` is the reference implementation.
 - **Indexes exist for every query pattern.** When adding a new `find()` or `countDocuments()` call, ensure a supporting index exists or create one. Queries that scan entire collections are rejected in review.
 - **Streaming over buffering.** File transfers use streams. Large response sets are paginated. No endpoint loads an entire collection into fact.
 - **Rate limits protect every public surface.** The rate-limit middleware is applied to all route groups. Limits are tuned per-endpoint based on expected traffic, not a global catch-all.
