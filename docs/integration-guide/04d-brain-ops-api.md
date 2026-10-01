@@ -146,10 +146,15 @@ GET /api/brain/spaces/:spaceId/reindex-status
 **Response** `200`:
 
 ```json
-{ "spaceId": "general", "needsReindex": false }
+{ "spaceId": "general", "needsReindex": true, "reindex": { "running": true, "remaining": 1830, "failed": 0 } }
 ```
 
-Returns `true` when the embedding model has changed and facts need re-embedding.
+- `needsReindex` — the stored vectors were made by a different embedding model than the one configured. Recall in the space **refuses** while it is `true`, and it stays `true` until a reindex has rebuilt every record.
+- `reindex.running` — a reindex of this space is under way. Poll until it is `false`: that is when every record has been rebuilt.
+- `reindex.remaining` — records still waiting to be rebuilt.
+- `reindex.failed` — records whose rebuild gave up. They are listed, with the reason, by [the brain embed queue](#vectorless-records--the-embed-queue-for-brain-records) (`status: failed`), and `retry_embed_record` takes them again.
+
+`space_meta` carries the same `needsReindex` and `reindex` on both doors, from the same function.
 
 ---
 
@@ -159,21 +164,17 @@ Returns `true` when the embedding model has changed and facts need re-embedding.
 POST /api/brain/spaces/:spaceId/reindex
 ```
 
-Re-computes **all** embeddings with the current model. **Runs asynchronously** — the call returns immediately and the job proceeds in the background (it may take minutes for large spaces). Poll `GET /api/brain/spaces/:spaceId/reindex-status` for progress.
+Re-computes **every** embedding in the space with the current configuration — including the passages of converted documents and the captions and transcripts of media — even where a record's text has not changed, because a new prefix scheme, a new dimension or new weights behind the same model name make a different vector from the same text. **Runs in the background:** the call records the run and returns; every record is then queued and rebuilt by the embedding worker, behind any write somebody is waiting to search for. A run survives a restart and continues where it was. Poll [`reindex-status`](#check-reindex-status) for progress.
 
-> **Not the same as the backfill, and this is the pair people pick wrong.** [`POST /api/spaces/:id/reembed`](06-spaces-api.md#re-embed-backfill) touches only records that have **no** vector, is awaited, and returns counts — it is the way back from `suppressEmbeddings`. This one rewrites every vector in the space, which is what you want after changing embedder or model and a great deal of work if you only meant to fill a gap. Tools: `space_reindex` and `space_reembed`.
+> **Not the same as the backfill, and this is the pair people pick wrong.** [`POST /api/spaces/:id/reembed`](06-spaces-api.md#re-embed-backfill) touches only records that have **no** vector, is awaited, and returns counts — it is the way back from `suppressEmbeddings`. This one rebuilds every vector in the space, which is what you want after changing embedder or model and a great deal of work if you only meant to fill a gap. Tools: `space_reindex` and `space_reembed`.
 
-**Response** `200` — the job was *accepted*; `reindexed`/`errors` are always `0` here (the real counts land on the status endpoint), and `status` is `"started"`:
+**Response** `200` — the run was *recorded*; `reindexed`/`errors` are always `0` here and kept for older clients (the progress is `reindex` on the status endpoint), and `status` is `"started"`:
 
 ```json
 { "spaceId": "general", "reindexed": 0, "errors": 0, "status": "started" }
 ```
 
-Returns `409 { "error": "Reindex already in progress" }` if one is already running — **instance-wide, not
-per space.** One reindex runs at a time across the whole instance, and a second request is *refused rather
-than queued*. Thirteen fired at once get one `200` and twelve `409`s, so a loop that counts only non-200s as
-failures would report thirteen dispatched having dispatched one. **Retry on 409** is the correct
-client, and it self-paces.
+Returns `409 { "error": "A reindex of 'general' is already running" }` while **this space** has a run going. Any other space starts: the records are queued, the queue embeds one at a time, and a second space's run waits in the same queue rather than being refused. (Before, one reindex ran per instance and every other request was refused; a client that retries on `409` still works, it simply sees none for different spaces.)
 
 Returns `400` with the member spaces named if `:spaceId` is a **proxy**:
 
@@ -184,6 +185,8 @@ Returns `400` with the member spaces named if `:spaceId` is a **proxy**:
 
 A proxy has no index of its own — its members do; reindex each member. `GET /api/spaces` carries `proxyFor` on any space that has one, so a client can skip proxies without
 discovering this by trying.
+
+**What a run does when the embedder is away.** A rebuild that fails because the embedder cannot be reached leaves the record exactly as it was and is retried; nothing is stripped. A record whose own text the embedder refuses fails like any other embed job and is counted in `reindex.failed`.
 
 > **Reindexing does NOT repair "search returns nothing".** It re-computes the embeddings *stored on*
 > your records. Recall queries those vectors through a separate `$vectorSearch` index, and that index

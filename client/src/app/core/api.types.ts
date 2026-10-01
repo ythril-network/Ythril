@@ -433,6 +433,24 @@ export interface ChronoEntry {
   seq: number;
 }
 
+/** A space's reindex run, as `GET /api/brain/spaces/:id/reindex-status` and `space_meta` report it. */
+export interface ReindexRunState {
+  /** A run is going: its records are queued and being rebuilt. */
+  running: boolean;
+  /** Rebuild jobs still to run. */
+  remaining: number;
+  /** Rebuild jobs that gave up; listed with the space's embed jobs. */
+  failed: number;
+}
+
+/** `GET /api/brain/spaces/:id/reindex-status`. */
+export interface ReindexStatus {
+  spaceId: string;
+  /** Recall refuses in this space until it is false. */
+  needsReindex: boolean;
+  reindex: ReindexRunState;
+}
+
 /** Embedding-job backlog for a space (F9 Overview embedding-queue panel). */
 export interface EmbeddingQueue {
   pending: number;

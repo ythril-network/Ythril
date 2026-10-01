@@ -241,7 +241,11 @@ export async function initSpace(
     );
     setReindexNeeded(spaceId, true);
   } else {
-    setReindexNeeded(spaceId, false);
+    // A reindex run that began with the flag asserted keeps it asserted until the run ends, whatever the one sampled
+    // fact says: a boot mid-run can sample a record already rebuilt, and recall would reopen over mixed vectors.
+    // Read here, in the step that computes the flag, so there is no window in which it reads false.
+    const { reindexRunFlags } = await import('../brain/reindex.js');
+    setReindexNeeded(spaceId, await reindexRunFlags(spaceId));
   }
 }
 
@@ -763,6 +767,10 @@ export async function wipeSpace(spaceId: string, types?: WipeCollectionType[]): 
   // bounds it, but a wipe is an operator saying "gone now". Any wipe, since a spill mixes record kinds.
   const { dropSpillsForSpace } = await import('../brain/read-spill-store.js');
   await dropSpillsForSpace(spaceId);
+
+  // A reindex run is a promise about the records a full wipe just removed. Left behind, it would hold the space's
+  // reindex refusal and its recall flag for work that no longer exists, and a boot would resume it.
+  if (isFullWipe) await col(spaceCollection(spaceId, 'reindexRun')).deleteMany({});
 
   // Clear tombstones for the wiped types.
   // Full wipe: drop everything (single deleteMany with no filter).

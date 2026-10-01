@@ -27,12 +27,11 @@
  * arrives BEFORE the work, that the job guard is released afterwards, and — the part that matters most — that all
  * five collections actually come out with an embedding.
  *
- * **What the API cannot observe is WHICH TEXT was embedded.** The reindex loop writes `embedding` and
- * `embeddingModel` and deliberately does not write `matchedText`, so there is no way from outside to tell
- * `edgeEmbedText(from, label, to, …)` from `edgeEmbedText(label, from, to, …)` — both produce a vector. That is
- * exactly what an extraction of five similar loops is most likely to get wrong, and it is why
- * `reindex-embeds-the-same-text.test.js` exists beside this file as a source-level gate. Two checks because there
- * are two failure modes, and neither can see the other's.
+ * **Which TEXT was embedded is pinned elsewhere.** Since Q-99 part 2 a reindex queues its records and the worker
+ * rebuilds them through the one text builder every write uses, so the rebuilt `matchedText` is the creator's —
+ * asserted per kind, derived records included, by `a-rebuild-embeds-what-the-producer-embedded-db.test.js`, and
+ * `reindex-embeds-the-same-text.test.js` holds that the reindex builds no text of its own. This file pins the
+ * contract both doors see.
  *
  * Run: node --test testing/integration/reindex-contract.test.js
  */
@@ -223,13 +222,12 @@ describe('reindex — what the API can actually attribute to it', () => {
   it('leaves every collection embedded, in all five branches', async () => {
     // **What this does and does not prove.** A normally-written record already carries an embedding, so this cannot
     // show that the reindex is what produced one — the operation is idempotent by design. What it does show is that
-    // a reindex over records of every kind leaves them all embedded: no branch throws, and none clears a vector it
-    // fails to replace. Dropping a loop in the extraction would not fail this; dropping a loop that half-writes
-    // would.
+    // a reindex over records of every kind leaves them all embedded: no kind throws, and none clears a vector it
+    // fails to replace.
     //
-    // The assertion that a branch used the RIGHT text is not observable here at all — the loop does not store
-    // `matchedText` — and lives in `standalone/reindex-embeds-the-same-text.test.js`. Stated here so the pair is
-    // read as one net rather than this file being mistaken for the whole of it.
+    // That each kind was rebuilt from the RIGHT text is asserted where the text is built, by
+    // `standalone/a-rebuild-embeds-what-the-producer-embedded-db.test.js`. Stated here so the pair is read as one
+    // net rather than this file being mistaken for the whole of it.
     const seeded = { facts: 1, entities: 2, edges: 1, chrono: 1, files: 1 };
 
     await reindex(SPACE);

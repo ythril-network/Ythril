@@ -18,7 +18,7 @@ import { classifyEntityUpsertAgainst, SchemaViolationError, type UpdateValidatio
 import { writeFilterFor, writeOutcome } from './write-precondition.js';
 import { applyDeleteFields, setUnlessDeleted } from './delete-fields.js';
 import { mergeTagsAndProperties, mergePropertiesOrKeep, mergeTagsOrKeep } from './merge-fields.js';
-import { enqueueEmbedJob, retireEmbedJob } from './embed-queue.js';
+import { enqueueEmbedJob, retireEmbedJob, EMBED_PRIORITY } from './embed-queue.js';
 import { embeddingSuppressedFor } from './suppress-embeddings.js';
 import { LINK_CLASSES, assertLinkRecords, linksPointingAt, docsFromCollection, type LinkClass }
   from './link-adjacency.js';
@@ -208,7 +208,7 @@ export async function upsertEntity(
     if ('_expireAt' in $set) entity._expireAt = $set['_expireAt'] as Date;
     else if ('_expireAt' in $unset) delete (entity as { _expireAt?: unknown })._expireAt;
     // After the write, never before: a job for a record that failed to store would be a job for nothing.
-    if (!embeddingFields.embedding && !suppressed) await enqueueEmbedJob(spaceId, 'entity', entity._id);
+    if (!embeddingFields.embedding && !suppressed) await enqueueEmbedJob(spaceId, 'entity', entity._id, { priority: EMBED_PRIORITY.write });
     if (actor) emitWebhookEvent({ event: 'entity.updated', spaceId, entry: { ...entity, embedding: undefined }, ...actor });
     return { entity: withoutVector(entity) };
   }
@@ -266,7 +266,7 @@ export async function upsertEntity(
   await collection.insertOne(asDoc<EntityDoc>(doc));
   // Not queued when suppressed, for the reason `saveFact` states: a queued job stores the vector the flag
   // forbids moments later, and nothing revisits it.
-  if (!embeddingFields.embedding && !suppressed) await enqueueEmbedJob(spaceId, 'entity', doc._id);
+  if (!embeddingFields.embedding && !suppressed) await enqueueEmbedJob(spaceId, 'entity', doc._id, { priority: EMBED_PRIORITY.write });
   // Real-time duplicate-rule evaluation (opt-in per space). Fire-and-forget; the
   // dynamic import avoids a static cycle with dupe-scanner.js.
   //
@@ -460,7 +460,7 @@ export async function updateEntityById(
   // text from the record as STORED, and honour the exclusion flag in whichever direction it was moved —
   // `embedStoredRecord` unsets the vector when the flag is on and computes one when it is off, so this path
   // still never has to know which way the toggle went.
-  await enqueueEmbedJob(spaceId, 'entity', result._id);
+  await enqueueEmbedJob(spaceId, 'entity', result._id, { priority: EMBED_PRIORITY.write });
   if (actor) emitWebhookEvent({ event: 'entity.updated', spaceId, entry: { ...result, embedding: undefined }, ...actor });
   return result;
 }

@@ -20,7 +20,7 @@ import { stampSkewOnCreate } from './stamp-skew.js';
 import { getSpaceMeta } from '../spaces/schema-validation.js';
 import { applyDeleteFields, setUnlessDeleted } from './delete-fields.js';
 import { mergePropertiesOrKeep, mergeTagsOrKeep } from './merge-fields.js';
-import { enqueueEmbedJob, retireEmbedJob } from './embed-queue.js';
+import { enqueueEmbedJob, retireEmbedJob, EMBED_PRIORITY } from './embed-queue.js';
 import { embeddingSuppressedFor } from './suppress-embeddings.js';
 import { linkClassFor, LINK_CLASSES } from './link-adjacency.js';
 import { frontierEdgeQuery } from './frontier-query.js';
@@ -259,7 +259,7 @@ export async function upsertEdge(
     };
     if ('_expireAt' in $set) updatedEdge._expireAt = $set['_expireAt'] as Date;
     else if ('_expireAt' in $unset) delete (updatedEdge as { _expireAt?: unknown })._expireAt;
-    if (!embeddingFields.embedding && !suppressed) await enqueueEmbedJob(spaceId, 'edge', updatedEdge._id);
+    if (!embeddingFields.embedding && !suppressed) await enqueueEmbedJob(spaceId, 'edge', updatedEdge._id, { priority: EMBED_PRIORITY.write });
     if (actor) emitWebhookEvent({ event: 'edge.created', spaceId, entry: { ...updatedEdge, embedding: undefined }, ...actor });
     return withoutVector(updatedEdge);
   }
@@ -307,7 +307,7 @@ export async function upsertEdge(
   // threshold, so presence is the signal. The write proceeds either way -- a backdated import is legitimate.
   stampSkewOnCreate(doc, getSpaceMeta(spaceId));
   await collection.insertOne(asDoc<EdgeDoc>(doc));
-  if (!embeddingFields.embedding && !suppressed) await enqueueEmbedJob(spaceId, 'edge', doc._id);
+  if (!embeddingFields.embedding && !suppressed) await enqueueEmbedJob(spaceId, 'edge', doc._id, { priority: EMBED_PRIORITY.write });
   if (actor) emitWebhookEvent({ event: 'edge.created', spaceId, entry: { ...doc, embedding: undefined }, ...actor });
   return withoutVector(doc);
 }
@@ -568,7 +568,7 @@ export async function updateEdgeById(
       // label and the endpoint names, so a re-key always changes it.
       const work = embedQueueWorkFor(moved);
       await retireEmbedJob(spaceId, 'edge', work.retire);
-      await enqueueEmbedJob(spaceId, 'edge', work.enqueue);
+      await enqueueEmbedJob(spaceId, 'edge', work.enqueue, { priority: EMBED_PRIORITY.write });
       brainWriteSeqTotal.labels({
         collection: 'edges', outcome: writeOutcome(true, ifMatchSeq !== undefined, false),
       }).inc();
@@ -632,7 +632,7 @@ export async function updateEdgeById(
   // ONE enqueue, unconditionally, for every successful update: recompute the text from the record as
   // STORED, and honour excludeFromVectorSearch in whichever direction it moved. See the entity update and
   // `embedStoredRecord` for why this replaced an inline embed built from a stale read.
-  await enqueueEmbedJob(spaceId, 'edge', result._id);
+  await enqueueEmbedJob(spaceId, 'edge', result._id, { priority: EMBED_PRIORITY.write });
   if (actor) emitWebhookEvent({ event: 'edge.updated', spaceId, entry: { ...result, embedding: undefined }, ...actor });
   return result;
 }

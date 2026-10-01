@@ -19,7 +19,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post, get, waitForIndexed as waitForIndexedShared } from '../sync/helpers.js';
+import { INSTANCES, post, get, waitForIndexed as waitForIndexedShared, ensureReindexed } from '../sync/helpers.js';
 import { openMcpSession } from '../sync/mcp-session.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -31,17 +31,6 @@ let tokenA;
 let embeddingAvailable = false;
 
 function token() { return tokenA; }
-
-async function ensureReindexed(baseUrl, tok) {
-  const { body: spacesBody } = await get(baseUrl, tok, '/api/spaces');
-  const spaces = spacesBody?.spaces ?? [];
-  for (const space of spaces) {
-    const { body: statusBody } = await get(baseUrl, tok, `/api/brain/spaces/${space.id}/reindex-status`);
-    if (statusBody?.needsReindex) {
-      await post(baseUrl, tok, `/api/brain/spaces/${space.id}/reindex`, {});
-    }
-  }
-}
 
 // The MCP client harness lives in ../sync/mcp-session.js. It was copy-pasted into ten files while the
 // transport was SSE; 4.0 removed SSE and one shared `POST /mcp` caller replaced every copy.

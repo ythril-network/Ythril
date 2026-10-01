@@ -1,5 +1,5 @@
 import { Injectable, inject } from '@angular/core';
-import type { ReembedResult } from './api.types';
+import type { ReembedResult, ReindexStatus } from './api.types';
 import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import type {
@@ -159,8 +159,8 @@ export class SpacesApi {
     );
   }
 
-  getReindexStatus(spaceId: string): Observable<{ spaceId: string; needsReindex: boolean }> {
-    return this.http.get<{ spaceId: string; needsReindex: boolean }>(`/api/brain/spaces/${spaceId}/reindex-status`);
+  getReindexStatus(spaceId: string): Observable<ReindexStatus> {
+    return this.http.get<ReindexStatus>(`/api/brain/spaces/${spaceId}/reindex-status`);
   }
 
   reindex(spaceId: string): Observable<Record<string, number>> {

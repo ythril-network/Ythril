@@ -85,6 +85,53 @@ function jobs(spaceId: string) {
   return col<BrainEmbedJobDoc>(spaceCollection(spaceId, 'embedJobs'));
 }
 
+/**
+ * The lanes a job is claimed in, most urgent first.
+ *
+ * ## Why the queue has lanes at all
+ *
+ * The claim used to take the oldest claimable job of the first space that had one. That was fair while every job was
+ * a write. Once a reindex queues a whole space and a backfill queues every vectorless record, oldest-first holds the
+ * write somebody is waiting to search for behind tens of thousands of jobs nobody is waiting for.
+ *
+ * - `write` — a local write.
+ * - `background` — work that arrived on its own: a peer's record, a backfill.
+ * - `rebuild` — a reindex.
+ *
+ * Every caller states its lane (`enqueueEmbedJob` takes it as a required argument), because a lane that defaults is
+ * a decision nobody made at the call site.
+ */
+export const EMBED_PRIORITY = { write: 0, background: 1, rebuild: 2 } as const;
+export type EmbedPriority = typeof EMBED_PRIORITY[keyof typeof EMBED_PRIORITY];
+
+/** Every lane, in the order they are claimed on an ordinary claim. */
+const LANES: readonly EmbedPriority[] = [EMBED_PRIORITY.write, EMBED_PRIORITY.background, EMBED_PRIORITY.rebuild];
+
+/**
+ * The lane order for the `n`th claim.
+ *
+ * Strict priority would let a steady stream of writes starve the other lanes for ever, and a reindex that never
+ * finishes keeps its space's recall refused — so one space's writers could switch off another space's search. Every
+ * fourth claim therefore starts one lane lower, in turn: lane 1 leads on n % 8 = 3, lane 2 on n % 8 = 7. Under full
+ * load each lower lane keeps at least one claim in eight, and a write still leads six claims in eight.
+ */
+export function claimOrder(n: number): EmbedPriority[] {
+  const slot = ((n % 8) + 8) % 8;
+  if (slot === 3) return [EMBED_PRIORITY.background, EMBED_PRIORITY.rebuild, EMBED_PRIORITY.write];
+  if (slot === 7) return [EMBED_PRIORITY.rebuild, EMBED_PRIORITY.write, EMBED_PRIORITY.background];
+  return [...LANES];
+}
+
+/**
+ * The filter value that selects one lane. Lane 0 also takes a job with NO priority: one queued before lanes existed,
+ * which would otherwise sit in no lane and never be claimed. Two point values, so the index still orders it.
+ */
+function laneMatch(priority: EmbedPriority): unknown {
+  return priority === EMBED_PRIORITY.write ? { $in: [EMBED_PRIORITY.write, null] } : priority;
+}
+
+let claimCount = 0;
+
 /** Composite id, so a rewrite of the same record replaces its job rather than adding one. */
 export function embedJobId(recordType: BrainEmbedRecordType, recordId: string): string {
   return `${recordType}:${recordId}`;
@@ -97,8 +144,11 @@ export function embedJobId(recordType: BrainEmbedRecordType, recordId: string): 
  * it to one value, and the sort key comes last so it is satisfied by the index rather than in memory.
  */
 export const EMBED_JOB_INDEXES: Array<Record<string, 1>> = [
-  // claimNextEmbedJob: { status, $or:[claimableAfter …] } sorted by createdAt.
-  { status: 1, claimableAfter: 1, createdAt: 1 },
+  // claimNextEmbedJob: { status, priority, claimableAfter } sorted by createdAt. The fresh pass pins all three to
+  // one value each, so the index alone yields the oldest job with no sort stage.
+  { status: 1, priority: 1, claimableAfter: 1, createdAt: 1 },
+  // The reindex watcher: how many rebuild jobs are still pending or processing.
+  { rebuild: 1, status: 1 },
   // resetStalledEmbedJobs: { status, progressAt < cutoff }, and the per-status counts.
   { status: 1, progressAt: 1 },
   // reviveFailedEmbedJobs: { status: 'failed', revivedForVersion != running }.
@@ -133,37 +183,19 @@ export async function enqueueEmbedJob(
   spaceId: string,
   recordType: BrainEmbedRecordType,
   recordId: string,
+  { priority }: { priority: EmbedPriority },
 ): Promise<void> {
-  // A spill is a read's own OUTPUT, written so a caller can download a graph that did not fit inline. Embedding
-  // it would spend model time turning recall results into recall-searchable content — so the next recall could
-  // match the JSON dump of an earlier one. It is also deleted within a day, which is shorter than the queue's
-  // own patience on a busy instance.
-  //
-  // The rule lives here rather than at the call site because `upsertFileMeta` enqueues unconditionally, and
-  // unconditionally is correct: every other file in the store IS content.
-  if (recordType === 'file' && isSpillPath(recordId)) return;
+  if (!embeddable(recordType, recordId)) return;
 
   const now = new Date().toISOString();
   try {
     await jobs(spaceId).updateOne(
       asFilter<BrainEmbedJobDoc>({ _id: embedJobId(recordType, recordId) }),
       asUpdate<BrainEmbedJobDoc>({
-        $set: {
-          spaceId, recordType, recordId,
-          status: 'pending',
-          attempts: 0,
-          // Reset with `attempts`, for the same reason: a new write is new content, and it must not inherit
-          // a half-hour backoff earned by an outage that has since ended.
-          transientFailures: 0,
-          lostChildFailures: 0,
-          maxAttempts: MAX_EMBED_ATTEMPTS,
-          lastError: null,
-          claimedAt: null,
-          progressAt: null,
-          claimableAfter: null,
-          claimToken: null,
-          updatedAt: now,
-        },
+        // Every field reset: a new write is new content, and it must not inherit a verdict — or a half-hour
+        // backoff earned by an outage that has since ended — reached on the old content.
+        $set: { ...freshJob(spaceId, recordType, recordId, now) },
+        $min: { priority },
         $setOnInsert: { createdAt: now },
       }),
       { upsert: true },
@@ -174,36 +206,148 @@ export async function enqueueEmbedJob(
   }
 }
 
-/** Claim one job across the given spaces, oldest first. Returns null when nothing is claimable. */
+/**
+ * Whether a record may be queued at all.
+ *
+ * A spill is a read's own OUTPUT, written so a caller can download a graph that did not fit inline. Embedding it
+ * would spend model time turning recall results into recall-searchable content — so the next recall could match the
+ * JSON dump of an earlier one. It is also deleted within a day, which is shorter than the queue's own patience on a
+ * busy instance. The rule lives here, in both enqueue paths, because `upsertFileMeta` enqueues unconditionally and
+ * a sweep walks every file.
+ */
+function embeddable(recordType: BrainEmbedRecordType, recordId: string): boolean {
+  return !(recordType === 'file' && isSpillPath(recordId));
+}
+
+/** A job as it is when nothing has happened to it yet — the one place both enqueue paths take its fields from. */
+function freshJob(spaceId: string, recordType: BrainEmbedRecordType, recordId: string, now: string) {
+  return {
+    spaceId, recordType, recordId,
+    status: 'pending' as const,
+    attempts: 0,
+    transientFailures: 0,
+    lostChildFailures: 0,
+    maxAttempts: MAX_EMBED_ATTEMPTS,
+    lastError: null,
+    claimedAt: null,
+    progressAt: null,
+    claimableAfter: null,
+    claimToken: null,
+    updatedAt: now,
+  };
+}
+
+/** Ids per bulk write. The probe measured no difference between 500 and 1000 (about 1 s for 40k jobs). */
+const SWEEP_BATCH = 500;
+
+/**
+ * Queue many records of one kind at once — what a sweep (a reindex, a backfill) does, as opposed to a write.
+ *
+ * ## How it differs from `enqueueEmbedJob`, and why each difference is there
+ *
+ * - **It does not reset a job that is already waiting.** A sweep is not new content. A pending job keeps its
+ *   attempts, its outage counter and its backoff, or a reindex during an outage would hammer the embedder by
+ *   resetting every backoff it touched.
+ * - **It does revive a FAILED job**, with a fresh budget: the operator asking again is the retry, and a job kept at
+ *   its spent budget would go terminal on its first error.
+ * - **It re-runs a PROCESSING job.** The worker holding it read the job before `rebuild` was set and may finish it as
+ *   "unchanged"; nulling the claim makes that finish match nothing, so the job runs again under the rebuild.
+ * - **It throws.** A write's enqueue swallows its error so the write still lands; a sweep that swallowed one would
+ *   report a batch as queued that never was, and a reindex would then declare itself done over records it never
+ *   reached.
+ *
+ * `priority` is lowered with `$min` and never raised, so a record a local write already queued stays urgent.
+ */
+export async function enqueueEmbedJobs(
+  spaceId: string,
+  recordType: BrainEmbedRecordType,
+  recordIds: readonly string[],
+  { priority, rebuild }: { priority: EmbedPriority; rebuild?: boolean },
+): Promise<{ queued: number }> {
+  const ids = recordIds.filter(id => embeddable(recordType, id));
+  let queued = 0;
+  for (let i = 0; i < ids.length; i += SWEEP_BATCH) {
+    const batch = ids.slice(i, i + SWEEP_BATCH);
+    const now = new Date().toISOString();
+    const ops = batch.flatMap(recordId => {
+      const _id = embedJobId(recordType, recordId);
+      return [
+        {
+          updateOne: {
+            filter: { _id },
+            update: {
+              $setOnInsert: { ...freshJob(spaceId, recordType, recordId, now), createdAt: now },
+              $min: { priority },
+              ...(rebuild ? { $set: { rebuild: true } } : {}),
+            },
+            upsert: true,
+          },
+        },
+        {
+          updateOne: {
+            filter: { _id, status: 'failed' },
+            update: { $set: { ...freshJob(spaceId, recordType, recordId, now) } },
+          },
+        },
+        {
+          updateOne: {
+            filter: { _id, status: 'processing' },
+            update: {
+              $set: { status: 'pending', claimToken: null, claimedAt: null, progressAt: null, claimableAfter: null, updatedAt: now },
+            },
+          },
+        },
+      ];
+    });
+    await jobs(spaceId).bulkWrite(ops as unknown as Parameters<ReturnType<typeof jobs>['bulkWrite']>[0], { ordered: false });
+    queued += batch.length;
+  }
+  if (queued > 0) _signal.markSpaceMayHaveWork(spaceId);
+  return { queued };
+}
+
+/**
+ * Claim one job across the given spaces. Returns null when nothing is claimable.
+ *
+ * Lane by lane ACROSS every probed space, so a write in the last space overtakes a reindex in the first — see
+ * `EMBED_PRIORITY` and `claimOrder`. Within a lane, a job never tried (`claimableAfter: null`) before one whose retry
+ * has come due: the first is one equality per index field and comes out of the index already in age order, where
+ * the old single query's three-way `$or` sorted every pending job in memory on every claim (61 ms a claim at 40k).
+ *
+ * A space leaves the probe hint only when EVERY pass found nothing there. Dropping it after an empty lane-0 pass
+ * would strand its lane-2 jobs until the next full scan, which is the line that looks like bookkeeping.
+ */
 export async function claimNextEmbedJob(spaceIds: string[]): Promise<BrainEmbedJobDoc | null> {
   const now = new Date().toISOString();
   // Consumes the full-scan slot, so it is called exactly once per claim.
-  for (const spaceId of _signal.spacesToProbe(spaceIds)) {
-    const claimed = await jobs(spaceId).findOneAndUpdate(
-      asFilter<BrainEmbedJobDoc>({
-        status: 'pending',
-        $or: [
-          { claimableAfter: null },
-          { claimableAfter: { $exists: false } },
-          { claimableAfter: { $lte: now } as unknown as string },
-        ],
-      }),
-      asUpdate<BrainEmbedJobDoc>({
-        $set: {
-          status: 'processing', claimedAt: now, progressAt: now, claimableAfter: null,
-          updatedAt: now, claimToken: newClaimToken(),
-        },
-        $inc: { attempts: 1 },
-      }),
-      { returnDocument: 'after', sort: { createdAt: 1 } },
-    ) as BrainEmbedJobDoc | null;
-
-    if (claimed) {
-      _signal.noteClaimed(spaceId);
-      return claimed;
+  const probe = _signal.spacesToProbe(spaceIds);
+  const order = claimOrder(claimCount++);
+  for (const priority of order) {
+    for (const due of [false, true]) {
+      for (const spaceId of probe) {
+        const claimed = await jobs(spaceId).findOneAndUpdate(
+          asFilter<BrainEmbedJobDoc>({
+            status: 'pending',
+            priority: laneMatch(priority) as never,
+            claimableAfter: (due ? { $ne: null, $lte: now } : null) as unknown as string,
+          }),
+          asUpdate<BrainEmbedJobDoc>({
+            $set: {
+              status: 'processing', claimedAt: now, progressAt: now, claimableAfter: null,
+              updatedAt: now, claimToken: newClaimToken(),
+            },
+            $inc: { attempts: 1 },
+          }),
+          { returnDocument: 'after', sort: { createdAt: 1 } },
+        ) as BrainEmbedJobDoc | null;
+        if (claimed) {
+          _signal.noteClaimed(spaceId);
+          return claimed;
+        }
+      }
     }
-    _signal.noteEmpty(spaceId);
   }
+  for (const spaceId of probe) _signal.noteEmpty(spaceId);
   return null;
 }
 
@@ -668,5 +812,7 @@ export async function enqueueIngestedRecord(
   // above is narrow on purpose: it names the two fields this decision reads, so a caller can see at the call
   // site that the record's own mark is what travels here.
   if (embeddingSuppressedFor(spaceId, recordType, doc as unknown as Record<string, unknown>)) return;
-  await enqueueEmbedJob(spaceId, recordType, doc._id);
+  // The background lane: a record a peer sent is not a write anybody here is waiting on. It still keeps one claim in
+  // eight under load (`claimOrder`), so a busy instance cannot leave a peer's records unsearchable for ever.
+  await enqueueEmbedJob(spaceId, recordType, doc._id, { priority: EMBED_PRIORITY.background });
 }

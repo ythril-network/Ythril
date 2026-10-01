@@ -14,7 +14,7 @@ import { ChronoTabComponent } from './chrono-tab.component';
 import { OverviewTabComponent } from './overview-tab.component';
 import { ReviewTabComponent } from './review-tab.component';
 import { FormsModule } from '@angular/forms';
-import { Space, SpaceStats, AboutInfo } from '../../core/api.types';
+import { Space, SpaceStats, AboutInfo, ReindexRunState, ReindexStatus } from '../../core/api.types';
 import { SpacesApi } from '../../core/spaces-api.service';
 import { OverviewDataService } from './overview-data.service';
 import { SpaceSettingsPopupComponent } from '../settings/space-settings-popup.component';
@@ -225,9 +225,10 @@ interface SpaceView {
       @if (needsReindex() && !activeSpaceIsProxy()) {
         <div class="reindex-banner">
           <span><ph-icon name="warning" [size]="16" style="display:inline-flex;vertical-align:middle;margin-right:4px;"/> {{ 'brain.reindex.stale' | transloco }}</span>
-          <button class="btn btn-sm btn-primary" [disabled]="reindexing()" (click)="runReindex()">
+          <button class="btn btn-sm btn-primary" [disabled]="reindexing()" [attr.aria-busy]="reindexing() ? 'true' : null"
+            (click)="runReindex()">
             @if (reindexing()) { <span class="spinner" style="width:11px;height:11px;border-width:2px;"></span> }
-            {{ 'brain.reindex.button' | transloco }}
+            {{ (reindexRun()?.running ? 'brain.overview.reindexing' : 'brain.reindex.button') | transloco }}
           </button>
         </div>
       }
@@ -348,7 +349,7 @@ interface SpaceView {
         @if (activeTab() === 'overview') {
           @if (activeSpace(); as sp) {
             <app-overview-tab [space]="sp" [stats]="activeStats()" [needsReindex]="needsReindex()"
-              [reindexing]="reindexing()" [about]="aboutInfo()" [embeddingQueue]="ov.embeddingQueue()"
+              [reindexing]="reindexing()" [reindexRun]="reindexRun()" [about]="aboutInfo()" [embeddingQueue]="ov.embeddingQueue()"
               [openVotes]="ov.overviewVotes()" [tokenAccess]="ov.tokenAccess()" [completeness]="ov.completeness()" [activity]="ov.spaceActivity()"
               [pending]="ov.overviewPending()"
               (reindex)="runReindex()" (retryFailed)="runRetryFailedEmbeddings()"
@@ -453,7 +454,18 @@ export class BrainComponent implements OnInit, OnDestroy {
 
   // Reindex
   needsReindex = signal(false);
-  reindexing = signal(false);
+  /** The active space's reindex run as the server last reported it. */
+  reindexRun = signal<ReindexRunState | null>(null);
+  /** A reindex request is on the wire. */
+  private reindexInFlight = signal(false);
+  /**
+   * ONE answer for both Reindex buttons (the stale-index banner's and the Overview's). It used to be the request
+   * alone, which lasts milliseconds, so a second click during a run that takes minutes sent a second reindex.
+   */
+  reindexing = computed(() => this.reindexInFlight() || this.reindexRun()?.running === true);
+  /** While a run is going the page asks again on this interval, and stops when the server says it ended. */
+  private static readonly REINDEX_POLL_MS = 5_000;
+  private reindexPollTimer?: ReturnType<typeof setTimeout>;
 
   // Entity picker
 
@@ -536,6 +548,7 @@ export class BrainComponent implements OnInit, OnDestroy {
   ngOnDestroy(): void {
     this.closeLiveStream();
     clearTimeout(this.liveRefreshTimer);
+    clearTimeout(this.reindexPollTimer);
   }
 
   // ── Live updates (F12) ──────────────────────────────────────────────────────
@@ -614,7 +627,13 @@ export class BrainComponent implements OnInit, OnDestroy {
     // rows underneath you: the page looked unchanged until you clicked a tab, and the space you had
     // chosen never introduced itself. Re-clicking the chip of the space you are ALREADY on is not a
     // switch, so that leaves your current tab alone.
-    if (this.activeSpaceId() !== id) this.activeTab.set('overview');
+    if (this.activeSpaceId() !== id) {
+      this.activeTab.set('overview');
+      // The previous space's run is not this one's: hold nothing and poll nothing until this space answers.
+      clearTimeout(this.reindexPollTimer);
+      this.reindexPollTimer = undefined;
+      this.reindexRun.set(null);
+    }
     this.activeSpaceId.set(id);
     this.picker.spaceId.set(id);
     this.drawerState.spaceId.set(id);
@@ -782,9 +801,36 @@ export class BrainComponent implements OnInit, OnDestroy {
       error: () => { /* stats are best-effort here; no Overview panel blanks on them */ },
     });
     this.spacesApi.getReindexStatus(spaceId).subscribe({
-      next: ({ needsReindex }) => this.needsReindex.set(needsReindex),
+      next: (st) => this.applyReindexStatus(spaceId, st),
       error: () => {},
     });
+  }
+
+  /**
+   * Take a reindex-status answer, and keep asking while a run is going.
+   *
+   * Nothing else tells the page a run ended: the rebuild is not a write, so no live event fires for it. Without the
+   * poll the buttons stayed held and the banner stayed up until the user switched space or reloaded. When the run
+   * ends, the stats and the flag are read again, once.
+   */
+  private applyReindexStatus(spaceId: string, st: ReindexStatus): void {
+    if (this.activeSpaceId() !== spaceId) return;
+    const wasRunning = this.reindexRun()?.running === true;
+    this.needsReindex.set(st.needsReindex);
+    this.reindexRun.set(st.reindex ?? null);
+    clearTimeout(this.reindexPollTimer);
+    this.reindexPollTimer = undefined;
+    if (st.reindex?.running) {
+      this.reindexPollTimer = setTimeout(() => {
+        this.reindexPollTimer = undefined;
+        this.spacesApi.getReindexStatus(spaceId).subscribe({
+          next: (next) => this.applyReindexStatus(spaceId, next),
+          error: () => {},
+        });
+      }, BrainComponent.REINDEX_POLL_MS);
+    } else if (wasRunning) {
+      this.loadStats(spaceId);
+    }
   }
 
   requestDelete(id: string): void { this.recordList.confirmDeleteId.set(id); }
@@ -844,10 +890,11 @@ export class BrainComponent implements OnInit, OnDestroy {
    * was cleared only by switching space, so a note about a finished job outlived everything after it.
    */
   runReindex(): void {
-    this.reindexing.set(true);
+    if (this.reindexing()) return;
+    this.reindexInFlight.set(true);
     this.spacesApi.reindex(this.activeSpaceId()).subscribe({
       next: () => {
-        this.reindexing.set(false);
+        this.reindexInFlight.set(false);
         this.toast.info(this.transloco.translate('brain.reindex.started'));
         // The stale-index banner is NOT cleared here. It was, optimistically — and the index really is
         // still stale, because the job has only just been scheduled. `loadStats` re-reads the true state
@@ -856,7 +903,14 @@ export class BrainComponent implements OnInit, OnDestroy {
         this.loadStats(this.activeSpaceId());
       },
       error: (err) => {
-        this.reindexing.set(false);
+        this.reindexInFlight.set(false);
+        // A 409 is this space's run still going, which is not a failure: say so in the reader's language and
+        // pick the run up, so the buttons are held and the progress shows.
+        if (err?.status === 409) {
+          this.toast.info(this.transloco.translate('brain.reindex.alreadyRunning'));
+          this.loadStats(this.activeSpaceId());
+          return;
+        }
         // The server's own words when it has them: a proxy refusal names the member spaces to reindex
         // instead, and "check server logs" would send the reader to the one place that does not say it.
         this.toast.error(err?.error?.error ?? this.transloco.translate('brain.reindex.failed'));

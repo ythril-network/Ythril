@@ -155,6 +155,14 @@ export interface BrainEmbedJobDoc {
    * version cannot churn a genuinely-bad record.
    */
   revivedForVersion?: string | null;
+  /**
+   * Which lane the job is claimed in: 0 a local write somebody may be waiting to search for, 1 work that arrived on
+   * its own (a peer's record, a backfill), 2 a reindex rebuild. Absent on a job written before lanes existed, which
+   * claims as 0. Only ever lowered (`$min`), so a write into a queued rebuild makes it urgent and never the reverse.
+   */
+  priority?: 0 | 1 | 2;
+  /** Set by a reindex: rebuild the vector even when its text and model name are unchanged. */
+  rebuild?: boolean;
   createdAt: string;
   updatedAt: string;
 }

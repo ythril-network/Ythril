@@ -35,10 +35,12 @@ const spaces = () => strip(readFileSync('server/src/api/spaces.ts', 'utf8'));
 
 const handler = () => {
   const s = search();
-  const i = s.indexOf('export function planReindex');
+  const i = s.indexOf('export async function planReindex');
   assert.ok(i > 0, 'planReindex moved — re-point this test at wherever the refusal is decided');
   // To the end of the decision function: `startReindex` is the work, and nothing after it is a refusal.
-  return s.slice(i, s.indexOf('export function startReindex', i));
+  const end = s.indexOf('export async function startReindex', i);
+  assert.ok(end > i, 'startReindex moved — the decision function has no end to slice to');
+  return s.slice(i, end);
 };
 
 describe('a proxy is refused', () => {
@@ -62,12 +64,13 @@ describe('a proxy is refused', () => {
       'the members must be named in the message');
   });
 
-  it('the refusal comes BEFORE the singleton check', () => {
-    // Otherwise a proxy request during a running reindex answers 409 "already in progress", which reads as
-    // "try again later" — so the caller retries a request that can never be right.
+  it('the refusal comes BEFORE the running-run check', () => {
+    // Otherwise a proxy request while a run is going answers 409 "already running", which reads as "try again
+    // later" — so the caller retries a request that can never be right. The check is per space now (`activeRun`).
     const h = handler();
-    assert.ok(h.indexOf('proxyFor') < h.indexOf('reindexJobRunning'),
-      'a proxy must be refused for being a proxy, not queued behind the singleton');
+    assert.ok(h.indexOf('activeRun(') > 0, 'the 409 is decided by asking whether the space has an active run');
+    assert.ok(h.indexOf('proxyFor') < h.indexOf('activeRun('),
+      'a proxy must be refused for being a proxy, not behind a running run');
   });
 
   it('and AFTER the 404, so an unknown id is still not-found', () => {
@@ -77,15 +80,15 @@ describe('a proxy is refused', () => {
   });
 
   it('nothing is marked running before the refusal', () => {
-    // The flag is a global singleton. Setting it and then returning early would block every real reindex on
-    // the instance until a restart — a worse bug than the one being fixed.
-    // Stronger than the ordering check it replaces: the decision function does not SET the flag anywhere, so no
-    // refusal can leave it set. Taking the guard is `startReindex`'s job, and it is only reachable with a plan.
-    assert.doesNotMatch(handler(), /reindexJobRunning = true/,
-      'planReindex must not take the singleton — a refusal that set it would block every reindex until restart');
+    // A run is marked by writing its document. Writing it and then refusing would leave a run nobody sweeps,
+    // holding the space's 409 for ever. So the decision function writes NOTHING; writing the run document is
+    // `startReindex`'s job, and it is only reachable with a plan.
+    assert.doesNotMatch(handler(), /\.(replaceOne|insertOne|updateOne|updateMany)\(/,
+      'planReindex must not write — a refusal that left a run document would block that space until it is removed');
     const work = search();
-    assert.match(work.slice(work.indexOf('export function startReindex')), /reindexJobRunning = true/,
-      'startReindex is where the guard is taken');
+    const start = work.slice(work.indexOf('export async function startReindex'));
+    assert.match(start.slice(0, start.indexOf('\nfunction ')), /\.replaceOne\(/,
+      'startReindex is where the run document is written');
   });
 });
 

@@ -21,7 +21,7 @@ import { mergeTags } from './merge-fields.js';
 import { edgeIdFor } from './edge-id.js';
 import { linkIdFor } from './links.js';
 import { rekeyEdge, embedQueueWorkFor } from './edge-rekey.js';
-import { enqueueEmbedJob, retireEmbedJob } from './embed-queue.js';
+import { enqueueEmbedJob, retireEmbedJob, EMBED_PRIORITY } from './embed-queue.js';
 import { embeddingSuppressedFor } from './suppress-embeddings.js';
 import { validateEdge } from '../spaces/schema-validation.js';
 import type { ResolvedEdgeEnds } from '../spaces/schema-validation.js';
@@ -815,7 +815,7 @@ export async function executeMerge(
    */
   for (const job of rekeyedEdgeJobs) {
     await retireEmbedJob(spaceId, 'edge', job.retire);
-    await enqueueEmbedJob(spaceId, 'edge', job.enqueue);
+    await enqueueEmbedJob(spaceId, 'edge', job.enqueue, { priority: EMBED_PRIORITY.write });
   }
 
   // Centralised webhook emission: a merge is an update to the survivor, deletion of the

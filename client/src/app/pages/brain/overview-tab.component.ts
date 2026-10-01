@@ -25,7 +25,7 @@ import { ConfirmDialogService } from '../../core/confirm-dialog.service';
 import { InstantComponent } from '../../shared/instant.component';
 import { InstantPipe } from '../../core/date-format.service';
 import { RouterLink } from '@angular/router';
-import { Space, SpaceStats, AboutInfo, EmbeddingQueue, VoteRound, TokenAccessEntry, CompletenessReport, CompletenessCheck, SpaceActivity } from '../../core/api.types';
+import { Space, SpaceStats, AboutInfo, EmbeddingQueue, VoteRound, TokenAccessEntry, CompletenessReport, CompletenessCheck, SpaceActivity, ReindexRunState } from '../../core/api.types';
 // Aliased: the class members below carry the same names, and a bare call that resolves to the import
 // rather than the member is the kind of line a reader has to stop and check.
 import { retentionSummary as summariseRetention, retentionTypeOverrides as retentionOverridesOf } from './overview-retention';
@@ -405,6 +405,16 @@ import { ErModelPanelComponent } from './er-model-panel.component';
               <span>{{ 'brain.overview.reindexNeeded' | transloco }}</span>
             </div>
           }
+          <!-- A run's progress, read from the server while it lasts: role=status so a screen reader hears it change
+               without the focus moving, and the line is gone when the run is. -->
+          @if (reindexRun(); as run) {
+            @if (run.running && !isProxy()) {
+              <div class="reindex-note" role="status">
+                <span class="spinner" style="width:12px;height:12px;border-width:2px;flex:none;margin-top:2px;"></span>
+                <span>{{ 'brain.overview.reindexProgress' | transloco: { remaining: run.remaining, failed: run.failed } }}</span>
+              </div>
+            }
+          }
           @if (isProxy()) {
             <!-- Said rather than left blank: a card whose action silently vanishes reads as broken, and the
                  remedy (reindex the members) is not guessable from an absent button. -->
@@ -436,7 +446,8 @@ import { ErModelPanelComponent } from './er-model-panel.component';
                button could only ever produce a 400. -->
           @if (!isProxy()) {
             <div class="actions">
-              <button class="btn btn-sm btn-secondary" type="button" [disabled]="reindexing()" (click)="requestReindex()">
+              <button class="btn btn-sm btn-secondary" type="button" [disabled]="reindexing()"
+                [attr.aria-busy]="reindexing() ? 'true' : null" (click)="requestReindex()">
                 @if (reindexing()) { <span class="spinner" style="width:12px;height:12px;border-width:2px;"></span> }
                 <ph-icon name="arrows-clockwise" [size]="14" style="margin-right:5px;vertical-align:-2px;"/>{{ 'brain.overview.reindexButton' | transloco }}
               </button>
@@ -612,7 +623,10 @@ export class OverviewTabComponent {
   /** The SHELL owns the schema dialog: this tab reports which type was asked for and nothing more. */
   editSchemaType = output<string>();
   stats = input<SpaceStats | undefined>(undefined);
+  /** True while a reindex request is in flight OR the server says this space's run is going. */
   reindexing = input(false);
+  /** The space's reindex run as the server reports it, or null before the first answer. */
+  reindexRun = input<ReindexRunState | null>(null);
   /**
    * A proxy space stands in for its members and holds no records — so it has no index of its own and
    * nothing to reindex. The server has refused the call since the double-embed fix (`planReindex` answers
