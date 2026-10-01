@@ -141,6 +141,21 @@ describe('the arrival writer applies this accept, and no copy of it', () => {
   });
 });
 
+describe('the planner keys a unique index by the family\'s own derived identity', () => {
+  it('uniqueKey is edgeIdFor for an edge and linkIdFor for a link, with no endpoint-kind coalescer of its own', async () => {
+    // Dup pass: a local `k === 'entity' ? '' : k` was a second spelling of `edgeEndpointKind`/`storedEdgeKind`.
+    // Seen red by mutation, restored by hand: the local coalescer and part-joined key written back.
+    const { readFileSync } = await import('node:fs');
+    const { stripComments } = await import('./_strip-comments.mjs');
+    const { bodyOf } = await import('./_structural-window.mjs');
+    const src = stripComments(readFileSync('server/src/sync/upsert-plan.ts', 'utf8'));
+    const body = bodyOf(src, 'uniqueKey');
+    assert.match(body, /kind === 'edges'\) return edgeIdFor\(/, 'an edge is keyed by something other than its derived id');
+    assert.match(body, /return linkIdFor\(/, 'a link is keyed by something other than its derived id');
+    assert.doesNotMatch(src, /=== 'entity'/, 'upsert-plan.ts coalesces an endpoint kind itself — use the shared one');
+  });
+});
+
 describe('planPushArrivals — the push accept, decided as sequential processing decided it', () => {
   let P;
   before(async () => { P = await import('../../server/dist/sync/upsert-plan.js'); });

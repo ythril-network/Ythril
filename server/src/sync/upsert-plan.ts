@@ -32,7 +32,9 @@
  */
 
 import { createHash } from 'node:crypto';
-import { idPart } from '../brain/edge-id.js';
+import { idPart, edgeIdFor } from '../brain/edge-id.js';
+import { linkIdFor } from '../brain/link-id.js';
+import type { RefKind } from '../config/types-knowledge.js';
 
 /** The minimum shape this module needs: everything sync replicates carries an id and a seq. */
 export interface Replicable {
@@ -210,15 +212,17 @@ export function forkCandidates(docs: readonly PushDoc[], stored: ReadonlyMap<str
   return [...out];
 }
 
-/** `entity` is stored as absent (`storedEdgeKind`), so both spellings key the same unique-index entry. */
-const endpointKind = (k: string | undefined): string => (k === undefined || k === 'entity' ? '' : k);
-
-/** The key of the unique index a family carries besides `_id`, or undefined for a family with none. */
+/**
+ * The key of the unique index a family carries besides `_id`, or undefined for a family with none — the
+ * family's own DERIVED identity, never a key spelled here: an edge's is `edgeIdFor` (its triplet and endpoint
+ * kinds, coalesced by the shared `edgeEndpointKind`), a link's is `linkIdFor`. Two copies with one key are one
+ * row under the index, so they collide here exactly when they would collide in the store.
+ */
 function uniqueKey(kind: PushFamily, d: PushDoc): string | undefined {
-  if (kind === 'edges') {
-    return [d.from, d.to, d.label, endpointKind(d.fromKind), endpointKind(d.toKind)].map(p => idPart(String(p ?? ''))).join('');
+  if (kind === 'edges') return edgeIdFor(String(d.from ?? ''), String(d.to ?? ''), String(d.label ?? ''), d.fromKind, d.toKind);
+  if (kind === 'links') {
+    return linkIdFor(String(d.from ?? ''), d.fromKind as RefKind, String(d.to ?? ''), d.toKind as RefKind);
   }
-  if (kind === 'links') return [d.from, d.fromKind, d.to, d.toKind].map(p => idPart(String(p ?? ''))).join('');
   return undefined;
 }
 
