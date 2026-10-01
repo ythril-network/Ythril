@@ -31,6 +31,9 @@
  *     window is therefore stamped in the past, and the sweep deletes it through the normal path.
  *  6. **The write guard**: `{ _id, seq < s or absent }`, on the insert half as well — a copy newer than the one
  *     planned, written meanwhile, fails the op with a duplicate `_id` and is kept. A RESTORE replaces, unguarded.
+ *     **File metadata is the stated exception until `Q-107` part 2:** it is merged per document by
+ *     `ingestFileMeta`, whose `$set` upsert filters on `_id` alone, so only the accept read (`batchUpsertBySeq`)
+ *     guards it — a copy written between that read and the merge is overwritten.
  *  7. **Failures by operation**: a duplicate is read back — a newer stored copy is "skipped", anything else is a
  *     unique-index duplicate (an edge triplet, a link's endpoints). Any other per-operation failure is retried
  *     ONCE alone and then refused by id. A failure with no per-operation shape falls back to one write per
