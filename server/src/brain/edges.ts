@@ -292,7 +292,8 @@ export async function upsertEdge(
     ...(type !== undefined ? { type } : {}),
     ...(weight !== undefined ? { weight } : {}),
     ...(description !== undefined ? { description } : {}),
-    ...(properties !== undefined ? { properties } : {}),
+    // `withDefaults`, the document validation passed — the raw `properties` dropped every schema default.
+    ...(withDefaults !== undefined ? { properties: withDefaults } : {}),
     author: authorRef(),
     createdAt: now,
     updatedAt: now,

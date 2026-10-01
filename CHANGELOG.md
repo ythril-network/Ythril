@@ -81,6 +81,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`save_bulk` on MCP accepted a retired or unknown key and wrote nothing (`Q-195`)**: `{"memories": […]}`
   answered success while the REST door refused it with a `400` naming `facts`. Both doors now run the same check
   and refuse the same keys with the same message.
+- **An edge created with a property its label's schema defaults was stored without the default**, although the
+  default was what passed validation; the stored edge now carries the value that was checked.
 
 ## [5.6.0] — 2026-09-29
 
