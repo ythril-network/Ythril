@@ -334,6 +334,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   failure naming the space and family, and the page is fetched again next cycle.
 - **A refused document in a push or pull no longer goes unnamed:** one warning per page names the ids and the
   reason, where duplicate-key warnings used to list `(unknown)`.
+- **A peer could forge a line in this instance's log.** A document id or a peer label containing a line break was
+  written into the log as it arrived, so a peer could add a line that read exactly like this server's own. Every
+  value a peer sends that reaches a log line on the push, pull or import path is now written with its control
+  characters escaped (`\r`, `\n`, `\u001b`), so it stays visible and stays on its line.
 - **A new space could stay "building" until the next restart.** Once its search indexes were ready, the space
   recorded that in config.json, re-reading the file first so a concurrent edit is kept. On Docker Desktop the file
   is a bind mount, and a read that landed while the file was being rewritten failed with `ENODATA` — and the
