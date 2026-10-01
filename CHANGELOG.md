@@ -276,6 +276,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A new space could stay "building" until the next restart.** Once its search indexes were ready, the space
+  recorded that in config.json, re-reading the file first so a concurrent edit is kept. On Docker Desktop the file
+  is a bind mount, and a read that landed while the file was being rewritten failed with `ENODATA` — and the
+  first such failure was taken as final. A read spoiled by a concurrent writer is now retried a few times; any
+  other error is still reported at once.
 - **A peer could miss a record for good when two writes overlapped (`Q-196`).** A write took its sequence number
   a moment before it stored the record, and every page a peer pulls served whatever sequence numbers were stored —
   so a later write that finished first could be handed out while an earlier one was still being stored, the peer
