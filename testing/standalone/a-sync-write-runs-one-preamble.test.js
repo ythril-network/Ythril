@@ -40,7 +40,7 @@ describe('a sync write runs one preamble', () => {
     for (const s of SOURCES.filter(f => f.file.startsWith('server/src/api/sync/') && /(?:docs|tombstones)\.ts$/.test(f.file))) {
       for (const m of s.code.matchAll(/(\w+Router)\.post\(\s*'([^']+)'/g)) {
         routes++;
-        if (!/\bpushAllowed\(req, res/.test(statementFrom(s.code, m.index, `${s.file} POST ${m[2]}`))) missing.push(`${s.file} POST ${m[2]}`);
+        if (!/\bpushAllowed\(res, /.test(statementFrom(s.code, m.index, `${s.file} POST ${m[2]}`))) missing.push(`${s.file} POST ${m[2]}`);
       }
     }
     assert.ok(routes >= 7, `only ${routes} write route(s) found — re-anchor this gate`);

@@ -372,8 +372,8 @@ const refusedError = (r: PushedFamilyResult) => ({ error: r.reasons[0] ?? 'the d
  */
 syncDocsRouter.post('/facts', syncRateLimit, requireAuth, denyReadOnly, async (req, res) => {
   try {
-    const spaceId = pushAllowed(req, res);
-    if (spaceId === null) return;
+    const { spaceId, networkId } = req.query as Record<string, string>;
+    if (pushAllowed(res, spaceId, networkId, req.authToken) === null) return;
     const parsed = IncomingFactDoc.safeParse(req.body);
     if (!parsed.success) { res.status(400).json({ error: 'Invalid fact document' }); return; }
     const incoming = parsed.data as unknown as Pushed;
@@ -401,8 +401,8 @@ syncDocsRouter.post('/facts', syncRateLimit, requireAuth, denyReadOnly, async (r
  */
 syncDocsRouter.post('/entities', syncRateLimit, requireAuth, denyReadOnly, async (req, res) => {
   try {
-    const spaceId = pushAllowed(req, res);
-    if (spaceId === null) return;
+    const { spaceId, networkId } = req.query as Record<string, string>;
+    if (pushAllowed(res, spaceId, networkId, req.authToken) === null) return;
     const parsed = IncomingEntityDoc.safeParse(req.body);
     if (!parsed.success) { res.status(400).json({ error: 'Invalid entity document' }); return; }
     const incoming = parsed.data as unknown as Pushed;
@@ -427,8 +427,8 @@ syncDocsRouter.post('/entities', syncRateLimit, requireAuth, denyReadOnly, async
  */
 syncDocsRouter.post('/edges', syncRateLimit, requireAuth, denyReadOnly, async (req, res) => {
   try {
-    const spaceId = pushAllowed(req, res);
-    if (spaceId === null) return;
+    const { spaceId, networkId } = req.query as Record<string, string>;
+    if (pushAllowed(res, spaceId, networkId, req.authToken) === null) return;
     const parsed = IncomingEdgeDoc.safeParse(req.body);
     if (!parsed.success) { res.status(400).json({ error: 'Invalid edge document' }); return; }
     const incoming = parsed.data as unknown as Pushed;
@@ -458,8 +458,8 @@ syncDocsRouter.post('/edges', syncRateLimit, requireAuth, denyReadOnly, async (r
  */
 syncDocsRouter.post('/chrono', syncRateLimit, requireAuth, denyReadOnly, async (req, res) => {
   try {
-    const spaceId = pushAllowed(req, res);
-    if (spaceId === null) return;
+    const { spaceId, networkId } = req.query as Record<string, string>;
+    if (pushAllowed(res, spaceId, networkId, req.authToken) === null) return;
     const parsed = IncomingChronoDoc.safeParse(req.body);
     if (!parsed.success) { res.status(400).json({ error: 'Invalid chrono document' }); return; }
     const incoming = parsed.data as unknown as Pushed;
@@ -527,8 +527,8 @@ const schemaKindOf = (key: PushKey): KnowledgeType | undefined => {
  */
 syncDocsRouter.post('/batch-upsert', syncRateLimit, requireAuth, denyReadOnly, async (req, res) => {
   try {
-    const spaceId = pushAllowed(req, res);
-    if (spaceId === null) return;
+    const { spaceId, networkId } = req.query as Record<string, string>;
+    if (pushAllowed(res, spaceId, networkId, req.authToken) === null) return;
     const peer = peerOf(req);
     const body = req.body as Partial<Record<PushKey, unknown[]>>;
     /*

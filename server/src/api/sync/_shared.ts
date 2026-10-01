@@ -484,15 +484,17 @@ export const NON_PEER_WRITE_MESSAGE =
  * the tombstone route, the file-tombstone route) and a write route that misses one is a door with less in front
  * of it.
  *
- * @param spaceId where the route names the space — the query by default; the file-tombstone route names it in the body
+ * Handed the parameters rather than the request, so each route still states what it reads in one destructure
+ * (`a-tool-and-its-route-take-the-same-parameters` reads that). The file-tombstone route names its space in the
+ * body, the others in the query.
  */
 export function pushAllowed(
-  req: import('express').Request,
   res: import('express').Response,
-  spaceId: unknown = (req.query as Record<string, unknown>)['spaceId'],
+  spaceId: unknown,
+  networkId: string | undefined,
+  authToken: unknown,
 ): string | null {
-  const networkId = (req.query as Record<string, string | undefined>)['networkId'];
-  const token = req.authToken as Record<string, unknown>;
+  const token = authToken as Record<string, unknown>;
   if (typeof spaceId !== 'string' || !spaceId) { res.status(400).json({ error: 'spaceId required' }); return null; }
   if (!spaceAllowed(spaceId, networkId, token)) { res.status(403).json({ error: 'Forbidden' }); return null; }
   if (isNonPeerSyncWrite(token)) { res.status(403).json({ error: NON_PEER_WRITE_MESSAGE }); return null; }
