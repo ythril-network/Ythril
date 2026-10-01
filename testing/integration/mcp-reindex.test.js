@@ -18,8 +18,9 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post, get, delWithBody } from '../sync/helpers.js';
+import { INSTANCES, post, delWithBody, waitForReindexRunEnd } from '../sync/helpers.js';
 import { openMcpSession } from '../sync/mcp-session.js';
+import { seedActiveReindexRun, clearSeededReindexState, closeReindexSeed } from '../_shared/reindex-run-seed.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, '..', 'sync', 'configs');
@@ -44,12 +45,16 @@ async function makeSpace(id, body = {}) {
 const SPACE = idFor('plain');
 const MEMBER = idFor('member');
 const PROXY = idFor('proxy');
+const BUSY = idFor('busy');
+const FREE = idFor('free');
 
 before(async () => {
   token = fs.readFileSync(path.join(CONFIGS, 'a', 'token.txt'), 'utf8').trim();
   await makeSpace(SPACE);
   await makeSpace(MEMBER);
   await makeSpace(PROXY, { proxyFor: [MEMBER] });
+  await makeSpace(BUSY);
+  await makeSpace(FREE);
   const mem = await post(INSTANCES.a, token, `/api/brain/spaces/${SPACE}/facts`, { fact: `reindex me ${RUN}` });
   assert.equal(mem.status, 201, JSON.stringify(mem.body));
   session = await openMcpSession(token);
@@ -57,6 +62,8 @@ before(async () => {
 
 after(async () => {
   session?.close();
+  await clearSeededReindexState(BUSY).catch(() => {});
+  await closeReindexSeed();
   for (const id of created.reverse()) {
     await delWithBody(INSTANCES.a, token, `/api/spaces/${id}`, { confirm: true }).catch(() => {});
   }
@@ -81,12 +88,12 @@ describe('reindex is offered and starts a job', () => {
   it('reports the member spaces it will walk', async () => {
     // This is the argument that differs per surface, so it is the one worth surfacing to the caller. For a normal
     // space it is the space itself.
+    //
+    // It used to accept a 409 here and return early, so it passed without ever reading memberSpaces. The guard is
+    // per space now, so wait for the run the case above started to END, then this call must be accepted.
+    await waitForReindexRunEnd(INSTANCES.a, token, SPACE, 180_000);
     const r = await session.callTool('space_reindex', { space: SPACE });
-    if (r?.isError) {
-      // A job from the previous test may still hold the guard; that is the 409 path, asserted below.
-      assert.match(r.content[0].text, /409/);
-      return;
-    }
+    assert.ok(!r?.isError, `refused after the previous run finished: ${JSON.stringify(r)}`);
     assert.deepEqual(r?.structuredContent?.memberSpaces, [SPACE]);
   });
 });
@@ -101,14 +108,26 @@ describe('reindex is held to the ROUTE rules, not looser ones', () => {
       'and carried as a field, so an agent need not parse prose to find the remedy');
   });
 
-  it('REFUSES a second job while one is running, with 409 rather than a generic failure', async () => {
+  it('REFUSES a space whose run is active with 409 naming only it — and starts another space meanwhile', async () => {
     // 409 means "try later"; 400 means "never". An agent that cannot tell them apart either retries forever or gives
     // up on a space that is merely busy.
-    const first = await session.callTool('space_reindex', { space: SPACE });
-    const second = await session.callTool('space_reindex', { space: MEMBER });
-    const both = [first, second].filter(r => r?.isError).map(r => r.content[0].text);
-    assert.ok(both.some(t => /409/.test(t)) || !second?.isError,
-      `expected a 409 while a job runs, or a clean start once it finished: ${JSON.stringify([first, second])}`);
+    //
+    // It used to fire two calls and accept "a 409, or no error at all", which is every outcome. The run is now held
+    // open by a seeded run document (`testing/_shared/reindex-run-seed.mjs` says why), so the answer is fixed.
+    await seedActiveReindexRun(BUSY);
+    try {
+      const busy = await session.callTool('space_reindex', { space: BUSY });
+      assert.ok(busy?.isError, `a space with an active run accepted a second reindex: ${JSON.stringify(busy)}`);
+      assert.match(busy.content[0].text, /409/);
+      assert.match(busy.content[0].text, new RegExp(BUSY), 'the refusal must name the busy space');
+      assert.doesNotMatch(busy.content[0].text, new RegExp(FREE), 'and only that space');
+
+      const free = await session.callTool('space_reindex', { space: FREE });
+      assert.ok(!free?.isError, `another space was refused while ${BUSY} ran: ${JSON.stringify(free)}`);
+      assert.equal(free?.structuredContent?.status, 'started');
+    } finally {
+      await clearSeededReindexState(BUSY);
+    }
   });
 
   it('REFUSES an unknown parameter rather than silently ignoring it', async () => {
