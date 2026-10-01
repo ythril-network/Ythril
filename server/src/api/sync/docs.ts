@@ -559,14 +559,17 @@ syncDocsRouter.post('/batch-upsert', syncRateLimit, requireAuth, denyReadOnly, a
         log.warn(`batch-upsert: ${overflow} ${key} document(s) past the ${BATCH_FAMILY_CAP}-per-family cap for space `
           + `'${spaceId}' from peer '${peer}' were REJECTED; the sender offers them again in its next page.`);
       }
+      const misfits: ArrivalRefusal[] = [];
       page[key] = raw[key].slice(0, BATCH_FAMILY_CAP).flatMap((d) => {
         const parsed = schema.safeParse(d);
         if (parsed.success) return [parsed.data as Pushed];
         dropped[key]++;
-        log.warn(`batch-upsert: REJECTED ${key} '${arrivalId(d)}' for space '${spaceId}' from peer '${peer}' — it did `
-          + `not match ${name}. Issues: ${JSON.stringify(parsed.error?.issues ?? []).slice(0, 400)}`);
+        misfits.push({ _id: arrivalId(d), reason: `not ${name}: ${JSON.stringify(parsed.error?.issues ?? []).slice(0, 200)}` });
         return [];
       });
+      // One warning per page, the shape every door logs a refusal in — never a line per document.
+      warnArrivalsNotStored(`sync batch-upsert from ${peer}`, spaceId, key, 'REJECTED by the wire schema (the sender '
+        + 'advances past them)', misfits);
     }
     // P-21 = C: validated against THIS space's schema, counted, and let in — never refused for it.
     const violated = (key: PushKey): number => {

@@ -217,6 +217,19 @@ ${stmt}`,
     }
   });
 
+  it('a document the WIRE schema rejects is named in one warning per page, the shape every door logs', () => {
+    /*
+     * Dup pass: the batch route logged each rejected document on a line of its own, beside the writer's
+     * per-page summary (`warnArrivalsNotStored`) for every other refusal. A poison page then floods the log ring
+     * with one fact. Seen red by mutation, restored by hand: the per-document `log.warn` put back.
+     */
+    const batch = docs.slice(docs.indexOf("syncDocsRouter.post('/batch-upsert'"));
+    const parse = batch.slice(batch.indexOf('.flatMap((d) => {'), batch.indexOf('warnArrivalsNotStored('));
+    assert.ok(parse.includes('schema.safeParse(d)'), 'the per-document parse moved — re-anchor this case');
+    assert.doesNotMatch(parse, /\blog\.\w+\(/, 'a rejected document is logged one line at a time again');
+    assert.match(batch, /warnArrivalsNotStored\([^;]*misfits\)/, 'the rejected documents are not reported at all');
+  });
+
   it('a chrono type nobody understands IS refused, on BOTH paths', () => {
     /*
      * Not the same thing. A `type` outside the product's vocabulary AND outside anything the space declared is
