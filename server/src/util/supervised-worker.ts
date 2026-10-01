@@ -524,6 +524,14 @@ export function createSupervisedWorker(opts: SupervisedWorkerOptions) {
         if (m['kind'] === 'load') {
           if (inc.stage !== 'loading') return;
           const text = fromChild(m['error']);
+          // ONE warning, here, where the failure is learned. Every later request for this model is refused from
+          // `loadFailures` in `enqueue` without reaching this line, so a queue of a thousand records cannot write a
+          // thousand warnings; and without this line the only trace was a debug entry per failed embed job, which
+          // an operator at the default level never sees. Both strings go through `fromChild` (bounded, redacted).
+          if (!loadFailures.has(inc.modelId)) {
+            log('warn', `${label}: model ${fromChild(inc.modelId)} could not be loaded; requests for it are refused `
+              + `until the configuration changes: ${text}`);
+          }
           loadFailures.set(inc.modelId, text);
           lastLoadFailure = text;
           lastLoadFailureModelId = inc.modelId;

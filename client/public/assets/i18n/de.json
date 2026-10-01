@@ -1836,7 +1836,7 @@
   "mediaProcessing.embedding.purpose": "Wandelt Text in die Vektoren um, die die semantische Suche über alle Bereiche hinweg tragen.",
   "mediaProcessing.embedding.pillExternal": "Extern",
   "mediaProcessing.embedding.pillLocalHttp": "Lokal · HTTP",
-  "mediaProcessing.embedding.pillBundled": "Mitgeliefert · im Prozess",
+  "mediaProcessing.embedding.pillBundled": "Mitgeliefert · lokales Modell",
   "mediaProcessing.embedding.optLocal": "Lokal / vertrauenswürdig (mitgeliefertes ONNX oder ein interner Endpunkt)",
   "mediaProcessing.embedding.optExternal": "Extern (öffentlicher OpenAI-kompatibler Endpunkt)",
   "mediaProcessing.embedding.endpointPlaceholder": "http://ollama:11434 oder https://api.example.com",

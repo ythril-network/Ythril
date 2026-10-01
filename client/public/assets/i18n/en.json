@@ -1836,7 +1836,7 @@
   "mediaProcessing.embedding.purpose": "Turns text into the vectors that power semantic search across every space.",
   "mediaProcessing.embedding.pillExternal": "External",
   "mediaProcessing.embedding.pillLocalHttp": "Local · HTTP",
-  "mediaProcessing.embedding.pillBundled": "Bundled · in-process",
+  "mediaProcessing.embedding.pillBundled": "Bundled · local model",
   "mediaProcessing.embedding.optLocal": "Local / trusted (bundled ONNX, or an internal endpoint)",
   "mediaProcessing.embedding.optExternal": "External (public OpenAI-compatible endpoint)",
   "mediaProcessing.embedding.endpointPlaceholder": "http://ollama:11434 or https://api.example.com",

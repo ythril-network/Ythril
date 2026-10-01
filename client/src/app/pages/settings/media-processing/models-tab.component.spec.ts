@@ -61,7 +61,7 @@ function renderTab(cfg: Record<string, unknown>) {
       { provide: ConfirmDialogService, useValue: { confirm: vi.fn().mockResolvedValue(true) } },
       { provide: PipelineStatusService, useValue: {
         status: () => null, bySidecarKey: () => new Map(),
-        modelState: () => 'unconfigured', sidecarState: () => 'unconfigured',
+        modelState: () => 'unconfigured', sidecarState: () => 'unconfigured', modelDetail: () => null, sidecarDetail: () => null,
       } },
       { provide: SchemaApi, useValue: { listSchemaLibrary: () => of({ entries: [] }) } },
     ],
@@ -175,6 +175,84 @@ describe('ModelsTabComponent — person-types picker', () => {
 });
 
 /**
+ * The embedding card when its bundled model cannot load (found driving Q-99, 2026-10-01).
+ *
+ * The server reports the stage `down` with the load error as `detail`. The card showed a red dot whose title said
+ * "not responding", beside a GREEN pill reading "Bundled · in-process" -- in-process having stopped being true when
+ * the model moved to its own process. Three rules: the reason is readable on the card without pressing Verify, the
+ * pill is not green over a stage that is down, and its wording does not claim in-process.
+ */
+describe('ModelsTabComponent — an embedding stage that is down', () => {
+  const REASON = "Embedding model 'nomic-ai/nomic-embed-text-v1.5' is not in the model cache (/models) and downloads are off";
+
+  function renderDown(state: string, detail: string | undefined) {
+    TestBed.resetTestingModule();
+    const cfg = CFG();
+    const http = {
+      get: vi.fn().mockReturnValue(of(cfg)),
+      patch: vi.fn().mockReturnValue(of({ ok: true, config: cfg })),
+      post: vi.fn().mockReturnValue(of({ ok: true })),
+    } as unknown as HttpClient;
+    TestBed.configureTestingModule({
+      imports: [ModelsTabComponent, getTranslocoModule()],
+      providers: [
+        MediaProcessingStateService,
+        { provide: HttpClient, useValue: http },
+        { provide: ConfirmDialogService, useValue: { confirm: vi.fn().mockResolvedValue(true) } },
+        { provide: PipelineStatusService, useValue: {
+          status: () => null, bySidecarKey: () => new Map(),
+          modelState: (k: string) => (k === 'embedding' ? state : 'unconfigured'),
+          modelDetail: (k: string) => (k === 'embedding' ? detail : undefined),
+          sidecarState: () => 'unconfigured', sidecarDetail: () => undefined,
+        } },
+        { provide: SchemaApi, useValue: { listSchemaLibrary: () => of({ entries: [] }) } },
+      ],
+    });
+    TestBed.inject(MediaProcessingStateService).load();
+    const fixture = TestBed.createComponent(ModelsTabComponent);
+    fixture.detectChanges();
+    return (fixture.nativeElement as HTMLElement).querySelector('#model-card-embedding') as HTMLElement;
+  }
+
+  it('shows the reason as a visible line under the header, with the full text on hover', () => {
+    const card = renderDown('down', REASON);
+    const line = card.querySelector('.health-detail') as HTMLElement;
+    expect(line, 'a visible reason line').toBeTruthy();
+    expect(line.textContent).toContain(REASON);
+    expect(line.getAttribute('title'), 'the line truncates, so its full text is on hover').toBe(REASON);
+  });
+
+  it('carries the reason on the dot as well', () => {
+    const dot = renderDown('down', REASON).querySelector('app-health-dot .dot') as HTMLElement;
+    expect(dot.getAttribute('title')).toContain(REASON);
+    expect(dot.getAttribute('aria-label')).toContain(REASON);
+  });
+
+  it('shows no reason line while the stage is ok, whatever its detail says', () => {
+    expect(renderDown('ok', 'in-process').querySelector('.health-detail')).toBeNull();
+  });
+
+  it('the Bundled pill is not green beside a red dot', () => {
+    const pill = (card: HTMLElement) => card.querySelector('.pills app-status-pill .pill') as HTMLElement;
+    const down = pill(renderDown('down', REASON));
+    expect(down.textContent).toContain('mediaProcessing.embedding.pillBundled');
+    expect(down.classList.contains('ok'), 'green over a stage every embed fails on').toBe(false);
+    expect(down.classList.contains('error')).toBe(true);
+    expect(pill(renderDown('ok', 'in-process')).classList.contains('ok'), 'and still green when it works').toBe(true);
+  });
+
+  it('the Bundled pill no longer says in-process, in any language', () => {
+    // Q-99 moved the bundled model into its own child process, so "in-process" became false on this pill.
+    const words: Record<string, RegExp> = { en: /in-process/i, de: /im Prozess/i, pl: /w procesie/i };
+    for (const [lang, stale] of Object.entries(words)) {
+      const dict = JSON.parse(readFileSync(`public/assets/i18n/${lang}.json`, 'utf8')) as Record<string, string>;
+      expect(dict['mediaProcessing.embedding.pillBundled'], `${lang} has the key`).toBeTruthy();
+      expect(dict['mediaProcessing.embedding.pillBundled'], `${lang} still claims in-process`).not.toMatch(stale);
+    }
+  });
+});
+
+/**
  * The per-card Save button, asserted in the DOM.
  *
  * The service tests drive `cardDirty`/`saveCard` directly, which is exactly the blind spot that let the
@@ -196,7 +274,7 @@ describe('ModelsTabComponent — per-card Save button', () => {
         // The rendered template asks for more of this service than the logic-only tests do.
         { provide: PipelineStatusService, useValue: {
           status: () => null, bySidecarKey: () => new Map(),
-          modelState: () => null, sidecarState: () => null,
+          modelState: () => null, sidecarState: () => null, modelDetail: () => null, sidecarDetail: () => null,
         } },
         { provide: SchemaApi, useValue: { listSchemaLibrary: () => of({ entries: [] }) } },
       ],

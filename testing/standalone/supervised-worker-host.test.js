@@ -716,6 +716,36 @@ describe('a model that cannot be loaded', () => {
     await worker.request(req('b', { modelId: 'bad' })).catch(() => {});
     assert.equal(fake.children.length, 2);
   });
+
+  // A background load failure used to reach the server log only as one debug line per failing embed job, so an
+  // operator reading the log at its default level saw nothing at all while every embed failed. One warn when the
+  // failure is LEARNED, never one per refused embed: a thousand queued records would otherwise write a thousand.
+  it('warns ONCE when a load failure is first learned, naming the model and the reason, and not on later embeds', async () => {
+    const { worker, logs } = setup({ fake: { auto: { failLoad: m => (m.startsWith('bad') ? `cannot load ${m}: no such file` : false) } } });
+    for (let i = 0; i < 6; i++) await worker.request(req(`t${i}`, { modelId: 'bad' })).catch(() => {});
+    const warns = () => logs.filter(l => l.level === 'warn');
+    assert.equal(warns().length, 1, `six failing embeds, one warning: ${JSON.stringify(warns())}`);
+    assert.match(warns()[0].message, /bad/, 'the warning names the model');
+    assert.match(warns()[0].message, /cannot load bad: no such file/, 'and carries the reason the child gave');
+
+    // A different model that cannot load either is a new fact, so it is said once more.
+    for (let i = 0; i < 3; i++) await worker.request(req(`u${i}`, { modelId: 'bad-two' })).catch(() => {});
+    assert.equal(warns().length, 2, 'a model change that fails again warns again, once');
+    assert.match(warns()[1].message, /bad-two/);
+
+    // Forgotten (an operator changed something) and failing again: learned again, so warned again.
+    worker.forgetLoadFailures();
+    await worker.request(req('v', { modelId: 'bad' })).catch(() => {});
+    assert.equal(warns().length, 3);
+  });
+
+  it('bounds the reason in that warning, however much the child said', async () => {
+    const { worker, logs } = setup({ fake: { auto: { failLoad: () => 'x'.repeat(50_000) } }, host: { maxErrorChars: 300 } });
+    await worker.request(req('a', { modelId: 'bad' })).catch(() => {});
+    const warn = logs.find(l => l.level === 'warn');
+    assert.ok(warn, 'warned');
+    assert.ok(warn.message.length < 600, `the warning is ${warn.message.length} chars long`);
+  });
 });
 
 describe('events from a child that is no longer the current one', () => {

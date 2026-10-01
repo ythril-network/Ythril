@@ -28,6 +28,7 @@ import { HealthDotComponent } from './health-dot.component';
 import { SlotTuningComponent } from './slot-tuning.component';
 import { MediaProcessingStateService } from './media-processing-state.service';
 import { HealthState, CARD_SLOT, SLOT_DEFAULT_MS } from './media-processing.types';
+import { problemDetail } from './stage-health';
 
 @Component({
   selector: 'app-model-provider-card',
@@ -59,6 +60,8 @@ import { HealthState, CARD_SLOT, SLOT_DEFAULT_MS } from './media-processing.type
     .t { flex: 1; min-width: 0; }
     .t h3 { margin: 0; font-size: 15px; font-weight: 620; display: flex; align-items: center; gap: 8px; }
     .t p { margin: 3px 0 0; font-size: 12.5px; color: var(--text-secondary); }
+    .t p.health-detail { color: var(--error); font-size: 12px;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
     /* Pills on their own row under the title, at the size the owner specified. */
     .pills { display: flex; flex-wrap: wrap; gap: 6px; padding: 9px 18px 0; }
@@ -87,10 +90,15 @@ import { HealthState, CARD_SLOT, SLOT_DEFAULT_MS } from './media-processing.type
             {{ heading() }}
             @if (health() !== undefined) {
               <!-- The nullish fallback only satisfies the compiler; the guard above rules out undefined. -->
-              <app-health-dot [state]="health() ?? null" [subject]="heading()"/>
+              <app-health-dot [state]="health() ?? null" [detail]="healthDetail()" [subject]="heading()"/>
             }
           </h3>
           @if (purpose()) { <p>{{ purpose() }}</p> }
+          @if (problem(); as why) {
+            <!-- Why the dot is not green, readable without a click. One line, so a long load error cannot push
+                 the card's fields down; the full text is on hover and in the dot's accessible name. -->
+            <p class="health-detail" [attr.title]="why">{{ why }}</p>
+          }
         </div>
       </header>
 
@@ -147,6 +155,9 @@ export class ModelProviderCardComponent {
   purpose = input<string>('');
   /** undefined = this card has no health to report (as opposed to `null`, meaning "not known yet"). */
   health = input<HealthState | null | undefined>(undefined);
+  /** The stage's `detail` from the status payload; shown (dot and reason line) only while `health` is not ok. */
+  healthDetail = input<string | null | undefined>(null);
+  readonly problem = computed(() => problemDetail(this.health(), this.healthDetail()));
   /** True when the value is owned by infrastructure and cannot be set here. */
   infra = input<boolean>(false);
   /** The env var that owns it, named on the pill. Only meaningful when `infra` is true. */

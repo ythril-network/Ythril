@@ -661,8 +661,8 @@ export function withEmbeddingProcess(models: ModelStageStatus[], state: WorkerSt
     const loadFailure = state.loadFailure !== null && state.loadFailureModelId === m.model ? state.loadFailure : null;
     return {
       ...m,
-      // The Models screen renders only `state` as the stage's dot: green over a model every embed fails on would be
-      // the one wrong answer, so a sticky load failure for the configured model reads as `down`, with its reason.
+      // Green over a model every embed fails on would be the one wrong answer, so a sticky load failure for the
+      // configured model reads as `down`, with its reason as `detail` -- which the screen shows beside the dot.
       ...(loadFailure !== null ? { state: 'down' as const, detail: loadFailure } : {}),
       inference: {
         phase: state.phase, modelId: state.modelId, consecutiveLosses: state.consecutiveLosses,

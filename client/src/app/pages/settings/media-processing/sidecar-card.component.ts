@@ -9,6 +9,7 @@ import { ChangeDetectionStrategy, Component, computed, inject, input } from '@an
 import { TranslocoPipe } from '@jsverse/transloco';
 import { ModelProviderCardComponent } from './model-provider-card.component';
 import { PipelineStatusService } from './pipeline-status.service';
+import { problemDetail } from './stage-health';
 
 @Component({
   selector: 'app-sidecar-card',
@@ -31,14 +32,17 @@ import { PipelineStatusService } from './pipeline-status.service';
     <app-model-provider-card [id]="id()" [icon]="icon()"
       [heading]="('mediaProcessing.' + copy() + '.title') | transloco"
       [purpose]="('mediaProcessing.' + copy() + '.purpose') | transloco"
-      [health]="pipeline.sidecarState(id())"
+      [health]="pipeline.sidecarState(id())" [healthDetail]="pipeline.sidecarDetail(id())"
       [infra]="true" [envVar]="envVar()">
       <div class="field">
         <label>{{ 'mediaProcessing.field.endpoint' | transloco }}</label>
         <div class="ro">{{ status()?.url ?? '—' }}</div>
       </div>
+      <!-- Not repeated while the card's own reason line under its header already shows the same text. -->
       @if (status()?.detail; as d) {
+        @if (!problem()) {
         <div class="field"><label>{{ 'mediaProcessing.field.lastProbe' | transloco }}</label><div class="ro">{{ d }}</div></div>
+        }
       }
     </app-model-provider-card>
   `,
@@ -52,4 +56,5 @@ export class SidecarCardComponent {
   copy = input.required<string>();
   envVar = input.required<string>();
   protected readonly status = computed(() => this.pipeline.bySidecarKey().get(this.id()));
+  protected readonly problem = computed(() => problemDetail(this.status()?.state, this.status()?.detail));
 }

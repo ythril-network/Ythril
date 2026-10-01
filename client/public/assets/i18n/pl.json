@@ -1836,7 +1836,7 @@
   "mediaProcessing.embedding.purpose": "Zamienia tekst na wektory, na których opiera się wyszukiwanie semantyczne we wszystkich przestrzeniach.",
   "mediaProcessing.embedding.pillExternal": "Zewnętrzny",
   "mediaProcessing.embedding.pillLocalHttp": "Lokalny · HTTP",
-  "mediaProcessing.embedding.pillBundled": "Wbudowany · w procesie",
+  "mediaProcessing.embedding.pillBundled": "Wbudowany · model lokalny",
   "mediaProcessing.embedding.optLocal": "Lokalny / zaufany (wbudowany ONNX lub wewnętrzny punkt końcowy)",
   "mediaProcessing.embedding.optExternal": "Zewnętrzny (publiczny punkt końcowy zgodny z OpenAI)",
   "mediaProcessing.embedding.endpointPlaceholder": "http://ollama:11434 lub https://api.example.com",

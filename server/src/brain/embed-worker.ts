@@ -96,7 +96,8 @@ export async function runOneEmbedJob(opts: { heartbeatMs?: number } = {}): Promi
       claimToken: job.claimToken,
     });
     // debug, not warn: an embedder that is down produces one of these per queued record, and a
-    // thousand warnings say nothing the first one did not. The failed count is the signal.
+    // thousand warnings say nothing the first one did not. The failed count is the signal, and a bundled
+    // model that cannot load is warned about ONCE by the inference host (`util/supervised-worker.ts`).
     log.debug(`Embed job ${job._id} in ${job.spaceId} failed (attempt ${job.attempts}): ${msg}`);
   } finally {
     if (heartbeat) clearInterval(heartbeat);

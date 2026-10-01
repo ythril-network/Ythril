@@ -5,6 +5,7 @@
  * transcribe → [caption keyframes at full/auto] → embed) are now distinct cards, each with its own
  * single-class ceiling ladder. These tests pin `mediaPipelines()` so the split can't silently regress.
  */
+import { readFileSync } from 'node:fs';
 import { TestBed } from '@angular/core/testing';
 import { describe, it, expect } from 'vitest';
 import { getTranslocoModule } from '../../../testing/transloco-testing';
@@ -13,11 +14,14 @@ import { MediaProcessingStateService } from './media-processing-state.service';
 import { PipelineStatusService } from './pipeline-status.service';
 import { AUDIO_LEVELS, VIDEO_LEVELS } from './media-processing.types';
 
-function setup() {
+function setup(status: Record<string, unknown> = {
+  modelState: () => 'ok', modelDetail: () => null, sidecarState: () => 'ok', sidecarDetail: () => null, status: () => null,
+}) {
   const state = {
     form: { stt: { model: 'base' }, vision: { model: 'moondream' } },
     embedding: { model: 'nomic-embed-text' },
     docMode: () => 'off',
+    docCfg: () => ({}),
     isLocked: () => false,
     managed: false,
   };
@@ -26,11 +30,38 @@ function setup() {
     imports: [PipelinesTabComponent, getTranslocoModule()],
     providers: [
       { provide: MediaProcessingStateService, useValue: state },
-      { provide: PipelineStatusService, useValue: { modelState: () => 'ok', status: () => null } },
+      { provide: PipelineStatusService, useValue: status },
     ],
   });
   return TestBed.createComponent(PipelinesTabComponent).componentInstance;
 }
+
+describe('PipelinesTabComponent — a step that is not ok says why', () => {
+  // Found driving Q-99: the embedding stage was `down` with the model's load error as its detail, and every Embed
+  // dot on this tab said "Embed: not responding" and nothing more. The step carries the stage's detail to its dot.
+  const REASON = "Embedding model 'x' is not in the model cache";
+  const down = {
+    status: () => null,
+    modelState: (k: string) => (k === 'embedding' ? 'down' : 'ok'),
+    modelDetail: (k: string) => (k === 'embedding' ? REASON : undefined),
+    sidecarState: () => 'ok', sidecarDetail: () => undefined,
+  };
+
+  it('every Embed step, in every pipeline, carries the embedding stage\'s detail', () => {
+    const c = setup(down);
+    const embeds = [...c.documentSteps(), ...c.mediaPipelines().flatMap(p => p.steps)].filter(s => s.cardId === 'embedding');
+    expect(embeds.length, 'found the Embed steps').toBeGreaterThanOrEqual(5);
+    for (const st of embeds) expect(st.detail, st.key).toBe(REASON);
+  });
+
+  it('and the template hands it to the dot', () => {
+    // Read from source: rendering the whole tab needs the full page state. Both dots in the template must pass it.
+    const src = readFileSync('src/app/pages/settings/media-processing/pipelines-tab.component.ts', 'utf8');
+    const dots = src.match(/<app-health-dot [^>]*>/g) ?? [];
+    expect(dots.length).toBeGreaterThanOrEqual(2);
+    for (const d of dots) expect(d).toMatch(/\[detail\]="st\.detail/);
+  });
+});
 
 describe('PipelinesTabComponent — Audio / Video split', () => {
   it('exposes Audio and Video as separate single-class pipelines', () => {

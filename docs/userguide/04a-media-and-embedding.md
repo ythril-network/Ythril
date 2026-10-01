@@ -112,6 +112,14 @@ And one result that looks like a problem and is not:
 Every refusal is also written to the server log with the same detail, so an administrator can find it
 without you having to reproduce the click.
 
+**A dot that is not green says why, without a click.** When a stage is down, degraded or blocked and the
+server knows the reason, the card shows it in red under its title (hover for the full text), and the
+dot's tooltip carries it too — on the Models cards and on every step of the Pipelines tab. The commonest
+one is the bundled text-embedding model failing to load, typically because its files are not in the model
+cache and downloads are switched off; the card's **Bundled · local model** badge then turns red with the
+dot. The server log carries the same reason as **one** warning when the failure is first seen, not one
+per failed embedding.
+
 ### Verify — does the model actually answer?
 
 *New in 2.2.*

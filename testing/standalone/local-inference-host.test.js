@@ -228,6 +228,19 @@ describe('the two kinds of failure, and what crosses the boundary', () => {
       'a job for a model that cannot load fails after its attempts and can be retried by an operator, as embed-queue-db expects');
   });
 
+  it('a load failure is logged as ONE warning naming the model, with credentials redacted', async () => {
+    const text = 'fetch failed for https://user:hunter2@models.example/x?token=abc123 with Authorization: Bearer sk-secret-value';
+    const { inference, logs } = setup({ fake: { auto: { failLoad: () => text } } });
+    for (let i = 0; i < 4; i++) await reject(ask(inference, `t${i}`, 'x/y'));
+    const warns = logs.filter(l => l.level === 'warn');
+    assert.equal(warns.length, 1, `four failing embeds, one warning: ${JSON.stringify(warns)}`);
+    assert.match(warns[0].message, /x\/y/, 'the warning names the model');
+    assert.match(warns[0].message, /models\.example/, 'and the reason');
+    for (const secret of ['hunter2', 'abc123', 'sk-secret-value']) {
+      assert.ok(!warns[0].message.includes(secret), `${secret} survived into the warning`);
+    }
+  });
+
   it('an inference error is neither lost nor transient merely for what it says', async () => {
     const { inference, fake } = setup({ fake: {} });
     const p = reject(ask(inference));
