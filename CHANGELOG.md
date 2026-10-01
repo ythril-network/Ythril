@@ -30,6 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     violations instead of stopping at 500 (`Q-129`).
   - **The notify event list** (`GET /api/notify`) pages with `skip` and says when it is cut, instead of stopping at
     200 (`Q-130`).
+  - **Resolving entities by id** in the web UI asks for every id instead of dropping those past 100 (`Q-131`).
 - **A space schema-change notice is accepted by its peers (`Q-108`).** `meta_change_pending` was sent to every
   member and was not an event `POST /api/notify` accepted, so each peer answered `400` to a sender that does not read
   the answer. Peers now accept and record it.
