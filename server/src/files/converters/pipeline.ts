@@ -13,6 +13,7 @@ import { toDocId } from '../../util/paths.js';
 import { escapeRegex } from '../../util/redos.js';
 import { authorRef } from '../../config/author.js';
 import fs from 'fs/promises';
+import { removeTree } from '../remove-tree.js';
 import { UnstructuredConverter } from './unstructured.js';
 import type { ExtractedImage } from './unstructured.js';
 import { HtmlConverter } from './html.js';
@@ -536,7 +537,7 @@ export async function storeConversionResults(
 async function rmArtifactPath(spaceId: string, relPath: string): Promise<void> {
   try {
     const abs = await resolveSafePathChecked(spaceId, relPath);
-    await fs.rm(abs, { recursive: true, force: true });
+    await removeTree(abs);
   } catch (err) {
     log.warn(`Failed to remove conversion artifact path ${spaceId}/${relPath}: ${err instanceof Error ? err.message : String(err)}`);
   }

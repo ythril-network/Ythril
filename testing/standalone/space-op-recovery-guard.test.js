@@ -103,8 +103,11 @@ describe('both space operations claim the guard, and recovery reads it', () => {
 
   it('reconcilePendingSpaceOp checks it BEFORE doing any work', () => {
     const src = strip(readFileSync('server/src/spaces/lifecycle.ts', 'utf8'));
-    const fn = src.slice(src.indexOf('export async function reconcilePendingSpaceOp'));
-    const guardAt = fn.indexOf('spaceOpInFlight()');
+    // The work lives in `resumePendingSpaceOp`, which both the boot/reload reconciler and the op that meets a
+    // pending marker call. The guard counts ops in flight since then (`spaceOpsInFlight`), because an op resuming
+    // another's marker counts itself once — so the check is on that count, before any data moves.
+    const fn = src.slice(src.indexOf('async function resumePendingSpaceOp'));
+    const guardAt = fn.indexOf('spaceOpsInFlight()');
     const workAt = fn.indexOf('moveSpaceData(');
     assert.ok(guardAt > 0, 'the reconciler must consult the guard');
     assert.ok(workAt > 0 && guardAt < workAt, 'and it must do so before moving any data');

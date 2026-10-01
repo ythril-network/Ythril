@@ -36,6 +36,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   run the same move. **And a moved folder keeps its files' links** (`Q-164`): renaming one file re-created its
   links under the new path, but moving a folder re-rooted the records and left every link naming a path that was
   gone, so each file in it silently lost what it was linked to. Both now carry links through one step.
+- **A space delete no longer loses a race with the media worker, and one unfinished delete no longer blocks every
+  space operation until a restart.** Deleting a space while the worker was still converting one of its files failed
+  `ENOTEMPTY` when removing the files directory — the worker was writing artifacts under it — and the delete kept
+  its marker, as it must. But the marker was only ever resumed at boot, so every later rename and delete on the
+  instance answered `500 "… is still pending … It resumes automatically on restart"`. Three fixes: every removal of
+  a space's directories retries what a concurrent writer causes; a space being deleted or renamed away refuses new
+  file writes, which the media worker treats as an abandonment, like a moved file's; and the next rename or delete
+  finishes a pending op before it proceeds, refusing only when that fails again — with the reason.
 
 ## [5.6.0] — 2026-09-29
 

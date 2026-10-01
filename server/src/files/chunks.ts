@@ -8,6 +8,7 @@
  */
 
 import fs from 'fs/promises';
+import { removeTree } from './remove-tree.js';
 import path from 'path';
 import { createHash } from 'crypto';
 import { getDataRoot } from '../config/loader.js';
@@ -184,7 +185,7 @@ export async function assembleChunks(
   const sha256 = hash.digest('hex');
 
   // Clean up chunk directory
-  await fs.rm(dir, { recursive: true, force: true });
+  await removeTree(dir);
 
   return sha256;
 }
@@ -228,7 +229,7 @@ export async function cleanupStaleChunks(maxAgeMs = 24 * 60 * 60 * 1000): Promis
         if (!uStat.isDirectory()) continue;
 
         if (now - uStat.mtimeMs > maxAgeMs) {
-          await fs.rm(uploadDir, { recursive: true, force: true });
+          await removeTree(uploadDir);
           cleaned++;
         }
       }

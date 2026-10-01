@@ -38,6 +38,7 @@ import type { ClientSession } from 'mongodb';
 import { col, asFilter, getMongo } from '../../db/mongo.js';
 import type { MediaJobDoc } from '../../config/types.js';
 import { spaceCollection } from '../../db/space-collection.js';
+import { isSpaceNotWritable } from '../../spaces/space-write-gate.js';
 
 /** A fresh claim token. Random rather than time-based: two pods claiming in the same millisecond must differ. */
 export function newClaimToken(): string {
@@ -62,6 +63,16 @@ export class JobLeaseLostError extends Error {
     this.spaceId = spaceId;
     this.jobId = jobId;
   }
+}
+
+/**
+ * True when a run should STOP without failing its job: its claim was taken (moved, deleted, re-uploaded, stall
+ * recovery), or its space stopped taking writes because it is being deleted or renamed away
+ * (`spaces/space-write-gate.ts`). In both, nothing the run produced belongs anywhere, and failing the job would spend
+ * an attempt and record a `lastError` for work that did nothing wrong.
+ */
+export function isAbandonment(err: unknown): boolean {
+  return isLeaseLost(err) || isSpaceNotWritable(err);
 }
 
 /** True when `err` is a lost lease, including across module instances (name check, not `instanceof`). */

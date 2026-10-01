@@ -4,6 +4,7 @@ import { createHash } from 'crypto';
 import { resolveSafePathChecked, spaceRoot } from './sandbox.js';
 import { hardenPath, mkdirPrivate } from '../util/fs-modes.js';
 import { readStored, writeStored, statStored, deleteStored, moveStored } from './stored-bytes.js';
+import { assertSpaceTakesWrites } from '../spaces/space-write-gate.js';
 
 export interface FileEntry {
   name: string;
@@ -46,6 +47,8 @@ export async function readFileBytes(spaceId: string, filePath: string): Promise<
 
 /** Write a text file, creating parent directories as needed */
 export async function writeFile(spaceId: string, filePath: string, content: string): Promise<{ sha256: string }> {
+  // Nothing new lands under a space that is being deleted or renamed away — see `spaces/space-write-gate.ts`.
+  assertSpaceTakesWrites(spaceId);
   const abs = await resolveSafePathChecked(spaceId, filePath);
   // Through the one door for stored bytes (F-43): encrypted at rest when a master secret is set, written to a
   // temp file outside the tree and renamed, and hardened to owner-only whatever the file's history.
@@ -60,6 +63,7 @@ export async function writeFileBytes(
   filePath: string,
   data: Buffer,
 ): Promise<{ sha256: string }> {
+  assertSpaceTakesWrites(spaceId);   // see `writeFile` above
   const abs = await resolveSafePathChecked(spaceId, filePath);
   await writeStored(abs, data);   // see the note in `writeFile` above
   const sha256 = createHash('sha256').update(data).digest('hex');

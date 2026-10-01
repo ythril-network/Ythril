@@ -20,6 +20,7 @@
 import { Router } from 'express';
 import { toDocId } from '../util/paths.js';
 import fs from 'fs/promises';
+import { removeTree } from '../files/remove-tree.js';
 import path from 'path';
 import { requireSpaceAuth, denyReadOnly } from '../auth/middleware.js';
 import { globalRateLimit } from '../rate-limit/middleware.js';
@@ -534,7 +535,7 @@ fileStoreRouter.delete('/:spaceId', globalRateLimit, requireSpaceAuth, denyReadO
         listFilesRecursive(targetSpace, `_extracted/${filePath}`),
       ])).flat();
 
-      await fs.rm(absPath, { recursive: true, force: false });
+      await removeTree(absPath, { mustExist: true });   // a converter may still be writing under it
       log.info(`Deleted directory ${absPath} (space: ${targetSpace})`);
       invalidateUsageCache(); // freed disk — reflect it in the next quota check
 
