@@ -359,9 +359,24 @@ describe('the admin import restores what the export wrote', { skip }, () => {
     const r = out.results.facts;
     assert.deepEqual([r.inserted, r.updated, r.errors], [500, 0, 100],
       `an import that stored 500 of 600 reported ${JSON.stringify({ inserted: r.inserted, updated: r.updated, errors: r.errors })}`);
-    assert.equal(r.refusedTotal ?? r.refused.length, 100, 'the refused count does not match the documents not written');
+    assert.equal(r.errors, 100, 'the refused count does not match the documents not written');
+    // Lens S4: the named list is bounded — the first NAMED_IN_SUMMARY, with `errors` the total.
+    const { NAMED_IN_SUMMARY } = await import('../../server/dist/sync/arrivals.js');
+    assert.equal(r.refused.length, NAMED_IN_SUMMARY, `the response names ${r.refused.length} refusals, unbounded`);
     assert.ok(r.refused.every(x => /retry the import/.test(x.reason)), 'an unwritten document carries no retry reason');
     assert.ok(!r.refused.some(x => x._id === 'chunk-000'), 'a document that landed is reported refused');
+  });
+
+  it('the restored-over-tombstone list is bounded and says how many there were', async () => {
+    // Lens S4. Seen red by mutation, restored by hand: the slice removed.
+    const { NAMED_IN_SUMMARY } = await import('../../server/dist/sync/arrivals.js');
+    const n = NAMED_IN_SUMMARY + 3;
+    const ids = Array.from({ length: n }, (_, i) => `many-tomb-${i}`);
+    await coll(SPACE, 'tombstones').insertMany(ids.map(_id =>
+      ({ _id, type: 'fact', spaceId: SPACE, deletedAt: iso(CREATED), instanceId: 'origin', seq: 70 })));
+    const out = await importMod.importDocuments(SPACE, { facts: ids.map(id => fixture('facts', id, 65)) });
+    const r = out.results.facts;
+    assert.deepEqual([r.restoredOverTombstone?.length, r.restoredOverTombstoneTotal], [NAMED_IN_SUMMARY, n], JSON.stringify(r));
   });
 
   it('a record restored over a tombstone is reported by id', async () => {

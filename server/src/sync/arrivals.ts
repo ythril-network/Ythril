@@ -167,11 +167,14 @@ export function arrivalId(doc: unknown): string {
  * refusal reads the same from a push, a pull and a restore. Never a line per document: a poison page would
  * flood the log ring with one fact.
  */
+/** How many ids a refusal summary names before it says how many more — the log line's and the import response's. */
+export const NAMED_IN_SUMMARY = 10;
+
 export function warnArrivalsNotStored(
   where: string, spaceId: string, family: string, what: string, items: ReadonlyArray<string | ArrivalRefusal>,
 ): void {
   if (items.length === 0) return;
-  const shown = items.slice(0, 10).map(i => (typeof i === 'string' ? i : `${i._id} (${i.reason})`));
+  const shown = items.slice(0, NAMED_IN_SUMMARY).map(i => (typeof i === 'string' ? i : `${i._id} (${i.reason})`));
   log.warn(`${where}: ${items.length} ${family} record(s) ${what} in space '${spaceId}': ${shown.join(', ')}`
     + (items.length > shown.length ? `, and ${items.length - shown.length} more` : ''));
 }

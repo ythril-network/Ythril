@@ -117,8 +117,9 @@ syncTombstonesRouter.post('/tombstones', syncRateLimit, requireAuth, denyReadOnl
      * from that peer propagating by push.
      */
     const plausible = parsed.data.filter(t => seqRefusal(t.seq, { optional: false }) === null);
+    const kept = new Set(plausible);
     warnArrivalsNotStored('sync POST tombstones', spaceId, 'tombstone', 'refused',
-      parsed.data.filter(t => !plausible.includes(t)).map(t => ({ _id: t._id, reason: seqRefusal(t.seq, { optional: false })! })));
+      parsed.data.filter(t => !kept.has(t)).map(t => ({ _id: t._id, reason: seqRefusal(t.seq, { optional: false })! })));
 
     // A peer token may only delete content it authored (peerInstanceId === tombstone issuer);
     // a trusted local/admin token (no peerInstanceId) may relay any tombstone.

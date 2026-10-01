@@ -54,7 +54,7 @@ import type { BrainCollection, KnowledgeType } from '../config/types.js';
 import { log } from '../util/log.js';
 import type { SchemaViolation } from '../spaces/schema-validation.js';
 import { violationsAgainstLocalSchema } from './sync/_shared.js';
-import { writeArrivals, arrivalId, arrivalRefusal, ArrivalWriteError, type ArrivalOutcome } from '../sync/arrivals.js';
+import { writeArrivals, arrivalId, arrivalRefusal, ArrivalWriteError, NAMED_IN_SUMMARY, type ArrivalOutcome } from '../sync/arrivals.js';
 import { REPLICATED_FAMILIES, RECORD_TYPE_OF } from '../sync/replicated-families.js';
 import { readPageTombstones } from '../sync/push-reads.js';
 
@@ -80,14 +80,21 @@ export interface ImportRefusal {
 export interface ImportTypeResult {
   inserted: number;
   updated: number;
-  /** How many were not stored; `refused` names each one. */
+  /** How many were not stored — the total; `refused` names the first of them. */
   errors: number;
-  /** Every document not stored, by id and reason — a count says something is wrong and nothing about which. */
+  /**
+   * The documents not stored, by id and reason — the first `NAMED_IN_SUMMARY` of them, so a 50 000-record restore
+   * that fails answers a bounded body; `errors` is how many there were in all.
+   */
   refused?: ImportRefusal[];
   /** File chunks and face records left out because this instance derives them from the blob. */
   derived?: number;
-  /** Records restored over a tombstone this instance holds: a peer holding the same tombstone deletes them again. */
+  /**
+   * Records restored over a tombstone this instance holds — a peer holding the same tombstone deletes them again.
+   * The first `NAMED_IN_SUMMARY` ids; `restoredOverTombstoneTotal` is how many there were.
+   */
   restoredOverTombstone?: string[];
+  restoredOverTombstoneTotal?: number;
   /**
    * Documents stored WITH violations, named so an operator can find them.
    *
@@ -148,7 +155,7 @@ export async function importDocuments(spaceId: string, payload: Record<string, u
       log.warn(`Import into space '${spaceId}': ${t} could not be written: ${String(err)}`);
       if (!(err instanceof ArrivalWriteError) || !err.partial) {
         // Nothing of the family is vouched for, so every document is named.
-        result.refused = docs.map(d => ({ _id: arrivalId(d), reason: familyFailed(err) }));
+        result.refused = docs.slice(0, NAMED_IN_SUMMARY).map(d => ({ _id: arrivalId(d), reason: familyFailed(err) }));
         result.errors = docs.length;
         continue;
       }
@@ -167,7 +174,7 @@ export async function importDocuments(spaceId: string, payload: Record<string, u
       ...out.duplicates.map(_id => ({ _id, reason: 'a uniquely-indexed duplicate of a record held here under another id' })),
     ];
     result.errors = refused.length;
-    if (refused.length > 0) result.refused = refused;
+    if (refused.length > 0) result.refused = refused.slice(0, NAMED_IN_SUMMARY);
     if (out.derived.length > 0) result.derived = out.derived.length;
     if (violations.length > 0) result.schemaViolations = violations;
 
@@ -177,7 +184,10 @@ export async function importDocuments(spaceId: string, payload: Record<string, u
     if (tombType !== undefined && landed.length > 0) {
       const held = (await readPageTombstones(spaceId, landed)).get(tombType);
       const over = landed.filter(id => held?.has(id));
-      if (over.length > 0) result.restoredOverTombstone = over;
+      if (over.length > 0) {
+        result.restoredOverTombstone = over.slice(0, NAMED_IN_SUMMARY);
+        result.restoredOverTombstoneTotal = over.length;
+      }
     }
   }
 
@@ -186,7 +196,7 @@ export async function importDocuments(spaceId: string, payload: Record<string, u
     + IMPORT_TYPES.map(t => {
       const r = results[t];
       const v = r.schemaViolations?.length ?? 0;
-      const tomb = r.restoredOverTombstone?.length ?? 0;
+      const tomb = r.restoredOverTombstoneTotal ?? 0;
       return `${t}: +${r.inserted} ~${r.updated} !${r.errors}${v > 0 ? ` ?${v}` : ''}${tomb > 0 ? ` over-tombstone ${tomb}` : ''}`;
     }).join(', '),
   );
