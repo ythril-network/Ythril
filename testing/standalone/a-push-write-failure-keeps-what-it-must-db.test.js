@@ -13,12 +13,14 @@
  *    the record, which the tombstone would have refused, is accepted.
  * 2. **A deterministic per-document fault refuses that document, not the page.** One document the store rejects
  *    (here: a validator) answered 500 for the whole page, so the sender held its watermark and re-sent the same
- *    page for ever — every other record in it stuck behind one. It is counted in `rejected` instead.
+ *    page for ever — every other record in it stuck behind one. It is counted in `rejected` instead; on each of
+ *    the four single routes it is a 400 naming the store's refusal, and nothing is stored.
  * 3. **A fault with no per-document shape still answers 500.** A command-level failure (here: the collection is
  *    a view) may be transient, and a 500 is what keeps the sender's watermark so the page is offered again.
  * 4. **A unique-index duplicate is an outcome, not a fault.** An edge UPDATE that would move onto a triplet that
  *    already exists is `duplicateTriplets` (or `duplicate` on the single route); a link arriving under another id
- *    for endpoints already linked is the same link — `skipped`, never a 500.
+ *    for endpoints already linked is the same link — `skipped`, never a 500. The link case is batch-only because
+ *    links have no single-record route: they arrive only through `batch-upsert`.
  *
  * Run: a Mongo the harness accepts (see `_mongo-harness.mjs`), then
  *      node --test testing/standalone/a-push-write-failure-keeps-what-it-must-db.test.js
@@ -31,8 +33,17 @@ import { openPushDoor, build } from './_push-door.mjs';
 
 const skip = await mongoSkipReason();
 
-/** Facts here refuse the text 'POISON' through a real validator. */
+/** Records here refuse the text 'POISON' through a real validator, one per family a single route stores. */
 const GUARDED = 'pushfault';
+/** The collection of each single push route, and the field its validator refuses 'POISON' in. */
+const POISONED_FIELD = { facts: 'fact', entities: 'name', edges: 'label', chrono: 'title' };
+/** Each single route, the document builder it takes, and the collection it stores into. */
+const SINGLE = [
+  { route: '/facts', kind: 'fact', part: 'facts' },
+  { route: '/entities', kind: 'entity', part: 'entities' },
+  { route: '/edges', kind: 'edge', part: 'edges' },
+  { route: '/chrono', kind: 'chrono', part: 'chrono' },
+];
 /** Facts here are a VIEW: every write fails at the command level, with no per-document shape. */
 const VIEWED = 'pushview';
 const PLAIN = 'pushdup';
@@ -43,11 +54,14 @@ describe('a push write failure keeps what it must', { skip }, () => {
   before(async () => {
     door = await openPushDoor({ suite: 'pushfault', spaces: [GUARDED, VIEWED, PLAIN].map(id => ({ id, label: id, folders: [], meta: {} })) });
     const db = door.mongo.getDb();
-    await db.command({
-      collMod: `${GUARDED}_facts`,
-      validator: { $jsonSchema: { properties: { fact: { not: { enum: ['POISON'] } } } } },
-      validationLevel: 'strict', validationAction: 'error',
-    });
+    // One validator per family a SINGLE route stores, each refusing the text 'POISON' in a field it requires.
+    for (const [part, field] of Object.entries(POISONED_FIELD)) {
+      await db.command({
+        collMod: `${GUARDED}_${part}`,
+        validator: { $jsonSchema: { properties: { [field]: { not: { enum: ['POISON'] } } } } },
+        validationLevel: 'strict', validationAction: 'error',
+      });
+    }
     await db.collection(`${VIEWED}_facts`).drop();
     await db.createCollection(`${VIEWED}_facts`, { viewOn: `${VIEWED}_entities`, pipeline: [] });
   });
@@ -86,6 +100,24 @@ describe('a push write failure keeps what it must', { skip }, () => {
       assert.deepEqual([r.body.facts.inserted, r.body.facts.rejected], [2, 1], JSON.stringify(r.body.facts));
       assert.deepEqual((await door.coll(GUARDED, 'facts').find({}).toArray()).map(d => d._id).sort(), ['good-1', 'good-2']);
     });
+
+    /*
+     * The single-route half. A page of one is the same accept and the same writer, so the poison document is
+     * refused by id; the route answers the refusal as a 400 — the sender's error to fix, never retried — and not a
+     * 500, which would make it re-send the document for ever. Every single route stores a family that can carry
+     * one, so each is asked.
+     */
+    for (const { route, kind, part } of SINGLE) {
+      it(`single ${route}: a POISON document answers the store-refusal 400, not 500, and stores nothing`, async () => {
+        const doc = build[kind](GUARDED, `poison-${kind}`, 5, { [POISONED_FIELD[part]]: 'POISON' });
+        const r = await door.push(route, doc, { spaceId: GUARDED });
+        assert.equal(r.code, 400,
+          `a document the store refuses answered ${r.code} on POST ${route} (${JSON.stringify(r.body)}): a 500 makes the `
+          + 'sender re-send it every cycle, and a 200 would tell it the record landed');
+        assert.match(r.body?.error ?? '', /the store refused it \(error code 121\)/, JSON.stringify(r.body));
+        assert.equal(await door.coll(GUARDED, part).countDocuments({ _id: doc._id }), 0, `POST ${route} stored the poison`);
+      });
+    }
 
     it('the same page re-sent answers the same: the refusal is deterministic, not a retry', async () => {
       const page = { facts: [build.fact(GUARDED, 'good-1', 4), build.fact(GUARDED, 'bad', 5, { fact: 'POISON' })] };
