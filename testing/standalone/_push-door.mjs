@@ -121,17 +121,22 @@ export async function openPushDoor({ suite, spaces, networks = [], monitorComman
 
   // ── The counter probe: the highest value a COMPLETED counter write left, per space ─────────────────────────
   const landed = new Map();
+  const inFlight = new Set();
+  const track = (p) => { inFlight.add(p); p.finally(() => inFlight.delete(p)).catch(() => {}); return p; };
+  /** Every counter write already started has completed — so a fire-and-forget bump cannot land on a later case. */
+  async function settled() { while (inFlight.size > 0) await Promise.allSettled([...inFlight]); }
   const proto = Object.getPrototypeOf(mongo.col('probe'));
   const originals = { updateOne: proto.updateOne, findOneAndUpdate: proto.findOneAndUpdate };
+  const counted = (coll, op) => (coll.collectionName === 'ythril_counters' ? track(op) : op);
   proto.updateOne = async function observed(filter, update, ...rest) {
-    const r = await originals.updateOne.call(this, filter, update, ...rest);
+    const r = await counted(this, originals.updateOne.call(this, filter, update, ...rest));
     if (this.collectionName === 'ythril_counters' && typeof update?.$max?.seq === 'number') {
       landed.set(filter._id, Math.max(landed.get(filter._id) ?? 0, update.$max.seq));
     }
     return r;
   };
   proto.findOneAndUpdate = async function observed(filter, update, ...rest) {
-    const r = await originals.findOneAndUpdate.call(this, filter, update, ...rest);
+    const r = await counted(this, originals.findOneAndUpdate.call(this, filter, update, ...rest));
     if (this.collectionName === 'ythril_counters' && typeof r?.seq === 'number') {
       landed.set(filter._id, Math.max(landed.get(filter._id) ?? 0, r.seq));
     }
@@ -180,13 +185,16 @@ export async function openPushDoor({ suite, spaces, networks = [], monitorComman
   }
 
   const coll = (space, part) => mongo.col(`${space}_${part}`);
+  /** The stored counter, after every counter write already started has landed. */
   async function counter(space) {
+    await settled();
     return (await mongo.col('ythril_counters').findOne({ _id: space }))?.seq ?? 0;
   }
   async function setCounter(space, seq) {
     await mongo.col('ythril_counters').updateOne({ _id: space }, { $set: { seq } }, { upsert: true });
   }
   async function wipe(space) {
+    await settled();
     for (const part of ['facts', 'entities', 'edges', 'chrono', 'links', 'files', 'tombstones', 'embed_jobs']) {
       await coll(space, part).deleteMany({});
     }
@@ -209,5 +217,5 @@ export async function openPushDoor({ suite, spaces, networks = [], monitorComman
     try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* best effort */ }
   }
 
-  return { mongo, push, pull, coll, counter, setCounter, wipe, commandsDuring, close };
+  return { mongo, push, pull, coll, counter, setCounter, settled, wipe, commandsDuring, close };
 }
