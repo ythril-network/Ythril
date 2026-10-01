@@ -16,8 +16,9 @@
  * **For every seq allocation in the create/converge writers — `saveFact`, `upsertEntity`, `createChrono`,
  * `upsertEdge`, and every module under `server/src/brain/write-plan/` once it exists — the next `await` in the
  * source after the allocation is a record write** (`insertOne`/`insertMany`/`updateOne`/`updateMany`/
- * `replaceOne`/`bulkWrite`). An allocation is `await nextSeq(` or `await withAllocatedSeqs(` — for the latter the
- * next await is the first inside the write callback, which is the same question asked of the block form.
+ * `replaceOne`/`bulkWrite`). An allocation is `withSeq(` or `withAllocatedSeqs(`, which take the write as a
+ * callback, so the question is asked of the callback: everything it awaits is a record write. (`nextSeq`, the
+ * bare allocator, is gone — it could not be released when its write settled — but is still recognised here.)
  *
  * Read textually, not per control path: a branch whose write comes later in the source than another branch's is
  * judged by the first one. That errs toward PASSING an interleaved converge/insert pair, never toward a false red,
@@ -57,26 +58,40 @@ function subjects() {
   return out;
 }
 
-/** Each allocation in a subject, with the statement of the next `await` after it. */
+const IS_RECORD_WRITE = /\.(?:insertOne|insertMany|updateOne|updateMany|replaceOne|bulkWrite)\s*(?:<[^>]*>)?\s*\(/;
+
+/**
+ * Each allocation in a subject, with what it awaits before (or instead of) its write.
+ *
+ * Two forms. `await nextSeq(` hands back a number, so the next `await` after it is the one judged. The
+ * callback form — `withSeq(` / `withAllocatedSeqs(` — takes the write with it, so the judged text is the
+ * call itself: every `await` inside it must be a record write, and it must contain one (a callback that
+ * returns the write un-awaited has no inner `await` at all, which is the shape the rule wants).
+ */
 function allocationSites() {
   const sites = [];
   for (const { where, text } of subjects()) {
-    for (const m of text.matchAll(/await\s+(?:nextSeq|withAllocatedSeqs)\s*\(/g)) {
-      const after = m.index + m[0].length;
-      const next = /\bawait\b/g;
-      next.lastIndex = after;
-      const hit = next.exec(text);
+    for (const m of text.matchAll(/\b(nextSeq|withAllocatedSeqs|withSeq)\s*\(/g)) {
       const line = text.slice(0, m.index).split('\n').length;
-      sites.push({
-        where: `${where} (allocation on body line ${line})`,
-        nextAwait: hit ? statementFrom(text, hit.index, where).replace(/\s+/g, ' ').slice(0, 160) : '(none)',
-      });
+      const site = `${where} (allocation on body line ${line})`;
+      if (m[1] === 'nextSeq') {
+        const next = /\bawait\b/g;
+        next.lastIndex = m.index + m[0].length;
+        const hit = next.exec(text);
+        sites.push({ where: site, offending: hit && !IS_RECORD_WRITE.test(statementFrom(text, hit.index, where))
+          ? statementFrom(text, hit.index, where).replace(/\s+/g, ' ').slice(0, 160) : null });
+        continue;
+      }
+      const call = statementFrom(text, m.index, where);
+      const awaited = [...call.matchAll(/\bawait\b/g)]
+        .map(a => statementFrom(call, a.index, where).replace(/\s+/g, ' ').slice(0, 160))
+        .filter(s => !IS_RECORD_WRITE.test(s));
+      const offending = awaited[0] ?? (IS_RECORD_WRITE.test(call) ? null : '(the callback writes nothing)');
+      sites.push({ where: site, offending });
     }
   }
   return sites;
 }
-
-const IS_RECORD_WRITE = /\.(?:insertOne|insertMany|updateOne|updateMany|replaceOne|bulkWrite)\s*(?:<[^>]*>)?\s*\(/;
 
 describe('a seq allocation is followed by its write', () => {
   it('the sweep finds the allocations, so an empty set cannot pass', () => {
@@ -86,8 +101,8 @@ describe('a seq allocation is followed by its write', () => {
   });
 
   it('in every create/converge writer, nothing is awaited between allocating a seq and writing it', () => {
-    const bad = allocationSites().filter(s => !IS_RECORD_WRITE.test(s.nextAwait));
-    assert.deepEqual(bad.map(s => `${s.where}: next await is \`${s.nextAwait}\``), [],
+    const bad = allocationSites().filter(s => s.offending !== null);
+    assert.deepEqual(bad.map(s => `${s.where}: awaits \`${s.offending}\``), [],
       'an await between the allocation and the write holds every peer\'s pull of this space below the allocated '
       + 'seq for as long as it takes. Do the embedding, duplicate and contradiction work in planning, before the '
       + 'allocation, and let the write be the first thing awaited after it.');

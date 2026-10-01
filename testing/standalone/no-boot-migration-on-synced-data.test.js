@@ -197,7 +197,9 @@ function bootRoots() {
  */
 const SANCTIONED = new Map([
   ['server/src/brain/links-convert-on-boot.ts:convertLinksOnBoot', {
-    writes: ['server/src/brain/links.ts:reconcileLinks'],
+    // `writeLinkChanges` is `reconcileLinks`' own write step, split out when the rows became block writes
+    // (`Q-196`); the migration reaches the same writes it always did.
+    writes: ['server/src/brain/links.ts:writeLinkChanges'],
     why: 'The 5.0 link-array migration, owner-directed 2026-09-17 after the canary operator reported that '
       + '`npm run links:convert` cannot run on a deployed instance (`scripts/` is not in the image). '
       + '`MIN_PEER_VERSION` derives from our own major, so a 5.0 instance refuses every 4.x peer at the '

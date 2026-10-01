@@ -4,7 +4,8 @@ import { rekeyEdge, embedQueueWorkFor, type EdgeRekey } from './edge-rekey.js';
 import { brainWriteSeqTotal } from '../metrics/registry.js';
 import { authorRef } from '../config/author.js';
 import { col, getMongo, asFilter, asDoc, asUpdate } from '../db/mongo.js';
-import { nextSeq } from '../util/seq.js';
+import { withSeq, withSeqHorizonHeld } from '../util/seq.js';
+import { writeTombstone } from './tombstones.js';
 import { parseLimit, parseSkip } from '../util/pagination.js';
 import { toMongoSort, type SortSpec } from './list-sort.js';
 import { NEVER_RETURNED_PROJECTION, withoutVector } from './read-projection.js';
@@ -14,7 +15,6 @@ import { applyPropertyDefaults } from '../spaces/schema-validation.js';
 import { conveniencePredicate, conveniencesFrom } from './list-conveniences.js';
 import { embed } from './embedding.js';
 import { edgeEmbedText } from './embed-text.js';
-import { getConfig } from '../config/loader.js';
 import { stampExpiryOnCreate, applyExpiryToUpdate } from './ttl.js';
 import { stampSkewOnCreate } from './stamp-skew.js';
 import { getSpaceMeta } from '../spaces/schema-validation.js';
@@ -29,7 +29,7 @@ import { linkedRecordsAtFrontier, recordDisplayName, recordDisplayType }
 import { resolveEdgeEndpointNames, resolveEdgeEndsForWrite, neighbourNodes, startNode } from './edge-endpoint-names.js';
 import { storedEdgeKind } from './entity-refs.js';
 import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';
-import type { EdgeDoc, TombstoneDoc, FileMetaDoc } from '../config/types.js';
+import type { EdgeDoc, FileMetaDoc } from '../config/types.js';
 import type { RefKind } from '../config/types-knowledge.js';
 import { PROPERTIES_SCAN_MAX_MS } from './tag-filter.js';
 import { writeFilterFor, writeOutcome } from './write-precondition.js';
@@ -191,7 +191,6 @@ export async function upsertEdge(
   if (check.blocked) throw new EdgeSchemaViolation(check);
   opts?.onValidation?.(check);
 
-  const seq = await nextSeq(spaceId);
   const now = new Date().toISOString();
 
   const effectiveDesc = description ?? (existing as EdgeDoc | null)?.description;
@@ -222,7 +221,7 @@ export async function upsertEdge(
   }
 
   if (existing) {
-    const $set: Record<string, unknown> = { updatedAt: now, seq, ...embeddingFields };
+    const $set: Record<string, unknown> = { updatedAt: now, ...embeddingFields };
     if (weight !== undefined) $set['weight'] = weight;
     if (type !== undefined) $set['type'] = type;
     if (description !== undefined) $set['description'] = description;
@@ -240,12 +239,15 @@ export async function upsertEdge(
     }
     applyExpiryToUpdate(spaceId, ttlDays, (existing as EdgeDoc)._expireAt != null, $set, $unset,
       { collection: 'edge', existing: existing as unknown as Record<string, unknown> }); // F10
-    const updateOp: Record<string, unknown> = { $set };
-    if (Object.keys($unset).length > 0) updateOp['$unset'] = $unset;
-    await collection.updateOne(
-      asFilter<EdgeDoc>({ _id: (existing as EdgeDoc)._id }),
-      asUpdate<EdgeDoc>(updateOp),
-    );
+    const seq = await withSeq(spaceId, async (s) => {
+      const updateOp: Record<string, unknown> = { $set: { ...$set, seq: s } };
+      if (Object.keys($unset).length > 0) updateOp['$unset'] = $unset;
+      await collection.updateOne(
+        asFilter<EdgeDoc>({ _id: (existing as EdgeDoc)._id }),
+        asUpdate<EdgeDoc>(updateOp),
+      );
+      return s;
+    });
     const updatedEdge: EdgeDoc = {
       ...(existing as EdgeDoc),
       seq,
@@ -295,7 +297,7 @@ export async function upsertEdge(
     author: authorRef(),
     createdAt: now,
     updatedAt: now,
-    seq,
+    seq: 0, // taken at the insert below
     ...embeddingFields,
   };
   // Stored, not merely consulted — see the note in `saveFact`.
@@ -306,7 +308,10 @@ export async function upsertEdge(
   // Warn-not-refuse: a caller's own stamp checked against ours. Stored only when it disagrees beyond the space's
   // threshold, so presence is the signal. The write proceeds either way -- a backdated import is legitimate.
   stampSkewOnCreate(doc, getSpaceMeta(spaceId));
-  await collection.insertOne(asDoc<EdgeDoc>(doc));
+  await withSeq(spaceId, (seq) => {
+    doc.seq = seq;
+    return collection.insertOne(asDoc<EdgeDoc>(doc));
+  });
   if (!embeddingFields.embedding && !suppressed) await enqueueEmbedJob(spaceId, 'edge', doc._id, { priority: EMBED_PRIORITY.write });
   if (actor) emitWebhookEvent({ event: 'edge.created', spaceId, entry: { ...doc, embedding: undefined }, ...actor });
   return withoutVector(doc);
@@ -353,7 +358,6 @@ export async function listEdges(
 export async function deleteEdge(spaceId: string, edgeId: string, actor?: WebhookActor): Promise<boolean> {
   const existing = await col<EdgeDoc>(spaceCollection(spaceId, 'edges'))
     .findOne(asFilter<EdgeDoc>({ _id: edgeId, spaceId }), { projection: { seq: 1 } }) as { seq?: number } | null;
-  const seq = await nextSeq(spaceId);
   const result = await col<EdgeDoc>(spaceCollection(spaceId, 'edges')).deleteOne({
     _id: edgeId,
     spaceId,
@@ -365,20 +369,7 @@ export async function deleteEdge(spaceId: string, edgeId: string, actor?: Webhoo
   // that 404s.
   await retireEmbedJob(spaceId, 'edge', edgeId);
 
-  const tombstone: TombstoneDoc = {
-    _id: edgeId,
-    type: 'edge',
-    spaceId,
-    deletedAt: new Date().toISOString(),
-    instanceId: getConfig().instanceId,
-    seq,
-    ...(existing?.seq !== undefined ? { originalSeq: existing.seq } : {}),
-  };
-  await col<TombstoneDoc>(spaceCollection(spaceId, 'tombstones')).replaceOne(
-    asFilter<TombstoneDoc>({ _id: edgeId }),
-    asDoc<TombstoneDoc>(tombstone),
-    { upsert: true },
-  );
+  await writeTombstone(spaceId, { _id: edgeId, type: 'edge', originalSeq: existing?.seq });
   if (actor) emitWebhookEvent({ event: 'edge.deleted', spaceId, entry: { _id: edgeId }, ...actor });
   return true;
 }
@@ -407,9 +398,10 @@ export async function updateEdgeById(
     { projection: NEVER_RETURNED_PROJECTION }) as EdgeDoc | null;
   if (!existing) return null;
 
-  const seq = await nextSeq(spaceId);
+  // The seq is taken AT the write (`withSeq` below), not here: everything awaited between allocation and
+  // write holds every seq-paged reader of the space (`Q-196`).
   const now = new Date().toISOString();
-  const $set: Record<string, unknown> = { updatedAt: now, seq };
+  const $set: Record<string, unknown> = { updatedAt: now };
   const $unset: Record<string, unknown> = {};
 
   if (updates.suppressEmbeddings !== undefined) $set['suppressEmbeddings'] = updates.suppressEmbeddings;
@@ -539,8 +531,7 @@ export async function updateEdgeById(
       brainWriteSeqTotal.labels({ collection: 'edges', outcome: writeOutcome(false, true, true) }).inc();
       return null;
     }
-    const carried = { ...$set };
-    delete carried['seq'];   // `rekeyEdge` takes its own, after the tombstone's — see its docblock
+    const carried = { ...$set };   // no `seq`: `rekeyEdge` takes its own, after the tombstone's
     // The removals go too. Without them the re-inserted row keeps every field this patch deletes, while the
     // response says it does not — and for `ttlDays: null` that is an edge the sweep still expires.
     /*
@@ -556,9 +547,10 @@ export async function updateEdgeById(
     try {
       // The callback's value is the transaction's value, so the result is read out rather than assigned into
       // an outer variable — a closure write is invisible to the type narrowing and would type as `never`.
-      moved = await session.withTransaction(
+      // The horizon held across the session: the re-key's seqs are not committed until the session is.
+      moved = await withSeqHorizonHeld(spaceId, () => session.withTransaction(
         async () => rekeyEdge(spaceId, existing, { label: newLabel }, carried, Object.keys($unset), session),
-      );
+      ));
     } finally {
       await session.endSession();
     }
@@ -586,17 +578,21 @@ export async function updateEdgeById(
     }
   }
 
-  const updateOp: Record<string, unknown> = { $set };
-  if (Object.keys($unset).length > 0) updateOp['$unset'] = $unset;
   // Lost-update detection, identical to `updateFact` and for the same reason: `returnDocument: "before"`
   // hands back the record as it was at WRITE time, so comparing its seq with the one read at the top of this
   // function is exactly the test for another writer landing in the window. Observation only — no write that
   // previously succeeded is now rejected.
-  const beforeWrite = await collection.findOneAndUpdate(
-    asFilter<EdgeDoc>(writeFilterFor(id, ifMatchSeq)),
-    asUpdate<EdgeDoc>(updateOp),
-    { returnDocument: 'before' },
-  ) as EdgeDoc | null;
+  let seq = 0;
+  const beforeWrite = await withSeq(spaceId, (s) => {
+    seq = s;
+    const updateOp: Record<string, unknown> = { $set: { ...$set, seq } };
+    if (Object.keys($unset).length > 0) updateOp['$unset'] = $unset;
+    return collection.findOneAndUpdate(
+      asFilter<EdgeDoc>(writeFilterFor(id, ifMatchSeq)),
+      asUpdate<EdgeDoc>(updateOp),
+      { returnDocument: 'before' },
+    );
+  }) as EdgeDoc | null;
   brainWriteSeqTotal.labels({
     collection: 'edges',
     outcome: writeOutcome(!!beforeWrite, ifMatchSeq !== undefined, !!beforeWrite && beforeWrite.seq !== existing.seq),

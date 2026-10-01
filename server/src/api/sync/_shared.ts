@@ -160,7 +160,7 @@ export async function ingestBrainDoc<T extends { _id: string; suppressEmbeddings
 /**
  * Upper bound on any seq value accepted from a remote peer. Prevents a peer poisoning the high-water
  * mark with seq = MAX_SAFE_INTEGER, which would make later legitimate writes silently ignored.
- * 2^50 is far above any realistic counter yet keeps nextSeq() arithmetic in safe range.
+ * 2^50 is far above any realistic counter yet keeps seq-allocation arithmetic in safe range.
  */
 export const MAX_SYNC_SEQ = 2 ** 50; // 1_125_899_906_842_624
 

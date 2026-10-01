@@ -107,7 +107,13 @@ function seqCarriedBy(method, args) {
   if (method === 'insertOne') return args[0]?.seq;
   if (method === 'replaceOne' || method === 'findOneAndReplace') return args[1]?.seq;
   if (method === 'updateOne' || method === 'findOneAndUpdate') return args[1]?.$set?.seq;
-  return undefined;
+  // A block write carries several seqs; the LOWEST is the one the horizon must stop below.
+  const seqs = method === 'insertMany' ? (args[0] ?? []).map(d => d?.seq)
+    : method === 'bulkWrite' ? (args[0] ?? []).map(op =>
+      op.insertOne?.document?.seq ?? op.replaceOne?.replacement?.seq ?? op.updateOne?.update?.$set?.seq)
+    : [];
+  const numbers = seqs.filter(s => typeof s === 'number');
+  return numbers.length > 0 ? Math.min(...numbers) : undefined;
 }
 
 function installHold(proto) {

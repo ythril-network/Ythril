@@ -96,7 +96,7 @@ export async function moveSpaceData(oldId: string, newId: string): Promise<strin
   // entirely — and for the seq counter that is dangerous, not cosmetic:
   //
   //   `ythril_counters` stores the space's monotonic seq as `_id: <spaceId>`. Losing it
-  //   means nextSeq() restarts at 1 — while applySpaceRenameToConfig deliberately carries
+  //   means the next allocation restarts at 1 — while applySpaceRenameToConfig deliberately carries
   //   the OLD, high `lastSeqPushed` / `lastSeqReceived` watermarks over to the new id. Every
   //   subsequent local write would then get a seq BELOW the watermark, and sync would skip
   //   it forever: the space keeps working locally while silently never pushing to peers.

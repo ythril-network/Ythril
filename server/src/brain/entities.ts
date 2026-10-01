@@ -4,7 +4,8 @@ import { brainWriteSeqTotal } from '../metrics/registry.js';
 import { authorRef } from '../config/author.js';
 import { findInsertContradictions, type ContradictionWarning } from './insert-contradictions.js';
 import { col, asFilter, asDoc, asUpdate } from '../db/mongo.js';
-import { nextSeq } from '../util/seq.js';
+import { withSeq } from '../util/seq.js';
+import { writeTombstone } from './tombstones.js';
 import { parseLimit, parseSkip } from '../util/pagination.js';
 import { toMongoSort, type SortSpec } from './list-sort.js';
 import { NEVER_RETURNED_PROJECTION, withoutVector } from './read-projection.js';
@@ -27,7 +28,7 @@ import { checkDuplicates, type SimilarMatch } from './recall.js';
 import type { DupeCheckOpts } from './write-options.js';
 import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';
 import { log } from '../util/log.js';
-import type { EntityDoc, EdgeDoc, TombstoneDoc, FileMetaDoc } from '../config/types.js';
+import type { EntityDoc, EdgeDoc, FileMetaDoc } from '../config/types.js';
 import { PROPERTIES_SCAN_MAX_MS, textContains } from './tag-filter.js';
 import { spaceCollection } from '../db/space-collection.js';
 
@@ -159,7 +160,6 @@ export async function upsertEntity(
   onValidation?.(check);
   properties = withDefaults ?? properties;
 
-  const seq = await nextSeq(spaceId);
   const now = new Date().toISOString();
 
   // Embed the entity text (best-effort — if embedding fails we still store the entity)
@@ -193,17 +193,20 @@ export async function upsertEntity(
 
   if (existing) {
     const { tags: updatedTags, properties: mergedProps } = mergeTagsAndProperties(existing, { tags, properties });
-    const $set: Record<string, unknown> = { name, type, tags: updatedTags, properties: mergedProps, updatedAt: now, seq, ...embeddingFields };
+    const $set: Record<string, unknown> = { name, type, tags: updatedTags, properties: mergedProps, updatedAt: now, ...embeddingFields };
     if (description !== undefined) $set['description'] = description;
     const $unset: Record<string, unknown> = {};
     applyExpiryToUpdate(spaceId, ttlDays, existing._expireAt != null, $set, $unset,
       { collection: 'entity', existing: existing as unknown as Record<string, unknown> }); // F10
-    const updateOp: Record<string, unknown> = { $set };
-    if (Object.keys($unset).length > 0) updateOp['$unset'] = $unset;
-    await collection.updateOne(
-      asFilter<EntityDoc>({ _id: existing._id }),
-      asUpdate<EntityDoc>(updateOp),
-    );
+    const seq = await withSeq(spaceId, async (s) => {
+      const updateOp: Record<string, unknown> = { $set: { ...$set, seq: s } };
+      if (Object.keys($unset).length > 0) updateOp['$unset'] = $unset;
+      await collection.updateOne(
+        asFilter<EntityDoc>({ _id: existing._id }),
+        asUpdate<EntityDoc>(updateOp),
+      );
+      return s;
+    });
     const entity: EntityDoc = { ...existing, name, type, tags: updatedTags, properties: mergedProps, updatedAt: now, seq, ...embeddingFields, ...(description !== undefined ? { description } : {}) };
     if ('_expireAt' in $set) entity._expireAt = $set['_expireAt'] as Date;
     else if ('_expireAt' in $unset) delete (entity as { _expireAt?: unknown })._expireAt;
@@ -250,7 +253,7 @@ export async function upsertEntity(
     author: authorRef(),
     createdAt: now,
     updatedAt: now,
-    seq,
+    seq: 0, // taken at the insert below
     ...embeddingFields,
   };
   // Stored, not merely consulted — see the note in `saveFact`: everything that revisits a record later reads
@@ -263,7 +266,10 @@ export async function upsertEntity(
   // Warn-not-refuse: a caller's own stamp checked against ours. Stored only when it disagrees beyond the space's
   // threshold, so presence is the signal. The write proceeds either way -- a backdated import is legitimate.
   stampSkewOnCreate(doc, getSpaceMeta(spaceId));
-  await collection.insertOne(asDoc<EntityDoc>(doc));
+  await withSeq(spaceId, (seq) => {
+    doc.seq = seq;
+    return collection.insertOne(asDoc<EntityDoc>(doc));
+  });
   // Not queued when suppressed, for the reason `saveFact` states: a queued job stores the vector the flag
   // forbids moments later, and nothing revisits it.
   if (!embeddingFields.embedding && !suppressed) await enqueueEmbedJob(spaceId, 'entity', doc._id, { priority: EMBED_PRIORITY.write });
@@ -348,9 +354,9 @@ export async function updateEntityById(
     { projection: NEVER_RETURNED_PROJECTION }) as EntityDoc | null;
   if (!existing) return null;
 
-  const seq = await nextSeq(spaceId);
+  // The seq is taken AT the write (`withSeq` below), not here (`Q-196`).
   const now = new Date().toISOString();
-  const $set: Record<string, unknown> = { updatedAt: now, seq };
+  const $set: Record<string, unknown> = { updatedAt: now };
   const $unset: Record<string, unknown> = {};
 
   const newName = updates.name ?? existing.name;
@@ -415,17 +421,21 @@ export async function updateEntityById(
 
   applyExpiryToUpdate(spaceId, ttlDays, existing._expireAt != null, $set, $unset,
     { collection: 'entity', existing: existing as unknown as Record<string, unknown> }); // F10
-  const updateOp: Record<string, unknown> = { $set };
-  if (Object.keys($unset).length > 0) updateOp['$unset'] = $unset;
   // Lost-update detection, identical to `updateFact` and for the same reason: `returnDocument: "before"`
   // hands back the record as it was at WRITE time, so comparing its seq with the one read at the top of this
   // function is exactly the test for another writer landing in the window. Observation only — no write that
   // previously succeeded is now rejected.
-  const beforeWrite = await collection.findOneAndUpdate(
-    asFilter<EntityDoc>(writeFilterFor(id, ifMatchSeq)),
-    asUpdate<EntityDoc>(updateOp),
-    { returnDocument: 'before' },
-  ) as EntityDoc | null;
+  let seq = 0;
+  const beforeWrite = await withSeq(spaceId, (s) => {
+    seq = s;
+    const updateOp: Record<string, unknown> = { $set: { ...$set, seq } };
+    if (Object.keys($unset).length > 0) updateOp['$unset'] = $unset;
+    return collection.findOneAndUpdate(
+      asFilter<EntityDoc>(writeFilterFor(id, ifMatchSeq)),
+      asUpdate<EntityDoc>(updateOp),
+      { returnDocument: 'before' },
+    );
+  }) as EntityDoc | null;
   brainWriteSeqTotal.labels({
     collection: 'entities',
     outcome: writeOutcome(!!beforeWrite, ifMatchSeq !== undefined, !!beforeWrite && beforeWrite.seq !== existing.seq),
@@ -495,7 +505,6 @@ export async function deleteEntity(
 ): Promise<boolean> {
   const existing = await col<EntityDoc>(spaceCollection(spaceId, 'entities'))
     .findOne(asFilter<EntityDoc>({ _id: entityId, spaceId }), { projection: { seq: 1 } }) as { seq?: number } | null;
-  const seq = await nextSeq(spaceId);
   const result = await col<EntityDoc>(spaceCollection(spaceId, 'entities')).deleteOne({
     _id: entityId,
     spaceId,
@@ -507,20 +516,7 @@ export async function deleteEntity(
   // that 404s.
   await retireEmbedJob(spaceId, 'entity', entityId);
 
-  const tombstone: TombstoneDoc = {
-    _id: entityId,
-    type: 'entity',
-    spaceId,
-    deletedAt: new Date().toISOString(),
-    instanceId: getConfig().instanceId,
-    seq,
-    ...(existing?.seq !== undefined ? { originalSeq: existing.seq } : {}),
-  };
-  await col<TombstoneDoc>(spaceCollection(spaceId, 'tombstones')).replaceOne(
-    asFilter<TombstoneDoc>({ _id: entityId }),
-    asDoc<TombstoneDoc>(tombstone),
-    { upsert: true },
-  );
+  await writeTombstone(spaceId, { _id: entityId, type: 'entity', originalSeq: existing?.seq });
   // Erasure has to reach the biometric copy too — see unlabelFacesForEntities.
   await unlabelFacesForEntities(spaceId, [entityId]);
   if (actor) emitWebhookEvent({ event: 'entity.deleted', spaceId, entry: { _id: entityId }, ...actor });

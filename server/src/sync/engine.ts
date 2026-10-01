@@ -28,7 +28,7 @@ import { resolveWatermark, truncationWarn, type TransferOutcome } from './waterm
 import { pullTombstones, pushTombstones } from './tombstone-transfer.js';
 import { applyConcludedSpaceRounds } from '../spaces/apply-wipe-round.js';
 import { concreteSpaces } from '../spaces/proxy.js';
-import { bumpSeq, isSeqImplausible } from '../util/seq.js';
+import { bumpSeq, isSeqImplausible, settledSeqRange } from '../util/seq.js';
 import { adoptAnnouncedSpaces, announcedSpaces, healAnnouncedAliases } from '../networks/network-spaces.js';
 import { selfRecordFor } from '../networks/self-record.js';
 import { mergePeerRoster, revokeRemoved, pairIntroduced, applyPassedJoin } from '../networks/member-introductions.js';
@@ -1049,8 +1049,10 @@ async function pushToPeer(
     let seqCursor = lastSeqPushed;
     let truncated = false;
     while (true) {
+      // Settled seqs only (Q-196): `lastSeqPushed` moves to the last seq sent, so sending one above an
+      // unsettled write would step the watermark past a record this instance has not finished writing.
       const batch = await col<T>(collName)
-        .find(asFilter<T>({ seq: { $gt: seqCursor }, ...ownedFilter, ...extraFilter }))
+        .find(asFilter<T>({ seq: await settledSeqRange(spaceId, seqCursor), ...ownedFilter, ...extraFilter }))
         .sort({ seq: 1 })
         .limit(PUSH_BATCH_SIZE)
         .toArray() as T[];

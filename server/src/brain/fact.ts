@@ -11,7 +11,7 @@ import { reconcileLinks, removeLinksFrom, assertDesiredLinks } from './links.js'
 import { authorRef } from '../config/author.js';
 import { findInsertContradictions, type ContradictionWarning } from './insert-contradictions.js';
 import { col, asFilter, asDoc, asUpdate } from '../db/mongo.js';
-import { nextSeq } from '../util/seq.js';
+import { withSeq } from '../util/seq.js';
 import { brainWriteSeqTotal } from '../metrics/registry.js';
 import { parseLimit, parseSkip } from '../util/pagination.js';
 import { toMongoSort, type SortSpec } from './list-sort.js';
@@ -27,7 +27,8 @@ import { mergeTags, mergeProperties, mergePropertiesOrKeep } from './merge-field
 import { enqueueEmbedJob, retireEmbedJob, EMBED_PRIORITY } from './embed-queue.js';
 import { embeddingSuppressedFor } from './suppress-embeddings.js';
 import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';
-import type { FactDoc, TombstoneDoc } from '../config/types.js';
+import type { FactDoc } from '../config/types.js';
+import { writeTombstone } from './tombstones.js';
 import { SimilarMatch, checkDuplicates } from './recall.js';
 import type { DupeCheckOpts } from './write-options.js';
 import { PROPERTIES_SCAN_MAX_MS } from './tag-filter.js';
@@ -175,7 +176,6 @@ export async function saveFact(
     }
   }
 
-  const seq = await nextSeq(spaceId);
   const now = new Date().toISOString();
 
   // ── The idempotent branch: a supplied id that already names a record CONVERGES rather than duplicating.
@@ -192,7 +192,6 @@ export async function saveFact(
       tags: mergedTags,
       matchedText: embedText,
       updatedAt: now,
-      seq,
     };
     // Only when a vector was actually computed. When it was not, the PREVIOUS vector stays: it
     // describes the record as it was a moment ago, which is a better answer than none while the
@@ -207,11 +206,14 @@ export async function saveFact(
     const $unset: Record<string, unknown> = {};
     applyExpiryToUpdate(spaceId, ttlDays, existing._expireAt != null, $set, $unset,
       { collection: 'fact', existing: existing as unknown as Record<string, unknown> });
-    const updateOp: Record<string, unknown> = { $set };
-    if (Object.keys($unset).length > 0) updateOp['$unset'] = $unset;
-    await col<FactDoc>(spaceCollection(spaceId, 'facts')).updateOne(
-      asFilter<FactDoc>({ _id: existing._id }), asUpdate<FactDoc>(updateOp),
-    );
+    await withSeq(spaceId, (seq) => {
+      $set['seq'] = seq;
+      const updateOp: Record<string, unknown> = { $set };
+      if (Object.keys($unset).length > 0) updateOp['$unset'] = $unset;
+      return col<FactDoc>(spaceCollection(spaceId, 'facts')).updateOne(
+        asFilter<FactDoc>({ _id: existing._id }), asUpdate<FactDoc>(updateOp),
+      );
+    });
     const converged = { ...existing, ...($set as Partial<FactDoc>) } as FactDoc;
     if ('_expireAt' in $unset) delete (converged as { _expireAt?: unknown })._expireAt;
     // After the write, never before: a job for a record that failed to store would be a job for
@@ -253,7 +255,7 @@ export async function saveFact(
     author: authorRef(),
     createdAt: now,
     updatedAt: now,
-    seq,
+    seq: 0, // taken at the insert below
     ...(embResult ? { embedding: embResult.vector, embeddingModel: embResult.model } : {}),
   };
   /*
@@ -275,7 +277,10 @@ export async function saveFact(
   // Warn-not-refuse: a caller's own stamp checked against ours. Stored only when it disagrees beyond the space's
   // threshold, so presence is the signal. The write proceeds either way -- a backdated import is legitimate.
   stampSkewOnCreate(doc, getSpaceMeta(spaceId));
-  await col<FactDoc>(spaceCollection(spaceId, 'facts')).insertOne(asDoc<FactDoc>(doc));
+  await withSeq(spaceId, (seq) => {
+    doc.seq = seq;
+    return col<FactDoc>(spaceCollection(spaceId, 'facts')).insertOne(asDoc<FactDoc>(doc));
+  });
   if (!embResult && !suppressed) await enqueueEmbedJob(spaceId, 'fact', doc._id, { priority: EMBED_PRIORITY.write });
   // The link records for a new fact. One call whether the array is empty or not: `reconcileLinks` is a
   // reconcile, so "nothing to do" is a cheap answer rather than a decision this site has to make.
@@ -312,9 +317,9 @@ export async function updateFact(
     await assertDesiredLinks(spaceId, 'fact', { entity: updates.linkEntities });
   }
 
-  const seq = await nextSeq(spaceId);
+  // The seq is taken AT the write (`withSeq` below), not here (`Q-196`).
   const now = new Date().toISOString();
-  const $set: Record<string, unknown> = { updatedAt: now, seq };
+  const $set: Record<string, unknown> = { updatedAt: now };
   const $unset: Record<string, unknown> = {};
 
   // `properties` MERGES into the stored map. It used to replace it, which contradicted this tool's own
@@ -387,8 +392,6 @@ export async function updateFact(
 
   applyExpiryToUpdate(spaceId, ttlDays, existing._expireAt != null, $set, $unset,
     { collection: 'fact', existing: existing as unknown as Record<string, unknown> }); // F10
-  const updateOp: Record<string, unknown> = { $set };
-  if (Object.keys($unset).length > 0) updateOp['$unset'] = $unset;
   // findOneAndUpdate, not updateOne, so the PRE-image comes back in the same round trip.
   //
   // The update itself is unchanged — same filter, same operators, same result — but the returned document is
@@ -400,11 +403,16 @@ export async function updateFact(
   // succeeded, so the counter records and the write lands. With an `If-Match` the same operation ALSO
   // enforces it, because `seq` goes in this filter — see `write-precondition.ts` for why the check has to
   // live here rather than in a comparison made before the embed call above.
-  const before = await col<FactDoc>(spaceCollection(spaceId, 'facts')).findOneAndUpdate(
-    asFilter<FactDoc>(writeFilterFor(memoryId, ifMatchSeq)),
-    asUpdate<FactDoc>(updateOp),
-    { returnDocument: 'before' },
-  ) as FactDoc | null;
+  const before = await withSeq(spaceId, (seq) => {
+    $set['seq'] = seq;
+    const updateOp: Record<string, unknown> = { $set };
+    if (Object.keys($unset).length > 0) updateOp['$unset'] = $unset;
+    return col<FactDoc>(spaceCollection(spaceId, 'facts')).findOneAndUpdate(
+      asFilter<FactDoc>(writeFilterFor(memoryId, ifMatchSeq)),
+      asUpdate<FactDoc>(updateOp),
+      { returnDocument: 'before' },
+    );
+  }) as FactDoc | null;
   brainWriteSeqTotal
     .labels({
       collection: 'facts',
@@ -450,7 +458,6 @@ export async function deleteFact(
 ): Promise<boolean> {
   const existing = await col<FactDoc>(spaceCollection(spaceId, 'facts'))
     .findOne(asFilter<FactDoc>({ _id: memoryId, spaceId }), { projection: { seq: 1 } }) as { seq?: number } | null;
-  const seq = await nextSeq(spaceId);
   const result = await col<FactDoc>(spaceCollection(spaceId, 'facts')).deleteOne({
     _id: memoryId,
     spaceId,
@@ -462,20 +469,7 @@ export async function deleteFact(
   // that 404s.
   await retireEmbedJob(spaceId, 'fact', memoryId);
 
-  const tombstone: TombstoneDoc = {
-    _id: memoryId,
-    type: 'fact',
-    spaceId,
-    deletedAt: new Date().toISOString(),
-    instanceId: getConfig().instanceId,
-    seq,
-    ...(existing?.seq !== undefined ? { originalSeq: existing.seq } : {}),
-  };
-  await col<TombstoneDoc>(spaceCollection(spaceId, 'tombstones')).replaceOne(
-    asFilter<TombstoneDoc>({ _id: memoryId }),
-    asDoc<TombstoneDoc>(tombstone),
-    { upsert: true },
-  );
+  await writeTombstone(spaceId, { _id: memoryId, type: 'fact', originalSeq: existing?.seq });
   // The cascade. A deleted fact's links describe a connection whose SUBJECT no longer exists, and nothing
   // else would ever remove them — the reconcile hook only runs on a write to the record that is now gone.
   // Links pointing AT this fact are a different question and belong to the readers' slice: removing them

@@ -41,6 +41,7 @@ import { computeMergePlan, applyResolutions, executeMerge, MergeSchemaViolation 
 import { emitWebhookEvent } from '../webhooks/dispatcher.js';
 import type { DupeCandidateDoc, DupeScanStateDoc, DupeScanType, DupeActionRule } from '../config/types.js';
 import { runExclusive } from '../util/single-flight.js';
+import { settledSeqRange } from '../util/seq.js';
 import { summariseRecall } from './recall-shape.js';
 import { armedSchedules } from '../util/armed-schedule.js';
 import { spaceCollection } from '../db/space-collection.js';
@@ -372,7 +373,7 @@ export async function scanSpace(spaceId: string, opts?: { reset?: boolean }): Pr
       const batch = await col<{ _id: string; seq?: number }>(coll)
         // spaceId pins the leading field of the {spaceId,seq} index so this is an
         // indexed range scan + sorted output, not a collection scan + blocking sort.
-        .find(asFilter<{ _id: string; seq?: number }>({ spaceId, seq: { $gt: cursor } }), { projection: { _id: 1, seq: 1 } })
+        .find(asFilter<{ _id: string; seq?: number }>({ spaceId, seq: await settledSeqRange(spaceId, cursor) }), { projection: { _id: 1, seq: 1 } })
         .sort({ seq: 1 })
         .limit(take)
         .toArray();

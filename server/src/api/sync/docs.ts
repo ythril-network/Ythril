@@ -15,7 +15,7 @@ import { listTombstones } from '../../brain/tombstones.js';
 import { requireAuth, denyReadOnly } from '../../auth/middleware.js';
 import { log } from '../../util/log.js';
 import { reportServerFailure } from '../../util/report-failure.js';
-import { nextSeq, bumpSeq, isSeqImplausible, MAX_INGEST_SEQ } from '../../util/seq.js';
+import { withSeq, bumpSeq, isSeqImplausible, MAX_INGEST_SEQ, settledSeqRange } from '../../util/seq.js';
 import type { FactDoc, EntityDoc, EdgeDoc, ChronoEntry, LinkDoc, TombstoneDoc } from '../../config/types.js';
 import type { FileMetaDoc } from '../../config/types.js';
 import { LOCAL_ONLY_EXCLUSION } from '../../sync/local-only-fields.js';
@@ -72,8 +72,9 @@ function pageBySeq<T extends { _id: string; seq: number }>(
       const pageSize = Math.min(parseInt(limit, 10) || 100, 500);
       const returnFull = fullParam === 'true';
 
+      // Settled seqs only: a page that hands out a seq above an unsettled one moves the peer past it (Q-196).
       const found = col<T>(`${spaceId}_${collection}`)
-        .find(asFilter<T>({ seq: { $gt: sinceVal }, ...extraFilter })).sort({ seq: 1 }).limit(pageSize + 1);
+        .find(asFilter<T>({ seq: await settledSeqRange(spaceId, sinceVal), ...extraFilter })).sort({ seq: 1 }).limit(pageSize + 1);
       /*
        * The local-only fields never leave, which is the SAVING rather than the guarantee — a vector is
        * several hundred floats per record and was the bulk of every page. The guarantee is the receiver's
@@ -257,16 +258,18 @@ syncDocsRouter.post('/facts', syncRateLimit, requireAuth, denyReadOnly, async (r
         res.status(400).json({ error: `Fork depth limit (${MAX_FORK_DEPTH}) exceeded for _id '${incoming._id}'` });
         return;
       }
-      const forkSeq = await nextSeq(spaceId);
-      const fork: FactDoc = {
-        ...incoming,
-        _id: uuidv4(),
-        forkOf: incoming._id,
-        seq: forkSeq,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      };
-      await ingestBrainDoc<FactDoc>(spaceId, 'fact', 'facts', fork);
+      const fork = await withSeq(spaceId, async (forkSeq) => {
+        const doc: FactDoc = {
+          ...incoming,
+          _id: uuidv4(),
+          forkOf: incoming._id,
+          seq: forkSeq,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+        await ingestBrainDoc<FactDoc>(spaceId, 'fact', 'facts', doc);
+        return doc;
+      });
       res.status(200).json(withSchemaViolations({ status: 'forked', forkId: fork._id }, violations));
       return;
     }
@@ -646,12 +649,10 @@ syncDocsRouter.post('/batch-upsert', syncRateLimit, requireAuth, denyReadOnly, a
           continue;
         }
 
-        const forkSeq = await nextSeq(spaceId);
-        const fork: FactDoc = {
+        await withSeq(spaceId, (forkSeq) => ingestBrainDoc<FactDoc>(spaceId, 'fact', 'facts', {
           ...incoming, _id: uuidv4(), forkOf: incoming._id, seq: forkSeq,
           createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
-        };
-        await ingestBrainDoc<FactDoc>(spaceId, 'fact', 'facts', fork);
+        }));
         memStats.forked++;
       } else {
         memStats.skipped++;

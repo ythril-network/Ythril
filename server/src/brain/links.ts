@@ -38,9 +38,9 @@
  * still holds it — the delete would appear to work locally and undo itself within minutes. `TOMBSTONE_TYPES`
  * includes `link` for exactly this, and it is the reason that tuple exists rather than the knowledge one.
  */
-import { col, asFilter, asDoc } from '../db/mongo.js';
-import { getConfig } from '../config/loader.js';
-import { nextSeq } from '../util/seq.js';
+import { col, asFilter, asBulk } from '../db/mongo.js';
+import { withAllocatedSeqs } from '../util/seq.js';
+import { tombstoneDoc } from './tombstones.js';
 import { edgeIdFor } from './edge-id.js';
 import { legacyField, linksStartingFrom } from './link-adjacency.js';
 import { assertRefsResolve, ReferenceRefusal } from './entity-refs.js';
@@ -194,45 +194,53 @@ export async function reconcileLinks(
     .find(asFilter<LinkDoc>({ spaceId, from, fromKind, toKind: { $in: classes } }), { projection: { _id: 1 } })
     .toArray() as Array<{ _id: string }>;
 
-  const now = new Date().toISOString();
-  const instanceId = getConfig().instanceId;
-  let added = 0;
-  let removed = 0;
-
-  for (const { _id } of existing) {
-    if (wanted.has(_id)) continue;
-    // See `opts.additive`: the conversion reads a desired set out of the arrays, and a link that is
-    // already a record has no array entry to be named by. Deleting on that basis is data loss.
-    if (opts.additive) continue;
-    const seq = await nextSeq(spaceId);
-    await col<LinkDoc>(spaceCollection(spaceId, 'links')).deleteOne(asFilter<LinkDoc>({ _id, spaceId }));
-    // The tombstone is not optional. A link deleted without one comes back on the next pull from any peer
-    // that still holds it, so the removal would undo itself and nothing would report that it had.
-    const tombstone: TombstoneDoc = { _id, type: 'link', spaceId, deletedAt: now, instanceId, seq };
-    await col<TombstoneDoc>(spaceCollection(spaceId, 'tombstones')).replaceOne(
-      asFilter<TombstoneDoc>({ _id }), asDoc<TombstoneDoc>(tombstone), { upsert: true },
-    );
-    removed++;
-  }
-
+  // See `opts.additive`: the conversion reads a desired set out of the arrays, and a link that is already a
+  // record has no array entry to be named by. Deleting on that basis is data loss.
+  const toRemove = opts.additive ? [] : existing.map(e => e._id).filter(id => !wanted.has(id));
   const have = new Set(existing.map(e => e._id));
-  for (const [_id, { to, toKind }] of wanted) {
-    if (have.has(_id)) continue;
-    const seq = await nextSeq(spaceId);
-    // A seq PER RECORD, not one for the batch. `pageBySeq` continues from the last item's seq with
-    // `seq > since`, so two rows sharing a seq at a page boundary would leave the rest of that group
-    // unreachable — the cursor would step straight over them.
-    const doc: LinkDoc = { _id, spaceId, from, fromKind, to, toKind, author, createdAt: now, updatedAt: now, seq };
-    await col<LinkDoc>(spaceCollection(spaceId, 'links')).replaceOne(
-      asFilter<LinkDoc>({ _id, spaceId }), asDoc<LinkDoc>(doc), { upsert: true },
-    );
-    // A re-created link clears the tombstone that retired it, or the next pull would delete it again on the
-    // strength of a deletion the caller has since reversed.
-    await col<TombstoneDoc>(spaceCollection(spaceId, 'tombstones')).deleteOne(asFilter<TombstoneDoc>({ _id }));
-    added++;
-  }
+  const toAdd = [...wanted].filter(([id]) => !have.has(id));
+  await writeLinkChanges(spaceId, from, fromKind, author, toRemove, toAdd);
+  return { added: toAdd.length, removed: toRemove.length };
+}
 
-  return { added, removed };
+/**
+ * Apply a reconcile's removals and additions, each as one seq block and one write per collection.
+ *
+ * A seq PER RECORD, not one for the batch: `pageBySeq` continues from the last item's seq with `seq > since`,
+ * so two rows sharing a seq at a page boundary would leave the rest of that group unreachable. The block
+ * hands each row its own.
+ *
+ * The tombstone is not optional on a removal — a link deleted without one comes back on the next pull from
+ * any peer that still holds it. And a re-created link clears the tombstone that retired it, or the next pull
+ * would delete it again on the strength of a deletion the caller has since reversed.
+ */
+async function writeLinkChanges(
+  spaceId: string, from: string, fromKind: RefKind, author: AuthorRef,
+  toRemove: string[], toAdd: Array<[string, { to: string; toKind: RefKind }]>,
+): Promise<void> {
+  const links = col<LinkDoc>(spaceCollection(spaceId, 'links'));
+  const tombstones = col<TombstoneDoc>(spaceCollection(spaceId, 'tombstones'));
+  const now = new Date().toISOString();
+  if (toRemove.length > 0) {
+    await withAllocatedSeqs(spaceId, toRemove.length, async (first) => {
+      await links.deleteMany(asFilter<LinkDoc>({ _id: { $in: toRemove }, spaceId }));
+      await tombstones.bulkWrite(asBulk(toRemove.map((_id, i) => ({
+        replaceOne: { filter: { _id }, replacement: tombstoneDoc(spaceId, first + i, { _id, type: 'link', deletedAt: now }), upsert: true },
+      }))), { ordered: false });
+    });
+  }
+  if (toAdd.length > 0) {
+    await withAllocatedSeqs(spaceId, toAdd.length, async (first) => {
+      await links.bulkWrite(asBulk(toAdd.map(([_id, { to, toKind }], i) => ({
+        replaceOne: {
+          filter: { _id, spaceId },
+          replacement: { _id, spaceId, from, fromKind, to, toKind, author, createdAt: now, updatedAt: now, seq: first + i } satisfies LinkDoc,
+          upsert: true,
+        },
+      }))), { ordered: false });
+      await tombstones.deleteMany(asFilter<TombstoneDoc>({ _id: { $in: toAdd.map(([id]) => id) } }));
+    });
+  }
 }
 
 
