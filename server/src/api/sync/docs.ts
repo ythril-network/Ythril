@@ -188,7 +188,10 @@ syncDocsRouter.get('/filemeta/:id', syncRateLimit, requireAuth, oneById<FileMeta
 // THE PUSH DOOR — every POST below stores what it was sent through one page accept
 // ═══════════════════════════════════════════════════════════════════════════
 
-/** The push families, by their batch-upsert body key. */
+/**
+ * The push families, by their batch-upsert body key. `BRAIN_PUSH_KEYS` is NOT ALL BRAIN COLLECTIONS: file metadata
+ * (`filemeta`) is merged rather than planned, so it is handled after them.
+ */
 type PushKey = 'facts' | 'entities' | 'edges' | 'chrono' | 'links' | 'filemeta';
 const BRAIN_PUSH_KEYS = ['facts', 'entities', 'edges', 'chrono', 'links'] as const satisfies readonly PushFamily[];
 /** The tombstone type each brain push family's deletions are recorded under. */

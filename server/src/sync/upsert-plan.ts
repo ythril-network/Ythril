@@ -81,7 +81,10 @@ export function planSeqUpserts<T extends Replicable>(
  */
 export const MAX_FORK_DEPTH = 10;
 
-/** The push families the planner decides. File metadata is merged, not planned (`Q-107` part 2). */
+/**
+ * The push families the planner decides — NOT ALL BRAIN COLLECTIONS: file metadata is merged per document, not
+ * planned (`Q-107` part 2), so `files` is absent on purpose.
+ */
 export type PushFamily = 'facts' | 'entities' | 'edges' | 'chrono' | 'links';
 
 /** The fields of an arriving document the planner reads. */

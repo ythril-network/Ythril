@@ -120,7 +120,7 @@ describe('every push handler awaits its counter bump before it answers', () => {
     it(`${h.where}: no bump is left un-awaited`, () => {
       const names = [...BUMPERS].join('|');
       const loose = [...h.handler.matchAll(new RegExp(`(^|[^\\w.])((?:\\w+\\.)?(?:${names}))\\(`, 'gm'))]
-        .filter(m => !/(?:await|function)\s*$/.test(h.handler.slice(Math.max(0, m.index - 12), m.index + m[1].length)))
+        .filter(m => !/(?:await|function)\s*$/.test(h.handler.slice(h.handler.lastIndexOf('\n', m.index) + 1, m.index + m[1].length)))
         .map(m => h.handler.slice(m.index, h.handler.indexOf('\n', m.index)).trim());
       assert.deepEqual(loose, [], `${h.where} calls a counter bump without awaiting it`);
     });
