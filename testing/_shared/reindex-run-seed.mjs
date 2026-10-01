@@ -53,7 +53,7 @@ export async function seedActiveReindexRun(spaceId, extra = {}) {
   }, { upsert: true });
 }
 
-/** Write a FAILED rebuild job, so `reindex.failed` has something to count that the worker will not take. */
+/** Write a FAILED rebuild job, so `reindexRun.failed` has something to count that the worker will not take. */
 export async function seedFailedRebuildJob(spaceId, recordId) {
   const { spaceCollection } = await import('../../server/dist/db/space-collection.js');
   const now = new Date().toISOString();

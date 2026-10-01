@@ -6,7 +6,7 @@
  * Six integration files each defined their own `ensureReindexed`: POST reindex wherever `needsReindex` was set, and
  * go on without waiting. Q-99 part 2 makes a reindex a RUN that the embed queue finishes, so a fire-and-forget copy
  * now hands its suite a space whose recall is still refused — and the failure surfaces in whichever test recalls
- * first, nowhere near the cause. The fix is one helper that waits on `reindex.running`; the gate is that nobody
+ * first, nowhere near the cause. The fix is one helper that waits on `reindexRun.running`; the gate is that nobody
  * writes a seventh copy beside it.
  *
  * The set is DERIVED — every tracked or newly written `.js`/`.mjs` under `testing/` — with a floor, because a hand
@@ -47,8 +47,8 @@ describe('one ensureReindexed', () => {
       'it must WAIT for each run to end; a copy that posts and returns is the defect this replaces');
     const wait = bodyOf('waitForReindexRunEnd');
     assert.match(wait, /reindex-status/, 'the wait must read the status route');
-    assert.match(wait, /\.reindex\??\.running/,
-      'it must poll reindex.running — needsReindex is cleared at the end of a run, but a run can exist without it');
+    assert.match(wait, /\.reindexRun\??\.running/,
+      'it must poll reindexRun.running — needsReindex is cleared at the end of a run, but a run can exist without it');
     assert.match(wait, /waitFor\(/, 'and poll it, rather than read it once');
   });
 

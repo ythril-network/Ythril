@@ -252,7 +252,7 @@ export const space_reindexTool: ToolHandler = {
     + 'after changing embedder, model, dimensions or prefix scheme. Requires an admin token. Every record is rebuilt, '
     + 'including the passages of converted documents and the captions and transcripts of media, even when its text is '
     + 'unchanged. Returns as soon as the run STARTS: the records are queued and rebuilt in the background, behind any '
-    + 'write somebody is waiting on, so poll `space_meta` — its `reindex` field ({running, remaining, failed}) — '
+    + 'write somebody is waiting on, so poll `space_meta` — its `reindexRun` field ({running, remaining, failed}) — '
     + 'rather than waiting on this call; `running` turns false when every record is rebuilt. A space with a run '
     + 'already going refuses a second one (409); any other space starts. A PROXY space is refused by name — it has no '
     + 'index of its own, and its members are listed in the error so you can reindex them instead. Recall in a space '
@@ -298,7 +298,7 @@ export const space_reindexTool: ToolHandler = {
       content: [{ type: 'text' as const, text:
         `Reindex STARTED for '${callSpace}' (${decision.plan.memberIds.length === 1 ? '1 space' : `${decision.plan.memberIds.length} member spaces`}). `
         + 'It runs in the background — this reply does not mean it finished. space_meta reports its progress in '
-        + '`reindex` ({running, remaining, failed}); `running` turns false when every record is rebuilt.' }],
+        + '`reindexRun` ({running, remaining, failed}); `running` turns false when every record is rebuilt.' }],
       structuredContent: { status: 'started', spaceId: callSpace, memberSpaces: decision.plan.memberIds },
     };
   },

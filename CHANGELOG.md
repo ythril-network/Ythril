@@ -16,7 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   new dimension or new weights behind the same model name make a different vector from the same text. What an
   integrator or operator will notice:
   - **Progress is readable.** `GET .../reindex-status` and `space_meta` (both doors, one function) carry
-    `reindex: { running, remaining, failed }` beside `needsReindex`. Poll until `reindex.running` is `false`;
+    `reindexRun: { running, remaining, failed }` beside `needsReindex`. Poll until `reindexRun.running` is `false`;
     `needsReindex` now stays `true`, and recall in the space keeps refusing, until every record is rebuilt rather
     than only until the loop ended. The REST acknowledgement still carries `reindexed: 0, errors: 0`.
   - **The refusal is per space.** A space with a run going answers `409` to a second reindex; any other space

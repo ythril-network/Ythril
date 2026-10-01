@@ -448,7 +448,7 @@ export interface ReindexStatus {
   spaceId: string;
   /** Recall refuses in this space until it is false. */
   needsReindex: boolean;
-  reindex: ReindexRunState;
+  reindexRun: ReindexRunState;
 }
 
 /** Embedding-job backlog for a space (F9 Overview embedding-queue panel). */

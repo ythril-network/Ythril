@@ -21,7 +21,7 @@ The admin list at **Settings → Spaces** is the place to create, reorder and co
 spaces; the cog is the shortcut for the one you are working in.
 
 The same state is on both APIs as `needsReindex` on a space's meta, with a running reindex's progress beside it
-as `reindex`, so an agent can check both without watching the screen.
+as `reindexRun`, so an agent can check both without watching the screen.
 
 If the stored embeddings were made by a different model than the one configured (for example after the embedding model changes), a banner appears reading *"Embeddings are stale — the embedding model has changed and this space needs reindexing."* Semantic search in that space is switched off until the reindex has finished, because ranking new questions against another model's vectors gives plausible answers in the wrong order. Click **Reindex now** to rebuild them.
 

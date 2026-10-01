@@ -144,7 +144,7 @@ describe('reindex — the four answers', () => {
     assert.equal(ok.body.spaceId, SPACE);
     assert.equal(typeof ok.body.needsReindex, 'boolean', 'the flag is what a caller polls; it must be a boolean');
     // And the run's progress, which is what a caller polls for an END: the flag alone cannot say a run is going.
-    const r = ok.body.reindex;
+    const r = ok.body.reindexRun;
     assert.ok(r && typeof r === 'object', `reindex-status must carry a reindex object: ${JSON.stringify(ok.body)}`);
     assert.equal(typeof r.running, 'boolean');
     assert.ok(Number.isInteger(r.remaining) && r.remaining >= 0, `remaining: ${JSON.stringify(r)}`);
@@ -168,7 +168,7 @@ describe('reindex — it answers BEFORE it works, and releases its guard', () =>
 
   it('accepts a SECOND reindex once the first has FINISHED — the run ends and the guard goes with it', async () => {
     // It accepted [200, 409] for the first call and then polled for any 200, so it passed whether the guard was
-    // held, released, or never taken. Now: wait for the run the case above started to END (`reindex.running`
+    // held, released, or never taken. Now: wait for the run the case above started to END (`reindexRun.running`
     // false), then a new reindex must be exactly 200. A run that never ends fails the wait, naming the space.
     await waitForReindexRunEnd(INSTANCES.a, token, SPACE, 180_000);
     const again = await reindex(SPACE);

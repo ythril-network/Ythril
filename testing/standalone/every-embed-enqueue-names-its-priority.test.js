@@ -40,8 +40,9 @@ function callsOf(code, file, name, lineBase = 0) {
   const out = [];
   const re = new RegExp(`(?<![\\w.$])${name}\\(`, 'g');
   for (let m; (m = re.exec(code));) {
-    const before = code.slice(Math.max(0, m.index - 20), m.index);
-    if (/function\s*$/.test(before)) continue;
+    // The declaration, not a call: bounded by the line the match sits on, never by a character count.
+    const lineStart = code.lastIndexOf('\n', m.index) + 1;
+    if (/\bfunction\s*$/.test(code.slice(lineStart, m.index))) continue;
     const args = argumentsOf(code, m.index + name.length, `${file}: ${name}(`);
     const line = lineBase + code.slice(0, m.index).split('\n').length;
     out.push({ file, line, args });

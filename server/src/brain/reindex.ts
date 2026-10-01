@@ -271,7 +271,7 @@ async function rebuildCounts(spaceId: string): Promise<{ remaining: number; fail
  */
 export async function reindexStateFor(memberIds: string[]): Promise<{
   needsReindex: boolean;
-  reindex: { running: boolean; remaining: number; failed: number };
+  reindexRun: { running: boolean; remaining: number; failed: number };
 }> {
   let running = false;
   let remaining = 0;
@@ -291,7 +291,7 @@ export async function reindexStateFor(memberIds: string[]): Promise<{
       });
     }
   }
-  return { needsReindex: memberIds.some(mid => needsReindex(mid)), reindex: { running, remaining, failed } };
+  return { needsReindex: memberIds.some(mid => needsReindex(mid)), reindexRun: { running, remaining, failed } };
 }
 
 /** The gauge is the number of active runs, recomputed from the documents so two runs can never leave it wrong. */

@@ -84,8 +84,13 @@ describe('get_space_meta reports the reindex state the reindex tool points at', 
   const answer = readFileSync('server/src/spaces/space-meta-answer.ts', 'utf8');
 
   it('and get_space_meta puts it in the response', () => {
-    assert.match(answer, /needsReindex: memberIds\.some\(mid => needsReindex\(mid\)\)/,
-      'the meta answer must report needsReindex, summed over the member spaces like every other proxy read');
+    // Since Q-99 part 2 the meta answer and `GET .../reindex-status` take the field from ONE function, so the
+    // "over the members" half is asserted where that function builds it.
+    assert.match(answer, /needsReindex: reindexState\.needsReindex/, 'the meta answer must report needsReindex');
+    assert.match(answer, /reindexStateFor\(memberIds\)/, 'from the one reindex state, over the member spaces');
+    const state = readFileSync('server/src/brain/reindex.ts', 'utf8');
+    assert.match(state, /needsReindex: memberIds\.some\(mid => needsReindex\(mid\)\)/,
+      'summed over the member spaces like every other proxy read');
     assert.match(source, /spaceMetaAnswer\(/, 'space_meta must return the one meta answer');
   });
 

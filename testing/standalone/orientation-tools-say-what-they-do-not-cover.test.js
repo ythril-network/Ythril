@@ -114,9 +114,13 @@ describe('space_meta distinguishes declared from actual', () => {
     assert.match(META, /BREAKS, not what was already broken/, 'the P-6 behaviour');
   });
 
-  it('explains needsReindex as a QUALITY signal, not an outage', () => {
-    assert.match(META, /degrade quietly rather than erroring/,
-      'recall still answers, which is why nobody notices');
+  it('explains needsReindex by what it does to semantic search', () => {
+    // This pinned "results degrade quietly rather than erroring", and it was false the whole time: `recall`
+    // refuses a space whose `needsReindex` is set (brain/recall.ts), and `similar` leaves it out. Found by the
+    // Q-99 part 2 context sweep. A description a caller reads while constructing a call has to say what the call
+    // will do, so this pins both behaviours by the tool that has each.
+    assert.match(META, /`recall` in this space REFUSES/, 'a recall in a flagged space is refused, not degraded');
+    assert.match(META, /`similar` leaves the space out/, 'and a similar search leaves the space out');
   });
 
   it('and still does not name the repair tool, which a read-only token cannot call', () => {

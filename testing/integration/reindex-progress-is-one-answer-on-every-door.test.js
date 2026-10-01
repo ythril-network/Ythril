@@ -3,7 +3,7 @@
  *
  * ## Why three reads of one fact
  *
- * Q-99 part 2 makes a reindex a run the queue finishes, and adds `reindex: {running, remaining, failed}` so a caller
+ * Q-99 part 2 makes a reindex a run the queue finishes, and adds `reindexRun: {running, remaining, failed}` so a caller
  * can see it. The fact has three doors: `GET /api/brain/spaces/:id/reindex-status` (what the client polls),
  * `GET /api/spaces/:id/meta` and the `space_meta` tool (what an agent reads, and what `space_reindex`'s description
  * tells it to poll). The plan computes all three from `reindexStateFor`; this holds them to it from outside, which is
@@ -46,22 +46,22 @@ const created = [];
 const statusDoor = async (id) => {
   const r = await get(INSTANCES.a, token, `/api/brain/spaces/${id}/reindex-status`);
   assert.equal(r.status, 200, JSON.stringify(r.body));
-  return r.body.reindex;
+  return r.body.reindexRun;
 };
 const restMetaDoor = async (id) => {
   const r = await get(INSTANCES.a, token, `/api/spaces/${id}/meta`);
   assert.equal(r.status, 200, JSON.stringify(r.body));
-  return r.body.reindex;
+  return r.body.reindexRun;
 };
 const toolRestDoor = async (id) => {
   const r = await post(INSTANCES.a, token, '/api/space_meta', { space: id });
   assert.equal(r.status, 200, JSON.stringify(r.body));
-  return r.body?.data?.reindex;
+  return r.body?.data?.reindexRun;
 };
 const mcpDoor = async (id) => {
   const r = await session.callTool('space_meta', { space: id });
   assert.ok(!r?.isError, JSON.stringify(r));
-  return r?.structuredContent?.reindex;
+  return r?.structuredContent?.reindexRun;
 };
 
 /** A, B…, A: the bookends must agree, and every door between them must equal them. */

@@ -380,9 +380,9 @@ export async function waitForEmbedQueueEmpty(baseUrl, token, spaceId, timeoutMs 
  *
  * ## What it waits on, and what it refuses
  *
- * `reindex.running` on `GET /api/brain/spaces/:id/reindex-status` — the run, not `needsReindex`: the flag is
+ * `reindexRun.running` on `GET /api/brain/spaces/:id/reindex-status` — the run, not `needsReindex`: the flag is
  * cleared when a run ends, but a space can be running without having been flagged. A status that carries no
- * `reindex.running` boolean is a server this helper cannot read, and it THROWS rather than reading "absent" as
+ * `reindexRun.running` boolean is a server this helper cannot read, and it THROWS rather than reading "absent" as
  * "finished" — the quiet answer is the one that would let a suite start on a half-built index.
  *
  * A proxy is never POSTed: it has no index of its own and the route refuses it with 400. A 409 is accepted, because
@@ -408,9 +408,9 @@ export async function ensureReindexed(baseUrl, token, timeoutMs = INDEX_LAG_TIME
 }
 
 /**
- * Wait until ONE space has no reindex run going — `reindex.running` false on its `reindex-status`.
+ * Wait until ONE space has no reindex run going — `reindexRun.running` false on its `reindex-status`.
  *
- * Throws at once, rather than after the deadline, when the status carries no `reindex.running` boolean: that is a
+ * Throws at once, rather than after the deadline, when the status carries no `reindexRun.running` boolean: that is a
  * server whose runs cannot be read, and reading "absent" as "finished" is the quiet answer that lets a suite start
  * on a half-built index.
  */
@@ -419,11 +419,11 @@ export async function waitForReindexRunEnd(baseUrl, token, spaceId, timeoutMs = 
   await waitFor(async () => {
     const r = await get(baseUrl, token, `/api/brain/spaces/${spaceId}/reindex-status`);
     last = r.body;
-    if (r.status === 200 && typeof r.body?.reindex?.running !== 'boolean') {
-      throw new Error(`reindex-status of ${spaceId} carries no reindex.running boolean, so whether its run has `
+    if (r.status === 200 && typeof r.body?.reindexRun?.running !== 'boolean') {
+      throw new Error(`reindex-status of ${spaceId} carries no reindexRun.running boolean, so whether its run has `
         + `finished cannot be read: ${JSON.stringify(r.body)}`);
     }
-    return r.status === 200 && r.body.reindex.running === false;
+    return r.status === 200 && r.body.reindexRun.running === false;
   }, timeoutMs, 1_000, () => `the reindex of ${spaceId} never finished: last status ${JSON.stringify(last)}`);
 }
 

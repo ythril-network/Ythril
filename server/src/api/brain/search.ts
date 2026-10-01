@@ -238,7 +238,7 @@ searchRouter.post('/similar', globalRateLimit, requireAuth, statesRetryability, 
 });
 
 
-// `reindex` is the progress of a running reindex, from the same function `space_meta` answers with on both doors.
+// `reindexRun` is the progress of a running reindex, from the same function `space_meta` answers with on both doors.
 searchRouter.get('/spaces/:spaceId/reindex-status', globalRateLimit, requireSpaceAuth, async (req, res) => {
   const spaceId = req.params['spaceId'] as string;
   const cfg = getConfig();
@@ -258,7 +258,7 @@ searchRouter.get('/spaces/:spaceId/reindex-status', globalRateLimit, requireSpac
 // spaces from the REQUEST (which is where the token's scope is known) and turning a refusal into a status.
 //
 // The response is sent as soon as the run is RECORDED, with zeroed counters (kept for older clients; progress is
-// `reindex` on reindex-status). Awaiting the rebuild here would turn a multi-minute job into a request timeout.
+// `reindexRun` on reindex-status). Awaiting the rebuild here would turn a multi-minute job into a request timeout.
 searchRouter.post('/spaces/:spaceId/reindex', globalRateLimit, requireSpaceAuth, denyReadOnly, async (req, res) => {
   const spaceId = req.params['spaceId'] as string;
   const space = getConfig().spaces.find(s => s.id === spaceId);

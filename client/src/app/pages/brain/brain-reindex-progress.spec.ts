@@ -12,7 +12,7 @@
  * ## The rules
  *
  * - ONE source drives both buttons (the stale-index banner's and the Overview Indexing panel's): the server's
- *   `reindex.running`, OR a request in flight. Disabled with `aria-busy`.
+ *   `reindexRun.running`, OR a request in flight. Disabled with `aria-busy`.
  * - While running, the page polls `reindex-status` every 5 s, and stops when the run ends.
  * - The Indexing panel shows `brain.overview.reindexProgress` (params `remaining`, `failed`) in a `role=status`
  *   line, so a screen reader hears the progress without the focus moving.
@@ -37,7 +37,7 @@ import { BrainComponent } from './brain.component';
 const SPACES = [{ id: 'work', label: 'Work' }];
 
 type Run = { running: boolean; remaining: number; failed: number };
-const status = (reindex: Run, needsReindex = true) => ({ spaceId: 'work', needsReindex, reindex });
+const status = (reindex: Run, needsReindex = true) => ({ spaceId: 'work', needsReindex, reindexRun: reindex });
 const RUNNING: Run = { running: true, remaining: 3, failed: 1 };
 const IDLE: Run = { running: false, remaining: 0, failed: 0 };
 
@@ -103,7 +103,7 @@ const sequence = (...answers: ReturnType<typeof status>[]) => {
 describe('both Reindex buttons are held while a run is going', () => {
   beforeEach(() => TestBed.resetTestingModule());
 
-  it('disabled, and aria-busy, while the server says reindex.running', () => {
+  it('disabled, and aria-busy, while the server says reindexRun.running', () => {
     const { buttons } = create({ getReindexStatus: vi.fn(() => of(status(RUNNING))) });
     const { banner, overview } = buttons();
     expect(banner, 'the stale-index banner button').toBeTruthy();

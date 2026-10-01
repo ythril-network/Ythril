@@ -15,6 +15,7 @@ import { OverviewTabComponent } from './overview-tab.component';
 import { ReviewTabComponent } from './review-tab.component';
 import { FormsModule } from '@angular/forms';
 import { Space, SpaceStats, AboutInfo, ReindexRunState, ReindexStatus } from '../../core/api.types';
+import { pollUntil, type PollHandle } from '../../core/poll-until';
 import { SpacesApi } from '../../core/spaces-api.service';
 import { OverviewDataService } from './overview-data.service';
 import { SpaceSettingsPopupComponent } from '../settings/space-settings-popup.component';
@@ -465,7 +466,7 @@ export class BrainComponent implements OnInit, OnDestroy {
   reindexing = computed(() => this.reindexInFlight() || this.reindexRun()?.running === true);
   /** While a run is going the page asks again on this interval, and stops when the server says it ended. */
   private static readonly REINDEX_POLL_MS = 5_000;
-  private reindexPollTimer?: ReturnType<typeof setTimeout>;
+  private reindexPoll?: PollHandle;
 
   // Entity picker
 
@@ -548,7 +549,7 @@ export class BrainComponent implements OnInit, OnDestroy {
   ngOnDestroy(): void {
     this.closeLiveStream();
     clearTimeout(this.liveRefreshTimer);
-    clearTimeout(this.reindexPollTimer);
+    this.stopReindexPoll();
   }
 
   // ── Live updates (F12) ──────────────────────────────────────────────────────
@@ -630,8 +631,7 @@ export class BrainComponent implements OnInit, OnDestroy {
     if (this.activeSpaceId() !== id) {
       this.activeTab.set('overview');
       // The previous space's run is not this one's: hold nothing and poll nothing until this space answers.
-      clearTimeout(this.reindexPollTimer);
-      this.reindexPollTimer = undefined;
+      this.stopReindexPoll();
       this.reindexRun.set(null);
     }
     this.activeSpaceId.set(id);
@@ -813,33 +813,30 @@ export class BrainComponent implements OnInit, OnDestroy {
    * poll the buttons stayed held and the banner stayed up until the user switched space or reloaded. When the run
    * ends, the stats and the flag are read again, once.
    */
-  private applyReindexStatus(spaceId: string, st: ReindexStatus): void {
-    if (this.activeSpaceId() !== spaceId) return;
+  private applyReindexStatus(spaceId: string, st: ReindexStatus): boolean {
+    if (this.activeSpaceId() !== spaceId) return false;
     const wasRunning = this.reindexRun()?.running === true;
     this.needsReindex.set(st.needsReindex);
-    this.reindexRun.set(st.reindex ?? null);
-    clearTimeout(this.reindexPollTimer);
-    this.reindexPollTimer = undefined;
-    if (st.reindex?.running) this.scheduleReindexPoll(spaceId);
-    else if (wasRunning) this.loadStats(spaceId);
+    this.reindexRun.set(st.reindexRun ?? null);
+    if (st.reindexRun?.running) {
+      // `pollUntil` holds the guards a hand-written chain dropped: a failed request asks again, a hidden tab skips.
+      if (!this.reindexPoll?.active) {
+        this.reindexPoll = pollUntil({
+          delayMs: () => BrainComponent.REINDEX_POLL_MS,
+          request: () => this.spacesApi.getReindexStatus(spaceId),
+          onAnswer: (next) => this.applyReindexStatus(spaceId, next),
+        });
+      }
+      return true;
+    }
+    this.stopReindexPoll();
+    if (wasRunning) this.loadStats(spaceId);
+    return false;
   }
 
-  /**
-   * The next poll of a running reindex. A failed request schedules the next one rather than ending the chain — ended,
-   * the buttons would stay held until a reload — and a hidden tab skips the request but keeps the schedule, like the
-   * Spaces list's poll.
-   */
-  private scheduleReindexPoll(spaceId: string): void {
-    clearTimeout(this.reindexPollTimer);
-    this.reindexPollTimer = setTimeout(() => {
-      this.reindexPollTimer = undefined;
-      if (this.activeSpaceId() !== spaceId) return;
-      if (typeof document !== 'undefined' && document.hidden) { this.scheduleReindexPoll(spaceId); return; }
-      this.spacesApi.getReindexStatus(spaceId).subscribe({
-        next: (next) => this.applyReindexStatus(spaceId, next),
-        error: () => this.scheduleReindexPoll(spaceId),
-      });
-    }, BrainComponent.REINDEX_POLL_MS);
+  private stopReindexPoll(): void {
+    this.reindexPoll?.stop();
+    this.reindexPoll = undefined;
   }
 
   requestDelete(id: string): void { this.recordList.confirmDeleteId.set(id); }

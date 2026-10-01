@@ -198,14 +198,14 @@ describe('a reindex run is a document the queue finishes (real MongoDB, stub emb
         startedAt: new Date().toISOString(), cursor: null, sweepComplete: false,
       });
       const first = await reindex.reindexStateFor(['early']);
-      assert.equal(first.reindex.running, true);
-      assert.equal(first.reindex.remaining, ids.length,
+      assert.equal(first.reindexRun.running, true);
+      assert.equal(first.reindexRun.remaining, ids.length,
         'a run that has queued nothing yet still has every record left to rebuild — "0 left" reads as done');
 
       // Half queued: the queued jobs and the records not yet reached, each counted once.
       await queue.enqueueEmbedJobs('early', 'fact', ids.slice(0, 3), { priority: queue.EMBED_PRIORITY.rebuild, rebuild: true });
       await runCol('early').updateOne({ _id: 'run' }, { $set: { cursor: { kind: 'fact', lastId: ids[2] } } });
-      assert.equal((await reindex.reindexStateFor(['early'])).reindex.remaining, ids.length,
+      assert.equal((await reindex.reindexStateFor(['early'])).reindexRun.remaining, ids.length,
         'records not yet queued plus the jobs queued — never the jobs twice, never the unqueued records dropped');
     });
 
@@ -219,7 +219,7 @@ describe('a reindex run is a document the queue finishes (real MongoDB, stub emb
       // The sweep QUEUES; it embeds nothing itself. Every record is a rebuild job until the worker takes it.
       assert.deepEqual([...await rebuildQueued('life')].sort(), ids, 'every record must be queued as a rebuild');
       const mid = await reindex.reindexStateFor(['life']);
-      assert.deepEqual(mid, { needsReindex: true, reindex: { running: true, remaining: ids.length, failed: 0 } },
+      assert.deepEqual(mid, { needsReindex: true, reindexRun: { running: true, remaining: ids.length, failed: 0 } },
         'while the jobs are queued the run is running and the flag is still asserted');
 
       // A tick before the queue drains must NOT finish the run: needsReindex refuses recall until it is done.
@@ -232,7 +232,7 @@ describe('a reindex run is a document the queue finishes (real MongoDB, stub emb
       assert.equal(await runCol('life').findOne({ _id: 'run' }), null, 'a finished run must delete its document');
       assert.equal(shared.needsReindex('life'), false, 'a finished run must clear needsReindex');
       assert.deepEqual(await reindex.reindexStateFor(['life']),
-        { needsReindex: false, reindex: { running: false, remaining: 0, failed: 0 } });
+        { needsReindex: false, reindexRun: { running: false, remaining: 0, failed: 0 } });
     });
 
     it('a written cursor names its kind in the embed record-type vocabulary', async () => {

@@ -3,6 +3,7 @@ import { moveItemInArray } from '@angular/cdk/drag-drop';
 import { Network, Space, SpacesResponse } from '../../core/api.types';
 import { NetworksApi } from '../../core/networks-api.service';
 import { SpacesApi } from '../../core/spaces-api.service';
+import { pollUntil, type PollHandle } from '../../core/poll-until';
 
 /** How often the index poll asks while a space is truly BUILDING its indexes (`Q-113`). */
 export const INDEX_POLL_FAST_MS = 3_000;
@@ -36,9 +37,8 @@ export class SpacesStore {
   private networksApi = inject(NetworksApi);
   private destroyRef  = inject(DestroyRef);
 
-  /** True from the moment the index poll chain starts until it stops: the one flag that keeps it from stacking. */
-  private polling = false;
-  private pollTimer: ReturnType<typeof setTimeout> | null = null;
+  /** The index poll while it runs; its `active` is the one flag that keeps a second chain from stacking. */
+  private indexPoll?: PollHandle;
   /** A reorder's optimistic list is on screen until the server answers; a poll answer must not overwrite it. */
   private reorderInFlight = false;
 
@@ -142,9 +142,17 @@ export class SpacesStore {
    * "building" for ever), a hidden tab skips its tick, and the store's destruction cancels it.
    */
   pollIndexStatus(): void {
-    if (this.polling) return;
-    this.polling = true;
-    this.scheduleIndexPoll();
+    if (this.indexPoll?.active) return;
+    // `pollUntil` holds the guards this chain had by hand: a hidden tab skips its tick, a failed request asks again,
+    // and the delay is read per tick so the cadence follows what the spaces are waiting on.
+    this.indexPoll = pollUntil({
+      delayMs: () => this.indexPollDelay(),
+      request: () => this.spacesApi.listSpaces(),
+      onAnswer: ({ spaces }) => {
+        if (!this.reorderInFlight) this.spaces.set(spaces);
+        return spaces.some(isBuilding);
+      },
+    });
   }
 
   /** Every building space is merely waiting for the search service → the slow cadence; any true build → the fast one. */
@@ -153,26 +161,8 @@ export class SpacesStore {
     return building.length > 0 && building.every(s => s.indexWaiting) ? INDEX_POLL_SLOW_MS : INDEX_POLL_FAST_MS;
   }
 
-  private scheduleIndexPoll(): void {
-    this.pollTimer = setTimeout(() => this.indexPollTick(), this.indexPollDelay());
-  }
-
-  private indexPollTick(): void {
-    this.pollTimer = null;
-    if (typeof document !== 'undefined' && document.hidden) { this.scheduleIndexPoll(); return; }
-    this.spacesApi.listSpaces().subscribe({
-      next: ({ spaces }) => {
-        if (!this.polling) return;
-        if (!this.reorderInFlight) this.spaces.set(spaces);
-        if (spaces.some(isBuilding)) this.scheduleIndexPoll();
-        else this.polling = false;
-      },
-      error: () => { if (this.polling) this.scheduleIndexPoll(); },
-    });
-  }
-
   private stopIndexPoll(): void {
-    this.polling = false;
-    if (this.pollTimer) { clearTimeout(this.pollTimer); this.pollTimer = null; }
+    this.indexPoll?.stop();
+    this.indexPoll = undefined;
   }
 }

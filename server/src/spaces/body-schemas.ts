@@ -403,10 +403,10 @@ export const SpaceMetaBody = z.object({
  * the whole object back would otherwise be refused for sending something nobody can write. That is the
  * rule this list exists for: do not return what you will not accept.
  *
- * `reindex` joined in Q-99 part 2 — a running reindex's progress beside `needsReindex` — for the same reason, and
+ * `reindexRun` joined in Q-99 part 2 — a running reindex's progress beside `needsReindex` — for the same reason, and
  * the same round-trip test caught it the same way.
  */
-export const SERVER_OWNED_META_FIELDS = ['version', 'updatedAt', 'previousVersions', 'needsReindex', 'reindex', 'actualSchema'] as const;
+export const SERVER_OWNED_META_FIELDS = ['version', 'updatedAt', 'previousVersions', 'needsReindex', 'reindexRun', 'actualSchema'] as const;
 
 /** Drop the server-owned housekeeping fields from an incoming `meta`, leaving everything else to Zod. */
 export function stripServerOwnedMeta(meta: unknown): unknown {

@@ -270,7 +270,7 @@ than failing the write, which leaves exactly this state.
 > |---|---|---|
 > | touches | only records with **no** vector | **every** record, rebuilt even when its text is unchanged |
 > | for | the way back from `suppressEmbeddings` | recovery after changing embedder, model, dimensions or prefix scheme |
-> | returns | counts, awaited — the counts are the answer | `status: "started"`; progress is `reindex` on `space_meta` / `reindex-status` |
+> | returns | counts, awaited — the counts are the answer | `status: "started"`; progress is `reindexRun` on `space_meta` / `reindex-status` |
 > | bounded | `limit`, and `truncated` tells you to call again | runs to completion in the background, and survives a restart |
 >
 > Both QUEUE their records for the embedding worker, and both yield to local writes: the worker takes a write
@@ -665,7 +665,7 @@ type schemas are readable only by tokens that may reach the space.
   },
   "stats": { "facts": 142, "entities": 53, "edges": 87, "chrono": 12, "files": 31 },
   "needsReindex": false,
-  "reindex": { "running": false, "remaining": 0, "failed": 0 }
+  "reindexRun": { "running": false, "remaining": 0, "failed": 0 }
 }
 ```
 
@@ -674,12 +674,12 @@ recall in the space refuses while it is. A reindex clears it when it has rebuilt
 On a **proxy space** it is `true` when **any** member needs one, matching
 [`GET /reindex-status`](04d-brain-ops-api.md#check-reindex-status).
 
-`reindex` is a running reindex's progress: `running` while one is going, `remaining` records still to rebuild,
+`reindexRun` is a running reindex's progress: `running` while one is going, `remaining` records still to rebuild,
 `failed` records whose rebuild gave up. It is here because `space_reindex` returns as soon as the run *starts*:
-poll until `reindex.running` is `false` to learn it finished. `GET /api/brain/spaces/:spaceId/reindex-status`
+poll until `reindexRun.running` is `false` to learn it finished. `GET /api/brain/spaces/:spaceId/reindex-status`
 answers the same two fields from the same function.
 
-> **MCP tool:** `space_meta` — returns the same information, `needsReindex` and `reindex` included. Available to
+> **MCP tool:** `space_meta` — returns the same information, `needsReindex` and `reindexRun` included. Available to
 > all tokens (not admin-only). Before this field existed, the `space_reindex` tool's own description told MCP
 > callers to poll the REST status route — which a client with no HTTP door cannot do.
 
