@@ -205,6 +205,8 @@ All access to Ythril — from the web UI, REST API, or AI assistants — require
 
 Tokens can also be **space-scoped** — restricted to a specific list of spaces. Spaces outside that list are invisible to the token. Library Access tokens are always space-less.
 
+**Tokens named `peer:…` belong to other instances in your networks**, and each has exactly one. Joining another network with the same instance hands it a new token, and the one it replaces is revoked at once — an instance keeps only the newest token you gave it, so the older one could never be used again. Instances that had collected several from earlier joins drop the unused ones the next time they start.
+
 ### Finding a token in the list
 
 **Every column sorts except the buttons.** Click a column heading to order the list by it; click the same one

@@ -42,6 +42,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   seen on an instance whose two joined networks had no schedule at all. It gets the default at the next start, named
   in the log. Clearing a schedule now stores manual as a choice (`""`) rather than as nothing, so manual set on
   purpose is never replaced; one cleared before this change reads as never set, so it is scheduled once.
+- **A peer keeps one token, not one per join (`Q-163`).** Every network joined with the same instance minted it a
+  new token and left the previous one valid, though the peer keeps only the newest and could never present the
+  others: an instance showed eight `peer:` tokens for one peer, seven of them last used minutes after they were made.
+  A completed handshake now revokes the tokens it replaces, on both sides, and an instance drops the unused leftovers
+  when it starts. A token still in a handshake is left alone, since two joins can overlap.
 
 ## [5.6.0] — 2026-09-29
 
