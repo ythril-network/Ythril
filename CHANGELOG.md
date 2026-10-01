@@ -21,6 +21,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   queues it), and a passage of a file whose owner suppressed its embeddings, at any depth, is not embedded. A
   reindex rebuilds a vector even when its text is unchanged, and an embedder outage during one leaves a record's
   vector as it was.
+- **Two lists that stopped at a number now say so and can be read to the end** (bundle-34). Owner rule: *"if i
+  get a result i want to be sure i get what i asked for."* Each now pages through one rule (`brain/list-page.ts`):
+  whole rows, `limit` and `skip` refused with a `400` rather than floored when they are not numbers, the byte budget,
+  and `count`, `total`, `limit`, `skip`, `truncated` and `nextSkip` on every answer.
+  - **The schema dry-run** (`POST /api/spaces/:id/validate-schema`) says, per collection, how many records it
+    checked against how many exist and whether the check was complete (`checked`, `complete`), and pages its
+    violations instead of stopping at 500 (`Q-129`).
+  - **The notify event list** (`GET /api/notify`) pages with `skip` and says when it is cut, instead of stopping at
+    200 (`Q-130`).
 
 ## [5.6.0] — 2026-09-29
 

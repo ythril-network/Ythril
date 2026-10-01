@@ -29,8 +29,13 @@ Events: `vote_pending`, `member_departed`, `member_removed`, `space_deletion_pen
 ### List Events
 
 ```http
-GET /api/notify?networkId=net-uuid&limit=50
+GET /api/notify?networkId=net-uuid&limit=50&skip=0
 ```
+
+Newest first. `limit` defaults to 50 and is held to 200; `skip` pages on. The answer says where it stands: `events`,
+`count` (rows in this page), `total` (events matching), `limit` (the one that applied), `skip`, `truncated`, and
+`nextSkip` exactly when there are more — the same fields every paged list answers with. `maxChars` / `maxBytes` bound
+the body as on the search routes. A non-numeric `limit` or `skip` is a `400`, never a default.
 
 ---
 
