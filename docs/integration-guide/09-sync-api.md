@@ -20,7 +20,13 @@ POST /api/notify
 }
 ```
 
-Events: `vote_pending`, `member_departed`, `member_removed`, `space_deletion_pending`, `space_wipe_pending`, `sync_available`, `ping`.
+Events: `vote_pending`, `member_departed`, `member_removed`, `space_deletion_pending`, `space_wipe_pending`, `meta_change_pending`, `sync_available`, `ping`.
+
+The receiver keeps the recent events in memory for `GET /api/notify`, and that store is bounded by bytes as well as
+by count (500 events, 1 MiB), oldest out first.
+
+> **`meta_change_pending` was refused until 5.6.1 (`Q-108`).** A space's schema-change round sent it to every member
+> and no receiver listed it, so each answered `400` and the sender, which does not read the answer, never knew.
 
 **Response** `204`.
 

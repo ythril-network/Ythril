@@ -30,6 +30,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     violations instead of stopping at 500 (`Q-129`).
   - **The notify event list** (`GET /api/notify`) pages with `skip` and says when it is cut, instead of stopping at
     200 (`Q-130`).
+- **A space schema-change notice is accepted by its peers (`Q-108`).** `meta_change_pending` was sent to every
+  member and was not an event `POST /api/notify` accepted, so each peer answered `400` to a sender that does not read
+  the answer. Peers now accept and record it.
+- **An unknown tool name no longer becomes a metric label (`Q-108`).** It was counted in `ythril_tool_calls_total`
+  before the `404`, so any caller could mint a time series per spelling.
+- **The notify event store is bounded by bytes, not only by count (`Q-108`).** 500 events of up to the JSON body
+  limit each could hold gigabytes; it now holds at most 1 MiB, oldest out first.
 
 ## [5.6.0] — 2026-09-29
 
