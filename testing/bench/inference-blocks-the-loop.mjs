@@ -68,7 +68,9 @@ async function measured(label, count, work) {
 
 if (mode === 'main' || mode === 'both') {
   const { loadLocalPipeline } = await import(dist('brain/local-pipeline.js'));
-  const pipe = await loadLocalPipeline({ modelId: MODEL, cacheDir, offline: true });
+  const { availableCpus } = await import(dist('util/cpu-budget.js'));
+  // The same thread count the inference process is given, so the two arms differ only in where the model runs.
+  const pipe = await loadLocalPipeline({ modelId: MODEL, cacheDir, offline: true, threads: availableCpus() });
   await pipe(TEXTS[0], OPTIONS);   // warm: the first inference pays one-time costs
   await measured('main thread, one text at a time', 16, async () => {
     for (let i = 0; i < 16; i++) await pipe(TEXTS[i], OPTIONS);

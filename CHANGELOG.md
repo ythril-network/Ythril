@@ -35,7 +35,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   of queued documents in the one inference queue and never interrupts the embed already running. The brain embed
   worker now heartbeats its claim while an embed is in flight, and finishes or fails a job only under the claim it
   holds, so a slow embed is not re-claimed by the stall sweep and a late finish cannot delete a newer claim.
-  **Batching was measured and not built:** several texts in one inference call were slower on mixed-length text, 161
+  **The inference process sizes its threads to the container's CPU quota** (read from the cgroup by the server, by
+  the new `util/cpu-budget.ts`, and passed to the child), because onnxruntime counts the host's cores and ignores the
+  quota: on a one-CPU container on a 16-core host that was 640 ms per text with its default pool against 54 ms with
+  the count matched, slow enough that a thousand-record seed did not embed in ten minutes. **Batching was measured and not built:** several texts in one inference call were slower on mixed-length text, 161
   to 215 ms per text against 96 one at a time, because every text in a call is padded to the longest. Three metrics
   are new: `ythril_embed_wait_seconds` (queue wait, kept out of `ythril_embedding_duration_seconds`, which now
   carries the inference process's own timing for the local model), `ythril_embed_process_restarts_total{reason}` and

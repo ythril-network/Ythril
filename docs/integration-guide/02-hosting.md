@@ -756,8 +756,8 @@ pairs with `requireEncryptedTransport` for encryption in transit.
 | Network | Any | Low-latency link between syncing brains improves convergence time |
 
 MongoDB Atlas Local runs a `mongot` sidecar for vector search. This adds ~300 MB RAM overhead on top of baseline `mongod` usage.
-On the bundled configuration the embedding model runs in a child process of the server, which counts against the
-`ythril` container's `mem_limit` (`YTHRIL_MEM_LIMIT`) and shares its cores: see [the inference process](05b-media-embedding.md#configuration).
+On the bundled configuration the embedding model runs in a child process of the server, which counts against the `ythril` container's `mem_limit` (`YTHRIL_MEM_LIMIT`) and shares its cores;
+it sizes its threads to the container's CPU quota (`cpus:`, a pod's CPU limit), not the host's cores (640 ms per text against 54 ms on one CPU of sixteen): see [the inference process](05b-media-embedding.md#configuration).
 
 ### Upgrading
 

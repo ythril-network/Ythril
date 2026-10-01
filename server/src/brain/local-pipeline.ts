@@ -6,7 +6,7 @@
  * The model runs in a supervised child process (`brain/embed-process.ts`, hosted by `brain/local-inference.ts`), so
  * this is the code that child calls. That changes the shape of it, and only the shape:
  *
- *  - **Its inputs are arguments.** `{ modelId, cacheDir, offline }`. The child has no loaded server config and must
+ *  - **Its inputs are arguments.** `{ modelId, cacheDir, offline, threads }`. The child has no loaded server config and must
  *    not guess, and the loader never reads `process.env`: the process that read the flags decided `offline` and
  *    passes it in. (`brain/models-offline.ts` is the one place those variables are read.)
  *  - **Its output is a callback.** Progress and warnings go to `log(level, message)`, which the child forwards over
@@ -37,6 +37,8 @@ export interface LocalPipelineSpec {
   cacheDir: string;
   /** True when runtime downloads are forbidden (`brain/models-offline.ts`). */
   offline: boolean;
+  /** onnxruntime's intra-op thread count: the host's CPU budget (`util/cpu-budget.ts`), never the library's default. */
+  threads: number;
 }
 
 export type LoaderLog = (level: 'info' | 'warn', message: string) => void;
@@ -59,7 +61,7 @@ function isCached(cacheDir: string, modelId: string): boolean {
 }
 
 export async function loadLocalPipeline(
-  { modelId, cacheDir, offline }: LocalPipelineSpec,
+  { modelId, cacheDir, offline, threads }: LocalPipelineSpec,
   log?: LoaderLog,
 ): Promise<LocalPipeline> {
   const { pipeline, env } = await import('@huggingface/transformers');
@@ -94,10 +96,17 @@ export async function loadLocalPipeline(
     );
   }
 
-  log?.('info', `Loading embedding model ${modelId} (cache: ${cacheDir}${offline ? ', offline' : ''})`);
+  log?.('info', `Loading embedding model ${modelId} (cache: ${cacheDir}${offline ? ', offline' : ''}, ${threads} thread${threads === 1 ? '' : 's'})`);
   let pipe: unknown;
   try {
-    pipe = await pipeline('feature-extraction', modelId);
+    // The thread count is not a tuning knob, it is the difference between working and not. onnxruntime sizes its
+    // intra-op pool from the HOST's cores and ignores a container's CPU quota, so a one-CPU container on a 16-core
+    // node ran sixteen threads on one CPU's quota: 640 ms per text, against 54 ms with one thread (measured in the
+    // test stack, 2026-10-01). The host passes the budget it read from the cgroup; one request runs at a time, so
+    // there is nothing for an inter-op pool to do.
+    pipe = await pipeline('feature-extraction', modelId, {
+      session_options: { intraOpNumThreads: threads, interOpNumThreads: 1 },
+    });
   } catch (err) {
     // The library's own message on a blocked miss names `node_modules/@huggingface/transformers/models/`,
     // a path that has nothing to do with where Ythril keeps its models — so an operator would go looking

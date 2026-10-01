@@ -12,7 +12,7 @@
  *
  * ## Its contract is the real module's
  *
- * `loadLocalPipeline({ modelId, cacheDir, offline }, log)` resolving to `async (input, opts) => ({ data })`, where
+ * `loadLocalPipeline({ modelId, cacheDir, offline, threads }, log)` resolving to `async (input, opts) => ({ data })`, where
  * `data` is a `Float32Array` — exactly what `brain/local-pipeline.ts` exports. Anything that works against this
  * works against the real one; nothing here is a second protocol.
  *
@@ -101,10 +101,10 @@ export function makePipeline(modelId, send) {
   };
 }
 
-export async function loadLocalPipeline({ modelId, cacheDir, offline }, log) {
+export async function loadLocalPipeline({ modelId, cacheDir, offline, threads }, log) {
   const send = (m) => { if (typeof process.send === 'function') process.send(m); };
   send({
-    fixture: 'loading', modelId, cacheDir, offline,
+    fixture: 'loading', modelId, cacheDir, offline, threads,
     envKeys: Object.keys(process.env).sort(),
     execArgv: process.execArgv,
     pid: process.pid,

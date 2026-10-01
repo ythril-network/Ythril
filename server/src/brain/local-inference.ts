@@ -7,7 +7,8 @@
  * may say). This module owns the four things the EMBEDDING layer adds, and the generic host must not know about:
  *
  *  1. **Which child, and how it is told its model.** `brain/embed-process.ts`, found through `resolveEntry`, with the
- *     model cache directory in its environment and, for the tests only, `--pipeline=<module>` on its command line.
+ *     model cache directory in its environment, its inference thread count (`--threads=<n>`, the CPU budget from
+ *     `util/cpu-budget.ts`) on its command line, and, for the tests only, `--pipeline=<module>` there too.
  *  2. **Two failure classes, crossing the process boundary as strings** (`brain/embed-errors.ts`). A model that
  *     cannot load is deterministic: the host remembers it and the text is unchanged, so the queue ends the job
  *     `failed` after its attempts and an operator can retry it. A LOST child is the embedder's fault and is
@@ -32,6 +33,7 @@
 import path from 'node:path';
 import { createSupervisedWorker, type SupervisedWorker, type WorkerEvent, type WorkerState, type Scheduler, type SpawnSpec, type ChildLike, type WorkerRequest, type WorkerReply } from '../util/supervised-worker.js';
 import { resolveEntry } from '../util/entry-path.js';
+import { availableCpus } from '../util/cpu-budget.js';
 import { log as serverLog, redactSecrets } from '../util/log.js';
 import { getDataRoot } from '../config/loader.js';
 import { embedProcessRestartsTotal, embedWaitSeconds, setEmbedProcessPhaseSource } from '../metrics/registry.js';
@@ -82,6 +84,18 @@ export interface LocalInferenceOptions {
   loadDeadlineMs?: number;
   killGraceMs?: number;
   backoffMs?: (consecutiveLosses: number) => number;
+  /** How many CPUs the child's inference may use; default `availableCpus` (`util/cpu-budget.ts`). Read once, by this host. */
+  cpus?: () => number;
+}
+
+/**
+ * The inference thread count the child is told, as `--threads=<n>`: the CPU budget, or 1 for anything that is not a
+ * positive integer. onnxruntime would otherwise size its pool from the HOST's cores and ignore the container's quota
+ * (640 ms per text against 54 ms on a one-CPU container on 16 cores). Decided here, once, never by the child.
+ */
+function inferenceThreads(cpus: () => number): number {
+  const n = cpus();
+  return Number.isInteger(n) && n >= 1 ? n : 1;
 }
 
 /**
@@ -100,10 +114,12 @@ function configurationFingerprint(explicitCacheDir: string | undefined): string 
 
 export function createLocalInference(opts: LocalInferenceOptions = {}): LocalInference {
   const entry = resolveEntry('brain/embed-process');
+  const threads = `--threads=${inferenceThreads(opts.cpus ?? availableCpus)}`;
   const worker: SupervisedWorker = createSupervisedWorker({
-    entry: opts.pipelineModule
-      ? { cmd: entry.cmd, args: [...entry.args, `--pipeline=${opts.pipelineModule}`] }
-      : entry,
+    entry: {
+      cmd: entry.cmd,
+      args: [...entry.args, threads, ...(opts.pipelineModule ? [`--pipeline=${opts.pipelineModule}`] : [])],
+    },
     label: 'Inference process',
     spawn: opts.spawn,
     now: opts.now,

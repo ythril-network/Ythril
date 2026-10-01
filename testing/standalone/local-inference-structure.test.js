@@ -28,7 +28,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { trackedSources, REPO_ROOT } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
-import { balancedFrom, bodyOf, between } from './_structural-window.mjs';
+import { balancedFrom, bodyOf, between, argumentsOf } from './_structural-window.mjs';
 import { importClosure, relativeImports, bareImports } from './_import-closure.mjs';
 
 const SRC = trackedSources('server/src', { floor: 100, untracked: true });
@@ -107,7 +107,7 @@ describe('what runs inside the child', () => {
   });
 
   it('the loader takes its inputs as arguments and never re-reads the environment', () => {
-    assert.ok(!/\bprocess\.env\b/.test(code(LOADER)), 'local-pipeline.ts reads process.env; it gets { modelId, cacheDir, offline } instead');
+    assert.ok(!/\bprocess\.env\b/.test(code(LOADER)), 'local-pipeline.ts reads process.env; it gets { modelId, cacheDir, offline, threads } instead');
     assert.match(code(LOADER), /allowRemoteModels\s*=\s*false/);
     assert.match(code(LOADER), /\.cacheDir\s*=/);
   });
@@ -163,6 +163,51 @@ describe('the child\'s pipeline module is an argument, never found', () => {
     const child = code(CHILD_ENTRY);
     assert.ok(child.includes('--pipeline='));
     assert.match(child, /process\.argv/);
+  });
+});
+
+describe('the inference thread count is the host\'s CPU budget, handed to the child as an argument', () => {
+  // onnxruntime sizes its intra-op pool from the HOST's cores and ignores a container's CPU quota: on a one-CPU
+  // container on 16 cores that was 640 ms per text against 54 ms with one thread. The count is decided once, by the
+  // host, from `util/cpu-budget.ts`, and the child is told it; a child that computed it would be a second answer.
+
+  it('every call of the model library\'s `pipeline(` in the loader passes the thread count it was given', () => {
+    const src = code(LOADER);
+    const calls = [...src.matchAll(/\bpipeline\s*\(/g)].map(m => m.index);
+    assert.ok(calls.length >= 1, 'the loader calls no pipeline: re-anchor this gate');
+    for (const at of calls) {
+      const args = argumentsOf(src, at, 'the loader\'s pipeline call');
+      const options = args[2] ?? '';
+      assert.match(options, /session_options\s*:\s*\{[^}]*intraOpNumThreads\s*:\s*threads\b/,
+        `pipeline(${args.join(', ')}) does not size onnxruntime's intra-op pool from the \`threads\` argument`);
+      assert.match(options, /interOpNumThreads\s*:\s*1\b/, 'a single-model, one-request-at-a-time child needs no inter-op pool');
+    }
+    assert.match(src, /\{\s*modelId\s*,\s*cacheDir\s*,\s*offline\s*,\s*threads\s*\}\s*:\s*LocalPipelineSpec/,
+      'loadLocalPipeline does not take `threads` as an argument');
+  });
+
+  it('the host reads the budget through util/cpu-budget and appends it as `--threads=`', () => {
+    const host = code('server/src/brain/local-inference.ts');
+    assert.ok(relativeImports('server/src/brain/local-inference.ts').includes('server/src/util/cpu-budget.ts'),
+      'the inference host does not use the one module that answers "how many CPUs may this process use"');
+    assert.ok(host.includes('--threads='));
+    assert.match(host, /\bavailableCpus\b/);
+  });
+
+  it('the child reads it from argv, passes it to the loader, and never computes a CPU count itself', () => {
+    const child = code(CHILD_ENTRY);
+    assert.ok(child.includes('--threads='));
+    assert.match(child, /loader\s*\(\s*\{[^}]*\bthreads\b[^}]*\}/, 'the child does not pass `threads` to the loader');
+    for (const f of importClosure(CHILD_ENTRY)) {
+      const src = code(f);
+      assert.ok(!/availableParallelism|\bcpus\s*\(\s*\)|cpu\.max|cfs_quota/.test(src),
+        `${f} runs in the inference child and sizes its own threads: the host decides, the child is told`);
+    }
+  });
+
+  it('one module reads the cgroup quota: util/cpu-budget.ts', () => {
+    const readers = SRC.filter(f => /cpu\.max|cfs_quota_us/.test(code(f)));
+    assert.deepEqual(readers, ['server/src/util/cpu-budget.ts']);
   });
 });
 

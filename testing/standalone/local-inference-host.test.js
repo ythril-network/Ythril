@@ -12,15 +12,16 @@
  *
  * ## The contract (names the implementation must match)
  *
- *   createLocalInference({ pipelineModule?, cacheDir?, spawn?, now?, scheduler?, log?, onEvent?, idleMs?, ... })
+ *   createLocalInference({ pipelineModule?, cacheDir?, cpus?, spawn?, now?, scheduler?, log?, onEvent?, idleMs?, ... })
  *     returns the same object as `createSupervisedWorker`: request / warm / recycle / stop / state / waitOutBackoff
  *   LOCAL_INFERENCE_ENV_NAMES            the variables the child is allowed to inherit (the model loader's needs)
  *   runLocalInference(req), warmLocalInference({ modelId }), stopLocalInference({ budgetMs }),
  *   localInferenceState(), waitOutLocalInferenceBackoff()         module-level, over one lazily created instance
  *   _setLocalInferenceForTests(instance | null)                   the seam for `embed()` tests
  *
- * The child is launched as `resolveEntry('brain/embed-process')`, with `--pipeline=<absolute path>` appended ONLY
- * when a `pipelineModule` was passed.
+ * The child is launched as `resolveEntry('brain/embed-process')`, with `--threads=<n>` (the host's CPU budget, from
+ * the `cpus` option, default `availableCpus`) always appended, and `--pipeline=<absolute path>` ONLY when a
+ * `pipelineModule` was passed.
  *
  * Run: node --test testing/standalone/local-inference-host.test.js
  * (requires a prior `npm run build` in server/)
@@ -91,14 +92,44 @@ describe('the child it launches', () => {
     await ask(inference);
     const { entry } = fake.last().spec;
     assert.equal(entry.cmd, process.execPath);
-    const target = entry.args.at(-1);
-    assert.match(target.replace(/\\/g, '/'), /brain\/embed-process\.(js|ts)$/, `launches ${target}`);
+    const at = entry.args.findIndex(a => /brain\/embed-process\.(js|ts)$/.test(a.replace(/\\/g, '/')));
+    assert.ok(at >= 0, `launches ${JSON.stringify(entry.args)}`);
+    // What follows the script is the script's argv; before it, node would read a flag as one of its own options.
+    assert.ok(entry.args.slice(0, at).every(a => !a.startsWith('--threads=') && !a.startsWith('--pipeline=')),
+      `the child's own arguments must come after its script: ${JSON.stringify(entry.args)}`);
     assert.ok(!entry.args.some(a => a.startsWith('--pipeline=')), 'no fixture unless one was given');
 
     const withModule = setup({ host: { pipelineModule: '/some/where/fixture.mjs' } });
     await ask(withModule.inference);
     assert.ok(withModule.fake.last().spec.entry.args.includes('--pipeline=/some/where/fixture.mjs'),
       `args were ${JSON.stringify(withModule.fake.last().spec.entry.args)}`);
+  });
+
+  it('is told its inference thread count as an ARGUMENT, from the host\'s CPU budget, resolved once', async () => {
+    let calls = 0;
+    const { inference, fake } = setup({ host: { cpus: () => { calls++; return 3; } } });
+    await ask(inference);
+    const { args } = fake.last().spec.entry;
+    assert.ok(args.includes('--threads=3'), `args were ${JSON.stringify(args)}`);
+    assert.equal(args.filter(a => a.startsWith('--threads=')).length, 1);
+    await inference.recycle();
+    await ask(inference);
+    assert.ok(fake.last().spec.entry.args.includes('--threads=3'));
+    assert.equal(calls, 1, 'the budget is read once per host, not by the child and not per request');
+
+    // The default reads the real budget: an integer of at least 1, whatever this machine is.
+    const plain = setup();
+    await ask(plain.inference);
+    const threads = plain.fake.last().spec.entry.args.find(a => a.startsWith('--threads='));
+    assert.match(threads ?? '', /^--threads=[1-9]\d*$/, `args were ${JSON.stringify(plain.fake.last().spec.entry.args)}`);
+  });
+
+  it('refuses a CPU budget that is not a positive integer rather than handing the child nonsense', async () => {
+    for (const bad of [0, -1, 1.5, Number.NaN]) {
+      const { inference, fake } = setup({ host: { cpus: () => bad } });
+      await ask(inference);
+      assert.ok(fake.last().spec.entry.args.includes('--threads=1'), `for ${bad}: ${JSON.stringify(fake.last().spec.entry.args)}`);
+    }
   });
 
   it('gets the model cache directory through its environment, from the argument when one is given', async () => {

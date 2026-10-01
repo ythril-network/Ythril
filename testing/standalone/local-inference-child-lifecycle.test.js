@@ -229,6 +229,16 @@ describe('a child that wedges', () => {
   });
 });
 
+describe('the child\'s inference threads', () => {
+  it('are the host\'s CPU budget, reaching the real child\'s loader as a number through argv', async () => {
+    await withHost({ cpus: () => 3 }, async ({ host, real }) => {
+      await ask(host, 'threads');
+      const { m } = await real.waitFor(x => x.fixture === 'loading', 'the fixture to load');
+      assert.equal(m.threads, 3, `the loader was given ${JSON.stringify(m.threads)}`);
+    });
+  });
+});
+
 describe('the child\'s environment', () => {
   it('is the allowlist: no database credential, key, token or inspector flag from the server\'s own environment', async () => {
     await withHost({}, async ({ host, real }) => {

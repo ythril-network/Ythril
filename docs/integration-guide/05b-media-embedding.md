@@ -197,8 +197,14 @@ The worker-tuning fields — `workerConcurrency`, `workerPollIntervalMs`, `worke
 > - **The first embed after ten idle minutes pays the model load**, about one to two seconds; the process exits
 >   when idle so that its memory goes back to the operating system (the model's memory arena never gives any back
 >   while the process lives). `ythril_embed_process_state` shows whether it is running.
+> - **The inference process sizes its threads to the container's CPU quota**, read from the cgroup at start-up
+>   (`cpus:` in Compose, a pod's CPU limit in Kubernetes), and to the machine's cores when there is no quota. Left
+>   to itself, onnxruntime counts the HOST's cores and ignores the quota: on a one-CPU container on a 16-core host
+>   that was sixteen threads throttled on one CPU, **640 ms per text against 54 ms** with the thread count matched,
+>   enough that a seed of a thousand records did not embed in ten minutes. There is no setting for it; give the
+>   container more CPU and the next process uses it.
 > - **CPU and memory are shared, not doubled.** The inference process competes with the server for the
->   container's cores (onnxruntime's thread count is not pinned), so a one-core limit is one core for both. A
+>   container's cores, so a one-core limit is one core for both. A
 >   container `mem_limit` or a pod memory limit counts **both** processes; the server's own metrics do not include
 >   the child's resident memory.
 > - **A crash is survived.** A native fault in the model, an out-of-memory kill or a wedged inference no longer takes

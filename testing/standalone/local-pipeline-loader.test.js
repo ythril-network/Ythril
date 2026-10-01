@@ -4,8 +4,8 @@
  * ## What moved, and what must not change when it moves
  *
  * `getLocalPipeline` lived in `embedding.ts`, read `process.env` and the loaded config, and logged through the
- * server's logger. `brain/local-pipeline.ts` is what the inference CHILD calls, so it takes its three inputs as
- * arguments (`{ modelId, cacheDir, offline }`) because the child has no loaded config, and reports through a
+ * server's logger. `brain/local-pipeline.ts` is what the inference CHILD calls, so it takes its inputs as
+ * arguments (`{ modelId, cacheDir, offline, threads }`) because the child has no loaded config, and reports through a
  * `log(level, message)` callback because a console line written in the child would bypass the main process's
  * redacting logger. Everything else is moved unchanged, and the parts an operator depends on are pinned here with
  * the REAL loader (`@huggingface/transformers` is installed; no model is needed, because every case below is one
@@ -47,7 +47,7 @@ describe('loadLocalPipeline with downloads forbidden and nothing cached', () => 
 
   it('refuses with the operator-facing text, naming the cache and the flags, and never transient', async () => {
     const lines = [];
-    const err = await loadLocalPipeline({ modelId: MODEL, cacheDir: emptyCache, offline: true }, (l, m) => lines.push([l, m]))
+    const err = await loadLocalPipeline({ modelId: MODEL, cacheDir: emptyCache, offline: true, threads: 1 }, (l, m) => lines.push([l, m]))
       .then(() => null, e => e);
     assert.ok(err instanceof Error, 'a load that cannot succeed must throw');
 
@@ -66,7 +66,7 @@ describe('loadLocalPipeline with downloads forbidden and nothing cached', () => 
     process.stdout.write = (...a) => { writes.push(String(a[0])); return true; };
     process.stderr.write = (...a) => { writes.push(String(a[0])); return true; };
     try {
-      await loadLocalPipeline({ modelId: MODEL, cacheDir: emptyCache, offline: true }, (l, m) => lines.push([l, m])).catch(() => {});
+      await loadLocalPipeline({ modelId: MODEL, cacheDir: emptyCache, offline: true, threads: 1 }, (l, m) => lines.push([l, m])).catch(() => {});
     } finally { process.stdout.write = real.out; process.stderr.write = real.err; }
 
     assert.ok(lines.some(([l, m]) => l === 'info' && m.includes(`Loading embedding model ${MODEL}`) && m.includes(emptyCache) && /offline/.test(m)),
@@ -78,14 +78,14 @@ describe('loadLocalPipeline with downloads forbidden and nothing cached', () => 
     const other = path.join(tmp, 'another-cache');
     fs.mkdirSync(other, { recursive: true });
     transformersEnv.allowRemoteModels = true;
-    await loadLocalPipeline({ modelId: MODEL, cacheDir: other, offline: true }, () => {}).catch(() => {});
+    await loadLocalPipeline({ modelId: MODEL, cacheDir: other, offline: true, threads: 1 }, () => {}).catch(() => {});
     assert.equal(transformersEnv.cacheDir, other);
     assert.equal(transformersEnv.allowRemoteModels, false,
       'offline: true must switch the library\'s runtime download off, whatever its default is');
   });
 
   it('takes the log callback as optional', async () => {
-    const err = await loadLocalPipeline({ modelId: MODEL, cacheDir: emptyCache, offline: true }).then(() => null, e => e);
+    const err = await loadLocalPipeline({ modelId: MODEL, cacheDir: emptyCache, offline: true, threads: 1 }).then(() => null, e => e);
     assert.ok(err instanceof Error);
   });
 });

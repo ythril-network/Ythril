@@ -24,11 +24,13 @@
  *
  * ## Why this is not sized from the core count
  *
- * `os.availableParallelism()` reports the HOST's cores, not the cgroup CPU limit. The reporting deployment is
- * capped at 4 CPU on a 16-core node, so core detection would have "left headroom" of 15 and oversubscribed
- * exactly as before. A container's real budget is not visible from inside it, so the default is a deliberately
- * conservative constant instead of a computed one, and an operator with headroom can raise it. (The inference process
- * does compete with the server for the container's CPU: it is a second process, not a second allowance.)
+ * A container's CPU budget IS visible from inside it: `util/cpu-budget.ts` reads the cgroup quota (the reporting
+ * deployment's 4 CPU on a 16-core node, the test stack's 1), and the inference process sizes its threads from it.
+ * It is still not what this number should follow. The inference process runs one embed at a time whatever the core
+ * count, so what this bounds is queue depth in front of it (see above), not parallel CPU work, and a larger budget
+ * does not make a deeper queue useful. So the default stays a deliberately conservative constant, and an operator
+ * with a reason can raise it. (The inference process does compete with the server for the container's CPU: it is a
+ * second process, not a second allowance.)
  *
  * An EXTERNAL embedding endpoint is network-bound: the work happens elsewhere, this process is waiting on
  * sockets, and eight in flight is the right call. Same constant for both was the mistake.

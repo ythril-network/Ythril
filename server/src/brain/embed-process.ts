@@ -38,6 +38,9 @@
  *  - **Its pipeline module is an ARGUMENT** (`--pipeline=<absolute path>`), for the tests, which replace the model
  *    with a fixture. It is never read from the environment or from configuration: a switch like that is a way to
  *    replace the embedder of a running instance.
+ *  - **Its thread count is an ARGUMENT too** (`--threads=<n>`), decided by the host from the container's CPU budget.
+ *    Nothing in this process counts CPUs: onnxruntime's default is the host's cores, which on a one-CPU container on
+ *    16 cores ran at 640 ms per text against 54 ms with one thread.
  *  - **It ends with its owner.** An owner that died without saying goodbye (`kill -9`, the OOM killer) closes the
  *    IPC channel, and a process holding a loaded model would otherwise sit on its memory for good: it exits on
  *    `disconnect`. (A loaded model keeps handles of its own, so an empty event loop cannot be relied on to do it.)
@@ -68,6 +71,18 @@ async function resolveLoader(): Promise<Loader> {
   return mod.loadLocalPipeline;
 }
 
+/**
+ * `--threads=<n>`: how many intra-op threads the model may use, decided by the HOST from the container's CPU budget
+ * (`util/cpu-budget.ts`). This process never sizes it itself: onnxruntime's own default is the host's core count,
+ * which on a CPU-limited container is the thrash this argument exists to prevent.
+ */
+function threadsArgument(): number {
+  const arg = process.argv.find(a => a.startsWith('--threads='));
+  const n = arg ? Number(arg.slice('--threads='.length)) : Number.NaN;
+  if (!Number.isInteger(n) || n < 1) throw new Error('--threads=<n> was not passed to the inference process');
+  return n;
+}
+
 const errorText = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
 let loading = false;
@@ -80,8 +95,9 @@ async function onLoad(modelId: string): Promise<void> {
   try {
     const cacheDir = process.env['MODEL_CACHE_DIR'];
     if (!cacheDir) throw new Error('MODEL_CACHE_DIR was not passed to the inference process');
+    const threads = threadsArgument();
     const loader = await resolveLoader();
-    const pipe = await loader({ modelId, cacheDir, offline: modelsOffline() }, log);
+    const pipe = await loader({ modelId, cacheDir, offline: modelsOffline(), threads }, log);
     model = { id: modelId, pipe };
     send({ type: 'loaded', modelId });
   } catch (err) {
