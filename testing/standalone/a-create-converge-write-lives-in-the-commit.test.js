@@ -39,17 +39,21 @@
  * `reconcileLinks` write directly. Mutations, each restored by hand: an exemption entry deleted (red: an
  * unclaimed site); a dummy exemption for a function that writes nothing (red: stale).
  *
+ * Re-anchored for `Q-107` part 1 and red on 797dbb2e for it: the sync-ingest rows collapse to the arrival writer
+ * `sync/arrivals.ts:writeArrivals`, which does not exist yet (stale), while `ingestBrainDoc`, `batchUpsertBySeq`
+ * and the `$setOnInsert` inline in `POST /api/sync/entities` (an orphan) still write directly.
+ *
  * Run: node --test testing/standalone/a-create-converge-write-lives-in-the-commit.test.js
  * (requires a prior `npm run build` in server/)
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { moduleIndex, walkFrom, pathTo } from './_call-graph.mjs';
-import { spaceWriters, MUTATORS } from './_space-writers.mjs';
+import { MUTATORS } from './_space-writers.mjs';
+import { recordWrites, WRITE_METHODS } from './_record-writes.mjs';
 import { readTrackedSources } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 
-const { COLLECTION_METHOD_EFFECT } = await import('../../server/dist/db/record-write-observer.js');
 const { BRAIN_COLLECTIONS } = await import('../../server/dist/config/types.js');
 
 const COMMIT = 'server/src/brain/write-plan/commit.ts';
@@ -90,49 +94,41 @@ const EXEMPT = {
   'server/src/brain/candidate-prune.ts:pruneSpaceCandidates': 'prunes candidate rows; the collection name is computed',
   'server/src/spaces/lifecycle.ts:wipeSpace': 'the space wipe',
   'server/src/spaces/_shared.ts:repairStaleSpaceIds': 'repair: rewrites a stale spaceId field in every collection',
-  // sync ingest: the receiver stores what a peer sent (CLAUDE.md, "What a receiver does after the write")
-  'server/src/api/sync/_shared.ts:ingestBrainDoc': 'sync push ingest',
-  'server/src/sync/engine.ts:batchUpsertBySeq': 'sync pull ingest',
+  // sync ingest and import: the receiver stores what a peer or a restore sent, through ONE writer (`Q-107` part 1;
+  // CLAUDE.md, "What a receiver does after the write"). It replaced `ingestBrainDoc` (push, import) and the pull's
+  // `batchUpsertBySeq`, and the routes' inline `$setOnInsert`, which is why the docs.ts orphan exemption is gone.
+  'server/src/sync/arrivals.ts:writeArrivals': 'sync push, pull and admin import: the arrival writer',
   // migrations and restore
   'server/src/db/rekey-memory-kind-to-fact.ts:rekeyMemoryKindToFact': 'boot migration over local state',
   'server/src/db/drop-link-arrays.ts:dropLinkArrays': 'boot migration: drops the 4.x link arrays',
   'server/src/db/restore.ts:restoreDatabase': 'backup restore writes every collection',
-  // the sequence counter: not a record collection, but its name is not a record suffix the scanner can read
-  'server/src/util/seq.ts:withAllocatedSeqs': 'the per-space sequence counter, not a record',
-  'server/src/util/seq.ts:bumpSeq': 'the per-space sequence counter, not a record',
-  'server/src/spaces/rename.ts:moveSpaceData': 'moves the sequence counter row with a renamed space',
+  // The sequence counter is not here: `_record-writes.mjs` excludes it by what it is, so the three rows that
+  // excused it one caller at a time (`withAllocatedSeqs`, `bumpSeq`, `moveSpaceData`) went with the extraction.
 };
 
 /** Orphan sites (no function owns them) are exempted by FILE, with the same obligation to be real. */
-const EXEMPT_ORPHAN_FILES = {
-  'server/src/api/sync/docs.ts': 'sync ingest routes: inline handlers that store a peer\'s documents',
-};
-
-/** Methods that write or delete, from the observer's own table — never a list written here. */
-const WRITE_METHODS = Object.entries(COLLECTION_METHOD_EFFECT)
-  .filter(([, e]) => e !== 'read' && (e.write || e.delete))
-  .map(([m]) => m);
+const EXEMPT_ORPHAN_FILES = {};
 
 const RECORD_COLLECTIONS = new Set(BRAIN_COLLECTIONS.filter(c => c !== 'files'));
 
 const INDEX = moduleIndex('server/src');
 // Lowered from 170 when the plan/commit split folded the create/converge writers' direct writes into one
 // commit (`Q-99` part 3): the sites went because the copies did, not because the scan broke.
-const WRITERS = spaceWriters(INDEX, { floors: { space: 150 } });
+// The record floor is 40, from 50: the counter sites (five on 797dbb2e) stopped counting as records when the
+// predicate moved into `_record-writes.mjs`, which excludes the counter by what it is.
+const RECORDS = recordWrites(INDEX, { collections: RECORD_COLLECTIONS, floors: { space: 150 }, recordFloor: 40 });
+const WRITERS = RECORDS.writers;
+const writesRecord = RECORDS.isRecordWrite;
 
-/** A site that writes, or may write, a record collection: a known record collection, a computed name, or an unresolved receiver. */
-const writesRecord = s => WRITE_METHODS.includes(s.op)
-  && ((s.kind === 'space' && (s.collection == null || RECORD_COLLECTIONS.has(s.collection))) || s.kind === 'unknown');
-
-const SITES = WRITERS.sites.filter(writesRecord);
-const ORPHANS = WRITERS.orphans.filter(writesRecord);
+const SITES = RECORDS.sites;
+const ORPHANS = RECORDS.orphans;
 
 describe('the derivation works', () => {
   it('found the write methods, the record collections and the sites (floors)', () => {
     assert.ok(WRITE_METHODS.length >= 10, `only ${WRITE_METHODS.length} write methods derived from COLLECTION_METHOD_EFFECT`);
     assert.ok(RECORD_COLLECTIONS.size >= 5 && RECORD_COLLECTIONS.has('facts') && RECORD_COLLECTIONS.has('links'),
       `the record collections derived as ${[...RECORD_COLLECTIONS].join(', ')}`);
-    assert.ok(SITES.length >= 50, `only ${SITES.length} record-collection write sites found — the scan is broken`);
+    assert.ok(SITES.length >= 40, `only ${SITES.length} record-collection write sites found — the scan is broken`);
   });
 
   it('every write method the observer knows is one the site scanner can see, or is never called', () => {
@@ -181,13 +177,13 @@ describe('a create/converge write to a record collection lives in the commit', (
   it('nothing reached from a create/converge writer writes a record collection outside the commit', () => {
     // The exemption list says which functions MAY write; this says the create path does not reach them. It is
     // what keeps `reconcileLinks` (exempt for the update path) from being the create path's link writer too.
-    // The sequence counter is excluded by what it is, not by exemption: allocating a seq is not a record write.
+    // The sequence counter is excluded by what it is (`_record-writes.mjs`): allocating a seq is not a record write.
     const { seen, parent } = walkFrom(INDEX, CREATE_CONVERGE_WRITERS);
     for (const root of CREATE_CONVERGE_WRITERS) assert.ok(seen.has(root), `${root} is gone — re-anchor the scope`);
     const reached = [];
     for (const key of seen) {
       for (const s of WRITERS.byKey.get(key) ?? []) {
-        if (!writesRecord(s) || s.file === COMMIT || s.file === 'server/src/util/seq.ts') continue;
+        if (!writesRecord(s) || s.file === COMMIT) continue;
         reached.push(`${s.key}:${s.line} ${s.op} (${s.collection ?? s.why}) via ${pathTo(parent, key).map(k => k.split(':')[1]).join(' > ')}`);
       }
     }

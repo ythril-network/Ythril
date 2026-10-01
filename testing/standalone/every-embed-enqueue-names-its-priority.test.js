@@ -32,7 +32,8 @@ import { readTrackedSources } from './_sources.mjs';
 import { blankComments } from './_strip-comments.mjs';
 import { argumentsOf, bodyOf } from './_structural-window.mjs';
 
-const SOURCES = readTrackedSources('server/src', { floor: 100, specs: false })
+// Untracked-but-not-ignored too: a new arrival writer must not be outside this gate on its own commit.
+const SOURCES = readTrackedSources('server/src', { floor: 100, specs: false, untracked: true })
   .map(s => ({ file: s.file, code: blankComments(s.text) }));
 
 /** Every call of `name(` in the code, with its argument list, excluding the function's own declaration. */
@@ -55,7 +56,7 @@ function callsOf(code, file, name, lineBase = 0) {
  * writers no longer call `enqueueEmbedJob` one record at a time — the write commit queues a whole plan through
  * `enqueueWriteEmbedJobs` — so a gate that scanned only the single-record door would conclude about every enqueue
  * while reading fewer and fewer of them. Each door takes its lane in a trailing `{ priority }` options object.
- * (`enqueueIngestedRecord` is not a door here: it fixes its own lane, asserted below.)
+ * (The `enqueueIngested…` functions are not doors here: each fixes its own lane, asserted below.)
  */
 const QUEUE_SRC = SOURCES.find(s => s.file === 'server/src/brain/embed-queue.ts');
 const DOORS = QUEUE_SRC
@@ -100,29 +101,61 @@ describe('a record arriving by sync is queued in the BACKGROUND lane', () => {
     assert.ok(SYNC, 'server/src/api/sync/_shared.ts is gone — re-anchor this gate');
   });
 
-  it('enqueueIngestedRecord queues with EMBED_PRIORITY.background', () => {
-    const body = bodyOf(QUEUE.code, 'enqueueIngestedRecord');
-    const calls = callsOf(body, QUEUE.file, 'enqueueEmbedJob');
-    assert.ok(calls.length >= 1, 'enqueueIngestedRecord no longer enqueues — re-anchor this gate');
-    for (const c of calls) {
-      assert.match(c.args[3] ?? '', /EMBED_PRIORITY\.background\b/,
-        `enqueueIngestedRecord's enqueue passes ${c.args[3] ?? 'no priority'}; a sync arrival is background work`);
+  /*
+   * The INGEST enqueues, derived like the doors: every exported `enqueueIngested…` of embed-queue.ts. Since
+   * `Q-107` part 1 there are two — the single record, and the batched twin `enqueueIngestedRecords` the arrival
+   * writer queues a landed chunk with. A lane asserted of one by name is a lane the other may get wrong, and the
+   * batched one carries a whole page of a peer's records.
+   */
+  const INGESTED = QUEUE
+    ? [...QUEUE.code.matchAll(/^export\s+async\s+function\s+(enqueueIngested\w*)\s*[<(]/gm)].map(m => m[1])
+    : [];
+
+  it('the ingest enqueues were found — the single record and its batched twin (floor)', () => {
+    for (const name of ['enqueueIngestedRecord', 'enqueueIngestedRecords']) {
+      assert.ok(INGESTED.includes(name), `embed-queue.ts exports no ${name}`);
     }
   });
 
-  it('every exported ingest* function of api/sync/_shared.ts enqueues only through the background lane', () => {
-    const names = [...SYNC.code.matchAll(/^export\s+async\s+function\s+(ingest\w*)/gm)].map(m => m[1]);
-    assert.ok(names.length >= 2, `found ${names.length} ingest function(s) in api/sync/_shared.ts; expected at least 2`);
-    for (const name of names) {
-      const body = bodyOf(SYNC.code, name);
+  it('every ingest enqueue queues with EMBED_PRIORITY.background', () => {
+    for (const name of INGESTED) {
+      const body = bodyOf(QUEUE.code, name);
+      const calls = DOORS.flatMap(d => callsOf(body, QUEUE.file, d));
+      assert.ok(calls.length >= 1, `${name} no longer enqueues through a door — re-anchor this gate`);
+      for (const c of calls) {
+        assert.match(c.args[c.args.length - 1] ?? '', /EMBED_PRIORITY\.background\b/,
+          `${name}'s enqueue passes ${c.args[c.args.length - 1] ?? 'no priority'}; a sync arrival is background work`);
+      }
+    }
+  });
+
+  /*
+   * The ARRIVAL WRITERS: every exported `ingest…` of api/sync/_shared.ts (file metadata keeps its own merge), and
+   * `writeArrivals` of sync/arrivals.ts, which stores every other family (`Q-107` part 1). Read from both files,
+   * so the writer that replaced `ingestBrainDoc` cannot leave the lane rule behind with it.
+   */
+  const ARRIVALS = SOURCES.find(s => s.file === 'server/src/sync/arrivals.ts');
+  const WRITERS = [
+    ...(SYNC ? [...SYNC.code.matchAll(/^export\s+async\s+function\s+(ingest\w*)/gm)].map(m => ({ src: SYNC, name: m[1] })) : []),
+    ...(ARRIVALS ? [...ARRIVALS.code.matchAll(/^export\s+async\s+function\s+(writeArrivals)\b/gm)].map(m => ({ src: ARRIVALS, name: m[1] })) : []),
+  ];
+
+  it('the arrival writers were found (floor)', () => {
+    assert.ok(ARRIVALS, 'server/src/sync/arrivals.ts does not exist — the arrival writer is not where this gate looks');
+    assert.ok(WRITERS.some(w => w.name === 'writeArrivals'), 'sync/arrivals.ts exports no writeArrivals');
+    assert.ok(WRITERS.length >= 2, `found ${WRITERS.length} arrival writer(s); expected at least 2`);
+  });
+
+  it('every arrival writer enqueues only through the background lane', () => {
+    for (const { src, name } of WRITERS) {
+      const body = bodyOf(src.code, name);
       // bodyOf returns whole lines, so the body's first line is found by its text and the count is exact.
-      const base = SYNC.code.slice(0, SYNC.code.indexOf(body)).split('\n').length - 1;
-      const viaIngested = callsOf(body, SYNC.file, 'enqueueIngestedRecord', base);
-      const direct = callsOf(body, SYNC.file, 'enqueueEmbedJob', base);
-      const bulk = callsOf(body, SYNC.file, 'enqueueEmbedJobs', base);
-      assert.ok(viaIngested.length + direct.length + bulk.length >= 1,
+      const base = src.code.slice(0, src.code.indexOf(body)).split('\n').length - 1;
+      const viaIngested = INGESTED.flatMap(n => callsOf(body, src.file, n, base));
+      const direct = DOORS.flatMap(d => callsOf(body, src.file, d, base));
+      assert.ok(viaIngested.length + direct.length >= 1,
         `${name} queues nothing — an arriving record would never be embedded on this instance`);
-      for (const c of [...direct, ...bulk]) {
+      for (const c of direct) {
         assert.match(c.args[c.args.length - 1] ?? '', /EMBED_PRIORITY\.background\b/,
           `${name} (line ${c.line}) enqueues a sync arrival outside the background lane`);
       }
