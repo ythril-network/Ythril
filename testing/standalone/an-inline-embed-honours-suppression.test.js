@@ -69,6 +69,27 @@ function vectorStores() {
   return out;
 }
 
+/**
+ * The calls that count as consulting suppression: `embeddingSuppressedFor`, and every function exported beside it
+ * that answers by CALLING it — today `suppressedAfterWrite`, which the write planners use so the stored record's
+ * flag is read for them (`Q-194`).
+ *
+ * DERIVED from the module, never listed. A wrapper that stopped routing to the resolver drops out of the set, so
+ * its callers stop counting as checks — the gate follows the rule rather than a name. The floor is the resolver
+ * itself: if it is not found, nothing below is checking anything.
+ */
+function suppressionResolvers() {
+  const src = stripComments(readFileSync('server/src/brain/suppress-embeddings.ts', 'utf8'));
+  const names = [...src.matchAll(/^export function (\w+)/gm)].map(m => m[1])
+    .filter(n => n === 'embeddingSuppressedFor'
+      || /\bembeddingSuppressedFor\s*\(/.test(bodyOf(src, n).replace(/^[^\n]*\n/, '')));
+  assert.ok(names.includes('embeddingSuppressedFor'),
+    'suppress-embeddings.ts no longer exports embeddingSuppressedFor — re-anchor this gate');
+  return names;
+}
+const RESOLVERS = suppressionResolvers();
+const resolverCall = () => new RegExp(`\\b(?:${RESOLVERS.join('|')})\\(`, 'g');
+
 describe('the three-tier resolution has exactly one implementation', () => {
   it('resolves record > schema > space, with absent falling through', () => {
     // Exercised as a function, because the ORDER is the whole rule and a source read cannot check it. Absent
@@ -135,7 +156,7 @@ describe('every inline embed honours suppression', () => {
     for (const file of new Set(vectorStores().map(e => e.file))) {
       const src = stripComments(readFileSync(file, 'utf8'));
       const stores = (src.match(/embedding:\s*\w+\.vector\b/g) ?? []).length;
-      const checks = (src.match(/embeddingSuppressedFor\(/g) ?? []).length;
+      const checks = (src.match(resolverCall()) ?? []).length;
       if (checks < stores) unguarded.push(`${file}: ${stores} vector store(s), ${checks} suppression check(s)`);
     }
     assert.deepEqual(
@@ -153,7 +174,7 @@ describe('every inline embed honours suppression', () => {
       const at = src.indexOf('const suppressed =');
       if (at === -1) continue;
       assert.match(
-        statementAround(src, at, `${file} suppressed const`), /embeddingSuppressedFor\(/,
+        statementAround(src, at, `${file} suppressed const`), resolverCall(),
         `${file} computes \`suppressed\` without the shared resolution`,
       );
       /*
@@ -179,13 +200,14 @@ describe('every inline embed honours suppression', () => {
      * there, and silently never suppresses — on the one record kind the flag was specifically widened to
      * cover. `schemaKeyFor` encodes it, but only if the caller hands over the right field.
      */
-    const edges = stripComments(readFileSync('server/src/brain/edges.ts', 'utf8'));
-    const at = edges.indexOf('embeddingSuppressedFor(');
-    assert.notEqual(at, -1, 'edges.ts no longer consults suppression — re-point this gate');
+    // The edge's inline embed is decided by its PLANNER since Q-99 part 3; `upsertEdge` and bulk both run it.
+    const edges = bodyOf(stripComments(readFileSync('server/src/brain/write-plan/plan-edge.ts', 'utf8')), 'planEdge');
+    const call = resolverCall().exec(edges);
+    assert.ok(call, 'planEdge no longer consults suppression — re-point this gate');
     // The CALL's own arguments, not the statement around it: the statement continues into
     // `edgeEmbedText(… effectiveType …)`, so a `type` check over that window would read a word belonging to a
     // different call — the same mistake `merge-runs-the-write-paths-validators` records making.
-    const args = argumentsOf(edges, at + 'embeddingSuppressedFor'.length, 'the edge suppression check').join(' ');
+    const args = argumentsOf(edges, call.index + call[0].length - 1, 'the edge suppression check').join(' ');
     // `label` PRESENT rather than the whole object matched: that object now also carries the record tier
     // (`suppressEmbeddings`), which a create could not state until 2026-09-02. An exact-shape match failed on
     // that addition while the property this case exists for — keyed by label, not type — was untouched.

@@ -41,7 +41,7 @@ import assert from 'node:assert/strict';
 
 import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
-import { bodyOf, argumentsOf } from './_structural-window.mjs';
+import { bodyOf, argumentsOf, blockAfter } from './_structural-window.mjs';
 import { trackedSources } from './_sources.mjs';
 
 const { edgeIdFor } = await import('../../server/dist/brain/edge-id.js');
@@ -148,10 +148,22 @@ describe('there is exactly ONE stored representation of an entity endpoint', () 
   it('the write path stores the normalised value, not what the caller sent', () => {
     // Source-read, because the alternative is a database test for a one-line normalisation. What it pins is
     // that the raw option never reaches the document: `fromKind: opts.fromKind` would store `'entity'`.
-    const body = bodyOf(src('server/src/brain/edges.ts'), 'upsertEdge');
+    // The document is built by the edge PLANNER since Q-99 part 3 — `upsertEdge` and bulk both write what
+    // `planEdge` decided — so that is where the stored kind is read.
+    const body = bodyOf(src('server/src/brain/write-plan/plan-edge.ts'), 'planEdge');
     assert.match(body, /storedEdgeKind\(/, 'the upsert does not normalise the kind it stores');
-    assert.doesNotMatch(body, /\{ fromKind: opts\.fromKind \}/,
-      'the upsert stores the caller value verbatim, so an explicit `entity` would be written');
+    // PER SIDE, because `storedEdgeKind(` also appears in the converge branch: one side bound raw would leave
+    // the bare match above passing. And `opts?.` as well as `opts.` — the planner reads optional options.
+    // The verbatim check reads the inserted DOCUMENT only: the triplet lookup passes the raw kinds, correctly.
+    const at = body.indexOf('const doc: EdgeDoc');
+    assert.ok(at > -1, 'planEdge no longer builds an EdgeDoc literal — re-anchor this gate');
+    const doc = blockAfter(body, at, 'the inserted edge document');
+    for (const side of ['fromKind', 'toKind']) {
+      assert.match(body, new RegExp(`const ${side} = storedEdgeKind\\(opts\\??\\.${side}\\)`),
+        `the inserted ${side} is not bound from storedEdgeKind, so an explicit \`entity\` would be written`);
+      assert.doesNotMatch(doc, new RegExp(`${side}:\\s*opts\\??\\.${side}\\b`),
+        `the upsert stores the caller ${side} verbatim, so an explicit \`entity\` would be written`);
+    }
   });
 
   it('and correcting a kind back to entity UNSETS the field', () => {

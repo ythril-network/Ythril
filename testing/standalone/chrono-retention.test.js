@@ -32,7 +32,8 @@
  */
 import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
-import { balancedFrom } from './_structural-window.mjs';
+import { balancedFrom, bodyOf } from './_structural-window.mjs';
+import { stripComments } from './_strip-comments.mjs';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -229,8 +230,11 @@ describe('the feature is reachable and wired', () => {
   // Named files. A rule nothing calls is a rule that does not exist, and this one is invisible when broken:
   // records simply keep accumulating, which is what the operator reported in the first place.
   it('the chrono write passes its collection and type so the schema tier applies', () => {
-    const src = readFileSync(join(ROOT, 'server/src/brain/chrono.ts'), 'utf8');
-    assert.match(src, /stampExpiryOnCreate\(spaceId,\s*doc,\s*ttlDays,\s*\{\s*collection:\s*'chrono',\s*type:\s*doc\.type\s*\}\)/);
+    // The create is decided by the chrono PLANNER since Q-99 part 3 — `createChrono` and the bulk importer both
+    // run `planChrono` — so the stamp is read in its body, comments stripped so a quoted call cannot satisfy it.
+    const src = stripComments(readFileSync(join(ROOT, 'server/src/brain/write-plan/plan-chrono.ts'), 'utf8'));
+    assert.match(bodyOf(src, 'planChrono'),
+      /stampExpiryOnCreate\(spaceId,\s*doc,\s*ttlDays,\s*\{\s*collection:\s*'chrono',\s*type:\s*doc\.type\s*\}\)/);
   });
 
   it('the space PATCH accepts retention inside a type schema', () => {
