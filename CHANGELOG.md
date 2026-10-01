@@ -14,6 +14,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is a bind mount, and a read that landed while the file was being rewritten failed with `ENODATA` — and the
   first such failure was taken as final. A read spoiled by a concurrent writer is now retried a few times; any
   other error is still reported at once.
+- **A proxy space no longer gets collections at boot, and a hand-edited `proxyFor: []` is a real space everywhere
+  (`Q-80`, `Q-98`).** The boot initialisation walked every configured space, so each boot created a proxy's
+  collections — which creating it never made and deleting it (a config-only removal) never dropped; the restore
+  index rebuild walked proxies too. And "is this a proxy" was answered in two spellings that disagreed on an empty
+  member list: such a space was served as a real space and skipped as a proxy by the embed worker, the duplicate
+  and contradiction scanners, the prunes and the metrics, and deleted as a proxy with its collections left behind.
+  The loader now removes an empty `proxyFor` on load and reload (with a warning), and the boot and the restore
+  rebuild walk only the spaces that own collections. **Who is affected:** an instance with a proxy space (its boot
+  stops creating collections for it; ones already created are left as they are, empty), and one whose config was
+  edited by hand to hold `"proxyFor": []` (that space starts being embedded and scanned).
 
 ## [5.6.0] — 2026-09-29
 

@@ -53,7 +53,7 @@ Click **Create New Space**. Fill in:
 - **ID** — optional. Short lowercase identifier (auto-generated from the name if left blank).
 - **Max GiB** — optional storage quota. Leave blank for unlimited.
 - **Purpose** — optional description of what this space is for. Visible to AI assistants.
-- **Proxy for** — optionally mark this as a proxy space standing in for one or more other spaces (tick individual spaces or "all").
+- **Proxy for** — optionally mark this as a proxy space standing in for one or more other spaces (tick individual spaces or "all"). A proxy stores nothing of its own, so it gets no collections, is never embedded, scanned or swept, and deleting it removes only its entry. A space whose `config.json` entry says `"proxyFor": []` (only a hand edit writes one) is an ordinary space: the server removes the empty list when it reads the file and logs a warning naming the space.
 - **Validation mode** — the schema-validation posture for the new space: `off`, `warn`, or `strict`.
 - **Strict linkage** — a tickbox, on by default. While it is on, the space refuses to delete a record that another record still points at, and refuses a link to something that is not there. Untick it to allow both. This is the seventh field and the note below is about it as much as about validation.
 

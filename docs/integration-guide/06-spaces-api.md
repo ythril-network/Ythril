@@ -162,7 +162,12 @@ POST /api/spaces
 **Rules:**
 
 - All `proxyFor` members must be existing real spaces (not proxies — nesting is not allowed).
-- Proxy spaces are virtual: no DB collections or file directories are created.
+- Proxy spaces are virtual: no DB collections or file directories are created — not at creation, and not at a
+  later boot either (until the release after 5.6.0 every boot created a proxy's collections, which deleting the
+  proxy then left behind).
+- An **empty** member list is not a proxy. The API refuses `"proxyFor": []`; a `config.json` edited by hand to hold
+  one is read as a real space — the key is removed on load and on reload, with a warning naming the space — so it
+  is embedded, scanned, pruned and, when deleted, dropped like any other real space.
 - Creating the proxy is admin-gated (like any space creation); the create call validates only that each member exists and is not itself a proxy — it does **not** separately check the caller's space allowlist. (Per-space access is enforced at read/write time on the proxy's member spaces.)
 - The single-element wildcard `"proxyFor": ["*"]` creates an **all-spaces** proxy: it aggregates over every real space the caller can access (resolved dynamically), skipping per-member validation. The wildcard cannot be mixed with explicit member IDs.
 
