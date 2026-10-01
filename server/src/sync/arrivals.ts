@@ -63,7 +63,7 @@ import { log } from '../util/log.js';
 import { BRAIN_COLLECTIONS } from '../config/types.js';
 import type { BrainCollection, BrainEmbedRecordType, KnowledgeType } from '../config/types.js';
 import { LOCAL_ONLY_FIELDS, RESTORED_LOCAL_FIELDS, DERIVED_LOCAL_FIELDS } from './local-only-fields.js';
-import { planSeqUpserts, retagToLocalSpace } from './upsert-plan.js';
+import { planSeqUpserts, retagToLocalSpace, isNewerCopy } from './upsert-plan.js';
 import { enqueueIngestedRecords } from '../brain/embed-queue.js';
 import { recordExpiry, recordContentExpiry, type RetentionSpace } from '../brain/chrono-retention.js';
 import { retentionSpace, TYPE_FIELD } from '../brain/ttl.js';
@@ -277,8 +277,10 @@ export async function writeArrivals(
     if (seq > out.maxReceived) out.maxReceived = seq;
     const prev = page.get(doc._id);
     if (prev) {
+      // The one accept rule: a later copy replaces an earlier one only when it is NEWER — at an equal seq the
+      // earlier copy stands, as the push planner reads a page.
       out.collapsed.push(doc._id);
-      if ((prev.seq ?? -1) > (doc.seq ?? -1)) continue;
+      if (!isNewerCopy(doc.seq, prev.seq)) continue;
     }
     page.set(doc._id, prepared(doc, family, restore));
   }
@@ -373,7 +375,7 @@ export async function writeArrivals(
           const s = now.get(d._id)?.seq;
           const sameSeq = typeof s === 'number' && s === d.seq;
           if (!restore && sameSeq) landed.push(d);
-          else if (!restore && typeof s === 'number' && typeof d.seq === 'number' && s > d.seq) out.newerLocal.push(d._id);
+          else if (!restore && typeof s === 'number' && isNewerCopy(s, d.seq)) out.newerLocal.push(d._id);
           else out.duplicates.push(d._id);
         }
       }

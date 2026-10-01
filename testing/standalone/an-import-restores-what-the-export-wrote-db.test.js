@@ -305,6 +305,24 @@ describe('the admin import restores what the export wrote', { skip }, () => {
     assert.deepEqual(wrong, [], 'a repeated id was applied in file order, so the older copy overwrote the newer one');
   });
 
+  it('two copies of one id at an EQUAL seq: the earlier stands, as the push planner reads a page', async () => {
+    // The one tie-break (`isNewerCopy`, dup pass): an equal seq is not newer. It was "the later wins" in the
+    // writer's collapse while the push planner kept the earlier — two readings of one page.
+    const payload = {};
+    for (const c of importKeys()) {
+      const id = c === 'files' ? 'tie/a.md' : `tie-${c}`;
+      payload[c] = [fixture(c, id, 7, { description: 'first' }), fixture(c, id, 7, { description: 'second' })];
+    }
+    await importMod.importDocuments(SPACE, payload);
+    const wrong = [];
+    for (const c of importKeys()) {
+      const id = c === 'files' ? 'tie/a.md' : `tie-${c}`;
+      const stored = await coll(SPACE, c).findOne({ _id: id });
+      if (stored?.description !== 'first') wrong.push(`${c}/${id}: stored '${stored?.description}', want 'first'`);
+    }
+    assert.deepEqual(wrong, []);
+  });
+
   it('a record restored over a tombstone is reported by id', async () => {
     const payload = {};
     const want = [];

@@ -141,6 +141,37 @@ describe('the arrival writer applies this accept, and no copy of it', () => {
   });
 });
 
+describe('one accept rule: isNewerCopy', () => {
+  it('strictly newer; nothing held is beaten by anything; a seq-less copy beats nothing held at a seq', async () => {
+    const { isNewerCopy } = await import('../../server/dist/sync/upsert-plan.js');
+    assert.deepEqual([isNewerCopy(5, 4), isNewerCopy(5, 5), isNewerCopy(4, 5)], [true, false, false]);
+    assert.deepEqual([isNewerCopy(0, undefined), isNewerCopy(undefined, undefined), isNewerCopy(undefined, 0)], [true, true, false]);
+  });
+
+  it('the pull accept, the push planner and the writer\'s collapse and read-back all ask it, and nothing else compares', async () => {
+    /*
+     * Dup pass: the accept was written four times (`doc.seq > prev`, the planner's `doc.seq > curSeq`, the
+     * writer's `(prev.seq ?? -1) > (doc.seq ?? -1)` — with the OPPOSITE tie-break — and its read-back `s > d.seq`).
+     * Seen red by mutation, restored by hand: the writer's collapse written back as a raw comparison.
+     */
+    const { readFileSync } = await import('node:fs');
+    const { stripComments } = await import('./_strip-comments.mjs');
+    const { bodyOf } = await import('./_structural-window.mjs');
+    const plan = stripComments(readFileSync('server/src/sync/upsert-plan.ts', 'utf8'));
+    const writer = bodyOf(stripComments(readFileSync('server/src/sync/arrivals.ts', 'utf8')), 'writeArrivals');
+    for (const [where, body] of [['planSeqUpserts', bodyOf(plan, 'planSeqUpserts')], ['planPushArrivals', bodyOf(plan, 'planPushArrivals')]]) {
+      assert.match(body, /isNewerCopy\(/, `${where} no longer asks isNewerCopy`);
+    }
+    assert.equal((writer.match(/isNewerCopy\(/g) ?? []).length, 2, 'the writer\'s collapse and read-back do not both ask isNewerCopy');
+    // Any `x.seq > y` / `seq > z.seq` left is a second accept rule. The tombstone and counter comparisons are
+    // about different things (a deletion's seq, the counter's high-water mark) and are named, not hidden.
+    const ALLOWED = /tomb\s*>=\s*doc\.seq|curSeq\s*>\s*tomb|seq\s*>\s*out\.maxReceived|incoming\s*>\s*held/;
+    const raw = [...plan.matchAll(/[\w.?)]+\s*>=?\s*[\w.(]+/g), ...writer.matchAll(/[\w.?)]+\s*>=?\s*[\w.(]+/g)]
+      .map(m => m[0]).filter(e => /seq/i.test(e) && !ALLOWED.test(e));
+    assert.deepEqual(raw, [], 'a seq comparison outside isNewerCopy decides which copy wins');
+  });
+});
+
 describe('the planner keys a unique index by the family\'s own derived identity', () => {
   it('uniqueKey is edgeIdFor for an edge and linkIdFor for a link, with no endpoint-kind coalescer of its own', async () => {
     // Dup pass: a local `k === 'entity' ? '' : k` was a second spelling of `edgeEndpointKind`/`storedEdgeKind`.

@@ -67,10 +67,25 @@ export function planSeqUpserts<T extends Replicable>(
 ): T[] {
   const out: T[] = [];
   for (const doc of docs) {
-    const prev = existingSeq.get(doc._id);
-    if (prev === undefined || doc.seq > prev) out.push(doc);
+    if (isNewerCopy(doc.seq, existingSeq.get(doc._id))) out.push(doc);
   }
   return out;
+}
+
+/**
+ * Is a copy at seq `incoming` newer than one held at `held` — the ONE accept rule of every arrival door: the
+ * pull (`planSeqUpserts`), the push (`planPushArrivals`), the writer's collapse of a repeated id within one page,
+ * and its read-back of a guarded write. Strictly greater, so an equal seq is NOT newer: across peers that makes a
+ * re-sync a no-op, and inside one page it means the EARLIER of two equal copies stands — the push planner's
+ * sequential reading, applied on pull and restore too.
+ *
+ * Nothing held is beaten by anything; a copy that has no seq (file metadata from before 4.0) beats nothing held
+ * at a seq — but a held copy with no seq is overwritten by anything that arrives.
+ */
+export function isNewerCopy(incoming: number | undefined, held: number | undefined): boolean {
+  if (held === undefined) return true;
+  if (incoming === undefined) return false;
+  return incoming > held;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════════════════════
@@ -305,7 +320,7 @@ export function planPushArrivals<T extends PushDoc>(docs: readonly T[], input: P
 
     const cur: StoredCopy | undefined = overlay.get(doc._id) ?? stored.get(doc._id);
     const curSeq = cur?.seq;
-    const newer = cur === undefined || curSeq === undefined || doc.seq > curSeq;
+    const newer = isNewerCopy(doc.seq, curSeq);
 
     if (kind === 'facts') {
       if (cur === undefined) return accept(i, doc, 'inserted', tomb);
