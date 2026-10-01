@@ -42,7 +42,7 @@ import { col, asFilter } from '../db/mongo.js';
 import { reconcileLinkRows } from './write-plan/commit.js';
 import { linkLabel, linkIdFor } from './link-id.js';
 import { linksStartingFrom } from './link-adjacency.js';
-import { assertRefsResolve, ReferenceRefusal } from './entity-refs.js';
+import { assertRefs, missingRefs, missingRefsRefusal, ReferenceRefusal } from './entity-refs.js';
 import { isStrictLinkage } from '../spaces/proxy.js';
 import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';
 import type { AuthorRef, LinkDoc } from '../config/types.js';
@@ -112,6 +112,21 @@ export async function assertDesiredLinks(
   fromKind: RefKind,
   desired: DesiredLinks,
 ): Promise<void> {
+  await refuseDesiredLinks(spaceId, fromKind, desired, (kind, ids) => missingRefs(spaceId, kind, ids));
+}
+
+/**
+ * The refusals a desired link set earns, in the one order they are asked: the class first, then — only under
+ * `strictLinkage` — each id's shape, then its existence. Existence is asked through `missing`, because two
+ * callers answer it from two sources: `assertDesiredLinks` from the store, and the write planners from the
+ * read set they planned against. The ORDER and the sentences are what must not differ, so they live here once.
+ */
+export async function refuseDesiredLinks(
+  spaceId: string,
+  fromKind: RefKind,
+  desired: DesiredLinks,
+  missing: (kind: RefKind, ids: readonly string[]) => readonly string[] | Promise<readonly string[]>,
+): Promise<void> {
   const classes = Object.keys(desired) as RefKind[];
   for (const toKind of classes) {
     const refusal = linkClassRefusal(fromKind, toKind);
@@ -121,7 +136,12 @@ export async function assertDesiredLinks(
   // Named as the CALLER spells it. Built by hand this said `linkentity`, a field no door accepts, in the
   // one sentence somebody reads to find out what to send.
   for (const toKind of classes) {
-    await assertRefsResolve(spaceId, LINK_INPUT_FIELDS[toKind], toKind, desired[toKind]);
+    const ids = desired[toKind] ?? [];
+    const field = LINK_INPUT_FIELDS[toKind];
+    assertRefs(field, toKind, ids);
+    if (ids.length === 0) continue;
+    const refusal = missingRefsRefusal(spaceId, field, toKind, await missing(toKind, ids));
+    if (refusal) throw refusal;
   }
 }
 

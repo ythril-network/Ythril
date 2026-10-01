@@ -42,6 +42,7 @@ import { readFileSync } from 'node:fs';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import { bodyOf, statementFrom } from './_structural-window.mjs';
+import { resolverCallPattern } from './_suppression-resolvers.mjs';
 
 const skip = await mongoSkipReason();
 
@@ -199,10 +200,12 @@ describe('every create path states the record tier', () => {
   for (const w of WRITERS) {
     it(`${w.fn} hands the record's own flag to the resolver`, () => {
       const body = bodyOf(stripComments(readFileSync(w.file, 'utf8')), w.fn);
-      // `suppressedAfterWrite` states the record tier from the write's flag and the stored record (`Q-194`);
-      // the bare resolver must be handed the flag itself.
-      const at = Math.max(body.indexOf('suppressedAfterWrite('), body.indexOf('embeddingSuppressedFor('));
-      assert.ok(at > 0, `${w.fn} never asks whether this record is suppressed`);
+      // Asked through any of the derived resolvers — the planners ask through their shared `vectorBeforeWrite`,
+      // which states the record tier from the write's flag and the stored record (`Q-194`). Whichever is called,
+      // the write's own flag must be handed to it.
+      const asked = resolverCallPattern().exec(body);
+      assert.ok(asked, `${w.fn} never asks whether this record is suppressed`);
+      const at = asked.index;
       const call = statementFrom(body, at, w.fn);
       assert.match(call, /suppressEmbeddings/,
         `${w.fn} asks the resolver without the record's own flag, so the record tier is never stated and the `

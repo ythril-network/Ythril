@@ -29,7 +29,7 @@ import { requireSpaceAuth, denyReadOnly } from '../../auth/middleware.js';
 import { globalRateLimit } from '../../rate-limit/middleware.js';
 import { addLink, removeLink, LINK_PAIRS, linkLabel } from '../../brain/links.js';
 import { assertRefsResolve } from '../../brain/entity-refs.js';
-import { REF_KINDS } from '../../config/types-knowledge.js';
+import { REF_KINDS, isRefKind } from '../../config/types-knowledge.js';
 import type { RefKind } from '../../config/types-knowledge.js';
 import { getConfig } from '../../config/loader.js';
 import { resolveWriteTarget, isStrictLinkage, findFirstAcrossMembers } from '../../spaces/proxy.js';
@@ -52,7 +52,7 @@ const PAIR_LABELS = LINK_PAIRS.map(([f, t]) => linkLabel(f, t)).join(', ');
 /** A kind parameter that must be present and one of the four. Absent is refused, not defaulted. */
 function kindError(name: string, v: unknown): string | null {
   if (typeof v !== 'string' || v.length === 0) return `\`${name}\` string required (one of ${REF_KINDS.join(', ')})`;
-  if (!(REF_KINDS as readonly string[]).includes(v)) return `\`${name}\` must be one of ${REF_KINDS.join(', ')}`;
+  if (!isRefKind(v)) return `\`${name}\` must be one of ${REF_KINDS.join(', ')}`;
   return null;
 }
 

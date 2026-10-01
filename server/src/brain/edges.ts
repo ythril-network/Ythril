@@ -18,7 +18,7 @@ import { linkClassFor, LINK_CLASSES } from './link-adjacency.js';
 import { frontierEdgeQuery } from './frontier-query.js';
 import { linkedRecordsAtFrontier, recordDisplayName, recordDisplayType }
   from './link-frontier.js';
-import { resolveEdgeEndsForWrite, neighbourNodes, startNode } from './edge-endpoint-names.js';
+import { neighbourNodes, startNode } from './edge-endpoint-names.js';
 import { storedEdgeKind } from './entity-refs.js';
 import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';
 import type { EdgeDoc, FileMetaDoc } from '../config/types.js';
@@ -26,7 +26,7 @@ import type { RefKind } from '../config/types-knowledge.js';
 import { PROPERTIES_SCAN_MAX_MS } from './tag-filter.js';
 import { writeFilterFor, writeOutcome } from './write-precondition.js';
 import { spaceCollection } from '../db/space-collection.js';
-import { planEdge, edgeWant, type EdgeInput } from './write-plan/plan-edge.js';
+import { planEdge, edgeWant, resolveEdgeEndsForWrite, type EdgeInput } from './write-plan/plan-edge.js';
 import { planAndCommitOne } from './write-plan/plan-and-commit.js';
 import { subgraphEdges } from './traverse-subgraph.js';
 // `syntheticEdgeId` moved to `edge-id.ts`, beside `edgeIdFor`: its own docblock says the id format is a
@@ -325,9 +325,11 @@ export async function updateEdgeById(
      * but it CAN change the label, and the rules belong to the label: patching `works_with` to `reports_to`
      * has to be checked against `reports_to`'s ends.
      */
-    const resolvedEnds = await resolveEdgeEndsForWrite(spaceId, existing.from, existing.to, finalLabel,
-      { ...(existing.fromKind ? { fromKind: existing.fromKind } : {}),
-        ...(existing.toKind ? { toKind: existing.toKind } : {}) });
+    const resolvedEnds = await resolveEdgeEndsForWrite(spaceId, {
+      from: existing.from, to: existing.to, label: finalLabel,
+      opts: { ...(existing.fromKind ? { fromKind: existing.fromKind } : {}),
+        ...(existing.toKind ? { toKind: existing.toKind } : {}) },
+    });
     const check = classifyEdgeUpsertAgainst(getSpaceMeta(spaceId), existing,
       { label: finalLabel, properties: finalProps }, resolvedEnds);
     if (check.blocked) throw new SchemaViolationError(check);

@@ -7,22 +7,19 @@
  */
 import { v4 as uuidv4 } from 'uuid';
 import { authorRef } from '../../config/author.js';
-import { findInsertContradictions, type ContradictionWarning } from '../insert-contradictions.js';
-import { embed } from '../embedding.js';
+import { type ContradictionWarning } from '../insert-contradictions.js';
 import { chronoEmbedText } from '../embed-text.js';
 import { stampExpiryOnCreate, applyExpiryToUpdate } from '../ttl.js';
-import { stampSkewOnCreate } from '../stamp-skew.js';
 import { getSpaceMeta, applyPropertyDefaults } from '../../spaces/schema-validation.js';
 import { classifyChronoUpsertAgainst, SchemaViolationError, type UpdateValidation } from '../write-validation.js';
 import { mergeTags, mergeProperties } from '../merge-fields.js';
-import { suppressedAfterWrite } from '../suppress-embeddings.js';
-import { applyRecordFlags } from '../record-flag.js';
-import { checkDuplicates, type SimilarMatch } from '../recall.js';
+import { type SimilarMatch } from '../recall.js';
 import type { DupeCheckOpts } from '../write-options.js';
 import type { ChronoEntry, ChronoType, ChronoStatus } from '../../config/types.js';
 import { linkTargets, refuseLinks } from './plan-links.js';
 import type { ReadSet, ReadWant } from './read-set.js';
 import type { WritePlan } from './types.js';
+import { convergeResult, finishInsert, neighbourAdvisories, vectorBeforeWrite } from './plan-steps.js';
 
 export interface ChronoFields {
   title: string;
@@ -72,7 +69,7 @@ export async function planChrono(spaceId: string, input: ChronoInput, view: Read
   let fields = input.fields;
   const desired = desiredOf(fields);
   // THE LINKS ARE REFUSED BEFORE THE ENTRY IS WRITTEN — see `planFact`.
-  refuseLinks(view, 'chrono', desired);
+  await refuseLinks(view, 'chrono', desired);
 
   const existing = fields.id ? view.stored('chrono', fields.id) as unknown as ChronoEntry | null : null;
 
@@ -92,28 +89,16 @@ export async function planChrono(spaceId: string, input: ChronoInput, view: Read
 
   // `matchedText` is stored either way: a suppressed record stays findable lexically.
   const embedText = chronoEmbedText(fields.title, fields.type, status, fields.description, tags, fields.properties);
-  let embeddingFields: { embedding?: number[]; embeddingModel?: string; matchedText: string } = { matchedText: embedText };
   // Suppression wins over `waitForEmbedding`, on the record the write LEAVES (`Q-194`).
-  const suppressed = suppressedAfterWrite(spaceId, 'chrono', existing as unknown as Record<string, unknown> | null,
-    { type: fields.type }, opts?.suppressEmbeddings);
-  if (opts?.waitForEmbedding === true && !suppressed) {
-    const embResult = await embed(embedText);
-    embeddingFields = { embedding: embResult.vector, embeddingModel: embResult.model, matchedText: embedText };
-  }
+  const { suppressed, vector } = await vectorBeforeWrite({
+    spaceId, kind: 'chrono', existing, schemaKey: { type: fields.type }, stated: opts?.suppressEmbeddings,
+    wanted: opts?.waitForEmbedding === true,
+    text: () => embedText,
+  });
+  const embeddingFields = { matchedText: embedText, ...vector };
 
-  // ONE neighbour search serves both flags, before the insert so it cannot self-match. The structured judge
-  // compares the stored `status`, not the dates (see structured-claims.ts for why).
-  let similar: SimilarMatch[] | undefined;
-  let contradicts: ContradictionWarning[] | undefined;
-  if ((opts?.checkDuplicates || opts?.checkContradictions) && embeddingFields.embedding) {
-    const hits = await checkDuplicates(spaceId, 'chrono', embeddingFields.embedding, opts.dupeThreshold, opts.dupeTopK);
-    if (opts.checkDuplicates && hits.length > 0) similar = hits;
-    if (opts.checkContradictions && hits.length > 0) {
-      const found = await findInsertContradictions(spaceId, 'chrono', { properties: fields.properties, status }, hits);
-      if (found.length > 0) contradicts = found;
-    }
-  }
-  const advisories = { ...(similar ? { similar } : {}), ...(contradicts ? { contradicts } : {}) };
+  // The structured judge compares the stored `status`, not the dates (see structured-claims.ts for why).
+  const advisories = await neighbourAdvisories(spaceId, 'chrono', vector, opts, { properties: fields.properties, status });
 
   // The idempotent branch: a supplied id that names an entry converges rather than duplicating.
   if (existing) {
@@ -129,15 +114,14 @@ export async function planChrono(spaceId: string, input: ChronoInput, view: Read
     const $unset: Record<string, unknown> = {};
     applyExpiryToUpdate(spaceId, ttlDays, existing._expireAt != null, $set, $unset,
       { collection: 'chrono', existing: existing as unknown as Record<string, unknown> });
-    const result: Record<string, unknown> = { ...existing, ...$set };
-    if ('_expireAt' in $unset) delete result['_expireAt'];
+    const result = convergeResult(existing, $set, $unset);
     view.noteWritten('chrono', result as unknown as { _id: string }, false);
     return {
       plan: {
         kind: 'chrono', spaceId, id: existing._id, op: 'converge', set: $set, unset: $unset,
         expectSeq: existing.seq ?? null, result,
         // `Q-192`: the content just changed, so the stored vector is stale — the queue is what makes it catch up.
-        enqueue: !embeddingFields.embedding && !suppressed,
+        enqueue: !vector && !suppressed,
         // Both classes, from the converged entry: this branch merges, so what it now says is the reconcile's input.
         links: { fromKind: 'chrono', desired, author: existing.author ?? authorRef() },
         minted: false, dupeRules: false,
@@ -151,7 +135,6 @@ export async function planChrono(spaceId: string, input: ChronoInput, view: Read
     _id: uuidv4(), spaceId, title: fields.title, type: fields.type, startsAt: fields.startsAt, status, tags,
     author: authorRef(), createdAt: now, updatedAt: now, seq: 0, ...embeddingFields,
   };
-  applyRecordFlags(doc, opts);
   if (fields.description !== undefined) doc.description = fields.description;
   if (fields.endsAt !== undefined) doc.endsAt = fields.endsAt;
   if (fields.confidence !== undefined) doc.confidence = fields.confidence;
@@ -159,13 +142,11 @@ export async function planChrono(spaceId: string, input: ChronoInput, view: Read
   if (fields.recurrence !== undefined) doc.recurrence = fields.recurrence;
   // The collection+type is passed so the SCHEMA tier applies (record > schema > space).
   stampExpiryOnCreate(spaceId, doc, ttlDays, { collection: 'chrono', type: doc.type });
-  stampSkewOnCreate(doc, meta);
-  const { seq: _seq, ...insert } = doc;
-  view.noteWritten('chrono', doc, true);
+  const insert = finishInsert({ view, kind: 'chrono', doc, opts, meta });
   return {
     plan: {
       kind: 'chrono', spaceId, id: doc._id, op: 'insert', doc: insert, result: insert,
-      enqueue: !embeddingFields.embedding && !suppressed,
+      enqueue: !vector && !suppressed,
       // A chrono entry holds TWO classes, told apart by the to-kind — which is why one reconcile takes both.
       links: { fromKind: 'chrono', desired, author: doc.author! },
       minted: true, dupeRules: false,

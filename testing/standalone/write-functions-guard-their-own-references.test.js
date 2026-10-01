@@ -122,16 +122,20 @@ describe('write functions guard their own references', () => {
      * The CLASS check is not that: a fact cannot link to a chrono entry whatever the space says, because
      * there is no such class and the id would be derived from a label nothing reads.
      */
-    // Both spellings of the one check: the store's (`assertDesiredLinks`) and the read set's (`refuseLinks`).
+    // ONE implementation of the order, `refuseDesiredLinks`; the store's check (`assertDesiredLinks`) and the
+    // read set's (`refuseLinks`) differ only in where "which ids are missing" is answered.
+    const links = stripComments(readFileSync('server/src/brain/links.ts', 'utf8'));
+    const body = bodyOf(links, 'refuseDesiredLinks');
+    const strictAt = body.indexOf('isStrictLinkage(');
+    const classAt = body.indexOf('linkClassRefusal(');
+    assert.notEqual(strictAt, -1, 'refuseDesiredLinks: the reference check must stay opt-out-able');
+    assert.notEqual(classAt, -1, 'refuseDesiredLinks: the class check is missing, so a seventh class could be written');
+    assert.ok(classAt < strictAt,
+      'refuseDesiredLinks: the class check sits behind the linkage setting, so a lax space can store a link class '
+      + 'that does not exist — which no reader will ever follow');
     for (const [file, fn] of [['server/src/brain/links.ts', 'assertDesiredLinks'], ['server/src/brain/write-plan/plan-links.ts', 'refuseLinks']]) {
-      const body = bodyOf(stripComments(readFileSync(file, 'utf8')), fn);
-      const strictAt = body.indexOf('isStrictLinkage(');
-      const classAt = body.indexOf('linkClassRefusal(');
-      assert.notEqual(strictAt, -1, `${fn}: the reference check must stay opt-out-able`);
-      assert.notEqual(classAt, -1, `${fn}: the class check is missing, so a seventh class could be written`);
-      assert.ok(classAt < strictAt,
-        `${fn}: the class check sits behind the linkage setting, so a lax space can store a link class that does `
-        + 'not exist — which no reader will ever follow');
+      assert.match(bodyOf(stripComments(readFileSync(file, 'utf8')), fn), /\brefuseDesiredLinks\(/,
+        `${fn} no longer goes through refuseDesiredLinks, so it is a second copy of the order and can drift from it`);
     }
   });
 });

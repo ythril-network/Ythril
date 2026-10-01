@@ -187,22 +187,10 @@ export async function enqueueEmbedJob(
   recordId: string,
   { priority }: { priority: EmbedPriority },
 ): Promise<void> {
-  if (!embeddable(recordType, recordId)) return;
-
-  const now = new Date().toISOString();
+  // The write lane's ops through the one runner, so a single write and a batch cannot queue differently.
   try {
-    await jobs(spaceId).updateOne(
-      asFilter<BrainEmbedJobDoc>({ _id: embedJobId(recordType, recordId) }),
-      asUpdate<BrainEmbedJobDoc>({
-        // Every field reset: a new write is new content, and it must not inherit a verdict — or a half-hour
-        // backoff earned by an outage that has since ended — reached on the old content.
-        $set: { ...freshJob(spaceId, recordType, recordId, now) },
-        $min: { priority },
-        $setOnInsert: { createdAt: now },
-      }),
-      { upsert: true },
-    );
-    _signal.markSpaceMayHaveWork(spaceId);
+    await runEmbedJobOps(spaceId, [{ recordType, recordId }],
+      (type, id, now) => writeJobOps(spaceId, type, id, now, { priority }));
   } catch {
     /* see the note above — a queue failure must never fail the write it was announcing */
   }
@@ -369,7 +357,7 @@ function sweepJobOps(
   ];
 }
 
-/** A write's op for one record: `enqueueEmbedJob`'s update, as a batch entry. */
+/** A write's op for one record — the write lane's, used by `enqueueEmbedJob` and `enqueueWriteEmbedJobs` alike. */
 function writeJobOps(
   spaceId: string, recordType: BrainEmbedRecordType, recordId: string, now: string,
   { priority }: { priority: EmbedPriority },
@@ -377,6 +365,8 @@ function writeJobOps(
   return [{
     updateOne: {
       filter: { _id: embedJobId(recordType, recordId) },
+      // Every field reset: a new write is new content, and it must not inherit a verdict — or a half-hour
+      // backoff earned by an outage that has since ended — reached on the old content.
       update: { $set: { ...freshJob(spaceId, recordType, recordId, now) }, $min: { priority }, $setOnInsert: { createdAt: now } },
       upsert: true,
     },

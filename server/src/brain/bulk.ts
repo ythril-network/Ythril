@@ -25,9 +25,9 @@ import { parseRecordFlags, type RecordFlags } from './record-flag.js';
 import type { ChronoType, ChronoStatus } from '../config/types.js';
 import { SchemaViolationError, type UpdateValidation } from './write-validation.js';
 import type { DesiredLinks } from './links.js';
-import { edgeIdFor } from './edge-id.js';
-import { ReadSet, type ReadWant, type Triplet } from './write-plan/read-set.js';
+import { ReadSet, tripletKey, type ReadWant, type Triplet } from './write-plan/read-set.js';
 import { commitPlans } from './write-plan/commit.js';
+import { planAndCommit } from './write-plan/plan-and-commit.js';
 import type { CommitOutcome, WritePlan } from './write-plan/types.js';
 import { linkTargets, refuseLinks } from './write-plan/plan-links.js';
 import { planFact, factWant, type FactInput } from './write-plan/plan-fact.js';
@@ -38,8 +38,8 @@ import { planEdge, edgeWant, EdgeSchemaViolation, type EdgeInput } from './write
 /** Max items processed per collection in a single bulk call. */
 export const BULK_MAX_PER_TYPE = 500;
 
-import { UUID_V4_RE, edgeEndpointKind, isWellFormedRef, storedEdgeKind, missingRefsRefusal } from './entity-refs.js';
-import { REF_KINDS } from '../config/types-knowledge.js';
+import { UUID_V4_RE, edgeEndpointKind, isWellFormedRef, missingRefsRefusal } from './entity-refs.js';
+import { REF_KINDS, isRefKind } from '../config/types-knowledge.js';
 import type { RefKind } from '../config/types-knowledge.js';
 import { MAX_FACT_LENGTH } from '../util/request-bounds.js';
 import { retiredWriteFieldError } from './retired-write-fields.js';
@@ -421,7 +421,7 @@ function prepareItems(
 function topLevelEdgeWant(spaceId: string, item: Record<string, unknown>): ReadWant {
   const end = (raw: unknown, rawKind: unknown): { id: string; kind: RefKind } | null => {
     if (typeof raw !== 'string' || !raw.trim() || refKeyUsed(raw) !== undefined) return null;
-    if (rawKind !== undefined && (typeof rawKind !== 'string' || !(REF_KINDS as readonly string[]).includes(rawKind))) return null;
+    if (rawKind !== undefined && !isRefKind(rawKind)) return null;
     return { id: raw.trim(), kind: edgeEndpointKind(rawKind as RefKind | undefined) };
   };
   const from = end(item['from'], item['fromKind']);
@@ -498,7 +498,7 @@ function batchRun(
     let entry: Pending;
     try {
       // The item's whole link set, including classes its kind cannot hold — refused here in the shared words.
-      if (p.desired) refuseLinks(view, p.kind, p.desired);
+      if (p.desired) await refuseLinks(view, p.kind, p.desired);
       const planned = await p.plan(view);
       entry = {
         plan: planned.plan, type, index: p.index, counted, isUpdate: planned.plan.op === 'converge',
@@ -527,7 +527,7 @@ function batchRun(
     const rawFromKind = item['fromKind'];
     const rawToKind = item['toKind'];
     const badKind = ([['fromKind', rawFromKind], ['toKind', rawToKind]] as const)
-      .find(([, v]) => v !== undefined && (typeof v !== 'string' || !(REF_KINDS as readonly string[]).includes(v)));
+      .find(([, v]) => v !== undefined && !isRefKind(v));
     if (badKind) return refuse(`\`${badKind[0]}\` must be one of: ${REF_KINDS.join(', ')}`);
     /*
      * `F-27` item 2: an end may name a record this call created, as `$ref:key`. Where a `$ref` resolves, the
@@ -588,7 +588,7 @@ function batchRun(
     const want = edgeWant(spaceId, edgeInput);
     const t = want.triplets![0]!;
     // Keyed by the edge's IDENTITY, so an end stated as `entity` and one left unstated are the same target.
-    const target = `edge:${edgeIdFor(t.from, t.to, t.label, storedEdgeKind(t.fromKind), storedEdgeKind(t.toKind))}`;
+    const target = `edge:${tripletKey(t)}`;
     await beforeTarget(target, { triplets: [t] });
     await view.load(want);
     try {
@@ -631,15 +631,15 @@ function batchRun(
     );
   }
 
-  /** Re-plan, once, each write whose record another write moved while this batch was being applied. */
+  /**
+   * Re-plan each write whose record another write moved while this batch was being applied. The batch's own
+   * commit was the first attempt, so this is the last: losing again is the conflict a single write answers.
+   */
   async function replanStale(): Promise<void> {
     for (const e of stale.splice(0)) {
-      const view = new ReadSet(spaceId);
       try {
-        await view.load(e.want);
-        const planned = await e.replan!(view);
-        const [o] = await commitPlans(spaceId, [planned.plan]);
-        report({ ...e, plan: planned.plan, replan: undefined }, o!.ok ? o! : { ok: false, reason: o!.reason });
+        const { planned, outcome } = await planAndCommit(spaceId, e.want, e.replan!, 1);
+        report({ ...e, plan: planned.plan, replan: undefined }, outcome.ok ? outcome : { ok: false, reason: outcome.reason });
       } catch (err) {
         report({ ...e, replan: undefined }, { ok: false, reason: itemReason(err) });
       }

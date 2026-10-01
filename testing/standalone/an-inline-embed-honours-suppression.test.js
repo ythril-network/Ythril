@@ -32,6 +32,7 @@ import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { stripComments } from './_strip-comments.mjs';
 import { argumentsOf, bodyOf, statementAround } from './_structural-window.mjs';
+import { suppressionResolvers, resolverCallPattern } from './_suppression-resolvers.mjs';
 
 const { embeddingSuppressed } = await import('../../server/dist/brain/suppress-embeddings.js');
 
@@ -70,25 +71,12 @@ function vectorStores() {
 }
 
 /**
- * The calls that count as consulting suppression: `embeddingSuppressedFor`, and every function exported beside it
- * that answers by CALLING it — today `suppressedAfterWrite`, which the write planners use so the stored record's
- * flag is read for them (`Q-194`).
- *
- * DERIVED from the module, never listed. A wrapper that stopped routing to the resolver drops out of the set, so
- * its callers stop counting as checks — the gate follows the rule rather than a name. The floor is the resolver
- * itself: if it is not found, nothing below is checking anything.
+ * The calls that count as consulting suppression — `embeddingSuppressedFor` and every exported wrapper that
+ * reaches it, derived in `_suppression-resolvers.mjs` (the write planners ask through `vectorBeforeWrite`, which
+ * asks through `suppressedAfterWrite`, `Q-194`).
  */
-function suppressionResolvers() {
-  const src = stripComments(readFileSync('server/src/brain/suppress-embeddings.ts', 'utf8'));
-  const names = [...src.matchAll(/^export function (\w+)/gm)].map(m => m[1])
-    .filter(n => n === 'embeddingSuppressedFor'
-      || /\bembeddingSuppressedFor\s*\(/.test(bodyOf(src, n).replace(/^[^\n]*\n/, '')));
-  assert.ok(names.includes('embeddingSuppressedFor'),
-    'suppress-embeddings.ts no longer exports embeddingSuppressedFor — re-anchor this gate');
-  return names;
-}
 const RESOLVERS = suppressionResolvers();
-const resolverCall = () => new RegExp(`\\b(?:${RESOLVERS.join('|')})\\(`, 'g');
+const resolverCall = () => resolverCallPattern(RESOLVERS);
 
 describe('the three-tier resolution has exactly one implementation', () => {
   it('resolves record > schema > space, with absent falling through', () => {
@@ -129,12 +117,13 @@ describe('the three-tier resolution has exactly one implementation', () => {
 
 describe('every inline embed honours suppression', () => {
   it('finds the vector stores, so an empty sweep cannot pass', () => {
-    const found = vectorStores();
-    assert.ok(
-      found.length >= 5,
-      `expected the four creators plus the merge survivor, found ${found.length}. The scan has broken, so `
-      + 'nothing below is being checked.',
-    );
+    // By IDENTITY rather than a count: the four creators store through one shared step since `Q-99` part 3, so
+    // a count would have to be rewritten each time stores merge, and a count cannot say WHICH store is missing.
+    const files = new Set(vectorStores().map(e => e.file));
+    for (const known of ['server/src/brain/write-plan/plan-steps.ts', 'server/src/brain/merge.ts']) {
+      assert.ok(files.has(known),
+        `the scan no longer finds the vector store in ${known}, so it has broken and nothing below is checked`);
+    }
   });
 
   it('every store is matched by a suppression check in the same file', () => {

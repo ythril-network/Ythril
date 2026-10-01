@@ -24,9 +24,6 @@
  */
 import { col, asFilter } from '../db/mongo.js';
 import { collectionForRefKind, edgeEndpointKind, endpointNameField } from './entity-refs.js';
-import { getSpaceMeta } from '../spaces/schema-validation.js';
-import type { ResolvedEdgeEnds } from '../spaces/schema-validation.js';
-import type { EdgeDoc } from '../config/types.js';
 import type { RefKind } from '../config/types-knowledge.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { recordDisplayName, recordDisplayType } from './link-frontier.js';
@@ -60,72 +57,6 @@ export async function resolveEndpointName(spaceId: string, id: string, kind: Ref
   const value = doc?.[field];
   if (typeof value !== 'string' || !value.trim()) return id;
   return value.trim().slice(0, ENDPOINT_NAME_MAX);
-}
-
-/**
- * What a write needs to know about an edge's endpoints before a schema rule can be checked.
- *
- * ## Why the write path resolves rather than the validator
- *
- * `validateEdge` is pure and synchronous — two gates import it from `dist` and call it with plain objects — so
- * it cannot look anything up. The caller resolves and hands over what it FOUND, and an absent field is never a
- * violation. That split is what lets the bulk importer, which legitimately cannot resolve a forward reference,
- * use the same validator without being told its payload is wrong.
- *
- * ## `null` is not `undefined` here
- *
- * `null` means the entity is there and has no type, which an `endpoints` list matches with `UNTYPED`.
- * `undefined` means it could not be resolved at all — a dangling reference, which `strictLinkage: false` makes a
- * deliberate state with its own report. Collapsing them lets every untyped entity past every endpoint rule.
- *
- * ## The count excludes the edge being written
- *
- * An edge is not its own duplicate. Without the exclusion a `functional` label can be written once and never
- * touched again, because every later upsert on the same triplet reports the stored edge against itself.
- */
-export async function resolveEdgeEndsForWrite(
-  spaceId: string,
-  from: string,
-  to: string,
-  label: string,
-  kinds: { fromKind?: RefKind; toKind?: RefKind } = {},
-): Promise<ResolvedEdgeEnds> {
-  const out: ResolvedEdgeEnds = {};
-
-  /*
-   * Types only for ENTITY endpoints. `endpoints` is a vocabulary of entity types plus `UNTYPED`, and a fact,
-   * chrono entry or file has no `type` in that vocabulary — so resolving one would invent a value the schema
-   * cannot express. Left unresolved, which is never a violation.
-   */
-  const wanted: Array<['fromType' | 'toType', string]> = [];
-  if (edgeEndpointKind(kinds.fromKind) === 'entity') wanted.push(['fromType', from]);
-  if (edgeEndpointKind(kinds.toKind) === 'entity') wanted.push(['toType', to]);
-
-  if (wanted.length > 0) {
-    // ONE query for both ends, and only the type is projected: the ids are already in hand.
-    const ids = [...new Set(wanted.map(([, id]) => id))];
-    const docs = await col<{ _id: string; type?: string }>(spaceCollection(spaceId, 'entities'))
-      .find(asFilter<{ _id: string; type?: string }>({ _id: { $in: ids } }), { projection: { _id: 1, type: 1 } })
-      .toArray() as Array<{ _id: string; type?: string }>;
-    const typeOf = new Map(docs.map(d => [String(d._id), d.type ?? null]));
-    for (const [field, id] of wanted) {
-      if (typeOf.has(id)) out[field] = typeOf.get(id) as string | null;
-    }
-  }
-
-  /*
-   * How many OTHER edges carry this label from this subject. A COUNT rather than a fetch: the rule needs the
-   * number, and one hub could hold a great many.
-   *
-   * Counted only when the space declares the label functional, which is the common case being cheap: an
-   * unconstrained label pays nothing for a rule it does not have.
-   */
-  const functional = getSpaceMeta(spaceId)?.typeSchemas?.edge?.[label]?.functional;
-  if (functional) {
-    out.otherEdgesFromSubject = await col<EdgeDoc>(spaceCollection(spaceId, 'edges'))
-      .countDocuments(asFilter<EdgeDoc>({ from, label, to: { $ne: to } } as never));
-  }
-  return out;
 }
 
 /**

@@ -24,7 +24,7 @@ import { spaceCollection } from '../../db/space-collection.js';
 import { readRecordsById, type RecordsById } from '../walk-reads.js';
 import { NEVER_RETURNED_PROJECTION } from '../read-projection.js';
 import { edgeIdFor } from '../edge-id.js';
-import { storedEdgeKind } from '../entity-refs.js';
+import { tripletClause } from '../edge-lookup.js';
 import { inChunks } from '../../util/chunks.js';
 import { RECORD_COLLECTION, type RefKind } from '../../config/types-knowledge.js';
 import type { EdgeDoc } from '../../config/types.js';
@@ -52,7 +52,8 @@ export interface ReadWant {
 /** Per read, at most this many ids or clauses. Well under every bound the probe measured. */
 const CHUNK = 500;
 
-const tripletKey = (t: Triplet) => edgeIdFor(t.from, t.to, t.label, storedEdgeKind(t.fromKind), storedEdgeKind(t.toKind));
+/** A triplet's key is the edge's own id — an end stated as `entity` and one left unstated are one key. */
+export const tripletKey = (t: Triplet) => edgeIdFor(t.from, t.to, t.label, t.fromKind, t.toKind);
 const subjectKey = (from: string, label: string) => `${from}\u0000${label}`;
 const nameTypeKey = (name: string, type: string) => `${name}\u0000${type}`;
 
@@ -82,14 +83,9 @@ export class ReadSet {
     const tripletsWanted = (want.triplets ?? []).filter(t => !this.triplets.has(tripletKey(t)));
     const edges = col<EdgeDoc>(spaceCollection(this.spaceId, 'edges'));
     for (const chunk of inChunks(tripletsWanted, CHUNK)) {
-      // Exact clauses, `null` for an entity end — `undefined` is DROPPED by the driver and would match any kind
-      // (see `findEdgeByTriplet`). One clause per triplet is one index key each.
+      // Exact clauses, the same one `findEdgeByTriplet` reads by. One clause per triplet is one index key each.
       const found = await edges.find(asFilter<EdgeDoc>({
-        spaceId: this.spaceId,
-        $or: chunk.map(t => ({
-          from: t.from, to: t.to, label: t.label,
-          fromKind: storedEdgeKind(t.fromKind) ?? null, toKind: storedEdgeKind(t.toKind) ?? null,
-        })),
+        spaceId: this.spaceId, $or: chunk.map(tripletClause),
       } as never), { projection: NEVER_RETURNED_PROJECTION }).toArray() as EdgeDoc[];
       for (const t of chunk) this.triplets.set(tripletKey(t), null);
       for (const e of found) this.triplets.set(tripletKey(e), e);

@@ -257,13 +257,19 @@ export async function assertRefsResolve(
 ): Promise<void> {
   assertRefs(field, kind, values);
   if (!values || values.length === 0) return;
+  const refusal = missingRefsRefusal(spaceId, field, kind, await missingRefs(spaceId, kind, values));
+  if (refusal) throw refusal;
+}
+
+/** Which of these ids name no stored record of this kind — one `$in`, ids only, each id once. */
+export async function missingRefs(spaceId: string, kind: RefKind, values: readonly string[]): Promise<string[]> {
   const unique = [...new Set(values)];
+  if (unique.length === 0) return [];
   const docs = await col<{ _id: string }>(`${spaceId}_${COLLECTION_FOR[kind]}`)
     .find(asFilter<{ _id: string }>({ _id: { $in: unique } }), { projection: { _id: 1 } })
     .toArray();
   const found = new Set(docs.map(d => d._id));
-  const refusal = missingRefsRefusal(spaceId, field, kind, unique.filter(id => !found.has(id)));
-  if (refusal) throw refusal;
+  return unique.filter(id => !found.has(id));
 }
 
 /** The refusal for references that name nothing, or `null` when `missing` is empty — one sentence for every door. */

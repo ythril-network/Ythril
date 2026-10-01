@@ -83,7 +83,7 @@ describe('the two builders take no entity names', () => {
      * would pass with its result discarded and the raw ids embedded.
      */
     const RESOLVED_INTO_TEXT =
-      /\[(\w+), (\w+)\] = await resolveEdgeEndpointNames\([^)]*\);\s*(?:const \w+ = |return )edgeEmbedText\(\1, [\w.]+, \2[,)]/;
+      /\[(\w+), (\w+)\] = await resolveEdgeEndpointNames\([^)]*\);\s*(?:const \w+ = |\w+ = |return )edgeEmbedText\(\1, [\w.]+, \2[,)]/;
     for (const site of ['server/src/brain/write-plan/plan-edge.ts', 'server/src/brain/embed-record.ts']) {
       assert.match(src(site), RESOLVED_INTO_TEXT,
         `${site} no longer hands resolved endpoint names to edgeEmbedText, so an edge embeds raw ids`);

@@ -6,23 +6,19 @@
  */
 import { v4 as uuidv4 } from 'uuid';
 import { authorRef } from '../../config/author.js';
-import { getConfig } from '../../config/loader.js';
-import { findInsertContradictions, type ContradictionWarning } from '../insert-contradictions.js';
-import { embed } from '../embedding.js';
+import { type ContradictionWarning } from '../insert-contradictions.js';
 import { factEmbedText } from '../embed-text.js';
 import { stampExpiryOnCreate, applyExpiryToUpdate } from '../ttl.js';
-import { stampSkewOnCreate } from '../stamp-skew.js';
 import { getSpaceMeta, applyPropertyDefaults } from '../../spaces/schema-validation.js';
 import { classifyFactUpsertAgainst, SchemaViolationError, type UpdateValidation } from '../write-validation.js';
 import { mergeTags, mergeProperties } from '../merge-fields.js';
-import { suppressedAfterWrite } from '../suppress-embeddings.js';
-import { applyRecordFlags } from '../record-flag.js';
-import { checkDuplicates, type SimilarMatch } from '../recall.js';
+import { type SimilarMatch } from '../recall.js';
 import type { DupeCheckOpts } from '../write-options.js';
 import type { FactDoc } from '../../config/types.js';
 import { linkTargets, refuseLinks } from './plan-links.js';
 import type { ReadSet, ReadWant } from './read-set.js';
 import type { WritePlan } from './types.js';
+import { convergeResult, finishInsert, neighbourAdvisories, vectorBeforeWrite } from './plan-steps.js';
 
 export interface FactInput {
   fact: string;
@@ -59,7 +55,7 @@ export async function planFact(spaceId: string, input: FactInput, view: ReadSet)
    * THE LINKS ARE REFUSED BEFORE THE RECORD IS WRITTEN — a bad id after the insert would leave the fact
    * stored without the links it asked for.
    */
-  refuseLinks(view, 'fact', { entity: linkEntities });
+  await refuseLinks(view, 'fact', { entity: linkEntities });
 
   /*
    * THE SCHEMA IS ENFORCED HERE, against the record the write will produce. Defaults on INSERT only, before
@@ -83,26 +79,13 @@ export async function planFact(spaceId: string, input: FactInput, view: ReadSet)
    * `suppressEmbeddings` IS the absence of a vector, so computing one here stores what the flag forbids. And
    * the record tier is the one the record will HAVE — the stored flag unless this write states one (`Q-194`).
    */
-  const suppressed = suppressedAfterWrite(spaceId, 'fact', existing as unknown as Record<string, unknown> | null,
-    { type: type ?? existing?.type }, opts?.suppressEmbeddings);
-  const needsVectorNow = !suppressed
-    && (opts?.waitForEmbedding === true || opts?.checkDuplicates === true || opts?.checkContradictions === true);
-  // Unguarded on purpose: the caller asked for a record that is searchable when this returns.
-  const embResult = needsVectorNow ? await embed(embedText) : null;
-
-  // ONE neighbour search serves both flags, with the vector computed BEFORE the insert so it cannot self-match.
-  let similar: SimilarMatch[] | undefined;
-  let contradicts: ContradictionWarning[] | undefined;
-  if (embResult && (opts?.checkDuplicates || opts?.checkContradictions)) {
-    const hits = await checkDuplicates(spaceId, 'fact', embResult.vector, opts.dupeThreshold, opts.dupeTopK);
-    if (opts.checkDuplicates && hits.length > 0) similar = hits;
-    if (opts.checkContradictions && hits.length > 0) {
-      const found = await findInsertContradictions(spaceId, 'fact', { properties }, hits);
-      if (found.length > 0) contradicts = found;
-    }
-  }
+  const { suppressed, vector } = await vectorBeforeWrite({
+    spaceId, kind: 'fact', existing, schemaKey: { type: type ?? existing?.type }, stated: opts?.suppressEmbeddings,
+    wanted: opts?.waitForEmbedding === true || opts?.checkDuplicates === true || opts?.checkContradictions === true,
+    text: () => embedText,
+  });
+  const advisories = await neighbourAdvisories(spaceId, 'fact', vector, opts, { properties });
   const now = new Date().toISOString();
-  const advisories = { ...(similar ? { similar } : {}), ...(contradicts ? { contradicts } : {}) };
 
   /*
    * The idempotent branch: a supplied id that names a record CONVERGES rather than duplicating, with
@@ -116,15 +99,14 @@ export async function planFact(spaceId: string, input: FactInput, view: ReadSet)
     };
     // Only when a vector was computed: otherwise the previous one stays, describing the record as it was a
     // moment ago, while the queued job catches up. `matchedText` is always current, so the two can be compared.
-    if (embResult) { $set['embedding'] = embResult.vector; $set['embeddingModel'] = embResult.model; }
+    if (vector) Object.assign($set, vector);
     if (type !== undefined) $set['type'] = type;
     if (description !== undefined) $set['description'] = description;
     if (properties !== undefined) $set['properties'] = mergeProperties(existing.properties, properties);
     const $unset: Record<string, unknown> = {};
     applyExpiryToUpdate(spaceId, ttlDays, existing._expireAt != null, $set, $unset,
       { collection: 'fact', existing: existing as unknown as Record<string, unknown> });
-    const result = { ...existing, ...($set as Partial<FactDoc>) } as unknown as Record<string, unknown>;
-    if ('_expireAt' in $unset) delete result['_expireAt'];
+    const result = convergeResult(existing, $set, $unset);
     view.noteWritten('fact', result as unknown as { _id: string }, false);
     return {
       plan: {
@@ -132,7 +114,7 @@ export async function planFact(spaceId: string, input: FactInput, view: ReadSet)
         expectSeq: existing.seq ?? null, result,
         // Enqueued even when the content is the same — the queue is what makes a stale vector catch up — but
         // not when suppressed, which would store the vector the flag forbids a few seconds later.
-        enqueue: !embResult && !suppressed,
+        enqueue: !vector && !suppressed,
         links: { fromKind: 'fact', desired: { entity: linkEntities }, author: existing.author ?? authorRef() },
         minted: false, dupeRules: false,
       },
@@ -144,26 +126,23 @@ export async function planFact(spaceId: string, input: FactInput, view: ReadSet)
   const doc: FactDoc = {
     _id: uuidv4(), spaceId, fact, tags, matchedText: embedText, author: authorRef(),
     createdAt: now, updatedAt: now, seq: 0,
-    ...(embResult ? { embedding: embResult.vector, embeddingModel: embResult.model } : {}),
+    ...vector,
   };
-  // The flag is STORED, not merely consulted: everything that revisits a record later reads the tiers off it.
-  applyRecordFlags(doc, opts);
   if (type !== undefined) doc.type = type;
   if (description !== undefined) doc.description = description;
   if (properties !== undefined) doc.properties = properties;
   stampExpiryOnCreate(spaceId, doc, ttlDays, { collection: 'fact', type: doc.type });
-  // Warn-not-refuse: a caller's own stamp checked against ours; stored only when it disagrees.
-  stampSkewOnCreate(doc, meta);
-  const { seq: _seq, ...insert } = doc;
-  view.noteWritten('fact', doc, true);
+  const insert = finishInsert({ view, kind: 'fact', doc, opts, meta });
   return {
     plan: {
       kind: 'fact', spaceId, id: doc._id, op: 'insert', doc: insert, result: insert,
-      enqueue: !embResult && !suppressed,
+      enqueue: !vector && !suppressed,
       links: { fromKind: 'fact', desired: { entity: linkEntities }, author: doc.author! },
       minted: true,
-      // Opt-in per space, on insert. Fired after the commit lands, bounded there.
-      dupeRules: getConfig().spaces.find(s => s.id === spaceId)?.dupeRulesOnInsert === true,
+      // Only when embedded INLINE: a queued record gets them from the embed worker once its vector exists, and
+      // running them here as well would evaluate it twice. Whether the space has `dupeRulesOnInsert` on is the
+      // rule runner's own check (`evaluateRecordForDuplicates`), so it is not repeated here.
+      dupeRules: vector !== null,
     },
     ...advisories,
   };

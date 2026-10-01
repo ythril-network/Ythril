@@ -37,7 +37,7 @@ process.env['CONFIG_PATH'] = CONFIG_PATH;
 const SPACE = 'general';
 const HOLD_TIMEOUT = 30_000;
 
-let mongo, fact, types;
+let mongo, fact, bulk, types;
 const coll = (n) => mongo.col(`${SPACE}_${n}`);
 
 let armed = null;
@@ -61,6 +61,7 @@ describe('a converge that loses a race is re-planned', { skip }, () => {
     }, null, 2), { mode: 0o600 });
     (await import('../../server/dist/config/loader.js')).loadConfig();
     fact = await import('../../server/dist/brain/fact.js');
+    bulk = await import('../../server/dist/brain/bulk.js');
     types = await import('../../server/dist/brain/write-plan/types.js');
     const proto = Object.getPrototypeOf(mongo.col('probe'));
     original = proto.bulkWrite;
@@ -131,4 +132,32 @@ describe('a converge that loses a race is re-planned', { skip }, () => {
     assert.equal(stored.fact, 'the original text', 'a refused converge still wrote its text');
     assert.deepEqual(stored.tags, ['two'], 'the refused converge changed the record');
   });
+
+  it('a batch item that loses twice says so in the same words, and the rest of the batch is written',
+    { timeout: HOLD_TIMEOUT }, async () => {
+      /*
+       * The batch had its own re-plan, and it had drifted from the single write's: a second loss reported the
+       * commit's raw stale reason instead of the conflict. The write-semantics guide promises one reason on
+       * both, so this asserts the batch's item error IS the conflict a single write throws.
+       */
+      const seeded = await fact.saveFact(SPACE, 'the original text', [], ['seed']);
+      const first = arm(`${SPACE}_facts`);
+      const settled = bulk.bulkWrite(SPACE, {
+        facts: [{ id: seeded._id, fact: 'the converged text', tags: ['retry'] }, { fact: 'an unrelated fact' }],
+      });
+      await first.reached;
+      await fact.updateFact(SPACE, seeded._id, { tags: ['one'] });
+      const second = arm(`${SPACE}_facts`);
+      first.release();
+      await second.reached;
+      await fact.updateFact(SPACE, seeded._id, { tags: ['two'] });
+      second.release();
+      const res = await settled;
+      const expected = new types.WriteConflict('fact', seeded._id).message;
+      assert.deepEqual(res.errors.map(e => ({ index: e.index, reason: e.reason })), [{ index: 0, reason: expected }],
+        `the item that lost twice should carry the conflict a single write answers: ${JSON.stringify(res.errors)}`);
+      assert.equal(res.inserted.facts, 1, 'the rest of the batch was not written');
+      const stored = await coll('facts').findOne({ _id: seeded._id });
+      assert.equal(stored.fact, 'the original text', 'a refused converge still wrote its text');
+    });
 });

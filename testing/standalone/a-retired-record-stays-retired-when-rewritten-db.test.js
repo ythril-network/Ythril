@@ -139,8 +139,23 @@ function inlineEmbedSites() {
 describe('every inline-embed writer is covered (derived, not listed)', () => {
   it('each record-embedding call site is a writer exercised below, or a named exemption', () => {
     const sites = inlineEmbedSites();
-    assert.ok(sites.length >= 5, `found only ${sites.length} inline embed sites — the derivation is reading nothing`);
-    const covered = new Set([...Object.values(WRITERS).map(w => w.planner), 'executeMerge', ...Object.keys(NOT_A_WRITER)]);
+    // By identity, not a count: the known sites must be found, or the derivation is reading nothing.
+    for (const fn of ['vectorBeforeWrite', 'executeMerge']) {
+      assert.ok(sites.some(s => s.fn === fn), `the derivation no longer finds the inline embed in ${fn} — it is reading nothing`);
+    }
+    /*
+     * The four planners embed through ONE shared step since `Q-99` part 3 (`write-plan/plan-steps.ts`). That
+     * step is covered exactly when every planner exercised below reaches it — a planner that embedded on its
+     * own would show up as its own site and fail the derivation.
+     */
+    const steps = stripComments(readFileSync(path.join(REPO_ROOT, 'server/src/brain/write-plan/plan-steps.ts'), 'utf8'));
+    assert.match(steps, /^export async function vectorBeforeWrite\b/m, 'the planners\' shared embed step moved — re-anchor this gate');
+    for (const w of Object.values(WRITERS)) {
+      const file = `server/src/brain/write-plan/plan-${w.planner.replace(/^plan/, '').toLowerCase()}.ts`;
+      assert.match(stripComments(readFileSync(path.join(REPO_ROOT, file), 'utf8')), /\bvectorBeforeWrite\(/,
+        `${w.planner} no longer embeds through the shared step, so the step's coverage says nothing about it`);
+    }
+    const covered = new Set(['vectorBeforeWrite', 'executeMerge', ...Object.keys(NOT_A_WRITER)]);
     const unknown = sites.filter(s => !covered.has(s.fn)).map(s => `${s.file}:${s.fn}`);
     assert.deepEqual(unknown, [],
       'a function computes a record vector inline and is neither exercised here nor exempted with a reason — '

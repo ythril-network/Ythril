@@ -148,7 +148,8 @@ describe('the reference-checking asymmetry is stated — and that it is GONE', (
      * exists — rather than at each door. Asserting on the tool file would pin the old location and fail on
      * the change that made the check true of `linkEntities` as well, which never had one.
      */
-    assert.match(LINKS, /assertRefsResolve\(/,
+    // Resolved against the STORE (`missingRefs`), through the same order the batch's read set uses.
+    assert.match(LINKS, /\bmissingRefs\(spaceId/,
       'the single-record path must still resolve, which is what makes the shapes agree');
   });
 });

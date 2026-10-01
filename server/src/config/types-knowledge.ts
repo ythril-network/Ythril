@@ -281,6 +281,14 @@ export const REF_KINDS = ['entity', 'fact', 'chrono', 'file'] as const;
 export type RefKind = typeof REF_KINDS[number];
 
 /**
+ * Is this a reference kind? The one membership test — a door, the batch and the contradiction surface each
+ * spelled it as a cast-and-`includes`, and a copy that drops the `typeof` check reads any truthy value as a kind.
+ */
+export function isRefKind(value: unknown): value is RefKind {
+  return typeof value === 'string' && (REF_KINDS as readonly string[]).includes(value);
+}
+
+/**
  * The WRITE FIELD a caller uses to link to each kind — `entity` → `linkEntities`, derived from the kind
  * vocabulary so a new kind gets its field on the day it is declared.
  *
