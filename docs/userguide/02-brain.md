@@ -580,6 +580,11 @@ you land on the neighbourhood rather than on a lone node — then adjust with th
 Edges table the view is centred on the edge's **from** endpoint; the `to` endpoint is one hop away, so the
 edge itself is always on the canvas.
 
+**When the graph takes a while, it says why.** After three seconds of waiting the canvas says the server has
+not answered yet and names what it knows the space is doing: its search indexes being built (for example right
+after an upgrade), or records still waiting to be embedded. After thirty seconds without an answer the wait
+ends in an error with the same reasons and a **Retry** button, so a busy instance never shows an empty spinner.
+
 The Facts, Chrono and Files tables have no such button, because the search bar here finds entities.
 Those records are reachable *within* a graph — turn on the matching toggle and a walk brings back the facts,
 timeline entries and files that MENTION what it passes through, and the ones that mention each other as

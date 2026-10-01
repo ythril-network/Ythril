@@ -52,6 +52,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   sync pass already held to that. Casting the concluding vote did not: a member whose copy of the round came by
   gossip, with no credential for the joiner, added it anyway — a member that could never authenticate there. A local
   vote now follows the same rule.
+- **The Graph tab says why it is slow instead of spinning with nothing on it (`Q-155`).** After three seconds of
+  waiting it says the server has not answered yet and names what the space is doing — search indexes being built,
+  records waiting to be embedded — and after thirty seconds the wait ends in the error state with those reasons
+  and Retry. Reported on 5.6.0 while an upgraded instance rebuilt every space's search indexes.
 
 ## [5.6.0] — 2026-09-29
 
