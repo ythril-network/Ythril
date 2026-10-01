@@ -9,15 +9,13 @@
  * wrapper leaves the old function callable, and a second caller of the old one is a door without the writer's
  * guards. So it is not declared in the engine any more, and it is declared beside `writeArrivals`.
  *
- * The engine is frozen in the size ratchet (`_oversize-files.mjs`), and a move OUT of a frozen file that leaves it
- * larger is not a move. Its limit is read from the ratchet rather than restated here, so lowering the frozen
- * entry when the file shrinks tightens this too.
+ * The engine's size is NOT asserted here. It is frozen in the size ratchet (`_oversize-files.mjs`), and by owner
+ * rule (2026-09-28) crossing a size limit flags a file for decomposition rather than failing a build — that is the
+ * ratchet's report, not this gate's.
  *
  * ## Seen red
  *
- * Red on 797dbb2e: `batchUpsertBySeq` is declared in `sync/engine.ts` and `sync/arrivals.ts` does not exist. The size
- * half is green there (784 code lines against a frozen 802) and was seen red by planting lines in the engine by
- * hand and removing them by hand.
+ * Red on 797dbb2e: `batchUpsertBySeq` is declared in `sync/engine.ts` and `sync/arrivals.ts` does not exist.
  *
  * Run: node --test testing/standalone/the-pull-page-write-lives-with-the-arrival-writer.test.js
  */
@@ -26,7 +24,6 @@ import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { topLevelFunctions } from './_call-graph.mjs';
 import { stripComments } from './_strip-comments.mjs';
-import { FROZEN, codeLines, oversizeFiles } from './_oversize-files.mjs';
 
 const ENGINE = 'server/src/sync/engine.ts';
 const ARRIVALS = 'server/src/sync/arrivals.ts';
@@ -51,14 +48,5 @@ describe('the pull page write lives with the arrival writer', () => {
     const fns = declared(ARRIVALS);
     assert.ok(fns.includes('writeArrivals'), `${ARRIVALS} declares no writeArrivals`);
     assert.ok(fns.includes(PAGE_WRITE), `${ARRIVALS} declares no ${PAGE_WRITE} — it was dropped rather than moved`);
-  });
-
-  it('and the engine did not grow past its frozen size doing it', () => {
-    assert.ok(ENGINE in FROZEN, `${ENGINE} has no frozen entry in _oversize-files.mjs — re-anchor this gate`);
-    const code = codeLines(readFileSync(ENGINE, 'utf8'));
-    const over = oversizeFiles([{ file: ENGINE, code }]);
-    assert.deepEqual(over, [],
-      `${ENGINE} is ${code} code lines, over its frozen ${FROZEN[ENGINE]}. Moving the page write out must leave the `
-      + 'engine smaller, not hand its lines to new pull plumbing');
   });
 });
