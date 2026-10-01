@@ -113,4 +113,57 @@ describe('i18n key coverage', () => {
       expect(extra, `${loc}.json has keys that no longer exist in en.json`).toEqual([]);
     }
   });
+
+  it('every placeholder is double-braced, in every value of every locale', () => {
+    /*
+     * Transloco interpolates `{{param}}` and nothing else — this app has no messageformat plugin — so a
+     * value written `Entities ({count})` renders those eleven characters literally. Found on the Query tab
+     * (`Q-101`, 2026-09-28): the walk's headings read `REACHED BY THE WALK ({COUNT})`, in all three
+     * languages, with every spec green, because the test harness echoes keys rather than rendering values.
+     *
+     * A brace pair holding ONE bare identifier is the placeholder shape. Braces around a comma-separated
+     * list are prose — `{ knowledgeType, typeName, schema }` describes a JSON snippet in the schema-import
+     * errors — and are left alone. Derived over every value, never a list of known keys.
+     */
+    const offenders: string[] = [];
+    let scanned = 0;
+    for (const loc of ['en', 'de', 'pl']) {
+      for (const [key, value] of Object.entries(load(loc))) {
+        if (typeof value !== 'string') continue;
+        scanned++;
+        const withoutDouble = value.replace(/\{\{[^}]*\}\}/g, '');
+        const single = withoutDouble.match(/\{\s*[A-Za-z_][\w.]*\s*\}/g);
+        if (single) offenders.push(`${loc}: ${key} → ${single.join(' ')}`);
+      }
+    }
+    // A floor, so a loader that returned nothing cannot pass this by scanning nothing.
+    expect(scanned).toBeGreaterThan(3000);
+    expect(offenders, `single-brace placeholders render literally — write {{param}}:\n  ${offenders.join('\n  ')}`)
+      .toEqual([]);
+  });
+
+  it('de and pl interpolate exactly the parameters en does', () => {
+    /*
+     * A translation that drops or renames a `{{param}}` renders without the number the English shows, and
+     * like a single-brace placeholder it fails silently. Per key, the SET of parameter names must match.
+     */
+    const params = (v: unknown): string =>
+      typeof v === 'string'
+        ? [...new Set([...v.matchAll(/\{\{\s*([\w.]+)\s*\}\}/g)].map(m => m[1]))].sort().join(',')
+        : '';
+    const others = { de: load('de'), pl: load('pl') };
+    const mismatched: string[] = [];
+    let withParams = 0;
+    for (const [key, value] of Object.entries(en)) {
+      const want = params(value);
+      if (want) withParams++;
+      for (const loc of ['de', 'pl'] as const) {
+        const got = params(others[loc][key]);
+        if (got !== want) mismatched.push(`${loc}: ${key} has [${got}], en has [${want}]`);
+      }
+    }
+    expect(withParams).toBeGreaterThan(50);
+    expect(mismatched, `a locale's value interpolates different parameters from en:\n  ${mismatched.join('\n  ')}`)
+      .toEqual([]);
+  });
 });

@@ -450,7 +450,10 @@ when the inviter syncs manually), and falls back to every 15 minutes (`*/15 * * 
 it could run. A value the scheduler cannot run is refused `400` before the handshake, in the sentence
 `POST /api/networks` gives. Only a network the join creates is scheduled; one this instance already carries keeps its
 own. **Changed in 5.6.0**: a joined network used to get no schedule, which is manual-only, so a joiner never pulled
-on its own. Change it later on the network card or with `PATCH /api/networks/:id`.
+on its own. Change it later on the network card or with `PATCH /api/networks/:id`. A network joined before that
+default existed gets it when the instance next starts, and the log names each one; `""` sent to the join or to
+`PATCH` is kept as manual sync chosen, and is never replaced by the default. **Changed**: `PATCH` with `""` used to
+store no schedule at all, which reads the same as one never stated.
 
 ### Join Troubleshooting: private or local URLs rejected
 
@@ -766,6 +769,13 @@ instance also revokes, at start, any peer token whose instance shares no network
 handshake hands over replaces the previous one for every network the pair shares. It is therefore scoped to the
 spaces of all of those networks, not only the one being joined. That is not wider access: each sync request is
 admitted only to the spaces of networks the peer is currently a member of.
+
+**And the token it replaces is revoked** (`Q-163`). Once a handshake completes — on the inviter at `finalize`, on the
+joiner when `finalize` answers — every other live token this instance gave that
+peer is revoked, because the peer can no longer present it. They used to stay valid until the two shared no network
+at all, so each join left one more behind. A token still in a handshake keeps its expiry and is never revoked this
+way, since two joins with one peer can overlap. At start an instance also revokes the ones left from before: tokens a
+newer one with the same peer replaced, and that the peer has not presented since.
 
 **Why the whole bundle travels rather than a short URL to fetch it from.** `rsaPublicKeyPem` is what pins
 the handshake to the intended instance. If the joiner fetched it instead, whoever controls that fetch could

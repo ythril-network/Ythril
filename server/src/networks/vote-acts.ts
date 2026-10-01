@@ -65,12 +65,15 @@ export function castVoteAct(id: string, roundId: string, input: unknown): Networ
   concludeRoundIfReady(net, round);
 
   // A passed join admits the pending member — only on the direct parent in a tree, so ancestor-voters do not add
-  // the joiner to their own lists.
+  // the joiner to their own lists, and on any other voted network only on the member holding the joiner's
+  // credential: a round copy learned by gossip has `pendingMember.tokenHash` stripped, and admitting it added a
+  // member that could never authenticate here. The same rule as the gossip pass in `sync/engine.ts`.
   if (round.concluded && round.type === 'join' && round.pendingMember &&
       !net.members.some(m => m.instanceId === round.subjectInstanceId)) {
     const vetoCount = round.votes.filter(v => v.vote === 'veto').length;
     const isDirectParent = !round.pendingMember.parentInstanceId || round.pendingMember.parentInstanceId === cfg.instanceId;
-    if (vetoCount === 0 && (net.type !== 'braintree' || isDirectParent)) {
+    const mayAdmit = net.type === 'braintree' ? isDirectParent : Boolean(round.pendingMember.tokenHash);
+    if (vetoCount === 0 && mayAdmit) {
       net.members.push(round.pendingMember);
       log.info(`Join vote ${round.roundId} passed — added member ${round.subjectLabel} to network ${net.id}`);
     }

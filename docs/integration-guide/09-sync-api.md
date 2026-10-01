@@ -20,7 +20,13 @@ POST /api/notify
 }
 ```
 
-Events: `vote_pending`, `member_departed`, `member_removed`, `space_deletion_pending`, `space_wipe_pending`, `sync_available`, `ping`.
+Events: `vote_pending`, `member_departed`, `member_removed`, `space_deletion_pending`, `space_wipe_pending`, `meta_change_pending`, `sync_available`, `ping`.
+
+The receiver keeps the recent events in memory for `GET /api/notify`, and that store is bounded by bytes as well as
+by count (500 events, 1 MiB), oldest out first.
+
+> **`meta_change_pending` was refused until 5.6.1 (`Q-108`).** A space's schema-change round sent it to every member
+> and no receiver listed it, so each answered `400` and the sender, which does not read the answer, never knew.
 
 **Response** `204`.
 
@@ -29,8 +35,13 @@ Events: `vote_pending`, `member_departed`, `member_removed`, `space_deletion_pen
 ### List Events
 
 ```http
-GET /api/notify?networkId=net-uuid&limit=50
+GET /api/notify?networkId=net-uuid&limit=50&skip=0
 ```
+
+Newest first. `limit` defaults to 50 and is held to 200; `skip` pages on. The answer says where it stands: `events`,
+`count` (rows in this page), `total` (events matching), `limit` (the one that applied), `skip`, `truncated`, and
+`nextSkip` exactly when there are more — the same fields every paged list answers with. `maxChars` / `maxBytes` bound
+the body as on the search routes. A non-numeric `limit` or `skip` is a `400`, never a default.
 
 ---
 

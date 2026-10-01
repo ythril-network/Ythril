@@ -418,6 +418,56 @@ export function setTokenExpiry(id: string, expiresAt: string | null): boolean {
 }
 
 /**
+ * Make a peer's freshly handed-over token the one it holds here, and revoke every other token it was given (`Q-163`).
+ *
+ * A peer keeps ONE outbound token per instance and overwrites it on every handshake, so once it holds this one the
+ * rest can never be presented again — yet they stayed valid. Every network join minted another, and the only
+ * cleanup (`revokePeerCredentialsIfOrphaned`) waits until the peer shares no network with us, which never happens
+ * while the two share any. Call it exactly when the peer is known to hold `tokenId`: the handshake has completed.
+ * Lifting the expiry is part of it, because a pairing token that became live and an old one both staying valid is
+ * the defect; no caller may lift a peer token's expiry by hand.
+ */
+export async function adoptPeerToken(tokenId: string): Promise<void> {
+  const t = getConfig().tokens.find(x => x.id === tokenId);
+  if (!t?.peerInstanceId) return;
+  setTokenExpiry(tokenId, null);
+  // Only tokens already made live. One still carrying an expiry belongs to a handshake in flight — two joins with the
+  // same peer can overlap — and revoking it would hand the peer a dead token; it expires by itself if it never lands.
+  const replaced = getConfig().tokens.filter(x => x.peerInstanceId === t.peerInstanceId && x.id !== tokenId && x.expiresAt === null);
+  for (const old of replaced) {
+    if (await revokeToken(old.id)) log.info(`Revoked peer PAT '${old.name}' (${old.id}) — replaced by a newer handshake`);
+  }
+}
+
+/**
+ * The peer tokens a newer handshake with the same peer replaced, left from before `adoptPeerToken` existed.
+ *
+ * Only tokens the peer has provably stopped presenting: made before that peer's newest token and not used since it
+ * was made. An older token used after the newest appeared is still the live one — the newest never took — and is
+ * kept. Pure, so the choice is testable without a config; the boot sweep revokes what it returns.
+ */
+export function supersededPeerTokenIds(config: Pick<Config, 'tokens'>): string[] {
+  const byPeer = new Map<string, TokenRecord[]>();
+  for (const t of config.tokens) {
+    if (!t.peerInstanceId || t.expiresAt !== null) continue;   // a handshake still in flight, see `adoptPeerToken`
+    const list = byPeer.get(t.peerInstanceId);
+    if (list) list.push(t); else byPeer.set(t.peerInstanceId, [t]);
+  }
+  const out: string[] = [];
+  for (const list of byPeer.values()) {
+    if (list.length < 2) continue;
+    const newest = list.reduce((a, b) => (Date.parse(b.createdAt) > Date.parse(a.createdAt) ? b : a));
+    const since = Date.parse(newest.createdAt);
+    for (const t of list) {
+      if (t === newest) continue;
+      if (t.lastUsed && Date.parse(t.lastUsed) >= since) continue;
+      out.push(t.id);
+    }
+  }
+  return out;
+}
+
+/**
  * The peer instances holding an inbound token while sharing no network with us — nothing a live membership needs.
  *
  * A token an unfinished handshake created was never cleaned up: its session lived in memory and expired, and the

@@ -91,6 +91,78 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and refuse the same keys with the same message.
 - **An edge created with a property its label's schema defaults was stored without the default**, although the
   default was what passed validation; the stored edge now carries the value that was checked.
+- **A reindex embedded different text from the write that created the record, and never rebuilt a passage or a
+  caption (`Q-99`, part 2).** Its five hand-written loops were a copy of the embed queue's text builder that had
+  drifted: an edge whose end is a fact, a chrono entry or a file embedded that end's raw id instead of its name, and
+  a converted document re-embedded without its own text, because the loop never read the `excerpt` it passed on.
+  Derived records were skipped outright, so after a model change every passage and media caption kept the old
+  model's vector. And a backfill (`reembed`) gave a vectorless passage, face crop or converted copy a vector of its
+  PATH (`docs/a.pdf#chunk0`). A reindex now rebuilds every record through the one builder the queue uses: a passage
+  or caption is rebuilt from its own text (`chunkEmbedText`, shared with the conversion pipeline), a derived record
+  with no text is left without a vector (any path-vector a backfill gave it is removed, and a backfill no longer
+  queues it), and a passage of a file whose owner suppressed its embeddings, at any depth, is not embedded. A
+  reindex rebuilds a vector even when its text is unchanged, and an embedder outage during one leaves a record's
+  vector as it was.
+- **Two lists that stopped at a number now say so and can be read to the end** (bundle-34). Owner rule: *"if i
+  get a result i want to be sure i get what i asked for."* Each now pages through one rule (`brain/list-page.ts`):
+  whole rows, `limit` and `skip` refused with a `400` rather than floored when they are not numbers, the byte budget,
+  and `count`, `total`, `limit`, `skip`, `truncated` and `nextSkip` on every answer.
+  - **The schema dry-run** (`POST /api/spaces/:id/validate-schema`) says, per collection, how many records it
+    checked against how many exist and whether the check was complete (`checked`, `complete`), and pages its
+    violations instead of stopping at 500 (`Q-129`).
+  - **The notify event list** (`GET /api/notify`) pages with `skip` and says when it is cut, instead of stopping at
+    200 (`Q-130`).
+  - **Resolving entities by id** in the web UI asks for every id instead of dropping those past 100 (`Q-131`).
+- **A space schema-change notice is accepted by its peers (`Q-108`).** `meta_change_pending` was sent to every
+  member and was not an event `POST /api/notify` accepted, so each peer answered `400` to a sender that does not read
+  the answer. Peers now accept and record it.
+- **An unknown tool name no longer becomes a metric label (`Q-108`).** It was counted in `ythril_tool_calls_total`
+  before the `404`, so any caller could mint a time series per spelling.
+- **The notify event store is bounded by bytes, not only by count (`Q-108`).** 500 events of up to the JSON body
+  limit each could hold gigabytes; it now holds at most 1 MiB, oldest out first.
+- **A network joined before the join default now syncs on its own.** 5.6.0 gave a new join a schedule (every 15
+  minutes, or the inviter's), but a network joined earlier kept none and pulled only when its peer started a cycle —
+  seen on an instance whose two joined networks had no schedule at all. It gets the default at the next start, named
+  in the log. Clearing a schedule now stores manual as a choice (`""`) rather than as nothing, so manual set on
+  purpose is never replaced; one cleared before this change reads as never set, so it is scheduled once.
+- **A peer keeps one token, not one per join (`Q-163`).** Every network joined with the same instance minted it a
+  new token and left the previous one valid, though the peer keeps only the newest and could never present the
+  others: an instance showed eight `peer:` tokens for one peer, seven of them last used minutes after they were made.
+  A completed handshake now revokes the tokens it replaces, on both sides, and an instance drops the unused leftovers
+  when it starts. A token still in a handshake is left alone, since two joins can overlap.
+- **A member that learned a join vote from another member no longer admits the joiner on its own vote**
+  (`Q-154`). On a closed or democratic network only the member holding the joiner's credentials may add it, and the
+  sync pass already held to that. Casting the concluding vote did not: a member whose copy of the round came by
+  gossip, with no credential for the joiner, added it anyway — a member that could never authenticate there. A local
+  vote now follows the same rule.
+- **The Graph tab says why it is slow instead of spinning with nothing on it (`Q-155`).** After three seconds of
+  waiting it says the server has not answered yet and names what the space is doing — search indexes being built,
+  records waiting to be embedded — and after thirty seconds the wait ends in the error state with those reasons
+  and Retry. Reported on 5.6.0 while an upgraded instance rebuilt every space's search indexes.
+- **The Query tab's walk headings show their counts (`Q-101`).** "Reached by the walk", and the Entities, Facts,
+  Chrono and Files headings under it, rendered `({count})` literally in all three languages, and each reached record
+  read `{hops} hop(s)`: the values used single braces, which the translation layer does not interpolate. A client
+  spec now fails on a single-brace placeholder in any value of any locale, and on a German or Polish value that
+  interpolates different parameters from the English one.
+- **Buttons that name an action say it in German and Polish (`Q-115`).** "Clear results" read "Klare Ergebnisse"
+  (clear as in transparent) and the entity search's Clear read "Klar"; in Polish they read "Jasne", Reset read
+  "Nastawić" (to set a clock) and Close the infinitive "Zamknąć". They now read "Ergebnisse löschen" / "Leeren",
+  "Wyczyść wyniki" / "Wyczyść", "Zresetuj" and "Zamknij". The Query form's Projection field had the same fault
+  ("Vorsprung", "Występ") and now reads "Projektion" / "Projekcja". A client spec derives every English label that
+  starts with Clear, Reset or Close and fails when the German or Polish value does not contain a verb that does it.
+  The same fault on the product's noun: German called a space a "Leerzeichen" (the typed whitespace character) in
+  8 places — "Noch keine Leerzeichen" on the Brain page, "Leerzeichen erstellen/löschen" on the MFA card — and
+  Polish a "spacja" in 11; they now say "Space" / "przestrzeń" as the rest of each file does, and the same spec
+  fails on any value whose English names a space and whose German or Polish uses the whitespace word.
+- **The client never shows an answer older than the one you asked for last (`Q-112`).** The graph's depth slider
+  started a traversal on every step it passed and drew whichever answer arrived last, so a slow depth-3 answer
+  could land over depth 4 — and a depth drawn from the cache could be redrawn by a deeper request still in flight.
+  It now asks once the slider rests and cancels what it no longer needs. The record tabs (entities, edges, facts,
+  chrono) let a slow answer to an old filter replace the new filter's rows, and a list load could replace a
+  semantic search's rows or the reverse; every answer that writes a tab's rows now goes through one latest-wins
+  slot (`core/latest-wins.ts`, which the tab search bars had privately), and so do the graph's selected-record
+  card and linked records. Opening a record resolved each linked fact and chrono title with its own request; it
+  is one request per kind now.
 
 ## [5.6.0] — 2026-09-29
 

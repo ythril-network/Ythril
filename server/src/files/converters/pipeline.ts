@@ -27,6 +27,7 @@ import { writeFile, writeFileBytes } from '../files.js';
 import { resolveSafePathChecked } from '../sandbox.js';
 import { col, asFilter, asDoc } from '../../db/mongo.js';
 import { embed } from '../../brain/embedding.js';
+import { chunkEmbedText } from '../../brain/embed-text.js';
 import { getConfig, getDocumentProcessingConfig, getEmbeddingConfig } from '../../config/loader.js';
 import { vlmExtractDocument } from './vlm-extract.js';
 import type { FileMetaDoc, DocExtractionMode, TextLevel } from '../../config/types.js';
@@ -448,9 +449,8 @@ export async function storeConversionResults(
   // own index, so chunkDocs keeps the chunk order whatever order the embeds finish in.
   await mapLimit(chunks, EMBED_CONCURRENCY, async (chunk, i) => {
     const chunkId = `${originalId}#chunk${chunk.chunkIndex}`;
-    const embedText = chunk.headingText
-      ? `${chunk.headingText} ${chunk.content}`
-      : chunk.content;
+    // The one builder a rebuild uses too (`buildEmbedText`), so a reindexed chunk embeds this exact string.
+    const embedText = chunkEmbedText(chunk.headingText, chunk.content);
 
     let embeddingFields: { embedding?: number[]; embeddingModel?: string; matchedText?: string } = {};
     try {

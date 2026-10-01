@@ -245,6 +245,12 @@ describe('GraphComponent — detail rows are derived, not stored', () => {
 // 2. Traversal cache — which gestures reach the network
 // ─────────────────────────────────────────────────────────────────────────────────────────────────
 
+/** Move the depth slider and let it rest: the traversal waits for the slider to stop (Q-112). */
+function slide(c: any, depth: number): void {
+  vi.useFakeTimers();
+  try { c.onDepthChange(depth); vi.advanceTimersByTime(1000); } finally { vi.useRealTimers(); }
+}
+
 describe('GraphComponent — the traversal cache decides what hits the network', () => {
   it('fetches once for a new root', () => {
     const { c, brain } = create();
@@ -261,7 +267,7 @@ describe('GraphComponent — the traversal cache decides what hits the network',
     });
     const { c } = create(brain);
     c.selectRoot(ROOT);
-    c.onDepthChange(1);
+    slide(c, 1);
     expect(brain.traverseGraph).toHaveBeenCalledTimes(1);
     expect(cy.lastModel().nodes.map((n: any) => n.data.id).sort()).toEqual(['a', 'root']);
   });
@@ -277,7 +283,7 @@ describe('GraphComponent — the traversal cache decides what hits the network',
     });
     const { c } = create(brain);
     c.selectRoot(ROOT);
-    c.onDepthChange(3);
+    slide(c, 3);
     expect(brain.traverseGraph).toHaveBeenCalledTimes(2);
     const model = cy.lastModel();
     expect(model.nodes.map((n: any) => n.data.id).sort()).toEqual(['a', 'b', 'root']);
@@ -298,7 +304,7 @@ describe('GraphComponent — the traversal cache decides what hits the network',
     const { c } = create(brain);
     c.selectRoot(ROOT);
     expect(c.truncated()).toBe(true);
-    c.onDepthChange(3);
+    slide(c, 3);
     expect(cy.lastModel().nodes.map((n: any) => n.data.id).sort()).toEqual(['fresh', 'root']);
     expect(c.truncated()).toBe(false);
   });

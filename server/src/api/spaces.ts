@@ -44,6 +44,8 @@ import { refuseFaceWidthChange } from '../spaces/face-width-change.js';
 import { planSpaceCreate, applySpaceCreate } from '../spaces/space-create.js';
 import { validateStoredEdges } from '../spaces/validate-stored-edges.js';
 import { spaceCollection } from '../db/space-collection.js';
+import { pageList } from '../brain/list-page.js';
+import { defaultBudgetChars } from '../brain/result-budget.js';
 
 export const spacesRouter = Router();
 
@@ -732,10 +734,23 @@ spacesRouter.post('/:id/validate-schema', globalRateLimit, requireSpaceAuthMfaSc
   const violations: Array<{ collection: string; _id: string; violations: Array<{ field: string; value: unknown; reason: string }> }> = [];
   const memberIds = memberSpacesForRequest(req, id);
   const SCAN_LIMIT = 10_000;
+  /*
+   * Q-129: how much of each collection was actually checked. The scan reads at most SCAN_LIMIT records per collection,
+   * and a clean dry-run over a larger space used to be a dry-run of its first ten thousand records with nothing saying
+   * so. Now every answer says what was checked against what exists, and `complete` is true only when that is all.
+   */
+  const checked: Record<string, { checked: number; total: number }> = {};
+  const note = async (mid: string, collection: Parameters<typeof spaceCollection>[1], read: number) => {
+    const total = await col(spaceCollection(mid, collection)).countDocuments();
+    const c = (checked[collection] ??= { checked: 0, total: 0 });
+    c.checked += Math.min(read, total);
+    c.total += total;
+  };
 
   for (const mid of memberIds) {
     // Entities
     const entities = await col(spaceCollection(mid, 'entities')).find({}).limit(SCAN_LIMIT).toArray();
+    await note(mid, 'entities', entities.length);
     for (const ent of entities) {
       const doc = ent as unknown as { _id: string; name?: string; type?: string; properties?: Record<string, unknown> };
       const v = validateEntity(resolvedMeta, doc);
@@ -745,9 +760,11 @@ spacesRouter.post('/:id/validate-schema', globalRateLimit, requireSpaceAuthMfaSc
     // Edges need two lookups the document cannot supply — see `validateStoredEdges`, which also
     // explains why they live in a module of their own rather than here.
     violations.push(...await validateStoredEdges(mid, resolvedMeta, SCAN_LIMIT));
+    await note(mid, 'edges', SCAN_LIMIT);
 
     // Facts
     const facts = await col(spaceCollection(mid, 'facts')).find({}).limit(SCAN_LIMIT).toArray();
+    await note(mid, 'facts', facts.length);
     for (const mem of facts) {
       const doc = mem as unknown as { _id: string; properties?: Record<string, unknown> };
       const v = validateFact(resolvedMeta, doc);
@@ -756,6 +773,7 @@ spacesRouter.post('/:id/validate-schema', globalRateLimit, requireSpaceAuthMfaSc
 
     // Chrono
     const chronoEntries = await col(spaceCollection(mid, 'chrono')).find({}).limit(SCAN_LIMIT).toArray();
+    await note(mid, 'chrono', chronoEntries.length);
     for (const ch of chronoEntries) {
       const doc = ch as unknown as { _id: string; properties?: Record<string, unknown> };
       const v = validateChrono(resolvedMeta, doc);
@@ -763,11 +781,18 @@ spacesRouter.post('/:id/validate-schema', globalRateLimit, requireSpaceAuthMfaSc
     }
   }
 
+  // The violation list through the shared page rule (Q-129): it was `slice(0, 500)` with no way to reach the rest.
+  const page = pageList(violations, { limit: req.body?.limit ?? req.query['limit'], skip: req.body?.skip ?? req.query['skip'] },
+    { defaultLimit: 500, maxLimit: 500, budgetChars: defaultBudgetChars('rest') });
+  if (!page.ok) { res.status(400).json({ error: page.error }); return; }
   res.json({
     spaceId: id,
     meta: dryMeta,
+    checked,
+    complete: Object.values(checked).every(c => c.checked >= c.total),
     totalViolations: violations.length,
-    violations: violations.slice(0, 500), // cap response size
+    violations: page.rows,
+    ...page.fields,
   });
 });
 
