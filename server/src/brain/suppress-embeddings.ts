@@ -91,6 +91,25 @@ export function recordSuppression(doc: Record<string, unknown> | undefined): tru
   return v === true ? true : undefined;
 }
 
+/**
+ * The record tier of the record a write LEAVES: the write's own flag when it states one, and the STORED
+ * record's when it does not (`Q-194`).
+ *
+ * Asked with the payload alone, a write that did not restate the flag read as "not stated", fell through to a
+ * space that does not suppress, and an inline embed stored a vector (or the write queued one) on a record its
+ * author had retired from meaning-ranked search — `upsertEntity`, `saveFact`, `createChrono`, `upsertEdge` and
+ * the merge each did. The stored flag is the forgettable half, so it is read here and handed to
+ * `embeddingSuppressedFor` as the record tier, at each writer's own call.
+ */
+export function recordTierAfterWrite(
+  stated: boolean | undefined,
+  stored: Record<string, unknown> | object | null | undefined,
+): boolean | undefined {
+  if (stated !== undefined) return stated;
+  const v = (stored as Record<string, unknown> | null | undefined)?.[RECORD_SUPPRESS_FIELD];
+  return typeof v === 'boolean' ? v : undefined;
+}
+
 /** Mongo fragment matching the records the record tier does NOT suppress. */
 export function recordNotSuppressedFilter(): Record<string, unknown> {
   return { [RECORD_SUPPRESS_FIELD]: { $ne: true } };

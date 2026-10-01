@@ -259,6 +259,12 @@ export function endSpaceOp(): void { _spaceOpDepth = Math.max(0, _spaceOpDepth -
 export function spaceOpInFlight(): boolean { return _spaceOpDepth > 0; }
 
 /**
+ * How many renames/deletes are running here. A space op that meets another op's marker counts itself, so it may
+ * resume that marker only when it is the ONE running — more than one means the marker's own op is still going.
+ */
+export function spaceOpsInFlight(): number { return _spaceOpDepth; }
+
+/**
  * Maximum length of a space's directive (`meta.purpose`, and its deprecated `description` alias).
  *
  * One constant because there were six literals for one field, and two of them disagreed: REST accepted
@@ -300,4 +306,17 @@ export function pendingOpConflictMessage(pending: PendingSpaceOp, attempted: str
   const target = pending.type === 'rename' ? `${pending.spaceId} → ${pending.newId}` : pending.spaceId;
   return `Cannot ${attempted}: a ${pending.type} of '${target}' is still pending ` +
     `(started ${pending.startedAt}). It resumes automatically on restart; retry once it clears.`;
+}
+
+/**
+ * The refusal when a pending op was RESUMED by the op that met it, and still could not complete — with why.
+ *
+ * The plain message above promised a restart; since the next space operation resumes a pending one itself, a
+ * refusal now means the resume was tried and failed, and the reason is what an operator needs to act.
+ */
+export function pendingOpStillFailingMessage(pending: PendingSpaceOp, attempted: string, reason: string): string {
+  const target = pending.type === 'rename' ? `${pending.spaceId} → ${pending.newId}` : pending.spaceId;
+  return `Cannot ${attempted}: a ${pending.type} of '${target}' (started ${pending.startedAt}) is still pending, and `
+    + `resuming it just now did not complete: ${reason}. It is tried again by the next space rename or delete, and `
+    + 'on restart.';
 }

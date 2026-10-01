@@ -8,7 +8,8 @@
  */
 import { getDb, asDoc } from '../db/mongo.js';
 import { FACE_DESCRIPTOR_DIMS } from '../files/media/face-descriptor.js';
-import { getConfig, mutateConfig, getEmbeddingConfig, getFaceRecognitionConfig } from '../config/loader.js';
+import { getConfig, getEmbeddingConfig, getFaceRecognitionConfig } from '../config/loader.js';
+import { mutateConfigRetrying } from '../config/mutate-config-retrying.js';
 import { resolveMetaRefs } from './schema-validation.js';
 import { log } from '../util/log.js';
 import type { KnowledgeType } from '../config/types.js';
@@ -882,7 +883,9 @@ export async function finalizeSpaceIndexReady(
   // pendingSpaceOp crash marker being the case that bites, since losing it strands a
   // half-finished rename with no record that it was ever in flight.
   let found = true;
-  mutateConfig(cfg => {
+  // Retrying: this runs in the background with no caller to retry it, and one read spoiled by a concurrent
+  // writer would otherwise leave the space `building` until the next restart (`mutate-config-retrying.ts`).
+  await mutateConfigRetrying(cfg => {
     const space = cfg.spaces.find(s => s.id === spaceId);
     if (!space) { found = false; return; } // space was deleted while its indexes built
     space.indexStatus = ok ? 'ready' : 'failed';

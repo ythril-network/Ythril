@@ -29,6 +29,7 @@ import { startBackupScheduler } from '../db/backup-scheduler.js';
 import { dumpDatabase } from '../db/dump.js';
 import { restoreDatabase } from '../db/restore.js';
 import { buildSpaceVectorIndexes } from '../spaces/vector-index.js';
+import { concreteSpaces } from '../spaces/proxy.js';
 import { testConnection } from '../db/conn-test.js';
 import { isSsrfSafeMongoUri } from '../util/ssrf.js';
 import { log } from '../util/log.js';
@@ -400,7 +401,7 @@ dataRouter.post('/restore', requireAdminMfa, async (req, res) => {
     // indexes, seconds apiece, so a sequential loop grew this request by several seconds per space and
     // timed out on an instance with a few dozen of them — reporting a failed restore that had succeeded.
     // Bounded rather than all at once, so a large instance does not hand mongod every index build together.
-    const spaces = getConfig().spaces ?? [];
+    const spaces = concreteSpaces();   // a proxy owns no collections, so it has no indexes to rebuild
     const outcomes = await mapLimit(spaces, RESTORE_INDEX_CONCURRENCY, async (space) => {
       try {
         await buildSpaceVectorIndexes(space.id, false, { force: true });

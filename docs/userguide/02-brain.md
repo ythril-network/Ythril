@@ -279,7 +279,9 @@ means something different: the search did not finish, so it found nothing becaus
 themselves (so a part number, form id or clause name is found even though such a string carries almost no
 meaning for a language model). A record that scores on both ranks highest. If your administrator has
 configured a reranking model, the top candidates are then re-scored by a model that reads your question
-and each passage together.
+and each passage together. **Searching a proxy space ranks its members together:** the results of every member
+are combined into one ranking, so the best matches come first whichever space they live in — a member whose
+records matched your exact words is not pushed below one that only matched their meaning.
 
 None of that needs setting up, and none of it can make a search fail — a stage that is unavailable is
 simply skipped.
@@ -297,6 +299,13 @@ model, reranked a similar-sized set in under three seconds — the difference wa
 So there is no single number to expect. **If your records are long and you want reranking on more than a
 handful of results, ask your administrator to raise the reranking time limit** (`modelSlots.rerank.timeoutMs`,
 described in the hosting guide's model-slot table).
+
+**A reranker that fails or crawls is set aside for a while, so a search does not keep waiting for it.** When a
+reranking pass fails, runs out its time limit, or takes more than half of it, the searches after it skip reranking
+straight away — for 30 seconds at first, doubling each time it happens again, up to 5 minutes — and answer in the
+order by meaning, in well under a second instead of the full time limit. Ythril checks the reranker in the
+background and uses it again as soon as it answers within that half. Each search in between says the reranker did
+not run (`rerank_unavailable`), so a quiet reranker is never mistaken for a working one.
 
 **The search bars in the Entities, Facts, Edges and Chrono tabs, and the entity pickers, skip reranking.** You are
 waiting on them as you type, and on a busy model the reranking can take seconds for an order you will not read before

@@ -13,6 +13,7 @@ import { toDocId } from '../../util/paths.js';
 import { escapeRegex } from '../../util/redos.js';
 import { authorRef } from '../../config/author.js';
 import fs from 'fs/promises';
+import { removeTree } from '../remove-tree.js';
 import { UnstructuredConverter } from './unstructured.js';
 import type { ExtractedImage } from './unstructured.js';
 import { HtmlConverter } from './html.js';
@@ -33,7 +34,7 @@ import type { StepProgress } from './types.js';
 import { log } from '../../util/log.js';
 import { enqueueMediaJob } from '../media/job-queue.js';
 import { embedConcurrency } from './embed-concurrency.js';
-import { JobLeaseLostError, shouldHeartbeat } from '../media/lease.js';
+import { JobLeaseLostError, isLeaseLost, shouldHeartbeat, writeUnderClaim, type JobClaim } from '../media/lease.js';
 import { embedChunksTotal } from '../../metrics/registry.js';
 import { spaceCollection } from '../../db/space-collection.js';
 import { mapLimit } from '../../util/map-limit.js';
@@ -296,6 +297,11 @@ export async function runConversionPipeline(
  * @param convertedMarkdown If not null, write to _converted/<originalFileId>.md and return its path
  * @param extractedImages   Embedded images extracted during hi_res conversion
  * @returns object with chunkCount and optional convertedFileId
+ *
+ * Every record this writes lands in ONE commit at the end, fenced on the job's claim (`writeUnderClaim`). They used
+ * to be inserted as they were produced, unconditionally — so a conversion that finished after its file was moved
+ * wrote its chunk records under the path the file had just left, where nothing would ever delete them. A claim
+ * taken away before the commit now means nothing is written; after it, the records are there for whoever took it.
  */
 export async function storeConversionResults(
   spaceId: string,
@@ -312,14 +318,22 @@ export async function storeConversionResults(
    * recovery stop instead of racing the new claimant.
    */
   opts: {
+    /**
+     * The run these results belong to. REQUIRED, not optional: an unfenced caller is exactly the writer that
+     * resurrected a moved file's records, and a default would make that the path of least resistance.
+     */
+    claim: JobClaim;
     onProgress?: (p: StepProgress) => void;
     /** Checked between chunks; true means the claim is gone and this run throws `JobLeaseLostError`. */
     shouldStop?: () => boolean;
-  } = {},
+  },
 ): Promise<{ chunkCount: number; convertedFileId: string | null; embedFailures: number }> {
   const originalId = toDocId(originalFilePath);
   const now = new Date().toISOString();
   let embedFailures = 0;
+  // Every record this run derives, committed together at the end — see the fence in the docblock.
+  const derivedDocs: FileMetaDoc[] = [];
+  const imageJobs: Array<{ path: string; mimeType: string }> = [];
 
   // 1. Write the full converted Markdown to disk (binary formats only)
   let convertedFileId: string | null = null;
@@ -341,7 +355,7 @@ export async function storeConversionResults(
       author: authorRef(),
       parentFileId: originalId,
     };
-    await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).insertOne(asDoc<FileMetaDoc>(convertedDoc));
+    derivedDocs.push(convertedDoc);
   }
 
   // 2. Write extracted image subfiles and enqueue for media pipeline.
@@ -378,11 +392,10 @@ export async function storeConversionResults(
           author: authorRef(),
           parentFileId: originalId,
         };
-        await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).insertOne(asDoc<FileMetaDoc>(imgDoc));
-
-        // Enqueue for media pipeline (caption + face recognition)
-        const mimeType = `image/${img.ext === 'jpg' ? 'jpeg' : img.ext}`;
-        await enqueueMediaJob(spaceId, imgPath, mimeType, 'image');
+        derivedDocs.push(imgDoc);
+        // Enqueued for the media pipeline (caption + face recognition) once the commit has landed — a job for a
+        // record the fence then refused would retry against metadata that was never written.
+        imageJobs.push({ path: imgPath, mimeType: `image/${img.ext === 'jpg' ? 'jpeg' : img.ext}` });
       } catch (err) {
         // Non-fatal: log and continue; other images and chunks still processed
         log.warn(`Failed to store extracted image ${imgId}: ${err instanceof Error ? err.message : String(err)}`);
@@ -485,12 +498,36 @@ export async function storeConversionResults(
     };
   });
 
-  for (let i = 0; i < chunkDocs.length; i += INSERT_BATCH) {
-    const batch = chunkDocs.slice(i, i + INSERT_BATCH);
-    if (batch.length === 0) continue;
-    // ordered:false — one duplicate/invalid chunk must not abort the rest of the batch.
-    await col<FileMetaDoc>(spaceCollection(spaceId, 'files'))
-      .insertMany(batch.map(d => asDoc<FileMetaDoc>(d)), { ordered: false });
+  derivedDocs.push(...chunkDocs.filter(Boolean));
+
+  // The commit. Replace-by-id rather than a bare insert, for two reasons: a transaction aborts on its first
+  // duplicate key (the old `ordered: false` tolerance cannot exist inside one), and a write conflict makes
+  // `withTransaction` run this callback again from the top.
+  const files = col<FileMetaDoc>(spaceCollection(spaceId, 'files'));
+  try {
+    await writeUnderClaim(spaceId, opts.claim, async session => {
+      for (let i = 0; i < derivedDocs.length; i += INSERT_BATCH) {
+        const batch = derivedDocs.slice(i, i + INSERT_BATCH);
+        await files.deleteMany(asFilter<FileMetaDoc>({ _id: { $in: batch.map(d => d._id) } }), { session });
+        await files.insertMany(batch.map(d => asDoc<FileMetaDoc>(d)), { session });
+      }
+    });
+  } catch (err) {
+    // The sidecar FILES were written before the commit, so a refused commit can leave them at a path whose file has
+    // gone — moved or deleted mid-run — where sync would advertise them for ever. Only when the file is gone: under a
+    // claim lost to stall recovery the file is still there, and the same paths now belong to the run that replaced us.
+    const sourceGone = await resolveSafePathChecked(spaceId, originalId).then(p => fs.stat(p)).then(() => false, () => true);
+    if (isLeaseLost(err) && sourceGone && (convertedFileId || extractedImages.length > 0)) {
+      await rmArtifactPath(spaceId, `_converted/${originalId}.md`);
+      await rmArtifactPath(spaceId, `_extracted/${originalId}`);
+    }
+    throw err;
+  }
+
+  for (const job of imageJobs) {
+    await enqueueMediaJob(spaceId, job.path, job.mimeType, 'image').catch(err =>
+      log.warn(`Failed to enqueue extracted image ${spaceId}/${job.path}: ${err instanceof Error ? err.message : String(err)}`),
+    );
   }
 
   return { chunkCount: chunks.length, convertedFileId, embedFailures };
@@ -500,7 +537,7 @@ export async function storeConversionResults(
 async function rmArtifactPath(spaceId: string, relPath: string): Promise<void> {
   try {
     const abs = await resolveSafePathChecked(spaceId, relPath);
-    await fs.rm(abs, { recursive: true, force: true });
+    await removeTree(abs);
   } catch (err) {
     log.warn(`Failed to remove conversion artifact path ${spaceId}/${relPath}: ${err instanceof Error ? err.message : String(err)}`);
   }

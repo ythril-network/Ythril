@@ -20,7 +20,7 @@ import { writeFilterFor, writeOutcome } from './write-precondition.js';
 import { applyDeleteFields, setUnlessDeleted } from './delete-fields.js';
 import { mergeTagsAndProperties, mergePropertiesOrKeep, mergeTagsOrKeep } from './merge-fields.js';
 import { enqueueEmbedJob, retireEmbedJob } from './embed-queue.js';
-import { embeddingSuppressedFor } from './suppress-embeddings.js';
+import { embeddingSuppressedFor, recordTierAfterWrite } from './suppress-embeddings.js';
 import { LINK_CLASSES, assertLinkRecords, linksPointingAt, docsFromCollection, type LinkClass }
   from './link-adjacency.js';
 import type { RefKind } from '../config/types-knowledge.js';
@@ -181,8 +181,9 @@ export async function upsertEntity(
   // Suppression wins over all three — see `embeddingSuppressedFor`. Computing a vector here and skipping the
   // enqueue stored exactly what the flag forbids, with nothing to come back and remove it.
   // The RECORD tier is stated here, which it was not until 2026-09-02 — see `DupeCheckOpts`.
+  // The record tier is the one the write LEAVES: the stored flag unless this write states one (`Q-194`).
   const suppressed = embeddingSuppressedFor(spaceId, 'entity',
-    { type, suppressEmbeddings: opts?.suppressEmbeddings });
+    { type, suppressEmbeddings: recordTierAfterWrite(opts?.suppressEmbeddings, existing) });
   const needsVectorNow = !suppressed
     && (opts?.waitForEmbedding === true
       || opts?.checkDuplicates === true || opts?.checkContradictions === true);

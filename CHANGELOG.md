@@ -17,6 +17,80 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that has not finished; a write's sequence number is taken as part of the write and released when it settles,
   including inside a transaction, which holds it until it commits. A record a peer pushed with a sequence number
   above this instance's own counter is still served.
+- **A new space could stay "building" until the next restart.** Once its search indexes were ready, the space
+  recorded that in config.json, re-reading the file first so a concurrent edit is kept. On Docker Desktop the file
+  is a bind mount, and a read that landed while the file was being rewritten failed with `ENODATA` — and the
+  first such failure was taken as final. A read spoiled by a concurrent writer is now retried a few times; any
+  other error is still reported at once.
+- **A proxy space no longer gets collections at boot, and a hand-edited `proxyFor: []` is a real space everywhere
+  (`Q-80`, `Q-98`).** The boot initialisation walked every configured space, so each boot created a proxy's
+  collections — which creating it never made and deleting it (a config-only removal) never dropped; the restore
+  index rebuild walked proxies too. And "is this a proxy" was answered in two spellings that disagreed on an empty
+  member list: such a space was served as a real space and skipped as a proxy by the embed worker, the duplicate
+  and contradiction scanners, the prunes and the metrics, and deleted as a proxy with its collections left behind.
+  The loader now removes an empty `proxyFor` on load and reload (with a warning), and the boot and the restore
+  rebuild walk only the spaces that own collections. **Who is affected:** an instance with a proxy space (its boot
+  stops creating collections for it; ones already created are left as they are, empty), and one whose config was
+  edited by hand to hold `"proxyFor": []` (that space starts being embedded and scanned).
+- **Moving a file or folder leaves nothing at its old path, even while the file is still being processed.** A
+  document's conversion that finished after the move wrote its chunk records under the path the file had just
+  left — a folder that no longer existed, with nothing to ever delete them. The conversion now commits its records
+  in one transaction that holds only while its job is still claimed, and a move takes that claim before any bytes
+  leave, then re-queues the job at the new path. A run that finds its moved file missing no longer "cleans up a
+  deleted file" either — which deleted the job and records the move was carrying. And a move now carries
+  everything a file owns: a renamed file's chunks used to stay at the old path, a moved folder's chunks kept naming
+  parents that no longer existed (so deleting the moved file removed none of them), and the
+  `_converted/`/`_extracted/` sidecars moved for neither. REST `PATCH /api/files/:spaceId` and MCP `move_file` now
+  run the same move. **And a moved folder keeps its files' links** (`Q-164`): renaming one file re-created its
+  links under the new path, but moving a folder re-rooted the records and left every link naming a path that was
+  gone, so each file in it silently lost what it was linked to. Both now carry links through one step.
+- **A space delete no longer loses a race with the media worker, and one unfinished delete no longer blocks every
+  space operation until a restart.** Deleting a space while the worker was still converting one of its files failed
+  `ENOTEMPTY` when removing the files directory — the worker was writing artifacts under it — and the delete kept
+  its marker, as it must. But the marker was only ever resumed at boot, so every later rename and delete on the
+  instance answered `500 "… is still pending … It resumes automatically on restart"`. Three fixes: every removal of
+  a space's directories retries what a concurrent writer causes; a space being deleted or renamed away refuses new
+  file writes, which the media worker treats as an abandonment, like a moved file's; and the next rename or delete
+  finishes a pending op before it proceeds, refusing only when that fails again — with the reason.
+- **A slow or failing reranker no longer holds every search (`Q-157`).** Measured on a 5.6.0 instance: every
+  recall took 20 s — the reranker's time limit — and was answered in fused order anyway, while the same recall
+  without reranking took 90 ms. A reranker pass that fails, runs out its own time limit, or takes more than half of
+  it now sets the reranker aside for 30 s, doubling to 5 min; searches in between skip it at once and still report
+  `degraded: ["rerank_unavailable"]`. A background probe, never a user's search, brings it back. The assist
+  model's fallback rule and this one are now one module.
+- **A record's text rank is its rank among records of its own type (`Q-159`).** The text channel sorted every
+  type's matches together by raw MongoDB text score, whose scale is each collection's own, so a fact could outrank
+  an entity only because facts are longer — the comparison reciprocal rank fusion exists to avoid. The Query tab
+  now says what `fusedScore` is: a rank score, `1/(60 + rank by meaning) + 1/(60 + rank by text)`, about 0.016 to
+  0.033, never a similarity. **Who is affected:** the ORDER of a fused recall's results changes where several
+  record types matched the text.
+- **`filter`'s `total` counts what a name join matches (`Q-160`).** With `fromName`, `toName` or `entityName`, the
+  rows were right and `total` counted the whole collection — `count: 2, total: 86` on a space of 86 edges — so a
+  caller comparing the two, as the tool tells it to, read on for pages that did not exist. Both doors.
+- **A recall across spaces ranks by relevance, not by which spaces had a text match (`Q-82`).** Each space fused
+  its own candidates only when its text search found something, so a cross-space answer mixed rank scores near
+  0.03 with cosine scores near 0.3-0.9: without a reranker every result of a space whose text search missed came
+  before every result of one whose text search hit, whole spaces in blocks; with one, the rerank's unscored tail
+  did the same. The merged pool is now fused once — one ranking by meaning over every candidate, and each space's
+  per-type text ranking as its own channel — so every result carries a `fusedScore` from the same fusion, spaces
+  interleave by relevance, and the reranker picks its candidates by that order. **Who is affected:** a `recall`
+  naming several spaces, a proxy, or no space — the ORDER of its results and the values of `fusedScore` on them.
+  A recall over one space is unchanged.
+- **A bulk edge whose end was a `$ref` to a fact or chrono entry was stored as an entity end (`Q-193`)** when the
+  item did not state the kind: it was checked for existence as the fact it named and stored pointing at an entity
+  that did not exist, so a traversal from the fact never found it. The edge now stores the kind of the record the
+  key names.
+- **A chrono entry rewritten through its `id` kept the vector of its old content (`Q-192`).** The converge branch
+  never queued the re-embed the insert branch queues, so the entry's search vector described what it no longer said.
+- **A record retired from meaning-ranked search got a vector anyway when it was rewritten without restating the
+  flag (`Q-194`)** — on every create endpoint with `waitForEmbedding` or `checkDuplicates`, through a batch, and on
+  the survivor of a merge. The write now decides suppression on the record it leaves: the stored flag unless the
+  write states one.
+- **`save_bulk` on MCP accepted a retired or unknown key and wrote nothing (`Q-195`)**: `{"memories": […]}`
+  answered success while the REST door refused it with a `400` naming `facts`. Both doors now run the same check
+  and refuse the same keys with the same message.
+- **An edge created with a property its label's schema defaults was stored without the default**, although the
+  default was what passed validation; the stored edge now carries the value that was checked.
 
 ## [5.6.0] — 2026-09-29
 

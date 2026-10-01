@@ -20,6 +20,7 @@
 import { Router } from 'express';
 import { toDocId } from '../util/paths.js';
 import fs from 'fs/promises';
+import { removeTree } from '../files/remove-tree.js';
 import path from 'path';
 import { requireSpaceAuth, denyReadOnly } from '../auth/middleware.js';
 import { globalRateLimit } from '../rate-limit/middleware.js';
@@ -29,7 +30,6 @@ import { openStoredRead, statStored, StoredFileUnreadable } from '../files/store
 import {
   listDir,
   createDir,
-  moveFile,
   listFilesRecursive,
   type FileEntry,
 } from '../files/files.js';
@@ -41,12 +41,12 @@ import { invalidateUsageCache } from '../quota/quota.js';
 import { resolveSafePath, resolveSafePathChecked, assertNoSymlinkEscape, spaceRoot } from '../files/sandbox.js';
 import { col, asFilter } from '../db/mongo.js';
 import type { FileMetaDoc } from '../config/types.js';
-import { deleteFileMeta, deleteFileMetaByPrefix, renameFileMeta, renameFileMetaByPrefix, markFileMetaDeletedByPrefix } from '../files/file-meta.js';
+import { deleteFileMeta, deleteFileMetaByPrefix, markFileMetaDeletedByPrefix } from '../files/file-meta.js';
+import { moveFileCascade } from '../files/move-cascade.js';
 import { writeFileTombstones } from '../files/tombstones.js';
 import { deleteFileCascade } from '../files/delete-cascade.js';
 import { resolveWriteTarget } from '../spaces/proxy.js';
 import { memberSpacesForRequest } from '../spaces/proxy-scoped.js';
-import { emitWebhookEvent } from '../webhooks/dispatcher.js';
 import { deleteConversionArtifactsByPrefix } from '../files/converters/pipeline.js';
 import { cancelMediaJobsByPrefix } from '../files/media/job-queue.js';
 import { contentTypeForDownload } from '../files/mime.js';
@@ -535,7 +535,7 @@ fileStoreRouter.delete('/:spaceId', globalRateLimit, requireSpaceAuth, denyReadO
         listFilesRecursive(targetSpace, `_extracted/${filePath}`),
       ])).flat();
 
-      await fs.rm(absPath, { recursive: true, force: false });
+      await removeTree(absPath, { mustExist: true });   // a converter may still be writing under it
       log.info(`Deleted directory ${absPath} (space: ${targetSpace})`);
       invalidateUsageCache(); // freed disk — reflect it in the next quota check
 
@@ -609,22 +609,9 @@ fileStoreRouter.patch('/:spaceId', globalRateLimit, requireSpaceAuth, denyReadOn
   }
 
   try {
-    // Collect the OLD paths before the move so we can tombstone them: sync has no rename
-    // detection, so without a tombstone the peer's manifest still advertises the source path
-    // and re-downloads it (the moved-away file resurrects). For a directory move these are the
-    // child files; for a single file it is the source path itself.
-    const movedChildren = await listFilesRecursive(targetSpace, srcPath);
-    const oldPaths = movedChildren.length > 0 ? movedChildren : [srcPath];
-
-    await moveFile(targetSpace, srcPath, destination);
-    await Promise.all([
-      renameFileMeta(targetSpace, srcPath, destination),
-      renameFileMetaByPrefix(targetSpace, srcPath, destination),
-    ]).catch(err => {
-      log.warn(`renameFileMeta error for space ${targetSpace}, ${srcPath} → ${destination}: ${err}`);
-    });
-    await writeFileTombstones(targetSpace, oldPaths);
-    emitWebhookEvent({ event: 'file.updated', spaceId: targetSpace, entry: { path: destination, previousPath: srcPath }, ...webhookToken(req) });
+    // The whole move — bytes, metadata, derived records, sidecars, jobs, tombstones, webhook — shared with MCP
+    // `move_file`, and ordered so a conversion still running on the source cannot write under the old path.
+    await moveFileCascade(targetSpace, srcPath, destination, webhookToken(req));
     res.json({ from: srcPath, to: destination });
   } catch (err) {
     if (err instanceof RangeError) {
