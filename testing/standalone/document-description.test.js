@@ -204,9 +204,16 @@ describe('provenance is recorded, not assumed', () => {
   });
 
   it('a reindex re-embeds the excerpt instead of dropping it', () => {
-    // The whole-space reindex builds its own embed text. Missing the excerpt there would silently strip
-    // the document's own words out of every converted record's embedding.
-    // The reindex loops moved to `brain/reindex.ts`; the guarantee is unchanged.
-    assert.match(src('server/src/brain/reindex.ts'), /fileEmbedText\([^)]*doc\.excerpt\)/);
+    // Missing the excerpt on a reindex would silently strip the document's own words out of every converted
+    // record's embedding. A reindex no longer builds text of its own (Q-99 part 2): it rebuilds each record
+    // through `embedStoredRecord`, whose `buildEmbedText` is the one file-text derivation. So the guarantee has two halves — the shared
+    // builder passes the excerpt, and the reindex builds no file text that could leave it out. The excerpt
+    // reaching the stored text is asserted behaviourally in `a-rebuild-embeds-what-the-producer-embedded-db.test.js`.
+    assert.match(src('server/src/brain/embed-record.ts'), /fileEmbedText\([^)]*\.excerpt\)/,
+      'the shared file-text builder must pass the excerpt');
+    const reindex = src('server/src/brain/reindex.ts');
+    assert.doesNotMatch(reindex, /fileEmbedText\(/,
+      'reindex.ts builds file text itself — a second derivation that once dropped the excerpt');
+    assert.doesNotMatch(reindex, /\bembed\(/, 'reindex.ts must embed nothing itself; it delegates to embedStoredRecord');
   });
 });

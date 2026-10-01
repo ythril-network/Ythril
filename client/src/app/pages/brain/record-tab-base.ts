@@ -1,8 +1,14 @@
-import { Directive, effect, inject, input, signal, untracked } from '@angular/core';
+import { DestroyRef, Directive, effect, inject, input, signal, untracked } from '@angular/core';
+import type { Observable } from 'rxjs';
 import { BrainStore } from './brain-store.service';
 import { EntityRefPicker } from './entity-ref-picker.service';
 import { RecordListState } from './record-list-state.service';
 import type { ListSort } from '../../core/brain-api.service';
+import { LatestWins } from '../../core/latest-wins';
+import { httpErrorReason } from '../../core/http-error';
+
+/** How long a typed column filter waits for typing to pause before the list reloads. */
+const FILTER_DEBOUNCE_MS = 250;
 
 /** The type/tag filter a record list is narrowed by. Empty strings mean "no filter". */
 export interface RecordFilter {
@@ -94,7 +100,30 @@ export abstract class RecordTabBase {
    * top bar's semantic search, which is untouched here.
    */
   search = signal('');
-  private _searchTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /**
+   * THE slot for this tab's rows (`Q-112`). Every answer that writes the rows — the list load and the semantic
+   * search alike — goes through it, so a slow answer to an older request can never replace a newer one's rows.
+   * One slot per destination: two (one per kind of request) would let a stale list answer replace a fresh search.
+   */
+  protected readonly rows = new LatestWins(inject(DestroyRef));
+  /** The pause before a typed column filter reloads — one wait for every filter, since `load()` reads them all. */
+  private readonly typing = new LatestWins(inject(DestroyRef));
+
+  /**
+   * Load the rows through the tab's slot, with the list's loading and failure state handled HERE — the part each
+   * tab used to write by hand. `apply` receives only the answer to the latest request.
+   */
+  protected loadRows<T>(source: Observable<T>, apply: (value: T) => void): void {
+    this.recordList.loading.set(true);
+    this.recordList.loadError.set(null);
+    this.rows.run(source, {
+      next: apply,
+      error: (e) => this.recordList.loadError.set(httpErrorReason(e)),
+      // Superseded: the newer request owns the indicator now, so it stays on.
+      finally: (superseded) => { if (!superseded) this.recordList.loading.set(false); },
+    });
+  }
 
   /** The `?search=` value to hand the API, or `undefined` when the freetext filter is empty. */
   protected searchParam(): string | undefined {
@@ -187,19 +216,15 @@ export abstract class RecordTabBase {
   setDescriptionFilter(value: string): void {
     this.recordFilter.update(f => ({ ...f, description: value }));
     this.skip.set(0);
-    if (this._descTimer) clearTimeout(this._descTimer);
-    this._descTimer = setTimeout(() => this.load(), 250);
+    this.typing.after(FILTER_DEBOUNCE_MS, () => this.load());
   }
-  private _descTimer?: ReturnType<typeof setTimeout>;
 
   /** Docked Properties header filter changed. Debounced — the server side scans (no index is possible). */
   setPropertiesFilter(value: string): void {
     this.recordFilter.update(f => ({ ...f, properties: value }));
     this.skip.set(0);
-    if (this._propsTimer) clearTimeout(this._propsTimer);
-    this._propsTimer = setTimeout(() => this.load(), 250);
+    this.typing.after(FILTER_DEBOUNCE_MS, () => this.load());
   }
-  private _propsTimer?: ReturnType<typeof setTimeout>;
 
   /**
    * Docked entity-NAME header filter (From / To / Entities).
@@ -209,10 +234,8 @@ export abstract class RecordTabBase {
   setNameFilter(key: 'fromName' | 'toName' | 'entityName', value: string): void {
     this.recordFilter.update(f => ({ ...f, [key]: value }));
     this.skip.set(0);
-    if (this._nameTimer) clearTimeout(this._nameTimer);
-    this._nameTimer = setTimeout(() => this.load(), 250);
+    this.typing.after(FILTER_DEBOUNCE_MS, () => this.load());
   }
-  private _nameTimer?: ReturnType<typeof setTimeout>;
 
   /**
    * Docked freetext header filter changed. Updates the value immediately (so the input stays
@@ -221,11 +244,10 @@ export abstract class RecordTabBase {
    */
   setSearchFilter(value: string): void {
     this.search.set(value);
-    if (this._searchTimer) clearTimeout(this._searchTimer);
-    this._searchTimer = setTimeout(() => {
+    this.typing.after(FILTER_DEBOUNCE_MS, () => {
       this.skip.set(0);
       this.load();
-    }, 250);
+    });
   }
 
   /** The `ListSort` to hand the API, or `undefined` when no column sort is active. */

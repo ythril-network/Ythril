@@ -5,9 +5,9 @@ import { FormsModule } from '@angular/forms';
 import { TranslocoPipe } from '@jsverse/transloco';
 import { catchError, of } from 'rxjs';
 import { Edge, Entity } from '../../core/api.types';
-import { recordOf, interactiveRecallBody, LatestWins, INTERACTIVE_DEBOUNCE_MS } from './recall-hits';
+import { recordOf, interactiveRecallBody } from './recall-hits';
+import { INTERACTIVE_DEBOUNCE_MS } from '../../core/latest-wins';
 import { BrainApi } from '../../core/brain-api.service';
-import { httpErrorReason } from '../../core/http-error';
 import { TagInputComponent } from '../../shared/tag-input.component';
 import { PropertiesViewComponent } from '../../shared/properties-view.component';
 import { PropertiesEditorComponent } from '../../shared/properties-editor.component';
@@ -301,19 +301,16 @@ export class EdgesTabComponent extends RecordTabBase {
   protected override load(): void {
     const spaceId = this.spaceId();
     if (!spaceId) return;
-    this.recordList.loading.set(true);
-    this.recordList.loadError.set(null);
-    const gf: { type?: string; tag?: string; description?: string; properties?: string; fromName?: string; toName?: string } = {};
+    const gf:{ type?: string; tag?: string; description?: string; properties?: string; fromName?: string; toName?: string } = {};
     if (this.recordFilter().type) gf.type = this.recordFilter().type;
     if (this.recordFilter().tag) gf.tag = this.recordFilter().tag;
     if (this.recordFilter().description) gf.description = this.recordFilter().description;
     if (this.recordFilter().properties) gf.properties = this.recordFilter().properties;
     if (this.recordFilter().fromName) gf.fromName = this.recordFilter().fromName;
     if (this.recordFilter().toName) gf.toName = this.recordFilter().toName;
-    this.brainApi.listEdges(spaceId, this.pageSize, this.skip(), gf, this.sortParam(), this.searchParam()).subscribe({
-      next: ({ edges }) => { this.store.edges.set(edges); this.recordList.loading.set(false); },
-      error: (e) => { this.recordList.loadError.set(httpErrorReason(e)); this.recordList.loading.set(false); },
-    });
+    // Through the tab's rows slot (Q-112): a newer filter's request, or a semantic search, cancels this one.
+    this.loadRows(this.brainApi.listEdges(spaceId, this.pageSize, this.skip(), gf, this.sortParam(), this.searchParam()),
+      ({ edges }) => this.store.edges.set(edges));
   }
 
   /**
@@ -323,16 +320,16 @@ export class EdgesTabComponent extends RecordTabBase {
    */
   onEdgeSearch(q: string): void {
     this.store.edgeSearch.set(q);
-    if (!q.trim()) { this.semanticSearch.cancel(); this.skip.set(0); this.load(); return; }
-    this.semanticSearch.after(INTERACTIVE_DEBOUNCE_MS, () => this.runSemanticEdgeSearch());
+    if (!q.trim()) { this.rows.cancel(); this.skip.set(0); this.load(); return; }
+    this.rows.after(INTERACTIVE_DEBOUNCE_MS, () => this.runSemanticEdgeSearch());
   }
 
   runSemanticEdgeSearch(): void {
     const q = this.store.edgeSearch().trim();
     const spaceId = this.spaceId();
-    if (!q || !spaceId) { this.semanticSearch.cancel(); this.store.edges.set([]); return; }
-    // Latest wins (Q-88): this search cancels the one before it.
-    this.semanticSearch.run(this.brainApi.recallBrain(spaceId, interactiveRecallBody(q, 'edge', 20)).pipe(
+    if (!q || !spaceId) { this.rows.cancel(); this.store.edges.set([]); return; }
+    // Latest wins (Q-88, Q-112): through the rows slot, so this search cancels the one before it AND a list load in flight.
+    this.loadRows(this.brainApi.recallBrain(spaceId, interactiveRecallBody(q, 'edge', 20)).pipe(
       catchError(() => of({ results: [], count: 0 })),
     ), res => {
       // The fields are the RECORD's, not the hit's (Q-87): read off the hit they were all undefined.
@@ -352,7 +349,6 @@ export class EdgesTabComponent extends RecordTabBase {
     });
   }
 
-  private readonly semanticSearch = new LatestWins();
 
   openEdgeForm(): void {
     const firstLabel = Object.keys(this.store.spaceMeta()?.typeSchemas?.edge ?? {})[0] ?? '';

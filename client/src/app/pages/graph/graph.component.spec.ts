@@ -12,9 +12,9 @@
  * chainable no-op so `ngAfterViewInit → initCytoscape()` runs without a DOM canvas; the OnPush
  * behaviour under test lives entirely in Angular's signal → change-detection path, not in cytoscape.
  */
-import { vi, describe, it, expect, beforeEach } from 'vitest';
+import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { TestBed } from '@angular/core/testing';
-import { of } from 'rxjs';
+import { NEVER, of } from 'rxjs';
 import { ActivatedRoute } from '@angular/router';
 
 vi.mock('cytoscape', () => {
@@ -275,5 +275,56 @@ describe('GraphComponent (OnPush)', () => {
       expect(traverseGraph).not.toHaveBeenCalled();
       expect(c.loadError()).toBeNull();
     });
+  });
+});
+
+describe('GraphComponent — a graph that cannot load says why (Q-155)', () => {
+  beforeEach(() => { TestBed.resetTestingModule(); vi.useFakeTimers(); });
+  afterEach(() => vi.useRealTimers());
+
+  /** A traversal that never answers, on a space whose indexes are building and whose queue is not empty. */
+  function createWaiting() {
+    const getSpaceStats = vi.fn(() => of({ spaceId: 'work', embedQueue: { pending: 7, processing: 1, failed: 0 } }));
+    const listSpaces = vi.fn(() => of({ spaces: [{ id: 'work', label: 'Work', indexStatus: 'building' }] }));
+    TestBed.configureTestingModule({
+      imports: [GraphComponent, getTranslocoModule()],
+      providers: [
+        { provide: SpacesApi, useValue: { ...makeApi(), listSpaces, getSpaceStats } },
+        { provide: BrainApi, useValue: { ...makeApi(), getEntity: () => of({ _id: 'ent-1', name: 'Ada', type: 'person' }), traverseGraph: () => NEVER } },
+        { provide: AuthApi, useValue: makeApi() },
+        { provide: ActivatedRoute, useValue: { snapshot: { queryParams: {} } } },
+      ],
+    });
+    const fixture = TestBed.createComponent(GraphComponent);
+    fixture.componentRef.setInput('embeddedSpaceId', 'work');
+    fixture.componentRef.setInput('focusEntityId', 'ent-1');
+    fixture.detectChanges();
+    return { fixture, c: fixture.componentInstance, getSpaceStats };
+  }
+
+  it('says nothing for the first moments, so a fast graph never flashes a warning', () => {
+    const { fixture, getSpaceStats } = createWaiting();
+    vi.advanceTimersByTime(1_000);
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('.loading-waiting')).toBeNull();
+    expect(getSpaceStats).not.toHaveBeenCalled();
+  });
+
+  it('after a few seconds, says it is still waiting and names what the space is doing', () => {
+    const { fixture } = createWaiting();
+    vi.advanceTimersByTime(3_100);
+    fixture.detectChanges();
+    const box = fixture.nativeElement.querySelector('.loading-waiting');
+    expect(box, 'the waiting text must appear').toBeTruthy();
+    expect(box.querySelectorAll('.loading-reason').length).toBe(2);
+  });
+
+  it('a request with no answer ends in the error state, carrying the same reasons, with Retry', () => {
+    const { fixture, c } = createWaiting();
+    vi.advanceTimersByTime(30_100);
+    fixture.detectChanges();
+    expect(c.loading()).toBe(false);
+    expect(c.loadError()).toBeTruthy();
+    expect(c.waitReasons().length).toBe(2);
   });
 });

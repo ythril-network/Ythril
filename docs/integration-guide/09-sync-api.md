@@ -20,7 +20,13 @@ POST /api/notify
 }
 ```
 
-Events: `vote_pending`, `member_departed`, `member_removed`, `space_deletion_pending`, `space_wipe_pending`, `sync_available`, `ping`.
+Events: `vote_pending`, `member_departed`, `member_removed`, `space_deletion_pending`, `space_wipe_pending`, `meta_change_pending`, `sync_available`, `ping`.
+
+The receiver keeps the recent events in memory for `GET /api/notify`, and that store is bounded by bytes as well as
+by count (500 events, 1 MiB), oldest out first.
+
+> **`meta_change_pending` was refused until 5.6.1 (`Q-108`).** A space's schema-change round sent it to every member
+> and no receiver listed it, so each answered `400` and the sender, which does not read the answer, never knew.
 
 **Response** `204`.
 
@@ -29,8 +35,13 @@ Events: `vote_pending`, `member_departed`, `member_removed`, `space_deletion_pen
 ### List Events
 
 ```http
-GET /api/notify?networkId=net-uuid&limit=50
+GET /api/notify?networkId=net-uuid&limit=50&skip=0
 ```
+
+Newest first. `limit` defaults to 50 and is held to 200; `skip` pages on. The answer says where it stands: `events`,
+`count` (rows in this page), `total` (events matching), `limit` (the one that applied), `skip`, `truncated`, and
+`nextSkip` exactly when there are more — the same fields every paged list answers with. `maxChars` / `maxBytes` bound
+the body as on the search routes. A non-numeric `limit` or `skip` is a `400`, never a default.
 
 ---
 
@@ -489,6 +500,14 @@ reader rather than merely non-conforming, and nothing else in the pipeline would
 - **Send your real watermark, and never a value higher than what you have applied.** Claiming a position you have not reached lets the other side drop tombstones you still need.
   - **And a watermark shared across several transfers may only reach where ALL of them are complete.** A cycle that fetches tombstones plus four collections under one `sinceSeq` must limit its next `sinceSeq` to the lowest position among the transfers that stopped early — a non-`2xx`, or a page cap. Taking the maximum instead claims a position the stopped transfer never reached, and its unserved records then sit behind your watermark permanently while every later cycle looks successful. Our own engine had this defect until 3.2.0.
 - **A peer that never pulls tombstones blocks pruning for its spaces** — deliberately, since "has not pulled" and "has caught up" must not look alike.
+
+**A page never gets ahead of a write that has not finished.** Every seq-paged route (the five record
+families, `filemeta` and `tombstones`) serves only seqs below the lowest seq this instance has allocated and
+not yet committed. A write takes its seq a moment before it stores the record, so without that horizon a page
+could hand you a later seq while an earlier one was still being written — and a watermark moved to the later
+seq would never come back for the earlier record. So it is safe to move your watermark to the highest seq a
+page returned, and a page that seems shorter than expected during heavy writes is the horizon holding the rest
+back for a cycle, not a gap. The push side applies the same horizon to what it sends.
 
 ### File Sync Artifacts
 

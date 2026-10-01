@@ -97,17 +97,16 @@ describe('and no writer resolves names for them', () => {
       'embed-record still resolves entity names; the two types that used them no longer take them');
   });
 
-  it('the reindex job resolves none for memory or file', () => {
-    // The third path to a stored vector, and the one that has drifted from the other two before: it used to
-    // embed raw entity IDs for edges and drop properties entirely.
+  it('the reindex job builds no embed text, so it cannot resolve names into one', () => {
+    // It was the third path to a stored vector, and the one that had drifted from the other two before: it used
+    // to embed raw entity IDs for edges and drop properties entirely. Since Q-99 part 2 a reindex rebuilds each
+    // record through `embedStoredRecord`, and its `buildEmbedText` (asserted name-free above) is the only derivation — so the rule here is
+    // that reindex.ts has no builder call and no name resolution of its own to get wrong.
     const s = src('server/src/brain/reindex.ts');
-    for (const call of ['factEmbedText', 'fileEmbedText']) {
-      const at = s.indexOf(`${call}(`);
-      assert.ok(at > 0, `reindex no longer calls ${call} — re-anchor this gate`);
-      const args = s.slice(at, s.indexOf(')', at));
-      assert.doesNotMatch(args, /entityNames|entityDocs/,
-        `reindex still passes entity names to ${call}, so a reindexed record embeds different text from a `
-        + 'freshly written one');
-    }
+    assert.ok(s.length > 1000, 'reindex.ts is gone or empty — re-anchor this gate');
+    assert.doesNotMatch(s, /\w+EmbedText\(/,
+      'reindex.ts builds embed text itself, so a reindexed record can embed different text from a freshly written one');
+    assert.doesNotMatch(s, /entityNames|entityDocs/,
+      'reindex.ts resolves entity names, whose only use would be an embed text');
   });
 });

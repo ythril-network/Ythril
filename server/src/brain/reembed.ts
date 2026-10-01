@@ -56,7 +56,7 @@
  */
 
 import { col, asFilter } from '../db/mongo.js';
-import { COLLECTION, } from './embed-record.js';
+import { COLLECTION, derivedHasText } from './embed-record.js';
 import { enqueueEmbedJob } from './embed-queue.js';
 import {
   embeddingSuppressed, schemaKeyFor, recordSuppression, recordNotSuppressedFilter,
@@ -190,7 +190,13 @@ export async function reembedSpace(
     // `$exists: false` on `embedding`, NOT a null check: the suppressed path `$unset`s the field, so a record
     // that was suppressed and later released has no key at all rather than a null one. A `null` filter would
     // find nothing and report a clean sweep over a space that is entirely unindexed.
-    const vectorless = { embedding: { $exists: false } } as Record<string, unknown>;
+    //
+    // A DERIVED file record with no text (a face crop, a converted or extracted copy) is never a candidate: it has
+    // nothing to embed, `embedStoredRecord` answers `textless` and leaves it vectorless, so a sweep that queued it
+    // would queue it again on every call and never report done. It used to be queued and embedded from its PATH.
+    const vectorless = (kind === 'file'
+      ? { embedding: { $exists: false }, $or: [{ parentFileId: { $exists: false } }, derivedHasText] }
+      : { embedding: { $exists: false } }) as Record<string, unknown>;
 
     // ── Suppression is EXCLUDED IN THE QUERY, and that is a correctness requirement, not a speed one ──
     //

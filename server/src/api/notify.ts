@@ -7,6 +7,8 @@
  */
 
 import { Router } from 'express';
+import { pageList } from '../brain/list-page.js';
+import { defaultBudgetChars } from '../brain/result-budget.js';
 import { z } from 'zod';
 import { requireAuth, isInstanceAdmin } from '../auth/middleware.js';
 import { notifyRateLimit } from '../rate-limit/middleware.js';
@@ -18,7 +20,7 @@ export const notifyRouter = Router();
 
 // ── Event schema ────────────────────────────────────────────────────────────
 
-const NotifyBody = z.object({
+export const NotifyBody = z.object({
   networkId: z.string().min(1),
   instanceId: z.string().min(1),  // caller's instanceId
   event: z.enum([
@@ -27,6 +29,9 @@ const NotifyBody = z.object({
     'member_removed',           // sent to the ejected instance after a remove vote passes
     'space_deletion_pending',
     'space_wipe_pending',       // a wipe round is open — pull it now rather than at the next scheduled sync
+    // A schema-change round is open. `spaces/meta-update.ts` has sent this since the schema vote shipped and it was
+    // never in this list, so every peer refused it with a 400 that the sender's fire-and-forget never read (`Q-108`).
+    'meta_change_pending',
     'sync_available',   // "I have new data, come pull me"
     'ping',             // health check / keep-alive
   ]),
@@ -44,8 +49,36 @@ interface NotifyEvent {
   receivedAt: string;
 }
 
-const _events: NotifyEvent[] = [];
 const MAX_EVENTS = 500;
+
+/** Bytes the notify ring may hold across its events — the axis the ring costs on, beside its count (`Q-108`). */
+const NOTIFY_RING_MAX_BYTES = 1024 * 1024;
+
+/**
+ * The kept events, bounded on BOTH axes: a count (`MAX_EVENTS`) and the bytes they hold (`NOTIFY_RING_MAX_BYTES`).
+ * Oldest first out, whichever bound binds. Counted alone, the ring was a count of unbounded things: 500 events of
+ * up to the JSON body limit each could hold gigabytes.
+ */
+class NotifyRing {
+  private readonly events: { event: NotifyEvent; bytes: number }[] = [];
+  private held = 0;
+
+  push(event: NotifyEvent): void {
+    const bytes = Buffer.byteLength(JSON.stringify(event), 'utf8');
+    this.events.push({ event, bytes });
+    this.held += bytes;
+    while (this.events.length > MAX_EVENTS || (this.held > NOTIFY_RING_MAX_BYTES && this.events.length > 0)) {
+      this.held -= this.events.shift()!.bytes;
+    }
+  }
+
+  /** Oldest first. */
+  list(): NotifyEvent[] { return this.events.map(e => e.event); }
+
+  bytes(): number { return this.held; }
+}
+
+export const notifyRing = new NotifyRing();
 
 // ── POST /api/notify ────────────────────────────────────────────────────────
 
@@ -103,8 +136,7 @@ notifyRouter.post('/', notifyRateLimit, requireAuth, (req, res) => {
     receivedAt: new Date().toISOString(),
   };
 
-  _events.push(entry);
-  if (_events.length > MAX_EVENTS) _events.shift(); // rolling window
+  notifyRing.push(entry);
 
   log.info(`Notify: [${event}] from ${instanceId} in network ${networkId}`);
 
@@ -202,9 +234,12 @@ notifyRouter.post('/', notifyRateLimit, requireAuth, (req, res) => {
 // ── GET /api/notify — list recent events (admin) ───────────────────────────
 
 notifyRouter.get('/', notifyRateLimit, requireAuth, (req, res) => {
-  const { networkId, limit = '50' } = req.query as Record<string, string>;
-  let results = _events.slice().reverse(); // newest first
+  const { networkId, limit, skip, maxChars, maxBytes } = req.query as Record<string, string | undefined>;
+  let results = notifyRing.list().reverse(); // newest first
   if (networkId) results = results.filter(e => e.networkId === networkId);
-  const pageSize = Math.min(parseInt(limit, 10) || 50, 200);
-  res.json({ events: results.slice(0, pageSize) });
+  // Q-130: the shared page rule, so a list cut at its page size says so and can be read on with `skip`. It was
+  // `slice(0, 200)` with nothing in the answer to tell a complete list from a cut one.
+  const page = pageList(results, { limit, skip, maxChars, maxBytes }, { defaultLimit: 50, maxLimit: 200, budgetChars: defaultBudgetChars('rest') });
+  if (!page.ok) { res.status(400).json({ error: page.error }); return; }
+  res.json({ events: page.rows, ...page.fields });
 });

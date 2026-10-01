@@ -53,7 +53,7 @@ Click **Create New Space**. Fill in:
 - **ID** — optional. Short lowercase identifier (auto-generated from the name if left blank).
 - **Max GiB** — optional storage quota. Leave blank for unlimited.
 - **Purpose** — optional description of what this space is for. Visible to AI assistants.
-- **Proxy for** — optionally mark this as a proxy space standing in for one or more other spaces (tick individual spaces or "all").
+- **Proxy for** — optionally mark this as a proxy space standing in for one or more other spaces (tick individual spaces or "all"). A proxy stores nothing of its own, so it gets no collections, is never embedded, scanned or swept, and deleting it removes only its entry. A space whose `config.json` entry says `"proxyFor": []` (only a hand edit writes one) is an ordinary space: the server removes the empty list when it reads the file and logs a warning naming the space.
 - **Validation mode** — the schema-validation posture for the new space: `off`, `warn`, or `strict`.
 - **Strict linkage** — a tickbox, on by default. While it is on, the space refuses to delete a record that another record still points at, and refuses a link to something that is not there. Untick it to allow both. This is the seventh field and the note below is about it as much as about validation.
 
@@ -204,6 +204,8 @@ All access to Ythril — from the web UI, REST API, or AI assistants — require
 | Library Access | Public schema library endpoints only (`/api/schema-library/public*`); no space data, no brain, no files |
 
 Tokens can also be **space-scoped** — restricted to a specific list of spaces. Spaces outside that list are invisible to the token. Library Access tokens are always space-less.
+
+**Tokens named `peer:…` belong to other instances in your networks**, and each has exactly one. Joining another network with the same instance hands it a new token, and the one it replaces is revoked at once — an instance keeps only the newest token you gave it, so the older one could never be used again. Instances that had collected several from earlier joins drop the unused ones the next time they start.
 
 ### Finding a token in the list
 
@@ -585,6 +587,8 @@ Open votes name a space as this instance calls it, so a round about a renamed sp
 ### Sync schedule
 
 Enter a cron expression on the network card (e.g. `*/5 * * * *` for every 5 minutes). Click **Sync now** to trigger an immediate sync without waiting. Leave the field empty for manual-sync only — that is a real setting, not an omission.
+
+**A network you joined before 5.6 had no schedule** and synced only when the other instance started a sync. It gets the every-15-minutes default the next time your instance starts, and the server log names each network it scheduled. A network you set to manual yourself keeps manual — but one cleared before this change cannot be told apart from one never set, so check the card after upgrading and clear it again if you meant manual.
 
 **A value the scheduler cannot run is refused, and the message tells you what to send instead.** A short form such as `every 5m` or `*/2 hours` is refused with the cron expression it means, so the fix is a copy and paste. Short forms already saved are converted on upgrade, so an existing network keeps its schedule.
 

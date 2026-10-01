@@ -23,7 +23,7 @@ spaces; the cog is the shortcut for the one you are working in.
 The same state is on both APIs as `needsReindex` on a space's meta, so an agent can check it without watching
 the screen.
 
-If the search index needs rebuilding (for example after the embedding model changes), a banner appears reading *"Embeddings are stale — a reindex is recommended."* Click **Reindex** to rebuild it.
+If the search index needs rebuilding (for example after the embedding model changes), a banner appears reading *"Embeddings are stale — a reindex is recommended."* Click **Reindex** to rebuild it. Every record is rebuilt from the same text it was written with — the passages of converted documents and the captions and transcripts of media included.
 
 > **Reindex and rebuild are different repairs.** *Reindex* re-embeds your content against the current model. It does **not** help when the search index itself is missing or broken — the symptom there is search quietly returning nothing at all, with no error. That one needs **Rebuild search indexes** on the space's **Danger** tab (see below).
 
@@ -279,7 +279,9 @@ means something different: the search did not finish, so it found nothing becaus
 themselves (so a part number, form id or clause name is found even though such a string carries almost no
 meaning for a language model). A record that scores on both ranks highest. If your administrator has
 configured a reranking model, the top candidates are then re-scored by a model that reads your question
-and each passage together.
+and each passage together. **Searching a proxy space ranks its members together:** the results of every member
+are combined into one ranking, so the best matches come first whichever space they live in — a member whose
+records matched your exact words is not pushed below one that only matched their meaning.
 
 None of that needs setting up, and none of it can make a search fail — a stage that is unavailable is
 simply skipped.
@@ -297,6 +299,13 @@ model, reranked a similar-sized set in under three seconds — the difference wa
 So there is no single number to expect. **If your records are long and you want reranking on more than a
 handful of results, ask your administrator to raise the reranking time limit** (`modelSlots.rerank.timeoutMs`,
 described in the hosting guide's model-slot table).
+
+**A reranker that fails or crawls is set aside for a while, so a search does not keep waiting for it.** When a
+reranking pass fails, runs out its time limit, or takes more than half of it, the searches after it skip reranking
+straight away — for 30 seconds at first, doubling each time it happens again, up to 5 minutes — and answer in the
+order by meaning, in well under a second instead of the full time limit. Ythril checks the reranker in the
+background and uses it again as soon as it answers within that half. Each search in between says the reranker did
+not run (`rerank_unavailable`), so a quiet reranker is never mistaken for a working one.
 
 **The search bars in the Entities, Facts, Edges and Chrono tabs, and the entity pickers, skip reranking.** You are
 waiting on them as you type, and on a busy model the reranking can take seconds for an order you will not read before
@@ -580,6 +589,11 @@ you land on the neighbourhood rather than on a lone node — then adjust with th
 Edges table the view is centred on the edge's **from** endpoint; the `to` endpoint is one hop away, so the
 edge itself is always on the canvas.
 
+**When the graph takes a while, it says why.** After three seconds of waiting the canvas says the server has
+not answered yet and names what it knows the space is doing: its search indexes being built (for example right
+after an upgrade), or records still waiting to be embedded. After thirty seconds without an answer the wait
+ends in an error with the same reasons and a **Retry** button, so a busy instance never shows an empty spinner.
+
 The Facts, Chrono and Files tables have no such button, because the search bar here finds entities.
 Those records are reachable *within* a graph — turn on the matching toggle and a walk brings back the facts,
 timeline entries and files that MENTION what it passes through, and the ones that mention each other as
@@ -601,7 +615,7 @@ edges between the same pair**, both are drawn side by side instead of one standi
 | Control | What it does |
 |---------|-------------|
 | **Search** | Find and load an entity as the root node |
-| **Depth** | How many hops out from the root to show (1–10) |
+| **Depth** | How many hops out from the root to show (1–10). The graph asks for the depth once the slider comes to rest, so dragging across several steps is one request for where you stopped, and the canvas always shows the depth the slider reads — never a slower answer for a step you dragged past |
 | **Direction** | Show outbound edges, inbound edges, or both. It applies to the edges you drew between entities — not to the facts, timeline entries and files that merely MENTION an entity. A mention runs one way, from the record to the entity, so there is no second direction to choose and those are always reached the same way |
 | **Labels** | Toggle edge labels. The pill is lit when labels are SHOWN, so switching it off hides them. By default a label is shown only on the edges of the node you have selected, and on an edge you hover — labelling every edge at once is unreadable on a dense graph, because the labels overlap each other and the nodes |
 | **Fit** | Zoom to fit the whole graph in view |

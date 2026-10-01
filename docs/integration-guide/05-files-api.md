@@ -240,6 +240,7 @@ them from outside and built a workaround they did not need.
 | | |
 |---|---|
 | **A move carries the whole record** | `description`, `tags`, `properties`, `sha256`, the embedding state and the link arrays all arrive at the new path. The record is re-inserted under the new key with every field intact. |
+| **What the file owns moves with it** | Its chunk records (`path#chunkN`), a converted document's Markdown (`_converted/…`) and extracted images (`_extracted/…`) are re-keyed to the new path, on disk and in the metadata, and each still names the moved file as its parent. A conversion still running when the move lands writes nothing under the old path: it is re-run where the file now is. Nothing is left under the old path to find with `filter`, and a later delete of the moved file removes all of it. The file's **links** (to entities, facts and chrono entries) follow it too, for a folder move as for a single rename. Asserted by `a-moved-file-leaves-nothing-at-its-old-path-db.test.js`. |
 | **A content rewrite touches only what you send** | `POST` with a body carrying no `description`, `tags` or `properties` changes the bytes, the size and the hash, and leaves those three exactly as they were. Sending one replaces that one. |
 
 **To hold a stable handle onto a file, mint your own id into `properties` and resolve it with a query**

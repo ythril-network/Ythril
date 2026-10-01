@@ -11,6 +11,10 @@
  * the whole fix: checked before the writes, the same race stays open. So this asserts the order in the
  * worker, and the integration test asserts the outcome.
  *
+ * The reconcile takes the run's CLAIM rather than the file id: a file missing from its path may have been MOVED,
+ * and a run whose claim a move took must not clean up what the move is carrying
+ * (`a-moved-file-leaves-nothing-at-its-old-path-db.test.js`).
+ *
  * Run: node --test testing/standalone/a-file-deleted-mid-job-leaves-nothing-behind.test.js
  */
 import { describe, it } from 'node:test';
@@ -34,6 +38,6 @@ describe('the worker reconciles a source deleted during its job', () => {
     assert.ok(recheck > embedderDone, 'no source re-check after the embedder: chunks written after a delete stay as orphans');
     assert.ok(complete > recheck, 'the re-check must come before the job is completed');
     const between = body.slice(recheck, complete);
-    assert.match(between, /reconcileDeletedSource\(spaceId, fileId\)/, 'a missing source must be reconciled, not only logged');
+    assert.match(between, /reconcileDeletedSource\(spaceId, claim\)/, 'a missing source must be reconciled, not only logged');
   });
 });

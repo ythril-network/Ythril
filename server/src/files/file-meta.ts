@@ -18,7 +18,7 @@ import { authorRef } from '../config/author.js';
 import { col, asFilter, asDoc, asUpdate } from '../db/mongo.js';
 import { reconcileLinks, removeLinksFrom, assertDesiredLinks } from '../brain/links.js';
 import { linksStartingFrom } from '../brain/link-adjacency.js';
-import { nextSeq } from '../util/seq.js';
+import { withSeq } from '../util/seq.js';
 import { expiryForCreate } from '../brain/ttl.js';
 import { enqueueEmbedJob } from '../brain/embed-queue.js';
 import { mergePropertiesOrKeep } from '../brain/merge-fields.js';
@@ -92,7 +92,8 @@ export async function upsertFileMeta(
   if (existing) {
     // `P-32`: an authored write advances the space counter, which is what pages this record to a peer.
     // A re-upload can change the description, the tags and the properties, so it is an authored write.
-    const $set: Record<string, unknown> = { updatedAt: now, sizeBytes, seq: await nextSeq(spaceId) };
+    // The seq is allocated AT the write below (`withSeq`, `Q-196`).
+    const $set: Record<string, unknown> = { updatedAt: now, sizeBytes };
     if (opts.description !== undefined) $set['description'] = opts.description;
     if (opts.tags !== undefined) $set['tags'] = opts.tags;
     if (opts.properties !== undefined) $set['properties'] = opts.properties;
@@ -107,31 +108,33 @@ export async function upsertFileMeta(
       const expireAt = expiryForCreate(spaceId, opts.ttlDays, { collection: 'file' });
       if (expireAt) $set['_expireAt'] = expireAt; else $unset['_expireAt'] = '';
     }
-    await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).updateOne(
+    await withSeq(spaceId, (seq) => col<FileMetaDoc>(spaceCollection(spaceId, 'files')).updateOne(
       asFilter<FileMetaDoc>({ _id: normalised }),
-      asUpdate<FileMetaDoc>({ $set, $unset }),
-    );
+      asUpdate<FileMetaDoc>({ $set: { ...$set, seq }, $unset }),
+    ));
   } else {
     // A per-record ttlDays wins; otherwise the space's `file` retention bucket applies. Files have their OWN
     // bucket rather than sharing one with a knowledge collection: they are the largest and most obviously
     // disposable of the five, and they have no type, so the schema tier cannot reach them.
     const expireAt = expiryForCreate(spaceId, opts.ttlDays, { collection: 'file' });
-    const doc: FileMetaDoc = {
-      _id: normalised,
-      spaceId,
-      path: normalised,
-      ...(opts.description !== undefined ? { description: opts.description } : {}),
-      tags: opts.tags ?? [],
-      ...(opts.properties !== undefined ? { properties: opts.properties } : {}),
-      createdAt: now,
-      updatedAt: now,
-      sizeBytes,
-      ...(opts.sha256 !== undefined ? { sha256: opts.sha256 } : {}),
-      author: authorRef(),
-      seq: await nextSeq(spaceId),
-      ...(expireAt ? { _expireAt: expireAt } : {}),
-    };
-    await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).insertOne(asDoc<FileMetaDoc>(doc));
+    await withSeq(spaceId, (seq) => {
+      const doc: FileMetaDoc = {
+        _id: normalised,
+        spaceId,
+        path: normalised,
+        ...(opts.description !== undefined ? { description: opts.description } : {}),
+        tags: opts.tags ?? [],
+        ...(opts.properties !== undefined ? { properties: opts.properties } : {}),
+        createdAt: now,
+        updatedAt: now,
+        sizeBytes,
+        ...(opts.sha256 !== undefined ? { sha256: opts.sha256 } : {}),
+        author: authorRef(),
+        seq,
+        ...(expireAt ? { _expireAt: expireAt } : {}),
+      };
+      return col<FileMetaDoc>(spaceCollection(spaceId, 'files')).insertOne(asDoc<FileMetaDoc>(doc));
+    });
   }
 
   // Both branches, unconditionally. A create enqueues for the reason every brain create does — the write
@@ -209,7 +212,7 @@ export async function setDerivedDescriptionIfUnset(
   descriptionSource?: 'generated' | 'extracted',
 ): Promise<boolean> {
   const _id = toDocId(filePath);
-  const r = await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).updateOne(
+  const r = await withSeq(spaceId, (seq) => col<FileMetaDoc>(spaceCollection(spaceId, 'files')).updateOne(
     asFilter<FileMetaDoc>({
       _id,
       $and: [
@@ -232,10 +235,10 @@ export async function setDerivedDescriptionIfUnset(
     } as never),
     asUpdate<FileMetaDoc>({
       // `P-32`: an authored write, so it advances the space counter and pages to a peer.
-      $set: { description, updatedAt: new Date().toISOString(), seq: await nextSeq(spaceId), ...(descriptionSource ? { descriptionSource } : {}) },
+      $set: { description, updatedAt: new Date().toISOString(), seq, ...(descriptionSource ? { descriptionSource } : {}) },
       ...(descriptionSource ? {} : { $unset: { descriptionSource: '' } }),
     }),
-  );
+  ));
   return r.modifiedCount > 0;
 }
 
@@ -382,18 +385,21 @@ export async function updateFileMeta(
   const linksGiven = opts.linkEntities !== undefined || opts.linkFacts !== undefined || opts.linkChronos !== undefined;
   const authored = linksGiven
     || [...Object.keys($set), ...Object.keys($unset)].some(k => k !== 'updatedAt' && !LOCAL_FILE_FIELDS.has(k));
-  if (authored) $set['seq'] = await nextSeq(spaceId);
-  else delete $set['updatedAt'];
-  const update = {
-    ...(Object.keys($set).length > 0 ? { $set } : {}),
-    ...(Object.keys($unset).length > 0 ? { $unset } : {}),
-  };
-  if (Object.keys(update).length > 0) {
+  if (!authored) delete $set['updatedAt'];
+  const write = async (): Promise<void> => {
+    const update = {
+      ...(Object.keys($set).length > 0 ? { $set } : {}),
+      ...(Object.keys($unset).length > 0 ? { $unset } : {}),
+    };
+    if (Object.keys(update).length === 0) return;
     await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).updateOne(
       asFilter<FileMetaDoc>({ _id: normalised }),
       asUpdate<FileMetaDoc>(update),
     );
-  }
+  };
+  // The seq is allocated AT the write (`withSeq`, `Q-196`); an unauthored write stamps none.
+  if (authored) await withSeq(spaceId, (seq) => { $set['seq'] = seq; return write(); });
+  else await write();
 
   // ONE enqueue, unconditionally, after the write. Not gated on which fields moved: any such condition
   // could only be computed from the read above, which is the stale value this change exists to stop using.
@@ -509,13 +515,13 @@ export async function markFileMetaDeleted(
   filePath: string,
 ): Promise<void> {
   const normalised = toDocId(filePath);
-  await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).updateOne(
+  await withSeq(spaceId, (seq) => col<FileMetaDoc>(spaceCollection(spaceId, 'files')).updateOne(
     asFilter<FileMetaDoc>({ _id: normalised }),
     // `P-32`: a deletion is an authored change. The file TOMBSTONE carries the removal to a peer; this
     // seq is what pages the soft-deleted record itself, so a peer sees the flag rather than a record
     // that simply stopped changing.
-    asUpdate<FileMetaDoc>({ $set: { deletedAt: new Date().toISOString(), seq: await nextSeq(spaceId) } }),
-  );
+    asUpdate<FileMetaDoc>({ $set: { deletedAt: new Date().toISOString(), seq } }),
+  ));
 }
 
 /**
@@ -572,33 +578,33 @@ export async function renameFileMeta(
     updatedAt: now,
   }));
 
-  /*
-   * The link records move with it, and this is the path that hides them.
-   *
-   * A file's `_id` IS its path, so a rename changes the identity every `file.*` link hangs off. The three
-   * arrays ride across by object spread, so their field names never appear here — a grep for `entityIds`
-   * finds nothing in this function, in either spelling. Without this the links would still name the OLD
-   * path: a `from` pointing at a record that no longer exists.
-   *
-   * Removed from the old id first and created under the new one, because the id is derived from the `from`
-   * — so there is no rename of a link record either, only a delete and a create. The tombstone that the
-   * removal writes is what stops a peer restoring the links under the old path on the next pull.
-   */
-  /*
-   * READ THE LINK ROWS FIRST, because they are now the only record of what this file linked to.
-   *
-   * This used to take the desired set off the file's own `entityIds`/`memoryIds`/`chronoIds` arrays. 5.0
-   * removed them, and reading them after the removal would have been reading nothing — a move would have
-   * silently detached every link on the file it moved.
-   */
-  const carried = await linksStartingFrom(spaceId, [normSrc]);
+  await carryFileLinks(spaceId, normSrc, normDst, existing.author ?? authorRef());
+}
+
+/**
+ * Move every link a file holds from its old path to its new one — for a single rename and for each file of a
+ * directory move alike (`Q-164`).
+ *
+ * A file's `_id` IS its path, so a move changes the identity every `file.*` link hangs off, and without this the
+ * links would still name the OLD path: a `from` pointing at a record that no longer exists. The single-file rename
+ * carried them inline; the directory move re-rooted the records and did not, so every file in a moved directory
+ * lost its links in silence. One function now, so the next move path cannot forget the step.
+ *
+ * READ THE LINK ROWS FIRST: since 5.0 they are the only record of what the file linked to. Removed from the old id
+ * and created under the new one, because a link's id is derived from its `from` — there is no rename of a link,
+ * only a delete and a create — and the tombstone the removal writes is what stops a peer restoring the links under
+ * the old path on the next pull.
+ */
+async function carryFileLinks(spaceId: string, fromId: string, toId: string, author: AuthorRef): Promise<void> {
+  const carried = await linksStartingFrom(spaceId, [fromId]);
+  if (carried.length === 0) return;
   const byKind = { entity: [] as string[], fact: [] as string[], chrono: [] as string[] };
   for (const row of carried) {
     const bucket = byKind[row.toKind as keyof typeof byKind];
     if (bucket) bucket.push(row.to);
   }
-  await removeLinksFrom(spaceId, normSrc, 'file');
-  await reconcileLinks(spaceId, normDst, 'file', byKind, existing.author ?? authorRef());
+  await removeLinksFrom(spaceId, fromId, 'file');
+  await reconcileLinks(spaceId, toId, 'file', byKind, author);
 }
 
 /**
@@ -624,8 +630,10 @@ export async function renameFileMetaByPrefix(
   if (srcPrefix === dstPrefix) return;
 
   const escaped = escapeRegex(srcPrefix);
+  // The files themselves only. Their derived records (chunks, sidecars) are re-rooted by `parentFileId` in
+  // `move-cascade.ts`: renamed here by id, a chunk kept the `parentFileId` of a path that no longer existed.
   const docs = await col<FileMetaDoc>(spaceCollection(spaceId, 'files'))
-    .find(asFilter<FileMetaDoc>({ _id: { $regex: `^${escaped}` } }))
+    .find(asFilter<FileMetaDoc>({ _id: { $regex: `^${escaped}` }, parentFileId: { $exists: false } }))
     .toArray() as FileMetaDoc[];
 
   if (docs.length === 0) return;
@@ -643,4 +651,8 @@ export async function renameFileMetaByPrefix(
     updatedAt: now,
   }));
   await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).insertMany(updated.map(d => asDoc<FileMetaDoc>(d)));
+  // Each file's links follow it, exactly as a single rename carries them (Q-164).
+  for (let i = 0; i < docs.length; i++) {
+    await carryFileLinks(spaceId, docs[i]!._id, updated[i]!._id, docs[i]!.author ?? authorRef());
+  }
 }

@@ -42,6 +42,7 @@ import { recordContradiction, contradictionPairId } from './contradiction-candid
 import { nliConfigured, nliIsLocal } from './nli-client.js';
 import type { ContradictionScannerConfig, DupeScanStateDoc, DupeScanType } from '../config/types.js';
 import { runExclusive } from '../util/single-flight.js';
+import { settledSeqRange } from '../util/seq.js';
 import { summariseRecall } from './recall-shape.js';
 import { armedSchedules } from '../util/armed-schedule.js';
 
@@ -330,7 +331,7 @@ export async function scanSpace(spaceId: string, opts?: { reset?: boolean }): Pr
       while (scanned < tune.maxPerRun && !stopThisType) {
         const take = Math.min(tune.batchSize, tune.maxPerRun - scanned);
         const batch = await col<{ _id: string; seq?: number }>(coll)
-          .find(asFilter<{ _id: string; seq?: number }>({ spaceId, seq: { $gt: cursor } }), { projection: { _id: 1, seq: 1 } })
+          .find(asFilter<{ _id: string; seq?: number }>({ spaceId, seq: await settledSeqRange(spaceId, cursor) }), { projection: { _id: 1, seq: 1 } })
           .sort({ seq: 1 })
           .limit(take)
           .toArray();

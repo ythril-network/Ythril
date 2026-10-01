@@ -5,9 +5,9 @@ import { FormsModule } from '@angular/forms';
 import { TranslocoPipe } from '@jsverse/transloco';
 import { catchError, of, switchMap } from 'rxjs';
 import { Fact } from '../../core/api.types';
-import { recordOf, interactiveRecallBody, LatestWins, INTERACTIVE_DEBOUNCE_MS } from './recall-hits';
+import { recordOf, interactiveRecallBody } from './recall-hits';
+import { INTERACTIVE_DEBOUNCE_MS } from '../../core/latest-wins';
 import { BrainApi } from '../../core/brain-api.service';
-import { httpErrorReason } from '../../core/http-error';
 import { TagInputComponent } from '../../shared/tag-input.component';
 import { PropertiesViewComponent } from '../../shared/properties-view.component';
 import { PropertiesEditorComponent } from '../../shared/properties-editor.component';
@@ -285,7 +285,6 @@ export class FactsTabComponent extends RecordTabBase {
   memoryForm = { fact: '', type: '', tags: [] as string[], linkEntities: '', description: '', properties: {} as Record<string, string | number | boolean> };
   editMemory = { fact: '', tags: [] as string[], linkEntities: '', description: '', properties: {} as Record<string, string | number | boolean> };
 
-
   protected override resetOnSpaceChange(): void {
     this.recordFilter.set({ type: '', tag: '', description: '', properties: '', fromName: '', toName: '', entityName: '' });
     this.filterEntity.set('');
@@ -294,8 +293,6 @@ export class FactsTabComponent extends RecordTabBase {
   protected override load(): void {
     const spaceId = this.spaceId();
     if (!spaceId) return;
-    this.recordList.loading.set(true);
-    this.recordList.loadError.set(null);
     const filters: { tag?: string; entity?: string; type?: string; description?: string; properties?: string; entityName?: string } = {};
     if (this.recordFilter().tag) filters.tag = this.recordFilter().tag;
     if (this.filterEntity()) filters.entity = this.filterEntity();
@@ -303,15 +300,13 @@ export class FactsTabComponent extends RecordTabBase {
     if (this.recordFilter().description) filters.description = this.recordFilter().description;
     if (this.recordFilter().entityName) filters.entityName = this.recordFilter().entityName;
     if (this.recordFilter().properties) filters.properties = this.recordFilter().properties;
-    this.brainApi.listFacts(spaceId, this.pageSize, this.skip(), filters, this.sortParam(), this.searchParam()).subscribe({
-      next: ({ facts }) => {
+    // Through the tab's rows slot (Q-112): a newer filter's request, or a semantic search, cancels this one.
+    this.loadRows(this.brainApi.listFacts(spaceId, this.pageSize, this.skip(), filters, this.sortParam(), this.searchParam()),
+      ({ facts }) => {
         this.store.facts.set(facts);
         const ids = [...new Set(facts.flatMap(m => m.linkEntities ?? []))];
         if (ids.length) this.picker.resolveEntityNames(ids);
-        this.recordList.loading.set(false);
-      },
-      error: (e) => { this.recordList.loadError.set(httpErrorReason(e)); this.recordList.loading.set(false); },
-    });
+      });
   }
 
   /**
@@ -321,16 +316,16 @@ export class FactsTabComponent extends RecordTabBase {
    */
   onMemorySearch(q: string): void {
     this.store.memorySearch.set(q);
-    if (!q.trim()) { this.semanticSearch.cancel(); this.skip.set(0); this.load(); return; }
-    this.semanticSearch.after(INTERACTIVE_DEBOUNCE_MS, () => this.runSemanticMemorySearch());
+    if (!q.trim()) { this.rows.cancel(); this.skip.set(0); this.load(); return; }
+    this.rows.after(INTERACTIVE_DEBOUNCE_MS, () => this.runSemanticMemorySearch());
   }
 
   runSemanticMemorySearch(): void {
     const q = this.store.memorySearch().trim();
     const spaceId = this.spaceId();
-    if (!q || !spaceId) { this.semanticSearch.cancel(); this.store.facts.set([]); return; }
-    // Latest wins (Q-88): this search cancels the one before it, hydration included.
-    this.semanticSearch.run(this.brainApi.recallBrain(spaceId, interactiveRecallBody(q, 'fact', 20)).pipe(
+    if (!q || !spaceId) { this.rows.cancel(); this.store.facts.set([]); return; }
+    // Latest wins (Q-88, Q-112): through the rows slot, so this search cancels the one before it AND a list load in flight, hydration included.
+    this.loadRows(this.brainApi.recallBrain(spaceId, interactiveRecallBody(q, 'fact', 20)).pipe(
       catchError(() => of({ results: [], count: 0 })),
       switchMap(res => {
       // The fields are the RECORD's, not the hit's (Q-87): read off the hit they were all undefined.
@@ -352,8 +347,6 @@ export class FactsTabComponent extends RecordTabBase {
       }),
     ), hydrated => this.store.facts.set(hydrated));
   }
-
-  private readonly semanticSearch = new LatestWins();
 
   applyFilter(type: 'tag' | 'entity', value: string): void {
     if (type === 'tag') this.recordFilter.set({ ...this.recordFilter(), tag: value });

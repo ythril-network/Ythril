@@ -27,12 +27,13 @@ import { log } from '../util/log.js';
 import { resolveWatermark, truncationWarn, type TransferOutcome } from './watermark.js';
 import { pullTombstones, pushTombstones } from './tombstone-transfer.js';
 import { applyConcludedSpaceRounds } from '../spaces/apply-wipe-round.js';
-import { bumpSeq, isSeqImplausible } from '../util/seq.js';
+import { bumpSeq, isSeqImplausible, settledSeqRange } from '../util/seq.js';
 import { adoptAnnouncedSpaces, announcedSpaces, healAnnouncedAliases } from '../networks/network-spaces.js';
 import { selfRecordFor } from '../networks/self-record.js';
 import { pullSpaceMetaFromUpstream } from './space-meta-pull.js';
 import { peerSafeFetch, isPeerUrlAllowed } from './peer-fetch.js';
 import { concludeRoundIfReady, sendMemberRemovedNotify } from './governance.js';
+import { admitPassedJoin } from '../networks/admit-passed-join.js';
 import { adoptPeerRound } from '../networks/round-local-state.js';
 import { enqueueMediaJob } from '../files/media/job-queue.js';
 import { resolveInputFormat } from '../files/converters/pipeline.js';
@@ -747,22 +748,8 @@ async function propagateVotesWithPeer(
           if (justPassed && round.type === 'remove') {
             sendMemberRemovedNotify(round.subjectUrl, round.subjectInstanceId, net.id);
           }
-          // For join rounds, add the held pending member on conclusion.
-          // Braintree: only the direct parent (the node that opened the round)
-          // admits — ancestor-voters must NOT add the joining node to their own
-          // member list. Other vote-governed types: only the instance holding
-          // the joiner's credentials admits (gossip-adopted round copies have
-          // pendingMember.tokenHash stripped).
-          if (justPassed && round.type === 'join' && round.pendingMember) {
-            const alreadyAdded = freshNet.members.some(m => m.instanceId === round.subjectInstanceId);
-            const mayAdmit = freshNet.type === 'braintree'
-              ? (!round.pendingMember.parentInstanceId || round.pendingMember.parentInstanceId === fresh.instanceId)
-              : Boolean(round.pendingMember.tokenHash);
-            const vetoed = round.votes.some(v => v.vote === 'veto');
-            if (!alreadyAdded && mayAdmit && !vetoed) {
-              freshNet.members.push(round.pendingMember);
-              log.info(`Join round ${round.roundId} concluded via gossip — added ${round.subjectLabel} to network ${net.id}`);
-            }
+          if (justPassed && admitPassedJoin(freshNet, fresh.instanceId, round)) {
+            log.info(`Join round ${round.roundId} concluded via gossip — added ${round.subjectLabel} to network ${net.id}`);
           }
         }
       }
@@ -1054,8 +1041,10 @@ async function pushToPeer(
     let seqCursor = lastSeqPushed;
     let truncated = false;
     while (true) {
+      // Settled seqs only (Q-196): `lastSeqPushed` moves to the last seq sent, so sending one above an
+      // unsettled write would step the watermark past a record this instance has not finished writing.
       const batch = await col<T>(collName)
-        .find(asFilter<T>({ seq: { $gt: seqCursor }, ...ownedFilter, ...extraFilter }))
+        .find(asFilter<T>({ seq: await settledSeqRange(spaceId, seqCursor), ...ownedFilter, ...extraFilter }))
         .sort({ seq: 1 })
         .limit(PUSH_BATCH_SIZE)
         .toArray() as T[];

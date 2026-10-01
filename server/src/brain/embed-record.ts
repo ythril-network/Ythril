@@ -17,10 +17,12 @@
 
 import { col, asFilter } from '../db/mongo.js';
 import { embed } from './embedding.js';
-import { factEmbedText, entityEmbedText, edgeEmbedText, chronoEmbedText, fileEmbedText } from './embed-text.js';
+import { factEmbedText, entityEmbedText, edgeEmbedText, chronoEmbedText, fileEmbedText, chunkEmbedText } from './embed-text.js';
 import { resolveEdgeEndpointNames } from './edge-endpoint-names.js';
-import { embeddingSuppressedFor } from './suppress-embeddings.js';
+import { embeddingSuppressedFor, recordSuppression, RECORD_SUPPRESS_FIELD } from './suppress-embeddings.js';
+import { isTransientEmbedError } from './embed-queue.js';
 import { getEmbeddingConfig } from '../config/loader.js';
+import { spaceCollection } from '../db/space-collection.js';
 import type {
   BrainEmbedRecordType, FactDoc, EntityDoc, EdgeDoc, ChronoEntry, FileMetaDoc,
 } from '../config/types.js';
@@ -36,6 +38,55 @@ export const COLLECTION: Record<BrainEmbedRecordType, string> = {
 // which is the round-trip A-3 removed along with the prepend. Both of its consumers are gone, so it goes rather
 // than sitting unused — and with it one Mongo query per embedded fact and per embedded file.
 
+/** A file record a conversion or a media job DERIVED from another file, rather than one somebody stored. */
+function isDerived(doc: Record<string, unknown>): boolean {
+  return typeof doc['parentFileId'] === 'string';
+}
+
+/** A derived record's text, or `null` when it has none: a face chunk, a converted or extracted copy. */
+function derivedText(doc: Record<string, unknown>): string | null {
+  const content = doc['content'];
+  if (typeof content !== 'string' || content === '') return null;
+  return chunkEmbedText(doc['headingText'] as string | null | undefined, content);
+}
+
+/**
+ * The derived records that HAVE text, as a Mongo fragment — the same rule as `derivedText` above, for a sweep.
+ *
+ * Beside the function it mirrors so the two are read together: a sweep that queued textless derived records would
+ * queue them on every call for ever, because nothing ever gives them a vector to stop matching "has no vector".
+ */
+export const derivedHasText: Readonly<Record<string, unknown>> = {
+  parentFileId: { $exists: true },
+  content: { $type: 'string', $ne: '' },
+};
+
+/** How far up `parentFileId` a derived record looks for its owner. A caption chunk of an image extracted from a
+ *  document is two levels down; nothing is deeper. */
+const MAX_ANCESTRY = 3;
+
+/**
+ * Whether a derived record's TOP-LEVEL file says its embeddings are suppressed.
+ *
+ * A chunk carries no flag of its own: its owner set one on the file. Read only one level up, the caption chunk of an
+ * image extracted from a suppressed document would still embed, because the extracted image is the parent and the
+ * document is the grandparent. A missing ancestor counts as suppressed — fail closed, because the alternative sends
+ * the passage to an embedder that may be external, against a choice nobody can see any more.
+ */
+async function ancestorSuppressed(spaceId: string, doc: Record<string, unknown>): Promise<boolean> {
+  let parentId = doc['parentFileId'];
+  for (let depth = 0; depth < MAX_ANCESTRY && typeof parentId === 'string'; depth++) {
+    const parent = await col(spaceCollection(spaceId, 'files')).findOne(
+      asFilter({ _id: parentId }),
+      { projection: { parentFileId: 1, [RECORD_SUPPRESS_FIELD]: 1 } },
+    ) as Record<string, unknown> | null;
+    if (!parent) return true;
+    if (recordSuppression(parent) === true) return true;
+    parentId = parent['parentFileId'];
+  }
+  return false;
+}
+
 /**
  * The exact string this record's vector is built from.
  *
@@ -46,7 +97,7 @@ export async function buildEmbedText(
   spaceId: string,
   recordType: BrainEmbedRecordType,
   doc: Record<string, unknown>,
-): Promise<string> {
+): Promise<string | null> {
   switch (recordType) {
     case 'fact': {
       const m = doc as unknown as FactDoc;
@@ -66,6 +117,10 @@ export async function buildEmbedText(
       return chronoEmbedText(c.title, c.type, c.status, c.description, c.tags ?? [], c.properties);
     }
     case 'file': {
+      // A DERIVED record (a chunk, a media chunk, a face chunk, a converted or extracted copy) carries no path text
+      // of its own: its producer embedded its `content`, or nothing at all. Building it from `_id` gave every chunk
+      // the vector of `docs/a.pdf#chunk0`, which is how a backfill used to "repair" one.
+      if (isDerived(doc)) return derivedText(doc);
       // `_id` IS the normalised path — `toDocId(filePath)` — so the path the vector is built from is the
       // stored one, not one the caller passed in and that may since have been renamed.
       const f = doc as unknown as FileMetaDoc & { _id: string };
@@ -81,7 +136,16 @@ export async function buildEmbedText(
  * findable. Neither is owed a vector, so neither may be retried: a retry would keep a job alive forever for
  * work that must never happen.
  */
-export type EmbedOutcome = 'embedded' | 'gone' | 'excluded' | 'unchanged';
+export type EmbedOutcome = 'embedded' | 'gone' | 'excluded' | 'unchanged' | 'textless';
+
+/**
+ * `rebuild`: make the vector again even when its text and model name are unchanged. A reindex is exactly that case —
+ * a prefix scheme, a dimension or the weights behind a model name changed, and "the same text with the same name" is
+ * no longer the same vector. Only a reindex asks for it.
+ */
+export interface EmbedStoredRecordOptions {
+  rebuild?: boolean;
+}
 
 /**
  * ## Why an UPDATE enqueues this instead of embedding inline
@@ -118,6 +182,7 @@ export async function embedStoredRecord(
   spaceId: string,
   recordType: BrainEmbedRecordType,
   recordId: string,
+  opts: EmbedStoredRecordOptions = {},
 ): Promise<EmbedOutcome> {
   const collName = `${spaceId}_${COLLECTION[recordType]}`;
   const doc = await col(collName).findOne(asFilter({ _id: recordId })) as Record<string, unknown> | null;
@@ -143,10 +208,23 @@ export async function embedStoredRecord(
   // suppressing.
   const text = await buildEmbedText(spaceId, recordType, doc);
 
+  // A derived record with no text is owed nothing, and whatever vector it holds came from a backfill that embedded
+  // its path. Decided BEFORE suppression, whose branch writes `matchedText` and would give the record a text it does
+  // not have. `faceEmbedding` is a different index of a different model and is not touched.
+  if (text === null) {
+    if ('embedding' in doc || 'embeddingModel' in doc || 'matchedText' in doc) {
+      await col(collName).updateOne(
+        asFilter({ _id: recordId }),
+        { $unset: { embedding: '', embeddingModel: '', matchedText: '' } },
+      );
+    }
+    return 'textless';
+  }
+
   // `matchedText` is what the lexical channel searches, so it is rewritten on EVERY outcome, not only when a vector is
   // stored (`Q-94`). Left as it was, a suppressed record kept matching the text it held when suppression began — a
   // deleted property went on being found, and shown as the record's matched text.
-  if (embeddingSuppressedFor(spaceId, recordType, doc)) {
+  if (embeddingSuppressedFor(spaceId, recordType, doc) || (isDerived(doc) && await ancestorSuppressed(spaceId, doc))) {
     await col(collName).updateOne(
       asFilter({ _id: recordId }),
       { $set: { matchedText: text }, $unset: { embedding: '', embeddingModel: '' } },
@@ -167,7 +245,7 @@ export async function embedStoredRecord(
   // from this text with this model. Any of the three conditions failing falls through and re-embeds.
   const configuredModel = getEmbeddingConfig().model;
   const vectorPresent = Array.isArray(doc['embedding']) && (doc['embedding'] as unknown[]).length > 0;
-  if (vectorPresent && doc['matchedText'] === text && doc['embeddingModel'] === configuredModel) {
+  if (!opts.rebuild && vectorPresent && doc['matchedText'] === text && doc['embeddingModel'] === configuredModel) {
     return 'unchanged';
   }
 
@@ -175,6 +253,12 @@ export async function embedStoredRecord(
   try {
     result = await embed(text);
   } catch (err) {
+    // A rebuild that fails because the EMBEDDER is away changes nothing. The record's text did not change, so its
+    // vector still describes it — under the old model, perhaps, but a model-change reindex keeps recall refused for
+    // the space until it is done. Unsetting here would strip a whole space's vectors at claim rate for as long as
+    // an outage lasts, and the job retries under the rebuild either way. Any other failure is the record's own,
+    // and takes the path below.
+    if (opts.rebuild && isTransientEmbedError(err instanceof Error ? err.message : String(err))) throw err;
     // The failed path, and the one retries and a dead letter end on (`Q-94`). The current text is written so the
     // lexical channel stops matching what the record no longer says, and the vector is DROPPED with it: that vector
     // is of text that is gone, and `matchedText` doubles as the "unchanged" fingerprint above — written beside a

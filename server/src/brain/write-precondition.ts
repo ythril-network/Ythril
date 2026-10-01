@@ -5,7 +5,7 @@
  *
  * The obvious shape is: read the record, compare its `seq` with the client's `If-Match`, then write.
  * That is a race with a longer window than the one it claims to close — every update function reads,
- * then awaits `nextSeq`, then embeds (a network call, on the slow paths), and only then writes. A
+ * then validates and resolves (a network call, on the slow paths), and only then writes. A
  * comparison made at the top has been stale for the whole of that.
  *
  * Putting `seq` in the update's own filter makes the check part of the write. MongoDB matches the
@@ -15,7 +15,7 @@
  *
  * ── Why `seq` is the right validator, and how to talk about it ──────────────────────────────────
  *
- * `seq` comes from `nextSeq(spaceId)` — a per-SPACE monotonic counter, not a per-record version. It
+ * `seq` comes from `withSeq(spaceId, …)` — a per-SPACE monotonic counter, not a per-record version. It
  * still answers the only question a precondition asks ("has this record been written since I read
  * it?"), because a record's `seq` changes on every write to that record and on no other event. What
  * it is NOT is a small counter that goes 1, 2, 3 for a given record, so nothing user-facing should

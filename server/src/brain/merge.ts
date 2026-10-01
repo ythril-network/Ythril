@@ -10,7 +10,8 @@
  */
 
 import { col, getMongo, asFilter, asDoc, asUpdate } from '../db/mongo.js';
-import { nextSeq } from '../util/seq.js';
+import { withSeq, withSeqHorizonHeld } from '../util/seq.js';
+import { writeTombstone } from './tombstones.js';
 import { NUMERIC_MERGE_FNS, BOOLEAN_MERGE_FNS } from '../config/types-knowledge.js';
 import { embed } from './embedding.js';
 import { entityEmbedText } from './embed-text.js';
@@ -22,12 +23,12 @@ import { edgeIdFor } from './edge-id.js';
 import { linkIdFor } from './links.js';
 import { rekeyEdge, embedQueueWorkFor } from './edge-rekey.js';
 import { enqueueEmbedJob, retireEmbedJob } from './embed-queue.js';
-import { embeddingSuppressedFor } from './suppress-embeddings.js';
+import { embeddingSuppressedFor, recordTierAfterWrite } from './suppress-embeddings.js';
 import { validateEdge } from '../spaces/schema-validation.js';
 import type { ResolvedEdgeEnds } from '../spaces/schema-validation.js';
 import { validateEntity, getSpaceMeta, applyValidation, type SchemaViolation } from '../spaces/schema-validation.js';
 import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';
-import type { EntityDoc, EdgeDoc, FileMetaDoc, LinkDoc, TombstoneDoc, PropertySchema } from '../config/types.js';
+import type { EntityDoc, EdgeDoc, FileMetaDoc, LinkDoc, PropertySchema } from '../config/types.js';
 import { spaceCollection } from '../db/space-collection.js';
 
 // ── Public types ───────────────────────────────────────────────────────────
@@ -489,9 +490,10 @@ export async function executeMerge(
   const deletedDuplicateEdgeIds: string[] = [];
 
   try {
-    await session.withTransaction(async () => {
+    // The horizon is held for the whole transaction: a write inside a session has not committed when it
+    // returns, so its seq must not be handed to a reader until the session has (`withSeqHorizonHeld`).
+    await withSeqHorizonHeld(spaceId, () => session.withTransaction(async () => {
       const now = new Date().toISOString();
-      const seq = await nextSeq(spaceId);
 
       const edgeColl = col<EdgeDoc>(spaceCollection(spaceId, 'edges'));
 
@@ -534,12 +536,7 @@ export async function executeMerge(
         if (survivorKeys.has(postKey)) {
           // This absorbed edge would collide — delete it as a duplicate.
           await edgeColl.deleteOne(asFilter<EdgeDoc>({ _id: edge._id }), { session });
-          const tombSeq = await nextSeq(spaceId);
-          await col<TombstoneDoc>(spaceCollection(spaceId, 'tombstones')).replaceOne(
-            asFilter<TombstoneDoc>({ _id: edge._id }),
-            asDoc<TombstoneDoc>({ _id: edge._id, type: 'edge', spaceId, deletedAt: now, instanceId: getConfig().instanceId, seq: tombSeq }),
-            { upsert: true, session },
-          );
+          await writeTombstone(spaceId, { _id: edge._id, type: 'edge', deletedAt: now }, session);
           deletedDuplicateEdgeIds.push(edge._id);
         } else {
           edgesToRelink.push(edge);
@@ -580,14 +577,14 @@ export async function executeMerge(
          * the edge was authored by a PEER, whose copy would refuse our tombstone and end up holding two
          * rows. Dropping the write here would leave the edge pointing at the entity the merge just absorbed.
          */
-        const updates: Record<string, unknown> = { updatedAt: now, seq: await nextSeq(spaceId) };
+        const updates: Record<string, unknown> = { updatedAt: now };
         if (edge.from === absorbed._id) updates['from'] = survivor._id;
         if (edge.to === absorbed._id) updates['to'] = survivor._id;
-        await edgeColl.updateOne(
+        await withSeq(spaceId, (seq) => edgeColl.updateOne(
           asFilter<EdgeDoc>({ _id: edge._id }),
-          asUpdate<EdgeDoc>({ $set: updates }),
+          asUpdate<EdgeDoc>({ $set: { ...updates, seq } }),
           { session },
-        );
+        ));
       }
 
       /*
@@ -650,13 +647,13 @@ export async function executeMerge(
         // `faceEntityId` ONLY. The file's `entityIds` array went with the other five in 5.0, and its links
         // are re-keyed by the link half below; a face label is a different thing that happens to name an
         // entity, so it is still a field and still has to follow the merge.
-        const set: Record<string, unknown> = { updatedAt: now, seq: await nextSeq(spaceId) };
+        const set: Record<string, unknown> = { updatedAt: now };
         if (f.faceEntityId === absorbed._id) set['faceEntityId'] = survivor._id;
-        await fileColl.updateOne(
+        await withSeq(spaceId, (seq) => fileColl.updateOne(
           asFilter<FileMetaDoc>({ _id: f._id }),
-          asUpdate<FileMetaDoc>({ $set: set }),
+          asUpdate<FileMetaDoc>({ $set: { ...set, seq } }),
           { session },
-        );
+        ));
       }
 
       /*
@@ -684,25 +681,16 @@ export async function executeMerge(
         .toArray() as LinkDoc[];
       for (const link of affectedLinks) {
         const newId = linkIdFor(link.from, link.fromKind, survivor._id, 'entity');
-        const linkSeq = await nextSeq(spaceId);
         // UPSERT: the survivor may already be linked from the same record, and two records describing one
         // connection is what the derived id exists to prevent. Then the old row goes, with its tombstone.
-        await linkColl.replaceOne(
+        await withSeq(spaceId, (linkSeq) => linkColl.replaceOne(
           asFilter<LinkDoc>({ _id: newId, spaceId }),
           asDoc<LinkDoc>({ ...link, _id: newId, to: survivor._id, updatedAt: now, seq: linkSeq }),
           { upsert: true, session },
-        );
+        ));
         if (newId !== link._id) {
           await linkColl.deleteOne(asFilter<LinkDoc>({ _id: link._id, spaceId }), { session });
-          const linkTombSeq = await nextSeq(spaceId);
-          await col<TombstoneDoc>(spaceCollection(spaceId, 'tombstones')).replaceOne(
-            asFilter<TombstoneDoc>({ _id: link._id }),
-            asDoc<TombstoneDoc>({
-              _id: link._id, type: 'link', spaceId, deletedAt: now,
-              instanceId: getConfig().instanceId, seq: linkTombSeq,
-            }),
-            { upsert: true, session },
-          );
+          await writeTombstone(spaceId, { _id: link._id, type: 'link', deletedAt: now }, session);
         }
       }
 
@@ -718,7 +706,10 @@ export async function executeMerge(
        * document directly and never enqueues, so the queue's check — the last place suppression takes
        * effect — was never reached. Same shape as the creators, one path further along.
        */
-      const suppressed = embeddingSuppressedFor(spaceId, 'entity', { type: survivor.type });
+      // The survivor's own record tier too (`Q-194`): asked with `{ type }` alone, a survivor stored as
+      // retired from meaning-ranked search was handed a vector.
+      const suppressed = embeddingSuppressedFor(spaceId, 'entity',
+        { type: survivor.type, suppressEmbeddings: recordTierAfterWrite(undefined, survivor) });
       let embeddingFields: { embedding?: number[]; embeddingModel?: string } = {};
       if (!suppressed) {
         try {
@@ -777,20 +768,18 @@ export async function executeMerge(
         );
       }
 
-      await entityColl.updateOne(
-        asFilter<EntityDoc>({ _id: survivor._id }),
-        asUpdate<EntityDoc>({ $set: { properties: mergedProperties, tags: mergedTags, updatedAt: now, seq, ...embeddingFields } }),
-        { session },
-      );
+      const seq = await withSeq(spaceId, async (s) => {
+        await entityColl.updateOne(
+          asFilter<EntityDoc>({ _id: survivor._id }),
+          asUpdate<EntityDoc>({ $set: { properties: mergedProperties, tags: mergedTags, updatedAt: now, seq: s, ...embeddingFields } }),
+          { session },
+        );
+        return s;
+      });
 
       // ── 5. Delete absorbed entity + write tombstone ────────────────────
-      const absorbedSeq = await nextSeq(spaceId);
       await entityColl.deleteOne(asFilter<EntityDoc>({ _id: absorbed._id, spaceId }), { session });
-      await col<TombstoneDoc>(spaceCollection(spaceId, 'tombstones')).replaceOne(
-        asFilter<TombstoneDoc>({ _id: absorbed._id }),
-        asDoc<TombstoneDoc>({ _id: absorbed._id, type: 'entity', spaceId, deletedAt: now, instanceId: getConfig().instanceId, seq: absorbedSeq }),
-        { upsert: true, session },
-      );
+      await writeTombstone(spaceId, { _id: absorbed._id, type: 'entity', deletedAt: now }, session);
 
       // Store result on survivor for return
       Object.assign(survivor, {
@@ -800,7 +789,7 @@ export async function executeMerge(
         seq,
         ...embeddingFields,
       });
-    });
+    }));
   } finally {
     await session.endSession();
   }

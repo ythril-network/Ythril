@@ -259,9 +259,10 @@ describe('executeMerge relinks every collection that can reference an entity', (
   it('bumps seq on every relinked record, so the change replicates', () => {
     // A relink that does not advance `seq` is invisible to sync: a peer would keep the old link forever, and
     // the dangling reference would come back on the next pull.
-    const relinkBlocks = merge.split('nextSeq(spaceId)').length - 1;
+    // An allocation is `withSeq(spaceId` / `withAllocatedSeqs(spaceId` since `Q-196` — the write rides inside it.
+    const relinkBlocks = (merge.match(/\bwith(?:Seq|AllocatedSeqs)\(\s*spaceId\b/g) ?? []).length;
     assert.ok(relinkBlocks >= 4,
-      `only ${relinkBlocks} nextSeq calls — each relinked collection plus the survivor needs its own`);
+      `only ${relinkBlocks} seq allocations — each relinked collection plus the survivor needs its own`);
   });
 
   it('dedupes after relinking, so a record linked to BOTH does not hold the survivor twice', () => {

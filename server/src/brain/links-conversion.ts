@@ -29,7 +29,7 @@
  * network-wide, so a marker there would announce one instance's finished conversion as everybody's.
  */
 import { col, asFilter } from '../db/mongo.js';
-import { nextSeq } from '../util/seq.js';
+import { withSeq } from '../util/seq.js';
 import { getConfig } from '../config/loader.js';
 import { updateSpace } from '../spaces/spaces.js';
 import { reconcileLinksForDocument, LINK_BEARING_COLLECTIONS } from './links.js';
@@ -125,9 +125,9 @@ export async function stampFileMetaSeqs(spaceId: string): Promise<number> {
     if (!doc) break;
     // One seq PER RECORD. A shared seq at a page boundary would leave the rest of that group unreachable,
     // because the cursor continues from the last item with `seq > since` and would step straight over them.
-    await col(spaceCollection(spaceId, 'files')).updateOne(
-      asFilter({ _id: doc._id }), { $set: { seq: await nextSeq(spaceId) } } as never,
-    );
+    await withSeq(spaceId, (seq) => col(spaceCollection(spaceId, 'files')).updateOne(
+      asFilter({ _id: doc._id }), { $set: { seq } } as never,
+    ));
     stamped++;
   }
   return stamped;

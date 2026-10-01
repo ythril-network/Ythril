@@ -4,7 +4,8 @@ import { reconcileLinks, removeLinksFrom, assertDesiredLinks } from './links.js'
 import { brainWriteSeqTotal } from '../metrics/registry.js';
 import { authorRef } from '../config/author.js';
 import { col, asFilter, asDoc, asUpdate } from '../db/mongo.js';
-import { nextSeq } from '../util/seq.js';
+import { withSeq } from '../util/seq.js';
+import { writeTombstone } from './tombstones.js';
 import { PROPERTIES_SCAN_MAX_MS } from './tag-filter.js';
 import { parseLimit, parseSkip } from '../util/pagination.js';
 import { toMongoSort, type SortSpec } from './list-sort.js';
@@ -17,7 +18,6 @@ import type { DupeCheckOpts } from './write-options.js';
 import { findInsertContradictions, type ContradictionWarning } from './insert-contradictions.js';
 import { deriveChronoStatus } from './chrono-status.js';
 import { datePassedPolicy, typesWhereDatePassedMeansNothing } from './chrono-date-policy.js';
-import { getConfig } from '../config/loader.js';
 import { stampExpiryOnCreate, applyExpiryToUpdate } from './ttl.js';
 import { stampSkewOnCreate } from './stamp-skew.js';
 import { getSpaceMeta, applyPropertyDefaults } from '../spaces/schema-validation.js';
@@ -25,9 +25,9 @@ import { classifyChronoUpsertAgainst, SchemaViolationError, type UpdateValidatio
 import { mergeTags, mergeProperties, mergePropertiesOrKeep } from './merge-fields.js';
 import { applyDeleteFields } from './delete-fields.js';
 import { enqueueEmbedJob, retireEmbedJob } from './embed-queue.js';
-import { embeddingSuppressedFor } from './suppress-embeddings.js';
+import { embeddingSuppressedFor, recordTierAfterWrite } from './suppress-embeddings.js';
 import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';
-import type { ChronoEntry, ChronoType, ChronoStatus, TombstoneDoc } from '../config/types.js';
+import type { ChronoEntry, ChronoType, ChronoStatus } from '../config/types.js';
 import { writeFilterFor, writeOutcome } from './write-precondition.js';
 import { spaceCollection } from '../db/space-collection.js';
 
@@ -181,7 +181,9 @@ export async function createChrono(
   }
   fields = { ...fields, properties: withDefaults };
 
-  const seq = await nextSeq(spaceId);
+  // The seq is allocated AT the write (`withSeq`, below), never here: everything awaited between an
+  // allocation and its write — the embed, the duplicate scan — holds every seq-paged reader of this space
+  // below it (`Q-196`).
   const now = new Date().toISOString();
   const status = fields.status ?? 'upcoming';
   const tags = fields.tags ?? [];
@@ -195,8 +197,9 @@ export async function createChrono(
   //
   // Hoisted, because the enqueue below consults the same answer. The RECORD tier is stated here, which it was
   // not until 2026-09-02 — see `DupeCheckOpts`.
+  // The record tier is the one the write LEAVES: the stored flag unless this write states one (`Q-194`).
   const suppressed = embeddingSuppressedFor(spaceId, 'chrono',
-    { type: fields.type, suppressEmbeddings: opts?.suppressEmbeddings });
+    { type: fields.type, suppressEmbeddings: recordTierAfterWrite(opts?.suppressEmbeddings, existing) });
   if (opts?.waitForEmbedding === true && !suppressed) {
     const embResult = await embed(embedText);
     embeddingFields = { embedding: embResult.vector, embeddingModel: embResult.model, matchedText: embedText };
@@ -228,7 +231,6 @@ export async function createChrono(
       status,
       tags: mergedTags,
       updatedAt: now,
-      seq,
       ...embeddingFields,
     };
     if (fields.endsAt !== undefined) $set['endsAt'] = fields.endsAt;
@@ -241,9 +243,15 @@ export async function createChrono(
       { collection: 'chrono', existing: existing as unknown as Record<string, unknown> });
     const updateOp: Record<string, unknown> = { $set };
     if (Object.keys($unset).length > 0) updateOp['$unset'] = $unset;
-    await col<ChronoEntry>(spaceCollection(spaceId, 'chrono')).updateOne(
-      asFilter<ChronoEntry>({ _id: existing._id }), asUpdate<ChronoEntry>(updateOp),
-    );
+    await withSeq(spaceId, (seq) => {
+      $set['seq'] = seq;
+      return col<ChronoEntry>(spaceCollection(spaceId, 'chrono')).updateOne(
+        asFilter<ChronoEntry>({ _id: existing._id }), asUpdate<ChronoEntry>(updateOp),
+      );
+    });
+    // The converge re-embeds as the insert does (`Q-192`): it rewrote the title and description the vector
+    // describes, and without the job the entry kept the vector of its old content. Same rule as `saveFact`.
+    if (!embeddingFields.embedding && !suppressed) await enqueueEmbedJob(spaceId, 'chrono', existing._id);
     const converged = { ...existing, ...($set as Partial<ChronoEntry>) } as ChronoEntry;
     if ('_expireAt' in $unset) delete (converged as { _expireAt?: unknown })._expireAt;
     // Both classes, from the CONVERGED document rather than the parameters: this branch merges, so what
@@ -273,7 +281,7 @@ export async function createChrono(
     author: authorRef(),
     createdAt: now,
     updatedAt: now,
-    seq,
+    seq: 0, // allocated at the insert below (`withSeq`)
     ...embeddingFields,
   };
   // Stored, not merely consulted — see the note in `saveFact`.
@@ -291,7 +299,10 @@ export async function createChrono(
   // Warn-not-refuse: a caller's own stamp checked against ours. Stored only when it disagrees beyond the space's
   // threshold, so presence is the signal. The write proceeds either way -- a backdated import is legitimate.
   stampSkewOnCreate(doc, getSpaceMeta(spaceId));
-  await col<ChronoEntry>(spaceCollection(spaceId, 'chrono')).insertOne(asDoc<ChronoEntry>(doc));
+  await withSeq(spaceId, (seq) => {
+    doc.seq = seq;
+    return col<ChronoEntry>(spaceCollection(spaceId, 'chrono')).insertOne(asDoc<ChronoEntry>(doc));
+  });
   if (!embeddingFields.embedding && !suppressed) await enqueueEmbedJob(spaceId, 'chrono', doc._id);
   // A chrono entry is the only record kind that holds TWO classes, and they are told apart by the to-kind
   // rather than by a field name — which is why one reconcile call takes both.
@@ -325,9 +336,9 @@ export async function updateChrono(
     ...(updates.linkFacts !== undefined ? { fact: updates.linkFacts } : {}),
   });
 
-  const seq = await nextSeq(spaceId);
   const now = new Date().toISOString();
-  const $set: Record<string, unknown> = { updatedAt: now, seq };
+  // `seq` is allocated at the write below (`withSeq`, `Q-196`).
+  const $set: Record<string, unknown> = { updatedAt: now };
   const $unset: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(updates)) {
     if (v !== undefined) $set[k] = v;
@@ -418,11 +429,14 @@ export async function updateChrono(
   // hands back the record as it was at WRITE time, so comparing its seq with the one read at the top of this
   // function is exactly the test for another writer landing in the window. Observation only — no write that
   // previously succeeded is now rejected.
-  const beforeWrite = await col<ChronoEntry>(spaceCollection(spaceId, 'chrono')).findOneAndUpdate(
-    asFilter<ChronoEntry>(writeFilterFor(id, ifMatchSeq)),
-    asUpdate<ChronoEntry>(updateOp),
-    { returnDocument: 'before' },
-  ) as ChronoEntry | null;
+  const beforeWrite = await withSeq(spaceId, (seq) => {
+    $set['seq'] = seq;
+    return col<ChronoEntry>(spaceCollection(spaceId, 'chrono')).findOneAndUpdate(
+      asFilter<ChronoEntry>(writeFilterFor(id, ifMatchSeq)),
+      asUpdate<ChronoEntry>(updateOp),
+      { returnDocument: 'before' },
+    );
+  }) as ChronoEntry | null;
   brainWriteSeqTotal.labels({
     collection: 'chrono',
     outcome: writeOutcome(!!beforeWrite, ifMatchSeq !== undefined, !!beforeWrite && beforeWrite.seq !== existing.seq),
@@ -742,7 +756,6 @@ export async function deleteChrono(
 ): Promise<boolean> {
   const existing = await col<ChronoEntry>(spaceCollection(spaceId, 'chrono'))
     .findOne(asFilter<ChronoEntry>({ _id: chronoId, spaceId }), { projection: { seq: 1 } }) as { seq?: number } | null;
-  const seq = await nextSeq(spaceId);
   const result = await col<ChronoEntry>(spaceCollection(spaceId, 'chrono')).deleteOne({
     _id: chronoId,
     spaceId,
@@ -754,20 +767,7 @@ export async function deleteChrono(
   // that 404s.
   await retireEmbedJob(spaceId, 'chrono', chronoId);
 
-  const tombstone: TombstoneDoc = {
-    _id: chronoId,
-    type: 'chrono',
-    spaceId,
-    deletedAt: new Date().toISOString(),
-    instanceId: getConfig().instanceId,
-    seq,
-    ...(existing?.seq !== undefined ? { originalSeq: existing.seq } : {}),
-  };
-  await col<TombstoneDoc>(spaceCollection(spaceId, 'tombstones')).replaceOne(
-    asFilter<TombstoneDoc>({ _id: chronoId }),
-    asDoc<TombstoneDoc>(tombstone),
-    { upsert: true },
-  );
+  await writeTombstone(spaceId, { _id: chronoId, type: 'chrono', originalSeq: existing?.seq });
   // The cascade — see `removeLinksFrom`. Links pointing AT this entry belong to the readers' slice.
   await removeLinksFrom(spaceId, chronoId, 'chrono');
   if (actor) emitWebhookEvent({ event: 'chrono.deleted', spaceId, entry: { _id: chronoId }, ...actor });
