@@ -238,9 +238,8 @@ function replacementFor(doc: Doc, defaults: Doc): unknown[] {
   return [{ $replaceWith: { $mergeObjects: [{ $literal: defaults }, carried, { $literal: doc }] } }];
 }
 
-const codeOf = writeErrorCode;
 const storeRefusal = (err: unknown): string =>
-  `the store refused it (${codeOf(err) !== undefined ? `error code ${codeOf(err)}` : 'no error code'})`;
+  `the store refused it (${writeErrorCode(err) !== undefined ? `error code ${writeErrorCode(err)}` : 'no error code'})`;
 
 /**
  * Store documents that arrived from elsewhere — see the module docblock for every rule this holds.
@@ -323,7 +322,7 @@ export async function writeArrivals(
      * step-down — is not the document's, and fails the page so it is offered again.
      */
     const classify = (d: Doc, err: unknown): void => {
-      if (codeOf(err) === DUPLICATE_KEY) dupes.push(d);
+      if (writeErrorCode(err) === DUPLICATE_KEY) dupes.push(d);
       else if (isDocumentRefusal(err)) out.refused.push({ _id: d._id, reason: storeRefusal(err) });
       else throw stopped(err);
     };
@@ -400,6 +399,9 @@ export async function writeArrivals(
   await bump(out.maxReceived);
 
   warnArrivalsNotStored(where, spaceId, family, 'refused', out.refused);
+  // A repeated id is a sender's bug or a page that overlapped itself: one copy was kept, by the accept rule.
+  warnArrivalsNotStored(where, spaceId, family, 'sent more than once in one page (the newest copy was kept)',
+    [...new Set(out.collapsed)]);
   warnArrivalsNotStored(where, spaceId, family, 'not applied: a uniquely-indexed duplicate of a record held '
     + 'here under another id (the local copy is kept)', out.duplicates);
   return out;

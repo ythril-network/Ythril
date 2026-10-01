@@ -268,15 +268,17 @@ describe('a pulled page lands by the receiver\'s rules', { skip }, () => {
       served[S.dup][fam.payloadKey] = [[make(hi), make(hi - 6)]];
       want.push({ coll: fam.collection, id, hi });
     }
-    const out = await engine.runSyncForPeer(PEER);
+    const { result: out, lines } = await capturingLogs(() => engine.runSyncForPeer(PEER));
     assert.equal(out.errors, 0, JSON.stringify(out));
     const wrong = [];
     for (const w of want) {
       const stored = await coll(S.dup, w.coll).findOne({ _id: w.id });
       if (stored?.seq !== w.hi) wrong.push(`${w.coll}/${w.id}: stored seq ${stored?.seq}, want ${w.hi}`);
+      // Lens S5: the collapse is reported, naming the id, rather than recorded and read by nobody.
+      if (!lines.some(l => l.includes('sent more than once') && l.includes(w.id))) wrong.push(`${w.coll}/${w.id}: collapse not reported`);
     }
     assert.deepEqual(wrong, [], 'a repeated id in one page let the OLDER version win: the page was applied in '
-      + 'arrival order instead of collapsing to the highest seq');
+      + 'arrival order instead of collapsing to the highest seq — or the collapse went unreported');
   });
 
   it('the counter is at least the max landed seq after EACH page, not only after the run', async () => {

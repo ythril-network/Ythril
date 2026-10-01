@@ -38,7 +38,6 @@ const EDGE_NAMESPACE = '8fdb66f3-a72f-574e-91a9-55e2a04e19a7';
  * second place for the separator to become forgeable.
  */
 export const idPart = (s: string): string => `${s.length}:${s}`;
-const part = idPart;
 
 /**
  * The `_id` for the relationship `(from) -[label]-> (to)`.
@@ -65,8 +64,8 @@ export function edgeIdFor(
   // id that disagrees with the kind stored beside it.
   const fk = edgeEndpointKind(fromKind as RefKind | undefined);
   const tk = edgeEndpointKind(toKind as RefKind | undefined);
-  const kinds = fk === 'entity' && tk === 'entity' ? '' : `${part(fk)}${part(tk)}`;
-  return uuidv5(`${part(from)}${part(to)}${part(label)}${kinds}`, EDGE_NAMESPACE);
+  const kinds = fk === 'entity' && tk === 'entity' ? '' : `${idPart(fk)}${idPart(tk)}`;
+  return uuidv5(`${idPart(from)}${idPart(to)}${idPart(label)}${kinds}`, EDGE_NAMESPACE);
 }
 
 /**

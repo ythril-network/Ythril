@@ -206,10 +206,11 @@ syncTombstonesRouter.get('/file-tombstones', syncRateLimit, requireAuth, async (
  */
 syncTombstonesRouter.post('/file-tombstones', syncRateLimit, requireAuth, denyReadOnly, async (req, res) => {
   try {
-    const { spaceId, tombstones } = req.body as { spaceId?: string; tombstones?: unknown[] };
+    // `spaceId` is typed as present: pushAllowed refuses the request (400) before anything reads it, if it is not.
+    const { spaceId, tombstones } = req.body as { spaceId: string; tombstones?: unknown[] };
     const { networkId } = req.query as Record<string, string>;
     // The space is named in the BODY on this route; the preamble is the same one every sync write runs.
-    if (pushAllowed(res, spaceId, networkId, req.authToken) === null || spaceId === undefined) return;
+    if (pushAllowed(res, spaceId, networkId, req.authToken) === null) return;
     if (!Array.isArray(tombstones)) { res.status(400).json({ error: 'tombstones must be array' }); return; }
 
     const spaceFiles = path.resolve(getDataRoot(), 'files', spaceId);
