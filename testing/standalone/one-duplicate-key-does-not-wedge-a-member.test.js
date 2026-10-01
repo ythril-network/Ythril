@@ -98,23 +98,31 @@ describe('one duplicate key does not wedge a member', () => {
      * sitting in the function, so a check for those passed while the behaviour it was meant to protect —
      * a genuine write fault reaching the caller — had been removed.
      */
+    /*
+     * Since Q-99 part 3 the two questions are answered by the shared reader of a bulk write's failures
+     * (`db/write-errors.ts`) rather than spelled inline, so the rule is pinned in two halves: the catch rethrows
+     * on either answer, and the shared functions answer them the way the rule needs.
+     */
     const block = applyFn();
-
-    const guardAt = block.indexOf('Array.isArray(');
-    assert.notEqual(guardAt, -1, 'no shape guard on the caught error: a fault carrying no writeErrors must rethrow');
-    assert.match(
-      statementAround(block, guardAt, 'the writeErrors shape guard'), /throw/,
-      'an error the handler cannot recognise as a bulk write result must be rethrown, not fall through into '
-      + 'code that assumes it is one',
-    );
-
-    const nonDupAt = block.search(/!==\s*11000/);
-    assert.notEqual(nonDupAt, -1, 'nothing separates duplicate-key errors from the rest');
-    assert.match(
-      block.slice(nonDupAt), /throw/,
+    const catchAt = block.search(/catch\s*\(\s*err\s*\)/);
+    assert.notEqual(catchAt, -1, 'batchUpsertBySeq no longer catches the page write — re-point this gate');
+    const guardAt = block.indexOf('if (', catchAt);
+    assert.notEqual(guardAt, -1, 'no guard in the catch: the caught error is never examined');
+    const guard = statementAround(block, guardAt, 'the catch guard');
+    assert.match(guard, /^\s*if\s*\(([^)]|\([^)]*\))*!bulkWriteFailures\(err\)([^)]|\([^)]*\))*\)\s*throw err\s*;/,
+      'no shape guard on the caught error: a fault carrying no writeErrors must rethrow, not fall through into '
+      + `code that assumes it is a bulk write result.\n\nguard:\n${guard}`);
+    assert.match(guard, /^\s*if\s*\(([^)]|\([^)]*\))*\|\|\s*!isDuplicateKeyOnly\(err\)\s*\)\s*throw err\s*;/,
       'a page containing a NON-duplicate write error must still fail loudly — absorbing every bulkWrite error '
-      + 'would turn real corruption into a warning nobody reads',
-    );
+      + `would turn real corruption into a warning nobody reads.\n\nguard:\n${guard}`);
+
+    const shared = stripComments(readFileSync('server/src/db/write-errors.ts', 'utf8'));
+    const failures = bodyOf(shared, 'bulkWriteFailures');
+    assert.match(failures, /if \(!writeErrors\) return null;/,
+      'bulkWriteFailures answers something for an error with no writeErrors, so the shape guard above never fires');
+    assert.match(bodyOf(shared, 'isDuplicateKeyOnly'), /failures\.every\(f => f\.code === DUPLICATE_KEY\)/,
+      'isDuplicateKeyOnly no longer requires EVERY failure to be a duplicate, so one real fault rides along');
+    assert.match(shared, /export const DUPLICATE_KEY = 11000;/, 'the duplicate-key code is not 11000');
   });
 
   it('a duplicate is REPORTED as a record, naming it', () => {

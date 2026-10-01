@@ -76,8 +76,18 @@ describe('the two builders take no entity names', () => {
      * paths and the one read path each resolved both ends in the entities collection. The function now takes
      * each endpoint's kind and resolves it where that kind lives.
      */
-    assert.match(src('server/src/brain/edges.ts'), /resolveEdgeEndpointNames/,
-      'nothing resolves an edge\'s endpoints to names any more, so it embeds raw ids');
+    /*
+     * Asserted at BOTH places an edge's embed text is built — the inline path of the edge planner (Q-99 part 3
+     * moved it out of `edges.ts`, which is now a door) and the queue's derivation — and asserted as the resolved
+     * names being the very values handed to `edgeEmbedText` as its endpoints. A bare mention of the resolver
+     * would pass with its result discarded and the raw ids embedded.
+     */
+    const RESOLVED_INTO_TEXT =
+      /\[(\w+), (\w+)\] = await resolveEdgeEndpointNames\([^)]*\);\s*(?:const \w+ = |return )edgeEmbedText\(\1, [\w.]+, \2[,)]/;
+    for (const site of ['server/src/brain/write-plan/plan-edge.ts', 'server/src/brain/embed-record.ts']) {
+      assert.match(src(site), RESOLVED_INTO_TEXT,
+        `${site} no longer hands resolved endpoint names to edgeEmbedText, so an edge embeds raw ids`);
+    }
   });
 });
 

@@ -192,7 +192,15 @@ describe('the knowledge types are named in one place per side', () => {
        * thing in the product that could REFUSE one of these names.
        */
       const decl = clean.slice(Math.max(0, clean.lastIndexOf(';', i) + 1), i);
-      const forcedComplete = /Record<\s*\w+/.test(decl);
+      /*
+       * `{ … } satisfies Record<Kind, X>` forces the same completeness from the other side of the literal —
+       * a missing key fails to compile, by name — so it is the same exemption, read after the object rather
+       * than before it (`PLAN_KINDS`, Q-99 part 3, and `COLLECTION_SUFFIX` are written this way). Keyed by
+       * `string` it forces nothing, so that spelling is not exempt.
+       */
+      const tail = clean.slice(j + 1, clean.indexOf(';', j + 1) < 0 ? clean.length : clean.indexOf(';', j + 1));
+      const forcedComplete = /Record<\s*\w+/.test(decl)
+        || /^\s*(?:as\s+const\s+)?satisfies\s+(?:Readonly<\s*)?Record<\s*(?!string\b)\w+/.test(tail);
       if (named.length === KINDS.length && !forcedComplete) hits.push(top.replace(/\s+/g, ' ').trim());
       i = j; // an object already reported is not re-scanned from the inside
     }
@@ -211,6 +219,14 @@ describe('the knowledge types are named in one place per side', () => {
       '}).strict();',
     ].join('\n');
     assert.equal(propertyEnumerationsIn(before).length, 1, 'the detector does not see the shape it exists for');
+  });
+
+  it('exempts a `satisfies Record<Kind, …>` table, and only a kind-keyed one', () => {
+    const body = '{ fact: 0, entity: 1, chrono: 2, edge: 3 }';
+    assert.deepEqual(propertyEnumerationsIn(`export const T = ${body} as const satisfies Record<PlanKind, number>;`), [],
+      'a table the compiler holds complete is the better gate, and flagging it pushes a correct table into a copy');
+    assert.equal(propertyEnumerationsIn(`export const T = ${body} as const satisfies Record<string, number>;`).length, 1,
+      'keyed by string, `satisfies` forces nothing — that is a copy');
   });
 
   it('and does NOT flag a deliberately different set', () => {

@@ -21,7 +21,7 @@ import { describe, it } from 'node:test';
 import { trackedSources } from './_sources.mjs';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
-import { balancedFrom } from './_structural-window.mjs';
+import { balancedFrom, bodyOf } from './_structural-window.mjs';
 import { routeBody, delegatesCleanly } from './_delegating-routes.mjs';
 
 const { isSpillPath, SPILL_DIR } = await import('../../server/dist/brain/spill-path.js');
@@ -49,20 +49,36 @@ describe('the spill directory is recognised at the root and nowhere else', () =>
 describe('the queue declines to embed a spill', () => {
   const queue = read('server/src/brain/embed-queue.ts');
 
-  it('the guard is in BOTH enqueue paths, before any write', () => {
+  it('the guard is in EVERY enqueue path, before any write', () => {
     // At the enqueue rather than the call site: `upsertFileMeta` enqueues unconditionally and that is right,
-    // because every other file in the store is content. Since Q-99 part 2 there are two enqueue paths — a write's
-    // `enqueueEmbedJob` and a sweep's bulk `enqueueEmbedJobs` — and the rule is one function both call first.
+    // because every other file in the store is content. The rule is one function every enqueue path calls before
+    // it writes. The paths are DERIVED — every exported `enqueue…EmbedJob(s)` — because Q-99 part 3 added a third
+    // (`enqueueWriteEmbedJobs`, the write commit's batch) that a list of two would never have looked at.
     const guard = queue.slice(queue.indexOf('function embeddable('));
     assert.match(guard.slice(0, guard.indexOf('\n}')), /recordType === 'file' && isSpillPath\(recordId\)/,
       'the shared guard must refuse a spill');
-    for (const name of ['enqueueEmbedJob', 'enqueueEmbedJobs']) {
-      const fn = queue.slice(queue.indexOf(`export async function ${name}(`));
-      // Bounded by the function's first write, not by a character count.
-      const beforeWrite = fn.slice(0, fn.indexOf('jobs(spaceId)'));
-      assert.ok(beforeWrite.length > 0, `${name} moved — re-point this gate`);
-      assert.match(beforeWrite, /embeddable\(recordType, (recordId|id)\)/,
-        `${name} must decline a spill before it writes anything`);
+    // The one batched jobs writer: it must filter through the guard before its first write, or every door that
+    // delegates to it is unguarded.
+    const batched = bodyOf(queue, 'runEmbedJobOps');
+    const batchedBeforeWrite = batched.slice(0, batched.indexOf('jobs(spaceId)'));
+    assert.ok(batchedBeforeWrite.length > 0 && batched.includes('jobs(spaceId)'), 'runEmbedJobOps moved — re-point this gate');
+    assert.match(batchedBeforeWrite, /\.filter\(\s*(\w+)\s*=>\s*embeddable\(\1\.recordType, \1\.recordId\)\)/,
+      'runEmbedJobOps must decline a spill before it writes anything');
+    const doors = [...queue.matchAll(/^export\s+async\s+function\s+(enqueue\w*EmbedJobs?)\(/gm)].map(m => m[1]);
+    for (const d of ['enqueueEmbedJob', 'enqueueEmbedJobs', 'enqueueWriteEmbedJobs']) {
+      assert.ok(doors.includes(d), `${d} is not an enqueue door any more — re-point this gate`);
+    }
+    for (const name of doors) {
+      const fn = bodyOf(queue, name);
+      // Bounded by the function's first write, not by a character count: either it guards and then writes, or
+      // its write IS the guarded batched writer.
+      const direct = fn.indexOf('jobs(spaceId)');
+      const delegated = fn.indexOf('runEmbedJobOps(');
+      assert.ok(direct > 0 || delegated > 0, `${name} writes no jobs any more — re-point this gate`);
+      if (direct > 0 && (delegated < 0 || direct < delegated)) {
+        assert.match(fn.slice(0, direct), /embeddable\(recordType, (recordId|id)\)/,
+          `${name} must decline a spill before it writes anything`);
+      }
     }
   });
 

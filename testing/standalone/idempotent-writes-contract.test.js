@@ -90,8 +90,14 @@ describe('identity is minted by the server', () => {
   it('an id may still ADDRESS an existing record', () => {
     // The half that must NOT be removed. Update and delete take an id, and records written before this ruling
     // may carry a non-UUID one — so those paths stay permissive, or the junk they created becomes undeletable.
-    const chrono = strip(readFileSync('server/src/brain/chrono.ts', 'utf8'));
-    assert.match(chrono, /_id: fields\.id, spaceId/,
+    //
+    // Since Q-99 part 3 the lookup is two halves of the chrono PLANNER, and both must hold: the supplied id is
+    // asked of the read set, and the record it names is what the plan converges on. Either alone is not the
+    // lookup — asked and never consulted, or consulted and never fetched, both mint a new record instead.
+    const chrono = strip(readFileSync('server/src/brain/write-plan/plan-chrono.ts', 'utf8'));
+    assert.match(chrono, /fields\.id \? \{ chrono: \[input\.fields\.id\] \}/,
+      'the chrono planner no longer asks the read set for the supplied id, so an update can no longer find its record');
+    assert.match(chrono, /const existing = fields\.id \? view\.stored\('chrono', fields\.id\)/,
       'the lookup-by-supplied-id path is gone, so an update can no longer find its record');
   });
 });
