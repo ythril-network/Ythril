@@ -103,11 +103,12 @@ describe('the delete half leaves a tombstone a peer can act on', () => {
      * than for ever.
      */
     const b = body();
-    const tombAt = b.search(/const tombSeq/);
-    const insAt = b.search(/const insertSeq/);
-    assert.ok(tombAt > 0 && insAt > 0, 'both seqs must be taken explicitly, so their ORDER is visible here');
-    assert.ok(tombAt < insAt,
-      'the insert seq is taken first, so a peer can advance past the insert and keep only the delete');
+    // ONE block of two (`withAllocatedSeqs`, `Q-196`): the tombstone takes the block's first seq and the insert
+    // the one after it, so the order is in the arithmetic rather than in which of two calls came first.
+    assert.match(b, /withAllocatedSeqs\(\s*spaceId\s*,\s*2\s*,\s*async\s*\(\s*tombSeq\s*\)/,
+      'both seqs must come from one block whose FIRST is the tombstone\'s, so their ORDER is visible here');
+    assert.match(b, /const insertSeq = tombSeq \+ 1/,
+      'the insert seq must be the one AFTER the tombstone\'s, or a peer can advance past the insert and keep only the delete');
 
     /*
      * AND each write must use the one it was given. Checking the declaration order alone pins a SPELLING:
@@ -115,7 +116,7 @@ describe('the delete half leaves a tombstone a peer can act on', () => {
      * and the gate would not notice. That is the same wrong-axis mistake this file was written to replace.
      */
     const tombWrite = b.slice(b.indexOf("'tombstones'"));
-    assert.match(tombWrite.slice(0, 400), /seq: tombSeq/,
+    assert.match(tombWrite.slice(0, 400), /seq: tombSeq|tombstoneDoc\(\s*spaceId\s*,\s*tombSeq\b/,
       'the tombstone is stamped with the later seq, so a peer can advance past the insert');
     const insertDoc = b.slice(b.indexOf('const stored ='));
     assert.match(insertDoc.slice(0, 300), /seq: insertSeq/,

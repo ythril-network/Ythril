@@ -39,8 +39,8 @@
  * includes `link` for exactly this, and it is the reason that tuple exists rather than the knowledge one.
  */
 import { col, asFilter, asDoc } from '../db/mongo.js';
-import { getConfig } from '../config/loader.js';
-import { nextSeq } from '../util/seq.js';
+import { withSeq } from '../util/seq.js';
+import { writeTombstone } from './tombstones.js';
 import { edgeIdFor } from './edge-id.js';
 import { legacyField, linksStartingFrom } from './link-adjacency.js';
 import { assertRefsResolve, ReferenceRefusal } from './entity-refs.js';
@@ -195,7 +195,6 @@ export async function reconcileLinks(
     .toArray() as Array<{ _id: string }>;
 
   const now = new Date().toISOString();
-  const instanceId = getConfig().instanceId;
   let added = 0;
   let removed = 0;
 
@@ -204,28 +203,25 @@ export async function reconcileLinks(
     // See `opts.additive`: the conversion reads a desired set out of the arrays, and a link that is
     // already a record has no array entry to be named by. Deleting on that basis is data loss.
     if (opts.additive) continue;
-    const seq = await nextSeq(spaceId);
     await col<LinkDoc>(spaceCollection(spaceId, 'links')).deleteOne(asFilter<LinkDoc>({ _id, spaceId }));
     // The tombstone is not optional. A link deleted without one comes back on the next pull from any peer
     // that still holds it, so the removal would undo itself and nothing would report that it had.
-    const tombstone: TombstoneDoc = { _id, type: 'link', spaceId, deletedAt: now, instanceId, seq };
-    await col<TombstoneDoc>(spaceCollection(spaceId, 'tombstones')).replaceOne(
-      asFilter<TombstoneDoc>({ _id }), asDoc<TombstoneDoc>(tombstone), { upsert: true },
-    );
+    await writeTombstone(spaceId, { _id, type: 'link', deletedAt: now });
     removed++;
   }
 
   const have = new Set(existing.map(e => e._id));
   for (const [_id, { to, toKind }] of wanted) {
     if (have.has(_id)) continue;
-    const seq = await nextSeq(spaceId);
     // A seq PER RECORD, not one for the batch. `pageBySeq` continues from the last item's seq with
     // `seq > since`, so two rows sharing a seq at a page boundary would leave the rest of that group
-    // unreachable — the cursor would step straight over them.
-    const doc: LinkDoc = { _id, spaceId, from, fromKind, to, toKind, author, createdAt: now, updatedAt: now, seq };
-    await col<LinkDoc>(spaceCollection(spaceId, 'links')).replaceOne(
-      asFilter<LinkDoc>({ _id, spaceId }), asDoc<LinkDoc>(doc), { upsert: true },
-    );
+    // unreachable — the cursor would step straight over them. Allocated AT the write (`Q-196`).
+    await withSeq(spaceId, (seq) => {
+      const doc: LinkDoc = { _id, spaceId, from, fromKind, to, toKind, author, createdAt: now, updatedAt: now, seq };
+      return col<LinkDoc>(spaceCollection(spaceId, 'links')).replaceOne(
+        asFilter<LinkDoc>({ _id, spaceId }), asDoc<LinkDoc>(doc), { upsert: true },
+      );
+    });
     // A re-created link clears the tombstone that retired it, or the next pull would delete it again on the
     // strength of a deletion the caller has since reversed.
     await col<TombstoneDoc>(spaceCollection(spaceId, 'tombstones')).deleteOne(asFilter<TombstoneDoc>({ _id }));

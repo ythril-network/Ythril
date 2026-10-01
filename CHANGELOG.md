@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A peer could miss a record for good when two writes overlapped (`Q-196`).** A write took its sequence number
+  a moment before it stored the record, and every page a peer pulls served whatever sequence numbers were stored —
+  so a later write that finished first could be handed out while an earlier one was still being stored, the peer
+  moved its watermark past it, and never came back for it. Every seq-paged route (the five record families,
+  `filemeta`, `tombstones`), the push loop and the duplicate and contradiction scanners now stop below any write
+  that has not finished; a write's sequence number is taken as part of the write and released when it settles,
+  including inside a transaction, which holds it until it commits. A record a peer pushed with a sequence number
+  above this instance's own counter is still served.
+
 ## [5.6.0] — 2026-09-29
 
 **A minor release: a filtered recall returns every record that matches, a search never writes into a space, and a

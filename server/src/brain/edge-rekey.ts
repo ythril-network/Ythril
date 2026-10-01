@@ -39,8 +39,9 @@
  */
 import { col, asFilter, asDoc } from '../db/mongo.js';
 import type { ClientSession } from 'mongodb';
-import { nextSeq } from '../util/seq.js';
+import { withAllocatedSeqs } from '../util/seq.js';
 import { getConfig } from '../config/loader.js';
+import { tombstoneDoc } from './tombstones.js';
 import { edgeIdFor } from './edge-id.js';
 import { withoutVector } from './read-projection.js';
 import type { EdgeDoc, TombstoneDoc } from '../config/types.js';
@@ -163,38 +164,37 @@ export async function rekeyEdge(
   if (taken) throw new EdgeIdentityTaken(newId, from, to, label);
 
   const now = new Date().toISOString();
-  // Taken in THIS ORDER — see the docblock. Reversing them is the one ordering that loses the edge on a peer.
-  const tombSeq = await nextSeq(spaceId);
-  const insertSeq = await nextSeq(spaceId);
+  // One block of two, taken in THIS ORDER — see the docblock. The tombstone gets the lower seq; reversing
+  // them is the one ordering that loses the edge on a peer. Every caller runs this inside a transaction and
+  // holds the horizon across it (`withSeqHorizonHeld`), because the block's release here precedes the commit.
+  return withAllocatedSeqs(spaceId, 2, async (tombSeq) => {
+    const insertSeq = tombSeq + 1;
 
-  await coll.deleteOne(asFilter<EdgeDoc>({ _id: existing._id }), { session });
-  await col<TombstoneDoc>(spaceCollection(spaceId, 'tombstones')).replaceOne(
-    asFilter<TombstoneDoc>({ _id: existing._id }),
-    asDoc<TombstoneDoc>({
-      _id: existing._id, type: 'edge', spaceId, deletedAt: now,
-      instanceId: getConfig().instanceId, seq: tombSeq,
-      ...(existing.seq !== undefined ? { originalSeq: existing.seq } : {}),
-    }),
-    { upsert: true, session },
-  );
+    await coll.deleteOne(asFilter<EdgeDoc>({ _id: existing._id }), { session });
+    await col<TombstoneDoc>(spaceCollection(spaceId, 'tombstones')).replaceOne(
+      asFilter<TombstoneDoc>({ _id: existing._id }),
+      asDoc<TombstoneDoc>(tombstoneDoc(spaceId, tombSeq, { _id: existing._id, type: 'edge', deletedAt: now, originalSeq: existing.seq })),
+      { upsert: true, session },
+    );
 
-  // The stored document carried forward, not rebuilt: `createdAt`, `author`, `tags`, `description` and
-  // `properties` describe the relationship, and the relationship did not change — only which entities it
-  // connects, or what it is called. Rebuilding would reset an edge's provenance on every entity merge.
-  const stored = { ...existing, ...alsoSet, _id: newId, from, to, label, updatedAt: now, seq: insertSeq } as EdgeDoc;
-  // BEFORE the write, never on the copy that is returned. Removing them from the response alone is what made
-  // a GET immediately contradict the 200 that created the row.
-  for (const key of alsoUnset) delete (stored as unknown as Record<string, unknown>)[key];
-  await coll.insertOne(asDoc<EdgeDoc>(stored), { session });
+    // The stored document carried forward, not rebuilt: `createdAt`, `author`, `tags`, `description` and
+    // `properties` describe the relationship, and the relationship did not change — only which entities it
+    // connects, or what it is called. Rebuilding would reset an edge's provenance on every entity merge.
+    const stored = { ...existing, ...alsoSet, _id: newId, from, to, label, updatedAt: now, seq: insertSeq } as EdgeDoc;
+    // BEFORE the write, never on the copy that is returned. Removing them from the response alone is what made
+    // a GET immediately contradict the 200 that created the row.
+    for (const key of alsoUnset) delete (stored as unknown as Record<string, unknown>)[key];
+    await coll.insertOne(asDoc<EdgeDoc>(stored), { session });
 
-  /*
-   * INSERTED with its vector, RETURNED without one.
-   *
-   * The stored document must keep the embedding — dropping it would blank the vector on every entity merge
-   * and take the edge out of recall until the queue caught up. But `merge.ts` reads its edges unprojected, so
-   * the document reaching here can carry a 768-float array, and `updateEdgeById` sends what this returns
-   * straight back as its 200. `upsertEdge` leaked exactly this way, measured against the live stack, and the
-   * fix was the same shape: strip at the return, not at the write.
-   */
-  return { edge: withoutVector(stored), previousId: existing._id };
+    /*
+     * INSERTED with its vector, RETURNED without one.
+     *
+     * The stored document must keep the embedding — dropping it would blank the vector on every entity merge
+     * and take the edge out of recall until the queue caught up. But `merge.ts` reads its edges unprojected, so
+     * the document reaching here can carry a 768-float array, and `updateEdgeById` sends what this returns
+     * straight back as its 200. `upsertEdge` leaked exactly this way, measured against the live stack, and the
+     * fix was the same shape: strip at the return, not at the write.
+     */
+    return { edge: withoutVector(stored), previousId: existing._id };
+  });
 }
