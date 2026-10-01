@@ -1,8 +1,12 @@
 /**
  * Which pulled documents sync actually writes, and how they are scoped.
  *
- * Extracted from `batchUpsertBySeq` in `sync/engine.ts` (god-file split, slice 2). The engine keeps the
- * Mongo IO; the decisions live in `upsert-plan.ts` and are tested here with no database at all.
+ * Extracted from `batchUpsertBySeq` in `sync/engine.ts` (god-file split, slice 2). Since `Q-107` part 1 the IO
+ * is the arrival writer's (`sync/arrivals.ts`, where `batchUpsertBySeq` moved as the writer's by-seq accept); the
+ * decisions still live in `upsert-plan.ts` — the pull's `planSeqUpserts` and the push's `planPushArrivals` — and
+ * are tested here with no database at all. Re-anchored: the writer is asserted to apply THIS `planSeqUpserts`,
+ * so the rule tested below is the one every door's write runs (seen red by mutation, restored by hand: the
+ * writer's accept replaced by a hand-written `>=`).
  *
  * Every mistake in this decision is silent:
  *
@@ -122,5 +126,81 @@ describe('retagToLocalSpace — synced documents belong to the local space', () 
 
   it('is a no-op on an empty batch', () => {
     assert.doesNotThrow(() => retagToLocalSpace([], 'ours'));
+  });
+});
+
+describe('the arrival writer applies this accept, and no copy of it', () => {
+  it('batchUpsertBySeq in sync/arrivals.ts calls planSeqUpserts for every write but a restore', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { stripComments } = await import('./_strip-comments.mjs');
+    const { bodyOf } = await import('./_structural-window.mjs');
+    const body = bodyOf(stripComments(readFileSync('server/src/sync/arrivals.ts', 'utf8')), 'batchUpsertBySeq');
+    assert.match(body, /if \(restore\) return \{ toWrite: docs, stored \};/, 'a restore no longer bypasses the accept');
+    assert.match(body, /toWrite: planSeqUpserts\(/, 'the writer accepts by a rule of its own instead of planSeqUpserts');
+    assert.doesNotMatch(body, /\.seq\s*>=?\s*\w+\.seq|seq\s*>=\s*prev/, 'a hand-written seq comparison is back beside planSeqUpserts');
+  });
+});
+
+describe('planPushArrivals — the push accept, decided as sequential processing decided it', () => {
+  let P;
+  before(async () => { P = await import('../../server/dist/sync/upsert-plan.js'); });
+  const plan = (kind, docs, over = {}) => P.planPushArrivals(docs, { kind, stored: new Map(), tombstones: new Map(), ...over });
+
+  it('facts [9, 3] for one id: inserted then skipped, and the 9 is the one write', () => {
+    const p = plan('facts', [doc('f', 9, { fact: 'nine' }), doc('f', 3, { fact: 'three' })]);
+    assert.deepEqual(p.verdicts, ['inserted', 'skipped']);
+    assert.deepEqual(p.accepts.get('f').map(a => a.doc.seq), [9]);
+  });
+
+  it('facts 5 then 6: inserted then updated, the 6 written last', () => {
+    const p = plan('facts', [doc('f', 5, { fact: 'a' }), doc('f', 6, { fact: 'b' })]);
+    assert.deepEqual(p.verdicts, ['inserted', 'updated']);
+    assert.equal(p.accepts.get('f').at(-1).doc.seq, 6);
+  });
+
+  it('an equal seq: equal text is skipped, divergent text forks; an entity never forks', () => {
+    assert.deepEqual(plan('facts', [doc('f', 5, { fact: 'x' }), doc('f', 5, { fact: 'x' })]).verdicts, ['inserted', 'skipped']);
+    const split = plan('facts', [doc('f', 5, { fact: 'x' }), doc('f', 5, { fact: 'y' })]);
+    assert.deepEqual(split.verdicts, ['inserted', 'forked']);
+    assert.equal(split.forks[0].doc.forkOf, 'f');
+    assert.deepEqual(plan('entities', [doc('e', 5), doc('e', 5)]).verdicts, ['upserted', 'skipped']);
+  });
+
+  it('a tombstone at or above the seq tombstones; one below is cleaned only when the record lands', () => {
+    const tombstones = new Map([['a', 7], ['b', 3]]);
+    const p = plan('entities', [doc('a', 7), doc('b', 4)], { tombstones });
+    assert.deepEqual(p.verdicts, ['tombstoned', 'upserted']);
+    assert.deepEqual(p.tombstoneCleanups.get('b'), { below: 4, onLanding: true });
+    assert.equal(p.tombstoneCleanups.has('a'), false);
+  });
+
+  it('two ids on one edge triplet in a page: the first is written, the second is a duplicate', () => {
+    const t = { from: 'A', to: 'B', label: 'knows' };
+    assert.deepEqual(plan('edges', [doc('g1', 5, t), doc('g2', 6, t)]).verdicts, ['upserted', 'duplicate']);
+  });
+
+  it('the fan-out cap counts stored and in-page siblings together; an existing fork is the same fork', () => {
+    const stored = new Map([['f', { seq: 5, fact: 'root' }]]);
+    const variants = Array.from({ length: 4 }, (_, i) => doc('f', 5, { fact: `v${i}` }));
+    const p = plan('facts', variants, { stored, siblings: new Map([['f', P.MAX_FORK_DEPTH - 2]]) });
+    assert.deepEqual(p.verdicts, ['forked', 'forked', 'forkRefused', 'forkRefused']);
+    const again = plan('facts', [variants[0]], { stored, siblings: new Map([['f', P.MAX_FORK_DEPTH]]),
+      existingForks: new Set([p.forkIds[0]]) });
+    assert.deepEqual([again.verdicts[0], again.forkIds[0], again.forks.length], ['forked', p.forkIds[0], 0]);
+  });
+
+  it('a fork id is derived: the same divergence gives the same id, a different text another, v4-shaped', () => {
+    const a = P.forkIdFor('f', 5, 'x');
+    assert.equal(a, P.forkIdFor('f', 5, 'x'));
+    assert.notEqual(a, P.forkIdFor('f', 5, 'y'));
+    assert.notEqual(a, P.forkIdFor('f', 6, 'x'));
+    assert.match(a, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  });
+
+  it('the chain walk stops at a cycle and one past the cap', () => {
+    const ring = new Map([['a', 'b'], ['b', 'a']]);
+    assert.equal(P.forkDepth('a', id => ring.get(id)), 2);
+    const long = (id) => (Number(id) < 100 ? String(Number(id) + 1) : undefined);
+    assert.equal(P.forkDepth('0', long), P.MAX_FORK_DEPTH + 1);
   });
 });
