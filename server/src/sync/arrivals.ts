@@ -259,8 +259,8 @@ export async function writeArrivals(
   const out: ArrivalOutcome = {
     inserted: [], updated: [], newerLocal: [], duplicates: [], refused: [], derived: [], collapsed: [], maxReceived: 0,
     enqueue: async () => {
-      // A file is queued by `ingestFileMeta` when its blob is here; a restore queues every restored file.
-      if (recordType === null || queued.length === 0 || (family === 'files' && !restore)) return;
+      // A file is queued by `ingestFileMeta` alone — when its blob is here, or on a restore — never here as well.
+      if (recordType === null || queued.length === 0 || family === 'files') return;
       const batch = queued.splice(0);
       await enqueueIngestedRecords(spaceId, recordType, batch);
     },
@@ -334,7 +334,7 @@ export async function writeArrivals(
           const keep = stored.get(d._id);
           // D-9 for a file: a stamp the stored copy has is kept by the merge itself (`$set`, never `$unset`).
           const stamps = keep?.['_expireAt'] !== undefined || keep?.['_contentExpireAt'] !== undefined ? {} : defaults.get(d._id);
-          return ingestFileMeta(spaceId, { ...stamps, ...d } as never);
+          return ingestFileMeta(spaceId, { ...stamps, ...d } as never, { restore });
         });
       } else {
         const update = (d: Doc) => replacementFor(d, defaults.get(d._id) ?? ({} as Doc));

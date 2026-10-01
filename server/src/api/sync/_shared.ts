@@ -217,7 +217,16 @@ export const IncomingFileMetaDoc = z.object({
  * Reached only through `writeArrivals` (`sync/arrivals.ts`), which shape-checks, collapses, accepts by seq,
  * stamps retention, and bumps the counter after the merge. The merge stays per document until `Q-107` part 2.
  */
-export async function ingestFileMeta(spaceId: string, incoming: z.infer<typeof IncomingFileMetaDoc>): Promise<boolean> {
+export async function ingestFileMeta(
+  spaceId: string,
+  incoming: z.infer<typeof IncomingFileMetaDoc>,
+  /**
+   * An admin RESTORE queues the file whether or not its blob is here — the export carries no bytes, and the
+   * restore's promise is "search comes back on its own". This function is the one place a merged file is queued,
+   * so the writer never queues one beside it.
+   */
+  { restore = false }: { restore?: boolean } = {},
+): Promise<boolean> {
   // A legacy read spill (Q-92) is one caller's search result an older peer wrote into the space. It travels in
   // neither direction now, and this is the one function both push and pull write file metadata through.
   if (spillIdFromPath(String(incoming._id))) return false;
@@ -237,7 +246,7 @@ export async function ingestFileMeta(spaceId: string, incoming: z.infer<typeof I
   // No seq is noted here: the writer's counter bump after the merge is what makes the seq visible (`Q-107`).
 
   const haveBytes = existing?.sha256 !== undefined || existing?.sizeBytes !== undefined;
-  if (haveBytes) await enqueueIngestedRecord(spaceId, 'file', incoming);
+  if (haveBytes || restore) await enqueueIngestedRecord(spaceId, 'file', incoming);
   return true;
 }
 

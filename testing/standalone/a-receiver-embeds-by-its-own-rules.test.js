@@ -254,6 +254,24 @@ describe('and the receiver decides whether to embed it', () => {
   });
 });
 
+describe('a merged file is queued in one place', () => {
+  it('ingestFileMeta queues a file, and the arrival writer never queues one beside it', () => {
+    /*
+     * Dup pass: a restored file was queued twice — by `ingestFileMeta` when its blob was here, and by the writer
+     * for every restore. Idempotent at the jobs collection, so nothing failed; two owners of one decision is the
+     * shape that drifts. Seen red by mutation, restored by hand: the writer's `family === 'files'` exclusion
+     * narrowed back to `!restore`.
+     */
+    const shared = src('server/src/api/sync/_shared.ts');
+    assert.match(bodyOf(shared, 'ingestFileMeta'), /if \(haveBytes \|\| restore\) await enqueueIngestedRecord\(spaceId, 'file', incoming\);/,
+      'ingestFileMeta no longer decides when a merged file is queued');
+    const writer = bodyOf(src('server/src/sync/arrivals.ts'), 'writeArrivals');
+    assert.match(writer, /if \(recordType === null \|\| queued\.length === 0 \|\| family === 'files'\) return;/,
+      'the arrival writer queues file metadata itself, beside ingestFileMeta');
+    assert.match(writer, /ingestFileMeta\([^;]*\{ restore \}\)/, 'the writer does not tell ingestFileMeta it is a restore');
+  });
+});
+
 describe('the record tier of suppression reaches the receiver', () => {
   it('every ingest schema that can embed declares the flag — and only the current spelling', async () => {
     /*
