@@ -42,28 +42,23 @@ const ROUTE = stripComments(readFileSync('server/src/api/sync/tombstones.ts', 'u
 const TRANSFER = stripComments(readFileSync('server/src/sync/tombstone-transfer.ts', 'utf8'));
 
 describe('both tombstone ingest paths wind the clock forward', () => {
-  it('the PULL folds the tombstone seq into the counter bump', () => {
+  it('the PULL folds the tombstone seq into the counter bump, and records are the writer\'s alone', () => {
     /*
-     * The FAMILIES are no longer named here: the bump reads the same `pulled` object the watermark does,
-     * because it was a third hand-written list and it omitted file metadata — so a file-meta record with
-     * a high seq left this counter beneath it, and the next local write could take a number below a
-     * record already received. Tombstones stay named, because they are not in that object.
+     * Re-anchored for `Q-107` part 1: every record a pull hands over is bumped over by the arrival writer, per
+     * landed chunk, so the engine's own bump covers ONLY what the writer never sees — the pulled tombstones. A
+     * second bump over the records here would be the same rule twice. Seen red by mutation, restored by hand: the
+     * record maxima folded back into the engine's bump.
      */
-    const at = ENGINE.indexOf('overallMaxSeq = Math.max(');
-    assert.notEqual(at, -1, 'the counter bump input is gone — re-point this gate');
+    const at = ENGINE.search(/^\s*overallMaxSeq = /m) + ENGINE.slice(ENGINE.search(/^\s*overallMaxSeq = /m)).search(/\S/);
+    assert.ok(ENGINE.search(/^\s*overallMaxSeq = /m) !== -1, 'the counter bump input is gone — re-point this gate');
     const stmt = statementAround(ENGINE, at, 'the overallMaxSeq assignment');
-    assert.match(stmt, /Object\.values\(pulled\)/,
-      'the bump must read the shared transfer set, not a list of its own — that list omitted a family');
-    assert.match(
-      stmt, /tombstones\.maxSeq/,
+    assert.match(stmt.trim(), /^overallMaxSeq = tombstones\.maxSeq;$/,
       'the tombstone transfer is excluded from the counter bump, so a peer\'s deletions leave this instance\'s '
-      + 'clock behind — and a record re-created here is then refused by every peer holding the tombstone.',
-    );
-    /*
-     * The per-family assertions that were here are subsumed by the `Object.values(pulled)` check above: the
-     * set is one object now, and `one-watermark-every-transfer` holds that object to every replicated
-     * collection. Naming them again here would be the hand-written list this change removed.
-     */
+      + 'clock behind — and a record re-created here is then refused by every peer holding the tombstone. And '
+      + 'nothing else may join it: the records are bumped by the writer.');
+    const writer = stripComments(readFileSync('server/src/sync/arrivals.ts', 'utf8'));
+    assert.match(bodyOf(writer, 'writeArrivals'), /await bumpSeq\(spaceId, top\)/,
+      'the arrival writer no longer bumps over what it received, so pulled records leave the counter behind');
   });
 
   it('the PUSH-side route bumps on what it received', () => {

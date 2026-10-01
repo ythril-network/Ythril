@@ -827,7 +827,7 @@ async function pullFromPeer(
   // Pull facts — use full=true to return complete docs in a single pass,
   // eliminating the N per-document secondary fetches that would be brutal over WAN.
   let highestSeq = sinceSeq;
-  let overallMaxSeq = 0; // Track the highest seq seen across ALL items (used to bump local counter)
+  let overallMaxSeq = 0; // the pulled tombstones' highest seq — the records are bumped by the writer
 
   type PullResult = { count: number; highSeq: number; maxSeq: number } & TransferOutcome;
   /*
@@ -943,28 +943,12 @@ async function pullFromPeer(
     seqOf: (t) => t.highSeq,
     warn: log.warn,
   });
-  // TOMBSTONES ARE IN THIS MAX, and their absence was a silent record-loss bug rather than an omission.
-  //
-  // The bump below exists so local writes always sort above anything received from this peer. A tombstone IS
-  // received from this peer and carries the deleting instance's seq — so excluding it left a quiet peer's
-  // counter behind a busy peer's deletions, and a record re-created there (same id, lower seq) was refused
-  // by every peer holding the tombstone, permanently, with a 200 the sender reads as success.
-  //
-  // The watermark line above passes every transfer and says why an omitted one is the dangerous one. This
-  // is the same argument about the same transfer, one line down.
-  //
-  // AND IT WAS A THIRD HAND-WRITTEN LIST, missing file metadata. `filemeta` is in `transfers` and was
-  // absent here, so a file-meta record arriving with a high seq left the local counter below it — and the
-  // next local write could take a seq beneath a record already received, which is the exact failure the
-  // bump exists to prevent. Derived from the same object now, so there is one enumeration for all three
-  // uses.
-  overallMaxSeq = Math.max(...Object.values(pulled).map(t => t.maxSeq), tombstones.maxSeq);
-
-  // Bump the local seq counter so future local writes always get a seq higher
-  // than any document received from this peer.  Without this, sync-upserted docs
-  // with high seq values from the source instance would sit above the local
-  // counter, causing newly written docs to get a lower seq that the pull
-  // watermark has already advanced past.
+  // THE TOMBSTONES' share of the counter bump — and only theirs. Every RECORD this pull handed over was bumped
+  // over by the arrival writer itself, per landed chunk (`writeArrivals`), so a second bump over the records here
+  // would be the same rule in two places. A tombstone is not written by the writer, and it IS received from this
+  // peer with the deleting instance's seq: left out, a quiet peer's counter stays behind a busy peer's deletions,
+  // and a record re-created there (same id, lower seq) is refused by every peer holding the tombstone, for good.
+  overallMaxSeq = tombstones.maxSeq;
   if (overallMaxSeq > 0) {
     await bumpSeq(spaceId, overallMaxSeq);
   }

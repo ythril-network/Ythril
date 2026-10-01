@@ -236,9 +236,11 @@ async function writePushed(spaceId: string, key: PushKey, docs: readonly Pushed[
  *  3. **Write** the winners through `writeArrivals`. A winner whose write fails (a unique-index duplicate, a store
  *     refusal) is replaced by the version the page accepted before it, so the outcome stays the sequential one.
  *     A stale tombstone is deleted only once its record has LANDED.
- *  4. **Bump** the counter over every plausible seq RECEIVED — written or not, tombstoned, skipped, refused as an
- *     unknown type — awaited, in a `finally`, before anything answers: the counter follows the peer's clock, and a
- *     bump over only what landed leaves it behind exactly where a re-created record is then refused.
+ *  4. **Bump** the counter over every plausible seq RECEIVED, awaited, in a `finally`, before anything answers. The
+ *     writer bumps over every document it is HANDED; this bump exists only for the ones the planner never hands it
+ *     — tombstoned, already current, an unknown chrono type, a fork refused at its cap, the earlier copies of an
+ *     id the page collapsed. The counter follows the peer's clock, and a bump over only what landed leaves it
+ *     behind exactly where a re-created record is then refused.
  *  5. **Forks**, last: a fork is a LOCAL write and takes a local seq, allocated from a counter that is already past
  *     everything this page carried — so it sorts above the arrival that caused it. The seq hold covers the fork
  *     write alone; its embed jobs are queued after the hold is released.
