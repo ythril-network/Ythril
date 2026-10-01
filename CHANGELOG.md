@@ -323,7 +323,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   instance missed it. It is now stored under the local space id, as a pulled record always was.
 - **A stale tombstone was deleted before the record that superseded it was written**, so a write that then failed
   lost both. It is deleted only once the record has landed.
-- **A page holding the same id twice could store the older copy**, on pull and on import. The highest seq now wins.
+- **A page holding the same id twice could store the older copy**, on pull and on import. The highest seq now wins,
+  and two copies at the same seq keep the first — the same reading the push door has always applied.
 - **`POST /api/sync/tombstones` accepted any number as a seq.** A tombstone with a seq inside the protocol's ceiling
   reserve is now refused on its own (and logged); it used to refuse every later copy of its record and drag the
   counter towards the ceiling.
