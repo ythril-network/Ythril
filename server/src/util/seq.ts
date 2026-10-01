@@ -70,14 +70,16 @@ async function highestStoredSeq(spaceId: string): Promise<number> {
 /**
  * Seeded from the counter AND from what is stored, because the two can disagree: a single-document sync push
  * stores the sender's seq without moving the counter, and an older version did the same. Seeded from the
- * counter alone, the bound hid every such record from every pull until the counter happened to pass it. When
- * the store is ahead, the counter is moved up to it, so this space's next allocation is above it too.
+ * counter alone, the bound hid every such record from every pull until the counter happened to pass it.
+ *
+ * It does NOT move the counter, though the store being ahead of it is its own defect (`Q-198`): a pull is a
+ * READ door, and `no-read-door-reaches-a-write` holds a read-only token to causing no write at all. Moving the
+ * counter belongs to the ingest that stored the record.
  */
 async function seededState(spaceId: string): Promise<SeqState> {
   const s = stateOf(spaceId);
   if (s.maxSeen === undefined) {
     const [counter, stored] = await Promise.all([currentSeq(spaceId), highestStoredSeq(spaceId)]);
-    if (stored > counter) await bumpSeq(spaceId, stored);
     // Another caller may have allocated while the reads were out; never move the bound backwards.
     s.maxSeen = Math.max(s.maxSeen ?? 0, counter, stored);
   }
