@@ -143,22 +143,52 @@ function candidates(kind: BrainEmbedRecordType, match: SweepOptions['match']): R
     : {};
 }
 
+/**
+ * The filters a sweep walks one kind by: `base`, the records it considers at all, and `allowed`, the ones suppression
+ * lets it queue. One rule for both callers: a suppressed record is skipped unless it still holds a vector to remove.
+ */
+function kindFilters(spaceId: string, kind: BrainEmbedRecordType, match: SweepOptions['match']) {
+  const base = candidates(kind, match);
+  const exclusion = suppressionExclusion(getSpaceMeta(spaceId), kind);
+  const holdsVector = { embedding: { $exists: true } };
+  const allowed = exclusion === 'all' ? holdsVector : { $or: [exclusion.query, holdsVector] };
+  return { base, allowed };
+}
+
+/** The kinds a walk still has ahead of it, and the `_id` bound inside the kind it stopped in. */
+function kindsFrom(kinds: BrainEmbedRecordType[], after: SweepCursor | undefined) {
+  const startAt = after ? EMBED_SWEEP_KINDS.indexOf(after.kind) : -1;
+  return kinds
+    .filter(kind => !(startAt >= 0 && EMBED_SWEEP_KINDS.indexOf(kind) < startAt))
+    .map(kind => ({ kind, resumeHere: after && after.kind === kind ? { _id: { $gt: after.lastId } } : {} }));
+}
+
+/**
+ * How many records a sweep stopped at `after` has still to queue — what a reindex's progress adds to the jobs already
+ * queued while its sweep is incomplete. Counted with the walk's own filters, so the number is the walk's work and not
+ * an estimate of it; without it the first poll of a run read "0 left" while every record waited.
+ */
+export async function countUnswept(
+  spaceId: string,
+  { match, after }: { match: SweepOptions['match']; after?: SweepCursor },
+): Promise<number> {
+  let n = 0;
+  for (const { kind, resumeHere } of kindsFrom(EMBED_SWEEP_KINDS, after)) {
+    const { base, allowed } = kindFilters(spaceId, kind, match);
+    n += await col(spaceCollection(spaceId, COLLECTION[kind] as 'facts'))
+      .countDocuments(asFilter({ $and: [base, allowed, resumeHere] }));
+  }
+  return n;
+}
+
 /** Queue the records of a space a sweep owes a job, kind by kind. See the module comment for what it guarantees. */
 export async function queueEmbedSweep(spaceId: string, opts: SweepOptions): Promise<SweepResult> {
-  const kinds = opts.kinds ?? EMBED_SWEEP_KINDS;
   const cap = opts.limit ?? Number.POSITIVE_INFINITY;
   const result: SweepResult = { enqueued: 0, skippedSuppressed: 0, byKind: {}, remaining: 0 };
-  const startAt = opts.after ? EMBED_SWEEP_KINDS.indexOf(opts.after.kind) : -1;
 
-  for (const kind of kinds) {
-    if (startAt >= 0 && EMBED_SWEEP_KINDS.indexOf(kind) < startAt) continue;
+  for (const { kind, resumeHere } of kindsFrom(opts.kinds ?? EMBED_SWEEP_KINDS, opts.after)) {
     const coll = col(spaceCollection(spaceId, COLLECTION[kind] as 'facts'));
-    const base = candidates(kind, opts.match);
-
-    // One rule for both callers: a suppressed record is skipped unless it still holds a vector to remove.
-    const exclusion = suppressionExclusion(getSpaceMeta(spaceId), kind);
-    const holdsVector = { embedding: { $exists: true } };
-    const allowed = exclusion === 'all' ? holdsVector : { $or: [exclusion.query, holdsVector] };
+    const { base, allowed } = kindFilters(spaceId, kind, opts.match);
 
     /*
      * BOTH COUNTS FROM ONE SNAPSHOT, and the subtraction is why that matters. Two live counts over a population
@@ -176,7 +206,6 @@ export async function queueEmbedSweep(spaceId: string, opts: SweepOptions): Prom
     const budget = cap - result.enqueued;
     if (budget <= 0) { result.remaining += total; continue; }
 
-    const resumeHere = opts.after && opts.after.kind === kind ? { _id: { $gt: opts.after.lastId } } : {};
     const knowledgeType: KnowledgeType | undefined = kind === 'file' ? undefined : kind;
     const projection: Record<string, unknown> = {
       _id: 1,

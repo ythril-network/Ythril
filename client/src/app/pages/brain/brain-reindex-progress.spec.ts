@@ -181,6 +181,18 @@ describe('the Indexing panel says what is left', () => {
       `no role=status line with the progress: ${JSON.stringify(lines)}`).toBe(true);
   });
 
+  it('while running, the panel does not also recommend a reindex', () => {
+    // Found by the Q-99 part 2 drive: "a reindex is recommended" sat above "Reindexing: N left", pointing at a
+    // button held because the reindex was already under way.
+    const { el, fixture } = create(
+      { getReindexStatus: vi.fn(() => of(status(RUNNING))) },
+      { 'brain.overview.reindexNeeded': 'A reindex is recommended.' },
+    );
+    fixture.detectChanges();
+    const panel = el.querySelector('app-overview-tab')?.textContent ?? '';
+    expect(panel, 'the recommendation must give way to the progress while a run is going').not.toContain('A reindex is recommended.');
+  });
+
   it('and no progress line when nothing is running', () => {
     const { el, fixture } = create({}, { 'brain.overview.reindexProgress': 'Reindexing: {{remaining}} left, {{failed}} failed' });
     fixture.detectChanges();

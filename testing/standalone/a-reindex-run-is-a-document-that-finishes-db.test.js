@@ -50,7 +50,7 @@ import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness
 const skip = await mongoSkipReason();
 
 const DIMS = 8;
-const SPACES = ['life', 'resume', 'retarget', 'broken', 'flagged', 'guard-a', 'guard-b', 'guard-c', 'ref',
+const SPACES = ['life', 'early', 'resume', 'retarget', 'broken', 'flagged', 'guard-a', 'guard-b', 'guard-c', 'ref',
   'gauge-a', 'gauge-b'];
 
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ythril-reindex-run-'));
@@ -185,6 +185,28 @@ describe('a reindex run is a document the queue finishes (real MongoDB, stub emb
       }
       assert.ok('cursor' in doc, 'the cursor is what a resumed sweep continues from');
       assert.ok(doc.startedAt, 'startedAt is what the no-progress warning measures from');
+    });
+
+    it('before the sweep has queued anything, remaining already counts every record the run will rebuild', async () => {
+      // Found by the Q-99 part 2 drive: the first poll after the POST read "0 left to rebuild" while 314 records
+      // waited, because only queued jobs were counted. startReindex resolves before the sweep's first batch.
+      // Held in that state deterministically: a run document whose sweep has not started (no process is sweeping
+      // it), as after a restart before the resume, rather than racing a real sweep's first batch.
+      const ids = await seedFacts('early', 7);
+      await runCol('early').insertOne({
+        _id: 'run', spaceId: 'early', members: ['early'], flagged: false, target: await currentTarget(),
+        startedAt: new Date().toISOString(), cursor: null, sweepComplete: false,
+      });
+      const first = await reindex.reindexStateFor(['early']);
+      assert.equal(first.reindex.running, true);
+      assert.equal(first.reindex.remaining, ids.length,
+        'a run that has queued nothing yet still has every record left to rebuild — "0 left" reads as done');
+
+      // Half queued: the queued jobs and the records not yet reached, each counted once.
+      await queue.enqueueEmbedJobs('early', 'fact', ids.slice(0, 3), { priority: queue.EMBED_PRIORITY.rebuild, rebuild: true });
+      await runCol('early').updateOne({ _id: 'run' }, { $set: { cursor: { kind: 'fact', lastId: ids[2] } } });
+      assert.equal((await reindex.reindexStateFor(['early'])).reindex.remaining, ids.length,
+        'records not yet queued plus the jobs queued — never the jobs twice, never the unqueued records dropped');
     });
 
     it('after the sweep and a drained queue, one tick clears needsReindex and deletes the document', async () => {

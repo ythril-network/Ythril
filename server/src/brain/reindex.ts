@@ -53,7 +53,7 @@ import { isProxy, concreteSpaces } from '../spaces/proxy.js';
 import { reindexInProgress } from '../metrics/registry.js';
 import { log } from '../util/log.js';
 import { spaceCollection } from '../db/space-collection.js';
-import { queueEmbedSweep, type SweepCursor } from './queue-embed-sweep.js';
+import { queueEmbedSweep, countUnswept, type SweepCursor } from './queue-embed-sweep.js';
 import { EMBED_PRIORITY, getEmbedJobCounts } from './embed-queue.js';
 import { resolvePrefixScheme } from './embedding.js';
 import { backoffDelayMs } from '../util/backoff.js';
@@ -277,10 +277,19 @@ export async function reindexStateFor(memberIds: string[]): Promise<{
   let remaining = 0;
   let failed = 0;
   for (const mid of memberIds) {
-    if (await activeRun(mid)) running = true;
+    const run = await activeRun(mid);
+    if (run) running = true;
     const c = await rebuildCounts(mid);
     remaining += c.remaining;
     failed += c.failed;
+    // Until the sweep is complete, the records it has not reached yet are left too — or the first poll of a run reads
+    // "0 left" while every record waits to be queued.
+    if (run && !run.sweepComplete) {
+      remaining += await countUnswept(mid, {
+        match: 'all',
+        ...(run.cursor ? { after: { kind: run.cursor.kind as BrainEmbedRecordType, lastId: run.cursor.lastId } } : {}),
+      });
+    }
   }
   return { needsReindex: memberIds.some(mid => needsReindex(mid)), reindex: { running, remaining, failed } };
 }

@@ -399,7 +399,9 @@ import { ErModelPanelComponent } from './er-model-panel.component';
             <app-status-pill [variant]="indexVariant()" [dot]="true">{{ 'brain.overview.idx.' + indexState() | transloco }}</app-status-pill>
           </div>
 
-          @if (needsReindex() && !isProxy()) {
+          <!-- Gives way to the progress line while a run is going: recommending a reindex beside one already under
+               way points at a button that is held for exactly that reason. -->
+          @if (needsReindex() && !isProxy() && !reindexRun()?.running) {
             <div class="reindex-note">
               <ph-icon name="warning" [size]="15"/>
               <span>{{ 'brain.overview.reindexNeeded' | transloco }}</span>
