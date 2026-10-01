@@ -24,7 +24,7 @@ import { getSpaceMeta, applyPropertyDefaults } from '../spaces/schema-validation
 import { classifyChronoUpsertAgainst, SchemaViolationError, type UpdateValidation } from './write-validation.js';
 import { mergeTags, mergeProperties, mergePropertiesOrKeep } from './merge-fields.js';
 import { applyDeleteFields } from './delete-fields.js';
-import { enqueueEmbedJob, retireEmbedJob } from './embed-queue.js';
+import { enqueueEmbedJob, retireEmbedJob, EMBED_PRIORITY } from './embed-queue.js';
 import { embeddingSuppressedFor } from './suppress-embeddings.js';
 import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';
 import type { ChronoEntry, ChronoType, ChronoStatus, TombstoneDoc } from '../config/types.js';
@@ -292,7 +292,7 @@ export async function createChrono(
   // threshold, so presence is the signal. The write proceeds either way -- a backdated import is legitimate.
   stampSkewOnCreate(doc, getSpaceMeta(spaceId));
   await col<ChronoEntry>(spaceCollection(spaceId, 'chrono')).insertOne(asDoc<ChronoEntry>(doc));
-  if (!embeddingFields.embedding && !suppressed) await enqueueEmbedJob(spaceId, 'chrono', doc._id);
+  if (!embeddingFields.embedding && !suppressed) await enqueueEmbedJob(spaceId, 'chrono', doc._id, { priority: EMBED_PRIORITY.write });
   // A chrono entry is the only record kind that holds TWO classes, and they are told apart by the to-kind
   // rather than by a field name — which is why one reconcile call takes both.
   await reconcileLinks(spaceId, doc._id, 'chrono',
@@ -437,7 +437,7 @@ export async function updateChrono(
   // ONE enqueue, unconditionally, for every successful update: recompute the text from the record as
   // STORED, and honour `suppressEmbeddings` in whichever direction it moved. See the entity update and
   // `embedStoredRecord` for why this replaced an inline embed built from a stale read.
-  await enqueueEmbedJob(spaceId, 'chrono', updatedChrono._id);
+  await enqueueEmbedJob(spaceId, 'chrono', updatedChrono._id, { priority: EMBED_PRIORITY.write });
   /*
    * The writer whose `$set` key is COMPUTED — `$set[k] = v` over `Object.entries(updates)` — so no grep for
    * the field name finds this path at all. Reconciled from the STORED document for that reason: reading the

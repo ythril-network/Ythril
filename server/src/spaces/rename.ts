@@ -68,6 +68,17 @@ export async function moveSpaceData(oldId: string, newId: string): Promise<strin
     errors.push(msg);
   }
 
+  // 1b''. A reindex run names its space in `members`, which a resumed run walks: left at the old id it would walk
+  // a space that no longer exists and never end. The collection moved with the rest; this is its contents.
+  try {
+    const { renameReindexRun } = await import('../brain/reindex.js');
+    await renameReindexRun(oldId, newId);
+  } catch (err) {
+    const msg = `Could not move the reindex run from ${oldId} to ${newId}: ${err}`;
+    log.warn(msg);
+    errors.push(msg);
+  }
+
   // 1b'. Read spills name their member spaces (Q-92): the renamed one follows, or its owner's read check
   // would name a space that no longer exists and refuse the spill. Idempotent on a resumed rename.
   try {

@@ -116,9 +116,17 @@ describe('the two counters answer different questions', () => {
     const { readFileSync } = await import('node:fs');
     const src = readFileSync('server/src/brain/embed-queue.ts', 'utf8')
       .replace(/^\s*\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
-    const resets = [...src.matchAll(/attempts: 0/g)].length;
-    const paired = [...src.matchAll(/transientFailures: 0/g)].length;
-    assert.ok(resets >= 3, `expected at least 3 attempt resets, found ${resets} — the scanner is wrong`);
-    assert.equal(paired, resets, `${resets} places reset attempts but only ${paired} reset transientFailures`);
+    // ONE place resets the budget (`freshBudget`), and every path that grants a clean attempt takes it from there,
+    // so the pair cannot be split: the rule is held by that one function resetting both, and by nothing else
+    // writing `attempts: 0` beside it.
+    const body = src.slice(src.indexOf('function freshBudget('));
+    const fn = body.slice(0, body.indexOf('\n}') + 2);
+    assert.ok(fn.length > 20, 'freshBudget moved — re-point this gate at wherever the attempt budget is reset');
+    assert.match(fn, /attempts: 0/, 'freshBudget must reset attempts');
+    assert.match(fn, /transientFailures: 0/, 'and the outage counter with it, or a new write inherits an old backoff');
+    const outside = src.replace(fn, '');
+    assert.doesNotMatch(outside, /attempts: 0/, 'an attempt reset written outside freshBudget can drop the wait');
+    const uses = [...outside.matchAll(/freshBudget\(\)/g)].length;
+    assert.ok(uses >= 3, `expected enqueue, revive and retry to take the budget from freshBudget, found ${uses} use(s)`);
   });
 });

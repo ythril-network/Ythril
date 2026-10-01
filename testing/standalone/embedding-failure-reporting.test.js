@@ -35,7 +35,10 @@ const CANDIDATE_CONFIGS = [
 ];
 const CONFIG_FILE = CANDIDATE_CONFIGS.find(p => fs.existsSync(p)) ?? null;
 const TOKEN_FILE = path.join(__dirname, '..', 'sync', 'configs', 'a', 'token.txt');
-const USE_DOCKER_EXEC = process.platform !== 'win32' && CONFIG_FILE?.includes(path.join('sync', 'configs'));
+// Through the container on EVERY platform when the config is the test stack's. Written from the Windows side of a
+// Docker Desktop bind mount, the container's view lagged by seconds or did not change at all within 15 s (measured
+// 2026-10-01), so the reload read the old embedder and the test failed for its harness, not for the product.
+const USE_DOCKER_EXEC = CONFIG_FILE?.includes(path.join('sync', 'configs')) ?? false;
 const CONTAINER_A = 'ythril-a';
 const RUN_ID = Date.now();
 const SPACE_ID = `b3-embed-fail-${RUN_ID}`;
@@ -61,7 +64,8 @@ function readConfig() {
 function writeConfig(cfg) {
   if (USE_DOCKER_EXEC) {
     execSync(
-      `docker exec -i ${CONTAINER_A} sh -c 'cat > /config/config.json && chmod 600 /config/config.json'`,
+      // Double quotes: execSync runs cmd.exe on Windows, which does not treat single quotes as quoting.
+      `docker exec -i ${CONTAINER_A} sh -c "cat > /config/config.json && chmod 600 /config/config.json"`,
       { input: JSON.stringify(cfg, null, 2) },
     );
     return;
@@ -74,8 +78,21 @@ async function setEmbeddingAndReload(embedding) {
   if (embedding === undefined) delete cfg.embedding;
   else cfg.embedding = embedding;
   writeConfig(cfg);
-  // Let the Docker Desktop bind-mount propagate before the reload (see reload-config.test.js).
-  await new Promise(r => setTimeout(r, 600));
+  // Wait until the CONTAINER sees the file we wrote, then reload. A fixed pause was not enough on Docker Desktop:
+  // measured 2026-10-01, the bind mount showed the new config about three seconds later, so the reload read the old
+  // one, the upload embedded against a working model, and the file was reported `complete` — this test failing for
+  // its harness rather than for the product. Reading it back through the container is the propagation, not a guess.
+  const want = JSON.stringify(cfg.embedding ?? null);
+  const deadline = Date.now() + 15_000;
+  for (;;) {
+    let seen;
+    try {
+      seen = JSON.stringify(JSON.parse(execSync(`docker exec ${CONTAINER_A} cat /config/config.json`).toString('utf8')).embedding ?? null);
+    } catch { seen = undefined; }
+    if (seen === want) break;
+    if (Date.now() > deadline) throw new Error(`the container never saw the written embedding config: ${seen} vs ${want}`);
+    await new Promise(r => setTimeout(r, 250));
+  }
   const reload = await post(INSTANCES.a, token, '/api/admin/reload-config', {});
   assert.equal(reload.status, 200, `reload-config failed: ${JSON.stringify(reload.body)}`);
 }

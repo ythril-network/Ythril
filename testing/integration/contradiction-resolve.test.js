@@ -42,7 +42,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post, get, dockerExec, readRecord, readCollection } from '../sync/helpers.js';
+import { INSTANCES, post, get, dockerExec, readRecord, readCollection, ensureReindexed } from '../sync/helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, '..', 'sync', 'configs');
@@ -64,14 +64,6 @@ async function raw(method, urlPath, body) {
   let parsed = null;
   try { parsed = await r.json(); } catch { /* no body */ }
   return { status: r.status, body: parsed };
-}
-
-async function ensureReindexed() {
-  const { body } = await get(INSTANCES.a, token(), '/api/spaces');
-  for (const space of body?.spaces ?? []) {
-    const { body: st } = await get(INSTANCES.a, token(), `/api/brain/spaces/${space.id}/reindex-status`);
-    if (st?.needsReindex) await post(INSTANCES.a, token(), `/api/brain/spaces/${space.id}/reindex`, {});
-  }
 }
 
 const createEntity = async (name, description, properties) => {
@@ -100,7 +92,7 @@ before(async () => {
   tokenA = fs.readFileSync(path.join(CONFIGS, 'a', 'token.txt'), 'utf8').trim();
   const sp = await post(INSTANCES.a, token(), '/api/spaces', { id: SPACE, label: `Contradiction Resolve ${RUN}` });
   assert.equal(sp.status, 201, `create space: ${JSON.stringify(sp.body)}`);
-  await ensureReindexed();
+  await ensureReindexed(INSTANCES.a, token());
 
   ids.a = await createEntity('Vault Secret Service', 'Vault secret storage handling token rotation', { port: 8080 });
   ids.b = await createEntity('Vault Secrets Service', 'Vault secret storage handling token rotation', { port: 9090 });

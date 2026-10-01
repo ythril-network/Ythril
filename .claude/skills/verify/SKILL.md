@@ -18,6 +18,12 @@ $env:MONGO_URI='mongodb://127.0.0.1:27017/ythril_scratch'   # host mongod; disti
 Set-Location server; npx tsx src/index.ts              # run in background, redirect output to a log
 ```
 
+**From a worktree under `.claude/`, every client route 404s.** Express `sendFile` refuses a path with a dot segment,
+so the SPA fallback cannot serve `index.html` out of `.claude\worktrees\<name>\client\dist\browser` — `/setup`
+answers 404 while the API works (found by the Q-99 part 2 verify, 2026-10-01). Point `CLIENT_DIST` at a junction
+outside the dot path (`New-Item -ItemType Junction -Path <scratch>\client-browser -Target <worktree>\client\dist\browser`)
+and remove the junction afterwards.
+
 **Anything that runs `recall` or `similar` needs a search engine, and host mongod has none.** Every recall answers
 `SearchNotEnabled` (code 31082) against it — found by the Q-92 verify, 2026-09-28; this line used to say host mongod
 "supports $vectorSearch". For those, give the scratch server its own Atlas-local container and remove it afterwards:

@@ -146,3 +146,19 @@ export function fileEmbedText(
   if (trimmedExcerpt && trimmedExcerpt !== description?.trim()) parts.push(trimmedExcerpt);
   return parts.join(' ');
 }
+
+/**
+ * A DERIVED file record's text: a passage of a converted document, or a media chunk's caption or transcript.
+ *
+ * The heading leads when the chunker found one, so a passage is findable by the section it sits in as well as by
+ * its own words. A media chunk has no heading, and its `content` is exactly what its producer embedded — a caption,
+ * a transcript, or a video's captions joined to its transcript — so the same function rebuilds every derived shape.
+ *
+ * It exists as a builder, not as a template written where it is used, because the conversion pipeline embeds a
+ * chunk and the queue rebuilds one, and two spellings of one string are how a rebuilt vector quietly stops
+ * describing the passage it belongs to. Before this, the queue had no derived branch at all and embedded a chunk
+ * from its path (`docs/a.pdf#chunk0`).
+ */
+export function chunkEmbedText(headingText: string | null | undefined, content: string): string {
+  return headingText ? `${headingText} ${content}` : content;
+}

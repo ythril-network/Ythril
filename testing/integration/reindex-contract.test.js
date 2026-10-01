@@ -23,16 +23,15 @@
  *
  * ## What is pinned at RUNTIME, and the one thing that cannot be
  *
- * Pinned here: the four answers (`404`, `400` on a proxy, `409` while running, `200 started`), that the response
+ * Pinned here: the four answers (`404`, `400` on a proxy, `409` for a space whose run is active, `200 started`), that the response
  * arrives BEFORE the work, that the job guard is released afterwards, and — the part that matters most — that all
  * five collections actually come out with an embedding.
  *
- * **What the API cannot observe is WHICH TEXT was embedded.** The reindex loop writes `embedding` and
- * `embeddingModel` and deliberately does not write `matchedText`, so there is no way from outside to tell
- * `edgeEmbedText(from, label, to, …)` from `edgeEmbedText(label, from, to, …)` — both produce a vector. That is
- * exactly what an extraction of five similar loops is most likely to get wrong, and it is why
- * `reindex-embeds-the-same-text.test.js` exists beside this file as a source-level gate. Two checks because there
- * are two failure modes, and neither can see the other's.
+ * **Which TEXT was embedded is pinned elsewhere.** Since Q-99 part 2 a reindex queues its records and the worker
+ * rebuilds them through the one text builder every write uses, so the rebuilt `matchedText` is the creator's —
+ * asserted per kind, derived records included, by `a-rebuild-embeds-what-the-producer-embedded-db.test.js`, and
+ * `reindex-embeds-the-same-text.test.js` holds that the reindex builds no text of its own. This file pins the
+ * contract both doors see.
  *
  * Run: node --test testing/integration/reindex-contract.test.js
  */
@@ -42,7 +41,8 @@ import assert from 'node:assert/strict';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post, get, delWithBody, waitFor, filterRest } from '../sync/helpers.js';
+import { INSTANCES, post, get, delWithBody, waitFor, waitForReindexRunEnd, filterRest } from '../sync/helpers.js';
+import { seedActiveReindexRun, clearSeededReindexState, closeReindexSeed } from '../_shared/reindex-run-seed.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, '..', 'sync', 'configs');
@@ -143,6 +143,12 @@ describe('reindex — the four answers', () => {
     assert.equal(ok.status, 200, JSON.stringify(ok.body));
     assert.equal(ok.body.spaceId, SPACE);
     assert.equal(typeof ok.body.needsReindex, 'boolean', 'the flag is what a caller polls; it must be a boolean');
+    // And the run's progress, which is what a caller polls for an END: the flag alone cannot say a run is going.
+    const r = ok.body.reindexRun;
+    assert.ok(r && typeof r === 'object', `reindex-status must carry a reindex object: ${JSON.stringify(ok.body)}`);
+    assert.equal(typeof r.running, 'boolean');
+    assert.ok(Number.isInteger(r.remaining) && r.remaining >= 0, `remaining: ${JSON.stringify(r)}`);
+    assert.ok(Number.isInteger(r.failed) && r.failed >= 0, `failed: ${JSON.stringify(r)}`);
   });
 });
 
@@ -160,20 +166,55 @@ describe('reindex — it answers BEFORE it works, and releases its guard', () =>
     assert.equal(r.body.errors, 0);
   });
 
-  it('accepts a SECOND reindex once the first has finished — the guard is released', async () => {
-    // The `finally` that clears `reindexJobRunning`. If an extraction moved the work behind a function that throws
-    // before reaching its own try/finally, the process would refuse every reindex from then on with 409 and only a
-    // restart would clear it. Nothing else in the suite would notice.
-    //
-    // This kicks its OWN reindex rather than relying on the test above having run one. A guard test that passes
-    // because nothing was ever running is the shape this whole file exists to avoid — it would report the guard
-    // released without a guard ever having been taken.
-    const first = await reindex(SPACE);
-    assert.ok([200, 409].includes(first.status), `unexpected: ${first.status} ${JSON.stringify(first.body)}`);
+  it('accepts a SECOND reindex once the first has FINISHED — the run ends and the guard goes with it', async () => {
+    // It accepted [200, 409] for the first call and then polled for any 200, so it passed whether the guard was
+    // held, released, or never taken. Now: wait for the run the case above started to END (`reindexRun.running`
+    // false), then a new reindex must be exactly 200. A run that never ends fails the wait, naming the space.
+    await waitForReindexRunEnd(INSTANCES.a, token, SPACE, 180_000);
+    const again = await reindex(SPACE);
+    assert.equal(again.status, 200, `a reindex after the last one finished was refused: ${JSON.stringify(again.body)}`);
+  });
+});
 
-    const second = await waitFor(async () => (await reindex(SPACE)).status === 200, 180_000, 1_000,
-      'a second reindex kept answering 409, so the job guard was never released');
-    assert.ok(second, 'a second reindex must eventually be accepted');
+describe('reindex — the guard is per space, and deterministic', () => {
+  // The run is held open by a seeded run document rather than by racing a real one, which is what made the old
+  // assertion accept either answer. `testing/_shared/reindex-run-seed.mjs` says why.
+  const BUSY = `reindex-busy-${RUN}`;
+  const FREE = `reindex-free-${RUN}`;
+
+  before(async () => {
+    await makeSpace(BUSY);
+    await makeSpace(FREE);
+  });
+  after(async () => {
+    await clearSeededReindexState(BUSY).catch(() => {});
+    await closeReindexSeed();
+  });
+
+  it('409 for the space with an active run, naming only that space — and 200 for another space meanwhile', async () => {
+    await seedActiveReindexRun(BUSY);
+    try {
+      const busy = await reindex(BUSY);
+      assert.equal(busy.status, 409, `a space with an active run accepted a second reindex: ${JSON.stringify(busy.body)}`);
+      assert.match(JSON.stringify(busy.body), new RegExp(BUSY), 'the refusal must name the busy space');
+      assert.doesNotMatch(JSON.stringify(busy.body), new RegExp(FREE), 'and only that space');
+
+      // The instance-wide refusal is gone: the queue serialises embedding, so one space's run blocks nobody else.
+      const free = await reindex(FREE);
+      assert.equal(free.status, 200, `another space was refused while ${BUSY} ran: ${JSON.stringify(free.body)}`);
+    } finally {
+      await clearSeededReindexState(BUSY);
+    }
+  });
+
+  it('a run that ended in error does not block a new reindex of its space', async () => {
+    await seedActiveReindexRun(BUSY, { error: 'seeded: sweep failed after its retries' });
+    try {
+      const r = await reindex(BUSY);
+      assert.equal(r.status, 200, `an errored run blocked its space: ${JSON.stringify(r.body)}`);
+    } finally {
+      await clearSeededReindexState(BUSY);
+    }
   });
 });
 
@@ -181,13 +222,12 @@ describe('reindex — what the API can actually attribute to it', () => {
   it('leaves every collection embedded, in all five branches', async () => {
     // **What this does and does not prove.** A normally-written record already carries an embedding, so this cannot
     // show that the reindex is what produced one — the operation is idempotent by design. What it does show is that
-    // a reindex over records of every kind leaves them all embedded: no branch throws, and none clears a vector it
-    // fails to replace. Dropping a loop in the extraction would not fail this; dropping a loop that half-writes
-    // would.
+    // a reindex over records of every kind leaves them all embedded: no kind throws, and none clears a vector it
+    // fails to replace.
     //
-    // The assertion that a branch used the RIGHT text is not observable here at all — the loop does not store
-    // `matchedText` — and lives in `standalone/reindex-embeds-the-same-text.test.js`. Stated here so the pair is
-    // read as one net rather than this file being mistaken for the whole of it.
+    // That each kind was rebuilt from the RIGHT text is asserted where the text is built, by
+    // `standalone/a-rebuild-embeds-what-the-producer-embedded-db.test.js`. Stated here so the pair is read as one
+    // net rather than this file being mistaken for the whole of it.
     const seeded = { facts: 1, entities: 2, edges: 1, chrono: 1, files: 1 };
 
     await reindex(SPACE);

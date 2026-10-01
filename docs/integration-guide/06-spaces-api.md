@@ -268,10 +268,16 @@ than failing the write, which leaves exactly this state.
 >
 > | | this | [`POST /api/brain/spaces/:spaceId/reindex`](04d-brain-ops-api.md) |
 > |---|---|---|
-> | touches | only records with **no** vector | **every** record |
-> | for | the way back from `suppressEmbeddings` | recovery after changing embedder or model |
-> | returns | counts, awaited — the counts are the answer | `status: "started"`, fire-and-forget |
-> | bounded | `limit`, and `truncated` tells you to call again | runs to completion in the background |
+> | touches | only records with **no** vector | **every** record, rebuilt even when its text is unchanged |
+> | for | the way back from `suppressEmbeddings` | recovery after changing embedder, model, dimensions or prefix scheme |
+> | returns | counts, awaited — the counts are the answer | `status: "started"`; progress is `reindexRun` on `space_meta` / `reindex-status` |
+> | bounded | `limit`, and `truncated` tells you to call again | runs to completion in the background, and survives a restart |
+>
+> Both QUEUE their records for the embedding worker, and both yield to local writes: the worker takes a write
+> somebody is waiting to search for ahead of a backfill, and a backfill ahead of a reindex, while giving each lower
+> lane at least one claim in eight so none waits for ever. A record a peer sent waits with the backfill. A derived
+> record with no text of its own (a face crop, a converted copy of a document) is never a backfill candidate, so a
+> second call after the queue has drained reports `enqueued: 0`.
 >
 > Reaching for `reindex` when you wanted this one re-embeds the whole space to fix a handful of records.
 
@@ -658,20 +664,24 @@ type schemas are readable only by tokens that may reach the space.
     }
   },
   "stats": { "facts": 142, "entities": 53, "edges": 87, "chrono": 12, "files": 31 },
-  "needsReindex": false
+  "needsReindex": false,
+  "reindexRun": { "running": false, "remaining": 0, "failed": 0 }
 }
 ```
 
-`needsReindex` is `true` when the space holds embeddings from a different model than the one configured — the
-state `POST /reindex` clears. On a **proxy space** it is `true` when **any** member needs one, matching
-[`GET /reindex-status`](04d-brain-ops-api.md).
+`needsReindex` is `true` when the space holds embeddings from a different model than the one configured, and
+recall in the space refuses while it is. A reindex clears it when it has rebuilt every record — not when it starts.
+On a **proxy space** it is `true` when **any** member needs one, matching
+[`GET /reindex-status`](04d-brain-ops-api.md#check-reindex-status).
 
-It is here because `space_reindex` returns as soon as the job *starts*: this is the field you poll to learn it
-finished. The dedicated `GET /api/brain/spaces/:spaceId/reindex-status` route still exists and is unchanged.
+`reindexRun` is a running reindex's progress: `running` while one is going, `remaining` records still to rebuild,
+`failed` records whose rebuild gave up. It is here because `space_reindex` returns as soon as the run *starts*:
+poll until `reindexRun.running` is `false` to learn it finished. `GET /api/brain/spaces/:spaceId/reindex-status`
+answers the same two fields from the same function.
 
-> **MCP tool:** `space_meta` — returns the same information, `needsReindex` included. Available to all
-> tokens (not admin-only). Before this field existed, the `space_reindex` tool's own description told MCP callers to
-> poll the REST status route — which a client with no HTTP door cannot do.
+> **MCP tool:** `space_meta` — returns the same information, `needsReindex` and `reindexRun` included. Available to
+> all tokens (not admin-only). Before this field existed, the `space_reindex` tool's own description told MCP
+> callers to poll the REST status route — which a client with no HTTP door cannot do.
 
 ---
 

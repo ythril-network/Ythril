@@ -75,6 +75,7 @@ export const SPACE_COLLECTIONS = {
   dupeCandidates: 'dupe_candidates',
   contradictionCandidates: 'contradiction_candidates',
   embedJobs: 'embed_jobs',
+  reindexRun: 'reindex_run',
   fileTombstones: 'file_tombstones',
   mediaJobs: 'media_jobs',
   linkViolations: 'link_violations',

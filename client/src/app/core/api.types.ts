@@ -568,22 +568,8 @@ export interface QueryResult {
 
 export type WipeCollectionType = BrainCollection;
 
-/**
- * What `POST /api/spaces/:id/reembed` reports back.
- *
- * `remaining` is counted over the whole space rather than the returned page, so `truncated` genuinely means "call
- * again" — a backfill that quietly stopped at a round number would read as a fully-indexed space.
- *
- * `skippedSuppressed` is how the UI can say "suppression is still on" instead of showing a successful no-op.
- */
-export interface ReembedResult {
-  spaceId: string;
-  enqueued: number;
-  skippedSuppressed: number;
-  byKind: Record<string, number>;
-  remaining: number;
-  truncated: boolean;
-}
+// `ReembedResult`, and the reindex run's status, live in `embed-ops.types.ts`: what the two ways of making a space's
+// vectors again report, side by side, outside this frozen file.
 
 export type RecallKnowledgeType = 'fact' | 'entity' | 'edge' | 'chrono' | 'file';
 

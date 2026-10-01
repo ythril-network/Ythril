@@ -49,18 +49,27 @@ describe('the spill directory is recognised at the root and nowhere else', () =>
 describe('the queue declines to embed a spill', () => {
   const queue = read('server/src/brain/embed-queue.ts');
 
-  it('the guard is in enqueueEmbedJob, before any write', () => {
+  it('the guard is in BOTH enqueue paths, before any write', () => {
     // At the enqueue rather than the call site: `upsertFileMeta` enqueues unconditionally and that is right,
-    // because every other file in the store is content.
-    const fn = queue.slice(queue.indexOf('export async function enqueueEmbedJob'));
-    assert.match(fn.slice(0, 600), /if \(recordType === 'file' && isSpillPath\(recordId\)\) return;/,
-      'a spill must never reach the embedding queue');
+    // because every other file in the store is content. Since Q-99 part 2 there are two enqueue paths — a write's
+    // `enqueueEmbedJob` and a sweep's bulk `enqueueEmbedJobs` — and the rule is one function both call first.
+    const guard = queue.slice(queue.indexOf('function embeddable('));
+    assert.match(guard.slice(0, guard.indexOf('\n}')), /recordType === 'file' && isSpillPath\(recordId\)/,
+      'the shared guard must refuse a spill');
+    for (const name of ['enqueueEmbedJob', 'enqueueEmbedJobs']) {
+      const fn = queue.slice(queue.indexOf(`export async function ${name}(`));
+      // Bounded by the function's first write, not by a character count.
+      const beforeWrite = fn.slice(0, fn.indexOf('jobs(spaceId)'));
+      assert.ok(beforeWrite.length > 0, `${name} moved — re-point this gate`);
+      assert.match(beforeWrite, /embeddable\(recordType, (recordId|id)\)/,
+        `${name} must decline a spill before it writes anything`);
+    }
   });
 
   it('and the guard is reachable — the enqueue is what file writes call', () => {
     // Without this the assertion above could pass against a function nothing calls.
     const meta = read('server/src/files/file-meta.ts');
-    assert.match(meta, /await enqueueEmbedJob\(spaceId, 'file', normalised\)/);
+    assert.match(meta, /await enqueueEmbedJob\(spaceId, 'file', normalised, \{ priority:/);
   });
 });
 

@@ -366,6 +366,67 @@ export async function waitForEmbedQueueEmpty(baseUrl, token, spaceId, timeoutMs 
   }, timeoutMs, 500, () => `the embed queue of ${spaceId} never emptied: last counts ${JSON.stringify(last)}`);
 }
 
+/**
+ * Reindex every space whose stored vectors are stale, and RETURN ONLY WHEN THE RUNS HAVE FINISHED (Q-99 part 2).
+ *
+ * ## Why this is one helper, and why it waits
+ *
+ * It was copied into six integration files as fire-and-forget: POST reindex where `needsReindex` is set, then go on.
+ * That was harmless while a reindex embedded inline and the instance refused a second one; once a reindex is a run
+ * the embed queue finishes, a copy that does not wait hands its suite a space whose recall is still refused, and the
+ * failure lands in whichever test happens to recall first. One copy that waits is the fix; six that each must
+ * remember to is the defect that made it necessary. `standalone/one-ensure-reindexed-helper.test.js` refuses a
+ * seventh.
+ *
+ * ## What it waits on, and what it refuses
+ *
+ * `reindexRun.running` on `GET /api/brain/spaces/:id/reindex-status` — the run, not `needsReindex`: the flag is
+ * cleared when a run ends, but a space can be running without having been flagged. A status that carries no
+ * `reindexRun.running` boolean is a server this helper cannot read, and it THROWS rather than reading "absent" as
+ * "finished" — the quiet answer is the one that would let a suite start on a half-built index.
+ *
+ * A proxy is never POSTed: it has no index of its own and the route refuses it with 400. A 409 is accepted, because
+ * it means a run for that space already exists — which is the state this then waits out.
+ */
+export async function ensureReindexed(baseUrl, token, timeoutMs = INDEX_LAG_TIMEOUT_MS) {
+  const { body } = await get(baseUrl, token, '/api/spaces');
+  const spaces = body?.spaces ?? [];
+  for (const space of spaces) {
+    if ((space.proxyFor?.length ?? 0) > 0) continue;
+    const { body: st } = await get(baseUrl, token, `/api/brain/spaces/${space.id}/reindex-status`);
+    if (st?.needsReindex) {
+      const r = await post(baseUrl, token, `/api/brain/spaces/${space.id}/reindex`, {});
+      if (r.status !== 200 && r.status !== 409) {
+        throw new Error(`ensureReindexed: reindex of ${space.id} answered ${r.status} ${JSON.stringify(r.body)}`);
+      }
+    }
+  }
+  for (const space of spaces) {
+    if ((space.proxyFor?.length ?? 0) > 0) continue;
+    await waitForReindexRunEnd(baseUrl, token, space.id, timeoutMs);
+  }
+}
+
+/**
+ * Wait until ONE space has no reindex run going — `reindexRun.running` false on its `reindex-status`.
+ *
+ * Throws at once, rather than after the deadline, when the status carries no `reindexRun.running` boolean: that is a
+ * server whose runs cannot be read, and reading "absent" as "finished" is the quiet answer that lets a suite start
+ * on a half-built index.
+ */
+export async function waitForReindexRunEnd(baseUrl, token, spaceId, timeoutMs = INDEX_LAG_TIMEOUT_MS) {
+  let last = null;
+  await waitFor(async () => {
+    const r = await get(baseUrl, token, `/api/brain/spaces/${spaceId}/reindex-status`);
+    last = r.body;
+    if (r.status === 200 && typeof r.body?.reindexRun?.running !== 'boolean') {
+      throw new Error(`reindex-status of ${spaceId} carries no reindexRun.running boolean, so whether its run has `
+        + `finished cannot be read: ${JSON.stringify(r.body)}`);
+    }
+    return r.status === 200 && r.body.reindexRun.running === false;
+  }, timeoutMs, 1_000, () => `the reindex of ${spaceId} never finished: last status ${JSON.stringify(last)}`);
+}
+
 export async function waitForIndexed(baseUrl, token, spaceId, ids, types, timeoutMs = INDEX_LAG_TIMEOUT_MS) {
   const pending = new Set(ids);
   const started = Date.now();

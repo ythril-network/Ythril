@@ -98,10 +98,10 @@ describe('the three-tier resolution has exactly one implementation', () => {
       !f.endsWith('/suppress-embeddings.ts')
       && /\bembeddingSuppressed\s*\(/.test(stripComments(readFileSync(f, 'utf8'))));
     assert.deepEqual(
-      callers, ['server/src/brain/reembed.ts'],
+      callers, [],
       'the record > schema > space order must exist in one place — `embeddingSuppressedFor`, in the module '
-      + 'that owns the resolver. The re-embed sweep is the one other caller, resolving against a stored '
-      + 'document for its own documented reasons. Anything else is a third copy of the order.',
+      + 'that owns the resolver. The embed sweep was the last other caller, with a hand-written copy of that '
+      + 'function; it now calls `embeddingSuppressedFor` itself. Anything here is a second copy of the order.',
     );
   });
 });

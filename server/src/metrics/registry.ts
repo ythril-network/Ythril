@@ -496,7 +496,7 @@ export const embedWaitSeconds = new Histogram({
 
 export const reindexInProgress = new Gauge({
   name: 'ythril_reindex_in_progress',
-  help: '1 if a reindex operation is currently running, 0 otherwise',
+  help: 'Number of spaces with a reindex run going (0 when none)',
   registers: [register],
 });
 

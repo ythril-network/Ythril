@@ -6,7 +6,7 @@
  * page provides — so this component just renders them and calls them.
  */
 import { Component, ChangeDetectionStrategy, inject, signal, computed, effect } from '@angular/core';
-import type { ReembedResult } from '../../core/api.types';
+import type { ReembedResult } from '../../core/embed-ops.types';
 import { firstValueFrom } from 'rxjs';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';

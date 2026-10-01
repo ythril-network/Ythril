@@ -20,7 +20,7 @@
  * definition beside a `$ref` back to the reference. `resolve: false` returns the stored form alone, on both doors.
  */
 import type { SpaceConfig } from '../config/types.js';
-import { needsReindex } from './_shared.js';
+import { reindexStateFor } from '../brain/reindex.js';
 import { withLibraryDefinitions } from './library-ref-expansion.js';
 import { actualSchemaOf, spaceStatsOf, type SpaceStats } from '../brain/space-shape.js';
 
@@ -46,9 +46,10 @@ export async function spaceMetaAnswer(input: {
   // History is served by its own endpoint, never inline.
   const { previousVersions: _pv, ...metaPublic } = meta;
 
-  const [perMemberStats, actualPerMember] = await Promise.all([
+  const [perMemberStats, actualPerMember, reindexState] = await Promise.all([
     Promise.all(memberIds.map(mid => spaceStatsOf(mid))),
     Promise.all(memberIds.map(mid => actualSchemaOf(mid))),
+    reindexStateFor(memberIds),
   ]);
   const stats: SpaceStats = { facts: 0, entities: 0, edges: 0, chrono: 0, files: 0 };
   for (const s of perMemberStats) for (const k of Object.keys(stats) as (keyof SpaceStats)[]) stats[k] += s[k];
@@ -58,9 +59,10 @@ export async function spaceMetaAnswer(input: {
     spaceName: space?.label ?? spaceId,
     ...metaPublic,
     stats,
-    // Reindex state travels with the meta on BOTH doors: `reindex` tells a caller to poll `space_meta` after
-    // starting a job. `.some()` over the members, like `GET /reindex-status` — a proxy needs one when any member does.
-    needsReindex: memberIds.some(mid => needsReindex(mid)),
+    // Reindex state travels with the meta on BOTH doors: `space_reindex` tells a caller to poll `space_meta` after
+    // starting a run. One function with `GET /reindex-status`, so the two report the same numbers.
+    needsReindex: reindexState.needsReindex,
+    reindexRun: reindexState.reindexRun,
     /*
      * WHAT THE SPACE ACTUALLY HOLDS, beside what it declares, in the declared schema's own format so a type the
      * space really holds can be promoted into it. Per member on a proxy, never merged: two types sharing a name

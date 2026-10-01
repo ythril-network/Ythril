@@ -13,8 +13,7 @@ import { countFacts } from '../../brain/fact.js';
 import { getEmbedJobCounts } from '../../brain/embed-queue.js';
 import { getConfig } from '../../config/loader.js';
 import { col } from '../../db/mongo.js';
-import { needsReindex } from '../../spaces/_shared.js';
-import { planReindex, startReindex } from '../../brain/reindex.js';
+import { planReindex, startReindex, reindexStateFor } from '../../brain/reindex.js';
 import { memberSpacesForRequest } from '../../spaces/proxy-scoped.js';
 import { rankOf } from '../../brain/recall-shape.js';
 import { statesRetryability } from './_read-failure.js';
@@ -239,42 +238,37 @@ searchRouter.post('/similar', globalRateLimit, requireAuth, statesRetryability, 
 });
 
 
-searchRouter.get('/spaces/:spaceId/reindex-status', globalRateLimit, requireSpaceAuth, (req, res) => {
+// `reindexRun` is the progress of a running reindex, from the same function `space_meta` answers with on both doors.
+searchRouter.get('/spaces/:spaceId/reindex-status', globalRateLimit, requireSpaceAuth, async (req, res) => {
   const spaceId = req.params['spaceId'] as string;
   const cfg = getConfig();
   if (!cfg.spaces.some(s => s.id === spaceId)) {
     res.status(404).json({ error: `Space '${spaceId}' not found` });
     return;
   }
-  const memberIds = memberSpacesForRequest(req, spaceId);
-  const needs = memberIds.some(mid => needsReindex(mid));
-  res.json({ spaceId, needsReindex: needs });
+  const state = await reindexStateFor(memberSpacesForRequest(req, spaceId));
+  res.json({ spaceId, ...state });
 });
 
 
 // POST /api/brain/spaces/:spaceId/reindex
-// Re-embeds all facts in a space using the currently configured model.
-// Long-running: may take minutes for large spaces. Progress is logged server-side.
-// POST /api/brain/spaces/:spaceId/reindex
 //
-// Every refusal -- 404, the proxy 400, the single-job 409 -- and the work itself live in `brain/reindex.ts`, so an
-// MCP tool reaches the same rules and the same guard instead of a weaker copy of them (B-2). What stays here is
-// resolving the member spaces from the REQUEST (which is where the token's scope is known) and turning a refusal into
-// a status.
+// Every refusal -- 404, the proxy 400, the per-space 409 -- and the run itself live in `brain/reindex.ts`, so an
+// MCP tool reaches the same rules instead of a weaker copy of them (B-2). What stays here is resolving the member
+// spaces from the REQUEST (which is where the token's scope is known) and turning a refusal into a status.
 //
-// The response is sent as soon as the job is SCHEDULED, with zeroed counters. That is deliberate and pinned:
-// `reindex-contract.test.js` asserts the shape, because awaiting the work here would answer the same 200 and turn a
-// multi-minute job into a request timeout.
+// The response is sent as soon as the run is RECORDED, with zeroed counters (kept for older clients; progress is
+// `reindexRun` on reindex-status). Awaiting the rebuild here would turn a multi-minute job into a request timeout.
 searchRouter.post('/spaces/:spaceId/reindex', globalRateLimit, requireSpaceAuth, denyReadOnly, async (req, res) => {
   const spaceId = req.params['spaceId'] as string;
   const space = getConfig().spaces.find(s => s.id === spaceId);
 
-  const decision = planReindex({ spaceId, space, memberIds: memberSpacesForRequest(req, spaceId) });
+  const decision = await planReindex({ spaceId, space, memberIds: memberSpacesForRequest(req, spaceId) });
   if (!decision.ok) {
     res.status(decision.refusal.status).json(decision.refusal.body);
     return;
   }
 
-  startReindex(decision.plan);
+  await startReindex(decision.plan);
   res.json({ spaceId, reindexed: 0, errors: 0, status: 'started' });
 });

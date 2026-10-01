@@ -221,8 +221,8 @@ export const ROUTE_RIGHTS: readonly RouteRight[] = [
   { route: '/api/spaces/:id/rebuild-indexes', method: 'POST', area: 'knowledge', needs: 'admin', scope: 'path' },
   // Registered onto `spacesRouter` from `spaces-reembed.ts` rather than declared in `spaces.ts`, which is
   // exactly why it went unclassified: a sweep of the router FILE cannot see a route another file attaches to
-  // the same router. Re-embedding rewrites every vector in the space and recall degrades until it finishes,
-  // so it sits with `rebuild-indexes` at `admin` rather than with the `write` mutations.
+  // the same router. A backfill queues a job for every vectorless record in the space — an unbounded amount of
+  // model work from one call — so it sits with `rebuild-indexes` at `admin` rather than with the `write` mutations.
   { route: '/api/spaces/:id/reembed', method: 'POST', area: 'knowledge', needs: 'admin', scope: 'path' },
   { route: '/api/brain/spaces/:spaceId/reindex', method: 'POST', area: 'knowledge', needs: 'admin', scope: 'path' },
   { route: '/api/brain/spaces/:spaceId/reindex-status', method: 'GET', area: 'knowledge', needs: 'read', scope: 'path' },

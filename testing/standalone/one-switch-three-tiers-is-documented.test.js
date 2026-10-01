@@ -114,8 +114,10 @@ describe('`false` at the record tier never reaches the resolver as `false`', () 
     }
     // A FLOOR: a scanner that finds nothing passes every loop written over it, and this assertion would
     // then report "every reader is correct" about no readers at all.
-    assert.ok(readers.length >= 2,
-      `found ${readers.length} reader(s) of the record tier; the two known ones are the minimum, so the scan is wrong`);
+    // One since Q-99 part 2: the sweep's hand-written copy of `embeddingSuppressedFor` was the second reader, and it
+    // now calls the resolver instead. Fewer readers is the point; NONE would mean the scan stopped matching.
+    assert.ok(readers.length >= 1,
+      `found ${readers.length} reader(s) of the record tier; the resolver itself is one, so the scan is wrong`);
 
     for (const { file, call } of readers) {
       assert.match(call, /record:\s*recordSuppression\(/,

@@ -15,6 +15,7 @@ import { OverviewTabComponent } from './overview-tab.component';
 import { ReviewTabComponent } from './review-tab.component';
 import { FormsModule } from '@angular/forms';
 import { Space, SpaceStats, AboutInfo } from '../../core/api.types';
+import { BrainReindex } from './brain-reindex';
 import { SpacesApi } from '../../core/spaces-api.service';
 import { OverviewDataService } from './overview-data.service';
 import { SpaceSettingsPopupComponent } from '../settings/space-settings-popup.component';
@@ -225,9 +226,10 @@ interface SpaceView {
       @if (needsReindex() && !activeSpaceIsProxy()) {
         <div class="reindex-banner">
           <span><ph-icon name="warning" [size]="16" style="display:inline-flex;vertical-align:middle;margin-right:4px;"/> {{ 'brain.reindex.stale' | transloco }}</span>
-          <button class="btn btn-sm btn-primary" [disabled]="reindexing()" (click)="runReindex()">
+          <button class="btn btn-sm btn-primary" [disabled]="reindexing()" [attr.aria-busy]="reindexing() ? 'true' : null"
+            (click)="runReindex()">
             @if (reindexing()) { <span class="spinner" style="width:11px;height:11px;border-width:2px;"></span> }
-            {{ 'brain.reindex.button' | transloco }}
+            {{ (reindexRun()?.running ? 'brain.overview.reindexing' : 'brain.reindex.button') | transloco }}
           </button>
         </div>
       }
@@ -348,7 +350,7 @@ interface SpaceView {
         @if (activeTab() === 'overview') {
           @if (activeSpace(); as sp) {
             <app-overview-tab [space]="sp" [stats]="activeStats()" [needsReindex]="needsReindex()"
-              [reindexing]="reindexing()" [about]="aboutInfo()" [embeddingQueue]="ov.embeddingQueue()"
+              [reindexing]="reindexing()" [reindexRun]="reindexRun()" [about]="aboutInfo()" [embeddingQueue]="ov.embeddingQueue()"
               [openVotes]="ov.overviewVotes()" [tokenAccess]="ov.tokenAccess()" [completeness]="ov.completeness()" [activity]="ov.spaceActivity()"
               [pending]="ov.overviewPending()"
               (reindex)="runReindex()" (retryFailed)="runRetryFailedEmbeddings()"
@@ -451,9 +453,14 @@ export class BrainComponent implements OnInit, OnDestroy {
 
 
 
-  // Reindex
-  needsReindex = signal(false);
-  reindexing = signal(false);
+  // Reindex: the one state both Reindex buttons follow, and the poll of a running reindex — `brain-reindex.ts`.
+  private readonly rx = new BrainReindex({
+    spacesApi: this.spacesApi, toast: this.toast, transloco: this.transloco,
+    activeSpaceId: () => this.activeSpaceId(), reload: (id) => this.loadStats(id),
+  });
+  readonly needsReindex = this.rx.needsReindex;
+  readonly reindexRun = this.rx.reindexRun;
+  readonly reindexing = this.rx.reindexing;
 
   // Entity picker
 
@@ -536,6 +543,7 @@ export class BrainComponent implements OnInit, OnDestroy {
   ngOnDestroy(): void {
     this.closeLiveStream();
     clearTimeout(this.liveRefreshTimer);
+    this.rx.stop();
   }
 
   // ── Live updates (F12) ──────────────────────────────────────────────────────
@@ -614,7 +622,10 @@ export class BrainComponent implements OnInit, OnDestroy {
     // rows underneath you: the page looked unchanged until you clicked a tab, and the space you had
     // chosen never introduced itself. Re-clicking the chip of the space you are ALREADY on is not a
     // switch, so that leaves your current tab alone.
-    if (this.activeSpaceId() !== id) this.activeTab.set('overview');
+    if (this.activeSpaceId() !== id) {
+      this.activeTab.set('overview');
+      this.rx.forget();
+    }
     this.activeSpaceId.set(id);
     this.picker.spaceId.set(id);
     this.drawerState.spaceId.set(id);
@@ -782,7 +793,7 @@ export class BrainComponent implements OnInit, OnDestroy {
       error: () => { /* stats are best-effort here; no Overview panel blanks on them */ },
     });
     this.spacesApi.getReindexStatus(spaceId).subscribe({
-      next: ({ needsReindex }) => this.needsReindex.set(needsReindex),
+      next: (st) => this.rx.apply(spaceId, st),
       error: () => {},
     });
   }
@@ -824,45 +835,8 @@ export class BrainComponent implements OnInit, OnDestroy {
   /** A proxy holds no records of its own, so it has no index — and the server refuses to reindex one. */
   activeSpaceIsProxy = (): boolean => (this.activeSpace()?.proxyFor?.length ?? 0) > 0;
 
-  /**
-   * Start a reindex and say that it STARTED.
-   *
-   * ## The report this rewrites
-   *
-   * Owner, 2026-08-15: *"on clicking reindex on overview it sais reindexed 0 documents in green as if it
-   * worked on an unclosable inline message."*
-   *
-   * The route never awaits the job — `startReindex` schedules the work and both surfaces answer immediately
-   * with ZEROED counters, deliberately, so the HTTP call does not hang for the length of a re-embed. This
-   * method summed those zeros and printed "Reindexed 0 documents." So the acknowledgement of a job that had
-   * just been scheduled was rendered as its result, in green, at the moment it began.
-   *
-   * There is no count to print here and there never was. Progress lives in `reindex-status` and the log,
-   * which is where the panel's own indicator reads it from.
-   *
-   * A toast rather than an inline banner, for the reason the report gives: the inline one had no dismiss and
-   * was cleared only by switching space, so a note about a finished job outlived everything after it.
-   */
-  runReindex(): void {
-    this.reindexing.set(true);
-    this.spacesApi.reindex(this.activeSpaceId()).subscribe({
-      next: () => {
-        this.reindexing.set(false);
-        this.toast.info(this.transloco.translate('brain.reindex.started'));
-        // The stale-index banner is NOT cleared here. It was, optimistically — and the index really is
-        // still stale, because the job has only just been scheduled. `loadStats` re-reads the true state
-        // from `reindex-status` a moment later and would put the banner straight back, so the optimism
-        // bought a flicker and a false claim. The toast is what says the work has begun.
-        this.loadStats(this.activeSpaceId());
-      },
-      error: (err) => {
-        this.reindexing.set(false);
-        // The server's own words when it has them: a proxy refusal names the member spaces to reindex
-        // instead, and "check server logs" would send the reader to the one place that does not say it.
-        this.toast.error(err?.error?.error ?? this.transloco.translate('brain.reindex.failed'));
-      },
-    });
-  }
+  /** Start a reindex and say that it STARTED — see `BrainReindex.run` for why there is no count to show. */
+  runReindex(): void { this.rx.run(); }
 
   /** Re-queue every failed embedding job for the active space, then refresh the queue panel. */
   runRetryFailedEmbeddings(): void {

@@ -24,7 +24,7 @@ import { getSpaceMeta, applyPropertyDefaults } from '../spaces/schema-validation
 import { classifyFactUpsertAgainst, SchemaViolationError, type UpdateValidation } from './write-validation.js';
 import { applyDeleteFields } from './delete-fields.js';
 import { mergeTags, mergeProperties, mergePropertiesOrKeep } from './merge-fields.js';
-import { enqueueEmbedJob, retireEmbedJob } from './embed-queue.js';
+import { enqueueEmbedJob, retireEmbedJob, EMBED_PRIORITY } from './embed-queue.js';
 import { embeddingSuppressedFor } from './suppress-embeddings.js';
 import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';
 import type { FactDoc, TombstoneDoc } from '../config/types.js';
@@ -219,7 +219,7 @@ export async function saveFact(
     // stored vector is now stale, and the queue is what makes it catch up.
     // Not queued when suppressed: skipping the inline embed and queueing anyway stores the vector the flag
     // forbids a few seconds later, with nothing to come back and remove it.
-    if (!embResult && !suppressed) await enqueueEmbedJob(spaceId, 'fact', converged._id);
+    if (!embResult && !suppressed) await enqueueEmbedJob(spaceId, 'fact', converged._id, { priority: EMBED_PRIORITY.write });
     /*
      * The link records, after the write and before the event.
      *
@@ -276,7 +276,7 @@ export async function saveFact(
   // threshold, so presence is the signal. The write proceeds either way -- a backdated import is legitimate.
   stampSkewOnCreate(doc, getSpaceMeta(spaceId));
   await col<FactDoc>(spaceCollection(spaceId, 'facts')).insertOne(asDoc<FactDoc>(doc));
-  if (!embResult && !suppressed) await enqueueEmbedJob(spaceId, 'fact', doc._id);
+  if (!embResult && !suppressed) await enqueueEmbedJob(spaceId, 'fact', doc._id, { priority: EMBED_PRIORITY.write });
   // The link records for a new fact. One call whether the array is empty or not: `reconcileLinks` is a
   // reconcile, so "nothing to do" is a cheap answer rather than a decision this site has to make.
   await reconcileLinks(spaceId, doc._id, 'fact', { entity: linkEntities }, doc.author);
@@ -429,7 +429,7 @@ export async function updateFact(
   // ONE enqueue, unconditionally, for every successful update: recompute the text from the record as
   // STORED, and honour excludeFromVectorSearch in whichever direction it moved. See the entity update and
   // `embedStoredRecord` for why this replaced an inline embed built from a stale read.
-  await enqueueEmbedJob(spaceId, 'fact', result._id);
+  await enqueueEmbedJob(spaceId, 'fact', result._id, { priority: EMBED_PRIORITY.write });
   // Only when the caller NAMED it. Omitting `linkEntities` on a patch means "leave the links alone", and
   // passing `{ entity: undefined }` would read as "remove them all" — the same absent-versus-empty
   // distinction `deleteFields` exists for, one level down.

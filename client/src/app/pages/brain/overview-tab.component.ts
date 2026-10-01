@@ -26,18 +26,20 @@ import { InstantComponent } from '../../shared/instant.component';
 import { InstantPipe } from '../../core/date-format.service';
 import { RouterLink } from '@angular/router';
 import { Space, SpaceStats, AboutInfo, EmbeddingQueue, VoteRound, TokenAccessEntry, CompletenessReport, CompletenessCheck, SpaceActivity } from '../../core/api.types';
+import type { ReindexRunState } from '../../core/embed-ops.types';
 // Aliased: the class members below carry the same names, and a bare call that resolves to the import
 // rather than the member is the kind of line a reader has to stop and check.
 import { retentionSummary as summariseRetention, retentionTypeOverrides as retentionOverridesOf } from './overview-retention';
 
 import { CollectionTab } from './brain-tabs';
 import { ErModelPanelComponent } from './er-model-panel.component';
+import { ReindexNotesComponent } from './reindex-notes.component';
 
 @Component({
   selector: 'app-overview-tab',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [ErModelPanelComponent, TranslocoPipe, PhIconComponent, StatusPillComponent, SkeletonLinesComponent, RouterLink, InstantComponent, InstantPipe],
+  imports: [ErModelPanelComponent, ReindexNotesComponent, TranslocoPipe, PhIconComponent, StatusPillComponent, SkeletonLinesComponent, RouterLink, InstantComponent, InstantPipe],
   styles: [`
     :host { display: block; }
 
@@ -107,9 +109,6 @@ import { ErModelPanelComponent } from './er-model-panel.component';
 
     .idx-row { display: flex; align-items: center; gap: 10px; }
     .idx-row .lab { font-size: 13px; color: var(--text-secondary); flex: 1; }
-    .reindex-note { display: flex; align-items: flex-start; gap: 8px; margin-top: 13px; padding: 10px 12px;
-      border-radius: 8px; font-size: 12.5px; border: 1px solid var(--warning-border); background: var(--warning-bg); }
-    .reindex-note ph-icon { flex: none; margin-top: 1px; color: var(--warning); }
     .actions { margin-top: 13px; }
     .retention { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border-muted); }
     .ret-line { margin: 4px 0 0; font-size: 12.5px; color: var(--text-primary); }
@@ -399,20 +398,7 @@ import { ErModelPanelComponent } from './er-model-panel.component';
             <app-status-pill [variant]="indexVariant()" [dot]="true">{{ 'brain.overview.idx.' + indexState() | transloco }}</app-status-pill>
           </div>
 
-          @if (needsReindex() && !isProxy()) {
-            <div class="reindex-note">
-              <ph-icon name="warning" [size]="15"/>
-              <span>{{ 'brain.overview.reindexNeeded' | transloco }}</span>
-            </div>
-          }
-          @if (isProxy()) {
-            <!-- Said rather than left blank: a card whose action silently vanishes reads as broken, and the
-                 remedy (reindex the members) is not guessable from an absent button. -->
-            <div class="reindex-note">
-              <ph-icon name="info" [size]="15"/>
-              <span>{{ 'brain.overview.reindexProxy' | transloco }}</span>
-            </div>
-          }
+          <app-reindex-notes [needsReindex]="needsReindex()" [isProxy]="isProxy()" [run]="reindexRun()" />
 
           <!-- Retention belongs on this card: both answers here are about the lifecycle of what is stored,
                and "why did that record disappear?" is asked far more often than it is answered. Read-only —
@@ -436,7 +422,8 @@ import { ErModelPanelComponent } from './er-model-panel.component';
                button could only ever produce a 400. -->
           @if (!isProxy()) {
             <div class="actions">
-              <button class="btn btn-sm btn-secondary" type="button" [disabled]="reindexing()" (click)="requestReindex()">
+              <button class="btn btn-sm btn-secondary" type="button" [disabled]="reindexing()"
+                [attr.aria-busy]="reindexing() ? 'true' : null" (click)="requestReindex()">
                 @if (reindexing()) { <span class="spinner" style="width:12px;height:12px;border-width:2px;"></span> }
                 <ph-icon name="arrows-clockwise" [size]="14" style="margin-right:5px;vertical-align:-2px;"/>{{ 'brain.overview.reindexButton' | transloco }}
               </button>
@@ -612,7 +599,10 @@ export class OverviewTabComponent {
   /** The SHELL owns the schema dialog: this tab reports which type was asked for and nothing more. */
   editSchemaType = output<string>();
   stats = input<SpaceStats | undefined>(undefined);
+  /** True while a reindex request is in flight OR the server says this space's run is going. */
   reindexing = input(false);
+  /** The space's reindex run as the server reports it, or null before the first answer. */
+  reindexRun = input<ReindexRunState | null>(null);
   /**
    * A proxy space stands in for its members and holds no records — so it has no index of its own and
    * nothing to reindex. The server has refused the call since the double-embed fix (`planReindex` answers

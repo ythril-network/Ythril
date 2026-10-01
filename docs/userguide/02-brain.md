@@ -20,10 +20,10 @@ it returns you to the tab you were on. The cog is greyed out until a space is se
 The admin list at **Settings → Spaces** is the place to create, reorder and compare
 spaces; the cog is the shortcut for the one you are working in.
 
-The same state is on both APIs as `needsReindex` on a space's meta, so an agent can check it without watching
-the screen.
+The same state is on both APIs as `needsReindex` on a space's meta, with a running reindex's progress beside it
+as `reindexRun`, so an agent can check both without watching the screen.
 
-If the search index needs rebuilding (for example after the embedding model changes), a banner appears reading *"Embeddings are stale — a reindex is recommended."* Click **Reindex** to rebuild it.
+If the stored embeddings were made by a different model than the one configured (for example after the embedding model changes), a banner appears reading *"Embeddings are stale — the embedding model has changed and this space needs reindexing."* Semantic search in that space is switched off until the reindex has finished, because ranking new questions against another model's vectors gives plausible answers in the wrong order. Click **Reindex now** to rebuild them.
 
 > **Reindex and rebuild are different repairs.** *Reindex* re-embeds your content against the current model. It does **not** help when the search index itself is missing or broken — the symptom there is search quietly returning nothing at all, with no error. That one needs **Rebuild search indexes** on the space's **Danger** tab (see below).
 >
@@ -504,8 +504,9 @@ What it does is remove the record's embedding, not hide the record. So a suppres
 next to it — it simply stops competing on meaning. If a record you know exists never appears in a search, check
 these three levels before treating it as a fault.
 
-> Turning suppression off does not go back and embed what was written while it was on. Use the space's
-> **Reindex** control on the Overview tab, or re-save an individual record.
+> Turning suppression off does not go back and embed what was written while it was on. Use **Backfill
+> embeddings** on the space's Danger tab, which embeds only what has no vector, or re-save an individual record.
+> **Reindex** works too, but it rebuilds every vector in the space to fill that gap.
 >
 > The per-record setting is API-only today — there is no checkbox for it in the UI. Upgrading a script
 > from before 3.1: the old name `excludeFromVectorSearch` is refused, so send `suppressEmbeddings`.
@@ -666,8 +667,13 @@ when you click it. See the integration guide's graph page, *Bodies in one call*.
 > nothing — a record that genuinely cannot be embedded must not be retried on every boot for ever.
 > **Reindex tells you it STARTED, not what it found.** The button schedules the work and returns at once —
 > a whole-space re-embed is far too long to hold a request open — so there is no count to report yet, and
-> the notification says the job is running in the background. The **Indexing** panel is where progress and
-> completion show up.
+> the notification says the job is running in the background. The **Indexing** panel then shows
+> *Reindexing: N left to rebuild, F failed* while it runs, both Reindex buttons stay disabled, and the line goes
+> when every record has been rebuilt. Every record is rebuilt, passages of documents and captions of media
+> included, so a large space takes a while; the work waits behind anything you write meanwhile, so the rest of
+> the app stays responsive. A reindex left running when the server restarts continues where it stopped. Records
+> whose rebuild fails are counted as *failed* and listed with the space's embedding jobs; if the embedding
+> service is unreachable, the reindex simply waits for it and strips nothing.
 >
 > **A proxy space has no Reindex button at all.** It holds no records of its own — its members do — so it has
 > no index to rebuild, and the panel says to reindex the member spaces instead.

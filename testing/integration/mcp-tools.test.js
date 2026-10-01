@@ -38,7 +38,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post, get, del, patch, delWithBody, readRecord, readCollection } from '../sync/helpers.js';
+import { INSTANCES, post, get, del, patch, delWithBody, readRecord, readCollection, ensureReindexed } from '../sync/helpers.js';
 import { openMcpSession } from '../sync/mcp-session.js';
 import { legacyRights } from '../_shared/legacy-token-rights.mjs';
 
@@ -54,21 +54,6 @@ let tokenA;
 async function rawGet(url) {
   const r = await fetch(url);
   return r.status;
-}
-
-/**
- * Reindex every space on the given instance whose embeddings were created with a
- * different model, so recall / recall_global work with the currently configured model.
- */
-async function ensureReindexed(baseUrl, token) {
-  const { body: spacesBody } = await get(baseUrl, token, '/api/spaces');
-  const spaces = spacesBody?.spaces ?? [];
-  for (const space of spaces) {
-    const { body: statusBody } = await get(baseUrl, token, `/api/brain/spaces/${space.id}/reindex-status`);
-    if (statusBody?.needsReindex) {
-      await post(baseUrl, token, `/api/brain/spaces/${space.id}/reindex`, {});
-    }
-  }
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

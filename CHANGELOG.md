@@ -9,6 +9,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **A reindex queues its records for the embedding worker instead of embedding them in a loop of its own, and it
+  survives a restart (`Q-99`, part 2 of 3).** `POST /api/brain/spaces/:id/reindex` and `space_reindex` record a
+  run for the space and return; every record is then queued as a rebuild job and rebuilt by the same worker and the
+  same text builder every write goes through, even where its text has not changed, because a new prefix scheme, a
+  new dimension or new weights behind the same model name make a different vector from the same text. What an
+  integrator or operator will notice:
+  - **Progress is readable.** `GET .../reindex-status` and `space_meta` (both doors, one function) carry
+    `reindexRun: { running, remaining, failed }` beside `needsReindex`. Poll until `reindexRun.running` is `false`;
+    `needsReindex` now stays `true`, and recall in the space keeps refusing, until every record is rebuilt rather
+    than only until the loop ended. The REST acknowledgement still carries `reindexed: 0, errors: 0`.
+  - **The refusal is per space.** A space with a run going answers `409` to a second reindex; any other space
+    starts. One reindex per INSTANCE was the rule while the work ran inline and two loops fought over the main
+    thread; the queue serialises embedding now, so a script that reindexed spaces one at a time by retrying on
+    `409` still works and simply stops waiting.
+  - **The embed queue has lanes.** A local write is claimed first, a record a peer sent and a backfill
+    (`reembed`) next, a reindex last, and every fourth claim starts one lane lower in turn, so under load each
+    lower lane keeps at least one claim in eight. A large reindex or backfill no longer holds the write somebody
+    is waiting to search for, and the claim of a never-tried job no longer sorts every pending job in memory (it
+    was about 60 ms a claim with 40,000 jobs queued).
+  - **A run is a document** (`<space>_reindex_run`): a restart re-asserts its space's `needsReindex` in the same
+    step that computes it, continues the sweep where it stopped, and starts it again if the embedding
+    configuration changed meanwhile. It moves with a rename and goes with a delete or a full wipe.
+  - **An embedder outage strips nothing.** A rebuild that cannot reach the embedder leaves the record as it was and
+    retries. A run that has made no progress for ten minutes says so once in the log.
+  - **`ythril_reindex_in_progress` is the number of spaces with a run going**, no longer 0 or 1. An alert written
+    as `== 1` should become `> 0`.
+  - A reindex now also rebuilds the passages of converted documents and the captions and transcripts of media, so
+    it takes longer on a document-heavy space, and a reindex no longer runs the duplicate check on every record it
+    rebuilds.
+
 - **The bundled embedding model runs in a child process of its own, so embedding no longer stops the server from
   answering (`Q-99`, part 1 of 3).** It ran inside the server: one text took 39 ms of CPU and the event loop's lag
   was 38 ms at the median (the lag *was* the inference), a batch of 16 blocked it for 516 ms, and a bulk import of
@@ -224,6 +254,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   resolver, so MCP accepts what REST always did; `recall`'s `maxTokens` text no longer says it converts onto bytes.
 
 ### Fixed
+
+- **A reindex embedded different text from the write that created the record, and never rebuilt a passage or a
+  caption (`Q-99`, part 2).** Its five hand-written loops were a copy of the embed queue's text builder that had
+  drifted: an edge whose end is a fact, a chrono entry or a file embedded that end's raw id instead of its name, and
+  a converted document re-embedded without its own text, because the loop never read the `excerpt` it passed on.
+  Derived records were skipped outright, so after a model change every passage and media caption kept the old
+  model's vector. And a backfill (`reembed`) gave a vectorless passage, face crop or converted copy a vector of its
+  PATH (`docs/a.pdf#chunk0`). One builder now serves all of them: a passage or caption is rebuilt from its own text
+  (`chunkEmbedText`, shared with the conversion pipeline), a derived record with no text is left without a vector
+  (any path-vector a backfill gave it is removed), and a passage of a file whose owner suppressed its embeddings, at
+  any depth, is not embedded.
 
 - **The client never shows an answer older than the one you asked for last (`Q-112`).** The graph's depth slider
   started a traversal on every step it passed and drew whichever answer arrived last, so a slow depth-3 answer

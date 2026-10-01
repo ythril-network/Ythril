@@ -20,7 +20,7 @@ import { reconcileLinks, removeLinksFrom, assertDesiredLinks } from '../brain/li
 import { linksStartingFrom } from '../brain/link-adjacency.js';
 import { nextSeq } from '../util/seq.js';
 import { expiryForCreate } from '../brain/ttl.js';
-import { enqueueEmbedJob } from '../brain/embed-queue.js';
+import { enqueueEmbedJob, EMBED_PRIORITY } from '../brain/embed-queue.js';
 import { mergePropertiesOrKeep } from '../brain/merge-fields.js';
 
 /**
@@ -136,7 +136,7 @@ export async function upsertFileMeta(
 
   // Both branches, unconditionally. A create enqueues for the reason every brain create does — the write
   // should not pay the model's latency — and an update for the correctness reason above.
-  await enqueueEmbedJob(spaceId, 'file', normalised);
+  await enqueueEmbedJob(spaceId, 'file', normalised, { priority: EMBED_PRIORITY.write });
 }
 
 /**
@@ -168,7 +168,8 @@ export async function recordArrivedFile(
     } as never),
     { upsert: true },
   );
-  await enqueueEmbedJob(spaceId, 'file', normalised);
+  // A peer's bytes, not a local write: nobody here is waiting on it, so it yields to the writes that are.
+  await enqueueEmbedJob(spaceId, 'file', normalised, { priority: EMBED_PRIORITY.background });
 }
 
 /**
@@ -397,7 +398,7 @@ export async function updateFileMeta(
 
   // ONE enqueue, unconditionally, after the write. Not gated on which fields moved: any such condition
   // could only be computed from the read above, which is the stale value this change exists to stop using.
-  await enqueueEmbedJob(spaceId, 'file', normalised);
+  await enqueueEmbedJob(spaceId, 'file', normalised, { priority: EMBED_PRIORITY.write });
 
   /*
    * A file's THREE classes — the only record kind with all of them, and the only one whose `_id` is a path.

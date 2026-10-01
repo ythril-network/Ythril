@@ -249,11 +249,14 @@ export const retry_embed_mediaTool: ToolHandler = {
 export const space_reindexTool: ToolHandler = {
   name: 'space_reindex',
   description: 'Re-embed every record in a space with the currently configured embedding model — the recovery path '
-    + 'after changing embedder or model. Requires an admin token. Returns as soon as the job STARTS: it runs in the '
-    + 'background and may take minutes, so poll `space_meta` — its `needsReindex` field — rather than waiting '
-    + 'on this call. One job per instance at a time; a second call while one is running is refused. A PROXY space is '
-    + 'refused by name — it has no index of its own, and its members are listed in the error so you can reindex them '
-    + 'instead. Idempotent: re-embedding a record that is already current is harmless.',
+    + 'after changing embedder, model, dimensions or prefix scheme. Requires an admin token. Every record is rebuilt, '
+    + 'including the passages of converted documents and the captions and transcripts of media, even when its text is '
+    + 'unchanged. Returns as soon as the run STARTS: the records are queued and rebuilt in the background, behind any '
+    + 'write somebody is waiting on, so poll `space_meta` — its `reindexRun` field ({running, remaining, failed}) — '
+    + 'rather than waiting on this call; `running` turns false when every record is rebuilt. A space with a run '
+    + 'already going refuses a second one (409); any other space starts. A PROXY space is refused by name — it has no '
+    + 'index of its own, and its members are listed in the error so you can reindex them instead. Recall in a space '
+    + 'whose `needsReindex` is true refuses until its run finishes.',
   mutating: true,
   admin: true,
   spaceRequired: true,
@@ -274,13 +277,13 @@ export const space_reindexTool: ToolHandler = {
 
     // The member list comes from what this TOKEN may reach, not from the space's full membership. A proxy is refused
     // below regardless, but a scoped admin reindexing a normal space must never walk a member it cannot see.
-    const decision = planReindex({
+    const decision = await planReindex({
       spaceId: callSpace,
       space,
       memberIds: memberSpacesWithin(callSpace, accessibleSpaceIds),
     });
     if (!decision.ok) {
-      // The status is reported alongside the message: 409 means "one is already running, try later" and 400 means
+      // The status is reported alongside the message: 409 means "this space's run is still going" and 400 means
       // "this can never work, reindex the members instead". An agent that cannot tell those apart retries the wrong one.
       return {
         content: [{ type: 'text' as const, text: `Error (${decision.refusal.status}): ${decision.refusal.body.error}` }],
@@ -290,12 +293,12 @@ export const space_reindexTool: ToolHandler = {
       };
     }
 
-    startReindex(decision.plan);
+    await startReindex(decision.plan);
     return {
       content: [{ type: 'text' as const, text:
         `Reindex STARTED for '${callSpace}' (${decision.plan.memberIds.length === 1 ? '1 space' : `${decision.plan.memberIds.length} member spaces`}). `
-        + 'It runs in the background — this reply does not mean it finished. Progress is in the server log, and '
-        + 'space_meta reflects the result once it completes.' }],
+        + 'It runs in the background — this reply does not mean it finished. space_meta reports its progress in '
+        + '`reindexRun` ({running, remaining, failed}); `running` turns false when every record is rebuilt.' }],
       structuredContent: { status: 'started', spaceId: callSpace, memberSpaces: decision.plan.memberIds },
     };
   },
@@ -329,6 +332,10 @@ export const space_reembedTool: ToolHandler = {
     + 'BOUNDED, AND `truncated: true` MEANS CALL AGAIN. `limit` defaults to '
     + `${REEMBED_DEFAULT_LIMIT} and cannot exceed ${REEMBED_MAX_LIMIT}, so one call can never enqueue `
     + 'unbounded work. `remaining` is what is left after this page.\n\n'
+    + 'QUEUED BEHIND LOCAL WRITES. The jobs wait in the background lane: a write somebody is waiting to search '
+    + 'for is embedded first, while the backfill still gets a share of the worker. A derived record with no text '
+    + 'of its own (a face crop, a converted copy of a document) is never a candidate, so a second call after the '
+    + 'queue has drained reports `enqueued: 0`.\n\n'
     + 'RESPONSE: `enqueued`, `skippedSuppressed`, `byKind`, `remaining`, `truncated`. A run that enqueues '
     + 'nothing and skips nothing means every record already has a vector — not that it failed.',
   mutating: true,

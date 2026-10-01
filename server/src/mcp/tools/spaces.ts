@@ -162,14 +162,16 @@ export const space_metaTool: ToolHandler = {
         + 'Editing a record that was invalid before you touched it reports the pre-existing violation and '
         + 'still saves, because refusing would not fix a problem that is already stored.\n\n'
         + '`needsReindex` IS TRUE WHEN THE STORED VECTORS WERE MADE BY A DIFFERENT EMBEDDING MODEL from the '
-        + 'one configured now. Recall still answers while it is true, but it compares new queries against old '
-        + 'vectors, so results degrade quietly rather than erroring. Treat a true value as the explanation '
-        + 'for poor ranking, and as something for whoever administers the instance — not a reason to stop '
-        + 'reading.\n\n'
+        + 'one configured now. While it is, `recall` in this space REFUSES with an error and `similar` leaves the space out '
+        + '— ranking new queries against another model\'s vectors would return plausible results in the '
+        + 'wrong order. `filter` and `graph_traverse` still answer. Treat a true value as the explanation for a '
+        + 'refused or empty semantic search, and as something for whoever administers the instance. It stays true '
+        + 'until every record has been rebuilt. `reindexRun` is that rebuild\'s progress: `running` while one is '
+        + 'going, `remaining` records still to rebuild, `failed` records whose rebuild gave up.\n\n'
         + 'RESPONSE: `purpose` and `usageNotes` (prose written for whoever reads this space), `typeSchemas` '
-        + 'per knowledge type, `validationMode`, `strictLinkage`, the entry counts, `needsReindex`, and '
-        + '`version` — which increments on every meta write and is what a conditional update is checked '
-        + 'against.',
+        + 'per knowledge type, `validationMode`, `strictLinkage`, the entry counts, `needsReindex`, '
+        + '`reindexRun`, and `version` — which increments on every meta write and is what a conditional update '
+        + 'is checked against.',
   spaceRequired: true,
   inputSchema: (s: ToolSchemas) => ({
           type: 'object',
