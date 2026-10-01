@@ -190,5 +190,8 @@ describe('the import writes through the one arrival writer', () => {
       'the import does not write through the arrival writer as a restore');
     assert.doesNotMatch(src, /\.(?:replaceOne|insertOne|insertMany|updateOne|updateMany|bulkWrite)\(/,
       'a second write path into the same collections is how the embed queue got skipped the first time');
+    // Dup pass: the retag is the writer's (`retagToLocalSpace`); a `{ ...doc, spaceId }` here was a second one.
+    // Seen red by mutation, restored by hand: the spread put back.
+    assert.doesNotMatch(src, /\.\.\.\(?doc\b[^}]*,\s*spaceId\s*\}/, 'the import retags a document itself again');
   });
 });

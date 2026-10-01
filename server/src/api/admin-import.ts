@@ -134,7 +134,9 @@ export async function importDocuments(spaceId: string, payload: Record<string, u
         // What the writer will refuse is not stored, so it has no violations to report — the same shape rule.
         if (arrivalRefusal(doc, { seqOptional: false }) !== null) continue;
         const id = arrivalId(doc);
-        const found = violationsAgainstLocalSchema(spaceId, kind as KnowledgeType, { ...(doc as Record<string, unknown>), spaceId });
+        // The document as it arrived: the schema check reads its type and properties, never its `spaceId`, and the
+        // retag to this space is the writer's (`retagToLocalSpace`, in `writeArrivals`) — not a second one here.
+        const found = violationsAgainstLocalSchema(spaceId, kind as KnowledgeType, doc as Record<string, unknown>);
         if (found.length > 0) violations.push({ _id: id, violations: found });
       }
     }
