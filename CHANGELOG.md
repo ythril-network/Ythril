@@ -544,6 +544,206 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   refused; the schema now states it from the same constant. Routes that validate by hand are counted, and may only
   get fewer.
 
+## [5.6.1] — 2026-10-01
+
+**A patch release: every fix since 5.6.0 for a defect present in 5.6.0, and nothing else.** The one to take first
+is sync: two overlapping writes could leave a peer missing a record for good. It also fixes bulk writes that
+stored the wrong edge kind or a vector a record had retired, a reindex that embedded different text from the write
+that created a record, a cross-space recall ranked by the wrong signal, and a set of space, file, network and
+client defects. Breaking changes and features already on `main` are not part of it; they ship in the next minor.
+
+| What changes on upgrade | What to do |
+|---|---|
+| A recall across several spaces is ranked by one fusion over the merged results, so its order changes | Nothing; a caller that pinned an order across spaces should re-read it |
+| A network joined before 5.6.0's join default gets the default schedule at boot | Nothing; a network set to manual stays manual |
+| A peer that completes a new handshake has the older tokens it replaces revoked | Nothing; every member should run 5.6.1 so each side keeps one token |
+| A space whose config was hand-edited to `"proxyFor": []` is loaded as a real space, with a warning | Nothing, unless that space was meant to be a proxy |
+| `GET /api/notify` answers `400` to a `limit` or `skip` that is not a number, where it fell back to the default | Send numbers, or leave the parameter out |
+| `PATCH /api/networks/:id` with `syncSchedule: ""` stores manual (`''`) instead of dropping the field | Nothing, unless you relied on `""` meaning unset |
+
+### Fixed
+
+#### Sync and networks
+
+- **A peer could miss a record for good when two writes overlapped (`Q-196`).** A write took its sequence number
+  a moment before it stored the record, and every page a peer pulls served whatever sequence numbers were stored —
+  so a later write that finished first could be handed out while an earlier one was still being stored, the peer
+  moved its watermark past it, and never came back for it. Every seq-paged route (the five record families,
+  `filemeta`, `tombstones`), the push loop and the duplicate and contradiction scanners now stop below any write
+  that has not finished; a write's sequence number is taken as part of the write and released when it settles,
+  including inside a transaction, which holds it until it commits. A record a peer pushed with a sequence number
+  above this instance's own counter is still served.
+
+- **A network joined before the join default now syncs on its own.** 5.6.0 gave a new join a schedule (every 15
+  minutes, or the inviter's), but a network joined earlier kept none and pulled only when its peer started a cycle.
+  It gets the default at the next start, named
+  in the log. Clearing a schedule now stores manual as a choice (`""`) rather than as nothing, so manual set on
+  purpose is never replaced; one cleared before this change reads as never set, so it is scheduled once.
+
+- **A peer keeps one token, not one per join (`Q-163`).** Every network joined with the same instance minted it a
+  new token and left the previous one valid, though the peer keeps only the newest and could never present the
+  others, so unused tokens piled up. A completed handshake now revokes the tokens it replaces, on both sides, and an instance drops the unused leftovers
+  when it starts. A token still in a handshake is left alone, since two joins can overlap.
+
+- **A member that learned a join vote from another member no longer admits the joiner on its own vote**
+  (`Q-154`). On a closed or democratic network only the member holding the joiner's credentials may add it, and the
+  sync pass already held to that. Casting the concluding vote did not: a member whose copy of the round came by
+  gossip, with no credential for the joiner, added it anyway — a member that could never authenticate there. A local
+  vote now follows the same rule.
+
+- **A space schema-change notice is accepted by its peers (`Q-108`).** `meta_change_pending` was sent to every
+  member and was not an event `POST /api/notify` accepted, so each peer answered `400` to a sender that does not read
+  the answer. Peers now accept and record it.
+
+#### Writes and embedding
+
+- **A bulk edge whose end was a `$ref` to a fact or chrono entry was stored as an entity end (`Q-193`)** when the
+  item did not state the kind: it was checked for existence as the fact it named and stored pointing at an entity
+  that did not exist, so a traversal from the fact never found it. The edge now stores the kind of the record the
+  key names.
+
+- **A chrono entry rewritten through its `id` kept the vector of its old content (`Q-192`).** A rewrite never queued
+  a re-embed, as a new entry does, so the entry's search vector described what it no longer said.
+
+- **A record retired from meaning-ranked search got a vector anyway when it was rewritten without restating the
+  flag (`Q-194`)** — on every create endpoint with `waitForEmbedding` or `checkDuplicates`, through a batch, and on
+  the survivor of a merge. The write now decides suppression on the record it leaves: the stored flag unless the
+  write states one.
+
+- **`save_bulk` on MCP accepted a retired or unknown key and wrote nothing (`Q-195`)**: `{"memories": […]}`
+  answered success while the REST door refused it with a `400` naming `facts`. Both doors now run the same check
+  and refuse the same keys with the same message.
+
+- **An edge created with a property its label's schema defaults was stored without the default**, although the
+  default was what passed validation; the stored edge now carries the value that was checked.
+
+- **A reindex embedded different text from the write that created the record, and never rebuilt a passage or a
+  caption (`Q-99`, part 2).** It built a record's text its own way, not the way a write does: an edge whose end is a fact, a chrono entry or a file embedded that end's raw id instead of its name, and
+  a converted document re-embedded without its own text.
+  Derived records were skipped outright, so after a model change every passage and media caption kept the old
+  model's vector. And a backfill (`reembed`) gave a vectorless passage, face crop or converted copy a vector of its
+  PATH (`docs/a.pdf#chunk0`). A reindex now builds every record's text as a write does: a passage
+  or caption is rebuilt from its own text, a derived record
+  with no text is left without a vector (any path-vector a backfill gave it is removed, and a backfill no longer
+  queues it), and a passage of a file whose owner suppressed its embeddings, at any depth, is not embedded. A
+  reindex rebuilds a vector even when its text is unchanged, and an embedder outage during one leaves a record's
+  vector as it was.
+
+#### Search
+
+- **A slow or failing reranker no longer holds every search (`Q-157`).** While the reranker was slow or down,
+  every recall waited out its time limit (20 s) and was then answered in fused order anyway. A reranker pass that fails, runs out its own time limit, or takes more than half of
+  it now sets the reranker aside for 30 s, doubling to 5 min; searches in between skip it at once and still report
+  `degraded: ["rerank_unavailable"]`. A background probe, never a user's search, brings it back.
+
+- **A record's text rank is its rank among records of its own type (`Q-159`).** The text channel sorted every
+  type's matches together by raw MongoDB text score, whose scale is each collection's own, so a fact could outrank
+  an entity only because facts are longer — the comparison reciprocal rank fusion exists to avoid. The Query tab
+  now says what `fusedScore` is: a rank score, `1/(60 + rank by meaning) + 1/(60 + rank by text)`, about 0.016 to
+  0.033, never a similarity. **Who is affected:** the ORDER of a fused recall's results changes where several
+  record types matched the text.
+
+- **`filter`'s `total` counts what a name join matches (`Q-160`).** With `fromName`, `toName` or `entityName`, the
+  rows were right and `total` counted the whole collection — `count: 2, total: 86` on a space of 86 edges — so a
+  caller comparing the two, as the tool tells it to, read on for pages that did not exist. Both doors.
+
+- **A recall across spaces ranks by relevance, not by which spaces had a text match (`Q-82`).** Each space fused
+  its own candidates only when its text search found something, so a cross-space answer mixed rank scores near
+  0.03 with cosine scores near 0.3-0.9: without a reranker every result of a space whose text search missed came
+  before every result of one whose text search hit, whole spaces in blocks; with one, the rerank's unscored tail
+  did the same. The merged pool is now fused once — one ranking by meaning over every candidate, and each space's
+  per-type text ranking as its own channel — so every result carries a `fusedScore` from the same fusion, spaces
+  interleave by relevance, and the reranker picks its candidates by that order. **Who is affected:** a `recall`
+  naming several spaces, a proxy, or no space — the ORDER of its results and the values of `fusedScore` on them.
+  A recall over one space is unchanged.
+
+#### Spaces and files
+
+- **A new space could stay "building" until the next restart.** Once its search indexes were ready, the space
+  recorded that in config.json, re-reading the file first so a concurrent edit is kept. On Docker Desktop the file
+  is a bind mount, and a read that landed while the file was being rewritten failed with `ENODATA` — and the
+  first such failure was taken as final. A read spoiled by a concurrent writer is now retried a few times; any
+  other error is still reported at once.
+
+- **A proxy space no longer gets collections at boot, and a hand-edited `proxyFor: []` is a real space everywhere
+  (`Q-80`, `Q-98`).** The boot initialisation walked every configured space, so each boot created a proxy's
+  collections — which creating it never made and deleting it (a config-only removal) never dropped; the restore
+  index rebuild walked proxies too. And "is this a proxy" was answered in two spellings that disagreed on an empty
+  member list: such a space was served as a real space and skipped as a proxy by the embed worker, the duplicate
+  and contradiction scanners, the prunes and the metrics, and deleted as a proxy with its collections left behind.
+  The loader now removes an empty `proxyFor` on load and reload (with a warning), and the boot and the restore
+  rebuild walk only the spaces that own collections. **Who is affected:** an instance with a proxy space (its boot
+  stops creating collections for it; ones already created are left as they are, empty), and one whose config was
+  edited by hand to hold `"proxyFor": []` (that space starts being embedded and scanned).
+
+- **Moving a file or folder leaves nothing at its old path, even while the file is still being processed.** A
+  document's conversion that finished after the move wrote its chunk records under the path the file had just
+  left — a folder that no longer existed, with nothing to ever delete them. The conversion now commits its records
+  in one transaction that holds only while its job is still claimed, and a move takes that claim before any bytes
+  leave, then re-queues the job at the new path. A run that finds its moved file missing no longer "cleans up a
+  deleted file" either — which deleted the job and records the move was carrying. And a move now carries
+  everything a file owns: a renamed file's chunks used to stay at the old path, a moved folder's chunks kept naming
+  parents that no longer existed (so deleting the moved file removed none of them), and the
+  `_converted/`/`_extracted/` sidecars moved for neither. REST `PATCH /api/files/:spaceId` and MCP `move_file` now
+  run the same move. **And a moved folder keeps its files' links** (`Q-164`): renaming one file re-created its
+  links under the new path, but moving a folder re-rooted the records and left every link naming a path that was
+  gone, so each file in it silently lost what it was linked to. Both now carry links through one step.
+
+- **A space delete no longer loses a race with the media worker, and one unfinished delete no longer blocks every
+  space operation until a restart.** Deleting a space while the worker was still converting one of its files failed
+  `ENOTEMPTY` when removing the files directory — the worker was writing artifacts under it — and the delete kept
+  its marker, as it must. But the marker was only ever resumed at boot, so every later rename and delete on the
+  instance answered `500 "… is still pending … It resumes automatically on restart"`. Three fixes: every removal of
+  a space's directories retries what a concurrent writer causes; a space being deleted or renamed away refuses new
+  file writes, which the media worker treats as an abandonment, like a moved file's; and the next rename or delete
+  finishes a pending op before it proceeds, refusing only when that fails again — with the reason.
+
+#### Lists, notify and metrics
+
+- **Two lists that stopped at a number now say so and can be read to the end.** Each now pages the same way:
+  whole rows, `limit` and `skip` refused with a `400` rather than floored when they are not numbers, the byte budget,
+  and `count`, `total`, `limit`, `skip`, `truncated` and `nextSkip` on every answer.
+  - **The schema dry-run** (`POST /api/spaces/:id/validate-schema`) says, per collection, how many records it
+    checked against how many exist and whether the check was complete (`checked`, `complete`), and pages its
+    violations instead of stopping at 500 (`Q-129`).
+  - **The notify event list** (`GET /api/notify`) pages with `skip` and says when it is cut, instead of stopping at
+    200 (`Q-130`).
+  - **Resolving entities by id** in the web UI asks for every id instead of dropping those past 100 (`Q-131`).
+
+- **An unknown tool name no longer becomes a metric label (`Q-108`).** It was counted in `ythril_tool_calls_total`
+  before the `404`, so any caller could mint a time series per spelling.
+
+- **The notify event store is bounded by bytes, not only by count (`Q-108`).** 500 events of up to the JSON body
+  limit each could hold gigabytes; it now holds at most 1 MiB, oldest out first.
+
+#### Client
+
+- **The Graph tab says why it is slow instead of spinning with nothing on it (`Q-155`).** After three seconds of
+  waiting it says the server has not answered yet and names what the space is doing — search indexes being built,
+  records waiting to be embedded — and after thirty seconds the wait ends in the error state with those reasons
+  and Retry — for example while an upgraded instance rebuilds its search indexes.
+
+- **The Query tab's walk headings show their counts (`Q-101`).** "Reached by the walk", and the Entities, Facts,
+  Chrono and Files headings under it, rendered `({count})` literally in all three languages, and each reached record
+  read `{hops} hop(s)`: the values used single braces, which the translation layer does not interpolate.
+
+- **Buttons that name an action say it in German and Polish (`Q-115`).** "Clear results" read "Klare Ergebnisse"
+  (clear as in transparent) and the entity search's Clear read "Klar"; in Polish they read "Jasne", Reset read
+  "Nastawić" (to set a clock) and Close the infinitive "Zamknąć". They now read "Ergebnisse löschen" / "Leeren",
+  "Wyczyść wyniki" / "Wyczyść", "Zresetuj" and "Zamknij". The Query form's Projection field had the same fault
+  ("Vorsprung", "Występ") and now reads "Projektion" / "Projekcja". The same fault on the product's noun: German called a space a "Leerzeichen" (the typed whitespace character) in
+  8 places — "Noch keine Leerzeichen" on the Brain page, "Leerzeichen erstellen/löschen" on the MFA card — and
+  Polish a "spacja" in 11; they now say "Space" / "przestrzeń" as the rest of the interface does.
+
+- **The client never shows an answer older than the one you asked for last (`Q-112`).** The graph's depth slider
+  started a traversal on every step it passed and drew whichever answer arrived last, so a slow depth-3 answer
+  could land over depth 4 — and a depth drawn from the cache could be redrawn by a deeper request still in flight.
+  It now asks once the slider rests and cancels what it no longer needs. The record tabs (entities, edges, facts,
+  chrono) let a slow answer to an old filter replace the new filter's rows, and a list load could replace a
+  semantic search's rows or the reverse; now the latest request always wins on every tab,
+  and on the graph's selected-record card and linked records. Opening a record resolved each linked fact and chrono title with its own request; it
+  is one request per kind now.
+
 ## [5.6.0] — 2026-09-29
 
 **A minor release: a filtered recall returns every record that matches, a search never writes into a space, and a
