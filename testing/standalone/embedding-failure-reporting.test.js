@@ -35,7 +35,10 @@ const CANDIDATE_CONFIGS = [
 ];
 const CONFIG_FILE = CANDIDATE_CONFIGS.find(p => fs.existsSync(p)) ?? null;
 const TOKEN_FILE = path.join(__dirname, '..', 'sync', 'configs', 'a', 'token.txt');
-const USE_DOCKER_EXEC = process.platform !== 'win32' && CONFIG_FILE?.includes(path.join('sync', 'configs'));
+// Through the container on EVERY platform when the config is the test stack's. Written from the Windows side of a
+// Docker Desktop bind mount, the container's view lagged by seconds or did not change at all within 15 s (measured
+// 2026-10-01), so the reload read the old embedder and the test failed for its harness, not for the product.
+const USE_DOCKER_EXEC = CONFIG_FILE?.includes(path.join('sync', 'configs')) ?? false;
 const CONTAINER_A = 'ythril-a';
 const RUN_ID = Date.now();
 const SPACE_ID = `b3-embed-fail-${RUN_ID}`;
@@ -61,7 +64,8 @@ function readConfig() {
 function writeConfig(cfg) {
   if (USE_DOCKER_EXEC) {
     execSync(
-      `docker exec -i ${CONTAINER_A} sh -c 'cat > /config/config.json && chmod 600 /config/config.json'`,
+      // Double quotes: execSync runs cmd.exe on Windows, which does not treat single quotes as quoting.
+      `docker exec -i ${CONTAINER_A} sh -c "cat > /config/config.json && chmod 600 /config/config.json"`,
       { input: JSON.stringify(cfg, null, 2) },
     );
     return;
