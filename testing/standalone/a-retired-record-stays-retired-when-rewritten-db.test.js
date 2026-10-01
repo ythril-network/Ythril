@@ -110,9 +110,6 @@ const WRITERS = {
 const NOT_A_WRITER = {
   embedStoredRecord: 'the queue job itself: it reads the record tier from the STORED document (`recordSuppression`), '
     + 'which is the behaviour every writer here is asked to match',
-  // 5.6.x only: main's reindex queues its records instead of embedding them (`Q-99` part 2).
-  startReindex: 'a rebuild of STORED records: each loop projects `suppressEmbeddings` and asks the resolver with '
-    + 'the stored document, so the record tier is the stored flag by construction',
 };
 
 /** Rewrites asked of every writer. `{}` is the plain converge, which must not QUEUE a vector either. */
