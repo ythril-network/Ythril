@@ -176,3 +176,38 @@ export function stampFusion(
   }
   return true;
 }
+
+/** One space's answer as a cross-space merge receives it: its results, and the lexical ranking that fused them. */
+export interface SpaceAnswer<T extends FusableResult = FusableResult> {
+  results: T[];
+  /** The space's per-type lexical rankings, as `stampFusion` took them — empty when its text search found nothing. */
+  lexicalPerType: ReadonlyArray<readonly string[]>;
+}
+
+/**
+ * Merge several spaces' answers and fuse them ONCE, so every merged result is ranked on the same scale (`Q-82`).
+ *
+ * ## Why the per-space fusion cannot simply be kept
+ *
+ * `stampFusion` stamps every candidate of a space when that space's lexical channel found something, and none
+ * when it found nothing. So the per-space answers arrive on two scales: fused rank scores (at most about 0.033)
+ * and cosine similarities (about 0.3 to 0.9). Ordered by `byRankThenId`, every result of a space whose text
+ * search missed outranked every result of one whose text search hit — whole spaces came back as blocks, the
+ * spaces that matched the query's words best came last — and two fused spaces interleaved round-robin, because
+ * each space's ranks start at 1.
+ *
+ * ## What the one fusion is
+ *
+ * `stampFusion` itself, over the merged pool — not a second implementation of RRF. Its vector channel becomes
+ * every merged candidate by cosine score, which IS comparable across spaces (one query vector, one model), and
+ * each space's per-type lexical ranking stays its own channel: the rule `Q-159` set for types within a space,
+ * one level up, because raw text scores of two collections are not comparable either. A result its space's text
+ * search did not find keeps the vector term alone, exactly as inside one space.
+ *
+ * When no space's text search found anything, nothing is stamped and the cosine order stands.
+ */
+export function fuseAcrossSpaces<T extends FusableResult>(answers: ReadonlyArray<SpaceAnswer<T>>): { merged: T[]; fused: boolean } {
+  const merged = answers.flatMap(a => a.results);
+  const fused = stampFusion(merged, [], answers.flatMap(a => a.lexicalPerType));
+  return { merged, fused };
+}

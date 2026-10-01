@@ -59,6 +59,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`filter`'s `total` counts what a name join matches (`Q-160`).** With `fromName`, `toName` or `entityName`, the
   rows were right and `total` counted the whole collection — `count: 2, total: 86` on a space of 86 edges — so a
   caller comparing the two, as the tool tells it to, read on for pages that did not exist. Both doors.
+- **A recall across spaces ranks by relevance, not by which spaces had a text match (`Q-82`).** Each space fused
+  its own candidates only when its text search found something, so a cross-space answer mixed rank scores near
+  0.03 with cosine scores near 0.3-0.9: without a reranker every result of a space whose text search missed came
+  before every result of one whose text search hit, whole spaces in blocks; with one, the rerank's unscored tail
+  did the same. The merged pool is now fused once — one ranking by meaning over every candidate, and each space's
+  per-type text ranking as its own channel — so every result carries a `fusedScore` from the same fusion, spaces
+  interleave by relevance, and the reranker picks its candidates by that order. **Who is affected:** a `recall`
+  naming several spaces, a proxy, or no space — the ORDER of its results and the values of `fusedScore` on them.
+  A recall over one space is unchanged.
 
 ## [5.6.0] — 2026-09-29
 

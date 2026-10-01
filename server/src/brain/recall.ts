@@ -33,7 +33,7 @@ import { datePassedPolicy } from './chrono-date-policy.js';
 import { getSpaceMeta } from '../spaces/schema-validation.js';
 import { rerankConfigured, candidateMultiplier } from './rerank-client.js';
 import { rerankPool } from './rerank-pool.js';
-import { lexicalSearch, stampFusion, hybridSearchEnabled, LEXICAL_LIMIT_MULTIPLIER, type LexicalHit } from './lexical-search.js';
+import { lexicalSearch, stampFusion, fuseAcrossSpaces, hybridSearchEnabled, LEXICAL_LIMIT_MULTIPLIER, type LexicalHit } from './lexical-search.js';
 import { atlasVectorScore, scoresAgree } from './vector-score.js';
 import { matchFreshWrites, addFreshWrites } from './fresh-writes.js';
 import type { ChronoStatus, RecordType } from '../config/types.js';
@@ -273,6 +273,12 @@ export async function recall(
      */
     deferRerank?: boolean;
     /**
+     * Receives this space's per-type lexical rankings — the lists its fusion ran over, empty when the text search
+     * found nothing — so `recallGlobal` can fuse the MERGED pool once (`Q-82`, see `fuseAcrossSpaces`). Set only by
+     * `recallGlobal`, like `embedded`.
+     */
+    observeLexical?: (lexicalPerType: string[][]) => void;
+    /**
      * `false` skips the cross-encoder for THIS call (`Q-88`): no over-fetch for it and no rerank pass, the fused order
      * returned. For a caller that is waiting on the answer as the user types — a type-ahead — where the rerank
      * dominated the latency (16-25 s on a shared GPU) and bought an ordering nobody reads before the next keystroke.
@@ -420,7 +426,8 @@ export async function recall(
   // contributes an empty channel and the vector order stands unchanged.
   // `fused` says whether ONE fusion ranked this whole pool, which is what lets the rerank cap trust it.
   const fused = hybridSearchEnabled()
-    && await applyLexicalFusion(spaceId, query, embResult.vector, activeTypes, perTypeK, allResults, guaranteed, tags, filter);
+    && await applyLexicalFusion(spaceId, query, embResult.vector, activeTypes, perTypeK, allResults, guaranteed, tags, filter,
+      opts?.observeLexical);
 
   // Phase 3: rerank the candidate pool, if a cross-encoder is configured. Best-effort by construction —
   // `rerankPool` leaves the fused order untouched when the reranker has no opinion.
@@ -482,6 +489,8 @@ async function applyLexicalFusion(
   floors: readonly RecallResult[],
   tags?: string[],
   filter?: RecallFilter,
+  /** Handed the per-type rankings fused below, for a caller merging several spaces (`recallGlobal`, `Q-82`). */
+  observeLexical?: (lexicalPerType: string[][]) => void,
 ): Promise<boolean> {
   if (pool.length === 0) return false;
 
@@ -520,7 +529,9 @@ async function applyLexicalFusion(
     }
   }
 
-  return stampFusion(pool, floors, perType.map(hits => hits.map(h => h._id)));
+  const lexicalPerType = perType.map(hits => hits.map(h => h._id));
+  observeLexical?.(lexicalPerType);
+  return stampFusion(pool, floors, lexicalPerType);
 }
 
 /**
@@ -1143,13 +1154,29 @@ export async function recallGlobal(
   // operator's instance, ten of them killed by the shared deadline. One space needs no merge, so it keeps
   // the ordinary path.
   const deferRerank = spaceIds.length > 1 && rerankConfigured() && opts?.rerank !== false;
+  const lexicalOf: string[][][] = spaceIds.map(() => []);
   const results = await Promise.all(spaceIds.map(
-    id => recall(id, query, topK, tags, types, minPerType, minScore, filter, { ...opts, embedded, deferRerank }),
+    (id, i) => recall(id, query, topK, tags, types, minPerType, minScore, filter,
+      { ...opts, embedded, deferRerank, observeLexical: l => lexicalOf[i]!.push(...l) }),
   ));
-  const flat = results.flat();
+  /*
+   * ONE fusion over the merged pool (`Q-82`), before the rerank chooses its candidates and before the order.
+   *
+   * Each space fused its own candidates, or did not when its text search found nothing, so the answers arrive on
+   * two scales — rank scores near 0.03 and cosine scores near 0.3 to 0.9 — and ordering them together put whole
+   * spaces in blocks. `fuseAcrossSpaces` re-fuses the merged pool with one vector channel and each space's lexical
+   * rankings as channels of their own, so every merged result carries a score from the same fusion.
+   *
+   * One space is left exactly as its own recall ranked it: there is nothing to merge, and re-fusing its topK
+   * alone would renumber ranks that were taken over its whole candidate pool.
+   */
+  const { merged: flat, fused } = spaceIds.length > 1
+    ? fuseAcrossSpaces(results.map((r, i) => ({ results: r, lexicalPerType: lexicalOf[i]! })))
+    : { merged: results.flat(), fused: false };
   if (deferRerank) {
     const budgetMs = effectiveBudgetFor(opts?.maxTimeMS);
-    await rerankStage(query, [], flat, budgetMs - (Date.now() - startedAt), budgetMs, degradedNoter(opts?.degraded), 'vector');
+    await rerankStage(query, [], flat, budgetMs - (Date.now() - startedAt), budgetMs, degradedNoter(opts?.degraded),
+      fused ? 'fused' : 'vector');
   }
   // Sort by score descending, deduplicate by _id
   const seen = new Set<string>();
