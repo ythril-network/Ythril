@@ -32,8 +32,13 @@ import type { RefKind } from '../config/types-knowledge.js';
  */
 const EDGE_NAMESPACE = '8fdb66f3-a72f-574e-91a9-55e2a04e19a7';
 
-/** Length-prefixed so no part can forge the separator. See the docblock. */
-const part = (s: string): string => `${s.length}:${s}`;
+/**
+ * Length-prefixed so no part can forge the separator. See the docblock. Exported because a derived id elsewhere
+ * (`forkIdFor`, `sync/upsert-plan.ts`) needs the same injective encoding, and a second spelling of it is a
+ * second place for the separator to become forgeable.
+ */
+export const idPart = (s: string): string => `${s.length}:${s}`;
+const part = idPart;
 
 /**
  * The `_id` for the relationship `(from) -[label]-> (to)`.

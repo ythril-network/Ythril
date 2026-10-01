@@ -31,6 +31,7 @@ import { col, asFilter, asBulk } from '../../db/mongo.js';
 import { spaceCollection } from '../../db/space-collection.js';
 import { withAllocatedSeqs } from '../../util/seq.js';
 import { inChunks } from '../../util/chunks.js';
+import { readStoredById, READ_CHUNK } from '../../db/read-by-id.js';
 import { mapLimit } from '../../util/map-limit.js';
 import { log } from '../../util/log.js';
 import { bulkWriteFailures, phraseWriteFailure, DUPLICATE_KEY } from '../../db/write-errors.js';
@@ -44,9 +45,6 @@ import { COMMIT_ORDER, PLAN_KINDS, type CommitOutcome, type PlanKind, type Write
 
 /** Insert-time duplicate rules run at most this many at once — each is a vector search. */
 const DUPE_RULE_CONCURRENCY = 4;
-
-/** Ids per read-back and per link-row read. */
-const READ_CHUNK = 500;
 
 /** Write `plans` (all for `spaceId`) and say what happened to each, in the order given. */
 export async function commitPlans(spaceId: string, plans: readonly WritePlan[]): Promise<CommitOutcome[]> {
@@ -119,7 +117,7 @@ async function writeStage(
   // have matched nothing because its record moved since it was planned.
   const mustRead = ambiguous ? ready.map((i, k) => ({ i, k }))
     : converges.filter(({ k }) => !failedAt.has(k)).length > matched ? converges.filter(({ k }) => !failedAt.has(k)) : [];
-  const storedSeq = await readSeqs(coll, mustRead.map(({ i }) => plans[i]!.id));
+  const storedSeq = await readSeqs(spaceCollection(spaceId, PLAN_KINDS[kind].collection), mustRead.map(({ i }) => plans[i]!.id));
 
   const landed: number[] = [];
   ready.forEach((i, k) => {
@@ -154,13 +152,9 @@ function opFor(plan: WritePlan, seq: number): object {
   return { updateOne: { filter, update } };
 }
 
-async function readSeqs(coll: ReturnType<typeof col<{ _id: string; seq?: number }>>, ids: readonly string[]): Promise<Map<string, number | undefined>> {
-  const out = new Map<string, number | undefined>();
-  for (const chunk of inChunks(ids, READ_CHUNK)) {
-    const docs = await coll.find(asFilter<{ _id: string; seq?: number }>({ _id: { $in: chunk } }), { projection: { _id: 1, seq: 1 } }).toArray();
-    for (const d of docs) out.set(String(d._id), d.seq);
-  }
-  return out;
+async function readSeqs(collName: string, ids: readonly string[]): Promise<Map<string, number | undefined>> {
+  const stored = await readStoredById<{ seq?: number }>(collName, ids, { seq: 1 });
+  return new Map([...stored].map(([id, d]) => [id, d.seq]));
 }
 
 /** A landed stage's link rows and embed jobs. Never throws: the records are stored, and saying otherwise lies. */

@@ -54,6 +54,47 @@ export function isDuplicateKeyOnly(err: unknown): boolean {
 
 export const DUPLICATE_KEY = 11000;
 
+/**
+ * Server codes that refuse ONE DOCUMENT for what it is — it will be refused identically however often it is
+ * sent — as opposed to a refusal of the command, the collection or the moment (a view, a missing namespace, an
+ * authorisation, a step-down), which is not the document's and must fail the whole write so it is retried.
+ *
+ * An ALLOWLIST, and the reason is the direction of the mistake: a fault misread as a document's refusal drops
+ * that document from a sync page for good (the sender is told it was handled and moves past it), while a
+ * document's refusal misread as a fault only re-sends a page. So only a code that positively identifies the
+ * document is one.
+ */
+const DOCUMENT_REFUSAL_CODES = new Set([
+  2,      // BadValue
+  14,     // TypeMismatch
+  28,     // PathNotViable
+  52,     // DollarPrefixedFieldName
+  53,     // InvalidIdField
+  55,     // InvalidDBRef
+  56,     // EmptyFieldName
+  57,     // DottedFieldName
+  66,     // ImmutableField
+  121,    // DocumentValidationFailure — a `$jsonSchema` validator refusing this document
+  10334,  // BSONObjectTooLarge
+  17280,  // KeyTooLong
+  17419,  // a resulting document over the size limit
+]);
+
+/** Driver errors raised before anything is sent, about the document itself (a `$`-prefixed key, unserialisable BSON). */
+const DOCUMENT_REFUSAL_NAMES = new Set(['MongoInvalidArgumentError', 'BSONError', 'BSONVersionError']);
+
+/** Is this failure one document's, so refusing that document (and only it) is the right answer? */
+export function isDocumentRefusal(err: unknown): boolean {
+  const e = err as { code?: unknown; name?: unknown } | null;
+  if (typeof e?.code === 'number' && DOCUMENT_REFUSAL_CODES.has(e.code)) return true;
+  return typeof e?.name === 'string' && DOCUMENT_REFUSAL_NAMES.has(e.name);
+}
+
+/** The per-operation shape of the same question, for a code read off a bulk write's failure list. */
+export function isDocumentRefusalCode(code: number | undefined): boolean {
+  return code !== undefined && DOCUMENT_REFUSAL_CODES.has(code);
+}
+
 /** A write failure said for a caller — from the code alone, never the driver's message. */
 export function phraseWriteFailure(code: number | undefined): string {
   if (code === DUPLICATE_KEY) return 'a record with this identity was written by another request at the same moment; nothing was written for this item — retry it';

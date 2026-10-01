@@ -83,6 +83,13 @@ export async function ensureQueryIndexes(): Promise<number> {
         log.warn(`ensureQueryIndexes: ${space.id} links ${Object.keys(ix.keys).join(',')} index: ${err}`);
       }
     }
+    // The fork fan-out count of the push door (`sync/push-reads.ts`), for a space `initSpace` never revisits.
+    try {
+      await col(spaceCollection(space.id, 'facts')).createIndex({ forkOf: 1 }, { sparse: true });
+      issued++;
+    } catch (err) {
+      log.warn(`ensureQueryIndexes: ${space.id} facts forkOf index: ${err}`);
+    }
   }
   return issued;
 }

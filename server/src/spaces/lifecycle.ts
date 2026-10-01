@@ -92,6 +92,10 @@ export async function initSpace(
 
   await memoriesColl.createIndex({ seq: 1 });
   await memoriesColl.createIndex({ tags: 1 });
+  // The push door's fork fan-out cap counts a parent's forks per page in one aggregate (`sync/push-reads.ts`).
+  // Without this it was a `countDocuments({ forkOf })` per fork candidate over the whole collection. Sparse: most
+  // facts are no fork. Local, like every index here — nothing about it replicates.
+  await memoriesColl.createIndex({ forkOf: 1 }, { sparse: true });
   // `{ type: 1 }` on all four record collections. MEASURED, not assumed: every list endpoint exposes a `type`
   // filter and `total` counts with it, and `explain()` on a live instance returned COLLSCAN for
   // `{type: …}` on facts, entities, edges and chrono. Entities looked covered by `{ name: 1, type: 1 }` and

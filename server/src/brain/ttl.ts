@@ -107,7 +107,7 @@ export function contentExpiryForCreate(
 }
 
 /** The retention-relevant fields of a space, or undefined pre-setup / for an unknown id. */
-function retentionSpace(spaceId: string): RetentionSpace | undefined {
+export function retentionSpace(spaceId: string): RetentionSpace | undefined {
   try {
     const s = getConfig().spaces.find(x => x.id === spaceId);
     return s ? { recordTtlDays: s.recordTtlDays, meta: s.meta } : undefined;
