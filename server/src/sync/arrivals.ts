@@ -115,6 +115,11 @@ export interface ArrivalOutcome {
 
 /** A record write the store could not do for reasons that are not one document's — transient, retry the page. */
 export class ArrivalWriteError extends Error {
+  /**
+   * What the writer had already done when it stopped: earlier chunks are committed (and bumped and queued) before a
+   * later one fails, so a caller reporting per document must not call them refused. Set by `writeArrivals`.
+   */
+  partial?: ArrivalOutcome;
   constructor(readonly spaceId: string, readonly family: string, readonly underlying: unknown) {
     super(`record write failed for ${family} in space '${spaceId}': `
       + `${underlying instanceof Error ? underlying.message : String(underlying)}`);
@@ -290,6 +295,12 @@ export async function writeArrivals(
 
   // ── the write, a chunk at a time ──────────────────────────────────────────────────────────────────────────
   const coll = col<Doc>(collName);
+  /** The page cannot be written: say so, carrying the outcome so far (the chunk's `finally` completes it). */
+  const stopped = (err: unknown): ArrivalWriteError => {
+    const e = new ArrivalWriteError(spaceId, family, err);
+    e.partial = out;
+    return e;
+  };
   let bumped = 0;
   const bump = async (top: number): Promise<void> => {
     if (top <= bumped) return;
@@ -308,7 +319,7 @@ export async function writeArrivals(
     const classify = (d: Doc, err: unknown): void => {
       if (codeOf(err) === DUPLICATE_KEY) dupes.push(d);
       else if (isDocumentRefusal(err)) out.refused.push({ _id: d._id, reason: storeRefusal(err) });
-      else throw new ArrivalWriteError(spaceId, family, err);
+      else throw stopped(err);
     };
     /** One write per document, for an ambiguous bulk failure and for file metadata (merged, never bulk). */
     const oneByOne = async (docsHere: readonly Doc[], write: (d: Doc) => Promise<boolean>): Promise<void> => {
@@ -352,7 +363,7 @@ export async function writeArrivals(
               const d = chunk[k]!;
               if (code === DUPLICATE_KEY) dupes.push(d);
               else if (isDocumentRefusalCode(code)) retry.push(d);
-              else throw new ArrivalWriteError(spaceId, family, err);
+              else throw stopped(err);
             }
             // Retried ONCE alone: a document the store refuses refuses again, and is then refused by id.
             await oneByOne(retry, writeOne);

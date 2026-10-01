@@ -54,7 +54,7 @@ import type { BrainCollection, KnowledgeType } from '../config/types.js';
 import { log } from '../util/log.js';
 import type { SchemaViolation } from '../spaces/schema-validation.js';
 import { violationsAgainstLocalSchema } from './sync/_shared.js';
-import { writeArrivals, arrivalId, arrivalRefusal, type ArrivalOutcome } from '../sync/arrivals.js';
+import { writeArrivals, arrivalId, arrivalRefusal, ArrivalWriteError, type ArrivalOutcome } from '../sync/arrivals.js';
 import { REPLICATED_FAMILIES, RECORD_TYPE_OF } from '../sync/replicated-families.js';
 import { readPageTombstones } from '../sync/push-reads.js';
 
@@ -145,11 +145,20 @@ export async function importDocuments(spaceId: string, payload: Record<string, u
     try {
       out = await writeArrivals(spaceId, t, RECORD_TYPE_OF[t], docs, { restore: true });
     } catch (err) {
-      // A family the store could not write at all: nothing of it is vouched for, so every document is named.
-      result.refused = docs.map(d => ({ _id: arrivalId(d), reason: familyFailed(err) }));
-      result.errors = docs.length;
       log.warn(`Import into space '${spaceId}': ${t} could not be written: ${String(err)}`);
-      continue;
+      if (!(err instanceof ArrivalWriteError) || !err.partial) {
+        // Nothing of the family is vouched for, so every document is named.
+        result.refused = docs.map(d => ({ _id: arrivalId(d), reason: familyFailed(err) }));
+        result.errors = docs.length;
+        continue;
+      }
+      // The writer stopped part-way: the chunks before the fault are COMMITTED. Report what landed, and refuse only
+      // what did not — a restore that says "nothing was written" over records it did write is the worse lie.
+      out = err.partial;
+      const settled = new Set([...out.inserted, ...out.updated, ...out.derived, ...out.newerLocal,
+        ...out.duplicates, ...out.refused.map(r => r._id)]);
+      const unwritten = [...new Set(docs.map(arrivalId))].filter(id => !settled.has(id));
+      out = { ...out, refused: [...out.refused, ...unwritten.map(_id => ({ _id, reason: familyFailed(err) }))] };
     }
     result.inserted = out.inserted.length;
     result.updated = out.updated.length;

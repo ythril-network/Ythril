@@ -323,6 +323,47 @@ describe('the admin import restores what the export wrote', { skip }, () => {
     assert.deepEqual(wrong, []);
   });
 
+  it('a fault part-way through a family reports what landed and refuses only what did not', async () => {
+    /*
+     * Lens S2: the writer commits a family 500 documents at a time, so a fault in the second chunk leaves the first
+     * stored. The import answered "every document refused, inserted 0" over records it had written. The fault is a
+     * dropped connection on the SECOND write of the collection (the whole second chunk, and its per-document retry),
+     * injected below the driver API the way the pull test does — no store refusal could produce it, because a
+     * document's own refusal is refused by id and never stops the page. Seen red by mutation, restored by hand: the
+     * import's partial-outcome branch removed.
+     */
+    const { MongoNetworkError } = await import('mongodb');
+    const N = 600;
+    const docs = Array.from({ length: N }, (_, i) => fixture('facts', `chunk-${String(i).padStart(3, '0')}`, 1000 + i));
+    const target = `${SPACE}_facts`;
+    const proto = Object.getPrototypeOf(mongo.col('probe'));
+    const originals = { bulkWrite: proto.bulkWrite, updateOne: proto.updateOne };
+    let bulkCalls = 0;
+    proto.bulkWrite = function faulty(...args) {
+      if (this.collectionName === target && ++bulkCalls >= 2) return Promise.reject(new MongoNetworkError('injected: reset'));
+      return originals.bulkWrite.apply(this, args);
+    };
+    proto.updateOne = function faulty(...args) {
+      if (this.collectionName === target && bulkCalls >= 2) return Promise.reject(new MongoNetworkError('injected: reset'));
+      return originals.updateOne.apply(this, args);
+    };
+    let out;
+    try {
+      out = await importMod.importDocuments(SPACE, { facts: docs });
+    } finally {
+      Object.assign(proto, originals);
+    }
+    assert.ok(bulkCalls >= 2, 'fixture check: the second chunk was never written, so no fault was reached');
+    const stored = await coll(SPACE, 'facts').countDocuments({ _id: { $regex: '^chunk-' } });
+    assert.equal(stored, 500, `fixture check: the first chunk should be stored, found ${stored}`);
+    const r = out.results.facts;
+    assert.deepEqual([r.inserted, r.updated, r.errors], [500, 0, 100],
+      `an import that stored 500 of 600 reported ${JSON.stringify({ inserted: r.inserted, updated: r.updated, errors: r.errors })}`);
+    assert.equal(r.refusedTotal ?? r.refused.length, 100, 'the refused count does not match the documents not written');
+    assert.ok(r.refused.every(x => /retry the import/.test(x.reason)), 'an unwritten document carries no retry reason');
+    assert.ok(!r.refused.some(x => x._id === 'chunk-000'), 'a document that landed is reported refused');
+  });
+
   it('a record restored over a tombstone is reported by id', async () => {
     const payload = {};
     const want = [];
