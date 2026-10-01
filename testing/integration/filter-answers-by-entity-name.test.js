@@ -118,6 +118,25 @@ describe('filter answers by entity name', () => {
     assert.equal(to.body.data.results.length, 0, 'nothing runs TO Alice — direction is data, not a guess');
   });
 
+  it('total counts what the NAME matches, on both doors, not the whole collection (Q-160)', async () => {
+    /*
+     * Reported by the platform operator, 2026-09-29: `fromName` answered `count: 2, total: 86, truncated: false` on a
+     * space holding 86 edges. The rows were right; `total` was counted with the caller's bare predicate, before the
+     * name resolved. The tool tells a caller to compare `count` against `total` to know whether more rows match, so a
+     * name join always said "more" while `truncated` said the opposite.
+     */
+    for (const args of [
+      { collection: 'edges', fromName: ALICE }, { collection: 'edges', toName: ALICE }, { collection: 'facts', entityName: ALICE },
+    ]) {
+      const rest = await viaRest('filter', { space: SPACE, filter: {}, ...args });
+      assert.equal(rest.status, 200, JSON.stringify(rest.body));
+      assert.equal(rest.body.data.total, rest.body.data.results.length, `REST ${JSON.stringify(args)}: total counts past the name join`);
+      const viaMcp = await mcp.callTool('filter', { space: SPACE, filter: {}, ...args });
+      assert.ok(!viaMcp.isError, JSON.stringify(viaMcp));
+      assert.equal(viaMcp.structuredContent?.total, (viaMcp.structuredContent?.results ?? []).length, `MCP ${JSON.stringify(args)}: total counts past the name join`);
+    }
+  });
+
   it('MCP gives the same answer as HTTP, which is the whole point', async () => {
     const r = await mcp.callTool('filter', { space: SPACE, collection: 'facts', filter: {}, entityName: BOB });
     assert.ok(!r.isError, JSON.stringify(r));

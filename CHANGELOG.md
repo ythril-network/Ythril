@@ -56,6 +56,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now says what `fusedScore` is: a rank score, `1/(60 + rank by meaning) + 1/(60 + rank by text)`, about 0.016 to
   0.033, never a similarity. **Who is affected:** the ORDER of a fused recall's results changes where several
   record types matched the text.
+- **`filter`'s `total` counts what a name join matches (`Q-160`).** With `fromName`, `toName` or `entityName`, the
+  rows were right and `total` counted the whole collection — `count: 2, total: 86` on a space of 86 edges — so a
+  caller comparing the two, as the tool tells it to, read on for pages that did not exist. Both doors.
 
 ## [5.6.0] — 2026-09-29
 
