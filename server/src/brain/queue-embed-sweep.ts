@@ -29,9 +29,7 @@
 import { col, asFilter } from '../db/mongo.js';
 import { COLLECTION, derivedHasText } from './embed-record.js';
 import { enqueueEmbedJobs, type EmbedPriority } from './embed-queue.js';
-import {
-  embeddingSuppressed, schemaKeyFor, recordSuppression, recordNotSuppressedFilter, RECORD_SUPPRESS_FIELD,
-} from './suppress-embeddings.js';
+import { embeddingSuppressedFor, recordNotSuppressedFilter, RECORD_SUPPRESS_FIELD } from './suppress-embeddings.js';
 import { TYPE_FIELD } from './ttl.js';
 import { getSpaceMeta } from '../spaces/schema-validation.js';
 import { spaceCollection } from '../db/space-collection.js';
@@ -98,29 +96,6 @@ export function suppressionExclusion(
   const query: Record<string, unknown> = { ...recordNotSuppressedFilter() };
   if (field && suppressedTypes.length > 0) query[field] = { $nin: suppressedTypes };
   return { query };
-}
-
-/**
- * Whether this stored document is still suppressed, by the record and its type and space.
- *
- * Mirrors `embedStoredRecord` exactly, including the file asymmetry: a file has no type and therefore no type
- * schema, so it skips the middle tier. Narrowed rather than cast — a cast would index `typeSchemas` with `'file'`
- * and miss every time, which here would mean re-embedding files an operator had suppressed.
- *
- * Still consulted per document even though `suppressionExclusion` removes suppressed records in the query. The
- * query is derived from `meta`; this reads the record. A tier the query cannot express keeps working.
- */
-function stillSuppressed(spaceId: string, kind: BrainEmbedRecordType, doc: Record<string, unknown>): boolean {
-  const meta = getSpaceMeta(spaceId);
-  const knowledgeType: KnowledgeType | undefined = kind === 'file' ? undefined : kind;
-  const schemaKey = knowledgeType === undefined ? undefined : schemaKeyFor(knowledgeType, doc);
-  return embeddingSuppressed({
-    record: recordSuppression(doc),
-    schema: knowledgeType === undefined || schemaKey === undefined
-      ? undefined
-      : meta?.typeSchemas?.[knowledgeType]?.[schemaKey],
-    space: meta?.suppressEmbeddings === true,
-  });
 }
 
 /** Where a walk has got to: the kind it is in and the last record id it queued there. */
@@ -231,10 +206,10 @@ export async function queueEmbedSweep(spaceId: string, opts: SweepOptions): Prom
       walked++;
       const id = doc['_id'];
       if (typeof id !== 'string') continue;
-      // Belt and braces: the query already applied the tiers it can express, and the resolver is consulted per
-      // document so a tier the query cannot express still keeps a suppressed record out — unless it holds a vector
-      // the worker must remove.
-      if (doc['holdsVector'] !== true && stillSuppressed(spaceId, kind, doc)) { result.skippedSuppressed++; continue; }
+      // Belt and braces: the query already applied the tiers it can express, and THE resolver — the one the worker
+      // asks — is consulted per document, so a tier the query cannot express still keeps a suppressed record out,
+      // unless it holds a vector the worker must remove. A derived record's ancestors are the worker's to read.
+      if (doc['holdsVector'] !== true && embeddingSuppressedFor(spaceId, kind, doc)) { result.skippedSuppressed++; continue; }
       batch.push(id);
       if (batch.length >= WALK_BATCH) await flush();
     }

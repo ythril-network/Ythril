@@ -820,17 +820,26 @@ export class BrainComponent implements OnInit, OnDestroy {
     this.reindexRun.set(st.reindex ?? null);
     clearTimeout(this.reindexPollTimer);
     this.reindexPollTimer = undefined;
-    if (st.reindex?.running) {
-      this.reindexPollTimer = setTimeout(() => {
-        this.reindexPollTimer = undefined;
-        this.spacesApi.getReindexStatus(spaceId).subscribe({
-          next: (next) => this.applyReindexStatus(spaceId, next),
-          error: () => {},
-        });
-      }, BrainComponent.REINDEX_POLL_MS);
-    } else if (wasRunning) {
-      this.loadStats(spaceId);
-    }
+    if (st.reindex?.running) this.scheduleReindexPoll(spaceId);
+    else if (wasRunning) this.loadStats(spaceId);
+  }
+
+  /**
+   * The next poll of a running reindex. A failed request schedules the next one rather than ending the chain — ended,
+   * the buttons would stay held until a reload — and a hidden tab skips the request but keeps the schedule, like the
+   * Spaces list's poll.
+   */
+  private scheduleReindexPoll(spaceId: string): void {
+    clearTimeout(this.reindexPollTimer);
+    this.reindexPollTimer = setTimeout(() => {
+      this.reindexPollTimer = undefined;
+      if (this.activeSpaceId() !== spaceId) return;
+      if (typeof document !== 'undefined' && document.hidden) { this.scheduleReindexPoll(spaceId); return; }
+      this.spacesApi.getReindexStatus(spaceId).subscribe({
+        next: (next) => this.applyReindexStatus(spaceId, next),
+        error: () => this.scheduleReindexPoll(spaceId),
+      });
+    }, BrainComponent.REINDEX_POLL_MS);
   }
 
   requestDelete(id: string): void { this.recordList.confirmDeleteId.set(id); }

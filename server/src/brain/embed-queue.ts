@@ -219,21 +219,35 @@ function embeddable(recordType: BrainEmbedRecordType, recordId: string): boolean
   return !(recordType === 'file' && isSpillPath(recordId));
 }
 
+/**
+ * A job handed back to the pending pool, claimable at once and held by nobody. The one spelling of "release the
+ * claim" for every path that does it — a stall reset, a revive, a retry, a sweep — so none of them leaves a stale
+ * `claimToken` that would let an old worker's finish delete the new run.
+ */
+function releasedClaim(now: string) {
+  return {
+    status: 'pending' as const,
+    claimedAt: null,
+    claimToken: null,
+    claimableAfter: null,
+    progressAt: null,
+    updatedAt: now,
+  };
+}
+
+/** A clean attempt budget: what a retry, a revive and new content each grant. */
+function freshBudget() {
+  return { attempts: 0, transientFailures: 0, lostChildFailures: 0 };
+}
+
 /** A job as it is when nothing has happened to it yet — the one place both enqueue paths take its fields from. */
 function freshJob(spaceId: string, recordType: BrainEmbedRecordType, recordId: string, now: string) {
   return {
     spaceId, recordType, recordId,
-    status: 'pending' as const,
-    attempts: 0,
-    transientFailures: 0,
-    lostChildFailures: 0,
+    ...releasedClaim(now),
+    ...freshBudget(),
     maxAttempts: MAX_EMBED_ATTEMPTS,
     lastError: null,
-    claimedAt: null,
-    progressAt: null,
-    claimableAfter: null,
-    claimToken: null,
-    updatedAt: now,
   };
 }
 
@@ -284,17 +298,17 @@ export async function enqueueEmbedJobs(
           },
         },
         {
+          // `lastError` is KEPT, as the version revive keeps it: whoever looks at the re-queued job can still see
+          // what it died of last time.
           updateOne: {
             filter: { _id, status: 'failed' },
-            update: { $set: { ...freshJob(spaceId, recordType, recordId, now) } },
+            update: { $set: { ...releasedClaim(now), ...freshBudget() } },
           },
         },
         {
           updateOne: {
             filter: { _id, status: 'processing' },
-            update: {
-              $set: { status: 'pending', claimToken: null, claimedAt: null, progressAt: null, claimableAfter: null, updatedAt: now },
-            },
+            update: { $set: releasedClaim(now) },
           },
         },
       ];
@@ -603,11 +617,7 @@ export async function reviveFailedEmbedJobs(spaceIds: string[], version: string)
     const res = await jobs(spaceId).updateMany(
       asFilter<BrainEmbedJobDoc>({ status: 'failed', revivedForVersion: { $ne: version } as unknown as string }),
       asUpdate<BrainEmbedJobDoc>({
-        $set: {
-          status: 'pending', attempts: 0, transientFailures: 0, lostChildFailures: 0,
-          claimedAt: null, claimToken: null, claimableAfter: null,
-          revivedForVersion: version, updatedAt: new Date().toISOString(),
-        },
+        $set: { ...releasedClaim(new Date().toISOString()), ...freshBudget(), revivedForVersion: version },
       }),
     );
     if (res.modifiedCount > 0) {
@@ -632,10 +642,7 @@ export async function resetStalledEmbedJobs(spaceIds: string[], timeoutMs: numbe
     const res = await jobs(spaceId).updateMany(
       asFilter<BrainEmbedJobDoc>({ status: 'processing', progressAt: { $lt: cutoff } as unknown as string }),
       asUpdate<BrainEmbedJobDoc>({
-        $set: {
-          status: 'pending', claimedAt: null, claimToken: null, claimableAfter: null,
-          updatedAt: new Date().toISOString(),
-        },
+        $set: releasedClaim(new Date().toISOString()),
       }),
     );
     if (res.modifiedCount > 0) {
@@ -646,12 +653,22 @@ export async function resetStalledEmbedJobs(spaceIds: string[], timeoutMs: numbe
   return reset;
 }
 
-/** Per-status counts for one space. A missing collection reports all-zero. */
+/**
+ * Per-status counts for one space. A missing collection reports all-zero.
+ *
+ * `rebuild: true` counts a reindex's jobs only — what its progress is made of. One aggregation either way, so the
+ * three numbers describe one instant: two counts taken apart over a queue the worker is draining can count a job
+ * that moved between them twice, or not at all.
+ */
 export async function getEmbedJobCounts(
   spaceId: string,
+  only: { rebuild?: true } = {},
 ): Promise<{ pending: number; processing: number; failed: number }> {
   const rows = await jobs(spaceId)
-    .aggregate([{ $group: { _id: '$status', n: { $sum: 1 } } }])
+    .aggregate([
+      ...(only.rebuild ? [{ $match: { rebuild: true } }] : []),
+      { $group: { _id: '$status', n: { $sum: 1 } } },
+    ])
     .toArray() as Array<{ _id: string; n: number }>;
   const out = { pending: 0, processing: 0, failed: 0 };
   for (const r of rows) {
@@ -736,18 +753,7 @@ export async function retryEmbedJob(
   await jobs(spaceId).updateOne(
     asFilter<BrainEmbedJobDoc>({ _id }),
     asUpdate<BrainEmbedJobDoc>({
-      $set: {
-        status: 'pending',
-        attempts: 0,
-        transientFailures: 0,
-        lostChildFailures: 0,
-        lastError: null,
-        claimedAt: null,
-        claimableAfter: null,
-        claimToken: null,
-        progressAt: null,
-        updatedAt: now,
-      },
+      $set: { ...releasedClaim(now), ...freshBudget(), lastError: null },
     }),
   );
   // A retry is only useful if something picks it up; without this the job sits pending until the next poll.

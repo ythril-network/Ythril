@@ -63,7 +63,10 @@ describe('a reindex embeds nothing itself', () => {
   it('calls no embed()', () => {
     assert.doesNotMatch(reindex, /\bembed\(/,
       'reindex.ts calls the model itself, so it is a second place a vector is built — one the behavioural test does not reach');
-    assert.doesNotMatch(reindex, /from '\.\/embedding\.js'/, 'and must not import the embedder at all');
+    // The embedder's `embed` is the thing that must not be reachable; the module's pure helpers (the effective
+    // prefix scheme a run is stamped with) are not a second place a vector is built.
+    assert.doesNotMatch(reindex, /import\s*\{[^}]*\bembed\b[^}]*\}\s*from '\.\/embedding\.js'/,
+      'and must not import the embedder');
   });
 
   it('calls no *EmbedText builder', () => {

@@ -54,7 +54,10 @@ import { reindexInProgress } from '../metrics/registry.js';
 import { log } from '../util/log.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { queueEmbedSweep, type SweepCursor } from './queue-embed-sweep.js';
-import { EMBED_PRIORITY } from './embed-queue.js';
+import { EMBED_PRIORITY, getEmbedJobCounts } from './embed-queue.js';
+import { resolvePrefixScheme } from './embedding.js';
+import { backoffDelayMs } from '../util/backoff.js';
+import { runExclusive } from '../util/single-flight.js';
 import type { SpaceConfig, BrainEmbedRecordType } from '../config/types.js';
 
 /** A refusal, carrying the status the contract suite pins. */
@@ -109,11 +112,15 @@ const STALLED_MS = 10 * 60_000;
 const SWEEP_ATTEMPTS = 3;
 
 const runs = (spaceId: string) => col<ReindexRunDoc>(spaceCollection(spaceId, 'reindexRun'));
-const embedJobs = (spaceId: string) => col(spaceCollection(spaceId, 'embedJobs'));
 
+/**
+ * What the vectors are made by now. The prefix scheme is the EFFECTIVE one (`resolvePrefixScheme`): under `auto` a
+ * change of endpoint changes the scheme, and naming `nomic` where `auto` already meant it changes nothing. Similarity
+ * is not here — it shapes the search index, not a vector.
+ */
 function currentTarget(): ReindexTarget {
   const cfg = getEmbeddingConfig();
-  return { model: cfg.model, dimensions: cfg.dimensions, prefixScheme: cfg.prefixScheme ?? null };
+  return { model: cfg.model, dimensions: cfg.dimensions, prefixScheme: resolvePrefixScheme(cfg) };
 }
 
 function sameTarget(a: ReindexTarget | undefined, b: ReindexTarget): boolean {
@@ -233,7 +240,7 @@ async function sweepRun(spaceId: string): Promise<void> {
       return;
     } catch (err) {
       lastError = err instanceof Error ? err.message : String(err);
-      if (attempt < SWEEP_ATTEMPTS) await new Promise(r => setTimeout(r, 1_000 * 2 ** (attempt - 1)));
+      if (attempt < SWEEP_ATTEMPTS) await new Promise(r => setTimeout(r, backoffDelayMs(attempt - 1, 1_000, 10_000)));
     }
   }
   try {
@@ -250,13 +257,10 @@ async function sweepRun(spaceId: string): Promise<void> {
   await refreshGauge().catch(() => { /* the next tick recomputes it */ });
 }
 
-/** Rebuild jobs of a space still to run, and the ones that went terminal. */
+/** Rebuild jobs of a space still to run, and the ones that went terminal — from one snapshot of the queue. */
 async function rebuildCounts(spaceId: string): Promise<{ remaining: number; failed: number }> {
-  const [remaining, failed] = await Promise.all([
-    embedJobs(spaceId).countDocuments(asFilter({ rebuild: true, status: { $in: ['pending', 'processing'] } })),
-    embedJobs(spaceId).countDocuments(asFilter({ rebuild: true, status: 'failed' })),
-  ]);
-  return { remaining, failed };
+  const c = await getEmbedJobCounts(spaceId, { rebuild: true });
+  return { remaining: c.pending + c.processing, failed: c.failed };
 }
 
 /**
@@ -296,10 +300,12 @@ async function refreshGauge(): Promise<void> {
  * records not yet queued.
  */
 export async function reindexRunTick(): Promise<void> {
+  let active = 0;
   for (const s of concreteSpaces()) {
     try {
       const run = await activeRun(s.id);
       if (!run) continue;
+      active++;
       const { remaining, failed } = await rebuildCounts(s.id);
       const now = Date.now();
       if (!run.sweepComplete || remaining > 0) {
@@ -317,22 +323,24 @@ export async function reindexRunTick(): Promise<void> {
       log.info(`Reindex completed for space '${s.id}': queued=${run.queued ?? 0}, `
         + `suppressed=${run.skippedSuppressed ?? 0}, failed=${failed}`);
       await runs(s.id).deleteOne(asFilter<ReindexRunDoc>({ _id: RUN_ID }));
+      active--;
     } catch (err) {
       log.warn(`Reindex watcher: '${s.id}': ${err instanceof Error ? err.message : String(err)}`);
     }
   }
-  await refreshGauge();
+  // Counted on the same pass rather than by reading every run document again.
+  reindexInProgress.set(active);
 }
 
 let watcher: NodeJS.Timeout | null = null;
 
-/** One interval for every run, armed by the first run and kept while any exists. */
+/**
+ * One interval for every run, armed by the first run. Each tick runs under `runExclusive`, so a tick slower than the
+ * interval — a large instance, a slow database — is skipped and said, never stacked behind the one still running.
+ */
 function armWatcher(): void {
   if (watcher) return;
-  watcher = setInterval(() => {
-    void reindexRunTick().catch(err =>
-      log.warn(`Reindex watcher: ${err instanceof Error ? err.message : String(err)}`));
-  }, WATCH_MS);
+  watcher = setInterval(() => { void runExclusive('Reindex watcher', reindexRunTick); }, WATCH_MS);
   watcher.unref();
 }
 
@@ -371,13 +379,14 @@ export async function reindexRunFlags(spaceId: string): Promise<boolean> {
 }
 
 /**
- * After a rename moved the run document to the new space's collection, make it name its space by the new id. A
- * resumed run walks `members`; left at the old id it would walk a space that no longer exists, and never end.
+ * After a rename moved the run document to the new space's collection, make its `members` name the new id. A resumed
+ * run walks `members`; left at the old id it would walk a space that no longer exists, and never end. `spaceId` is
+ * already rewritten by `repairStaleSpaceIds`, the step of the rename that fixes it in every moved collection.
  */
 export async function renameReindexRun(oldId: string, newId: string): Promise<void> {
   const doc = await runs(newId).findOne(asFilter<ReindexRunDoc>({ _id: RUN_ID })) as ReindexRunDoc | null;
   if (!doc) return;
   await runs(newId).updateOne(asFilter<ReindexRunDoc>({ _id: RUN_ID }), {
-    $set: { spaceId: newId, members: doc.members.map(m => (m === oldId ? newId : m)) },
+    $set: { members: doc.members.map(m => (m === oldId ? newId : m)) },
   });
 }
