@@ -56,6 +56,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   waiting it says the server has not answered yet and names what the space is doing — search indexes being built,
   records waiting to be embedded — and after thirty seconds the wait ends in the error state with those reasons
   and Retry. Reported on 5.6.0 while an upgraded instance rebuilt every space's search indexes.
+- **The Query tab's walk headings show their counts (`Q-101`).** "Reached by the walk", and the Entities, Facts,
+  Chrono and Files headings under it, rendered `({count})` literally in all three languages, and each reached record
+  read `{hops} hop(s)`: the values used single braces, which the translation layer does not interpolate. A client
+  spec now fails on a single-brace placeholder in any value of any locale, and on a German or Polish value that
+  interpolates different parameters from the English one.
+- **Buttons that name an action say it in German and Polish (`Q-115`).** "Clear results" read "Klare Ergebnisse"
+  (clear as in transparent) and the entity search's Clear read "Klar"; in Polish they read "Jasne", Reset read
+  "Nastawić" (to set a clock) and Close the infinitive "Zamknąć". They now read "Ergebnisse löschen" / "Leeren",
+  "Wyczyść wyniki" / "Wyczyść", "Zresetuj" and "Zamknij". The Query form's Projection field had the same fault
+  ("Vorsprung", "Występ") and now reads "Projektion" / "Projekcja". A client spec derives every English label that
+  starts with Clear, Reset or Close and fails when the German or Polish value does not contain a verb that does it.
+  The same fault on the product's noun: German called a space a "Leerzeichen" (the typed whitespace character) in
+  8 places — "Noch keine Leerzeichen" on the Brain page, "Leerzeichen erstellen/löschen" on the MFA card — and
+  Polish a "spacja" in 11; they now say "Space" / "przestrzeń" as the rest of each file does, and the same spec
+  fails on any value whose English names a space and whose German or Polish uses the whitespace word.
 
 ## [5.6.0] — 2026-09-29
 
