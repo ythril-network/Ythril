@@ -50,6 +50,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   it now sets the reranker aside for 30 s, doubling to 5 min; searches in between skip it at once and still report
   `degraded: ["rerank_unavailable"]`. A background probe, never a user's search, brings it back. The assist
   model's fallback rule and this one are now one module.
+- **A record's text rank is its rank among records of its own type (`Q-159`).** The text channel sorted every
+  type's matches together by raw MongoDB text score, whose scale is each collection's own, so a fact could outrank
+  an entity only because facts are longer — the comparison reciprocal rank fusion exists to avoid. The Query tab
+  now says what `fusedScore` is: a rank score, `1/(60 + rank by meaning) + 1/(60 + rank by text)`, about 0.016 to
+  0.033, never a similarity. **Who is affected:** the ORDER of a fused recall's results changes where several
+  record types matched the text.
 
 ## [5.6.0] — 2026-09-29
 

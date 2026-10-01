@@ -336,12 +336,12 @@ import { SpillEndingComponent } from './spill-ending.component';
                           The other stages follow it, dimmer, for a reader asking why.
                         -->
                         @if (orderingOf(g.hits[0]); as ord) {
-                          <span class="score-by" [attr.title]="'brain.query.orderedBy' | transloco: { by: ord.by }">
+                          <span class="score-by" [attr.title]="(ord.by === 'fusedScore' ? 'brain.query.fusedExplained' : 'brain.query.orderedBy') | transloco: { by: ord.by }">
                             {{ ord.by }}: {{ ord.value.toFixed(3) }}
                           </span>
                           @for (st of ord.stages; track st.name) {
                             @if (st.name !== ord.by) {
-                              <span class="score-also">{{ st.name }}: {{ st.value.toFixed(3) }}</span>
+                              <span class="score-also" [attr.title]="st.name === 'fusedScore' ? ('brain.query.fusedExplained' | transloco) : null">{{ st.name }}: {{ st.value.toFixed(3) }}</span>
                             }
                           }
                         }
@@ -380,12 +380,12 @@ import { SpillEndingComponent } from './spill-ending.component';
                           The other stages follow it, dimmer, for a reader asking why.
                         -->
                         @if (orderingOf(g.hits[0]); as ord) {
-                          <span class="score-by" [attr.title]="'brain.query.orderedBy' | transloco: { by: ord.by }">
+                          <span class="score-by" [attr.title]="(ord.by === 'fusedScore' ? 'brain.query.fusedExplained' : 'brain.query.orderedBy') | transloco: { by: ord.by }">
                             {{ ord.by }}: {{ ord.value.toFixed(3) }}
                           </span>
                           @for (st of ord.stages; track st.name) {
                             @if (st.name !== ord.by) {
-                              <span class="score-also">{{ st.name }}: {{ st.value.toFixed(3) }}</span>
+                              <span class="score-also" [attr.title]="st.name === 'fusedScore' ? ('brain.query.fusedExplained' | transloco) : null">{{ st.name }}: {{ st.value.toFixed(3) }}</span>
                             }
                           }
                         }

@@ -127,6 +127,13 @@ unavailable, and **none of them can fail a search** — a stage that cannot answ
    the same records lexically, producing `lexicalScore`; the two rankings are combined by **Reciprocal
    Rank Fusion** into `fusedScore`.
 
+   **The formula:** `fusedScore = 1/(60 + rank by meaning) + 1/(60 + lexical rank)`, ranks from 1, and a record
+   the text search did not find contributes only the first term. The **lexical rank is the record's rank among
+   records of its own type** (`Q-159`): each type's text index scores against its own collection's field
+   lengths, so raw text scores of two types are not comparable and are never compared. So `fusedScore` is a
+   RANK score, not a similarity: about `0.016` (first in one ranking only) to `0.033` (first in both), and only
+   its order means anything.
+
    This exists because vector search compares *meaning*, which is the wrong tool for the tokens a corpus
    is most precise about — article numbers, form ids, part codes, clause names, proper nouns. An opaque
    identifier has no useful semantic neighbourhood, so the right record could rank below plausible prose
