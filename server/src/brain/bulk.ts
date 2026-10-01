@@ -11,36 +11,36 @@
  * WebhookActor, so a 10k-item import doesn't fire 10k events. The caller emits one summary.
  */
 
-import { col, asFilter } from '../db/mongo.js';
 import { primitivePropertyError } from './property-values.js';
 import { shapeError } from './write-shape.js';
 import { parseRecurrence } from './chrono.js';
-import { assertRefsResolve } from './entity-refs.js';
 import { getConfig } from '../config/loader.js';
-import {
-  resolveMetaRefs, getAllowedChronoTypes, validateFact, validateEntity, validateEdge, validateChrono,
-} from '../spaces/schema-validation.js';
+import { resolveMetaRefs, getAllowedChronoTypes } from '../spaces/schema-validation.js';
+import type { SpaceMeta } from '../config/types.js';
 import { isStrictLinkage } from '../spaces/proxy.js';
-import { saveFact } from './fact.js';
-import { upsertEntity } from './entities.js';
-import { upsertEdge, findEdgeByTriplet } from './edges.js';
-import { BatchRefs, resolveRef, refKeyDeclared, isRefUse, type ResolvedRef } from './batch-refs.js';
-import { resolveEdgeEndsForWrite } from './edge-endpoint-names.js';
-import { mergeTagsAndProperties, mergePropertiesOrKeep } from './merge-fields.js';
-import { connectionInputError, assertConnections, applyConnections, edgeInputsFrom } from './write-connections.js';
-import { createChrono } from './chrono.js';
+import { BatchRefs, resolveRef, refKeyDeclared, refKeyUsed, isRefUse, type ResolvedRef } from './batch-refs.js';
+import { connectionInputError, connectionsOf, edgeInputsFrom } from './write-connections.js';
 import { CHRONO_STATUSES } from '../config/types.js';
-import { parseRecordFlags } from './record-flag.js';
-import type { EntityDoc, ChronoType, ChronoStatus } from '../config/types.js';
+import { parseRecordFlags, type RecordFlags } from './record-flag.js';
+import type { ChronoType, ChronoStatus } from '../config/types.js';
+import { SchemaViolationError, type UpdateValidation } from './write-validation.js';
+import type { DesiredLinks } from './links.js';
+import { edgeIdFor } from './edge-id.js';
+import { ReadSet, type ReadWant, type Triplet } from './write-plan/read-set.js';
+import { commitPlans } from './write-plan/commit.js';
+import type { CommitOutcome, WritePlan } from './write-plan/types.js';
+import { linkTargets, refuseLinks } from './write-plan/plan-links.js';
+import { planFact, factWant, type FactInput } from './write-plan/plan-fact.js';
+import { planEntity, entityWant, type EntityInput } from './write-plan/plan-entity.js';
+import { planChrono, chronoWant, type ChronoInput } from './write-plan/plan-chrono.js';
+import { planEdge, edgeWant, EdgeSchemaViolation, type EdgeInput } from './write-plan/plan-edge.js';
 
 /** Max items processed per collection in a single bulk call. */
 export const BULK_MAX_PER_TYPE = 500;
 
-import { UUID_V4_RE, edgeEndpointKind, isWellFormedRef } from './entity-refs.js';
+import { UUID_V4_RE, edgeEndpointKind, isWellFormedRef, storedEdgeKind, missingRefsRefusal } from './entity-refs.js';
 import { REF_KINDS } from '../config/types-knowledge.js';
 import type { RefKind } from '../config/types-knowledge.js';
-import { NEVER_RETURNED_PROJECTION } from './read-projection.js';
-import { spaceCollection } from '../db/space-collection.js';
 import { MAX_FACT_LENGTH } from '../util/request-bounds.js';
 import { retiredWriteFieldError } from './retired-write-fields.js';
 import { unknownBodyFields } from './query.js';
@@ -195,398 +195,69 @@ function itemConnectionError(item: unknown, strict: boolean): string | null {
 }
 
 /**
- * Process a batch of facts/entities/edges/chrono for one space. Deterministic order
- * (facts → entities → chrono → EDGES LAST), which matters only for records the batch UPDATES: an entity
- * addressed by an existing id is written before an edge below reads it. Per-item failures are collected,
- * never fatal. Returns counts + errors.
+ * Process a batch of facts/entities/edges/chrono for one space, in the order facts → entities → chrono →
+ * EDGES LAST, so a `$ref` in the top-level `edges` array can name a record of any kind the payload creates.
  *
- * **The order does not buy a forward reference, and four surfaces said it did until 2026-09-01.** `upsertEntity`
- * mints the identity on insert — a supplied id addresses an existing record and never becomes a new one's — so
- * an id a caller invents for an entity in this payload is not the id that entity gets, and an edge naming it
- * points at nothing. Combined with shape-not-existence below, that edge is stored dangling and counted as
- * inserted. Callers build a graph in two passes, taking ids from the first response's `refs`.
+ * ## One read, one write per kind (`Q-99` part 3)
+ *
+ * Every item is checked for shape first, then the whole batch's reads happen at once (`ReadSet.load`: one `$in`
+ * per kind, one `$or` of triplets, one read per functional label and per name), every item is PLANNED by the
+ * same planner its single-record door uses, and the plans are written by one commit — a seq block and a
+ * `bulkWrite` per kind. A batch of 500 is a handful of round trips, not a few per item, and it cannot mean
+ * anything different from the same items written one at a time: the rules are the planners', and the read set
+ * shows each item the batch's earlier items as written.
+ *
+ * The one place the batch cannot just look ahead is an item that addresses something an EARLIER item of the
+ * same batch also writes — the same id twice, the same triplet twice. The plans so far are committed first
+ * and that record read again, so the second write converges on what the first wrote, exactly as two calls
+ * would. It costs a round trip only when a batch actually repeats itself.
+ *
+ * ## What it answers
+ *
+ * Per-item failures are collected, never fatal. `inserted` counts NEW records and `updated` the ones a write
+ * converged on — including a fact or chrono entry addressed by its `id`, which used to count as inserted.
+ * A key whose item was not written is absent from `refs`, and anything depending on it says why.
  */
 export async function bulkWrite(spaceId: string, input: BulkInput): Promise<BulkResult> {
   const tooLarge = bulkSizeRefusal(input as unknown as Record<string, unknown>);
   if (tooLarge) throw new Error(tooLarge);
   const metaRaw = getConfig().spaces.find(s => s.id === spaceId)?.meta;
   const meta = metaRaw ? resolveMetaRefs(metaRaw) : undefined;
-  const mode = meta?.validationMode ?? 'off';
   const strict = isStrictLinkage(spaceId);
-  /*
-   * `F-27` item 2, owner's ruling 2026-09-07: on this door a REFERENCE is existence-checked too, under
-   * the same `strictLinkage` setting the single-record doors read.
-   *
-   * This door was deliberately laxer than the single-record ones — references were checked for shape and
-   * never for existence, which is a defensible trade for a bulk import where records legitimately arrive
-   * in an order nobody controls.
-   *
-   * It stopped being defensible once the correlation key made this the normal way to write a linked
-   * record. The operator said so plainly: their correspondence, deploy log and ticket updates would all
-   * move onto the door with the weaker guarantee, *"and a dangling `answers` edge is exactly the failure
-   * we would never notice — it reads as an unanswered post forever."*
-   *
-   * It was scoped to CONVERTED spaces while a space could still be unconverted and keep the import trade.
-   * 5.0 leaves one shape — an unconverted space is refused rather than read — so the condition had one
-   * value left and is gone with the flag it read.
-   */
-
-  /*
-   * `F-27` item 2: what this call has minted, by the key its author gave it.
-   *
-   * One table for the whole batch, and it never reaches a document — the key exists for the length of this
-   * request. See `batch-refs.ts` for why a duplicate key is refused rather than resolved.
-   */
+  // One table for the whole batch, never stored — see `batch-refs.ts`.
   const refs = new BatchRefs();
 
   const inserted: Counts = { facts: 0, entities: 0, edges: 0, chrono: 0 };
   const updated: Counts = { facts: 0, entities: 0, edges: 0, chrono: 0 };
   const errors: { type: string; index: number; reason: string }[] = [];
-  /** What the ITEMS' own connection fields attached, added up across all three record loops (`Q-44`). */
   const connections = { links: 0, edges: 0 };
-  const addConnections = (applied: { links: number; edges: number }): void => {
-    connections.links += applied.links;
-    connections.edges += applied.edges;
+
+  /** A refused item: its error, and — if it declared a key — the reason a dependant will be told. */
+  const reject = (type: string, index: number, item: unknown, reason: string): void => {
+    errors.push({ type, index, reason });
+    const key = refKeyDeclared(item);
+    if (key) refs.fail(key, reason);
   };
-
-  const schemaFails = (type: string, index: number, violations: { field: string; reason: string }[]): boolean => {
-    if (mode === 'off' || !meta || violations.length === 0) return false;
-    if (mode === 'strict') { errors.push({ type, index, reason: `schema_violation: ${violations.map(v => v.reason).join('; ')}` }); return true; }
-    for (const v of violations) errors.push({ type, index, reason: `schema_warning: ${v.field} — ${v.reason}` });
-    return false;
-  };
-
-  // ── facts ───────────────────────────────────────────────────────────────
-  const facts = slice(input.facts);
-  for (let i = 0; i < facts.length; i++) {
-    const item = facts[i]!;
-    const fact = typeof item['fact'] === 'string' ? item['fact'].trim() : '';
-    if (!fact) { errors.push({ type: 'fact', index: i, reason: 'missing required field: fact' }); continue; }
-    if (fact.length > MAX_FACT_LENGTH) { errors.push({ type: 'fact', index: i, reason: '`fact` must not exceed 50 000 characters' }); continue; }
-    const type = typeof item['type'] === 'string' && item['type'].trim() ? item['type'] : undefined;
-    const properties = optProps(item['properties']);
-    const ttlDays = bulkTtlDays(item['ttlDays']);
-    if (ttlDays === TTL_INVALID) { errors.push({ type: 'fact', index: i, reason: TTL_INVALID_MSG }); continue; }
-    /*
-     * `W-22`: THE CALLER-SUPPLIED `id`, which bulk ENTITIES read and these two ignored.
-     *
-     * A supplied id makes a create idempotent — a retried write converges on the same record instead of
-     * producing a second one. Every single-record door reads it. These two dropped it, so a batch resent
-     * after a timeout DUPLICATED every fact and chrono entry in it, silently, while the same batch of
-     * entities was correctly idempotent.
-     */
-    const rawId = typeof item['id'] === 'string' ? item['id'].trim() : undefined;
-    if (rawId !== undefined && !UUID_V4_RE.test(rawId)) { errors.push({ type: 'fact', index: i, reason: '`id` must be a valid UUID v4' }); continue; }
-    // `W-14`..`W-22`: the same value rules the single-record doors read. Bulk had its own, weaker set —
-    // `strArray` DROPPED a non-string element silently and `optProps` cast the bag without looking inside,
-    // so a batch stored what the single create refuses and reported nothing.
-    const shapeErr = shapeError('fact', item);
-    if (shapeErr) { errors.push({ type: 'fact', index: i, reason: shapeErr }); continue; }
-    const factFlags = parseRecordFlags(item);
-    if (!factFlags.ok) { errors.push({ type: 'fact', index: i, reason: factFlags.error }); continue; }
-    // `Q-44`: the SHARED refusal, which this loop used to restate as a UUID pattern per link field.
-    const connErr = itemConnectionError(item, strict);
-    if (connErr) { errors.push({ type: 'fact', index: i, reason: connErr }); continue; }
-    try {
-      if (schemaFails('fact', i, validateFact(meta ?? {}, { type, properties }))) continue;
-      /*
-       * `Q-44`: BEFORE the write, so a connection naming nothing leaves no record behind.
-       *
-       * `applyConnections` runs after the insert — it has to, because a link needs both ends and the `from`
-       * is what was just minted. Asserting there alone would report the refusal with the fact already
-       * stored, which on a batch means a caller reconciling hundreds of rows they did not ask for.
-       */
-      await assertConnections(spaceId, 'fact', item);
-      // No link set here: the connections come from the item's own fields, through `applyConnections`
-      // below, which is the one path every other create door takes.
-      const memDoc = await saveFact(spaceId, fact, [], strArray(item['tags']),
-        typeof item['description'] === 'string' ? item['description'] : undefined, properties, type,
-        factFlags.flags, undefined, ttlDays, rawId);
-      addConnections(await applyConnections(spaceId, memDoc._id, 'fact', item, memDoc.author));
-      /*
-       * `F-27` item 2: record what this item's key names, if it declared one.
-       *
-       * After the write, because the id is minted by it. A duplicate key is reported as an item error and
-       * the record still stands — the write already happened, and refusing to record the key is the honest
-       * consequence rather than pretending the row is not there.
-       */
-      const keyMem = refKeyDeclared(item);
-      if (keyMem) {
-        const dupe = refs.declare(keyMem, memDoc._id, 'fact');
-        if (dupe) errors.push({ type: 'fact', index: i, reason: dupe });
-      }
-
-      inserted.facts++;
-    } catch (err) { errors.push({ type: 'fact', index: i, reason: err instanceof Error ? err.message : String(err) }); }
-  }
-
-  // ── entities ───────────────────────────────────────────────────────────────
-  const entities = slice(input.entities);
-  for (let i = 0; i < entities.length; i++) {
-    const item = entities[i]!;
-    const name = typeof item['name'] === 'string' ? item['name'].trim() : '';
-    if (!name) { errors.push({ type: 'entity', index: i, reason: 'missing required field: name' }); continue; }
-    const type = typeof item['type'] === 'string' ? item['type'].trim() : '';
-    if (!type) { errors.push({ type: 'entity', index: i, reason: 'missing required field: type' }); continue; }
-    const rawId = typeof item['id'] === 'string' ? item['id'].trim() : undefined;
-    if (rawId !== undefined && !UUID_V4_RE.test(rawId)) { errors.push({ type: 'entity', index: i, reason: '`id` must be a valid UUID v4' }); continue; }
-    const properties = optProps(item['properties']) ?? {};
-    const ttlDays = bulkTtlDays(item['ttlDays']);
-    if (ttlDays === TTL_INVALID) { errors.push({ type: 'entity', index: i, reason: TTL_INVALID_MSG }); continue; }
-    // `W-14`..`W-22`: the same value rules the single-record doors read. Bulk had its own, weaker set —
-    // `strArray` DROPPED a non-string element silently and `optProps` cast the bag without looking inside,
-    // so a batch stored what the single create refuses and reported nothing.
-    const shapeErr = shapeError('entity', item);
-    if (shapeErr) { errors.push({ type: 'entity', index: i, reason: shapeErr }); continue; }
-    const entityFlags = parseRecordFlags(item);
-    if (!entityFlags.ok) { errors.push({ type: 'entity', index: i, reason: entityFlags.error }); continue; }
-    /*
-     * `Q-44`: an entity holds NO link classes — it is only ever the far end of one — and it can still be
-     * the start of a labelled edge. Asking the shared module here is what makes that distinction the link
-     * vocabulary's rather than this loop's: `linkEntities` on an entity item is refused by the class table,
-     * not by a condition somebody wrote out again.
-     */
-    const connErr = itemConnectionError(item, strict);
-    if (connErr) { errors.push({ type: 'entity', index: i, reason: connErr }); continue; }
-    try {
-      // The MERGED record, not the payload — an id that matches an existing entity makes this an
-      // update, and the importer had the merge target in hand two lines later for its own counter.
-      const existing = rawId
-        ? await col<EntityDoc>(spaceCollection(spaceId, 'entities')).findOne(asFilter<EntityDoc>({ _id: rawId, spaceId }),
-          { projection: NEVER_RETURNED_PROJECTION })
-        : null;
-      /*
-       * THE THIRD DOOR, and nobody reported it — `optProps` above casts the bag and checks no value.
-       *
-       * Reported for the create/patch pair only, so this is the sweep going wider than the report. It fails
-       * the ITEM rather than the request, which is this endpoint's whole contract: one bad row is reported
-       * and skipped, never a reason to abandon the rest of a batch.
-       *
-       * Entity only, matching the single-record doors — `04-brain-api.md` states that the fact, edge and
-       * chrono paths deliberately do not reject non-primitives at the API layer, and changing that would
-       * refuse writes that work today.
-       */
-      const propErr = primitivePropertyError(item['properties']);
-      if (propErr) { errors.push({ type: 'entity', index: i, reason: propErr }); continue; }
-      const mergedEnt = mergeTagsAndProperties(existing as EntityDoc | null, { tags: strArray(item['tags']), properties });
-      if (schemaFails('entity', i, validateEntity(meta ?? {}, { name, type, properties: mergedEnt.properties }))) continue;
-      await assertConnections(spaceId, 'entity', item);
-      const result = await upsertEntity(spaceId, name, type, strArray(item['tags']), properties,
-        typeof item['description'] === 'string' ? item['description'] : undefined, rawId, entityFlags.flags, undefined, ttlDays);
-      addConnections(await applyConnections(spaceId, result.entity._id, 'entity', item, result.entity.author));
-      /*
-       * `F-27` item 2: record what this item's key names, if it declared one.
-       *
-       * After the write, because the id is minted by it. A duplicate key is reported as an item error and
-       * the record still stands — the write already happened, and refusing to record the key is the honest
-       * consequence rather than pretending the row is not there.
-       */
-      const keyEnt = refKeyDeclared(item);
-      if (keyEnt) {
-        const dupe = refs.declare(keyEnt, result.entity._id, 'entity');
-        if (dupe) errors.push({ type: 'entity', index: i, reason: dupe });
-      }
-      if (existing) updated.entities++; else inserted.entities++;
-      if (result.warning) errors.push({ type: 'entity', index: i, reason: result.warning });
-    } catch (err) { errors.push({ type: 'entity', index: i, reason: err instanceof Error ? err.message : String(err) }); }
-  }
-
-  // ── chrono ─────────────────────────────────────────────────────────────────
-  const allowedChronoTypes = getAllowedChronoTypes(meta);
-  const chrono = slice(input.chrono);
-  for (let i = 0; i < chrono.length; i++) {
-    const item = chrono[i]!;
-    const title = typeof item['title'] === 'string' ? item['title'].trim() : '';
-    const type = typeof item['type'] === 'string' ? item['type'] : '';
-    const startsAt = typeof item['startsAt'] === 'string' ? item['startsAt'] : '';
-    if (!title) { errors.push({ type: 'chrono', index: i, reason: 'missing required field: title' }); continue; }
-    if (!allowedChronoTypes.has(type)) { errors.push({ type: 'chrono', index: i, reason: `\`type\` must be one of: ${[...allowedChronoTypes].join(', ')}` }); continue; }
-    if (!startsAt) { errors.push({ type: 'chrono', index: i, reason: 'missing required field: startsAt' }); continue; }
-    /*
-     * `W-22`: THE CALLER-SUPPLIED `id`, which bulk ENTITIES read and these two ignored.
-     *
-     * A supplied id makes a create idempotent — a retried write converges on the same record instead of
-     * producing a second one. Every single-record door reads it. These two dropped it, so a batch resent
-     * after a timeout DUPLICATED every fact and chrono entry in it, silently, while the same batch of
-     * entities was correctly idempotent.
-     */
-    const rawId = typeof item['id'] === 'string' ? item['id'].trim() : undefined;
-    if (rawId !== undefined && !UUID_V4_RE.test(rawId)) { errors.push({ type: 'chrono', index: i, reason: '`id` must be a valid UUID v4' }); continue; }
-    /*
-     * `W-22`: THE RECURRENCE RULE, which this loop never read at all.
-     *
-     * `mcp/tools/bulk.ts` says a bulk chrono item takes the *"same fields as the `save_chrono` tool"*,
-     * twice. It did not: the token `recurrence` appeared nowhere in this file, so a recurring event
-     * created in a batch was accepted, counted as inserted, and had no recurrence — with nothing said.
-     *
-     * Through `parseRecurrence`, the same validator both single-record doors use, so a malformed rule is
-     * reported here rather than stored.
-     */
-    const rec = parseRecurrence(item['recurrence']);
-    if (!rec.ok) { errors.push({ type: 'chrono', index: i, reason: rec.error }); continue; }
-    // `W-14`..`W-22`: the same value rules the single-record doors read. Bulk had its own, weaker set —
-    // `strArray` DROPPED a non-string element silently and `optProps` cast the bag without looking inside,
-    // so a batch stored what the single create refuses and reported nothing.
-    const shapeErr = shapeError('chrono', item);
-    if (shapeErr) { errors.push({ type: 'chrono', index: i, reason: shapeErr }); continue; }
-    const chronoFlags = parseRecordFlags(item);
-    if (!chronoFlags.ok) { errors.push({ type: 'chrono', index: i, reason: chronoFlags.error }); continue; }
-    // `Q-44`: the SHARED refusal, which this loop used to restate as a UUID pattern per link field.
-    const connErr = itemConnectionError(item, strict);
-    if (connErr) { errors.push({ type: 'chrono', index: i, reason: connErr }); continue; }
-    const properties = optProps(item['properties']);
-    // Normalise status to a known value (drop unknowns) — REST did this; MCP did not.
-    const status = typeof item['status'] === 'string' && CHRONO_STATUS_SET.has(item['status'] as ChronoStatus)
-      ? item['status'] as ChronoStatus : undefined;
-    const ttlDays = bulkTtlDays(item['ttlDays']);
-    if (ttlDays === TTL_INVALID) { errors.push({ type: 'chrono', index: i, reason: TTL_INVALID_MSG }); continue; }
-    try {
-      if (schemaFails('chrono', i, validateChrono(meta ?? {}, { type, properties }))) continue;
-      await assertConnections(spaceId, 'chrono', item);
-      // No link set here: the connections come from the item's own fields, through `applyConnections`.
-      const chronoDoc = await createChrono(spaceId, {
-        title, type: type as ChronoType, startsAt,
-        endsAt: typeof item['endsAt'] === 'string' ? item['endsAt'] : undefined,
-        status, confidence: typeof item['confidence'] === 'number' ? item['confidence'] : undefined,
-        description: typeof item['description'] === 'string' ? item['description'] : undefined,
-        tags: optStrArray(item['tags']), properties,
-        recurrence: rec.value, id: rawId,
-      }, undefined, ttlDays, chronoFlags.flags);
-      addConnections(await applyConnections(spaceId, chronoDoc._id, 'chrono', item, chronoDoc.author));
-      /*
-       * `F-27` item 2: record what this item's key names, if it declared one. After the write, because the
-       * id is minted by it.
-       */
-      const keyChrono = refKeyDeclared(item);
-      if (keyChrono) {
-        const dupe = refs.declare(keyChrono, chronoDoc._id, 'chrono');
-        if (dupe) errors.push({ type: 'chrono', index: i, reason: dupe });
-      }
-      inserted.chrono++;
-    } catch (err) { errors.push({ type: 'chrono', index: i, reason: err instanceof Error ? err.message : String(err) }); }
-  }
 
   /*
-   * EDGES RUN LAST, since `F-27` item 2.
-   *
-   * They used to run before chrono, and the order was documented as mattering only for records the batch
-   * UPDATES. A correlation key changes that: an edge may name a record this call created, and a reference
-   * cannot point forwards — so an edge to a chrono entry in the same payload could never have resolved.
-   *
-   * Every record array is written before any edge is, which makes 'declare it earlier in the call' true for
-   * every kind rather than for the two that happened to come first.
+   * A `warn` space reports what a `strict` one would refuse. The planner's classification says which
+   * violations to surface (`warnings` is empty when validation is off), so the batch reads it rather than
+   * running the validators a second time for its report.
    */
-  // ── edges ──────────────────────────────────────────────────────────────────
-  const edges = slice(input.edges);
-  for (let i = 0; i < edges.length; i++) {
-    const item = edges[i]!;
-    const rawFrom = typeof item['from'] === 'string' ? item['from'].trim() : '';
-    const rawTo = typeof item['to'] === 'string' ? item['to'].trim() : '';
-    const label = typeof item['label'] === 'string' ? item['label'].trim() : '';
-    /*
-     * The endpoint kinds, and they have to be read HERE rather than left to `upsertEdge`, because the shape
-     * check two lines down is this door's own copy: a `file` endpoint is a path, so a bulk import of
-     * file-ended edges would be refused item by item against a UUID pattern while the same edges go through
-     * one at a time on the other two doors.
-     *
-     * An unknown kind is an item error rather than a throw — bulk's contract is per-item, so it says which
-     * index is wrong and carries on with the rest.
-     */
-    const rawFromKind = item['fromKind'];
-    const rawToKind = item['toKind'];
-    const badKind = ([['fromKind', rawFromKind], ['toKind', rawToKind]] as const)
-      .find(([, v]) => v !== undefined && (typeof v !== 'string' || !(REF_KINDS as readonly string[]).includes(v)));
-    if (badKind) { errors.push({ type: 'edge', index: i, reason: `\`${badKind[0]}\` must be one of: ${REF_KINDS.join(', ')}` }); continue; }
-    /*
-     * `F-27` item 2: an end may name a record this call created, as `$ref:key`.
-     *
-     * Resolved BEFORE the well-formedness checks below, because a reference is not a UUID and would be
-     * refused by them — and resolved with the STATED kind so a disagreement is caught here rather than
-     * stored. Where a `$ref` resolves, the kind comes from the array it was declared in: `fromKind` on an
-     * item whose `from` is a reference is a claim to check, not an input to use.
-     */
-    const fromRef = resolveRef(rawFrom, refs, rawFromKind as RefKind | undefined);
-    const toRef = resolveRef(rawTo, refs, rawToKind as RefKind | undefined);
-    if (fromRef.error) { errors.push({ type: 'edge', index: i, reason: `from: ${fromRef.error}` }); continue; }
-    if (toRef.error) { errors.push({ type: 'edge', index: i, reason: `to: ${toRef.error}` }); continue; }
-    const from = fromRef.id ?? '';
-    const to = toRef.id ?? '';
+  const warn = (type: string, index: number) => (check: UpdateValidation): void => {
+    if (check.blocked) return;
+    for (const v of check.warnings) errors.push({ type, index, reason: `schema_warning: ${v.field} — ${v.reason}` });
+  };
 
-    const fromKind = fromRef.kind ?? edgeEndpointKind(rawFromKind as RefKind | undefined);
-    const toKind = toRef.kind ?? edgeEndpointKind(rawToKind as RefKind | undefined);
-    if (!from) { errors.push({ type: 'edge', index: i, reason: 'missing required field: from' }); continue; }
-    if (strict && !isWellFormedRef(fromKind, from)) { errors.push({ type: 'edge', index: i, reason: `\`from\` must be a valid ${fromKind} reference, not a name` }); continue; }
-    if (!to) { errors.push({ type: 'edge', index: i, reason: 'missing required field: to' }); continue; }
-    if (strict && !isWellFormedRef(toKind, to)) { errors.push({ type: 'edge', index: i, reason: `\`to\` must be a valid ${toKind} reference, not a name` }); continue; }
-    /*
-     * `F-27` item 2: both ends must EXIST.
-     *
-     * A `$ref` that resolved is existent by construction — it names a record this call just wrote — so this
-     * costs nothing for the case the feature is for. What it catches is the literal id: a well-formed UUID
-     * pointing at nothing, which this door has always stored and which becomes unacceptable once the batch
-     * is how linked records are written.
-     */
-    /*
-     * UNDER `strictLinkage`, which is the same condition the single-record doors use.
-     *
-     * It was scoped to a CONVERTED space while an unconverted one could keep the looser import trade, and
-     * 5.0 left that condition one value. Making it unconditional would have been the other half of the
-     * same defect: `strictLinkage: false` exists for staged imports where targets resolve in a later pass,
-     * and this door is where those imports arrive.
-     */
-    if (strict) {
-      const missing = await firstMissingEnd(spaceId, [[from, fromKind, 'from'], [to, toKind, 'to']]);
-      if (missing) { errors.push({ type: 'edge', index: i, reason: missing }); continue; }
-    }
-    if (!label) { errors.push({ type: 'edge', index: i, reason: 'missing required field: label' }); continue; }
-    const properties = optProps(item['properties']);
-    const ttlDays = bulkTtlDays(item['ttlDays']);
-    if (ttlDays === TTL_INVALID) { errors.push({ type: 'edge', index: i, reason: TTL_INVALID_MSG }); continue; }
-    // `W-14`..`W-22`: the same value rules the single-record doors read. Bulk had its own, weaker set —
-    // `strArray` DROPPED a non-string element silently and `optProps` cast the bag without looking inside,
-    // so a batch stored what the single create refuses and reported nothing.
-    const shapeErr = shapeError('edge', item);
-    if (shapeErr) { errors.push({ type: 'edge', index: i, reason: shapeErr }); continue; }
-    const edgeFlags = parseRecordFlags(item);
-    if (!edgeFlags.ok) { errors.push({ type: 'edge', index: i, reason: edgeFlags.error }); continue; }
-    try {
-      /*
-       * `upsertEdge` validates too, since 2026-08-29 — this check is kept for REPORTING, not for enforcement.
-       *
-       * Bulk's contract is per-item: it must say which index failed and carry on with the rest. Letting the
-       * throw from `upsertEdge` do the work would report the same refusal with less structure, and the catch
-       * below would flatten it to a message. So this stays as the reporting path while the write function is
-       * the guarantee — the distinction matters, because the enforcement is no longer THIS line's job.
-       */
-      const existing = await findEdgeByTriplet(spaceId, from, to, label, fromKind, toKind);
-      /*
-       * The endpoint facts, resolved for the REPORT as well as the write.
-       *
-       * `upsertEdge` resolves and enforces on its own; if this line handed the validator nothing, an endpoint
-       * refusal would still happen — as a throw, flattened by the catch below into a message naming the field.
-       * The item's reason would stop saying which types are allowed, which on a per-item contract is the whole
-       * value of the report. One rule, and this is the copy that would have carried less.
-       *
-       * An endpoint that does not resolve is left ABSENT rather than reported, which is what keeps bulk's own
-       * contract intact: references here are checked for shape and never for existence, so a well-formed id
-       * pointing at nothing is stored on purpose. An unresolved end cannot break an endpoint rule.
-       */
-      const resolvedEnds = await resolveEdgeEndsForWrite(spaceId, from, to, label, { fromKind, toKind });
-      if (schemaFails('edge', i, validateEdge(meta ?? {},
-        { label, properties: mergePropertiesOrKeep(existing?.properties, properties) ?? {} }, resolvedEnds))) continue;
-      await upsertEdge(spaceId, from, to, label,
-        typeof item['weight'] === 'number' ? item['weight'] : undefined,
-        typeof item['type'] === 'string' ? item['type'] : undefined,
-        typeof item['description'] === 'string' ? item['description'] : undefined,
-        properties, optStrArray(item['tags']), undefined, ttlDays,
-        {
-          ...edgeFlags.flags,
-          ...(rawFromKind !== undefined ? { fromKind } : {}),
-          ...(rawToKind !== undefined ? { toKind } : {}),
-        });
-      if (existing) updated.edges++; else inserted.edges++;
-    } catch (err) { errors.push({ type: 'edge', index: i, reason: err instanceof Error ? err.message : String(err) }); }
-  }
+  const prepared = prepareItems(spaceId, input, meta, strict, reject, warn);
+  const view = new ReadSet(spaceId);
+  await view.load(mergeWants([...prepared.map(p => p.want), ...slice(input.edges).map(e => topLevelEdgeWant(spaceId, e))]));
+
+  const run = batchRun(spaceId, view, refs, reject, warn, { inserted, updated, connections, errors });
+  for (const p of prepared) await run.planRecord(p);
+  for (const [i, item] of slice(input.edges).entries()) await run.planTopLevelEdge(i, item, strict);
+  await run.flush();
+  await run.replanStale();
 
   return { inserted, updated, connections, errors, refs: refs.toJSON() };
 }
@@ -594,34 +265,430 @@ export async function bulkWrite(spaceId: string, input: BulkInput): Promise<Bulk
 /**
  * Total records actually written (used to decide whether to fire the bulk.write webhook).
  *
- * The items' own connections count (`Q-44`). A link and an edge ARE records — a batch that attached fifty
- * relationships to records it updated wrote fifty rows, and a webhook that stayed silent about it would be
- * reporting "nothing happened" to the workflow watching for exactly that.
+ * Converges count — a batch of retries that converged on their records wrote them — and so do the items' own
+ * connections (`Q-44`): a link and an edge ARE records, and a webhook silent about fifty attachments would
+ * report "nothing happened" to the workflow watching for exactly that.
  */
 export function bulkWriteTotal(r: BulkResult): number {
   return r.inserted.facts + r.inserted.entities + r.inserted.edges + r.inserted.chrono
-    + r.updated.entities + r.updated.edges
+    + r.updated.facts + r.updated.entities + r.updated.edges + r.updated.chrono
     + r.connections.links + r.connections.edges;
 }
 
+/** The array name each record kind is reported under — the type a batch error carries. */
+const REPORTED: Record<'fact' | 'entity' | 'chrono', { type: string; counted: keyof Counts }> = {
+  fact: { type: 'fact', counted: 'facts' },
+  entity: { type: 'entity', counted: 'entities' },
+  chrono: { type: 'chrono', counted: 'chrono' },
+};
+
+/** One record item, checked for shape and ready for its planner. */
+interface PreparedRecord {
+  kind: 'fact' | 'entity' | 'chrono';
+  index: number;
+  item: Record<string, unknown>;
+  /** What the item's own `link*` fields ask for, or null when it names none. */
+  desired: DesiredLinks | null;
+  plan: (view: ReadSet) => Promise<{ plan: WritePlan; warning?: string }>;
+  /** The record this item addresses, when it names one by id — what a repeat is detected by. */
+  addresses?: string;
+  want: ReadWant;
+}
+
+type Reject = (type: string, index: number, item: unknown, reason: string) => void;
+type Warn = (type: string, index: number) => (check: UpdateValidation) => void;
+
 /**
- * The first edge end that does not resolve, phrased for the caller, or `null`.
- *
- * `assertRefsResolve` is the one implementation of "does this reference exist", and this wraps it rather
- * than re-querying: bulk's contract is per-item, so a throw has to become a reason string naming which end
- * was wrong. Re-implementing the lookup here would be the second copy of a rule whose whole point is that
- * every door answers it the same way.
+ * Check every record item's shape, in order, and say what its planner will ask the read set. A refusal here is
+ * reported and the item skipped — the same per-item value rules the single-record doors read (`W-14`..`W-22`).
  */
-async function firstMissingEnd(
+function prepareItems(
+  spaceId: string, input: BulkInput, meta: SpaceMeta | undefined, strict: boolean, reject: Reject, warn: Warn,
+): PreparedRecord[] {
+  const out: PreparedRecord[] = [];
+  const common = (kind: 'fact' | 'entity' | 'chrono', item: Record<string, unknown>, i: number): {
+    ok: true; ttlDays: number | null | undefined; rawId: string | undefined; flags: RecordFlags; desired: DesiredLinks | null;
+  } | { ok: false } => {
+    const type = REPORTED[kind].type;
+    const ttlDays = bulkTtlDays(item['ttlDays']);
+    if (ttlDays === TTL_INVALID) { reject(type, i, item, TTL_INVALID_MSG); return { ok: false }; }
+    // `W-22`: the caller-supplied id makes a retried write converge instead of duplicating.
+    const rawId = typeof item['id'] === 'string' ? item['id'].trim() : undefined;
+    if (rawId !== undefined && !UUID_V4_RE.test(rawId)) { reject(type, i, item, '`id` must be a valid UUID v4'); return { ok: false }; }
+    const shapeErr = shapeError(kind, item);
+    if (shapeErr) { reject(type, i, item, shapeErr); return { ok: false }; }
+    const flags = parseRecordFlags(item);
+    if (!flags.ok) { reject(type, i, item, flags.error); return { ok: false }; }
+    // `Q-44`: the SHARED refusal for the item's own connections.
+    const connErr = itemConnectionError(item, strict);
+    if (connErr) { reject(type, i, item, connErr); return { ok: false }; }
+    return { ok: true, ttlDays, rawId, flags: flags.flags, desired: connectionsOf(item, rawId ?? '', kind).desired };
+  };
+
+  for (const [i, item] of slice(input.facts).entries()) {
+    const fact = typeof item['fact'] === 'string' ? item['fact'].trim() : '';
+    if (!fact) { reject('fact', i, item, 'missing required field: fact'); continue; }
+    if (fact.length > MAX_FACT_LENGTH) { reject('fact', i, item, '`fact` must not exceed 50 000 characters'); continue; }
+    const c = common('fact', item, i);
+    if (!c.ok) continue;
+    const factInput: FactInput = {
+      fact, linkEntities: [...(c.desired?.entity ?? [])], tags: strArray(item['tags']),
+      description: typeof item['description'] === 'string' ? item['description'] : undefined,
+      properties: optProps(item['properties']),
+      type: typeof item['type'] === 'string' && item['type'].trim() ? item['type'] : undefined,
+      opts: { ...c.flags, onValidation: warn('fact', i) }, ttlDays: c.ttlDays, id: c.rawId,
+    };
+    out.push({
+      kind: 'fact', index: i, item, desired: c.desired, addresses: c.rawId,
+      plan: view => planFact(spaceId, factInput, view), want: factWant(factInput),
+    });
+  }
+
+  for (const [i, item] of slice(input.entities).entries()) {
+    const name = typeof item['name'] === 'string' ? item['name'].trim() : '';
+    if (!name) { reject('entity', i, item, 'missing required field: name'); continue; }
+    const type = typeof item['type'] === 'string' ? item['type'].trim() : '';
+    if (!type) { reject('entity', i, item, 'missing required field: type'); continue; }
+    const c = common('entity', item, i);
+    if (!c.ok) continue;
+    // Entity only, matching the single-record doors: the fact, edge and chrono paths do not reject
+    // non-primitives at the API layer (`04-brain-api.md`).
+    const propErr = primitivePropertyError(item['properties']);
+    if (propErr) { reject('entity', i, item, propErr); continue; }
+    const entityInput: EntityInput = {
+      name, type, tags: strArray(item['tags']), properties: optProps(item['properties']) ?? {},
+      description: typeof item['description'] === 'string' ? item['description'] : undefined,
+      id: c.rawId, opts: c.flags, ttlDays: c.ttlDays, onValidation: warn('entity', i),
+    };
+    out.push({
+      kind: 'entity', index: i, item, desired: c.desired, addresses: c.rawId,
+      plan: view => planEntity(spaceId, entityInput, view), want: entityWant(entityInput),
+    });
+  }
+
+  const allowedChronoTypes = getAllowedChronoTypes(meta);
+  for (const [i, item] of slice(input.chrono).entries()) {
+    const title = typeof item['title'] === 'string' ? item['title'].trim() : '';
+    const type = typeof item['type'] === 'string' ? item['type'] : '';
+    const startsAt = typeof item['startsAt'] === 'string' ? item['startsAt'] : '';
+    if (!title) { reject('chrono', i, item, 'missing required field: title'); continue; }
+    if (!allowedChronoTypes.has(type)) { reject('chrono', i, item, `\`type\` must be one of: ${[...allowedChronoTypes].join(', ')}`); continue; }
+    if (!startsAt) { reject('chrono', i, item, 'missing required field: startsAt'); continue; }
+    // `W-22`: the recurrence rule, through the validator both single-record doors use.
+    const rec = parseRecurrence(item['recurrence']);
+    if (!rec.ok) { reject('chrono', i, item, rec.error); continue; }
+    const c = common('chrono', item, i);
+    if (!c.ok) continue;
+    // Normalise status to a known value (drop unknowns) — REST did this; MCP did not.
+    const status = typeof item['status'] === 'string' && CHRONO_STATUS_SET.has(item['status'] as ChronoStatus)
+      ? item['status'] as ChronoStatus : undefined;
+    const chronoInput: ChronoInput = {
+      fields: {
+        title, type: type as ChronoType, startsAt,
+        endsAt: typeof item['endsAt'] === 'string' ? item['endsAt'] : undefined,
+        status, confidence: typeof item['confidence'] === 'number' ? item['confidence'] : undefined,
+        description: typeof item['description'] === 'string' ? item['description'] : undefined,
+        tags: optStrArray(item['tags']), properties: optProps(item['properties']),
+        recurrence: rec.value, id: c.rawId,
+        linkEntities: [...(c.desired?.entity ?? [])], linkFacts: [...(c.desired?.fact ?? [])],
+      },
+      ttlDays: c.ttlDays, opts: { ...c.flags, onValidation: warn('chrono', i) },
+    };
+    out.push({
+      kind: 'chrono', index: i, item, desired: c.desired, addresses: c.rawId,
+      plan: view => planChrono(spaceId, chronoInput, view), want: chronoWant(chronoInput),
+    });
+  }
+
+  // What the items' OWN connections will ask: the link targets for the class check, and each inline edge's
+  // far end and (for a record addressed by id) its triplet. An edge from a record this batch mints needs no
+  // read — nothing stored can name it.
+  for (const p of out) {
+    const extra: ReadWant[] = [];
+    if (p.desired) extra.push({ records: linkTargets(p.desired) });
+    for (const e of connectionsOf(p.item, p.addresses ?? '', p.kind).edges) extra.push(edgeWant(spaceId, e));
+    // From a record this batch mints, nothing stored can be the edge or share its subject: only the far end is read.
+    if (extra.length > 0) p.want = mergeWants([p.want, ...extra.map(w => p.addresses ? w : { records: w.records })]);
+  }
+  return out;
+}
+
+/**
+ * What a top-level edge will ask the read set, as far as can be known before the records are planned: its ends'
+ * records (existence, an entity's type) and — when neither end is a `$ref` — its triplet and functional subject.
+ * An end that is a `$ref` names a record this batch writes, which the read set learns as it is planned.
+ */
+function topLevelEdgeWant(spaceId: string, item: Record<string, unknown>): ReadWant {
+  const end = (raw: unknown, rawKind: unknown): { id: string; kind: RefKind } | null => {
+    if (typeof raw !== 'string' || !raw.trim() || refKeyUsed(raw) !== undefined) return null;
+    if (rawKind !== undefined && (typeof rawKind !== 'string' || !(REF_KINDS as readonly string[]).includes(rawKind))) return null;
+    return { id: raw.trim(), kind: edgeEndpointKind(rawKind as RefKind | undefined) };
+  };
+  const from = end(item['from'], item['fromKind']);
+  const to = end(item['to'], item['toKind']);
+  const label = typeof item['label'] === 'string' ? item['label'].trim() : '';
+  const records: NonNullable<ReadWant['records']> = {};
+  for (const e of [from, to]) if (e) records[e.kind] = [...(records[e.kind] ?? []), e.id];
+  if (!from || !to || !label) return { records };
+  return mergeWants([{ records }, edgeWant(spaceId, { from: from.id, to: to.id, label, opts: { fromKind: from.kind, toKind: to.kind } })]);
+}
+
+
+/** Several read wants as one — the batch's single `load`. */
+function mergeWants(wants: readonly ReadWant[]): ReadWant {
+  const records: NonNullable<ReadWant['records']> = {};
+  const triplets: NonNullable<ReadWant['triplets']>[number][] = [];
+  const functional: NonNullable<ReadWant['functional']>[number][] = [];
+  const nameTypes: NonNullable<ReadWant['nameTypes']>[number][] = [];
+  for (const w of wants) {
+    for (const [kind, ids] of Object.entries(w.records ?? {}) as Array<[keyof typeof records, readonly string[]]>) {
+      records[kind] = [...(records[kind] ?? []), ...ids];
+    }
+    triplets.push(...(w.triplets ?? []));
+    functional.push(...(w.functional ?? []));
+    nameTypes.push(...(w.nameTypes ?? []));
+  }
+  return { records, triplets, functional, nameTypes };
+}
+
+/** A plan waiting for the commit, with what the batch reports about it. */
+interface Pending {
+  plan: WritePlan;
+  type: string;
+  index: number;
+  /** null: an item's own edge — reported under `connections`, not under the arrays. */
+  counted: keyof Counts | null;
+  /** The plan counts as an update (a converge, or a triplet that was already stored). */
+  isUpdate: boolean;
+  key?: string;
+  warning?: string;
+  /** The pending entry this one needs written first. */
+  after?: Pending;
+  /** Re-plan once against a fresh read when the commit reports the record moved. */
+  replan?: (view: ReadSet) => Promise<{ plan: WritePlan }>;
+  want: ReadWant;
+  /** Set once committed: undefined while pending. */
+  result?: { ok: true } | { ok: false; reason: string };
+}
+
+/** The planning and committing state of one batch — closures, so the call graph can follow them. */
+function batchRun(
   spaceId: string,
-  ends: ReadonlyArray<readonly [string, RefKind, string]>,
-): Promise<string | null> {
-  for (const [value, kind, field] of ends) {
+  view: ReadSet,
+  refs: BatchRefs,
+  reject: Reject,
+  warn: Warn,
+  out: { inserted: Counts; updated: Counts; connections: { links: number; edges: number }; errors: BulkResult['errors'] },
+) {
+  let pending: Pending[] = [];
+  const targets = new Set<string>();
+  const stale: Pending[] = [];
+
+  async function planRecord(p: PreparedRecord): Promise<void> {
+    const { type, counted } = REPORTED[p.kind];
+    if (p.addresses) await beforeTarget(`${p.kind}:${p.addresses}`, { records: { [p.kind]: [p.addresses] } });
+    // A key used twice is refused BEFORE anything is planned: the item would otherwise stand under a name that
+    // means two things, and the read set would hold a record nobody will write.
+    const key = refKeyDeclared(p.item);
+    if (key && refs.get(key)) {
+      out.errors.push({ type, index: p.index, reason: refs.declare(key, '', p.kind)! });
+      return;
+    }
+    await view.load(p.want);
+    let entry: Pending;
     try {
-      await assertRefsResolve(spaceId, field, kind, [value]);
+      // The item's whole link set, including classes its kind cannot hold — refused here in the shared words.
+      if (p.desired) refuseLinks(view, p.kind, p.desired);
+      const planned = await p.plan(view);
+      entry = {
+        plan: planned.plan, type, index: p.index, counted, isUpdate: planned.plan.op === 'converge',
+        ...(key ? { key } : {}), want: p.want, replan: p.plan,
+        ...(planned.warning ? { warning: planned.warning } : {}),
+      };
     } catch (err) {
-      return err instanceof Error ? err.message : String(err);
+      reject(type, p.index, p.item, itemReason(err));
+      return;
+    }
+    if (key) refs.declare(key, entry.plan.id, p.kind);
+    push(entry, `${p.kind}:${entry.plan.id}`);
+    // The item's own edges hang off the record just planned, and are written after it — the edge writes
+    // `connectionsOf` derives, the same ones `applyConnections` makes after a single-record write.
+    for (const e of connectionsOf(p.item, entry.plan.id, p.kind).edges) {
+      await planEdgeItem(e, type, p.index, p.item, null, entry);
     }
   }
-  return null;
+
+  async function planTopLevelEdge(i: number, item: Record<string, unknown>, strict: boolean): Promise<void> {
+    const refuse = (reason: string) => reject('edge', i, item, reason);
+    const rawFrom = typeof item['from'] === 'string' ? item['from'].trim() : '';
+    const rawTo = typeof item['to'] === 'string' ? item['to'].trim() : '';
+    const label = typeof item['label'] === 'string' ? item['label'].trim() : '';
+    // An unknown kind is an item error rather than a throw — bulk's contract is per-item.
+    const rawFromKind = item['fromKind'];
+    const rawToKind = item['toKind'];
+    const badKind = ([['fromKind', rawFromKind], ['toKind', rawToKind]] as const)
+      .find(([, v]) => v !== undefined && (typeof v !== 'string' || !(REF_KINDS as readonly string[]).includes(v)));
+    if (badKind) return refuse(`\`${badKind[0]}\` must be one of: ${REF_KINDS.join(', ')}`);
+    /*
+     * `F-27` item 2: an end may name a record this call created, as `$ref:key`. Where a `$ref` resolves, the
+     * kind comes from the array it was declared in: `fromKind` on an item whose `from` is a reference is a
+     * claim to check, not an input to use.
+     */
+    const fromRef = resolveRef(rawFrom, refs, rawFromKind as RefKind | undefined);
+    const toRef = resolveRef(rawTo, refs, rawToKind as RefKind | undefined);
+    if (fromRef.error) return refuse(`from: ${fromRef.error}`);
+    if (toRef.error) return refuse(`to: ${toRef.error}`);
+    const from = fromRef.id ?? '';
+    const to = toRef.id ?? '';
+    const fromKind = fromRef.kind ?? edgeEndpointKind(rawFromKind as RefKind | undefined);
+    const toKind = toRef.kind ?? edgeEndpointKind(rawToKind as RefKind | undefined);
+    if (!from) return refuse('missing required field: from');
+    if (strict && !isWellFormedRef(fromKind, from)) return refuse(`\`from\` must be a valid ${fromKind} reference, not a name`);
+    if (!to) return refuse('missing required field: to');
+    if (strict && !isWellFormedRef(toKind, to)) return refuse(`\`to\` must be a valid ${toKind} reference, not a name`);
+    if (!label) return refuse('missing required field: label');
+    const ttlDays = bulkTtlDays(item['ttlDays']);
+    if (ttlDays === TTL_INVALID) return refuse(TTL_INVALID_MSG);
+    const shapeErr = shapeError('edge', item);
+    if (shapeErr) return refuse(shapeErr);
+    const edgeFlags = parseRecordFlags(item);
+    if (!edgeFlags.ok) return refuse(edgeFlags.error);
+
+    // The records both ends name, read now if the batch's one read did not (a `$ref` to a record addressed by id).
+    await view.load(fromKind === toKind
+      ? { records: { [fromKind]: [from, to] } }
+      : { records: { [fromKind]: [from], [toKind]: [to] } });
+    /*
+     * `F-27` item 2: under `strictLinkage` both ends must EXIST — the same condition the single-record doors
+     * use. A `$ref` that resolved names a record this batch writes, which the read set holds as written.
+     */
+    if (strict) {
+      for (const [id, kind, field] of [[from, fromKind, 'from'], [to, toKind, 'to']] as const) {
+        const refusal = missingRefsRefusal(spaceId, field, kind, view.missing(kind, [id]));
+        if (refusal) return refuse(refusal.message);
+      }
+    }
+    const after = pendingFor(fromRef.id && rawFrom !== from ? `${fromKind}:${from}` : undefined)
+      ?? pendingFor(toRef.id && rawTo !== to ? `${toKind}:${to}` : undefined);
+    await planEdgeItem({
+      from, to, label,
+      weight: typeof item['weight'] === 'number' ? item['weight'] : undefined,
+      type: typeof item['type'] === 'string' ? item['type'] : undefined,
+      description: typeof item['description'] === 'string' ? item['description'] : undefined,
+      properties: optProps(item['properties']), tags: optStrArray(item['tags']), ttlDays,
+      // The RESOLVED kinds, always (`Q-193`): a `$ref` to a fact is stored as a fact end even when the
+      // caller stated no kind. Passing them only when typed stored such an end as an entity.
+      opts: { ...edgeFlags.flags, fromKind, toKind, onValidation: warn('edge', i) },
+    }, 'edge', i, item, 'edges', after);
+  }
+
+  async function planEdgeItem(
+    edgeInput: EdgeInput, type: string, index: number, item: unknown, counted: keyof Counts | null, after?: Pending,
+  ): Promise<void> {
+    const want = edgeWant(spaceId, edgeInput);
+    const t = want.triplets![0]!;
+    // Keyed by the edge's IDENTITY, so an end stated as `entity` and one left unstated are the same target.
+    const target = `edge:${edgeIdFor(t.from, t.to, t.label, storedEdgeKind(t.fromKind), storedEdgeKind(t.toKind))}`;
+    await beforeTarget(target, { triplets: [t] });
+    await view.load(want);
+    try {
+      const planned = await planEdge(spaceId, edgeInput, view);
+      push({
+        plan: planned.plan, type, index, counted, isUpdate: planned.existed, want,
+        replan: view => planEdge(spaceId, edgeInput, view),
+        ...(after ? { after } : {}),
+      }, target);
+    } catch (err) {
+      reject(type, index, counted === null ? undefined : item, itemReason(err));
+    }
+  }
+
+  /** Commit everything pending and report it. */
+  async function flush(): Promise<void> {
+    const batch = pending;
+    pending = [];
+    targets.clear();
+    if (batch.length === 0) return;
+    const position = new Map(batch.map((e, k) => [e, k]));
+    const plans = batch.map(e => {
+      if (e.after?.result && !e.after.result.ok) return null;
+      const dep = e.after ? position.get(e.after) : undefined;
+      return dep === undefined ? e.plan : { ...e.plan, dependsOn: [dep] };
+    });
+    // An entry whose dependency already failed in an earlier commit is not written at all.
+    const toWrite = plans.map((p, k) => ({ p, k })).filter((x): x is { p: WritePlan; k: number } => x.p !== null);
+    const outcomes = await commitPlans(spaceId, toWrite.map(x => x.p));
+    const byEntry = new Map<number, CommitOutcome>(toWrite.map((x, j) => [x.k, outcomes[j]!]));
+    batch.forEach((e, k) => {
+      const o: CommitOutcome = byEntry.get(k)
+        ?? { ok: false, reason: `it depends on an item of this request that was not written: ${(e.after!.result as { reason: string }).reason}` };
+      report(e, o);
+    });
+    // What was written is read again before an item addresses it, so a later converge plans against the truth.
+    view.forget(
+      Object.fromEntries(['fact', 'entity', 'chrono'].map(kind => [kind, batch.filter(e => e.plan.kind === kind).map(e => e.plan.id)])),
+      batch.filter(e => e.plan.kind === 'edge').map(e => e.plan.result as unknown as Triplet),
+    );
+  }
+
+  /** Re-plan, once, each write whose record another write moved while this batch was being applied. */
+  async function replanStale(): Promise<void> {
+    for (const e of stale.splice(0)) {
+      const view = new ReadSet(spaceId);
+      try {
+        await view.load(e.want);
+        const planned = await e.replan!(view);
+        const [o] = await commitPlans(spaceId, [planned.plan]);
+        report({ ...e, plan: planned.plan, replan: undefined }, o!.ok ? o! : { ok: false, reason: o!.reason });
+      } catch (err) {
+        report({ ...e, replan: undefined }, { ok: false, reason: itemReason(err) });
+      }
+    }
+  }
+
+  /** Commit what is pending first when an item addresses something already planned — see `bulkWrite`. */
+  async function beforeTarget(target: string, reread: ReadWant): Promise<void> {
+    if (!targets.has(target)) return;
+    await flush();
+    await view.load(reread);
+  }
+
+  function pendingFor(target: string | undefined): Pending | undefined {
+    if (!target) return undefined;
+    return pending.find(e => `${e.plan.kind}:${e.plan.id}` === target);
+  }
+
+  function push(entry: Pending, target: string): void {
+    pending.push(entry);
+    targets.add(target);
+  }
+
+  function report(e: Pending, o: CommitOutcome): void {
+    if (!o.ok && o.stale && e.replan) {
+      stale.push(e);
+      e.result = { ok: false, reason: o.reason };
+      return;
+    }
+    if (!o.ok) {
+      e.result = { ok: false, reason: o.reason };
+      out.errors.push({ type: e.type, index: e.index, reason: o.reason });
+      if (e.key) refs.fail(e.key, o.reason);
+      return;
+    }
+    e.result = { ok: true };
+    if (e.counted === null) out.connections.edges++;
+    else if (e.isUpdate) out.updated[e.counted]++;
+    else out.inserted[e.counted]++;
+    out.connections.links += o.linksAdded ?? 0;
+    if (e.warning) out.errors.push({ type: e.type, index: e.index, reason: e.warning });
+  }
+  return { planRecord, planTopLevelEdge, flush, replanStale };
+}
+
+/** A planning refusal as a per-item reason. A schema refusal keeps the `schema_violation:` form the batch always used. */
+function itemReason(err: unknown): string {
+  if (err instanceof SchemaViolationError || err instanceof EdgeSchemaViolation) {
+    return `schema_violation: ${err.check.all.map(v => v.reason).join('; ')}`;
+  }
+  return err instanceof Error ? err.message : String(err);
 }

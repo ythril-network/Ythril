@@ -43,10 +43,13 @@ const JOBS = SPACE_COLLECTIONS.embedJobs;
 /** A batched write whose collection name is computed, and why it is not the jobs collection. */
 const COMPUTED_BULK_WRITES = {
   'server/src/sync/engine.ts:batchUpsertBySeq': 'sync pull replicates brain documents; embed jobs are local and never replicated',
+  'server/src/brain/write-plan/commit.ts:writeStage': 'the write commit\'s record stage: the collection is a record kind\'s '
+    + '(`PLAN_KINDS`), never the jobs collection — the commit queues its jobs through the runner, which the last case holds',
 };
 
 const INDEX = moduleIndex('server/src');
-const WRITERS = spaceWriters(INDEX, { floors: { space: 170 } });
+// Lowered from 170 with the plan/commit split (`Q-99` part 3) — see `a-create-converge-write-lives-in-the-commit`.
+const WRITERS = spaceWriters(INDEX, { floors: { space: 150 } });
 const ALL = [...WRITERS.sites, ...WRITERS.orphans.map(o => ({ ...o, key: `${o.file}:(orphan)` }))];
 
 const computed = s => s.kind === 'unknown' || (s.kind === 'space' && s.collection == null);

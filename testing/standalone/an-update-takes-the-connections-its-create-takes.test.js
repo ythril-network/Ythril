@@ -181,7 +181,8 @@ describe('and the MCP tools take them on update too', () => {
        * there, which is a gate concluding about a mechanism it never looked at.
        */
       if (applied === 0) {
-        if (!delegatedWriters(t.src).some(w => w.includes('applyConnections('))) {
+        // `connectionsOf` is the same mapping, planned into a batch's commit rather than applied after a write.
+        if (!delegatedWriters(t.src).some(w => w.includes('applyConnections(') || w.includes('connectionsOf('))) {
           offenders.push(`${t.file}: neither applies connections nor delegates to a writer that does`);
         }
         continue;

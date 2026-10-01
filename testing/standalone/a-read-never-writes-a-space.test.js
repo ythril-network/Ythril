@@ -61,7 +61,9 @@ const ROUTE_ROOTS = new Map(ROUTES.map(r => [`${r.method} ${r.path}`, routeHandl
  * ALIAS floor is the one that proves the alias resolution is live: with it disabled, most of those sites
  * fall to `unknown` and this throws.
  */
-const WRITERS = spaceWriters(INDEX, { floors: { space: 170, alias: 65, files: 40 } });
+// `space` lowered from 170 when the plan/commit split folded the create/converge writers' direct writes into
+// one commit (`Q-99` part 3): the sites went because the copies did, not because the scan broke.
+const WRITERS = spaceWriters(INDEX, { floors: { space: 150, alias: 65, files: 40 } });
 const WRITER_FUNCTION_FLOOR = 110;
 const READ_DOOR_FLOOR = 100;
 

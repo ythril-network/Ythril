@@ -109,5 +109,6 @@ export class WriteConflict extends Error {
 
 /** What the commit did with one plan. */
 export type CommitOutcome =
-  | { readonly ok: true; readonly seq: number }
+  /** `linksAdded`: link rows the reconcile created for this record — what a batch reports as connections. */
+  | { readonly ok: true; readonly seq: number; readonly linksAdded?: number }
   | { readonly ok: false; readonly reason: string; readonly stale?: boolean };

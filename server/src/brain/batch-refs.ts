@@ -81,6 +81,25 @@ export class BatchRefs {
     return this.minted.get(key);
   }
 
+  /**
+   * Record that the item declaring `key` was NOT written, and why — and drop the key if it had resolved.
+   *
+   * A dependant used to be told `unknown $ref`, which says the key was never declared: false, it was declared on
+   * an item that failed. The dependant's reason now carries the failure it actually depends on, and the key is
+   * absent from `toJSON` so no caller is handed an id for a record that was never written.
+   */
+  fail(key: string, reason: string): void {
+    this.minted.delete(key);
+    if (!this.failed.has(key)) this.failed.set(key, reason);
+  }
+
+  /** Why the item declaring `key` was not written, or undefined. */
+  failure(key: string): string | undefined {
+    return this.failed.get(key);
+  }
+
+  private readonly failed = new Map<string, string>();
+
   get size(): number {
     return this.minted.size;
   }
@@ -118,6 +137,10 @@ export function resolveRef(value: unknown, refs: BatchRefs, statedKind?: RefKind
   }
 
   const found = refs.get(key);
+  const failed = refs.failure(key);
+  if (!found && failed !== undefined) {
+    return { error: `$ref "${key}" names an item of this request that was not written: ${failed}` };
+  }
   if (!found) {
     return {
       error: `unknown $ref "${key}". A reference can only name a record declared earlier in the SAME call, `

@@ -118,7 +118,8 @@ export async function planEdge(spaceId: string, input: EdgeInput, view: ReadSet)
   const meta = getSpaceMeta(spaceId);
   const withDefaults = existing ? properties : applyPropertyDefaults(meta?.typeSchemas?.edge?.[label], properties);
   const functional = meta?.typeSchemas?.edge?.[label]?.functional === true;
-  const check = classifyEdgeUpsertAgainst(meta, existing, { label, properties: withDefaults }, resolvedEnds(view, input, functional));
+  const ends = resolvedEnds(view, input, functional);
+  const check = classifyEdgeUpsertAgainst(meta, existing, { label, properties: withDefaults }, ends);
   if (check.blocked) throw new EdgeSchemaViolation(check);
   opts?.onValidation?.(check);
 

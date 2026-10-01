@@ -79,8 +79,6 @@ const EXEMPT = {
   'server/src/brain/chrono.ts:deleteChrono': 'delete path',
   'server/src/brain/edges.ts:updateEdgeById': 'update path',
   'server/src/brain/edges.ts:deleteEdge': 'delete path',
-  'server/src/brain/links.ts:reconcileLinks': 'the update paths reconcile links here; the create/converge path '
-    + 'writes its link rows in the commit, which the reach case below holds',
   // whole-record operations that are not a create
   'server/src/brain/merge.ts:executeMerge': 'merge: rewrites a survivor and retires the merged records',
   'server/src/brain/edge-rekey.ts:rekeyEdge': 're-key: moves an edge to a new identity, delete + insert',
@@ -100,7 +98,7 @@ const EXEMPT = {
   'server/src/db/drop-link-arrays.ts:dropLinkArrays': 'boot migration: drops the 4.x link arrays',
   'server/src/db/restore.ts:restoreDatabase': 'backup restore writes every collection',
   // the sequence counter: not a record collection, but its name is not a record suffix the scanner can read
-  'server/src/util/seq.ts:nextSeq': 'the per-space sequence counter, not a record',
+  'server/src/util/seq.ts:withAllocatedSeqs': 'the per-space sequence counter, not a record',
   'server/src/util/seq.ts:bumpSeq': 'the per-space sequence counter, not a record',
   'server/src/spaces/rename.ts:moveSpaceData': 'moves the sequence counter row with a renamed space',
 };
@@ -118,7 +116,9 @@ const WRITE_METHODS = Object.entries(COLLECTION_METHOD_EFFECT)
 const RECORD_COLLECTIONS = new Set(BRAIN_COLLECTIONS.filter(c => c !== 'files'));
 
 const INDEX = moduleIndex('server/src');
-const WRITERS = spaceWriters(INDEX, { floors: { space: 170 } });
+// Lowered from 170 when the plan/commit split folded the create/converge writers' direct writes into one
+// commit (`Q-99` part 3): the sites went because the copies did, not because the scan broke.
+const WRITERS = spaceWriters(INDEX, { floors: { space: 150 } });
 
 /** A site that writes, or may write, a record collection: a known record collection, a computed name, or an unresolved receiver. */
 const writesRecord = s => WRITE_METHODS.includes(s.op)

@@ -72,7 +72,7 @@ export async function commitPlans(spaceId: string, plans: readonly WritePlan[]):
     if (ready.length === 0) continue;
     const stageLanded = await writeStage(spaceId, kind, plans, ready, outcomes, landed.length > 0);
     landed.push(...stageLanded);
-    await afterStage(spaceId, plans, stageLanded);
+    await afterStage(spaceId, plans, stageLanded, outcomes);
   }
 
   runDupeRules(spaceId, landed.map(i => plans[i]!).filter(p => p.dupeRules));
@@ -164,14 +164,20 @@ async function readSeqs(coll: ReturnType<typeof col<{ _id: string; seq?: number 
 }
 
 /** A landed stage's link rows and embed jobs. Never throws: the records are stored, and saying otherwise lies. */
-async function afterStage(spaceId: string, plans: readonly WritePlan[], landed: readonly number[]): Promise<void> {
+async function afterStage(
+  spaceId: string, plans: readonly WritePlan[], landed: readonly number[], outcomes: Array<CommitOutcome | undefined>,
+): Promise<void> {
   if (landed.length === 0) return;
   const withLinks = landed.filter(i => plans[i]!.links);
   if (withLinks.length > 0) {
     try {
-      await reconcileLinkRows(spaceId, withLinks.map(i => ({
+      const counts = await reconcileLinkRows(spaceId, withLinks.map(i => ({
         from: plans[i]!.id, minted: plans[i]!.minted, ...plans[i]!.links!,
       })));
+      withLinks.forEach((i, k) => {
+        const o = outcomes[i];
+        if (o?.ok) outcomes[i] = { ...o, linksAdded: counts[k]!.added };
+      });
     } catch (err) {
       // The records are stored, so their outcomes stay `ok`: reporting them failed would invite a resend that
       // duplicates. What did not land is the links, and this is what says so.

@@ -62,6 +62,8 @@ export class ReadSet {
   /** Per functional subject: the edges under that label, by identity, with their `to`. */
   private readonly subjectEdges = new Map<string, Map<string, string>>();
   private readonly nameTypeCounts = new Map<string, number>();
+  /** Ids this batch minted — records that cannot appear in any stored edge or link. */
+  private readonly mintedIds = new Set<string>();
 
   constructor(readonly spaceId: string, private readonly read: RecordsById = readRecordsById) {}
 
@@ -128,11 +130,25 @@ export class ReadSet {
     return [...new Set(ids)].filter(id => this.stored(kind, id) === null);
   }
 
-  /** The stored edge with this identity, or `null`. Throws when never loaded. */
+  /**
+   * The stored edge with this identity, or `null`. Throws when never loaded — except for an end this batch
+   * minted: no stored edge can name a record that did not exist until a moment ago, so that answer needs no read.
+   */
   triplet(t: Triplet): EdgeDoc | null {
     const k = tripletKey(t);
-    if (!this.triplets.has(k)) throw new Error(`read set: triplet ${t.from} -${t.label}-> ${t.to} was never loaded`);
+    if (!this.triplets.has(k)) {
+      if (this.mintedIds.has(t.from) || this.mintedIds.has(t.to)) return null;
+      throw new Error(`read set: triplet ${t.from} -${t.label}-> ${t.to} was never loaded`);
+    }
     return this.triplets.get(k)!;
+  }
+
+  /** Forget what is held for these records and triplets, so the next `load` reads them as they now stand. */
+  forget(records: Partial<Record<ReadKind, readonly string[]>>, triplets: readonly Triplet[] = []): void {
+    for (const [kind, ids] of Object.entries(records) as Array<[ReadKind, readonly string[]]>) {
+      for (const id of ids) this.recordsOf(kind).delete(id);
+    }
+    for (const t of triplets) this.triplets.delete(tripletKey(t));
   }
 
   /**
@@ -141,6 +157,10 @@ export class ReadSet {
    * excluded by its `to`, as `resolveEdgeEndsForWrite` excludes it: an edge is not its own duplicate.
    */
   otherEdgesFromSubject(from: string, label: string, to: string): number {
+    // A subject minted by this batch has no stored edges; only this batch's own can count.
+    if (!this.subjectEdges.has(subjectKey(from, label)) && this.mintedIds.has(from)) {
+      this.subjectEdges.set(subjectKey(from, label), new Map());
+    }
     const edges = this.subjectEdges.get(subjectKey(from, label));
     if (!edges) throw new Error(`read set: functional subject ${from} -${label}-> was never loaded`);
     let n = 0;
@@ -162,10 +182,14 @@ export class ReadSet {
   noteWritten(kind: PlanKind, written: { _id: string }, inserted: boolean): void {
     const doc = written as StoredRecord;
     this.recordsOf(kind).set(doc._id, doc);
+    if (inserted) this.mintedIds.add(doc._id);
     if (kind === 'edge') {
       const e = doc as unknown as EdgeDoc;
       this.triplets.set(tripletKey(e), e);
-      this.subjectEdges.get(subjectKey(e.from, e.label))?.set(tripletKey(e), e.to);
+      const sk = subjectKey(e.from, e.label);
+      // A subject this batch minted was never read (it has no stored edges), so its count starts here.
+      if (!this.subjectEdges.has(sk) && this.mintedIds.has(e.from)) this.subjectEdges.set(sk, new Map());
+      this.subjectEdges.get(sk)?.set(tripletKey(e), e.to);
     }
     if (kind === 'entity' && inserted) {
       const k = nameTypeKey(String(doc['name']), String(doc['type']));

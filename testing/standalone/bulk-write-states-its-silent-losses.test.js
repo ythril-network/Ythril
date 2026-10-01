@@ -32,6 +32,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
+import { bodyOf } from './_structural-window.mjs';
 
 const TOOL = stripComments(readFileSync('server/src/mcp/tools/bulk.ts', 'utf8'));
 const CORE = stripComments(readFileSync('server/src/brain/bulk.ts', 'utf8'));
@@ -82,7 +83,9 @@ describe('partial success is stated as the trap it is', () => {
 
   it('and says errors are indexed, so a caller can map them back', () => {
     assert.match(DESC, /INDEX/, 'an error without a position is not actionable on a 500-item batch');
-    assert.match(CORE, /errors\.push\(\{ type: 'fact', index: i/, 'and they really are');
+    // Every refusal goes through `reject(type, index, …)`, which is what puts the position on it.
+    assert.match(CORE, /reject\('fact', i, item/, 'and they really are');
+    assert.match(CORE, /errors\.push\(\{ type, index, reason \}\)/, 'and the one place errors are recorded carries the index');
   });
 });
 
@@ -135,7 +138,8 @@ describe('the reference-checking asymmetry is stated — and that it is GONE', (
      * pin the old behaviour — what has to hold is that the description states the condition, so the claim
      * and the code cannot drift apart.
      */
-    assert.match(CORE, /firstMissingEnd\(/, 'and existence, which is no longer conditional');
+    // Existence is answered from the batch's read set, in `assertRefsResolve`'s words (`missingRefsRefusal`).
+    assert.match(CORE, /missingRefsRefusal\(/, 'and existence, which is no longer conditional');
     assert.match(DESC, /CONVERTED SPACE/i,
       'the description must say what the condition USED to be, or a caller written against 4.x has no way '
       + 'to tell that their dangling-link trade is gone');
@@ -169,14 +173,25 @@ describe('the processing order is stated with its consequence', () => {
   });
 
   it('and the code really runs in that order', () => {
-    const iMem = CORE.indexOf('const facts = slice(input.facts)');
-    const iEnt = CORE.indexOf('const entities = slice(input.entities)');
-    const iEdge = CORE.indexOf('const edges = slice(input.edges)');
-    const iChrono = CORE.indexOf('const chrono = slice(input.chrono)');
-    // EDGES LAST since `F-27` item 2. A reference cannot point forwards, so under the old order an edge to
-    // a chrono entry created in the same payload could never have resolved.
-    assert.ok(iMem > 0 && iEnt > iMem && iChrono > iEnt && iEdge > iChrono,
-      `order changed: facts=${iMem} entities=${iEnt} chrono=${iChrono} edges=${iEdge}. Every record array `
-      + 'must be written before any edge, or a batch reference to a record of a later kind cannot resolve.');
+    /*
+     * Two orders since the plan/commit split (`Q-99` part 3), and both have to hold. The items are PLANNED in
+     * array order — facts, entities, chrono, and every record before any top-level edge, so a `$ref` can only
+     * name an item planned before it — and the commit WRITES by kind in `COMMIT_ORDER`, edges last, so an
+     * edge's ends are stored before it is.
+     */
+    const prep = bodyOf(CORE, 'prepareItems');
+    const iMem = prep.indexOf('slice(input.facts)');
+    const iEnt = prep.indexOf('slice(input.entities)');
+    const iChrono = prep.indexOf('slice(input.chrono)');
+    const writer = bodyOf(CORE, 'bulkWrite');
+    const iRecords = writer.indexOf('run.planRecord(');
+    const iEdge = writer.indexOf('run.planTopLevelEdge(');
+    assert.ok(iMem > 0 && iEnt > iMem && iChrono > iEnt && iRecords > 0 && iEdge > iRecords,
+      `order changed: facts=${iMem} entities=${iEnt} chrono=${iChrono} records=${iRecords} edges=${iEdge}. Every record `
+      + 'array must be planned before any edge, or a batch reference to a record of a later kind cannot resolve.');
+    const types = stripComments(readFileSync('server/src/brain/write-plan/types.ts', 'utf8'));
+    const ranks = Object.fromEntries([...types.matchAll(/(\w+): \{ collection: [^}]*rank: (\d+) \}/g)].map(m => [m[1], Number(m[2])]));
+    assert.ok(ranks.fact < ranks.entity && ranks.entity < ranks.chrono && ranks.chrono < ranks.edge,
+      `the commit writes kinds in rank order, and edges must be last: ${JSON.stringify(ranks)}`);
   });
 });
