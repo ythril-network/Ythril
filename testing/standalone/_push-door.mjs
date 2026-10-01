@@ -75,13 +75,22 @@ export const FAMILIES = Object.freeze({
   filemeta: { coll: 'files',    type: 'file',   single: null },
 });
 
-/** The body keys `batch-upsert` reads, out of its own source: a family it reads and this table lacks fails a floor. */
+/**
+ * The body keys `batch-upsert` reads. The route derives them from `REPLICATED_FAMILIES` (`Q-107` part 1 dup pass),
+ * so this does too — after checking the route still does, since a route that went back to a hand list would make
+ * the registry the wrong thing to read. A family the registry has and the fixture table lacks fails a floor.
+ */
 export function familiesCarriedByBatch() {
   const src = fs.readFileSync('server/src/api/sync/docs.ts', 'utf8');
-  const keys = [...new Set([...src.matchAll(/body\?\.(\w+)\)/g)].map(m => m[1]))];
+  if (!/Array\.isArray\(body\?\.\[k\]\)/.test(src) || !/REPLICATED_FAMILIES\.map\(\(\{ payloadKey: k \}\)/.test(src)) {
+    throw new Error('batch-upsert no longer reads its body keys from REPLICATED_FAMILIES — re-anchor familiesCarriedByBatch');
+  }
+  const keys = REPLICATED_FAMILY_KEYS;
   if (keys.length < 6) throw new Error(`batch-upsert reads only ${keys.length} body key(s) — the derivation is broken: ${keys}`);
   return keys;
 }
+const REPLICATED_FAMILY_KEYS = (await import('../../server/dist/sync/replicated-families.js'))
+  .REPLICATED_FAMILIES.map(f => f.payloadKey);
 
 /**
  * Open a push door.

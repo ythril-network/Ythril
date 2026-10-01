@@ -141,7 +141,7 @@ describe('nothing writes an arriving record without offering it to the embedder'
       + 'every meaning-ranked search on that peer, with no error to find it by');
   });
 
-  it('and every record type reaches it, named at the call — null only for links', () => {
+  it('and every record type reaches it, named at the call — null only for links', async () => {
     /*
      * Per type, because the types are written by different code paths and "it is handled" has been true of
      * three out of four before now. The types are `KNOWLEDGE_TYPES`, derived; the record-type argument is the
@@ -150,18 +150,34 @@ describe('nothing writes an arriving record without offering it to the embedder'
      * `null` means "this kind has nothing to embed", and only a link may say it: a link is a pair of ids and a
      * label. A `null` on any other family is a record kind silently excluded from recall on every receiver.
      */
-    const literal = (a) => /^'(\w+)'$/.exec(a ?? '')?.[1] ?? null;
-    for (const kind of KNOWLEDGE_TYPES) {
-      assert.ok(WRITER_CALLS.some(c => literal(c.args[2]) === kind),
-        `no writeArrivals call names '${kind}' as its record type, so a synced ${COLLECTION_SUFFIX[kind]} record `
-        + 'arriving by push is not queued for embedding by name');
-    }
-    const nulls = WRITER_CALLS.filter(c => c.args[2] === 'null');
-    assert.ok(nulls.length >= 1, 'no writeArrivals call passes null — the link family is not stored by the writer');
-    const notLinks = nulls.filter(c => !/\blinks\b/.test(c.args[1] ?? '')).map(c => `${c.file}:${c.line} (${c.args[1]})`);
-    assert.deepEqual(notLinks, [], 'a writeArrivals call passes null as the record type for a family that is not links');
+    /*
+     * Re-anchored for the duplicated-rule pass of `Q-107` part 1: every door now passes the record type out of the
+     * ONE derived table, `RECORD_TYPE_OF[<the family's collection>]`, rather than a literal per family — so "named
+     * at the call" means the call reads the family's own row, keyed by the same expression it passes as the family,
+     * and the table is checked here to name each knowledge type and to hold `null` for links alone. A literal is
+     * still allowed; a record type that is neither a literal nor the family's own row is the defect. Seen red by
+     * mutation, restored by hand: `RECORD_TYPE_OF[collection]` passed as `null` in the push door.
+     */
     const short = WRITER_CALLS.filter(c => c.args.length < 4).map(c => `${c.file}:${c.line}`);
     assert.deepEqual(short, [], 'a writeArrivals call omits the record type — it is an explicit argument, null for links');
+    const own = (c) => c.args[2] === `RECORD_TYPE_OF[${c.args[1]}]`;
+    const literal = (a) => /^'(\w+)'$/.exec(a ?? '')?.[1] ?? null;
+    const loose = WRITER_CALLS.filter(c => !own(c) && literal(c.args[2]) === null && c.args[2] !== 'null')
+      .map(c => `${c.file}:${c.line} (${c.args[1]} -> ${c.args[2]})`);
+    assert.deepEqual(loose, [], 'a writeArrivals call passes a record type that is not the family\'s own row of '
+      + 'RECORD_TYPE_OF, nor a literal — a family could be stored under another kind\'s embed rules');
+    const nulls = WRITER_CALLS.filter(c => c.args[2] === 'null' && !/\blinks\b/.test(c.args[1] ?? ''))
+      .map(c => `${c.file}:${c.line} (${c.args[1]})`);
+    assert.deepEqual(nulls, [], 'a writeArrivals call passes null as the record type for a family that is not links');
+
+    const { RECORD_TYPE_OF } = await import('../../server/dist/sync/replicated-families.js');
+    for (const kind of KNOWLEDGE_TYPES) {
+      assert.equal(RECORD_TYPE_OF[COLLECTION_SUFFIX[kind]], kind,
+        `RECORD_TYPE_OF does not name '${kind}' for ${COLLECTION_SUFFIX[kind]}, so a synced record of it is not queued by its kind`);
+    }
+    const nullRows = Object.entries(RECORD_TYPE_OF).filter(([, t]) => t === null).map(([c]) => c);
+    assert.deepEqual(nullRows, ['links'], 'RECORD_TYPE_OF holds null for a family that is not links');
+    assert.ok(WRITER_CALLS.some(own), 'no writeArrivals call reads the family\'s row of RECORD_TYPE_OF — re-anchor');
   });
 });
 

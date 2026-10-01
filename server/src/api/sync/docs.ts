@@ -21,6 +21,8 @@ import { LOCAL_ONLY_EXCLUSION } from '../../sync/local-only-fields.js';
 import { checkEdgeLinkViolations, checkLinkViolations, MAX_FORK_DEPTH, IncomingFactDoc, IncomingEntityDoc, IncomingEdgeDoc, IncomingChronoDoc, IncomingLinkDoc, IncomingFileMetaDoc, encodeCursor, decodeCursor, callerPeerId, spaceAllowed, isNonPeerSyncWrite, NON_PEER_WRITE_MESSAGE, isDirectionalWriteBlocked, violationsAgainstLocalSchema, withSchemaViolations } from './_shared.js';
 import { writeArrivals, arrivalRefusal, arrivalId, warnArrivalsNotStored, type ArrivalOptions, type ArrivalOutcome, type ArrivalRefusal } from '../../sync/arrivals.js';
 import { planPushArrivals, type PushDoc, type PushFamily, type PushVerdict } from '../../sync/upsert-plan.js';
+import { REPLICATED_FAMILIES, RECORD_TYPE_OF, type PayloadKey, type ReplicatedFamily } from '../../sync/replicated-families.js';
+import { TOMBSTONE_TYPE_OF, KNOWLEDGE_TYPES, type KnowledgeType } from '../../config/types.js';
 import { readPageTombstones, readPushStored, readForkContext, deleteSupersededTombstones } from '../../sync/push-reads.js';
 
 export const syncDocsRouter = Router();
@@ -189,13 +191,18 @@ syncDocsRouter.get('/filemeta/:id', syncRateLimit, requireAuth, oneById<FileMeta
 // ═══════════════════════════════════════════════════════════════════════════
 
 /**
- * The push families, by their batch-upsert body key. `BRAIN_PUSH_KEYS` is NOT ALL BRAIN COLLECTIONS: file metadata
- * (`filemeta`) is merged rather than planned, so it is handled after them.
+ * The push families, DERIVED: every replicated family, by its batch-upsert body key (`REPLICATED_FAMILIES`).
+ * `PLANNED` is NOT ALL BRAIN COLLECTIONS: the families whose deletions ride as brain tombstones are planned
+ * against what is stored; file metadata (no tombstone type — a deleted file has its own route) is merged
+ * instead. Each family's record type and tombstone type come from `RECORD_TYPE_OF` / `TOMBSTONE_TYPE_OF`, so a
+ * seventh family is carried here by being declared there.
  */
-type PushKey = 'facts' | 'entities' | 'edges' | 'chrono' | 'links' | 'filemeta';
-const BRAIN_PUSH_KEYS = ['facts', 'entities', 'edges', 'chrono', 'links'] as const satisfies readonly PushFamily[];
-/** The tombstone type each brain push family's deletions are recorded under. */
-const PUSH_TOMBSTONE_TYPE = { facts: 'fact', entities: 'entity', edges: 'edge', chrono: 'chrono', links: 'link' } as const;
+type PushKey = PayloadKey;
+const FAMILY_BY_KEY = new Map<PushKey, ReplicatedFamily>(REPLICATED_FAMILIES.map(f => [f.payloadKey, f]));
+const familyOf = (key: PushKey): ReplicatedFamily => FAMILY_BY_KEY.get(key)!;
+const PLANNED = REPLICATED_FAMILIES.filter(f => TOMBSTONE_TYPE_OF[f.collection] !== undefined)
+  .map(f => ({ key: f.payloadKey, kind: f.collection as PushFamily, tombstone: TOMBSTONE_TYPE_OF[f.collection]! }));
+const MERGED = REPLICATED_FAMILIES.filter(f => TOMBSTONE_TYPE_OF[f.collection] === undefined).map(f => f.payloadKey);
 
 type Pushed = Record<string, unknown> & PushDoc;
 interface PushedFamilyResult {
@@ -209,18 +216,13 @@ interface PushedFamilyResult {
 }
 
 /**
- * Store one family's arrivals through the arrival writer, the record type NAMED at the call — `null` only for
- * links, which carry nothing to embed (CLAUDE.md, "What a receiver does after the write").
+ * Store one family's arrivals through the arrival writer, the record type given at the call from the family's own
+ * row of `RECORD_TYPE_OF` — `null` only for links, which carry nothing to embed (CLAUDE.md, "What a receiver does
+ * after the write").
  */
 async function writePushed(spaceId: string, key: PushKey, docs: readonly Pushed[], opts: ArrivalOptions): Promise<ArrivalOutcome> {
-  switch (key) {
-    case 'facts': return await writeArrivals(spaceId, 'facts', 'fact', docs, opts);
-    case 'entities': return await writeArrivals(spaceId, 'entities', 'entity', docs, opts);
-    case 'edges': return await writeArrivals(spaceId, 'edges', 'edge', docs, opts);
-    case 'chrono': return await writeArrivals(spaceId, 'chrono', 'chrono', docs, opts);
-    case 'links': return await writeArrivals(spaceId, 'links', null, docs, opts);
-    case 'filemeta': return await writeArrivals(spaceId, 'files', 'file', docs, opts);
-  }
+  const { collection } = familyOf(key);
+  return await writeArrivals(spaceId, collection, RECORD_TYPE_OF[collection], docs, opts);
 }
 
 /**
@@ -252,7 +254,7 @@ async function acceptPushedPage(
   const sound = {} as Record<PushKey, Array<{ index: number; doc: Pushed }>>;
   const refusedAt = {} as Record<PushKey, ArrivalRefusal[]>;
   let maxReceived = 0;
-  for (const key of [...BRAIN_PUSH_KEYS, 'filemeta'] as const) {
+  for (const { payloadKey: key } of REPLICATED_FAMILIES) {
     const docs = page[key] ?? [];
     results[key] = { verdicts: docs.map(() => 'rejected' as PushVerdict), forkIds: docs.map(() => undefined),
       reasons: docs.map(() => undefined), landed: [] };
@@ -270,17 +272,17 @@ async function acceptPushedPage(
   const forks: Array<{ key: PushKey; index: number; doc: Pushed }> = [];
   try {
     const tombstones = await readPageTombstones(spaceId,
-      BRAIN_PUSH_KEYS.flatMap(k => sound[k].map(s => s.doc._id)));
+      PLANNED.flatMap(f => sound[f.key].map(s => s.doc._id)));
     const allowedChrono = getAllowedChronoTypes(getConfig().spaces.find(sp => sp.id === spaceId)?.meta);
-    for (const key of BRAIN_PUSH_KEYS) {
+    for (const { key, kind, tombstone } of PLANNED) {
       const items = sound[key];
       if (items.length === 0) continue;
       const docs = items.map(s => s.doc);
-      const stored = await readPushStored(spaceId, key, docs);
+      const stored = await readPushStored(spaceId, kind, docs);
       const plan = planPushArrivals(docs, {
-        kind: key, stored, tombstones: tombstones.get(PUSH_TOMBSTONE_TYPE[key]) ?? new Map(),
-        allowedTypes: key === 'chrono' ? allowedChrono : undefined,
-        ...(key === 'facts' ? await readForkContext(spaceId, docs, stored) : {}),
+        kind, stored, tombstones: tombstones.get(tombstone) ?? new Map(),
+        allowedTypes: kind === 'chrono' ? allowedChrono : undefined,
+        ...(kind === 'facts' ? await readForkContext(spaceId, docs, stored) : {}),
       });
       const res = results[key];
       plan.verdicts.forEach((v, k) => { res.verdicts[items[k]!.index] = v; res.forkIds[items[k]!.index] = plan.forkIds[k]; });
@@ -309,26 +311,27 @@ async function acceptPushedPage(
           }
           const clean = plan.tombstoneCleanups.get(id);
           if (clean?.onLanding) cleanups.push({ id, below: top.doc.seq });
-          if (key === 'links') res.landed.push(top.doc);
+          if (RECORD_TYPE_OF[kind] === null) res.landed.push(top.doc);
         }
         pending = next;
       }
       for (const [id, c] of plan.tombstoneCleanups) if (!c.onLanding) cleanups.push({ id, below: c.below });
-      await deleteSupersededTombstones(spaceId, PUSH_TOMBSTONE_TYPE[key], cleanups);
+      await deleteSupersededTombstones(spaceId, tombstone, cleanups);
     }
 
     // A file's metadata: merged, never replaced, and per document until `Q-107` part 2. No tombstone rides here
     // — a deleted file has its own route (`/api/sync/file-tombstones`).
-    if (sound.filemeta.length > 0) {
-      const out = await writePushed(spaceId, 'filemeta', sound.filemeta.map(s => s.doc), { from });
+    for (const key of MERGED) {
+      if (sound[key].length === 0) continue;
+      const out = await writePushed(spaceId, key, sound[key].map(s => s.doc), { from });
       const verdictOf = new Map<string, PushVerdict>();
       for (const id of [...out.inserted, ...out.updated]) verdictOf.set(id, 'upserted');
       for (const id of [...out.newerLocal, ...out.derived]) verdictOf.set(id, 'skipped');
       for (const r of out.refused) verdictOf.set(r._id, 'rejected');
       const why = new Map(out.refused.map(r => [r._id, r.reason]));
-      for (const s of sound.filemeta) {
-        results.filemeta.verdicts[s.index] = verdictOf.get(s.doc._id) ?? 'skipped';
-        results.filemeta.reasons[s.index] = why.get(s.doc._id);
+      for (const s of sound[key]) {
+        results[key].verdicts[s.index] = verdictOf.get(s.doc._id) ?? 'skipped';
+        results[key].reasons[s.index] = why.get(s.doc._id);
       }
     }
   } finally {
@@ -497,18 +500,36 @@ syncDocsRouter.post('/chrono', syncRateLimit, requireAuth, denyReadOnly, async (
 /** Documents per family per request. What is sent past it is counted `rejected`, never dropped unsaid. */
 const BATCH_FAMILY_CAP = 500;
 
-/** The `Incoming*` schema each body key is validated against. */
-const BATCH_SCHEMAS = {
+type SafeParser = { safeParse: (v: unknown) => { success: boolean; data?: unknown; error?: { issues: unknown[] } } };
+
+/**
+ * The `Incoming*` schema each family is validated against — the one hand-written family table here, because a
+ * schema is a fact about the wire that no registry can derive. Keyed by the DERIVED family list, and checked at
+ * load against it, so a family added to `REPLICATED_FAMILIES` without a schema stops the server rather than being
+ * dropped with a 200 at the boundary.
+ */
+const BATCH_SCHEMAS: Readonly<Partial<Record<PushKey, { schema: SafeParser; name: string }>>> = {
   facts: { schema: IncomingFactDoc, name: 'IncomingFactDoc' },
   entities: { schema: IncomingEntityDoc, name: 'IncomingEntityDoc' },
   edges: { schema: IncomingEdgeDoc, name: 'IncomingEdgeDoc' },
   chrono: { schema: IncomingChronoDoc, name: 'IncomingChronoDoc' },
   links: { schema: IncomingLinkDoc, name: 'IncomingLinkDoc' },
   filemeta: { schema: IncomingFileMetaDoc, name: 'IncomingFileMetaDoc' },
-} as const satisfies Record<PushKey, unknown>;
+};
+{
+  const keys: readonly string[] = REPLICATED_FAMILIES.map(f => f.payloadKey);
+  const missing = keys.filter(k => !(k in BATCH_SCHEMAS));
+  const extra = Object.keys(BATCH_SCHEMAS).filter(k => !keys.includes(k));
+  if (missing.length > 0 || extra.length > 0) {
+    throw new Error(`batch-upsert schemas do not match the replicated families: missing [${missing}], extra [${extra}]`);
+  }
+}
 
-/** The record type whose type schema a family's documents are checked against, where it has one. */
-const SCHEMA_KIND = { facts: 'fact', entities: 'entity', edges: 'edge', chrono: 'chrono' } as const;
+/** The knowledge type a family's documents are checked against in this space's schema, or none (links, files). */
+const schemaKindOf = (key: PushKey): KnowledgeType | undefined => {
+  const rt = RECORD_TYPE_OF[familyOf(key).collection];
+  return rt !== null && (KNOWLEDGE_TYPES as readonly string[]).includes(rt) ? rt as KnowledgeType : undefined;
+};
 
 /**
  * POST /api/sync/batch-upsert?spaceId=&networkId=
@@ -528,16 +549,10 @@ syncDocsRouter.post('/batch-upsert', syncRateLimit, requireAuth, denyReadOnly, a
      */
     const dropped = {} as Record<PushKey, number>;
     const page = {} as Record<PushKey, Pushed[]>;
-    const raw: Record<PushKey, unknown[]> = {
-      facts: Array.isArray(body?.facts) ? body.facts : [],
-      entities: Array.isArray(body?.entities) ? body.entities : [],
-      edges: Array.isArray(body?.edges) ? body.edges : [],
-      chrono: Array.isArray(body?.chrono) ? body.chrono : [],
-      links: Array.isArray(body?.links) ? body.links : [],
-      filemeta: Array.isArray(body?.filemeta) ? body.filemeta : [],
-    };
-    for (const key of Object.keys(BATCH_SCHEMAS) as PushKey[]) {
-      const { schema, name } = BATCH_SCHEMAS[key];
+    const raw = Object.fromEntries(REPLICATED_FAMILIES.map(({ payloadKey: k }) =>
+      [k, Array.isArray(body?.[k]) ? body[k]! : []])) as Record<PushKey, unknown[]>;
+    for (const { payloadKey: key } of REPLICATED_FAMILIES) {
+      const { schema, name } = BATCH_SCHEMAS[key]!;
       const overflow = Math.max(0, raw[key].length - BATCH_FAMILY_CAP);
       dropped[key] = overflow;
       if (overflow > 0) {
@@ -545,7 +560,7 @@ syncDocsRouter.post('/batch-upsert', syncRateLimit, requireAuth, denyReadOnly, a
           + `'${spaceId}' from peer '${peer}' were REJECTED; the sender offers them again in its next page.`);
       }
       page[key] = raw[key].slice(0, BATCH_FAMILY_CAP).flatMap((d) => {
-        const parsed = (schema as { safeParse: (v: unknown) => { success: boolean; data?: unknown; error?: { issues: unknown[] } } }).safeParse(d);
+        const parsed = schema.safeParse(d);
         if (parsed.success) return [parsed.data as Pushed];
         dropped[key]++;
         log.warn(`batch-upsert: REJECTED ${key} '${arrivalId(d)}' for space '${spaceId}' from peer '${peer}' — it did `
@@ -554,9 +569,10 @@ syncDocsRouter.post('/batch-upsert', syncRateLimit, requireAuth, denyReadOnly, a
       });
     }
     // P-21 = C: validated against THIS space's schema, counted, and let in — never refused for it.
-    const violated = (key: PushKey): number => key in SCHEMA_KIND
-      ? page[key].filter(d => violationsAgainstLocalSchema(spaceId, SCHEMA_KIND[key as keyof typeof SCHEMA_KIND], d).length > 0).length
-      : 0;
+    const violated = (key: PushKey): number => {
+      const kind = schemaKindOf(key);
+      return kind === undefined ? 0 : page[key].filter(d => violationsAgainstLocalSchema(spaceId, kind, d).length > 0).length;
+    };
 
     const out = await acceptPushedPage(spaceId, page, peer);
 

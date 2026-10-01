@@ -240,7 +240,7 @@ ${stmt}`,
     assert.match(single, /verdict === 'unknownType'/, 'the single-record route does not answer the planner\'s refusal');
     const accept = docs.slice(docs.indexOf('async function acceptPushedPage('), docs.indexOf("syncDocsRouter.post('/facts'"));
     assert.match(accept, /getAllowedChronoTypes\(/, 'the page accept does not read this space\'s chrono vocabulary');
-    assert.match(accept, /allowedTypes: key === 'chrono' \? allowedChrono : undefined/,
+    assert.match(accept, /allowedTypes: kind === 'chrono' \? allowedChrono : undefined/,
       'the vocabulary is not handed to the planner, so the rule applies on neither path');
     const planner = stripComments(readFileSync('server/src/sync/upsert-plan.ts', 'utf8'));
     assert.match(planner, /kind === 'chrono' && input\.allowedTypes && !input\.allowedTypes\.has\([^)]*\)\)\s*\{\s*plan\.verdicts\[i\] = 'unknownType'/,

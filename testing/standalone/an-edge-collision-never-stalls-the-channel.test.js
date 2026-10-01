@@ -38,6 +38,7 @@ import { stripComments } from './_strip-comments.mjs';
 import { bodyOf, enclosingBlockMatching } from './_structural-window.mjs';
 
 const { isDuplicateKeyOnly } = await import('../../server/dist/api/sync/_shared.js');
+const REGISTRY = await import('../../server/dist/sync/replicated-families.js');
 
 const DOCS = 'server/src/api/sync/docs.ts';
 const docs = stripComments(readFileSync(DOCS, 'utf8'));
@@ -86,9 +87,15 @@ describe('every edge ingest absorbs a duplicate triplet', () => {
    */
   const ARRIVALS = stripComments(readFileSync('server/src/sync/arrivals.ts', 'utf8'));
 
-  /** Every arrival-writer call in the push door that stores edges — derived, not named. */
+  /**
+   * Every arrival-writer call in the push door — derived, not named. The door writes every family through one
+   * call keyed by the family's collection (`the-push-door-derives-its-families`), and `edges` is one of them, so
+   * the edge write is that call; a literal `'edges'` call would be the same write again.
+   */
   function edgeWrites() {
-    return [...docs.matchAll(/writeArrivals\(\s*\w+\s*,\s*'edges'\s*,\s*'edge'\s*,/g)].map(m => m.index);
+    const { REPLICATED_FAMILIES } = REGISTRY;
+    assert.ok(REPLICATED_FAMILIES.some(f => f.collection === 'edges'), 'edges are no longer a replicated family');
+    return [...docs.matchAll(/writeArrivals\(\s*\w+\s*,\s*(?:'edges'|\w+)\s*,/g)].map(m => m.index);
   }
 
   it('finds the ingest writes, so an empty sweep cannot pass', () => {
