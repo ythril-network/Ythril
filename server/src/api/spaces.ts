@@ -45,6 +45,7 @@ import { planSpaceCreate, applySpaceCreate } from '../spaces/space-create.js';
 import { validateStoredEdges } from '../spaces/validate-stored-edges.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { pageList } from '../brain/list-page.js';
+import { defaultBudgetChars } from '../brain/result-budget.js';
 
 export const spacesRouter = Router();
 
@@ -739,7 +740,7 @@ spacesRouter.post('/:id/validate-schema', globalRateLimit, requireSpaceAuthMfaSc
    * so. Now every answer says what was checked against what exists, and `complete` is true only when that is all.
    */
   const checked: Record<string, { checked: number; total: number }> = {};
-  const note = async (mid: string, collection: 'entities' | 'edges' | 'facts' | 'chrono', read: number) => {
+  const note = async (mid: string, collection: Parameters<typeof spaceCollection>[1], read: number) => {
     const total = await col(spaceCollection(mid, collection)).countDocuments();
     const c = (checked[collection] ??= { checked: 0, total: 0 });
     c.checked += Math.min(read, total);
@@ -782,7 +783,7 @@ spacesRouter.post('/:id/validate-schema', globalRateLimit, requireSpaceAuthMfaSc
 
   // The violation list through the shared page rule (Q-129): it was `slice(0, 500)` with no way to reach the rest.
   const page = pageList(violations, { limit: req.body?.limit ?? req.query['limit'], skip: req.body?.skip ?? req.query['skip'] },
-    { defaultLimit: 500, maxLimit: 500 });
+    { defaultLimit: 500, maxLimit: 500, budgetChars: defaultBudgetChars('rest') });
   if (!page.ok) { res.status(400).json({ error: page.error }); return; }
   res.json({
     spaceId: id,

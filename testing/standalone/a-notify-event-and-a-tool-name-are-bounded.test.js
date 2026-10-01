@@ -19,18 +19,17 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { execFileSync } from 'node:child_process';
 import { stripComments } from './_strip-comments.mjs';
+import { trackedSources, REPO_ROOT } from './_sources.mjs';
 
 const notify = await import('../../server/dist/api/notify.js').catch(err => ({ __missing: err.message }));
 
 /** Every `event: '<name>'` a source file that calls `/api/notify` sends, other than the route itself. */
 function sentEvents() {
-  const files = execFileSync('git', ['ls-files', 'server/src/*.ts', 'server/src/**/*.ts'], { encoding: 'utf8' })
-    .split('\n').filter(f => f && f !== 'server/src/api/notify.ts');
+  const files = trackedSources(['server/src'], { untracked: true, exclude: ['server/src/api/notify.ts'] });
   const sent = new Map();
   for (const f of files) {
-    const src = stripComments(readFileSync(f, 'utf8'));
+    const src = stripComments(readFileSync(`${REPO_ROOT}/${f}`, 'utf8'));
     if (!src.includes('/api/notify')) continue;
     for (const m of src.matchAll(/\bevent:\s*'([a-z_]+)'/g)) sent.set(m[1], f);
   }
