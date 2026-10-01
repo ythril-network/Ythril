@@ -1,126 +1,119 @@
 /**
- * A reindex embeds the SAME text the normal write path embeds — asserted from source, because nothing else can.
+ * A reindex embeds the SAME text the write path embeds — because it embeds nothing itself.
  *
- * ## The gap this fills, stated precisely
+ * ## What this gate used to assert, and why that passed on the defect
  *
- * `reindex-contract.test.js` proves every collection comes out with an embedding. It cannot prove the embedding came
- * from the right text: the reindex loop writes `embedding` and `embeddingModel` and deliberately does not write
- * `matchedText`, so from outside the API a vector built from `edgeEmbedText(from, label, to, …)` and one built from
- * `edgeEmbedText(label, from, to, …)` are indistinguishable. Both are 768 floats and both make the record findable
- * by *something*.
+ * A reindex was five hand-written loops in `brain/reindex.ts`, and this file asserted that each one called the
+ * `*EmbedText` builder its collection's write path calls. Every one did, and the gate was green — while the loops
+ * skipped every record with `parentFileId` (text chunks, media chunks, captions), so after a model change those
+ * kept vectors from the old model for ever. A gate that pairs builder names with loops can only see the loops that
+ * exist; the missing kinds were invisible to it by construction.
  *
- * That is the failure an extraction of five near-identical loops is most likely to introduce, and the failure nobody
- * would notice: recall would keep returning results, just slightly wrong ones, for the records reindexed after the
- * refactor and not for the ones written before it.
+ * ## What it asserts now (Q-99 part 2)
  *
- * So this reads the source. A source gate is the weaker instrument in general, and here it is the only one that can
- * see the thing at all — which is the whole argument for having both files.
+ * The rebuild goes through the embed queue, so the text is built in ONE place — `buildEmbedText` in
+ * `brain/embed-record.ts` — for a reindex, a queued write, a sync arrival and a backfill alike. Whether that one
+ * place produces the creator's text is asserted behaviourally, per kind and per derived record, in
+ * `a-rebuild-embeds-what-the-producer-embedded-db.test.js`. What a source gate is still the right instrument for is
+ * the STRUCTURE that makes that test sufficient:
  *
- * ## What is actually asserted
+ *  1. `reindex.ts` calls no `embed()` and no `*EmbedText` builder, and delegates to the queue sweep. A loop grown
+ *     back here would be a second text derivation the behavioural test never reaches.
+ *  2. The route still delegates to `startReindex` and builds nothing.
+ *  3. `pipeline.ts` builds a chunk's text only through `chunkEmbedText`, and so does `buildEmbedText`'s derived
+ *     branch — so the text a chunk was stored with and the text it is rebuilt from cannot drift.
  *
- * Each of the five branches must call the `*EmbedText` builder that its collection's WRITE path calls. Derived by
- * pairing collection → builder rather than by counting call sites, so a sixth collection added later is covered on
- * the day it is written, and a branch that quietly starts building its own string fails.
- *
- * The `excerpt` argument on the file branch is asserted by name, and it has a specific history: without it a reindex
- * re-embeds every converted document WITHOUT the document's own text, dropping exactly the phrases a reader
- * searches for. The file's own comment says so; this is that comment with a test attached.
+ * Comments are stripped before matching, so a docblock that mentions `embed(` can neither satisfy nor fail a check.
  *
  * Run: node --test testing/standalone/reindex-embeds-the-same-text.test.js
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { stripComments } from './_strip-comments.mjs';
 
-const stripComments = (t) => t.replace(/(^|[^:])\/\/.*$/gm, '$1').replace(/\/\*[\s\S]*?\*\//g, '');
+const src = (p) => stripComments(readFileSync(p, 'utf8'));
 
-/**
- * The five loops, wherever they live.
- *
- * They were inline in the route handler and now sit in `brain/reindex.ts`, so this reads the module. The route's own
- * obligation — that it still DELEGATES rather than growing its own loop back — is a separate assertion below, because
- * re-pointing a gate at moved code and forgetting the place it moved from is how a check quietly covers half of what
- * it used to.
- */
-const WORK = 'server/src/brain/reindex.ts';
+const REINDEX = 'server/src/brain/reindex.ts';
+const PIPELINE = 'server/src/files/converters/pipeline.ts';
+const EMBED_RECORD = 'server/src/brain/embed-record.ts';
 
-function reindexLoops() {
-  const src = stripComments(readFileSync(WORK, 'utf8'));
-  const start = src.indexOf('export function startReindex');
-  assert.ok(start > 0, `the reindex work moved out of ${WORK} — re-point this gate at wherever the loops now live`);
-  return src.slice(start);
+/** Every name a file imports from a given module, so a check can ask "is any of them CALLED". */
+function importedFrom(source, modulePattern) {
+  const names = [];
+  const re = new RegExp(`import\\s*\\{([^}]*)\\}\\s*from\\s*'${modulePattern}'`, 'g');
+  for (const m of source.matchAll(re)) {
+    for (const part of m[1].split(',')) {
+      const name = part.trim().split(/\s+as\s+/).pop().trim();
+      if (name && !name.startsWith('type ')) names.push(name);
+    }
+  }
+  return names;
 }
 
-/**
- * collection → the embed-text builder its WRITE path uses.
- *
- * Not a list of what the reindex currently calls — that would agree with the code by construction. Each pairing is
- * the one the record's own write path uses, so the assertion is *the reindex reproduces the write*, which is the
- * property that matters.
- */
-const BUILDERS = [
-  ['facts', 'factEmbedText'],
-  ['entities', 'entityEmbedText'],
-  ['edges', 'edgeEmbedText'],
-  ['chrono', 'chronoEmbedText'],
-  ['files', 'fileEmbedText'],
-];
+describe('a reindex embeds nothing itself', () => {
+  const reindex = src(REINDEX);
 
-describe('a reindex reproduces what the write path embedded', () => {
-  const handler = reindexLoops();
-
-  it('found the loops, and they are the whole job rather than a stub', () => {
-    // Floors it: if the slice were empty or tiny, every check below would pass on nothing. The five loops are
-    // hundreds of lines, which is why they were extracted rather than duplicated for a second surface.
-    assert.ok(handler.length > 3000, `the sliced work is only ${handler.length} chars — the slice is wrong`);
+  it('the module is there and is not empty (the checks below cannot pass on nothing)', () => {
+    assert.ok(reindex.length > 1000, `${REINDEX} is only ${reindex.length} chars after stripping comments — re-anchor this gate`);
+    assert.match(reindex, /export\s+async\s+function\s+startReindex\b|export\s+function\s+startReindex\b/,
+      'startReindex is gone from reindex.ts — re-anchor this gate at wherever a reindex now starts');
   });
 
-  it('every collection is re-embedded through its own write-path builder', () => {
-    const missing = BUILDERS.filter(([, builder]) => !new RegExp(`\\b${builder}\\(`).test(handler))
-      .map(([collection, builder]) => `${collection} → ${builder}()`);
-    assert.deepEqual(missing, [],
-      'these collections are reindexed without calling the builder their write path uses, so their vectors are '
-      + 'built from different text than the records written normally — recall keeps working and quietly disagrees '
-      + `with itself:\n  ${missing.join('\n  ')}`);
+  it('calls no embed()', () => {
+    assert.doesNotMatch(reindex, /\bembed\(/,
+      'reindex.ts calls the model itself, so it is a second place a vector is built — one the behavioural test does not reach');
+    assert.doesNotMatch(reindex, /from '\.\/embedding\.js'/, 'and must not import the embedder at all');
   });
 
-  it('the builders come from the shared module, not re-implemented locally', () => {
-    // The other way to break the pairing above: keep the name, declare it here. A local `const edgeEmbedText = …`
-    // would satisfy the regex and embed whatever it liked.
-    const src = readFileSync(WORK, 'utf8');
-    for (const [, builder] of BUILDERS) {
-      assert.match(src, new RegExp(`import \\{[^}]*\\b${builder}\\b[^}]*\\} from '[^']*embed-text\\.js'`, 's'),
-        `${builder} must be imported from brain/embed-text.js, not declared alongside the loops`);
-    }
+  it('calls no *EmbedText builder', () => {
+    assert.doesNotMatch(reindex, /\w+EmbedText\(/,
+      'reindex.ts builds embed text itself — a second derivation that has drifted from the write path before');
+    assert.doesNotMatch(reindex, /\bresolveEdgeEndpointNames\(/,
+      'nor resolves an edge\'s endpoint names, which is the half of an edge\'s text a hand loop gets wrong');
+  });
+
+  it('delegates to the queue sweep', () => {
+    const sweepNames = importedFrom(reindex, '\\./queue-embed-sweep\\.js');
+    assert.ok(sweepNames.length > 0, 'reindex.ts must import the shared sweep from ./queue-embed-sweep.js');
+    const called = sweepNames.filter(n => new RegExp(`\\b${n}\\(`).test(reindex));
+    assert.ok(called.length > 0,
+      `reindex.ts imports ${sweepNames.join(', ')} from the sweep and calls none of them — the import is decoration`);
   });
 
   it('the ROUTE still delegates, rather than growing its own loop back', () => {
-    // The other half of re-pointing this gate. Everything above now reads `brain/reindex.ts`, so a handler that
-    // re-implemented the re-embed inline would satisfy all of it while embedding whatever it liked. Asserted where the
-    // route is: it must call `startReindex`, and must build no embed text of its own.
-    const route = stripComments(readFileSync('server/src/api/brain/search.ts', 'utf8'));
+    const route = src('server/src/api/brain/search.ts');
     const at = route.indexOf("searchRouter.post('/spaces/:spaceId/reindex'");
     assert.ok(at > 0, 'the reindex route is gone — if it moved, re-point this assertion too');
     const next = route.indexOf('searchRouter.', at + 20);
     const handlerSrc = route.slice(at, next > 0 ? next : route.length);
     assert.match(handlerSrc, /startReindex\(/, 'the route must delegate the work');
     assert.doesNotMatch(handlerSrc, /\bembed\(/, 'the route must not embed anything itself');
-    assert.doesNotMatch(handlerSrc, /EmbedText\(/, 'nor build embed text — that is the shared module’s job');
+    assert.doesNotMatch(handlerSrc, /EmbedText\(/, 'nor build embed text — that is the shared module\u2019s job');
+  });
+});
+
+describe('a chunk\'s text has one builder', () => {
+  it('pipeline.ts imports chunkEmbedText from embed-text.js and calls it', () => {
+    const pipeline = src(PIPELINE);
+    assert.ok(importedFrom(pipeline, '[^\']*embed-text\\.js').includes('chunkEmbedText'),
+      'pipeline.ts must take its chunk text from brain/embed-text.js');
+    assert.match(pipeline, /\bchunkEmbedText\(/, 'and must call it for every text chunk');
   });
 
-  it('the file branch passes `excerpt`, or a reindex drops every document body', () => {
-    // Specific and paid for: without `excerpt` a reindex re-embeds a converted document WITHOUT the document's own
-    // text, so the phrases a reader actually searches for disappear from the vector while the record still looks
-    // indexed. The route carries a comment saying exactly this; a comment is not a check.
-    const call = /fileEmbedText\(([^)]*)\)/.exec(handler);
-    assert.ok(call, 'the file branch no longer calls fileEmbedText');
-    assert.match(call[1], /excerpt/, 'fileEmbedText must be given the excerpt — see the comment at the call site');
+  it('pipeline.ts does not assemble a chunk\'s text inline', () => {
+    // The shape it had: `chunk.headingText ? \`${chunk.headingText} ${chunk.content}\` : chunk.content`. Any
+    // template or concatenation that splices headingText is that same derivation written a second time.
+    const pipeline = src(PIPELINE);
+    assert.doesNotMatch(pipeline, /\$\{\s*[\w.]*headingText\s*\}/,
+      'pipeline.ts splices headingText into a template itself — the rebuild would build the chunk text differently');
+    assert.doesNotMatch(pipeline, /headingText\s*\+/, 'nor by concatenation');
   });
 
-  it('chunk records are excluded, so a chunk is not re-embedded as a file', () => {
-    // Chunks carry `parentFileId` and have their own embedding logic. Re-embedding one here would overwrite a
-    // passage vector with a file-metadata vector, which is how a document becomes unsearchable by its own contents.
-    assert.match(handler, /parentFileId/,
-      'the files branch must still exclude chunk records (parentFileId set) from the file re-embed');
+  it('buildEmbedText\'s derived branch uses the same builder', () => {
+    const record = src(EMBED_RECORD);
+    assert.ok(importedFrom(record, '\\./embed-text\\.js').includes('chunkEmbedText'),
+      'embed-record.ts must import chunkEmbedText, or a rebuilt chunk is embedded from different text than it was stored with');
+    assert.match(record, /\bchunkEmbedText\(/, 'and call it');
   });
 });
