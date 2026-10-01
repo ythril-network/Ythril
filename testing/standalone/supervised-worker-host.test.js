@@ -64,7 +64,10 @@ function setup({ fake = { auto: true }, host: hostOpts = {}, noConstants = false
     scheduler: vt.scheduler,
     log: (level, message) => logs.push({ level, message }),
     onEvent: e => events.push(e),
-    lostError: (detail) => { lostDetails.push(detail); return Object.assign(new Error(`LOST(${detail})`), { lost: true }); },
+    lostError: (detail, info) => {
+      lostDetails.push(detail);
+      return Object.assign(new Error(`LOST(${detail})`), { lost: true, inFlight: info?.inFlight });
+    },
     ...constants,
     ...hostOpts,
   });
@@ -266,9 +269,28 @@ describe('a child that dies', () => {
     assert.equal(a.error?.lost, true);
     assert.equal(b.error?.lost, true, 'nothing the lost child had not answered may hang');
     assert.match(lostDetails[0], /code=3\b/);
+    // Only the request the child was HOLDING can have killed it. The one behind it was never sent, and a caller that
+    // charges a loss to a record must be able to tell the two apart, or a bystander of a poison record ends failed.
+    assert.equal(a.error.inFlight, true, 'the request that was in flight is told so');
+    assert.equal(b.error.inFlight, false, 'a request that was never sent is told so');
 
     const c = fake.children.length;
     assert.equal(c, 1);
+  });
+
+  it('charges nobody for a child lost while it was still loading: no request had been sent', async () => {
+    const { worker, fake } = setup({ fake: {} });
+    const a = watch(worker.request(req('a')));
+    const b = watch(worker.request(req('b')));
+    await flush();
+    fake.last().ready();
+    await flush();
+    fake.last().exit(139, null);
+    await flush();
+    assert.equal(a.error?.lost, true);
+    assert.equal(b.error?.lost, true);
+    assert.equal(a.error.inFlight, false, 'the model load died, not a request');
+    assert.equal(b.error.inFlight, false);
   });
 
   it('names a signal when that is how the child ended', async () => {
@@ -325,7 +347,7 @@ describe('a child that dies', () => {
 
     assert.equal(worker.state().phase, 'backoff');
     assert.equal(worker.state().backoffRemainingMs, 1_000);
-    await assert.rejects(worker.request(req('b')), e => e.lost === true,
+    await assert.rejects(worker.request(req('b')), e => e.lost === true && e.inFlight === false,
       'a caller arriving while the host is not allowed to spawn is told so, not queued behind a timer');
     assert.equal(fake.children.length, 1, 'still backing off, so still one child');
 
@@ -672,6 +694,8 @@ describe('a model that cannot be loaded', () => {
     assert.equal(worker.state().phase, 'none');
     assert.equal(worker.state().consecutiveLosses, 0);
     assert.match(worker.state().loadFailure, /not in the model cache/);
+    assert.equal(worker.state().loadFailureModelId, 'bad',
+      'the state names the model the failure is about, so a reader can tell it from a failure of a previous model');
 
     await vt.advance(24 * 60 * MIN);
     await worker.request(req('b', { modelId: 'bad' })).catch(() => {});

@@ -239,6 +239,8 @@ npm run test:down
 
 Covers: closed-network sync, braintree governance, democratic voting, pubsub topology, gossip exchange, conflict detection, file sync, entity/edge sync, fork/merge, Merkle verification, vote propagation, vote signing &amp; safe relay, signing-key rotation, vote forgery rejection, tombstone forgery rejection, direction enforcement, leave/removal.
 
+**The test stack's database memory is a ceiling, not a recommendation.** `ythril-mongo-a` runs at 2.5 GB (its `mem_limit` in `testing/docker-compose.test.yml`, with a comment there). A space of 44 000 records ran the database out of memory there, and 5 GB held. A test that seeds tens of thousands of records into the test stack needs that limit raised; the same number in production is `YTHRIL_MONGO_MEM_LIMIT` (default 4g, not measured at that size).
+
 ### Red-team tests
 
 ```bash

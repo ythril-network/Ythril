@@ -10,7 +10,7 @@
 > opens this same editor for the selected space, without leaving the page. Use the list below to create,
 > reorder or compare spaces.
 
-Open **Settings → Spaces** to manage all spaces on this instance. A summary above the list shows the total number of spaces, the storage in use across all of them, and how many are still building (or have failed to build) their search index. If a space's index is still preparing, its row is flagged so you know recall may be incomplete for it.
+Open **Settings → Spaces** to manage all spaces on this instance. A summary above the list shows the total number of spaces, the storage in use across all of them, and how many are still building (or have failed to build) their search index. A space that is waiting for the search service has its own count, *Waiting for search*, which is not added to *Indexing*: nothing is being built for it. If a space's index is still preparing, its row is flagged so you know recall may be incomplete for it.
 
 ### Finding a space, and ordering the list
 
@@ -167,6 +167,8 @@ Below the fields, any type that *does* have its own window is listed read-only �
 
 **Rebuild search indexes** is the repair for *search returns nothing and nothing says why* — a space whose vector indexes are missing or were destroyed. It re-creates them from your existing content; search stays empty until it finishes, and nothing is deleted. Reindexing is not a substitute: it re-embeds content against the current model and cannot recreate a missing index. Requires an admin token (and TOTP when MFA is on). The same rebuild is also available per space directly from the **vector-index table** under Settings → Media Processing → Tools — the one place the drift (recorded *ready* vs. a database with no index) is actually visible — behind the same confirmation.
 
+> **A space can be *Waiting for search service*, and that clears by itself.** The search service (`mongot`, next to the database) can start after Ythril does. Until it answers, a space shows *Waiting for search service* with a still dot instead of the spinning *Preparing indexes*, because nothing is being built: semantic search is simply not there yet. The page keeps checking (about every 30 seconds while every such space is only waiting, every few seconds while a real build runs, and not while the tab is hidden), the badge changes when the service is back, and Ythril builds every missing index on its own. Use **Rebuild search indexes** only if the state never goes away. *Index build failed* now means a build that really failed or ran out of time, and **Rebuild search indexes** is the repair for it.
+>
 > **An empty collection has no search index, and that is healthy.** A search index exists only while its collection holds something: it is built when the first record of that kind arrives and removed a minute after the last one is deleted, because every index costs the database work on every write whether or not it can return anything. A new space therefore starts with none and still reads *Ready*, and its first entity is findable straight away while the index for it builds. **Rebuild search indexes** rebuilds only the collections that hold records.
 >
 > **Optional indexes do not count towards those states.** The face gallery is built when face recognition is enabled and is not part of what search needs, so a space with every search index in place reads as *Ready* even when the gallery is absent — including when face recognition is on with no model configured. A missing gallery is still reported, but not as the space failing.

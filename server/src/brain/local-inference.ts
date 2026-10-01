@@ -114,7 +114,8 @@ export function createLocalInference(opts: LocalInferenceOptions = {}): LocalInf
       else if (event.type === 'served') embedWaitSeconds.observe(event.waitMs / 1000);
       opts.onEvent?.(event);
     },
-    lostError: detail => new LostChildError(detail),
+    // `inFlight` is the generic host's answer to "was this the request the child held"; only that one is charged.
+    lostError: (detail, { inFlight }) => new LostChildError(detail, { inFlight }),
     // Everything the child says is redacted first and has the marker defused second: see the module docblock.
     childText: text => withoutLostMarker(redactSecrets(text)),
     envNames: LOCAL_INFERENCE_ENV_NAMES,
@@ -162,7 +163,7 @@ let instance: LocalInference | null = null;
 
 const NEVER_STARTED: WorkerState = {
   phase: 'none', modelId: null, pid: null, inFlight: 0, queued: 0, spawns: 0,
-  consecutiveLosses: 0, backoffRemainingMs: 0, loadFailure: null,
+  consecutiveLosses: 0, backoffRemainingMs: 0, loadFailure: null, loadFailureModelId: null,
 };
 
 function current(): LocalInference {

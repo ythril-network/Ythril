@@ -167,6 +167,26 @@ describe('the two kinds of failure, and what crosses the boundary', () => {
     assert.equal(isTransientEmbedError(err.message), true, 'the queue retries it with backoff instead of spending the record\'s attempts');
   });
 
+  it('a request queued behind the lost one is transient too, but never reads as the crash the queue counts', async () => {
+    const { inference, fake } = setup({ fake: {} });
+    const held = reject(ask(inference, 'the poison'));
+    const behind = reject(ask(inference, 'a bystander'));
+    await flush();
+    fake.last().ready(); await flush();
+    fake.last().loaded('m'); await flush();
+    fake.last().exit(139, null);
+    const [a, b] = await Promise.all([held, behind]);
+
+    assert.equal(a.inFlight, true);
+    assert.ok(a.message.includes(LOST_MARKER), 'the request the child held is the one a crash is charged to');
+    assert.equal(isLostChildError(b), true, 'the host raised it');
+    assert.equal(b.inFlight, false, 'it was never sent to the child that died');
+    assert.ok(!b.message.includes(LOST_MARKER),
+      `the queue counts the marker per record, so a bystander must not carry it: ${b.message}`);
+    assert.match(b.message, /code=139\b/, 'an operator still sees what happened');
+    assert.equal(isTransientEmbedError(b.message), true, 'the embedder\'s fault, so retried without spending an attempt');
+  });
+
   it('a load failure keeps its text, is not lost and not transient', async () => {
     const text = `Embedding model 'x/y' is not in the model cache (/c) and runtime downloads are disabled by HF_HUB_OFFLINE / TRANSFORMERS_OFFLINE / YTHRIL_MODELS_OFFLINE. Underlying error: nope`;
     const { inference } = setup({ fake: { auto: { failLoad: () => text } } });

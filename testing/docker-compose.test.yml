@@ -117,6 +117,9 @@ services:
     image: mongodb/mongodb-atlas-local:latest@sha256:1cd040bb201bb7f910c7c6ab7f6cb8ab9dd79331f6a213f37025adc6804e96aa
     container_name: ythril-mongo-a
     cpus: "${YTHRIL_TEST_MONGO_CPUS:-1.0}"
+    # A ceiling for TESTS, not a sizing guide: a space of 44 000 records ran the database out of memory at this
+    # limit, and 5 GB held. Raise YTHRIL_TEST_MONGO_A_MEM for a test that seeds tens of thousands of records. The
+    # production knob is YTHRIL_MONGO_MEM_LIMIT (default 4g, unmeasured at that size); see docs/contribution-guide.md.
     mem_limit: "${YTHRIL_TEST_MONGO_A_MEM:-2560m}"
     # Published so standalone tests can assert database-LEVEL behaviour — that MongoDB actually agrees
     # with a query rule, not merely that a JS matcher does. Until this existed, rules like

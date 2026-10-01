@@ -186,6 +186,60 @@ describe('SpacesComponent — summary strip (U9 pt2)', () => {
   });
 });
 
+describe('SpacesComponent — a space waiting for the search service (Q-113)', () => {
+  const waiting = (over: Partial<Space> = {}) =>
+    space({ id: 'w', label: 'Waiting', indexStatus: 'building', indexWaiting: true, indexWaitingSince: '2026-09-30T10:00:00.000Z', ...over });
+
+  const badge = (list: Space[]) => {
+    const el = create(list).nativeElement as HTMLElement;
+    return Array.from(el.querySelectorAll('td .badge')).find(b => /spaces\.index/.test(b.textContent ?? '')) as HTMLElement | undefined;
+  };
+
+  it('shows VISIBLE text and a static dot, never a spinner, for a waiting space', () => {
+    const b = badge([waiting()]);
+    expect(b, 'the waiting badge is rendered').toBeDefined();
+    expect(b!.textContent).toContain('spaces.indexWaiting');
+    expect(b!.textContent).not.toContain('spaces.indexBuilding');
+    expect(b!.querySelector('.spinner'), 'a waiting space must not animate as if work were running').toBeNull();
+    expect(b!.querySelector('.dot, .badge-dot'), 'a static dot stands where the spinner was').not.toBeNull();
+  });
+
+  it('carries the detail in the title and the aria-label, not as the only wording', () => {
+    const b = badge([waiting()])!;
+    expect(b.getAttribute('title')).toBe('spaces.indexWaitingTitle');
+    expect(b.getAttribute('aria-label')).toBe('spaces.indexWaitingTitle');
+  });
+
+  it('leaves a plain building space as it was: "Preparing indexes" with a spinner', () => {
+    const b = badge([space({ id: 'b', label: 'Building', indexStatus: 'building' })])!;
+    expect(b.textContent).toContain('spaces.indexBuilding');
+    expect(b.textContent).not.toContain('spaces.indexWaiting');
+    expect(b.querySelector('.spinner')).not.toBeNull();
+    expect(b.getAttribute('title')).toBe('spaces.indexBuildingTitle');
+  });
+
+  it('counts waiting spaces as their own summary item, with a hint, and not in the indexing count', () => {
+    const c = create([
+      waiting({ id: 'w1' }), waiting({ id: 'w2' }),
+      space({ id: 'b', label: 'B', indexStatus: 'building' }),
+      space({ id: 'r', label: 'R', indexStatus: 'ready' }),
+    ]).componentInstance;
+    const items = c.spacesSummary();
+    const own = items.find(i => i.label === 'spaces.summary.waiting');
+    expect(own, 'a summary item labelled spaces.summary.waiting').toBeDefined();
+    expect(own!.value).toBe('2');
+    expect(own!.hint, 'the item explains itself for assistive tech').toBeTruthy();
+    const indexing = items.find(i => i.label === 'spaces.summary.indexing')!;
+    expect(indexing.value).toBe('1');   // only the true build; the two waiting spaces are not folded in
+  });
+
+  it('a waiting space alone leaves the indexing count at zero', () => {
+    const items = create([waiting()]).componentInstance.spacesSummary();
+    expect(items.find(i => i.label === 'spaces.summary.indexing')!.value).toBe('0');
+    expect(items.find(i => i.label === 'spaces.summary.waiting')!.value).toBe('1');
+  });
+});
+
 describe('SpacesComponent — load-error state', () => {
   function createErroring() {
     TestBed.resetTestingModule();

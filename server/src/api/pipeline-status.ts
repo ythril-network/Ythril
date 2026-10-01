@@ -39,7 +39,10 @@ import { getDb } from '../db/mongo.js';
 import { faceRecognitionAllowed } from '../files/converters/media-level.js';
 import { VECTOR_INDEXED_COLLECTIONS } from '../spaces/vector-index.js';
 import { collectionHoldsRecord } from '../spaces/record-presence.js';
+import { searchReadinessSnapshot, isSearchDown, type SearchReadinessSnapshot } from '../spaces/search-readiness.js';
 import { log } from '../util/log.js';
+import { localInferenceState } from '../brain/local-inference.js';
+import type { WorkerPhase, WorkerState } from '../util/supervised-worker.js';
 import { assistBackend, assistBudgetStatus, type AssistBudget } from '../config/assist-backend.js';
 import type { ChatWire } from '../util/model-chat.js';
 
@@ -85,6 +88,26 @@ export interface ModelStageStatus {
   state: HealthState;
   latencyMs?: number;
   detail?: string;
+  /** The bundled embedding model's inference process; only on an `in-process` embedding stage. See `withEmbeddingProcess`. */
+  inference?: InferenceProcessStatus;
+}
+
+/**
+ * What the bundled model's inference process is doing, as the embedding stage reports it.
+ *
+ * The stage's dot says only that there is no endpoint to be unreachable. It cannot say that the process is
+ * respawning after a crash, or that the model failed to load and will not be tried again until the model, an offline
+ * flag or the server changes: every embed then fails with the same text, and without this an operator has to find
+ * that text in a job's `lastError` or a log. `loadFailure` is for the CONFIGURED model only.
+ */
+export interface InferenceProcessStatus {
+  phase: WorkerPhase;
+  /** The model the running (or last) process was started for; null before the first embed. */
+  modelId: string | null;
+  consecutiveLosses: number;
+  backoffRemainingMs: number;
+  /** The sticky load failure for the configured model, or null. */
+  loadFailure: string | null;
 }
 
 export interface CollectionIndexStatus {
@@ -469,6 +492,19 @@ export function isDrifted(stored: SpaceIndexStatus['stored'], live: SpaceIndexSt
   return stored === 'ready' && (live === 'missing' || live === 'building');
 }
 
+/**
+ * What `index.unavailable` says while database search is down (Q-113): built from the readiness snapshot, which is
+ * an enum and numbers, so nothing a driver said can reach this admin-only route. `null` when search is not down.
+ */
+export function searchOutageNote(snapshot: SearchReadinessSnapshot): string | null {
+  if (!isSearchDown(snapshot)) return null;
+  const since = snapshot.since !== null ? ` since ${new Date(snapshot.since).toISOString()}` : '';
+  const next = snapshot.nextProbeAt !== null ? `, next check ${new Date(snapshot.nextProbeAt).toISOString()}` : '';
+  const what = snapshot.state === 'absent' ? 'has no search component' : 'is not answering';
+  return `database search ${what}${since} (${snapshot.attempts} check(s)${next}). Indexes are built by themselves when it returns; `
+    + 'spaces stay "building" until then. To force a rebuild afterwards: POST /api/spaces/<space>/rebuild-indexes.';
+}
+
 async function indexStatus(): Promise<{ spaces: SpaceIndexStatus[]; unavailable?: string }> {
   if (!isConfigLoaded()) return { spaces: [], unavailable: 'configuration is not loaded' };
   // Proxy spaces aggregate other spaces' reads and own no collections, so they have no indexes to
@@ -563,18 +599,19 @@ async function indexStatus(): Promise<{ spaces: SpaceIndexStatus[]; unavailable?
    * is empty has no index anywhere and has answered correctly; only a collection that holds a record should
    * have one, so only those make the silence informative.
    */
+  const outage = searchOutageNote(searchReadinessSnapshot());
   const anyIndexSeen = out.some(s => s.collections.some(c => c.status !== null));
   const anyIndexExpected = out.some(s => s.collections.some(c => !c.empty && !c.optional));
   if (out.length > 0 && anyIndexExpected && !anyIndexSeen) {
     return {
       spaces: out.map(s => ({ ...s, live: 'unknown' as const, drifted: false })),
-      unavailable: 'this deployment does not report search indexes — `listSearchIndexes` returned nothing '
+      unavailable: outage ?? ('this deployment does not report search indexes — `listSearchIndexes` returned nothing '
         + 'for every collection, which a native `$vectorSearch` server does. Recall is unaffected and is the '
-        + 'thing to check: if it returns ranked results, the vectors are there.',
+        + 'thing to check: if it returns ranked results, the vectors are there.'),
     };
   }
 
-  return { spaces: out };
+  return { spaces: out, ...(outage ? { unavailable: outage } : {}) };
 }
 
 // ── Assembly, cached and single-flighted ──────────────────────────────────────
@@ -611,8 +648,41 @@ async function collect(): Promise<PipelineStatus> {
   };
 }
 
-/** Cached + single-flighted: several admins on this screen must not multiply the outbound probes. */
+/**
+ * The bundled embedding stage with its inference process's state added; every other stage unchanged.
+ *
+ * Pure, so the rule is testable without a process. Only an `in-process` embedding stage has a process to report: an
+ * embedding stage with an endpoint calls that endpoint, and the process state would describe nothing it uses. Built
+ * field by field, so the pid and the queue counts in `WorkerState` do not reach the response.
+ */
+export function withEmbeddingProcess(models: ModelStageStatus[], state: WorkerState): ModelStageStatus[] {
+  return models.map(m => {
+    if (m.key !== 'embedding' || m.detail !== 'in-process') return m;
+    const loadFailure = state.loadFailure !== null && state.loadFailureModelId === m.model ? state.loadFailure : null;
+    return {
+      ...m,
+      // The Models screen renders only `state` as the stage's dot: green over a model every embed fails on would be
+      // the one wrong answer, so a sticky load failure for the configured model reads as `down`, with its reason.
+      ...(loadFailure !== null ? { state: 'down' as const, detail: loadFailure } : {}),
+      inference: {
+        phase: state.phase, modelId: state.modelId, consecutiveLosses: state.consecutiveLosses,
+        backoffRemainingMs: state.backoffRemainingMs, loadFailure,
+      },
+    };
+  });
+}
+
+/**
+ * Cached + single-flighted: several admins on this screen must not multiply the outbound probes. The inference
+ * process state is read on every call, over the cached probes: it costs nothing to read, and a backoff reported
+ * twenty seconds late would already be over.
+ */
 export async function getPipelineStatus(): Promise<PipelineStatus> {
+  const probed = await probedPipelineStatus();
+  return { ...probed, models: withEmbeddingProcess(probed.models, localInferenceState()) };
+}
+
+async function probedPipelineStatus(): Promise<PipelineStatus> {
   if (cached && Date.now() - cached.at < CACHE_TTL_MS) return cached.value;
   if (inFlight) return inFlight;
   inFlight = collect()

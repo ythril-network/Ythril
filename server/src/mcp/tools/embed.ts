@@ -23,7 +23,7 @@ import {
 } from '../../brain/embed-queue.js';
 import type { ToolContext, ToolHandler, ToolResult, ToolSchemas } from './types.js';
 import { embedJobsPage, MAX_JOB_PAGE, DEFAULT_JOB_PAGE } from '../../brain/embed-jobs-page.js';
-import { LOST_MARKER } from '../../brain/embed-errors.js';
+import { LOST_MARKER, NOT_SENT_MARKER } from '../../brain/embed-errors.js';
 
 const RECORD_TYPES = [...EMBED_RECORD_TYPES];
 
@@ -51,7 +51,8 @@ export const list_embed_jobsTool: ToolHandler = {
     + 'THE ONE EXCEPTION: a `failed` job whose `lastError` begins `' + LOST_MARKER + '` has `attempts` BELOW its maximum. '
     + 'The bundled embedding process was lost three times while that record was being embedded, which is how an input that '
     + 'crashes the model looks; retrying it for ever would loop, so it is left for you. Shorten or fix the content, or '
-    + 'retry it with the per-record retry tool once the cause is understood. One lost process alone never does this.\n\n'
+    + 'retry it with the per-record retry tool once the cause is understood. One lost process alone never does this, and only '
+    + 'the record in flight is counted: one merely queued behind it fails `' + NOT_SENT_MARKER + '`, is retried, and is never counted.\n\n'
     + 'This tool only REPORTS. The per-record retry lives on its own mutating tool, and a read-only token is '
     + 'deliberately not shown one — `help()` lists what your token can actually reach, so if no retry appears there, '
     + 'the answer is that this token cannot retry rather than that no such tool exists.',

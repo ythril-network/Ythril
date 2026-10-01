@@ -31,20 +31,45 @@
  * drag anything in by doing so.
  */
 
-/** The words the queue recognises. Lower case, because the queue matches on a lower-cased message. */
+/**
+ * The words the queue recognises AND COUNTS against a record. Lower case, because the queue matches on a lower-cased
+ * message. Carried only by the request the process was holding when it was lost: that is the one input that can have
+ * killed it.
+ */
 export const LOST_MARKER = 'embedding process lost';
 
 /**
+ * The words for a request the lost process had NOT been sent: queued behind the one in flight, arriving during the
+ * respawn backoff, or waiting while the model loaded. Transient, like `LOST_MARKER`, and never counted.
+ *
+ * ## Why this is a second marker and not a flag
+ *
+ * The queue sees only the message, so the difference has to be in the words. One marker for both was the bystander
+ * defect: with `embedConcurrency` above one, a record queued behind a poison record was rejected with the same text
+ * on every crash, charged the same crash, and ended `failed` beside it after three. It must not CONTAIN
+ * `LOST_MARKER`, or the queue would count it anyway; `embed-failures-are-classified-by-who-produced-them.test.js`
+ * holds that.
+ */
+export const NOT_SENT_MARKER = 'embedding process unavailable';
+
+/**
  * The inference process ended without answering — it exited, crashed, was killed, or stopped answering — and what
- * it held was rejected. Only the host constructs this.
+ * it held was rejected. Only the host constructs this, and only the host knows `inFlight`, so neither can be spoofed
+ * by text a child supplies.
  *
  * `detail` says how it ended (`code=139 signal=null`), because the queue ends a record on the third one and an
- * operator reading `lastError` needs to see the crash, not just that there was one.
+ * operator reading `lastError` needs to see the crash, not just that there was one. `inFlight: false` (the request
+ * was never sent to the process that was lost) gives the message `NOT_SENT_MARKER` instead of `LOST_MARKER`.
  */
 export class LostChildError extends Error {
-  constructor(detail: string) {
-    super(`${LOST_MARKER} (${detail})`);
+  readonly inFlight: boolean;
+  constructor(detail: string, opts: { inFlight?: boolean } = {}) {
+    const inFlight = opts.inFlight ?? true;
+    super(inFlight
+      ? `${LOST_MARKER} (${detail})`
+      : `${NOT_SENT_MARKER}: it was lost before this request was sent (${detail})`);
     this.name = 'LostChildError';
+    this.inFlight = inFlight;
   }
 }
 
@@ -53,9 +78,11 @@ export function isLostChildError(err: unknown): err is LostChildError {
   return err instanceof LostChildError;
 }
 
-const MARKER_ANYWHERE = new RegExp(LOST_MARKER.replace(/ /g, '\\s+'), 'gi');
+/** Both markers, each matched across any run of whitespace, each defused by hyphenating it. */
+const MARKERS_ANYWHERE = [LOST_MARKER, NOT_SENT_MARKER]
+  .map(marker => ({ pattern: new RegExp(marker.replace(/ /g, '\\s+'), 'gi'), defused: marker.replace(/ /g, '-') }));
 
-/** `text` with the marker words defused, for any string a child process supplied. */
+/** `text` with both markers' words defused, for any string a child process supplied. */
 export function withoutLostMarker(text: string): string {
-  return text.replace(MARKER_ANYWHERE, LOST_MARKER.replace(/ /g, '-'));
+  return MARKERS_ANYWHERE.reduce((out, { pattern, defused }) => out.replace(pattern, defused), text);
 }

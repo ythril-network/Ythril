@@ -188,8 +188,9 @@ discovering this by trying.
 > **Reindexing does NOT repair "search returns nothing".** It re-computes the embeddings *stored on*
 > your records. Recall queries those vectors through a separate `$vectorSearch` index, and that index
 > can be missing while every record still holds a perfectly good embedding — after restoring a backup,
-> or if the database search process was not ready when the instance started. Reindexing every record
-> in the space will not create it. Use the rebuild endpoint below.
+> or after an index build that search refused. (A database search process that is merely late is not this case: the
+> instance finds it by itself and builds the indexes when it answers; see `indexWaiting` on `GET /api/spaces`.)
+> Reindexing every record in the space will not create it. Use the rebuild endpoint below.
 
 ### Reorder spaces
 
@@ -351,8 +352,9 @@ with `lastError` beginning `embedding process lost` and `attempts` **below** `ma
 `attempts === maxAttempts`, is how you recognise it. Fix or shorten the record's content (a rewrite gives the job a
 clean count), or retry it once the cause is understood (`POST /api/brain/spaces/:spaceId/embedding-queue/records/retry`,
 or the MCP `retry_embed_record`; a retry and a new server version also give it a clean count). One lost process never
-does this on its own, and a record queued behind a crashing one can be charged for it too: an unexplained
-`embedding process lost` on a record with ordinary content is worth retrying once before editing it.
+does this on its own, and only the record in flight is counted: a record that was merely queued behind it, or that asked
+while the process was being replaced, fails with `lastError` beginning `embedding process unavailable`, is retried as
+transient, and is never counted toward the three.
 
 **MCP `list_embed_jobs` is the same act** (`Q-109`): the same `status`, `limit` and `skip`, the same refusals, and a proxy
 space's members read and summed exactly as here. It used to read only the named space and take no `skip`.

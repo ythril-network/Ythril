@@ -30,4 +30,20 @@ describe('readinessReasons', () => {
     expect(readinessReasons('ready', { pending: 0, processing: 0, failed: 0 })).toEqual([]);
     expect(readinessReasons(undefined, undefined)).toEqual([]);
   });
+
+  it('names a search service that is late as its own reason, not "being built" (Q-113)', () => {
+    const reasons = readinessReasons('building', undefined, true);
+    expect(reasons).toEqual([{ key: 'graph.waiting.indexWaiting' }]);
+    expect(reasons.map(r => r.key)).not.toContain('graph.waiting.indexBuilding');
+  });
+
+  it('indexWaiting false or absent leaves a build as a build', () => {
+    expect(readinessReasons('building', undefined, false)).toEqual([{ key: 'graph.waiting.indexBuilding' }]);
+    expect(readinessReasons('building', undefined, undefined)).toEqual([{ key: 'graph.waiting.indexBuilding' }]);
+  });
+
+  it('a waiting space still lists its embedding backlog after the waiting reason', () => {
+    expect(readinessReasons('building', { pending: 2, processing: 0, failed: 0 }, true).map(r => r.key))
+      .toEqual(['graph.waiting.indexWaiting', 'graph.waiting.embedding']);
+  });
 });

@@ -25,7 +25,9 @@
  *  - **Everything that can be lost is rejected, never left to hang.** A loss (exit, crash, signal, a dead channel, a
  *    spawn error, a deadline) rejects the request it held AND every request queued behind it with `lostError`, and so
  *    does a request that arrives while the respawn backoff is running. A request that has been `send`-ed to a child
- *    that cannot answer must not wait for a reply that cannot come.
+ *    that cannot answer must not wait for a reply that cannot come. Only the request the child HELD is rejected with
+ *    `inFlight: true`: the rest were never sent, so they cannot have caused the loss, and a caller that counts losses
+ *    against a request (the embed queue's `lostChildFailures`) must not count them.
  *  - **Deadlines, measured from the SEND.** A request gets `requestDeadlineMs` from the moment it leaves, not from the
  *    moment it was queued; the model load gets the much longer `loadDeadlineMs` (a first download takes minutes).
  *    Past either, the child is SIGKILLed and the request is rejected without waiting for the kill to land.
@@ -50,7 +52,7 @@
  * `node:child_process` is reached only through `forkChild`, and only here.
  */
 import { fork } from 'node:child_process';
-import { withJitter } from './backoff.js';
+import { backoffDelayMs } from './backoff.js';
 
 export type Lane = 'query' | 'document';
 export type WorkerPhase = 'none' | 'starting' | 'ready' | 'backoff';
@@ -132,8 +134,13 @@ export interface SupervisedWorkerOptions {
   log?: (level: 'info' | 'warn' | 'error' | 'debug', message: string) => void;
   /** Observability: `spawn`, `restart`, `served` and `state` events. Never allowed to throw into the host. */
   onEvent?: (event: WorkerEvent) => void;
-  /** Builds the error for a lost child; the caller owns the class and its marker. */
-  lostError?: (detail: string) => Error;
+  /**
+   * Builds the error for a lost child; the caller owns the class and its marker. `inFlight` is true only for the one
+   * request the child was holding (sent, and not answered) when it was lost: every other rejection (queued behind it,
+   * arriving during the backoff, waiting on a model load) is for a request that cannot have caused the loss, and a
+   * caller that charges a loss to a request must be able to tell the two apart.
+   */
+  lostError?: (detail: string, info: { inFlight: boolean }) => Error;
   /** Respawn delay after the n-th consecutive loss. */
   backoffMs?: (consecutiveLosses: number) => number;
   idleMs?: number;
@@ -172,22 +179,22 @@ export interface WorkerState {
   consecutiveLosses: number;
   backoffRemainingMs: number;
   loadFailure: string | null;
+  /** The model `loadFailure` is about, so a reader can tell it from a failure of a model no longer configured. */
+  loadFailureModelId: string | null;
 }
 
 /**
  * The default respawn delay: 1 s, 2 s, 4 s, ... capped at a minute, each scattered by `withJitter`.
  *
  * The cap is what keeps a transient fault (an OOM kill during a burst) from silencing the embedder for a day, and a
- * minute keeps a permanently broken child at about one 1-2 s model load a minute.
- *
- * TODO: `util/backoff.ts` gains `backoffDelayMs` on the bundle-30 branch, which was not merged when this was written.
- * This is the same capped exponential written locally on the existing `withJitter`; when that lands, this should call
- * it so the repo has one backoff schedule, not two.
+ * minute keeps a permanently broken child at about one 1-2 s model load a minute. The schedule is `backoffDelayMs`,
+ * the repo's one capped exponential, so the exponent clamp and the jitter are not written here a second time. The
+ * first loss is attempt 0, the base itself.
  */
 const RESPAWN_BASE_MS = 1_000;
 const RESPAWN_CAP_MS = 60_000;
-export function respawnBackoffMs(consecutiveLosses: number): number {
-  return withJitter(Math.min(RESPAWN_CAP_MS, RESPAWN_BASE_MS * 2 ** Math.max(0, consecutiveLosses - 1)));
+export function respawnBackoffMs(consecutiveLosses: number, random: () => number = Math.random): number {
+  return backoffDelayMs(Math.max(0, consecutiveLosses - 1), RESPAWN_BASE_MS, RESPAWN_CAP_MS, random);
 }
 
 /** How much of a child's own output is kept for the loss warning. */
@@ -206,6 +213,8 @@ interface Pending {
   modelId: string;
   enqueuedAt: number;
   sentAt: number;
+  /** The send to the child failed, so a loss that follows cannot have been caused by this request. */
+  undelivered?: boolean;
   /** `undefined` for a warm-up, which answers nothing. */
   resolve: (reply: WorkerReply | undefined) => void;
   reject: (error: Error) => void;
@@ -245,7 +254,8 @@ export function createSupervisedWorker(opts: SupervisedWorkerOptions) {
   const maxErrorChars = opts.maxErrorChars ?? 900;
   const backoffMs = opts.backoffMs ?? respawnBackoffMs;
   const spawn = opts.spawn ?? forkChild;
-  const lostError = opts.lostError ?? ((detail: string) => Object.assign(new Error(`${label} lost (${detail})`), { lost: true }));
+  const lostError = opts.lostError
+    ?? ((detail: string, info: { inFlight: boolean }) => Object.assign(new Error(`${label} lost (${detail})`), { lost: true, inFlight: info.inFlight }));
 
   const queues: Record<Lane, Pending[]> = { query: [], document: [] };
   let inFlight: Pending | null = null;
@@ -266,6 +276,7 @@ export function createSupervisedWorker(opts: SupervisedWorkerOptions) {
   /** model -> the text its load failed with. Sticky until `forgetLoadFailures()`. */
   const loadFailures = new Map<string, string>();
   let lastLoadFailure: string | null = null;
+  let lastLoadFailureModelId: string | null = null;
 
   // ── small helpers ────────────────────────────────────────────────────────────────────────────────
   const emit = (event: WorkerEvent): void => {
@@ -336,11 +347,15 @@ export function createSupervisedWorker(opts: SupervisedWorkerOptions) {
   }
 
   /** `send` that cannot throw out of the host and treats a dead channel as a lost child. */
-  function sendOrLose(inc: Incarnation, message: unknown): void {
+  /** `undelivered` runs before the loss when the message did not reach the child. */
+  function sendOrLose(inc: Incarnation, message: unknown, undelivered?: () => void): void {
     if (!inc.child) return;
     try {
-      inc.child.send(message, (error) => { if (error) lose(inc, `send failed: ${error.message}`, 'exit'); });
+      inc.child.send(message, (error) => {
+        if (error) { undelivered?.(); lose(inc, `send failed: ${error.message}`, 'exit'); }
+      });
     } catch (error) {
+      undelivered?.();
       lose(inc, `send failed: ${error instanceof Error ? error.message : String(error)}`, 'exit');
     }
   }
@@ -354,12 +369,14 @@ export function createSupervisedWorker(opts: SupervisedWorkerOptions) {
     for (const wake of waiters) wake();
   }
 
-  function rejectEverything(error: () => Error): void {
+  /** Reject the request in flight and everything queued; `error` is told which of the two each one was. */
+  function rejectEverything(error: (inFlight: boolean) => Error): void {
+    const held = inFlight && !inFlight.undelivered ? inFlight : null;
     const all = [...(inFlight ? [inFlight] : []), ...queues.query, ...queues.document];
     settleInFlight();
     queues.query = [];
     queues.document = [];
-    for (const p of all) p.reject(error());
+    for (const p of all) p.reject(error(p === held));
   }
 
   // ── idle ─────────────────────────────────────────────────────────────────────────────────────────
@@ -419,7 +436,7 @@ export function createSupervisedWorker(opts: SupervisedWorkerOptions) {
     }
     emit({ type: 'restart', reason });
     logLoss(inc, `${detail}; consecutive loss ${consecutiveLosses}${wait > 0 && !stopping ? `, next attempt in ${wait} ms` : ''}`);
-    rejectEverything(() => lostError(detail));
+    rejectEverything(inFlightNow => lostError(detail, { inFlight: inFlightNow }));
     phaseChanged();
   }
 
@@ -509,6 +526,7 @@ export function createSupervisedWorker(opts: SupervisedWorkerOptions) {
           const text = fromChild(m['error']);
           loadFailures.set(inc.modelId, text);
           lastLoadFailure = text;
+          lastLoadFailureModelId = inc.modelId;
           // What was waiting for THIS model can never be served; other models' requests stay queued.
           for (const lane of ['query', 'document'] as const) {
             const keep: Pending[] = [];
@@ -585,7 +603,8 @@ export function createSupervisedWorker(opts: SupervisedWorkerOptions) {
       if (current === inc && inFlight === request) lose(inc, `no answer within ${requestDeadlineMs} ms, killed (signal=SIGKILL)`, 'deadline');
     }, requestDeadlineMs);
     updateRef();
-    sendOrLose(inc, { type: 'request', id: request.id, input: request.input, modelId: request.modelId });
+    sendOrLose(inc, { type: 'request', id: request.id, input: request.input, modelId: request.modelId },
+      () => { request.undelivered = true; });
   }
 
   /** Decide what happens next: spawn, switch models, send the next request, or go idle. */
@@ -616,7 +635,7 @@ export function createSupervisedWorker(opts: SupervisedWorkerOptions) {
 
     const failure = loadFailures.get(r.modelId);
     if (failure !== undefined) return Promise.reject(Object.assign(new Error(failure), { kind: 'load' }));
-    if (inBackoff()) return Promise.reject(lostError(`respawning, ${backoffUntil - now()} ms of backoff remaining`));
+    if (inBackoff()) return Promise.reject(lostError(`respawning, ${backoffUntil - now()} ms of backoff remaining`, { inFlight: false }));
 
     return new Promise<WorkerReply | undefined>((resolve, reject) => {
       queues[lane].push({
@@ -637,6 +656,7 @@ export function createSupervisedWorker(opts: SupervisedWorkerOptions) {
   function forgetLoadFailures(): void {
     loadFailures.clear();
     lastLoadFailure = null;
+    lastLoadFailureModelId = null;
   }
 
   async function doStop(budgetMs: number): Promise<void> {
@@ -731,6 +751,7 @@ export function createSupervisedWorker(opts: SupervisedWorkerOptions) {
         consecutiveLosses,
         backoffRemainingMs: inBackoff() ? backoffUntil - now() : 0,
         loadFailure: lastLoadFailure,
+        loadFailureModelId: lastLoadFailureModelId,
       };
     },
   };

@@ -54,6 +54,9 @@ describe('the marker', () => {
     const holding = files.filter(f => stripComments(readFileSync(join(REPO_ROOT, f), 'utf8')).includes('embedding process lost'));
     assert.deepEqual(holding, ['server/src/brain/embed-errors.ts'],
       'the marker text is written in more than one place; the queue would stop recognising a crash the day one is edited');
+    const holdingNotSent = files.filter(f => stripComments(readFileSync(join(REPO_ROOT, f), 'utf8')).includes('embedding process unavailable'));
+    assert.deepEqual(holdingNotSent, ['server/src/brain/embed-errors.ts'],
+      'the not-sent marker text is written in more than one place');
 
     const queueSrc = stripComments(readFileSync(join(REPO_ROOT, 'server/src/brain/embed-queue.ts'), 'utf8'));
     assert.match(queueSrc, /from\s+['"]\.\/embed-errors\.js['"]/, 'embed-queue.ts does not import the marker module');
@@ -68,6 +71,27 @@ describe('isLostChildError: only what the host produced', () => {
     assert.equal(errors.isLostChildError(err), true);
     assert.ok(err.message.startsWith(errors.LOST_MARKER));
     assert.ok(err.message.includes('code=139'));
+  });
+
+  it('says whether the request was in flight, and only the one in flight carries the marker the queue counts', () => {
+    const held = new errors.LostChildError('code=139 signal=null');
+    assert.equal(held.inFlight, true, 'the default is the request the child held');
+
+    const behind = new errors.LostChildError('code=139 signal=null', { inFlight: false });
+    assert.equal(errors.isLostChildError(behind), true);
+    assert.equal(behind.inFlight, false);
+    assert.ok(behind.message.startsWith(errors.NOT_SENT_MARKER), behind.message);
+    assert.ok(!behind.message.includes(errors.LOST_MARKER),
+      'the queue charges a crash to every record whose error carries the marker: a bystander must not');
+    assert.ok(behind.message.includes('code=139'));
+    assert.equal(isTransientEmbedError(behind.message), true, 'still the embedder\'s fault, so retried');
+  });
+
+  it('defuses the not-sent words too in anything a child supplies', () => {
+    const defused = errors.withoutLostMarker(`${errors.NOT_SENT_MARKER} and ${errors.LOST_MARKER}`);
+    assert.ok(!defused.includes(errors.NOT_SENT_MARKER), defused);
+    assert.ok(!defused.includes(errors.LOST_MARKER), defused);
+    assert.equal(isTransientEmbedError(defused), false, 'a child cannot make its own failure read as the embedder\'s');
   });
 
   it('is false for anything that merely reads like one', () => {
@@ -93,7 +117,9 @@ describe('isTransientEmbedError: the classification truth table', () => {
   const rows = [
     // [message, transient, why]
     [`${'embedding process lost'} (code=134 signal=null)`, true, 'a crashed inference process is the embedder\'s fault'],
-    [LOAD_TEXT, false, 'a model that cannot load is deterministic: the job must reach failed so an operator sees it'],
+    [`${'embedding process unavailable'}: it was lost before this request was sent (code=134 signal=null)`, true,
+      'a request queued behind a crash is the embedder\'s fault as well'],
+    [LOAD_TEXT, false,'a model that cannot load is deterministic: the job must reach failed so an operator sees it'],
     ['unsupported input shape', false, 'a per-record inference failure spends the record\'s attempts'],
     ['Embedding API returned empty vector', false, 'unchanged'],
     ['Embedding request failed (HTTP 400): bad input', false, 'a malformed request is the record\'s'],

@@ -31,7 +31,7 @@ export function createScriptedHost() {
     stop: async () => { host.stopped++; },
     state: () => ({
       phase: 'none', modelId: null, pid: null, inFlight: 0, queued: 0, spawns: 0,
-      consecutiveLosses: 0, backoffRemainingMs: 0, loadFailure: null,
+      consecutiveLosses: 0, backoffRemainingMs: 0, loadFailure: null, loadFailureModelId: null,
     }),
   };
   return host;

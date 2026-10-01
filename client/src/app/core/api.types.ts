@@ -110,6 +110,11 @@ export interface Space {
   /** Vector-index build state for a newly created space (B1). 'building' while the
    *  Atlas indexes finish; absent means ready. Semantic recall waits for READY. */
   indexStatus?: 'building' | 'ready' | 'failed';
+  /** With `indexStatus: 'building'`: nothing is being built, the search service is late and the space is waiting
+   *  for it (`Q-113`). It clears by itself when the service answers; the badge must not animate as if work ran. */
+  indexWaiting?: boolean;
+  /** When the wait began (ISO-8601). Present with `indexWaiting`. */
+  indexWaitingSince?: string;
   /** Networks this space belongs to (F8). Absent/empty when the space is in no
    *  network — the Brain chip shows the network indicator only when present. */
   networks?: { id: string; label: string; type: Network['type'] }[];

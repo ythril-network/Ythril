@@ -35,6 +35,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
 import { createScriptedHost, gate } from './_scripted-inference-host.mjs';
+import { createFakeSpawn, autopilot } from './_fake-child.mjs';
 
 const skip = await mongoSkipReason();
 const SPACE = 'general';
@@ -165,6 +166,69 @@ describe('the brain embed queue and a lost inference process (real MongoDB)', { 
       job = await jobs().findOne({ _id: id });
       assert.equal(job.status, 'pending');
       assert.equal(job.lostChildFailures ?? 0, 0);
+    });
+  });
+
+  describe('a record queued behind one that kills the process', () => {
+    // The REAL host (`createLocalInference`) over a scripted child, because what is under test is the hand-off
+    // between the two: the host rejects everything the lost child had, the queue charges a crash per record, and
+    // only the record that was IN FLIGHT can have caused it. With `embedConcurrency` above one a bystander is
+    // queued behind the poison record every time, so charging it too ends an innocent record `failed` after three.
+    it('charges the crash to the record in flight only; the bystander is not counted and later completes', async () => {
+      const spawns = createFakeSpawn({
+        onSpawn: (child) => {
+          autopilot(child);
+          const send = child.send.bind(child);
+          // The poison input is taken and never answered: the test kills the child while it holds it.
+          child.send = (msg, cb) => {
+            if (msg?.type === 'request' && String(msg.input).includes('poison')) {
+              child.sent.push(msg);
+              queueMicrotask(() => cb?.(null));
+              return true;
+            }
+            return send(msg, cb);
+          };
+        },
+      });
+      const real = local.createLocalInference({ spawn: spawns.spawn, backoffMs: () => 0, log: () => {} });
+      local._setLocalInferenceForTests(real);
+
+      const poison = await enqueue('poison record');
+      const innocent = await enqueue('an innocent record');
+      const hold = (id) => jobs().updateOne({ _id: id }, { $set: { claimableAfter: '2999-01-01T00:00:00.000Z' } });
+      const release = (id) => jobs().updateOne({ _id: id }, { $set: { claimableAfter: null } });
+
+      for (let crash = 1; crash <= queue.MAX_LOST_CHILD_FAILURES; crash++) {
+        // The poison record first, until it is the request the child holds; then the innocent one, until it waits
+        // behind it in the host's queue. Then the child dies.
+        await hold(innocent.id);
+        await release(poison.id);
+        queue.resetEmbedPendingHint();
+        const first = worker.runOneEmbedJob();
+        await until(() => real.state().inFlight === 1, `the poison record in flight (crash ${crash})`);
+        await release(innocent.id);
+        queue.resetEmbedPendingHint();
+        const second = worker.runOneEmbedJob();
+        await until(() => real.state().queued === 1, `the innocent record queued behind it (crash ${crash})`);
+        spawns.last().exit(null, 'SIGSEGV');
+        assert.deepEqual(await Promise.all([first, second]), [true, true]);
+
+        const bystander = await jobs().findOne({ _id: innocent.id });
+        assert.equal(bystander.status, 'pending', `crash ${crash}: the bystander is retried`);
+        assert.equal(bystander.lostChildFailures ?? 0, 0, `crash ${crash}: a record that was never sent is not charged`);
+        assert.equal(bystander.attempts, 0, 'and spends none of its attempts: the embedder was at fault');
+      }
+
+      const culprit = await jobs().findOne({ _id: poison.id });
+      assert.equal(culprit.status, 'failed', 'the record that kills the runtime ends failed after three');
+      assert.equal(culprit.lostChildFailures, queue.MAX_LOST_CHILD_FAILURES);
+      assert.ok(culprit.lastError.includes(errors.LOST_MARKER), culprit.lastError);
+
+      await release(innocent.id);
+      queue.resetEmbedPendingHint();
+      assert.equal(await worker.runOneEmbedJob(), true, 'the bystander is claimed again');
+      assert.equal(await jobs().countDocuments({ _id: innocent.id }), 0, 'and completes on a fresh process');
+      await real.stop();
     });
   });
 

@@ -39,7 +39,7 @@ import { withJitter } from '../util/backoff.js';
 import { createWorkSignal } from '../util/work-signal.js';
 import { newClaimToken } from '../files/media/lease.js';
 import { isSpillPath } from './spill-path.js';
-import { LOST_MARKER } from './embed-errors.js';
+import { LOST_MARKER, NOT_SENT_MARKER } from './embed-errors.js';
 import { embeddingSuppressedFor } from './suppress-embeddings.js';
 import type { BrainEmbedJobDoc, BrainEmbedRecordType } from '../config/types.js';
 import { RECORD_TYPES } from '../config/types.js';
@@ -319,6 +319,8 @@ export function isTransientEmbedError(message: string): boolean {
   return [
     // A crashed inference process, raised by the host (`embed-errors.ts` owns the words). Transient, and capped per record.
     LOST_MARKER,
+    // A request queued behind that crash, never sent to the process that died: transient too, and NOT counted.
+    NOT_SENT_MARKER,
     'econnrefused', 'econnreset', 'etimedout', 'ehostunreach', 'enetunreach', 'eai_again', 'enotfound',
     'socket hang up', 'fetch failed', 'network error', 'timeout', 'timed out',
     'too many requests', 'service unavailable', 'bad gateway', 'gateway timeout', 'temporarily unavailable',
@@ -359,6 +361,7 @@ export async function failEmbedJob(
   // failure of the embedder's that is counted per record and ends one: see `MAX_LOST_CHILD_FAILURES`. Decided BEFORE
   // the transient branch on purpose, which stays exactly what it says it is: a transient failure never goes terminal.
   // The marker can only have come from the host: text a child supplies has it defused before it becomes an error.
+  // Only the request that was IN FLIGHT carries it; one merely queued behind the crash carries `NOT_SENT_MARKER`.
   const lostCrash = errorMessage.includes(LOST_MARKER);
   const lostFailures = (opts.lostChildFailures ?? 0) + (lostCrash ? 1 : 0);
   if (lostCrash && lostFailures >= MAX_LOST_CHILD_FAILURES) {
