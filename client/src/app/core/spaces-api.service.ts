@@ -1,5 +1,5 @@
 import { Injectable, inject } from '@angular/core';
-import type { ReembedResult, ReindexStatus } from './api.types';
+import type { ReembedResult, ReindexStatus } from './embed-ops.types';
 import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import type {

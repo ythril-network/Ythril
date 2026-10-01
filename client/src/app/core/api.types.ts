@@ -433,24 +433,6 @@ export interface ChronoEntry {
   seq: number;
 }
 
-/** A space's reindex run, as `GET /api/brain/spaces/:id/reindex-status` and `space_meta` report it. */
-export interface ReindexRunState {
-  /** A run is going: its records are queued and being rebuilt. */
-  running: boolean;
-  /** Rebuild jobs still to run. */
-  remaining: number;
-  /** Rebuild jobs that gave up; listed with the space's embed jobs. */
-  failed: number;
-}
-
-/** `GET /api/brain/spaces/:id/reindex-status`. */
-export interface ReindexStatus {
-  spaceId: string;
-  /** Recall refuses in this space until it is false. */
-  needsReindex: boolean;
-  reindexRun: ReindexRunState;
-}
-
 /** Embedding-job backlog for a space (F9 Overview embedding-queue panel). */
 export interface EmbeddingQueue {
   pending: number;
@@ -586,22 +568,8 @@ export interface QueryResult {
 
 export type WipeCollectionType = BrainCollection;
 
-/**
- * What `POST /api/spaces/:id/reembed` reports back.
- *
- * `remaining` is counted over the whole space rather than the returned page, so `truncated` genuinely means "call
- * again" — a backfill that quietly stopped at a round number would read as a fully-indexed space.
- *
- * `skippedSuppressed` is how the UI can say "suppression is still on" instead of showing a successful no-op.
- */
-export interface ReembedResult {
-  spaceId: string;
-  enqueued: number;
-  skippedSuppressed: number;
-  byKind: Record<string, number>;
-  remaining: number;
-  truncated: boolean;
-}
+// `ReembedResult`, and the reindex run's status, live in `embed-ops.types.ts`: what the two ways of making a space's
+// vectors again report, side by side, outside this frozen file.
 
 export type RecallKnowledgeType = 'fact' | 'entity' | 'edge' | 'chrono' | 'file';
 

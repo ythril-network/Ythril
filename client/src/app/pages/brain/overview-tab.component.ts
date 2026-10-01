@@ -25,19 +25,21 @@ import { ConfirmDialogService } from '../../core/confirm-dialog.service';
 import { InstantComponent } from '../../shared/instant.component';
 import { InstantPipe } from '../../core/date-format.service';
 import { RouterLink } from '@angular/router';
-import { Space, SpaceStats, AboutInfo, EmbeddingQueue, VoteRound, TokenAccessEntry, CompletenessReport, CompletenessCheck, SpaceActivity, ReindexRunState } from '../../core/api.types';
+import { Space, SpaceStats, AboutInfo, EmbeddingQueue, VoteRound, TokenAccessEntry, CompletenessReport, CompletenessCheck, SpaceActivity } from '../../core/api.types';
+import type { ReindexRunState } from '../../core/embed-ops.types';
 // Aliased: the class members below carry the same names, and a bare call that resolves to the import
 // rather than the member is the kind of line a reader has to stop and check.
 import { retentionSummary as summariseRetention, retentionTypeOverrides as retentionOverridesOf } from './overview-retention';
 
 import { CollectionTab } from './brain-tabs';
 import { ErModelPanelComponent } from './er-model-panel.component';
+import { ReindexNotesComponent } from './reindex-notes.component';
 
 @Component({
   selector: 'app-overview-tab',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [ErModelPanelComponent, TranslocoPipe, PhIconComponent, StatusPillComponent, SkeletonLinesComponent, RouterLink, InstantComponent, InstantPipe],
+  imports: [ErModelPanelComponent, ReindexNotesComponent, TranslocoPipe, PhIconComponent, StatusPillComponent, SkeletonLinesComponent, RouterLink, InstantComponent, InstantPipe],
   styles: [`
     :host { display: block; }
 
@@ -107,9 +109,6 @@ import { ErModelPanelComponent } from './er-model-panel.component';
 
     .idx-row { display: flex; align-items: center; gap: 10px; }
     .idx-row .lab { font-size: 13px; color: var(--text-secondary); flex: 1; }
-    .reindex-note { display: flex; align-items: flex-start; gap: 8px; margin-top: 13px; padding: 10px 12px;
-      border-radius: 8px; font-size: 12.5px; border: 1px solid var(--warning-border); background: var(--warning-bg); }
-    .reindex-note ph-icon { flex: none; margin-top: 1px; color: var(--warning); }
     .actions { margin-top: 13px; }
     .retention { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border-muted); }
     .ret-line { margin: 4px 0 0; font-size: 12.5px; color: var(--text-primary); }
@@ -399,32 +398,7 @@ import { ErModelPanelComponent } from './er-model-panel.component';
             <app-status-pill [variant]="indexVariant()" [dot]="true">{{ 'brain.overview.idx.' + indexState() | transloco }}</app-status-pill>
           </div>
 
-          <!-- Gives way to the progress line while a run is going: recommending a reindex beside one already under
-               way points at a button that is held for exactly that reason. -->
-          @if (needsReindex() && !isProxy() && !reindexRun()?.running) {
-            <div class="reindex-note">
-              <ph-icon name="warning" [size]="15"/>
-              <span>{{ 'brain.overview.reindexNeeded' | transloco }}</span>
-            </div>
-          }
-          <!-- A run's progress, read from the server while it lasts: role=status so a screen reader hears it change
-               without the focus moving, and the line is gone when the run is. -->
-          @if (reindexRun(); as run) {
-            @if (run.running && !isProxy()) {
-              <div class="reindex-note" role="status">
-                <span class="spinner" style="width:12px;height:12px;border-width:2px;flex:none;margin-top:2px;"></span>
-                <span>{{ 'brain.overview.reindexProgress' | transloco: { remaining: run.remaining, failed: run.failed } }}</span>
-              </div>
-            }
-          }
-          @if (isProxy()) {
-            <!-- Said rather than left blank: a card whose action silently vanishes reads as broken, and the
-                 remedy (reindex the members) is not guessable from an absent button. -->
-            <div class="reindex-note">
-              <ph-icon name="info" [size]="15"/>
-              <span>{{ 'brain.overview.reindexProxy' | transloco }}</span>
-            </div>
-          }
+          <app-reindex-notes [needsReindex]="needsReindex()" [isProxy]="isProxy()" [run]="reindexRun()" />
 
           <!-- Retention belongs on this card: both answers here are about the lifecycle of what is stored,
                and "why did that record disappear?" is asked far more often than it is answered. Read-only —
