@@ -202,13 +202,18 @@ records in two collections and a wrong guess stores a relationship that reads as
 nothing. A `$ref` cannot be ambiguous, so stating a kind becomes a CHECK — one that disagrees with the array
 the key was declared in is refused rather than resolved.
 
-**A key used twice is refused**, not overwritten. Two items claiming one name is a mistake with two readings,
-and picking one silently means half your payload points somewhere you did not intend.
+**A key used twice is refused**, not overwritten: the second item is reported and not written. Two items
+claiming one name is a mistake with two readings, and picking one silently means half your payload points
+somewhere you did not intend.
 
-**On a converted space, references are checked for EXISTENCE.** This door is otherwise laxer than the
-single-record ones — shape only — which is a deliberate trade for an import where records arrive in an order
-nobody controls. Once a space uses link records, that trade is off: a well-formed id pointing at nothing is
-refused here as it is everywhere else. A resolved `$ref` always exists, so this costs a batch nothing.
+**A key whose item was not written is not a key.** It is absent from `refs`, and an item referencing it fails
+with a reason naming why that item was refused — not "unknown `$ref`", which would say it was never declared.
+
+**References are checked for EXISTENCE under `strictLinkage`**, the same rule the single-record doors apply.
+This door used to be laxer — shape only, on a space that had not been converted to link records — and 5.0
+removed that shape, so a well-formed id pointing at nothing is refused here as it is everywhere else. With
+`strictLinkage: false` neither shape nor existence is checked. A resolved `$ref` always exists, so this costs a
+batch nothing.
 
 #### An item carries its own relationships
 

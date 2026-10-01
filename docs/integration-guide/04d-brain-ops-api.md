@@ -484,9 +484,10 @@ kind that the same call created.
 
 **An id you send ADDRESSES an existing record; it never becomes a new record's identity.** Identities are
 minted here — a supplied id would make you a co-author of our primary key, and across a sync two instances
-deriving ids from one key would collide by design. So an id you invent for a new record names nothing, and
-since references on this door are shape-checked and not existence-checked, an edge naming it is accepted and
-stored dangling.
+deriving ids from one key would collide by design. So an id you invent for a new record names nothing — and
+on a space with `strictLinkage` (the default) an edge naming it is refused, because references on this door
+are checked for shape AND existence, exactly as on the single-record endpoints. With `strictLinkage: false`
+neither is checked, for staged imports whose targets arrive in a later pass.
 
 **To connect records this call creates, use a `$ref` correlation key** — `{"$ref": "post-1"}` on an item and
 `"$ref:post-1"` where it is referenced. See
@@ -530,13 +531,15 @@ Each item accepts the same fields as its corresponding individual endpoint (`POS
 }
 ```
 
-- `inserted` — count of new documents written per type.
-- `updated` — count of existing documents merged per type (entities are upserted by `id` when supplied; edges are upserted by their natural key `(from, to, label)`).
+- `inserted` — count of NEW documents written per type.
+- `updated` — count of existing documents a write converged on, per type: a fact, entity or chrono item carrying the `id` of an existing record, and an edge whose identity — `(from, to, label)` and the kind of each end — is already stored. Before 5.7 a converging fact or chrono item was counted under `inserted`.
 - `connections` — what the ITEMS' own `link*` and `edges` fields attached. **A different question from `inserted.edges`**, which counts the top-level `edges` array: that one is a collection you wrote, these are relationships hung off records you wrote. Folded together the number could not be reconciled against the payload you sent. `links` is the rows that were added; `edges` is the upserts, and this door does not tell a new one from an updated one for an item's own edges.
-- `errors` — per-item failures (`type`, zero-based `index`, human-readable `reason`). Valid items are still written even when errors are present.
+- `errors` — per-item failures (`type`, zero-based `index`, human-readable `reason`). Valid items are still written even when errors are present. An item that depends on another item of the same call that was not written — an edge from a `$ref` whose item was refused — fails with a reason naming that item's failure. An item whose record another request changed while this one was being applied is re-tried once against what the record now says; if that also loses, it fails with a reason saying so, and resending it is the remedy.
 - `refs` — the id each `$ref` key was given, keyed by the key, with the kind of record it names. Only keys whose item was written appear. It is how you learn the ids a batch minted, for a second batch or a file's links, without reading them back.
 
-Entity items in the `entities` array accept an optional `id` field (UUID v4). If `id` is supplied, the entity with that ID is updated (or created with that ID). If `id` is omitted, a new entity is always inserted. See [Upsert an Entity](04b-graph-api.md#upsert-an-entity) for full identity semantics.
+Fact, entity and chrono items accept an optional `id` field (UUID v4). If `id` names an existing record, the item converges onto it (tags union, properties merge) and is counted under `updated`; a batch resent after a timeout therefore converges instead of duplicating. An `id` that names nothing does not become a new record's id — the record is minted as if no id were sent. If `id` is omitted, a new record is always inserted. See [Upsert an Entity](04b-graph-api.md#upsert-an-entity) for full identity semantics.
+
+**One read and one write per kind.** The whole batch is read at once and written in one block per kind, so a batch of 500 costs a handful of database round trips rather than several per item. Items are still decided in order and see the earlier items of the same call as written — a repeated edge identity becomes one edge and an update, a `functional` label counts the batch's earlier edges, the duplicate-name warning sees the batch's earlier entities. An item that addresses something an earlier item of the same call also writes (the same `id`, the same edge) is applied after it, exactly as two separate calls would be.
 
 **Schema validation:** When the target space has `validationMode` set to `strict` or `warn`, each item is validated against the space schema before writing. In strict mode, violating items are skipped and recorded in `errors` (e.g. `"schema_violation: not in entityTypes allowlist: Person, Service"`). In warn mode, violations are recorded as warnings but the item is written. See [Schema Validation](06a-schema-api.md#schema-validation) for the full schema specification.
 

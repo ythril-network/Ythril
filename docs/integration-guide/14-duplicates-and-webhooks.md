@@ -314,7 +314,7 @@ Webhooks allow external systems to receive real-time HTTP POST notifications whe
 | `file.created` | A file is written (new or overwrite) |
 | `file.updated` | A file is moved/renamed |
 | `file.deleted` | A file is deleted |
-| `bulk.write` | A bulk write completed (`POST /bulk` or MCP `save_bulk`). Per-item events are **not** fired for bulk; this one summary carries `entry` = `{ inserted, updated, errorCount }` for a workflow to inspect. |
+| `bulk.write` | A bulk write completed (`POST /bulk` or MCP `save_bulk`). Per-item events are **not** fired for bulk; this one summary carries `entry` = `{ inserted, updated, connections, errorCount }` for a workflow to inspect. It fires whenever the call wrote anything — a batch that only converged on existing records (`updated`) or only attached connections counts. |
 | `duplicate.detected` | The duplicate scanner found a near-duplicate pair under a `notify` rule (see [Duplicate Scanner](#duplicate-scanner--action-rules)). Payload `entry` = `{ type, score, a: {record}, b: {record} }` |
 | `change_note.received` | A change note arrived from the instance above this one in a network (see [Sync API → A sync can carry a change note](09-sync-api.md#a-sync-can-carry-a-change-note)). Fired once per space the note concerns, or per space the network carries here for a note about the whole network. Payload `entry` = `{ id, networkId, networkLabel, from, author, generated, note, spaces }` |
 | `test.ping` | Synthetic test event sent via the test endpoint |

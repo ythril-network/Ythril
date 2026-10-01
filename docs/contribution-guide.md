@@ -206,7 +206,7 @@ docker compose up -d
 npm run test:integration
 ```
 
-Covers: setup gating, auth, files, spaces, brain CRUD (facts, entities, edges, chrono), schema validation (strict/warn/off, bulk, dry-run), networks, voting, invite handshake, MCP tools (including bulk_write), notifications, about endpoint, sync history, space rename, space deletion, space export, space wipe, conflict resolution, proxy spaces.
+Covers: setup gating, auth, files, spaces, brain CRUD (facts, entities, edges, chrono), schema validation (strict/warn/off, bulk, dry-run), networks, voting, invite handshake, MCP tools (including save_bulk), notifications, about endpoint, sync history, space rename, space deletion, space export, space wipe, conflict resolution, proxy spaces.
 
 #### Rate-limit kill-switches
 

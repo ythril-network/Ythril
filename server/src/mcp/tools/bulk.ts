@@ -27,7 +27,9 @@ export const save_bulkTool: ToolHandler = {
     + 'any combination.\n\n'
     + 'A SUCCESSFUL CALL MAY HAVE WRITTEN NOTHING. This is partial-success by design: a bad item is reported '
     + 'in `errors` and the rest of the batch proceeds, so there is no failure status to check. ALWAYS read '
-    + '`inserted` and `errors` from the response — `inserted` counts what landed, per collection, and `errors` '
+    + '`inserted`, `updated` and `errors` from the response — `inserted` counts NEW records per collection, '
+    + '`updated` the existing ones a write converged on (an item carrying the `id` of a stored record, or an edge '
+    + 'already stored), and `errors` '
     + 'names each rejection by `type` and by its INDEX in the array you sent. Treating a returned result as '
     + 'proof of success is the mistake this tool most invites.\n\n'
     + `AT MOST ${BULK_MAX_PER_TYPE} PER COLLECTION, AND A LONGER ARRAY REFUSES THE WHOLE BATCH — nothing is written, `
@@ -54,11 +56,15 @@ export const save_bulkTool: ToolHandler = {
     + 'PARAMETERS: each collection takes the same fields as its single-record tool — `facts` as `saveFact`, '
     + '`entities` as `save_entity`, `edges` as `save_edge`, `chrono` as `save_chrono` — including '
     + '`ttlDays` per item. `targetSpace` is required when `space` is a proxy.\n\n'
-    + 'RESPONSE: `inserted` (a count per collection), `connections` (the links and edges the ITEMS\' own '
-    + 'fields attached, which is a different question from `inserted.edges` — that one counts the top-level '
-    + '`edges` array), `errors` (one entry per rejected item, with its collection and index), and `refs` '
-    + '(the id each `$ref` key was given). None of '
-    + 'them tells you about items dropped by the 500 cap; only your own count does.',
+    + 'A RETRY CONVERGES: a fact, entity or chrono item carrying the `id` of an existing record converges onto '
+    + 'it (tags union, properties merge) instead of duplicating, so resending a batch after a timeout is safe '
+    + 'for every item that carried its id. An item depending on another item of this call that was not '
+    + 'written fails saying why; an item whose record another request changed mid-call is retried once, then '
+    + 'fails asking you to resend it.\n\n'
+    + 'RESPONSE: `inserted` and `updated` (counts per collection), `connections` (the links and edges the '
+    + 'ITEMS\' own fields attached, which is a different question from `inserted.edges` — that one counts the '
+    + 'top-level `edges` array), `errors` (one entry per rejected item, with its collection and index), and '
+    + '`refs` (the id each `$ref` key was given, for items that were written).',
   mutating: true,
   spaceRequired: true,
   // Partial-success contract: invalid items are reported per-item in `errors`, not rejected up front.
@@ -80,10 +86,11 @@ export const save_bulkTool: ToolHandler = {
                   fact:        { type: 'string', minLength: 1, maxLength: MAX_FACT_LENGTH, description: 'The fact or fact to store (1–50 000 characters).' },
                   tags:        {
                     type: 'array', maxItems: MAX_TAGS, items: { type: 'string' },
-                    description: 'Categorisation tags. Every fact item is an INSERT, so there is nothing '
-                      + 'to merge with. They are embedded along with the fact, so a tag affects ranking as '
-                      + 'well as being an exact filter.',
+                    description: 'Categorisation tags — unioned with the stored ones when `id` names an existing '
+                      + 'fact. They are embedded along with the fact, so a tag affects ranking as well as being '
+                      + 'an exact filter.',
                   },
+                  id:          uuidSchema('UUID v4 of an EXISTING fact: the item converges onto it instead of inserting, which is what makes a resent batch safe. An id that names nothing is ignored rather than adopted — identity is server-generated.'),
                   /*
                    * `Q-44`: the SAME connection fields the single-record tools declare, from the one builder.
                    *
@@ -163,8 +170,10 @@ export const save_bulkTool: ToolHandler = {
                     type: 'string',
                     description: 'The record the relationship starts at — a UUID v4 unless `fromKind` says '
                       + 'otherwise, and a space-relative PATH when `fromKind` is `file`. Part of the identity '
-                      + '(from + to + label), so the same triplet twice UPDATES rather than duplicating. '
-                      + 'Checked for shape only under strict linkage, and never for existence.',
+                      + '(from + to + label, and the kind of each end), so the same edge twice UPDATES rather '
+                      + 'than duplicating. Under strict linkage it is checked for shape AND existence, as on '
+                      + '`save_edge`; a `$ref:key` resolves to a record this call writes, and the edge stores the '
+                      + 'kind of the record the key names.',
                   },
                   to:          {
                     type: 'string',
@@ -242,7 +251,8 @@ export const save_bulkTool: ToolHandler = {
                   },
                   confidence:  { type: 'number', description: 'Confidence 0 to 1, for entries that are predictions. A non-number is dropped silently and does not appear in `errors`; unlike `save_chrono`, the 0–1 bound is not enforced on this door.' },
                   description: { type: 'string', description: 'Optional longer description of the entry.' },
-                  tags:        { type: 'array', maxItems: MAX_TAGS, items: { type: 'string' }, description: 'Categorisation tags. Every chrono item is an INSERT, so there is nothing to merge with.' },
+                  tags:        { type: 'array', maxItems: MAX_TAGS, items: { type: 'string' }, description: 'Categorisation tags — unioned with the stored ones when `id` names an existing entry.' },
+                  id:          uuidSchema('UUID v4 of an EXISTING chrono entry: the item converges onto it instead of inserting, which is what makes a resent batch safe. An id that names nothing is ignored rather than adopted — identity is server-generated.'),
                   // `Q-44`: the same two link classes a chrono entry has always held, plus `edges`, from the
                   // one builder — see the note on the `facts` item above for what the hand-written pair said.
                   ...connectionSchemas('chrono'),
