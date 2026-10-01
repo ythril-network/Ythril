@@ -2106,6 +2106,12 @@ export interface MediaJobDoc {
    * sibling jobs that would otherwise succeed. Cleared on success/manual retry.
    */
   claimableAfter?: string | null;
+  /**
+   * How many times a run has committed its results under this job's claim (`writeUnderClaim`). Its value is never
+   * read: the increment exists because a fence has to WRITE the job document for the database to order it against a
+   * concurrent revocation — a matching read, or a `$set` of a value already stored, conflicts with nothing.
+   */
+  fencedWrites?: number;
   createdAt: string;          // ISO8601
   updatedAt: string;          // ISO8601
 }

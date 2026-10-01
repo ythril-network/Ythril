@@ -15,6 +15,7 @@ import { withJitter } from '../../util/backoff.js';
 import { newClaimToken, stalledJobWarning } from './lease.js';
 import { createWorkSignal } from '../../util/work-signal.js';
 import { spaceCollection } from '../../db/space-collection.js';
+import { jobIdsUnder, movedId } from '../moved-paths.js';
 
 const MAX_ATTEMPTS = 3;
 
@@ -690,6 +691,80 @@ export async function cancelMediaJobsByPrefix(spaceId: string, dirPath: string):
   await jobCollection(spaceId).deleteMany(
     asFilter<MediaJobDoc>({ $or: prefixes.map(p => ({ _id: { $regex: `^${escapeRegex(p)}` } })) }),
   );
+}
+
+// ── Move (a file or directory changes path) ────────────────────────────────
+
+/**
+ * How long a move may hold its jobs before they become claimable again on their own. Only reached if the process
+ * dies mid-move; then the job runs at the old path, finds the file wherever the move left it, and reconciles.
+ */
+const MOVE_HOLD_MS = 10 * 60_000;
+
+/**
+ * Take the claim on every unfinished job belonging to `src` and keep them unclaimable — step one of a move, BEFORE the
+ * bytes leave. Returns the ids held, for `rekeyJobsForMove` or `releaseMoveHold`.
+ *
+ * Before the bytes, because both late writers a move can meet act on what they observe on disk. A run whose
+ * conversion commits after this finds its claim gone and writes nothing (`writeUnderClaim`); a run that finds the file
+ * missing asks whether it still holds the claim before it "reconciles a deleted source" — which, mid-move, would
+ * delete the very job and records the move is carrying (`holdsClaim`). Held first, the answer is already "no" by the
+ * time anything can see the file gone. Held after, both windows stay open.
+ */
+export async function holdJobsForMove(spaceId: string, src: string): Promise<string[]> {
+  const regexes = jobIdsUnder(src);
+  if (regexes.length === 0) return [];
+  const open = asFilter<MediaJobDoc>({
+    $or: regexes.map(r => ({ _id: { $regex: r } })),
+    status: { $in: ['pending', 'processing'] },
+  });
+  const ids = (await jobCollection(spaceId).find(open, { projection: { _id: 1 } }).toArray()).map(j => String(j._id));
+  if (ids.length === 0) return [];
+  const now = new Date().toISOString();
+  await jobCollection(spaceId).updateMany(
+    asFilter<MediaJobDoc>({ _id: { $in: ids }, status: { $in: ['pending', 'processing'] } }),
+    // Handed back rather than failed: nothing went wrong, so `attempts` is not charged — the same terms as a release.
+    asUpdate<MediaJobDoc>({ $set: {
+      status: 'pending', claimedAt: null, claimToken: null, updatedAt: now,
+      claimableAfter: new Date(Date.now() + MOVE_HOLD_MS).toISOString(),
+    } }),
+  );
+  return ids;
+}
+
+/** Undo `holdJobsForMove` where they stand — the move failed, so the jobs belong to the old path after all. */
+export async function releaseMoveHold(spaceId: string, heldIds: string[]): Promise<void> {
+  if (heldIds.length === 0) return;
+  await jobCollection(spaceId).updateMany(
+    asFilter<MediaJobDoc>({ _id: { $in: heldIds } }),
+    asUpdate<MediaJobDoc>({ $set: { claimableAfter: null, updatedAt: new Date().toISOString() } }),
+  );
+  markSpaceMayHaveWork(spaceId);
+}
+
+/**
+ * Re-key every job belonging to `src` onto its path under `dst`, releasing the ones `holdJobsForMove` held so they
+ * run again where the file now is. A job's `_id` IS its path, so this is a delete and a re-insert — the same shape as
+ * the metadata it follows. A finished job keeps its state: it describes bytes that moved unchanged.
+ */
+export async function rekeyJobsForMove(spaceId: string, src: string, dst: string, heldIds: string[]): Promise<void> {
+  const regexes = jobIdsUnder(src);
+  if (regexes.length === 0) return;
+  const jobs = await jobCollection(spaceId).find(
+    asFilter<MediaJobDoc>({ $or: regexes.map(r => ({ _id: { $regex: r } })) }),
+  ).toArray() as MediaJobDoc[];
+  const held = new Set(heldIds);
+  const now = new Date().toISOString();
+  const moved = jobs.flatMap(j => {
+    const to = movedId(j._id, src, dst);
+    return to ? [{ ...j, _id: to, filePath: to, updatedAt: now, ...(held.has(j._id) ? { claimableAfter: null } : {}) }] : [];
+  });
+  if (moved.length === 0) return;
+  await jobCollection(spaceId).deleteMany(asFilter<MediaJobDoc>({ _id: { $in: jobs.map(j => j._id) } }));
+  // Replacing anything already queued at the destination: a move onto an existing path replaces that file.
+  await jobCollection(spaceId).deleteMany(asFilter<MediaJobDoc>({ _id: { $in: moved.map(j => j._id) } }));
+  await jobCollection(spaceId).insertMany(moved.map(j => asDoc<MediaJobDoc>(j)));
+  markSpaceMayHaveWork(spaceId);
 }
 
 // ── retry_embedding helper ─────────────────────────────────────────────────
