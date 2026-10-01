@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A new space could stay "building" until the next restart.** Once its search indexes were ready, the space
+  recorded that in config.json, re-reading the file first so a concurrent edit is kept. On Docker Desktop the file
+  is a bind mount, and a read that landed while the file was being rewritten failed with `ENODATA` — and the
+  first such failure was taken as final. A read spoiled by a concurrent writer is now retried a few times; any
+  other error is still reported at once.
+
 ## [5.6.0] — 2026-09-29
 
 **A minor release: a filtered recall returns every record that matches, a search never writes into a space, and a
