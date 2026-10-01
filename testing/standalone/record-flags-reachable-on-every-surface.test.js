@@ -38,7 +38,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { between } from './_structural-window.mjs';
+import { argumentsOf, between } from './_structural-window.mjs';
 
 const ROOT = process.cwd();
 
@@ -339,17 +339,31 @@ describe('every per-record flag is reachable on every surface that can set it', 
     // say an item takes the same fields as its single-record endpoint, and until F-31 no loop read either
     // flag: both doors answered 207 with the flag dropped. The wire test is
     // `a-batch-item-carries-its-record-flags.test.js`; this holds the source to the derived set.
+    //
+    // Q-99 part 3: the three record kinds share ONE item check (`common` in `prepareItems`), which parses the
+    // flags after the shape check and returns them; each kind's loop then hands `c.flags` to its planner input.
+    // The edge item has its own check. So the rule is asserted twice over: the shared check PARSES and RETURNS
+    // the flags, and every kind's loop both goes through that check and FORWARDS what it returned — a parse
+    // whose result never reaches the planner is the mention-only shape.
     const bulk = code('server/src/brain/bulk.ts');
     const kinds = ['fact', 'entity', 'chrono', 'edge'];
-    for (const kind of kinds) {
-      // From the kind's shape check to its write: the item-validation run of that loop, bounded by the
-      // `try {` that opens the write rather than by a character count.
-      const validation = between(bulk, `shapeError('${kind}', item);`, 'try {', `bulk ${kind} loop`);
-      assert.match(validation, /= parseRecordFlags\(item\);/, `the ${kind} loop in brain/bulk.ts does not parse the record flags`);
+    const shared = between(bulk, 'shapeError(kind, item);', 'return { ok: true', 'bulk shared record-item check');
+    assert.match(shared, /const flags = parseRecordFlags\(item\);/, 'the shared record-item check in brain/bulk.ts does not parse the record flags');
+    const sharedReturn = between(bulk, 'return { ok: true', ';', 'bulk shared record-item check return');
+    assert.match(sharedReturn, /\bflags: flags\.flags\b/, 'the shared record-item check parses the flags and does not return them');
+    const plural = { fact: 'facts', entity: 'entities', chrono: 'chrono' };
+    for (const kind of kinds.filter(k => k !== 'edge')) {
+      // From the kind's loop head to the plan it pushes — bounded by the push, not by a character count.
+      const loop = between(bulk, `of slice(input.${plural[kind]}).entries())`, 'out.push(', `bulk ${kind} loop`);
+      assert.match(loop, new RegExp(`= common\\('${kind}', item, i\\);`), `the ${kind} loop in brain/bulk.ts skips the shared item check, so it parses no record flags`);
+      assert.match(loop, /\bc\.flags\b/, `the ${kind} loop in brain/bulk.ts drops the parsed record flags before its planner`);
     }
-    // Four parses and four forwards — a parse whose result never reaches the writer is the mention-only shape.
-    assert.equal((bulk.match(/Flags\.flags/g) ?? []).length, kinds.length,
-      'each bulk loop must hand its parsed flags to its writer');
+    const edge = between(bulk, "shapeError('edge', item);", 'planEdgeItem(', 'bulk edge loop');
+    assert.match(edge, /const edgeFlags = parseRecordFlags\(item\);/, 'the edge loop in brain/bulk.ts does not parse the record flags');
+    // The planner input is the call's FIRST argument, so a forward elsewhere in the call does not count.
+    const edgeCall = bulk.indexOf('planEdgeItem(', bulk.indexOf("shapeError('edge', item);"));
+    const edgePlanned = argumentsOf(bulk, edgeCall, 'bulk edge planEdgeItem call')[0];
+    assert.match(edgePlanned, /\.\.\.edgeFlags\.flags\b/, 'the edge loop in brain/bulk.ts drops the parsed record flags before its planner');
     const mcp = code('server/src/mcp/tools/bulk.ts');
     for (const flag of recordFlags()) {
       const declared = (mcp.match(new RegExp(`\\n\\s+${flag}:\\s+\\w+,`, 'g')) ?? []).length;

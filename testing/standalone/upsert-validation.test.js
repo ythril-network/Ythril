@@ -31,7 +31,8 @@
  */
 import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
+import { trackedSources } from './_sources.mjs';
 
 let classifyEntityUpsertAgainst;
 let classifyEdgeUpsertAgainst;
@@ -215,22 +216,21 @@ describe('upsert validation', () => {
     it('the enumeration matches reality (the check itself works)', () => {
       // If a new file starts calling a merging writer, it belongs in this list — and the assertion below
       // has to see it. A gate whose scope is stale reads like coverage it does not have.
+      //
+      // Q-99 part 3: the merge moved into the write PLANNERS (`planEntity` / `planEdge`), and `upsertEntity` /
+      // `upsertEdge` became doors over them. A batch now plans its items directly rather than calling the doors,
+      // so a caller of EITHER spelling is a site where a merge happens. Listed through the shared git helper,
+      // not readdir, so a gitignored scratch file cannot enter the set.
       const roots = ['server/src/mcp/tools', 'server/src/api/brain', 'server/src/brain'];
-      const found = [];
-      const walk = dir => {
-        for (const name of readdirSync(dir)) {
-          const p = `${dir}/${name}`;
-          if (statSync(p).isDirectory()) { walk(p); continue; }
-          if (!p.endsWith('.ts')) continue;
-          const src = strip(readFileSync(p, 'utf8'));
-          if (/\b(?:await\s+)?upsertEntity\(|\b(?:await\s+)?upsertEdge\(/.test(src)) found.push(p.replace(/\\/g, '/'));
-        }
-      };
-      for (const r of roots) walk(r);
+      const MERGING_WRITER_CALL = /\b(?:upsertEntity|upsertEdge|planEntity|planEdge)\(/;
+      const found = trackedSources(roots, { specs: false, untracked: true, floor: 50 })
+        .filter(p => MERGING_WRITER_CALL.test(strip(readFileSync(p, 'utf8'))));
       // The writers' own modules define the functions; exclude the definitions, keep the callers. The
       // path has to be anchored — `brain/entities.ts` also matches `api/brain/entities.ts`, which is a
-      // caller, and dropping it would have made this check silently ignore two of the six sites.
-      const callers = found.filter(p => !/^server\/src\/brain\/(entities|edges)\.ts$/.test(p));
+      // caller, and dropping it would have made this check silently ignore two of the six sites. The doors
+      // and the planners they delegate to are ONE writer, so both halves are definitions here.
+      const callers = found.filter(p =>
+        !/^server\/src\/brain\/(?:(?:entities|edges)|write-plan\/plan-(?:entity|edge))\.ts$/.test(p));
       assert.deepEqual(callers.sort(), [...WRITER_CALLERS].sort(),
         'a new caller of upsertEntity/upsertEdge must be checked here — it merges, so it must not ' +
         'validate the payload');
