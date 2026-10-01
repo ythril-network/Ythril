@@ -81,7 +81,7 @@ one that ran out of time contributes nothing and the response gains a `degraded`
 |---|---|
 | `search_timeout` | at least one collection's vector search hit the deadline, so the answer is **partial** — fewer results than the corpus holds, not fewer results because the corpus is empty |
 | `rerank_skipped_budget` | the cross-encoder was configured but not run: too little budget was left. The order is the hybrid-fusion order, which is a slightly worse ranking, delivered |
-| `rerank_unavailable` | the cross-encoder was configured and did not answer (unreachable, non-2xx, unreadable body) |
+| `rerank_unavailable` | the cross-encoder was configured and did not answer (unreachable, non-2xx, unreadable body) — or it is **cooling down** after one of those, a timeout of its own, or a pass slower than half its time limit: it is then skipped at once for 30 s, doubling to 5 min, and a background probe reopens it (`Q-157`). A recall in a cool-down answers without waiting on the reranker at all |
 | `filter_window` | a filtered answer could not be completed, so it **may be missing records that satisfy the filter**: the vector index was still being updated to a definition that can complete it, the index did not yet hold matching records the collection has had for longer than the fresh-write window, or more than 500 000 records matched a filter the index cannot apply. What was found is returned |
 | `candidate_cap` | `topK` asked for more of one knowledge type than a recall considers — at most 2000 per type, however large `topK` is — and that type filled the bound, so it **may hold matches the recall never looked at**. Narrow the query or add a `filter` rather than raising `topK` |
 

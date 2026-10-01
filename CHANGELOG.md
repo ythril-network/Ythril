@@ -44,6 +44,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a space's directories retries what a concurrent writer causes; a space being deleted or renamed away refuses new
   file writes, which the media worker treats as an abandonment, like a moved file's; and the next rename or delete
   finishes a pending op before it proceeds, refusing only when that fails again — with the reason.
+- **A slow or failing reranker no longer holds every search (`Q-157`).** Measured on a 5.6.0 instance: every
+  recall took 20 s — the reranker's time limit — and was answered in fused order anyway, while the same recall
+  without reranking took 90 ms. A reranker pass that fails, runs out its own time limit, or takes more than half of
+  it now sets the reranker aside for 30 s, doubling to 5 min; searches in between skip it at once and still report
+  `degraded: ["rerank_unavailable"]`. A background probe, never a user's search, brings it back. The assist
+  model's fallback rule and this one are now one module.
 
 ## [5.6.0] — 2026-09-29
 
