@@ -50,4 +50,7 @@ export class PipelineStatusService {
   /** The state for a model-backed step, or null when the status is not loaded (drawn as unknown). */
   modelState(key: string): HealthState | null { return this.byModelKey().get(key)?.state ?? null; }
   sidecarState(key: string): HealthState | null { return this.bySidecarKey().get(key)?.state ?? null; }
+  /** The stage's `detail` as the server sent it, ok or not; a surface shows it through `problemDetail`. */
+  modelDetail(key: string): string | null { return this.byModelKey().get(key)?.detail ?? null; }
+  sidecarDetail(key: string): string | null { return this.bySidecarKey().get(key)?.detail ?? null; }
 }

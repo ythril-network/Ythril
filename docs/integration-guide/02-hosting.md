@@ -89,8 +89,8 @@ DEBUG=1 docker compose up
 | `NODE_ENV` | `production` | Node environment |
 | `PORT` | `3200` | HTTP listen port |
 | `CLIENT_DIST` | (resolved from the image layout) | Directory the built Angular client is served from. Set by the Dockerfile; override it only when running the server against a client build in a non-standard location — a local dev checkout, or an image you re-layered. |
-| `MODEL_CACHE_DIR` | `/app/model-cache` in the image, else `<DATA_ROOT>/.model-cache` | Where the bundled in-process embedding model's weights are cached. Baked into the image so a cold start does not download them; the `DATA_ROOT` fallback is for running from source. Point it at a persistent volume if you strip the cache out of your image, or **every** boot re-downloads the model. |
-| `HF_HUB_OFFLINE` / `TRANSFORMERS_OFFLINE` / `YTHRIL_MODELS_OFFLINE` | `1` in the image, unset when running from source | Forbid fetching a model at runtime. Any of the three, set to anything other than `0`/`false`/`no`/empty, stops the in-process embedding model from reaching `huggingface.co`: a model that is not in `MODEL_CACHE_DIR` fails to load, with an error naming the cache and this flag, instead of being downloaded. The first two are the names the wider ecosystem uses (Python's `huggingface_hub` reads them, and `docker-compose.yml` already sets `HF_HUB_OFFLINE` on the `unstructured` sidecar); transformers.js reads none of them, so Ythril maps them itself. Set `HF_HUB_OFFLINE=0` in the image if you deliberately want to switch to a model it does not carry. |
+| `MODEL_CACHE_DIR` | `/app/model-cache` in the image, else `<DATA_ROOT>/.model-cache` | Where the bundled embedding model's weights are cached; the embedding process the server starts reads them from here. Baked into the image so a cold start does not download them; the `DATA_ROOT` fallback is for running from source. Point it at a persistent volume if you strip the cache out of your image, or **every** boot re-downloads the model. |
+| `HF_HUB_OFFLINE` / `TRANSFORMERS_OFFLINE` / `YTHRIL_MODELS_OFFLINE` | `1` in the image, unset when running from source | Forbid fetching a model at runtime. Any of the three, set to anything other than `0`/`false`/`no`/empty, stops the bundled embedding model from reaching `huggingface.co`: a model that is not in `MODEL_CACHE_DIR` fails to load, with an error naming the cache and this flag, instead of being downloaded. The first two are the names the wider ecosystem uses (Python's `huggingface_hub` reads them, and `docker-compose.yml` already sets `HF_HUB_OFFLINE` on the `unstructured` sidecar); transformers.js reads none of them, so Ythril maps them itself. Set `HF_HUB_OFFLINE=0` in the image if you deliberately want to switch to a model it does not carry. The flags are read when the embedding process starts, so changing one while the server runs restarts that process at the next embed, and a model that had failed to load is tried again. |
 | `DEBUG` | (unset) | Set to `1` for verbose logging |
 | `MONGO_CONNECT_RETRY_MS` | `30000` | How long the **first** MongoDB connection may spend retrying before boot gives up. A container orchestrator's healthcheck can report MongoDB healthy while it is still finishing startup, so the first driver connection can have its socket reset mid-handshake — which used to kill the process outright. Only "not up yet" failures are retried (network errors, server selection, topology closed); bad credentials and a malformed URI fail immediately, because waiting cannot help and retrying would turn a clear error into a boot that appears to hang. Backoff is jittered so several instances starting together do not retry in lockstep. |
 | `SHUTDOWN_DRAIN_MS` | `8000` | How long in-flight HTTP requests get to finish after SIGTERM before their connections are forced shut. On SIGTERM the server stops accepting new connections, waits for the running ones, then flushes config and closes MongoDB. The default is sized for **Docker's 10 s stop grace period** — the whole drain plus the flush has to fit inside it or the container is SIGKILLed mid-write anyway. Kubernetes allows 30 s by default, so raise this if your orchestrator gives you longer. |
@@ -170,7 +170,7 @@ docker compose down -v     # ⚠ permanently deletes all named volumes
 
 **The published image never fetches a model at runtime, and that is enforced rather than assumed.**
 
-Ythril's in-process embedding model is baked into the image at `/app/model-cache`, and the image sets
+Ythril's embedding model (which runs in a child process of the server, see [the inference process](05b-media-embedding.md#configuration)) is baked into the image at `/app/model-cache`, and the image sets
 `HF_HUB_OFFLINE=1`. Only one model is baked in — `nomic-ai/nomic-embed-text-v1.5`, the default — so this
 matters the moment you change it.
 
@@ -453,7 +453,7 @@ the difference is policy. That is the point at which `allowPrivateModelEndpoints
 #### First boot takes longer than you expect
 
 A cold start does work that no later start repeats: creating vector and lexical search indexes for each
-space, and — on the bundled configuration — loading the in-process embedding model.
+space, and — on the bundled configuration — starting the embedding process and loading the model into it.
 
 - **Subsequent boots:** a few seconds to ready.
 - **First boot:** commonly **30–90 s**, and legitimately several minutes on a slow disk, a cold image
@@ -756,8 +756,8 @@ pairs with `requireEncryptedTransport` for encryption in transit.
 | Network | Any | Low-latency link between syncing brains improves convergence time |
 
 MongoDB Atlas Local runs a `mongot` sidecar for vector search. This adds ~300 MB RAM overhead on top of baseline `mongod` usage.
-
-For multi-brain networks, each brain runs its own full stack. Scale vertically (more RAM/disk) rather than horizontally — each brain is an independent unit.
+On the bundled configuration the embedding model runs in a child process of the server, which counts against the `ythril` container's `mem_limit` (`YTHRIL_MEM_LIMIT`) and shares its cores;
+it sizes its threads to the container's CPU quota (`cpus:`, a pod's CPU limit), not the host's cores (640 ms per text against 54 ms on one CPU of sixteen): see [the inference process](05b-media-embedding.md#configuration).
 
 ### Upgrading
 

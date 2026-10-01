@@ -23,7 +23,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post, get, waitForSimilarityIndex, readRecord } from '../sync/helpers.js';
+import { INSTANCES, post, get, waitForSimilarityIndex, readRecord, waitForEmbedQueueEmpty } from '../sync/helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, '..', 'sync', 'configs');
@@ -225,6 +225,8 @@ describe('Duplicate scanner — flag + review', () => {
     // come back for review.
     const u = await raw('PATCH', `/api/brain/spaces/${SPACE}/entities/${ids.v1}`, { description: 'Vault secret storage service handling authentication token scoping and rotation on a nightly schedule now' });
     assert.equal(u.status, 200, JSON.stringify(u.body));
+    // The edit re-queues V1's embedding, and the scanner compares vectors: scan once the new one exists (Q-99).
+    await waitForEmbedQueueEmpty(INSTANCES.a, token(), SPACE);
     await scan(SPACE);
     open = await listDupes(SPACE, 'open');
     assert.ok(

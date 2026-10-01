@@ -326,6 +326,14 @@ async function main(): Promise<void> {
       server.close(() => { clearTimeout(forced); log.debug('HTTP server closed'); resolve(); });
     });
 
+    // The local embedding model lives in a child process. Drain the inference in flight (a request that was mid-embed
+    // when the HTTP drain ended, or the brain worker's job) and end the process, rather than leaving it to notice that
+    // its parent is gone. After the drain, so requests that embed can still finish; before `closeMongo`, because what
+    // the worker does with an answer is a database write. Bounded: past the budget the child is killed.
+    const { stopLocalInference } = await import('./brain/local-inference.js');
+    await stopLocalInference({ budgetMs: 2_000 }).catch(err =>
+      log.debug(`Shutdown: stopping the inference process failed: ${err instanceof Error ? err.message : String(err)}`));
+
     // Only now is nothing mid-request. Persist coalesced config writes (sync watermarks), then drop
     // the database connection.
     await flushConfig();

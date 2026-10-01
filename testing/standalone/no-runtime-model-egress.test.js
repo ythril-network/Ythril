@@ -43,20 +43,37 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { markdownSectionFrom } from './_structural-window.mjs';
+import { trackedSources } from './_sources.mjs';
+import { stripComments } from './_strip-comments.mjs';
 
 const ROOT = process.cwd();
 const read = (p) => readFileSync(join(ROOT, p), 'utf8');
 
-const EMBEDDING = read('server/src/brain/embedding.ts');
+/*
+ * WHERE THE LOADER LIVES, since Q-99 part 1.
+ *
+ * The model is loaded by the inference CHILD, through `brain/local-pipeline.ts` — the one module that imports the
+ * model library (`local-inference-structure.test.js` holds that, derived). This gate used to read `embedding.ts`;
+ * it is re-pointed rather than re-run, because the old anchor (`function getLocalPipeline(`) is gone and a gate
+ * whose slice is empty passes every assertion over it. Every case below is the SAME rule as before, against the
+ * new home: the offline flag is honoured, the miss is announced first, a blocked miss explains itself. What changed
+ * is that the loader is handed `offline` as an argument by the process that read the flags, because the child has
+ * no config and must not guess; so "the variables are read" is asked of the brain sources, not of the loader.
+ */
+const LOADER = read('server/src/brain/local-pipeline.ts');
 const DOCKERFILE = read('Dockerfile');
 
-/** The body of `getLocalPipeline`, from its signature to the closing of its IIFE. */
+/** Every brain source, comments stripped: where the offline flags are READ, which is no longer the loader. */
+const BRAIN = trackedSources('server/src/brain', { floor: 20, untracked: true })
+  .map(f => stripComments(read(f))).join('\n');
+
+/** The body of `loadLocalPipeline`, from its signature to the closing brace of the function. */
 function loaderBody() {
-  const at = EMBEDDING.indexOf('function getLocalPipeline(');
-  assert.ok(at > 0, 'getLocalPipeline is gone — this gate is pinned to it');
-  const end = EMBEDDING.indexOf('\n}', at);
-  assert.ok(end > at, 'could not find the end of getLocalPipeline');
-  return EMBEDDING.slice(at, end);
+  const at = LOADER.indexOf('function loadLocalPipeline(');
+  assert.ok(at > 0, 'loadLocalPipeline is gone — this gate is pinned to it');
+  const end = LOADER.indexOf('\n}', at);
+  assert.ok(end > at, 'could not find the end of loadLocalPipeline');
+  return LOADER.slice(at, end);
 }
 
 describe('the offline flag is honoured by the process that claims to be offline', () => {
@@ -71,17 +88,29 @@ describe('the offline flag is honoured by the process that claims to be offline'
     // transformers.js reads NONE of these — they are Python's. That is exactly why the mapping has to exist here:
     // an operator air-gapping a stack sets HF_HUB_OFFLINE and reasonably expects the whole stack to obey.
     for (const v of ['HF_HUB_OFFLINE', 'TRANSFORMERS_OFFLINE', 'YTHRIL_MODELS_OFFLINE']) {
-      assert.match(EMBEDDING, new RegExp(`['"\`]${v}['"\`]`),
+      assert.match(BRAIN, new RegExp(`['"\`]${v}['"\`]`),
         `${v} is not read — a stack-wide offline flag would silently not apply to the embedding model`);
     }
-    assert.match(EMBEDDING, /env\.allowRemoteModels\s*=\s*false/,
+    assert.match(LOADER, /env\.allowRemoteModels\s*=\s*false/,
       'nothing sets env.allowRemoteModels = false, so the library default (true) still allows a runtime download');
+    assert.match(loaderBody(), /if\s*\(\s*offline\s*\)/,
+      'the switch is not conditional on the `offline` argument the caller resolved from those variables');
+  });
+
+  it('lets the child INHERIT those variables, or none of the above reaches the process that loads the model', () => {
+    // The loader no longer reads the environment; the child does, at its entry, and passes `offline` in. The
+    // child's environment is an allowlist, so a variable that is not on it is one the flag silently stops working
+    // for — the operator sets HF_HUB_OFFLINE on the server and the child, which never sees it, downloads.
+    const host = stripComments(read('server/src/brain/local-inference.ts'));
+    for (const v of ['HF_HUB_OFFLINE', 'TRANSFORMERS_OFFLINE', 'YTHRIL_MODELS_OFFLINE', 'MODEL_CACHE_DIR']) {
+      assert.match(host, new RegExp(`['"\`]${v}['"\`]`), `${v} is not on the child's environment allowlist`);
+    }
   });
 
   it('announces the egress BEFORE it happens, naming the host', () => {
     // The order is the whole point. A warning after the fact is a log line about 274 MB that already left.
     const body = loaderBody();
-    const warnAt = body.search(/log\.warn\(/);
+    const warnAt = body.search(/\blog\??\.?\(\s*['"]warn['"]/);
     const loadAt = body.search(/await pipeline\(/);
     assert.ok(warnAt > 0, 'a cache miss with remote loading allowed must warn — otherwise the egress is silent');
     assert.ok(loadAt > 0, 'could not find the pipeline() load');

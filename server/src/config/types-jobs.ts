@@ -127,6 +127,13 @@ export interface BrainEmbedJobDoc {
    * over twelve and a half minutes, spent on a sidecar that was restarting.
    */
   transientFailures?: number;
+  /**
+   * How many times this job was in flight when the local inference process was lost. Absent reads as 0. Counted
+   * separately from `transientFailures` because it is the one transient failure that ends a job: an input that
+   * kills the runtime looks like an embedder outage for ever, so after `MAX_LOST_CHILD_FAILURES` the job is left
+   * `failed`, naming the crash in `lastError`. Reset by a retry, a rewrite and a new server version.
+   */
+  lostChildFailures?: number;
   lastError: string | null;
   /** ISO8601 — set when a worker claims this job. */
   claimedAt: string | null;

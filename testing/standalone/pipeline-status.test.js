@@ -21,7 +21,7 @@ import assert from 'node:assert/strict';
 
 const {
   classifyStage, groupStagesByEndpoint, endpointId, hostOf,
-  deriveLiveIndexState, isDrifted,
+  deriveLiveIndexState, isDrifted, withEmbeddingProcess,
 } = await import('../../server/dist/api/pipeline-status.js');
 
 const stage = (over = {}) => ({ key: 'vision', label: 'Vision', model: 'moondream', baseUrl: 'http://ollama:11434', external: false, ...over });
@@ -263,5 +263,59 @@ describe('isDrifted — the silent index loss this endpoint exists to catch', ()
 
   it('a stored `failed` is not drift — it is already reported honestly', () => {
     assert.equal(isDrifted('failed', 'missing'), false);
+  });
+});
+
+describe('withEmbeddingProcess — the bundled model\'s process, on its stage', () => {
+  // The inference child's own view (`WorkerState`), as `localInferenceState()` returns it.
+  const worker = (over = {}) => ({
+    phase: 'ready', modelId: 'nomic-embed-text', pid: 4242, inFlight: 1, queued: 3, spawns: 2,
+    consecutiveLosses: 0, backoffRemainingMs: 0, loadFailure: null, loadFailureModelId: null, ...over,
+  });
+  const bundled = () => classifyStage(stage({ key: 'embedding', label: 'Text embedding', model: 'nomic-embed-text', baseUrl: undefined }), undefined);
+
+  it('adds the process state to the bundled embedding stage and changes nothing it already said', () => {
+    const before = bundled();
+    const [after] = withEmbeddingProcess([before], worker({ phase: 'backoff', consecutiveLosses: 2, backoffRemainingMs: 1_500 }));
+    for (const [k, v] of Object.entries(before)) assert.deepEqual(after[k], v, `${k} changed: a process that loads is reported without changing what the stage said`);
+    assert.deepEqual(after.inference, {
+      phase: 'backoff', modelId: 'nomic-embed-text', consecutiveLosses: 2, backoffRemainingMs: 1_500, loadFailure: null,
+    });
+  });
+
+  it('reports a sticky load failure for the configured model, and only for that model', () => {
+    const text = 'Embedding model \'nomic-embed-text\' is not in the model cache';
+    const [failing] = withEmbeddingProcess([bundled()], worker({ phase: 'none', loadFailure: text, loadFailureModelId: 'nomic-embed-text' }));
+    assert.equal(failing.inference.loadFailure, text, 'an operator sees why every embed fails, without reading a log');
+
+    const [switched] = withEmbeddingProcess([bundled()], worker({ phase: 'none', loadFailure: text, loadFailureModelId: 'an-older-model' }));
+    assert.equal(switched.inference.loadFailure, null, 'a failure about the previous model says nothing about this one');
+    assert.equal(switched.state, 'ok');
+  });
+
+  it('a model that cannot load turns the stage\'s dot red, with the reason as its detail', () => {
+    // The Models screen renders only `state` as the dot. Green over a model every embed fails on is the one answer
+    // that is wrong for an operator, so a sticky load failure for the CONFIGURED model is `down`, like an endpoint
+    // that cannot be reached.
+    const text = 'Embedding model \'nomic-embed-text\' is not in the model cache';
+    const [failing] = withEmbeddingProcess([bundled()], worker({ phase: 'none', loadFailure: text, loadFailureModelId: 'nomic-embed-text' }));
+    assert.equal(failing.state, 'down');
+    assert.equal(failing.detail, text);
+    const [healthy] = withEmbeddingProcess([bundled()], worker());
+    assert.equal(healthy.state, 'ok');
+    assert.equal(healthy.detail, 'in-process');
+  });
+
+  it('never carries the pid or the queue counts: the screen needs the state, not the process', () => {
+    const [after] = withEmbeddingProcess([bundled()], worker());
+    assert.deepEqual(Object.keys(after.inference).sort(), ['backoffRemainingMs', 'consecutiveLosses', 'loadFailure', 'modelId', 'phase']);
+  });
+
+  it('leaves every other stage alone, and an embedding stage that calls an endpoint has no process to report', () => {
+    const http = classifyStage(stage({ key: 'embedding', model: 'nomic-embed-text', baseUrl: 'http://ollama:11434' }), up(['nomic-embed-text']));
+    const vision = classifyStage(stage(), up(['moondream']));
+    const out = withEmbeddingProcess([http, vision], worker());
+    assert.deepEqual(out, [http, vision]);
+    assert.ok(!('inference' in out[0]) && !('inference' in out[1]));
   });
 });

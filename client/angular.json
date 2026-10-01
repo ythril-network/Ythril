@@ -61,7 +61,7 @@
                 { "type": "bundle", "name": "brain-component", "maximumWarning": "215kB", "maximumError": "260kB" },
                 { "type": "bundle", "name": "space-settings-popup-component", "maximumWarning": "60kB", "maximumError": "175kB" },
                 { "type": "bundle", "name": "file-manager-component", "maximumWarning": "160kB", "maximumError": "260kB" },
-                { "type": "bundle", "name": "media-processing-page-component", "maximumWarning": "130kB", "maximumError": "200kB" }
+                { "type": "bundle", "name": "media-processing-page-component", "maximumWarning": "135kB", "maximumError": "200kB" }
               ],
               "outputHashing": "all"
             },

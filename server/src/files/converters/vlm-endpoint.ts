@@ -124,7 +124,7 @@ export function systemOneUrlFor(baseUrl: string): string {
   return `${normalizeOpenAiBase(baseUrl)}/systemone`;
 }
 
-/** Where text embeddings are POSTed. OpenAI-compatible only — the bundled model is in-process. */
+/** Where text embeddings are POSTed. OpenAI-compatible only — the bundled model runs in the server's own inference process. */
 export function embeddingsUrlFor(baseUrl: string): string {
   return `${normalizeOpenAiBase(baseUrl)}/embeddings`;
 }

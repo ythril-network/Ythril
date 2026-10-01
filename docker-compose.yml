@@ -4,8 +4,10 @@
     container_name: ythril
     restart: unless-stopped
     # A memory ceiling, so one instance cannot take a shared host down with it. Node sizes its heap from
-    # the container limit, so the app runs inside it rather than into it. Raise YTHRIL_MEM_LIMIT in .env for
-    # very large ingests or document batches; an infra deployment sets its own pod limit instead.
+    # the container limit, so the app runs inside it rather than into it. The ceiling covers the server AND
+    # its embedding process (the bundled model runs in a child process that exits after ten idle minutes),
+    # not one each. Raise YTHRIL_MEM_LIMIT in .env for very large ingests or document batches; an infra
+    # deployment sets its own pod limit instead.
     mem_limit: ${YTHRIL_MEM_LIMIT:-4g}
     ports:
       - "${YTHRIL_PORT:-3200}:3200"

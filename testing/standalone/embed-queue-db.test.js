@@ -204,4 +204,16 @@ describe('brain embedding queue (real MongoDB, no reachable model)', { skip }, (
     assert.equal(job.status, 'pending');
     assert.equal(job.claimableAfter, null, 'and is claimable at once — it already waited long enough');
   });
+
+  it('a model that cannot load costs ONE inference process for the whole file, not one per attempt', async () => {
+    // Every test above embedded against the same unreachable model, through the real inference host and the real
+    // child process. A load failure is deterministic, so the host remembers it: five attempts on one job, a
+    // `waitForEmbedding` write and an insert-time duplicate check all got the same answer from ONE spawn.
+    // Without that, every retry of every queued record would start a process that loads nothing and dies —
+    // a spawn storm on exactly the instance that is already unwell.
+    const local = await import('../../server/dist/brain/local-inference.js');
+    assert.equal(local.localInferenceState().spawns, 1,
+      'the unreachable model was tried more than once; a sticky load failure must not respawn');
+    assert.notEqual(local.localInferenceState().loadFailure, null, 'and the failure is recorded where an operator can read it');
+  });
 });

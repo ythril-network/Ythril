@@ -24,6 +24,7 @@ import { MediaProcessingStateService } from './media-processing-state.service';
 import { PipelineStatusService } from './pipeline-status.service';
 import { SchemaApi } from '../../../core/schema-api.service';
 import { TestTarget } from './media-processing.types';
+import { stagePillVariant } from './stage-health';
 
 @Component({
   selector: 'app-models-tab',
@@ -108,8 +109,8 @@ import { TestTarget } from './media-processing.types';
       <app-model-provider-card id="embedding" icon="database"
         [heading]="'mediaProcessing.embedding.title' | transloco"
         [purpose]="'mediaProcessing.embedding.purpose' | transloco"
-        [health]="pipeline.modelState('embedding')">
-        <app-status-pill pill [variant]="s.embedding.provider === 'external' ? 'active' : 'ok'">
+        [health]="pipeline.modelState('embedding')" [healthDetail]="pipeline.modelDetail('embedding')">
+        <app-status-pill pill [variant]="stagePill(s.embedding.provider === 'external' ? 'active' : 'ok', pipeline.modelState('embedding'))">
           {{ (s.embedding.provider === 'external' ? 'mediaProcessing.embedding.pillExternal'
               : (s.embedding.baseUrl ? 'mediaProcessing.embedding.pillLocalHttp' : 'mediaProcessing.embedding.pillBundled')) | transloco }}
         </app-status-pill>
@@ -179,12 +180,12 @@ import { TestTarget } from './media-processing.types';
             {{ (s.testOf('embedding')?.loading ? 'mediaProcessing.action.testing' : 'mediaProcessing.action.test') | transloco }}
           </button>
           <!-- B.4: a dead button and a broken button look identical. With no endpoint the embedder IS the
-               bundled in-process model, so there is nothing to probe — a fact about the configuration,
+               bundled local model, so there is nothing to probe — a fact about the configuration,
                not a fault, and the same thing classifyStage reports as in-process on the health dot.
                Verify still works: it embeds the word ping locally. -->
           @if (!s.embedding.baseUrl) {
             <!-- Titled, because the row truncates it: the card is narrow enough that the reason reads
-                 "In-process mod…", and an explanation you cannot finish reading is the same failure this
+                 "Bundled local m…", and an explanation you cannot finish reading is the same failure this
                  line exists to fix. -->
             <span class="hint" [attr.title]="'mediaProcessing.test.inProcess' | transloco">{{ 'mediaProcessing.test.inProcess' | transloco }}</span>
           }
@@ -210,7 +211,7 @@ import { TestTarget } from './media-processing.types';
       <app-model-provider-card id="rerank" icon="sort-descending"
         [heading]="'mediaProcessing.rerank.title' | transloco"
         [purpose]="'mediaProcessing.rerank.purpose' | transloco"
-        [health]="pipeline.modelState('rerank')">
+        [health]="pipeline.modelState('rerank')" [healthDetail]="pipeline.modelDetail('rerank')">
         <app-status-pill pill [variant]="s.rerankConfigured() ? 'active' : 'off'">
           {{ (s.rerankConfigured() ? 'mediaProcessing.rerank.pillOn' : 'mediaProcessing.rerank.pillOff') | transloco }}
         </app-status-pill>
@@ -268,7 +269,7 @@ import { TestTarget } from './media-processing.types';
       <app-model-provider-card id="nli" icon="check-circle"
         [heading]="'mediaProcessing.nli.title' | transloco"
         [purpose]="'mediaProcessing.nli.purpose' | transloco"
-        [health]="pipeline.modelState('nli')">
+        [health]="pipeline.modelState('nli')" [healthDetail]="pipeline.modelDetail('nli')">
         <app-status-pill pill [variant]="s.nliConfigured() ? 'active' : 'off'">
           {{ (s.nliConfigured() ? 'mediaProcessing.nli.pillOn' : 'mediaProcessing.nli.pillOff') | transloco }}
         </app-status-pill>
@@ -314,7 +315,7 @@ import { TestTarget } from './media-processing.types';
       <app-model-provider-card id="vision" icon="image"
         [heading]="'mediaProcessing.vision.title' | transloco"
         [purpose]="'mediaProcessing.vision.purpose' | transloco"
-        [health]="pipeline.modelState('vision')">
+        [health]="pipeline.modelState('vision')" [healthDetail]="pipeline.modelDetail('vision')">
         <app-status-pill pill [variant]="s.mediaClassOn('images') ? 'active' : 'off'">
           {{ (s.form.visionProvider === 'external' ? 'mediaProcessing.pill.external' : 'mediaProcessing.vision.pillLocal') | transloco }}
         </app-status-pill>
@@ -367,7 +368,7 @@ import { TestTarget } from './media-processing.types';
       <app-model-provider-card id="stt" icon="microphone"
         [heading]="'mediaProcessing.stt.title' | transloco"
         [purpose]="'mediaProcessing.stt.purpose' | transloco"
-        [health]="pipeline.modelState('stt')">
+        [health]="pipeline.modelState('stt')" [healthDetail]="pipeline.modelDetail('stt')">
         <app-status-pill pill [variant]="s.mediaClassOn('audio') ? 'active' : 'off'">
           {{ (s.form.sttProvider === 'external' ? 'mediaProcessing.pill.external' : 'mediaProcessing.stt.pillLocal') | transloco }}
         </app-status-pill>
@@ -420,7 +421,7 @@ import { TestTarget } from './media-processing.types';
       <app-model-provider-card id="assist" icon="globe"
         [heading]="'mediaProcessing.assist.title' | transloco"
         [purpose]="'mediaProcessing.assist.purpose' | transloco"
-        [health]="pipeline.modelState('assist')">
+        [health]="pipeline.modelState('assist')" [healthDetail]="pipeline.modelDetail('assist')">
         <app-status-pill pill [variant]="s.assistLocked() ? 'env' : (s.assistInUse() ? 'active' : 'off')">
           {{ (s.assistLocked() ? 'mediaProcessing.pill.env' : (s.assistInUse() ? 'mediaProcessing.assist.pillInUse' : 'mediaProcessing.assist.pillUnset')) | transloco }}
         </app-status-pill>
@@ -489,7 +490,7 @@ import { TestTarget } from './media-processing.types';
       <app-model-provider-card id="doc-vlm" icon="file-image"
         [heading]="'mediaProcessing.docVlm.title' | transloco"
         [purpose]="'mediaProcessing.docVlm.purpose' | transloco"
-        [health]="pipeline.modelState('doc-vlm')"
+        [health]="pipeline.modelState('doc-vlm')" [healthDetail]="pipeline.modelDetail('doc-vlm')"
         [infra]="true" envVar="DOC_VLM_MODEL">
         <div class="field">
           <label>{{ 'mediaProcessing.field.model' | transloco }}</label>
@@ -507,7 +508,7 @@ import { TestTarget } from './media-processing.types';
       <app-model-provider-card id="doc-repair" icon="file-image"
         [heading]="'mediaProcessing.docRepair.title' | transloco"
         [purpose]="'mediaProcessing.docRepair.purpose' | transloco"
-        [health]="pipeline.modelState('doc-repair')"
+        [health]="pipeline.modelState('doc-repair')" [healthDetail]="pipeline.modelDetail('doc-repair')"
         [infra]="true" envVar="DOC_REPAIR_MODEL">
         <div class="field">
           <label>{{ 'mediaProcessing.field.model' | transloco }}</label>
@@ -525,7 +526,7 @@ import { TestTarget } from './media-processing.types';
       <app-model-provider-card id="doc-verify" icon="file-image"
         [heading]="'mediaProcessing.docVerify.title' | transloco"
         [purpose]="'mediaProcessing.docVerify.purpose' | transloco"
-        [health]="pipeline.modelState('doc-verify')"
+        [health]="pipeline.modelState('doc-verify')" [healthDetail]="pipeline.modelDetail('doc-verify')"
         [infra]="true" envVar="DOC_VERIFY_MODEL">
         <div class="field">
           <label>{{ 'mediaProcessing.field.model' | transloco }}</label>
@@ -698,6 +699,8 @@ export class ModelsTabComponent implements OnInit {
   readonly s = inject(MediaProcessingStateService);
   readonly pipeline = inject(PipelineStatusService);
   private schemaApi = inject(SchemaApi);
+  /** A provider pill is not green over a stage that is down (Q-99: green "Bundled" beside a red dot). */
+  readonly stagePill = stagePillVariant;
 
   /** Face recognition runs in-process, so its only health is enabled/disabled. */
   faceState = computed(() => this.pipeline.status()?.faceRecognition.state ?? null);

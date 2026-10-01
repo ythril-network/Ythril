@@ -54,7 +54,9 @@ spec:
           #   /tmp    — os.tmpdir() scratch for audio/video embedding (emptyDir)
           # The embedding model is baked into the image at /app/model-cache (read-only)
           # and is loaded, never written, at runtime — so it must NOT be shadowed by a
-          # writable mount.
+          # writable mount. It is loaded by a CHILD process of this container (started on
+          # the first embed, ended after ten idle minutes), which reads the same path and
+          # is started from the same image, so nothing here needs a second entry for it.
           securityContext:
             runAsNonRoot: true
             runAsUser: 1000
@@ -75,7 +77,10 @@ spec:
               value: http://localhost:8000
           # The conversion/embedding pipeline is CPU- and memory-hungry; without a
           # limit an unbounded main container is a node-level DoS. Requests reserve
-          # headroom for the embedding model (~274 MB) plus the Node heap.
+          # headroom for the embedding model (~274 MB) plus the Node heap. The model runs
+          # in a child process of this container, so the limits below count the server AND
+          # that process together (and the child exits when idle, returning its memory);
+          # they are one allowance for two processes, not one each.
           resources:
             requests:
               cpu: "250m"

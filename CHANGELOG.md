@@ -9,6 +9,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The bundled embedding model runs in a child process of its own, so embedding no longer stops the server from
+  answering (`Q-99`, part 1 of 3).** It ran inside the server: one text took 39 ms of CPU and the event loop's lag
+  was 38 ms at the median (the lag *was* the inference), a batch of 16 blocked it for 516 ms, and a bulk import of
+  50 facts made `/health` answer in 1639 ms at the 95th percentile, against 3 ms idle. The model is now loaded and
+  run by a supervised child process (`brain/embed-process.ts`, hosted by the generic `util/supervised-worker.ts`):
+  on the same texts the loop's lag stays at the timer floor, flat, whichever way the texts are fed
+  (`testing/bench/inference-blocks-the-loop.mjs` measures both ways on your own model cache), and a test holds it on
+  every machine by running the real child with an inference that spins the CPU for half a second and failing if the
+  main thread goes 100 ms without running a timer. A thread would have fixed the lag and nothing else, so it is a
+  process: a native fault in the model (an out-of-memory kill, a segfault) no longer takes the server down, and the
+  process exits after ten idle minutes, which is what returns the model's memory to the operating system (the ONNX
+  arena never gives any back while the process lives). What changed for an operator: the first embed after ten idle
+  minutes pays the model load, one to two seconds; `mem_limit` or a pod memory limit now counts **both** processes,
+  and the child competes with the server for the container's cores; and the child gets a minimal environment (the
+  platform basics, the model cache directory and the three offline flags), never the Mongo URI, the master key or an
+  API token. A lost process is replaced with a growing delay (about a second, doubling, capped at a minute), requests
+  that arrive during the delay fail at once rather than hang, the embed queue waits the delay out before it claims,
+  and **a record that keeps killing the process is left `failed` after three losses**, with the crash named in its
+  job's `lastError`, instead of being retried for ever (only the record the process was working on is counted: one
+  queued behind it fails `embedding process unavailable`, is retried, and is never charged); a retry, a rewrite and a new server version each give it a
+  clean count. A model that cannot be loaded **stays failed until the model or an offline flag changes, or the server
+  restarts**: it is tried once, not on every embed, so a bulk write against an unreachable model costs one process and
+  its jobs end `failed` after their attempts exactly as before, with the same error text. A recall query goes ahead
+  of queued documents in the one inference queue and never interrupts the embed already running. The brain embed
+  worker now heartbeats its claim while an embed is in flight, and finishes or fails a job only under the claim it
+  holds, so a slow embed is not re-claimed by the stall sweep and a late finish cannot delete a newer claim.
+  **The inference process sizes its threads to the container's CPU quota** (read from the cgroup by the server, by
+  the new `util/cpu-budget.ts`, and passed to the child), because onnxruntime counts the host's cores and ignores the
+  quota: on a one-CPU container on a 16-core host that was 640 ms per text with its default pool against 54 ms with
+  the count matched, slow enough that a thousand-record seed did not embed in ten minutes. **Batching was measured and not built:** several texts in one inference call were slower on mixed-length text, 161
+  to 215 ms per text against 96 one at a time, because every text in a call is padded to the longest. Three metrics
+  are new: `ythril_embed_wait_seconds` (queue wait, kept out of `ythril_embedding_duration_seconds`, which now
+  carries the inference process's own timing for the local model), `ythril_embed_process_restarts_total{reason}` and
+  `ythril_embed_process_state`. `embedConcurrency` keeps its defaults (2 bundled, 8 external) but what it bounds is
+  now queue pressure on one inference process, not event-loop starvation, and the document pipeline's per-chunk
+  `setImmediate` yield, which existed only because an embed blocked the loop, is gone. The bundled embedding stage of
+  `GET /api/admin/pipeline-status` gains an additive `inference` object (the process `phase`, the model it was started
+  for, consecutive losses, the backoff remaining and the sticky `loadFailure` for the configured model), read live
+  rather than from the 20-second cache, and a sticky load failure turns the stage's `state` to `down` with the reason
+  as its `detail`, so the Models screen's dot is no longer green over a model every embed fails on. No route, tool, parameter or
+  setting changed; the `list_embed_jobs` description gained the one case in which a transient failure ends a job.
+  The local-agent launcher and the inference host now share one `resolveEntry` for starting a compiled or a
+  development entry point.
+
 - **A tool call no longer builds a validator, and a media worker slot refills the moment it frees (`Q-114`).** Every
   tool call, on both doors, built an Ajv and compiled the tool's schema before its handler ran: 4.3 ms of main
   thread per call measured (`testing/bench/tool-call-setup-cost.mjs`, `recall`; `save_entity` 4.2 ms), against 1 us

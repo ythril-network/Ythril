@@ -17,6 +17,7 @@
 import { ChangeDetectionStrategy, Component, computed, input } from '@angular/core';
 import { TranslocoPipe } from '@jsverse/transloco';
 import { HealthState } from './media-processing.types';
+import { problemDetail } from './stage-health';
 
 @Component({
   selector: 'app-health-dot',
@@ -59,8 +60,8 @@ import { HealthState } from './media-processing.types';
   `],
   template: `
     <span class="dot" [class]="cls()" role="img"
-      [attr.aria-label]="prefix() + ('mediaProcessing.health.' + cls() | transloco)"
-      [attr.title]="prefix() + ('mediaProcessing.health.' + cls() | transloco)"></span>
+      [attr.aria-label]="prefix() + ('mediaProcessing.health.' + cls() | transloco) + suffix()"
+      [attr.title]="prefix() + ('mediaProcessing.health.' + cls() | transloco) + suffix()"></span>
   `,
 })
 export class HealthDotComponent {
@@ -68,9 +69,15 @@ export class HealthDotComponent {
   state = input<HealthState | null>(null);
   /** Prepended to the accessible name, so a dot says WHAT is healthy, not just that something is. */
   subject = input<string>('');
+  /**
+   * The stage's `detail` from the status payload. Appended to the name only while the stage is not ok
+   * (`problemDetail`): "not responding" alone sent an operator to Verify for a reason the payload already had.
+   */
+  detail = input<string | null | undefined>(null);
 
   cls = computed(() => this.state() ?? 'unknown');
   // Built in the template via the pipe rather than in a computed, so the name re-translates when the
   // active language changes instead of freezing at whatever it was when the dot was first drawn.
   prefix = computed(() => this.subject() ? `${this.subject()}: ` : '');
+  suffix = computed(() => { const d = problemDetail(this.state(), this.detail()); return d ? ` — ${d}` : ''; });
 }

@@ -41,6 +41,8 @@ import { VECTOR_INDEXED_COLLECTIONS } from '../spaces/vector-index.js';
 import { collectionHoldsRecord } from '../spaces/record-presence.js';
 import { searchReadinessSnapshot, isSearchDown, type SearchReadinessSnapshot } from '../spaces/search-readiness.js';
 import { log } from '../util/log.js';
+import { localInferenceState } from '../brain/local-inference.js';
+import type { WorkerPhase, WorkerState } from '../util/supervised-worker.js';
 import { assistBackend, assistBudgetStatus, type AssistBudget } from '../config/assist-backend.js';
 import type { ChatWire } from '../util/model-chat.js';
 
@@ -86,6 +88,26 @@ export interface ModelStageStatus {
   state: HealthState;
   latencyMs?: number;
   detail?: string;
+  /** The bundled embedding model's inference process; only on an `in-process` embedding stage. See `withEmbeddingProcess`. */
+  inference?: InferenceProcessStatus;
+}
+
+/**
+ * What the bundled model's inference process is doing, as the embedding stage reports it.
+ *
+ * The stage's dot says only that there is no endpoint to be unreachable. It cannot say that the process is
+ * respawning after a crash, or that the model failed to load and will not be tried again until the model, an offline
+ * flag or the server changes: every embed then fails with the same text, and without this an operator has to find
+ * that text in a job's `lastError` or a log. `loadFailure` is for the CONFIGURED model only.
+ */
+export interface InferenceProcessStatus {
+  phase: WorkerPhase;
+  /** The model the running (or last) process was started for; null before the first embed. */
+  modelId: string | null;
+  consecutiveLosses: number;
+  backoffRemainingMs: number;
+  /** The sticky load failure for the configured model, or null. */
+  loadFailure: string | null;
 }
 
 export interface CollectionIndexStatus {
@@ -218,7 +240,7 @@ function modelStages(): StageSpec[] {
   const emb = getEmbeddingConfig();
   const doc = getDocumentProcessingConfig();
   return [
-    // A blank embedding baseUrl means the bundled in-process ONNX model — no endpoint to reach.
+    // A blank embedding baseUrl means the bundled local ONNX model, run by the server's own inference child process — no endpoint to reach.
     { key: 'embedding', label: 'Text embedding', model: emb.model, baseUrl: emb.baseUrl ?? undefined, apiKey: getEmbeddingApiKey(), external: emb.provider === 'external' },
     // The only Ollama-protocol target: a LOCAL vision provider. Its base is a bare host and its routes
     // live under `/api/`; every other target here is OpenAI-compatible.
@@ -331,7 +353,8 @@ export function groupStagesByEndpoint(stages: StageSpec[]): Map<string, StageSpe
 export function classifyStage(s: StageSpec, res: ProbeOutcome | undefined): ModelStageStatus {
   const base = { key: s.key, label: s.label, model: s.model || null, endpoint: hostOf(s.baseUrl), external: s.external };
   if (!s.model) return { ...base, state: 'unconfigured' };
-  // No endpoint + a model name = the bundled in-process model. There is nothing to reach, and
+  // No endpoint + a model name = the bundled local model (in the server's inference child process; the `detail` value
+  // below is an API contract and keeps its name). There is nothing to reach, and
   // reporting it as `down` would put a red dot on the one component that cannot fail that way.
   if (!s.baseUrl) return { ...base, state: 'ok', detail: 'in-process' };
   if (!res) return { ...base, state: 'unconfigured' };
@@ -625,8 +648,41 @@ async function collect(): Promise<PipelineStatus> {
   };
 }
 
-/** Cached + single-flighted: several admins on this screen must not multiply the outbound probes. */
+/**
+ * The bundled embedding stage with its inference process's state added; every other stage unchanged.
+ *
+ * Pure, so the rule is testable without a process. Only an `in-process` embedding stage has a process to report: an
+ * embedding stage with an endpoint calls that endpoint, and the process state would describe nothing it uses. Built
+ * field by field, so the pid and the queue counts in `WorkerState` do not reach the response.
+ */
+export function withEmbeddingProcess(models: ModelStageStatus[], state: WorkerState): ModelStageStatus[] {
+  return models.map(m => {
+    if (m.key !== 'embedding' || m.detail !== 'in-process') return m;
+    const loadFailure = state.loadFailure !== null && state.loadFailureModelId === m.model ? state.loadFailure : null;
+    return {
+      ...m,
+      // Green over a model every embed fails on would be the one wrong answer, so a sticky load failure for the
+      // configured model reads as `down`, with its reason as `detail` -- which the screen shows beside the dot.
+      ...(loadFailure !== null ? { state: 'down' as const, detail: loadFailure } : {}),
+      inference: {
+        phase: state.phase, modelId: state.modelId, consecutiveLosses: state.consecutiveLosses,
+        backoffRemainingMs: state.backoffRemainingMs, loadFailure,
+      },
+    };
+  });
+}
+
+/**
+ * Cached + single-flighted: several admins on this screen must not multiply the outbound probes. The inference
+ * process state is read on every call, over the cached probes: it costs nothing to read, and a backoff reported
+ * twenty seconds late would already be over.
+ */
 export async function getPipelineStatus(): Promise<PipelineStatus> {
+  const probed = await probedPipelineStatus();
+  return { ...probed, models: withEmbeddingProcess(probed.models, localInferenceState()) };
+}
+
+async function probedPipelineStatus(): Promise<PipelineStatus> {
   if (cached && Date.now() - cached.at < CACHE_TTL_MS) return cached.value;
   if (inFlight) return inFlight;
   inFlight = collect()

@@ -12,6 +12,7 @@
 import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { balancedFrom } from './_structural-window.mjs';
 
 let prepareInput, resolvePrefixScheme;
 
@@ -96,7 +97,17 @@ describe('the structure that prevents the bug coming back', () => {
     // `text` is the unprefixed parameter. Once prepareInput exists, every downstream use must be `input`;
     // a stray `text` is the bug reappearing.
     assert.ok(!/embedViaHttp\(text\b/.test(body), 'the HTTP path must send the prepared input');
-    assert.ok(!/pipe\(text\b/.test(body), 'the local path must embed the prepared input');
+    // The local branch used to call `pipe(input, …)`, and this asserted there was no `pipe(text`. Since Q-99 part 1
+    // the local branch hands the string to the inference host, so that negative would be VACUOUS: nothing in
+    // the file calls `pipe(` any more, and a regression to `runLocalInference({ input: text, … })` would pass it.
+    // Re-pointed at the call that exists: it must be given `input`, and the raw `text` must appear nowhere in its
+    // arguments. (`embed-calls-the-inference-host.test.js` holds the behavioural half.)
+    const at = body.indexOf('runLocalInference(');
+    assert.ok(at > 0, 'the local branch no longer calls the inference host — re-anchor this gate');
+    const args = balancedFrom(body, at, 'the runLocalInference arguments');
+    assert.match(args, /\binput\b/, 'the local path must hand the host the prepared input');
+    assert.ok(!/\btext\b/.test(args), 'the local path is handing the host the raw, unprefixed text');
+    assert.ok(!/\bpipe\s*\(/.test(body), 'embed() is calling a pipeline itself again, on the main thread');
   });
 
   it('the HTTP body sends the prepared input, not the raw text', () => {

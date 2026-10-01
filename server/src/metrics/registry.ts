@@ -423,7 +423,7 @@ export const spacesTotal = new Gauge({
 
 export const embeddingDurationSeconds = new Histogram({
   name: 'ythril_embedding_duration_seconds',
-  help: 'Time to compute a single embedding vector',
+  help: 'Time to compute a single embedding vector; for the local model the inference process times it, so queue wait is not included',
   buckets: [0.01, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10],
   registers: [register],
 });
@@ -448,6 +448,49 @@ export const embeddingRetryTotal = new Counter({
   name: 'ythril_embedding_retry_total',
   help: 'Transient embedding-endpoint refusals that were retried, by HTTP status',
   labelNames: ['status'],
+  registers: [register],
+});
+
+/**
+ * The local embedding model runs in a supervised child process (Q-99 part 1). These three are what an operator reads to
+ * see it: how often it was replaced and why, what it is doing now, and how long requests queued for it.
+ *
+ * The queue wait is its own histogram because `ythril_embedding_duration_seconds` is fed the inference process's own
+ * timing: measured around the round trip it would absorb the wait behind other requests, and a busy queue would read
+ * as a slow model.
+ */
+export const embedProcessRestartsTotal = new Counter({
+  name: 'ythril_embed_process_restarts_total',
+  help: 'Times the local embedding process was replaced, by reason: exit, killed, deadline, idle, model-change',
+  labelNames: ['reason'],
+  registers: [register],
+});
+
+const EMBED_PROCESS_STATE_CODE = { none: 0, starting: 1, ready: 2, backoff: 3 } as const;
+let embedProcessPhase: () => keyof typeof EMBED_PROCESS_STATE_CODE = () => 'none';
+
+/**
+ * Where the state gauge reads from. `brain/local-inference.ts` sets it when it loads: the registry cannot import the
+ * host, which imports the registry for its own counters. Until the host is loaded nothing has ever been started, which
+ * is what the default answers. Read at scrape time and synchronously, so the collector has nothing to await.
+ */
+export function setEmbedProcessPhaseSource(read: () => keyof typeof EMBED_PROCESS_STATE_CODE): void {
+  embedProcessPhase = read;
+}
+
+export const embedProcessState = new Gauge({
+  name: 'ythril_embed_process_state',
+  help: 'State of the local embedding process: 0 none, 1 starting, 2 ready, 3 backoff',
+  registers: [register],
+  collect() {
+    this.set(EMBED_PROCESS_STATE_CODE[embedProcessPhase()]);
+  },
+});
+
+export const embedWaitSeconds = new Histogram({
+  name: 'ythril_embed_wait_seconds',
+  help: 'Time a local embedding request waited in the queue before it was sent to the embedding process',
+  buckets: [0.01, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60],
   registers: [register],
 });
 

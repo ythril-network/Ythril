@@ -5,16 +5,15 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 import { globalRateLimit } from '../rate-limit/middleware.js';
 import { requireAdminMfa } from '../auth/middleware.js';
 import { log } from '../util/log.js';
 import { isLoopbackHost, LOCAL_AGENT_DEFAULT_URL } from './local-agent-url.js';
 import { envInt } from '../config/env-num.js';
+import { resolveEntry, type EntryCommand } from '../util/entry-path.js';
 
 export const localAgentRouter = Router();
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
 let runtimeLocalAgentEnabled = false;
 
 export const BootstrapLocalAgentBody = z.object({
@@ -167,7 +166,7 @@ function killStaleConnector(): void {
   }
 }
 
-function spawnConnector(entry: string, tsx?: string): void {
+function spawnConnector(entry: EntryCommand): void {
   const connectorDir = path.join(os.homedir(), '.ythril-local-connector');
   const logFile = path.join(connectorDir, 'connector.log');
   try { fs.mkdirSync(connectorDir, { recursive: true, mode: 0o700 }); } catch { /* ignore */ }
@@ -179,8 +178,7 @@ function spawnConnector(entry: string, tsx?: string): void {
   const token = getOrCreateConnectorToken();
   runtimeConnectorToken = token;
 
-  const cmd = tsx ?? process.execPath;
-  const args = tsx ? [tsx, entry] : [entry];
+  const { cmd, args } = entry;
   let outFd: number | undefined;
   let errFd: number | undefined;
   try {
@@ -204,23 +202,13 @@ function spawnConnector(entry: string, tsx?: string): void {
 }
 
 function tryStartLocalConnector(): void {
-  const jsEntry = path.resolve(__dirname, '..', 'local-agent-connector', 'index.js');
-  const tsEntry = path.resolve(__dirname, '..', 'local-agent-connector', 'index.ts');
-
-  if (fs.existsSync(jsEntry)) {
-    log.info(`[local-agent] starting connector (compiled): ${jsEntry}`);
-    spawnConnector(jsEntry);
-  } else if (fs.existsSync(tsEntry)) {
-    // Dev mode — tsx lives in repo root node_modules (hoisted).
-    const tsxCli = path.resolve(__dirname, '..', '..', '..', 'node_modules', 'tsx', 'dist', 'cli.mjs');
-    if (!fs.existsSync(tsxCli)) {
-      log.warn(`[local-agent] tsx not found at ${tsxCli} — start connector manually: npm run local-connector:dev`);
-      return;
-    }
-    log.info(`[local-agent] starting connector (dev/tsx): ${tsEntry}`);
-    spawnConnector(tsEntry, tsxCli);
-  } else {
-    log.warn(`[local-agent] connector entry not found — jsEntry=${jsEntry}, tsEntry=${tsEntry}`);
+  try {
+    // The compiled entry in a build, the source entry through the hoisted tsx in a checkout; the rule is in one place.
+    const entry = resolveEntry('local-agent-connector/index');
+    log.info(`[local-agent] starting connector: ${entry.args.join(' ')}`);
+    spawnConnector(entry);
+  } catch (err) {
+    log.warn(`[local-agent] ${err instanceof Error ? err.message : String(err)} — start the connector manually: npm run local-connector:dev`);
   }
 }
 

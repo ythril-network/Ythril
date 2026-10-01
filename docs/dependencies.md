@@ -349,7 +349,7 @@ If you run a larger model (a 13B vision model, a `large-v3` transcription model)
 scans, raise the relevant ceiling in `.env` rather than editing `docker-compose.yml`:
 
 ```bash
-YTHRIL_MEM_LIMIT=8g        # default 4g  — the app itself
+YTHRIL_MEM_LIMIT=8g        # default 4g  — the app itself, and its embedding process (one ceiling for both)
 YTHRIL_MONGO_MEM_LIMIT=8g  # default 4g  — MongoDB and vector search; the database cache is sized from it
 OLLAMA_MEM_LIMIT=16g       # default 8g  / OLLAMA_PIDS_LIMIT 2048       / OLLAMA_CPUS 8.0
 WHISPER_MEM_LIMIT=8g       # default 4g  / WHISPER_PIDS_LIMIT 1024      / WHISPER_CPUS 4.0
@@ -366,6 +366,11 @@ The last two are the document sidecars: `doc-render` turns PDF pages into images
 (the `office` profile) converts Word and similar through LibreOffice. Their ceilings used to be fixed in
 `docker-compose.yml`, so raising them meant editing that file -- dense or very large documents are exactly
 the case where you would need to.
+
+`YTHRIL_MEM_LIMIT` is one ceiling for **two processes**: the bundled embedding model does not run inside the server,
+it runs in a child process of the same container (started on the first embed, ended after ten idle minutes, which is
+what returns the model's memory to the operating system). If you run a larger embedding model, size this for the model
+as well as the server.
 
 A job that exceeds its memory ceiling is OOM-killed by the kernel: the affected caption/transcription/
 extraction fails and is reported as such, the rest of the stack keeps running. To confirm that is what

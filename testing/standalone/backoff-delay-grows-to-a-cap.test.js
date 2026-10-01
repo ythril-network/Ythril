@@ -133,4 +133,19 @@ describe('backoffDelayMs — the delays the hand-rolled copies produced', () => 
       }
     }
   });
+
+  it('util/supervised-worker.ts respawn: 1 s doubling to a minute per consecutive loss, the same value for the same random', async () => {
+    // The Q-99 part 1 original: `withJitter(Math.min(60_000, 1_000 * 2 ** Math.max(0, losses - 1)))`.
+    const { respawnBackoffMs } = await import('../../server/dist/util/supervised-worker.js');
+    const oldRespawn = (losses, rand) => {
+      const delay = Math.min(60_000, 1_000 * 2 ** Math.max(0, losses - 1));
+      const half = delay / 2;
+      return Math.round(half + rand() * half);
+    };
+    for (const seed of [11, 12, 13]) {
+      for (const losses of [0, 1, 2, 3, 6, 7, 8, 40, 5_000]) {
+        assert.equal(respawnBackoffMs(losses, seeded(seed)), oldRespawn(losses, seeded(seed)), `losses ${losses}, seed ${seed}`);
+      }
+    }
+  });
 });

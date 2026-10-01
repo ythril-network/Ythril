@@ -36,6 +36,8 @@ interface Step {
   name: string;
   actor: string;
   health: HealthState | null;
+  /** The stage's `detail`, handed to the dot, which shows it only while the step is not ok. */
+  detail?: string | null;
   /** Dashed when true — the step only runs under some configurations. */
   conditional: boolean;
   /** The Models-tab card this actor is configured on. Anchors the deep-link (landing in a later PR). */
@@ -170,7 +172,7 @@ interface Step {
         @for (st of documentSteps(); track st.key) {
           <div class="step" [class.cond]="st.conditional" [class.dim]="stepDim(st.key)" [class.active]="stepActive(st.key)">
             <div class="box">
-              <div class="nm">{{ st.name | transloco }}<app-health-dot [state]="st.health" [subject]="st.name | transloco"/></div>
+              <div class="nm">{{ st.name | transloco }}<app-health-dot [state]="st.health" [detail]="st.detail" [subject]="st.name | transloco"/></div>
               <div class="actor">
                 @if (st.cardId; as cid) {
                   <button type="button" class="link" [class.infra]="isInfra(cid)" (click)="s.requestFocusCard(cid)"
@@ -254,7 +256,7 @@ interface Step {
             <div class="step" [class.cond]="st.conditional"
                  [class.dim]="mediaStepDim(p.id, st.key)" [class.active]="mediaStepActive(p.id, st.key)">
               <div class="box">
-                <div class="nm">{{ st.name | transloco }}<app-health-dot [state]="st.health" [subject]="st.name | transloco"/></div>
+                <div class="nm">{{ st.name | transloco }}<app-health-dot [state]="st.health" [detail]="st.detail" [subject]="st.name | transloco"/></div>
                 <div class="actor">
                   @if (st.cardId; as cid) {
                     <button type="button" class="link" [class.infra]="isInfra(cid)" (click)="s.requestFocusCard(cid)"
@@ -457,19 +459,30 @@ export class PipelinesTabComponent {
     this.s.touched.set(true);
   }
 
+  /**
+   * A step's state AND its detail, read together, so a step cannot be given the colour without the reason. The
+   * dot shows the detail only while the step is not ok (Q-99: "Embed: not responding", with the load error that
+   * explained it sitting unread in the payload).
+   */
+  private stage(kind: 'model' | 'sidecar', key: string): Pick<Step, 'health' | 'detail'> {
+    const ps = this.pipeline;
+    return kind === 'model'
+      ? { health: ps.modelState(key), detail: ps.modelDetail(key) }
+      : { health: ps.sidecarState(key), detail: ps.sidecarDetail(key) };
+  }
+
   documentSteps = computed<Step[]>(() => {
     const doc = this.s.docCfg();
-    const ps = this.pipeline;
     return [
-      { key: 'ocr', name: 'mediaProcessing.step.ocr', actor: 'Tesseract', health: ps.sidecarState('unstructured'), conditional: false, cardId: 'unstructured' },
-      { key: 'render', name: 'mediaProcessing.step.render', actor: 'doc-render', health: ps.sidecarState('doc-render'), conditional: true, cardId: 'doc-render' },
-      { key: 'vlm', name: 'mediaProcessing.step.vlm', actor: doc.vlmModel || this.notSet, health: ps.modelState('doc-vlm'), conditional: true, cardId: 'doc-vlm' },
+      { key: 'ocr', name: 'mediaProcessing.step.ocr', actor: 'Tesseract', ...this.stage('sidecar', 'unstructured'), conditional: false, cardId: 'unstructured' },
+      { key: 'render', name: 'mediaProcessing.step.render', actor: 'doc-render', ...this.stage('sidecar', 'doc-render'), conditional: true, cardId: 'doc-render' },
+      { key: 'vlm', name: 'mediaProcessing.step.vlm', actor: doc.vlmModel || this.notSet, ...this.stage('model', 'doc-vlm'), conditional: true, cardId: 'doc-vlm' },
       // Validate is pure in-process arithmetic (does the VLM output cover the OCR text?), so it has no
       // endpoint and therefore no dot to report — undefined health, not a green one it has not earned.
       { key: 'validate', name: 'mediaProcessing.step.validate', actor: 'in-process', health: null, conditional: true },
-      { key: 'repair', name: 'mediaProcessing.step.repair', actor: doc.repairModel || doc.vlmModel || this.notSet, health: ps.modelState('doc-repair'), conditional: true, cardId: 'doc-repair' },
-      { key: 'verify', name: 'mediaProcessing.step.verify', actor: doc.verifyModel || this.notSet, health: ps.modelState('doc-verify'), conditional: true, cardId: 'doc-verify' },
-      { key: 'embed', name: 'mediaProcessing.step.embed', actor: this.s.embedding.model || this.notSet, health: ps.modelState('embedding'), conditional: false, cardId: 'embedding' },
+      { key: 'repair', name: 'mediaProcessing.step.repair', actor: doc.repairModel || doc.vlmModel || this.notSet, ...this.stage('model', 'doc-repair'), conditional: true, cardId: 'doc-repair' },
+      { key: 'verify', name: 'mediaProcessing.step.verify', actor: doc.verifyModel || this.notSet, ...this.stage('model', 'doc-verify'), conditional: true, cardId: 'doc-verify' },
+      { key: 'embed', name: 'mediaProcessing.step.embed', actor: this.s.embedding.model || this.notSet, ...this.stage('model', 'embedding'), conditional: false, cardId: 'embedding' },
     ];
   });
 
@@ -495,8 +508,8 @@ export class PipelinesTabComponent {
         id: 'images', icon: 'image', title: 'mediaProcessing.pipelines.images', purpose: 'mediaProcessing.pipelines.imagesPurpose',
         ceilings: [{ cls: 'images' as MediaClass, ladder: IMAGE_LEVELS }],
         steps: [
-          { key: 'caption', name: 'mediaProcessing.step.caption', actor: this.s.form.vision?.model || this.notSet, health: ps.modelState('vision'), conditional: false, cardId: 'vision' },
-          { key: 'img-embed', name: 'mediaProcessing.step.embed', actor: embedModel, health: ps.modelState('embedding'), conditional: false, cardId: 'embedding' },
+          { key: 'caption', name: 'mediaProcessing.step.caption', actor: this.s.form.vision?.model || this.notSet, ...this.stage('model', 'vision'), conditional: false, cardId: 'vision' },
+          { key: 'img-embed', name: 'mediaProcessing.step.embed', actor: embedModel, ...this.stage('model', 'embedding'), conditional: false, cardId: 'embedding' },
           // Only at the `recognition` rung, and only when faceRecognition is enabled — genuinely conditional.
           { key: 'faces', name: 'mediaProcessing.step.faces', actor: 'BlazeFace + FaceRes', health: ps.status()?.faceRecognition.state ?? null, conditional: true, cardId: 'face' },
         ] as Step[],
@@ -505,8 +518,8 @@ export class PipelinesTabComponent {
         id: 'audio', icon: 'microphone', title: 'mediaProcessing.pipelines.audio', purpose: 'mediaProcessing.pipelines.audioPurpose',
         ceilings: [{ cls: 'audio' as MediaClass, ladder: AUDIO_LEVELS }],
         steps: [
-          { key: 'transcribe', name: 'mediaProcessing.step.transcribe', actor: this.s.form.stt?.model || this.notSet, health: ps.modelState('stt'), conditional: false, cardId: 'stt' },
-          { key: 'aud-embed', name: 'mediaProcessing.step.embed', actor: embedModel, health: ps.modelState('embedding'), conditional: false, cardId: 'embedding' },
+          { key: 'transcribe', name: 'mediaProcessing.step.transcribe', actor: this.s.form.stt?.model || this.notSet, ...this.stage('model', 'stt'), conditional: false, cardId: 'stt' },
+          { key: 'aud-embed', name: 'mediaProcessing.step.embed', actor: embedModel, ...this.stage('model', 'embedding'), conditional: false, cardId: 'embedding' },
         ] as Step[],
       },
       {
@@ -518,10 +531,10 @@ export class PipelinesTabComponent {
         ceilings: [{ cls: 'video' as MediaClass, ladder: VIDEO_LEVELS }],
         steps: [
           { key: 'vid-split', name: 'mediaProcessing.step.split', actor: 'ffmpeg', health: 'ok', conditional: false },
-          { key: 'vid-transcribe', name: 'mediaProcessing.step.transcribe', actor: this.s.form.stt?.model || this.notSet, health: ps.modelState('stt'), conditional: false, cardId: 'stt' },
+          { key: 'vid-transcribe', name: 'mediaProcessing.step.transcribe', actor: this.s.form.stt?.model || this.notSet, ...this.stage('model', 'stt'), conditional: false, cardId: 'stt' },
           // Only at the `full`/`auto` rung — at `audio` the vision model is not called.
-          { key: 'vid-keyframe', name: 'mediaProcessing.step.keyframe', actor: this.s.form.vision?.model || this.notSet, health: ps.modelState('vision'), conditional: true, cardId: 'vision' },
-          { key: 'vid-embed', name: 'mediaProcessing.step.embed', actor: embedModel, health: ps.modelState('embedding'), conditional: false, cardId: 'embedding' },
+          { key: 'vid-keyframe', name: 'mediaProcessing.step.keyframe', actor: this.s.form.vision?.model || this.notSet, ...this.stage('model', 'vision'), conditional: true, cardId: 'vision' },
+          { key: 'vid-embed', name: 'mediaProcessing.step.embed', actor: embedModel, ...this.stage('model', 'embedding'), conditional: false, cardId: 'embedding' },
         ] as Step[],
       },
       {
@@ -531,7 +544,7 @@ export class PipelinesTabComponent {
           // Chunking only happens at the `chunk` rung; `embed` produces one vector for the whole
           // document. The chunker is bundled and always available in-process, so it reports 'ok'.
           { key: 'chunk', name: 'mediaProcessing.step.chunk', actor: 'text chunker', health: 'ok', conditional: true },
-          { key: 'txt-embed', name: 'mediaProcessing.step.embed', actor: embedModel, health: ps.modelState('embedding'), conditional: false, cardId: 'embedding' },
+          { key: 'txt-embed', name: 'mediaProcessing.step.embed', actor: embedModel, ...this.stage('model', 'embedding'), conditional: false, cardId: 'embedding' },
         ] as Step[],
       },
     ];

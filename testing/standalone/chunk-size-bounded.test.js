@@ -33,6 +33,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
+import { closureCode } from './_import-closure.mjs';
+import { stripComments } from './_strip-comments.mjs';
 
 const ROOT = process.cwd();
 
@@ -175,10 +177,17 @@ describe('the maximum body length', () => {
 describe('the embed call is the backstop', () => {
   it('the local pipeline is called with truncation', () => {
     // Without it, one long input is quadratic attention memory — 9.6 GiB of fp32 scores for a single layer at
-    // ~14,700 tokens. Reading a named file: if it moves, this throws.
-    const src = readFileSync(join(ROOT, 'server/src/brain/embedding.ts'), 'utf8');
-    assert.match(src, /pipe\(input,\s*\{[^}]*truncation:\s*true/,
+    // ~14,700 tokens.
+    //
+    // Re-pointed by Q-99 part 1: the call moved WITH the inference, into the child process. It is asked of
+    // everything the child entry imports rather than of one named file, because which of the child's modules
+    // holds the call is a detail and "the call that runs the model truncates" is the rule. A named file that
+    // moved would make this an assertion about a file that no longer runs the model.
+    const src = closureCode('server/src/brain/embed-process.ts');
+    assert.match(src, /\bpipe\s*\(\s*[\w.]+\s*,\s*\{[^}]*truncation:\s*true/,
       'the local embed no longer truncates, so one unchunked body can cost gigabytes again');
+    assert.ok(!/truncation:\s*true/.test(stripComments(readFileSync(join(ROOT, 'server/src/brain/embedding.ts'), 'utf8'))),
+      'embedding.ts still carries pipeline options: the inference is in the child now, and a stale copy here would be believed');
   });
 
   it('an oversized input is warned about rather than silently averaged', () => {

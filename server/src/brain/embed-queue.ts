@@ -39,6 +39,7 @@ import { withJitter } from '../util/backoff.js';
 import { createWorkSignal } from '../util/work-signal.js';
 import { newClaimToken } from '../files/media/lease.js';
 import { isSpillPath } from './spill-path.js';
+import { LOST_MARKER, NOT_SENT_MARKER } from './embed-errors.js';
 import { embeddingSuppressedFor } from './suppress-embeddings.js';
 import type { BrainEmbedJobDoc, BrainEmbedRecordType } from '../config/types.js';
 import { RECORD_TYPES } from '../config/types.js';
@@ -46,6 +47,17 @@ import { spaceCollection } from '../db/space-collection.js';
 
 /** Attempts before a job is left `failed` for an operator (or a rewrite) to deal with. */
 export const MAX_EMBED_ATTEMPTS = 5;
+
+/**
+ * Times one record may be the job in flight when the inference process is LOST before it is left `failed`.
+ *
+ * A lost process is the embedder's fault, so it is transient and spends none of the record's attempts. But "the
+ * embedder's fault" is also exactly how an input that KILLS the runtime looks, for ever: an outage ends, a segfault on
+ * a particular text does not. Three is enough to tell one OOM kill beside a busy moment from a record that does it
+ * every time, and the terminal `failed` names the crash in `lastError` where an operator can see it and
+ * `retry_embed_record` it. A retry, a rewrite and a new server version each give the record a clean count.
+ */
+export const MAX_LOST_CHILD_FAILURES = 3;
 
 /**
  * More attempts than the media queue's three, for a different failure profile. A media job fails on a
@@ -143,6 +155,7 @@ export async function enqueueEmbedJob(
           // Reset with `attempts`, for the same reason: a new write is new content, and it must not inherit
           // a half-hour backoff earned by an outage that has since ended.
           transientFailures: 0,
+          lostChildFailures: 0,
           maxAttempts: MAX_EMBED_ATTEMPTS,
           lastError: null,
           claimedAt: null,
@@ -206,8 +219,45 @@ export async function completeEmbedJob(
   spaceId: string,
   recordType: BrainEmbedRecordType,
   recordId: string,
+  claimToken?: string | null,
 ): Promise<void> {
-  await jobs(spaceId).deleteOne(asFilter<BrainEmbedJobDoc>({ _id: embedJobId(recordType, recordId) }));
+  await jobs(spaceId).deleteOne(asFilter<BrainEmbedJobDoc>(claimedBy(recordType, recordId, claimToken)));
+}
+
+/**
+ * The filter for a job this worker CLAIMED, when it says which claim that was.
+ *
+ * Once the stall sweep has revived a slow job and another worker holds it, the first worker's late `completeEmbedJob`
+ * (which deletes the job) or `failEmbedJob` would act on a claim that is no longer its own: the newer holder's job
+ * deleted from under it, or its counters overwritten. Naming the token makes a stale finish match nothing. Without
+ * a token the filter is the job's id alone, which is how every caller that does not hold a claim (a test, a delete
+ * path) behaves as before.
+ */
+function claimedBy(recordType: BrainEmbedRecordType, recordId: string, claimToken?: string | null): { _id: string; claimToken?: string } {
+  const _id = embedJobId(recordType, recordId);
+  return claimToken ? { _id, claimToken } : { _id };
+}
+
+/**
+ * Say the worker is alive and still on this job: advance `progressAt`, but only while the claim is still ours.
+ *
+ * The stall sweep revives a `processing` job whose `progressAt` is older than two minutes. An embed used to be short,
+ * but a cold model load, or a queue behind a long document, now takes longer, so the worker beats while an embed is in
+ * flight. `false` means the claim is gone (revived, or finished elsewhere) and is told to nobody: the holder of a stale
+ * claim simply finds its finish is ignored.
+ */
+export async function heartbeatEmbedJob(
+  spaceId: string,
+  recordType: BrainEmbedRecordType,
+  recordId: string,
+  claimToken: string,
+): Promise<boolean> {
+  const now = new Date().toISOString();
+  const res = await jobs(spaceId).updateOne(
+    asFilter<BrainEmbedJobDoc>({ ...claimedBy(recordType, recordId, claimToken), status: 'processing' }),
+    asUpdate<BrainEmbedJobDoc>({ $set: { progressAt: now } }),
+  );
+  return res.matchedCount > 0;
 }
 
 /**
@@ -262,11 +312,15 @@ export async function retireEmbedJob(
  * failure mode with another: a job that never completes and never gives up.
  *
  * Matched on the message because that is what reaches us — the embedder is behind `fetch`, an HTTP client or
- * an in-process model depending on configuration, and there is no one error type across the three.
+ * an inference child process depending on configuration, and there is no one error type across the three.
  */
 export function isTransientEmbedError(message: string): boolean {
   const m = message.toLowerCase();
   return [
+    // A crashed inference process, raised by the host (`embed-errors.ts` owns the words). Transient, and capped per record.
+    LOST_MARKER,
+    // A request queued behind that crash, never sent to the process that died: transient too, and NOT counted.
+    NOT_SENT_MARKER,
     'econnrefused', 'econnreset', 'etimedout', 'ehostunreach', 'enetunreach', 'eai_again', 'enotfound',
     'socket hang up', 'fetch failed', 'network error', 'timeout', 'timed out',
     'too many requests', 'service unavailable', 'bad gateway', 'gateway timeout', 'temporarily unavailable',
@@ -292,21 +346,48 @@ export async function failEmbedJob(
   attempts: number,
   errorMessage: string,
   transientFailures = 0,
+  opts: {
+    /** How many times this job has already been in flight when the inference process was lost. */
+    lostChildFailures?: number;
+    /** The claim this worker holds; a finish under a claim that has been taken over changes nothing. */
+    claimToken?: string | null;
+  } = {},
 ): Promise<void> {
   const now = new Date().toISOString();
-  const _id = embedJobId(recordType, recordId);
+  const filter = claimedBy(recordType, recordId, opts.claimToken);
   const lastError = errorMessage.slice(0, 500);
+
+  // A lost inference process is transient, but it is also how an input that kills the runtime looks, so it is the one
+  // failure of the embedder's that is counted per record and ends one: see `MAX_LOST_CHILD_FAILURES`. Decided BEFORE
+  // the transient branch on purpose, which stays exactly what it says it is: a transient failure never goes terminal.
+  // The marker can only have come from the host: text a child supplies has it defused before it becomes an error.
+  // Only the request that was IN FLIGHT carries it; one merely queued behind the crash carries `NOT_SENT_MARKER`.
+  const lostCrash = errorMessage.includes(LOST_MARKER);
+  const lostFailures = (opts.lostChildFailures ?? 0) + (lostCrash ? 1 : 0);
+  if (lostCrash && lostFailures >= MAX_LOST_CHILD_FAILURES) {
+    await jobs(spaceId).updateOne(
+      asFilter<BrainEmbedJobDoc>(filter),
+      asUpdate<BrainEmbedJobDoc>({
+        $set: {
+          status: 'failed', claimedAt: null, claimToken: null, lastError, updatedAt: now,
+          transientFailures: transientFailures + 1, lostChildFailures: lostFailures,
+        },
+      }),
+    );
+    return;
+  }
 
   if (isTransientEmbedError(errorMessage)) {
     const failures = transientFailures + 1;
     await jobs(spaceId).updateOne(
-      asFilter<BrainEmbedJobDoc>({ _id }),
+      asFilter<BrainEmbedJobDoc>(filter),
       asUpdate<BrainEmbedJobDoc>({
         $set: {
           status: 'pending', claimedAt: null, claimToken: null, lastError, updatedAt: now,
           // The attempt is given back: this failure was not the record's.
           attempts: Math.max(0, attempts - 1),
           transientFailures: failures,
+          ...(lostCrash ? { lostChildFailures: lostFailures } : {}),
           // Saturates at the last step, so a permanently-dead embedder costs one claim per job per half hour
           // rather than a spin. It self-heals the moment the embedder answers.
           claimableAfter: nextClaimableAfter(failures),
@@ -319,7 +400,7 @@ export async function failEmbedJob(
 
   if (attempts < MAX_EMBED_ATTEMPTS) {
     await jobs(spaceId).updateOne(
-      asFilter<BrainEmbedJobDoc>({ _id }),
+      asFilter<BrainEmbedJobDoc>(filter),
       asUpdate<BrainEmbedJobDoc>({
         $set: {
           status: 'pending', claimedAt: null, claimToken: null, lastError, updatedAt: now,
@@ -332,7 +413,7 @@ export async function failEmbedJob(
   }
 
   await jobs(spaceId).updateOne(
-    asFilter<BrainEmbedJobDoc>({ _id }),
+    asFilter<BrainEmbedJobDoc>(filter),
     asUpdate<BrainEmbedJobDoc>({
       $set: { status: 'failed', claimedAt: null, claimToken: null, lastError, updatedAt: now },
     }),
@@ -379,7 +460,7 @@ export async function reviveFailedEmbedJobs(spaceIds: string[], version: string)
       asFilter<BrainEmbedJobDoc>({ status: 'failed', revivedForVersion: { $ne: version } as unknown as string }),
       asUpdate<BrainEmbedJobDoc>({
         $set: {
-          status: 'pending', attempts: 0, transientFailures: 0,
+          status: 'pending', attempts: 0, transientFailures: 0, lostChildFailures: 0,
           claimedAt: null, claimToken: null, claimableAfter: null,
           revivedForVersion: version, updatedAt: new Date().toISOString(),
         },
@@ -515,6 +596,7 @@ export async function retryEmbedJob(
         status: 'pending',
         attempts: 0,
         transientFailures: 0,
+        lostChildFailures: 0,
         lastError: null,
         claimedAt: null,
         claimableAfter: null,
