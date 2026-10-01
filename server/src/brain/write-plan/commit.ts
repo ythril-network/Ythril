@@ -186,7 +186,12 @@ async function afterStage(
     }
   }
   const toQueue = landed.filter(i => plans[i]!.enqueue).map(i => ({ recordType: plans[i]!.kind, recordId: plans[i]!.id }));
-  if (toQueue.length > 0) await enqueueWriteEmbedJobs(spaceId, toQueue, { priority: EMBED_PRIORITY.write });
+  // The write lane never throws by contract; this holds the commit to its own promise whatever the lane does.
+  if (toQueue.length > 0) {
+    await enqueueWriteEmbedJobs(spaceId, toQueue, { priority: EMBED_PRIORITY.write }).catch((err: unknown) => {
+      log.warn(`write commit: ${toQueue.length} record(s) in '${spaceId}' were written but not queued for embedding: ${String(err)}`);
+    });
+  }
 }
 
 /** Insert-time duplicate rules for the landed records that asked for them — bounded, and never awaited by the write. */
