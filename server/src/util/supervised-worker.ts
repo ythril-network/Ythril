@@ -114,7 +114,7 @@ export function forkChild(spec: SpawnSpec): ChildLike {
 }
 
 export interface Scheduler {
-  setTimeout(fn: () => void, ms: number): { unref?(): unknown };
+  setTimeout(fn: () => void, ms: number): { unref?(): unknown; ref?(): unknown };
   clearTimeout(handle: unknown): void;
 }
 
@@ -736,9 +736,17 @@ export function createSupervisedWorker(opts: SupervisedWorkerOptions) {
       await exitOf(inc);
     },
 
-    /** Resolves at once when the host is not backing off, and when the backoff ends when it is. */
+    /**
+     * Resolves at once when the host is not backing off, and when the backoff ends when it is.
+     *
+     * The backoff timer is ref'd once somebody waits on it. During a backoff there is no child, so nothing else holds
+     * the event loop: unref'd like the host's other timers, a script or a test awaiting this promise simply ended
+     * (Linux CI, PR #1470; Windows hid it because a killed child's handles linger there past a short backoff). A
+     * backoff nobody awaits stays unref'd, so an idle process still exits.
+     */
     waitOutBackoff(): Promise<void> {
       if (!inBackoff()) return Promise.resolve();
+      (backoffTimer as { ref?(): unknown } | null)?.ref?.();
       return new Promise<void>(resolve => backoffWaiters.push(resolve));
     },
 

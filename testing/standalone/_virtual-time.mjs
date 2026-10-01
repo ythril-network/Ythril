@@ -55,14 +55,18 @@ export function createVirtualTime(startMs = 1_700_000_000_000) {
   const timers = new Set();
   const slept = [];
 
-  /** A handle shaped like a Node timer, so code that calls `unref()` on it works unchanged. */
+  /**
+   * A handle shaped like a Node timer, so code that calls `unref()` on it works unchanged. It records whether it is
+   * ref'd, as a real one does, because "is anything keeping the process alive while a caller waits" is a property a
+   * test has to be able to read: a waiter on an unref'd timer is a process that exits under it (`refedTimers`).
+   */
   const setTimer = (fn, ms) => {
     const delay = Math.max(0, Number(ms) || 0);
     const handle = {
-      at: t + delay, ms: delay, fn, seq: seq++,
-      unref() { return handle; },
-      ref() { return handle; },
-      hasRef() { return true; },
+      at: t + delay, ms: delay, fn, seq: seq++, refed: true,
+      unref() { handle.refed = false; return handle; },
+      ref() { handle.refed = true; return handle; },
+      hasRef() { return handle.refed; },
       refresh() { if (timers.has(handle)) handle.at = t + handle.ms; return handle; },
     };
     timers.add(handle);
@@ -114,6 +118,8 @@ export function createVirtualTime(startMs = 1_700_000_000_000) {
     slept,
     /** How many timers are waiting. A leak reads as a number that never comes back down. */
     pendingTimers: () => timers.size,
+    /** How many waiting timers are ref'd: what a real event loop would stay alive for. */
+    refedTimers: () => [...timers].filter(x => x.refed).length,
     /** ms until the next timer, or null when none is scheduled. */
     nextDueIn: () => {
       let min = null;

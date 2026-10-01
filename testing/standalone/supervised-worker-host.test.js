@@ -921,6 +921,43 @@ describe('the child holds the process open only while there is work for it', () 
     assert.equal(a.error?.lost, true);
     assert.equal(child.refed || child.channelRefed, false);
   });
+
+  it('stays ref\'d until the LAST pending request is answered, not the first', async () => {
+    const { worker, fake } = setup({ fake: {} });
+    const a = watch(worker.request(req('a')));
+    const b = watch(worker.request(req('b')));
+    await flush();
+    const child = fake.last();
+    await bringUp(child);
+    await answer(child);
+    assert.equal(a.settled, true);
+    assert.equal(b.settled, false);
+    assert.equal(child.refed && child.channelRefed, true, 'one answered, one still waiting: still held');
+    await answer(child);
+    assert.equal(b.settled, true);
+    assert.equal(child.refed || child.channelRefed, false);
+  });
+
+  // Found on Linux CI (PR #1470): after a loss there is no child to hold anything, the backoff timer was unref'd
+  // like every other host timer, and a caller awaiting `waitOutBackoff()` was a process with nothing keeping it
+  // alive, so a script (or a test) that awaited the end of a backoff simply ended. Windows passed only because a
+  // killed child's handles linger there long enough to bridge a short backoff.
+  it('a caller waiting out the backoff is held open by the backoff timer, and a backoff nobody awaits holds nothing', async () => {
+    const { worker, fake, vt } = setup({ fake: {}, host: { backoffMs: () => 5_000 } });
+    worker.request(req('a')).catch(() => {});
+    await flush();
+    await bringUp(fake.last());
+    fake.last().exit(1, null);
+    await flush();
+    assert.equal(worker.state().phase, 'backoff');
+    assert.equal(vt.refedTimers(), 0, 'a backoff nobody is waiting for must not keep a script alive');
+
+    const w = watch(worker.waitOutBackoff());
+    assert.equal(vt.refedTimers(), 1, 'someone awaits the end of the backoff: the process must live to see it');
+    await vt.advance(5_000);
+    assert.equal(w.settled, true);
+    assert.equal(vt.refedTimers(), 0);
+  });
 });
 
 describe('the environment a child gets', () => {
