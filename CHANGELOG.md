@@ -9,6 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **A bulk write costs a handful of database round trips, not several per item (`Q-99`, part 3 of 3).** A batch
+  is now read once — every record, edge end and triplet it names in one query per kind — decided item by item by
+  the same code each single-record endpoint uses, and written in one block per kind. Measured on the standalone
+  harness: 200 facts went from 800 database commands to a handful, 200 edges between existing entities from 1800.
+  Items still see the earlier items of the same call as written (a repeated edge becomes one edge and an update,
+  a `functional` label counts the batch's earlier edges, the duplicate-name warning sees earlier entities), and an
+  item that addresses something an earlier item also writes is applied after it, as two calls would be. What an
+  integrator will notice:
+  - **BREAKING for a reader of `inserted`: a converge counts under `updated`.** A fact or chrono item carrying the
+    `id` of an existing record converges onto it, and was counted in `inserted` although nothing new was created;
+    it now counts in `updated`, as an entity always did. `inserted` means new records, as the guide always said.
+    The `bulk.write` webhook fires for a batch that only converged.
+  - **An item that depends on an item that was not written says why** — an edge from a `$ref` whose item was
+    refused names that refusal, not "unknown `$ref`" — and a `$ref` key used twice is refused before anything is
+    written rather than reported after.
+  - **A per-item reason never carries the database's own text** (a duplicate-key message named the internal
+    collection and index).
+  - **A converge that loses a race to another write is decided again**, against what the record now says, so the
+    other write's change is kept; losing twice is a `409` on every create door and an item error in a batch.
+  - `save_bulk` documents and declares the `id` its fact and chrono items always accepted.
+
 - **A reindex queues its records for the embedding worker instead of embedding them in a loop of its own, and it
   survives a restart (`Q-99`, part 2 of 3).** `POST /api/brain/spaces/:id/reindex` and `space_reindex` record a
   run for the space and return; every record is then queued as a rebuild job and rebuilt by the same worker and the
@@ -254,6 +275,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   resolver, so MCP accepts what REST always did; `recall`'s `maxTokens` text no longer says it converts onto bytes.
 
 ### Fixed
+
+- **A peer could miss a record for good when two writes overlapped (`Q-196`).** A write took its sequence number
+  a moment before it stored the record, and every page a peer pulls served whatever sequence numbers were stored —
+  so a later write that finished first could be handed out while an earlier one was still being stored, the peer
+  moved its watermark past it, and never came back for it. Every seq-paged route (the five record families,
+  `filemeta`, `tombstones`), the push loop and the duplicate and contradiction scanners now stop below any write
+  that has not finished; a write's sequence number is taken as part of the write and released when it settles,
+  including inside a transaction, which holds it until it commits.
+- **A bulk edge whose end was a `$ref` to a fact or chrono entry was stored as an entity end (`Q-193`)** when the
+  item did not state the kind: it was checked for existence as the fact it named and stored pointing at an entity
+  that did not exist, so a traversal from the fact never found it. The edge now stores the kind of the record the
+  key names.
+- **A chrono entry rewritten through its `id` kept the vector of its old content (`Q-192`).** The converge branch
+  never queued the re-embed the insert branch queues, so the entry's search vector described what it no longer said.
+- **A record retired from meaning-ranked search got a vector anyway when it was rewritten without restating the
+  flag (`Q-194`)** — on every create endpoint with `waitForEmbedding` or `checkDuplicates`, through a batch, and on
+  the survivor of a merge. The write now decides suppression on the record it leaves: the stored flag unless the
+  write states one.
+- **`save_bulk` on MCP accepted a retired or unknown key and wrote nothing (`Q-195`)**: `{"memories": […]}`
+  answered success while the REST door refused it with a `400` naming `facts`. Both doors now run the same check
+  and refuse the same keys with the same message.
+- **An edge created with a property its label's schema defaults was stored without the default**, although the
+  default was what passed validation; the stored edge now carries the value that was checked.
 
 - **A reindex embedded different text from the write that created the record, and never rebuilt a passage or a
   caption (`Q-99`, part 2).** Its five hand-written loops were a copy of the embed queue's text builder that had

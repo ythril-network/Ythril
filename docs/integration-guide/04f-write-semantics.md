@@ -329,6 +329,24 @@ Notes:
 The same header, in the same spellings, is honoured on space-meta writes against `meta.version` — see the
 [Spaces API](06-spaces-api.md).
 
+#### A converging create never overwrites a concurrent write
+
+The create endpoints (`POST /facts`, `/entities`, `/chrono`, `/edges`, their MCP `save_*` tools, and every item
+of a bulk write) protect a converge without being asked. A create that names an existing record by `id` — or an
+edge whose identity is already stored — is decided against the record as it was read, and lands only if nobody
+changed it in between. If somebody did, the write is decided again against what the record now says, so the
+other write's change is kept and merged rather than overwritten.
+
+Losing that race a second time answers **409** on both doors (on MCP, the tool result is an error with status
+`409`), with nothing written:
+
+```json
+{ "error": "the fact '3f2b1c9e-…' was changed by another write while this one was being applied, twice; nothing was written — retry it" }
+```
+
+It takes a record under continuous concurrent writes to see it. Resending the same request is the remedy. On a
+bulk write the same case is an item error with that reason, and the rest of the batch is written.
+
 ### What a read never sends, and what you can drop
 
 **The embedding vector is never returned — by any endpoint, on either door, and there is no parameter that
