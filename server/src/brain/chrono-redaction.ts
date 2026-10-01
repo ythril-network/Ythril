@@ -41,10 +41,10 @@ import { col, asFilter, asUpdate } from '../db/mongo.js';
 import { concreteSpaces } from '../spaces/proxy.js';
 import { log } from '../util/log.js';
 import {
-  recordExpiry, recordContentExpiry, needsContentRedaction, REDACTED_CHRONO_FIELDS, declaredRetention,
+  needsContentRedaction, REDACTED_CHRONO_FIELDS, declaredRetention,
   type RetentionSpace,
 } from './chrono-retention.js';
-import { COLLECTION_SUFFIX, TYPE_FIELD } from './ttl.js';
+import { COLLECTION_SUFFIX, TYPE_FIELD, retentionStamps } from './ttl.js';
 import type { ChronoEntry, KnowledgeType } from '../config/types.js';
 import { KNOWLEDGE_TYPES } from '../config/types.js';
 import { spaceCollection } from '../db/space-collection.js';
@@ -113,16 +113,13 @@ export async function backfillTypedExpiry(
     .toArray() as unknown as Array<Record<string, unknown> & { _id: string; createdAt?: string }>;
 
   for (const r of rows) {
-    // From the record's OWN creation time. Using `now` would hand every existing record a fresh full window,
-    // which is the opposite of what enabling a retention policy means.
-    const createdMs = Date.parse(r.createdAt ?? '');
-    if (!Number.isFinite(createdMs)) continue;   // cannot date it ⇒ cannot expire it
+    // From the record's OWN creation time — the same stamping step as the arrival writer's (`retentionStamps`).
+    // Using `now` would hand every existing record a fresh full window, the opposite of what enabling a retention
+    // policy means. The schema-only half of this pass's policy is WHICH records it reaches (`policedTypes`, above).
     const type = typeof r[typeField] === 'string' ? r[typeField] as string : undefined;
-    const $set: Record<string, unknown> = {};
-    const expireAt = recordExpiry(space, collection, type, createdMs);
-    const contentAt = recordContentExpiry(space, collection, type, createdMs);
-    if (expireAt) $set['_expireAt'] = expireAt;
-    if (contentAt) $set['_contentExpireAt'] = contentAt;
+    const $set: Record<string, unknown> = retentionStamps(space, collection, r);
+    const expireAt = $set['_expireAt'] as Date | undefined;
+    const contentAt = $set['_contentExpireAt'] as Date | undefined;
     if (Object.keys($set).length === 0) continue;
     // A policy configured months ago and never applied begins deleting records the moment this pass reaches it.
     // That is the documented behaviour and it is still worth saying out loud, once, at info.

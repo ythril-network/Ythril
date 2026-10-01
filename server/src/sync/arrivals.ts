@@ -61,12 +61,12 @@ import { bumpSeq, isSeqImplausible } from '../util/seq.js';
 import { inChunks } from '../util/chunks.js';
 import { log } from '../util/log.js';
 import { BRAIN_COLLECTIONS } from '../config/types.js';
-import type { BrainCollection, BrainEmbedRecordType, KnowledgeType } from '../config/types.js';
+import type { BrainCollection, BrainEmbedRecordType } from '../config/types.js';
 import { LOCAL_ONLY_FIELDS, RESTORED_LOCAL_FIELDS, DERIVED_LOCAL_FIELDS } from './local-only-fields.js';
 import { planSeqUpserts, retagToLocalSpace, isNewerCopy } from './upsert-plan.js';
 import { enqueueIngestedRecords } from '../brain/embed-queue.js';
-import { recordExpiry, recordContentExpiry, type RetentionSpace } from '../brain/chrono-retention.js';
-import { retentionSpace, TYPE_FIELD } from '../brain/ttl.js';
+import type { RetentionSpace } from '../brain/chrono-retention.js';
+import { retentionSpace, retentionStamps } from '../brain/ttl.js';
 import { isDerived } from '../brain/embed-record.js';
 import { ingestFileMeta, fileMetaForWire } from '../api/sync/_shared.js';
 
@@ -191,13 +191,8 @@ function prepared(raw: Doc, family: BrainCollection, restore: boolean): Doc {
 
 /** D-9: the stamps this instance's policy gives a record created at `createdAt`, absent where it gives none. */
 function receiverStamps(doc: Doc, recordType: BrainEmbedRecordType, space: RetentionSpace | undefined): Doc {
-  const created = typeof doc['createdAt'] === 'string' ? Date.parse(doc['createdAt']) : NaN;
-  if (!space || Number.isNaN(created)) return {} as Doc;
-  const typeField = recordType === 'file' ? undefined : TYPE_FIELD[recordType as KnowledgeType];
-  const type = typeField && typeof doc[typeField] === 'string' ? doc[typeField] as string : undefined;
-  const expireAt = recordExpiry(space, recordType, type, created);
-  const contentAt = recordContentExpiry(space, recordType, type, created);
-  return { ...(expireAt ? { _expireAt: expireAt } : {}), ...(contentAt ? { _contentExpireAt: contentAt } : {}) } as Doc;
+  // This instance's whole `schema > space` policy (the backfill passes a schema-only one to the same step).
+  return (space ? retentionStamps(space, recordType, doc) : {}) as Doc;
 }
 
 /**
