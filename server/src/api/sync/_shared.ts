@@ -478,6 +478,29 @@ export const NON_PEER_WRITE_MESSAGE =
   'Sync writes require a peer token (peerInstanceId) or an admin token — use the regular REST API for user writes';
 
 /**
+ * The preamble every sync WRITE route runs before it reads the body: a space named, the caller's reach into it, a
+ * peer (or admin) token, and the network direction. Answers the refusal itself and returns `null`; otherwise the
+ * space id. One function, because these four checks were written out at every write route (the document routes,
+ * the tombstone route, the file-tombstone route) and a write route that misses one is a door with less in front
+ * of it.
+ *
+ * @param spaceId where the route names the space — the query by default; the file-tombstone route names it in the body
+ */
+export function pushAllowed(
+  req: import('express').Request,
+  res: import('express').Response,
+  spaceId: unknown = (req.query as Record<string, unknown>)['spaceId'],
+): string | null {
+  const networkId = (req.query as Record<string, string | undefined>)['networkId'];
+  const token = req.authToken as Record<string, unknown>;
+  if (typeof spaceId !== 'string' || !spaceId) { res.status(400).json({ error: 'spaceId required' }); return null; }
+  if (!spaceAllowed(spaceId, networkId, token)) { res.status(403).json({ error: 'Forbidden' }); return null; }
+  if (isNonPeerSyncWrite(token)) { res.status(403).json({ error: NON_PEER_WRITE_MESSAGE }); return null; }
+  if (isDirectionalWriteBlocked(spaceId, token)) { res.status(403).json({ error: 'Directional network: write not permitted from this peer' }); return null; }
+  return spaceId;
+}
+
+/**
  * For directional networks (braintree, pubsub), reject inbound writes from
  * members whose direction is 'push'. Direction is stored from THIS instance's
  * perspective:

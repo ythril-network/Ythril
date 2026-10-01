@@ -18,7 +18,7 @@ import { bumpSeq, withAllocatedSeqs, settledSeqRange } from '../../util/seq.js';
 import type { FactDoc, EntityDoc, EdgeDoc, ChronoEntry, LinkDoc } from '../../config/types.js';
 import type { FileMetaDoc } from '../../config/types.js';
 import { LOCAL_ONLY_EXCLUSION } from '../../sync/local-only-fields.js';
-import { checkEdgeLinkViolations, checkLinkViolations, MAX_FORK_DEPTH, IncomingFactDoc, IncomingEntityDoc, IncomingEdgeDoc, IncomingChronoDoc, IncomingLinkDoc, IncomingFileMetaDoc, encodeCursor, decodeCursor, callerPeerId, spaceAllowed, isNonPeerSyncWrite, NON_PEER_WRITE_MESSAGE, isDirectionalWriteBlocked, violationsAgainstLocalSchema, withSchemaViolations } from './_shared.js';
+import { checkEdgeLinkViolations, checkLinkViolations, MAX_FORK_DEPTH, IncomingFactDoc, IncomingEntityDoc, IncomingEdgeDoc, IncomingChronoDoc, IncomingLinkDoc, IncomingFileMetaDoc, encodeCursor, decodeCursor, callerPeerId, spaceAllowed, pushAllowed, violationsAgainstLocalSchema, withSchemaViolations } from './_shared.js';
 import { writeArrivals, arrivalRefusal, arrivalId, warnArrivalsNotStored, type ArrivalOptions, type ArrivalOutcome, type ArrivalRefusal } from '../../sync/arrivals.js';
 import { planPushArrivals, type PushDoc, type PushFamily, type PushVerdict } from '../../sync/upsert-plan.js';
 import { REPLICATED_FAMILIES, RECORD_TYPE_OF, type PayloadKey, type ReplicatedFamily } from '../../sync/replicated-families.js';
@@ -354,17 +354,6 @@ async function acceptPushedPage(
     }
   }
   return results;
-}
-
-/** The single routes' shared preamble: scope, peer token, direction. Answers and returns false when refused. */
-function pushAllowed(req: Request, res: Response): string | null {
-  const { spaceId, networkId } = req.query as Record<string, string>;
-  const token = req.authToken as Record<string, unknown>;
-  if (!spaceId) { res.status(400).json({ error: 'spaceId required' }); return null; }
-  if (!spaceAllowed(spaceId, networkId, token)) { res.status(403).json({ error: 'Forbidden' }); return null; }
-  if (isNonPeerSyncWrite(token)) { res.status(403).json({ error: NON_PEER_WRITE_MESSAGE }); return null; }
-  if (isDirectionalWriteBlocked(spaceId, token)) { res.status(403).json({ error: 'Directional network: write not permitted from this peer' }); return null; }
-  return spaceId;
 }
 
 const peerOf = (req: Request): string => callerPeerId(req.authToken as Record<string, unknown>) ?? 'unknown';

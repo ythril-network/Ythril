@@ -20,7 +20,7 @@ import { deleteStored } from '../../files/stored-bytes.js';
 import path from 'node:path';
 import type { TombstoneDoc, FileTombstoneDoc } from '../../config/types.js';
 
-import { spaceAllowed, isNonPeerSyncWrite, NON_PEER_WRITE_MESSAGE, isDirectionalWriteBlocked, callerPeerId } from './_shared.js';
+import { spaceAllowed, pushAllowed, callerPeerId } from './_shared.js';
 import { recordServedSeq } from '../../sync/served-watermark.js';
 import { spaceCollection } from '../../db/space-collection.js';
 
@@ -78,11 +78,8 @@ syncTombstonesRouter.get('/tombstones', syncRateLimit, requireAuth, async (req, 
 /** POST /api/sync/tombstones — apply tombstones received from a peer */
 syncTombstonesRouter.post('/tombstones', syncRateLimit, requireAuth, denyReadOnly, async (req, res) => {
   try {
-    const { spaceId, networkId } = req.query as Record<string, string>;
-    if (!spaceId) { res.status(400).json({ error: 'spaceId required' }); return; }
-    if (!spaceAllowed(spaceId, networkId, req.authToken as Record<string, unknown>)) { res.status(403).json({ error: 'Forbidden' }); return; }
-    if (isNonPeerSyncWrite(req.authToken as Record<string, unknown>)) { res.status(403).json({ error: NON_PEER_WRITE_MESSAGE }); return; }
-    if (isDirectionalWriteBlocked(spaceId, req.authToken as Record<string, unknown>)) { res.status(403).json({ error: 'Directional network: write not permitted from this peer' }); return; }
+    const spaceId = pushAllowed(req, res);
+    if (spaceId === null) return;
 
     const body = req.body as { tombstones?: TombstoneDoc[] };
     const tombstones = body?.tombstones ?? [];
@@ -208,13 +205,11 @@ syncTombstonesRouter.get('/file-tombstones', syncRateLimit, requireAuth, async (
  */
 syncTombstonesRouter.post('/file-tombstones', syncRateLimit, requireAuth, denyReadOnly, async (req, res) => {
   try {
-    const { spaceId, tombstones } = req.body as { spaceId?: string; tombstones?: unknown[] };
-    const { networkId } = req.query as Record<string, string>;
-    if (!spaceId || typeof spaceId !== 'string') { res.status(400).json({ error: 'spaceId required' }); return; }
+    const { spaceId: named, tombstones } = req.body as { spaceId?: unknown; tombstones?: unknown[] };
+    // The space is named in the BODY on this route; the preamble is the same one every sync write runs.
+    const spaceId = pushAllowed(req, res, named);
+    if (spaceId === null) return;
     if (!Array.isArray(tombstones)) { res.status(400).json({ error: 'tombstones must be array' }); return; }
-    if (!spaceAllowed(spaceId, networkId, req.authToken as Record<string, unknown>)) { res.status(403).json({ error: 'Forbidden' }); return; }
-    if (isNonPeerSyncWrite(req.authToken as Record<string, unknown>)) { res.status(403).json({ error: NON_PEER_WRITE_MESSAGE }); return; }
-    if (isDirectionalWriteBlocked(spaceId, req.authToken as Record<string, unknown>)) { res.status(403).json({ error: 'Directional network: write not permitted from this peer' }); return; }
 
     const spaceFiles = path.resolve(getDataRoot(), 'files', spaceId);
     let applied = 0;
