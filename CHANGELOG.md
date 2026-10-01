@@ -72,6 +72,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   item did not state the kind: it was checked for existence as the fact it named and stored pointing at an entity
   that did not exist, so a traversal from the fact never found it. The edge now stores the kind of the record the
   key names.
+- **A chrono entry rewritten through its `id` kept the vector of its old content (`Q-192`).** The converge branch
+  never queued the re-embed the insert branch queues, so the entry's search vector described what it no longer said.
+- **A record retired from meaning-ranked search got a vector anyway when it was rewritten without restating the
+  flag (`Q-194`)** — on every create endpoint with `waitForEmbedding` or `checkDuplicates`, through a batch, and on
+  the survivor of a merge. The write now decides suppression on the record it leaves: the stored flag unless the
+  write states one.
 
 ## [5.6.0] — 2026-09-29
 

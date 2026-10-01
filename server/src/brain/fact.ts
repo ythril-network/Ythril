@@ -25,7 +25,7 @@ import { classifyFactUpsertAgainst, SchemaViolationError, type UpdateValidation 
 import { applyDeleteFields } from './delete-fields.js';
 import { mergeTags, mergeProperties, mergePropertiesOrKeep } from './merge-fields.js';
 import { enqueueEmbedJob, retireEmbedJob } from './embed-queue.js';
-import { embeddingSuppressedFor } from './suppress-embeddings.js';
+import { embeddingSuppressedFor, recordTierAfterWrite } from './suppress-embeddings.js';
 import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';
 import type { FactDoc, TombstoneDoc } from '../config/types.js';
 import { SimilarMatch, checkDuplicates } from './recall.js';
@@ -149,8 +149,9 @@ export async function saveFact(
   // The RECORD tier is stated here, which it was not until 2026-09-02: this asked with `{ type }` alone, so
   // a caller's own flag had nowhere to be read from and the type schema answered instead. `undefined` still
   // means "not stated" and falls through, which is what makes passing it unconditionally safe.
+  // The record tier is the one the write LEAVES: the stored flag unless this write states one (`Q-194`).
   const suppressed = embeddingSuppressedFor(spaceId, 'fact',
-    { type, suppressEmbeddings: opts?.suppressEmbeddings });
+    { type, suppressEmbeddings: recordTierAfterWrite(opts?.suppressEmbeddings, existing) });
   const needsVectorNow = !suppressed
     && (opts?.waitForEmbedding === true || opts?.checkDuplicates === true || opts?.checkContradictions === true);
 

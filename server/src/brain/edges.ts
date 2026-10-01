@@ -21,7 +21,7 @@ import { getSpaceMeta } from '../spaces/schema-validation.js';
 import { applyDeleteFields, setUnlessDeleted } from './delete-fields.js';
 import { mergePropertiesOrKeep, mergeTagsOrKeep } from './merge-fields.js';
 import { enqueueEmbedJob, retireEmbedJob } from './embed-queue.js';
-import { embeddingSuppressedFor } from './suppress-embeddings.js';
+import { embeddingSuppressedFor, recordTierAfterWrite } from './suppress-embeddings.js';
 import { linkClassFor, LINK_CLASSES } from './link-adjacency.js';
 import { frontierEdgeQuery } from './frontier-query.js';
 import { linkedRecordsAtFrontier, recordDisplayName, recordDisplayType }
@@ -212,8 +212,9 @@ export async function upsertEdge(
   // Hoisted rather than asked inline, because the enqueue below has to consult the same answer: skipping the
   // inline embed and queueing anyway stores the vector the flag forbids moments later. The RECORD tier is
   // stated here, which it was not until 2026-09-02 — see `DupeCheckOpts`.
+  // The record tier is the one the write LEAVES: the stored flag unless this write states one (`Q-194`).
   const suppressed = embeddingSuppressedFor(spaceId, 'edge',
-    { label, suppressEmbeddings: opts?.suppressEmbeddings });
+    { label, suppressEmbeddings: recordTierAfterWrite(opts?.suppressEmbeddings, existing) });
   if (opts?.waitForEmbedding === true && !suppressed) {
     const [fromName, toName] = await resolveEdgeEndpointNames(spaceId, from, to, opts?.fromKind, opts?.toKind);
     const embedText = edgeEmbedText(fromName, label, toName, effectiveTags, effectiveType, effectiveDesc, effectiveProps);

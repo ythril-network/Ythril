@@ -25,7 +25,7 @@ import { classifyChronoUpsertAgainst, SchemaViolationError, type UpdateValidatio
 import { mergeTags, mergeProperties, mergePropertiesOrKeep } from './merge-fields.js';
 import { applyDeleteFields } from './delete-fields.js';
 import { enqueueEmbedJob, retireEmbedJob } from './embed-queue.js';
-import { embeddingSuppressedFor } from './suppress-embeddings.js';
+import { embeddingSuppressedFor, recordTierAfterWrite } from './suppress-embeddings.js';
 import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';
 import type { ChronoEntry, ChronoType, ChronoStatus, TombstoneDoc } from '../config/types.js';
 import { writeFilterFor, writeOutcome } from './write-precondition.js';
@@ -195,8 +195,9 @@ export async function createChrono(
   //
   // Hoisted, because the enqueue below consults the same answer. The RECORD tier is stated here, which it was
   // not until 2026-09-02 — see `DupeCheckOpts`.
+  // The record tier is the one the write LEAVES: the stored flag unless this write states one (`Q-194`).
   const suppressed = embeddingSuppressedFor(spaceId, 'chrono',
-    { type: fields.type, suppressEmbeddings: opts?.suppressEmbeddings });
+    { type: fields.type, suppressEmbeddings: recordTierAfterWrite(opts?.suppressEmbeddings, existing) });
   if (opts?.waitForEmbedding === true && !suppressed) {
     const embResult = await embed(embedText);
     embeddingFields = { embedding: embResult.vector, embeddingModel: embResult.model, matchedText: embedText };
@@ -244,6 +245,9 @@ export async function createChrono(
     await col<ChronoEntry>(spaceCollection(spaceId, 'chrono')).updateOne(
       asFilter<ChronoEntry>({ _id: existing._id }), asUpdate<ChronoEntry>(updateOp),
     );
+    // The converge re-embeds as the insert does (`Q-192`): it rewrote the title and description the vector
+    // describes, and without the job the entry kept the vector of its old content. Same rule as `saveFact`.
+    if (!embeddingFields.embedding && !suppressed) await enqueueEmbedJob(spaceId, 'chrono', existing._id);
     const converged = { ...existing, ...($set as Partial<ChronoEntry>) } as ChronoEntry;
     if ('_expireAt' in $unset) delete (converged as { _expireAt?: unknown })._expireAt;
     // Both classes, from the CONVERGED document rather than the parameters: this branch merges, so what

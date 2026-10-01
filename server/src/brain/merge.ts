@@ -22,7 +22,7 @@ import { edgeIdFor } from './edge-id.js';
 import { linkIdFor } from './links.js';
 import { rekeyEdge, embedQueueWorkFor } from './edge-rekey.js';
 import { enqueueEmbedJob, retireEmbedJob } from './embed-queue.js';
-import { embeddingSuppressedFor } from './suppress-embeddings.js';
+import { embeddingSuppressedFor, recordTierAfterWrite } from './suppress-embeddings.js';
 import { validateEdge } from '../spaces/schema-validation.js';
 import type { ResolvedEdgeEnds } from '../spaces/schema-validation.js';
 import { validateEntity, getSpaceMeta, applyValidation, type SchemaViolation } from '../spaces/schema-validation.js';
@@ -718,7 +718,10 @@ export async function executeMerge(
        * document directly and never enqueues, so the queue's check — the last place suppression takes
        * effect — was never reached. Same shape as the creators, one path further along.
        */
-      const suppressed = embeddingSuppressedFor(spaceId, 'entity', { type: survivor.type });
+      // The survivor's own record tier too (`Q-194`): asked with `{ type }` alone, a survivor stored as
+      // retired from meaning-ranked search was handed a vector.
+      const suppressed = embeddingSuppressedFor(spaceId, 'entity',
+        { type: survivor.type, suppressEmbeddings: recordTierAfterWrite(undefined, survivor) });
       let embeddingFields: { embedding?: number[]; embeddingModel?: string } = {};
       if (!suppressed) {
         try {
