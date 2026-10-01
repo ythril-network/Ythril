@@ -87,14 +87,17 @@ describe('one duplicate key does not wedge a member', () => {
   it('an error that is NOT a duplicate or a document\'s own refusal still throws', () => {
     const body = writer();
     // The per-operation path: a code that is neither a duplicate nor a document refusal fails the page.
-    assert.match(body, /else if \(isDocumentRefusalCode\(code\)\) retry\.push\(d\);\s*else throw new ArrivalWriteError\(/,
+    assert.match(body, /else if \(isDocumentRefusalCode\(code\)\) retry\.push\(d\);\s*else throw stopped\(err\);/,
       'a per-operation failure whose code is not the document\'s is absorbed instead of failing the page');
     // The no-shape path: nothing says which documents landed, so each is asked — and classified the same way.
     assert.match(body, /if \(!failures \|\|[^\n]*\)\s*\{[\s\S]*?await oneByOne\(chunk, writeOne\)/,
       'a failure with no per-operation shape is treated as if it had one');
-    assert.match(body, /else if \(isDocumentRefusal\(err\)\)[^\n]*\n\s*else throw new ArrivalWriteError\(/,
+    assert.match(body, /else if \(isDocumentRefusal\(err\)\)[^\n]*\n\s*else throw stopped\(err\);/,
       'a single write\'s failure that is not the document\'s own is refused instead of failing the page');
 
+    // `stopped` is the one way the writer gives up on a page: an ArrivalWriteError carrying the outcome so far.
+    assert.match(body, /const stopped = \(err: unknown\): ArrivalWriteError => \{[\s\S]*?e\.partial = out;/,
+      'the writer stops a page without an ArrivalWriteError that carries what already landed');
     const shared = stripComments(readFileSync('server/src/db/write-errors.ts', 'utf8'));
     assert.match(bodyOf(shared, 'bulkWriteFailures'), /if \(!writeErrors\) return null;/,
       'bulkWriteFailures answers something for an error with no writeErrors, so the no-shape path never runs');
