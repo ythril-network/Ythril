@@ -38,15 +38,14 @@ client defects. Breaking changes and features already on `main` are not part of 
   above this instance's own counter is still served.
 
 - **A network joined before the join default now syncs on its own.** 5.6.0 gave a new join a schedule (every 15
-  minutes, or the inviter's), but a network joined earlier kept none and pulled only when its peer started a cycle —
-  seen on an instance whose two joined networks had no schedule at all. It gets the default at the next start, named
+  minutes, or the inviter's), but a network joined earlier kept none and pulled only when its peer started a cycle.
+  It gets the default at the next start, named
   in the log. Clearing a schedule now stores manual as a choice (`""`) rather than as nothing, so manual set on
   purpose is never replaced; one cleared before this change reads as never set, so it is scheduled once.
 
 - **A peer keeps one token, not one per join (`Q-163`).** Every network joined with the same instance minted it a
   new token and left the previous one valid, though the peer keeps only the newest and could never present the
-  others: an instance showed eight `peer:` tokens for one peer, seven of them last used minutes after they were made.
-  A completed handshake now revokes the tokens it replaces, on both sides, and an instance drops the unused leftovers
+  others, so unused tokens piled up. A completed handshake now revokes the tokens it replaces, on both sides, and an instance drops the unused leftovers
   when it starts. A token still in a handshake is left alone, since two joins can overlap.
 
 - **A member that learned a join vote from another member no longer admits the joiner on its own vote**
@@ -66,8 +65,8 @@ client defects. Breaking changes and features already on `main` are not part of 
   that did not exist, so a traversal from the fact never found it. The edge now stores the kind of the record the
   key names.
 
-- **A chrono entry rewritten through its `id` kept the vector of its old content (`Q-192`).** The converge branch
-  never queued the re-embed the insert branch queues, so the entry's search vector described what it no longer said.
+- **A chrono entry rewritten through its `id` kept the vector of its old content (`Q-192`).** A rewrite never queued
+  a re-embed, as a new entry does, so the entry's search vector described what it no longer said.
 
 - **A record retired from meaning-ranked search got a vector anyway when it was rewritten without restating the
   flag (`Q-194`)** — on every create endpoint with `waitForEmbedding` or `checkDuplicates`, through a batch, and on
@@ -82,13 +81,12 @@ client defects. Breaking changes and features already on `main` are not part of 
   default was what passed validation; the stored edge now carries the value that was checked.
 
 - **A reindex embedded different text from the write that created the record, and never rebuilt a passage or a
-  caption (`Q-99`, part 2).** Its five hand-written loops were a copy of the embed queue's text builder that had
-  drifted: an edge whose end is a fact, a chrono entry or a file embedded that end's raw id instead of its name, and
-  a converted document re-embedded without its own text, because the loop never read the `excerpt` it passed on.
+  caption (`Q-99`, part 2).** It built a record's text its own way, not the way a write does: an edge whose end is a fact, a chrono entry or a file embedded that end's raw id instead of its name, and
+  a converted document re-embedded without its own text.
   Derived records were skipped outright, so after a model change every passage and media caption kept the old
   model's vector. And a backfill (`reembed`) gave a vectorless passage, face crop or converted copy a vector of its
-  PATH (`docs/a.pdf#chunk0`). A reindex now rebuilds every record through the one builder the queue uses: a passage
-  or caption is rebuilt from its own text (`chunkEmbedText`, shared with the conversion pipeline), a derived record
+  PATH (`docs/a.pdf#chunk0`). A reindex now builds every record's text as a write does: a passage
+  or caption is rebuilt from its own text, a derived record
   with no text is left without a vector (any path-vector a backfill gave it is removed, and a backfill no longer
   queues it), and a passage of a file whose owner suppressed its embeddings, at any depth, is not embedded. A
   reindex rebuilds a vector even when its text is unchanged, and an embedder outage during one leaves a record's
@@ -96,12 +94,10 @@ client defects. Breaking changes and features already on `main` are not part of 
 
 #### Search
 
-- **A slow or failing reranker no longer holds every search (`Q-157`).** Measured on a 5.6.0 instance: every
-  recall took 20 s — the reranker's time limit — and was answered in fused order anyway, while the same recall
-  without reranking took 90 ms. A reranker pass that fails, runs out its own time limit, or takes more than half of
+- **A slow or failing reranker no longer holds every search (`Q-157`).** While the reranker was slow or down,
+  every recall waited out its time limit (20 s) and was then answered in fused order anyway. A reranker pass that fails, runs out its own time limit, or takes more than half of
   it now sets the reranker aside for 30 s, doubling to 5 min; searches in between skip it at once and still report
-  `degraded: ["rerank_unavailable"]`. A background probe, never a user's search, brings it back. The assist
-  model's fallback rule and this one are now one module.
+  `degraded: ["rerank_unavailable"]`. A background probe, never a user's search, brings it back.
 
 - **A record's text rank is its rank among records of its own type (`Q-159`).** The text channel sorted every
   type's matches together by raw MongoDB text score, whose scale is each collection's own, so a fact could outrank
@@ -167,8 +163,7 @@ client defects. Breaking changes and features already on `main` are not part of 
 
 #### Lists, notify and metrics
 
-- **Two lists that stopped at a number now say so and can be read to the end** (bundle-34). Owner rule: *"if i
-  get a result i want to be sure i get what i asked for."* Each now pages through one rule (`brain/list-page.ts`):
+- **Two lists that stopped at a number now say so and can be read to the end.** Each now pages the same way:
   whole rows, `limit` and `skip` refused with a `400` rather than floored when they are not numbers, the byte budget,
   and `count`, `total`, `limit`, `skip`, `truncated` and `nextSkip` on every answer.
   - **The schema dry-run** (`POST /api/spaces/:id/validate-schema`) says, per collection, how many records it
@@ -189,33 +184,27 @@ client defects. Breaking changes and features already on `main` are not part of 
 - **The Graph tab says why it is slow instead of spinning with nothing on it (`Q-155`).** After three seconds of
   waiting it says the server has not answered yet and names what the space is doing — search indexes being built,
   records waiting to be embedded — and after thirty seconds the wait ends in the error state with those reasons
-  and Retry. Reported on 5.6.0 while an upgraded instance rebuilt every space's search indexes.
+  and Retry — for example while an upgraded instance rebuilds its search indexes.
 
 - **The Query tab's walk headings show their counts (`Q-101`).** "Reached by the walk", and the Entities, Facts,
   Chrono and Files headings under it, rendered `({count})` literally in all three languages, and each reached record
-  read `{hops} hop(s)`: the values used single braces, which the translation layer does not interpolate. A client
-  spec now fails on a single-brace placeholder in any value of any locale, and on a German or Polish value that
-  interpolates different parameters from the English one.
+  read `{hops} hop(s)`: the values used single braces, which the translation layer does not interpolate.
 
 - **Buttons that name an action say it in German and Polish (`Q-115`).** "Clear results" read "Klare Ergebnisse"
   (clear as in transparent) and the entity search's Clear read "Klar"; in Polish they read "Jasne", Reset read
   "Nastawić" (to set a clock) and Close the infinitive "Zamknąć". They now read "Ergebnisse löschen" / "Leeren",
   "Wyczyść wyniki" / "Wyczyść", "Zresetuj" and "Zamknij". The Query form's Projection field had the same fault
-  ("Vorsprung", "Występ") and now reads "Projektion" / "Projekcja". A client spec derives every English label that
-  starts with Clear, Reset or Close and fails when the German or Polish value does not contain a verb that does it.
-  The same fault on the product's noun: German called a space a "Leerzeichen" (the typed whitespace character) in
+  ("Vorsprung", "Występ") and now reads "Projektion" / "Projekcja". The same fault on the product's noun: German called a space a "Leerzeichen" (the typed whitespace character) in
   8 places — "Noch keine Leerzeichen" on the Brain page, "Leerzeichen erstellen/löschen" on the MFA card — and
-  Polish a "spacja" in 11; they now say "Space" / "przestrzeń" as the rest of each file does, and the same spec
-  fails on any value whose English names a space and whose German or Polish uses the whitespace word.
+  Polish a "spacja" in 11; they now say "Space" / "przestrzeń" as the rest of the interface does.
 
 - **The client never shows an answer older than the one you asked for last (`Q-112`).** The graph's depth slider
   started a traversal on every step it passed and drew whichever answer arrived last, so a slow depth-3 answer
   could land over depth 4 — and a depth drawn from the cache could be redrawn by a deeper request still in flight.
   It now asks once the slider rests and cancels what it no longer needs. The record tabs (entities, edges, facts,
   chrono) let a slow answer to an old filter replace the new filter's rows, and a list load could replace a
-  semantic search's rows or the reverse; every answer that writes a tab's rows now goes through one latest-wins
-  slot (`core/latest-wins.ts`, which the tab search bars had privately), and so do the graph's selected-record
-  card and linked records. Opening a record resolved each linked fact and chrono title with its own request; it
+  semantic search's rows or the reverse; now the latest request always wins on every tab,
+  and on the graph's selected-record card and linked records. Opening a record resolved each linked fact and chrono title with its own request; it
   is one request per kind now.
 
 ## [5.6.0] — 2026-09-29
