@@ -47,6 +47,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   others: an instance showed eight `peer:` tokens for one peer, seven of them last used minutes after they were made.
   A completed handshake now revokes the tokens it replaces, on both sides, and an instance drops the unused leftovers
   when it starts. A token still in a handshake is left alone, since two joins can overlap.
+- **A member that learned a join vote from another member no longer admits the joiner on its own vote**
+  (`Q-154`). On a closed or democratic network only the member holding the joiner's credentials may add it, and the
+  sync pass already held to that. Casting the concluding vote did not: a member whose copy of the round came by
+  gossip, with no credential for the joiner, added it anyway — a member that could never authenticate there. A local
+  vote now follows the same rule.
 
 ## [5.6.0] — 2026-09-29
 
