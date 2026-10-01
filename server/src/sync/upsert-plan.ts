@@ -219,12 +219,20 @@ export function forkCandidates(docs: readonly PushDoc[], stored: ReadonlyMap<str
   const out = new Set<string>();
   const seen = new Map<string, PushDoc[]>();
   for (const d of docs) {
-    const s = stored.get(d._id);
-    if (s && s.seq === d.seq && s.fact !== d.fact) out.add(d._id);
-    for (const other of seen.get(d._id) ?? []) if (other.seq === d.seq && other.fact !== d.fact) out.add(d._id);
+    if (divergesFrom(d, stored.get(d._id))) out.add(d._id);
+    for (const other of seen.get(d._id) ?? []) if (divergesFrom(d, other)) out.add(d._id);
     seen.set(d._id, [...(seen.get(d._id) ?? []), d]);
   }
   return [...out];
+}
+
+/**
+ * Does an arriving fact DIVERGE from a copy of it — the same seq, different `fact` text? The one fork rule, asked
+ * by `forkCandidates` (which facts the door reads a fork context for) and `planPushArrivals` (which facts fork),
+ * so the reads and the decision cannot disagree about what a fork is.
+ */
+export function divergesFrom(doc: { seq?: number; fact?: string }, copy: { seq?: number; fact?: string } | undefined): boolean {
+  return copy !== undefined && copy.seq === doc.seq && copy.fact !== doc.fact;
 }
 
 /**
@@ -325,7 +333,7 @@ export function planPushArrivals<T extends PushDoc>(docs: readonly T[], input: P
     if (kind === 'facts') {
       if (cur === undefined) return accept(i, doc, 'inserted', tomb);
       if (newer) return accept(i, doc, 'updated', tomb);
-      if (doc.seq === curSeq && doc.fact !== cur.fact) {
+      if (divergesFrom(doc, cur)) {
         const forkId = forkIdFor(doc._id, doc.seq, doc.fact ?? '');
         if (input.existingForks?.has(forkId) || newForks.has(forkId)) {
           plan.verdicts[i] = 'forked'; plan.forkIds[i] = forkId; return;

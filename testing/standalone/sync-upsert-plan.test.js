@@ -172,6 +172,23 @@ describe('one accept rule: isNewerCopy', () => {
   });
 });
 
+describe('one fork rule: divergesFrom', () => {
+  it('the candidate read and the planner both ask it, and no fact-text comparison is written beside it', async () => {
+    // Dup pass: `seq === … && fact !== …` was written in forkCandidates twice and in the planner once. Seen red
+    // by mutation, restored by hand: the planner's test written back inline.
+    const { readFileSync } = await import('node:fs');
+    const { stripComments } = await import('./_strip-comments.mjs');
+    const { bodyOf } = await import('./_structural-window.mjs');
+    const P = await import('../../server/dist/sync/upsert-plan.js');
+    assert.deepEqual([P.divergesFrom({ seq: 5, fact: 'a' }, { seq: 5, fact: 'b' }), P.divergesFrom({ seq: 5, fact: 'a' }, { seq: 5, fact: 'a' }),
+      P.divergesFrom({ seq: 5, fact: 'a' }, { seq: 4, fact: 'b' }), P.divergesFrom({ seq: 5, fact: 'a' }, undefined)], [true, false, false, false]);
+    const src = stripComments(readFileSync('server/src/sync/upsert-plan.ts', 'utf8'));
+    for (const fn of ['forkCandidates', 'planPushArrivals']) assert.match(bodyOf(src, fn), /divergesFrom\(/, `${fn} no longer asks divergesFrom`);
+    const inline = [...src.matchAll(/\.fact\s*!==\s*[\w.]+\.fact/g)].length;
+    assert.equal(inline, 1, 'a fact-text comparison is written outside divergesFrom');
+  });
+});
+
 describe('the planner keys a unique index by the family\'s own derived identity', () => {
   it('uniqueKey is edgeIdFor for an edge and linkIdFor for a link, with no endpoint-kind coalescer of its own', async () => {
     // Dup pass: a local `k === 'entity' ? '' : k` was a second spelling of `edgeEndpointKind`/`storedEdgeKind`.
