@@ -131,7 +131,16 @@ export function arrivalRefusal(doc: unknown, { seqOptional }: { seqOptional: boo
   if (!doc || typeof doc !== 'object' || Array.isArray(doc)) return 'not a document';
   const { _id: id, seq } = doc as { _id?: unknown; seq?: unknown };
   if (typeof id !== 'string' || id.length === 0) return '_id is not a non-empty string';
-  if (seq === undefined && seqOptional) return null;
+  return seqRefusal(seq, { optional: seqOptional });
+}
+
+/**
+ * Why a received seq cannot be carried by this instance's counter, or `null` when it can: a non-negative integer
+ * below the protocol's ingest ceiling (`isSeqImplausible`). The seq half of `arrivalRefusal`, exposed for what
+ * arrives with a seq and is not a record — a tombstone — so its check is this one and not a second spelling.
+ */
+export function seqRefusal(seq: unknown, { optional }: { optional: boolean }): string | null {
+  if (seq === undefined && optional) return null;
   if (typeof seq !== 'number' || !Number.isInteger(seq) || seq < 0) {
     return `seq ${JSON.stringify(seq) ?? String(seq)} is not a non-negative integer`;
   }

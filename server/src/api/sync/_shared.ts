@@ -15,7 +15,7 @@ import { enqueueIngestedRecord } from '../../brain/embed-queue.js';
 import { isWellFormedRef, collectionForRefKind, edgeEndpointKind } from '../../brain/entity-refs.js';
 import type { TokenRights } from '../../config/rights-shape.js';
 import { log } from '../../util/log.js';
-import { isSeqImplausible, MAX_INGEST_SEQ, MAX_SYNC_SEQ } from '../../util/seq.js';
+import { MAX_SYNC_SEQ } from '../../util/seq.js';
 import { isStrictLinkage } from '../../spaces/proxy.js';
 import type { FileMetaDoc } from '../../config/types.js';
 import { emitWebhookEvent } from '../../webhooks/dispatcher.js';
@@ -360,25 +360,6 @@ export function decodeCursor(token: string): number {
 }
 
 // ── Space access guard ─────────────────────────────────────────────────────
-
-/**
- * Refuse a document whose `seq` is implausibly far ahead of the space counter
- * (see util/seq.ts — MAX_INGEST_SEQ). Responds 400 and returns true when rejected.
- */
-export function rejectImplausibleSeq(
-  spaceId: string,
-  seq: number,
-  res: import('express').Response,
-  peerInstanceId?: string,
-): boolean {
-  if (!isSeqImplausible(seq)) return false;
-  log.warn(
-    `Refused document with implausible seq ${seq} for space '${spaceId}' ` +
-    `from peer '${peerInstanceId ?? 'unknown'}' (max ingest seq ${MAX_INGEST_SEQ}).`,
-  );
-  res.status(400).json({ error: `seq ${seq} is too close to the protocol ceiling and was refused` });
-  return true;
-}
 
 /** The peer identity bound to a production peer PAT (set by the invite handshake). */
 export function callerPeerId(authToken: Record<string, unknown> | undefined): string | undefined {

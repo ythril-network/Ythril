@@ -94,7 +94,7 @@ describe('both tombstone ingest paths wind the clock forward', () => {
      */
     assert.match(stmt, /\bplausible\.reduce\(/, 'the max must come from the tombstones received, not a filtered subset');
     const def = statementAround(ROUTE, ROUTE.indexOf('const plausible'), 'the plausible set');
-    assert.match(def, /parsed\.data\.filter\(t => !isSeqImplausible\(t\.seq\)/,
+    assert.match(def, /parsed\.data\.filter\(t => seqRefusal\(t\.seq, \{ optional: false \}\) === null\)/,
       'the max must come from everything parsed — less only a seq no counter can carry — before authorisation filters it');
     assert.doesNotMatch(def, /applyRemoteTombstone|peerInstanceId|trustedRelay/,
       'the max is filtered by authority, which is about who may delete, not about where the peer\'s clock is');

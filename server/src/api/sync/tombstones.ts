@@ -13,9 +13,9 @@ import { getDataRoot } from '../../config/loader.js';
 import { listTombstones, applyRemoteTombstone } from '../../brain/tombstones.js';
 import { requireAuth, denyReadOnly, isInstanceAdmin } from '../../auth/middleware.js';
 import { log } from '../../util/log.js';
-import { bumpSeq, isSeqImplausible } from '../../util/seq.js';
+import { bumpSeq } from '../../util/seq.js';
 import { reportServerFailure } from '../../util/report-failure.js';
-import { warnArrivalsNotStored } from '../../sync/arrivals.js';
+import { warnArrivalsNotStored, seqRefusal } from '../../sync/arrivals.js';
 import { deleteStored } from '../../files/stored-bytes.js';
 import path from 'node:path';
 import type { TombstoneDoc, FileTombstoneDoc } from '../../config/types.js';
@@ -119,9 +119,9 @@ syncTombstonesRouter.post('/tombstones', syncRateLimit, requireAuth, denyReadOnl
      * tombstone is refused on its own — a 400 would hold the sender's tombstone watermark and stop EVERY deletion
      * from that peer propagating by push.
      */
-    const plausible = parsed.data.filter(t => !isSeqImplausible(t.seq) && Number.isInteger(t.seq));
-    warnArrivalsNotStored('sync POST tombstones', spaceId, 'tombstone', 'refused (an implausible seq)',
-      parsed.data.filter(t => !plausible.includes(t)).map(t => `${t._id} (seq ${t.seq})`));
+    const plausible = parsed.data.filter(t => seqRefusal(t.seq, { optional: false }) === null);
+    warnArrivalsNotStored('sync POST tombstones', spaceId, 'tombstone', 'refused',
+      parsed.data.filter(t => !plausible.includes(t)).map(t => ({ _id: t._id, reason: seqRefusal(t.seq, { optional: false })! })));
 
     // A peer token may only delete content it authored (peerInstanceId === tombstone issuer);
     // a trusted local/admin token (no peerInstanceId) may relay any tombstone.

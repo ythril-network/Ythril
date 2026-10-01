@@ -479,7 +479,7 @@ All incoming documents are validated against Zod schemas before any database wri
 
 Two additional ingest safety caps protect the local seq counter and fork chains from a malicious or corrupted peer:
 
-- **Implausible seq** — the schema bound on `seq` is 2^50, but ingest applies a stricter ceiling of `2^50 − 2^40` (`rejectImplausibleSeq`); a document above it is refused so a poisoned seq can never exhaust the counter's headroom.
+- **Implausible seq** — the schema bound on `seq` is 2^50, but ingest applies a stricter ceiling of `2^50 − 2^40` (`arrivalRefusal` in the arrival writer, and `seqRefusal` for a tombstone); a document above it is refused so a poisoned seq can never exhaust the counter's headroom.
 - **Fork limits** — fork chain depth and fan-out (no more than 10 forks pointing at the same parent, the request's own new forks counted) are each capped at 10 on both paths: exceeding either returns `400` on the single `POST /facts` endpoint and counts `forkDepthRefused` (and `rejected`) in `batch-upsert`, with the refused ids in the receiver's log.
 
 ### Gossip endpoints

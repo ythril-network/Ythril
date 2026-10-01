@@ -18,7 +18,7 @@ import { bumpSeq, withAllocatedSeqs, settledSeqRange } from '../../util/seq.js';
 import type { FactDoc, EntityDoc, EdgeDoc, ChronoEntry, LinkDoc } from '../../config/types.js';
 import type { FileMetaDoc } from '../../config/types.js';
 import { LOCAL_ONLY_EXCLUSION } from '../../sync/local-only-fields.js';
-import { checkEdgeLinkViolations, checkLinkViolations, MAX_FORK_DEPTH, IncomingFactDoc, IncomingEntityDoc, IncomingEdgeDoc, IncomingChronoDoc, IncomingLinkDoc, IncomingFileMetaDoc, encodeCursor, decodeCursor, rejectImplausibleSeq, callerPeerId, spaceAllowed, isNonPeerSyncWrite, NON_PEER_WRITE_MESSAGE, isDirectionalWriteBlocked, violationsAgainstLocalSchema, withSchemaViolations } from './_shared.js';
+import { checkEdgeLinkViolations, checkLinkViolations, MAX_FORK_DEPTH, IncomingFactDoc, IncomingEntityDoc, IncomingEdgeDoc, IncomingChronoDoc, IncomingLinkDoc, IncomingFileMetaDoc, encodeCursor, decodeCursor, callerPeerId, spaceAllowed, isNonPeerSyncWrite, NON_PEER_WRITE_MESSAGE, isDirectionalWriteBlocked, violationsAgainstLocalSchema, withSchemaViolations } from './_shared.js';
 import { writeArrivals, arrivalRefusal, arrivalId, warnArrivalsNotStored, type ArrivalOptions, type ArrivalOutcome, type ArrivalRefusal } from '../../sync/arrivals.js';
 import { planPushArrivals, type PushDoc, type PushFamily, type PushVerdict } from '../../sync/upsert-plan.js';
 import { readPageTombstones, readPushStored, readForkContext, deleteSupersededTombstones } from '../../sync/push-reads.js';
@@ -202,6 +202,8 @@ interface PushedFamilyResult {
   /** One per document handed in, in order: what sequential processing would have answered. */
   verdicts: PushVerdict[];
   forkIds: Array<string | undefined>;
+  /** Why each `rejected` document was refused — the shape rule's words or the store's, for the single routes' 400. */
+  reasons: Array<string | undefined>;
   /** The links that landed, for the strict-linkage check. */
   landed: Pushed[];
 }
@@ -250,12 +252,13 @@ async function acceptPushedPage(
   let maxReceived = 0;
   for (const key of [...BRAIN_PUSH_KEYS, 'filemeta'] as const) {
     const docs = page[key] ?? [];
-    results[key] = { verdicts: docs.map(() => 'rejected' as PushVerdict), forkIds: docs.map(() => undefined), landed: [] };
+    results[key] = { verdicts: docs.map(() => 'rejected' as PushVerdict), forkIds: docs.map(() => undefined),
+      reasons: docs.map(() => undefined), landed: [] };
     sound[key] = [];
     refusedAt[key] = [];
     docs.forEach((doc, index) => {
       const why = arrivalRefusal(doc, { seqOptional: false });
-      if (why) { refusedAt[key].push({ _id: arrivalId(doc), reason: why }); return; }
+      if (why) { refusedAt[key].push({ _id: arrivalId(doc), reason: why }); results[key].reasons[index] = why; return; }
       sound[key].push({ index, doc });
       if (doc.seq > maxReceived) maxReceived = doc.seq;
     });
@@ -289,7 +292,7 @@ async function acceptPushedPage(
         const out = await writePushed(spaceId, key, pending.map(l => l.at(-1)!.doc), { from });
         const newer = new Set(out.newerLocal);
         const dup = new Set(out.duplicates);
-        const refused = new Set(out.refused.map(r => r._id));
+        const refused = new Map(out.refused.map(r => [r._id, r.reason]));
         const next: typeof pending = [];
         for (const list of pending) {
           const top = list.at(-1)!;
@@ -297,6 +300,7 @@ async function acceptPushedPage(
           if (newer.has(id)) { for (const a of list) res.verdicts[items[a.index]!.index] = 'skipped'; continue; }
           if (dup.has(id) || refused.has(id)) {
             res.verdicts[items[top.index]!.index] = dup.has(id) ? 'duplicate' : 'rejected';
+            res.reasons[items[top.index]!.index] = refused.get(id);
             list.pop();
             if (list.length > 0) next.push(list);
             continue;
@@ -319,7 +323,11 @@ async function acceptPushedPage(
       for (const id of [...out.inserted, ...out.updated]) verdictOf.set(id, 'upserted');
       for (const id of [...out.newerLocal, ...out.derived]) verdictOf.set(id, 'skipped');
       for (const r of out.refused) verdictOf.set(r._id, 'rejected');
-      for (const s of sound.filemeta) results.filemeta.verdicts[s.index] = verdictOf.get(s.doc._id) ?? 'skipped';
+      const why = new Map(out.refused.map(r => [r._id, r.reason]));
+      for (const s of sound.filemeta) {
+        results.filemeta.verdicts[s.index] = verdictOf.get(s.doc._id) ?? 'skipped';
+        results.filemeta.reasons[s.index] = why.get(s.doc._id);
+      }
     }
   } finally {
     if (maxReceived > 0) await bumpSeq(spaceId, maxReceived);
@@ -356,7 +364,12 @@ function pushAllowed(req: Request, res: Response): string | null {
 
 const peerOf = (req: Request): string => callerPeerId(req.authToken as Record<string, unknown>) ?? 'unknown';
 const forkCapError = (id: string) => ({ error: `Fork depth limit (${MAX_FORK_DEPTH}) exceeded for _id '${id}'` });
-const storeRefusedError = (id: string) => ({ error: `'${id}' was refused by this instance's store and was not written` });
+/**
+ * A refused document's 400, in the words of the rule that refused it — the arrival writer's shape check
+ * (`arrivalRefusal`: an implausible seq answers `seq N is too close to the protocol ceiling and was refused`, as
+ * it always did) or the store's. One source for the text, so a route cannot phrase a refusal of its own.
+ */
+const refusedError = (r: PushedFamilyResult) => ({ error: r.reasons[0] ?? 'the document was refused and was not written' });
 
 /**
  * POST /api/sync/facts?spaceId=&networkId=
@@ -370,7 +383,6 @@ syncDocsRouter.post('/facts', syncRateLimit, requireAuth, denyReadOnly, async (r
     const parsed = IncomingFactDoc.safeParse(req.body);
     if (!parsed.success) { res.status(400).json({ error: 'Invalid fact document' }); return; }
     const incoming = parsed.data as unknown as Pushed;
-    if (rejectImplausibleSeq(spaceId, incoming.seq, res, peerOf(req))) return;
     // Reported on every exit that KEPT something; `tombstoned` and `skipped` store nothing to describe.
     const violations = violationsAgainstLocalSchema(spaceId, 'fact', incoming);
 
@@ -380,7 +392,7 @@ syncDocsRouter.post('/facts', syncRateLimit, requireAuth, denyReadOnly, async (r
     if (verdict === 'forked') { res.status(200).json(withSchemaViolations({ status: 'forked', forkId: facts.forkIds[0] }, violations)); return; }
     if (verdict === 'tombstoned') { res.status(200).json({ status: 'tombstoned' }); return; }
     if (verdict === 'forkRefused') { res.status(400).json(forkCapError(incoming._id)); return; }
-    if (verdict === 'rejected') { res.status(400).json(storeRefusedError(incoming._id)); return; }
+    if (verdict === 'rejected') { res.status(400).json(refusedError(facts)); return; }
     res.status(200).json({ status: 'skipped' });
   } catch (err) {
     reportServerFailure('sync POST facts', err);
@@ -400,13 +412,12 @@ syncDocsRouter.post('/entities', syncRateLimit, requireAuth, denyReadOnly, async
     const parsed = IncomingEntityDoc.safeParse(req.body);
     if (!parsed.success) { res.status(400).json({ error: 'Invalid entity document' }); return; }
     const incoming = parsed.data as unknown as Pushed;
-    if (rejectImplausibleSeq(spaceId, incoming.seq, res, peerOf(req))) return;
     const violations = violationsAgainstLocalSchema(spaceId, 'entity', incoming);
 
     const { entities } = await acceptPushedPage(spaceId, { entities: [incoming] }, peerOf(req));
     const verdict = entities.verdicts[0];
     if (verdict === 'tombstoned') { res.status(200).json({ status: 'tombstoned' }); return; }
-    if (verdict === 'rejected') { res.status(400).json(storeRefusedError(incoming._id)); return; }
+    if (verdict === 'rejected') { res.status(400).json(refusedError(entities)); return; }
     res.status(200).json(withSchemaViolations({ status: 'ok' }, violations));
   } catch (err) {
     reportServerFailure('sync POST entities', err);
@@ -427,13 +438,12 @@ syncDocsRouter.post('/edges', syncRateLimit, requireAuth, denyReadOnly, async (r
     const parsed = IncomingEdgeDoc.safeParse(req.body);
     if (!parsed.success) { res.status(400).json({ error: 'Invalid edge document' }); return; }
     const incoming = parsed.data as unknown as Pushed;
-    if (rejectImplausibleSeq(spaceId, incoming.seq, res, peerOf(req))) return;
     const violations = violationsAgainstLocalSchema(spaceId, 'edge', incoming);
 
     const { edges } = await acceptPushedPage(spaceId, { edges: [incoming] }, peerOf(req));
     const verdict = edges.verdicts[0];
     if (verdict === 'tombstoned') { res.status(200).json({ status: 'tombstoned' }); return; }
-    if (verdict === 'rejected') { res.status(400).json(storeRefusedError(incoming._id)); return; }
+    if (verdict === 'rejected') { res.status(400).json(refusedError(edges)); return; }
     // Records, never blocks: what the edge points at that is not here (strict linkage only).
     checkEdgeLinkViolations(spaceId, incoming as unknown as EdgeDoc, peerOf(req)).catch(() => {});
     res.status(200).json(withSchemaViolations({ status: verdict === 'duplicate' ? 'duplicate' : 'ok' }, violations));
@@ -459,7 +469,6 @@ syncDocsRouter.post('/chrono', syncRateLimit, requireAuth, denyReadOnly, async (
     const parsed = IncomingChronoDoc.safeParse(req.body);
     if (!parsed.success) { res.status(400).json({ error: 'Invalid chrono document' }); return; }
     const incoming = parsed.data as unknown as Pushed;
-    if (rejectImplausibleSeq(spaceId, incoming.seq, res, peerOf(req))) return;
     const violations = violationsAgainstLocalSchema(spaceId, 'chrono', incoming);
 
     const { chrono } = await acceptPushedPage(spaceId, { chrono: [incoming] }, peerOf(req));
@@ -470,7 +479,7 @@ syncDocsRouter.post('/chrono', syncRateLimit, requireAuth, denyReadOnly, async (
       return;
     }
     if (verdict === 'tombstoned') { res.status(200).json({ status: 'tombstoned' }); return; }
-    if (verdict === 'rejected') { res.status(400).json(storeRefusedError(incoming._id)); return; }
+    if (verdict === 'rejected') { res.status(400).json(refusedError(chrono)); return; }
     res.status(200).json(withSchemaViolations({ status: 'ok' }, violations));
   } catch (err) {
     reportServerFailure('sync POST chrono', err);

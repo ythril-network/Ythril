@@ -54,7 +54,7 @@ import type { BrainCollection, KnowledgeType } from '../config/types.js';
 import { log } from '../util/log.js';
 import type { SchemaViolation } from '../spaces/schema-validation.js';
 import { violationsAgainstLocalSchema } from './sync/_shared.js';
-import { writeArrivals, arrivalId, type ArrivalOutcome } from '../sync/arrivals.js';
+import { writeArrivals, arrivalId, arrivalRefusal, type ArrivalOutcome } from '../sync/arrivals.js';
 import { REPLICATED_FAMILIES, RECORD_TYPE_OF } from '../sync/replicated-families.js';
 import { readPageTombstones } from '../sync/push-reads.js';
 
@@ -131,8 +131,9 @@ export async function importDocuments(spaceId: string, payload: Record<string, u
     const violations: ImportViolation[] = [];
     if (kind !== null && (KNOWLEDGE_TYPES as readonly string[]).includes(kind)) {
       for (const doc of docs) {
+        // What the writer will refuse is not stored, so it has no violations to report — the same shape rule.
+        if (arrivalRefusal(doc, { seqOptional: false }) !== null) continue;
         const id = arrivalId(doc);
-        if (!doc || typeof doc !== 'object' || typeof (doc as { _id?: unknown })._id !== 'string') continue;
         const found = violationsAgainstLocalSchema(spaceId, kind as KnowledgeType, { ...(doc as Record<string, unknown>), spaceId });
         if (found.length > 0) violations.push({ _id: id, violations: found });
       }
