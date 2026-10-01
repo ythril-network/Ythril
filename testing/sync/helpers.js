@@ -347,6 +347,25 @@ export async function waitForSimilarityIndex(
     + `${expectedId} from seed ${seedId} in space ${spaceId}: ${how}`);
 }
 
+/**
+ * Wait until a space's brain embed queue holds nothing pending or processing (Q-99).
+ *
+ * A REST write does not embed inline (only `waitForEmbedding`/`checkDuplicates` do), so a record is reachable by
+ * recall, and comparable by the duplicate scanner, only once the background queue has embedded it. While the bundled
+ * model ran on the server's own thread every request waited behind each inference, so the queue happened to keep
+ * pace with a test's writes and tests that never waited for it passed. With inference in its own process a write
+ * answers in milliseconds and the queue trails it by seconds: a test whose premise is "the corpus is embedded" has to
+ * wait for exactly that, not for a clock. Uses the same counts `list_embed_jobs` answers on both doors.
+ */
+export async function waitForEmbedQueueEmpty(baseUrl, token, spaceId, timeoutMs = INDEX_LAG_TIMEOUT_MS) {
+  let last = null;
+  await waitFor(async () => {
+    const r = await post(baseUrl, token, '/api/list_embed_jobs', { space: spaceId, limit: 1 });
+    last = r.body?.data?.counts ?? r.body;
+    return r.status === 200 && last && last.pending === 0 && last.processing === 0;
+  }, timeoutMs, 500, () => `the embed queue of ${spaceId} never emptied: last counts ${JSON.stringify(last)}`);
+}
+
 export async function waitForIndexed(baseUrl, token, spaceId, ids, types, timeoutMs = INDEX_LAG_TIMEOUT_MS) {
   const pending = new Set(ids);
   const started = Date.now();

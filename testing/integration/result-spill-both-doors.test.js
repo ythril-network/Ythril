@@ -49,7 +49,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post } from '../sync/helpers.js';
+import { INSTANCES, post, waitForEmbedQueueEmpty } from '../sync/helpers.js';
 import { openMcpSession } from '../sync/mcp-session.js';
 import { requireEmbedding } from '../_shared/embedding-required.mjs';
 
@@ -95,8 +95,14 @@ before(async () => {
     if (r.status !== 201) break;
     ids.push(r.body._id ?? r.body.id);
   }
+  // A wait for the EMBED QUEUE, and only that (Q-99). The fresh-write scan below covers a record that is embedded and
+  // not yet INDEXED; it cannot score one that has no vector yet, and a REST write does not embed inline. While the
+  // model ran on the server's own thread the queue kept pace with these writes by accident; in its own process it
+  // trails them by a few seconds, and recall answered 4 of 28. ~2 s for 28 records with the inference threads sized
+  // to the container, so the 300-second worry below no longer applies to this wait.
+  if (ids.length === COUNT) await waitForEmbedQueueEmpty(INSTANCES.a, token(), SPACE);
   // NO wait for the vector index. Every recall also scans the newest records straight from the collection
-  // since 5.0, so the test does not depend on how warm the embedder is. This used to pass
+  // since 5.0, so the test does not depend on index lag. This used to pass
   // `includeFreshWrites: true` for the same reason; the flag is gone because the scan is unconditional.
   //
   // IT DOES DEPEND ON `DUPE_FRESH_WINDOW_MS`, which `testing/docker-compose.test.yml` sets to ten minutes —
