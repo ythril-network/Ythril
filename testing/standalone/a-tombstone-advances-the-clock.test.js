@@ -86,7 +86,20 @@ describe('both tombstone ingest paths wind the clock forward', () => {
     const at = ROUTE.indexOf('const maxTombstoneSeq');
     assert.notEqual(at, -1, 'the route no longer computes a max — re-point this gate');
     const stmt = statementAround(ROUTE, at, 'the route max');
-    assert.match(stmt, /parsed\.data/, 'the max must come from everything parsed, before authorisation filters it');
+    /*
+     * Re-anchored for `Q-107` part 1: a tombstone whose seq no counter can carry (inside the protocol's ceiling
+     * reserve) is refused first — it would refuse every later copy of its record and drag the counter into the
+     * reserve. Everything ELSE that was parsed counts, before authorisation filters anything. Seen red by
+     * mutation, restored by hand: the max taken over the tombstones `applyRemoteTombstone` accepted.
+     */
+    assert.match(stmt, /\bplausible\.reduce\(/, 'the max must come from the tombstones received, not a filtered subset');
+    const def = statementAround(ROUTE, ROUTE.indexOf('const plausible'), 'the plausible set');
+    assert.match(def, /parsed\.data\.filter\(t => !isSeqImplausible\(t\.seq\)/,
+      'the max must come from everything parsed — less only a seq no counter can carry — before authorisation filters it');
+    assert.doesNotMatch(def, /applyRemoteTombstone|peerInstanceId|trustedRelay/,
+      'the max is filtered by authority, which is about who may delete, not about where the peer\'s clock is');
+    assert.match(ROUTE, /await bumpSeq\(spaceId, maxTombstoneSeq\)/,
+      'the bump is not awaited before the answer, so the sender is told the page landed while the counter is behind');
   });
 
   it('the transfer reports a seq at all, and starts from zero', () => {

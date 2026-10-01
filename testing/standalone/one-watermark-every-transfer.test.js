@@ -193,10 +193,16 @@ describe('every transfer under a shared watermark is passed to the rule', () => 
   });
 
   it('the pull records its position only AFTER the page is applied', () => {
-    // Vouching before the upsert would promise records that a throw between the two would have lost — the same
-    // class of mistake one layer down.
-    assert.match(src, /await batchUpsertBySeq<T>\([^\n]*\);\s*\n\s*if \(maxSeq > deliveredThrough\) deliveredThrough = maxSeq;/,
-      'deliveredThrough must be advanced after the batch upsert, not before');
+    // Vouching before the write would promise records that a throw between the two would have lost — the same
+    // class of mistake one layer down. Re-anchored for `Q-107` part 1: the page is written by the arrival writer
+    // (`writeArrivals`), and a failed write `break`s out of the page loop before the advance is reached.
+    const write = src.search(/=\s*await writeArrivals\(/);
+    const advance = src.indexOf('if (maxSeq > deliveredThrough) deliveredThrough = maxSeq;');
+    assert.ok(write > 0, 'the pull no longer writes its page through writeArrivals — re-anchor this gate');
+    assert.ok(advance > write, 'deliveredThrough must be advanced after the page write, not before');
+    assert.equal(src.split('deliveredThrough = maxSeq').length - 1, 1, 'a second advance of deliveredThrough is back');
+    assert.match(src.slice(write, advance), /catch \(err\) \{\s*\n\s*truncated = true;[\s\S]*?break;/,
+      'a page whose write failed must stop the transfer as truncated, before the advance');
   });
 
   it('the page cap counts as a truncation', () => {

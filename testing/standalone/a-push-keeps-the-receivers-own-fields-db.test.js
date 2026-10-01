@@ -120,7 +120,10 @@ describe('a push keeps the receiver\'s own fields, space id and retention', { sk
       const stored = build.fact(S, 'f-fp', 5, { fact: 'the text both copies share' });
       await door.coll(S, 'facts').insertOne({ ...stored, embedding: [0.1, 0.2, 0.3], embeddingModel: getEmbeddingConfig().model,
         matchedText: await buildEmbedText(S, 'fact', stored) });
-      await door.push('/facts', build.fact(S, 'f-fp', 6, { fact: 'the text both copies share', tags: ['retagged'] }), { spaceId: S });
+      // A newer copy whose EMBEDDED text is the same: only `updatedAt` moves. (Tags are part of a fact's embed text
+      // — `factEmbedText` — so a retag is new text and is rightly re-embedded; it cannot stand for "unchanged".)
+      await door.push('/facts', build.fact(S, 'f-fp', 6, { fact: 'the text both copies share', updatedAt: '2026-09-02T00:00:00.000Z' }),
+        { spaceId: S });
       const after = await door.coll(S, 'facts').findOne({ _id: 'f-fp' });
       // Checked before the embed call: a vectorless record would make it call the model, which this test never wants.
       assert.ok(Array.isArray(after.embedding) && after.embedding.length > 0,
