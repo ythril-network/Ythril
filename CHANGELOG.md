@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A reindex embedded different text from the write that created the record, and never rebuilt a passage or a
+  caption (`Q-99`, part 2).** Its five hand-written loops were a copy of the embed queue's text builder that had
+  drifted: an edge whose end is a fact, a chrono entry or a file embedded that end's raw id instead of its name, and
+  a converted document re-embedded without its own text, because the loop never read the `excerpt` it passed on.
+  Derived records were skipped outright, so after a model change every passage and media caption kept the old
+  model's vector. And a backfill (`reembed`) gave a vectorless passage, face crop or converted copy a vector of its
+  PATH (`docs/a.pdf#chunk0`). A reindex now rebuilds every record through the one builder the queue uses: a passage
+  or caption is rebuilt from its own text (`chunkEmbedText`, shared with the conversion pipeline), a derived record
+  with no text is left without a vector (any path-vector a backfill gave it is removed, and a backfill no longer
+  queues it), and a passage of a file whose owner suppressed its embeddings, at any depth, is not embedded. A
+  reindex rebuilds a vector even when its text is unchanged, and an embedder outage during one leaves a record's
+  vector as it was.
+
 ## [5.6.0] — 2026-09-29
 
 **A minor release: a filtered recall returns every record that matches, a search never writes into a space, and a

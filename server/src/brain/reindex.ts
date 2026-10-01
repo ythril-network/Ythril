@@ -1,5 +1,5 @@
 /**
- * Re-embedding a space: the refusals, the single-job guard, and the five collection loops.
+ * Re-embedding a space: the refusals, the single-job guard, and the walk that rebuilds every record.
  *
  * ## Why this is a module and not a route
  *
@@ -21,31 +21,37 @@
  * carries `status: 'started'` with zeroed counters, and the work runs on the next turn so headers flush immediately.
  * Awaiting the work would turn a multi-minute job into a request timeout while still answering 200.
  *
- * ## Two properties of the loops that are easy to lose
+ * ## Two properties of the walk that are easy to lose
  *
- *  - **A re-embed is not a write.** The embedding fields go in with a direct `$set` rather than through the record
- *    update path, so `seq` and `updatedAt` do not move. Routing them through `updateFact` would look tidier and
- *    would bump `seq` on every record in the space -- a sync-visible change on every peer, for a local re-embed that
- *    changed no content.
- *  - **Each collection embeds the text its WRITE path embeds.** These loops call the same `*EmbedText` builders the
- *    upsert paths call. Nothing stores `matchedText` here, so a vector built from the wrong argument order is
- *    indistinguishable through the API -- it keeps recall working while quietly disagreeing with every record written
- *    normally.
+ *  - **A re-embed is not a write.** `embedStoredRecord` stores the embedding fields with a direct `$set` rather than
+ *    through the record update path, so `seq` and `updatedAt` do not move. Routing them through `updateFact` would
+ *    look tidier and would bump `seq` on every record in the space -- a sync-visible change on every peer, for a
+ *    local re-embed that changed no content.
+ *  - **Each record embeds the text its WRITE embedded, because this module builds none.** It was five hand-written
+ *    loops, one per collection, each with its own projection and its own `*EmbedText` call, and they had drifted from
+ *    the writers in three ways at once (Q-99 part 2): the edge loop projected no `fromKind`/`toKind`, so an edge with
+ *    a fact or file end embedded that end's raw id; the file loop projected no `excerpt` though it passed one, so every
+ *    converted document re-embedded without its own text; and the loop skipped every derived record (`parentFileId`),
+ *    so passages, captions and transcripts kept the OLD model's vectors after a model change, for ever. Every record
+ *    is now rebuilt through `embedStoredRecord(..., { rebuild: true })`, which reads the whole stored document and
+ *    builds its text in `buildEmbedText`, the one derivation the queue, a sync arrival and a backfill use too.
+ *    `rebuild` forces past the "unchanged" skip (a model change keeps the text and still needs a new vector), and
+ *    a transient embedder failure leaves the old vector in place rather than stripping a space during an outage.
  *
- * Both are pinned, and both suites landed against the unmoved route: `integration/reindex-contract.test.js` for the
- * contract and the `seq` property, `standalone/reindex-embeds-the-same-text.test.js` for the builders -- the second
- * reads SOURCE because no runtime test can see which text was embedded.
+ * Both are pinned: `integration/reindex-contract.test.js` for the contract and the `seq` property,
+ * `standalone/reindex-embeds-the-same-text.test.js` for the structure (this module builds no text), and
+ * `standalone/a-rebuild-embeds-what-the-producer-embedded-db.test.js` for the text itself, per kind.
  */
 import { col, asFilter } from '../db/mongo.js';
-import { embed } from './embedding.js';
-import { embeddingSuppressedFor } from './suppress-embeddings.js';
-import { factEmbedText, entityEmbedText, edgeEmbedText, chronoEmbedText, fileEmbedText } from './embed-text.js';
+import { COLLECTION, embedStoredRecord } from './embed-record.js';
 import { clearReindexFlag } from '../spaces/_shared.js';
-import { resolveEdgeEndpointNames } from './edge-endpoint-names.js';
 import { reindexInProgress } from '../metrics/registry.js';
 import { log } from '../util/log.js';
-import type { SpaceConfig, FactDoc, EntityDoc, EdgeDoc, ChronoEntry, FileMetaDoc } from '../config/types.js';
-import { spaceCollection } from '../db/space-collection.js';
+import type { SpaceConfig, BrainEmbedRecordType } from '../config/types.js';
+import { spaceCollection, type SpacePart } from '../db/space-collection.js';
+
+/** Every record kind that carries a vector, derived from `COLLECTION` so a new kind is reindexed the day it exists. */
+const REINDEX_KINDS = Object.keys(COLLECTION) as BrainEmbedRecordType[];
 
 /**
  * One job per process, and the guard lives HERE.
@@ -131,7 +137,7 @@ export function planReindex(input: {
  *
  * Never awaits the job. Both surfaces answer immediately with zeroed counters, and progress is read from
  * `reindex-status` or the log. The guard is released in a `finally` around the whole job, so a throw anywhere in the
- * five loops cannot wedge the process into refusing every later reindex until a restart.
+ * walk cannot wedge the process into refusing every later reindex until a restart.
  */
 export function startReindex(plan: ReindexPlan): void {
   const { spaceId, memberIds } = plan;
@@ -148,149 +154,38 @@ export function startReindex(plan: ReindexPlan): void {
       let suppressed = 0;
       let errors = 0;
       try {
-            for (const mid of memberIds) {
-            const BATCH = 50;
-
-            // Re-embed facts
-            {
-              let cursor: string | null = null;
-              while (true) {
-                const q: Record<string, unknown> = cursor ? { _id: { $gt: cursor } } : {};
-                const batch: FactDoc[] = await col<FactDoc>(spaceCollection(mid, 'facts'))
-                  .find(asFilter<FactDoc>(q), { projection: { _id: 1, fact: 1, tags: 1, description: 1, properties: 1, type: 1, suppressEmbeddings: 1,} })
-                  .sort({ _id: 1 })
-                  .limit(BATCH)
-                  .toArray() as FactDoc[];
-                if (batch.length === 0) break;
-                for (const doc of batch) {
-                  try {
-                    if (embeddingSuppressedFor(mid, 'fact', doc as unknown as Record<string, unknown>)) { suppressed++; continue; }
-                    const result = await embed(factEmbedText(doc.fact, doc.tags ?? [], doc.description, doc.properties));
-                    await col<FactDoc>(spaceCollection(mid, 'facts')).updateOne(
-                      { _id: doc._id },
-                      { $set: { embedding: result.vector, embeddingModel: result.model } },
-                    );
-                    reindexed++;
-                  } catch { errors++; }
-                }
-                cursor = batch[batch.length - 1]?._id ?? null;
+        for (const mid of memberIds) {
+          const BATCH = 50;
+          for (const kind of REINDEX_KINDS) {
+            // Ids only: `embedStoredRecord` reads the whole stored document itself, which is what keeps this walk
+            // from choosing a projection — the projections are where the five loops it replaced had drifted.
+            // Derived records (passages, captions, transcripts, face crops) are walked too: one with text is
+            // rebuilt from it, one without loses any path-vector a backfill gave it (`textless`).
+            let cursor: string | null = null;
+            while (true) {
+              const q: Record<string, unknown> = cursor ? { _id: { $gt: cursor } } : {};
+              const batch = await col(spaceCollection(mid, COLLECTION[kind] as SpacePart))
+                .find(asFilter(q), { projection: { _id: 1 } })
+                .sort({ _id: 1 })
+                .limit(BATCH)
+                .toArray() as Array<{ _id: unknown }>;
+              if (batch.length === 0) break;
+              for (const doc of batch) {
+                if (typeof doc._id !== 'string') continue;
+                try {
+                  const outcome = await embedStoredRecord(mid, kind, doc._id, { rebuild: true });
+                  if (outcome === 'embedded') reindexed++;
+                  else if (outcome === 'excluded') suppressed++;
+                } catch { errors++; }
               }
+              const last = batch[batch.length - 1]?._id;
+              cursor = typeof last === 'string' ? last : null;
+              if (cursor === null) break;
             }
+          }
 
-            // Re-embed entities (name + type + tags + description + properties)
-            {
-              let cursor: string | null = null;
-              while (true) {
-                const q: Record<string, unknown> = cursor ? { _id: { $gt: cursor } } : {};
-                const batch: EntityDoc[] = await col<EntityDoc>(spaceCollection(mid, 'entities'))
-                  .find(asFilter<EntityDoc>(q), { projection: { _id: 1, name: 1, type: 1, tags: 1, description: 1, properties: 1, suppressEmbeddings: 1,} })
-                  .sort({ _id: 1 })
-                  .limit(BATCH)
-                  .toArray() as EntityDoc[];
-                if (batch.length === 0) break;
-                for (const doc of batch) {
-                  try {
-                    if (embeddingSuppressedFor(mid, 'entity', doc as unknown as Record<string, unknown>)) { suppressed++; continue; }
-                    const result = await embed(entityEmbedText(doc.name, doc.type, doc.tags ?? [], doc.description, doc.properties ?? {}));
-                    await col<EntityDoc>(spaceCollection(mid, 'entities')).updateOne(
-                      { _id: doc._id },
-                      { $set: { embedding: result.vector, embeddingModel: result.model } },
-                    );
-                    reindexed++;
-                  } catch { errors++; }
-                }
-                cursor = batch[batch.length - 1]?._id ?? null;
-              }
-            }
-
-            // Re-embed edges (tags + from-name + label + to-name + type + description + properties)
-            {
-              let cursor: string | null = null;
-              while (true) {
-                const q: Record<string, unknown> = cursor ? { _id: { $gt: cursor } } : {};
-                const batch: EdgeDoc[] = await col<EdgeDoc>(spaceCollection(mid, 'edges'))
-                  .find(asFilter<EdgeDoc>(q), { projection: { _id: 1, from: 1, label: 1, to: 1, type: 1, tags: 1, description: 1, properties: 1, suppressEmbeddings: 1,} })
-                  .sort({ _id: 1 })
-                  .limit(BATCH)
-                  .toArray() as EdgeDoc[];
-                if (batch.length === 0) break;
-                for (const doc of batch) {
-                  try {
-                    // Resolve from/to to entity NAMES (not IDs) and include properties — matching
-                    // edgeEmbedText so a reindex reproduces exactly what upsertEdge embedded.
-                    const [fromName, toName] = await resolveEdgeEndpointNames(mid, doc.from, doc.to, doc.fromKind, doc.toKind);
-                    if (embeddingSuppressedFor(mid, 'edge', doc as unknown as Record<string, unknown>)) { suppressed++; continue; }
-                    const result = await embed(edgeEmbedText(fromName, doc.label, toName, doc.tags ?? [], doc.type, doc.description, doc.properties));
-                    await col<EdgeDoc>(spaceCollection(mid, 'edges')).updateOne(
-                      { _id: doc._id },
-                      { $set: { embedding: result.vector, embeddingModel: result.model } },
-                    );
-                    reindexed++;
-                  } catch { errors++; }
-                }
-                cursor = batch[batch.length - 1]?._id ?? null;
-              }
-            }
-
-            // Re-embed chrono (type + status + title + tags + description + properties)
-            {
-              let cursor: string | null = null;
-              while (true) {
-                const q: Record<string, unknown> = cursor ? { _id: { $gt: cursor } } : {};
-                const batch: ChronoEntry[] = await col<ChronoEntry>(spaceCollection(mid, 'chrono'))
-                  .find(asFilter<ChronoEntry>(q), { projection: { _id: 1, title: 1, type: 1, status: 1, description: 1, tags: 1, properties: 1, suppressEmbeddings: 1,} })
-                  .sort({ _id: 1 })
-                  .limit(BATCH)
-                  .toArray() as ChronoEntry[];
-                if (batch.length === 0) break;
-                for (const doc of batch) {
-                  try {
-                    if (embeddingSuppressedFor(mid, 'chrono', doc as unknown as Record<string, unknown>)) { suppressed++; continue; }
-                    const result = await embed(chronoEmbedText(doc.title, doc.type, doc.status, doc.description, doc.tags ?? [], doc.properties));
-                    await col<ChronoEntry>(spaceCollection(mid, 'chrono')).updateOne(
-                      { _id: doc._id },
-                      { $set: { embedding: result.vector, embeddingModel: result.model } },
-                    );
-                    reindexed++;
-                  } catch { errors++; }
-                }
-                cursor = batch[batch.length - 1]?._id ?? null;
-              }
-            }
-
-            // Re-embed files (path + entity names + tags + description + property values)
-            {
-              let cursor: string | null = null;
-              while (true) {
-                // Exclude chunk records (parentFileId set) — they have their own embedding logic
-                const q: Record<string, unknown> = cursor
-                  ? { _id: { $gt: cursor }, parentFileId: { $exists: false } }
-                  : { parentFileId: { $exists: false } };
-                const batch: FileMetaDoc[] = await col<FileMetaDoc>(spaceCollection(mid, 'files'))
-                  .find(asFilter<FileMetaDoc>(q), { projection: { _id: 1, path: 1, tags: 1, description: 1, properties: 1, suppressEmbeddings: 1,} })
-                  .sort({ _id: 1 })
-                  .limit(BATCH)
-                  .toArray() as FileMetaDoc[];
-                if (batch.length === 0) break;
-                for (const doc of batch) {
-                  try {
-                    // `excerpt` included, or a reindex would silently re-embed every converted document
-                    // without the document's own text — dropping exactly the phrases a reader searches for.
-                    if (embeddingSuppressedFor(mid, 'file', doc as unknown as Record<string, unknown>)) { suppressed++; continue; }
-                    const result = await embed(fileEmbedText(doc.path, doc.tags ?? [], doc.description, doc.properties, doc.excerpt));
-                    await col<FileMetaDoc>(spaceCollection(mid, 'files')).updateOne(
-                      { _id: doc._id },
-                      { $set: { embedding: result.vector, embeddingModel: result.model } },
-                    );
-                    reindexed++;
-                  } catch { errors++; }
-                }
-                cursor = batch[batch.length - 1]?._id ?? null;
-              }
-            }
-
-              clearReindexFlag(mid);
-            }
+          clearReindexFlag(mid);
+        }
         log.info(`Reindex completed for space '${spaceId}': reindexed=${reindexed}, suppressed=${suppressed}, errors=${errors}`);
       } catch (err) {
         log.error(`Reindex job failed for space '${spaceId}': ${String(err)}`);

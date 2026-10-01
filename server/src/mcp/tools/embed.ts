@@ -250,7 +250,8 @@ export const retry_embed_mediaTool: ToolHandler = {
 export const space_reindexTool: ToolHandler = {
   name: 'space_reindex',
   description: 'Re-embed every record in a space with the currently configured embedding model — the recovery path '
-    + 'after changing embedder or model. Requires an admin token. Returns as soon as the job STARTS: it runs in the '
+    + 'after changing embedder or model. Every record is rebuilt from the same text its write embedded, document '
+    + 'passages and media captions included, even when its text is unchanged. Requires an admin token. Returns as soon as the job STARTS: it runs in the '
     + 'background and may take minutes, so poll `space_meta` — its `needsReindex` field — rather than waiting '
     + 'on this call. One job per instance at a time; a second call while one is running is refused. A PROXY space is '
     + 'refused by name — it has no index of its own, and its members are listed in the error so you can reindex them '

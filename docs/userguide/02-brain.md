@@ -23,7 +23,7 @@ spaces; the cog is the shortcut for the one you are working in.
 The same state is on both APIs as `needsReindex` on a space's meta, so an agent can check it without watching
 the screen.
 
-If the search index needs rebuilding (for example after the embedding model changes), a banner appears reading *"Embeddings are stale — a reindex is recommended."* Click **Reindex** to rebuild it.
+If the search index needs rebuilding (for example after the embedding model changes), a banner appears reading *"Embeddings are stale — a reindex is recommended."* Click **Reindex** to rebuild it. Every record is rebuilt from the same text it was written with — the passages of converted documents and the captions and transcripts of media included.
 
 > **Reindex and rebuild are different repairs.** *Reindex* re-embeds your content against the current model. It does **not** help when the search index itself is missing or broken — the symptom there is search quietly returning nothing at all, with no error. That one needs **Rebuild search indexes** on the space's **Danger** tab (see below).
 
