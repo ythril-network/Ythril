@@ -72,6 +72,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   8 places — "Noch keine Leerzeichen" on the Brain page, "Leerzeichen erstellen/löschen" on the MFA card — and
   Polish a "spacja" in 11; they now say "Space" / "przestrzeń" as the rest of each file does, and the same spec
   fails on any value whose English names a space and whose German or Polish uses the whitespace word.
+- **The client never shows an answer older than the one you asked for last (`Q-112`).** The graph's depth slider
+  started a traversal on every step it passed and drew whichever answer arrived last, so a slow depth-3 answer
+  could land over depth 4 — and a depth drawn from the cache could be redrawn by a deeper request still in flight.
+  It now asks once the slider rests and cancels what it no longer needs. The record tabs (entities, edges, facts,
+  chrono) let a slow answer to an old filter replace the new filter's rows, and a list load could replace a
+  semantic search's rows or the reverse; every answer that writes a tab's rows now goes through one latest-wins
+  slot (`core/latest-wins.ts`, which the tab search bars had privately), and so do the graph's selected-record
+  card and linked records. Opening a record resolved each linked fact and chrono title with its own request; it
+  is one request per kind now.
 
 ## [5.6.0] — 2026-09-29
 

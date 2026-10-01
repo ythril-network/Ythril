@@ -11,7 +11,6 @@
  * keeps rendering against either shape and hides the day the server stops sending one — which is exactly how this
  * defect shipped. `RecallHit` has no index signature, so a flat read does not compile.
  */
-import type { Observable, Subscription } from 'rxjs';
 import type { RecallHit } from '../../core/api.types';
 
 /** The record a hit carries. Throws on a hit that carries none — a changed shape must fail loudly, not render blank. */
@@ -40,37 +39,8 @@ export function interactiveRecallBody(
   return { query, types: [type], topK, rerank: false };
 }
 
-/**
- * Latest wins for a search bar (`Q-88`): starting a search cancels the one before it, so a slow answer to an earlier
- * keystroke can never overwrite the answer to a later one — and the cancelled request stops, rather than finishing
- * for nobody. The picker has this through `switchMap`; the tab bars fired each search and applied whatever came back.
- */
-export class LatestWins {
-  private sub?: Subscription;
-  private timer?: ReturnType<typeof setTimeout>;
-
-  /** Run `search` once typing pauses for `ms` — a new keystroke restarts the wait, as each tab bar did by hand. */
-  after(ms: number, search: () => void): void {
-    if (this.timer) clearTimeout(this.timer);
-    this.timer = setTimeout(() => { this.timer = undefined; search(); }, ms);
-  }
-
-  run<T>(source: Observable<T>, apply: (value: T) => void): void {
-    this.sub?.unsubscribe();
-    this.sub = source.subscribe(apply);
-  }
-
-  /** Drop the pending wait and the search in flight — the bar was cleared. */
-  cancel(): void {
-    if (this.timer) clearTimeout(this.timer);
-    this.timer = undefined;
-    this.sub?.unsubscribe();
-    this.sub = undefined;
-  }
-}
-
-/** How long a tab search bar waits for typing to pause before it searches. */
-export const INTERACTIVE_DEBOUNCE_MS = 300;
+// `LatestWins` and `INTERACTIVE_DEBOUNCE_MS` lived here, where only the tab search bars could find them; they are
+// `core/latest-wins.ts` now, and the record tabs' list loads use the same slot as their searches (`Q-112`).
 
 /** A string field of a hit's record, or `undefined`. */
 export function recordString(hit: RecallHit, field: string): string | undefined {

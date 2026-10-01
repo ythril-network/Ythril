@@ -523,14 +523,23 @@ export class BrainApi {
    * merged: each `$in` stays bounded, and the answer is the whole set asked for.
    */
   getEntitiesByIds(spaceId: string, ids: string[]): Observable<{ entities: Entity[] }> {
+    return this.getRecordsByIds<Entity>(spaceId, 'entities', ids).pipe(map(entities => ({ entities })));
+  }
+
+  /**
+   * Records of one collection for a set of ids, in as few requests as the batch bound allows — the rule
+   * `getEntitiesByIds` states, for every collection a picker resolves (`Q-112`: linked facts and chrono entries were
+   * one `getMemory`/`getChrono` per id). Every id is asked for; each `$in` stays bounded at `ENTITY_ID_BATCH`.
+   */
+  getRecordsByIds<T>(spaceId: string, collection: 'entities' | 'facts' | 'chrono', ids: string[]): Observable<T[]> {
     const unique = [...new Set(ids)];
-    if (!unique.length) return of({ entities: [] });
+    if (!unique.length) return of([]);
     const batches: string[][] = [];
     for (let i = 0; i < unique.length; i += ENTITY_ID_BATCH) batches.push(unique.slice(i, i + ENTITY_ID_BATCH));
-    return forkJoin(batches.map(batch => filterCall<{ results: Entity[] }>(this.http, {
-      space: spaceId, collection: 'entities', filter: { _id: { $in: batch } }, limit: batch.length,
+    return forkJoin(batches.map(batch => filterCall<{ results: T[] }>(this.http, {
+      space: spaceId, collection, filter: { _id: { $in: batch } }, limit: batch.length,
     })))
-      .pipe(map(pages => ({ entities: pages.flatMap(r => r.results ?? []) })));
+      .pipe(map(pages => pages.flatMap(r => r.results ?? [])));
   }
 
   getEntity(spaceId: string, id: string): Observable<Entity> {

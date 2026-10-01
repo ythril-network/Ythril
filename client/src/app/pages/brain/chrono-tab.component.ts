@@ -5,9 +5,9 @@ import { FormsModule } from '@angular/forms';
 import { TranslocoPipe } from '@jsverse/transloco';
 import { catchError, of, switchMap } from 'rxjs';
 import { ChronoEntry, ChronoType, ChronoStatus } from '../../core/api.types';
-import { recordOf, interactiveRecallBody, LatestWins, INTERACTIVE_DEBOUNCE_MS } from './recall-hits';
+import { recordOf, interactiveRecallBody } from './recall-hits';
+import { INTERACTIVE_DEBOUNCE_MS } from '../../core/latest-wins';
 import { BrainApi } from '../../core/brain-api.service';
-import { httpErrorReason } from '../../core/http-error';
 import { TagInputComponent } from '../../shared/tag-input.component';
 import { EntityRefFieldComponent } from './entity-ref-field.component';
 import { FactRefFieldComponent } from './fact-ref-field.component';
@@ -308,9 +308,7 @@ export class ChronoTabComponent extends RecordTabBase {
   protected override load(): void {
     const spaceId = this.spaceId();
     if (!spaceId) return;
-    this.recordList.loading.set(true);
-    this.recordList.loadError.set(null);
-    const cf: { search?: string; type?: string; tag?: string; description?: string; status?: string; entityName?: string } = {};
+    const cf:{ search?: string; type?: string; tag?: string; description?: string; status?: string; entityName?: string } = {};
     // Docked Title column freetext filter → server-side substring (2b-iii-c), matching memories/edges.
     // The top bar is semantic-only now and never feeds this.
     if (this.searchParam()) cf.search = this.searchParam();
@@ -319,15 +317,13 @@ export class ChronoTabComponent extends RecordTabBase {
     if (this.recordFilter().description) cf.description = this.recordFilter().description;
     if (this.recordFilter().entityName) cf.entityName = this.recordFilter().entityName;
     if (this.statusFilter()) cf.status = this.statusFilter();
-    this.brainApi.listChrono(spaceId, this.pageSize, this.skip(), cf, this.sortParam()).subscribe({
-      next: ({ chrono }) => {
+    // Through the tab's rows slot (Q-112): a newer filter's request, or a semantic search, cancels this one.
+    this.loadRows(this.brainApi.listChrono(spaceId, this.pageSize, this.skip(), cf, this.sortParam()),
+      ({ chrono }) => {
         this.store.chrono.set(chrono);
         const ids = [...new Set(chrono.flatMap(e => e.linkEntities ?? []))];
         if (ids.length) this.picker.resolveEntityNames(ids);
-        this.recordList.loading.set(false);
-      },
-      error: (e) => { this.recordList.loadError.set(httpErrorReason(e)); this.recordList.loading.set(false); },
-    });
+      });
   }
 
   /**
@@ -337,16 +333,16 @@ export class ChronoTabComponent extends RecordTabBase {
    */
   onChronoSearch(q: string): void {
     this.store.chronoSearch.set(q);
-    if (!q.trim()) { this.semanticSearch.cancel(); this.skip.set(0); this.load(); return; }
-    this.semanticSearch.after(INTERACTIVE_DEBOUNCE_MS, () => this.runSemanticChronoSearch());
+    if (!q.trim()) { this.rows.cancel(); this.skip.set(0); this.load(); return; }
+    this.rows.after(INTERACTIVE_DEBOUNCE_MS, () => this.runSemanticChronoSearch());
   }
 
   runSemanticChronoSearch(): void {
     const q = this.store.chronoSearch().trim();
     const spaceId = this.spaceId();
-    if (!q || !spaceId) { this.semanticSearch.cancel(); this.store.chrono.set([]); return; }
-    // Latest wins (Q-88): this search cancels the one before it, hydration included.
-    this.semanticSearch.run(this.brainApi.recallBrain(spaceId, interactiveRecallBody(q, 'chrono', 20)).pipe(
+    if (!q || !spaceId) { this.rows.cancel(); this.store.chrono.set([]); return; }
+    // Latest wins (Q-88, Q-112): through the rows slot, so this search cancels the one before it AND a list load in flight, hydration included.
+    this.loadRows(this.brainApi.recallBrain(spaceId, interactiveRecallBody(q, 'chrono', 20)).pipe(
       catchError(() => of({ results: [], count: 0 })),
       switchMap(res => {
       // The fields are the RECORD's, not the hit's (Q-87). Read off the hit, the row was blank and its type was the
@@ -376,7 +372,6 @@ export class ChronoTabComponent extends RecordTabBase {
     ), hydrated => this.store.chrono.set(hydrated));
   }
 
-  private readonly semanticSearch = new LatestWins();
 
   /** Effective chrono type for schema lookup. */
   chronoFormKind(): string {
