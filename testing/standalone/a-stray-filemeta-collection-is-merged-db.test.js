@@ -14,7 +14,8 @@
  *  - a stray record NEWER than the stored file record is merged: its authored keys land, and the receiver's own
  *    size and hash stand, because they describe the bytes this instance holds;
  *  - a stray record OLDER than the stored one changes nothing (the seq-guarded accept every arrival takes);
- *  - a stray record with no stored file record is stored (metadata may arrive before its blob);
+ *  - a stray record with no stored file record is NOT stored: a stray record is old, and a file whose record is gone
+ *    was usually deleted since, so storing it would bring back a deleted file as a row with no bytes;
  *  - a chunk is never stored as a file;
  *  - the stray collection is gone afterwards, and a second cycle is a no-op.
  *
@@ -56,8 +57,8 @@ describe('file metadata a 4.0-5.6.1 pull left in <space>_filemeta is merged into
       { ...build.filemeta(SPACE, 'newer.md', 20, { author: PEER, description: 'described upstream', tags: ['onboarding'] }),
         sizeBytes: 999, sha256: 'sender-hash' },
       { ...build.filemeta(SPACE, 'older.md', 40, { author: PEER, description: 'the earlier edit' }), sizeBytes: 999, sha256: 'sender-hash' },
-      { ...build.filemeta(SPACE, 'only-here.md', 30, { author: PEER, description: 'no blob yet' }) },
-      { ...build.filemeta(SPACE, 'only-here.md#chunk-0', 31, { author: PEER }), parentFileId: 'only-here.md' },
+      { ...build.filemeta(SPACE, 'deleted-since.md', 30, { author: PEER, description: 'a file deleted since' }) },
+      { ...build.filemeta(SPACE, 'newer.md#chunk-0', 31, { author: PEER }), parentFileId: 'newer.md' },
     ]);
     assert.ok(await strayExists(), 'fixture: the stray collection exists before the cycle');
     await sweepExpired();
@@ -79,9 +80,9 @@ describe('file metadata a 4.0-5.6.1 pull left in <space>_filemeta is merged into
     assert.equal(d?.seq, 50);
   });
 
-  it('a stray record with no stored file is stored, and a chunk is not stored as a file', async () => {
-    assert.equal((await stored('only-here.md'))?.description, 'no blob yet');
-    assert.equal(await stored('only-here.md#chunk-0'), null);
+  it('a stray record with no stored file does not bring the file back, and a chunk is not stored as a file', async () => {
+    assert.equal(await stored('deleted-since.md'), null, 'a deleted file came back as a record with no bytes');
+    assert.equal(await stored('newer.md#chunk-0'), null);
   });
 
   it('the stray collection is dropped, and the next cycle changes nothing', async () => {
