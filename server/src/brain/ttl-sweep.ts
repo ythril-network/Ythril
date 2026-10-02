@@ -20,6 +20,7 @@ import { deleteFileCascade } from '../files/delete-cascade.js';
 import { runExclusive } from '../util/single-flight.js';
 import { sweepChronoRetention } from './chrono-redaction.js';
 import { sweepLegacySpills } from '../files/legacy-spill-sweep.js';
+import { drainStrayFileMeta } from '../sync/stray-filemeta-drain.js';
 
 const SWEEP_INTERVAL_MS = 5 * 60_000; // 5 min
 const SWEEP_BATCH = 500;              // max deletions per collection per cycle
@@ -73,6 +74,10 @@ export async function sweepExpired(now: Date = new Date()): Promise<number> {
   // Read spills older versions wrote into spaces (Q-92), on the same clock and every cycle: older peers keep
   // sending them until they upgrade. Contained like the pass above.
   await sweepLegacySpills().catch(err => log.warn(`Legacy spill sweep: ${err}`));
+
+  // File metadata a 4.0-5.6.1 pull left in `<space>_filemeta` (Q-219). Contained like the passes above; a failed
+  // drain keeps its collection and is retried next cycle.
+  await drainStrayFileMeta().catch(err => log.warn(`Stray file-metadata drain: ${err}`));
 
   return total;
 }

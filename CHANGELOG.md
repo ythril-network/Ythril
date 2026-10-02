@@ -312,6 +312,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **File metadata a 4.0-5.6.1 pull left in `<space>_filemeta` is merged into the space's files on upgrade, as in
+  5.6.2 (`Q-219`).** The next housekeeping cycle (within five minutes of start) merges each space's stray collection
+  into the files this instance still holds a record for — never over a newer copy, never over this instance's own
+  size and hash, never bringing back a file deleted since — then drops the collection and logs one line per space.
 - **A peer with more than a thousand deletions of one kind to pass on now passes on all of them (`Q-237`).** The
   tombstone pull asked once, was served at most 1000 per kind, and called itself complete, so every later deletion
   was never applied and never asked for again. The push paged, but lost the part of a run of equal seqs that
