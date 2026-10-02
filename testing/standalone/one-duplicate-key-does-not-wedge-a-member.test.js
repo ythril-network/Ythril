@@ -2,31 +2,44 @@
  * A duplicate key is a record-level problem. It must not abort a member's sync, and it must not be reported as
  * an unreachable peer.
  *
- * ## What one duplicate does today
+ * ## What one duplicate did
  *
- * `_edges` carries a unique index on `(from, to, label)` (`spaces/lifecycle.ts:90`) with no partial or sparse
- * option, and new edges get `_id: uuidv4()`. Sync ingest is keyed on `_id` alone and never consults the
- * triplet, so two peers that independently create the same relationship hold two ids for one unique key — and
- * the first of them to cross the wire raises `E11000`.
+ * `_edges` carries a unique index on its triplet (`spaces/lifecycle.ts`), and `_links` one on a link's endpoints.
+ * Sync ingest is keyed on `_id`, so two peers that independently create the same relationship hold two ids for
+ * one unique key — and the first of them to cross the wire raises `E11000`.
  *
- * `batchUpsertBySeq` calls `bulkWrite` with **no `ordered: false` and no try/catch**, so that error:
+ * The pull's page write called `bulkWrite` with **no `ordered: false` and no try/catch**, so that error:
  *
- *  1. escapes `pullType` before `deliveredThrough` is written;
- *  2. escapes `pullFromPeer` before the watermark persists;
- *  3. escapes the unguarded `await` in the space loop, **taking every remaining space with it, including files**;
- *  4. lands in the member-level catch, which logs "Sync failed for member", increments the failure count, and
+ *  1. escaped `pullType` before `deliveredThrough` was written;
+ *  2. escaped `pullFromPeer` before the watermark persisted;
+ *  3. escaped the unguarded `await` in the space loop, **taking every remaining space with it, including files**;
+ *  4. landed in the member-level catch, which logs "Sync failed for member", increments the failure count, and
  *     at threshold prints **`PEER UNREACHABLE`**.
  *
- * `lastSyncAt` is never written, so the next cycle pulls the identical page and throws identically. One
- * duplicate edge stops a member syncing **permanently**, and tells the operator to go and look at the network.
+ * One duplicate edge stopped a member syncing **permanently**, and told the operator to go and look at the network.
+ *
+ * ## Where the rule lives now (5.6.2, `Q-218`; main's `Q-107` part 1)
+ *
+ * Every door — the push, the pull, the import — stores arriving records through ONE writer, `writeArrivals` in
+ * `sync/arrivals.ts`, so the rule is asserted there, once, rather than at the pull alone: the write is unordered;
+ * a duplicate is caught where it happens, read back, and reported as a record; a refusal of ONE document (from an
+ * allowlist of codes that name the document) is kept apart from the rest (`storeRefused`, which each door answers
+ * as 5.6.1 answered that fault — cut `C3`); and anything else — a fault with no per-operation shape, a code that is
+ * not the document's — still throws, so a real fault is never absorbed as a duplicate. The pull catches that throw,
+ * and a store refusal, as a RECORD-WRITE failure and holds its watermark, rather than letting it reach the
+ * member-level escalation.
  *
  * ## Why this asserts on source
  *
  * Reproducing it needs two peers, a partition, the same relationship written on both sides, and a reconnect —
- * a fixture substantially larger than the change, and one that pins the symptom rather than the rule. The rule
- * is small and checkable: the write is unordered, the duplicate is caught where it happens, and it is reported
- * as a record rather than escalated as a peer failure. Same reasoning, and the same shape, as
- * `sync-dropped-record-is-not-silent.test.js` beside it.
+ * a fixture substantially larger than the change, and one that pins the symptom rather than the rule. The
+ * behaviour half is `a-push-write-failure-keeps-what-it-must-db.test.js` (real validator, view and unique-index
+ * faults on the push door) and `a-pulled-page-lands-by-the-receivers-rules-db.test.js` (a non-duplicate fault and
+ * a store refusal on the pull door hold the watermark and are not counted against the peer).
+ *
+ * Re-anchored for 5.6.2 from `sync/engine.ts:batchUpsertBySeq`, and seen red against the new site by mutation,
+ * each restored by hand: `ordered: false` removed from the writer's bulk write; the throw for a non-document code
+ * replaced by a refusal; the engine's catch of a failed page write made to rethrow.
  *
  * Run: node --test testing/standalone/one-duplicate-key-does-not-wedge-a-member.test.js
  */
@@ -36,102 +49,91 @@ import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
 import { statementAround, bodyOf } from './_structural-window.mjs';
 
-const SRC = 'server/src/sync/engine.ts';
-const engine = stripComments(readFileSync(SRC, 'utf8'));
+const ARRIVALS = 'server/src/sync/arrivals.ts';
+const ENGINE = 'server/src/sync/engine.ts';
+const writerSrc = stripComments(readFileSync(ARRIVALS, 'utf8'));
+const engine = stripComments(readFileSync(ENGINE, 'utf8'));
 
-/** The one `bulkWrite` the pull path applies a page with. */
-function bulkWriteAt() {
-  const at = engine.indexOf('.bulkWrite(');
-  assert.notEqual(at, -1, `no .bulkWrite( in ${SRC} — re-point this gate at the pull apply path`);
-  assert.equal(
-    engine.indexOf('.bulkWrite(', at + 1), -1,
-    'more than one bulkWrite in the engine: this gate checks the first and would miss the others',
-  );
-  return at;
-}
-
-/**
- * The WHOLE apply function, not the innermost block around the write.
- *
- * `enclosingBlockFrom` was used here first and it was wrong in a way worth recording: once the fix wraps the
- * write in `try { … }`, the innermost enclosing block IS that try body, which contains the bulkWrite and
- * neither the `catch` nor its reporting. The gate went green on `ordered: false` and stayed red on the other
- * two for a reason that had nothing to do with the code under test.
- */
-function applyFn() {
-  const body = bodyOf(engine, 'batchUpsertBySeq');
-  assert.ok(body.includes('.bulkWrite('), 'batchUpsertBySeq no longer contains the bulkWrite — re-point this gate');
+/** The writer's whole body, closures included — where every arriving page is written. */
+function writer() {
+  const body = bodyOf(writerSrc, 'writeArrivals');
+  assert.ok(body.includes('.bulkWrite('), 'writeArrivals no longer contains the page bulkWrite — re-point this gate');
   return body;
 }
 
 describe('one duplicate key does not wedge a member', () => {
-  it('the page write is UNORDERED, so one bad document does not abandon the rest', () => {
-    const stmt = statementAround(engine, bulkWriteAt(), 'the bulkWrite statement');
-    assert.match(
-      stmt, /ordered\s*:\s*false/,
+  it('the page write is UNORDERED, and it is the only bulk write the writer makes', () => {
+    const at = writerSrc.indexOf('.bulkWrite(');
+    assert.notEqual(at, -1, `no .bulkWrite( in ${ARRIVALS}`);
+    assert.equal(writerSrc.indexOf('.bulkWrite(', at + 1), -1,
+      'more than one bulkWrite in the arrival writer: this gate checks the first and would miss the others');
+    const stmt = statementAround(writerSrc, at, 'the bulkWrite statement');
+    assert.match(stmt, /ordered\s*:\s*false/,
       'bulkWrite defaults to ordered:true, which stops at the first error and leaves every later document in '
-      + 'the page unapplied. A duplicate key is a property of ONE record and must not decide the fate of the '
-      + `others.\n\nstatement:\n${stmt}`,
-    );
+      + `the page unapplied. A duplicate key is a property of ONE record.\n\nstatement:\n${stmt}`);
   });
 
-  it('the duplicate is caught where it happens, not at member level', () => {
-    // The enclosing function must handle it itself. If the only handler is the member-level catch, a
-    // record-level fault has already destroyed the rest of the cycle by the time anything sees it.
-    const block = applyFn();
-    assert.match(
-      block, /try\s*\{/,
-      'the bulkWrite is unguarded, so a duplicate key escapes to the member-level catch — aborting every '
-      + 'remaining space in the loop, including files, and never writing lastSyncAt. Catch it here.',
-    );
-    assert.match(
-      block, /11000|duplicate|writeErrors/i,
-      'the handler must distinguish a duplicate key from a real failure. Swallowing every bulkWrite error '
-      + 'would hide genuine write faults, which is the opposite defect.',
-    );
+  it('the duplicate is caught where it happens, read back, and reported as a record', () => {
+    const body = writer();
+    assert.match(body, /try\s*\{[\s\S]*\.bulkWrite\([\s\S]*catch\s*\(\s*err\s*\)/,
+      'the bulkWrite is unguarded, so a duplicate key escapes the writer');
+    assert.match(body, /code === DUPLICATE_KEY\)\s*dupes\.push\(d\)/,
+      'a duplicate is not set apart from the other failures, so it cannot be answered as the record it is');
+    assert.match(body, /readStoredById<Doc>\(collName, dupes\.map/,
+      'a duplicate is not read back, so a newer stored copy cannot be told from a unique-index collision');
+    assert.match(body, /warnArrivalsNotStored\([^;]*out\.duplicates\)/,
+      'a duplicate handled silently is the dropped-record defect again: report it with the ids');
   });
 
-  it('an error that is NOT a duplicate key still throws', () => {
-    /*
-     * Pinned as two statements rather than as vocabulary, because the vocabulary version survived its own
-     * mutant: neutering the guard to `if (false) throw err` left the words `writeErrors` and `duplicate`
-     * sitting in the function, so a check for those passed while the behaviour it was meant to protect —
-     * a genuine write fault reaching the caller — had been removed.
-     */
-    const block = applyFn();
+  it('an error that is NOT a duplicate or a document\'s own refusal still throws', () => {
+    const body = writer();
+    // The per-operation path: a code that is neither a duplicate nor a document refusal fails the page.
+    assert.match(body, /else if \(isDocumentRefusalCode\(code\)\) retry\.push\(d\);\s*else throw stopped\(err\);/,
+      'a per-operation failure whose code is not the document\'s is absorbed instead of failing the page');
+    // The no-shape path: nothing says which documents landed, so each is asked — and classified the same way.
+    assert.match(body, /if \(!failures \|\|[^\n]*\)\s*\{[\s\S]*?await oneByOne\(chunk, writeOne\)/,
+      'a failure with no per-operation shape is treated as if it had one');
+    assert.match(body, /else if \(isDocumentRefusal\(err\)\)[^\n]*\n\s*else throw stopped\(err\);/,
+      'a single write\'s failure that is not the document\'s own is refused instead of failing the page');
 
-    const guardAt = block.indexOf('Array.isArray(');
-    assert.notEqual(guardAt, -1, 'no shape guard on the caught error: a fault carrying no writeErrors must rethrow');
-    assert.match(
-      statementAround(block, guardAt, 'the writeErrors shape guard'), /throw/,
-      'an error the handler cannot recognise as a bulk write result must be rethrown, not fall through into '
-      + 'code that assumes it is one',
-    );
-
-    const nonDupAt = block.search(/!==\s*11000/);
-    assert.notEqual(nonDupAt, -1, 'nothing separates duplicate-key errors from the rest');
-    assert.match(
-      block.slice(nonDupAt), /throw/,
-      'a page containing a NON-duplicate write error must still fail loudly — absorbing every bulkWrite error '
-      + 'would turn real corruption into a warning nobody reads',
-    );
+    // `stopped` is the one way the writer gives up on a page: an ArrivalWriteError carrying the outcome so far.
+    assert.match(body, /const stopped = \(err: unknown\): ArrivalWriteError => \{[\s\S]*?e\.partial = out;/,
+      'the writer stops a page without an ArrivalWriteError that carries what already landed');
+    const shared = stripComments(readFileSync('server/src/db/write-errors.ts', 'utf8'));
+    assert.match(bodyOf(shared, 'bulkWriteFailures'), /if \(!writeErrors\) return null;/,
+      'bulkWriteFailures answers something for an error with no writeErrors, so the no-shape path never runs');
+    assert.match(shared, /export const DUPLICATE_KEY = 11000;/, 'the duplicate-key code is not 11000');
+    // An ALLOWLIST: a refusal is the document's only when a code or a driver error NAMES it, never by default.
+    assert.match(bodyOf(shared, 'isDocumentRefusal'), /DOCUMENT_REFUSAL_CODES\.has\([^)]*\)\) return true;[\s\S]*DOCUMENT_REFUSAL_NAMES\.has/,
+      'isDocumentRefusal no longer reads its allowlists');
+    assert.doesNotMatch(shared, /DOCUMENT_REFUSAL_CODES = new Set\(\[[^\]]*\b(?:166|11000|91|189|11600)\b/,
+      'a code that is the collection\'s, the store\'s or a duplicate is in the document-refusal allowlist');
   });
 
-  it('a duplicate is REPORTED as a record, naming it', () => {
-    const block = applyFn();
-    assert.match(
-      block, /log\.(warn|error)/,
-      'a duplicate that is handled silently is the sync-dropped-record defect again: the record does not '
-      + 'arrive, the watermark advances, and nothing says so. Report it with enough to find the record.',
-    );
+  it('the writer reads a failure\'s code through the shared reader, never by hand', () => {
+    assert.match(writerSrc, /writeErrorCode\(err\) === DUPLICATE_KEY/, 'the writer no longer reads codes through writeErrorCode');
+    assert.doesNotMatch(writerSrc, /\?\.code\b|\.code\s*===|as \{ code\?/, 'the writer reads an error code by hand again');
+    const shared = stripComments(readFileSync('server/src/db/write-errors.ts', 'utf8'));
+    assert.match(shared, /export function writeErrorCode\(/, 'the shared code reader is gone');
+  });
+
+  it('the pull holds its watermark on a failed page write — and on a store refusal — instead of escalating it', () => {
+    const write = engine.search(/=\s*await writeArrivals\(/);
+    assert.ok(write > 0, `${ENGINE} no longer writes a pulled page through writeArrivals — re-point this gate`);
+    const after = engine.slice(write, engine.indexOf('deliveredThrough = maxSeq', write));
+    assert.match(after, /catch \(err\) \{\s*\n\s*truncated = true;[\s\S]*?log\.warn\([\s\S]*?break;/,
+      'a failed page write must be caught in the transfer — logged as a record write, the transfer stopped — and '
+      + 'not rethrown into the member-level catch, which counts it toward PEER UNREACHABLE');
+    assert.doesNotMatch(after.slice(0, after.indexOf('break;')), /\bthrow\b/, 'the page-write catch rethrows');
+    // Cut `C3`: a document the store refused is never counted as delivered — the transfer holds the same way.
+    assert.match(after, /if \(written\.storeRefused\.length > 0\) \{\s*\n\s*truncated = true;[\s\S]*?break;/,
+      'a store refusal on a pulled page lets the watermark pass the refused record, which is then never offered again');
   });
 
   it('the member-level escalation still exists for real failures', () => {
     // Guard against the fix being "stop escalating anything". PEER UNREACHABLE is correct when the peer is
     // actually unreachable; the defect was a record fault reaching it, not the escalation itself.
-    assert.match(
-      engine, /PEER UNREACHABLE/,
-      'the peer-unreachable escalation must survive — this gate is about what reaches it, not about removing it',
-    );
+    assert.match(engine, /PEER UNREACHABLE/,
+      'the peer-unreachable escalation must survive — this gate is about what reaches it, not about removing it');
   });
 });

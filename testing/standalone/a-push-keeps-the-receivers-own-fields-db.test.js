@@ -1,7 +1,7 @@
 /**
  * A pushed document is stored on THIS instance's terms: under this instance's space id, keeping what only this
- * instance knows about the record, and stamped with this instance's retention (`Q-107` part 1 §1, owner
- * decision `D-9`, 2026-10-01).
+ * instance knows about the record — the retention stamps it holds included — and never stamped by main's `D-9`,
+ * which 5.6.x does not carry (`Q-107` part 1 §1, ported by `Q-218`; cut `C4`).
  *
  * ## 1. The receiver's local-only fields survive a peer's replace
  *

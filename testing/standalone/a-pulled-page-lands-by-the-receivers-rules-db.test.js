@@ -1,5 +1,6 @@
 /**
- * A page pulled from a peer lands by the RECEIVER's rules (`Q-107` part 1, `Q-203`, `D-9`).
+ * A page pulled from a peer lands by the RECEIVER's rules (`Q-107` part 1, `Q-203`, ported by `Q-218`; main's `D-9`
+ * stamping is cut from 5.6.x, `C4`, and pinned below).
  *
  * ## The rules this file holds, each over every family the pull door writes
  *
@@ -156,7 +157,7 @@ function member() {
 
 /** Families the pull door writes as whole documents, with the record type each holds (null: nothing to embed). */
 function writtenFamilies() {
-  // File metadata is merged by `applyFileMetaPage` (`ingestFileMeta`), queued only when the blob is held, and has
+  // File metadata is merged by the writer through `ingestFileMeta`, queued only when the blob is held, and has
   // its own suites; it is the `Q-107` part 2 half. Named here rather than silently absent.
   return families.filter(f => f.payloadKey !== 'filemeta');
 }

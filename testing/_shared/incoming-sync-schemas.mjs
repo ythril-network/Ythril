@@ -55,7 +55,7 @@ export function incomingSchemas(shared) {
  * The ingest schemas for records that can carry embedded TEXT.
  *
  * `IncomingLinkDoc` is the exemption and it has one reason: a link record is a pair of ids and a label
- * between two documents, so there is nothing to embed. `ingestBrainDoc` is told this out loud — links pass
+ * between two documents, so there is nothing to embed. The arrival writer is told this out loud — links pass
  * `null` as the record type, which is *this kind has nothing to embed* — so a missing embed job on an
  * arriving link is correct rather than a bug, and a suppression flag on one would be a switch for a thing
  * that never happens.

@@ -23,9 +23,12 @@
  * without the enqueue would produce a record that is stored, listed, traversable, and absent from every
  * meaning-ranked search, with no error anywhere.
  *
- * So the check is structural: **no bare `replaceOne` on a brain collection**, anywhere in that file. The write
- * and the enqueue happen together in `ingestBrainDoc`, which is the only thing that may write one, and that is
- * what makes forgetting impossible rather than merely unlikely.
+ * So the check is structural: **no raw write into a record collection** in any of the three files that store
+ * what arrived — the push router, the pull engine (`sync/engine.ts`) and the importer (`api/admin-import.ts`).
+ * The write and the enqueue happen together in `writeArrivals` (`sync/arrivals.ts`, 5.6.2 `Q-218`), which is
+ * the only thing that may write one, and that is what makes forgetting impossible rather than merely unlikely.
+ * That the doors REACH no other writer is `an-arrival-is-written-by-one-writer.test.js`; this file holds the
+ * embedding half.
  *
  * ## The suppression half, and why the flag has to travel
  *
@@ -45,97 +48,175 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { stripComments } from './_strip-comments.mjs';
-import { bodyOf } from './_structural-window.mjs';
+import { stripComments, blankComments } from './_strip-comments.mjs';
+import { argumentsOf, bodyOf } from './_structural-window.mjs';
+import { moduleIndex } from './_call-graph.mjs';
+import { recordWrites } from './_record-writes.mjs';
 import { embeddableIncomingSchemas } from '../_shared/incoming-sync-schemas.mjs';
 
+const { BRAIN_COLLECTIONS, KNOWLEDGE_TYPES, COLLECTION_SUFFIX } = await import('../../server/dist/config/types-knowledge.js');
+
 const DOCS = 'server/src/api/sync/docs.ts';
-const QUEUE = 'server/src/brain/embed-queue.js';
+/** The three files that store what arrived from elsewhere: the push router, the pull engine, the importer. */
+const INGEST_FILES = [DOCS, 'server/src/sync/engine.ts', 'server/src/api/admin-import.ts'];
+const QUEUE_FILE = 'server/src/brain/embed-queue.ts';
 
 const src = (p) => stripComments(readFileSync(p, 'utf8'));
 
-/** The four types, and the collection each lands in. */
-const TYPES = [
-  ['fact', 'facts'],
-  ['entity', 'entities'],
-  ['edge', 'edges'],
-  ['chrono', 'chrono'],
-];
+const INDEX = moduleIndex('server/src');
+const RECORDS = recordWrites(INDEX, { collections: BRAIN_COLLECTIONS, floors: { space: 150 }, recordFloor: 50 });
+
+/** Every `writeArrivals(` call in the ingest files, with its arguments; comments blanked so a line is the real line. */
+const WRITER_CALLS = INGEST_FILES.flatMap((file) => {
+  const code = blankComments(readFileSync(file, 'utf8'));
+  const out = [];
+  for (const m of code.matchAll(/(?<![\w.$])writeArrivals\s*(?:<[^>(]*>)?\s*\(/g)) {
+    const before = code.slice(code.lastIndexOf('\n', m.index) + 1, m.index);
+    if (/\bfunction\s*$/.test(before)) continue;
+    const paren = m.index + m[0].length - 1;
+    out.push({ file, line: code.slice(0, m.index).split('\n').length, args: argumentsOf(code, paren, `${file}: writeArrivals(`) });
+  }
+  return out;
+});
+
+/**
+ * The enqueue functions an ARRIVAL goes through — every exported `enqueueIngested…` of the embed queue, derived.
+ * Since 5.6.2 there are two: the single record (`enqueueIngestedRecord`, a merged file's) and the batched twin the
+ * arrival writer queues a landed chunk with (`enqueueIngestedRecords`). A rule asserted of one of them by name is
+ * a rule the other is free to break.
+ */
+const QUEUE_CODE = src(QUEUE_FILE);
+const INGEST_ENQUEUES = [...QUEUE_CODE.matchAll(/^export\s+async\s+function\s+(enqueueIngested\w*)\s*[<(]/gm)].map(m => m[1]);
+/** The enqueue doors that never throw into their caller: an exported `enqueue…EmbedJob(s)` whose body catches. */
+const ENQUEUE_DOORS = [...QUEUE_CODE.matchAll(/^export\s+async\s+function\s+(enqueue\w*EmbedJobs?)\s*\(/gm)].map(m => m[1]);
+const SWALLOWING_DOORS = ENQUEUE_DOORS.filter(d => /\bcatch\b/.test(bodyOf(QUEUE_CODE, d)));
 
 describe('nothing writes an arriving record without offering it to the embedder', () => {
-  it('the ingest file is the one this gate thinks it is', () => {
+  it('the ingest files are the ones this gate thinks they are', () => {
     // Floors every assertion below: a moved file would read as an empty string and pass everything.
     const s = src(DOCS);
     assert.ok(s.includes('IncomingFactDoc'), `${DOCS} is not the sync ingest router any more — re-anchor`);
     assert.ok(s.length > 10_000, 'the ingest router is suspiciously small — re-anchor this gate');
+    for (const f of INGEST_FILES) assert.ok(INDEX.files.includes(f), `${f} is gone — re-anchor this gate`);
   });
 
-  it('the sweep finds the ingest writes, so it cannot pass by finding nothing', () => {
+  it('the sweep finds the arrival writes, so it cannot pass by finding nothing', () => {
     /*
      * The floor, and it is here because its absence has already cost something. The rule used to be a COUNT:
      * every `.replaceOne(`/`.insertOne(` into a synced brain collection matched by an enqueue somewhere in the
      * file. Thirteen of each, and it worked — until the write was extracted into one helper, at which point
      * nought equalled nought and the check passed by looking at nothing.
+     *
+     * Now per FILE: each of the three ingest files — the push router, the pull engine, the importer — stores
+     * what it was handed through the one arrival writer (5.6.2). A file with none is a door that either stopped
+     * storing records or stores them some other way, and the next case cannot tell which.
      */
-    const ingests = src(DOCS).split('\n').filter(l => /ingestBrainDoc[<(]/.test(l)).length;
-    assert.ok(ingests >= 8, `the ingest router has ${ingests} ingest writes — re-anchor this gate`);
+    for (const f of INGEST_FILES) {
+      const n = WRITER_CALLS.filter(c => c.file === f).length;
+      assert.ok(n >= 1, `${f} makes no writeArrivals call — it stores arriving records some other way, or this gate is stale`);
+    }
   });
 
-  it('no raw write into a synced brain collection survives in the ingest router', () => {
+  it('no raw write into a record collection survives in the ingest files', () => {
     /*
      * The whole mechanism. Thirteen sites wrote the document and then queued it as a separate following
      * statement, which works for exactly as long as everyone writing the fourteenth remembers the second line.
-     * One helper does both now, so a new site cannot be written wrong: there is no way to write the document
+     * One writer does both now, so a new site cannot be written wrong: there is no way to write the document
      * without queueing it.
      *
-     * Scoped from the SHAPE of a write rather than a list of route names — a name list is how a sweep of the
-     * merge rule once missed its twelfth copy.
+     * Scoped from the SHAPE of a write, through `_record-writes.mjs` — the scanner that resolves an alias, a
+     * helper and a computed collection name back to what they open. It replaced a one-line regex over `docs.ts`
+     * that named `memories` two releases after the collection became `facts`: it was looking for a spelling
+     * nothing wrote any more, and passed. And it covered one of the three ingest files; the pull engine's
+     * `bulkWrite` was outside it for as long as it existed.
      */
-    const bare = src(DOCS).split('\n')
-      .map((l, i) => [i + 1, l])
-      .filter(([, l]) =>
-        /col<\w+>\(`\$\{spaceId\}_(memories|entities|edges|chrono)`\)\s*\.?\s*(replaceOne|insertOne)\(/.test(l));
-    assert.deepEqual(bare.map(([n]) => n), [],
-      'a raw write into a synced brain collection is back in the ingest router, at line(s) '
-      + `${bare.map(([n]) => n).join(', ')}. Use ingestBrainDoc, which writes the document AND queues its `
-      + 'embedding — a record written without the queue is stored, listed, traversable, and absent from every '
-      + 'meaning-ranked search on that peer, with no error to find it by');
+    const files = new Set(INGEST_FILES);
+    const raw = [...RECORDS.sites, ...RECORDS.orphans]
+      .filter(s => files.has(s.file))
+      .map(s => `${s.file}:${s.line} ${s.op} (${s.collection ?? s.why})`);
+    assert.deepEqual([...new Set(raw)], [],
+      'a raw write into a record collection is in an ingest file. Use writeArrivals, which writes the document AND '
+      + 'queues its embedding — a record written without the queue is stored, listed, traversable, and absent from '
+      + 'every meaning-ranked search on that peer, with no error to find it by');
   });
 
-  it('and all four record types reach it', () => {
+  it('and every record type reaches it, named at the call — null only for links', async () => {
     /*
-     * Per type, because the four are written by four different code paths and "it is handled" has been true of
-     * three out of four before now.
-     *
-     * Asserted on the whole call, built from the type name, rather than on a windowed search near the helper:
-     * a window with a character count in it spans different amounts of code on CRLF than on CI's LF, and the
-     * repo forbids them for that reason.
+     * Per type, because the types are written by different code paths and "it is handled" has been true of
+     * three out of four before now. Every door passes the record type out of the ONE derived table,
+     * `RECORD_TYPE_OF[<the family's collection>]`, so "named at the call" means the call reads the family's own
+     * row, keyed by the same expression it passes as the family; a literal is allowed too. `null` means "this
+     * kind has nothing to embed", and only a link may say it. Seen red by mutation, restored by hand: the push
+     * door's `RECORD_TYPE_OF[family]` passed as `null`.
      */
-    const s = src(DOCS);
-    for (const [kind, collection] of TYPES) {
-      assert.ok(s.includes(`ingestBrainDoc<`) && s.includes(`, '${kind}', '${collection}',`),
-        `nothing queues an arriving ${kind} for embedding, so a synced ${collection} record ranks in no recall`);
+    const short = WRITER_CALLS.filter(c => c.args.length < 4).map(c => `${c.file}:${c.line}`);
+    assert.deepEqual(short, [], 'a writeArrivals call omits the record type — it is an explicit argument, null for links');
+    const own = (c) => c.args[2] === `RECORD_TYPE_OF[${c.args[1]}]`;
+    const literal = (a) => /^'(\w+)'$/.exec(a ?? '')?.[1] ?? null;
+    const loose = WRITER_CALLS.filter(c => !own(c) && literal(c.args[2]) === null && c.args[2] !== 'null')
+      .map(c => `${c.file}:${c.line} (${c.args[1]} -> ${c.args[2]})`);
+    assert.deepEqual(loose, [], 'a writeArrivals call passes a record type that is not the family\'s own row of '
+      + 'RECORD_TYPE_OF, nor a literal — a family could be stored under another kind\'s embed rules');
+    const nulls = WRITER_CALLS.filter(c => c.args[2] === 'null' && !/\blinks\b/.test(c.args[1] ?? ''))
+      .map(c => `${c.file}:${c.line} (${c.args[1]})`);
+    assert.deepEqual(nulls, [], 'a writeArrivals call passes null as the record type for a family that is not links');
+
+    const { RECORD_TYPE_OF } = await import('../../server/dist/sync/replicated-families.js');
+    for (const kind of KNOWLEDGE_TYPES) {
+      assert.equal(RECORD_TYPE_OF[COLLECTION_SUFFIX[kind]], kind,
+        `RECORD_TYPE_OF does not name '${kind}' for ${COLLECTION_SUFFIX[kind]}, so a synced record of it is not queued by its kind`);
     }
+    const nullRows = Object.entries(RECORD_TYPE_OF).filter(([, t]) => t === null).map(([c]) => c);
+    assert.deepEqual(nullRows, ['links'], 'RECORD_TYPE_OF holds null for a family that is not links');
+    assert.ok(WRITER_CALLS.some(own), 'no writeArrivals call reads the family\'s row of RECORD_TYPE_OF — re-anchor');
   });
 });
 
 describe('and the receiver decides whether to embed it', () => {
-  const queue = src('server/src/brain/embed-queue.ts');
+  it('the ingest enqueues were found — the single record and its batched twin (floor)', () => {
+    for (const name of ['enqueueIngestedRecord', 'enqueueIngestedRecords']) {
+      assert.ok(INGEST_ENQUEUES.includes(name),
+        `${QUEUE_FILE} exports no ${name} — ${name === 'enqueueIngestedRecords'
+          ? 'the arrival writer has no batched enqueue to queue a landed chunk with'
+          : 're-anchor this gate'}`);
+    }
+    assert.ok(SWALLOWING_DOORS.length >= 1, `no enqueue door of ${QUEUE_FILE} catches — the derivation is broken`);
+  });
 
-  it('the ingest enqueue consults the receiver own suppression resolution', () => {
+  it('every ingest enqueue consults the receiver\'s own suppression resolution', () => {
     /*
      * `embeddingSuppressedFor` reads the record, then the type schema, then the space — the last two from the
      * receiver's own configuration. Consulting it here is what makes "the receiver applies its rules" true of
      * the arriving record rather than only of records written locally.
      *
      * Asserted on the CALL, not on the identifier appearing in the file: a mention in a comment is exactly
-     * what a gate like this passes on if it is written lazily.
+     * what a gate like this passes on if it is written lazily. And of EVERY ingest enqueue, derived: the
+     * batched twin is the one the writer uses, and a rule held by the single record alone would not reach it.
      */
-    const body = bodyOf(queue, 'enqueueIngestedRecord');
-    assert.ok(body.length > 40, 'enqueueIngestedRecord is gone or renamed — re-anchor this gate');
-    assert.match(body, /embeddingSuppressedFor\(/,
-      'the ingest enqueue does not ask whether the receiver wants this record embedded, so a record its '
-      + 'author suppressed is queued anyway');
+    for (const name of INGEST_ENQUEUES) {
+      const body = bodyOf(QUEUE_CODE, name).replace(/^[^\n]*\n/, '');
+      assert.ok(body.length > 40, `${name} is empty — re-anchor this gate`);
+      assert.match(body, /\bembeddingSuppressedFor\(/,
+        `${name} does not ask whether the receiver wants these records embedded, so a record its author `
+        + 'suppressed — or one in a space or type this instance suppresses — is queued anyway');
+    }
+  });
+
+  it('and no ingest enqueue throws into the write it announces', () => {
+    /*
+     * The records are stored by the time they are queued. An enqueue that throws turns a delayed search hit into
+     * a failed push — a 500 the sender retries for ever, over records this instance already holds. So each ingest
+     * enqueue either catches itself or queues only through a door that does (`enqueueEmbedJob`).
+     */
+    for (const name of INGEST_ENQUEUES) {
+      const body = bodyOf(QUEUE_CODE, name).replace(/^[^\n]*\n/, '');
+      if (/\btry\s*\{[\s\S]*\bcatch\b/.test(body)) continue;
+      const called = ENQUEUE_DOORS.filter(d => new RegExp(`(?<![\\w.$])${d}\\s*\\(`).test(body));
+      assert.ok(called.length >= 1, `${name} queues through no enqueue door — re-anchor this gate`);
+      const throwing = called.filter(d => !SWALLOWING_DOORS.includes(d));
+      assert.deepEqual(throwing, [],
+        `${name} queues through ${throwing.join(', ')}, which throws, outside any try — a failed enqueue fails the arrival`);
+    }
   });
 
   it('and it no longer trusts a vector that arrived with the record', () => {
@@ -151,10 +232,31 @@ describe('and the receiver decides whether to embed it', () => {
      * concludes about all of them. `a-local-only-field-is-dropped-on-both-ingest-paths.test.js` is the one
      * that spans both.
      */
-    const body = bodyOf(queue, 'enqueueIngestedRecord');
-    assert.doesNotMatch(body, /doc\.embedding|Array\.isArray\(vec\)/,
-      'the ingest enqueue still skips records that arrived with a vector. No ingest schema can deliver one, '
-      + 'so the branch is unreachable — and it documents the opposite of the rule');
+    for (const name of INGEST_ENQUEUES) {
+      const body = bodyOf(QUEUE_CODE, name);
+      assert.doesNotMatch(body, /\.embedding\b|Array\.isArray\(vec\)/,
+        `${name} still skips records that arrived with a vector. No ingest schema can deliver one, `
+        + 'so the branch is unreachable — and it documents the opposite of the rule');
+    }
+  });
+});
+
+describe('a file is queued by whichever path stored it, and by one only', () => {
+  it('a peer\'s file is queued by ingestFileMeta; a restored one by the writer, which replaced it', () => {
+    /*
+     * 5.6.x shape (cut `C6`): a peer's file metadata is MERGED by `ingestFileMeta`, which queues it when this
+     * instance holds the blob; a RESTORED file row is REPLACED by the writer, as 5.6.1's restore did, and the
+     * writer queues it as that restore did. Two owners would queue one file twice; none would leave it unqueued.
+     * Seen red by mutation, restored by hand: the writer's file exclusion dropped (`|| restore` removed).
+     */
+    const shared = src('server/src/api/sync/_shared.ts');
+    assert.match(bodyOf(shared, 'ingestFileMeta'), /if \(haveBytes\) await enqueueIngestedRecord\(spaceId, 'file', incoming\);/,
+      'ingestFileMeta no longer decides when a merged file is queued');
+    const writer = bodyOf(src('server/src/sync/arrivals.ts'), 'writeArrivals');
+    assert.match(writer, /const queues = recordType !== null && \(family !== 'files' \|\| restore\);/,
+      'the arrival writer queues a peer\'s file metadata itself, beside ingestFileMeta — or no longer queues a restored file');
+    assert.match(writer, /const merges = family === 'files' && !restore;/,
+      'a restored file is merged by ingestFileMeta again, so the writer and ingestFileMeta both decide its queue');
   });
 });
 
@@ -199,7 +301,7 @@ describe('the record tier of suppression reaches the receiver', () => {
     /*
      * The exclusion is the half a hand-written list cannot express. `IncomingLinkDoc` legitimately has no
      * suppression flag — a link is a pair of ids and a label, so there is nothing to embed, and
-     * `ingestBrainDoc` is told so out loud: links pass `null` as the record type, which means "this kind
+     * the arrival writer is told so out loud: links pass `null` as the record type, which means "this kind
      * has nothing to embed". A missing embed job on an arriving link is correct rather than a bug.
      *
      * Asserted rather than assumed, because the day a link gains embeddable text the exemption becomes the
@@ -210,7 +312,7 @@ describe('the record tier of suppression reaches the receiver', () => {
     assert.ok(Object.keys(shape).length > 3, 'IncomingLinkDoc not found — re-anchor this gate');
     assert.ok(!Object.prototype.hasOwnProperty.call(shape, 'suppressEmbeddings'),
       'IncomingLinkDoc declares a suppression flag. Either a link now carries text worth embedding — in '
-      + 'which case it belongs in the loop above and `ingestBrainDoc` must stop passing `null` for it — or '
+      + 'which case it belongs in the loop above and RECORD_TYPE_OF must stop holding `null` for it — or '
       + 'the field is a switch for something that never happens.');
   });
 
