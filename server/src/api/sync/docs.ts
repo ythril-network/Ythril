@@ -313,6 +313,12 @@ async function applyPushVerdict<S extends { seq?: number }>(
   return landing;
 }
 
+/**
+ * The id the fork of `incoming` has — one spelling for the fork that is written (`writeFork`) and the fork a re-send
+ * looks for (`heldFork`), so the two can never ask about different ids.
+ */
+const forkIdOf = (incoming: FactDoc): string => forkIdFor(incoming._id, incoming.seq, incoming.fact);
+
 /** A divergent copy at the stored seq: a fork, unless it is the stored copy's own text. */
 const divergent = (stored: FactDoc | null, incoming: FactDoc): boolean =>
   stored !== null && incoming.seq === stored.seq && incoming.fact !== stored.fact;
@@ -324,7 +330,7 @@ const divergent = (stored: FactDoc | null, incoming: FactDoc): boolean =>
  * record it already delivered was dropped.
  */
 async function heldFork(spaceId: string, incoming: FactDoc): Promise<string | null> {
-  const id = forkIdFor(incoming._id, incoming.seq, incoming.fact);
+  const id = forkIdOf(incoming);
   const found = await col<FactDoc>(spaceCollection(spaceId, 'facts'))
     .findOne(asFilter<FactDoc>({ _id: id }), { projection: { _id: 1 } });
   return found ? id : null;
@@ -339,7 +345,7 @@ function writeFork(spaceId: string, incoming: FactDoc, from: string): Promise<{ 
   return withSeq(spaceId, async (forkSeq) => {
     const now = new Date().toISOString();
     const doc: FactDoc = {
-      ...incoming, _id: forkIdFor(incoming._id, incoming.seq, incoming.fact), forkOf: incoming._id, seq: forkSeq,
+      ...incoming, _id: forkIdOf(incoming), forkOf: incoming._id, seq: forkSeq,
       createdAt: now, updatedAt: now,
     };
     return { doc, landing: landingOf(await landOne(spaceId, 'facts', doc, from), doc._id) };

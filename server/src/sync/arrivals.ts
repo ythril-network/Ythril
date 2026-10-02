@@ -265,7 +265,8 @@ function filterFor(doc: Doc, restore: boolean): Record<string, unknown> {
  *    — but the embed queue skips a record the receiver suppresses, so a vector carried onto one stays for good and
  *    keeps the record in meaning-ranked search. Asked of the ARRIVING document by the one resolver
  *    (`embeddingSuppressedFor`, record > schema > space; a file has two tiers), since it is what the stored record
- *    will be. A family with nothing to embed (`recordType` null) carries none.
+ *    will be. A family with nothing to embed (`recordType` null, a link) has nothing to suppress, so whatever it
+ *    holds is carried as before.
  *  - the RECORD-TIER fields (`RESTORED_LOCAL_FIELDS`: the retention stamps, `syncBase`) for a peer's arrival only. A
  *    RESTORE carries none: the backup is the record's state, so a stamp the backup does not hold belongs to the copy
  *    the operator is replacing, and carried it would decide when the restored record is deleted.
@@ -273,7 +274,8 @@ function filterFor(doc: Doc, restore: boolean): Record<string, unknown> {
 function carriedFields(
   spaceId: string, recordType: BrainEmbedRecordType | null, doc: Doc, restore: boolean,
 ): readonly string[] {
-  const derived = recordType !== null && !embeddingSuppressedFor(spaceId, recordType, doc) ? [...DERIVED_LOCAL_FIELDS] : [];
+  const suppressed = recordType !== null && embeddingSuppressedFor(spaceId, recordType, doc);
+  const derived = suppressed ? [] : [...DERIVED_LOCAL_FIELDS];
   return restore ? derived : [...derived, ...RESTORED_LOCAL_FIELDS];
 }
 
