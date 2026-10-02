@@ -154,7 +154,9 @@ export const FROZEN = {
   // where in the cycle a refusal is recorded, which is a fact about the cycle.
   // 964 -> 802: file sync (tombstones, manifest, bytes) moved whole into `sync/file-sync.ts` (Q-68), which the
   // fix for a renamed space's files and the last-agreed-hash conflict rule both change.
-  'server/src/sync/engine.ts': 802,
+  // 802 -> 752 (5.6.2, `Q-218`): the pull's page write (`batchUpsertBySeq`) moved out into the one arrival writer,
+  // `sync/arrivals.ts`; the ceiling follows the file down so the reclaimed lines are not room to regrow into.
+  'server/src/sync/engine.ts': 752,
   // 958 -> 684: the per-type editor body moved into `schema-type-editor.component` so the Brain Overview
   // could open the same editor. Lowered rather than left — a frozen number 274 lines above the real size
   // is 274 lines this file could regrow into without the gate saying a word.
