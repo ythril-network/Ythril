@@ -28,6 +28,7 @@ import { readdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { Socket } from 'node:net';
 import { splitStandalone, batched } from '../testing/_shared/standalone-split.mjs';
+import { NODE_TEST_ARGS } from '../testing/_shared/node-test-args.mjs';
 
 /** Gates that read SOURCE only — no build required, so they run first and fail fastest. */
 const SOURCE_GATES = [
@@ -56,7 +57,7 @@ const failures = [];
 function gate(name, why, file) {
   process.stdout.write(`\n── ${name} ──\n`);
   try {
-    run(`node --test testing/standalone/${file}.test.js`);
+    run(`node ${NODE_TEST_ARGS.join(' ')} testing/standalone/${file}.test.js`);
   } catch {
     failures.push({ name, why });
   }
@@ -112,7 +113,7 @@ const batches = batched(pure.map(f => `testing/standalone/${f}`));
 let standaloneFailed = false;
 for (const [i, batch] of batches.entries()) {
   if (batches.length > 1) console.log(`  batch ${i + 1}/${batches.length} — ${batch.length} file(s)`);
-  try { run(`node --test ${batch.join(' ')}`); } catch {
+  try { run(`node ${NODE_TEST_ARGS.join(' ')} ${batch.join(' ')}`); } catch {
     // Keep going: one batch failing must not hide a second failure in a later batch, which is exactly the
     // information a single all-or-nothing invocation used to give.
     standaloneFailed = true;

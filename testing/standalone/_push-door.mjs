@@ -109,6 +109,24 @@ export async function openPushDoor({ suite, spaces, networks = [], monitorComman
   }, null, 2), { mode: 0o600 });
 
   const mongo = await openTestMongo(suite);
+  try {
+    return await assemblePushDoor({ suite, spaces, monitorCommands, mongo, tmpDir });
+  } catch (err) {
+    // A setup that throws after the connect must still close it: an open client keeps this test process alive,
+    // and node's runner waits on the file for ever instead of reporting it failed (PR #1475's hung Build & Test).
+    await releaseHarness(tmpDir);
+    throw err;
+  }
+}
+
+/** Close the harness database and remove the door's config directory: the one teardown, success or failure. */
+async function releaseHarness(tmpDir) {
+  await closeTestMongo();
+  try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* best effort */ }
+}
+
+/** Everything `openPushDoor` builds once the harness database is open; split out so its failure can close it. */
+async function assemblePushDoor({ suite, spaces, monitorCommands, mongo, tmpDir }) {
   const DB = `ythril_harness_${suite}`;
   let counting = false;
   let commands = [];
@@ -222,8 +240,7 @@ export async function openPushDoor({ suite, spaces, networks = [], monitorComman
   async function close() {
     proto.updateOne = originals.updateOne;
     proto.findOneAndUpdate = originals.findOneAndUpdate;
-    await closeTestMongo();
-    try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* best effort */ }
+    await releaseHarness(tmpDir);
   }
 
   return { mongo, push, pull, coll, counter, setCounter, settled, wipe, commandsDuring, close };
