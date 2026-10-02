@@ -30,6 +30,7 @@ import { resolveWriteTarget } from '../spaces/proxy.js';
 import { log } from '../util/log.js';
 import { primitivePropertyError } from '../brain/property-values.js';
 import { webhookToken, parseTtlDaysQuery, requireQueryPath, enforceSizeLimit } from './files-request.js';
+import { callerPeerAuthor } from './sync/_shared.js';
 import { tagsError } from '../util/request-bounds.js';
 
 /**
@@ -67,6 +68,9 @@ export function registerUploadRoute(router: Router): void {
 
       const filePath = requireQueryPath(req, res);
       if (filePath === null) return;
+      // A peer pushing a file it holds (sync/file-sync.ts) delivers an ARRIVAL, recorded as the peer's — see
+      // `arrivedFrom` in files/store-file.ts. Both branches below pass it.
+      const arrivedFrom = callerPeerAuthor(req.authToken as Record<string, unknown> | undefined);
 
       // ── Chunked upload (Content-Range) ───────────────────────────────────
       const range = parseContentRange(req.headers['content-range'] as string | undefined);
@@ -128,6 +132,7 @@ export function registerUploadRoute(router: Router): void {
                 meta: ttlDays !== undefined ? { ttlDays } : {},
                 ...(req.headers['content-type'] ? { contentType: req.headers['content-type'] } : {}),
                 actor: webhookToken(req) as Record<string, unknown>,
+                ...(arrivedFrom ? { arrivedFrom } : {}),
               });
             const isDocFormat = resolvedFmt !== 'text' && !isMediaFormat(resolvedFmt);
             const chunkedStatusCode = (chunkedEmbeddingStatus === 'pending' && isDocFormat) ? 202 : 201;
@@ -207,6 +212,7 @@ export function registerUploadRoute(router: Router): void {
             meta: metaOpts, inputFormat,
             ...(req.headers['content-type'] ? { contentType: req.headers['content-type'] } : {}),
             actor: webhookToken(req) as Record<string, unknown>,
+            ...(arrivedFrom ? { arrivedFrom } : {}),
           });
         } catch (err) {
           if (err instanceof QuotaError) { res.status(507).json({ error: err.message, storageExceeded: true }); return; }
