@@ -35,7 +35,7 @@ export async function pullSpaceMetaFromUpstream(
     const q = new URLSearchParams({ spaceId: remoteSpaceId, networkId: net.id });
     const resp = await peerSafeFetch(`${member.url}/api/sync/meta?${q}`, opts());
     if (!resp.ok) {
-      log.warn(`Schema from ${logSafe(member.label)} for '${spaceId}': HTTP ${resp.status}`);
+      log.warn(`Schema from ${logSafe(member.label)} for '${spaceId}': HTTP ${logSafe(resp.status)}`);
       return false;
     }
     const { meta: incoming } = await boundedJson<{ meta?: unknown }>(resp, 'sync peer');

@@ -719,7 +719,7 @@ syncDocsRouter.post('/batch-upsert', syncRateLimit, requireAuth, denyReadOnly, a
         if (seqRefusal(d.seq, { optional: false }) === null) return true;
         drop(kind);
         log.warn(
-          `batch-upsert: dropped ${kind} '${logSafe(d._id)}' with implausible seq ${d.seq} ` +
+          `batch-upsert: dropped ${kind} '${logSafe(d._id)}' with implausible seq ${logSafe(d.seq)} ` +
           `for space '${spaceId}' (max ingest seq ${MAX_INGEST_SEQ}) from peer ` +
           `'${logSafe(callerPeerId(req.authToken as Record<string, unknown>) ?? 'unknown')}'.`,
         );
@@ -803,7 +803,7 @@ syncDocsRouter.post('/batch-upsert', syncRateLimit, requireAuth, denyReadOnly, a
            */
           memStats.forkDepthRefused++;
           log.warn(`sync batch-upsert: DROPPED fact ${logSafe(incoming._id)} in '${spaceId}' — divergent content at `
-            + `seq ${incoming.seq} and the fork chain is already ${depth} deep (MAX_FORK_DEPTH=${MAX_FORK_DEPTH}). `
+            + `seq ${logSafe(incoming.seq)} and the fork chain is already ${logSafe(depth)} deep (MAX_FORK_DEPTH=${MAX_FORK_DEPTH}). `
             + 'The sender will not offer it again. Resolve the fork chain to accept it.');
           continue;
         }
@@ -952,12 +952,12 @@ syncDocsRouter.post('/batch-upsert', syncRateLimit, requireAuth, denyReadOnly, a
     const range = (docs: { seq?: number }[]): string =>
       docs.length === 0 ? '-' : `${Math.min(...docs.map(d => d.seq ?? 0))}..${Math.max(...docs.map(d => d.seq ?? 0))}`;
     log.debug(`Batch-upsert accepted for space '${spaceId}': `
-      + `facts ${JSON.stringify(memStats)} seq ${range(facts)}; `
-      + `entities ${JSON.stringify(entStats)} seq ${range(entities)}; `
-      + `edges ${JSON.stringify(edgeStats)} seq ${range(edges)}; `
-      + `chrono ${JSON.stringify(chronoStats)} seq ${range(chrono)}; `
-      + `links ${JSON.stringify(linkStats)} seq ${range(links)} `
-      + `filemeta ${JSON.stringify(fileMetaStats)} seq ${range(fileMeta)}`);
+      + `facts ${logSafe(JSON.stringify(memStats))} seq ${logSafe(range(facts))}; `
+      + `entities ${logSafe(JSON.stringify(entStats))} seq ${logSafe(range(entities))}; `
+      + `edges ${logSafe(JSON.stringify(edgeStats))} seq ${logSafe(range(edges))}; `
+      + `chrono ${logSafe(JSON.stringify(chronoStats))} seq ${logSafe(range(chrono))}; `
+      + `links ${logSafe(JSON.stringify(linkStats))} seq ${logSafe(range(links))} `
+      + `filemeta ${logSafe(JSON.stringify(fileMetaStats))} seq ${logSafe(range(fileMeta))}`);
 
     /*
      * ALL SIX FAMILIES, and `filemeta` was the one missing.

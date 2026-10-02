@@ -198,19 +198,19 @@ async function _runSyncForNetworkImpl(networkId: string): Promise<{ synced: numb
         const hasChildren = net.type === 'braintree' && (member.children?.length ?? 0) > 0;
         log.warn(
           `PEER UNREACHABLE: '${logSafe(member.label)}' in network '${logSafe(net.label)}' has failed ` +
-          `${failures} consecutive sync cycles. Last success: ${logSafe(member.lastSyncAt ?? 'never')}. ` +
+          `${logSafe(failures)} consecutive sync cycles. Last success: ${logSafe(member.lastSyncAt ?? 'never')}. ` +
           `Member has NOT been removed — manual action required.` +
           (hasChildren
             ? ` NOTE: this node has ${member.children!.length} child(ren) in a braintree network — its entire subtree is now partitioned from this brain until it comes back online.`
             : ''),
         );
       } else if (failures > STALE_FAILURE_THRESHOLD && failures % 10 === 0) {
-        log.warn(`PEER STILL UNREACHABLE: '${logSafe(member.label)}' (${failures} consecutive failures, last success: ${logSafe(member.lastSyncAt ?? 'never')})`);
+        log.warn(`PEER STILL UNREACHABLE: '${logSafe(member.label)}' (${logSafe(failures)} consecutive failures, last success: ${logSafe(member.lastSyncAt ?? 'never')})`);
       }
     }
   }
 
-  log.info(`Sync cycle complete for '${logSafe(net.label)}': ${synced} ok, ${errors} errors`);
+  log.info(`Sync cycle complete for '${logSafe(net.label)}': ${logSafe(synced)} ok, ${logSafe(errors)} errors`);
   syncTimer();
 
   // Calculate status once and share between Prometheus and sync history
@@ -282,7 +282,7 @@ async function _runSyncForNetworkImpl(networkId: string): Promise<{ synced: numb
     if (freshNet) {
       const removed = pruneExpiredRounds(freshNet);
       if (removed > 0) {
-        log.info(`Pruned ${removed} concluded+expired vote round(s) from network '${logSafe(freshNet.label)}'`);
+        log.info(`Pruned ${logSafe(removed)} concluded+expired vote round(s) from network '${logSafe(freshNet.label)}'`);
         saveConfig(freshCfg);
       }
     }
@@ -576,7 +576,7 @@ async function gossipWithPeer(
         }
       } catch { /* ignore JSON parse failures */ }
     } else {
-      log.warn(`Gossip self-push to ${logSafe(member.label)}: HTTP ${resp.status}`);
+      log.warn(`Gossip self-push to ${logSafe(member.label)}: HTTP ${logSafe(resp.status)}`);
     }
   } catch (err) {
     log.warn(`Gossip self-push to ${logSafe(member.label)}: ${logSafe(String(err))}`);
@@ -586,7 +586,7 @@ async function gossipWithPeer(
   try {
     const resp = await peerSafeFetch(`${base}/members`, opts());
     if (!resp.ok) {
-      log.warn(`Gossip pull from ${logSafe(member.label)}: HTTP ${resp.status}`);
+      log.warn(`Gossip pull from ${logSafe(member.label)}: HTTP ${logSafe(resp.status)}`);
       return;
     }
     const { members: peerView } = await boundedJson<{ members: Partial<NetworkMember>[] }>(resp, 'sync peer');
@@ -656,7 +656,7 @@ async function propagateVotesWithPeer(
   try {
     const resp = await peerSafeFetch(`${base}/votes`, opts());
     if (!resp.ok) {
-      log.warn(`Vote pull from ${logSafe(member.label)}: HTTP ${resp.status}`);
+      log.warn(`Vote pull from ${logSafe(member.label)}: HTTP ${logSafe(resp.status)}`);
       return;
     }
     const { rounds: peerRounds } = await boundedJson<{ rounds: (Omit<VoteRound, 'concluded'>)[] }>(resp, 'sync peer');
@@ -853,7 +853,7 @@ async function pullFromPeer(
         truncated = true;
         log.warn(`sync pull ${spaceId} ${family.collection}: record write failed: `
           + `${logSafe(err instanceof Error ? err.message : String(err))} (from ${logSafe(member.label ?? member.instanceId)}). `
-          + `This is this instance's database, not the peer: the transfer holds at ${deliveredThrough} and the page `
+          + `This is this instance's database, not the peer: the transfer holds at ${logSafe(deliveredThrough)} and the page `
           + 'is fetched again next cycle.');
         break;
       }
@@ -861,7 +861,7 @@ async function pullFromPeer(
         // `Q-218` R3: the page is stored, but this counter may be behind it, so the position is not vouched for.
         truncated = true;
         log.warn(`sync pull ${spaceId} ${family.collection}: record write failed: the seq counter could not be moved `
-          + `past the page from ${logSafe(member.label ?? member.instanceId)}. The transfer holds at ${deliveredThrough} `
+          + `past the page from ${logSafe(member.label ?? member.instanceId)}. The transfer holds at ${logSafe(deliveredThrough)} `
           + 'and the page is fetched again next cycle.');
         break;
       }
@@ -870,7 +870,7 @@ async function pullFromPeer(
         // The documents are named once, by the writer's own summary (`warnArrivalsNotStored`); this says what it costs.
         log.warn(`sync pull ${spaceId} ${family.collection}: record write failed: the store refused `
           + `${written.storeRefused.length} document(s) from ${logSafe(member.label ?? member.instanceId)}. The `
-          + `transfer holds at ${deliveredThrough} and the page is fetched again next cycle.`);
+          + `transfer holds at ${logSafe(deliveredThrough)} and the page is fetched again next cycle.`);
         break;
       }
       const refused = new Set(written.refused.map(r => r._id));
@@ -891,7 +891,7 @@ async function pullFromPeer(
     // transfer has more to give, so it must cap the watermark AND keep making progress.
     if (cur) {
       truncated = true;
-      log.warn(truncationWarn(`Pull ${urlSuffix} from`, logSafe(member.label ?? ''), spaceId, `${pg}-page cap`, deliveredThrough));
+      log.warn(truncationWarn(`Pull ${urlSuffix} from`, logSafe(member.label ?? ''), spaceId, `${logSafe(pg)}-page cap`, deliveredThrough));
     }
     return { count, highSeq, maxSeq, deliveredThrough, truncated };
   }
@@ -1039,8 +1039,8 @@ async function pushToPeer(
        * attempts conclusive instead of inconclusive.
        */
       log.debug(`Push ${payloadKey} to ${logSafe(member.label ?? member.instanceId)} space '${spaceId}': `
-        + `${batch.length} doc(s) with seq > ${seqCursor}`
-        + (batch.length ? ` (through ${(batch[batch.length - 1] as FactDoc).seq})` : ''));
+        + `${batch.length} doc(s) with seq > ${logSafe(seqCursor)}`
+        + (batch.length ? ` (through ${logSafe((batch[batch.length - 1] as FactDoc).seq)})` : ''));
       if (batch.length === 0) break;
       const resp = await peerSafeFetch(batchEndpoint, {
         ...batchOpts(), method: 'POST',
@@ -1113,8 +1113,8 @@ async function pushToPeer(
    * nothing and the record is never offered again. That combination is invisible without both numbers in one
    * line, which is why they are logged together rather than at four separate call sites.
    */
-  log.debug(`Push cycle to ${logSafe(member.label ?? member.instanceId)} space '${spaceId}': watermark ${lastSeqPushed} -> `
-    + `${maxSeqPushed}, pushed ${pushedMemories}m/${pushedEntities}e/${pushedEdges}g/${pushedChrono}c/${pushedLinks}l`);
+  log.debug(`Push cycle to ${logSafe(member.label ?? member.instanceId)} space '${spaceId}': watermark ${logSafe(lastSeqPushed)} -> `
+    + `${logSafe(maxSeqPushed)}, pushed ${logSafe(pushedMemories)}m/${logSafe(pushedEntities)}e/${logSafe(pushedEdges)}g/${logSafe(pushedChrono)}c/${logSafe(pushedLinks)}l`);
 
   // Persist the push high-water mark so next sync only sends new/changed docs
   if (maxSeqPushed > lastSeqPushed) {
@@ -1169,7 +1169,7 @@ async function checkMerkleWithPeer(
     ]);
 
     if (!peerResp.ok) {
-      log.warn(`Merkle check for space '${spaceId}' with peer '${logSafe(member.label)}': peer returned HTTP ${peerResp.status} — skipping`);
+      log.warn(`Merkle check for space '${spaceId}' with peer '${logSafe(member.label)}': peer returned HTTP ${logSafe(peerResp.status)} — skipping`);
       return;
     }
 
@@ -1185,7 +1185,7 @@ async function checkMerkleWithPeer(
       log.warn(
         `MERKLE_DIVERGENCE: space '${spaceId}', peer '${logSafe(member.label)}' (${logSafe(member.instanceId)}), ` +
         `network '${logSafe(net.label)}'. ` +
-        `local root=${logSafe(localResult.root)} (${localResult.leafCount} leaves), ` +
+        `local root=${logSafe(localResult.root)} (${logSafe(localResult.leafCount)} leaves), ` +
         `peer root=${logSafe(peerRoot)} (${logSafe(peerResult.leafCount ?? '?')} leaves). ` +
         `The space contents differ after sync — possible data loss, concurrent write, or sync bug.`,
       );

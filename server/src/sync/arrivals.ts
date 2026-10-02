@@ -379,7 +379,7 @@ export async function writeArrivals(
       if (bumped >= out.maxReceived) out.counterBehind = false;
     } catch (err) {
       out.counterBehind = true;
-      log.warn(`${logSafe(where)}: the seq counter of space '${spaceId}' could not be moved to ${top}: ${message(err)}`);
+      log.warn(`${logSafe(where)}: the seq counter of space '${spaceId}' could not be moved to ${logSafe(top)}: ${message(err)}`);
     }
   };
   /** What each document's replace carries from its stored copy — decided once per document. */

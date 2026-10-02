@@ -187,7 +187,7 @@ export async function importDocuments(spaceId: string, payload: Record<string, u
     + IMPORT_TYPES.map(t => {
       const r = results[t];
       const v = r.schemaViolations?.length ?? 0;
-      return `${t}: +${r.inserted} ~${r.updated} !${r.errors}${v > 0 ? ` ?${v}` : ''}`;
+      return `${t}: +${logSafe(r.inserted)} ~${logSafe(r.updated)} !${logSafe(r.errors)}${v > 0 ? ` ?${logSafe(v)}` : ''}`;
     }).join(', '),
   );
 

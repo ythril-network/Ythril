@@ -68,8 +68,8 @@ export async function pullTombstones(opts: {
       // past them, so the next cycle asked for tombstones newer than ones it had never seen.
       outcome.truncated = true;
       log.warn(
-        `Pull tombstones from ${logSafe(member.label)} returned ${resp.status} — holding the receive watermark for `
-        + `space '${spaceId}' at ${sinceSeq} so the deletions are re-requested next cycle.`,
+        `Pull tombstones from ${logSafe(member.label)} returned ${logSafe(resp.status)} — holding the receive watermark for `
+        + `space '${spaceId}' at ${logSafe(sinceSeq)} so the deletions are re-requested next cycle.`,
       );
       return outcome;
     }
@@ -125,7 +125,7 @@ export async function pushTombstones(opts: {
       // it, is a deletion this instance will never send again.
       outcome.truncated = true;
       log.warn(
-        `Push tombstones to ${logSafe(member.label)}: ${resp.status} — delivered through seq ${logSafe(cursor)}, so the push `
+        `Push tombstones to ${logSafe(member.label)}: ${logSafe(resp.status)} — delivered through seq ${logSafe(cursor)}, so the push `
         + `watermark for space '${spaceId}' is held there.`,
       );
       break;

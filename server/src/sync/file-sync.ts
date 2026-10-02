@@ -60,7 +60,7 @@ export async function syncFiles(
           } catch { /* ignore per-file errors */ }
         }
       } else {
-        log.warn(`File tombstones from ${logSafe(member.label)}: ${tsResp.status}`);
+        log.warn(`File tombstones from ${logSafe(member.label)}: ${logSafe(tsResp.status)}`);
       }
     } catch (err) {
       // Tombstone fetch is best-effort; continue with manifest sync.
@@ -93,7 +93,7 @@ export async function syncFiles(
         if (ackResp.ok) {
           recordFileTombstoneAck(member.instanceId, spaceId, ackedPositionFrom(ourTombstones));
         } else {
-          log.debug(`Push file tombstones to ${logSafe(member.label)}: ${ackResp.status} — position not advanced`);
+          log.debug(`Push file tombstones to ${logSafe(member.label)}: ${logSafe(ackResp.status)} — position not advanced`);
         }
       }
     } catch (err) {
@@ -105,7 +105,7 @@ export async function syncFiles(
     // drives both directions). When neither direction needs manifest, skip entirely.
     if (!doPull && !doPush) return { pulledFiles, pushedFiles, pulledPaths };
     const resp = await peerSafeFetch(`${member.url}/api/sync/manifest?spaceId=${encodeURIComponent(remoteSpaceId)}&networkId=${encodeURIComponent(networkId)}`, opts());
-    if (!resp.ok) { log.warn(`File manifest from ${logSafe(member.label)}: ${resp.status}`); return { pulledFiles, pushedFiles, pulledPaths }; }
+    if (!resp.ok) { log.warn(`File manifest from ${logSafe(member.label)}: ${logSafe(resp.status)}`); return { pulledFiles, pushedFiles, pulledPaths }; }
     const { manifest, spaceId: peerSpaceId } = await boundedJson<{ manifest: { path: string; sha256: string; size: number; modifiedAt: string }[]; spaceId?: string }>(resp, 'sync peer');
     const fileSpaceId = peerFileSpaceId(peerSpaceId, remoteSpaceId); // Q-68: the plain file routes know only the peer's local id
 
@@ -150,7 +150,7 @@ export async function syncFiles(
           transferInit(opts()),
           { timeoutMs: PEER_TRANSFER_TIMEOUT_MS },
         );
-        if (!dl.ok) { log.warn(`DL file ${logSafe(remote.path)} from ${logSafe(member.label)}: ${dl.status}`); continue; }
+        if (!dl.ok) { log.warn(`DL file ${logSafe(remote.path)} from ${logSafe(member.label)}: ${logSafe(dl.status)}`); continue; }
         const buf = Buffer.from(await dl.arrayBuffer());
         const sha = createHash('sha256').update(buf).digest('hex');
         if (sha !== remote.sha256) { log.warn(`SHA mismatch for ${logSafe(remote.path)} from ${logSafe(member.label)}`); continue; }
@@ -232,7 +232,7 @@ export async function syncFiles(
           },
         );
         if (!pushResp.ok) {
-          log.warn(`Push file '${logSafe(localPath)}' to ${logSafe(member.label)}: HTTP ${pushResp.status}`);
+          log.warn(`Push file '${logSafe(localPath)}' to ${logSafe(member.label)}: HTTP ${logSafe(pushResp.status)}`);
         } else {
           pushedFiles++;
           await recordSyncBase(spaceId, localPath, member.instanceId, localEntry.sha256);

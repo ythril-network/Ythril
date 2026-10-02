@@ -224,7 +224,7 @@ export async function deliverChangeNotes(net: NetworkConfig, member: NetworkMemb
     // behind it back for ever. Send them one by one instead: a note refused on its own is taken out of this member's
     // queue and recorded in `refusedBy`, and the rest go through. Any other status (an older peer with no route, a
     // 403, a 5xx) is about the member rather than a note, so everything stays queued for the next cycle.
-    if (status !== 400) { log.warn(`Change notes to ${logSafe(member.label)} (${logSafe(member.instanceId)}) on '${logSafe(net.label)}': ${status}; kept for the next cycle`); return; }
+    if (status !== 400) { log.warn(`Change notes to ${logSafe(member.label)} (${logSafe(member.instanceId)}) on '${logSafe(net.label)}': ${logSafe(status)}; kept for the next cycle`); return; }
     for (const n of due) {
       const one = await send([n]);
       if (one >= 200 && one < 300) { await delivered([n._id]); continue; }
