@@ -17,7 +17,7 @@ import type { TokenRights } from '../../config/rights-shape.js';
 import { log, logSafe } from '../../util/log.js';
 import { seqRefusal, MAX_INGEST_SEQ, noteSeqStored } from '../../util/seq.js';
 import { isStrictLinkage } from '../../spaces/proxy.js';
-import type { FileMetaDoc } from '../../config/types.js';
+import type { FileMetaDoc, AuthorRef } from '../../config/types.js';
 import { emitWebhookEvent } from '../../webhooks/dispatcher.js';
 import { spillIdFromPath } from '../../brain/spill-path.js';
 import type { FactDoc, EdgeDoc, LinkViolationDoc } from '../../config/types.js';
@@ -410,6 +410,17 @@ export function rejectImplausibleSeq(
 export function callerPeerId(authToken: Record<string, unknown> | undefined): string | undefined {
   const v = authToken?.['peerInstanceId'];
   return typeof v === 'string' && v ? v : undefined;
+}
+
+/**
+ * The peer a peer-bound token belongs to, as the author of what it delivers — or undefined for any other token.
+ * The label is the member's as this instance lists it, or the id when no network lists the peer.
+ */
+export function callerPeerAuthor(authToken: Record<string, unknown> | undefined): AuthorRef | undefined {
+  const instanceId = callerPeerId(authToken);
+  if (!instanceId) return undefined;
+  const member = peerMemberNetworks(instanceId).flatMap(n => n.members).find(m => m.instanceId === instanceId);
+  return { instanceId, instanceLabel: member?.label ?? instanceId };
 }
 
 /**

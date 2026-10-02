@@ -51,6 +51,12 @@ are not part of it; they ship in the next minor.
   a newer copy and never over this instance's own size and hash, then drops the collection and logs one line per
   space. A description that lands this way is re-embedded once this instance holds the file's bytes.
 
+- **A file a publisher pushed could freeze its subscriber's copy of the file's description and tags.** The pushed
+  bytes reached the subscriber's upload door, which stored them as the subscriber's own upload: its own next seq,
+  itself as the author of a new file, and a description it derived itself. That copy then tied or outranked the
+  publisher's next description or tag edit, which was skipped on arrival for good. 5.6.2's counter fix made the
+  tie likely. Bytes a peer pushes are now recorded as an arrival, as a download already was (`Q-143`).
+
 - **A peer's edit erased this instance's own vector and retention stamps.** A pushed or pulled update replaced the
   whole document, so the record stopped expiring here, dropped out of vector search until re-embedded, and was
   re-embedded even when its text had not changed. They are now kept across the update — the vector only while this

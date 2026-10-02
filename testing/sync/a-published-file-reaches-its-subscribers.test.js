@@ -96,6 +96,21 @@ describe('a published file reaches the subscriber', () => {
       'the new file never reached the subscriber');
   });
 
+  it('the subscriber holds the publisher\'s record of a pushed file, not one it stamped itself', async () => {
+    // The publisher PUSHES the bytes to the subscriber's upload door. That door stored them as a local upload: this
+    // instance's next seq, this instance as the author of a new file, and a description derived here — so the
+    // subscriber's copy tied or outranked the publisher's next edit, which then never landed (seen in CI as Q-69).
+    // An arrival is recorded as the publisher's, whichever door brought the bytes (Q-143, the push half).
+    await syncUntil(async () => {
+      const [a, b] = [await fileMetaOn(INSTANCES.a, tokenA), await fileMetaOn(INSTANCES.b, tokenB)];
+      return a !== undefined && b !== undefined && a.seq === b.seq;
+    }, async () => 'the subscriber never held the publisher\'s seq for the file: '
+      + `B ${JSON.stringify((await fileMetaOn(INSTANCES.b, tokenB))?.seq)}, A ${JSON.stringify((await fileMetaOn(INSTANCES.a, tokenA))?.seq)}`);
+    const [a, b] = [await fileMetaOn(INSTANCES.a, tokenA), await fileMetaOn(INSTANCES.b, tokenB)];
+    const authored = d => ({ seq: d.seq, author: d.author?.instanceId, updatedAt: d.updatedAt, description: d.description, tags: d.tags });
+    assert.deepEqual(authored(a), authored(b), 'the subscriber\'s copy of a pushed file is not the publisher\'s record');
+  });
+
   it('a change on the publisher replaces the subscriber\'s copy, without a conflict', async () => {
     assert.ok((await writeFile(INSTANCES.b, tokenB, `# Onboarding ${RUN}, second edition\n`)) < 300);
     await syncUntil(async () => (await readFile(INSTANCES.a, tokenA)).text.includes('second edition'),
@@ -116,7 +131,8 @@ describe('a published file reaches the subscriber', () => {
       const doc = await fileMetaOn(INSTANCES.a, tokenA);
       return doc?.description === `described ${RUN}` && (doc.tags ?? []).includes('onboarding');
     }, async () => {
-      const pick = d => d && { seq: d.seq, description: d.description, tags: d.tags, author: d.author?.instanceId, updatedAt: d.updatedAt };
+      const pick = d => d && { seq: d.seq, description: d.description, descriptionSource: d.descriptionSource, tags: d.tags,
+        author: d.author?.instanceId, createdAt: d.createdAt, updatedAt: d.updatedAt, sha256: d.sha256, embeddingStatus: d.embeddingStatus };
       return 'the description and tags never reached the subscriber: '
         + `B holds ${JSON.stringify(pick(await fileMetaOn(INSTANCES.b, tokenB)))}, `
         + `A holds ${JSON.stringify(pick(await fileMetaOn(INSTANCES.a, tokenA)))}`;
