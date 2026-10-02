@@ -24,6 +24,7 @@ are not part of it; they ship in the next minor.
 | An import now moves this instance's counter past the records it restored | Nothing |
 | A duplicate link in a push is counted as `skipped` instead of answering `500` | Nothing; a sender that was re-sending that page for ever now moves on |
 | A tombstone pushed with a seq too close to the protocol ceiling is refused and logged; the rest of the push applies | Nothing |
+| File metadata a pull stored in a stray `<space>_filemeta` collection since 4.0 is merged into the space's files, and the collection dropped | Nothing; one log line per space says how many records were merged |
 
 ### Fixed
 
@@ -45,7 +46,10 @@ are not part of it; they ship in the next minor.
 - **File metadata pulled from a peer never reached this instance's files.** Since 4.0 a pulled page of file
   metadata was written to a collection nothing reads, so a subscriber that pulls (rather than being pushed to)
   never received a publisher's file descriptions and tags. It is now merged into the files the same way a pushed
-  page is. Metadata pulled before this release is not recovered by it.
+  page is. Metadata pulled before this release is recovered on upgrade (`Q-219`): the next housekeeping cycle
+  (within five minutes of start) merges each space's stray `<space>_filemeta` collection into its files, never over
+  a newer copy and never over this instance's own size and hash, then drops the collection and logs one line per
+  space. A description that lands this way is re-embedded once this instance holds the file's bytes.
 
 - **A peer's edit erased this instance's own vector and retention stamps.** A pushed or pulled update replaced the
   whole document, so the record stopped expiring here, dropped out of vector search until re-embedded, and was
