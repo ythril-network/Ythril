@@ -262,8 +262,14 @@ describe('the feature is reachable and wired', () => {
 
   it('the backfill dates records from createdAt, never from now', () => {
     // The one line that decides whether enabling a policy prunes the backlog or resets it.
+    // The step is shared with the arrival writer since `Q-107` part 1 (`retentionStamps`, brain/ttl.ts), so the
+    // pin follows it there: the backfill stamps through it, and it dates from the record's own createdAt.
     const red = readFileSync(join(ROOT, 'server/src/brain/chrono-redaction.ts'), 'utf8');
-    assert.match(red, /Date\.parse\(r\.createdAt/);
+    assert.match(red, /retentionStamps\(space, collection, r\)/);
+    const ttl = readFileSync(join(ROOT, 'server/src/brain/ttl.ts'), 'utf8');
+    const step = ttl.slice(ttl.indexOf('export function retentionStamps('), ttl.indexOf('export function effectiveType('));
+    assert.match(step, /Date\.parse\(doc\['createdAt'\]\)/);
+    assert.doesNotMatch(step, /Date\.now\(\)/);
     assert.doesNotMatch(red, /recordExpiry\(space, 'chrono', r\.type, Date\.now\(\)/);
   });
 

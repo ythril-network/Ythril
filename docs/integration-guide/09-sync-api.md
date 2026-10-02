@@ -335,19 +335,27 @@ POST /api/sync/batch-upsert?spaceId=general&networkId=net-uuid
   "facts": [ ... ],
   "entities": [ ... ],
   "edges": [ ... ],
-  "chrono": [ ... ]
+  "chrono": [ ... ],
+  "links": [ ... ],
+  "filemeta": [ ... ]
 }
 ```
 
-Each array is capped at 500 items. Response includes per-type counters:
+Each array is capped at 500 items; documents past the cap are counted in `rejected` rather than dropped unsaid. Response includes per-family counters for all six families:
 
 ```json
 { "status": "ok",
-  "facts": { "inserted": 3, "updated": 1, "forked": 0, "skipped": 12, "forkDepthRefused": 0, "tombstoned": 0, "rejected": 0 },
-  "entities": { "upserted": 5, "skipped": 2, "tombstoned": 0, "rejected": 0 },
-  "edges":    { "upserted": 0, "skipped": 0, "tombstoned": 0, "rejected": 0 },
-  "chrono":   { "upserted": 0, "skipped": 0, "tombstoned": 0, "unknownType": 0, "rejected": 0 } }
+  "facts":    { "inserted": 3, "updated": 1, "forked": 0, "skipped": 12, "forkDepthRefused": 0, "tombstoned": 0, "schemaViolations": 0, "rejected": 0 },
+  "entities": { "upserted": 5, "skipped": 2, "tombstoned": 0, "schemaViolations": 0, "rejected": 0 },
+  "edges":    { "upserted": 0, "skipped": 0, "tombstoned": 0, "schemaViolations": 0, "duplicateTriplets": 0, "rejected": 0 },
+  "chrono":   { "upserted": 0, "skipped": 0, "tombstoned": 0, "schemaViolations": 0, "unknownType": 0, "rejected": 0 },
+  "links":    { "upserted": 0, "skipped": 0, "tombstoned": 0, "rejected": 0 },
+  "filemeta": { "upserted": 0, "skipped": 0, "rejected": 0 } }
 ```
+
+**The counters count the items you sent, as processing them in order would.** A page carrying one `_id` twice is decided copy by copy (an entity at seq 5 then 6 is `upserted: 2`; a fact at seq 9 then 3 is `inserted: 1, skipped: 1`), and only the highest seq is stored. The single-record routes are the same code with one document, so they decide exactly as the batch does.
+
+**A `500` from `batch-upsert` means a fault that was not one document's** — the receiver's store was unavailable, or a connection dropped. Re-sending the page is safe and is what the engine does: records that landed come back `skipped`, and a fork that landed comes back as the same fork, because a fork's id is derived from the parent id, the seq and the text. A document the store refuses for what it is (a schema validator, a value it cannot store) is counted in `rejected` and named in the receiver's log, and never fails the page.
 
 **`skipped` is benign and `forkDepthRefused` is not — read the second one.** They were one counter until now,
 which is the whole reason this paragraph exists.
@@ -355,12 +363,12 @@ which is the whole reason this paragraph exists.
 | counter | what happened | did the record land? |
 |---|---|---|
 | `skipped` | the receiver already holds that record at the same `seq` or newer | **nothing was lost** — this is ordinary conflict resolution and is by far the common case |
-| `forkDepthRefused` | facts only: content diverged at an identical `seq` and the record's fork chain is already at its cap, so the incoming version was **discarded** | **no — the record is gone** |
-| `rejected` | every family: the records of this request the receiver refused for any reason (schema, seq, fork cap, undeclared chrono type) | **no** — subtract it from what you count as delivered |
+| `forkDepthRefused` | facts only: content diverged at an identical `seq` and the record's fork chain, or its fan-out (10 forks of one parent, those this request creates counted), is already at its cap, so the incoming version was **discarded** | **no — the record is gone** |
+| `rejected` | every family: the records of this request the receiver refused for any reason (schema, past the 500 cap, a non-string `_id`, an implausible `seq`, a store refusal, fork cap, undeclared chrono type) | **no** — subtract it from what you count as delivered |
 
 **A `200` therefore does not mean every record was applied — read `rejected`.** Every family carries it since
 5.5: the records of that family in your request that the receiver neither stored nor already held. That is a
-document its `Incoming*` schema refused, an implausible `seq`, a fact whose fork chain is at its cap
+document its `Incoming*` schema refused, one past the 500 cap, an implausible `seq`, a document the receiver's store refused, a fact whose fork chain or fan-out is at its cap
 (`forkDepthRefused`, which `rejected` includes), and a chrono entry of a type the space does not declare
 (`unknownType`, likewise included). Our own sync engine subtracts it from what it reports as pushed and records
 the cycle as `partial`, naming the family and the count — so a push the receiver refused is never shown as
@@ -373,8 +381,8 @@ rather than as an error.
 
 ### A duplicate relationship is reported, not an error
 
-An edge's identity is its `(from, to, label)` triplet — that combination is uniquely indexed — while its `_id`
-is random. So when two instances create the same relationship independently there is **one relationship under
+An edge's identity is its `(from, to, label, fromKind, toKind)` — that combination is uniquely indexed — while an
+older edge's `_id` may be random. So when two instances create the same relationship independently there is **one relationship under
 two ids**, and the receiver cannot store the second without breaking that index.
 
 It answers `200` and says so, rather than failing:
@@ -390,7 +398,9 @@ It answers `200` and says so, rather than failing:
 ```
 
 **The local copy stands and the incoming one is not applied** — the same rule the pull side uses, so both
-directions resolve it identically. The receiver logs the triplet.
+directions resolve it identically, and it holds for an UPDATE that would move an edge onto a triplet another id
+holds as much as for an insert. The receiver logs the ids. A **link** arriving under another id for endpoints
+already linked is that same link: it counts as `skipped`.
 
 **Why this is a 200 and not a 409.** A push that gets a non-2xx stops that collection's transfer and does not
 advance its watermark, so the next cycle re-sends the identical batch and hits the identical duplicate. An
@@ -412,12 +422,25 @@ last type that carried theirs; now none do.
 **The same holds when this instance PULLS from you, and until 4.0 it did not.** The schemas above run on the
 push path; a pull fetches whole documents and validates nothing, so a pulled record kept the sender's vector
 — and, more expensively, the sender's `_expireAt`, which the receiving instance's retention sweep then
-acted on. Both directions now drop the same five fields, and the serving side leaves them out of the page
-altogether, so a sync page is materially smaller than it was.
+acted on. Both directions now drop the same local-only fields, and the serving side leaves them out of the page
+altogether, so a sync page is materially smaller than it was. **And the receiver keeps its own:** a peer's update
+of a record no longer erases the receiver's vector, its model, `matchedText`, its retention stamps or its file sync
+bases — they are carried across the replace, so an update whose embedded text did not change is not re-embedded and
+the record stays searchable meanwhile.
 
 **The receiver embeds what it accepts, on its own terms.** Every accepted document is queued for embedding
-against the receiving instance's own model, at the moment it is written. Nothing has to ask for this and there
-is no flag for it.
+against the receiving instance's own model, at the moment it is written — by push (batch or single route, a new
+entity included) and by pull alike. Nothing has to ask for this and there is no flag for it.
+
+**Upgrading: records pulled by an earlier version were never queued.** A record this instance PULLED from a peer before this
+release was stored without an embed job and has no vector here. [`POST /api/spaces/:id/reembed`](06-spaces-api.md#re-embed-backfill)
+queues every record of a space that has none; run it once per synced space after upgrading.
+
+**The receiver's retention applies to what arrives.** A record that carries no retention stamp of this instance
+is stamped by this instance's policy (type schema over space), counted from the record's own `createdAt` — so a
+record older than the window is due at once and the sweep deletes it through the normal path, which tombstones
+it to peers. A stamp this instance already holds is carried, never recomputed. See
+[Sync Protocol → Receiver retention](../sync-protocol.md#receiver-retention-applies-to-arrivals).
 
 **Send the suppression mark, and it will be honoured.** `suppressEmbeddings` replicates, on all four
 types. Its pre-3.1 spelling `excludeFromVectorSearch` replicated too until 4.0 removed it; an ingest

@@ -69,6 +69,8 @@ import {
   configReloadPending,
 } from './metrics/registry.js';
 import { spaceCollection } from './db/space-collection.js';
+import { DERIVED_LOCAL_FIELDS } from './sync/local-only-fields.js';
+import { REPLICATED_FAMILIES } from './sync/replicated-families.js';
 
 // Server version — one reader, in `util/server-version.ts`. This file and `api/about.ts` each resolved
 // their own path to the same manifest; a third reader (the embed-job revive) is what made the duplication
@@ -409,10 +411,11 @@ export function createApp() {
   });
 
   // ── Admin: space export ───────────────────────────────────────────────────
-  // Returns a full JSON snapshot of the space — all facts, entities, edges,
-  // chrono entries, and file metadata (binary file content excluded by default).
-  // Vector embeddings are omitted from the export to keep the payload small;
-  // run POST /api/brain/spaces/:spaceId/reindex after import to rebuild them.
+  // Returns a full JSON snapshot of the space: every REPLICATED family (facts, entities, edges, chrono, links and
+  // file metadata, from `REPLICATED_FAMILIES`), binary file content excluded. What this instance DERIVES with its
+  // own model is left out (`DERIVED_LOCAL_FIELDS`: the vector, its model, `matchedText`); the record-tier local
+  // fields stay — the retention stamps and file sync bases — because a restore keeps them (`Q-205`, `Q-206`). An
+  // import queues every restored record for embedding, so nothing has to be reindexed by hand afterwards.
   app.get('/api/admin/spaces/:spaceId/export', globalRateLimit, requireAdminMfaScoped('spaceId'), async (req, res) => {
     const spaceId = req.params['spaceId'] as string;
     const cfg = getConfig();
@@ -430,10 +433,9 @@ export function createApp() {
     // data hurts most. We now walk each collection's cursor and write documents out one at a
     // time, respecting backpressure so the response buffer cannot grow unbounded either.
     //
-    // The OUTPUT SHAPE is byte-for-byte identical to before — same object, same keys, same
-    // order — so the import side and every existing consumer are untouched. (NDJSON would be
-    // cleaner but would break the import contract; not worth it for the fact win.)
-    const projection = { embedding: 0 };
+    // One JSON object, the envelope then one array per replicated family keyed by collection name — the
+    // shape the import reads. (NDJSON would be cleaner but would break the import contract.)
+    const projection = Object.fromEntries([...DERIVED_LOCAL_FIELDS].map(f => [f, 0]));
 
     // Backpressure-aware write: pause the cursor walk when the socket buffer is full.
     const write = (chunk: string): Promise<void> =>
@@ -460,13 +462,10 @@ export function createApp() {
         `"exportedAt":${JSON.stringify(new Date().toISOString())},` +
         `"spaceId":${JSON.stringify(spaceId)},` +
         `"spaceName":${JSON.stringify(space.label)},` +
-        `"version":${JSON.stringify(_serverVersion)},`,
+        `"version":${JSON.stringify(_serverVersion)}`,
       );
-      await write('"facts":'); await streamArray(spaceCollection(spaceId, 'facts'));
-      await write(',"entities":'); await streamArray(spaceCollection(spaceId, 'entities'));
-      await write(',"edges":'); await streamArray(spaceCollection(spaceId, 'edges'));
-      await write(',"chrono":'); await streamArray(spaceCollection(spaceId, 'chrono'));
-      await write(',"files":'); await streamArray(spaceCollection(spaceId, 'files'));
+      // Every replicated family, by collection name — the keys the import reads (`importPayloadError`).
+      for (const f of REPLICATED_FAMILIES) { await write(`,${JSON.stringify(f.collection)}:`); await streamArray(spaceCollection(spaceId, f.collection)); }
       await write('}');
       res.end();
     } catch (err) {
@@ -484,9 +483,9 @@ export function createApp() {
   });
 
   // ── Admin: space import ───────────────────────────────────────────────────
-  // Upserts all documents from an export payload into the target space.
-  // Existing documents with the same _id are replaced; new ones are inserted.
-  // Returns per-type counts: { inserted, updated, errors }.
+  // Restores an export payload into the target space through the arrival writer (`api/admin-import.ts`):
+  // existing documents with the same _id are replaced; new ones are inserted. Returns, per family, the counts
+  // and every document it did not store, by id and reason.
   app.post('/api/admin/spaces/:spaceId/import', globalRateLimit, requireAdminMfaScoped('spaceId'), async (req, res) => {
     const spaceId = req.params['spaceId'] as string;
     const cfg = getConfig();

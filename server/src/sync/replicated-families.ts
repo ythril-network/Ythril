@@ -1,4 +1,5 @@
-import type { BrainCollection } from '../config/types-knowledge.js';
+import type { BrainCollection, RecordType } from '../config/types-knowledge.js';
+import { RECORD_TYPES, RECORD_COLLECTION } from '../config/types-knowledge.js';
 
 /**
  * The replicated record families, as one list.
@@ -65,3 +66,17 @@ export const REPLICATED_FAMILIES: readonly ReplicatedFamily[] = [
 
 /** A family's payload key. One declaration, on the row type, so the union cannot drift from the rows. */
 export type PayloadKey = ReplicatedFamily['payloadKey'];
+
+/**
+ * The record type each replicated collection holds — what the embed queue, the type schema and the retention
+ * bucket are keyed by — or `null` for a collection whose documents carry nothing to embed.
+ *
+ * `null` for `links` and it is not a gap: a link says one record concerns another and carries no text, so there
+ * is nothing to embed, no type schema to check, and no retention bucket (a link lives as long as its endpoints).
+ * TOTAL over the collections and DERIVED from `RECORD_COLLECTION`, so a new record type gets its row by being
+ * declared there, and the arrival writer, the pull and the import read one table rather than three.
+ */
+export const RECORD_TYPE_OF: Readonly<Record<BrainCollection, RecordType | null>> = Object.freeze({
+  ...Object.fromEntries(RECORD_TYPES.map(t => [RECORD_COLLECTION[t], t])),
+  links: null,
+} as Record<BrainCollection, RecordType | null>);

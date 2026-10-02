@@ -43,6 +43,7 @@ import { newClaimToken } from '../files/media/lease.js';
 import { isSpillPath } from './spill-path.js';
 import { LOST_MARKER, NOT_SENT_MARKER } from './embed-errors.js';
 import { embeddingSuppressedFor } from './suppress-embeddings.js';
+import { getSpaceMeta } from '../spaces/schema-validation.js';
 import type { BrainEmbedJobDoc, BrainEmbedRecordType } from '../config/types.js';
 import { RECORD_TYPES } from '../config/types.js';
 import { spaceCollection } from '../db/space-collection.js';
@@ -874,4 +875,28 @@ export async function enqueueIngestedRecord(
   // The background lane: a record a peer sent is not a write anybody here is waiting on. It still keeps one claim in
   // eight under load (`claimOrder`), so a busy instance cannot leave a peer's records unsearchable for ever.
   await enqueueEmbedJob(spaceId, recordType, doc._id, { priority: EMBED_PRIORITY.background });
+}
+
+/**
+ * `enqueueIngestedRecord` for a whole landed chunk of arrivals — what the arrival writer (`sync/arrivals.ts`)
+ * queues a page with, so a 500-record pulled page is one bulk write onto the jobs collection and not 500.
+ *
+ * The same two rules as the single record, and they are the reason this is a twin beside it rather than a loop
+ * at the call site: the RECEIVER's suppression decides (`record > schema > space`, resolved against this
+ * instance's configuration — the space's meta read ONCE for the batch, never per record), and an arrival goes on
+ * the BACKGROUND lane. `enqueueWriteEmbedJobs` never throws into the write it announces: the records are stored
+ * by the time they are queued, and failing the arrival over a queue fault would make the sender re-send records
+ * this instance already holds.
+ */
+export async function enqueueIngestedRecords(
+  spaceId: string,
+  recordType: BrainEmbedRecordType,
+  docs: ReadonlyArray<{ _id: string; suppressEmbeddings?: boolean }>,
+): Promise<void> {
+  if (docs.length === 0) return;
+  const meta = getSpaceMeta(spaceId);
+  const wanted = docs.filter(d => !embeddingSuppressedFor(spaceId, recordType, d as unknown as Record<string, unknown>, meta));
+  if (wanted.length === 0) return;
+  await enqueueWriteEmbedJobs(spaceId, wanted.map(d => ({ recordType, recordId: d._id })),
+    { priority: EMBED_PRIORITY.background });
 }

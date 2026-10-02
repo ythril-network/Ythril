@@ -224,9 +224,6 @@ describe('no reader re-derives a link class', () => {
     'server/src/brain/links-conversion.ts':
       'THE MIGRATION. It reads the 4.x arrays off disk and writes the records that replace them, so it is '
       + 'the one reader of a shape the types no longer declare.',
-    'server/src/api/sync/docs.ts':
-      'REPLICATION, which pages a COLLECTION by `seq` and does not care what a row means. It treats links '
-      + 'exactly as it treats every other collection.',
     'server/src/brain/merge.ts':
       'A RE-KEY. When two entities become one, every link naming the absorbed id has to be rewritten to '
       + 'name the survivor — an update over rows, not a question about a record.',

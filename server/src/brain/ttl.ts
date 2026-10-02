@@ -107,7 +107,7 @@ export function contentExpiryForCreate(
 }
 
 /** The retention-relevant fields of a space, or undefined pre-setup / for an unknown id. */
-function retentionSpace(spaceId: string): RetentionSpace | undefined {
+export function retentionSpace(spaceId: string): RetentionSpace | undefined {
   try {
     const s = getConfig().spaces.find(x => x.id === spaceId);
     return s ? { recordTtlDays: s.recordTtlDays, meta: s.meta } : undefined;
@@ -148,6 +148,30 @@ export function applyExpiryToUpdate(
     });
     if (expireAt) $set['_expireAt'] = expireAt;
   }
+}
+
+/**
+ * The retention stamps a STORED record should carry, dated from its OWN `createdAt` (never from now) — `_expireAt`
+ * and, where the type has a content window, `_contentExpireAt`; absent where the policy gives none, and empty for a
+ * record with no parseable `createdAt` (it cannot be dated, so it cannot expire).
+ *
+ * The one step two callers share and each used to spell: the arrival writer (D-9 — an arrival with no receiver
+ * stamp) and the schema backfill (`backfillTypedExpiry` — a record a newly declared type window now covers). Each
+ * keeps its OWN policy: the policy is the `space` passed and the records the caller hands over. The writer stamps
+ * every arrival under `schema > space`; the backfill reaches only records of a type whose schema declares a window
+ * (`policedTypes`), because widening it to the space default would start deleting historic records on every space
+ * that ever set one.
+ */
+export function retentionStamps(
+  space: RetentionSpace, bucket: TtlBucket, doc: Record<string, unknown>,
+): { _expireAt?: Date; _contentExpireAt?: Date } {
+  const created = typeof doc['createdAt'] === 'string' ? Date.parse(doc['createdAt']) : NaN;
+  if (!Number.isFinite(created)) return {};
+  const field = bucket === 'file' ? undefined : TYPE_FIELD[bucket];
+  const type = field && typeof doc[field] === 'string' ? doc[field] as string : undefined;
+  const expireAt = recordExpiry(space, bucket, type, created);
+  const contentAt = recordContentExpiry(space, bucket, type, created);
+  return { ...(expireAt ? { _expireAt: expireAt } : {}), ...(contentAt ? { _contentExpireAt: contentAt } : {}) };
 }
 
 /** The type a record will carry after this `$set` is applied — the update's value if it sets one, else current. */

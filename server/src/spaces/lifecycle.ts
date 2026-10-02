@@ -25,6 +25,8 @@ import { unlabelAllFaces } from '../brain/entities.js';
 import { ensureMediaJobIndexes } from '../files/media/job-queue.js';
 import { ensureEmbedJobIndexes } from '../brain/embed-queue.js';
 import { LINK_INDEXES } from '../brain/link-adjacency.js';
+import { FORK_INDEXES } from '../sync/upsert-plan.js';
+import { RECORD_TYPE_OF } from '../sync/replicated-families.js';
 import { envInt } from '../config/env-num.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { mapLimit } from '../util/map-limit.js';
@@ -92,6 +94,8 @@ export async function initSpace(
 
   await memoriesColl.createIndex({ seq: 1 });
   await memoriesColl.createIndex({ tags: 1 });
+  // The fork caps' indexes (`FORK_INDEXES`, `sync/upsert-plan.ts`) — the same list `ensureQueryIndexes` creates.
+  for (const ix of FORK_INDEXES) await memoriesColl.createIndex(ix.keys, { sparse: ix.sparse });
   // `{ type: 1 }` on all four record collections. MEASURED, not assumed: every list endpoint exposes a `type`
   // filter and `total` counts with it, and `explain()` on a live instance returned COLLSCAN for
   // `{type: …}` on facts, entities, edges and chrono. Entities looked covered by `{ name: 1, type: 1 }` and
@@ -676,18 +680,14 @@ export function candidateTypesForWipe(targets: ReadonlySet<WipeCollectionType>):
    * TOTAL over the wipeable collections, with `null` where a collection has no findings — not `Partial`.
    *
    * `Partial` was the shape, and it cannot tell "this collection has no findings" from "somebody forgot".
-   * The gate over this function asserted every wipeable type is mapped, which was true only while all five
-   * had findings; `links` legitimately has none — a link is two ids and their kinds, so there is nothing to
-   * find a duplicate of and nothing to contradict — and under `Partial` that reads as the omission the gate
-   * exists to catch.
+   * `links` legitimately has none — a link is two ids and their kinds, so there is nothing to find a duplicate of
+   * and nothing to contradict — and under `Partial` that reads as the omission the gate exists to catch.
    *
-   * Spelled `null`, so a collection added later is a compiler error here and its author has to say which
-   * of the two it is.
+   * It is `RECORD_TYPE_OF` (`sync/replicated-families.ts`), the one total table from a collection to the record
+   * type it holds, with `null` for links; a hand copy of it here was the same table twice (dup pass of `Q-107`).
+   * Derived from `RECORD_COLLECTION`, so a collection added later is a compiler error there, once.
    */
-  const MAP: Record<WipeCollectionType, string | null> = {
-    facts: 'fact', entities: 'entity', edges: 'edge', chrono: 'chrono', files: 'file',
-    links: null,
-  };
+  const MAP: Readonly<Record<WipeCollectionType, string | null>> = RECORD_TYPE_OF;
   return Array.from(targets).map(t => MAP[t]).filter((t): t is string => t !== null && t !== undefined);
 }
 

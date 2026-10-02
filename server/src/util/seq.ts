@@ -30,7 +30,9 @@ import { spaceCollection, type SpacePart } from '../db/space-collection.js';
  *
  * In-process, and that is sufficient: one server process owns a space's counter. `maxSeen` is seeded from the
  * counter document on first use, and `bumpSeq` (an ingest moving the counter) advances it, so a record that
- * arrived from a peer is not hidden behind a stale bound.
+ * arrived from a peer is not hidden behind a stale bound. The bump is the ONLY way an arrival becomes visible
+ * (`Q-107`): the arrival writer bumps after each landed chunk and never notes a seq on its own, because a note
+ * without the counter would let a local write take a seq below a record a reader has already been handed.
  */
 interface SeqState {
   /** The highest seq this process has seen allocated or bumped to; undefined until seeded. */
@@ -72,8 +74,9 @@ async function highestStoredSeq(spaceId: string): Promise<number> {
 }
 
 /**
- * Seeded from the counter AND from what is stored, because the two can disagree: a single-document sync push
- * stores the sender's seq without moving the counter, and an older version did the same. Seeded from the
+ * Seeded from the counter AND from what is stored, because the two can disagree: before `Q-198` a
+ * single-document sync push stored the sender's seq without moving the counter, and a database written then
+ * still holds such records. Seeded from the
  * counter alone, the bound hid every such record from every pull until the counter happened to pass it.
  *
  * It does NOT move the counter, though the store being ahead of it is its own defect (`Q-198`): a pull is a
@@ -88,16 +91,6 @@ async function seededState(spaceId: string): Promise<SeqState> {
     s.maxSeen = Math.max(s.maxSeen ?? 0, counter, stored);
   }
   return s;
-}
-
-/**
- * A record was stored carrying this seq, from somewhere other than this process's allocator (an ingest): a
- * reader may now be handed it. In memory only and synchronous, so the ingest helpers can call it on every
- * document — the counter is `bumpSeq`'s, which the ingest routes call once per batch.
- */
-export function noteSeqStored(spaceId: string, seq: number): void {
-  const s = stateOf(spaceId);
-  if (s.maxSeen !== undefined && seq > s.maxSeen) s.maxSeen = seq;
 }
 
 /**
@@ -182,9 +175,10 @@ export async function currentSeq(spaceId: string): Promise<number> {
 }
 
 /**
- * The protocol sequence ceiling (mirrors `MAX_SYNC_SEQ` in api/sync.ts, where
- * incoming docs are Zod-validated to `<= 2^50`). A document at or above this
- * cannot be represented, so it is never a legitimate value on the wire.
+ * The protocol sequence ceiling — the one definition: the `Incoming*` schemas in `api/sync/_shared.ts`
+ * validate against this constant (`<= 2^50`), and it had a second copy there until `Q-107`. A document at or
+ * above this cannot be represented, so it is never a legitimate value on the wire. Kept within safe-integer
+ * arithmetic so a seq allocation can never round.
  */
 export const MAX_SYNC_SEQ = 2 ** 50;
 

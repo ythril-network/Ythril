@@ -14,11 +14,13 @@ import { listTombstones, applyRemoteTombstone } from '../../brain/tombstones.js'
 import { requireAuth, denyReadOnly, isInstanceAdmin } from '../../auth/middleware.js';
 import { log } from '../../util/log.js';
 import { bumpSeq } from '../../util/seq.js';
+import { reportServerFailure } from '../../util/report-failure.js';
+import { warnArrivalsNotStored, seqRefusal } from '../../sync/arrivals.js';
 import { deleteStored } from '../../files/stored-bytes.js';
 import path from 'node:path';
 import type { TombstoneDoc, FileTombstoneDoc } from '../../config/types.js';
 
-import { spaceAllowed, isNonPeerSyncWrite, NON_PEER_WRITE_MESSAGE, isDirectionalWriteBlocked, callerPeerId } from './_shared.js';
+import { spaceAllowed, pushAllowed, callerPeerId } from './_shared.js';
 import { recordServedSeq } from '../../sync/served-watermark.js';
 import { spaceCollection } from '../../db/space-collection.js';
 
@@ -77,10 +79,7 @@ syncTombstonesRouter.get('/tombstones', syncRateLimit, requireAuth, async (req, 
 syncTombstonesRouter.post('/tombstones', syncRateLimit, requireAuth, denyReadOnly, async (req, res) => {
   try {
     const { spaceId, networkId } = req.query as Record<string, string>;
-    if (!spaceId) { res.status(400).json({ error: 'spaceId required' }); return; }
-    if (!spaceAllowed(spaceId, networkId, req.authToken as Record<string, unknown>)) { res.status(403).json({ error: 'Forbidden' }); return; }
-    if (isNonPeerSyncWrite(req.authToken as Record<string, unknown>)) { res.status(403).json({ error: NON_PEER_WRITE_MESSAGE }); return; }
-    if (isDirectionalWriteBlocked(spaceId, req.authToken as Record<string, unknown>)) { res.status(403).json({ error: 'Directional network: write not permitted from this peer' }); return; }
+    if (pushAllowed(res, spaceId, networkId, req.authToken) === null) return;
 
     const body = req.body as { tombstones?: TombstoneDoc[] };
     const tombstones = body?.tombstones ?? [];
@@ -111,12 +110,22 @@ syncTombstonesRouter.post('/tombstones', syncRateLimit, requireAuth, denyReadOnl
     }));
     const parsed = schema.safeParse(tombstones);
     if (!parsed.success) { res.status(400).json({ error: 'Invalid tombstone format' }); return; }
+    /*
+     * A tombstone seq is checked like a document's (`Q-107` part 1): `z.number()` alone let a 1e300 tombstone in,
+     * which refuses every later copy of its record and drags the counter into the ceiling reserve. One such
+     * tombstone is refused on its own — a 400 would hold the sender's tombstone watermark and stop EVERY deletion
+     * from that peer propagating by push.
+     */
+    const plausible = parsed.data.filter(t => seqRefusal(t.seq, { optional: false }) === null);
+    const kept = new Set(plausible);
+    warnArrivalsNotStored('sync POST tombstones', spaceId, 'tombstone', 'refused',
+      parsed.data.filter(t => !kept.has(t)).map(t => ({ _id: t._id, reason: seqRefusal(t.seq, { optional: false })! })));
 
     // A peer token may only delete content it authored (peerInstanceId === tombstone issuer);
     // a trusted local/admin token (no peerInstanceId) may relay any tombstone.
     const callerPeerId = (req.authToken as Record<string, unknown>)?.['peerInstanceId'] as string | undefined;
     const trustedRelay = !callerPeerId && !!req.authToken && isInstanceAdmin(req.authToken);
-    await Promise.all(parsed.data.map(t =>
+    await Promise.all(plausible.map(t =>
       applyRemoteTombstone(t as TombstoneDoc, { peerInstanceId: callerPeerId, trustedRelay }),
     ));
 
@@ -141,13 +150,17 @@ syncTombstonesRouter.post('/tombstones', syncRateLimit, requireAuth, denyReadOnl
      * refuses on authorship grounds still tells us where that peer's clock is, and the two errors are not
      * symmetric: advancing too far only skips some seq numbers, while not advancing far enough loses a
      * record.
+     *
+     * AWAITED, before the answer (`Q-198`): a fire-and-forget bump let the sender be told the page landed while
+     * this instance's counter was still behind it, and the next local write could take a seq below a deletion
+     * the peer already holds.
      */
-    const maxTombstoneSeq = parsed.data.reduce((m, t) => Math.max(m, t.seq ?? 0), 0);
-    if (maxTombstoneSeq > 0) bumpSeq(spaceId, maxTombstoneSeq).catch(() => {});
+    const maxTombstoneSeq = plausible.reduce((m, t) => Math.max(m, t.seq), 0);
+    if (maxTombstoneSeq > 0) await bumpSeq(spaceId, maxTombstoneSeq);
 
-    res.status(200).json({ applied: parsed.data.length });
+    res.status(200).json({ applied: plausible.length });
   } catch (err) {
-    log.error(`sync POST tombstones: ${err}`);
+    reportServerFailure('sync POST tombstones', err);
     res.status(500).json({ error: 'Internal error' });
   }
 });
@@ -193,13 +206,12 @@ syncTombstonesRouter.get('/file-tombstones', syncRateLimit, requireAuth, async (
  */
 syncTombstonesRouter.post('/file-tombstones', syncRateLimit, requireAuth, denyReadOnly, async (req, res) => {
   try {
-    const { spaceId, tombstones } = req.body as { spaceId?: string; tombstones?: unknown[] };
+    // `spaceId` is typed as present: pushAllowed refuses the request (400) before anything reads it, if it is not.
+    const { spaceId, tombstones } = req.body as { spaceId: string; tombstones?: unknown[] };
     const { networkId } = req.query as Record<string, string>;
-    if (!spaceId || typeof spaceId !== 'string') { res.status(400).json({ error: 'spaceId required' }); return; }
+    // The space is named in the BODY on this route; the preamble is the same one every sync write runs.
+    if (pushAllowed(res, spaceId, networkId, req.authToken) === null) return;
     if (!Array.isArray(tombstones)) { res.status(400).json({ error: 'tombstones must be array' }); return; }
-    if (!spaceAllowed(spaceId, networkId, req.authToken as Record<string, unknown>)) { res.status(403).json({ error: 'Forbidden' }); return; }
-    if (isNonPeerSyncWrite(req.authToken as Record<string, unknown>)) { res.status(403).json({ error: NON_PEER_WRITE_MESSAGE }); return; }
-    if (isDirectionalWriteBlocked(spaceId, req.authToken as Record<string, unknown>)) { res.status(403).json({ error: 'Directional network: write not permitted from this peer' }); return; }
 
     const spaceFiles = path.resolve(getDataRoot(), 'files', spaceId);
     let applied = 0;

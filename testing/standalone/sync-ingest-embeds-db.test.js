@@ -15,7 +15,7 @@
  *
  * ## What this pins
  *
- * The decision, not the route. `enqueueIngestedRecord` is what every ingest write site reaches, so this tests
+ * The decision, not the route. `enqueueIngestedRecord` and its batched twin `enqueueIngestedRecords` are what every ingest write site reaches, so this tests
  * the thing all of them share: an arrival is queued, the job names the right record, and a record the
  * RECEIVER does not want embedded is not queued at all.
  *
@@ -126,9 +126,28 @@ describe('a synced-in record is queued for embedding', { skip }, () => {
   });
 
   /*
-   * The structural half of this rule — that `ingestBrainDoc` is the ONLY thing which may write an arriving
-   * brain document — lives in `a-receiver-embeds-by-its-own-rules.test.js` instead, because it needs no
-   * database and this suite self-skips without one. A rule that can only be checked where Mongo happens to be
-   * running is a rule that goes unchecked on the machine where it is broken.
+   * The BATCHED twin, `enqueueIngestedRecords`, is what the arrival writer (`writeArrivals`, `Q-107` part 1)
+   * queues every landed chunk with — the push, the pull and the import. Re-anchored here so the same decision is
+   * held of the function every door now reaches, not only of the single-record one file metadata keeps. Seen red
+   * by mutation, restored by hand: the suppression filter removed from the batched twin.
+   */
+  it('the batched twin queues a whole chunk by the same rules, in the background lane', async () => {
+    await queue.enqueueIngestedRecords(SPACE, 'fact', [
+      { _id: 'b-1' }, { _id: 'b-2', suppressEmbeddings: true }, { _id: 'b-3', suppressEmbeddings: false },
+      { _id: 'b-4', embedding: [0.1] },
+    ]);
+    const queued = (await jobs().find({}).toArray()).map(j => j.recordId).sort();
+    assert.deepEqual(queued, ['b-1', 'b-3', 'b-4'], 'the batched twin decides differently from the single record');
+    for (const j of await jobs().find({}).toArray()) {
+      assert.equal(j.priority, queue.EMBED_PRIORITY.background, 'an arrival is background work');
+    }
+  });
+
+  /*
+   * The structural half of this rule — that `writeArrivals` is the ONLY thing which may write an arriving
+   * brain document — lives in `a-receiver-embeds-by-its-own-rules.test.js` and
+   * `an-arrival-is-written-by-one-writer.test.js` instead, because it needs no database and this suite
+   * self-skips without one. A rule that can only be checked where Mongo happens to be running is a rule that
+   * goes unchecked on the machine where it is broken.
    */
 });

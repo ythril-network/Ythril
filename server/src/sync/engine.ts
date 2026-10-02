@@ -17,19 +17,18 @@
 
 import { getConfig, saveConfig, saveConfigSoon, getSecrets, getFaceRecognitionConfig } from '../config/loader.js';
 import { BRAIN_COLLECTIONS, type LinkDoc } from '../config/types.js';
-import { applyFileMetaPage, fileMetaForWire } from '../api/sync/_shared.js';
+import { fileMetaForWire } from '../api/sync/_shared.js';
 import { boundedJson } from '../util/bounded-read.js';
 import { reportPushRefusals, refusedTransfers } from './push-refusals.js';
 import { deliverChangeNotes } from './change-notes.js';
-import { col, asFilter, asBulk } from '../db/mongo.js';
+import { col, asFilter } from '../db/mongo.js';
 import { recordSyncResult, type SyncCounts } from './history.js';
-import { log } from '../util/log.js';
+import { log, logSafe } from '../util/log.js';
 import { resolveWatermark, truncationWarn, type TransferOutcome } from './watermark.js';
 import { pullTombstones, pushTombstones } from './tombstone-transfer.js';
 import { applyConcludedSpaceRounds } from '../spaces/apply-wipe-round.js';
 import { concreteSpaces } from '../spaces/proxy.js';
-import { bumpSeq, isSeqImplausible, settledSeqRange } from '../util/seq.js';
-import { bulkWriteFailures, isDuplicateKeyOnly } from '../db/write-errors.js';
+import { bumpSeq, settledSeqRange } from '../util/seq.js';
 import { adoptAnnouncedSpaces, announcedSpaces, healAnnouncedAliases } from '../networks/network-spaces.js';
 import { selfRecordFor } from '../networks/self-record.js';
 import { mergePeerRoster, revokeRemoved, pairIntroduced, applyPassedJoin } from '../networks/member-introductions.js';
@@ -41,7 +40,7 @@ import { enqueueMediaJob } from '../files/media/job-queue.js';
 import { resolveInputFormat } from '../files/converters/pipeline.js';
 import { mimeTypeForPath } from '../files/mime.js';
 import { createCoalescingRunner } from './coalescing-runner.js';
-import { retagToLocalSpace, planSeqUpserts } from './upsert-plan.js';
+import { writeArrivals, arrivalId, type ArrivalOutcome } from './arrivals.js';
 import { syncFiles } from './file-sync.js';
 import {
   syncCyclesTotal,
@@ -63,8 +62,7 @@ import { resolveSafePath } from '../files/sandbox.js';
 import type { FileMetaDoc } from '../config/types.js';
 import { acceptVoteCast, pinMemberSigningKey, castForWire } from '../util/signing.js';
 import { assertPeerAtFloor } from './peer-floor.js';
-import { REPLICATED_FAMILIES, type PayloadKey } from './replicated-families.js';
-import { stripLocalOnly } from './local-only-fields.js';
+import { REPLICATED_FAMILIES, RECORD_TYPE_OF, type PayloadKey, type ReplicatedFamily } from './replicated-families.js';
 import { spaceCollection } from '../db/space-collection.js';
 
 // Timeout for every outbound fetch to a peer.
@@ -829,7 +827,7 @@ async function pullFromPeer(
   // Pull facts — use full=true to return complete docs in a single pass,
   // eliminating the N per-document secondary fetches that would be brutal over WAN.
   let highestSeq = sinceSeq;
-  let overallMaxSeq = 0; // Track the highest seq seen across ALL items (used to bump local counter)
+  let overallMaxSeq = 0; // the pulled tombstones' highest seq — the records are bumped by the writer
 
   type PullResult = { count: number; highSeq: number; maxSeq: number } & TransferOutcome;
   /*
@@ -838,8 +836,9 @@ async function pullFromPeer(
    * and nothing reports that, because a peer holding no links hashes none either.
    */
   async function pullType<T extends FactDoc | EntityDoc | EdgeDoc | ChronoEntry | LinkDoc | (FileMetaDoc & { seq: number })>(
-    urlSuffix: string,
+    family: ReplicatedFamily,
   ): Promise<PullResult> {
+    const urlSuffix = family.payloadKey;
     let count = 0, highSeq = sinceSeq, maxSeq = 0;
     let cur: string | null = null;
     let pg = 0;
@@ -861,39 +860,39 @@ async function pullFromPeer(
       const { items, nextCursor } = await boundedJson<{
         items: (T | { _id: string; seq: number; deletedAt: string })[]; nextCursor: string | null;
       }>(resp, 'sync peer');
-      // Collect the applyable docs for this page, then upsert them in one batch (P3).
-      const pageDocs: T[] = [];
-      for (const item of items) {
-        if ('deletedAt' in item && (item as { deletedAt?: string }).deletedAt) continue;
-        const doc = item as T;
-        // Refuse a document whose seq is too close to the protocol ceiling:
-        // ingesting it would drag the counter there via the bumpSeq below,
-        // eventually making our own writes unsyncable (see util/seq.ts).
-        if (isSeqImplausible((doc as FactDoc).seq)) {
-          log.warn(
-            `Pull ${urlSuffix} from ${member.label}: skipped doc '${(doc as FactDoc)._id}' ` +
-            `with implausible seq ${(doc as FactDoc).seq} in space '${spaceId}'.`,
-          );
-          continue;
-        }
-        /*
-         * THE RECEIVER DECIDES WHAT IT STORES, and this is the one place on the pull path where it can.
-         *
-         * The push path drops these by omission — no `Incoming*` schema declares one, so zod strips them
-         * — and this path validates nothing at all: it fetches `full=true` and `replaceOne`s what comes
-         * back. Without the strip a pulled record carried the sender's vector, which ranks plausibly and
-         * in the wrong order, and the sender's `_expireAt`, which `brain/ttl-sweep.ts` acts on — so a peer
-         * decided when THIS instance deleted its data, with nothing logged either side.
-         */
-        pageDocs.push(stripLocalOnly(doc));
-        count++;
-        if ((doc as FactDoc).seq > maxSeq) maxSeq = (doc as FactDoc).seq;
-        if ((doc as FactDoc).seq > highSeq && (doc as FactDoc).author?.instanceId === member.instanceId) {
-          highSeq = (doc as FactDoc).seq;
-        }
+      // The page's documents; the tombstones riding in it were applied by `pullTombstones` above.
+      const pageDocs = items.filter(item => !('deletedAt' in item && (item as { deletedAt?: string }).deletedAt)) as T[];
+      /*
+       * THE RECEIVER DECIDES WHAT IT STORES, through the one arrival writer (`sync/arrivals.ts`): a malformed id
+       * or an implausible seq refused per document, the retag to the local space, a repeated id collapsed to its
+       * highest seq, the sender's local-only fields dropped and this instance's own carried across the replace,
+       * this instance's retention stamped (D-9), the guard against a newer stored copy, the counter bumped per
+       * landed chunk, and every landed record queued for embedding by THIS instance's rules (`Q-203` — a pulled
+       * record used to be stored and never queued at all).
+       *
+       * A write the store could not do is a RECORD-WRITE failure, not an unreachable peer: the transfer stops,
+       * holds `deliveredThrough` below the page, and fetches it again next cycle. It used to escape to the
+       * member-level catch, which counts toward PEER UNREACHABLE and names the driver error and nothing else.
+       */
+      let written: ArrivalOutcome;
+      try {
+        written = await writeArrivals(spaceId, family.collection, RECORD_TYPE_OF[family.collection], pageDocs,
+          { from: member.label ?? member.instanceId });
+      } catch (err) {
+        truncated = true;
+        log.warn(`Pull ${urlSuffix} from ${logSafe(member.label ?? member.instanceId)}: a record write failed in space `
+          + `'${spaceId}' (${logSafe(err instanceof Error ? err.message : String(err))}). This is this instance's database, not `
+          + `the peer: the transfer holds at ${deliveredThrough} and the page is fetched again next cycle.`);
+        break;
       }
-      await batchUpsertBySeq<T>(`${spaceId}_${urlSuffix}`, pageDocs, spaceId);
-      // Only after the page is APPLIED. Recording it before the upsert would vouch for records that a throw
+      const refused = new Set(written.refused.map(r => r._id));
+      for (const doc of pageDocs as FactDoc[]) {
+        if (refused.has(arrivalId(doc))) continue;
+        count++;
+        if (doc.seq > maxSeq) maxSeq = doc.seq;
+        if (doc.seq > highSeq && doc.author?.instanceId === member.instanceId) highSeq = doc.seq;
+      }
+      // Only after the page is APPLIED. Recording it before the write would vouch for records that a throw
       // between the two would have lost.
       if (maxSeq > deliveredThrough) deliveredThrough = maxSeq;
       cur = nextCursor; pg++;
@@ -916,7 +915,7 @@ async function pullFromPeer(
    */
   const pulled = {} as Record<PayloadKey, PullResult>;
   for (const family of REPLICATED_FAMILIES) {
-    pulled[family.payloadKey] = await pullType(family.payloadKey);
+    pulled[family.payloadKey] = await pullType(family);
   }
 
   pulledMemories = pulled.facts.count;
@@ -944,28 +943,12 @@ async function pullFromPeer(
     seqOf: (t) => t.highSeq,
     warn: log.warn,
   });
-  // TOMBSTONES ARE IN THIS MAX, and their absence was a silent record-loss bug rather than an omission.
-  //
-  // The bump below exists so local writes always sort above anything received from this peer. A tombstone IS
-  // received from this peer and carries the deleting instance's seq — so excluding it left a quiet peer's
-  // counter behind a busy peer's deletions, and a record re-created there (same id, lower seq) was refused
-  // by every peer holding the tombstone, permanently, with a 200 the sender reads as success.
-  //
-  // The watermark line above passes every transfer and says why an omitted one is the dangerous one. This
-  // is the same argument about the same transfer, one line down.
-  //
-  // AND IT WAS A THIRD HAND-WRITTEN LIST, missing file metadata. `filemeta` is in `transfers` and was
-  // absent here, so a file-meta record arriving with a high seq left the local counter below it — and the
-  // next local write could take a seq beneath a record already received, which is the exact failure the
-  // bump exists to prevent. Derived from the same object now, so there is one enumeration for all three
-  // uses.
-  overallMaxSeq = Math.max(...Object.values(pulled).map(t => t.maxSeq), tombstones.maxSeq);
-
-  // Bump the local seq counter so future local writes always get a seq higher
-  // than any document received from this peer.  Without this, sync-upserted docs
-  // with high seq values from the source instance would sit above the local
-  // counter, causing newly written docs to get a lower seq that the pull
-  // watermark has already advanced past.
+  // THE TOMBSTONES' share of the counter bump — and only theirs. Every RECORD this pull handed over was bumped
+  // over by the arrival writer itself, per landed chunk (`writeArrivals`), so a second bump over the records here
+  // would be the same rule in two places. A tombstone is not written by the writer, and it IS received from this
+  // peer with the deleting instance's seq: left out, a quiet peer's counter stays behind a busy peer's deletions,
+  // and a record re-created there (same id, lower seq) is refused by every peer holding the tombstone, for good.
+  overallMaxSeq = tombstones.maxSeq;
   if (overallMaxSeq > 0) {
     await bumpSeq(spaceId, overallMaxSeq);
   }
@@ -1166,103 +1149,6 @@ async function pushToPeer(
   };
 }
 
-
-// ── Local upsert helpers ────────────────────────────────────────────────────
-
-/**
- * Apply a page of pulled docs to a local collection with last-writer-wins-by-seq
- * semantics, in a bounded number of round trips (P3). Instead of a findOne+replaceOne
- * per doc (2×N round trips per page), this loads every existing seq for the page in one
- * `find({_id: {$in}})` and applies the survivors in one `bulkWrite`. The seq comparison
- * stays strictly greater-than, so conflict resolution is identical to the old per-doc path.
- */
-async function batchUpsertBySeq<T extends { _id: string; seq: number }>(
-  collName: string,
-  docs: T[],
-  localSpaceId: string,
-): Promise<void> {
-  if (docs.length === 0) return;
-
-  // See ./upsert-plan.ts for why re-tagging is load-bearing and why the seq comparison is strict.
-  retagToLocalSpace(docs, localSpaceId);
-
-  const collection = col<T>(collName);
-  const ids = docs.map(d => d._id);
-  const existing = await collection
-    .find(asFilter<T>({ _id: { $in: ids } as unknown as string }), { projection: { _id: 1, seq: 1 } })
-    .toArray() as Array<{ _id: string; seq: number }>;
-  const existingSeq = new Map(existing.map(e => [e._id, e.seq]));
-
-  const toWrite = planSeqUpserts(docs, existingSeq);
-  if (toWrite.length === 0) return;
-
-  /*
-   * UNORDERED, AND A DUPLICATE KEY IS A RECORD-LEVEL FAULT.
-   *
-   * `_edges` carries a unique index on `(from, to, label)` and new edges get a `uuidv4()` `_id`, while ingest
-   * is keyed on `_id` alone and never consults the triplet. So two peers that independently create the same
-   * relationship hold two ids for one unique key, and the first to cross the wire raises `E11000`.
-   *
-   * This used to be an unguarded, ORDERED `bulkWrite`, and the consequences were entirely out of proportion to
-   * the cause. Ordered meant every later document in the page was abandoned. Unguarded meant the error escaped
-   * `pullType` before `deliveredThrough` was written, escaped `pullFromPeer` before the watermark persisted,
-   * escaped the space loop — **taking every remaining space with it, including files** — and landed in the
-   * member-level catch, which increments the failure count and eventually prints `PEER UNREACHABLE`.
-   * `lastSyncAt` was never written, so the next cycle pulled the identical page and threw identically: one
-   * duplicate edge stopped a member syncing permanently, and pointed the operator at the network.
-   *
-   * Now: `ordered: false` so the rest of the page applies, and the duplicates are reported as the records they
-   * are. Only duplicate-key errors are absorbed — any other write fault still throws, because swallowing those
-   * would hide genuine corruption, which is the opposite defect.
-   */
-  /*
-   * A FILE'S METADATA IS MERGED, NOT REPLACED — the one collection this bulk path may not touch.
-   *
-   * The receiver derived `sizeBytes`, `sha256`, the excerpt, the vector and the chunk count from bytes it
-   * holds. A `replaceOne` would leave the file reporting the SENDER's size and hash with no vector at all.
-   *
-   * The applier lives in `api/sync/_shared.ts` beside `ingestFileMeta`, not here: the PUSH path already
-   * uses that function, and a second merge in the engine would be one rule with two implementations —
-   * the weaker being whichever direction nobody tested. It is also what the god-file ratchet on this file
-   * asks for, and the reason it asks.
-   */
-  if (collName.endsWith('_files')) {
-    await applyFileMetaPage(localSpaceId, toWrite as never);
-    return;
-  }
-
-  try {
-    await collection.bulkWrite(asBulk<T>(
-      toWrite.map(doc => ({ replaceOne: { filter: { _id: doc._id }, replacement: doc, upsert: true } })),
-    ), { ordered: false });
-  } catch (err) {
-    // Duplicate-key rejections only, read the shared way (`db/write-errors.ts`); anything else is a real fault.
-    if (!bulkWriteFailures(err) || !isDuplicateKeyOnly(err)) throw err;
-    const writeErrors = (err as { writeErrors: Array<{ err?: { op?: unknown } }> }).writeErrors;
-    log.warn(
-      `sync: ${writeErrors.length} duplicate-key rejection(s) applying '${collName}' for space `
-      + `'${localSpaceId}'. Every other document in the page was applied. A duplicate means two peers created `
-      + `the same uniquely-indexed record independently; the local copy is kept and the incoming one is not `
-      + `applied. Ids: ${writeErrors.map(w => {
-        const op = (w.err as { op?: { _id?: unknown } } | undefined)?.op;
-        return typeof op?._id === 'string' ? op._id : '(unknown)';
-      }).slice(0, 10).join(', ')}`,
-    );
-  }
-
-  /*
-   * NO LINK DERIVATION HERE ANY MORE, and the deletion is the point.
-   *
-   * A pulled document used to have its link records derived from the six arrays it carried, because push
-   * and pull are different write paths and each needed the hook. 5.0 removed the arrays: a link is its own
-   * record and replicates on the same channel as everything else, so there is nothing on an arriving fact
-   * to derive from and a `links` page applies through this same writer like any other collection.
-   *
-   * Left in, it would read a shape no document has and reconcile an empty set — which is a no-op today and
-   * a data loss the moment somebody makes the reconcile authoritative about classes it was handed nothing
-   * for.
-   */
-}
 
 // Silence unused import warning — resolveSafePath may be used by future file push refinement
 void resolveSafePath;

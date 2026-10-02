@@ -182,8 +182,12 @@ export function embeddingSuppressedFor(
   spaceId: string,
   recordType: BrainEmbedRecordType,
   doc: Record<string, unknown>,
+  /**
+   * The space's meta, when the caller resolved it once for a whole batch (`enqueueIngestedRecords`). Omitted,
+   * it is resolved here — the same lookup, so a caller cannot pass a different space's tiers by forgetting.
+   */
+  meta: ReturnType<typeof getSpaceMeta> = getSpaceMeta(spaceId),
 ): boolean {
-  const meta = getSpaceMeta(spaceId);
   // A FILE has no type and therefore no type schema — the same asymmetry `TtlBucket` exists to name. So a file
   // skips the middle tier entirely and is governed by the record flag or the space setting. Narrowing here
   // rather than casting, because a cast would silently index `typeSchemas` with `'file'` and always miss.

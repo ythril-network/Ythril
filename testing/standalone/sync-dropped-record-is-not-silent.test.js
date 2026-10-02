@@ -34,6 +34,7 @@ import { stripComments } from './_strip-comments.mjs';
 import { enclosingBlockFrom, balancedFrom, blockAfter } from './_structural-window.mjs';
 
 const receiver = stripComments(readFileSync('server/src/api/sync/docs.ts', 'utf8'));
+const planner = stripComments(readFileSync('server/src/sync/upsert-plan.ts', 'utf8'));
 const sender = stripComments(readFileSync('server/src/sync/engine.ts', 'utf8'));
 /*
  * The reporting lives BESIDE the engine, not in it. `no-new-god-files.test.js` freezes `sync/engine.ts` at its
@@ -43,53 +44,45 @@ const sender = stripComments(readFileSync('server/src/sync/engine.ts', 'utf8'));
 const refusals = stripComments(readFileSync('server/src/sync/push-refusals.ts', 'utf8'));
 
 describe('the receiver separates a drop from an already-current skip', () => {
+  /*
+   * Re-anchored for `Q-107` part 1: what each pushed document became is decided once, by the pure push planner
+   * (`planPushArrivals`, `sync/upsert-plan.ts`), as a VERDICT — and the batch route counts verdicts. So "counted
+   * apart" is two verdicts, the drop is logged by the route that knows why, by id, and the benign skip stays
+   * silent because the planner logs nothing at all. Seen red by mutation, restored by hand: the fork-cap branch
+   * answering `skipped`.
+   */
   it('counts them apart', () => {
-    assert.match(receiver, /forkDepthRefused: 0/,
+    assert.match(receiver, /forkDepthRefused: count\('facts', 'forkRefused'\)/,
       'the lossy outcome needs its own counter, or it is invisible inside `skipped`');
-    assert.match(receiver, /memStats\.forkDepthRefused\+\+/,
-      'and the MAX_FORK_DEPTH path must increment it');
+    assert.match(planner, /MAX_FORK_DEPTH \|\| siblingsOf\(doc\._id\) >= MAX_FORK_DEPTH\) \{\s*plan\.verdicts\[i\] = 'forkRefused'/,
+      'and the MAX_FORK_DEPTH path must answer its own verdict');
   });
 
   it('no longer counts a dropped record as `skipped`', () => {
-    // The exact line this replaced. If it comes back, the two outcomes are conflated again.
-    assert.doesNotMatch(receiver, /MAX_FORK_DEPTH\s*\)\s*\{\s*memStats\.skipped\+\+/,
+    assert.doesNotMatch(planner, /MAX_FORK_DEPTH\) \{\s*plan\.verdicts\[i\] = 'skipped'/,
       'a fork-depth refusal must never be counted as an already-current skip');
   });
 
   it('logs the drop, naming the record and saying it will not be retried', () => {
-    const at = receiver.indexOf('forkDepthRefused++');
+    const at = receiver.indexOf("verdicts[i] === 'forkRefused'");
     assert.ok(at > -1, 'anchor missing — re-point this gate');
-    // The rest of the branch the counter sits in, bounded by the brace that closes it.
-    const block = enclosingBlockFrom(receiver, at, 'the fork-depth refusal branch');
-    assert.match(block, /log\.warn\(/, 'the side that knows WHY must say so');
-    assert.match(block, /DROPPED/, 'and say what happened in a word an operator can grep for');
-    assert.match(block, /\$\{incoming\._id\}/, 'naming the record — a count alone cannot be investigated');
-    assert.match(block, /not offer it again|will not be offered again|not offered again/i,
+    const call = receiver.indexOf('warnArrivalsNotStored(', at);
+    const stmt = receiver.slice(at, receiver.indexOf('droppedForks);', call) + 'droppedForks);'.length);
+    assert.match(stmt, /\.map\(d => d\._id\)/, 'naming the records — a count alone cannot be investigated');
+    assert.match(stmt, /warnArrivalsNotStored\(/, 'the side that knows WHY must say so');
+    assert.match(stmt, /DROPPED/, 'and say what happened in a word an operator can grep for');
+    assert.match(stmt, /will not[\s'`+]*offer them again/i,
       'and stating the consequence, which is the part that makes it urgent rather than curious');
   });
 
   it('leaves the BENIGN skip silent', () => {
     /*
-     * The common path is `existing.seq >= incoming.seq` — the peer is already current. Logging that would
-     * produce a warn per record per cycle and train an operator to ignore the log entirely, which is how you
-     * lose the DROP message this change exists to make visible.
-     *
-     * The window is LINES around the statement, not a character count. The first version took 900 characters
-     * after `const entStats` and the `skipped++` it was looking for sits further than that — so the anchor
-     * assertion failed and the real check never ran. A character window spans different amounts of code
-     * depending on comment length and line endings; a structural one does not.
+     * The common path is "the peer is already current". Logging that would produce a warn per record per cycle
+     * and train an operator to ignore the log entirely, which is how you lose the DROP message this change exists
+     * to make visible. The planner decides it and logs nothing.
      */
-    const lines = receiver.split(/\r?\n/);
-    const benign = lines
-      .map((l, i) => ({ l, i }))
-      .filter(({ l }) => /(entStats|edgeStats|chronoStats)\.skipped\+\+/.test(l));
-    assert.ok(benign.length >= 3,
-      `expected the already-current skip on entities, edges and chrono; found ${benign.length}`);
-    for (const { l, i } of benign) {
-      const around = lines.slice(Math.max(0, i - 6), i + 2).join('\n');
-      assert.doesNotMatch(around, /log\.warn/,
-        `an already-current skip is correct behaviour and must stay quiet, near: ${l.trim()}`);
-    }
+    assert.match(planner, /plan\.verdicts\[i\] = 'skipped';/, 'the already-current skip is gone — re-point this gate');
+    assert.doesNotMatch(planner, /\blog\./, 'the planner logs, so an already-current skip is no longer quiet');
   });
 });
 

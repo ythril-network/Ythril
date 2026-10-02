@@ -15,12 +15,12 @@ import { enqueueIngestedRecord } from '../../brain/embed-queue.js';
 import { isWellFormedRef, collectionForRefKind, edgeEndpointKind } from '../../brain/entity-refs.js';
 import type { TokenRights } from '../../config/rights-shape.js';
 import { log } from '../../util/log.js';
-import { isSeqImplausible, MAX_INGEST_SEQ, noteSeqStored } from '../../util/seq.js';
+import { MAX_SYNC_SEQ } from '../../util/seq.js';
 import { isStrictLinkage } from '../../spaces/proxy.js';
 import type { FileMetaDoc } from '../../config/types.js';
 import { emitWebhookEvent } from '../../webhooks/dispatcher.js';
 import { spillIdFromPath } from '../../brain/spill-path.js';
-import type { FactDoc, EdgeDoc, LinkViolationDoc, BrainEmbedRecordType } from '../../config/types.js';
+import type { EdgeDoc, LinkViolationDoc } from '../../config/types.js';
 
 export const UUID_V4_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -118,60 +118,21 @@ export async function checkLinkViolations(
   }
 }
 
-/**
- * Write one arriving brain document and offer it to this instance's embedder — in that order, together.
- *
- * A write without the queue call yields a record absent from every meaning-ranked search on this peer,
- * silently. So this is the only thing in the ingest router that may call `replaceOne` or `insertOne` on a
- * brain collection, and `a-receiver-embeds-by-its-own-rules.test.js` fails on any that reappears.
- *
- * Always `upsert: true`: the caller has decided the document lands, and a `replaceOne` without upsert
- * silently writes nothing when the local copy was deleted meanwhile.
- *
- * Whether to embed is the RECEIVER's decision: `enqueueIngestedRecord` resolves `record > schema > space`
- * against this instance's configuration.
+/*
+ * An arriving brain document is written by `writeArrivals` (`sync/arrivals.ts`, `Q-107` part 1), which replaced
+ * `ingestBrainDoc` here: one writer for every door — push, pull and admin import — that owns every precondition
+ * the doors used to hold a different subset of.
  */
-export async function ingestBrainDoc<T extends { _id: string; suppressEmbeddings?: boolean;}>(
-  spaceId: string,
-  recordType: BrainEmbedRecordType | null,
-  collection: string,
-  incoming: T,
-): Promise<void> {
-  await col<T>(`${spaceId}_${collection}`).replaceOne(
-    asFilter<T>({ _id: incoming._id }),
-    asDoc<T>(incoming),
-    { upsert: true },
-  );
-  // Stored at the sender's seq, which this process did not allocate: the pull horizon must cover it (`Q-196`).
-  noteSeqStored(spaceId, (incoming as { seq?: number }).seq ?? 0);
-  /*
-   * `null` means this record kind has NOTHING TO EMBED (a link carries no text) — not "skip the queue this
-   * time". An explicit argument rather than a second ingest function, so a caller that embeds nothing has
-   * to say `null` at the call, where a reviewer sees it.
-   */
-  if (recordType !== null) await enqueueIngestedRecord(spaceId, recordType, incoming);
-
-  /*
-   * No link reconcile here: links replicate as their own documents. Deriving them from an arriving record
-   * would reconcile it to "no links" and delete the link rows that arrived beside it.
-   */
-}
 
 // ── Safety limits ─────────────────────────────────────────────────────────
 
 /**
- * Upper bound on any seq value accepted from a remote peer. Prevents a peer poisoning the high-water
- * mark with seq = MAX_SAFE_INTEGER, which would make later legitimate writes silently ignored.
- * 2^50 is far above any realistic counter yet keeps seq-allocation arithmetic in safe range.
- */
-export const MAX_SYNC_SEQ = 2 ** 50; // 1_125_899_906_842_624
-
-/**
  * Maximum chain depth for forkOf links — prevents a "fork chain bomb" of repeated equal-seq docs with
- * different content. Enforced twice: chain depth (walk forkOf upward) and sibling fan-out (count forks
- * of the same parent).
+ * different content. Enforced twice, on both push doors: chain depth (walk forkOf upward) and sibling fan-out
+ * (count forks of the same parent, the ones a page is creating included). Defined beside the planner that
+ * enforces it (`planPushArrivals`, `sync/upsert-plan.ts`) and re-exported here for the routes and their tests.
  */
-export const MAX_FORK_DEPTH = 10;
+export { MAX_FORK_DEPTH } from '../../sync/upsert-plan.js';
 
 // ── Incoming document schemas (Zod validation for peer-submitted docs) ─────
 
@@ -252,8 +213,20 @@ export const IncomingFileMetaDoc = z.object({
  *
  * Embedding is enqueued only when this instance HOLDS the blob; metadata can arrive first, and the file
  * transfer path enqueues via `upsertFileMeta` when the bytes land.
+ *
+ * Reached only through `writeArrivals` (`sync/arrivals.ts`), which shape-checks, collapses, accepts by seq,
+ * stamps retention, and bumps the counter after the merge. The merge stays per document until `Q-107` part 2.
  */
-export async function ingestFileMeta(spaceId: string, incoming: z.infer<typeof IncomingFileMetaDoc>): Promise<boolean> {
+export async function ingestFileMeta(
+  spaceId: string,
+  incoming: z.infer<typeof IncomingFileMetaDoc>,
+  /**
+   * An admin RESTORE queues the file whether or not its blob is here — the export carries no bytes, and the
+   * restore's promise is "search comes back on its own". This function is the one place a merged file is queued,
+   * so the writer never queues one beside it.
+   */
+  { restore = false }: { restore?: boolean } = {},
+): Promise<boolean> {
   // A legacy read spill (Q-92) is one caller's search result an older peer wrote into the space. It travels in
   // neither direction now, and this is the one function both push and pull write file metadata through.
   if (spillIdFromPath(String(incoming._id))) return false;
@@ -270,26 +243,11 @@ export async function ingestFileMeta(spaceId: string, incoming: z.infer<typeof I
     asUpdate<FileMetaDoc>({ $set }),
     { upsert: true },
   );
-  // As `ingestBrainDoc`: a seq this process did not allocate, which the pull horizon must cover.
-  if (typeof incoming.seq === 'number') noteSeqStored(spaceId, incoming.seq);
+  // No seq is noted here: the writer's counter bump after the merge is what makes the seq visible (`Q-107`).
 
   const haveBytes = existing?.sha256 !== undefined || existing?.sizeBytes !== undefined;
-  if (haveBytes) await enqueueIngestedRecord(spaceId, 'file', incoming);
+  if (haveBytes || restore) await enqueueIngestedRecord(spaceId, 'file', incoming);
   return true;
-}
-/**
- * Apply a whole PAGE of arriving file metadata on pull, through the same merge as push (`ingestFileMeta`)
- * rather than the engine's `replaceOne` bulk write, so the two directions cannot diverge.
- *
- * A chunk is skipped, not stored: stored, it would appear in every file list as a file.
- */
-export async function applyFileMetaPage(
-  spaceId: string, docs: readonly (z.infer<typeof IncomingFileMetaDoc> & { parentFileId?: string })[],
-): Promise<void> {
-  for (const doc of docs) {
-    if (doc.parentFileId !== undefined) continue;
-    await ingestFileMeta(spaceId, fileMetaForWire(doc) as z.infer<typeof IncomingFileMetaDoc>);
-  }
 }
 
 export const IncomingEntityDoc = z.object({
@@ -412,51 +370,6 @@ export function decodeCursor(token: string): number {
 
 // ── Space access guard ─────────────────────────────────────────────────────
 
-/**
- * Walk the forkOf chain upward from a document to measure how deep
- * this fork is in the chain.  Returns 0 for a root document.
- *
- * Uses a visited set to break any hypothetical cycle in O(depth) time.
- * Hard-caps the walk at MAX_FORK_DEPTH + 1 to avoid slow queries on
- * corrupted data.
- */
-export async function forkChainDepth(spaceId: string, docId: string | undefined): Promise<number> {
-  if (!docId) return 0;
-  const coll = col<FactDoc>(spaceCollection(spaceId, 'facts'));
-  const visited = new Set<string>();
-  let depth = 0;
-  let currentId: string | undefined = docId;
-
-  while (currentId && depth <= MAX_FORK_DEPTH) {
-    if (visited.has(currentId)) break; // cycle guard
-    visited.add(currentId);
-    const doc = await coll.findOne(asFilter<FactDoc>({ _id: currentId })) as FactDoc | null;
-    if (!doc?.forkOf) break;
-    depth++;
-    currentId = doc.forkOf;
-  }
-  return depth;
-}
-
-/**
- * Refuse a document whose `seq` is implausibly far ahead of the space counter
- * (see util/seq.ts — MAX_INGEST_SEQ). Responds 400 and returns true when rejected.
- */
-export function rejectImplausibleSeq(
-  spaceId: string,
-  seq: number,
-  res: import('express').Response,
-  peerInstanceId?: string,
-): boolean {
-  if (!isSeqImplausible(seq)) return false;
-  log.warn(
-    `Refused document with implausible seq ${seq} for space '${spaceId}' ` +
-    `from peer '${peerInstanceId ?? 'unknown'}' (max ingest seq ${MAX_INGEST_SEQ}).`,
-  );
-  res.status(400).json({ error: `seq ${seq} is too close to the protocol ceiling and was refused` });
-  return true;
-}
-
 /** The peer identity bound to a production peer PAT (set by the invite handshake). */
 export function callerPeerId(authToken: Record<string, unknown> | undefined): string | undefined {
   const v = authToken?.['peerInstanceId'];
@@ -563,6 +476,31 @@ export function isNonPeerSyncWrite(authToken: Record<string, unknown> | undefine
 
 export const NON_PEER_WRITE_MESSAGE =
   'Sync writes require a peer token (peerInstanceId) or an admin token — use the regular REST API for user writes';
+
+/**
+ * The preamble every sync WRITE route runs before it reads the body: a space named, the caller's reach into it, a
+ * peer (or admin) token, and the network direction. Answers the refusal itself and returns `null`; otherwise the
+ * space id. One function, because these four checks were written out at every write route (the document routes,
+ * the tombstone route, the file-tombstone route) and a write route that misses one is a door with less in front
+ * of it.
+ *
+ * Handed the parameters rather than the request, so each route still states what it reads in one destructure
+ * (`a-tool-and-its-route-take-the-same-parameters` reads that). The file-tombstone route names its space in the
+ * body, the others in the query.
+ */
+export function pushAllowed(
+  res: import('express').Response,
+  spaceId: unknown,
+  networkId: string | undefined,
+  authToken: unknown,
+): string | null {
+  const token = authToken as Record<string, unknown>;
+  if (typeof spaceId !== 'string' || !spaceId) { res.status(400).json({ error: 'spaceId required' }); return null; }
+  if (!spaceAllowed(spaceId, networkId, token)) { res.status(403).json({ error: 'Forbidden' }); return null; }
+  if (isNonPeerSyncWrite(token)) { res.status(403).json({ error: NON_PEER_WRITE_MESSAGE }); return null; }
+  if (isDirectionalWriteBlocked(spaceId, token)) { res.status(403).json({ error: 'Directional network: write not permitted from this peer' }); return null; }
+  return spaceId;
+}
 
 /**
  * For directional networks (braintree, pubsub), reject inbound writes from

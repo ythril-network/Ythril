@@ -336,6 +336,14 @@ describe('POST /api/sync/batch-upsert', () => {
     assert.equal(r.status, 200, JSON.stringify(r.body));
     const total = r.body.facts.inserted + r.body.facts.updated + r.body.facts.skipped + r.body.facts.forked + r.body.facts.tombstoned;
     assert.ok(total <= 500, `Expected at most 500 docs processed, got ${total}`);
+    /*
+     * The overflow is REJECTED, not dropped (`Q-107` part 1). It used to vanish: sliced off before counting, so
+     * the response accounted for 500 of 502 and the sender — which subtracts `rejected` from what it pushed —
+     * counted the other two as delivered and advanced its watermark past records this instance never stored.
+     */
+    assert.equal(total, 500, `Expected exactly the first 500 processed, got ${total}`);
+    assert.equal(r.body.facts.rejected, 2,
+      `the 2 documents past the 500 cap must be counted in rejected, got ${JSON.stringify(r.body.facts)}`);
   });
 
   it('returns 403 for forbidden space', async () => {

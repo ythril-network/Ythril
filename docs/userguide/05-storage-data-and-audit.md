@@ -110,6 +110,24 @@ Three things to know before enabling it:
 Enabling it without a master secret configured fails the backup **before writing anything**, rather than leaving a
 half-plaintext directory that looks like a valid backup.
 
+### Exporting and importing one space
+
+A whole-database backup restores everything. To move or restore **one space**, an administrator uses the space
+export and import ([Admin API → Export Space](../integration-guide/12-admin-api.md#export-space)). The export carries
+every kind of record the space syncs — facts, entities, edges, chrono entries, links and file metadata (not the
+file bytes) — and the import puts them back. What to expect from a restore:
+
+- **It replaces.** A record already in the space is overwritten by the exported copy, even when the space holds a
+  newer one — that is what restoring a backup means.
+- **Retention survives the round trip.** Each record keeps the expiry it had when it was exported. A record that
+  had none is given this space's retention window, counted from when the record was created.
+- **Search comes back on its own.** Vectors are not exported; every restored record is queued for embedding on
+  this instance, so nothing has to be reindexed by hand.
+- **Nothing is refused silently.** A record the import could not store is listed by id with the reason; a record
+  restored over a deletion this instance remembers is listed too, because a synced peer that remembers the same
+  deletion will remove it again.
+- File previews and passages are rebuilt from the file itself, so they are not part of the export.
+
 ### Uploaded files are encrypted at rest
 
 When the instance has a master secret (`YTHRIL_MASTER_KEY` or `YTHRIL_MASTER_PASSPHRASE`, set by whoever runs the

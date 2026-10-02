@@ -35,9 +35,10 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
-import { blockAfter, enclosingBlockMatching } from './_structural-window.mjs';
+import { bodyOf, enclosingBlockMatching } from './_structural-window.mjs';
 
 const { isDuplicateKeyOnly } = await import('../../server/dist/api/sync/_shared.js');
+const REGISTRY = await import('../../server/dist/sync/replicated-families.js');
 
 const DOCS = 'server/src/api/sync/docs.ts';
 const docs = stripComments(readFileSync(DOCS, 'utf8'));
@@ -72,114 +73,69 @@ describe('the duplicate-key predicate knows both error shapes', () => {
 });
 
 describe('every edge ingest absorbs a duplicate triplet', () => {
-  /**
-   * Each place an edge document is written on an ingest path — derived, not named.
+  /*
+   * Re-anchored for `Q-107` part 1. The single-record route and the batch loop were two implementations of one
+   * rule, each wrapping its own write in a `try` that absorbed E11000; both are now one page accept, and every
+   * edge a push stores is written by the arrival writer (`writeArrivals`, `sync/arrivals.ts`), which absorbs the
+   * duplicate PER OPERATION, reads it back and reports it by id (`outcome.duplicates`) — never as a throw. The
+   * writer half (unordered, read back, a non-duplicate still throws) is `one-duplicate-key-does-not-wedge-a-member`;
+   * this file holds the door half: every edge write is the writer's, a duplicate becomes the `duplicate` verdict,
+   * and that verdict answers 200 on both doors.
    *
-   * The single-record route and the batch loop are two implementations of one rule, and the previous round of
-   * work on this fixed the pull and left both of these. A list of two names would go stale the same way.
-   *
-   * The shape it matches changed in 3.7: the write is now `ingestBrainDoc(...)`, one helper that writes the
-   * document and queues its embedding together, so no ingest site calls `replaceOne` itself. The duplicate-key
-   * throw still comes from that write and still has to be absorbed by the CALLER — a `try` inside the helper
-   * would swallow it there and lose the per-item reporting the batch loop depends on, so the guarantee this
-   * gate holds is unchanged and only the pattern it looks for moved.
+   * Seen red by mutation, restored by hand: the batch counter `duplicateTriplets` counting `skipped`; the single
+   * route answering `ok` for a duplicate; the edges `writeArrivals` call replaced by a bare `bulkWrite`.
    */
-  function edgeWrites() {
-    return [...docs.matchAll(/ingestBrainDoc<EdgeDoc>\(/g)].map(m => m.index);
-  }
+  const ARRIVALS = stripComments(readFileSync('server/src/sync/arrivals.ts', 'utf8'));
 
   /**
-   * The try/catch guarding one write — BOTH halves.
-   *
-   * `enclosingBlockMatching` returns the `try { … }` braces, and `catch (err) { … }` is a SIBLING block, not
-   * a child. So a window bounded by the try excludes the catch entirely, which is where every assertion below
-   * is actually looking: the first version of this gate failed on a correct fix because it was checking the
-   * absorption inside the block that cannot contain it.
+   * Every arrival-writer call in the push door — derived, not named. The door writes every family through one
+   * call keyed by the family's collection (`the-push-door-derives-its-families`), and `edges` is one of them, so
+   * the edge write is that call; a literal `'edges'` call would be the same write again.
    */
-  function guardAround(at) {
-    const tryBlock = enclosingBlockMatching(docs, at, /\btry\s*\{/, `edge upsert @${at}`);
-    if (!tryBlock) return null;
-    const start = docs.lastIndexOf(tryBlock, at);
-    assert.notEqual(start, -1, `could not re-locate the try block for the write at ${at}`);
-    const afterTry = start + tryBlock.length;
-    // The catch's own block, taken from just past the try. `blockAfter` finds the next `{`, which is the
-    // catch's — bounded by its matching brace rather than by a character count.
-    return tryBlock + blockAfter(docs, afterTry, `the catch after ${at}`);
+  function edgeWrites() {
+    const { REPLICATED_FAMILIES } = REGISTRY;
+    assert.ok(REPLICATED_FAMILIES.some(f => f.collection === 'edges'), 'edges are no longer a replicated family');
+    return [...docs.matchAll(/writeArrivals\(\s*\w+\s*,\s*(?:'edges'|\w+)\s*,/g)].map(m => m.index);
   }
 
   it('finds the ingest writes, so an empty sweep cannot pass', () => {
-    assert.ok(
-      edgeWrites().length >= 2,
-      `expected the single-record route and the batch loop, found ${edgeWrites().length} edge upsert(s)`,
-    );
+    assert.ok(edgeWrites().length >= 1, `found ${edgeWrites().length} edge write(s) through the arrival writer in ${DOCS}`);
+    assert.doesNotMatch(docs, /\.(?:replaceOne|insertOne|updateOne|bulkWrite)\(/,
+      `${DOCS} writes a record itself again, outside the writer that absorbs a duplicate per document`);
   });
 
-  it('each one is inside a try that absorbs a duplicate key', () => {
-    const unguarded = [];
-    for (const at of edgeWrites()) {
-      const guard = guardAround(at);
-      // The ROUTE-level try does not count: it answers 500, which is the defect. The guard has to be close
-      // enough to let the rest of the request — and the rest of the batch — carry on.
-      if (!guard || !/isDuplicateKeyOnly/.test(guard)) unguarded.push(at);
-    }
-    assert.deepEqual(
-      unguarded, [],
-      'An edge upsert can reject with E11000 when two peers created the same triplet independently. '
-      + 'Unabsorbed it becomes a 500, the pushing peer holds its watermark, and it re-sends the identical '
-      + 'batch every cycle — that channel never advances again.',
-    );
-  });
-
-  it('the guard re-throws anything that is not a duplicate', () => {
-    // `catch { /* ignore */ }` would pass the assertion above and swallow real corruption.
-    for (const at of edgeWrites()) {
-      assert.match(
-        guardAround(at), /if \(!isDuplicateKeyOnly\(err\)\) throw err;/,
-        'the catch must re-throw a non-duplicate rather than absorbing every write fault',
-      );
-    }
+  it('the writer absorbs a duplicate per document and hands it back by id', () => {
+    const body = bodyOf(ARRIVALS, 'writeArrivals');
+    assert.match(body, /code === DUPLICATE_KEY\)\s*dupes\.push\(d\)/, 'the writer does not set a duplicate apart');
+    assert.match(body, /else out\.duplicates\.push\(d\._id\)/, 'a duplicate is not handed back by id');
   });
 
   it('a duplicate is REPORTED, not silently dropped', () => {
-    // The owner's P-21 ruling: accept what you can, and hand back what you could not. A duplicate that the
-    // sender cannot see is the do-nothing option with extra steps.
-    assert.match(docs, /duplicateTriplets/, 'the batch stats must carry a duplicate counter');
-    assert.match(
-      docs, /status: duplicateTriplet \? 'duplicate' : 'ok'/,
+    // The owner's P-21 ruling: accept what you can, and hand back what you could not.
+    assert.match(docs, /dup\.has\(id\) \? 'duplicate' : 'rejected'/,
+      'the door does not turn a writer duplicate into the `duplicate` verdict');
+    assert.match(docs, /duplicateTriplets: count\('edges', 'duplicate'\)/,
+      'the batch stats must count the duplicate verdict as duplicateTriplets');
+    assert.match(docs, /status: verdict === 'duplicate' \? 'duplicate' : 'ok'/,
       "the single-record route must answer 'duplicate' rather than 'ok' — a sender that cannot tell them "
-      + 'apart advances its watermark believing it delivered a record that was refused',
-    );
-    for (const at of edgeWrites()) {
-      assert.match(guardAround(at), /log\.warn\(/, 'and the operator must get a line naming the triplet');
-    }
+      + 'apart advances its watermark believing it delivered a record that was refused');
+    assert.match(ARRIVALS, /warnArrivalsNotStored\([^;]*out\.duplicates\)/, 'and the operator must get a line naming it');
   });
 
   it('the response still says 200, so the sender does not stall', () => {
     /*
-     * The assertion that actually pins the bug, rather than the mechanism around it.
-     *
      * `pushCollection` breaks on `!resp.ok` BEFORE advancing `seqCursor`, and `resolveWatermark` then caps
      * the watermark at the last batch that landed — so any non-2xx here is a permanent stall for that
-     * channel, not a retry.
+     * channel, not a retry. Read BACKWARDS to the `res.status(` that opens this response: the nearest preceding
+     * one IS the one that carries this body.
      */
-    const at = docs.indexOf("status: duplicateTriplet ? 'duplicate' : 'ok'");
+    const at = docs.indexOf("status: verdict === 'duplicate' ? 'duplicate' : 'ok'");
     assert.notEqual(at, -1, 'the duplicate status is gone — re-point this gate');
-    /*
-     * Read BACKWARDS to the `res.status(` that opens this response, rather than windowing around the anchor.
-     *
-     * The status is written before the anchor and the call spans several lines
-     * (`res.status(200).json(withSchemaViolations(\n  { status: … }, violations,\n));`), so a forward window
-     * misses it and a statement window has to survive being entered from inside a nested argument list. The
-     * nearest preceding `res.status(` IS the one that carries this body — that is what the assertion means,
-     * and saying it directly is stronger than approximating it with a span.
-     */
     const statusAt = docs.lastIndexOf('res.status(', at);
     assert.notEqual(statusAt, -1, 'no res.status before the duplicate body — re-point this gate');
-    assert.match(
-      docs.slice(statusAt, at), /^res\.status\(200\)/,
+    assert.match(docs.slice(statusAt, at), /^res\.status\(200\)/,
       'a duplicate must answer 200. A 500 makes the pushing peer hold its watermark and re-send the identical '
-      + 'batch every cycle, so the channel never advances again — which is the bug, not the symptom.',
-    );
+      + 'batch every cycle, so the channel never advances again — which is the bug, not the symptom.');
   });
 });
 

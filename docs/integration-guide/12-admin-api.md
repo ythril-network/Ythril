@@ -98,12 +98,17 @@ Dumps the entire knowledge base of a space as a single JSON document. Requires a
   "entities": [ { "_id": "...", "name": "...", "type": "...", "...": "..." } ],
   "edges":    [ { "_id": "...", "from": "...", "to": "...", "label": "...", "...": "..." } ],
   "chrono":   [ { "_id": "...", "title": "...", "type": "...", "...": "..." } ],
+  "links":    [ { "_id": "...", "from": "...", "fromKind": "fact", "to": "...", "toKind": "entity", "...": "..." } ],
   "files":    [ { "_id": "...", "path": "...", "...": "..." } ]
 }
 ```
 
-- Embedding vectors are stripped (`embedding` field excluded) — exported data is model-independent.
-- `embeddingModel` is retained on each doc so you can see what model last embedded it.
+- **Every replicated family is exported, keyed by its collection name** — facts, entities, edges, chrono, links and
+  file metadata. Links were missing until this release, so an export-then-import lost every link.
+- What this instance DERIVES with its own model is left out — `embedding`, `embeddingModel` and `matchedText` — so
+  exported data is model-independent; the import re-embeds.
+- The record's own local state is kept: the retention stamps (`_expireAt`, `_contentExpireAt`) and a file's
+  `syncBase`. JSON writes the stamps as ISO strings; the import turns them back into dates.
 - Binary file content is **not** included — only file metadata. Use the Files API to download actual files.
 
 ---
@@ -127,7 +132,23 @@ Upserts exported data into a space. Requires admin token + TOTP when MFA is enab
 }
 ```
 
-Each document must have a string `_id`. Documents with an existing `_id` in the space are replaced; new `_id`s are inserted.
+Each document must have a string `_id` and a `seq` that is a non-negative integer below the protocol's ingest
+ceiling (`2^50 − 2^40`); file metadata older than seqs may carry none. Documents with an existing `_id` in the space
+are **replaced, whatever their seq** — an import is a restore, so a backup restored over newer data wins; new
+`_id`s are inserted. A file holding the same `_id` twice stores the copy with the highest seq.
+
+What the import stores of each document:
+
+- **Kept**: everything the export carried as the record's content, plus its retention stamps (as dates — they ARE
+  the record's own retention, since a per-record `ttlDays` is never stored) and a file's `syncBase`. A record that
+  carries no stamp is stamped by THIS space's retention policy (type schema over space), counted from its own
+  `createdAt`.
+- **Dropped**: `embedding`, `embeddingModel` and `matchedText` (re-embedded here); every file chunk and face record
+  (`parentFileId` set — re-derived from the blob); and every file-metadata key that is not on the sync wire
+  (`sizeBytes`, `sha256`, `excerpt` and the like describe bytes this instance may not hold). File metadata is merged
+  onto what is stored, as sync merges it.
+- The space's seq counter is moved past every imported seq, chunk by chunk, so the next local write sorts above
+  every restored record.
 
 **Response** `200`:
 
@@ -139,10 +160,21 @@ Each document must have a string `_id`. Documents with an existing `_id` in the 
     "entities": { "inserted": 3, "updated": 1, "errors": 0 },
     "edges":    { "inserted": 0, "updated": 0, "errors": 0 },
     "chrono":   { "inserted": 0, "updated": 0, "errors": 0 },
-    "files":    { "inserted": 0, "updated": 0, "errors": 0 }
+    "links":    { "inserted": 0, "updated": 0, "errors": 0 },
+    "files":    { "inserted": 0, "updated": 0, "errors": 1, "derived": 2,
+                  "refused": [ { "_id": "notes/a.md", "reason": "seq \"7\" is not a non-negative integer" } ] }
   }
 }
 ```
+
+Per family, alongside the counts, and each present only when it has something to say:
+
+| field | what it holds |
+|---|---|
+| `refused` | the documents NOT stored, `{ _id, reason }` — a malformed id or seq, a value the store refuses, a uniquely-indexed duplicate of a record held under another id, or (when the store failed part-way through a family) every document after the fault. **The first 10 are named**; `errors` is the total. Documents written before a part-way fault are counted in `inserted`/`updated`, not here |
+| `derived` | how many file chunks and face records were left out because this instance derives them from the blob |
+| `restoredOverTombstone` | ids of records restored over a deletion this instance holds — a peer holding the same tombstone will delete them again on the next sync. **The first 10**; `restoredOverTombstoneTotal` is how many there were |
+| `schemaViolations` | documents stored despite breaking the space's schema (below) |
 
 **A document that breaks the space's schema is STORED, and reported.** It is not refused: a backup taken before
 a schema change would be rejected by the instance's own current rules, which would make backups unrestorable —
@@ -165,18 +197,21 @@ and nothing about which one. The array is absent when there is nothing to report
 
 **Imported records are queued for embedding.** Until 3.7 they were not — a restored backup was stored and
 invisible to meaning-ranked search until somebody ran a reindex they were never told they needed. The import
-now writes through the same function the sync ingest does, which writes and enqueues in one call. A reindex is
+now writes through the same arrival writer every sync door does, which writes and enqueues in one call — a
+restored file included, whether or not its blob is here yet. A reindex is
 still the tool for rebuilding vectors after an embedding-model change; it is no longer required to make an
 import searchable at all.
 
-**Two things an import deliberately does NOT do**, both of which sync does:
+**What an import deliberately does NOT do**, though sync does:
 
 - **It does not reallocate `seq`.** An exported document keeps the one it had, so a restored instance and its
   peers still agree about which copy of a record is newer.
-- **It does not check tombstones.** Sync refuses a document whose id has been deleted, so a lagging peer cannot
-  resurrect it. A restore is the one case where resurrection is the point — but a record deleted *after* the
-  backup will come back, and the tombstone will remove it again on the next sync with a peer that still holds
-  one.
+- **It does not refuse over tombstones.** Sync refuses a document whose id has been deleted, so a lagging peer
+  cannot resurrect it. A restore is the one case where resurrection is the point — but a record deleted *after*
+  the backup will come back, and the tombstone will remove it again on the next sync with a peer that still holds
+  one. Such records are counted in `restoredOverTombstoneTotal` and the first of them named in
+  `restoredOverTombstone`, so it is known rather than discovered.
+- **It does not guard by seq.** Sync keeps a stored copy that is newer than the incoming one; a restore replaces.
 
 **Files are stored without schema validation**, because a file has no `type` and therefore no type schema.
 

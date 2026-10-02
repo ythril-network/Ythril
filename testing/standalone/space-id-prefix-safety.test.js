@@ -102,6 +102,17 @@ describe('wipe → review findings', () => {
       'if every wipeable collection has findings again, this expectation is the thing to update');
   });
 
+  it('the map IS RECORD_TYPE_OF, not a hand copy of it', async () => {
+    // Dup pass of `Q-107` part 1: the collection -> record type table was written here and in the replication
+    // registry. Seen red by mutation, restored by hand: the literal map put back.
+    const { readFileSync } = await import('node:fs');
+    const { stripComments } = await import('./_strip-comments.mjs');
+    const { bodyOf } = await import('./_structural-window.mjs');
+    const body = bodyOf(stripComments(readFileSync('server/src/spaces/lifecycle.ts', 'utf8')), 'candidateTypesForWipe');
+    assert.match(body, /= RECORD_TYPE_OF;/, 'the wipe map is no longer the shared table');
+    assert.doesNotMatch(body, /facts:\s*'fact'/, 'the wipe map spells the table out again');
+  });
+
   it('clears only the wiped type', () => {
     assert.deepEqual(candidateTypesForWipe(new Set(['facts'])), ['fact']);
     assert.deepEqual(candidateTypesForWipe(new Set(['entities', 'chrono'])).sort(), ['chrono', 'entity']);

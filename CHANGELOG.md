@@ -9,6 +9,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **A pushed or pulled page is written in a handful of database commands, not four per document (`Q-107`,
+  part 1).** Every record that arrives from elsewhere — a peer's push (batch or single record), a pulled page, an
+  admin import — is now stored by one writer. A fork-free page of 200 facts, entities, edges, chrono entries or
+  links went from 801 commands to the same small number as a page of 20 (measured on the standalone harness).
+  File metadata is still merged one document at a time. What an integrator will notice:
+  - **BREAKING for a peer relying on it: `batch-upsert` now caps fork fan-out too.** A fact may have at most 10
+    forks; the forks one request creates count with the stored ones. An eleventh is counted in `forkDepthRefused`
+    and `rejected`, as a deep chain always was. An older receiver accepts it, so a network mixing versions can hold
+    different fork sets for such a record.
+  - **A fork's id is derived** from the parent's id, the seq and the text, so a push re-sent after a lost response
+    upserts the fork it already made instead of forking again.
+  - **Documents past the 500-per-family cap are counted in `rejected`** instead of being dropped unsaid — the
+    sender used to count them as delivered and move past them.
+  - **A record the receiver's store refuses (a schema validator, a value it cannot hold) is counted in
+    `rejected` and named in the receiver's log**, and never fails the page; a fault that is not one document's
+    still answers `500`, and the page is safe to re-send.
+  - **A link arriving under another id for endpoints already linked is `skipped`**, never a `500`.
+- **The admin export carries links, and the import restores what the export wrote (`Q-205`, `Q-206`).** The
+  export now streams every replicated family, links included, and leaves out only what this instance derives (the
+  vector, its model, `matchedText`). The import checks every `seq` (a non-negative integer below the ingest
+  ceiling; absent only for older file metadata), keeps the retention stamps as dates and a file's sync base, drops
+  file chunks, face records and file keys that describe bytes, stores the highest seq of a repeated id, names
+  every document it did not store with the reason (`refused`), and names every record restored over a deletion
+  this instance holds (`restoredOverTombstone`).
+- **Arriving records take this instance's retention (`D-9`).** A record that arrives by push, pull or import
+  without an expiry here is given this space's window (type schema over space), counted from its own creation
+  time. A record older than the window is therefore removed by the next retention sweep, and that deletion is
+  passed on to peers. An expiry this instance already holds for a record is kept when a peer updates it.
 - **A bulk write costs a handful of database round trips, not several per item (`Q-99`, part 3 of 3).** A batch
   is now read once — every record, edge end and triplet it names in one query per kind — decided item by item by
   the same code each single-record endpoint uses, and written in one block per kind. Measured on the standalone
@@ -276,6 +304,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A record pulled from a peer was never queued for embedding (`Q-203`).** It was stored and absent from every
+  meaning-ranked search on this instance until somebody ran a reindex. Pulled records are now queued by this
+  instance's suppression rules, like pushed ones. **Records pulled before this release** stay without a vector until
+  queued: run `POST /api/spaces/:id/reembed` (Settings → Spaces → Danger Zone → Backfill embeddings) once per
+  synced space.
+- **A new entity pushed through the single `POST /api/sync/entities` route was never embedded.** It was inserted
+  by a write that never reached the embed queue.
+- **A push could leave this instance's seq counter below what it had received (`Q-198`).** The single push routes
+  never moved it, `batch-upsert` left out links and file metadata and moved it only after answering, and
+  `POST /api/sync/tombstones` did not wait for it. Every push door now moves the counter past every seq it received
+  before it answers, so the next local write never takes a seq below a record a peer already holds. A fork is then
+  written with a seq above the arrival that caused it.
+- **A peer's edit erased this instance's own vector and retention stamps.** A pushed or pulled update replaced the
+  whole document, so the record stopped expiring here, dropped out of vector search until re-embedded, and was
+  re-embedded even when its text had not changed. They are now kept across the update.
+- **A record pushed under a `spaceMap` alias kept the sender's space id**, so every list and lookup on this
+  instance missed it. It is now stored under the local space id, as a pulled record always was.
+- **A stale tombstone was deleted before the record that superseded it was written**, so a write that then failed
+  lost both. It is deleted only once the record has landed.
+- **A page holding the same id twice could store the older copy**, on pull and on import. The highest seq now wins,
+  and two copies at the same seq keep the first — the same reading the push door has always applied.
+- **`POST /api/sync/tombstones` accepted any number as a seq.** A tombstone with a seq inside the protocol's ceiling
+  reserve is now refused on its own (and logged); it used to refuse every later copy of its record and drag the
+  counter towards the ceiling.
+- **A duplicate link in a push answered `500`**, so the sender re-sent that page for ever. It is now `skipped`.
+- **A database fault while writing a pulled page was reported as an unreachable peer.** It counted toward
+  `PEER UNREACHABLE` and named only the driver error. It now holds that family's position, logs a record-write
+  failure naming the space and family, and the page is fetched again next cycle.
+- **A refused document in a push or pull no longer goes unnamed:** one warning per page names the ids and the
+  reason, where duplicate-key warnings used to list `(unknown)`.
+- **A peer could forge a line in this instance's log.** A document id or a peer label containing a line break was
+  written into the log as it arrived, so a peer could add a line that read exactly like this server's own. Every
+  value a peer sends that reaches a log line on the push, pull or import path is now written with its control
+  characters escaped (`\r`, `\n`, `\u001b`), so it stays visible and stays on its line.
 - **A new space could stay "building" until the next restart.** Once its search indexes were ready, the space
   recorded that in config.json, re-reading the file first so a concurrent edit is kept. On Docker Desktop the file
   is a bind mount, and a read that landed while the file was being rewritten failed with `ENODATA` — and the
@@ -466,6 +528,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Internal
 
+- **A database test whose setup fails now fails, instead of hanging the run.** The test harness kept its Mongo
+  connection open when a setup step threw after connecting, and node's test runner waits for every file's process
+  to exit, so one such file held `test:standalone` with no output for as long as the CI job lived. The harness now
+  closes what it opened on a failed setup, and the CI job has a 90-minute ceiling, so a hang nobody has found yet
+  fails the run instead of holding it.
 - **A gate proves no read-rung door can reach a write into a space (`Q-97`).** `a-read-never-writes-a-space`
   derives every door a `read` token may call — `TOOL_RIGHTS` and `ROUTE_RIGHTS` rows at `read`, every mounted GET
   without a row or on a `NOT_AREA_SCOPED` path — walks what each call causes, and fails on any path to a space

@@ -26,6 +26,9 @@
  * `spaceCollection(spaceId, 'embedJobs')` added by hand to a scratch function in `brain/embed-queue.ts` (red:
  * two runners), then removed by hand.
  *
+ * Re-anchored for `Q-107` part 1 and red on 797dbb2e for it: the computed-name row names the arrival writer,
+ * which does not exist yet, and the pull's `batchUpsertBySeq` it replaces is unnamed.
+ *
  * Run: node --test testing/standalone/embed-jobs-are-queued-by-one-batch-runner.test.js
  * (requires a prior `npm run build` in server/)
  */
@@ -42,7 +45,10 @@ const JOBS = SPACE_COLLECTIONS.embedJobs;
 
 /** A batched write whose collection name is computed, and why it is not the jobs collection. */
 const COMPUTED_BULK_WRITES = {
-  'server/src/sync/engine.ts:batchUpsertBySeq': 'sync pull replicates brain documents; embed jobs are local and never replicated',
+  // Was `sync/engine.ts:batchUpsertBySeq`, the pull's page write, until the arrival writer took every door's
+  // record write (`Q-107` part 1). It queues its landed records through `enqueueIngestedRecords`, not a bulkWrite.
+  'server/src/sync/arrivals.ts:writeArrivals': 'sync push, pull and import store brain documents a peer or a restore '
+    + 'sent; the collection is a replicated family\'s, and embed jobs are local and never replicated',
   'server/src/brain/write-plan/commit.ts:writeStage': 'the write commit\'s record stage: the collection is a record kind\'s '
     + '(`PLAN_KINDS`), never the jobs collection — the commit queues its jobs through the runner, which the last case holds',
 };

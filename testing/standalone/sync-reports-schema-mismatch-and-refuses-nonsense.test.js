@@ -217,6 +217,19 @@ ${stmt}`,
     }
   });
 
+  it('a document the WIRE schema rejects is named in one warning per page, the shape every door logs', () => {
+    /*
+     * Dup pass: the batch route logged each rejected document on a line of its own, beside the writer's
+     * per-page summary (`warnArrivalsNotStored`) for every other refusal. A poison page then floods the log ring
+     * with one fact. Seen red by mutation, restored by hand: the per-document `log.warn` put back.
+     */
+    const batch = docs.slice(docs.indexOf("syncDocsRouter.post('/batch-upsert'"));
+    const parse = batch.slice(batch.indexOf('.flatMap((d) => {'), batch.indexOf('warnArrivalsNotStored('));
+    assert.ok(parse.includes('schema.safeParse(d)'), 'the per-document parse moved — re-anchor this case');
+    assert.doesNotMatch(parse, /\blog\.\w+\(/, 'a rejected document is logged one line at a time again');
+    assert.match(batch, /warnArrivalsNotStored\([^;]*misfits\)/, 'the rejected documents are not reported at all');
+  });
+
   it('a chrono type nobody understands IS refused, on BOTH paths', () => {
     /*
      * Not the same thing. A `type` outside the product's vocabulary AND outside anything the space declared is
@@ -231,12 +244,21 @@ ${stmt}`,
     assert.match(single, /getAllowedChronoTypes/, 'the single-record route lost its vocabulary check');
     assert.match(single, /res\.status\(400\)/, 'an unreadable type must still be refused');
 
+    /*
+     * Re-anchored for `Q-107` part 1: both routes are ONE page accept (`acceptPushedPage`), so the vocabulary is
+     * checked once, by the push planner's `unknownType` verdict, and each route maps the verdict — the single
+     * route to its 400, the batch to a count. Seen red by mutation, restored by hand: `allowedTypes` dropped from
+     * the planner input.
+     */
+    assert.match(single, /verdict === 'unknownType'/, 'the single-record route does not answer the planner\'s refusal');
+    const accept = docs.slice(docs.indexOf('async function acceptPushedPage('), docs.indexOf("syncDocsRouter.post('/facts'"));
+    assert.match(accept, /getAllowedChronoTypes\(/, 'the page accept does not read this space\'s chrono vocabulary');
+    assert.match(accept, /allowedTypes: kind === 'chrono' \? allowedChrono : undefined/,
+      'the vocabulary is not handed to the planner, so the rule applies on neither path');
+    const planner = stripComments(readFileSync('server/src/sync/upsert-plan.ts', 'utf8'));
+    assert.match(planner, /kind === 'chrono' && input\.allowedTypes && !input\.allowedTypes\.has\([^)]*\)\)\s*\{\s*plan\.verdicts\[i\] = 'unknownType'/,
+      'the planner no longer refuses a chrono type outside the vocabulary');
     const batch = docs.slice(docs.indexOf("syncDocsRouter.post('/batch-upsert'"));
-    assert.match(
-      batch, /allowedChronoTypes/,
-      'the batch route does not check the chrono vocabulary, so the rule applies only on the path a peer '
-      + 'barely uses — which is exactly the defect W-4 recorded',
-    );
     assert.match(
       batch, /unknownType/,
       'the batch route must COUNT what it skipped rather than dropping it silently; a 400 there would abandon '
