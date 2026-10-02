@@ -170,6 +170,43 @@ describe('one accept rule: isNewerCopy', () => {
       .map(m => m[0]).filter(e => /seq/i.test(e) && !ALLOWED.test(e));
     assert.deepEqual(raw, [], 'a seq comparison outside isNewerCopy decides which copy wins');
   });
+
+  it('every DOOR that hands the writer an arrival asks isNewerCopy too, and compares no seqs of its own (R8)', async () => {
+    /*
+     * `Q-218` round R, item R8. The case above reads `upsert-plan.ts` and the writer's body, and its title says
+     * "nothing else compares" — but the doors decide which documents reach the writer (the push routes read the
+     * stored copy and choose insert, skip or fork before the writer re-checks), so a door that compares seqs itself
+     * is a second accept rule the case above never looks at. The doors are DERIVED: every source file that calls
+     * `writeArrivals(` outside the writer, with a floor. Seen red by mutation, restored by hand: one `isNewerCopy`
+     * site in `api/sync/docs.ts` reverted to `!existing || incoming.seq > existing.seq`.
+     *
+     * What a door may still compare, each a different question from "which copy wins", named rather than hidden:
+     *  - a TOMBSTONE against the arrival (`tomb.seq >= incoming.seq`): the deletion rule, not the accept;
+     *  - a WATERMARK or high-water mark this side keeps, on the right of `>` (`maxSeq`, `highSeq`,
+     *    `deliveredThrough`, a `since…` position, a `lastSeq…` pushed mark, zero): a position, not a stored copy.
+     */
+    const { readFileSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const { blankComments } = await import('./_strip-comments.mjs');
+    const { trackedSources, REPO_ROOT } = await import('./_sources.mjs');
+    const read = (f) => blankComments(readFileSync(join(REPO_ROOT, f), 'utf8'));
+    const doors = trackedSources('server/src', { specs: false })
+      .filter(f => f !== 'server/src/sync/arrivals.ts' && /\bwriteArrivals\s*\(/.test(read(f)));
+    assert.ok(doors.length >= 3, `only ${doors.length} door(s) call writeArrivals: ${doors}`);
+    const NOT_THE_ACCEPT = /^(?:tomb(?:stone)?\??\.seq\s*>=?\s*incoming\.seq|[\w.]*\s*>\s*(?:0|\w*maxSeq|highSeq|deliveredThrough|since\w*|lastSeq\w*))$/i;
+    const raw = [];
+    for (const f of doors) {
+      const src = read(f);
+      for (const m of src.matchAll(/[\w.?)\]!]+\s*>=?\s*[\w.(?]+/g)) {
+        if (!/seq/i.test(m[0]) || NOT_THE_ACCEPT.test(m[0].trim())) continue;
+        raw.push(`${f}:${src.slice(0, m.index).split('\n').length}: ${m[0]}`);
+      }
+    }
+    assert.deepEqual(raw, [], 'a door compares seqs to decide which copy wins, beside isNewerCopy: a second accept rule '
+      + 'that drifts from the writer\'s');
+    const asking = doors.filter(f => /\bisNewerCopy\(/.test(read(f)));
+    assert.ok(asking.length >= 1, 'no door asks isNewerCopy — the push doors decide which copy wins some other way');
+  });
 });
 
 describe('a fork id is derived (`FK`)', () => {

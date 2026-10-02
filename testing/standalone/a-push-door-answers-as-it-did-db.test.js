@@ -282,6 +282,82 @@ describe('the push door answers as it did (characterization, green before Q-107 
       assert.equal(await stored(S, 'files', spill), null, 'a legacy spill was stored as a file');
     });
 
+    /*
+     * `Q-218` round R, item R10 — the batch COUNTERS a 5.6.1 sender acts on (`sync/push-refusals.ts` subtracts
+     * `rejected`; an operator reads the rest). Characterization, so green on unchanged 5.6.1 (`d62573ed`) and required
+     * to stay green. NOT pinned here: a duplicate LINK, which 5.6.1 answered 500 and 5.6.2 counts `skipped` (`F9`).
+     */
+    describe('R10: the batch counters a 5.6.1 sender acts on', () => {
+      const ALL = ['facts', 'entities', 'edges', 'chrono', 'links', 'filemeta'];
+      const KIND = { facts: 'fact', entities: 'entity', edges: 'edge', chrono: 'chrono', links: 'link', filemeta: 'filemeta' };
+      /** One document per family that its `Incoming*Doc` refuses — a fixture per family. */
+      const MALFORMED = {
+        facts: (d) => { delete d.fact; return d; },
+        entities: (d) => { delete d.name; return d; },
+        edges: (d) => { delete d.label; return d; },
+        chrono: (d) => { delete d.title; return d; },
+        links: (d) => { delete d.fromKind; return d; },
+        filemeta: (d) => ({ ...d, parentFileId: 'some/parent.md' }),
+      };
+      const uniq = (fam, i) => (fam === 'edges' || fam === 'links' ? { from: `from-${fam}-${i}`, to: `to-${fam}-${i}` } : {});
+
+      it('every family: a schema-invalid document and an implausible seq are each counted rejected; the rest lands', async () => {
+        const { MAX_INGEST_SEQ } = await import('../../server/dist/util/seq.js');
+        const body = Object.fromEntries(ALL.map(fam => [fam, [
+          MALFORMED[fam](build[KIND[fam]](S, `${fam}-bad`, 5, uniq(fam, 1))),
+          build[KIND[fam]](S, `${fam}-ceiling`, MAX_INGEST_SEQ + 1, uniq(fam, 2)),
+          build[KIND[fam]](S, `${fam}-good`, 7, uniq(fam, 3)),
+        ]]));
+        const r = await batch(body);
+        assert.equal(r.code, 200, JSON.stringify(r.body));
+        const landedKey = { facts: 'inserted', filemeta: 'upserted' };
+        const got = Object.fromEntries(ALL.map(fam => [fam, [r.body[fam].rejected, r.body[fam][landedKey[fam] ?? 'upserted']]]));
+        assert.deepEqual(got, Object.fromEntries(ALL.map(fam => [fam, [2, 1]])), JSON.stringify(r.body));
+        for (const fam of ALL) {
+          const coll = fam === 'filemeta' ? 'files' : fam;
+          assert.deepEqual((await door.coll(S, coll).find({}).toArray()).map(d => d._id), [`${fam}-good`], fam);
+        }
+      });
+
+      it('facts: a divergent copy whose fork chain is at the cap is forkDepthRefused 1 and rejected 1', async () => {
+        const chain = Array.from({ length: 10 }, (_, i) => `a${i + 1}`);
+        await door.coll(S, 'facts').insertMany([
+          build.fact(S, 'f', 5, { fact: 'mine', forkOf: chain[0] }),
+          ...chain.map((id, i) => build.fact(S, id, 1, chain[i + 1] ? { forkOf: chain[i + 1] } : {})),
+        ]);
+        const r = await batch({ facts: [build.fact(S, 'f', 5, { fact: 'theirs' })] });
+        assert.deepEqual(r.body.facts, { ...zeroFacts, forkDepthRefused: 1, rejected: 1 });
+        assert.equal(await door.coll(S, 'facts').countDocuments({ forkOf: 'f' }), 0);
+      });
+
+      it('every family a brain tombstone covers: an arrival at or below the tombstone is tombstoned 1 and not stored', async () => {
+        const TOMBED = { facts: 'fact', entities: 'entity', edges: 'edge', chrono: 'chrono', links: 'link' };
+        for (const [fam, type] of Object.entries(TOMBED)) {
+          await door.coll(S, 'tombstones').insertOne(build.tombstone(S, `${fam}-gone`, type, 7));
+        }
+        const r = await batch(Object.fromEntries(Object.keys(TOMBED).map(fam =>
+          [fam, [build[KIND[fam]](S, `${fam}-gone`, 6, uniq(fam, 4))]])));
+        assert.equal(r.code, 200, JSON.stringify(r.body));
+        const got = Object.fromEntries(Object.keys(TOMBED).map(fam => [fam, [r.body[fam].tombstoned, r.body[fam].rejected]]));
+        assert.deepEqual(got, Object.fromEntries(Object.keys(TOMBED).map(fam => [fam, [1, 0]])), JSON.stringify(r.body));
+        for (const fam of Object.keys(TOMBED)) assert.equal(await stored(S, fam, `${fam}-gone`), null, fam);
+      });
+
+      it('chrono: a type outside the vocabulary is unknownType 1 and rejected 1, and not stored', async () => {
+        const r = await batch({ chrono: [build.chrono(S, 'c-odd', 5, { type: 'not-a-chrono-type' }), build.chrono(S, 'c-ok', 6)] });
+        assert.deepEqual(r.body.chrono, { ...zeroEnt, upserted: 1, unknownType: 1, rejected: 1 });
+        assert.equal(await stored(S, 'chrono', 'c-odd'), null);
+      });
+
+      it('edges: a new id on a triplet already STORED is duplicateTriplets 1, rejected 0, and the stored edge stays', async () => {
+        const twin = { from: 'A', to: 'B', label: 'knows' };
+        await door.coll(S, 'edges').insertOne(build.edge(S, 'g-held', 5, twin));
+        const r = await batch({ edges: [build.edge(S, 'g-new', 6, twin)] });
+        assert.deepEqual(r.body.edges, { ...zeroEdge, duplicateTriplets: 1 });
+        assert.deepEqual((await door.coll(S, 'edges').find({}).toArray()).map(d => d._id), ['g-held']);
+      });
+    });
+
     it('edges: one id 5 then 6 is upserted 2; two ids on one triplet are upserted 1, duplicateTriplets 1', async () => {
       const same = await batch({ edges: [build.edge(S, 'g', 5), build.edge(S, 'g', 6)] });
       assert.deepEqual(same.body.edges, { ...zeroEdge, upserted: 2 });

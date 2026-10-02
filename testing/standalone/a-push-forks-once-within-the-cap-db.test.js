@@ -97,6 +97,48 @@ describe('a push forks once, within the fan-out cap, on both doors', { skip }, (
       assert.equal(await forks(), 1, 'a re-sent page forked the same divergent copy twice');
     });
 
+    /*
+     * `Q-218` round R, item R9: a RE-SENT push at a cap. The fork the first send made is found by its derived id, so
+     * the re-send is the same delivery again, not a new fork — it answers `forked` with that id whichever cap the
+     * parent has reached since (fan-out: the fork itself is one of the ten; depth: the chain above the parent). The
+     * cap refuses NEW forks; refusing the re-send tells the sender a record it already delivered was dropped
+     * (`rejected` on batch, a 400 on the single route) although the fork is stored. Truth table: both doors x both caps.
+     */
+    for (const cap of ['fan-out', 'depth']) {
+      for (const via of ['single', 'batch']) {
+        it(`R9 ${via}, at the ${cap} cap: a re-sent push whose derived fork exists answers forked with that id`, async () => {
+          const { forkIdFor } = await import('../../server/dist/sync/upsert-plan.js');
+          const forkId = forkIdFor('f', 5, 'variant 1');
+          const theFork = build.fact(S, forkId, 50, { fact: 'variant 1', forkOf: 'f' });
+          if (cap === 'fan-out') {
+            await door.coll(S, 'facts').insertMany([theFork,
+              ...Array.from({ length: CAP - 1 }, (_, i) => build.fact(S, `sib-${i}`, 20 + i, { fact: `sib ${i}`, forkOf: 'f' }))]);
+          } else {
+            // f -> a1 -> ... -> a10: f is CAP forks below its root, and its fork was made before the chain grew.
+            const chain = Array.from({ length: CAP }, (_, i) => `a${i + 1}`);
+            await door.coll(S, 'facts').updateOne({ _id: 'f' }, { $set: { forkOf: chain[0] } });
+            await door.coll(S, 'facts').insertMany([theFork,
+              ...chain.map((id, i) => build.fact(S, id, 1, chain[i + 1] ? { forkOf: chain[i + 1] } : {}))]);
+          }
+          const before = await forks();
+          const r = via === 'single'
+            ? await door.push('/facts', variant(1), { spaceId: S })
+            : await door.push('/batch-upsert', { facts: [variant(1)] }, { spaceId: S });
+          assert.equal(await forks(), before, 'fixture check: the re-send made a second fork');
+          if (via === 'single') {
+            assert.deepEqual([r.code, r.body], [200, { status: 'forked', forkId }],
+              `a re-sent push at the ${cap} cap was answered ${r.code} ${JSON.stringify(r.body)} although its fork ${forkId} `
+              + 'is stored: the sender is told a record it delivered was refused');
+          } else {
+            assert.equal(r.code, 200, JSON.stringify(r.body));
+            assert.deepEqual([r.body.facts.forked, r.body.facts.forkDepthRefused, r.body.facts.rejected], [1, 0, 0],
+              `a re-sent page at the ${cap} cap counted ${JSON.stringify(r.body.facts)} although the fork ${forkId} is `
+              + 'stored: the sender subtracts a delivered record as rejected');
+          }
+        });
+      }
+    }
+
     it('two DIFFERENT divergent texts still fork apart (the id is not the parent alone)', async () => {
       const a = await door.push('/facts', variant(1), { spaceId: S });
       const b = await door.push('/facts', variant(2), { spaceId: S });
