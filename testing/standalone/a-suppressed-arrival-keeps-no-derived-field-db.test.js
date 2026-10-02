@@ -16,7 +16,9 @@
  * every family that embeds, and every tier that can suppress:
  *
  *  - a record the receiver SUPPRESSES after the arrival holds none of the derived fields;
- *  - a record it does NOT suppress keeps the carried vector until it is re-embedded (the reason they are carried).
+ *  - a record it does NOT suppress keeps the carried vector until it is re-embedded (the reason they are carried) —
+ *    on a peer's arrival. A RESTORE carries nothing of the copy it replaces (R2), so a restored record holds no
+ *    derived field whatever the tier: it is the backup's record, and every restored record is queued.
  *
  * File metadata is not in the set: a peer's file is MERGED (`ingestFileMeta`, `$set`), as on 5.6.1, so no carried
  * field is a 5.6.2 change there.
@@ -81,6 +83,10 @@ async function verdict(fam, row, doc, via) {
   const after = await door.coll(row.space, fam.coll).findOne({ _id: doc._id });
   if (!after || after.seq !== doc.seq) return `${via} ${fam.type} (${row.label}): fixture check — the arrival did not land (${JSON.stringify(after?.seq)})`;
   const held = [...DERIVED].filter(f => after[f] !== undefined);
+  // A restore carries nothing of the copy it replaces (R2): the record is the backup's, queued to be re-embedded.
+  if (via === 'import') {
+    return held.length > 0 ? `import ${fam.type} (${row.label}): restored, and still holds ${held.join(', ')} of the replaced copy` : null;
+  }
   if (row.suppressed && held.length > 0) {
     return `${via} ${fam.type} (${row.label}): suppressed, and still holds ${held.join(', ')}`;
   }

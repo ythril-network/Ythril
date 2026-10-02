@@ -29,7 +29,8 @@
  *     arriving document) keeps no derived field (`DERIVED_LOCAL_FIELDS`), as 5.6.1's whole replace left it: the
  *     queue skips it, so a carried vector would stay for good (`Q-218` R1). A RESTORE keeps what the export carried
  *     as the record's own state (`RESTORED_LOCAL_FIELDS`, as Dates), drops what is derived from the export, and
- *     carries NO record-tier field from the copy it replaces (`Q-218` R2) — `carriedFields`.
+ *     carries NOTHING from the copy it replaces (`Q-218` R2), its vector included: every restored record is queued
+ *     and re-embedded from the backup's text — `carriedFields`.
  *  5. **No receiver stamping** (cut `C4`): main stamps an arrival with no stamp of its own from its `createdAt` by
  *     this instance's windows (`D-9`). 5.6.x stores it unstamped, as 5.6.1 did; a stamp the stored copy holds is
  *     carried (rule 4).
@@ -267,16 +268,19 @@ function filterFor(doc: Doc, restore: boolean): Record<string, unknown> {
  *    (`embeddingSuppressedFor`, record > schema > space; a file has two tiers), since it is what the stored record
  *    will be. A family with nothing to embed (`recordType` null, a link) has nothing to suppress, so whatever it
  *    holds is carried as before.
- *  - the RECORD-TIER fields (`RESTORED_LOCAL_FIELDS`: the retention stamps, `syncBase`) for a peer's arrival only. A
- *    RESTORE carries none: the backup is the record's state, so a stamp the backup does not hold belongs to the copy
- *    the operator is replacing, and carried it would decide when the restored record is deleted.
+ *  - the RECORD-TIER fields (`RESTORED_LOCAL_FIELDS`: the retention stamps, `syncBase`) for a peer's arrival only.
+ *  - A RESTORE carries nothing at all: the backup is the record's state, so a stamp the backup does not hold belongs
+ *    to the copy the operator is replacing (carried, it would decide when the restored record is deleted), and a
+ *    vector belongs to text the backup may not hold (every restored record is queued and re-embedded instead).
  */
 function carriedFields(
   spaceId: string, recordType: BrainEmbedRecordType | null, doc: Doc, restore: boolean,
 ): readonly string[] {
+  // A restore is the backup's record whole, as 5.6.1's replace left it: nothing of the copy it replaces, and every
+  // restored record is queued, so a vector the backup's text no longer matches never ranks it meanwhile.
+  if (restore) return [];
   const suppressed = recordType !== null && embeddingSuppressedFor(spaceId, recordType, doc);
-  const derived = suppressed ? [] : [...DERIVED_LOCAL_FIELDS];
-  return restore ? derived : [...derived, ...RESTORED_LOCAL_FIELDS];
+  return suppressed ? [...RESTORED_LOCAL_FIELDS] : [...DERIVED_LOCAL_FIELDS, ...RESTORED_LOCAL_FIELDS];
 }
 
 /**
