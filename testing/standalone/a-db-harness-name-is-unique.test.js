@@ -32,7 +32,9 @@ function harnessNames() {
   for (const { file, text } of readTrackedSources('testing', { ext: ['.test.js', '.mjs'], floor: 100 })) {
     // The harness module DEFINES the function and takes the name as a parameter — it claims no database.
     if (file.replace(/\\/g, '/').endsWith('_mongo-harness.mjs')) continue;
-    for (const m of stripComments(text).matchAll(/openTestMongo\(\s*'([^']+)'/g)) {
+    // A wrapper that opens the harness for its caller (`_push-door.mjs`) takes the name as `suite:`, and a name it
+    // is handed claims a database exactly as a direct call does — left out, those files were never checked.
+    for (const m of stripComments(text).matchAll(/(?:openTestMongo\(\s*|openPushDoor\(\s*\{[^}]*?\bsuite:\s*)'([^']+)'/g)) {
       found.push({ file: file.replace(/\\/g, '/'), name: m[1] });
     }
   }

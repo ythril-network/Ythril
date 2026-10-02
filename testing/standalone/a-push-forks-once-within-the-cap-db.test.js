@@ -1,0 +1,107 @@
+/**
+ * A push forks a divergent fact the way 5.6.1 did on each door — the single route capping fan-out at ten, the
+ * batch door not capping it — and the same push retried forks to the same id rather than forking again (`FK` of
+ * the 5.6.2 plan, from `Q-107` part 1 §2).
+ *
+ * ## The fan-out cap: main's batch cap is CUT from 5.6.x, and pinned
+ *
+ * `MAX_FORK_DEPTH` (10) caps a fork chain's depth on both doors, and its FAN-OUT — the number of forks one parent
+ * may have — on the single `POST /api/sync/facts` route only. Main extends the fan-out cap to `batch-upsert`, so an
+ * 11th divergent copy there is refused and counted in `rejected`. That is a new refusal a 5.6.1 sender never saw,
+ * so 5.6.x keeps 5.6.1's answer (cut `C1`): an 11th fork on batch-upsert is ACCEPTED. The single route keeps its
+ * 400, as it always had.
+ *
+ * ## The retry
+ *
+ * A fork id was `uuidv4()`, so a push whose 200 was lost and is re-sent forks the record a second time — the
+ * stored parent is unchanged, so the retry is divergent all over again. The fork id is now derived from (parent
+ * id, incoming seq, the incoming text), so a retry upserts the fork it already made.
+ *
+ * Run: a Mongo the harness accepts (see `_mongo-harness.mjs`), then
+ *      node --test testing/standalone/a-push-forks-once-within-the-cap-db.test.js
+ * (requires a prior `npm run build` in server/)
+ */
+import { describe, it, before, after, beforeEach } from 'node:test';
+import assert from 'node:assert/strict';
+import { mongoSkipReason } from './_mongo-harness.mjs';
+import { openPushDoor, build } from './_push-door.mjs';
+
+const skip = await mongoSkipReason();
+
+const S = 'pushfork';
+let door, CAP;
+const forks = () => door.coll(S, 'facts').countDocuments({ forkOf: 'f' });
+const variant = (i) => build.fact(S, 'f', 5, { fact: `variant ${i}` });
+
+describe('a push forks once, within the fan-out cap, on both doors', { skip }, () => {
+  before(async () => {
+    door = await openPushDoor({ suite: 'pushfork', spaces: [{ id: S, label: 'Forks', folders: [], meta: {} }] });
+    ({ MAX_FORK_DEPTH: CAP } = await import('../../server/dist/api/sync/_shared.js'));
+  });
+  after(async () => { await door?.close(); });
+  beforeEach(async () => {
+    await door.wipe(S);
+    await door.coll(S, 'facts').insertOne(build.fact(S, 'f', 5, { fact: 'root' }));
+  });
+
+  it('the cap is ten, as the red-team test and the docs state', () => { assert.equal(CAP, 10); });
+
+  describe('the fan-out cap', () => {
+    it('single /facts: forks 1..10 are forked, the 11th is a 400', async () => {
+      for (let i = 1; i <= CAP; i++) {
+        const r = await door.push('/facts', variant(i), { spaceId: S });
+        assert.deepEqual([r.code, r.body.status], [200, 'forked'], `fork ${i}: ${JSON.stringify(r.body)}`);
+      }
+      const over = await door.push('/facts', variant(CAP + 1), { spaceId: S });
+      assert.equal(over.code, 400, `fork ${CAP + 1}: ${JSON.stringify(over.body)}`);
+      assert.equal(await forks(), CAP);
+    });
+
+    it('C1 batch-upsert: eleven divergent copies in ONE page fork eleven times — the 11th is accepted, as on 5.6.1', async () => {
+      const r = await door.push('/batch-upsert', { facts: Array.from({ length: CAP + 1 }, (_, i) => variant(i + 1)) }, { spaceId: S });
+      assert.equal(r.code, 200, JSON.stringify(r.body));
+      assert.equal(await forks(), CAP + 1,
+        `one page forked one parent ${await forks()} times; 5.6.1 accepts all ${CAP + 1} on batch-upsert and 5.6.x keeps `
+        + 'that (C1: main\'s batch fan-out cap is cut)');
+      assert.deepEqual([r.body.facts.forked, r.body.facts.forkDepthRefused, r.body.facts.rejected], [CAP + 1, 0, 0],
+        JSON.stringify(r.body.facts));
+    });
+
+    it('C1 batch-upsert: stored siblings do not cap a page either', async () => {
+      await door.coll(S, 'facts').insertMany(Array.from({ length: 8 }, (_, i) =>
+        build.fact(S, `old-fork-${i}`, 100 + i, { fact: `old ${i}`, forkOf: 'f' })));
+      const r = await door.push('/batch-upsert', { facts: [variant(1), variant(2), variant(3), variant(4)] }, { spaceId: S });
+      assert.equal(r.code, 200, JSON.stringify(r.body));
+      assert.equal(await forks(), 12, `8 stored forks + a page of 4 left ${await forks()} forks of one parent, want 12 (C1)`);
+      assert.deepEqual([r.body.facts.forked, r.body.facts.forkDepthRefused, r.body.facts.rejected], [4, 0, 0],
+        JSON.stringify(r.body.facts));
+    });
+  });
+
+  describe('a retried push forks to the same id', () => {
+    it('single /facts: the same divergent push twice leaves one fork', async () => {
+      const first = await door.push('/facts', variant(1), { spaceId: S });
+      assert.equal(first.body.status, 'forked', JSON.stringify(first.body));
+      const retry = await door.push('/facts', variant(1), { spaceId: S });
+      assert.equal(retry.code, 200, JSON.stringify(retry.body));
+      assert.equal(await forks(), 1,
+        'a push re-sent after its 200 was lost forked the record a second time: the stored parent is unchanged, so '
+        + 'every retry is divergent again and every lost response is a duplicate fork on this instance');
+      if (retry.body.status === 'forked') assert.equal(retry.body.forkId, first.body.forkId);
+    });
+
+    it('batch-upsert: the same page twice leaves one fork', async () => {
+      await door.push('/batch-upsert', { facts: [variant(1)] }, { spaceId: S });
+      const retry = await door.push('/batch-upsert', { facts: [variant(1)] }, { spaceId: S });
+      assert.equal(retry.code, 200, JSON.stringify(retry.body));
+      assert.equal(await forks(), 1, 'a re-sent page forked the same divergent copy twice');
+    });
+
+    it('two DIFFERENT divergent texts still fork apart (the id is not the parent alone)', async () => {
+      const a = await door.push('/facts', variant(1), { spaceId: S });
+      const b = await door.push('/facts', variant(2), { spaceId: S });
+      assert.notEqual(a.body.forkId, b.body.forkId);
+      assert.equal(await forks(), 2);
+    });
+  });
+});

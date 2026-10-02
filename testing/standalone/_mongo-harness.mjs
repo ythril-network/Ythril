@@ -102,12 +102,19 @@ export async function openTestMongo(suite) {
   const mongo = await import('../../server/dist/db/mongo.js');
   mongo._resetDbName?.();
   await mongo.connectMongo();
+  // Held from the moment it is open, so `closeTestMongo` can close it whatever fails next: an open client keeps
+  // the test process alive, and node's runner then waits on that file for ever instead of reporting it failed.
+  _mongo = mongo;
 
   // Drop on ENTRY as well as exit: a previous run killed mid-test (Ctrl-C, CI timeout) would
   // otherwise leave documents behind and the next run would inherit them, which is how a
   // database-backed suite starts passing for the wrong reason.
-  await mongo.getDb().dropDatabase();
-  _mongo = mongo;
+  try {
+    await mongo.getDb().dropDatabase();
+  } catch (err) {
+    await closeTestMongo();
+    throw err;
+  }
   return mongo;
 }
 
