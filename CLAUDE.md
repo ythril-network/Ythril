@@ -294,7 +294,8 @@ they carry differently (`carriedFields` in `sync/arrivals.ts`):
   arrival keeps no derived field**, as 5.6.1's whole replace left it: the embed queue skips a suppressed record,
   so a vector carried onto one would stay for good and keep it in meaning-ranked search. What arrived is never
   kept, a restore's included, and **a restore carries nothing from the copy it replaces, its vector included**: the
-  record is the backup's, and every restored record is queued and re-embedded from the backup's text.
+  record is the backup's, and every restored record the space embeds is queued and re-embedded from the backup's
+  text (a suppressed one keeps no vector, which is what suppression means).
 
 The equivalence that makes it ONE list is the rule two sections above — a field that is hashed must replicate —
 read backwards: a field that must not replicate must not be hashed, or every cycle reports a divergence for a

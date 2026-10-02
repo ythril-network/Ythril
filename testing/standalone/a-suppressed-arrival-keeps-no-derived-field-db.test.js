@@ -18,7 +18,7 @@
  *  - a record the receiver SUPPRESSES after the arrival holds none of the derived fields;
  *  - a record it does NOT suppress keeps the carried vector until it is re-embedded (the reason they are carried) —
  *    on a peer's arrival. A RESTORE carries nothing of the copy it replaces (R2), so a restored record holds no
- *    derived field whatever the tier: it is the backup's record, and every restored record is queued.
+ *    derived field whatever the tier: it is the backup's record, and every restored record the space embeds is queued.
  *
  * File metadata is not in the set: a peer's file is MERGED (`ingestFileMeta`, `$set`), as on 5.6.1, so no carried
  * field is a 5.6.2 change there.

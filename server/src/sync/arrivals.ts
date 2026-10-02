@@ -29,7 +29,7 @@
  *     arriving document) keeps no derived field (`DERIVED_LOCAL_FIELDS`), as 5.6.1's whole replace left it: the
  *     queue skips it, so a carried vector would stay for good (`Q-218` R1). A RESTORE keeps what the export carried
  *     as the record's own state (`RESTORED_LOCAL_FIELDS`, as Dates), drops what is derived from the export, and
- *     carries NOTHING from the copy it replaces (`Q-218` R2), its vector included: every restored record is queued
+ *     carries NOTHING from the copy it replaces (`Q-218` R2), its vector included: every restored record the space embeds is queued
  *     and re-embedded from the backup's text — `carriedFields`.
  *  5. **No receiver stamping** (cut `C4`): main stamps an arrival with no stamp of its own from its `createdAt` by
  *     this instance's windows (`D-9`). 5.6.x stores it unstamped, as 5.6.1 did; a stamp the stored copy holds is
@@ -87,7 +87,8 @@ export interface ArrivalOptions {
   /**
    * An admin RESTORE (`POST /api/admin/spaces/:id/import`): what is stored is replaced whatever its seq, the
    * export's record-tier local fields are kept, a file row is REPLACED rather than merged and its derived records
-   * (chunks, face records) are restored as they were (cut `C6`), and every restored record is queued. Never set
+   * (chunks, face records) are restored as they were (cut `C6`), nothing is carried from the copy it replaces, and
+   * every restored record the space embeds is queued. Never set
    * for a peer.
    */
   restore?: boolean;
@@ -150,8 +151,10 @@ export interface ArrivalOutcome {
   /** The highest plausible seq received — what the counter has been bumped to at least, unless `counterBehind`. */
   maxReceived: number;
   /**
-   * The writer's own counter bump failed (rule 8), so this instance's counter may be BEHIND what was stored: the next
-   * local write could take a seq below a record already here. Never set under `counterMovedByCaller`. A door that
+   * The writer's own counter bump failed (rule 8) and no later one moved it past `maxReceived`, so this instance's
+   * counter may be BEHIND what was stored: the next local write could take a seq below a record already here. It
+   * states the counter when the writer returns, not whether some attempt failed. Never set under
+   * `counterMovedByCaller`. A door that
    * relies on the writer's bump must not report the arrival delivered while this is set — the pull holds the
    * family's position, the import counts the family as errors (`Q-218` R3).
    */
@@ -271,7 +274,8 @@ function filterFor(doc: Doc, restore: boolean): Record<string, unknown> {
  *  - the RECORD-TIER fields (`RESTORED_LOCAL_FIELDS`: the retention stamps, `syncBase`) for a peer's arrival only.
  *  - A RESTORE carries nothing at all: the backup is the record's state, so a stamp the backup does not hold belongs
  *    to the copy the operator is replacing (carried, it would decide when the restored record is deleted), and a
- *    vector belongs to text the backup may not hold (every restored record is queued and re-embedded instead).
+ *    vector belongs to text the backup may not hold (every restored record the space embeds is queued and
+ *    re-embedded instead).
  */
 function carriedFields(
   spaceId: string, recordType: BrainEmbedRecordType | null, doc: Doc, restore: boolean,
@@ -370,6 +374,9 @@ export async function writeArrivals(
     try {
       await bumpSeq(spaceId, top);
       bumped = top;
+      // The report is the counter's STATE, not an attempt's history: a later bump past everything received ($max,
+      // so it covers every earlier one) means the counter is where it must be (`Q-218` round S).
+      if (bumped >= out.maxReceived) out.counterBehind = false;
     } catch (err) {
       out.counterBehind = true;
       log.warn(`${logSafe(where)}: the seq counter of space '${spaceId}' could not be moved to ${top}: ${message(err)}`);

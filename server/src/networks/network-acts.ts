@@ -33,7 +33,7 @@ import { queueGeneratedNote } from '../sync/change-notes.js';
 import { syncScheduleRefusal } from '../sync/schedule.js';
 import { MIN_PEER_VERSION, peerFloorRefusal } from '../sync/peer-floor.js';
 import { peerSafeFetch } from '../sync/peer-fetch.js';
-import { log } from '../util/log.js';
+import { log, logSafe } from '../util/log.js';
 import { networkRole } from './network-role.js';
 import { addSpacesToNetwork, widenPeerTokens } from './network-spaces.js';
 import { concludeRoundIfReady } from '../sync/governance.js';
@@ -148,7 +148,7 @@ export function createNetworkAct(caller: Caller, input: unknown): NetworkActResu
   };
   cfg.networks.push(network);
   saveConfig(cfg);
-  log.info(`Created network '${label}' (${type}) id=${network.id}`);
+  log.info(`Created network '${logSafe(label)}' (${logSafe(type)}) id=${logSafe(network.id)}`);
   return { status: 201, body: networkView(network) };
 }
 
@@ -178,7 +178,7 @@ export function updateNetworkAct(caller: Caller, id: string, input: unknown): Ne
     net.syncSchedule = parsed.data.syncSchedule.trim();
     import('../sync/scheduler.js').then(({ scheduleSyncForNetwork }) => {
       scheduleSyncForNetwork(net.id, net.syncSchedule);
-    }).catch(err => log.warn(`Failed to reschedule sync for ${net.id}: ${err}`));
+    }).catch(err => log.warn(`Failed to reschedule sync for ${net.id}: ${logSafe(String(err))}`));
   }
   if (parsed.data.label) net.label = parsed.data.label;
   if (parsed.data.requireSignedVotes !== undefined) net.requireSignedVotes = parsed.data.requireSignedVotes;
@@ -260,7 +260,7 @@ export function addNetworkSpaceAct(caller: Caller, id: string, input: unknown): 
     // Evaluated now: on a club, and on a network with no other member, the proposer's yes already carries it (Q-49).
     if (!concludeRoundIfReady(net, round)) {
       saveConfig(cfg);
-      log.info(`Network ${net.id}: opened space_addition round ${round.roundId} for '${spaceId}'`);
+      log.info(`Network ${net.id}: opened space_addition round ${logSafe(round.roundId)} for '${spaceId}'`);
       return { status: 202, body: { status: 'vote_pending', round } };
     }
   }
@@ -345,7 +345,7 @@ export async function resolvePendingSpaceAct(caller: Caller, id: string, input: 
     if (why) return { status: 409, error: why };
     dropPending();
     saveConfig(cfg);
-    log.info(`Network ${net.id}: the network's '${spaceId}' now reaches the carried space '${localId}' (pending space accepted onto it)`);
+    log.info(`Network ${net.id}: the network's '${spaceId}' now reaches the carried space '${logSafe(localId)}' (pending space accepted onto it)`);
     return { status: 200, body: networkView(net), audit: { before, after: pendingSnapshot(net) } };
   }
   const exists = cfg.spaces.some(s => s.id === localId);
@@ -397,7 +397,7 @@ export async function leaveNetworkAct(caller: Caller, id: string): Promise<Netwo
       if (!r.ok) warnings.push(`${member.label}: HTTP ${r.status}`);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      log.warn(`member_departed to ${member.label}: ${msg}`);
+      log.warn(`member_departed to ${logSafe(member.label)}: ${logSafe(msg)}`);
       warnings.push(`${member.label}: ${msg}`);
     }
   }));
@@ -411,7 +411,7 @@ export async function leaveNetworkAct(caller: Caller, id: string): Promise<Netwo
   for (const member of net.members) {
     if (member.instanceId === cfg.instanceId) continue;
     await revokePeerCredentialsIfOrphaned(member.instanceId)
-      .catch(err => log.error(`peer credential revocation for ${member.instanceId}: ${err}`));
+      .catch(err => log.error(`peer credential revocation for ${logSafe(member.instanceId)}: ${logSafe(String(err))}`));
   }
   return warnings.length ? { status: 200, body: { ok: true, warnings } } : { status: 204 };
 }
@@ -436,7 +436,7 @@ export async function inviteKeyAct(caller: Caller, id: string): Promise<NetworkA
   if (!freshNet) return notFound;
   freshNet.inviteKeyHash = inviteKeyHash;
   saveConfig(fresh);
-  log.info(`Generated new invite key for network ${freshNet.id}${net.type === 'pubsub' ? ' (reusable)' : ' (shown once)'}`);
+  log.info(`Generated new invite key for network ${logSafe(freshNet.id)}${net.type === 'pubsub' ? ' (reusable)' : ' (shown once)'}`);
   return {
     status: 200,
     body: {
@@ -484,6 +484,6 @@ export function forkNetworkAct(sourceId: string, input: unknown): NetworkActResu
   };
   cfg.networks.push(forkedNet);
   saveConfig(cfg);
-  log.info(`Forked network ${sourceId} → new network ${forkedNet.id} ('${forkedNet.label}')`);
+  log.info(`Forked network ${logSafe(sourceId)} → new network ${logSafe(forkedNet.id)} ('${logSafe(forkedNet.label)}')`);
   return { status: 201, body: forkedNet as unknown as Record<string, unknown> };
 }

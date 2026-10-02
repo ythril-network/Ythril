@@ -18,7 +18,7 @@ import { concludeRoundIfReady, sendMemberRemovedNotify } from '../sync/governanc
 import { getSyncHistory } from '../sync/history.js';
 import { applyConcludedSpaceRounds } from '../spaces/apply-wipe-round.js';
 import { makeSignedOwnCast } from '../util/signing.js';
-import { log } from '../util/log.js';
+import { log, logSafe } from '../util/log.js';
 import type { NetworkActResult } from './network-acts.js';
 import { roundSpaceLocalId } from '../sync/space-map.js';
 import { admitPassedJoin } from './admit-passed-join.js';
@@ -66,7 +66,7 @@ export function castVoteAct(id: string, roundId: string, input: unknown): Networ
   concludeRoundIfReady(net, round);
 
   if (admitPassedJoin(net, cfg.instanceId, round)) {
-    log.info(`Join vote ${round.roundId} passed — added member ${round.subjectLabel} to network ${net.id}`);
+    log.info(`Join vote ${logSafe(round.roundId)} passed — added member ${logSafe(round.subjectLabel)} to network ${net.id}`);
   }
   // Deletion, wipe and addition: the function all three conclusion sites call (X-5, F-38.4).
   applyConcludedSpaceRounds(net, [round], 'local vote');
@@ -75,7 +75,7 @@ export function castVoteAct(id: string, roundId: string, input: unknown): Networ
   }
 
   saveConfig(cfg);
-  log.info(`Vote cast in round ${round.roundId}: ${parsed.data.vote} (concluded=${round.concluded})`);
+  log.info(`Vote cast in round ${logSafe(round.roundId)}: ${logSafe(parsed.data.vote)} (concluded=${logSafe(round.concluded)})`);
   return { status: 200, body: { concluded: round.concluded ?? false, round } };
 }
 

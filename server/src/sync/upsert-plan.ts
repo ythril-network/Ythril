@@ -72,7 +72,7 @@ export function planSeqUpserts<T extends Replicable>(
 
 /**
  * Is a copy at seq `incoming` newer than one held at `held` — the ONE accept rule of the pull (`planSeqUpserts`),
- * the push doors (`pushVerdict` in `api/sync/docs.ts`, which every single route and batch family loop asks), the
+ * the push doors (`pushVerdict` in `api/sync/docs.ts`, which every single route and record-family batch loop asks), the
  * arrival writer's collapse of a repeated id within one page, and its read-back of a guarded write. Strictly
  * greater, so an equal seq is NOT newer: across peers that makes a re-sync a no-op, and inside one page it means
  * the EARLIER of two equal copies stands — the push door's sequential reading, applied on pull and restore too.

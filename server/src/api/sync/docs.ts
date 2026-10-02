@@ -275,7 +275,8 @@ type PushVerdict<S> =
   | { kind: 'land' | 'stale'; tomb: TombstoneDoc | null; stored: S | null };
 
 /**
- * THE PUSH ACCEPT for one document — every push door asks it, the single routes and the batch family loops, so the
+ * THE PUSH ACCEPT for one document — every push door of a record family asks it, the single routes and the batch
+ * family loops (file metadata has no tombstone here and is accepted by the writer's own `planArrivalWrites`), so the
  * rule is read in one place (`Q-218` R5: it was written out nine times). A tombstone at or above the incoming seq
  * stands; otherwise the stored copy is read and `isNewerCopy` decides between landing it and leaving it stale.
  *
