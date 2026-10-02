@@ -97,10 +97,13 @@ Dumps the entire knowledge base of a space as a single JSON document. Requires a
   "entities": [ { "_id": "...", "name": "...", "type": "...", "...": "..." } ],
   "edges":    [ { "_id": "...", "from": "...", "to": "...", "label": "...", "...": "..." } ],
   "chrono":   [ { "_id": "...", "title": "...", "type": "...", "...": "..." } ],
+  "links":    [ { "_id": "...", "...": "..." } ],
   "files":    [ { "_id": "...", "path": "...", "...": "..." } ]
 }
 ```
 
+- Every replicated family is exported, links included. An export made by 5.6.1 or earlier has no `links`, so a
+  space restored from one comes back without the links between its records; take a fresh export.
 - Embedding vectors are stripped (`embedding` field excluded) — exported data is model-independent.
 - `embeddingModel` is retained on each doc so you can see what model last embedded it.
 - Binary file content is **not** included — only file metadata. Use the Files API to download actual files.
@@ -127,6 +130,13 @@ Upserts exported data into a space. Requires admin token + TOTP when MFA is enab
 ```
 
 Each document must have a string `_id`. Documents with an existing `_id` in the space are replaced; new `_id`s are inserted.
+A document listed twice is stored once, at its highest `seq` (of two at the same `seq`, the first).
+
+What this instance derives is left out of what it stores: `embedding`, `embeddingModel` and `matchedText` are
+dropped, and the record is queued for embedding by this instance's own model. The retention stamps
+(`_expireAt`, `_contentExpireAt`) are restored as dates, so the retention sweep acts on them; a stamp that does not
+parse as a date is dropped. A file's `syncBase` is kept. After the import this instance's seq counter is past every
+plausible `seq` it restored, so the next local write sorts above them.
 
 **Response** `200`:
 
@@ -138,7 +148,8 @@ Each document must have a string `_id`. Documents with an existing `_id` in the 
     "entities": { "inserted": 3, "updated": 1, "errors": 0 },
     "edges":    { "inserted": 0, "updated": 0, "errors": 0 },
     "chrono":   { "inserted": 0, "updated": 0, "errors": 0 },
-    "files":    { "inserted": 0, "updated": 0, "errors": 0 }
+    "files":    { "inserted": 0, "updated": 0, "errors": 0 },
+    "links":    { "inserted": 0, "updated": 0, "errors": 0 }
   }
 }
 ```
@@ -164,14 +175,14 @@ and nothing about which one. The array is absent when there is nothing to report
 
 **Imported records are queued for embedding.** Until 3.7 they were not — a restored backup was stored and
 invisible to meaning-ranked search until somebody ran a reindex they were never told they needed. The import
-now writes through the same function the sync ingest does, which writes and enqueues in one call. A reindex is
+now writes through the same writer every sync arrival does, which writes and enqueues. A reindex is
 still the tool for rebuilding vectors after an embedding-model change; it is no longer required to make an
 import searchable at all.
 
-**Two things an import deliberately does NOT do**, both of which sync does:
+**Two things an import deliberately does NOT do:**
 
-- **It does not reallocate `seq`.** An exported document keeps the one it had, so a restored instance and its
-  peers still agree about which copy of a record is newer.
+- **It does not reallocate `seq`**, any more than sync does. An exported document keeps the one it had, so a
+  restored instance and its peers still agree about which copy of a record is newer.
 - **It does not check tombstones.** Sync refuses a document whose id has been deleted, so a lagging peer cannot
   resurrect it. A restore is the one case where resurrection is the point — but a record deleted *after* the
   backup will come back, and the tombstone will remove it again on the next sync with a peer that still holds

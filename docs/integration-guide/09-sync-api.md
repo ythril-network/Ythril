@@ -332,19 +332,30 @@ POST /api/sync/batch-upsert?spaceId=general&networkId=net-uuid
   "facts": [ ... ],
   "entities": [ ... ],
   "edges": [ ... ],
-  "chrono": [ ... ]
+  "chrono": [ ... ],
+  "links": [ ... ],
+  "filemeta": [ ... ]
 }
 ```
 
-Each array is capped at 500 items. Response includes per-type counters:
+Each array is capped at 500 items; items past the 500th are dropped and counted nowhere, so send larger sets in
+several requests. Response includes per-family counters:
 
 ```json
 { "status": "ok",
-  "facts": { "inserted": 3, "updated": 1, "forked": 0, "skipped": 12, "forkDepthRefused": 0, "tombstoned": 0, "rejected": 0 },
-  "entities": { "upserted": 5, "skipped": 2, "tombstoned": 0, "rejected": 0 },
-  "edges":    { "upserted": 0, "skipped": 0, "tombstoned": 0, "rejected": 0 },
-  "chrono":   { "upserted": 0, "skipped": 0, "tombstoned": 0, "unknownType": 0, "rejected": 0 } }
+  "facts":    { "inserted": 3, "updated": 1, "forked": 0, "skipped": 12, "forkDepthRefused": 0, "tombstoned": 0, "schemaViolations": 0, "rejected": 0 },
+  "entities": { "upserted": 5, "skipped": 2, "tombstoned": 0, "schemaViolations": 0, "rejected": 0 },
+  "edges":    { "upserted": 0, "skipped": 0, "tombstoned": 0, "schemaViolations": 0, "duplicateTriplets": 0, "rejected": 0 },
+  "chrono":   { "upserted": 0, "skipped": 0, "tombstoned": 0, "schemaViolations": 0, "unknownType": 0, "rejected": 0 },
+  "links":    { "upserted": 0, "skipped": 0, "tombstoned": 0, "rejected": 0 },
+  "filemeta": { "upserted": 0, "skipped": 0, "rejected": 0 } }
 ```
+
+**This instance's counter is past every seq the request carried before it answers**, on every push door, so the
+next local write never takes a seq below a record you already hold. A link that arrives under another id for
+endpoints already linked is counted in `skipped` (it answered `500` before 5.6.2, so its page was re-sent for
+ever). A page the store fails part-way through answers `500` after writing the rest of it; re-sending it is safe,
+because a record already stored is skipped and a fork already made is found again by its id.
 
 **`skipped` is benign and `forkDepthRefused` is not — read the second one.** They were one counter until now,
 which is the whole reason this paragraph exists.
@@ -387,7 +398,7 @@ It answers `200` and says so, rather than failing:
 ```
 
 **The local copy stands and the incoming one is not applied** — the same rule the pull side uses, so both
-directions resolve it identically. The receiver logs the triplet.
+directions resolve it identically. The receiver's log names the incoming edge's id.
 
 **Why this is a 200 and not a 409.** A push that gets a non-2xx stops that collection's transfer and does not
 advance its watermark, so the next cycle re-sends the identical batch and hits the identical duplicate. An
@@ -409,12 +420,21 @@ last type that carried theirs; now none do.
 **The same holds when this instance PULLS from you, and until 4.0 it did not.** The schemas above run on the
 push path; a pull fetches whole documents and validates nothing, so a pulled record kept the sender's vector
 — and, more expensively, the sender's `_expireAt`, which the receiving instance's retention sweep then
-acted on. Both directions now drop the same five fields, and the serving side leaves them out of the page
+acted on. Both directions now drop the fields `sync/local-only-fields.ts` lists (the vector, its model, the
+matched text, the two retention stamps and a file's sync base), and the serving side leaves them out of the page
 altogether, so a sync page is materially smaller than it was.
 
+**The receiver keeps its own copy of those fields across your update (5.6.2).** A pushed or pulled edit of a
+record this instance already holds keeps this instance's vector and retention stamps; until 5.6.2 the update
+replaced the whole document, so the record stopped expiring here and was re-embedded even when its text had not
+changed.
+
 **The receiver embeds what it accepts, on its own terms.** Every accepted document is queued for embedding
-against the receiving instance's own model, at the moment it is written. Nothing has to ask for this and there
-is no flag for it.
+against the receiving instance's own model, at the moment it is written, whether it arrived by push (batch or
+single route) or by pull. A file is queued only once its bytes are here. Nothing has to ask for this and there is
+no flag for it. Until 5.6.2 a pulled record and a new entity pushed through `POST /api/sync/entities` were never
+queued; on an instance upgraded from 5.6.1 or earlier, run `POST /api/spaces/:id/reembed` once per synced space
+to queue the records it pulled before.
 
 **Send the suppression mark, and it will be honoured.** `suppressEmbeddings` replicates, on all four
 types. Its pre-3.1 spelling `excludeFromVectorSearch` replicated too until 4.0 removed it; an ingest

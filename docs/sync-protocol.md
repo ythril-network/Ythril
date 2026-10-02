@@ -217,7 +217,9 @@ Accepts `{ facts?: FactDoc[], entities?: EntityDoc[], edges?: EdgeDoc[], chrono?
 | Edges | same as entities |
 | Chrono | same as entities |
 
-Response: `{ status: 'ok', facts: {inserted,updated,forked,skipped,forkDepthRefused,tombstoned,schemaViolations}, entities: {upserted,skipped,tombstoned,schemaViolations}, edges: {upserted,skipped,tombstoned,schemaViolations,duplicateTriplets}, chrono: {upserted,skipped,tombstoned,schemaViolations,unknownType}, links: {upserted,skipped,tombstoned}, filemeta: {upserted,skipped} }`
+Response: `{ status: 'ok', facts: {inserted,updated,forked,skipped,forkDepthRefused,tombstoned,schemaViolations,rejected}, entities: {upserted,skipped,tombstoned,schemaViolations,rejected}, edges: {upserted,skipped,tombstoned,schemaViolations,duplicateTriplets,rejected}, chrono: {upserted,skipped,tombstoned,schemaViolations,unknownType,rejected}, links: {upserted,skipped,tombstoned,rejected}, filemeta: {upserted,skipped,rejected} }`
+
+**The counter moves before the answer.** Every push door (`batch-upsert`, the single-record routes and `POST /tombstones`) moves the receiver's seq counter past every plausible seq the request carried, after writing what it received and before it answers, so the receiver's next local write never takes a seq below a record the sender already holds. A link that arrives under another id for endpoints already linked is counted in `skipped`; before 5.6.2 it answered `500` and its page was re-sent for ever. A tombstone whose seq lies inside the ceiling reserve is refused on its own and logged, and the rest of the request applies.
 
 **One of those counters is the sender's only report of a PERMANENT loss.** `skipped` means the peer was already current, which is benign. `forkDepthRefused` means a record was DROPPED and will not be retried — the push path reads exactly that field to report a refusal, so a receiver that does not emit it makes the loss silent at both ends. `schemaViolations` counts documents stored despite failing the RECEIVER's schema (validated, counted and let in — see the ingest rule below); `duplicateTriplets` counts edges the unique index rejected; `unknownType` counts the case below.
 
@@ -445,12 +447,12 @@ There is no dedicated identity endpoint — a peer that needs the instance's ide
 
 `POST /batch-upsert` is the primary push path used by the engine. The individual `POST /facts`, `/entities`, `/edges` endpoints remain for backwards compatibility and direct API usage.
 
-All incoming documents are validated against Zod schemas before any database write. Invalid documents are rejected with `400` (single endpoints) or silently filtered out (batch-upsert). Key constraints: `tags` max 100 items, all string fields validated for type safety. Unknown fields are stripped.
+All incoming documents are validated against Zod schemas before any database write. Invalid documents are rejected with `400` (single endpoints) or, in batch-upsert, left out of the write, counted in that family's `rejected` and named in the receiver's log. Key constraints: `tags` max 100 items, all string fields validated for type safety. Unknown fields are stripped.
 
 Two additional ingest safety caps protect the local seq counter and fork chains from a malicious or corrupted peer:
 
 - **Implausible seq** — the schema bound on `seq` is 2^50, but ingest applies a stricter ceiling of `2^50 − 2^40` (`rejectImplausibleSeq`); a document above it is refused so a poisoned seq can never exhaust the counter's headroom.
-- **Fork limits** — fork chain depth is capped at 10 on both paths: exceeding it returns `400` on the single `POST /facts` endpoint and is silently skipped in `batch-upsert`. The additional per-document **fan-out** cap (no more than 10 forks pointing at the same parent) is enforced **only on the single endpoint** — `batch-upsert` checks chain depth alone, not sibling fan-out.
+- **Fork limits** — fork chain depth is capped at 10 on both paths: exceeding it returns `400` on the single `POST /facts` endpoint and, in `batch-upsert`, is counted in `forkDepthRefused` (which `rejected` includes). The additional per-document **fan-out** cap (no more than 10 forks pointing at the same parent) is enforced **only on the single endpoint** — `batch-upsert` checks chain depth alone, not sibling fan-out.
 
 ### Gossip endpoints
 

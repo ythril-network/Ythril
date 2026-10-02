@@ -159,9 +159,9 @@ never put to a network vote.
 
 **Retention** is the space-wide default: **Delete records after (days)**, as **five fields** — Entities, Facts, Edges, Chrono, Files — each applying to records of that kind with no TTL of their own and no window on their type. Five, not one, because a `tickets` space keeps ticket entities for a year and their status-change chrono entries for a month; **Files** gets its own because uploads share this setting and have no type for the Schema tab to reach.
 
-> **These numbers are yours alone, and a peer's are not.** In a space that syncs, every instance applies **its own** windows to every record it holds — including records that arrived from somebody else. An instance keeping tickets for a year does not start deleting them after a week because the peer it syncs with keeps them for a week. The expiry is worked out here, from the fields above, and is recomputed on this instance whenever the record is next written.
+> **These numbers are yours alone, and a peer's are not.** In a space that syncs, a peer's expiry never travels with a record, so an instance keeping tickets for a year does not start deleting them after a week because the peer it syncs with keeps them for a week. The expiry is worked out here, from the fields above, when a record is written on this instance, and recomputed whenever it is written here again. A record that only ever arrived from a peer carries no expiry here, so these windows do not delete it until it is written on this instance; an expiry this instance already holds for a record is kept when a peer updates it.
 >
-> Upgrading from before 4.0: records a peer's window already deleted are not restored, and a stamp that came from a peer is replaced by your own the next time that record is written.
+> Upgrading from before 4.0: records a peer's window already deleted are not restored, and a stamp that came from a peer is replaced by your own the next time that record is written here.
 
 Below the fields, any type that *does* have its own window is listed read-only — that list is where you see what actually overrides these numbers, and it is edited on the type, in the **Schema** tab.
 
