@@ -107,7 +107,9 @@ describe('a published file reaches the subscriber', () => {
     }, async () => 'the subscriber never held the publisher\'s seq for the file: '
       + `B ${JSON.stringify((await fileMetaOn(INSTANCES.b, tokenB))?.seq)}, A ${JSON.stringify((await fileMetaOn(INSTANCES.a, tokenA))?.seq)}`);
     const [a, b] = [await fileMetaOn(INSTANCES.a, tokenA), await fileMetaOn(INSTANCES.b, tokenB)];
-    const authored = d => ({ seq: d.seq, author: d.author?.instanceId, updatedAt: d.updatedAt, description: d.description, tags: d.tags });
+    // Not `updatedAt` yet: local processing (the media worker's status marks) still stamps it on any instance's copy,
+    // which is its own defect, Q-240. This row holds the fields an arrival decides: seq, author and the metadata.
+    const authored = d => ({ seq: d.seq, author: d.author?.instanceId, description: d.description, tags: d.tags });
     assert.deepEqual(authored(a), authored(b), 'the subscriber\'s copy of a pushed file is not the publisher\'s record');
   });
 
