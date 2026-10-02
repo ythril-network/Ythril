@@ -531,8 +531,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A database test whose setup fails now fails, instead of hanging the run.** The test harness kept its Mongo
   connection open when a setup step threw after connecting, and node's test runner waits for every file's process
   to exit, so one such file held `test:standalone` with no output for as long as the CI job lived. The harness now
-  closes what it opened on a failed setup; both runners of the standalone batches (`npm run test:standalone` and
-  preflight) take their arguments from one module and add `--test-force-exit`; the CI job has a 90-minute ceiling.
+  closes what it opened on a failed setup, and the CI job has a 90-minute ceiling, so a hang nobody has found yet
+  fails the run instead of holding it.
 - **A gate proves no read-rung door can reach a write into a space (`Q-97`).** `a-read-never-writes-a-space`
   derives every door a `read` token may call — `TOOL_RIGHTS` and `ROUTE_RIGHTS` rows at `read`, every mounted GET
   without a row or on a `NOT_AREA_SCOPED` path — walks what each call causes, and fails on any path to a space

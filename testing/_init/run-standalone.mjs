@@ -37,7 +37,6 @@ import { spawnSync } from 'node:child_process';
 import { statSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { splitStandalone, batched } from '../_shared/standalone-split.mjs';
-import { NODE_TEST_ARGS } from '../_shared/node-test-args.mjs';
 
 /**
  * REFUSE a stale `server/dist`, rather than testing the wrong build and reporting either answer.
@@ -90,7 +89,7 @@ const t0 = Date.now();
 
 /** Default concurrency: node uses one worker per core, and these files share nothing. */
 for (const batch of batched(offline.map(path))) {
-  const r = spawnSync('node', [...NODE_TEST_ARGS, ...batch], { stdio: 'inherit' });
+  const r = spawnSync('node', ['--test', ...batch], { stdio: 'inherit' });
   if (r.status !== 0) failed++;
 }
 
@@ -99,7 +98,7 @@ for (const batch of batched(offline.map(path))) {
  * writes to one instance — the failure the concurrency flag was added for in the first place.
  */
 for (const batch of batched(needsInstance.map(path))) {
-  const r = spawnSync('node', [...NODE_TEST_ARGS, '--test-concurrency=1', ...batch], { stdio: 'inherit' });
+  const r = spawnSync('node', ['--test', '--test-concurrency=1', ...batch], { stdio: 'inherit' });
   if (r.status !== 0) failed++;
 }
 
