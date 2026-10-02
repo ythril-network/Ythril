@@ -211,8 +211,8 @@ export const IncomingFileMetaDoc = z.object({
  * `$set`, never `$unset`: an omitted key is left alone, so an older peer cannot erase a field it does
  * not know.
  *
- * Embedding is enqueued only when this instance HOLDS the blob; metadata can arrive first, and the file
- * transfer path enqueues via `upsertFileMeta` when the bytes land.
+ * Embedding is enqueued only when this instance HOLDS the blob; metadata can arrive first, and the bytes,
+ * pulled or pushed, enqueue it via `recordArrivedFile` when they land.
  */
 export async function ingestFileMeta(spaceId: string, incoming: z.infer<typeof IncomingFileMetaDoc>): Promise<boolean> {
   // A legacy read spill (Q-92) is one caller's search result an older peer wrote into the space. It travels in

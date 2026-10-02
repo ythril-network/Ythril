@@ -55,7 +55,9 @@ are not part of it; they ship in the next minor.
   bytes reached the subscriber's upload door, which stored them as the subscriber's own upload: its own next seq,
   itself as the author of a new file, and a description it derived itself. That copy then tied or outranked the
   publisher's next description or tag edit, which was skipped on arrival for good. 5.6.2's counter fix made the
-  tie likely. Bytes a peer pushes are now recorded as an arrival, as a download already was (`Q-143`).
+  tie likely. Bytes a peer pushes are now recorded as an arrival, as a download already was (`Q-143`). Arriving
+  bytes, pushed or pulled, also make a soft-deleted path live again. A file new on this instance is now given its
+  file retention window: a pushed file had that before, a pulled one did not.
 
 - **A peer's edit erased this instance's own vector and retention stamps.** A pushed or pulled update replaced the
   whole document, so the record stopped expiring here, dropped out of vector search until re-embedded, and was
