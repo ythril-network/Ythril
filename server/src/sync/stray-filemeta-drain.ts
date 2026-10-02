@@ -23,7 +23,7 @@
  *
  * Removed at the next major.
  */
-import { getConfig } from '../config/loader.js';
+import { concreteSpaces } from '../spaces/proxy.js';
 import { getDb, col, asFilter } from '../db/mongo.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { writeArrivals } from './arrivals.js';
@@ -33,11 +33,9 @@ const PAGE = 500;
 
 /** Drain every space's stray file-metadata collection. Returns the spaces drained. */
 export async function drainStrayFileMeta(): Promise<string[]> {
-  let cfg;
-  try { cfg = getConfig(); } catch { return []; } // pre-setup
   const drained: string[] = [];
-  for (const space of cfg.spaces) {
-    if (space.proxyFor?.length) continue; // proxy spaces own no collections
+  // Proxy spaces own no collections; `concreteSpaces` is empty before setup.
+  for (const space of concreteSpaces()) {
     const spaceId = space.id;
     // The name the 4.0-5.6.1 pull built (`${spaceId}_${payloadKey}`); not a collection this version routes.
     const collName = `${spaceId}_filemeta`;
