@@ -8,9 +8,12 @@
  * `MERKLE_DIVERGENCE` for a space where nothing is wrong. So the set the space hash excludes and the set
  * ingest drops are the same set, and writing them separately means one of them is eventually wrong.
  *
- * `merkle.ts` excludes them from the hash. `sync/engine.ts` drops them from a PULLED document. The push
- * path drops them by omission — no `Incoming*` schema declares one, so zod strips them — which is why this
- * module has no third consumer.
+ * `merkle.ts` excludes them from the hash. The arrival writer (`sync/arrivals.ts`, `writeArrivals`) drops
+ * them from every document a peer delivers, by push or by pull — push zod-strips them as well, because no
+ * `Incoming*` schema declares one, but the writer does not rely on it — and CARRIES the receiver's own values
+ * across the replace, so a peer's edit does not erase what only this instance knows. The admin export leaves
+ * out the vector, and a restore keeps the record-tier half (`RESTORED_LOCAL_FIELDS` below) and drops the
+ * derived half (`DERIVED_LOCAL_FIELDS`).
  *
  * ## What each one is, and what taking a peer's copy would do
  *
@@ -37,6 +40,31 @@ export const LOCAL_ONLY_FIELDS: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * The local-only fields that are the RECORD's own state on this instance rather than something this instance
+ * derived from it — what an admin RESTORE keeps from an export it is handed (`Q-205`).
+ *
+ * The retention stamps ARE the record tier of retention: a per-record `ttlDays` is never stored, only the stamp
+ * it produced, so dropping them would hand a "never expire" record the space default. `syncBase` is what this
+ * instance last agreed with each peer about a file; dropping it on a self-restore turns every divergent file into
+ * a conflict copy. A PEER's copy of either is still refused: these are kept only from a restore, which is this
+ * instance's own backup, never from a sync arrival.
+ */
+export const RESTORED_LOCAL_FIELDS: ReadonlySet<string> = new Set(['_expireAt', '_contentExpireAt', 'syncBase']);
+
+/**
+ * The rest — what THIS instance computes with its own model (`embedding`, `embeddingModel`, `matchedText`), so
+ * never taken from anywhere, a restore included. Derived, so a seventh local-only field lands in one of the two
+ * halves by being named once, and one that is named in neither is derived data by default.
+ */
+export const DERIVED_LOCAL_FIELDS: ReadonlySet<string> =
+  new Set([...LOCAL_ONLY_FIELDS].filter(f => !RESTORED_LOCAL_FIELDS.has(f)));
+
+for (const f of RESTORED_LOCAL_FIELDS) {
+  // A restored field that is not local-only would be a field the hash covers and the restore treats as local.
+  if (!LOCAL_ONLY_FIELDS.has(f)) throw new Error(`RESTORED_LOCAL_FIELDS names '${f}', which is not a local-only field`);
+}
+
+/**
  * The same set as a Mongo projection, for the SENDING side.
  *
  * Not the guarantee — the receiver's strip is, because a peer decides what it sends and this instance
@@ -45,20 +73,3 @@ export const LOCAL_ONLY_FIELDS: ReadonlySet<string> = new Set([
  */
 export const LOCAL_ONLY_EXCLUSION: Readonly<Record<string, 0>> =
   Object.fromEntries([...LOCAL_ONLY_FIELDS].map(f => [f, 0])) as Record<string, 0>;
-
-/**
- * A copy of `doc` without the local-only fields.
- *
- * Returns the SAME object when there is nothing to drop, so the ordinary path allocates nothing — a sync
- * page is 200 documents and this runs on every one of them.
- */
-export function stripLocalOnly<T extends object>(doc: T): T {
-  let hit = false;
-  for (const f of LOCAL_ONLY_FIELDS) {
-    if (f in doc) { hit = true; break; }
-  }
-  if (!hit) return doc;
-  const out = { ...doc } as Record<string, unknown>;
-  for (const f of LOCAL_ONLY_FIELDS) delete out[f];
-  return out as T;
-}

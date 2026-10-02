@@ -1,5 +1,5 @@
 /**
- * The admin import: store what you are given, say what was wrong with it, and queue it for embedding.
+ * The admin import: restore what an export wrote, say what was wrong with it, and queue it for embedding.
  *
  * ## What it did before, and why none of it was a decision
  *
@@ -9,63 +9,63 @@
  *
  * The validation half READ as a decision, and was filed as one. The tension is real: an import is how you
  * restore a backup, and a backup taken before a schema change would be refused by its own instance, so
- * refusing the import makes backups unrestorable.
+ * refusing the import makes backups unrestorable. `api/sync/_shared.ts` meets the identical problem on the
+ * identical kind of payload and resolves it by RECORDING rather than refusing — the document is stored and the
+ * violations are reported back. So the question was withdrawn rather than answered.
  *
- * It should not have been filed. `api/sync/_shared.ts` meets the identical problem on the identical kind of
- * payload and resolves it by RECORDING rather than refusing — the document is stored and the violations are
- * reported back to whoever pushed it. Import is the other bulk ingest path into the same collections, and one
- * rule with two answers is the defect this codebase produces most. So the question was withdrawn rather than
- * answered.
+ * ## Why the write goes through `writeArrivals` (`Q-205`, ported to 5.6.x by `Q-218`)
  *
- * ## Why the write goes through `ingestBrainDoc`
+ * The arrival writer (`sync/arrivals.ts`) is the one thing that stores a record produced elsewhere. Import went
+ * through `ingestBrainDoc` and stored whatever it was handed: retention stamps as the TEXT JSON made of them (a
+ * sweep never compares them), the export's `embeddingModel` and `matchedText` (another model's), a repeated id in
+ * file order, and it never moved the counter. Through the writer, as a RESTORE (`restore: true`):
  *
- * That function is the only thing the sync router permits to write a brain document, and it exists for exactly
- * this: it writes AND enqueues in one call, so a new ingest site cannot be written without the queue. Import
- * grew its own `replaceOne` beside it and inherited none of that.
+ *  - **What is stored is replaced whatever its seq** — an operator restoring a backup over newer data asked for
+ *    exactly that — and the export's record-tier local fields are KEPT, as Dates: the retention stamps ARE the
+ *    record tier, and `syncBase` keeps a self-restore from turning every divergent file into a conflict copy. A
+ *    stamp that does not parse is removed rather than stored as text.
+ *  - **What this instance derives is dropped**: the vector, its model and `matchedText` (re-embedded here).
+ *  - **A repeated id stores its highest seq**, an equal seq keeping the first, as every other door reads a page.
+ *  - **The counter is moved past the highest PLAUSIBLE restored seq**, so a restored record never sorts above the
+ *    next local write.
+ *
+ * ## What the 5.6.x restore keeps as 5.6.1 had it (the 5.6.2 cuts)
+ *
+ *  - **`C5`, the response**: `{ inserted, updated, errors }` per family, plus `schemaViolations` when there are
+ *    some — nothing else. The counts read as 5.6.1's per-document loop counted them: a collapsed second copy of an
+ *    id counts `updated` (5.6.1 replaced it), a document with no usable `_id` and one the store refused count
+ *    `errors`.
+ *  - **`C6`, derived file records**: a file chunk and a face record are restored by replace, as 5.6.1 did, so a
+ *    face label survives a restore; a file row is replaced whole (its sizes and hashes kept), not merged.
+ *  - **`C7`, no seq refusal**: an odd seq (a string, a negative, a fraction, one in the ceiling reserve) is stored
+ *    as 5.6.1 stored it. It never moves the counter.
+ *  - **`C4`, no receiver stamping**: an imported record with no stamp stays unstamped.
  *
  * ## What is deliberately NOT done here
  *
- * **No `seq` allocation.** An exported document carries the seq it had, and a restore that renumbered them
- * would make this instance disagree with every peer about which copy is newer. Sync preserves an incoming seq
- * for the same reason.
+ * **No `seq` allocation.** An exported document carries the seq it had, and a restore that renumbered them would
+ * make this instance disagree with every peer about which copy is newer. Sync preserves an incoming seq for the
+ * same reason.
  *
- * **No tombstone check.** Sync refuses a document whose id has been tombstoned, so a peer that has not caught
- * up cannot resurrect a deleted record. A RESTORE is the one case where resurrection is the point — but it
- * does mean a record deleted after the backup comes back, and the tombstone will remove it again on the next
- * sync with a peer that still holds it. Stated rather than left to be discovered.
+ * **No tombstone check.** Sync refuses a document whose id has been tombstoned, so a peer that has not caught up
+ * cannot resurrect a deleted record. A RESTORE is the one case where resurrection is the point — but it does mean
+ * a record deleted after the backup comes back, and the tombstone will remove it again on the next sync with a
+ * peer that still holds it. Stated rather than left to be discovered.
  *
  * **Files are not schema-validated.** A file has no `type` and therefore no type schema — the same asymmetry
- * `embeddingSuppressedFor` encodes by skipping the middle tier for files. Validating one would mean inventing
- * a rule for it to break.
+ * `embeddingSuppressedFor` encodes by skipping the middle tier for files.
  */
-import { col } from '../db/mongo.js';
 import { BRAIN_COLLECTIONS, KNOWLEDGE_TYPES } from '../config/types.js';
-import { log } from '../util/log.js';
+import { log, logSafe } from '../util/log.js';
 import type { SchemaViolation } from '../spaces/schema-validation.js';
-import { violationsAgainstLocalSchema, ingestBrainDoc } from './sync/_shared.js';
-import type { BrainEmbedRecordType, KnowledgeType } from '../config/types.js';
+import { violationsAgainstLocalSchema } from './sync/_shared.js';
+import type { KnowledgeType } from '../config/types.js';
+import { writeArrivals, ArrivalWriteError, type ArrivalOutcome } from '../sync/arrivals.js';
+import { RECORD_TYPE_OF } from '../sync/replicated-families.js';
 
-/** The five collections an export carries, and what each one is called elsewhere. */
 /** What an import may carry: every knowledge collection, so a new one is importable without an edit. */
 const IMPORT_TYPES = BRAIN_COLLECTIONS;
 export type ImportType = typeof IMPORT_TYPES[number];
-
-/**
- * The record type each collection holds, for the embed queue and the schema lookup.
- *
- * `null` for `links` and it is not a gap: a link record says one record concerns another and carries no
- * text, so there is nothing to embed and no type schema to check it against. Spelled `null` rather than
- * left out, because this map is TOTAL over the importable collections — which is what made adding a
- * collection a compiler error here instead of a record kind the importer silently skipped.
- */
-const RECORD_TYPE: Record<ImportType, BrainEmbedRecordType | null> = {
-  facts: 'fact',
-  entities: 'entity',
-  edges: 'edge',
-  chrono: 'chrono',
-  files: 'file',
-  links: null,
-};
 
 /** One document that was stored despite breaking the space's schema. */
 export interface ImportViolation {
@@ -99,10 +99,26 @@ function importableId(v: unknown): string | null {
 }
 
 /**
+ * The writer's outcome counted as 5.6.1's per-document loop counted the same documents (cut `C5`): each copy of an
+ * id that landed is one document stored — the first as `inserted` when nothing was there before, every later one
+ * (5.6.1 replaced it again) as `updated` — and each copy of an id that did not land is an error.
+ */
+function countAs561(out: ArrivalOutcome, copies: ReadonlyMap<string, number>, result: ImportTypeResult): void {
+  const n = (id: string): number => copies.get(id) ?? 1;
+  for (const id of out.inserted) { result.inserted += 1; result.updated += n(id) - 1; }
+  for (const id of out.updated) result.updated += n(id);
+  // A restore is unguarded, so `newerLocal` and `derived` stay empty; counted all the same, so nothing goes uncounted.
+  const unstored = new Set([...out.storeRefused.map(r => r._id), ...out.duplicates, ...out.newerLocal, ...out.derived]);
+  for (const id of unstored) result.errors += n(id);
+  // A shape refusal is one document without a usable id — counted per document, as 5.6.1 did.
+  result.errors += out.refused.length;
+}
+
+/**
  * Import a payload of exported documents into one space.
  *
- * Extracted from `app.ts` so it can be exercised without an HTTP server: the route is now argument handling
- * and a status code, and everything that decides what is stored is here.
+ * Extracted from `app.ts` so it can be exercised without an HTTP server: the route is argument handling and a
+ * status code, and everything that decides what is stored is here and in the arrival writer.
  */
 export async function importDocuments(spaceId: string, payload: Record<string, unknown>): Promise<ImportResult> {
   const results = Object.fromEntries(
@@ -112,61 +128,47 @@ export async function importDocuments(spaceId: string, payload: Record<string, u
   for (const t of IMPORT_TYPES) {
     const docs: unknown[] = Array.isArray(payload[t]) ? payload[t] as unknown[] : [];
     if (docs.length === 0) continue;
-
-    const collName = `${spaceId}_${t}`;
     const result = results[t];
     const violations: ImportViolation[] = [];
+    const copies = new Map<string, number>();
 
+    /*
+     * Recorded, never refused — see the docblock. Only where there is a type SCHEMA to check against, which is
+     * membership in `KNOWLEDGE_TYPES`: a file HAS a record type (`file`) and has no type schema, and a link has
+     * neither. Per document as 5.6.1 reported it; the retag to this space is the writer's, and the check reads the
+     * record's type and properties, never its `spaceId`.
+     */
+    const kind = RECORD_TYPE_OF[t];
     for (const doc of docs) {
       const docId = importableId(doc);
-      if (docId === null) { result.errors++; continue; }
-
-      try {
-        /*
-         * Re-tag the document to the TARGET space.
-         *
-         * The export embeds the source space's id in every document, and the read paths filter on that field
-         * (listEntities, listEdges, listChrono, entity lookup-by-name, the edge-dedup lookup). Importing space
-         * A's export into space B while keeping `spaceId: "A"` writes documents that are counted but INVISIBLE
-         * to every list — the import looks like it worked, and the data appears to be missing. The collection
-         * name is the only real scope, so a document written into `{spaceId}_*` belongs to `spaceId` by
-         * definition.
-         */
-        const retagged = { ...(doc as Record<string, unknown>), _id: docId, spaceId };
-
-        /*
-         * Recorded, never refused — see the docblock.
-         *
-         * Skipped where there is no type SCHEMA to check against, and the condition is membership in
-         * `KNOWLEDGE_TYPES` rather than a list of collection names. It read `t !== 'files'`, which was the
-         * same thing while files were the only such collection; `M-2`'s links are the second, and a name
-         * check would have validated a link against nothing while claiming it had been checked.
-         *
-         * **The axis matters and the first attempt got it wrong.** Guarding on "has a record type" reads as
-         * the same question and is not: a file HAS one (`file`) and has no type schema, so files went into
-         * `violationsAgainstLocalSchema`, whose switch has no case for them, and every file import threw
-         * into the outer catch and was counted as an error. What `violationsAgainstLocalSchema` takes is a
-         * `KnowledgeType` — so that is the question to ask.
-         */
-        const kind = RECORD_TYPE[t];
-        if (kind !== null && (KNOWLEDGE_TYPES as readonly string[]).includes(kind)) {
-          const found = violationsAgainstLocalSchema(spaceId, kind as KnowledgeType, retagged);
-          if (found.length > 0) violations.push({ _id: docId, violations: found });
-        }
-
-        // Whether this REPLACES something has to be read before the write, because `ingestBrainDoc` upserts
-        // and does not report which it did. One extra id-only read per document, on a path that is already
-        // one round trip per document.
-        const existed = await col(collName).countDocuments({ _id: docId } as never, { limit: 1 });
-
-        await ingestBrainDoc(spaceId, RECORD_TYPE[t], t, retagged as { _id: string });
-
-        if (existed > 0) result.updated++; else result.inserted++;
-      } catch {
-        result.errors++;
+      if (docId === null) continue;
+      copies.set(docId, (copies.get(docId) ?? 0) + 1);
+      if (kind !== null && (KNOWLEDGE_TYPES as readonly string[]).includes(kind)) {
+        const found = violationsAgainstLocalSchema(spaceId, kind as KnowledgeType, doc as Record<string, unknown>);
+        if (found.length > 0) violations.push({ _id: docId, violations: found });
       }
     }
 
+    let out: ArrivalOutcome;
+    try {
+      out = await writeArrivals(spaceId, t, RECORD_TYPE_OF[t], docs, { restore: true });
+    } catch (err) {
+      log.warn(`Import into space '${spaceId}': ${t} could not be written: ${logSafe(String(err))}`);
+      if (!(err instanceof ArrivalWriteError) || !err.partial) {
+        // Nothing of the family is vouched for, so every document is an error — as 5.6.1 counted a failed write.
+        result.errors = docs.length;
+        if (violations.length > 0) result.schemaViolations = violations;
+        continue;
+      }
+      // The writer stopped part-way: the chunks before the fault are COMMITTED. Report what landed, and count only
+      // what did not as errors — a restore that says "nothing was written" over records it did write is the worse lie.
+      const partial = err.partial;
+      const settled = new Set([...partial.inserted, ...partial.updated, ...partial.derived, ...partial.newerLocal,
+        ...partial.duplicates, ...partial.storeRefused.map(r => r._id)]);
+      const unwritten = [...copies.keys()].filter(id => !settled.has(id));
+      out = { ...partial, storeRefused: [...partial.storeRefused, ...unwritten.map(_id => ({ _id, reason: String(err) }))] };
+    }
+    countAs561(out, copies, result);
     if (violations.length > 0) result.schemaViolations = violations;
   }
 

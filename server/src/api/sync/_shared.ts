@@ -14,13 +14,13 @@ import type { KnowledgeType } from '../../config/types-knowledge.js';
 import { enqueueIngestedRecord } from '../../brain/embed-queue.js';
 import { isWellFormedRef, collectionForRefKind, edgeEndpointKind } from '../../brain/entity-refs.js';
 import type { TokenRights } from '../../config/rights-shape.js';
-import { log } from '../../util/log.js';
+import { log, logSafe } from '../../util/log.js';
 import { isSeqImplausible, MAX_INGEST_SEQ, noteSeqStored } from '../../util/seq.js';
 import { isStrictLinkage } from '../../spaces/proxy.js';
 import type { FileMetaDoc } from '../../config/types.js';
 import { emitWebhookEvent } from '../../webhooks/dispatcher.js';
 import { spillIdFromPath } from '../../brain/spill-path.js';
-import type { FactDoc, EdgeDoc, LinkViolationDoc, BrainEmbedRecordType } from '../../config/types.js';
+import type { FactDoc, EdgeDoc, LinkViolationDoc } from '../../config/types.js';
 
 export const UUID_V4_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -52,7 +52,8 @@ export async function recordLinkViolation(
     await col<LinkViolationDoc>(spaceCollection(spaceId, 'linkViolations')).insertOne(asDoc<LinkViolationDoc>(doc));
     emitWebhookEvent({ event: 'link_violation.created', spaceId, entry: doc as unknown as Record<string, unknown> });
   } catch (err) {
-    log.error(`Failed to record link violation for ${docType} ${docId}: ${err}`);
+    // `docId` is a peer's text, and so may the error be (it can quote the document): `logSafe`.
+    log.error(`Failed to record link violation for ${docType} ${logSafe(docId)}: ${logSafe(String(err))}`);
   }
 }
 
@@ -116,45 +117,6 @@ export async function checkLinkViolations(
     await recordLinkViolation(spaceId, link.from, link.fromKind, field,
       `${field} references non-existent ${link.toKind} '${link.to}'`, peerInstanceId);
   }
-}
-
-/**
- * Write one arriving brain document and offer it to this instance's embedder — in that order, together.
- *
- * A write without the queue call yields a record absent from every meaning-ranked search on this peer,
- * silently. So this is the only thing in the ingest router that may call `replaceOne` or `insertOne` on a
- * brain collection, and `a-receiver-embeds-by-its-own-rules.test.js` fails on any that reappears.
- *
- * Always `upsert: true`: the caller has decided the document lands, and a `replaceOne` without upsert
- * silently writes nothing when the local copy was deleted meanwhile.
- *
- * Whether to embed is the RECEIVER's decision: `enqueueIngestedRecord` resolves `record > schema > space`
- * against this instance's configuration.
- */
-export async function ingestBrainDoc<T extends { _id: string; suppressEmbeddings?: boolean;}>(
-  spaceId: string,
-  recordType: BrainEmbedRecordType | null,
-  collection: string,
-  incoming: T,
-): Promise<void> {
-  await col<T>(`${spaceId}_${collection}`).replaceOne(
-    asFilter<T>({ _id: incoming._id }),
-    asDoc<T>(incoming),
-    { upsert: true },
-  );
-  // Stored at the sender's seq, which this process did not allocate: the pull horizon must cover it (`Q-196`).
-  noteSeqStored(spaceId, (incoming as { seq?: number }).seq ?? 0);
-  /*
-   * `null` means this record kind has NOTHING TO EMBED (a link carries no text) — not "skip the queue this
-   * time". An explicit argument rather than a second ingest function, so a caller that embeds nothing has
-   * to say `null` at the call, where a reviewer sees it.
-   */
-  if (recordType !== null) await enqueueIngestedRecord(spaceId, recordType, incoming);
-
-  /*
-   * No link reconcile here: links replicate as their own documents. Deriving them from an arriving record
-   * would reconcile it to "no links" and delete the link rows that arrived beside it.
-   */
 }
 
 // ── Safety limits ─────────────────────────────────────────────────────────
@@ -269,26 +231,12 @@ export async function ingestFileMeta(spaceId: string, incoming: z.infer<typeof I
     asUpdate<FileMetaDoc>({ $set }),
     { upsert: true },
   );
-  // As `ingestBrainDoc`: a seq this process did not allocate, which the pull horizon must cover.
+  // As the arrival writer's other families: a seq this process did not allocate, which the pull horizon must cover.
   if (typeof incoming.seq === 'number') noteSeqStored(spaceId, incoming.seq);
 
   const haveBytes = existing?.sha256 !== undefined || existing?.sizeBytes !== undefined;
   if (haveBytes) await enqueueIngestedRecord(spaceId, 'file', incoming);
   return true;
-}
-/**
- * Apply a whole PAGE of arriving file metadata on pull, through the same merge as push (`ingestFileMeta`)
- * rather than the engine's `replaceOne` bulk write, so the two directions cannot diverge.
- *
- * A chunk is skipped, not stored: stored, it would appear in every file list as a file.
- */
-export async function applyFileMetaPage(
-  spaceId: string, docs: readonly (z.infer<typeof IncomingFileMetaDoc> & { parentFileId?: string })[],
-): Promise<void> {
-  for (const doc of docs) {
-    if (doc.parentFileId !== undefined) continue;
-    await ingestFileMeta(spaceId, fileMetaForWire(doc) as z.infer<typeof IncomingFileMetaDoc>);
-  }
 }
 
 export const IncomingEntityDoc = z.object({
@@ -632,25 +580,10 @@ export function violationsAgainstLocalSchema(
 }
 
 /**
- * Is this write failure ONLY duplicate-key rejections — the shape two peers produce independently?
- *
- * Two peers creating the same edge independently produce one `{ from, to, label }` triplet under two ids, so
- * the receiver's upsert hits the unique index. Answering that with a 500 would stall the sender's edges
- * channel permanently (its watermark never advances past the batch).
- *
- * Only duplicates: any other write fault still throws, or genuine corruption would be hidden.
- *
- * Both shapes reach here: a single `replaceOne` rejects with `code: 11000`, while a `bulkWrite` collects
- * them into `writeErrors` with no top-level code.
+ * Is this write failure ONLY duplicate-key rejections? The rule lives in `db/write-errors.ts` with every other
+ * reading of a write failure; re-exported here for the sync routes that ask it.
  */
-export function isDuplicateKeyOnly(err: unknown): boolean {
-  const e = err as { code?: number; writeErrors?: Array<{ code?: number; err?: { code?: number } }> };
-  const writeErrors = e?.writeErrors;
-  if (Array.isArray(writeErrors) && writeErrors.length > 0) {
-    return writeErrors.every(w => (w.code ?? w.err?.code) === 11000);
-  }
-  return e?.code === 11000;
-}
+export { isDuplicateKeyOnly } from '../../db/write-errors.js';
 
 /**
  * Attach the violations to a single-record ingest response — the one spelling of that rule, so every

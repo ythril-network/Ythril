@@ -6,21 +6,23 @@
  * family is what forced the extraction.
  */
 import { Router, type Request, type Response } from 'express';
-import { v4 as uuidv4 } from 'uuid';
-import { col, asFilter, asUpdate } from '../../db/mongo.js';
+import { col, asFilter } from '../../db/mongo.js';
 import { syncRateLimit } from '../../rate-limit/middleware.js';
 import { getAllowedChronoTypes } from '../../spaces/schema-validation.js';
 import { getConfig } from '../../config/loader.js';
 import { listTombstones } from '../../brain/tombstones.js';
 import { requireAuth, denyReadOnly } from '../../auth/middleware.js';
-import { log } from '../../util/log.js';
+import { log, logSafe } from '../../util/log.js';
 import { reportServerFailure } from '../../util/report-failure.js';
 import { withSeq, bumpSeq, isSeqImplausible, MAX_INGEST_SEQ, settledSeqRange } from '../../util/seq.js';
-import type { FactDoc, EntityDoc, EdgeDoc, ChronoEntry, LinkDoc, TombstoneDoc } from '../../config/types.js';
+import type { FactDoc, EntityDoc, EdgeDoc, ChronoEntry, LinkDoc, TombstoneDoc, BrainCollection } from '../../config/types.js';
 import type { FileMetaDoc } from '../../config/types.js';
 import { LOCAL_ONLY_EXCLUSION } from '../../sync/local-only-fields.js';
-import { checkEdgeLinkViolations, checkLinkViolations, MAX_FORK_DEPTH, IncomingFactDoc, IncomingEntityDoc, IncomingEdgeDoc, IncomingChronoDoc, IncomingLinkDoc, IncomingFileMetaDoc, ingestFileMeta, encodeCursor, decodeCursor, forkChainDepth, rejectImplausibleSeq, callerPeerId, spaceAllowed, isNonPeerSyncWrite, NON_PEER_WRITE_MESSAGE, isDirectionalWriteBlocked, violationsAgainstLocalSchema, withSchemaViolations, isDuplicateKeyOnly, ingestBrainDoc } from './_shared.js';
+import { checkEdgeLinkViolations, checkLinkViolations, MAX_FORK_DEPTH, IncomingFactDoc, IncomingEntityDoc, IncomingEdgeDoc, IncomingChronoDoc, IncomingLinkDoc, IncomingFileMetaDoc, encodeCursor, decodeCursor, forkChainDepth, rejectImplausibleSeq, callerPeerId, spaceAllowed, isNonPeerSyncWrite, NON_PEER_WRITE_MESSAGE, isDirectionalWriteBlocked, violationsAgainstLocalSchema, withSchemaViolations } from './_shared.js';
 import { spaceCollection } from '../../db/space-collection.js';
+import { writeArrivals, type ArrivalOutcome } from '../../sync/arrivals.js';
+import { RECORD_TYPE_OF } from '../../sync/replicated-families.js';
+import { forkIdFor } from '../../sync/upsert-plan.js';
 
 export const syncDocsRouter = Router();
 
@@ -78,7 +80,7 @@ function pageBySeq<T extends { _id: string; seq: number }>(
       /*
        * The local-only fields never leave, which is the SAVING rather than the guarantee — a vector is
        * several hundred floats per record and was the bulk of every page. The guarantee is the receiver's
-       * strip in `sync/engine.ts`, because a peer decides what it sends and we decide what we store.
+       * arrival writer (`sync/arrivals.ts`), because a peer decides what it sends and we decide what we store.
        */
       const rawDocs = returnFull
         ? await found.project(LOCAL_ONLY_EXCLUSION).toArray() as T[]
@@ -184,11 +186,86 @@ syncDocsRouter.get('/links/:id', syncRateLimit, requireAuth, oneById<LinkDoc>('l
 syncDocsRouter.get('/filemeta/:id', syncRateLimit, requireAuth, oneById<FileMetaDoc>('files'));
 
 
-/**
- * GET /api/sync/facts/:id?spaceId=
- * Fetch a single full fact document.
+// ═══════════════════════════════════════════════════════════════════════════
+// THE PUSH DOORS — how a pushed document is stored (5.6.2, `Q-218`)
+// ═══════════════════════════════════════════════════════════════════════════
+/*
+ * Every pushed record is stored by the arrival writer (`sync/arrivals.ts`, `writeArrivals`), the one writer of a
+ * record produced elsewhere: retagged to this space, the receiver's own vector and stamps carried across the
+ * replace, written under the seq guard, the counter moved and the record queued for embedding by THIS instance's
+ * rules. The doors below keep 5.6.1's per-document reading of a page — the same statuses, the same counters, the
+ * same order — and decide only WHICH documents land; the writer is the only thing here that writes a record.
+ *
+ * Each door awaits the counter past every seq it parsed before it answers (`Q-198`), the 400s that follow the parse
+ * included: a peer told its push landed while this counter is behind lets the next local write sort below a record
+ * the peer already holds.
  */
 
+/** One pushed document through the writer, its family's own record type at the call. */
+function landOne(spaceId: string, family: BrainCollection, doc: object, from: string): Promise<ArrivalOutcome> {
+  return writeArrivals(spaceId, family, RECORD_TYPE_OF[family], [doc], { from });
+}
+
+/** What one document's write came to, read off the writer's outcome. */
+type Landing = 'inserted' | 'updated' | 'newer-here' | 'duplicate' | 'derived' | 'store-refused';
+function landingOf(out: ArrivalOutcome, id: string): Landing {
+  if (out.inserted.includes(id)) return 'inserted';
+  if (out.updated.includes(id)) return 'updated';
+  if (out.duplicates.includes(id)) return 'duplicate';
+  if (out.derived.includes(id)) return 'derived';
+  if (out.storeRefused.some(r => r._id === id)) return 'store-refused';
+  return 'newer-here';
+}
+const landed = (l: Landing): boolean => l === 'inserted' || l === 'updated';
+
+/**
+ * Cut `C3`: a document the STORE refuses is answered on a single route as 5.6.1 answered it — the route's 500
+ * `Internal error` — never main's 400 naming the refusal, which is a status no 5.6.1 peer was ever sent.
+ */
+function failOnStoreRefusal(l: Landing, route: string, id: string): void {
+  if (l === 'store-refused') throw new Error(`sync POST ${route}: the store refused '${logSafe(id)}'`);
+}
+
+/** The peer a push came from, for the writer's log lines. */
+const pushedBy = (req: Request): string => callerPeerId(req.authToken as Record<string, unknown>) ?? 'unknown peer';
+
+function tombstoneFor(spaceId: string, id: string, type: TombstoneDoc['type']): Promise<TombstoneDoc | null> {
+  return col<TombstoneDoc>(spaceCollection(spaceId, 'tombstones'))
+    .findOne(asFilter<TombstoneDoc>({ _id: id, type })) as Promise<TombstoneDoc | null>;
+}
+
+/**
+ * `F6`: a stale tombstone is deleted only once the record that supersedes it has LANDED, and only below that
+ * record's seq. 5.6.1 deleted it first and then wrote, so a write that failed left the record absent AND its
+ * deletion gone, and the next push of an older copy was accepted instead of refused.
+ */
+async function dropSupersededTombstone(spaceId: string, tomb: TombstoneDoc | null, id: string, seq: number): Promise<void> {
+  if (!tomb) return;
+  await col<TombstoneDoc>(spaceCollection(spaceId, 'tombstones'))
+    .deleteOne(asFilter<TombstoneDoc>({ _id: id, seq: { $lt: seq } as unknown as number }));
+}
+
+/** The skip and fork branches keep 5.6.1's cleanup: a tombstone below the incoming seq goes, nothing written. */
+async function dropStaleTombstone(spaceId: string, tomb: TombstoneDoc | null, id: string): Promise<void> {
+  if (!tomb) return;
+  await col<TombstoneDoc>(spaceCollection(spaceId, 'tombstones')).deleteOne(asFilter<TombstoneDoc>({ _id: id }));
+}
+
+/**
+ * A fork of `incoming`, written by the writer at a LOCAL seq. Its id is DERIVED from the parent, the shared seq and
+ * the diverging text (`forkIdFor`), so a push re-sent after its 200 was lost upserts the fork it already made
+ * instead of forking again.
+ */
+function writeFork(spaceId: string, incoming: FactDoc, from: string): Promise<{ doc: FactDoc; landing: Landing }> {
+  return withSeq(spaceId, async (forkSeq) => {
+    const now = new Date().toISOString();
+    const doc: FactDoc = {
+      ...incoming, _id: forkIdFor(incoming._id, incoming.seq, incoming.fact), forkOf: incoming._id, seq: forkSeq,
+      createdAt: now, updatedAt: now,
+    };
+    return { doc, landing: landingOf(await landOne(spaceId, 'facts', doc, from), doc._id) };
+  });
+}
 
 /**
  * POST /api/sync/facts?spaceId=&networkId=
@@ -210,39 +287,37 @@ syncDocsRouter.post('/facts', syncRateLimit, requireAuth, denyReadOnly, async (r
     }
     const incoming = parsed.data as FactDoc;
     if (rejectImplausibleSeq(spaceId, incoming.seq, res, callerPeerId(req.authToken as Record<string, unknown>))) return;
+    // Q-198: past what was received, before any answer — the fork-cap 400s below were parsed too.
+    await bumpSeq(spaceId, incoming.seq);
 
     // Computed before any store, and reported on every exit that KEPT something. The `tombstoned` and
     // `skipped` exits store nothing, so there is no accepted record for them to describe.
     const violations = violationsAgainstLocalSchema(spaceId, 'fact', incoming as unknown as Record<string, unknown>);
 
     // Check for tombstone — if a tombstone with >= seq exists, skip
-    const tombstone = await col<TombstoneDoc>(spaceCollection(spaceId, 'tombstones'))
-      .findOne(asFilter<TombstoneDoc>({ _id: incoming._id, type: 'fact' })) as TombstoneDoc | null;
+    const tombstone = await tombstoneFor(spaceId, incoming._id, 'fact');
     if (tombstone && tombstone.seq >= incoming.seq) {
       res.status(200).json({ status: 'tombstoned' });
       return;
-    }
-    // Clean up stale tombstone superseded by the incoming document
-    if (tombstone) {
-      await col<TombstoneDoc>(spaceCollection(spaceId, 'tombstones')).deleteOne(asFilter<TombstoneDoc>({ _id: incoming._id }));
     }
 
     const existing = await col<FactDoc>(spaceCollection(spaceId, 'facts'))
       .findOne(asFilter<FactDoc>({ _id: incoming._id })) as FactDoc | null;
 
-    if (!existing) {
-      // No local copy — insert directly
-      await ingestBrainDoc<FactDoc>(spaceId, 'fact', 'facts', incoming);
-      res.status(200).json(withSchemaViolations({ status: 'inserted' }, violations));
+    if (!existing || incoming.seq > existing.seq) {
+      // No local copy, or the remote is newer: the writer stores it, guarded against a newer copy written meanwhile.
+      const landing = landingOf(await landOne(spaceId, 'facts', incoming, pushedBy(req)), incoming._id);
+      failOnStoreRefusal(landing, 'facts', incoming._id);
+      if (landing === 'inserted' || landing === 'updated') {
+        await dropSupersededTombstone(spaceId, tombstone, incoming._id, incoming.seq);
+        res.status(200).json(withSchemaViolations({ status: landing }, violations));
+        return;
+      }
+      res.status(200).json({ status: 'skipped' });
       return;
     }
-
-    if (incoming.seq > existing.seq) {
-      // Remote is newer — overwrite
-      await ingestBrainDoc<FactDoc>(spaceId, 'fact', 'facts', incoming);
-      res.status(200).json(withSchemaViolations({ status: 'updated' }, violations));
-      return;
-    }
+    // The skip and fork branches below keep 5.6.1's cleanup of a stale tombstone.
+    await dropStaleTombstone(spaceId, tombstone, incoming._id);
 
     if (incoming.seq === existing.seq && incoming.fact !== existing.fact) {
       // Concurrent independent edit — fork; but cap both chain depth and fan-out.
@@ -258,25 +333,15 @@ syncDocsRouter.post('/facts', syncRateLimit, requireAuth, denyReadOnly, async (r
         res.status(400).json({ error: `Fork depth limit (${MAX_FORK_DEPTH}) exceeded for _id '${incoming._id}'` });
         return;
       }
-      const fork = await withSeq(spaceId, async (forkSeq) => {
-        const doc: FactDoc = {
-          ...incoming,
-          _id: uuidv4(),
-          forkOf: incoming._id,
-          seq: forkSeq,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        };
-        await ingestBrainDoc<FactDoc>(spaceId, 'fact', 'facts', doc);
-        return doc;
-      });
-      res.status(200).json(withSchemaViolations({ status: 'forked', forkId: fork._id }, violations));
+      const fork = await writeFork(spaceId, incoming, pushedBy(req));
+      failOnStoreRefusal(fork.landing, 'facts', fork.doc._id);
+      res.status(200).json(withSchemaViolations({ status: 'forked', forkId: fork.doc._id }, violations));
       return;
     }
 
     res.status(200).json({ status: 'skipped' });
   } catch (err) {
-    log.error(`sync POST facts: ${err}`);
+    log.error(`sync POST facts: ${logSafe(String(err))}`);
     res.status(500).json({ error: 'Internal error' });
   }
 });
@@ -305,36 +370,37 @@ syncDocsRouter.post('/entities', syncRateLimit, requireAuth, denyReadOnly, async
     }
     const incoming = parsed.data as EntityDoc;
     if (rejectImplausibleSeq(spaceId, incoming.seq, res, callerPeerId(req.authToken as Record<string, unknown>))) return;
+    // Q-198: past what was received, before the answer.
+    await bumpSeq(spaceId, incoming.seq);
 
     // Before the upsert, so the record reported on is the one the peer sent rather than whatever the
     // store settled on. The `tombstoned` exit keeps nothing and so reports nothing.
     const violations = violationsAgainstLocalSchema(spaceId, 'entity', incoming as unknown as Record<string, unknown>);
 
-    const tombstone = await col<TombstoneDoc>(spaceCollection(spaceId, 'tombstones'))
-      .findOne(asFilter<TombstoneDoc>({ _id: incoming._id, type: 'entity' })) as TombstoneDoc | null;
+    const tombstone = await tombstoneFor(spaceId, incoming._id, 'entity');
     if (tombstone && tombstone.seq >= incoming.seq) {
       res.status(200).json({ status: 'tombstoned' });
       return;
     }
-    if (tombstone) {
-      await col<TombstoneDoc>(spaceCollection(spaceId, 'tombstones')).deleteOne(asFilter<TombstoneDoc>({ _id: incoming._id }));
-    }
 
-    await col<EntityDoc>(spaceCollection(spaceId, 'entities')).updateOne(
-      asFilter<EntityDoc>({ _id: incoming._id }),
-      asUpdate<EntityDoc>({ $setOnInsert: incoming }),
-      { upsert: true },
-    );
-
-    // Merge tags on conflict
-    const existing = await col<EntityDoc>(spaceCollection(spaceId, 'entities')).findOne(asFilter<EntityDoc>({ _id: incoming._id })) as EntityDoc;
-    if (existing && incoming.seq > existing.seq) {
-      await ingestBrainDoc<EntityDoc>(spaceId, 'entity', 'entities', incoming);
+    /*
+     * New or newer: stored by the writer. This was a raw `$setOnInsert` followed by a replace only when the
+     * incoming seq beat the copy just inserted — which it never does — so a NEW entity pushed singly was stored
+     * and never queued for embedding. Every outcome still answers `ok`, as it always has.
+     */
+    const existing = await col<EntityDoc>(spaceCollection(spaceId, 'entities'))
+      .findOne(asFilter<EntityDoc>({ _id: incoming._id }), { projection: { seq: 1 } }) as { seq: number } | null;
+    if (!existing || incoming.seq > existing.seq) {
+      const landing = landingOf(await landOne(spaceId, 'entities', incoming, pushedBy(req)), incoming._id);
+      failOnStoreRefusal(landing, 'entities', incoming._id);
+      if (landed(landing)) await dropSupersededTombstone(spaceId, tombstone, incoming._id, incoming.seq);
+    } else {
+      await dropStaleTombstone(spaceId, tombstone, incoming._id);
     }
 
     res.status(200).json(withSchemaViolations({ status: 'ok' }, violations));
   } catch (err) {
-    log.error(`sync POST entities: ${err}`);
+    log.error(`sync POST entities: ${logSafe(String(err))}`);
     res.status(500).json({ error: 'Internal error' });
   }
 });
@@ -363,26 +429,26 @@ syncDocsRouter.post('/edges', syncRateLimit, requireAuth, denyReadOnly, async (r
     }
     const incoming = parsed.data as EdgeDoc;
     if (rejectImplausibleSeq(spaceId, incoming.seq, res, callerPeerId(req.authToken as Record<string, unknown>))) return;
+    // Q-198: past what was received, before the answer.
+    await bumpSeq(spaceId, incoming.seq);
 
     // Before the upsert, so the record reported on is the one the peer sent rather than whatever the
     // store settled on. The `tombstoned` exit keeps nothing and so reports nothing.
     const violations = violationsAgainstLocalSchema(spaceId, 'edge', incoming as unknown as Record<string, unknown>);
 
-    const tombstone = await col<TombstoneDoc>(spaceCollection(spaceId, 'tombstones'))
-      .findOne(asFilter<TombstoneDoc>({ _id: incoming._id, type: 'edge' })) as TombstoneDoc | null;
+    const tombstone = await tombstoneFor(spaceId, incoming._id, 'edge');
     if (tombstone && tombstone.seq >= incoming.seq) {
       res.status(200).json({ status: 'tombstoned' });
       return;
     }
-    if (tombstone) {
-      await col<TombstoneDoc>(spaceCollection(spaceId, 'tombstones')).deleteOne(asFilter<TombstoneDoc>({ _id: incoming._id }));
-    }
 
-    const existing = await col<EdgeDoc>(spaceCollection(spaceId, 'edges')).findOne(asFilter<EdgeDoc>({ _id: incoming._id })) as EdgeDoc | null;
+    const existing = await col<EdgeDoc>(spaceCollection(spaceId, 'edges'))
+      .findOne(asFilter<EdgeDoc>({ _id: incoming._id }), { projection: { seq: 1 } }) as { seq: number } | null;
     let duplicateTriplet = false;
     if (!existing || incoming.seq > existing.seq) {
       /*
-       * A duplicate TRIPLET is a 200, not a 500 — see `isDuplicateKeyOnly`.
+       * A duplicate TRIPLET is a 200, not a 500: the writer reads a unique-index collision back as a duplicate
+       * (`duplicates`), never a fault.
        *
        * The upsert is keyed on `_id`, which this peer has never seen, so it inserts; the space's unique
        * `{ from, to, label }` index then rejects it because the same relationship already exists locally under
@@ -391,19 +457,14 @@ syncDocsRouter.post('/edges', syncRateLimit, requireAuth, denyReadOnly, async (r
        * peer never advances again.
        *
        * Same policy as the pull side: the local copy stands, the incoming one is not applied, and the caller
-       * is told which it was rather than left to infer it from a status code.
+       * is told which it was rather than left to infer it from a status code. The writer logs it, naming the id.
        */
-      try {
-        await ingestBrainDoc<EdgeDoc>(spaceId, 'edge', 'edges', incoming);
-      } catch (err) {
-        if (!isDuplicateKeyOnly(err)) throw err;
-        duplicateTriplet = true;
-        log.warn(
-          `sync POST edges: '${incoming._id}' duplicates an existing triplet `
-          + `(${incoming.from} -[${incoming.label}]-> ${incoming.to}) in space '${spaceId}'. The local copy is `
-          + 'kept and the incoming one is not applied.',
-        );
-      }
+      const landing = landingOf(await landOne(spaceId, 'edges', incoming, pushedBy(req)), incoming._id);
+      failOnStoreRefusal(landing, 'edges', incoming._id);
+      duplicateTriplet = landing === 'duplicate';
+      if (landed(landing)) await dropSupersededTombstone(spaceId, tombstone, incoming._id, incoming.seq);
+    } else {
+      await dropStaleTombstone(spaceId, tombstone, incoming._id);
     }
 
     // Fire-and-forget: check strict linkage violations after ingest
@@ -416,7 +477,7 @@ syncDocsRouter.post('/edges', syncRateLimit, requireAuth, denyReadOnly, async (r
       { status: duplicateTriplet ? 'duplicate' : 'ok' }, violations,
     ));
   } catch (err) {
-    log.error(`sync POST edges: ${err}`);
+    log.error(`sync POST edges: ${logSafe(String(err))}`);
     res.status(500).json({ error: 'Internal error' });
   }
 });
@@ -445,6 +506,8 @@ syncDocsRouter.post('/chrono', syncRateLimit, requireAuth, denyReadOnly, async (
     }
     const incoming = parsed.data as ChronoEntry;
     if (rejectImplausibleSeq(spaceId, incoming.seq, res, callerPeerId(req.authToken as Record<string, unknown>))) return;
+    // Q-198: past what was received, before any answer — the unknown-type 400 below was parsed too.
+    await bumpSeq(spaceId, incoming.seq);
     /*
      * REPORTED, NOT REFUSED — owner's ruling P-21 = C, 2026-08-29.
      *
@@ -476,28 +539,27 @@ syncDocsRouter.post('/chrono', syncRateLimit, requireAuth, denyReadOnly, async (
     }
     const chronoViolations = violationsAgainstLocalSchema(spaceId, 'chrono', incoming as unknown as Record<string, unknown>);
 
-    const tombstone = await col<TombstoneDoc>(spaceCollection(spaceId, 'tombstones'))
-      .findOne(asFilter<TombstoneDoc>({ _id: incoming._id, type: 'chrono' })) as TombstoneDoc | null;
+    const tombstone = await tombstoneFor(spaceId, incoming._id, 'chrono');
     if (tombstone && tombstone.seq >= incoming.seq) {
       res.status(200).json({ status: 'tombstoned' });
       return;
     }
-    if (tombstone) {
-      await col<TombstoneDoc>(spaceCollection(spaceId, 'tombstones')).deleteOne(asFilter<TombstoneDoc>({ _id: incoming._id }));
-    }
 
-    const existing = await col<ChronoEntry>(spaceCollection(spaceId, 'chrono')).findOne(asFilter<ChronoEntry>({ _id: incoming._id })) as ChronoEntry | null;
+    const existing = await col<ChronoEntry>(spaceCollection(spaceId, 'chrono'))
+      .findOne(asFilter<ChronoEntry>({ _id: incoming._id }), { projection: { seq: 1 } }) as { seq: number } | null;
     if (!existing || incoming.seq > existing.seq) {
-      await ingestBrainDoc<ChronoEntry>(spaceId, 'chrono', 'chrono', incoming);
+      const landing = landingOf(await landOne(spaceId, 'chrono', incoming, pushedBy(req)), incoming._id);
+      failOnStoreRefusal(landing, 'chrono', incoming._id);
+      if (landed(landing)) await dropSupersededTombstone(spaceId, tombstone, incoming._id, incoming.seq);
+    } else {
+      await dropStaleTombstone(spaceId, tombstone, incoming._id);
     }
-
-    // Fire-and-forget: check strict linkage violations after ingest
 
     // The violations travel back so the receiving operator can see what arrived out of shape. Absent when
     // there are none, so a clean ingest keeps its existing response byte for byte.
     res.status(200).json(withSchemaViolations({ status: 'ok' }, chronoViolations));
   } catch (err) {
-    log.error(`sync POST chrono: ${err}`);
+    log.error(`sync POST chrono: ${logSafe(String(err))}`);
     res.status(500).json({ error: 'Internal error' });
   }
 });
@@ -509,9 +571,10 @@ syncDocsRouter.post('/chrono', syncRateLimit, requireAuth, denyReadOnly, async (
 
 /**
  * POST /api/sync/batch-upsert?spaceId=&networkId=
- * Accept arrays of facts, entities and/or edges and upsert them all in one
- * request.  Same conflict rules as the individual POST endpoints.
- * Limits: 500 docs per type per request to cap payload size.
+ * Accept arrays of every replicated family (facts, entities, edges, chrono, links, file metadata) and store
+ * them all in one request, each document read in order by the same conflict rules as the individual POST
+ * endpoints, and every one written by the arrival writer. Limits: 500 docs per family per request; what a family
+ * carries beyond that is dropped and counted nowhere (cut `C2`, as 5.6.1).
  */
 syncDocsRouter.post('/batch-upsert', syncRateLimit, requireAuth, denyReadOnly, async (req, res) => {
   try {
@@ -525,8 +588,8 @@ syncDocsRouter.post('/batch-upsert', syncRateLimit, requireAuth, denyReadOnly, a
     /*
      * A document the schema rejects is REPORTED, never silently removed.
      *
-     * This used to be a bare `flatMap` returning `[]` on a failed `safeParse`, and the comment below still says
-     * "batch ingest already skips invalid documents silently" as though that were harmless. It was not: the
+     * This used to be a bare `flatMap` returning `[]` on a failed `safeParse`, under a comment that said "batch
+     * ingest already skips invalid documents silently" as though that were harmless. It was not: the
      * document left the batch, was counted in no statistic, and the receiver answered 200 — after which the
      * sender advanced its watermark and never offered the record again. A required `embedding` on
      * `IncomingFactDoc` made that the ordinary fate of every suppressed fact.
@@ -545,12 +608,13 @@ syncDocsRouter.post('/batch-upsert', syncRateLimit, requireAuth, denyReadOnly, a
         if (r.success) return [r.data as T];
         drop(kind);
         const id = (d as { _id?: unknown })?._id;
+        // The id, the peer and the issues are a peer's text: `logSafe`, so none can start a log line of its own.
         log.warn(
-          `batch-upsert: REJECTED ${kind} '${typeof id === 'string' ? id : '(no id)'}' for space '${spaceId}' `
-          + `from peer '${callerPeerId(req.authToken as Record<string, unknown>) ?? 'unknown'}' — it did not `
+          `batch-upsert: REJECTED ${kind} '${typeof id === 'string' ? logSafe(id) : '(no id)'}' for space '${spaceId}' `
+          + `from peer '${logSafe(callerPeerId(req.authToken as Record<string, unknown>) ?? 'unknown')}' — it did not `
           + `match ${kind === 'fact' ? 'IncomingFactDoc' : `Incoming${kind[0]!.toUpperCase()}${kind.slice(1)}Doc`}. `
           + `The sender will advance past it and not offer it again. Issues: `
-          + `${JSON.stringify(r.error?.issues ?? []).slice(0, 400)}`,
+          + `${logSafe(JSON.stringify(r.error?.issues ?? []).slice(0, 400))}`,
         );
         return [];
       });
@@ -580,9 +644,9 @@ syncDocsRouter.post('/batch-upsert', syncRateLimit, requireAuth, denyReadOnly, a
         if (!isSeqImplausible(d.seq)) return true;
         drop(kind);
         log.warn(
-          `batch-upsert: dropped ${kind} '${d._id}' with implausible seq ${d.seq} ` +
+          `batch-upsert: dropped ${kind} '${logSafe(d._id)}' with implausible seq ${d.seq} ` +
           `for space '${spaceId}' (max ingest seq ${MAX_INGEST_SEQ}) from peer ` +
-          `'${callerPeerId(req.authToken as Record<string, unknown>) ?? 'unknown'}'.`,
+          `'${logSafe(callerPeerId(req.authToken as Record<string, unknown>) ?? 'unknown')}'.`,
         );
         return false;
       });
@@ -592,6 +656,27 @@ syncDocsRouter.post('/batch-upsert', syncRateLimit, requireAuth, denyReadOnly, a
     const chrono = plausible(chronoRaw, 'chrono');
     const links = plausible(linksRaw, 'link');
     const fileMeta = plausible(fileMetaRaw, 'filemeta');
+
+    /*
+     * THE PAGE'S CLOCK FIRST (`Q-198`): the counter past every plausible seq this page carried — all six families,
+     * whatever becomes of each document (a tombstoned, a skipped or an unknown-type one is the peer's clock too) —
+     * before anything is written, so a fork allocated below sorts above everything the page carried. A counter
+     * that cannot be moved does not cost the page (each landed chunk is bumped and queued by the writer, which logs
+     * its own failure); it is tried again before the answer, and THAT one is not swallowed, so the sender is never
+     * told the page landed while the counter is behind it.
+     */
+    const pageMax = Math.max(0, ...[facts, entities, edges, chrono, links, fileMeta].flatMap(f => f.map(d => d.seq ?? 0)));
+    let clockBehind = false;
+    try {
+      if (pageMax > 0) await bumpSeq(spaceId, pageMax);
+    } catch (err) {
+      clockBehind = true;
+      log.warn(`batch-upsert: the seq counter of space '${spaceId}' could not be moved to ${pageMax} before the page `
+        + `was written: ${logSafe(err instanceof Error ? err.message : String(err))}`);
+    }
+    const from = pushedBy(req);
+    /** Cut `C3`: documents the STORE refused. The rest of the page is still written; the page then answers 500. */
+    const storeRefused: string[] = [];
 
     // ── Facts ─────────────────────────────────────────────────────────
     // `skipped` = the peer is already current (benign). `forkDepthRefused` = a record was DROPPED. They were
@@ -611,21 +696,24 @@ syncDocsRouter.post('/batch-upsert', syncRateLimit, requireAuth, denyReadOnly, a
      */
     for (const incoming of facts) {
       if (violationsAgainstLocalSchema(spaceId, 'fact', incoming as unknown as Record<string, unknown>).length > 0) memStats.schemaViolations++;
-      const tomb = await col<TombstoneDoc>(spaceCollection(spaceId, 'tombstones'))
-        .findOne(asFilter<TombstoneDoc>({ _id: incoming._id, type: 'fact' })) as TombstoneDoc | null;
+      const tomb = await tombstoneFor(spaceId, incoming._id, 'fact');
       if (tomb && tomb.seq >= incoming.seq) { memStats.tombstoned++; continue; }
-      if (tomb) await col<TombstoneDoc>(spaceCollection(spaceId, 'tombstones')).deleteOne(asFilter<TombstoneDoc>({ _id: incoming._id }));
 
       const existing = await col<FactDoc>(spaceCollection(spaceId, 'facts'))
         .findOne(asFilter<FactDoc>({ _id: incoming._id })) as FactDoc | null;
-      if (!existing) {
-        await ingestBrainDoc<FactDoc>(spaceId, 'fact', 'facts', incoming);
-        memStats.inserted++;
-      } else if (incoming.seq > existing.seq) {
-        await ingestBrainDoc<FactDoc>(spaceId, 'fact', 'facts', incoming);
-        memStats.updated++;
-      } else if (incoming.seq === existing.seq && incoming.fact !== existing.fact) {
-        // Cap fork chains to prevent unbounded growth
+      if (!existing || incoming.seq > existing.seq) {
+        const landing = landingOf(await landOne(spaceId, 'facts', incoming, from), incoming._id);
+        if (landing === 'store-refused') { storeRefused.push(incoming._id); continue; }
+        if (landing === 'inserted') memStats.inserted++;
+        else if (landing === 'updated') memStats.updated++;
+        else memStats.skipped++;
+        if (landed(landing)) await dropSupersededTombstone(spaceId, tomb, incoming._id, incoming.seq);
+        continue;
+      }
+      // The skip and fork branches keep 5.6.1's cleanup of a stale tombstone.
+      await dropStaleTombstone(spaceId, tomb, incoming._id);
+      if (incoming.seq === existing.seq && incoming.fact !== existing.fact) {
+        // Cap fork chains to prevent unbounded growth. Depth only on this door — no fan-out cap (cut `C1`, as 5.6.1).
         const depth = await forkChainDepth(spaceId, incoming._id);
         if (depth >= MAX_FORK_DEPTH) {
           /*
@@ -634,25 +722,23 @@ syncDocsRouter.post('/batch-upsert', syncRateLimit, requireAuth, denyReadOnly, a
            * Those two outcomes could not be more different. The common `skipped` — `existing.seq >=
            * incoming.seq` — means the peer is already current: nothing is lost and the sender is right to
            * advance past it. THIS one means divergent content at the same seq that cannot fork any deeper,
-           * so the incoming version is discarded. Sharing one integer made the lossy case unobservable, and
-           * `sync/engine.ts` reads only `resp.ok` — so the sender advances its watermark past it and never
-           * sends it again.
+           * so the incoming version is discarded. Sharing one integer made the lossy case unobservable; the
+           * sender now subtracts `rejected` from what it calls pushed (`sync/push-refusals.ts`, `Q-59`), but it
+           * still advances its watermark past the record and never sends it again.
            *
            * Counted apart and logged HERE because this is the side that knows why. It does not change
            * delivery: holding the watermark back would re-push a record the peer will refuse identically
            * every cycle. The fix is visibility, exactly as the media-worker swallow was.
            */
           memStats.forkDepthRefused++;
-          log.warn(`sync batch-upsert: DROPPED fact ${incoming._id} in '${spaceId}' — divergent content at `
+          log.warn(`sync batch-upsert: DROPPED fact ${logSafe(incoming._id)} in '${spaceId}' — divergent content at `
             + `seq ${incoming.seq} and the fork chain is already ${depth} deep (MAX_FORK_DEPTH=${MAX_FORK_DEPTH}). `
             + 'The sender will not offer it again. Resolve the fork chain to accept it.');
           continue;
         }
 
-        await withSeq(spaceId, (forkSeq) => ingestBrainDoc<FactDoc>(spaceId, 'fact', 'facts', {
-          ...incoming, _id: uuidv4(), forkOf: incoming._id, seq: forkSeq,
-          createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
-        }));
+        const fork = await writeFork(spaceId, incoming, from);
+        if (fork.landing === 'store-refused') { storeRefused.push(fork.doc._id); continue; }
         memStats.forked++;
       } else {
         memStats.skipped++;
@@ -663,17 +749,22 @@ syncDocsRouter.post('/batch-upsert', syncRateLimit, requireAuth, denyReadOnly, a
     const entStats = { upserted: 0, skipped: 0, tombstoned: 0, schemaViolations: 0 };
     for (const incoming of entities) {
       if (violationsAgainstLocalSchema(spaceId, 'entity', incoming as unknown as Record<string, unknown>).length > 0) entStats.schemaViolations++;
-      const tomb = await col<TombstoneDoc>(spaceCollection(spaceId, 'tombstones'))
-        .findOne(asFilter<TombstoneDoc>({ _id: incoming._id, type: 'entity' })) as TombstoneDoc | null;
+      const tomb = await tombstoneFor(spaceId, incoming._id, 'entity');
       if (tomb && tomb.seq >= incoming.seq) { entStats.tombstoned++; continue; }
-      if (tomb) await col<TombstoneDoc>(spaceCollection(spaceId, 'tombstones')).deleteOne(asFilter<TombstoneDoc>({ _id: incoming._id }));
 
       const existing = await col<EntityDoc>(spaceCollection(spaceId, 'entities'))
-        .findOne(asFilter<EntityDoc>({ _id: incoming._id })) as EntityDoc | null;
+        .findOne(asFilter<EntityDoc>({ _id: incoming._id }), { projection: { seq: 1 } }) as { seq: number } | null;
       if (!existing || incoming.seq > existing.seq) {
-        await ingestBrainDoc<EntityDoc>(spaceId, 'entity', 'entities', incoming);
-        entStats.upserted++;
+        const landing = landingOf(await landOne(spaceId, 'entities', incoming, from), incoming._id);
+        if (landing === 'store-refused') { storeRefused.push(incoming._id); continue; }
+        if (landed(landing)) {
+          entStats.upserted++;
+          await dropSupersededTombstone(spaceId, tomb, incoming._id, incoming.seq);
+        } else {
+          entStats.skipped++;
+        }
       } else {
+        await dropStaleTombstone(spaceId, tomb, incoming._id);
         entStats.skipped++;
       }
     }
@@ -682,30 +773,25 @@ syncDocsRouter.post('/batch-upsert', syncRateLimit, requireAuth, denyReadOnly, a
     const edgeStats = { upserted: 0, skipped: 0, tombstoned: 0, schemaViolations: 0, duplicateTriplets: 0 };
     for (const incoming of edges) {
       if (violationsAgainstLocalSchema(spaceId, 'edge', incoming as unknown as Record<string, unknown>).length > 0) edgeStats.schemaViolations++;
-      const tomb = await col<TombstoneDoc>(spaceCollection(spaceId, 'tombstones'))
-        .findOne(asFilter<TombstoneDoc>({ _id: incoming._id, type: 'edge' })) as TombstoneDoc | null;
+      const tomb = await tombstoneFor(spaceId, incoming._id, 'edge');
       if (tomb && tomb.seq >= incoming.seq) { edgeStats.tombstoned++; continue; }
-      if (tomb) await col<TombstoneDoc>(spaceCollection(spaceId, 'tombstones')).deleteOne(asFilter<TombstoneDoc>({ _id: incoming._id }));
 
       const existing = await col<EdgeDoc>(spaceCollection(spaceId, 'edges'))
-        .findOne(asFilter<EdgeDoc>({ _id: incoming._id })) as EdgeDoc | null;
+        .findOne(asFilter<EdgeDoc>({ _id: incoming._id }), { projection: { seq: 1 } }) as { seq: number } | null;
       if (!existing || incoming.seq > existing.seq) {
         // The same absorption as the single-record route above. Worse here if it were missing: one duplicate
         // triplet anywhere in a 500-record page would 500 the WHOLE batch, so every other record in it is
-        // discarded too — and the sender re-sends that identical page for ever.
-        try {
-          await ingestBrainDoc<EdgeDoc>(spaceId, 'edge', 'edges', incoming);
+        // discarded too — and the sender re-sends that identical page for ever. The writer reads the collision
+        // back as a duplicate and logs it by id; the local copy is kept and the incoming one is not applied.
+        const landing = landingOf(await landOne(spaceId, 'edges', incoming, from), incoming._id);
+        if (landing === 'store-refused') { storeRefused.push(incoming._id); continue; }
+        if (landing === 'duplicate') edgeStats.duplicateTriplets++;
+        else if (landed(landing)) {
           edgeStats.upserted++;
-        } catch (err) {
-          if (!isDuplicateKeyOnly(err)) throw err;
-          edgeStats.duplicateTriplets++;
-          log.warn(
-            `sync batch-upsert: edge '${incoming._id}' duplicates an existing triplet `
-            + `(${incoming.from} -[${incoming.label}]-> ${incoming.to}) in space '${spaceId}'. The local copy `
-            + 'is kept and the incoming one is not applied.',
-          );
-        }
+          await dropSupersededTombstone(spaceId, tomb, incoming._id, incoming.seq);
+        } else edgeStats.skipped++;
       } else {
+        await dropStaleTombstone(spaceId, tomb, incoming._id);
         edgeStats.skipped++;
       }
     }
@@ -721,17 +807,22 @@ syncDocsRouter.post('/batch-upsert', syncRateLimit, requireAuth, denyReadOnly, a
        * uses. Skipped rather than 400d, because one bad record must not abandon the rest of a batch.
        */
       if (!allowedChronoTypes.has(incoming.type)) { chronoStats.unknownType++; continue; }
-      const tomb = await col<TombstoneDoc>(spaceCollection(spaceId, 'tombstones'))
-        .findOne(asFilter<TombstoneDoc>({ _id: incoming._id, type: 'chrono' })) as TombstoneDoc | null;
+      const tomb = await tombstoneFor(spaceId, incoming._id, 'chrono');
       if (tomb && tomb.seq >= incoming.seq) { chronoStats.tombstoned++; continue; }
-      if (tomb) await col<TombstoneDoc>(spaceCollection(spaceId, 'tombstones')).deleteOne(asFilter<TombstoneDoc>({ _id: incoming._id }));
 
       const existing = await col<ChronoEntry>(spaceCollection(spaceId, 'chrono'))
-        .findOne(asFilter<ChronoEntry>({ _id: incoming._id })) as ChronoEntry | null;
+        .findOne(asFilter<ChronoEntry>({ _id: incoming._id }), { projection: { seq: 1 } }) as { seq: number } | null;
       if (!existing || incoming.seq > existing.seq) {
-        await ingestBrainDoc<ChronoEntry>(spaceId, 'chrono', 'chrono', incoming);
-        chronoStats.upserted++;
+        const landing = landingOf(await landOne(spaceId, 'chrono', incoming, from), incoming._id);
+        if (landing === 'store-refused') { storeRefused.push(incoming._id); continue; }
+        if (landed(landing)) {
+          chronoStats.upserted++;
+          await dropSupersededTombstone(spaceId, tomb, incoming._id, incoming.seq);
+        } else {
+          chronoStats.skipped++;
+        }
       } else {
+        await dropStaleTombstone(spaceId, tomb, incoming._id);
         chronoStats.skipped++;
       }
     }
@@ -746,24 +837,27 @@ syncDocsRouter.post('/batch-upsert', syncRateLimit, requireAuth, denyReadOnly, a
      *   - **No fork resolution.** A fork exists because two peers can write different CONTENT under one id
      *     at one seq. A link has no content — it is two endpoints and their kinds — so two peers writing
      *     "these two records are connected" have written the same fact, and the newer seq simply wins.
-     *   - **No embedding.** `ingestBrainDoc` is passed `null` for the record type, which is that function's
-     *     way of saying this kind has nothing to embed. See its docblock for why that is an argument rather
-     *     than a second ingest function.
+     *   - **No embedding.** `RECORD_TYPE_OF['links']` is `null`, which is the writer's way of saying this kind
+     *     has nothing to embed — an argument at the call rather than a second writer for links.
      *
      * The tombstone check IS here, and unchanged: a delete that has already been applied must not be undone
      * by a stale copy of the record arriving afterwards.
+     *
+     * A link arriving under another id for endpoints already linked here is the SAME link, so the writer's
+     * duplicate is counted `skipped` — on 5.6.1 it reached the catch and the whole page answered 500 (`F9`).
      */
     const linkStats = { upserted: 0, skipped: 0, tombstoned: 0 };
     for (const incoming of links) {
-      const tomb = await col<TombstoneDoc>(spaceCollection(spaceId, 'tombstones'))
-        .findOne(asFilter<TombstoneDoc>({ _id: incoming._id, type: 'link' })) as TombstoneDoc | null;
+      const tomb = await tombstoneFor(spaceId, incoming._id, 'link');
       if (tomb && tomb.seq >= incoming.seq) { linkStats.tombstoned++; continue; }
-      if (tomb) await col<TombstoneDoc>(spaceCollection(spaceId, 'tombstones')).deleteOne(asFilter<TombstoneDoc>({ _id: incoming._id }));
 
       const existing = await col<LinkDoc>(spaceCollection(spaceId, 'links'))
-        .findOne(asFilter<LinkDoc>({ _id: incoming._id })) as LinkDoc | null;
+        .findOne(asFilter<LinkDoc>({ _id: incoming._id }), { projection: { seq: 1 } }) as { seq: number } | null;
       if (!existing || incoming.seq > existing.seq) {
-        await ingestBrainDoc<LinkDoc>(spaceId, null, 'links', incoming);
+        const landing = landingOf(await landOne(spaceId, 'links', incoming, from), incoming._id);
+        if (landing === 'store-refused') { storeRefused.push(incoming._id); continue; }
+        if (!landed(landing)) { linkStats.skipped++; continue; }
+        await dropSupersededTombstone(spaceId, tomb, incoming._id, incoming.seq);
         /*
          * THE LINK VIOLATION CHECK LIVES HERE NOW, on the arriving LINK.
          *
@@ -779,6 +873,7 @@ syncDocsRouter.post('/batch-upsert', syncRateLimit, requireAuth, denyReadOnly, a
         checkLinkViolations(spaceId, incoming, peerInst).catch(() => {});
         linkStats.upserted++;
       } else {
+        await dropStaleTombstone(spaceId, tomb, incoming._id);
         linkStats.skipped++;
       }
     }
@@ -786,9 +881,11 @@ syncDocsRouter.post('/batch-upsert', syncRateLimit, requireAuth, denyReadOnly, a
     /*
      * ── A file's metadata ────────────────────────────────────────────────
      *
-     * Last-writer-wins by seq, like every other family. What is NOT like the others is the write itself:
-     * `ingestFileMeta` sets the authored keys instead of replacing the document, because the receiver
-     * derived `sizeBytes`, `sha256`, the excerpt and the vector from bytes it holds — see that function.
+     * Last-writer-wins by seq, like every other family — the writer's accept, where a record stamped before 4.0
+     * (no seq) is overwritten by anything that arrives. What is NOT like the others is the write itself: the
+     * writer hands it to `ingestFileMeta`, which sets the authored keys instead of replacing the document,
+     * because the receiver derived `sizeBytes`, `sha256`, the excerpt and the vector from bytes it holds. A legacy
+     * read spill is never stored and is counted `skipped`, as 5.6.0 promised (cut `C8`).
      *
      * No tombstone check here. A deleted file has a `FileTombstoneDoc` and `/api/sync/file-tombstones`
      * carries it, which is why `TOMBSTONE_TYPES` has no `file` member; looking in the brain tombstones for
@@ -796,16 +893,10 @@ syncDocsRouter.post('/batch-upsert', syncRateLimit, requireAuth, denyReadOnly, a
      */
     const fileMetaStats = { upserted: 0, skipped: 0 };
     for (const incoming of fileMeta) {
-      const existing = await col<FileMetaDoc>(spaceCollection(spaceId, 'files'))
-        .findOne(asFilter<FileMetaDoc>({ _id: incoming._id }), { projection: { seq: 1 } }) as { seq?: number } | null;
-      // `?? -1` so a record stamped before 4.0 — which has no seq — is overwritten by anything that arrives,
-      // rather than winning for ever against every peer by comparing `undefined`.
-      if (!existing || incoming.seq > (existing.seq ?? -1)) {
-        if (await ingestFileMeta(spaceId, incoming as never)) fileMetaStats.upserted++;
-        else fileMetaStats.skipped++;
-      } else {
-        fileMetaStats.skipped++;
-      }
+      const landing = landingOf(await landOne(spaceId, 'files', incoming, from), incoming._id);
+      if (landing === 'store-refused') { storeRefused.push(incoming._id); continue; }
+      if (landed(landing)) fileMetaStats.upserted++;
+      else fileMetaStats.skipped++;
     }
 
     /*
@@ -850,6 +941,24 @@ syncDocsRouter.post('/batch-upsert', syncRateLimit, requireAuth, denyReadOnly, a
      * reported by the sender as `pushed chrono: 50`, `status: success`.
      */
     const rejected = (kind: string, extra = 0) => (dropped[kind] ?? 0) + extra;
+
+    // The page's clock, again, when it could not be moved before the write — and this one is not swallowed.
+    if (clockBehind && pageMax > 0) await bumpSeq(spaceId, pageMax);
+
+    /*
+     * Cut `C3`: a document the STORE refused is not counted in `rejected` and is not answered 200 — 5.6.1 answered
+     * such a page 500, and a 5.6.1 peer reads a new `rejected` cause as a contract it never agreed to. Unlike 5.6.1
+     * the REST of the page has been written, so the sender's re-send of it is idempotent (same seqs, the writer's
+     * guard, a fork id derived from what it forks) and lands the same records again.
+     */
+    if (storeRefused.length > 0) {
+      log.error(`sync POST batch-upsert: the store refused ${storeRefused.length} document(s) in space '${spaceId}' `
+        + `(${storeRefused.slice(0, 10).map(id => logSafe(id)).join(', ')}); every other document of the page was `
+        + 'written, and the page answers 500 so the sender keeps its watermark.');
+      res.status(500).json({ error: 'Internal error' });
+      return;
+    }
+
     res.status(200).json({
       status: 'ok',
       facts: { ...memStats, rejected: rejected('fact', memStats.forkDepthRefused) },
@@ -859,19 +968,8 @@ syncDocsRouter.post('/batch-upsert', syncRateLimit, requireAuth, denyReadOnly, a
       links: { ...linkStats, rejected: rejected('link') },
       filemeta: { ...fileMetaStats, rejected: rejected('filemeta') },
     });
-
-    // Bump the local seq counter so future local writes always get a seq higher
-    // than any document received via push.  Fire-and-forget after the response.
-    const allSeqs = [
-      ...facts.map(m => m.seq ?? 0),
-      ...entities.map(e => e.seq ?? 0),
-      ...edges.map(e => e.seq ?? 0),
-      ...chrono.map(c => c.seq ?? 0),
-    ];
-    const maxIncoming = Math.max(0, ...allSeqs);
-    if (maxIncoming > 0) bumpSeq(spaceId, maxIncoming).catch(() => {});
   } catch (err) {
-    log.error(`sync POST batch-upsert: ${err}`);
+    log.error(`sync POST batch-upsert: ${logSafe(String(err))}`);
     res.status(500).json({ error: 'Internal error' });
   }
 });
