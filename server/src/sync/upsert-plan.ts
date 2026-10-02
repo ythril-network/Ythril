@@ -72,7 +72,8 @@ export function planSeqUpserts<T extends Replicable>(
 
 /**
  * Is a copy at seq `incoming` newer than one held at `held` — the ONE accept rule of the pull (`planSeqUpserts`),
- * the arrival writer's collapse of a repeated id within one page, and its read-back of a guarded write. Strictly
+ * the push doors (`pushVerdict` in `api/sync/docs.ts`, which every single route and batch family loop asks), the
+ * arrival writer's collapse of a repeated id within one page, and its read-back of a guarded write. Strictly
  * greater, so an equal seq is NOT newer: across peers that makes a re-sync a no-op, and inside one page it means
  * the EARLIER of two equal copies stands — the push door's sequential reading, applied on pull and restore too.
  *
@@ -89,8 +90,9 @@ export function isNewerCopy(incoming: number | undefined, held: number | undefin
  * A fork's id, DERIVED from what it forks: the parent's id, the seq both copies share, and the diverging text.
  *
  * It was `uuidv4()`, so a push whose 200 was lost and is re-sent forked the record again — the stored parent is
- * unchanged, so the retry is divergent all over again. Derived, the retry upserts the fork it already made, and
- * two peers forking the same divergence arrive at one id.
+ * unchanged, so the retry is divergent all over again. Derived, the push door finds the fork it already made and
+ * answers the retry `forked` with it, writing nothing (`heldFork`, before either fork cap), and two peers forking
+ * the same divergence arrive at one id.
  *
  * Shaped as a v4 UUID (version and variant bits set) rather than v5, because a fork id is a fact id and every
  * reader that validates one — link endpoints, the fork-id response — expects that shape. The encoding is

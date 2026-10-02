@@ -85,14 +85,19 @@ describe('every edge ingest absorbs a duplicate triplet', () => {
    */
   const ARRIVALS = stripComments(readFileSync('server/src/sync/arrivals.ts', 'utf8'));
 
-  /** Each place an edge is handed to the writer on the push door — derived, not named: both doors, at least. */
+  /**
+   * Each place an edge is handed to the writer on the push door — derived, not named: both doors, at least. Since
+   * `Q-218` R5 a door lands a document through the one push accept (`applyPushVerdict`), which calls `landOne`.
+   */
   function edgeWrites() {
-    return [...docs.matchAll(/landOne\(\s*spaceId\s*,\s*'edges'\s*,/g)].map(m => m.index);
+    return [...docs.matchAll(/(?:landOne|applyPushVerdict)\(\s*spaceId\s*,\s*'edges'\s*,/g)].map(m => m.index);
   }
 
   it('finds the ingest writes, so an empty sweep cannot pass', () => {
     assert.ok(edgeWrites().length >= 2,
       `expected the single-record route and the batch loop, found ${edgeWrites().length} edge write(s) through the writer`);
+    assert.match(bodyOf(docs, 'applyPushVerdict'), /landOne\(spaceId, family, incoming,/,
+      'the push accept no longer lands a document through the door\'s one-document write');
     assert.match(bodyOf(docs, 'landOne'), /writeArrivals\(spaceId, family, RECORD_TYPE_OF\[family\]/,
       'the push door\'s one-document write no longer goes through the arrival writer');
     assert.doesNotMatch(docs, /\.(?:replaceOne|insertOne|updateOne|bulkWrite)\(/,
