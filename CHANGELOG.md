@@ -18,7 +18,8 @@ are not part of it; they ship in the next minor.
 
 | What changes on upgrade | What to do |
 |---|---|
-| Records pulled from a peer by 5.6.1 or earlier have no vector here and stay out of meaning-ranked search | Run `POST /api/spaces/:id/reembed` (Settings → Spaces → Danger Zone → Backfill embeddings) once per synced space. Pace a large space with `limit`: embedding runs on the server's main thread in 5.6, so it answers more slowly while the backlog drains, and your own new records wait behind it |
+| Records pulled from a peer by 5.6.1 or earlier have no vector here and stay out of meaning-ranked search | Run `POST /api/spaces/:id/reembed` (Settings → Spaces → the space's Danger Zone tab → **Backfill missing embeddings**) once per synced space. Pace a large space with `limit`: embedding runs on the server's main thread in 5.6, so it answers more slowly while the backlog drains, and your own new records wait behind it |
+| A subscriber's first pull now queues every record it receives for embedding, in the same queue as local writes | Nothing to run; expect embedding of your own edits to lag until a large first pull has drained |
 | A space export now carries the space's links | Take a fresh export: one made by 5.6.1 or earlier restores without its links |
 | An import now moves this instance's counter past the records it restored | Nothing |
 | A duplicate link in a push is counted as `skipped` instead of answering `500` | Nothing; a sender that was re-sending that page for ever now moves on |
@@ -48,7 +49,9 @@ are not part of it; they ship in the next minor.
 
 - **A peer's edit erased this instance's own vector and retention stamps.** A pushed or pulled update replaced the
   whole document, so the record stopped expiring here, dropped out of vector search until re-embedded, and was
-  re-embedded even when its text had not changed. They are now kept across the update.
+  re-embedded even when its text had not changed. They are now kept across the update — the vector only while this
+  instance still embeds the record: an arrival this instance suppresses (by the record's own mark, its type's
+  schema or the space) keeps no vector, model or matched text, as 5.6.1 left it.
 
 - **A record pushed in a batch under a `spaceMap` alias kept the sender's space id**, so every list and lookup on
   this instance missed it. It is now stored under the local space id, as the single routes and the pull already did.
@@ -60,7 +63,8 @@ are not part of it; they ship in the next minor.
   wins, and of two copies at the same seq the first is kept.
 
 - **A push re-sent after a lost answer forked a divergent fact again.** A fork's id is now derived from the record
-  and the arrival that caused it, so the re-sent push finds the fork it already made.
+  and the arrival that caused it, so the re-sent push finds the fork it already made and is answered `forked` with
+  its id, writing nothing — also when the parent has reached a fork cap since, where it used to be refused.
 
 - **`POST /api/sync/tombstones` accepted any number as a seq.** A tombstone with a seq inside the protocol's
   ceiling reserve is now refused on its own and logged; it used to refuse every later copy of its record and drag
@@ -76,13 +80,16 @@ are not part of it; they ship in the next minor.
 
 - **A queueing failure after an arrival was silent.** If the record could not be queued for embedding, or the
   counter could not be moved, nothing was logged; both are now warnings, and one failing no longer skips the other.
+  A counter that could not be moved past a pulled page also holds that family's position, so the page is fetched
+  again next cycle; a push answers `500` for it, as it does for any failed write.
 
 #### Security
 
 - **A peer could forge a line in this instance's log.** A document id, a file path or a peer label containing a
   line break was written into the log as it arrived, so a peer could add a line that read exactly like this
-  server's own. Every value a peer sends that reaches a log line on the push, pull and import paths is now written
-  with its control characters escaped (`\r`, `\n`, `\u001b`), so it stays visible and stays on its line.
+  server's own. Every value a peer sends that reaches a log line on the push, pull and import paths — and in the
+  rest of sync: gossip, votes, members, change notes, file sync and the sync triggers — is now written with its
+  control characters escaped (`\r`, `\n`, `\u001b`), so it stays visible and stays on its line.
 
 #### Export and import
 
@@ -92,7 +99,10 @@ are not part of it; they ship in the next minor.
 - **The import kept what this instance derives, and never moved the counter (`Q-205`).** An import stored the
   export's vector model and matched text, kept the retention stamps as text (so the retention sweep never acted on
   them), and left this instance's counter below the restored records. It now leaves out what this instance derives,
-  restores the stamps as dates, and moves the counter past every plausible seq it restored.
+  restores the stamps as dates, and moves the counter past every plausible seq it restored. A restored record holds
+  exactly the stamps and file sync bases its backup carried, never the replaced copy's. A family whose counter
+  could not be moved is answered with every document counted in `errors`, though it is stored; run the import
+  again.
 
 ### Internal
 

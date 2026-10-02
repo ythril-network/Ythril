@@ -355,14 +355,16 @@ several requests. Response includes per-family counters:
 next local write never takes a seq below a record you already hold. A link that arrives under another id for
 endpoints already linked is counted in `skipped` (it answered `500` before 5.6.2, so its page was re-sent for
 ever). A page the store fails part-way through answers `500` after writing the rest of it; re-sending it is safe,
-because a record already stored is skipped and a fork already made is found again by its id.
+because a record already stored is skipped and a fork already made is found again by its id — a re-sent
+divergent fact whose fork is stored is counted `forked` (the single `POST /api/sync/facts` answers
+`{ "status": "forked", "forkId": … }` with that id), writes nothing, and is never refused by a fork cap.
 
 **`skipped` is benign and `forkDepthRefused` is not — read the second one.** They were one counter until now,
 which is the whole reason this paragraph exists.
 
 | counter | what happened | did the record land? |
 |---|---|---|
-| `skipped` | the receiver already holds that record at the same `seq` or newer | **nothing was lost** — this is ordinary conflict resolution and is by far the common case |
+| `skipped` | the receiver already holds that record at the same `seq` or newer; or, for links, already holds the same link under another id; or, for file metadata, the record is a legacy read spill, which never syncs (a derived record — a chunk, a face record — carries `parentFileId`, which the schema refuses, so it is counted in `rejected`) | **nothing was lost** — this is ordinary conflict resolution and is by far the common case |
 | `forkDepthRefused` | facts only: content diverged at an identical `seq` and the record's fork chain is already at its cap, so the incoming version was **discarded** | **no — the record is gone** |
 | `rejected` | every family: the records of this request the receiver refused for any reason (schema, seq, fork cap, undeclared chrono type) | **no** — subtract it from what you count as delivered |
 
@@ -427,7 +429,10 @@ altogether, so a sync page is materially smaller than it was.
 **The receiver keeps its own copy of those fields across your update (5.6.2).** A pushed or pulled edit of a
 record this instance already holds keeps this instance's vector and retention stamps; until 5.6.2 the update
 replaced the whole document, so the record stopped expiring here and was re-embedded even when its text had not
-changed.
+changed. The vector, its model and the matched text are kept only while this instance still embeds the record: an
+update this instance suppresses — by the record's own `suppressEmbeddings`, its type's schema, or the space —
+lands with none of them, as before 5.6.2, because the embed queue skips a suppressed record and nothing would ever
+remove a vector carried onto it.
 
 **The receiver embeds what it accepts, on its own terms.** Every accepted document is queued for embedding
 against the receiving instance's own model, at the moment it is written, whether it arrived by push (batch or

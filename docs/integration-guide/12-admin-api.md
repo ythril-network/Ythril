@@ -135,8 +135,10 @@ A document listed twice is stored once, at its highest `seq` (of two at the same
 What this instance derives is left out of what it stores: `embedding`, `embeddingModel` and `matchedText` are
 dropped, and the record is queued for embedding by this instance's own model. The retention stamps
 (`_expireAt`, `_contentExpireAt`) are restored as dates, so the retention sweep acts on them; a stamp that does not
-parse as a date is dropped. A file's `syncBase` is kept. After the import this instance's seq counter is past every
-plausible `seq` it restored, so the next local write sorts above them.
+parse as a date is dropped. A file's `syncBase` is kept. The restored record holds exactly the stamps and `syncBase`
+the document carried: none is taken from the copy it replaces. After the import this instance's seq counter is past
+every plausible `seq` it restored, so the next local write sorts above them; a collection whose counter could not
+be moved is answered with every document counted in `errors` although it is stored — run the import again.
 
 **Response** `200`:
 
