@@ -17,10 +17,11 @@
  *    Seen red by mutation, restored by hand: `logSafe` bypassed in `warnArrivalsNotStored`.
  * 2. **Source, over the whole set** (R6): a sample proves two paths and says nothing about the next one, which is how
  *    raw `member.label`, `round.roundId`, `remote.path` and `${err}` interpolations survived the first pass. So in
- *    EVERY file on the push, pull and import paths, every `${…}` inside a `log.*(…)` call is either wrapped whole in
- *    `logSafe(…)` or is on `LOCAL_VALUES` — a short list of values this instance owns (a validated space id, a family
- *    name, a number). The file set is DERIVED: every tracked file under `server/src/sync` and `server/src/api/sync`,
- *    and every file that calls `writeArrivals(`, with floors. Comments are blanked before reading (so a comment
+ *    EVERY file on the push, pull, import and gossip paths, every `${…}` inside a `log.*(…)` call is either wrapped
+ *    whole in `logSafe(…)` or is on `LOCAL_VALUES` — a short list of values this instance owns (a validated space id,
+ *    a family name, a number). The file set is DERIVED: every tracked file under `server/src/sync`,
+ *    `server/src/api/sync` and `server/src/networks` (where gossip's acts log what a peer told it), and every file
+ *    that calls `writeArrivals(`, with floors. Comments are blanked before reading (so a comment
  *    explaining the fix neither trips nor satisfies the gate) with line numbers kept, so a finding names the real line.
  *
  * Run: a Mongo the harness accepts (see `_mongo-harness.mjs`), then
@@ -121,9 +122,13 @@ const derivedLocal = (e) =>
 /** A list whose every element was escaped as it was joined: `xs.map(x => logSafe(x)).join(', ')`. */
 const joinedSafe = (e) => /^[\w.]+\.map\(\(?(\w+)\)? => logSafe\(\1\)\)\.join\('[^']*'\)$/.test(e);
 
-/** The files on the push, pull and import paths: derived, with floors. */
+/**
+ * The files on the push, pull and import paths, and on gossip's: derived, with floors. `server/src/networks` is in
+ * the set because what gossip LEARNS from a peer (a member's label, a vote round's subject, a space announcement) is
+ * logged there, by the acts the engine hands it to (`Q-218` round S: three raw sites sat outside the first set).
+ */
 function arrivalPathFiles() {
-  const syncDirs = trackedSources(['server/src/sync', 'server/src/api/sync'], { floor: 15, specs: false });
+  const syncDirs = trackedSources(['server/src/sync', 'server/src/api/sync', 'server/src/networks'], { floor: 20, specs: false });
   const callers = trackedSources('server/src', { specs: false })
     .filter(f => /\bwriteArrivals\s*\(/.test(blankComments(readFileSync(join(REPO_ROOT, f), 'utf8'))));
   assert.ok(callers.length >= 4, `only ${callers.length} file(s) call writeArrivals: ${callers}`);

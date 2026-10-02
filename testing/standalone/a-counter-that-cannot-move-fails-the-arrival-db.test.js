@@ -41,14 +41,17 @@ const WRITES = ['updateOne', 'updateMany', 'bulkWrite', 'insertOne', 'insertMany
 
 let door, peer, engine, loader, importDocuments, served = {};
 
-/** Run `fn` with every write to the counter collection failing; resolve once every injected failure has settled. */
-async function counterCannotMove(fn) {
+/**
+ * Run `fn` with writes to the counter collection failing — every one, or only the first `failures` of them (a
+ * transient fault the writer's next bump recovers from); resolve once every injected failure has settled.
+ */
+async function counterCannotMove(fn, { failures = Infinity } = {}) {
   const proto = Object.getPrototypeOf(door.mongo.col('probe'));
   const originals = Object.fromEntries(WRITES.map(m => [m, proto[m]]));
   const injected = [];
   for (const m of WRITES) {
     proto[m] = function faulty(...args) {
-      if (this.collectionName !== 'ythril_counters') return originals[m].apply(this, args);
+      if (this.collectionName !== 'ythril_counters' || injected.length >= failures) return originals[m].apply(this, args);
       const p = Promise.reject(new Error(`injected: ythril_counters ${m} failed`));
       injected.push(p.catch(() => {}));
       return p;
@@ -119,5 +122,32 @@ describe('a counter that cannot move fails the arrival on the pull and the impor
     assert.ok(!clean,
       `the import answered success (${JSON.stringify(value?.results?.facts)}) although the counter could not be moved `
       + 'past what it restored: the next local write sorts below a restored record every peer already holds');
+  });
+
+  /*
+   * The other half of the rule (`Q-218` round S): the report is about the counter's STATE when the writer finishes,
+   * not about whether one attempt failed. A bump that fails once and is then moved past every restored seq by the
+   * writer's own next bump leaves the counter where it must be — answered as a failure, a correct restore reads as
+   * broken and a pulled page that landed is fetched again for nothing.
+   */
+  it('import and pull: a counter that failed once and was then moved past the page reports success', async () => {
+    const imp = await counterCannotMove(() =>
+      importDocuments(RESTORED, { facts: [build.fact(RESTORED, 'j-1', 901), build.fact(RESTORED, 'j-2', 902)] }), { failures: 1 });
+    assert.equal(imp.injected, 1, 'fixture check: exactly one counter write was made to fail');
+    assert.equal(imp.error, undefined, `the import threw: ${imp.error}`);
+    const counter = await door.mongo.col('ythril_counters').findOne({ _id: RESTORED });
+    assert.ok((counter?.seq ?? 0) >= 902, `fixture check: the counter is at ${JSON.stringify(counter)}, not past 902`);
+    assert.deepEqual(imp.value.results.facts.errors, 0,
+      `a restore whose counter WAS moved past it answered ${JSON.stringify(imp.value.results.facts)}: one failed `
+      + 'attempt the writer recovered from is reported as a failed write');
+
+    served = { [PULLED]: { facts: [build.fact(PULLED, 'q-1', 951, { author }), build.fact(PULLED, 'q-2', 952, { author })] } };
+    const pull = await counterCannotMove(() => engine.runSyncForPeer(PEER), { failures: 1 });
+    assert.equal(pull.injected, 1, 'fixture check: exactly one counter write was made to fail');
+    const through = loader.getConfig().networks.find(n => n.id === NET).members.find(m => m.instanceId === PEER)
+      .lastSeqReceived?.[PULLED] ?? 0;
+    assert.ok(through >= 952,
+      `the watermark stayed at ${through} although the counter was moved past the page (max 952): a page that landed `
+      + 'is held and fetched again');
   });
 });
