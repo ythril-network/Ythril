@@ -93,12 +93,41 @@ function acceptedFrom(handler) {
   return last;
 }
 
+/**
+ * The functions that WRITE what a push received: the arrival writer, the tombstone apply, and every server function
+ * whose body calls one, to a fixpoint — derived like the bumpers, so a door's local `landOne` counts without this
+ * file naming it.
+ */
+function arrivalWriters() {
+  const sources = readTrackedSources('server/src', { ext: ['.ts'], floor: 200 }).map(({ file, text }) => ({ file, src: stripComments(text) }));
+  const decls = [];
+  for (const { file, src } of sources) {
+    for (const m of src.matchAll(/^(?:export\s+)?(?:async\s+)?function\s+(\w+)|^(?:export\s+)?const\s+(\w+)\s*=\s*async\b/gm)) {
+      const name = m[1] ?? m[2];
+      let body;
+      try { body = bodyOf(src, name, `${file} ${name}`); } catch { continue; }
+      decls.push({ name, body: body.replace(/^[^\n]*\n/, '') });
+    }
+  }
+  const found = new Set(['writeArrivals', 'applyRemoteTombstone']);
+  for (let grew = true; grew;) {
+    grew = false;
+    const callsOne = new RegExp(`(?<![\\w.$])(?:${[...found].join('|')})\\s*\\(`);
+    for (const d of decls) {
+      if (!found.has(d.name) && callsOne.test(d.body)) { found.add(d.name); grew = true; }
+    }
+  }
+  return found;
+}
+
 const BUMPERS = bumpers();
 const HANDLERS = pushHandlers();
+const WRITERS = arrivalWriters();
 
 describe('every push handler awaits its counter bump before it answers', () => {
   it('the derivations found their subjects, so an empty set cannot pass', () => {
     assert.ok(BUMPERS.has('bumpSeq') && BUMPERS.size >= 2, `bumpers: ${[...BUMPERS]}`);
+    assert.ok(WRITERS.has('writeArrivals') && WRITERS.size >= 3, `arrival writers: ${[...WRITERS]}`);
     assert.ok(HANDLERS.length >= 6,
       `only ${HANDLERS.length} push handler(s) derived — the sweep is broken: ${HANDLERS.map(h => h.where).join(', ')}`);
   });
@@ -115,6 +144,26 @@ describe('every push handler awaits its counter bump before it answers', () => {
         `${h.where} answers before any awaited counter bump. A peer told its push landed while this instance's `
         + 'counter is still below what it received lets the next local write take a lower seq than a record the '
         + `peer already holds. Bumpers derived: ${[...BUMPERS].join(', ')}`);
+    });
+
+    it(`${h.where}: no bump precedes the handler's write of what it received`, () => {
+      /*
+       * On 5.6.x `bumpSeq` also raises the in-memory horizon a seq-paged reader is capped at (`settledSeqRange`,
+       * `maxSeen + 1`), because it assumes the record it bumps over is already committed. A bump BEFORE the write
+       * lets a concurrent `GET /api/sync/*` page be served past a seq whose record is not stored yet; the pulling
+       * peer moves its watermark past it and never comes back for it (`Q-196`). So the counter moves after the
+       * write, in a `finally`, and before the answer. A bumper that is itself an arrival writer (the writer bumps
+       * after its own write) is not counted here. Statement order, comments stripped, as the case above.
+       */
+      const names = [...BUMPERS].filter(n => !WRITERS.has(n)).join('|');
+      const firstWrite = h.handler.search(new RegExp(`(?<![\\w.$])(?:${[...WRITERS].join('|')})\\s*\\(`));
+      assert.ok(firstWrite > 0, `${h.where} writes nothing it received through a derived arrival writer — re-anchor`);
+      const early = [...h.handler.matchAll(new RegExp(`\\bawait\\s+(?:\\w+\\.)?(?:${names})\\(`, 'g'))]
+        .filter(m => m.index < firstWrite)
+        .map(m => h.handler.slice(m.index, h.handler.indexOf('\n', m.index)).trim());
+      assert.deepEqual(early, [],
+        `${h.where} moves the counter before it writes what it received, which hands a concurrent pull a horizon `
+        + 'past an uncommitted record (Q-196). Bump in a finally after the write, before the answer.');
     });
 
     it(`${h.where}: no bump is left un-awaited`, () => {
