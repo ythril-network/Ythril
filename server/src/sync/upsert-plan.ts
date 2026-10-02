@@ -304,9 +304,17 @@ function uniqueKey(kind: PushFamily, d: PushDoc): string | undefined {
  */
 function tombSeqFor(doc: PushDoc, held: HeldTombstone | undefined): number | undefined {
   if (held === undefined) return undefined;
-  const author = doc.author?.instanceId;
-  if (held.issuer && author && held.issuer !== author) return undefined;
-  return held.seq;
+  return tombstoneGoverns(held.issuer, doc.author?.instanceId) ? held.seq : undefined;
+}
+
+/**
+ * May a tombstone `issuer` issued speak for a record `author` wrote? Only when they are the same instance — or when
+ * either is unknown (a legacy tombstone, an author-less record), which governs as it always did. The one spelling of
+ * the rule, for the two questions that ask it: whether a peer's tombstone may delete a record held here
+ * (`applyPeerTombstones`) and whether a held tombstone refuses an arriving record (`planPushArrivals`).
+ */
+export function tombstoneGoverns(issuer: string | undefined, author: string | undefined): boolean {
+  return !(issuer && author && issuer !== author);
 }
 
 export function planPushArrivals<T extends PushDoc>(docs: readonly T[], input: PushPlanInput): PushPlan<T> {

@@ -75,7 +75,7 @@ syncTombstonesRouter.get('/tombstones', syncRateLimit, requireAuth, async (req, 
 
 
 /** The push body: an array of elements, unvalidated here, at most `MAX_TOMBSTONES_PER_REQUEST` of them. */
-const TombstonePage = z.object({ tombstones: z.array(z.unknown()).max(MAX_TOMBSTONES_PER_REQUEST).default([]) });
+export const TombstonePage = z.object({ tombstones: z.array(z.unknown()).max(MAX_TOMBSTONES_PER_REQUEST).default([]) });
 
 /** POST /api/sync/tombstones — apply tombstones received from a peer */
 syncTombstonesRouter.post('/tombstones', syncRateLimit, requireAuth, denyReadOnly, async (req, res) => {

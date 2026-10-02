@@ -53,7 +53,7 @@ import type { TombstoneDoc } from '../config/types.js';
 import { bumpSeq } from '../util/seq.js';
 import { log, logSafe } from '../util/log.js';
 import { seqRefusal, arrivalId, warnArrivalsNotStored, type ArrivalRefusal } from './arrivals.js';
-import { retagToLocalSpace } from './upsert-plan.js';
+import { retagToLocalSpace, tombstoneGoverns } from './upsert-plan.js';
 
 /** Who delivered a page of tombstones — what authorises a tombstone's deletion of a local record. */
 export interface TombstoneAuth {
@@ -190,7 +190,7 @@ export async function applyPeerTombstones(
           continue;
         }
         const author = targets.get(t._id)?.author?.instanceId;
-        if (author && author !== issuer) {
+        if (!tombstoneGoverns(issuer, author)) {
           out.declined.push({ _id: t._id, reason: `the record here was written by '${author}', not by the issuer '${issuer}'` });
           continue;
         }
