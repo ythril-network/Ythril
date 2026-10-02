@@ -29,9 +29,8 @@
  *  - **The counter is moved past the highest PLAUSIBLE restored seq**, so a restored record never sorts above the
  *    next local write. A family whose counter could not be moved is answered as a failed write — every document of
  *    it an `errors` count, 5.6.1's response keys — though its records are stored; re-running the import repairs it.
- *  - **Nothing is carried from the copy a record replaces**: no stamp, no `syncBase` the backup does not hold (the
- *    backup is the record's state). The one exception is this instance's vector, carried while the space still
- *    embeds the record, until the restore's own embed job replaces it.
+ *  - **Nothing is carried from the copy a record replaces**: no stamp, no `syncBase` the backup does not hold, and no
+ *    vector (the backup is the record's state; every restored record is queued and re-embedded from its text).
  *
  * ## What the 5.6.x restore keeps as 5.6.1 had it (the 5.6.2 cuts)
  *
