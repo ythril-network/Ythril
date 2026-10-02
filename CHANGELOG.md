@@ -316,7 +316,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   in 5.6.2).** The pushed bytes reached the subscriber's upload door, which stored them as the subscriber's own
   upload: its own next seq, itself as the author of a new file, and a description it derived itself. That copy then
   tied or outranked the publisher's next description or tag edit, which was skipped on arrival for good. Bytes a
-  peer pushes are now recorded as an arrival, as a download already was (`Q-143`).
+  peer pushes are now recorded as an arrival, as a download already was (`Q-143`). Arriving bytes, pushed or
+  pulled, also make a soft-deleted path live again, and a file new on this instance is given its file retention
+  window: a pushed file had that before, a pulled one did not.
 - **File metadata a 4.0-5.6.1 pull left in `<space>_filemeta` is merged into the space's files on upgrade, as in
   5.6.2 (`Q-219`).** The next housekeeping cycle (within five minutes of start) merges each space's stray collection
   into the files this instance still holds a record for — never over a newer copy, never over this instance's own
