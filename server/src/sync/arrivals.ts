@@ -4,7 +4,7 @@
  * and named where it would have been.
  *
  * `writeArrivals` replaced `ingestBrainDoc` (the four single push routes, `batch-upsert` and the import), the pull's
- * own page write (`batchUpsertBySeq`, moved here from `sync/engine.ts` with the accept it planned), and the inline
+ * own page write (`batchUpsertBySeq`, moved here from `sync/engine.ts` as `planArrivalWrites`, the accept it planned), and the inline
  * `$setOnInsert` of `POST /api/sync/entities`.
  *
  * ## Why one writer, and why it owns every precondition
@@ -23,9 +23,13 @@
  *  3. **Collapse** a repeated `_id` to its highest seq (equal: the earlier, `isNewerCopy`). An unordered bulk write
  *     lets the LAST op for an id win whatever its seq, so a page carrying `[9, 3]` stored 3.
  *  4. **What never crosses**: the receiver's local-only fields are dropped from what arrived — and CARRIED from the
- *     stored copy across the replace (`LOCAL_ONLY_FIELDS`), server-side, in the same update, so a peer's edit no
- *     longer erases this instance's vector, its retention stamps or its file sync bases. A RESTORE keeps what the
- *     export carried as the record's own state (`RESTORED_LOCAL_FIELDS`, as Dates) and drops what is derived.
+ *     stored copy across the replace, server-side, in the same update, so a peer's edit no longer erases this
+ *     instance's retention stamps or its file sync bases (`RESTORED_LOCAL_FIELDS`), nor its vector while the
+ *     receiver still embeds the record. A record the receiver SUPPRESSES (`embeddingSuppressedFor`, asked of the
+ *     arriving document) keeps no derived field (`DERIVED_LOCAL_FIELDS`), as 5.6.1's whole replace left it: the
+ *     queue skips it, so a carried vector would stay for good (`Q-218` R1). A RESTORE keeps what the export carried
+ *     as the record's own state (`RESTORED_LOCAL_FIELDS`, as Dates), drops what is derived from the export, and
+ *     carries NO record-tier field from the copy it replaces (`Q-218` R2) — `carriedFields`.
  *  5. **No receiver stamping** (cut `C4`): main stamps an arrival with no stamp of its own from its `createdAt` by
  *     this instance's windows (`D-9`). 5.6.x stores it unstamped, as 5.6.1 did; a stamp the stored copy holds is
  *     carried (rule 4).
@@ -41,8 +45,10 @@
  *     to one write per document; a fault that is not one document's THROWS (`ArrivalWriteError`).
  *  8. **The counter, the seq note, the bookkeeping and the queue**, in a `finally` per chunk, EACH in its own `try`
  *     (`E1`, filed against main as `Q-224`): one that fails is logged and the next still runs, and a write error
- *     thrown by the body is never replaced by a bump error. The bump is awaited, over what the chunk RECEIVED; the
- *     enqueue is one bulk write per chunk, by the RECEIVER's suppression.
+ *     thrown by the body is never replaced by a bump error. The bump is awaited, over what the chunk RECEIVED, and a
+ *     failed one is REPORTED (`counterBehind`) for the door to act on; the enqueue is one bulk write per chunk, by
+ *     the RECEIVER's suppression. A push door moves the counter itself, once, after the write
+ *     (`counterMovedByCaller`), and may hand over the stored copies it already read (`stored`).
  *
  * ## The record type is an explicit argument
  *
@@ -54,8 +60,9 @@
  * WHICH documents of a push land — tombstones, forks, the fork caps — is the push door's (`api/sync/docs.ts`, which
  * on 5.6.x keeps 5.6.1's per-document reading of a page); the writer only re-checks "strictly newer than stored",
  * which is the whole of the pull's accept rule (`planSeqUpserts`) and agrees with every push verdict. Whether a
- * counter that could not be moved fails the answer is the door's too: each door awaits its own bump before it
- * answers.
+ * counter that could not be moved fails the answer is the door's too: a push door awaits its own bump, unswallowed,
+ * before it answers; the pull and the import rely on the writer's bump and read `counterBehind` — the pull then holds
+ * the family's position, the import counts the family as errors (`Q-218` R3).
  */
 import { col, asBulk } from '../db/mongo.js';
 import { spaceCollection } from '../db/space-collection.js';
@@ -66,7 +73,8 @@ import { inChunks } from '../util/chunks.js';
 import { log, logSafe } from '../util/log.js';
 import { BRAIN_COLLECTIONS } from '../config/types.js';
 import type { BrainCollection, BrainEmbedRecordType } from '../config/types.js';
-import { LOCAL_ONLY_FIELDS, RESTORED_LOCAL_FIELDS, DERIVED_LOCAL_FIELDS } from './local-only-fields.js';
+import { RESTORED_LOCAL_FIELDS, DERIVED_LOCAL_FIELDS } from './local-only-fields.js';
+import { embeddingSuppressedFor } from '../brain/suppress-embeddings.js';
 import { planSeqUpserts, retagToLocalSpace, isNewerCopy } from './upsert-plan.js';
 import { enqueueIngestedRecords } from '../brain/embed-queue.js';
 import { isDerived } from '../brain/embed-record.js';
@@ -84,6 +92,30 @@ export interface ArrivalOptions {
   restore?: boolean;
   /** Who sent it, for the log lines only. */
   from?: string;
+  /**
+   * The stored copies the CALLER read immediately before, by id, at least their `seq` — handed over so the writer
+   * does not read them a second time (`Q-218` R4: a push page read every stored copy twice). An id absent from the
+   * map is one the caller found nothing stored for.
+   *
+   * Why a caller may: the copy is used only for the accept ("strictly newer than stored") and for telling an insert
+   * from an update. A copy written MEANWHILE is still caught by the write guard and read back (rule 6), so a map
+   * that went stale between the caller's read and this write can only mislabel an insert as an update, never store
+   * an older copy over a newer one. The caller MUST have read every id it hands over; one it did not read and left
+   * out is taken as "nothing stored", and the write guard is then the only thing between it and an older copy.
+   */
+  stored?: ReadonlyMap<string, { seq?: unknown }>;
+  /**
+   * The caller moves the seq counter itself, after this write, awaited and not swallowed — so the writer does not
+   * (`Q-218` R4: a push page moved the one counter document of the space once per document). Set by the batch push
+   * door, which bumps once per page in its `finally` over every seq the page carried, and by the single push routes,
+   * which bump the arriving seq the same way.
+   *
+   * The caller MUST then bump past `maxReceived` AFTER the write returns or throws — never before it, because on
+   * 5.6.x `bumpSeq` also raises the horizon a seq-paged reader is capped at (`settledSeqRange`), and a bump ahead of
+   * the write lets a concurrent pull be served past a record not yet stored (`Q-196`). The seq note per landed
+   * record (`noteSeqStored`) is still the writer's.
+   */
+  counterMovedByCaller?: boolean;
 }
 
 /** One document refused, by id and in words a log reader and an integrator can act on. */
@@ -114,8 +146,15 @@ export interface ArrivalOutcome {
   derived: string[];
   /** Ids that arrived more than once; one version (the highest seq) was kept. */
   collapsed: string[];
-  /** The highest plausible seq received — what the counter has been bumped to at least. */
+  /** The highest plausible seq received — what the counter has been bumped to at least, unless `counterBehind`. */
   maxReceived: number;
+  /**
+   * The writer's own counter bump failed (rule 8), so this instance's counter may be BEHIND what was stored: the next
+   * local write could take a seq below a record already here. Never set under `counterMovedByCaller`. A door that
+   * relies on the writer's bump must not report the arrival delivered while this is set — the pull holds the
+   * family's position, the import counts the family as errors (`Q-218` R3).
+   */
+  counterBehind: boolean;
 }
 
 /** A record write the store could not do for reasons that are not one document's — transient, retry the page. */
@@ -136,16 +175,13 @@ export class ArrivalWriteError extends Error {
  * Why a document cannot be stored as it arrived, or `null` when it can. The one shape rule for every door. A
  * restore asks the id half only (`seq: 'any'`, cut `C7`).
  */
-export function arrivalRefusal(doc: unknown, { seq }: { seq: 'required' | 'optional' | 'any' }): string | null {
+function arrivalRefusal(doc: unknown, { seq }: { seq: 'required' | 'optional' | 'any' }): string | null {
   if (!doc || typeof doc !== 'object' || Array.isArray(doc)) return 'not a document';
   const { _id: id, seq: s } = doc as { _id?: unknown; seq?: unknown };
   if (typeof id !== 'string' || id.length === 0) return '_id is not a non-empty string';
   if (seq === 'any') return null;
   return seqRefusal(s, { optional: seq === 'optional' });
 }
-
-/** The seq half of `arrivalRefusal` — one rule in `util/seq.ts`, re-exported for the doors that import from here. */
-export { seqRefusal };
 
 /** An id for a log line or a refusal, whatever arrived in its place. */
 export function arrivalId(doc: unknown): string {
@@ -154,7 +190,7 @@ export function arrivalId(doc: unknown): string {
 }
 
 /** How many ids a refusal summary names before it says how many more. */
-export const NAMED_IN_SUMMARY = 10;
+const NAMED_IN_SUMMARY = 10;
 
 /**
  * One warning per page for what a door did not store, naming the first ids — the shape every door logs, so a
@@ -199,14 +235,15 @@ function prepared(raw: Doc, family: BrainCollection, restore: boolean): Doc {
 }
 
 /**
- * The pull's page accept, moved from the engine with the write it planned for: which documents are strictly newer
- * than what is stored (`planSeqUpserts`), read in one projected `$in` per chunk. A restore accepts all. Returns the
- * stored copies too — whether one existed is what tells an insert from an update.
+ * Which arriving documents are to be written: the pull's page accept, moved from the engine with the write it
+ * planned for — strictly newer than what is stored (`planSeqUpserts`), read in one projected `$in` per chunk unless
+ * the caller handed the stored copies over (`ArrivalOptions.stored`). A restore accepts all. Returns the stored
+ * copies too — whether one existed is what tells an insert from an update.
  */
-export async function batchUpsertBySeq<T extends Doc>(
-  collName: string, docs: T[], { restore }: { restore: boolean },
-): Promise<{ toWrite: T[]; stored: Map<string, Doc> }> {
-  const stored = await readStoredById<Doc>(collName, docs.map(d => d._id), { seq: 1 });
+async function planArrivalWrites<T extends Doc>(
+  collName: string, docs: T[], { restore, handed }: { restore: boolean; handed?: ReadonlyMap<string, { seq?: unknown }> },
+): Promise<{ toWrite: T[]; stored: ReadonlyMap<string, { seq?: unknown }> }> {
+  const stored = handed ?? await readStoredById<Doc>(collName, docs.map(d => d._id), { seq: 1 });
   if (restore) return { toWrite: docs, stored };
   const existingSeq = new Map<string, number>();
   // A stored copy with no seq (file metadata from before 4.0) is overwritten by anything that arrives.
@@ -221,13 +258,35 @@ function filterFor(doc: Doc, restore: boolean): Record<string, unknown> {
 }
 
 /**
- * The replace, as an update pipeline so the receiver's own fields are carried IN THE SAME WRITE: the stored values
- * of `LOCAL_ONLY_FIELDS` (a missing one is simply absent), under what arrived. Read-free, and race-free against an
- * embed worker writing a vector between a read and this write. (No `D-9` defaults beneath them: cut `C4`.)
+ * Which local-only fields the replace carries from the stored copy, for ONE document (`Q-218` R1, R2):
+ *
+ *  - the DERIVED fields (`DERIVED_LOCAL_FIELDS`: the vector, its model, `matchedText`) only while the receiver still
+ *    embeds the record. They are carried so a peer's edit does not drop a still-valid vector until it is re-embedded
+ *    — but the embed queue skips a record the receiver suppresses, so a vector carried onto one stays for good and
+ *    keeps the record in meaning-ranked search. Asked of the ARRIVING document by the one resolver
+ *    (`embeddingSuppressedFor`, record > schema > space; a file has two tiers), since it is what the stored record
+ *    will be. A family with nothing to embed (`recordType` null) carries none.
+ *  - the RECORD-TIER fields (`RESTORED_LOCAL_FIELDS`: the retention stamps, `syncBase`) for a peer's arrival only. A
+ *    RESTORE carries none: the backup is the record's state, so a stamp the backup does not hold belongs to the copy
+ *    the operator is replacing, and carried it would decide when the restored record is deleted.
  */
-function replacementFor(doc: Doc): unknown[] {
-  const carried = Object.fromEntries([...LOCAL_ONLY_FIELDS].map(f => [f, `$${f}`]));
-  return [{ $replaceWith: { $mergeObjects: [carried, { $literal: doc }] } }];
+function carriedFields(
+  spaceId: string, recordType: BrainEmbedRecordType | null, doc: Doc, restore: boolean,
+): readonly string[] {
+  const derived = recordType !== null && !embeddingSuppressedFor(spaceId, recordType, doc) ? [...DERIVED_LOCAL_FIELDS] : [];
+  return restore ? derived : [...derived, ...RESTORED_LOCAL_FIELDS];
+}
+
+/**
+ * The replace, as an update pipeline so the receiver's own fields are carried IN THE SAME WRITE: the stored values
+ * of `carried` (a missing one is simply absent), under what arrived. Read-free, and race-free against an embed
+ * worker writing a vector between a read and this write. (No `D-9` defaults beneath them: cut `C4`.) A field not
+ * carried is absent from the result, as 5.6.1's whole-document replace left every one of them.
+ */
+function replacementFor(doc: Doc, carried: readonly string[]): unknown[] {
+  if (carried.length === 0) return [{ $replaceWith: { $literal: doc } }];
+  const fromStored = Object.fromEntries(carried.map(f => [f, `$${f}`]));
+  return [{ $replaceWith: { $mergeObjects: [fromStored, { $literal: doc }] } }];
 }
 
 const storeRefusal = (err: unknown): string =>
@@ -253,7 +312,7 @@ export async function writeArrivals(
   const where = `${restore ? 'import' : 'sync'} ${family}${opts.from ? ` from ${opts.from}` : ''}`;
   const out: ArrivalOutcome = {
     inserted: [], updated: [], newerLocal: [], duplicates: [], refused: [], storeRefused: [], derived: [],
-    collapsed: [], maxReceived: 0,
+    collapsed: [], maxReceived: 0, counterBehind: false,
   };
   // A peer's file is queued by `ingestFileMeta` alone, when its blob is here; a RESTORED file row is replaced here,
   // not merged, so the writer queues it as 5.6.1's restore did.
@@ -282,7 +341,7 @@ export async function writeArrivals(
 
   // ── the accept: strictly newer than what is stored, unless a restore ─────────────────────────────────────────
   const collName = spaceCollection(spaceId, family);
-  const { toWrite, stored } = await batchUpsertBySeq(collName, arriving, { restore });
+  const { toWrite, stored } = await planArrivalWrites(collName, arriving, { restore, handed: opts.stored });
   const writing = new Set(toWrite);
   for (const d of arriving) if (!writing.has(d)) out.newerLocal.push(d._id);
 
@@ -296,16 +355,22 @@ export async function writeArrivals(
     return e;
   };
   let bumped = 0;
-  /** The counter over what was received — awaited, and a failure LOGGED, never thrown (`E1`): see the docblock. */
+  /**
+   * The counter over what was received — awaited, a failure LOGGED and REPORTED (`counterBehind`), never thrown
+   * (`E1`): see the docblock. Not run at all when the caller moves the counter itself (`counterMovedByCaller`).
+   */
   const bump = async (top: number): Promise<void> => {
-    if (top <= bumped) return;
+    if (opts.counterMovedByCaller === true || top <= bumped) return;
     try {
       await bumpSeq(spaceId, top);
       bumped = top;
     } catch (err) {
+      out.counterBehind = true;
       log.warn(`${logSafe(where)}: the seq counter of space '${spaceId}' could not be moved to ${top}: ${message(err)}`);
     }
   };
+  /** What each document's replace carries from its stored copy — decided once per document. */
+  const carry = (d: Doc): readonly string[] => carriedFields(spaceId, recordType, d, restore);
   for (const chunk of inChunks(toWrite, READ_CHUNK)) {
     const landed: Doc[] = [];
     const dupes: Doc[] = [];
@@ -336,13 +401,13 @@ export async function writeArrivals(
       } else {
         try {
           await coll.bulkWrite(asBulk<Doc>(chunk.map(d => ({
-            updateOne: { filter: filterFor(d, restore), update: replacementFor(d), upsert: true },
+            updateOne: { filter: filterFor(d, restore), update: replacementFor(d, carry(d)), upsert: true },
           }))), { ordered: false });
           landed.push(...chunk);
         } catch (err) {
           const failures = bulkWriteFailures(err);
           const writeOne = async (d: Doc): Promise<boolean> => {
-            await coll.updateOne(filterFor(d, restore), replacementFor(d), { upsert: true });
+            await coll.updateOne(filterFor(d, restore), replacementFor(d, carry(d)), { upsert: true });
             return true;
           };
           if (!failures || failures.some(f => chunk[f.index] === undefined)) {

@@ -32,7 +32,7 @@ import { adoptAnnouncedSpaces, announcedSpaces, healAnnouncedAliases } from '../
 import { selfRecordFor } from '../networks/self-record.js';
 import { pullSpaceMetaFromUpstream } from './space-meta-pull.js';
 import { peerSafeFetch, isPeerUrlAllowed } from './peer-fetch.js';
-import { concludeRoundIfReady, sendMemberRemovedNotify } from './governance.js';
+import { concludeRoundIfReady, sendMemberRemovedNotify, isRoundPrunable, pruneExpiredRounds } from './governance.js';
 import { admitPassedJoin } from '../networks/admit-passed-join.js';
 import { adoptPeerRound } from '../networks/round-local-state.js';
 import { enqueueMediaJob } from '../files/media/job-queue.js';
@@ -113,32 +113,7 @@ function _setFailureCount(networkId: string, instanceId: string, value: number |
   return newValue;
 }
 
-// ── Vote-round retention ────────────────────────────────────────────────────
-
-/** A round is prunable once it is concluded AND past its deadline. After the deadline
- *  every peer concludes the round independently (the deadline path in
- *  `concludeRoundIfReady`), so such a round can no longer influence any decision and
- *  never needs re-serving or re-propagating. A malformed/unparseable deadline yields
- *  `NaN`, and `NaN < now` is false, so we keep the round rather than prune on doubt. */
-export function isRoundPrunable(
-  round: { concluded?: boolean; deadline: string },
-  now: number = Date.now(),
-): boolean {
-  return Boolean(round.concluded) && new Date(round.deadline).getTime() < now;
-}
-
-/** Drop concluded-and-expired rounds from a network's `pendingRounds` in place.
- *  `concludeRoundIfReady` marks a round `concluded` but never removes it, so without
- *  this `pendingRounds` grows for the life of the network — bloating `config.json`, the
- *  `GET /votes` scan, and gossip payloads. Returns the number of rounds removed. */
-export function pruneExpiredRounds(net: NetworkConfig, now: number = Date.now()): number {
-  const rounds = net.pendingRounds;
-  if (!rounds || rounds.length === 0) return 0;
-  const kept = rounds.filter(r => !isRoundPrunable(r, now));
-  const removed = rounds.length - kept.length;
-  if (removed > 0) net.pendingRounds = kept;
-  return removed;
-}
+// Vote-round retention (`isRoundPrunable`, `pruneExpiredRounds`) lives with round conclusion in `governance.ts`.
 
 // ── Per-network sync dedup lock ─────────────────────────────────────────────
 // Prevents concurrent sync cycles for the same network from competing for
@@ -862,7 +837,8 @@ async function pullFromPeer(
        * doc" did), the retag to the local space, a repeated id collapsed to its highest seq, the sender's
        * local-only fields dropped and this instance's own carried across the replace, the guard against a newer
        * stored copy, the counter bumped per landed chunk, and every landed record queued for embedding by THIS
-       * instance's rules (`Q-203` — a pulled record used to be stored and never queued at all).
+       * instance's rules (`Q-203` — a pulled record used to be stored and never queued at all). A bump that failed
+       * is reported (`counterBehind`) and holds the position like a failed write (`Q-218` R3).
        *
        * A write the store could not do is a RECORD-WRITE failure, not an unreachable peer (`F10`): the transfer
        * stops, holds `deliveredThrough` below the page, and fetches it again next cycle. It used to escape to the
@@ -879,6 +855,14 @@ async function pullFromPeer(
           + `${logSafe(err instanceof Error ? err.message : String(err))} (from ${logSafe(member.label ?? member.instanceId)}). `
           + `This is this instance's database, not the peer: the transfer holds at ${deliveredThrough} and the page `
           + 'is fetched again next cycle.');
+        break;
+      }
+      if (written.counterBehind) {
+        // `Q-218` R3: the page is stored, but this counter may be behind it, so the position is not vouched for.
+        truncated = true;
+        log.warn(`sync pull ${spaceId} ${family.collection}: record write failed: the seq counter could not be moved `
+          + `past the page from ${logSafe(member.label ?? member.instanceId)}. The transfer holds at ${deliveredThrough} `
+          + 'and the page is fetched again next cycle.');
         break;
       }
       if (written.storeRefused.length > 0) {

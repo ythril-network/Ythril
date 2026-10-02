@@ -2,7 +2,7 @@
  * Which pulled documents sync actually writes, and how they are scoped.
  *
  * Extracted from `batchUpsertBySeq` in `sync/engine.ts` (god-file split, slice 2). Since 5.6.2 the IO is the
- * arrival writer's (`sync/arrivals.ts`, where `batchUpsertBySeq` moved); the decisions live in `upsert-plan.ts`
+ * arrival writer's (`sync/arrivals.ts`, where `batchUpsertBySeq` moved as `planArrivalWrites`); the decisions live in `upsert-plan.ts`
  * and are tested here with no database at all.
  *
  * Every mistake in this decision is silent:
@@ -128,15 +128,15 @@ describe('retagToLocalSpace — synced documents belong to the local space', () 
 
 /*
  * Ported to 5.6.x with the arrival writer (`Q-218`): the IO moved from `sync/engine.ts` into `sync/arrivals.ts`,
- * where `batchUpsertBySeq` is the writer's by-seq accept. These hold that the writer applies THIS
+ * where `planArrivalWrites` (once `batchUpsertBySeq`) is the writer's by-seq accept. These hold that the writer applies THIS
  * `planSeqUpserts`, that one tie-break rule decides every copy, and the derived fork id.
  */
 describe('the arrival writer applies this accept, and no copy of it', () => {
-  it('batchUpsertBySeq in sync/arrivals.ts calls planSeqUpserts for every write but a restore', async () => {
+  it('planArrivalWrites in sync/arrivals.ts calls planSeqUpserts for every write but a restore', async () => {
     const { readFileSync } = await import('node:fs');
     const { stripComments } = await import('./_strip-comments.mjs');
     const { bodyOf } = await import('./_structural-window.mjs');
-    const body = bodyOf(stripComments(readFileSync('server/src/sync/arrivals.ts', 'utf8')), 'batchUpsertBySeq');
+    const body = bodyOf(stripComments(readFileSync('server/src/sync/arrivals.ts', 'utf8')), 'planArrivalWrites');
     assert.match(body, /if \(restore\) return \{ toWrite: docs, stored \};/, 'a restore no longer bypasses the accept');
     assert.match(body, /toWrite: planSeqUpserts\(/, 'the writer accepts by a rule of its own instead of planSeqUpserts');
     assert.doesNotMatch(body, /\.seq\s*>=?\s*\w+\.seq|seq\s*>=\s*prev/, 'a hand-written seq comparison is back beside planSeqUpserts');

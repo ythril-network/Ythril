@@ -27,7 +27,11 @@
  *  - **What this instance derives is dropped**: the vector, its model and `matchedText` (re-embedded here).
  *  - **A repeated id stores its highest seq**, an equal seq keeping the first, as every other door reads a page.
  *  - **The counter is moved past the highest PLAUSIBLE restored seq**, so a restored record never sorts above the
- *    next local write.
+ *    next local write. A family whose counter could not be moved is answered as a failed write — every document of
+ *    it an `errors` count, 5.6.1's response keys — though its records are stored; re-running the import repairs it.
+ *  - **Nothing is carried from the copy a record replaces**: no stamp, no `syncBase` the backup does not hold (the
+ *    backup is the record's state). The one exception is this instance's vector, carried while the space still
+ *    embeds the record, until the restore's own embed job replaces it.
  *
  * ## What the 5.6.x restore keeps as 5.6.1 had it (the 5.6.2 cuts)
  *
@@ -152,6 +156,13 @@ export async function importDocuments(spaceId: string, payload: Record<string, u
     let out: ArrivalOutcome;
     try {
       out = await writeArrivals(spaceId, t, RECORD_TYPE_OF[t], docs, { restore: true });
+      /*
+       * `Q-218` R3: the writer's counter bump failed, so this counter may be behind what was restored and the next
+       * local write could sort below a restored record every peer holds. Not a clean success: the family is answered
+       * as a failed write (every document an error, below), and running the import again repairs it — a restore
+       * replaces, so it is idempotent.
+       */
+      if (out.counterBehind) throw new Error('the seq counter could not be moved past the restored records');
     } catch (err) {
       log.warn(`Import into space '${spaceId}': ${t} could not be written: ${logSafe(String(err))}`);
       if (!(err instanceof ArrivalWriteError) || !err.partial) {

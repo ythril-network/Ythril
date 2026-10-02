@@ -4,7 +4,7 @@
  * ## Why a module
  *
  * Ported to 5.6.x with the arrival writer (`Q-218`). Its callers are the arrival writer's read of the stored copies
- * of a page (`sync/arrivals.ts`, `batchUpsertBySeq`) and its duplicate read-back. The copy that goes wrong is the one
+ * of a page (`sync/arrivals.ts`, `planArrivalWrites`) and its duplicate read-back. The copy that goes wrong is the one
  * that forgets the chunk: an unbounded `$in` over a 50 000-record import is one enormous query, and the chunk is the
  * line that looks like boilerplate. Other `_id: { $in }` reads in the tree predate this module and are not on it.
  *

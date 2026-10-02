@@ -44,6 +44,35 @@ export function localBraintreeRequiredVoters(
   return buildBraintreeAncestors(net, getConfig().instanceId, anchor);
 }
 
+// ── Vote-round retention (moved from `sync/engine.ts`, `Q-218`: conclusion and its clean-up are one concern) ──
+
+/** A round is prunable once it is concluded AND past its deadline. After the deadline
+ *  every peer concludes the round independently (the deadline path in
+ *  `concludeRoundIfReady`), so such a round can no longer influence any decision and
+ *  never needs re-serving or re-propagating. A malformed/unparseable deadline yields
+ *  `NaN`, and `NaN < now` is false, so we keep the round rather than prune on doubt. */
+export function isRoundPrunable(
+  round: { concluded?: boolean; deadline: string },
+  now: number = Date.now(),
+): boolean {
+  return Boolean(round.concluded) && new Date(round.deadline).getTime() < now;
+}
+
+/** Drop concluded-and-expired rounds from a network's `pendingRounds` in place.
+ *  `concludeRoundIfReady` marks a round `concluded` but never removes it, so without
+ *  this `pendingRounds` grows for the life of the network — bloating `config.json`, the
+ *  `GET /votes` scan, and gossip payloads. Returns the number of rounds removed. */
+export function pruneExpiredRounds(
+  net: Pick<import('../config/types.js').NetworkConfig, 'pendingRounds'>, now: number = Date.now(),
+): number {
+  const rounds = net.pendingRounds;
+  if (!rounds || rounds.length === 0) return 0;
+  const kept = rounds.filter(r => !isRoundPrunable(r, now));
+  const removed = rounds.length - kept.length;
+  if (removed > 0) net.pendingRounds = kept;
+  return removed;
+}
+
 export function concludeRoundIfReady(
   net: import('../config/types.js').NetworkConfig,
   round: import('../config/types.js').VoteRound,
