@@ -604,6 +604,125 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   refused; the schema now states it from the same constant. Routes that validate by hand are counted, and may only
   get fewer.
 
+## [5.6.2] — 2026-10-02
+
+**A patch release: every fix on `main` for a defect present in 5.6.1, and nothing else.** The ones to take first
+are sync's: a record pulled from a peer was never queued for embedding, so meaning-ranked search on the receiver
+could not find it; a push could leave this instance's counter below a record it had received, so a peer could
+miss the next local write; and a publisher's file descriptions and tags could fail to reach a subscriber, which
+this release also recovers for files synced before it. It also makes the space export carry links, makes the
+import restore what the export wrote, and stops a peer from forging a line in this instance's log. Breaking changes
+and features already on `main` are not part of it; they ship in the next minor.
+
+| What changes on upgrade | What to do |
+|---|---|
+| Records pulled from a peer by 5.6.1 or earlier have no vector here and stay out of meaning-ranked search | Run `POST /api/spaces/:id/reembed` (Settings → Spaces → the space's Danger Zone tab → **Backfill missing embeddings**) once per synced space. Pace a large space with `limit`: embedding runs on the server's main thread in 5.6, so it answers more slowly while the backlog drains, and your own new records wait behind it |
+| A subscriber's first pull now queues every record it receives for embedding, in the same queue as local writes | Nothing to run; expect embedding of your own edits to lag until a large first pull has drained |
+| A space export now carries the space's links | Take a fresh export: one made by 5.6.1 or earlier restores without its links |
+| An import now moves this instance's counter past the records it restored | Nothing |
+| A duplicate link in a push is counted as `skipped` instead of answering `500` | Nothing; a sender that was re-sending that page for ever now moves on |
+| A tombstone pushed with a seq too close to the protocol ceiling is refused and logged; the rest of the push applies | Nothing |
+| File metadata a pull stored in a stray `<space>_filemeta` collection since 4.0 is merged into the space's files, and the collection dropped | Nothing; one log line per space says how many records were merged |
+
+Documents changed in this release: `docs/sync-protocol.md`, `docs/integration-guide/09-sync-api.md`,
+`docs/integration-guide/12-admin-api.md` and `docs/userguide/04-settings.md`.
+
+### Fixed
+
+#### Sync
+
+- **A record pulled from a peer was never queued for embedding (`Q-203`).** It was stored and absent from every
+  meaning-ranked search on this instance until somebody ran a reindex. Pulled records are now queued by this
+  instance's suppression rules, like pushed ones. Records pulled before this release need the reembed above.
+
+- **A new entity pushed through the single `POST /api/sync/entities` route was never embedded.** It was inserted
+  by a write that never reached the embed queue.
+
+- **A push could leave this instance's seq counter below what it had received (`Q-198`).** The single push routes
+  never moved it, `batch-upsert` left out links and file metadata and moved it only after answering, and
+  `POST /api/sync/tombstones` did not wait for it. Every push door now moves the counter past every seq it received
+  before it answers, and a pulled page moves it as it lands, so the next local write never takes a seq below a
+  record a peer already holds. A fork is written with a seq above the arrival that caused it.
+
+- **File metadata pulled from a peer never reached this instance's files.** Since 4.0 a pulled page of file
+  metadata was written to a collection nothing reads, so a subscriber that pulls (rather than being pushed to)
+  never received a publisher's file descriptions and tags. It is now merged into the files the same way a pushed
+  page is. Metadata pulled before this release is recovered on upgrade (`Q-219`): the next housekeeping cycle
+  (within five minutes of start) merges each space's stray `<space>_filemeta` collection into its files, never over
+  a newer copy and never over this instance's own size and hash, then drops the collection and logs one line per
+  space. A description that lands this way is re-embedded once this instance holds the file's bytes.
+
+- **A file a publisher pushed could freeze its subscriber's copy of the file's description and tags.** The pushed
+  bytes reached the subscriber's upload door, which stored them as the subscriber's own upload: its own next seq,
+  itself as the author of a new file, and a description it derived itself. That copy then tied or outranked the
+  publisher's next description or tag edit, which was skipped on arrival for good. Bytes a peer pushes are now
+  recorded as the publisher's, as downloaded bytes already were (`Q-239`). Arriving bytes, pushed or pulled, also
+  make a soft-deleted path live again. A file new on this instance is now given its file retention window: a pushed
+  file had that before, a pulled one did not.
+
+- **A peer's edit erased this instance's own vector and retention stamps.** A pushed or pulled update replaced the
+  whole document, so the record stopped expiring here, dropped out of vector search until re-embedded, and was
+  re-embedded even when its text had not changed. They are now kept across the update — the vector only while this
+  instance still embeds the record: an arrival this instance suppresses (by the record's own mark, its type's
+  schema or the space) keeps no vector, model or matched text, as 5.6.1 left it.
+
+- **A record pushed in a batch under a `spaceMap` alias kept the sender's space id**, so every list and lookup on
+  this instance missed it. It is now stored under the local space id, as the single routes and the pull already did.
+
+- **A stale tombstone was deleted before the record that superseded it was written**, so a write that then failed
+  lost both. It is deleted only once the record has landed.
+
+- **A page holding the same id twice could store the older copy**, on push, pull and import. The highest seq now
+  wins, and of two copies at the same seq the first is kept.
+
+- **A push re-sent after a lost answer forked a divergent fact again.** A fork's id is now derived from the record
+  and the arrival that caused it, so the re-sent push finds the fork it already made and is answered `forked` with
+  its id, writing nothing — also when the parent has reached a fork cap since, where it used to be refused.
+
+- **`POST /api/sync/tombstones` accepted any number as a seq.** A tombstone with a seq inside the protocol's
+  ceiling reserve is now refused on its own and logged; it used to refuse every later copy of its record and drag
+  the counter towards the ceiling.
+
+- **A duplicate link in a push answered `500`**, so the sender re-sent that page for ever. It is now `skipped`.
+
+- **A database fault while writing a pulled page was reported as an unreachable peer.** It now holds that family's
+  position, logs a record-write failure naming the space and family, and the page is fetched again next cycle.
+
+- **A document a push or pull did not store is named.** One warning per page names the ids and the reason, where
+  duplicate-key warnings used to list `(unknown)`.
+
+- **A queueing failure after an arrival was silent.** If the record could not be queued for embedding, or the
+  counter could not be moved, nothing was logged; both are now warnings, and one failing no longer skips the other.
+  A counter that could not be moved past a pulled page also holds that family's position, so the page is fetched
+  again next cycle; a push answers `500` for it, as it does for any failed write.
+
+#### Security
+
+- **A peer could forge a line in this instance's log.** A document id, a file path or a peer label containing a
+  line break was written into the log as it arrived, so a peer could add a line that read exactly like this
+  server's own. Every value a peer sends that reaches a log line on the push, pull and import paths — and in the
+  rest of sync: gossip, votes, members, change notes, file sync and the sync triggers — is now written with its
+  control characters escaped (`\r`, `\n`, `\u001b`), so it stays visible and stays on its line.
+
+#### Export and import
+
+- **The space export left out links (`Q-206`)**, so restoring it lost every link between records. It now streams
+  every replicated family.
+
+- **The import kept what this instance derives, and never moved the counter (`Q-205`).** An import stored the
+  export's vector model and matched text, kept the retention stamps as text (so the retention sweep never acted on
+  them), and left this instance's counter below the restored records. It now leaves out what this instance derives,
+  restores the stamps as dates, and moves the counter past every plausible seq it restored. A restored record holds
+  exactly the stamps and file sync bases its backup carried, never the replaced copy's. A family whose counter
+  could not be moved is answered with every document counted in `errors`, though it is stored; run the import
+  again.
+
+### Internal
+
+- **A database test whose setup fails now fails, instead of hanging the run.** The test harness kept its Mongo
+  connection open when a setup step threw after connecting, so one such file held `test:standalone` for as long as
+  the CI job lived. The harness now closes what it opened, and the CI job has a 90-minute ceiling.
+
 ## [5.6.1] — 2026-10-01
 
 **A patch release: every fix since 5.6.0 for a defect present in 5.6.0, and nothing else.** The one to take first
