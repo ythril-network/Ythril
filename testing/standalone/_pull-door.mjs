@@ -91,6 +91,8 @@ export async function openPullDoor({ suite, spaces, spaceMap, extraSpaces = [], 
     answers: [],
     /** Every tombstone the receiver PUSHED to the fake peer, in arrival order. */
     received: [],
+    /** Every record the receiver pushed by batch-upsert, each with its body `key`. */
+    pushedRecords: [],
     /** remote space -> payloadKey -> items, served as one page of the record family. */
     records: {},
   };
@@ -121,6 +123,11 @@ export async function openPullDoor({ suite, spaces, spaceMap, extraSpaces = [], 
     const page = Array.isArray(req.body?.tombstones) ? req.body.tombstones : [];
     state.received.push(...page);
     res.json({ applied: page.length, refused: 0 });
+  });
+  // A record page this instance pushes is accepted whole — what a push of records does is the push door's question.
+  app.post('/api/sync/batch-upsert', express.json({ limit: '100mb' }), (req, res) => {
+    for (const [key, items] of Object.entries(req.body ?? {})) if (Array.isArray(items)) state.pushedRecords.push(...items.map(d => ({ key, ...d })));
+    res.json({ status: 'ok' });
   });
   app.get('/api/sync/:family', (req, res) => {
     if (!families.includes(req.params.family)) { res.status(404).json({ error: 'not served by the fake peer' }); return; }
@@ -171,7 +178,7 @@ export async function openPullDoor({ suite, spaces, spaceMap, extraSpaces = [], 
     for (const p of peerSpaces) await door.mongo.col(`${p}_tombstones`).deleteMany({});
     const m = member();
     m.lastSeqReceived = {}; m.lastSeqPushed = {}; m.direction = d;
-    Object.assign(state, { tamper: null, requests: [], answers: [], received: [], records: {} });
+    Object.assign(state, { tamper: null, requests: [], answers: [], received: [], pushedRecords: [], records: {} });
   }
 
   /** One sync cycle of the real engine with the fake peer. */
@@ -196,7 +203,7 @@ export async function openPullDoor({ suite, spaces, spaceMap, extraSpaces = [], 
   }
 
   return {
-    ...door, NET, url, state, remoteOf: (local) => remoteOf.get(local), maxUpstreamBytes: maxCap,
+    ...door, NET, url, state, instanceId: `${suite}-receiver`, remoteOf: (local) => remoteOf.get(local), maxUpstreamBytes: maxCap,
     member, seedPeer, reset, sync, logsDuring, bumpSeq: seq.bumpSeq, close,
   };
 }

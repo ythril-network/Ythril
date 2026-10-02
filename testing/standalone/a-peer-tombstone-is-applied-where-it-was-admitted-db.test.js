@@ -188,6 +188,24 @@ describe('a peer tombstone is applied where it was admitted, element by element'
       const res = await door.push('/batch-upsert', { facts: [build.fact(S, 'r2', 10)] }, { spaceId: S });
       assert.equal(res.body.facts.tombstoned, 1, JSON.stringify(res.body.facts));
     });
+
+    /*
+     * THE PULL, CHARACTERISED — not a rule. The pull's arrival path (`writeArrivals`) consults no stored tombstone at
+     * all: the planner's tombstone check is the push's, and giving the pull one is `Q-204`, outside this bundle (plan
+     * decision 3). So both rows pin what the pull does today — a pulled record lands whoever issued the stored
+     * tombstone — and they go red if this bundle adds a pull-side tombstone refusal the plan does not make.
+     */
+    for (const [label, issuer] of [['a DIFFERENT issuer', 'third-party'], ['the record\'s own author', PEER]]) {
+      it(`pull, characterised: a stored tombstone from ${label} does not refuse a pulled record (Q-204 is open)`, async () => {
+        const id = `pulled-${issuer}`;
+        await door.coll(S, 'tombstones').insertOne(tomb(S, id, 50, issuer));
+        door.state.records[S] = { facts: [build.fact(S, id, 10, { author: { instanceId: PEER, instanceLabel: PEER } })] };
+        await door.sync();
+        assert.equal((await stored(S, 'facts', id))?.seq, 10,
+          `a pulled record was refused by a stored tombstone issued by '${issuer}' — a pull-side tombstone check arrived, `
+          + 'which is Q-204 and not this bundle');
+      });
+    }
   });
 
   describe('the push answer', () => {

@@ -152,4 +152,21 @@ describe('a delivered tombstone moves the counter, and a counter that could not 
     assert.ok(lines.some(l => !/failed with a 5xx/.test(l) && /failed validation/i.test(l)),
       `the bump failure under the apply error is not logged at all:\n${lines.join('\n')}`);
   });
+
+  it('pull: a failed bump is logged, never thrown over an apply error', async () => {
+    /*
+     * The pull has no 5xx to read, so "the apply error is the one reported" is read from what the cycle logs about
+     * the tombstone transfer: a line naming the apply's fault (the view), and the bump's own failure on a line of
+     * its own — never the bump's failure standing in for the apply's.
+     */
+    const { lines } = await door.logsDuring(() => withCounterCeiling(F, 100, () =>
+      withFactsAView(F, [build.entity(F, 'both', 3, author(ISSUER.pull))],
+        () => deliver('pull', F, [tomb(F, 'both', 400, ISSUER.pull)]))));
+    const applyLines = lines.filter(l => /is a view/i.test(l));
+    assert.ok(applyLines.length >= 1, `the apply error is not reported at all:\n${lines.join('\n')}`);
+    assert.ok(applyLines.every(l => !/failed validation/i.test(l)), 'the bump failure is folded into the apply error\'s report');
+    assert.ok(lines.some(l => !/is a view/i.test(l) && /failed validation/i.test(l)),
+      `the bump failure under the apply error is not logged at all:\n${lines.join('\n')}`);
+    assert.ok((door.member().lastSeqReceived?.[F] ?? 0) < 400, 'the watermark moved past a tombstone whose apply failed');
+  });
 });

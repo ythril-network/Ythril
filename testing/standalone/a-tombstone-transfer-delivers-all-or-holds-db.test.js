@@ -161,5 +161,23 @@ describe('a tombstone transfer delivers everything up to the horizon, or holds a
       const lost = missing(local, await pushOnly(local));
       assert.deepEqual(lost, [], `${lost.length} tombstone(s) of a page of one seq were never pushed`);
     });
+
+    it('more of one seq than the clamp holds answers truncated with a warning, and the push watermark is capped', async () => {
+      // A record of this instance's own at seq 100 is pushed in the same cycle, so the push watermark would reach
+      // 100 if the tombstone transfer claimed it was complete.
+      const local = run(CLAMP + 1, () => 7, 'w');
+      await door.reset({ direction: 'push' });
+      await door.coll(S, 'facts').insertOne(build.fact(S, 'mine', 100, { author: { instanceId: door.instanceId, instanceLabel: 'Receiver' } }));
+      await door.coll(S, 'tombstones').insertMany(local.map(t => ({ ...t, instanceId: door.instanceId })));
+      await door.bumpSeq(S, 100);
+      const { lines } = await door.logsDuring(() => door.sync());
+      assert.ok(door.state.pushedRecords.some(r => r._id === 'mine'), 'the record was not pushed, so the watermark proves nothing');
+      const watermark = door.member().lastSeqPushed?.[S] ?? 0;
+      assert.ok(watermark < 7,
+        `the push watermark moved to ${watermark}, past seq-7 deletions the push could not page through — they are never `
+        + 'offered again');
+      assert.ok(lines.some(l => l.includes(S) && l.includes(PEER_LABEL) && /\b7\b/.test(l) && /tombstone/i.test(l)),
+        `no warning names the space, the peer and the seq the push stopped at:\n${lines.join('\n')}`);
+    });
   });
 });
