@@ -120,8 +120,10 @@ const waitForIndexed = (space, ids, timeoutMs) =>
 async function syncEntity(space, id, name, seq) {
   const { post: syncPost } = await import('../sync/helpers.js');
   const now = new Date().toISOString();
+  // `suppressEmbeddings`: a record that arrives by sync is embedded by the receiver's rules (5.6.2, Q-218), so
+  // "reached structurally only" has to be stated on the record rather than assumed of the door.
   await syncPost(INSTANCES.a, token(), `/api/sync/entities?spaceId=${space}`, {
-    _id: id, spaceId: space, name, type: 'service', tags: [],
+    _id: id, spaceId: space, name, type: 'service', tags: [], suppressEmbeddings: true,
     seq, author: { instanceId: 'test', instanceLabel: 'Test' }, createdAt: now, updatedAt: now,
   });
 }
