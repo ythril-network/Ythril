@@ -104,6 +104,10 @@ const REPLICATED_FAMILY_KEYS = (await import('../../server/dist/sync/replicated-
 export async function openPushDoor({ suite, spaces, networks = [], monitorCommands = false }) {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), `ythril-${suite}-`));
   process.env['CONFIG_PATH'] = path.join(tmpDir, 'config.json');
+  // The space's files land under DATA_ROOT, whose default is /data: a directory Windows lets any process create at
+  // the drive root and the Linux CI runner refuses (EACCES), so without this every door passed locally and failed
+  // its setup in CI. Set here, once, so no test that opens a door has to remember it.
+  process.env['DATA_ROOT'] = path.join(tmpDir, 'data');
   fs.writeFileSync(process.env['CONFIG_PATH'], JSON.stringify({
     instanceId: `${suite}-receiver`, instanceLabel: 'Receiver', tokens: [], networks, spaces,
   }, null, 2), { mode: 0o600 });
