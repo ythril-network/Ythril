@@ -342,13 +342,20 @@ describe('a pull never passes an uncommitted seq', { skip }, () => {
        * Found by the sync suite (`full=true returns complete memory documents`): a single-document push stores
        * the sender's seq and does not move this instance's counter, so a horizon capped at the highest seq the
        * process had ALLOCATED hid the record from every pull. What is stored must be what can be served.
+       *
+       * Written through the ARRIVAL WRITER, the one thing every door stores a peer's record with (5.6.2, `Q-218`).
+       * It reaches the horizon by bumping the counter over the received seq, and on 5.6.x also notes the landed
+       * seq (`noteSeqStored`), so a counter that could not be moved still leaves the record servable.
        */
+      const arrivals = await import('../../server/dist/sync/arrivals.js').catch(() => null);
+      assert.equal(typeof arrivals?.writeArrivals, 'function',
+        'sync/arrivals.js exports no writeArrivals — an arriving record is not stored by the one arrival writer');
       const above = (await seqMod.currentSeq(SPACE)) + 1000;
-      await shared.ingestBrainDoc(SPACE, 'fact', 'facts', {
+      await arrivals.writeArrivals(SPACE, 'facts', 'fact', [{
         _id: 'arrived-high', spaceId: SPACE, fact: 'arrived from a peer', tags: [], seq: above,
         author: { instanceId: 'peer', instanceLabel: 'Peer' },
         createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
-      });
+      }], {});
       const page = delivered(await pull(factsRoute(), { sinceSeq: String(above - 1) }));
       assert.ok(page.seqs.includes(above), `an ingested record at seq ${above} is not served: ${JSON.stringify(page.seqs)}`);
     });

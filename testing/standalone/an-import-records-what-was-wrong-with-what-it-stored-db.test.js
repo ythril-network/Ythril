@@ -20,8 +20,8 @@
  *
  * ## The embed queue is the half nobody filed
  *
- * `ingestBrainDoc` exists so that a new ingest site cannot be written without the queue — it is the only thing
- * in the sync router permitted to write a brain document, and it writes AND enqueues in one call. Import grew
+ * The arrival writer (`writeArrivals`, `sync/arrivals.ts`; `ingestBrainDoc` before 5.6.2) exists so that a new
+ * ingest site cannot be written without the queue — it writes AND enqueues in one call. Import grew
  * its own `replaceOne` beside it and inherited none of that. A restored backup that never becomes searchable
  * is the same class of silence as a create that dropped `suppressEmbeddings`: a 200, a record, and a
  * capability quietly missing.
@@ -176,16 +176,21 @@ describe('the admin import records rather than refuses', { skip }, () => {
   });
 });
 
-describe('the import writes through the one ingest function', () => {
-  it('and does not carry its own replaceOne', () => {
+describe('the import writes through the one arrival writer', () => {
+  it('and does not carry its own write', () => {
     /*
-     * `ingestBrainDoc` writes AND enqueues in one call, which is why the sync router permits nothing else to
-     * write a brain document: a new ingest site cannot then be written without the queue. Import grew its own
-     * `replaceOne` beside it and inherited none of that.
+     * Re-anchored for 5.6.2 (`Q-218`): `ingestBrainDoc` is gone, and every door stores what arrived through the
+     * arrival writer (`sync/arrivals.ts`), which writes AND enqueues AND holds every other precondition — so a
+     * new ingest site cannot be written without them. Import grew its own `replaceOne` beside the old function
+     * once and inherited none of that; it is a RESTORE now (`restore: true`), which the writer must be told.
+     * Seen red by mutation, restored by hand: the call's `{ restore: true }` removed.
      */
-    const src = stripComments(readFileSync('server/src/api/admin-import.js'.replace('.js', '.ts'), 'utf8'));
-    assert.match(src, /ingestBrainDoc\(/, 'the import writes its own way into a brain collection again');
-    assert.doesNotMatch(src, /\.replaceOne\(/,
+    const src = stripComments(readFileSync('server/src/api/admin-import.ts', 'utf8'));
+    assert.match(src, /await writeArrivals\([^;]*\{\s*restore:\s*true\s*\}\)/,
+      'the import does not write through the arrival writer as a restore');
+    assert.doesNotMatch(src, /\.(?:replaceOne|insertOne|insertMany|updateOne|updateMany|bulkWrite)\(/,
       'a second write path into the same collections is how the embed queue got skipped the first time');
+    // The retag is the writer's (`retagToLocalSpace`); a `{ ...doc, spaceId }` here would be a second one.
+    assert.doesNotMatch(src, /\.\.\.\(?doc\b[^}]*,\s*spaceId\s*\}/, 'the import retags a document itself again');
   });
 });

@@ -280,10 +280,26 @@ every record whose stamp has passed, across every space, through the normal dele
 stamp let one instance decide when another deleted its data** — an operator who configured a year of
 retention losing records after the sender's seven days, with nothing logged on either side.
 
-**The list is `sync/local-only-fields.ts`, with two consumers and one reason.** `merkle.ts` excludes them
-from the hash; the pull path strips them before the write. The equivalence that makes it ONE list is the
-rule two sections above — a field that is hashed must replicate — read backwards: a field that must not
-replicate must not be hashed, or every cycle reports a divergence for a space where nothing is wrong.
+**The list is `sync/local-only-fields.ts`, with one reason.** `merkle.ts` excludes them from the hash; the
+arrival writer drops them from whatever arrives, by push or by pull, and CARRIES the receiver's own values
+across the replace — a peer's edit used to erase this instance's vector and retention stamps. Two halves, and
+they carry differently (`carriedFields` in `sync/arrivals.ts`):
+
+- **The record tier** (`RESTORED_LOCAL_FIELDS`: the two stamps and `syncBase`) is carried for a peer's arrival.
+  A RESTORE carries none of it from the copy it replaces: the backup is the record's state, so it keeps the
+  backup's own stamps and `syncBase` (as Dates) and nothing else — a stamp carried from the replaced copy would
+  decide when the restored record is deleted.
+- **The derived half** (`DERIVED_LOCAL_FIELDS`: the vector, its model, `matchedText`) is carried only while the
+  receiver still embeds the record, asked of the arriving document by `embeddingSuppressedFor`. **A suppressed
+  arrival keeps no derived field**, as 5.6.1's whole replace left it: the embed queue skips a suppressed record,
+  so a vector carried onto one would stay for good and keep it in meaning-ranked search. What arrived is never
+  kept, a restore's included, and **a restore carries nothing from the copy it replaces, its vector included**: the
+  record is the backup's, and every restored record the space embeds is queued and re-embedded from the backup's
+  text (a suppressed one keeps no vector, which is what suppression means).
+
+The equivalence that makes it ONE list is the rule two sections above — a field that is hashed must replicate —
+read backwards: a field that must not replicate must not be hashed, or every cycle reports a divergence for a
+space where nothing is wrong.
 
 **What to take from it, because the shape recurs:** the gate protecting this asserted that the receiver
 does not trust an arriving vector, and it was scoped to the ingest ROUTER. The second ingest site was
@@ -294,22 +310,33 @@ Whether to embed is then `embeddingSuppressedFor`, resolving `record > schema > 
 configuration — **except for a file, which has two tiers and not three.** A file has no `type`, so it has no
 type schema to consult; it is governed by its own record flag or by the space setting, and nothing in between.
 
-**Two functions in `api/sync/_shared.ts` may write an arriving brain document, and neither queues
-unconditionally.** This paragraph claimed one function queueing every document, and both halves have since
-stopped being true:
+**One writer stores every arriving record: `writeArrivals` in `sync/arrivals.ts` (ported to 5.6.x by
+`Q-218`).** The push routes (batch and single), the pulled page and the admin import all go through it, and it
+owns every precondition a door used to hold a subset of: per-document shape and seq refusal (a restore checks
+the id only, cut `C7`), the retag to the local space, a repeated id collapsed to its highest seq, the local-only
+fields dropped and the receiver's own carried (above), the seq write guard, failures classified per document (a
+store refusal kept apart for each door to answer as 5.6.1 did, cut `C3`), and — per landed chunk, in a
+`finally` — the counter bump, the seq note, then the embed enqueue (`enqueueIngestedRecords`). It used to be
+`ingestBrainDoc` plus the pull's own page write plus a raw `$setOnInsert`, which is how a pulled record was never
+queued and a new entity pushed singly was never embedded. `an-arrival-is-written-by-one-writer.test.js` holds
+that no door writes a record collection anywhere else.
 
-- **`ingestBrainDoc`** takes the record type as an explicit argument, and `null` means *this kind has nothing to
-  embed*. Links pass `null` — a link is a pair of ids, so there is no text. **A missing embed job on an arriving
-  link is correct, not a bug.**
-- **`ingestFileMeta`** is the second site, and it exists because file metadata is the one collection that cannot
-  be replaced wholesale: it merges the authored keys with `$set` and never `$unset`s, or the receiver would
-  publish the sender's `sizeBytes` and `sha256` for bytes it does not have. It queues **only when this instance
-  holds the blob**, because metadata can arrive before the file does.
-
-**So "a new ingest site cannot be written without the queue" is no longer structurally guaranteed** — it was a
-property of there being one function, and there are two. What holds instead is the argument that made
-`ingestBrainDoc` take its type explicitly: a caller that embeds nothing has to say `null` out loud, at the call,
-where a reviewer sees it. A third ingest site would have to make the same decision visible the same way.
+- **The record type is an EXPLICIT argument at every call**, and `null` means *this kind has nothing to embed*.
+  Links pass `null` — a link is a pair of ids, so there is no text. **A missing embed job on an arriving link is
+  correct, not a bug.** A caller that embeds nothing has to say so out loud, at the call, where a reviewer sees it.
+- **File metadata from a peer is merged, not replaced**: the writer hands it to `ingestFileMeta`, which `$set`s
+  the authored keys and never `$unset`s, or the receiver would publish the sender's `sizeBytes` and `sha256` for
+  bytes it does not have. A peer's file is queued **only when this instance holds the blob**. A restore replaces
+  the file row whole and restores its derived records as they were (cut `C6`), and queues every file.
+- **The counter is the door's to vouch for.** A push door moves it itself, once, after the write and before it
+  answers (`counterMovedByCaller`, and it hands over the stored copy its accept read as `stored`). The pull and
+  the import rely on the writer's bump, which never throws: a failed one is REPORTED (`counterBehind`), the pull
+  then holds that family's position and the import counts the family as errors.
+- **No receiver stamping on 5.6.x (cut `C4`).** Main stamps an arrival that carries no stamp from its own
+  `createdAt` by this instance's windows (`D-9`); 5.6.x stores it unstamped, as 5.6.1 did. A stamp already on
+  the stored copy of a peer's arrival is carried.
+- **An import is a restore, not a peer**: unguarded (a restore replaces), it keeps the export's stamps and
+  `syncBase` as Dates, because those ARE the record's own state here, and carries none from the copy it replaces.
 
 - **The record tier has to cross the wire for that to be true.** Both spellings of the suppression mark
   replicate. Stripped, a record its author retired from meaning-ranked search would re-enter it on every peer.

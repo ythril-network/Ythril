@@ -126,7 +126,7 @@ describe('a synced-in record is queued for embedding', { skip }, () => {
   });
 
   /*
-   * The structural half of this rule — that `ingestBrainDoc` is the ONLY thing which may write an arriving
+   * The structural half of this rule — that the arrival writer (`writeArrivals`) is the ONLY thing which may write an arriving
    * brain document — lives in `a-receiver-embeds-by-its-own-rules.test.js` instead, because it needs no
    * database and this suite self-skips without one. A rule that can only be checked where Mongo happens to be
    * running is a rule that goes unchecked on the machine where it is broken.

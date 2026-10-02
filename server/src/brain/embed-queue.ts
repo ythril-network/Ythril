@@ -34,7 +34,8 @@
  * shared with the media queue. Only the job shape and the collection differ.
  */
 
-import { col, asFilter, asUpdate } from '../db/mongo.js';
+import { col, asFilter, asUpdate, asBulk } from '../db/mongo.js';
+import { log, logSafe } from '../util/log.js';
 import { withJitter } from '../util/backoff.js';
 import { createWorkSignal } from '../util/work-signal.js';
 import { newClaimToken } from '../files/media/lease.js';
@@ -117,6 +118,31 @@ export async function ensureEmbedJobIndexes(spaceId: string): Promise<void> {
  * record with no vector. It is **on demand, not periodic** — say that precisely, because "it will be picked up"
  * and "an operator can pick it up" are different promises, and only one of them is true here.
  */
+/**
+ * The upsert that makes a job pending — the one shape of it, written by `enqueueEmbedJob` and by the batched
+ * `enqueueIngestedRecords`. Always resets `status`, `attempts`, the backoff and the claim: a new write is new
+ * content, and it must not inherit a verdict (or a half-hour backoff) earned by the old content or an outage that
+ * has since ended. The reset is the half a second copy would drop.
+ */
+function pendingJobUpdate(spaceId: string, recordType: BrainEmbedRecordType, recordId: string, now: string) {
+  return {
+    $set: {
+      spaceId, recordType, recordId,
+      status: 'pending' as const,
+      attempts: 0,
+      transientFailures: 0,
+      maxAttempts: MAX_EMBED_ATTEMPTS,
+      lastError: null,
+      claimedAt: null,
+      progressAt: null,
+      claimableAfter: null,
+      claimToken: null,
+      updatedAt: now,
+    },
+    $setOnInsert: { createdAt: now },
+  };
+}
+
 export async function enqueueEmbedJob(
   spaceId: string,
   recordType: BrainEmbedRecordType,
@@ -129,30 +155,12 @@ export async function enqueueEmbedJob(
   //
   // The rule lives here rather than at the call site because `upsertFileMeta` enqueues unconditionally, and
   // unconditionally is correct: every other file in the store IS content.
-  if (recordType === 'file' && isSpillPath(recordId)) return;
+  if (isSpillJob(recordType, recordId)) return;
 
-  const now = new Date().toISOString();
   try {
     await jobs(spaceId).updateOne(
       asFilter<BrainEmbedJobDoc>({ _id: embedJobId(recordType, recordId) }),
-      asUpdate<BrainEmbedJobDoc>({
-        $set: {
-          spaceId, recordType, recordId,
-          status: 'pending',
-          attempts: 0,
-          // Reset with `attempts`, for the same reason: a new write is new content, and it must not inherit
-          // a half-hour backoff earned by an outage that has since ended.
-          transientFailures: 0,
-          maxAttempts: MAX_EMBED_ATTEMPTS,
-          lastError: null,
-          claimedAt: null,
-          progressAt: null,
-          claimableAfter: null,
-          claimToken: null,
-          updatedAt: now,
-        },
-        $setOnInsert: { createdAt: now },
-      }),
+      asUpdate<BrainEmbedJobDoc>(pendingJobUpdate(spaceId, recordType, recordId, new Date().toISOString())),
       { upsert: true },
     );
     _signal.markSpaceMayHaveWork(spaceId);
@@ -585,6 +593,61 @@ export async function enqueueIngestedRecord(
   // Cast for the resolver's `Record<string, unknown>` signature, exactly as `reindex.ts` does. The parameter
   // above is narrow on purpose: it names the two fields this decision reads, so a caller can see at the call
   // site that the record's own mark is what travels here.
-  if (embeddingSuppressedFor(spaceId, recordType, doc as unknown as Record<string, unknown>)) return;
+  if (!arrivalToQueue(spaceId, recordType, doc)) return;
   await enqueueEmbedJob(spaceId, recordType, doc._id);
+}
+
+/** A job for a read spill — never queued (see `enqueueEmbedJob`). One spelling, for every enqueue path. */
+function isSpillJob(recordType: BrainEmbedRecordType, recordId: string): boolean {
+  return recordType === 'file' && isSpillPath(recordId);
+}
+
+/**
+ * Is this arriving record to be queued for embedding here: not a read spill, and not suppressed by the RECEIVER's
+ * `record > schema > space` resolution (`embeddingSuppressedFor`). The one question both ingest enqueues ask —
+ * the single record and the batched twin — so neither can drift from the other.
+ */
+function arrivalToQueue(spaceId: string, recordType: BrainEmbedRecordType, doc: { _id: string }): boolean {
+  return !isSpillJob(recordType, doc._id)
+    && !embeddingSuppressedFor(spaceId, recordType, doc as unknown as Record<string, unknown>);
+}
+
+/**
+ * `enqueueIngestedRecord` for a whole landed chunk of arrivals — what the arrival writer (`sync/arrivals.ts`)
+ * queues a page with, so a 500-record pulled page is ONE bulk write onto the jobs collection and not 500.
+ *
+ * The same rules as the single record, and they are the reason this is a twin beside it rather than a loop at the
+ * call site: the RECEIVER's suppression decides (`record > schema > space`, `embeddingSuppressedFor`, per record,
+ * in memory), each job is the same upsert `enqueueEmbedJob` writes (status, attempts and backoff reset, because a
+ * new write is new content), and a spill is never queued.
+ *
+ * **It never throws into the write it announces**, and unlike `enqueueEmbedJob` it does not swallow silently: the
+ * records are stored by the time they are queued, so failing the arrival over a queue fault would make the sender
+ * re-send records this instance already holds — but a record stored and never queued is absent from every
+ * meaning-ranked search here, so the failure is LOGGED, once for the batch, naming the space, the count and the
+ * cause. The repair is `POST /api/spaces/:id/reembed`. (5.6.x has no queue lanes: arrivals share the FIFO with
+ * local writes.)
+ */
+export async function enqueueIngestedRecords(
+  spaceId: string,
+  recordType: BrainEmbedRecordType,
+  docs: ReadonlyArray<{ _id: string; suppressEmbeddings?: boolean }>,
+): Promise<void> {
+  const wanted = docs.filter(d => arrivalToQueue(spaceId, recordType, d));
+  if (wanted.length === 0) return;
+  const now = new Date().toISOString();
+  try {
+    await jobs(spaceId).bulkWrite(asBulk<BrainEmbedJobDoc>(wanted.map(d => ({
+      updateOne: {
+        filter: { _id: embedJobId(recordType, d._id) },
+        update: pendingJobUpdate(spaceId, recordType, d._id, now),
+        upsert: true,
+      },
+    }))), { ordered: false });
+    _signal.markSpaceMayHaveWork(spaceId);
+  } catch (err) {
+    log.warn(`Embed enqueue failed for ${wanted.length} arriving ${recordType} record(s) in space '${spaceId}': `
+      + `${logSafe(err instanceof Error ? err.message : String(err))}. They are stored without a vector; `
+      + `POST /api/spaces/${spaceId}/reembed queues them again.`);
+  }
 }

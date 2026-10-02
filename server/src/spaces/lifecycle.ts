@@ -25,6 +25,7 @@ import { ensureEmbedJobIndexes } from '../brain/embed-queue.js';
 import { LINK_INDEXES } from '../brain/link-adjacency.js';
 import { envInt } from '../config/env-num.js';
 import { spaceCollection } from '../db/space-collection.js';
+import { RECORD_TYPE_OF } from '../sync/replicated-families.js';
 import { mapLimit } from '../util/map-limit.js';
 import { grantCreatorAdmin } from '../auth/creator-grant.js';
 import { logAuditEntry } from '../audit/audit.js';
@@ -637,13 +638,10 @@ export function candidateTypesForWipe(targets: ReadonlySet<WipeCollectionType>):
    * find a duplicate of and nothing to contradict — and under `Partial` that reads as the omission the gate
    * exists to catch.
    *
-   * Spelled `null`, so a collection added later is a compiler error here and its author has to say which
-   * of the two it is.
+   * The table is `RECORD_TYPE_OF` (`sync/replicated-families.ts`): the record type each collection holds, `null`
+   * for links, TOTAL over the collections and derived from `RECORD_COLLECTION`. This was a hand copy of it.
    */
-  const MAP: Record<WipeCollectionType, string | null> = {
-    facts: 'fact', entities: 'entity', edges: 'edge', chrono: 'chrono', files: 'file',
-    links: null,
-  };
+  const MAP: Readonly<Record<WipeCollectionType, string | null>> = RECORD_TYPE_OF;
   return Array.from(targets).map(t => MAP[t]).filter((t): t is string => t !== null && t !== undefined);
 }
 

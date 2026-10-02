@@ -28,7 +28,7 @@ const round = (over) => Object.assign(
 
 describe('vote-round retention — isRoundPrunable', () => {
   before(async () => {
-    ({ isRoundPrunable, pruneExpiredRounds } = await import('../../server/dist/sync/engine.js'));
+    ({ isRoundPrunable, pruneExpiredRounds } = await import('../../server/dist/sync/governance.js'));
   });
 
   it('concluded AND past deadline → prunable', () => {
@@ -54,7 +54,7 @@ describe('vote-round retention — isRoundPrunable', () => {
 
 describe('vote-round retention — pruneExpiredRounds', () => {
   before(async () => {
-    ({ isRoundPrunable, pruneExpiredRounds } = await import('../../server/dist/sync/engine.js'));
+    ({ isRoundPrunable, pruneExpiredRounds } = await import('../../server/dist/sync/governance.js'));
   });
 
   it('removes only concluded+expired rounds and returns the count', () => {

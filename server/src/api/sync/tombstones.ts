@@ -12,8 +12,9 @@ import { syncRateLimit } from '../../rate-limit/middleware.js';
 import { getDataRoot } from '../../config/loader.js';
 import { listTombstones, applyRemoteTombstone } from '../../brain/tombstones.js';
 import { requireAuth, denyReadOnly, isInstanceAdmin } from '../../auth/middleware.js';
-import { log } from '../../util/log.js';
-import { bumpSeq } from '../../util/seq.js';
+import { log, logSafe } from '../../util/log.js';
+import { bumpSeq, seqRefusal } from '../../util/seq.js';
+import { warnArrivalsNotStored } from '../../sync/arrivals.js';
 import { deleteStored } from '../../files/stored-bytes.js';
 import path from 'node:path';
 import type { TombstoneDoc, FileTombstoneDoc } from '../../config/types.js';
@@ -67,7 +68,7 @@ syncTombstonesRouter.get('/tombstones', syncRateLimit, requireAuth, async (req, 
     recordServedSeq(callerPeerId(req.authToken as Record<string, unknown>), spaceId, since);
     res.json(grouped);
   } catch (err) {
-    log.error(`sync GET tombstones: ${err}`);
+    log.error(`sync GET tombstones: ${logSafe(String(err))}`);
     res.status(500).json({ error: 'Internal error' });
   }
 });
@@ -111,12 +112,22 @@ syncTombstonesRouter.post('/tombstones', syncRateLimit, requireAuth, denyReadOnl
     }));
     const parsed = schema.safeParse(tombstones);
     if (!parsed.success) { res.status(400).json({ error: 'Invalid tombstone format' }); return; }
+    /*
+     * A tombstone seq is checked like a document's (`F8`, from main's `Q-107` part 1): `z.number()` alone let a
+     * 1e300 tombstone in, which refuses every later copy of its record and drags the counter into the ceiling
+     * reserve. One such tombstone is refused on its own and logged — a 400 would hold the sender's tombstone
+     * watermark and stop EVERY deletion from that peer propagating by push.
+     */
+    const plausible = parsed.data.filter(t => seqRefusal(t.seq, { optional: false }) === null);
+    const kept = new Set(plausible);
+    warnArrivalsNotStored('sync POST tombstones', spaceId, 'tombstone', 'refused',
+      parsed.data.filter(t => !kept.has(t)).map(t => ({ _id: t._id, reason: seqRefusal(t.seq, { optional: false })! })));
 
     // A peer token may only delete content it authored (peerInstanceId === tombstone issuer);
     // a trusted local/admin token (no peerInstanceId) may relay any tombstone.
     const callerPeerId = (req.authToken as Record<string, unknown>)?.['peerInstanceId'] as string | undefined;
     const trustedRelay = !callerPeerId && !!req.authToken && isInstanceAdmin(req.authToken);
-    await Promise.all(parsed.data.map(t =>
+    await Promise.all(plausible.map(t =>
       applyRemoteTombstone(t as TombstoneDoc, { peerInstanceId: callerPeerId, trustedRelay }),
     ));
 
@@ -133,21 +144,25 @@ syncTombstonesRouter.post('/tombstones', syncRateLimit, requireAuth, denyReadOnl
      *   it pushes back                                      -> `tombstone.seq >= incoming.seq`, refused as
      *                                                          `tombstoned` with a 200
      *
-     * The sender reads only `resp.ok`, so it advances past the record and never offers it again. Silent,
-     * permanent, and one-directional. It is reachable today wherever a caller supplies the id — facts,
-     * entities and chrono all take one — and it is what would make a derived edge id unsafe (P-23).
+     * The sender advances past the record and never offers it again. Silent, permanent, and one-directional.
+     * It is reachable today wherever a caller supplies the id — facts, entities and chrono all take one — and
+     * it is what would make a derived edge id unsafe (P-23).
      *
      * Bumped on everything RECEIVED rather than on what `applyRemoteTombstone` accepted. A tombstone it
      * refuses on authorship grounds still tells us where that peer's clock is, and the two errors are not
      * symmetric: advancing too far only skips some seq numbers, while not advancing far enough loses a
-     * record.
+     * record. Everything received with a PLAUSIBLE seq — an implausible one is refused above and moves nothing.
+     *
+     * AWAITED, before the answer (`Q-198`): a fire-and-forget bump let the sender be told the page landed while
+     * this instance's counter was still behind it, and the next local write could take a seq below a deletion
+     * the peer already holds.
      */
-    const maxTombstoneSeq = parsed.data.reduce((m, t) => Math.max(m, t.seq ?? 0), 0);
-    if (maxTombstoneSeq > 0) bumpSeq(spaceId, maxTombstoneSeq).catch(() => {});
+    const maxTombstoneSeq = plausible.reduce((m, t) => Math.max(m, t.seq), 0);
+    if (maxTombstoneSeq > 0) await bumpSeq(spaceId, maxTombstoneSeq);
 
-    res.status(200).json({ applied: parsed.data.length });
+    res.status(200).json({ applied: plausible.length });
   } catch (err) {
-    log.error(`sync POST tombstones: ${err}`);
+    log.error(`sync POST tombstones: ${logSafe(String(err))}`);
     res.status(500).json({ error: 'Internal error' });
   }
 });
@@ -178,7 +193,7 @@ syncTombstonesRouter.get('/file-tombstones', syncRateLimit, requireAuth, async (
       .toArray();
     res.json({ tombstones });
   } catch (err) {
-    log.error(`sync GET file-tombstones: ${err}`);
+    log.error(`sync GET file-tombstones: ${logSafe(String(err))}`);
     res.status(500).json({ error: 'Internal error' });
   }
 });
@@ -233,7 +248,7 @@ syncTombstonesRouter.post('/file-tombstones', syncRateLimit, requireAuth, denyRe
 
     res.json({ applied });
   } catch (err) {
-    log.error(`sync POST file-tombstones: ${err}`);
+    log.error(`sync POST file-tombstones: ${logSafe(String(err))}`);
     res.status(500).json({ error: 'Internal error' });
   }
 });

@@ -1,8 +1,9 @@
 /**
  * Which pulled documents sync actually writes, and how they are scoped.
  *
- * Extracted from `batchUpsertBySeq` in `sync/engine.ts` (god-file split, slice 2). The engine keeps the
- * Mongo IO; the decisions live in `upsert-plan.ts` and are tested here with no database at all.
+ * Extracted from `batchUpsertBySeq` in `sync/engine.ts` (god-file split, slice 2). Since 5.6.2 the IO is the
+ * arrival writer's (`sync/arrivals.ts`, where `batchUpsertBySeq` moved as `planArrivalWrites`); the decisions live in `upsert-plan.ts`
+ * and are tested here with no database at all.
  *
  * Every mistake in this decision is silent:
  *
@@ -122,5 +123,99 @@ describe('retagToLocalSpace — synced documents belong to the local space', () 
 
   it('is a no-op on an empty batch', () => {
     assert.doesNotThrow(() => retagToLocalSpace([], 'ours'));
+  });
+});
+
+/*
+ * Ported to 5.6.x with the arrival writer (`Q-218`): the IO moved from `sync/engine.ts` into `sync/arrivals.ts`,
+ * where `planArrivalWrites` (once `batchUpsertBySeq`) is the writer's by-seq accept. These hold that the writer applies THIS
+ * `planSeqUpserts`, that one tie-break rule decides every copy, and the derived fork id.
+ */
+describe('the arrival writer applies this accept, and no copy of it', () => {
+  it('planArrivalWrites in sync/arrivals.ts calls planSeqUpserts for every write but a restore', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { stripComments } = await import('./_strip-comments.mjs');
+    const { bodyOf } = await import('./_structural-window.mjs');
+    const body = bodyOf(stripComments(readFileSync('server/src/sync/arrivals.ts', 'utf8')), 'planArrivalWrites');
+    assert.match(body, /if \(restore\) return \{ toWrite: docs, stored \};/, 'a restore no longer bypasses the accept');
+    assert.match(body, /toWrite: planSeqUpserts\(/, 'the writer accepts by a rule of its own instead of planSeqUpserts');
+    assert.doesNotMatch(body, /\.seq\s*>=?\s*\w+\.seq|seq\s*>=\s*prev/, 'a hand-written seq comparison is back beside planSeqUpserts');
+  });
+});
+
+describe('one accept rule: isNewerCopy', () => {
+  it('strictly newer; nothing held is beaten by anything; a seq-less copy beats nothing held at a seq', async () => {
+    const { isNewerCopy } = await import('../../server/dist/sync/upsert-plan.js');
+    assert.deepEqual([isNewerCopy(5, 4), isNewerCopy(5, 5), isNewerCopy(4, 5)], [true, false, false]);
+    assert.deepEqual([isNewerCopy(0, undefined), isNewerCopy(undefined, undefined), isNewerCopy(undefined, 0)], [true, true, false]);
+  });
+
+  it('the pull accept and the writer\'s collapse and read-back all ask it, and nothing else compares', async () => {
+    /*
+     * The accept was written three times (`doc.seq > prev` in `planSeqUpserts`, and the writer's collapse and its
+     * read-back of a guarded write). Seen red by mutation, restored by hand: the writer's collapse written back as
+     * a raw comparison.
+     */
+    const { readFileSync } = await import('node:fs');
+    const { stripComments } = await import('./_strip-comments.mjs');
+    const { bodyOf } = await import('./_structural-window.mjs');
+    const plan = stripComments(readFileSync('server/src/sync/upsert-plan.ts', 'utf8'));
+    const writer = bodyOf(stripComments(readFileSync('server/src/sync/arrivals.ts', 'utf8')), 'writeArrivals');
+    assert.match(bodyOf(plan, 'planSeqUpserts'), /isNewerCopy\(/, 'planSeqUpserts no longer asks isNewerCopy');
+    assert.equal((writer.match(/isNewerCopy\(/g) ?? []).length, 2, 'the writer\'s collapse and read-back do not both ask isNewerCopy');
+    // Any `x.seq > y` / `seq > z.seq` left is a second accept rule. The counter's high-water comparison is about a
+    // different thing and is named, not hidden.
+    const ALLOWED = /seq\s*>\s*out\.maxReceived|incoming\s*>\s*held/;
+    const raw = [...plan.matchAll(/[\w.?)]+\s*>=?\s*[\w.(]+/g), ...writer.matchAll(/[\w.?)]+\s*>=?\s*[\w.(]+/g)]
+      .map(m => m[0]).filter(e => /seq/i.test(e) && !ALLOWED.test(e));
+    assert.deepEqual(raw, [], 'a seq comparison outside isNewerCopy decides which copy wins');
+  });
+
+  it('every DOOR that hands the writer an arrival asks isNewerCopy too, and compares no seqs of its own (R8)', async () => {
+    /*
+     * `Q-218` round R, item R8. The case above reads `upsert-plan.ts` and the writer's body, and its title says
+     * "nothing else compares" — but the doors decide which documents reach the writer (the push routes read the
+     * stored copy and choose insert, skip or fork before the writer re-checks), so a door that compares seqs itself
+     * is a second accept rule the case above never looks at. The doors are DERIVED: every source file that calls
+     * `writeArrivals(` outside the writer, with a floor. Seen red by mutation, restored by hand: one `isNewerCopy`
+     * site in `api/sync/docs.ts` reverted to `!existing || incoming.seq > existing.seq`.
+     *
+     * What a door may still compare, each a different question from "which copy wins", named rather than hidden:
+     *  - a TOMBSTONE against the arrival (`tomb.seq >= incoming.seq`): the deletion rule, not the accept;
+     *  - a WATERMARK or high-water mark this side keeps, on the right of `>` (`maxSeq`, `highSeq`,
+     *    `deliveredThrough`, a `since…` position, a `lastSeq…` pushed mark, zero): a position, not a stored copy.
+     */
+    const { readFileSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const { blankComments } = await import('./_strip-comments.mjs');
+    const { trackedSources, REPO_ROOT } = await import('./_sources.mjs');
+    const read = (f) => blankComments(readFileSync(join(REPO_ROOT, f), 'utf8'));
+    const doors = trackedSources('server/src', { specs: false })
+      .filter(f => f !== 'server/src/sync/arrivals.ts' && /\bwriteArrivals\s*\(/.test(read(f)));
+    assert.ok(doors.length >= 3, `only ${doors.length} door(s) call writeArrivals: ${doors}`);
+    const NOT_THE_ACCEPT = /^(?:tomb(?:stone)?\??\.seq\s*>=?\s*incoming\.seq|[\w.]*\s*>\s*(?:0|\w*maxSeq|highSeq|deliveredThrough|since\w*|lastSeq\w*))$/i;
+    const raw = [];
+    for (const f of doors) {
+      const src = read(f);
+      for (const m of src.matchAll(/[\w.?)\]!]+\s*>=?\s*[\w.(?]+/g)) {
+        if (!/seq/i.test(m[0]) || NOT_THE_ACCEPT.test(m[0].trim())) continue;
+        raw.push(`${f}:${src.slice(0, m.index).split('\n').length}: ${m[0]}`);
+      }
+    }
+    assert.deepEqual(raw, [], 'a door compares seqs to decide which copy wins, beside isNewerCopy: a second accept rule '
+      + 'that drifts from the writer\'s');
+    const asking = doors.filter(f => /\bisNewerCopy\(/.test(read(f)));
+    assert.ok(asking.length >= 1, 'no door asks isNewerCopy — the push doors decide which copy wins some other way');
+  });
+});
+
+describe('a fork id is derived (`FK`)', () => {
+  it('the same divergence gives the same id, a different text or seq another, v4-shaped', async () => {
+    const { forkIdFor } = await import('../../server/dist/sync/upsert-plan.js');
+    const a = forkIdFor('f', 5, 'x');
+    assert.equal(a, forkIdFor('f', 5, 'x'));
+    assert.notEqual(a, forkIdFor('f', 5, 'y'));
+    assert.notEqual(a, forkIdFor('f', 6, 'x'));
+    assert.match(a, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
   });
 });

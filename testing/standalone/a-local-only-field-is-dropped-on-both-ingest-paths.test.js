@@ -37,10 +37,12 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
+import { bodyOf } from './_structural-window.mjs';
 
 const FIELDS = 'server/src/sync/local-only-fields.ts';
 const ENGINE = 'server/src/sync/engine.ts';
 const SHARED = 'server/src/api/sync/_shared.ts';
+const ARRIVALS = 'server/src/sync/arrivals.ts';
 const src = (f) => stripComments(readFileSync(f, 'utf8'));
 
 /**
@@ -76,24 +78,32 @@ describe('the two ingest paths agree about local-only fields', () => {
       `an ingest schema declares a local-only field, so a peer can set it: ${declared.join(', ')}`);
   });
 
-  it('and PULL drops them too, which is the half that did not', () => {
+  it('and PULL drops them too, which is the half that did not — in the one arrival writer', () => {
     /*
-     * The pull path validates nothing, so the drop has to be explicit and has to name the shared list. This
-     * asserts the engine reaches for that list rather than spelling the fields out — a hand-written copy
-     * here would go stale the next time a field joins the exclusion, and go stale silently.
+     * The pull path validates nothing, so the drop has to be explicit and has to name the shared list. Since
+     * 5.6.2 (`Q-218`, main's `Q-107` part 1) it is not the engine's: every door stores through `writeArrivals`
+     * (`sync/arrivals.ts`), which drops what arrived of the local-only set — the derived half always, the
+     * record-tier half unless the write is a RESTORE — by the module's own sets, never by a list spelled here.
+     * The engine hands the page over whole.
      */
-    const s = src(ENGINE);
-    assert.match(s, /LOCAL_ONLY_FIELDS|stripLocalOnly/,
-      'the pull path does not drop local-only fields at all. It fetches `full=true` and `replaceOne`s what '
-      + 'arrives, so the sender vector and the sender `_expireAt` are stored — and `ttl-sweep.ts` deletes '
-      + 'that stamp, so a peer decides when this instance deletes its data.');
+    assert.match(src(ENGINE), /await writeArrivals\(/,
+      'the pull path no longer stores its page through the arrival writer, so nothing drops what never crosses');
+    const prep = bodyOf(src(ARRIVALS), 'prepared');
+    assert.match(prep, /for \(const f of DERIVED_LOCAL_FIELDS\) delete doc\[f\];/,
+      'the writer no longer drops the derived local-only fields (vector, model, matchedText) from what arrived');
+    assert.match(prep, /for \(const f of RESTORED_LOCAL_FIELDS\) \{\s*if \(!restore\) \{ delete doc\[f\]; continue; \}/,
+      'the writer keeps a peer\'s retention stamps or sync base — a peer would decide when this instance deletes '
+      + 'its data, which is what `ttl-sweep.ts` acts on');
+    const fields = src(FIELDS);
+    assert.match(fields, /DERIVED_LOCAL_FIELDS[^=]*=\s*new Set\(\[\.\.\.LOCAL_ONLY_FIELDS\]\.filter\(/,
+      'the derived half is no longer derived from LOCAL_ONLY_FIELDS, so a new local-only field can fall in neither');
   });
 
   it('the drop happens BEFORE the write, not after it', () => {
-    const s = src(ENGINE);
-    const strip = s.search(/stripLocalOnly\s*\(/);
-    const write = s.indexOf('batchUpsertBySeq');
-    assert.ok(strip > 0 && write > 0, 'cannot locate the strip and the write in the pull path');
+    const body = bodyOf(src(ARRIVALS), 'writeArrivals');
+    const strip = body.search(/prepared\(doc, family, restore\)/);
+    const write = body.indexOf('.bulkWrite(');
+    assert.ok(strip > 0 && write > 0, 'cannot locate the drop and the write in the arrival writer');
     assert.ok(strip < write,
       'the local-only fields are dropped after the document is written, which stores them first');
   });

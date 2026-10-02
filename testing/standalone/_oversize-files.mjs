@@ -96,9 +96,10 @@ export const FROZEN = {
   'client/src/app/pages/schema-library/schema-library.component.ts': 1112,
   // RAISED 966 -> 975 for `P-32`: a sixth sync family. The push call, the pull call, both watermark
   // entries, and the two signatures widened to accept it — every line of it is the engine deciding what
-  // crosses the wire, which is what this file is for. The MERGE it needs is already elsewhere:
-  // `applyFileMetaPage` lives in `api/sync/_shared.ts` beside the push path's `ingestFileMeta`, so the two
-  // directions share one implementation instead of this file holding a second.
+  // crosses the wire, which is what this file is for. The MERGE it needs is already elsewhere: both
+  // directions store file metadata through the arrival writer (`sync/arrivals.ts`, since 5.6.2), which hands
+  // it to `ingestFileMeta` in `api/sync/_shared.ts`, so they share one implementation instead of this file
+  // holding a second.
   //
   // NO DECOMPOSITION: PAID. This raise owed `A-12`, and it has shipped — so the marker is the settled form
   // the three raises above use, not an annotated live one.
@@ -154,7 +155,12 @@ export const FROZEN = {
   // where in the cycle a refusal is recorded, which is a fact about the cycle.
   // 964 -> 802: file sync (tombstones, manifest, bytes) moved whole into `sync/file-sync.ts` (Q-68), which the
   // fix for a renamed space's files and the last-agreed-hash conflict rule both change.
-  'server/src/sync/engine.ts': 802,
+  // 802 -> 752 (5.6.2, `Q-218`): the pull's page write (`batchUpsertBySeq`) moved out into the one arrival writer,
+  // `sync/arrivals.ts`; the ceiling follows the file down so the reclaimed lines are not room to regrow into.
+  // 752 -> 751 in the same patch: the pull's store-refusal line stopped naming ids the writer already names.
+  // 751 -> 744 in the same patch (`Q-218` round R): vote-round retention moved to `sync/governance.ts`, beside round
+  // conclusion, which paid for the pull's counter-behind hold (R3) and left seven lines the ceiling follows down.
+  'server/src/sync/engine.ts': 744,
   // 958 -> 684: the per-type editor body moved into `schema-type-editor.component` so the Brain Overview
   // could open the same editor. Lowered rather than left — a frozen number 274 lines above the real size
   // is 274 lines this file could regrow into without the gate saying a word.

@@ -17,29 +17,29 @@
 
 import { getConfig, saveConfig, saveConfigSoon, getSecrets, getFaceRecognitionConfig } from '../config/loader.js';
 import { BRAIN_COLLECTIONS, type LinkDoc } from '../config/types.js';
-import { applyFileMetaPage, fileMetaForWire } from '../api/sync/_shared.js';
+import { fileMetaForWire } from '../api/sync/_shared.js';
 import { boundedJson } from '../util/bounded-read.js';
 import { reportPushRefusals, refusedTransfers } from './push-refusals.js';
 import { deliverChangeNotes } from './change-notes.js';
-import { col, asFilter, asBulk } from '../db/mongo.js';
+import { col, asFilter } from '../db/mongo.js';
 import { recordSyncResult, type SyncCounts } from './history.js';
-import { log } from '../util/log.js';
+import { log, logSafe } from '../util/log.js';
 import { resolveWatermark, truncationWarn, type TransferOutcome } from './watermark.js';
 import { pullTombstones, pushTombstones } from './tombstone-transfer.js';
 import { applyConcludedSpaceRounds } from '../spaces/apply-wipe-round.js';
-import { bumpSeq, isSeqImplausible, settledSeqRange } from '../util/seq.js';
+import { bumpSeq, settledSeqRange } from '../util/seq.js';
 import { adoptAnnouncedSpaces, announcedSpaces, healAnnouncedAliases } from '../networks/network-spaces.js';
 import { selfRecordFor } from '../networks/self-record.js';
 import { pullSpaceMetaFromUpstream } from './space-meta-pull.js';
 import { peerSafeFetch, isPeerUrlAllowed } from './peer-fetch.js';
-import { concludeRoundIfReady, sendMemberRemovedNotify } from './governance.js';
+import { concludeRoundIfReady, sendMemberRemovedNotify, isRoundPrunable, pruneExpiredRounds } from './governance.js';
 import { admitPassedJoin } from '../networks/admit-passed-join.js';
 import { adoptPeerRound } from '../networks/round-local-state.js';
 import { enqueueMediaJob } from '../files/media/job-queue.js';
 import { resolveInputFormat } from '../files/converters/pipeline.js';
 import { mimeTypeForPath } from '../files/mime.js';
 import { createCoalescingRunner } from './coalescing-runner.js';
-import { retagToLocalSpace, planSeqUpserts } from './upsert-plan.js';
+import { writeArrivals, arrivalId, type ArrivalOutcome } from './arrivals.js';
 import { syncFiles } from './file-sync.js';
 import {
   syncCyclesTotal,
@@ -61,8 +61,7 @@ import { resolveSafePath } from '../files/sandbox.js';
 import type { FileMetaDoc } from '../config/types.js';
 import { acceptVoteCast, pinMemberSigningKey, castForWire } from '../util/signing.js';
 import { assertPeerAtFloor } from './peer-floor.js';
-import { REPLICATED_FAMILIES, type PayloadKey } from './replicated-families.js';
-import { stripLocalOnly } from './local-only-fields.js';
+import { REPLICATED_FAMILIES, RECORD_TYPE_OF, type PayloadKey, type ReplicatedFamily } from './replicated-families.js';
 import { spaceCollection } from '../db/space-collection.js';
 
 // Timeout for every outbound fetch to a peer.
@@ -114,32 +113,7 @@ function _setFailureCount(networkId: string, instanceId: string, value: number |
   return newValue;
 }
 
-// ── Vote-round retention ────────────────────────────────────────────────────
-
-/** A round is prunable once it is concluded AND past its deadline. After the deadline
- *  every peer concludes the round independently (the deadline path in
- *  `concludeRoundIfReady`), so such a round can no longer influence any decision and
- *  never needs re-serving or re-propagating. A malformed/unparseable deadline yields
- *  `NaN`, and `NaN < now` is false, so we keep the round rather than prune on doubt. */
-export function isRoundPrunable(
-  round: { concluded?: boolean; deadline: string },
-  now: number = Date.now(),
-): boolean {
-  return Boolean(round.concluded) && new Date(round.deadline).getTime() < now;
-}
-
-/** Drop concluded-and-expired rounds from a network's `pendingRounds` in place.
- *  `concludeRoundIfReady` marks a round `concluded` but never removes it, so without
- *  this `pendingRounds` grows for the life of the network — bloating `config.json`, the
- *  `GET /votes` scan, and gossip payloads. Returns the number of rounds removed. */
-export function pruneExpiredRounds(net: NetworkConfig, now: number = Date.now()): number {
-  const rounds = net.pendingRounds;
-  if (!rounds || rounds.length === 0) return 0;
-  const kept = rounds.filter(r => !isRoundPrunable(r, now));
-  const removed = rounds.length - kept.length;
-  if (removed > 0) net.pendingRounds = kept;
-  return removed;
-}
+// Vote-round retention (`isRoundPrunable`, `pruneExpiredRounds`) lives with round conclusion in `governance.ts`.
 
 // ── Per-network sync dedup lock ─────────────────────────────────────────────
 // Prevents concurrent sync cycles for the same network from competing for
@@ -152,8 +126,8 @@ export function pruneExpiredRounds(net: NetworkConfig, now: number = Date.now())
 // the one it holds, and a members-less cycle resolves in microtasks, so a queued rerun starts and
 // finishes before any caller resumes.
 const _syncRunner = createCoalescingRunner<{ synced: number; errors: number }>({
-  onQueued: (id) => log.debug(`Sync cycle already running for network ${id} — queuing rerun`),
-  onRerun: (id) => log.debug(`Rerun requested for network ${id} — starting`),
+  onQueued: (id) => log.debug(`Sync cycle already running for network ${logSafe(id)} — queuing rerun`),
+  onRerun: (id) => log.debug(`Rerun requested for network ${logSafe(id)} — starting`),
 });
 
 /** True while a sync cycle for the given network is in-flight. Cheap, in-memory —
@@ -181,7 +155,7 @@ async function _runSyncForNetworkImpl(networkId: string): Promise<{ synced: numb
   const pushed: SyncCounts = { facts: 0, entities: 0, edges: 0, files: 0, chrono: 0, links: 0 };
   const errorMessages: string[] = [];
 
-  log.info(`Starting sync cycle for network '${net.label}' (${net.members.length} members)`);
+  log.info(`Starting sync cycle for network '${logSafe(net.label)}' (${net.members.length} members)`);
   let synced = 0; let errors = 0; let refusals = 0;
   const syncTimer = syncDurationSeconds.startTimer({ network: networkId });
 
@@ -196,7 +170,7 @@ async function _runSyncForNetworkImpl(networkId: string): Promise<{ synced: numb
       if (counts.incomplete.length > 0) throw new Error(`transfer did not complete — ${counts.incomplete.join('; ')}`);
       // Q-59: records the peer answered for and refused make the cycle PARTIAL with the reason, not a failure of the
       // member — it answered, so its failure counter (and the "unreachable" alarm read from it) must not move.
-      if (counts.refused.length > 0) { refusals++; errorMessages.push(`${member.label} refused records: ${counts.refused.join('; ')}`); }
+      if (counts.refused.length > 0) { refusals++; errorMessages.push(`${logSafe(member.label)} refused records: ${counts.refused.join('; ')}`); }
       synced++;
       // Reset failure counter on success
       _setFailureCount(net.id, member.instanceId, 0);
@@ -208,14 +182,14 @@ async function _runSyncForNetworkImpl(networkId: string): Promise<{ synced: numb
       );
       for (const rc of reparentedChildren) {
         log.warn(
-          `REPARENT_REVERT_AVAILABLE: original parent '${member.label}' is back online. ` +
-          `'${rc.label}' (${rc.instanceId}) was temporarily re-parented during the outage. ` +
-          `To restore original topology: POST /api/networks/${net.id}/members/${rc.instanceId}/revert-parent. ` +
-          `To make the adoption permanent:  POST /api/networks/${net.id}/members/${rc.instanceId}/adopt.`,
+          `REPARENT_REVERT_AVAILABLE: original parent '${logSafe(member.label)}' is back online. ` +
+          `'${logSafe(rc.label)}' (${logSafe(rc.instanceId)}) was temporarily re-parented during the outage. ` +
+          `To restore original topology: POST /api/networks/${net.id}/members/${logSafe(rc.instanceId)}/revert-parent. ` +
+          `To make the adoption permanent:  POST /api/networks/${net.id}/members/${logSafe(rc.instanceId)}/adopt.`,
         );
       }
     } catch (err) {
-      const errMsg = `Sync failed for member ${member.label} (${member.instanceId}): ${err}`;
+      const errMsg = `Sync failed for member ${logSafe(member.label)} (${logSafe(member.instanceId)}): ${logSafe(String(err))}`;
       log.error(errMsg);
       errorMessages.push(errMsg);
       errors++;
@@ -223,20 +197,20 @@ async function _runSyncForNetworkImpl(networkId: string): Promise<{ synced: numb
       if (failures === STALE_FAILURE_THRESHOLD) {
         const hasChildren = net.type === 'braintree' && (member.children?.length ?? 0) > 0;
         log.warn(
-          `PEER UNREACHABLE: '${member.label}' in network '${net.label}' has failed ` +
-          `${failures} consecutive sync cycles. Last success: ${member.lastSyncAt ?? 'never'}. ` +
+          `PEER UNREACHABLE: '${logSafe(member.label)}' in network '${logSafe(net.label)}' has failed ` +
+          `${logSafe(failures)} consecutive sync cycles. Last success: ${logSafe(member.lastSyncAt ?? 'never')}. ` +
           `Member has NOT been removed — manual action required.` +
           (hasChildren
             ? ` NOTE: this node has ${member.children!.length} child(ren) in a braintree network — its entire subtree is now partitioned from this brain until it comes back online.`
             : ''),
         );
       } else if (failures > STALE_FAILURE_THRESHOLD && failures % 10 === 0) {
-        log.warn(`PEER STILL UNREACHABLE: '${member.label}' (${failures} consecutive failures, last success: ${member.lastSyncAt ?? 'never'})`);
+        log.warn(`PEER STILL UNREACHABLE: '${logSafe(member.label)}' (${logSafe(failures)} consecutive failures, last success: ${logSafe(member.lastSyncAt ?? 'never')})`);
       }
     }
   }
 
-  log.info(`Sync cycle complete for '${net.label}': ${synced} ok, ${errors} errors`);
+  log.info(`Sync cycle complete for '${logSafe(net.label)}': ${logSafe(synced)} ok, ${logSafe(errors)} errors`);
   syncTimer();
 
   // Calculate status once and share between Prometheus and sync history
@@ -261,7 +235,7 @@ async function _runSyncForNetworkImpl(networkId: string): Promise<{ synced: numb
     pulled,
     pushed,
     ...(errorMessages.length > 0 ? { errors: errorMessages } : {}),
-  }).catch(err => log.error(`Failed to record sync history: ${err}`));
+  }).catch(err => log.error(`Failed to record sync history: ${logSafe(String(err))}`));
 
   // ── Orphan detection (braintree only) ──────────────────────────────────
   // After the sync loop finishes, check if any member's parentInstanceId points to
@@ -281,8 +255,8 @@ async function _runSyncForNetworkImpl(networkId: string): Promise<{ synced: numb
         const me = freshNet.members.find(m => m.instanceId === freshCfg.instanceId);
         for (const orphan of orphans) {
           log.warn(
-            `ORPHAN DETECTED: '${orphan.label}' (${orphan.instanceId}) in '${freshNet.label}' ` +
-            `has parentInstanceId '${orphan.parentInstanceId}' which is not in the member list. ` +
+            `ORPHAN DETECTED: '${logSafe(orphan.label)}' (${logSafe(orphan.instanceId)}) in '${logSafe(freshNet.label)}' ` +
+            `has parentInstanceId '${logSafe(orphan.parentInstanceId)}' which is not in the member list. ` +
             `Auto-adopting as direct child of this instance.`,
           );
           orphan.parentInstanceId = freshCfg.instanceId;
@@ -308,7 +282,7 @@ async function _runSyncForNetworkImpl(networkId: string): Promise<{ synced: numb
     if (freshNet) {
       const removed = pruneExpiredRounds(freshNet);
       if (removed > 0) {
-        log.info(`Pruned ${removed} concluded+expired vote round(s) from network '${freshNet.label}'`);
+        log.info(`Pruned ${logSafe(removed)} concluded+expired vote round(s) from network '${logSafe(freshNet.label)}'`);
         saveConfig(freshCfg);
       }
     }
@@ -345,7 +319,7 @@ export async function runSyncForPeer(
       networksSynced++;
       _setFailureCount(net.id, member.instanceId, 0);
     } catch (err) {
-      log.error(`network_sync failed for peer ${member.label} (${member.instanceId}) in network '${net.label}': ${err}`);
+      log.error(`network_sync failed for peer ${logSafe(member.label)} (${logSafe(member.instanceId)}) in network '${logSafe(net.label)}': ${logSafe(String(err))}`);
       errors++;
       _setFailureCount(net.id, member.instanceId, 'increment');
     }
@@ -366,7 +340,7 @@ async function runSyncForMember(
   const secrets = getSecrets();
   const peerToken = secrets.peerTokens[member.instanceId];
   if (!peerToken) {
-    log.warn(`No peer token for ${member.label} (${member.instanceId}) — skipping sync`);
+    log.warn(`No peer token for ${logSafe(member.label)} (${logSafe(member.instanceId)}) — skipping sync`);
     return { pulled, pushed, incomplete: ['no peer token for this member'], refused };
   }
 
@@ -434,7 +408,7 @@ async function runSyncForMember(
     await propagateVotesWithPeer(net, member, fetchOpts);
     await deliverChangeNotes(net, member, fetchOpts); // F-42: only to a member below us; never throws, undelivered stays queued
   } catch (err) {
-    log.warn(`Governance gossip with ${member.label} (${member.instanceId}): ${err}`);
+    log.warn(`Governance gossip with ${logSafe(member.label)} (${logSafe(member.instanceId)}): ${logSafe(String(err))}`);
   }
 
   /*
@@ -458,7 +432,7 @@ async function runSyncForMember(
     // for space IDs that were registered on the network but never created locally.
     const cfg = getConfig();
     if (!cfg.spaces.some(s => s.id === spaceId && !s.proxyFor)) {
-      log.warn(`Skipping sync for space '${spaceId}' in network '${net.label}': space not in local config`);
+      log.warn(`Skipping sync for space '${spaceId}' in network '${logSafe(net.label)}': space not in local config`);
       continue;
     }
 
@@ -498,7 +472,7 @@ async function runSyncForMember(
               // Shared table. The inline copy here defaulted to `image/jpeg`, so a synced image whose
               // extension it did not list was mislabelled rather than left unknown.
               enqueueMediaJob(spaceId, p, mimeTypeForPath(p), 'image').catch(err =>
-                log.warn(`Face reprocess enqueue for ${spaceId}/${p}: ${err}`),
+                log.warn(`Face reprocess enqueue for ${spaceId}/${logSafe(p)}:${logSafe(String(err))}`),
               );
             }
           }
@@ -566,7 +540,7 @@ async function gossipWithPeer(
               let changed = false;
               if (peerSelf.url && peerSelf.url !== local.url) {
                 if (isPeerUrlAllowed(peerSelf.url)) { local.url = peerSelf.url; changed = true; }
-                else log.warn(`Gossip: rejected unsafe self-URL from ${member.label} (${member.instanceId}): ${peerSelf.url}`);
+                else log.warn(`Gossip: rejected unsafe self-URL from ${logSafe(member.label)} (${logSafe(member.instanceId)}): ${logSafe(peerSelf.url)}`);
               }
               if (peerSelf.label && peerSelf.label !== local.label) { local.label = peerSelf.label; changed = true; }
               /*
@@ -594,7 +568,7 @@ async function gossipWithPeer(
               if (!local.versionCheckedAt) { local.versionCheckedAt = new Date().toISOString(); changed = true; }
               if (pinMemberSigningKey(local, peerSelf.signingPublicKey, peerSelf.signingKeyRotation)) changed = true;
               if (changed) {
-                log.info(`Gossip: updated ${member.label} via self-piggyback (${net.id})`);
+                log.info(`Gossip: updated ${logSafe(member.label)} via self-piggyback (${net.id})`);
                 saveConfig(freshCfg);
               }
             }
@@ -602,17 +576,17 @@ async function gossipWithPeer(
         }
       } catch { /* ignore JSON parse failures */ }
     } else {
-      log.warn(`Gossip self-push to ${member.label}: HTTP ${resp.status}`);
+      log.warn(`Gossip self-push to ${logSafe(member.label)}: HTTP ${logSafe(resp.status)}`);
     }
   } catch (err) {
-    log.warn(`Gossip self-push to ${member.label}: ${err}`);
+    log.warn(`Gossip self-push to ${logSafe(member.label)}: ${logSafe(String(err))}`);
   }
 
   // 2. Pull peer's member view and merge into our config
   try {
     const resp = await peerSafeFetch(`${base}/members`, opts());
     if (!resp.ok) {
-      log.warn(`Gossip pull from ${member.label}: HTTP ${resp.status}`);
+      log.warn(`Gossip pull from ${logSafe(member.label)}: HTTP ${logSafe(resp.status)}`);
       return;
     }
     const { members: peerView } = await boundedJson<{ members: Partial<NetworkMember>[] }>(resp, 'sync peer');
@@ -646,13 +620,13 @@ async function gossipWithPeer(
       }
       if (pinMemberSigningKey(local, peerRecord.signingPublicKey)) updated = true;
       if (updated) {
-        log.info(`Gossip: updated member ${local.label} (${local.instanceId}) in network ${net.id}`);
+        log.info(`Gossip: updated member ${logSafe(local.label)} (${logSafe(local.instanceId)}) in network ${net.id}`);
         changed = true;
       }
     }
     if (changed) saveConfig(fresh);
   } catch (err) {
-    log.warn(`Gossip pull from ${member.label}: ${err}`);
+    log.warn(`Gossip pull from ${logSafe(member.label)}: ${logSafe(String(err))}`);
   }
 }
 
@@ -682,7 +656,7 @@ async function propagateVotesWithPeer(
   try {
     const resp = await peerSafeFetch(`${base}/votes`, opts());
     if (!resp.ok) {
-      log.warn(`Vote pull from ${member.label}: HTTP ${resp.status}`);
+      log.warn(`Vote pull from ${logSafe(member.label)}: HTTP ${logSafe(resp.status)}`);
       return;
     }
     const { rounds: peerRounds } = await boundedJson<{ rounds: (Omit<VoteRound, 'concluded'>)[] }>(resp, 'sync peer');
@@ -702,7 +676,7 @@ async function propagateVotesWithPeer(
         // Nothing local is taken from it (S-7, S-9); votes are merged below, one cast at a time.
         local = adoptPeerRound(freshNet, peerRound as VoteRound);
         changed = true;
-        log.info(`Vote gossip: adopted round ${peerRound.roundId} (${peerRound.type}) from ${member.label}`);
+        log.info(`Vote gossip: adopted round ${logSafe(peerRound.roundId)} (${logSafe(peerRound.type)}) from ${logSafe(member.label)}`);
       }
       if (local.concluded) continue;
 
@@ -719,8 +693,8 @@ async function propagateVotesWithPeer(
         const decision = acceptVoteCast(freshNet, local, peerCast, member.instanceId);
         if (!decision.accept) {
           log.warn(
-            `Vote gossip: rejecting cast for '${peerCast.instanceId}' relayed by '${member.instanceId}' ` +
-            `(round ${peerRound.roundId}) — ${decision.reason}`,
+            `Vote gossip: rejecting cast for '${logSafe(peerCast.instanceId)}' relayed by '${logSafe(member.instanceId)}' ` +
+            `(round ${logSafe(peerRound.roundId)}) — ${logSafe(decision.reason)}`,
           );
           continue;
         }
@@ -749,7 +723,7 @@ async function propagateVotesWithPeer(
             sendMemberRemovedNotify(round.subjectUrl, round.subjectInstanceId, net.id);
           }
           if (justPassed && admitPassedJoin(freshNet, fresh.instanceId, round)) {
-            log.info(`Join round ${round.roundId} concluded via gossip — added ${round.subjectLabel} to network ${net.id}`);
+            log.info(`Join round ${logSafe(round.roundId)} concluded via gossip — added ${logSafe(round.subjectLabel)} to network ${net.id}`);
           }
         }
       }
@@ -759,7 +733,7 @@ async function propagateVotesWithPeer(
       saveConfig(fresh);
     }
   } catch (err) {
-    log.warn(`Vote pull from ${member.label}: ${err}`);
+    log.warn(`Vote pull from ${logSafe(member.label)}: ${logSafe(String(err))}`);
   }
 
   // Push our votes to the peer (non-fatal 404 if the peer doesn't have the round yet).
@@ -789,11 +763,11 @@ async function propagateVotesWithPeer(
           // valid, relay this cast onward — signed casts are relay-safe.
           // Both signatures travel (Q-138): the one shape the relay route reads back.
           body: JSON.stringify(castForWire(cast)),
-        }).catch(err => log.warn(`Vote push (${round.roundId}) to ${member.label}: ${err}`));
+        }).catch(err => log.warn(`Vote push (${logSafe(round.roundId)}) to ${logSafe(member.label)}: ${logSafe(String(err))}`));
       }
     }
   } catch (err) {
-    log.warn(`Vote push to ${member.label}: ${err}`);
+    log.warn(`Vote push to ${logSafe(member.label)}: ${logSafe(String(err))}`);
   }
 }
 
@@ -820,17 +794,20 @@ async function pullFromPeer(
   // Pull facts — use full=true to return complete docs in a single pass,
   // eliminating the N per-document secondary fetches that would be brutal over WAN.
   let highestSeq = sinceSeq;
-  let overallMaxSeq = 0; // Track the highest seq seen across ALL items (used to bump local counter)
+  let overallMaxSeq = 0; // the pulled tombstones' highest seq — the records are bumped by the writer
 
   type PullResult = { count: number; highSeq: number; maxSeq: number } & TransferOutcome;
   /*
-   * NOT ALL BRAIN COLLECTIONS: `files` is absent because a file arrives as blob plus manifest, not as a
-   * document on this path. `links` is present — a collection missing here is one a peer never sends us,
-   * and nothing reports that, because a peer holding no links hashes none either.
+   * One transfer per REPLICATED family: the five record collections and file metadata, which is the `files`
+   * collection pulled from the `filemeta` route. The family is passed whole because the URL suffix and the
+   * collection differ for that one (`F15`): the page write named its collection after the suffix, so a pulled
+   * file-metadata page went to a `<space>_filemeta` collection nothing reads. A family missing here is one a peer
+   * never sends us, and nothing reports that, because a peer holding none of it hashes none either.
    */
   async function pullType<T extends FactDoc | EntityDoc | EdgeDoc | ChronoEntry | LinkDoc | (FileMetaDoc & { seq: number })>(
-    urlSuffix: string,
+    family: ReplicatedFamily,
   ): Promise<PullResult> {
+    const urlSuffix = family.payloadKey;
     let count = 0, highSeq = sinceSeq, maxSeq = 0;
     let cur: string | null = null;
     let pg = 0;
@@ -846,45 +823,64 @@ async function pullFromPeer(
       const resp = await peerSafeFetch(`${member.url}/api/sync/${urlSuffix}?${params}`, batchOpts());
       if (!resp.ok) {
         truncated = true;
-        log.warn(truncationWarn(`Pull ${urlSuffix} from`, member.label ?? '', spaceId, resp.status, deliveredThrough));
+        log.warn(truncationWarn(`Pull ${urlSuffix} from`, logSafe(member.label ?? ''), spaceId, resp.status, deliveredThrough));
         break;
       }
       const { items, nextCursor } = await boundedJson<{
         items: (T | { _id: string; seq: number; deletedAt: string })[]; nextCursor: string | null;
       }>(resp, 'sync peer');
-      // Collect the applyable docs for this page, then upsert them in one batch (P3).
-      const pageDocs: T[] = [];
-      for (const item of items) {
-        if ('deletedAt' in item && (item as { deletedAt?: string }).deletedAt) continue;
-        const doc = item as T;
-        // Refuse a document whose seq is too close to the protocol ceiling:
-        // ingesting it would drag the counter there via the bumpSeq below,
-        // eventually making our own writes unsyncable (see util/seq.ts).
-        if (isSeqImplausible((doc as FactDoc).seq)) {
-          log.warn(
-            `Pull ${urlSuffix} from ${member.label}: skipped doc '${(doc as FactDoc)._id}' ` +
-            `with implausible seq ${(doc as FactDoc).seq} in space '${spaceId}'.`,
-          );
-          continue;
-        }
-        /*
-         * THE RECEIVER DECIDES WHAT IT STORES, and this is the one place on the pull path where it can.
-         *
-         * The push path drops these by omission — no `Incoming*` schema declares one, so zod strips them
-         * — and this path validates nothing at all: it fetches `full=true` and `replaceOne`s what comes
-         * back. Without the strip a pulled record carried the sender's vector, which ranks plausibly and
-         * in the wrong order, and the sender's `_expireAt`, which `brain/ttl-sweep.ts` acts on — so a peer
-         * decided when THIS instance deleted its data, with nothing logged either side.
-         */
-        pageDocs.push(stripLocalOnly(doc));
-        count++;
-        if ((doc as FactDoc).seq > maxSeq) maxSeq = (doc as FactDoc).seq;
-        if ((doc as FactDoc).seq > highSeq && (doc as FactDoc).author?.instanceId === member.instanceId) {
-          highSeq = (doc as FactDoc).seq;
-        }
+      // The page's documents; the tombstones riding in it were applied by `pullTombstones` above.
+      const pageDocs = items.filter(item => !('deletedAt' in item && (item as { deletedAt?: string }).deletedAt)) as T[];
+      /*
+       * THE RECEIVER DECIDES WHAT IT STORES, through the one arrival writer (`sync/arrivals.ts`): a malformed id
+       * or an implausible seq refused per document (warned, and the position advances past it as 5.6.1's "skipped
+       * doc" did), the retag to the local space, a repeated id collapsed to its highest seq, the sender's
+       * local-only fields dropped and this instance's own carried across the replace, the guard against a newer
+       * stored copy, the counter bumped per landed chunk, and every landed record queued for embedding by THIS
+       * instance's rules (`Q-203` — a pulled record used to be stored and never queued at all). A bump that failed
+       * is reported (`counterBehind`) and holds the position like a failed write (`Q-218` R3).
+       *
+       * A write the store could not do is a RECORD-WRITE failure, not an unreachable peer (`F10`): the transfer
+       * stops, holds `deliveredThrough` below the page, and fetches it again next cycle. It used to escape to the
+       * member-level catch, which counts toward PEER UNREACHABLE and names the driver error and nothing else. A
+       * document the STORE refuses holds the position the same way (cut `C3`: never counted as delivered).
+       */
+      let written: ArrivalOutcome;
+      try {
+        written = await writeArrivals(spaceId, family.collection, RECORD_TYPE_OF[family.collection], pageDocs,
+          { from: member.label ?? member.instanceId });
+      } catch (err) {
+        truncated = true;
+        log.warn(`sync pull ${spaceId} ${family.collection}: record write failed: `
+          + `${logSafe(err instanceof Error ? err.message : String(err))} (from ${logSafe(member.label ?? member.instanceId)}). `
+          + `This is this instance's database, not the peer: the transfer holds at ${logSafe(deliveredThrough)} and the page `
+          + 'is fetched again next cycle.');
+        break;
       }
-      await batchUpsertBySeq<T>(`${spaceId}_${urlSuffix}`, pageDocs, spaceId);
-      // Only after the page is APPLIED. Recording it before the upsert would vouch for records that a throw
+      if (written.counterBehind) {
+        // `Q-218` R3: the page is stored, but this counter may be behind it, so the position is not vouched for.
+        truncated = true;
+        log.warn(`sync pull ${spaceId} ${family.collection}: record write failed: the seq counter could not be moved `
+          + `past the page from ${logSafe(member.label ?? member.instanceId)}. The transfer holds at ${logSafe(deliveredThrough)} `
+          + 'and the page is fetched again next cycle.');
+        break;
+      }
+      if (written.storeRefused.length > 0) {
+        truncated = true;
+        // The documents are named once, by the writer's own summary (`warnArrivalsNotStored`); this says what it costs.
+        log.warn(`sync pull ${spaceId} ${family.collection}: record write failed: the store refused `
+          + `${written.storeRefused.length} document(s) from ${logSafe(member.label ?? member.instanceId)}. The `
+          + `transfer holds at ${logSafe(deliveredThrough)} and the page is fetched again next cycle.`);
+        break;
+      }
+      const refused = new Set(written.refused.map(r => r._id));
+      for (const doc of pageDocs as FactDoc[]) {
+        if (refused.has(arrivalId(doc))) continue;
+        count++;
+        if (doc.seq > maxSeq) maxSeq = doc.seq;
+        if (doc.seq > highSeq && doc.author?.instanceId === member.instanceId) highSeq = doc.seq;
+      }
+      // Only after the page is APPLIED. Recording it before the write would vouch for records that a throw
       // between the two would have lost.
       if (maxSeq > deliveredThrough) deliveredThrough = maxSeq;
       cur = nextCursor; pg++;
@@ -895,7 +891,7 @@ async function pullFromPeer(
     // transfer has more to give, so it must cap the watermark AND keep making progress.
     if (cur) {
       truncated = true;
-      log.warn(truncationWarn(`Pull ${urlSuffix} from`, member.label ?? '', spaceId, `${pg}-page cap`, deliveredThrough));
+      log.warn(truncationWarn(`Pull ${urlSuffix} from`, logSafe(member.label ?? ''), spaceId, `${logSafe(pg)}-page cap`, deliveredThrough));
     }
     return { count, highSeq, maxSeq, deliveredThrough, truncated };
   }
@@ -907,7 +903,7 @@ async function pullFromPeer(
    */
   const pulled = {} as Record<PayloadKey, PullResult>;
   for (const family of REPLICATED_FAMILIES) {
-    pulled[family.payloadKey] = await pullType(family.payloadKey);
+    pulled[family.payloadKey] = await pullType(family);
   }
 
   pulledMemories = pulled.facts.count;
@@ -935,28 +931,12 @@ async function pullFromPeer(
     seqOf: (t) => t.highSeq,
     warn: log.warn,
   });
-  // TOMBSTONES ARE IN THIS MAX, and their absence was a silent record-loss bug rather than an omission.
-  //
-  // The bump below exists so local writes always sort above anything received from this peer. A tombstone IS
-  // received from this peer and carries the deleting instance's seq — so excluding it left a quiet peer's
-  // counter behind a busy peer's deletions, and a record re-created there (same id, lower seq) was refused
-  // by every peer holding the tombstone, permanently, with a 200 the sender reads as success.
-  //
-  // The watermark line above passes every transfer and says why an omitted one is the dangerous one. This
-  // is the same argument about the same transfer, one line down.
-  //
-  // AND IT WAS A THIRD HAND-WRITTEN LIST, missing file metadata. `filemeta` is in `transfers` and was
-  // absent here, so a file-meta record arriving with a high seq left the local counter below it — and the
-  // next local write could take a seq beneath a record already received, which is the exact failure the
-  // bump exists to prevent. Derived from the same object now, so there is one enumeration for all three
-  // uses.
-  overallMaxSeq = Math.max(...Object.values(pulled).map(t => t.maxSeq), tombstones.maxSeq);
-
-  // Bump the local seq counter so future local writes always get a seq higher
-  // than any document received from this peer.  Without this, sync-upserted docs
-  // with high seq values from the source instance would sit above the local
-  // counter, causing newly written docs to get a lower seq that the pull
-  // watermark has already advanced past.
+  // THE TOMBSTONES' share of the counter bump — and only theirs. Every RECORD this pull handed over was bumped
+  // over by the arrival writer itself, per landed chunk (`writeArrivals`), so a second bump over the records here
+  // would be the same rule in two places. A tombstone is not written by the writer, and it IS received from this
+  // peer with the deleting instance's seq: left out, a quiet peer's counter stays behind a busy peer's deletions,
+  // and a record re-created there (same id, lower seq) is refused by every peer holding the tombstone, for good.
+  overallMaxSeq = tombstones.maxSeq;
   if (overallMaxSeq > 0) {
     await bumpSeq(spaceId, overallMaxSeq);
   }
@@ -1058,9 +1038,9 @@ async function pushToPeer(
        * free unless somebody is looking — and it is the one line that would have made six failed reproduction
        * attempts conclusive instead of inconclusive.
        */
-      log.debug(`Push ${payloadKey} to ${member.label ?? member.instanceId} space '${spaceId}': `
-        + `${batch.length} doc(s) with seq > ${seqCursor}`
-        + (batch.length ? ` (through ${(batch[batch.length - 1] as FactDoc).seq})` : ''));
+      log.debug(`Push ${payloadKey} to ${logSafe(member.label ?? member.instanceId)} space '${spaceId}': `
+        + `${batch.length} doc(s) with seq > ${logSafe(seqCursor)}`
+        + (batch.length ? ` (through ${logSafe((batch[batch.length - 1] as FactDoc).seq)})` : ''));
       if (batch.length === 0) break;
       const resp = await peerSafeFetch(batchEndpoint, {
         ...batchOpts(), method: 'POST',
@@ -1068,7 +1048,7 @@ async function pushToPeer(
       });
       if (!resp.ok) {
         truncated = true;
-        log.warn(truncationWarn(`Batch push ${payloadKey} to`, member.label ?? '', spaceId, resp.status, seqCursor));
+        log.warn(truncationWarn(`Batch push ${payloadKey} to`, logSafe(member.label ?? ''), spaceId, resp.status, seqCursor));
         break;
       }
       // A 200 does not mean every record landed: the peer can discard a fact whose fork chain is at its
@@ -1133,8 +1113,8 @@ async function pushToPeer(
    * nothing and the record is never offered again. That combination is invisible without both numbers in one
    * line, which is why they are logged together rather than at four separate call sites.
    */
-  log.debug(`Push cycle to ${member.label ?? member.instanceId} space '${spaceId}': watermark ${lastSeqPushed} -> `
-    + `${maxSeqPushed}, pushed ${pushedMemories}m/${pushedEntities}e/${pushedEdges}g/${pushedChrono}c/${pushedLinks}l`);
+  log.debug(`Push cycle to ${logSafe(member.label ?? member.instanceId)} space '${spaceId}': watermark ${logSafe(lastSeqPushed)} -> `
+    + `${logSafe(maxSeqPushed)}, pushed ${logSafe(pushedMemories)}m/${logSafe(pushedEntities)}e/${logSafe(pushedEdges)}g/${logSafe(pushedChrono)}c/${logSafe(pushedLinks)}l`);
 
   // Persist the push high-water mark so next sync only sends new/changed docs
   if (maxSeqPushed > lastSeqPushed) {
@@ -1157,105 +1137,6 @@ async function pushToPeer(
   };
 }
 
-
-// ── Local upsert helpers ────────────────────────────────────────────────────
-
-/**
- * Apply a page of pulled docs to a local collection with last-writer-wins-by-seq
- * semantics, in a bounded number of round trips (P3). Instead of a findOne+replaceOne
- * per doc (2×N round trips per page), this loads every existing seq for the page in one
- * `find({_id: {$in}})` and applies the survivors in one `bulkWrite`. The seq comparison
- * stays strictly greater-than, so conflict resolution is identical to the old per-doc path.
- */
-async function batchUpsertBySeq<T extends { _id: string; seq: number }>(
-  collName: string,
-  docs: T[],
-  localSpaceId: string,
-): Promise<void> {
-  if (docs.length === 0) return;
-
-  // See ./upsert-plan.ts for why re-tagging is load-bearing and why the seq comparison is strict.
-  retagToLocalSpace(docs, localSpaceId);
-
-  const collection = col<T>(collName);
-  const ids = docs.map(d => d._id);
-  const existing = await collection
-    .find(asFilter<T>({ _id: { $in: ids } as unknown as string }), { projection: { _id: 1, seq: 1 } })
-    .toArray() as Array<{ _id: string; seq: number }>;
-  const existingSeq = new Map(existing.map(e => [e._id, e.seq]));
-
-  const toWrite = planSeqUpserts(docs, existingSeq);
-  if (toWrite.length === 0) return;
-
-  /*
-   * UNORDERED, AND A DUPLICATE KEY IS A RECORD-LEVEL FAULT.
-   *
-   * `_edges` carries a unique index on `(from, to, label)` and new edges get a `uuidv4()` `_id`, while ingest
-   * is keyed on `_id` alone and never consults the triplet. So two peers that independently create the same
-   * relationship hold two ids for one unique key, and the first to cross the wire raises `E11000`.
-   *
-   * This used to be an unguarded, ORDERED `bulkWrite`, and the consequences were entirely out of proportion to
-   * the cause. Ordered meant every later document in the page was abandoned. Unguarded meant the error escaped
-   * `pullType` before `deliveredThrough` was written, escaped `pullFromPeer` before the watermark persisted,
-   * escaped the space loop — **taking every remaining space with it, including files** — and landed in the
-   * member-level catch, which increments the failure count and eventually prints `PEER UNREACHABLE`.
-   * `lastSyncAt` was never written, so the next cycle pulled the identical page and threw identically: one
-   * duplicate edge stopped a member syncing permanently, and pointed the operator at the network.
-   *
-   * Now: `ordered: false` so the rest of the page applies, and the duplicates are reported as the records they
-   * are. Only duplicate-key errors are absorbed — any other write fault still throws, because swallowing those
-   * would hide genuine corruption, which is the opposite defect.
-   */
-  /*
-   * A FILE'S METADATA IS MERGED, NOT REPLACED — the one collection this bulk path may not touch.
-   *
-   * The receiver derived `sizeBytes`, `sha256`, the excerpt, the vector and the chunk count from bytes it
-   * holds. A `replaceOne` would leave the file reporting the SENDER's size and hash with no vector at all.
-   *
-   * The applier lives in `api/sync/_shared.ts` beside `ingestFileMeta`, not here: the PUSH path already
-   * uses that function, and a second merge in the engine would be one rule with two implementations —
-   * the weaker being whichever direction nobody tested. It is also what the god-file ratchet on this file
-   * asks for, and the reason it asks.
-   */
-  if (collName.endsWith('_files')) {
-    await applyFileMetaPage(localSpaceId, toWrite as never);
-    return;
-  }
-
-  try {
-    await collection.bulkWrite(asBulk<T>(
-      toWrite.map(doc => ({ replaceOne: { filter: { _id: doc._id }, replacement: doc, upsert: true } })),
-    ), { ordered: false });
-  } catch (err) {
-    const writeErrors = (err as { writeErrors?: Array<{ code?: number; err?: { code?: number; op?: unknown } }> })?.writeErrors;
-    if (!Array.isArray(writeErrors) || writeErrors.length === 0) throw err;
-    const codeOf = (w: { code?: number; err?: { code?: number } }) => w.code ?? w.err?.code;
-    const nonDuplicate = writeErrors.filter(w => codeOf(w) !== 11000);
-    if (nonDuplicate.length > 0) throw err;
-    log.warn(
-      `sync: ${writeErrors.length} duplicate-key rejection(s) applying '${collName}' for space `
-      + `'${localSpaceId}'. Every other document in the page was applied. A duplicate means two peers created `
-      + `the same uniquely-indexed record independently; the local copy is kept and the incoming one is not `
-      + `applied. Ids: ${writeErrors.map(w => {
-        const op = (w.err as { op?: { _id?: unknown } } | undefined)?.op;
-        return typeof op?._id === 'string' ? op._id : '(unknown)';
-      }).slice(0, 10).join(', ')}`,
-    );
-  }
-
-  /*
-   * NO LINK DERIVATION HERE ANY MORE, and the deletion is the point.
-   *
-   * A pulled document used to have its link records derived from the six arrays it carried, because push
-   * and pull are different write paths and each needed the hook. 5.0 removed the arrays: a link is its own
-   * record and replicates on the same channel as everything else, so there is nothing on an arriving fact
-   * to derive from and a `links` page applies through this same writer like any other collection.
-   *
-   * Left in, it would read a shape no document has and reconcile an empty set — which is a no-op today and
-   * a data loss the moment somebody makes the reconcile authoritative about classes it was handed nothing
-   * for.
-   */
-}
 
 // Silence unused import warning — resolveSafePath may be used by future file push refinement
 void resolveSafePath;
@@ -1288,7 +1169,7 @@ async function checkMerkleWithPeer(
     ]);
 
     if (!peerResp.ok) {
-      log.warn(`Merkle check for space '${spaceId}' with peer '${member.label}': peer returned HTTP ${peerResp.status} — skipping`);
+      log.warn(`Merkle check for space '${spaceId}' with peer '${logSafe(member.label)}': peer returned HTTP ${logSafe(peerResp.status)} — skipping`);
       return;
     }
 
@@ -1296,22 +1177,22 @@ async function checkMerkleWithPeer(
     const peerRoot = peerResult.root;
 
     if (!peerRoot) {
-      log.warn(`Merkle check for space '${spaceId}' with peer '${member.label}': peer response missing 'root' field`);
+      log.warn(`Merkle check for space '${spaceId}' with peer '${logSafe(member.label)}': peer response missing 'root' field`);
       return;
     }
 
     if (localResult.root !== peerRoot) {
       log.warn(
-        `MERKLE_DIVERGENCE: space '${spaceId}', peer '${member.label}' (${member.instanceId}), ` +
-        `network '${net.label}'. ` +
-        `local root=${localResult.root} (${localResult.leafCount} leaves), ` +
-        `peer root=${peerRoot} (${peerResult.leafCount ?? '?'} leaves). ` +
+        `MERKLE_DIVERGENCE: space '${spaceId}', peer '${logSafe(member.label)}' (${logSafe(member.instanceId)}), ` +
+        `network '${logSafe(net.label)}'. ` +
+        `local root=${logSafe(localResult.root)} (${logSafe(localResult.leafCount)} leaves), ` +
+        `peer root=${logSafe(peerRoot)} (${logSafe(peerResult.leafCount ?? '?')} leaves). ` +
         `The space contents differ after sync — possible data loss, concurrent write, or sync bug.`,
       );
     } else {
-      log.info(`Merkle OK: space '${spaceId}', peer '${member.label}' root=${localResult.root.slice(0, 12)}…`);
+      log.info(`Merkle OK: space '${spaceId}', peer '${logSafe(member.label)}' root=${logSafe(localResult.root.slice(0, 12))}…`);
     }
   } catch (err) {
-    log.warn(`Merkle check for space '${spaceId}' with peer '${member.label}': ${err}`);
+    log.warn(`Merkle check for space '${spaceId}' with peer '${logSafe(member.label)}': ${logSafe(String(err))}`);
   }
 }

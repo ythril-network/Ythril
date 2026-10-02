@@ -161,12 +161,13 @@ describe('forkOf depth bomb — fork chain must be capped', () => {
         updatedAt: new Date().toISOString(),
         embeddingModel: 'none',
       });
-      // These may succeed or start returning 400 before the limit — both are OK
-      if (r.status === 400) {
-        // Already being blocked — pass the test early
-        return;
-      }
+      /*
+       * Forks 1..MAX_FORK_DEPTH are legitimate and must FORK. This used to accept an early 400 as "already being
+       * blocked" and pass — so a cap that refused the first fork, or a door that answered 400 for an unrelated
+       * reason, passed exactly like a working cap. A cap is two halves: what it lets through and what it stops.
+       */
       assert.equal(r.status, 200, `Fork ${i}: ${JSON.stringify(r.body)}`);
+      assert.equal(r.body.status, 'forked', `Fork ${i} within the cap must fork: ${JSON.stringify(r.body)}`);
     }
 
     // The (MAX_FORK_DEPTH + 1)-th fork must now be blocked

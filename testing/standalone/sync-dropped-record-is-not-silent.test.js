@@ -63,7 +63,9 @@ describe('the receiver separates a drop from an already-current skip', () => {
     const block = enclosingBlockFrom(receiver, at, 'the fork-depth refusal branch');
     assert.match(block, /log\.warn\(/, 'the side that knows WHY must say so');
     assert.match(block, /DROPPED/, 'and say what happened in a word an operator can grep for');
-    assert.match(block, /\$\{incoming\._id\}/, 'naming the record — a count alone cannot be investigated');
+    // Named through `logSafe` since 5.6.2 (`F12`): the id is a peer's text, and must not be able to forge a line.
+    assert.match(block, /\$\{logSafe\(incoming\._id\)\}/,
+      'naming the record — a count alone cannot be investigated — and through logSafe, since the id is a peer\'s text');
     assert.match(block, /not offer it again|will not be offered again|not offered again/i,
       'and stating the consequence, which is the part that makes it urgent rather than curious');
   });

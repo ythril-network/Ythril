@@ -39,7 +39,7 @@ export const COLLECTION: Record<BrainEmbedRecordType, string> = {
 // than sitting unused — and with it one Mongo query per embedded fact and per embedded file.
 
 /** A file record a conversion or a media job DERIVED from another file, rather than one somebody stored. */
-function isDerived(doc: Record<string, unknown>): boolean {
+export function isDerived(doc: Record<string, unknown>): boolean {
   return typeof doc['parentFileId'] === 'string';
 }
 

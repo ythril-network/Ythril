@@ -336,6 +336,14 @@ describe('POST /api/sync/batch-upsert', () => {
     assert.equal(r.status, 200, JSON.stringify(r.body));
     const total = r.body.facts.inserted + r.body.facts.updated + r.body.facts.skipped + r.body.facts.forked + r.body.facts.tombstoned;
     assert.ok(total <= 500, `Expected at most 500 docs processed, got ${total}`);
+    /*
+     * C2 of the 5.6.2 plan, PINNED: on 5.6.x the overflow past the 500 cap is dropped and counted NOWHERE, as 5.6.1
+     * answered. Main counts it in `rejected` (`Q-107` part 1); that is a new count a 5.6.1 sender would subtract
+     * from what it pushed, so it is cut from the patch. A port that brings it along fails here.
+     */
+    assert.equal(total, 500, `Expected exactly the first 500 processed, got ${total}`);
+    assert.equal(r.body.facts.rejected, 0,
+      `5.6.x drops the documents past the 500 cap without counting them (C2), got ${JSON.stringify(r.body.facts)}`);
   });
 
   it('returns 403 for forbidden space', async () => {

@@ -17,6 +17,9 @@ jobs:
   test:
     name: Build & Test
     runs-on: ubuntu-latest
+    # A green run takes 30-50 minutes. Without a ceiling a hung test holds the job for the platform's six hours
+    # with no output (PR #1475 sat in test:standalone for an hour before it was cancelled to read the log).
+    timeout-minutes: 90
 
     steps:
       - name: Checkout
