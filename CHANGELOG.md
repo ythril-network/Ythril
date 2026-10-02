@@ -11,10 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 **A patch release: every fix on `main` for a defect present in 5.6.1, and nothing else.** The ones to take first
 are sync's: a record pulled from a peer was never queued for embedding, so meaning-ranked search on the receiver
-could not find it, and a push could leave this instance's counter below a record it had received, so a peer could
-miss the next local write. It also makes the space export carry links, makes the import restore what the export
-wrote, and stops a peer from forging a line in this instance's log. Breaking changes and features already on `main`
-are not part of it; they ship in the next minor.
+could not find it; a push could leave this instance's counter below a record it had received, so a peer could
+miss the next local write; and a publisher's file descriptions and tags could fail to reach a subscriber, which
+this release also recovers for files synced before it. It also makes the space export carry links, makes the
+import restore what the export wrote, and stops a peer from forging a line in this instance's log. Breaking changes
+and features already on `main` are not part of it; they ship in the next minor.
 
 | What changes on upgrade | What to do |
 |---|---|
@@ -25,6 +26,9 @@ are not part of it; they ship in the next minor.
 | A duplicate link in a push is counted as `skipped` instead of answering `500` | Nothing; a sender that was re-sending that page for ever now moves on |
 | A tombstone pushed with a seq too close to the protocol ceiling is refused and logged; the rest of the push applies | Nothing |
 | File metadata a pull stored in a stray `<space>_filemeta` collection since 4.0 is merged into the space's files, and the collection dropped | Nothing; one log line per space says how many records were merged |
+
+Documents changed in this release: `docs/sync-protocol.md`, `docs/integration-guide/09-sync-api.md`,
+`docs/integration-guide/12-admin-api.md` and `docs/userguide/04-settings.md`.
 
 ### Fixed
 
@@ -54,10 +58,10 @@ are not part of it; they ship in the next minor.
 - **A file a publisher pushed could freeze its subscriber's copy of the file's description and tags.** The pushed
   bytes reached the subscriber's upload door, which stored them as the subscriber's own upload: its own next seq,
   itself as the author of a new file, and a description it derived itself. That copy then tied or outranked the
-  publisher's next description or tag edit, which was skipped on arrival for good. 5.6.2's counter fix made the
-  tie likely. Bytes a peer pushes are now recorded as an arrival, as a download already was (`Q-143`). Arriving
-  bytes, pushed or pulled, also make a soft-deleted path live again. A file new on this instance is now given its
-  file retention window: a pushed file had that before, a pulled one did not.
+  publisher's next description or tag edit, which was skipped on arrival for good. Bytes a peer pushes are now
+  recorded as the publisher's, as downloaded bytes already were (`Q-239`). Arriving bytes, pushed or pulled, also
+  make a soft-deleted path live again. A file new on this instance is now given its file retention window: a pushed
+  file had that before, a pulled one did not.
 
 - **A peer's edit erased this instance's own vector and retention stamps.** A pushed or pulled update replaced the
   whole document, so the record stopped expiring here, dropped out of vector search until re-embedded, and was
