@@ -883,10 +883,10 @@ async function pullFromPeer(
       }
       if (written.storeRefused.length > 0) {
         truncated = true;
+        // The documents are named once, by the writer's own summary (`warnArrivalsNotStored`); this says what it costs.
         log.warn(`sync pull ${spaceId} ${family.collection}: record write failed: the store refused `
-          + `${written.storeRefused.length} document(s) (${written.storeRefused.slice(0, 10).map(r => logSafe(r._id)).join(', ')}) `
-          + `from ${logSafe(member.label ?? member.instanceId)}. The transfer holds at ${deliveredThrough} and the page `
-          + 'is fetched again next cycle.');
+          + `${written.storeRefused.length} document(s) from ${logSafe(member.label ?? member.instanceId)}. The `
+          + `transfer holds at ${deliveredThrough} and the page is fetched again next cycle.`);
         break;
       }
       const refused = new Set(written.refused.map(r => r._id));

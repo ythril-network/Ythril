@@ -216,6 +216,21 @@ export function isSeqImplausible(seq: number): boolean {
 }
 
 /**
+ * Why a received seq cannot be carried by this instance's counter, or `null` when it can: a non-negative integer
+ * below the protocol's ingest ceiling (`isSeqImplausible`). The ONE rule and the one wording every door refuses a
+ * received seq with — the arrival writer (`arrivalRefusal`), the single push routes (`rejectImplausibleSeq`), the
+ * batch door's pre-filter and the tombstone route — so a 400 and a log line say the same thing on every door.
+ */
+export function seqRefusal(seq: unknown, { optional }: { optional: boolean }): string | null {
+  if (seq === undefined && optional) return null;
+  if (typeof seq !== 'number' || !Number.isInteger(seq) || seq < 0) {
+    return `seq ${JSON.stringify(seq) ?? String(seq)} is not a non-negative integer`;
+  }
+  if (isSeqImplausible(seq)) return `seq ${seq} is too close to the protocol ceiling and was refused`;
+  return null;
+}
+
+/**
  * Ensure the space counter is at least `minSeq`.
  * Called after receiving remote documents via sync so that subsequent local
  * writes always get a seq higher than any synced document.

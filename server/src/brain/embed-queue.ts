@@ -155,7 +155,7 @@ export async function enqueueEmbedJob(
   //
   // The rule lives here rather than at the call site because `upsertFileMeta` enqueues unconditionally, and
   // unconditionally is correct: every other file in the store IS content.
-  if (recordType === 'file' && isSpillPath(recordId)) return;
+  if (isSpillJob(recordType, recordId)) return;
 
   try {
     await jobs(spaceId).updateOne(
@@ -593,8 +593,23 @@ export async function enqueueIngestedRecord(
   // Cast for the resolver's `Record<string, unknown>` signature, exactly as `reindex.ts` does. The parameter
   // above is narrow on purpose: it names the two fields this decision reads, so a caller can see at the call
   // site that the record's own mark is what travels here.
-  if (embeddingSuppressedFor(spaceId, recordType, doc as unknown as Record<string, unknown>)) return;
+  if (!arrivalToQueue(spaceId, recordType, doc)) return;
   await enqueueEmbedJob(spaceId, recordType, doc._id);
+}
+
+/** A job for a read spill — never queued (see `enqueueEmbedJob`). One spelling, for every enqueue path. */
+function isSpillJob(recordType: BrainEmbedRecordType, recordId: string): boolean {
+  return recordType === 'file' && isSpillPath(recordId);
+}
+
+/**
+ * Is this arriving record to be queued for embedding here: not a read spill, and not suppressed by the RECEIVER's
+ * `record > schema > space` resolution (`embeddingSuppressedFor`). The one question both ingest enqueues ask —
+ * the single record and the batched twin — so neither can drift from the other.
+ */
+function arrivalToQueue(spaceId: string, recordType: BrainEmbedRecordType, doc: { _id: string }): boolean {
+  return !isSpillJob(recordType, doc._id)
+    && !embeddingSuppressedFor(spaceId, recordType, doc as unknown as Record<string, unknown>);
 }
 
 /**
@@ -618,9 +633,7 @@ export async function enqueueIngestedRecords(
   recordType: BrainEmbedRecordType,
   docs: ReadonlyArray<{ _id: string; suppressEmbeddings?: boolean }>,
 ): Promise<void> {
-  const wanted = docs.filter(d =>
-    !(recordType === 'file' && isSpillPath(d._id))
-    && !embeddingSuppressedFor(spaceId, recordType, d as unknown as Record<string, unknown>));
+  const wanted = docs.filter(d => arrivalToQueue(spaceId, recordType, d));
   if (wanted.length === 0) return;
   const now = new Date().toISOString();
   try {

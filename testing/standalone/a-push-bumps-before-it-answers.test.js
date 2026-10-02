@@ -36,8 +36,9 @@ import { readTrackedSources } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import { statementFrom, bodyOf } from './_structural-window.mjs';
 
-const TAKES_A_RECEIVED_SEQ = /\.seq\b|seq:\s*z\.|Incoming\w+Doc|isSeqImplausible\(|rejectImplausibleSeq\(/;
-const GUARD = /parsed\.success|rejectImplausibleSeq\(|isSeqImplausible\(/g;
+const TAKES_A_RECEIVED_SEQ = /\.seq\b|seq:\s*z\.|Incoming\w+Doc|isSeqImplausible\(|rejectImplausibleSeq\(|seqRefusal\(/;
+// `seqRefusal(` is the one seq rule since 5.6.2 (`util/seq.ts`); the batch door's pre-filter asks it.
+const GUARD = /parsed\.success|rejectImplausibleSeq\(|isSeqImplausible\(|seqRefusal\(/g;
 
 /** `bumpSeq` and every server function whose body awaits a bumper, to a fixpoint. */
 function bumpers() {

@@ -193,10 +193,23 @@ describe('and the receiver decides whether to embed it', () => {
      * what a gate like this passes on if it is written lazily. And of EVERY ingest enqueue, derived: the
      * batched twin is the one the writer uses, and a rule held by the single record alone would not reach it.
      */
+    /*
+     * The resolver, or a function of the queue module that calls it, to a fixpoint — derived, so the one predicate
+     * both ingest enqueues share (`arrivalToQueue`) counts and a wrapper that stops calling the resolver does not.
+     */
+    const askers = ['embeddingSuppressedFor'];
+    const fns = [...QUEUE_CODE.matchAll(/^(?:export\s+)?(?:async\s+)?function\s+(\w+)/gm)].map(m => m[1]);
+    for (let grew = true; grew;) {
+      grew = false;
+      for (const f of fns) {
+        if (askers.includes(f)) continue;
+        if (new RegExp(`\\b(?:${askers.join('|')})\\(`).test(bodyOf(QUEUE_CODE, f).replace(/^[^\n]*\n/, ''))) { askers.push(f); grew = true; }
+      }
+    }
     for (const name of INGEST_ENQUEUES) {
       const body = bodyOf(QUEUE_CODE, name).replace(/^[^\n]*\n/, '');
       assert.ok(body.length > 40, `${name} is empty — re-anchor this gate`);
-      assert.match(body, /\bembeddingSuppressedFor\(/,
+      assert.match(body, new RegExp(`\\b(?:${askers.filter(a => !INGEST_ENQUEUES.includes(a)).join('|')})\\(`),
         `${name} does not ask whether the receiver wants these records embedded, so a record its author `
         + 'suppressed — or one in a space or type this instance suppresses — is queued anyway');
     }

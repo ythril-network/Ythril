@@ -61,7 +61,7 @@ import { col, asBulk } from '../db/mongo.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { readStoredById, READ_CHUNK } from '../db/read-by-id.js';
 import { bulkWriteFailures, DUPLICATE_KEY, isDocumentRefusal, isDocumentRefusalCode, writeErrorCode } from '../db/write-errors.js';
-import { bumpSeq, isSeqImplausible, noteSeqStored } from '../util/seq.js';
+import { bumpSeq, noteSeqStored, seqRefusal } from '../util/seq.js';
 import { inChunks } from '../util/chunks.js';
 import { log, logSafe } from '../util/log.js';
 import { BRAIN_COLLECTIONS } from '../config/types.js';
@@ -144,19 +144,8 @@ export function arrivalRefusal(doc: unknown, { seq }: { seq: 'required' | 'optio
   return seqRefusal(s, { optional: seq === 'optional' });
 }
 
-/**
- * Why a received seq cannot be carried by this instance's counter, or `null` when it can: a non-negative integer
- * below the protocol's ingest ceiling (`isSeqImplausible`). The seq half of `arrivalRefusal`, exposed for what
- * arrives with a seq and is not a record — a tombstone — so its check is this one and not a second spelling.
- */
-export function seqRefusal(seq: unknown, { optional }: { optional: boolean }): string | null {
-  if (seq === undefined && optional) return null;
-  if (typeof seq !== 'number' || !Number.isInteger(seq) || seq < 0) {
-    return `seq ${JSON.stringify(seq) ?? String(seq)} is not a non-negative integer`;
-  }
-  if (isSeqImplausible(seq)) return `seq ${seq} is too close to the protocol ceiling and was refused`;
-  return null;
-}
+/** The seq half of `arrivalRefusal` — one rule in `util/seq.ts`, re-exported for the doors that import from here. */
+export { seqRefusal };
 
 /** An id for a log line or a refusal, whatever arrived in its place. */
 export function arrivalId(doc: unknown): string {

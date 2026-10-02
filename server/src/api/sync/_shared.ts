@@ -15,7 +15,7 @@ import { enqueueIngestedRecord } from '../../brain/embed-queue.js';
 import { isWellFormedRef, collectionForRefKind, edgeEndpointKind } from '../../brain/entity-refs.js';
 import type { TokenRights } from '../../config/rights-shape.js';
 import { log, logSafe } from '../../util/log.js';
-import { isSeqImplausible, MAX_INGEST_SEQ, noteSeqStored } from '../../util/seq.js';
+import { seqRefusal, MAX_INGEST_SEQ, noteSeqStored } from '../../util/seq.js';
 import { isStrictLinkage } from '../../spaces/proxy.js';
 import type { FileMetaDoc } from '../../config/types.js';
 import { emitWebhookEvent } from '../../webhooks/dispatcher.js';
@@ -395,12 +395,14 @@ export function rejectImplausibleSeq(
   res: import('express').Response,
   peerInstanceId?: string,
 ): boolean {
-  if (!isSeqImplausible(seq)) return false;
+  // The rule and its words are `seqRefusal`'s, the one every door refuses a received seq with.
+  const why = seqRefusal(seq, { optional: false });
+  if (why === null) return false;
   log.warn(
     `Refused document with implausible seq ${seq} for space '${spaceId}' ` +
-    `from peer '${peerInstanceId ?? 'unknown'}' (max ingest seq ${MAX_INGEST_SEQ}).`,
+    `from peer '${logSafe(peerInstanceId ?? 'unknown')}' (max ingest seq ${MAX_INGEST_SEQ}).`,
   );
-  res.status(400).json({ error: `seq ${seq} is too close to the protocol ceiling and was refused` });
+  res.status(400).json({ error: why });
   return true;
 }
 
