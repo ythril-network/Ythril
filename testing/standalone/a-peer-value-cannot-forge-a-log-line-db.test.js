@@ -110,11 +110,12 @@ const LOCAL_VALUES = new Set([
   'message(err)', "shown.join(', ')", 'what',
 ]);
 /**
- * A NUMBER this instance computed: an integer literal, a constant, a `.length` / `.size`, a count, a seq, a status
- * code, a page index — read off the last identifier of the expression. A number cannot carry a line break.
- * `JSON.stringify(<x>Stats)` and `range(<docs>)` are a handler's own counters and seq range, numbers only.
+ * A NUMBER, and only what is a number BY CONSTRUCTION: an integer literal, a module constant, a `.length` or `.size`. Never a
+ * NAME that sounds numeric (`status`, `seq`, `count`, `v` ...): a name says nothing about the value's type, and a
+ * peer string under such a name would pass (`Q-218` round S, found by the pre-ship sweep). Anything else goes
+ * through `logSafe`, which prints a number unchanged.
  */
-const NUMERIC = /^(?:\d+|[A-Z][A-Z_]+|[\w.!]*\.(?:length|size)|[\w.]*(?:[sS]eq|[cC]ount|[sS]tatus|Through|[dD]epth|pg|top|errors|inserted|updated|synced|failures|removed|refused|batchSize|leafCount|Cursor|pushed\w*|v)|JSON\.stringify\(\w+Stats\)|range\(\w+\)|pushed[A-Z]\w*|\w*SeqPushed|\(batch\[batch\.length - 1\] as FactDoc\)\.seq)$/;
+const NUMERIC = /^(?:\d+|[A-Z][A-Z_]+|[\w.!]*\.(?:length|size))$/;
 /** An arithmetic of numbers (`items.length - shown.length`), or a slice/case of a locally-owned name (`kind.slice(1)`). */
 const derivedLocal = (e) =>
   e.split(/\s*[-+]\s*/).every(part => NUMERIC.test(part))
