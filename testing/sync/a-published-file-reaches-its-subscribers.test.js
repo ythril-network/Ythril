@@ -39,13 +39,27 @@ async function readFile(base, token) {
   return { status: r.status, text: r.ok ? await r.text() : '' };
 }
 
-/** Sync from both ends each poll: whichever end moves files, a passing test must not depend on guessing it. */
+/**
+ * Sync from both ends each poll: whichever end moves files, a passing test must not depend on guessing it.
+ *
+ * On a timeout it reports the last sync answer from each end, and `what` may be a function that goes and looks:
+ * the CI container dump keeps only the tail of each log, so a failure early in the run leaves nothing else.
+ */
 async function syncUntil(condition, what) {
+  const last = {};
   await waitFor(async () => {
-    await post(INSTANCES.b, tokenB, `/api/networks/${networkId}/sync?wait=true`, {});
-    await post(INSTANCES.a, tokenA, `/api/networks/${networkId}/sync?wait=true`, {});
+    last.b = await post(INSTANCES.b, tokenB, `/api/networks/${networkId}/sync?wait=true`, {});
+    last.a = await post(INSTANCES.a, tokenA, `/api/networks/${networkId}/sync?wait=true`, {});
     return condition();
-  }, 60_000, 2_000, () => what);
+  }, 60_000, 2_000, async () => `${typeof what === 'function' ? await what() : what}; last sync answers: `
+    + `B ${last.b?.status} ${JSON.stringify(last.b?.body)}, A ${last.a?.status} ${JSON.stringify(last.a?.body)}`);
+}
+
+/** The file's metadata record as one end holds it — the fields the Q-69 case decides on. */
+async function fileMetaOn(base, token) {
+  const q = await post(base, token, '/api/filter', { space: SPACE, collection: 'files', filter: { path: FILE }, limit: 1 });
+  const rows = q.body?.results ?? (typeof q.body?.text === 'string' ? JSON.parse(q.body.text) : []);
+  return rows[0];
 }
 
 before(async () => {
@@ -99,11 +113,14 @@ describe('a published file reaches the subscriber', () => {
     });
     assert.ok(r.status < 300, `meta edit answered ${r.status}`);
     await syncUntil(async () => {
-      const q = await post(INSTANCES.a, tokenA, '/api/filter', { space: SPACE, collection: 'files', filter: { path: FILE }, limit: 1 });
-      const rows = q.body?.results ?? (typeof q.body?.text === 'string' ? JSON.parse(q.body.text) : []);
-      const doc = rows[0];
+      const doc = await fileMetaOn(INSTANCES.a, tokenA);
       return doc?.description === `described ${RUN}` && (doc.tags ?? []).includes('onboarding');
-    }, 'the description and tags never reached the subscriber');
+    }, async () => {
+      const pick = d => d && { seq: d.seq, description: d.description, tags: d.tags, author: d.author?.instanceId, updatedAt: d.updatedAt };
+      return 'the description and tags never reached the subscriber: '
+        + `B holds ${JSON.stringify(pick(await fileMetaOn(INSTANCES.b, tokenB)))}, `
+        + `A holds ${JSON.stringify(pick(await fileMetaOn(INSTANCES.a, tokenA)))}`;
+    });
   });
 
   it('a delete on the publisher removes the subscriber\'s copy', async () => {
