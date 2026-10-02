@@ -18,7 +18,7 @@
  */
 import { schedule as cronSchedule, type ScheduledTask } from 'node-cron';
 import { getConfig } from '../config/loader.js';
-import { log } from '../util/log.js';
+import { log, logSafe } from '../util/log.js';
 import { armedSchedules } from '../util/armed-schedule.js';
 import { resolveSyncCron } from './schedule.js';
 import { runSyncForNetwork } from './engine.js';
@@ -50,7 +50,7 @@ export function startSyncScheduler(): void {
 export function stopSyncScheduler(): void {
   for (const [id, task] of _scheduledTasks) {
     task.stop();
-    log.debug(`Sync scheduler stopped for network ${id}`);
+    log.debug(`Sync scheduler stopped for network ${logSafe(id)}`);
   }
   _scheduledTasks.clear();
   _armed.forget();
@@ -104,7 +104,7 @@ export async function runScheduledSync(networkId: string): Promise<void> {
     return;
   }
   await runSyncForNetwork(networkId).catch(err =>
-    log.error(`Scheduled sync failed for network ${networkId}: ${err}`),
+    log.error(`Scheduled sync failed for network ${networkId}: ${logSafe(String(err))}`),
   );
 }
 

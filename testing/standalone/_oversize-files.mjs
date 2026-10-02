@@ -158,7 +158,9 @@ export const FROZEN = {
   // 802 -> 752 (5.6.2, `Q-218`): the pull's page write (`batchUpsertBySeq`) moved out into the one arrival writer,
   // `sync/arrivals.ts`; the ceiling follows the file down so the reclaimed lines are not room to regrow into.
   // 752 -> 751 in the same patch: the pull's store-refusal line stopped naming ids the writer already names.
-  'server/src/sync/engine.ts': 751,
+  // 751 -> 744 in the same patch (`Q-218` round R): vote-round retention moved to `sync/governance.ts`, beside round
+  // conclusion, which paid for the pull's counter-behind hold (R3) and left seven lines the ceiling follows down.
+  'server/src/sync/engine.ts': 744,
   // 958 -> 684: the per-type editor body moved into `schema-type-editor.component` so the Brain Overview
   // could open the same editor. Lowered rather than left — a frozen number 274 lines above the real size
   // is 274 lines this file could regrow into without the gate saying a word.

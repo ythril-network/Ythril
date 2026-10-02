@@ -10,7 +10,7 @@
  */
 import { getConfig, getSecrets } from '../config/loader.js';
 import { revokePeerCredentialsIfOrphaned } from '../auth/tokens.js';
-import { log } from '../util/log.js';
+import { log, logSafe } from '../util/log.js';
 import { commitOwnMetaEdit, storeNetworkLayer } from '../spaces/effective-meta.js';
 import { carriedLocalId } from './space-map.js';
 import { peerSafeFetch } from './peer-fetch.js';
@@ -97,7 +97,7 @@ export function concludeRoundIfReady(
       const rejectedId = round.subjectInstanceId;
       setImmediate(() => {
         revokePeerCredentialsIfOrphaned(rejectedId)
-          .catch(err => log.error(`peer credential revocation for rejected joiner ${rejectedId}: ${err}`));
+          .catch(err => log.error(`peer credential revocation for rejected joiner ${logSafe(rejectedId)}: ${logSafe(String(err))}`));
       });
     }
     return false;
@@ -193,7 +193,7 @@ export function concludeRoundIfReady(
       if (ejectedId) {
         setImmediate(() => {
           revokePeerCredentialsIfOrphaned(ejectedId)
-            .catch(err => log.error(`peer credential revocation for ${ejectedId}: ${err}`));
+            .catch(err => log.error(`peer credential revocation for ${logSafe(ejectedId)}: ${logSafe(String(err))}`));
         });
       }
     }
@@ -234,9 +234,9 @@ export function concludeRoundIfReady(
         // The vote wins — the network decided this value — but the operator whose edit it superseded has
         // to be able to find out, and the only place that can say so is here.
         log.warn(
-          `meta_change round ${round.roundId} overwrote field(s) changed since it was proposed ` +
-          `(space ${round.spaceId}, based on meta v${round.baseMetaVersion}, now v${currentMeta?.version ?? 0}): ` +
-          `${applied.conflicts.join(', ')} — the passed vote wins`,
+          `meta_change round ${logSafe(round.roundId)} overwrote field(s) changed since it was proposed ` +
+          `(space ${logSafe(round.spaceId)}, based on meta v${logSafe(round.baseMetaVersion)}, `
+          + `now v${logSafe(currentMeta?.version ?? 0)}): ${logSafe(applied.conflicts.join(', '))} — the passed vote wins`,
         );
       }
     }
@@ -256,7 +256,7 @@ export function sendMemberRemovedNotify(
   const secrets = getSecrets();
   const peerToken = secrets.peerTokens[subjectInstanceId];
   if (!peerToken) {
-    log.warn(`member_removed: no outbound token for ${subjectInstanceId} — cannot notify`);
+    log.warn(`member_removed: no outbound token for ${logSafe(subjectInstanceId)} — cannot notify`);
     return;
   }
   peerSafeFetch(`${subjectUrl}/api/notify`, {
@@ -267,5 +267,5 @@ export function sendMemberRemovedNotify(
     },
     body: JSON.stringify({ networkId, instanceId: cfg.instanceId, event: 'member_removed' }),
     signal: AbortSignal.timeout(10_000),
-  }).catch(err => log.warn(`member_removed notify to ${subjectInstanceId}: ${err}`));
+  }).catch(err => log.warn(`member_removed notify to ${logSafe(subjectInstanceId)}: ${logSafe(String(err))}`));
 }

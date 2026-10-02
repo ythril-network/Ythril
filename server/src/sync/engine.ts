@@ -126,8 +126,8 @@ function _setFailureCount(networkId: string, instanceId: string, value: number |
 // the one it holds, and a members-less cycle resolves in microtasks, so a queued rerun starts and
 // finishes before any caller resumes.
 const _syncRunner = createCoalescingRunner<{ synced: number; errors: number }>({
-  onQueued: (id) => log.debug(`Sync cycle already running for network ${id} — queuing rerun`),
-  onRerun: (id) => log.debug(`Rerun requested for network ${id} — starting`),
+  onQueued: (id) => log.debug(`Sync cycle already running for network ${logSafe(id)} — queuing rerun`),
+  onRerun: (id) => log.debug(`Rerun requested for network ${logSafe(id)} — starting`),
 });
 
 /** True while a sync cycle for the given network is in-flight. Cheap, in-memory —
@@ -155,7 +155,7 @@ async function _runSyncForNetworkImpl(networkId: string): Promise<{ synced: numb
   const pushed: SyncCounts = { facts: 0, entities: 0, edges: 0, files: 0, chrono: 0, links: 0 };
   const errorMessages: string[] = [];
 
-  log.info(`Starting sync cycle for network '${net.label}' (${net.members.length} members)`);
+  log.info(`Starting sync cycle for network '${logSafe(net.label)}' (${net.members.length} members)`);
   let synced = 0; let errors = 0; let refusals = 0;
   const syncTimer = syncDurationSeconds.startTimer({ network: networkId });
 
@@ -183,13 +183,13 @@ async function _runSyncForNetworkImpl(networkId: string): Promise<{ synced: numb
       for (const rc of reparentedChildren) {
         log.warn(
           `REPARENT_REVERT_AVAILABLE: original parent '${logSafe(member.label)}' is back online. ` +
-          `'${rc.label}' (${rc.instanceId}) was temporarily re-parented during the outage. ` +
-          `To restore original topology: POST /api/networks/${net.id}/members/${rc.instanceId}/revert-parent. ` +
-          `To make the adoption permanent:  POST /api/networks/${net.id}/members/${rc.instanceId}/adopt.`,
+          `'${logSafe(rc.label)}' (${logSafe(rc.instanceId)}) was temporarily re-parented during the outage. ` +
+          `To restore original topology: POST /api/networks/${net.id}/members/${logSafe(rc.instanceId)}/revert-parent. ` +
+          `To make the adoption permanent:  POST /api/networks/${net.id}/members/${logSafe(rc.instanceId)}/adopt.`,
         );
       }
     } catch (err) {
-      const errMsg = `Sync failed for member ${logSafe(member.label)} (${member.instanceId}): ${logSafe(String(err))}`;
+      const errMsg = `Sync failed for member ${logSafe(member.label)} (${logSafe(member.instanceId)}): ${logSafe(String(err))}`;
       log.error(errMsg);
       errorMessages.push(errMsg);
       errors++;
@@ -197,20 +197,20 @@ async function _runSyncForNetworkImpl(networkId: string): Promise<{ synced: numb
       if (failures === STALE_FAILURE_THRESHOLD) {
         const hasChildren = net.type === 'braintree' && (member.children?.length ?? 0) > 0;
         log.warn(
-          `PEER UNREACHABLE: '${logSafe(member.label)}' in network '${net.label}' has failed ` +
-          `${failures} consecutive sync cycles. Last success: ${member.lastSyncAt ?? 'never'}. ` +
+          `PEER UNREACHABLE: '${logSafe(member.label)}' in network '${logSafe(net.label)}' has failed ` +
+          `${failures} consecutive sync cycles. Last success: ${logSafe(member.lastSyncAt ?? 'never')}. ` +
           `Member has NOT been removed — manual action required.` +
           (hasChildren
             ? ` NOTE: this node has ${member.children!.length} child(ren) in a braintree network — its entire subtree is now partitioned from this brain until it comes back online.`
             : ''),
         );
       } else if (failures > STALE_FAILURE_THRESHOLD && failures % 10 === 0) {
-        log.warn(`PEER STILL UNREACHABLE: '${logSafe(member.label)}' (${failures} consecutive failures, last success: ${member.lastSyncAt ?? 'never'})`);
+        log.warn(`PEER STILL UNREACHABLE: '${logSafe(member.label)}' (${failures} consecutive failures, last success: ${logSafe(member.lastSyncAt ?? 'never')})`);
       }
     }
   }
 
-  log.info(`Sync cycle complete for '${net.label}': ${synced} ok, ${errors} errors`);
+  log.info(`Sync cycle complete for '${logSafe(net.label)}': ${synced} ok, ${errors} errors`);
   syncTimer();
 
   // Calculate status once and share between Prometheus and sync history
@@ -255,8 +255,8 @@ async function _runSyncForNetworkImpl(networkId: string): Promise<{ synced: numb
         const me = freshNet.members.find(m => m.instanceId === freshCfg.instanceId);
         for (const orphan of orphans) {
           log.warn(
-            `ORPHAN DETECTED: '${orphan.label}' (${orphan.instanceId}) in '${freshNet.label}' ` +
-            `has parentInstanceId '${orphan.parentInstanceId}' which is not in the member list. ` +
+            `ORPHAN DETECTED: '${logSafe(orphan.label)}' (${logSafe(orphan.instanceId)}) in '${logSafe(freshNet.label)}' ` +
+            `has parentInstanceId '${logSafe(orphan.parentInstanceId)}' which is not in the member list. ` +
             `Auto-adopting as direct child of this instance.`,
           );
           orphan.parentInstanceId = freshCfg.instanceId;
@@ -282,7 +282,7 @@ async function _runSyncForNetworkImpl(networkId: string): Promise<{ synced: numb
     if (freshNet) {
       const removed = pruneExpiredRounds(freshNet);
       if (removed > 0) {
-        log.info(`Pruned ${removed} concluded+expired vote round(s) from network '${freshNet.label}'`);
+        log.info(`Pruned ${removed} concluded+expired vote round(s) from network '${logSafe(freshNet.label)}'`);
         saveConfig(freshCfg);
       }
     }
@@ -319,7 +319,7 @@ export async function runSyncForPeer(
       networksSynced++;
       _setFailureCount(net.id, member.instanceId, 0);
     } catch (err) {
-      log.error(`network_sync failed for peer ${logSafe(member.label)} (${member.instanceId}) in network '${net.label}': ${logSafe(String(err))}`);
+      log.error(`network_sync failed for peer ${logSafe(member.label)} (${logSafe(member.instanceId)}) in network '${logSafe(net.label)}': ${logSafe(String(err))}`);
       errors++;
       _setFailureCount(net.id, member.instanceId, 'increment');
     }
@@ -340,7 +340,7 @@ async function runSyncForMember(
   const secrets = getSecrets();
   const peerToken = secrets.peerTokens[member.instanceId];
   if (!peerToken) {
-    log.warn(`No peer token for ${logSafe(member.label)} (${member.instanceId}) — skipping sync`);
+    log.warn(`No peer token for ${logSafe(member.label)} (${logSafe(member.instanceId)}) — skipping sync`);
     return { pulled, pushed, incomplete: ['no peer token for this member'], refused };
   }
 
@@ -408,7 +408,7 @@ async function runSyncForMember(
     await propagateVotesWithPeer(net, member, fetchOpts);
     await deliverChangeNotes(net, member, fetchOpts); // F-42: only to a member below us; never throws, undelivered stays queued
   } catch (err) {
-    log.warn(`Governance gossip with ${logSafe(member.label)} (${member.instanceId}): ${logSafe(String(err))}`);
+    log.warn(`Governance gossip with ${logSafe(member.label)} (${logSafe(member.instanceId)}): ${logSafe(String(err))}`);
   }
 
   /*
@@ -432,7 +432,7 @@ async function runSyncForMember(
     // for space IDs that were registered on the network but never created locally.
     const cfg = getConfig();
     if (!cfg.spaces.some(s => s.id === spaceId && !s.proxyFor)) {
-      log.warn(`Skipping sync for space '${spaceId}' in network '${net.label}': space not in local config`);
+      log.warn(`Skipping sync for space '${spaceId}' in network '${logSafe(net.label)}': space not in local config`);
       continue;
     }
 
@@ -540,7 +540,7 @@ async function gossipWithPeer(
               let changed = false;
               if (peerSelf.url && peerSelf.url !== local.url) {
                 if (isPeerUrlAllowed(peerSelf.url)) { local.url = peerSelf.url; changed = true; }
-                else log.warn(`Gossip: rejected unsafe self-URL from ${logSafe(member.label)} (${member.instanceId}): ${logSafe(peerSelf.url)}`);
+                else log.warn(`Gossip: rejected unsafe self-URL from ${logSafe(member.label)} (${logSafe(member.instanceId)}): ${logSafe(peerSelf.url)}`);
               }
               if (peerSelf.label && peerSelf.label !== local.label) { local.label = peerSelf.label; changed = true; }
               /*
@@ -620,7 +620,7 @@ async function gossipWithPeer(
       }
       if (pinMemberSigningKey(local, peerRecord.signingPublicKey)) updated = true;
       if (updated) {
-        log.info(`Gossip: updated member ${local.label} (${local.instanceId}) in network ${net.id}`);
+        log.info(`Gossip: updated member ${logSafe(local.label)} (${logSafe(local.instanceId)}) in network ${net.id}`);
         changed = true;
       }
     }
@@ -693,8 +693,8 @@ async function propagateVotesWithPeer(
         const decision = acceptVoteCast(freshNet, local, peerCast, member.instanceId);
         if (!decision.accept) {
           log.warn(
-            `Vote gossip: rejecting cast for '${peerCast.instanceId}' relayed by '${member.instanceId}' ` +
-            `(round ${peerRound.roundId}) — ${decision.reason}`,
+            `Vote gossip: rejecting cast for '${logSafe(peerCast.instanceId)}' relayed by '${logSafe(member.instanceId)}' ` +
+            `(round ${logSafe(peerRound.roundId)}) — ${logSafe(decision.reason)}`,
           );
           continue;
         }
@@ -723,7 +723,7 @@ async function propagateVotesWithPeer(
             sendMemberRemovedNotify(round.subjectUrl, round.subjectInstanceId, net.id);
           }
           if (justPassed && admitPassedJoin(freshNet, fresh.instanceId, round)) {
-            log.info(`Join round ${round.roundId} concluded via gossip — added ${round.subjectLabel} to network ${net.id}`);
+            log.info(`Join round ${logSafe(round.roundId)} concluded via gossip — added ${logSafe(round.subjectLabel)} to network ${net.id}`);
           }
         }
       }
@@ -763,7 +763,7 @@ async function propagateVotesWithPeer(
           // valid, relay this cast onward — signed casts are relay-safe.
           // Both signatures travel (Q-138): the one shape the relay route reads back.
           body: JSON.stringify(castForWire(cast)),
-        }).catch(err => log.warn(`Vote push (${round.roundId}) to ${logSafe(member.label)}: ${logSafe(String(err))}`));
+        }).catch(err => log.warn(`Vote push (${logSafe(round.roundId)}) to ${logSafe(member.label)}: ${logSafe(String(err))}`));
       }
     }
   } catch (err) {
@@ -1038,7 +1038,7 @@ async function pushToPeer(
        * free unless somebody is looking — and it is the one line that would have made six failed reproduction
        * attempts conclusive instead of inconclusive.
        */
-      log.debug(`Push ${payloadKey} to ${member.label ?? member.instanceId} space '${spaceId}': `
+      log.debug(`Push ${payloadKey} to ${logSafe(member.label ?? member.instanceId)} space '${spaceId}': `
         + `${batch.length} doc(s) with seq > ${seqCursor}`
         + (batch.length ? ` (through ${(batch[batch.length - 1] as FactDoc).seq})` : ''));
       if (batch.length === 0) break;
@@ -1113,7 +1113,7 @@ async function pushToPeer(
    * nothing and the record is never offered again. That combination is invisible without both numbers in one
    * line, which is why they are logged together rather than at four separate call sites.
    */
-  log.debug(`Push cycle to ${member.label ?? member.instanceId} space '${spaceId}': watermark ${lastSeqPushed} -> `
+  log.debug(`Push cycle to ${logSafe(member.label ?? member.instanceId)} space '${spaceId}': watermark ${lastSeqPushed} -> `
     + `${maxSeqPushed}, pushed ${pushedMemories}m/${pushedEntities}e/${pushedEdges}g/${pushedChrono}c/${pushedLinks}l`);
 
   // Persist the push high-water mark so next sync only sends new/changed docs
@@ -1183,14 +1183,14 @@ async function checkMerkleWithPeer(
 
     if (localResult.root !== peerRoot) {
       log.warn(
-        `MERKLE_DIVERGENCE: space '${spaceId}', peer '${logSafe(member.label)}' (${member.instanceId}), ` +
-        `network '${net.label}'. ` +
-        `local root=${localResult.root} (${localResult.leafCount} leaves), ` +
-        `peer root=${peerRoot} (${peerResult.leafCount ?? '?'} leaves). ` +
+        `MERKLE_DIVERGENCE: space '${spaceId}', peer '${logSafe(member.label)}' (${logSafe(member.instanceId)}), ` +
+        `network '${logSafe(net.label)}'. ` +
+        `local root=${logSafe(localResult.root)} (${localResult.leafCount} leaves), ` +
+        `peer root=${logSafe(peerRoot)} (${logSafe(peerResult.leafCount ?? '?')} leaves). ` +
         `The space contents differ after sync — possible data loss, concurrent write, or sync bug.`,
       );
     } else {
-      log.info(`Merkle OK: space '${spaceId}', peer '${logSafe(member.label)}' root=${localResult.root.slice(0, 12)}…`);
+      log.info(`Merkle OK: space '${spaceId}', peer '${logSafe(member.label)}' root=${logSafe(localResult.root.slice(0, 12))}…`);
     }
   } catch (err) {
     log.warn(`Merkle check for space '${spaceId}' with peer '${logSafe(member.label)}': ${logSafe(String(err))}`);

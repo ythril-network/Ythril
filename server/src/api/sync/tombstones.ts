@@ -12,7 +12,7 @@ import { syncRateLimit } from '../../rate-limit/middleware.js';
 import { getDataRoot } from '../../config/loader.js';
 import { listTombstones, applyRemoteTombstone } from '../../brain/tombstones.js';
 import { requireAuth, denyReadOnly, isInstanceAdmin } from '../../auth/middleware.js';
-import { log } from '../../util/log.js';
+import { log, logSafe } from '../../util/log.js';
 import { bumpSeq, seqRefusal } from '../../util/seq.js';
 import { warnArrivalsNotStored } from '../../sync/arrivals.js';
 import { deleteStored } from '../../files/stored-bytes.js';
@@ -68,7 +68,7 @@ syncTombstonesRouter.get('/tombstones', syncRateLimit, requireAuth, async (req, 
     recordServedSeq(callerPeerId(req.authToken as Record<string, unknown>), spaceId, since);
     res.json(grouped);
   } catch (err) {
-    log.error(`sync GET tombstones: ${err}`);
+    log.error(`sync GET tombstones: ${logSafe(String(err))}`);
     res.status(500).json({ error: 'Internal error' });
   }
 });
@@ -162,7 +162,7 @@ syncTombstonesRouter.post('/tombstones', syncRateLimit, requireAuth, denyReadOnl
 
     res.status(200).json({ applied: plausible.length });
   } catch (err) {
-    log.error(`sync POST tombstones: ${err}`);
+    log.error(`sync POST tombstones: ${logSafe(String(err))}`);
     res.status(500).json({ error: 'Internal error' });
   }
 });
@@ -193,7 +193,7 @@ syncTombstonesRouter.get('/file-tombstones', syncRateLimit, requireAuth, async (
       .toArray();
     res.json({ tombstones });
   } catch (err) {
-    log.error(`sync GET file-tombstones: ${err}`);
+    log.error(`sync GET file-tombstones: ${logSafe(String(err))}`);
     res.status(500).json({ error: 'Internal error' });
   }
 });
@@ -248,7 +248,7 @@ syncTombstonesRouter.post('/file-tombstones', syncRateLimit, requireAuth, denyRe
 
     res.json({ applied });
   } catch (err) {
-    log.error(`sync POST file-tombstones: ${err}`);
+    log.error(`sync POST file-tombstones: ${logSafe(String(err))}`);
     res.status(500).json({ error: 'Internal error' });
   }
 });

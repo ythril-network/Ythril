@@ -232,13 +232,13 @@ export async function syncFiles(
           },
         );
         if (!pushResp.ok) {
-          log.warn(`Push file '${localPath}' to ${logSafe(member.label)}: HTTP ${pushResp.status}`);
+          log.warn(`Push file '${logSafe(localPath)}' to ${logSafe(member.label)}: HTTP ${pushResp.status}`);
         } else {
           pushedFiles++;
           await recordSyncBase(spaceId, localPath, member.instanceId, localEntry.sha256);
         }
       } catch (err) {
-        log.warn(`Push file '${localPath}' to ${logSafe(member.label)}: ${logSafe(String(err))}`);
+        log.warn(`Push file '${logSafe(localPath)}' to ${logSafe(member.label)}: ${logSafe(String(err))}`);
       }
     }
     } // end doPush
@@ -266,5 +266,5 @@ async function syncBasesFor(spaceId: string, peerId: string): Promise<Map<string
 async function recordSyncBase(spaceId: string, filePath: string, peerId: string, sha256: string): Promise<void> {
   await col<SyncedFileMeta>(spaceCollection(spaceId, 'files'))
     .updateOne(asFilter<SyncedFileMeta>({ _id: filePath }), asUpdate<SyncedFileMeta>({ $set: { [`syncBase.${peerId}`]: sha256 } }))
-    .catch(err => log.warn(`recordSyncBase ${filePath}: ${logSafe(String(err))}`));
+    .catch(err => log.warn(`recordSyncBase ${logSafe(filePath)}: ${logSafe(String(err))}`));
 }
