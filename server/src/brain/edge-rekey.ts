@@ -132,7 +132,7 @@ export async function rekeyEdge(
   /*
    * ── ONLY THE AUTHOR MAY MOVE IT ───────────────────────────────────────────────────────────────────────
    *
-   * `applyRemoteTombstone` deletes the underlying document **only if it was authored by the instance that
+   * `applyPeerTombstones` deletes the underlying document **only if it was authored by the instance that
    * issued the tombstone**. That guard exists so a remote tombstone cannot delete locally-authored content,
    * it is what protects a pubsub subscriber's own data, and it returns silently.
    *

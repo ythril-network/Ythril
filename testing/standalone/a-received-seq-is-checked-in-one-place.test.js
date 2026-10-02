@@ -8,7 +8,8 @@
  * helper, and the pull skipped with a warning. Three copies of a guard that protects the counter is how one door
  * came to check only `z.number()` (the tombstone route). Now `arrivalRefusal` / `seqRefusal` in
  * `sync/arrivals.ts` are the rule, and every door asks them: the writer for records, the push accept before it
- * plans, the tombstone route for tombstones, the import for its schema report.
+ * plans, the tombstone apply (`sync/tombstone-apply.ts`, both tombstone doors) for tombstones, the import for its
+ * schema report.
  *
  * So the predicate underneath (`isSeqImplausible`) is called from its own module and the arrival writer, and
  * nowhere else in `server/src` — the call sites are derived from the sources, not listed, with a floor.
@@ -44,8 +45,9 @@ describe('a received seq is checked in one place', () => {
 
   it('the tombstone route and the import ask the shared rule', () => {
     const of = (f) => SOURCES.find(s => s.file === f)?.code ?? '';
-    assert.match(of('server/src/api/sync/tombstones.ts'), /seqRefusal\(t\.seq, \{ optional: false \}\)/,
-      'the tombstone route no longer judges a tombstone seq by the shared rule');
+    // The tombstone rule moved out of the route into the one apply both tombstone doors share (bundle-46).
+    assert.match(of('server/src/sync/tombstone-apply.ts'), /seqRefusal\(t\.seq, \{ optional: false \}\)/,
+      'the tombstone apply no longer judges a tombstone seq by the shared rule');
     assert.match(of('server/src/api/admin-import.ts'), /arrivalRefusal\(doc, /,
       'the import\'s schema report no longer skips what the writer will refuse, by the writer\'s rule');
   });

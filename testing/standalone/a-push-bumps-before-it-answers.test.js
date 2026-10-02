@@ -62,8 +62,15 @@ function bumpers() {
   return found;
 }
 
-/** Every POST on the sync routers that takes a seq off a received document, with its handler text resolved. */
-function pushHandlers() {
+/**
+ * Every POST on the sync routers that takes a seq off a received document, with its handler text resolved.
+ *
+ * Two ways to take one: in the handler's own text (`TAKES_A_RECEIVED_SEQ`), or by handing what arrived to a
+ * derived bumper — the tombstone door validates nothing itself since bundle-46, it hands its page to the one apply
+ * both tombstone doors share, and a selection by spelling alone lost the door the day its seq check moved.
+ */
+function pushHandlers(bumperNames) {
+  const handsToABumper = new RegExp(`\\bawait\\s+(?:\\w+\\.)?(?:${[...bumperNames].join('|')})\\(`);
   const out = [];
   for (const { file, text } of readTrackedSources('server/src/api/sync', { ext: ['.ts'], floor: 5 })) {
     const src = stripComments(text);
@@ -73,7 +80,7 @@ function pushHandlers() {
       // A handler built by a factory in the same file is read through it, so moving the body into one is no escape.
       const called = [...reg.matchAll(/\b(\w+)\(/g)].map(c => c[1]).filter(n => localFns.has(n));
       const handler = [reg, ...called.map(n => bodyOf(src, n, `${file} ${n}`))].join('\n');
-      if (TAKES_A_RECEIVED_SEQ.test(handler)) out.push({ where: `${file.replace(/\\/g, '/')} POST ${m[2]}`, handler });
+      if (TAKES_A_RECEIVED_SEQ.test(handler) || handsToABumper.test(handler)) out.push({ where: `${file.replace(/\\/g, '/')} POST ${m[2]}`, handler });
     }
   }
   return out;
@@ -94,7 +101,7 @@ function acceptedFrom(handler) {
 }
 
 const BUMPERS = bumpers();
-const HANDLERS = pushHandlers();
+const HANDLERS = pushHandlers(BUMPERS);
 
 describe('every push handler awaits its counter bump before it answers', () => {
   it('the derivations found their subjects, so an empty set cannot pass', () => {

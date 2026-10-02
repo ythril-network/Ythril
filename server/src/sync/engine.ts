@@ -28,7 +28,7 @@ import { resolveWatermark, truncationWarn, type TransferOutcome } from './waterm
 import { pullTombstones, pushTombstones } from './tombstone-transfer.js';
 import { applyConcludedSpaceRounds } from '../spaces/apply-wipe-round.js';
 import { concreteSpaces } from '../spaces/proxy.js';
-import { bumpSeq, settledSeqRange } from '../util/seq.js';
+import { settledSeqRange } from '../util/seq.js';
 import { adoptAnnouncedSpaces, announcedSpaces, healAnnouncedAliases } from '../networks/network-spaces.js';
 import { selfRecordFor } from '../networks/self-record.js';
 import { mergePeerRoster, revokeRemoved, pairIntroduced, applyPassedJoin } from '../networks/member-introductions.js';
@@ -827,7 +827,6 @@ async function pullFromPeer(
   // Pull facts — use full=true to return complete docs in a single pass,
   // eliminating the N per-document secondary fetches that would be brutal over WAN.
   let highestSeq = sinceSeq;
-  let overallMaxSeq = 0; // the pulled tombstones' highest seq — the records are bumped by the writer
 
   type PullResult = { count: number; highSeq: number; maxSeq: number } & TransferOutcome;
   /*
@@ -943,15 +942,8 @@ async function pullFromPeer(
     seqOf: (t) => t.highSeq,
     warn: log.warn,
   });
-  // THE TOMBSTONES' share of the counter bump — and only theirs. Every RECORD this pull handed over was bumped
-  // over by the arrival writer itself, per landed chunk (`writeArrivals`), so a second bump over the records here
-  // would be the same rule in two places. A tombstone is not written by the writer, and it IS received from this
-  // peer with the deleting instance's seq: left out, a quiet peer's counter stays behind a busy peer's deletions,
-  // and a record re-created there (same id, lower seq) is refused by every peer holding the tombstone, for good.
-  overallMaxSeq = tombstones.maxSeq;
-  if (overallMaxSeq > 0) {
-    await bumpSeq(spaceId, overallMaxSeq);
-  }
+  // No counter bump here: every record this pull handed over was bumped over by the arrival writer, per landed
+  // chunk (`writeArrivals`), and every tombstone by the one tombstone apply, per page (`applyPeerTombstones`).
 
   // Persist the high-water mark
   if (highestSeq > sinceSeq) {

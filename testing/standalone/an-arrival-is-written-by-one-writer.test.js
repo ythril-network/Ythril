@@ -63,9 +63,9 @@ const SYNC_ROUTES_DIR = 'server/src/api/sync/';
  * collection, fails — so this cannot outlive what it excuses.
  */
 const EXEMPT = {
-  'server/src/brain/tombstones.ts:applyRemoteTombstone':
-    'a peer\'s tombstone deletes its record — POST /api/sync/tombstones and the pull\'s tombstone transfer. A delete, '
-    + 'not an arrival; batching the tombstone apply is Q-107 part 2',
+  'server/src/sync/tombstone-apply.ts:applyPeerTombstones':
+    'a peer\'s tombstones delete their records — POST /api/sync/tombstones and the pull\'s tombstone transfer, one '
+    + 'apply for both doors (bundle-46). A delete, not an arrival',
   'server/src/api/sync/_shared.ts:ingestFileMeta':
     'file metadata is merged with $set of the authored keys and never replaced (CLAUDE.md, "What a receiver does '
     + 'after the write"); its page batching is Q-107 part 2',

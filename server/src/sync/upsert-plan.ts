@@ -124,6 +124,17 @@ export interface PushDoc extends Replicable {
   label?: string;
   fromKind?: string;
   toKind?: string;
+  author?: { instanceId?: string };
+}
+
+/**
+ * A tombstone stored here for an id: its seq, and the instance that issued it. The issuer is what lets a tombstone
+ * refuse only the records its own issuer wrote (bundle-46): without it, a tombstone one peer planted for an id
+ * blocked every later copy of that record from every other author.
+ */
+export interface HeldTombstone {
+  seq: number;
+  issuer?: string;
 }
 
 /** What the planner needs to know of a stored copy. */
@@ -143,8 +154,8 @@ export interface StoredCopy {
 export interface PushPlanInput {
   kind: PushFamily;
   stored: ReadonlyMap<string, StoredCopy>;
-  /** Tombstone seq per id, for this family's tombstone type only. */
-  tombstones: ReadonlyMap<string, number>;
+  /** The tombstone held per id, for this family's tombstone type only. */
+  tombstones: ReadonlyMap<string, HeldTombstone>;
   /** The chrono vocabulary this space allows; ignored for the other families. */
   allowedTypes?: ReadonlySet<string>;
   forkParent?: ReadonlyMap<string, string | undefined>;
@@ -265,6 +276,7 @@ function uniqueKey(kind: PushFamily, d: PushDoc): string | undefined {
  *
  * ## The rules, exactly as the per-document handler applied them
  *
+ * - Only a tombstone its issuer wrote the record under governs it (`tombSeqFor`); one from another issuer is ignored.
  * - A tombstone at or above the incoming seq: `tombstoned`. One below it is stale — superseded by this copy, so
  *   later copies of the id in the page no longer see it, and it is deleted once the record lands.
  * - Chrono only: a type outside this space's vocabulary is `unknownType`, before anything else is consulted.
@@ -284,6 +296,19 @@ function uniqueKey(kind: PushFamily, d: PushDoc): string | undefined {
  * that counts only stored siblings lets one page past it by any amount. A fork whose derived id is already stored
  * (or already created by this page) is that same fork: `forked`, with no second write and no cap consulted.
  */
+/**
+ * The seq of the tombstone that governs `doc`, or `undefined` when none does. A held tombstone governs a record
+ * only when its issuer wrote that record: one from a different issuer is someone else's statement about an id, and
+ * neither refuses the record nor is cleaned up by it. When either side carries no instance (a legacy tombstone, an
+ * author-less record) the tombstone governs, as it always did.
+ */
+function tombSeqFor(doc: PushDoc, held: HeldTombstone | undefined): number | undefined {
+  if (held === undefined) return undefined;
+  const author = doc.author?.instanceId;
+  if (held.issuer && author && held.issuer !== author) return undefined;
+  return held.seq;
+}
+
 export function planPushArrivals<T extends PushDoc>(docs: readonly T[], input: PushPlanInput): PushPlan<T> {
   const { kind, stored, tombstones } = input;
   const plan: PushPlan<T> = {
@@ -333,7 +358,7 @@ export function planPushArrivals<T extends PushDoc>(docs: readonly T[], input: P
       plan.verdicts[i] = 'unknownType';
       return;
     }
-    const tomb = superseded.has(doc._id) ? undefined : tombstones.get(doc._id);
+    const tomb = superseded.has(doc._id) ? undefined : tombSeqFor(doc, tombstones.get(doc._id));
     if (tomb !== undefined && tomb >= doc.seq) { plan.verdicts[i] = 'tombstoned'; return; }
 
     const cur: StoredCopy | undefined = overlay.get(doc._id) ?? stored.get(doc._id);

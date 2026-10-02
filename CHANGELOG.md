@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`POST /api/sync/tombstones` checks each tombstone on its own, answers `refused`, and takes at most 5000 per
+  request (bundle-46).** A malformed tombstone, or one whose seq the counter cannot carry, is refused alone and the
+  rest of the page applies; the answer is `{ applied, refused }`, where `applied` keeps its meaning (the tombstones
+  admitted by shape and seq) and `refused` is new and additive. A malformed page used to be refused whole with a
+  `400`, which held the sender's watermark and stopped every deletion from it. A tombstone of a type the receiver
+  does not know still answers `400`, so the sender re-sends it after the receiver upgrades. More than 5000
+  tombstones in one request is a `400`; this instance sends 500. A tombstone page also costs the same handful of
+  database commands whatever its size, on both doors, instead of four per tombstone.
 - **A pushed or pulled page is written in a handful of database commands, not four per document (`Q-107`,
   part 1).** Every record that arrives from elsewhere — a peer's push (batch or single record), a pulled page, an
   admin import — is now stored by one writer. A fork-free page of 200 facts, entities, edges, chrono entries or
@@ -304,6 +312,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A peer with more than a thousand deletions of one kind to pass on now passes on all of them (`Q-237`).** The
+  tombstone pull asked once, was served at most 1000 per kind, and called itself complete, so every later deletion
+  was never applied and never asked for again. The push paged, but lost the part of a run of equal seqs that
+  straddled a page (equal seqs are normal for deletions relayed from several instances). Both now page by a
+  cursor that re-reads a full page's last seq, and a transfer that cannot finish — a refused request, a page of one
+  seq it cannot page past, its per-cycle bound — holds the watermark where it stopped and says so, naming the
+  space, the peer and the seq. A peer still on 5.6.x pulls at most 1000 per kind until it upgrades.
+- **A tombstone with an impossible seq no longer reaches the counter by pull (`Q-221`).** The push refused it; the
+  pull checked nothing, so a peer could drag this instance's seq counter into its ceiling reserve with one
+  tombstone. Both doors now refuse it on its own, log it, and do not move the counter to it — and a refused
+  tombstone no longer moves the pull's cursor past the real deletions after it.
 - **A record pulled from a peer was never queued for embedding (`Q-203`).** It was stored and absent from every
   meaning-ranked search on this instance until somebody ran a reindex. Pulled records are now queued by this
   instance's suppression rules, like pushed ones. **Records pulled before this release** stay without a vector until
@@ -525,6 +544,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   waiting it says the server has not answered yet and names what the space is doing — search indexes being built,
   records waiting to be embedded — and after thirty seconds the wait ends in the error state with those reasons
   and Retry. Reported on 5.6.0 while an upgraded instance rebuilt every space's search indexes.
+
+### Security
+
+- **A peer's tombstone is applied to the space its sync admitted, never to the space the tombstone names
+  (`Q-236`).** Both tombstone doors — a peer's push and this instance's pull — applied each tombstone to the space
+  written inside it. So a peer admitted to one space could delete records it authored in any other space this
+  instance holds, and store tombstones there or in a space this instance does not have. And under a `spaceMap`
+  (a space joined under another name) every deletion an honest peer sent was stored under the network's name and
+  **never reached the local space**: those deletions were silently lost. Every tombstone is now applied to the
+  local space the door admitted.
+- **A tombstone is authorised before it is stored.** One whose issuer is not the peer delivering it, or whose
+  record here another instance wrote, is refused and no longer stored — stored, it refused every later copy of that
+  record from its real author.
+- **A tombstone no longer blocks another author's record.** A pushed record is refused as `tombstoned` only by a
+  tombstone its own author issued, so a tombstone one peer planted for an id cannot keep another instance's record
+  out.
+- **What stays as it was, named:** a record with no author (data older than authorship) stays deletable by an
+  admitted peer's own tombstone; tombstones a peer already planted in a space it was not admitted to stay where they
+  are, because they cannot be told apart from legitimate ones; a 5.5 peer serves tombstones without the settled
+  horizon, as before.
 
 ### Internal
 
