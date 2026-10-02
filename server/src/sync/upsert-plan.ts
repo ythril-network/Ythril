@@ -156,6 +156,11 @@ export interface PushPlanInput {
   stored: ReadonlyMap<string, StoredCopy>;
   /** The tombstone held per id, for this family's tombstone type only. */
   tombstones: ReadonlyMap<string, HeldTombstone>;
+  /**
+   * The peer identity the pushing token PROVES, or undefined for an admin or local token. Required, so a door has to
+   * say it: a record escapes another issuer's tombstone only when the peer delivering it IS its author.
+   */
+  deliveredBy: string | undefined;
   /** The chrono vocabulary this space allows; ignored for the other families. */
   allowedTypes?: ReadonlySet<string>;
   forkParent?: ReadonlyMap<string, string | undefined>;
@@ -276,7 +281,8 @@ function uniqueKey(kind: PushFamily, d: PushDoc): string | undefined {
  *
  * ## The rules, exactly as the per-document handler applied them
  *
- * - Only a tombstone its issuer wrote the record under governs it (`tombSeqFor`); one from another issuer is ignored.
+ * - A tombstone from another issuer than the record's author is ignored when the pushing peer proves it is that
+ *   author (`tombSeqFor`); otherwise every held tombstone governs.
  * - A tombstone at or above the incoming seq: `tombstoned`. One below it is stale — superseded by this copy, so
  *   later copies of the id in the page no longer see it, and it is deleted once the record lands.
  * - Chrono only: a type outside this space's vocabulary is `unknownType`, before anything else is consulted.
@@ -297,14 +303,20 @@ function uniqueKey(kind: PushFamily, d: PushDoc): string | undefined {
  * (or already created by this page) is that same fork: `forked`, with no second write and no cap consulted.
  */
 /**
- * The seq of the tombstone that governs `doc`, or `undefined` when none does. A held tombstone governs a record
- * only when its issuer wrote that record: one from a different issuer is someone else's statement about an id, and
- * neither refuses the record nor is cleaned up by it. When either side carries no instance (a legacy tombstone, an
- * author-less record) the tombstone governs, as it always did.
+ * The seq of the tombstone that governs `doc`, or `undefined` when none does.
+ *
+ * A held tombstone from a different issuer than the record's author is someone else's statement about an id, so it
+ * neither refuses the record nor is cleaned up by it — but ONLY when the peer delivering the record proves it is
+ * that author (`deliveredBy`). The author field is the sender's text: without the proof, a push claiming any other
+ * author for a deleted id would resurrect it past its tombstone. It is the mirror of the rule a tombstone itself
+ * passes (`applyPeerTombstones`: its issuer must be the delivering peer). When either side carries no instance (a
+ * legacy tombstone, an author-less record) the tombstone governs, as it always did.
  */
-function tombSeqFor(doc: PushDoc, held: HeldTombstone | undefined): number | undefined {
+function tombSeqFor(doc: PushDoc, held: HeldTombstone | undefined, deliveredBy: string | undefined): number | undefined {
   if (held === undefined) return undefined;
-  return tombstoneGoverns(held.issuer, doc.author?.instanceId) ? held.seq : undefined;
+  const author = doc.author?.instanceId;
+  const provenOtherAuthor = !tombstoneGoverns(held.issuer, author) && deliveredBy !== undefined && author === deliveredBy;
+  return provenOtherAuthor ? undefined : held.seq;
 }
 
 /**
@@ -366,7 +378,7 @@ export function planPushArrivals<T extends PushDoc>(docs: readonly T[], input: P
       plan.verdicts[i] = 'unknownType';
       return;
     }
-    const tomb = superseded.has(doc._id) ? undefined : tombSeqFor(doc, tombstones.get(doc._id));
+    const tomb = superseded.has(doc._id) ? undefined : tombSeqFor(doc, tombstones.get(doc._id), input.deliveredBy);
     if (tomb !== undefined && tomb >= doc.seq) { plan.verdicts[i] = 'tombstoned'; return; }
 
     const cur: StoredCopy | undefined = overlay.get(doc._id) ?? stored.get(doc._id);

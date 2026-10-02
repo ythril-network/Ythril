@@ -254,12 +254,16 @@ describe('planPushArrivals — the push accept, decided as sequential processing
     assert.equal(p.tombstoneCleanups.has('a'), false);
   });
 
-  it('a held tombstone governs only the records its issuer wrote', () => {
+  it('another issuer\'s tombstone does not refuse a record its PROVEN author pushes; unproven, it still does', () => {
     const tombstones = new Map([['a', { seq: 9, issuer: 'X' }], ['b', { seq: 9, issuer: 'X' }], ['c', { seq: 9, issuer: 'X' }]]);
-    const p = plan('entities', [doc('a', 4, { author: { instanceId: 'Y' } }), doc('b', 4, { author: { instanceId: 'X' } }), doc('c', 4)],
-      { tombstones });
-    assert.deepEqual(p.verdicts, ['upserted', 'tombstoned', 'tombstoned']);
-    assert.equal(p.tombstoneCleanups.has('a'), false, 'another issuer\'s tombstone is not cleaned up by this author\'s record');
+    const docs = [doc('a', 4, { author: { instanceId: 'Y' } }), doc('b', 4, { author: { instanceId: 'X' } }), doc('c', 4)];
+    const proven = plan('entities', docs, { tombstones, deliveredBy: 'Y' });
+    assert.deepEqual(proven.verdicts, ['upserted', 'tombstoned', 'tombstoned']);
+    assert.equal(proven.tombstoneCleanups.has('a'), false, 'another issuer\'s tombstone is not cleaned up by this author\'s record');
+    // The author field is the sender's text: claimed by an admin token, or by a peer that is not the author, it is
+    // no proof, and the deleted id stays deleted.
+    assert.deepEqual(plan('entities', docs, { tombstones }).verdicts, ['tombstoned', 'tombstoned', 'tombstoned']);
+    assert.deepEqual(plan('entities', docs, { tombstones, deliveredBy: 'Z' }).verdicts, ['tombstoned', 'tombstoned', 'tombstoned']);
   });
 
   it('two ids on one edge triplet in a page: the first is written, the second is a duplicate', () => {

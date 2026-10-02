@@ -566,9 +566,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A tombstone is authorised before it is stored.** One whose issuer is not the peer delivering it, or whose
   record here another instance wrote, is refused and no longer stored — stored, it refused every later copy of that
   record from its real author.
-- **A tombstone no longer blocks another author's record.** A pushed record is refused as `tombstoned` only by a
-  tombstone its own author issued, so a tombstone one peer planted for an id cannot keep another instance's record
-  out.
+- **A tombstone no longer blocks another author's record.** A record its author pushes with its own peer token is
+  no longer refused as `tombstoned` by a tombstone another instance issued for the id, so a tombstone one peer
+  planted cannot keep another instance's record out. A claimed author is not enough: pushed by anyone else, a
+  record with a deleted id is still refused, so a forged author cannot bring a deleted record back.
 - **What stays as it was, named:** a record with no author (data older than authorship) stays deletable by an
   admitted peer's own tombstone; tombstones a peer already planted in a space it was not admitted to stay where they
   are, because they cannot be told apart from legitimate ones; a 5.5 peer serves tombstones without the settled

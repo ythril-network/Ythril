@@ -248,8 +248,10 @@ async function writePushed(spaceId: string, key: PushKey, docs: readonly Pushed[
  *     write alone; its embed jobs are queued after the hold is released.
  */
 async function acceptPushedPage(
-  spaceId: string, page: Partial<Record<PushKey, Pushed[]>>, from: string,
+  spaceId: string, page: Partial<Record<PushKey, Pushed[]>>, pusher: string | undefined,
 ): Promise<Record<PushKey, PushedFamilyResult>> {
+  // `pusher` is the peer identity the token PROVES (undefined for an admin or local token); `from` names it in logs.
+  const from = pusher ?? 'unknown';
   const results = {} as Record<PushKey, PushedFamilyResult>;
   const sound = {} as Record<PushKey, Array<{ index: number; doc: Pushed }>>;
   const refusedAt = {} as Record<PushKey, ArrivalRefusal[]>;
@@ -280,7 +282,7 @@ async function acceptPushedPage(
       const docs = items.map(s => s.doc);
       const stored = await readPushStored(spaceId, kind, docs);
       const plan = planPushArrivals(docs, {
-        kind, stored, tombstones: tombstones.get(tombstone) ?? new Map(),
+        kind, stored, tombstones: tombstones.get(tombstone) ?? new Map(), deliveredBy: pusher,
         allowedTypes: kind === 'chrono' ? allowedChrono : undefined,
         ...(kind === 'facts' ? await readForkContext(spaceId, docs, stored) : {}),
       });
@@ -356,7 +358,9 @@ async function acceptPushedPage(
   return results;
 }
 
-const peerOf = (req: Request): string => callerPeerId(req.authToken as Record<string, unknown>) ?? 'unknown';
+/** The peer identity the request's token proves, or undefined (an admin or local token). */
+const pusherOf = (req: Request): string | undefined => callerPeerId(req.authToken as Record<string, unknown>);
+const peerOf = (req: Request): string => pusherOf(req) ?? 'unknown';
 const forkCapError = (id: string) => ({ error: `Fork depth limit (${MAX_FORK_DEPTH}) exceeded for _id '${id}'` });
 /**
  * A refused document's 400, in the words of the rule that refused it — the arrival writer's shape check
@@ -380,7 +384,7 @@ syncDocsRouter.post('/facts', syncRateLimit, requireAuth, denyReadOnly, async (r
     // Reported on every exit that KEPT something; `tombstoned` and `skipped` store nothing to describe.
     const violations = violationsAgainstLocalSchema(spaceId, 'fact', incoming);
 
-    const { facts } = await acceptPushedPage(spaceId, { facts: [incoming] }, peerOf(req));
+    const { facts } = await acceptPushedPage(spaceId, { facts: [incoming] }, pusherOf(req));
     const verdict = facts.verdicts[0];
     if (verdict === 'inserted' || verdict === 'updated') { res.status(200).json(withSchemaViolations({ status: verdict }, violations)); return; }
     if (verdict === 'forked') { res.status(200).json(withSchemaViolations({ status: 'forked', forkId: facts.forkIds[0] }, violations)); return; }
@@ -408,7 +412,7 @@ syncDocsRouter.post('/entities', syncRateLimit, requireAuth, denyReadOnly, async
     const incoming = parsed.data as unknown as Pushed;
     const violations = violationsAgainstLocalSchema(spaceId, 'entity', incoming);
 
-    const { entities } = await acceptPushedPage(spaceId, { entities: [incoming] }, peerOf(req));
+    const { entities } = await acceptPushedPage(spaceId, { entities: [incoming] }, pusherOf(req));
     const verdict = entities.verdicts[0];
     if (verdict === 'tombstoned') { res.status(200).json({ status: 'tombstoned' }); return; }
     if (verdict === 'rejected') { res.status(400).json(refusedError(entities)); return; }
@@ -434,7 +438,7 @@ syncDocsRouter.post('/edges', syncRateLimit, requireAuth, denyReadOnly, async (r
     const incoming = parsed.data as unknown as Pushed;
     const violations = violationsAgainstLocalSchema(spaceId, 'edge', incoming);
 
-    const { edges } = await acceptPushedPage(spaceId, { edges: [incoming] }, peerOf(req));
+    const { edges } = await acceptPushedPage(spaceId, { edges: [incoming] }, pusherOf(req));
     const verdict = edges.verdicts[0];
     if (verdict === 'tombstoned') { res.status(200).json({ status: 'tombstoned' }); return; }
     if (verdict === 'rejected') { res.status(400).json(refusedError(edges)); return; }
@@ -465,7 +469,7 @@ syncDocsRouter.post('/chrono', syncRateLimit, requireAuth, denyReadOnly, async (
     const incoming = parsed.data as unknown as Pushed;
     const violations = violationsAgainstLocalSchema(spaceId, 'chrono', incoming);
 
-    const { chrono } = await acceptPushedPage(spaceId, { chrono: [incoming] }, peerOf(req));
+    const { chrono } = await acceptPushedPage(spaceId, { chrono: [incoming] }, pusherOf(req));
     const verdict = chrono.verdicts[0];
     if (verdict === 'unknownType') {
       const allowed = getAllowedChronoTypes(getConfig().spaces.find(sp => sp.id === spaceId)?.meta);
@@ -566,7 +570,7 @@ syncDocsRouter.post('/batch-upsert', syncRateLimit, requireAuth, denyReadOnly, a
       return kind === undefined ? 0 : page[key].filter(d => violationsAgainstLocalSchema(spaceId, kind, d).length > 0).length;
     };
 
-    const out = await acceptPushedPage(spaceId, page, peer);
+    const out = await acceptPushedPage(spaceId, page, pusherOf(req));
 
     const count = (key: PushKey, v: PushVerdict) => out[key].verdicts.filter(x => x === v).length;
     const rejected = (key: PushKey, ...also: PushVerdict[]) =>
