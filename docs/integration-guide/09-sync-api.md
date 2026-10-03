@@ -517,8 +517,13 @@ reader rather than merely non-conforming, and nothing else in the pipeline would
 
 ### Tombstones
 
-- `GET /api/sync/tombstones?spaceId=general&sinceSeq=0` returns grouped `{ entities, facts, edges, chrono, links }` tombstones. The keys are derived from the tombstone types, so a new record kind appears here without a protocol change; a client should read the keys it knows and ignore the rest.
-- `POST /api/sync/tombstones` accepts `{ tombstones: [...] }` and applies deletions.
+- `GET /api/sync/tombstones?spaceId=general&sinceSeq=0&limit=5000` returns grouped `{ entities, facts, edges, chrono, links }` tombstones, each ascending by seq and at most `limit` long (default 1000, max 5000, **per type**). The keys are derived from the tombstone types, so a new record kind appears here without a protocol change; a client should read the keys it knows and ignore the rest.
+  - **Page it tie-safe.** A full array may hold more at its last seq — equal seqs are legitimate, because an instance relays tombstones issued by several others. Ask next from the lowest last seq among the full arrays **minus one**, and skip what you already applied by `(type, _id)`. Moving to the last seq instead loses every tombstone of a run that straddles the page. A full array that is all one seq cannot be paged past by seq: stop, and hold your watermark below it.
+- `POST /api/sync/tombstones` accepts `{ tombstones: [...] }`, at most 5000 per request (`400` above), and answers `200 { applied, refused }`.
+  - Each element is checked on its own: one that is malformed (no `type`, a missing field) or whose seq the counter cannot carry is refused alone, counted in `refused`, and the rest applies. `refused` is additive — an older receiver answers `{ applied }` only. A refusal is by shape, so re-sending it changes nothing; advance past it.
+  - An element of a `type` the receiver does not know answers `400 { error: 'Invalid tombstone format' }` and nothing of the page is applied: hold your watermark and re-send after the receiver upgrades.
+  - A tombstone is applied to the space your request names (after the network alias), never to the `spaceId` in its body. It deletes a record only when your peer identity issued it and authored the record; one that fails that is refused and **not stored**, so a forged tombstone cannot block the real author's record either. Symmetrically, a record you push as its author with your own peer token is not refused by a tombstone another instance issued for its id; a record whose author you only claim still is.
+  - The receiver's counter is moved past the highest admitted seq before it answers; a counter that could not move answers `500`, and you should re-send.
 
 **The `sinceSeq` you send is recorded.** The serving instance stores it as `lastSeqServed` for your peer identity and prunes tombstones that every member has pulled past — that is the only retention bound on the collection, because an age-based one would let a long-absent peer resurrect a deleted record. Two consequences for an integrator:
 

@@ -780,6 +780,15 @@ searches move to it, the original is rebuilt, and searches move back. Until an i
 needs completing returns what it found and says `filter_window` in `degraded`; every other search is unaffected. On
 a large instance this takes as long as building every index twice, in the background.
 
+**Upgrading to 5.6.3 or later finishes the stray file-metadata recovery 5.6.2 started.** On a space where 5.6.2
+already dropped its stray `<space>_filemeta` collection there is nothing left to recover; where the collection is
+still there, the retention pass now fills the descriptions and tags into the files this instance holds, at most
+2,000 records per space per cycle (each may queue an embedding), keeps a record whose file has not arrived for up to
+30 days, and drops the collection once it is empty (audited as `file.stray_filemeta.drain`). The first boot also
+builds one index per space on its tombstones (`type`, `seq`), and the first pulls after a long absence carry more
+deletions per cycle than before: up to 5000 per kind per request and 200 requests per cycle, until they have caught
+up. A peer still on 5.6.2 or earlier pulls at most 1000 per kind from you until it upgrades.
+
 ### Rolling Back
 
 **A rollback from 5.6.0 rebuilds the vector indexes once more**, to the previous version's filter fields. Search

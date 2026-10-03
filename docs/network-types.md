@@ -268,7 +268,7 @@ The subscriber runs all of it itself: `POST /api/networks/join-by-key` on its ow
 Subscribers may add their own content to the synced spaces. Publisher-pushed content coexists alongside subscriber-local content — it is never overwritten or displaced. If the publisher deletes a document, the tombstone only removes the publisher's copy on the subscriber; subscriber-authored documents are unaffected. Two layers of protection guarantee this:
 
 1. **UUIDv4 identity** — every document `_id` is a UUIDv4 (122 bits of randomness). Two independent instances will never generate the same ID, so a publisher's tombstone structurally cannot target a subscriber-created document.
-2. **Author guard** — even if IDs hypothetically collided, `applyRemoteTombstone` compares `tombstone.instanceId` against `localDoc.author.instanceId` and skips the delete when they differ.
+2. **Author guard** — even if IDs hypothetically collided, `applyPeerTombstones` compares `tombstone.instanceId` against `localDoc.author.instanceId` and, when they differ, neither deletes nor stores the tombstone. It also applies a tombstone only to the subscriber's own space the sync admitted, never to a space the tombstone names.
 
 See [Tombstone deletion authorisation](sync-protocol.md#tombstone-deletion-authorisation) and [Document ID collision safety](sync-protocol.md#document-id-collision-safety) in the sync protocol for details. The same protection applies to all directional network types (braintree, pubsub).
 
@@ -287,7 +287,7 @@ See [Tombstone deletion authorisation](sync-protocol.md#tombstone-deletion-autho
 
 ### Temporarily offline (vacation scenario)
 
-A peer that is unreachable for a sync cycle is skipped, and the cycle continues for all other members. The `lastSyncAt` timestamp and the `lastSeqReceived` high-water mark are only advanced on a successful sync — so when the peer comes back online, it picks up exactly where it left off, regardless of how long it was gone. All accumulated changes since the last successful sync are exchanged on the next cycle.
+A peer that is unreachable for a sync cycle is skipped, and the cycle continues for all other members. The `lastSyncAt` timestamp and the `lastSeqReceived` high-water mark are only advanced on a successful sync — so when the peer comes back online, it picks up exactly where it left off, regardless of how long it was gone. All accumulated changes since the last successful sync are exchanged — deletions included, however many there are — over as many cycles as the per-cycle page bounds need: a cycle that could not deliver everything holds the watermark where it stopped, says so, and the next cycle continues from there.
 
 Every outbound call has its own bounded timeout (10 s for small requests, 60 s for batch transfers) rather than the OS TCP timeout (~75 s) — so an offline member simply makes the cycle take longer while it works through those timeouts; the cycle always completes and every other member still syncs.
 

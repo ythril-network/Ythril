@@ -7,6 +7,109 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.6.3] — 2026-10-03
+
+**A patch release: sync's tombstone and file-metadata fixes from `main`, and five defects found in 5.6.2, and
+nothing else.** The one to take first is a security fix: a peer's tombstone was applied to whatever space it named,
+so a peer admitted to one space could delete its own records in another, and under a `spaceMap` every deletion an
+honest peer sent was lost. It also makes a peer with many deletions pass on all of them, makes the stray
+file-metadata recovery 5.6.2 shipped actually recover the descriptions, and corrects three things 5.6.2's notes
+said that were only partly true.
+
+| What changes on upgrade | What to do |
+|---|---|
+| The first boot builds one index per space on its tombstones (`type`, `seq`) | Nothing |
+| A stray `<space>_filemeta` collection 5.6.2 had not dropped yet is now recovered at most 2,000 records per space per cycle; a record whose file has not arrived waits up to 30 days | Nothing; where 5.6.2 already dropped the collection there is nothing left to recover |
+| `POST /api/sync/tombstones` answers `{ applied, refused }` and takes at most 5000 tombstones per request | Nothing for a Ythril peer (it sends 500); an integrator reading `applied` keeps its meaning |
+| The first pulls after a long absence carry up to 5000 deletions per kind per request, 200 requests per cycle | Nothing; a peer still on 5.6.2 or earlier pulls at most 1000 per kind until it upgrades |
+| A record its author pushes is no longer refused by a tombstone another instance issued for its id | Takes effect for pushes received by an instance on 5.6.3 |
+
+Documents changed in this release: `docs/sync-protocol.md`, `docs/network-types.md`,
+`docs/integration-guide/02-hosting.md`, `docs/integration-guide/09-sync-api.md`,
+`docs/integration-guide/13-audit-log-api.md` and `docs/userguide/05-storage-data-and-audit.md`.
+
+### Security
+
+- **A peer's tombstone is applied to the space its sync admitted, never to the space the tombstone names
+  (`Q-236`).** Both tombstone doors — a peer's push and this instance's pull — applied each tombstone to the space
+  written inside it. So a peer admitted to one space could delete records it authored in any other space this
+  instance holds, and store tombstones there or in a space this instance does not have. And under a `spaceMap`
+  (a space joined under another name) every deletion an honest peer sent was stored under the network's name and
+  **never reached the local space**: those deletions were silently lost. Every tombstone is now applied to the
+  local space the door admitted.
+- **A tombstone is authorised before it is stored.** One whose issuer is not the peer delivering it, or whose
+  record here another instance wrote, is refused and no longer stored — stored, it refused every later copy of that
+  record from its real author.
+- **A tombstone no longer blocks another author's record.** A record its author pushes with its own peer token is
+  no longer refused as `tombstoned` by a tombstone another instance issued for the id, so a tombstone one peer
+  planted cannot keep another instance's record out. A claimed author is not enough: pushed by an admin token or by
+  a peer that is not the author, a record with a deleted id is still refused, so a forged author cannot bring a
+  deleted record back. This takes effect for pushes an instance on 5.6.3 receives.
+- **What stays as it was, named:** a record with no author (data older than authorship) stays deletable by an
+  admitted peer's own tombstone; tombstones a peer already planted in a space it was not admitted to stay where they
+  are, because they cannot be told apart from legitimate ones.
+
+### Fixed
+
+- **A peer with more than a thousand deletions of one kind to pass on now passes on all of them (`Q-237`).** The
+  tombstone pull asked once, was served at most 1000 per kind, and called itself complete, so every later deletion
+  was never applied and never asked for again. The push paged, but lost the part of a run of equal seqs that
+  straddled a page (equal seqs are normal for deletions relayed from several instances). Both now page by a
+  cursor that re-reads a full page's last seq, and a transfer that cannot finish — a refused request, a page of one
+  seq it cannot page past, its per-cycle bound — holds the watermark where it stopped and says so, naming the
+  space, the peer and the seq.
+- **A tombstone with an impossible seq no longer reaches the counter by pull (`Q-221`).** The push refused it; the
+  pull checked nothing, so a peer could drag this instance's seq counter into its ceiling reserve with one
+  tombstone. Both doors now refuse it on its own, log it, and do not move the counter to it — and a refused
+  tombstone no longer moves the pull's cursor past the real deletions after it.
+- **File metadata a 4.0-5.6.1 pull left in `<space>_filemeta` is now actually recovered (`Q-219`).** 5.6.2's notes
+  said the drain merged it "never over a newer copy"; but a receiver before 5.6.0 had stamped its OWN seq on the
+  file rows of peers' files it pulled, so most stray descriptions counted as older than the stored copy and were
+  dropped with the collection. The drain now FILLS a row this instance made itself with the keys it lacks — never
+  over a description or tags it has (an automatic caption gives way to the sender's wording), never changing its
+  seq, author or update time — and gives a row another instance wrote the usual newer-wins rule. It never creates a
+  row: a record whose file is missing waits up to 30 days for the file's bytes, or is discarded when a file
+  tombstone says the file was deleted. It works a bounded amount per cycle (2,000 records per space) and resumes;
+  a page whose counter could not be moved is kept for the next cycle; a failing space no longer stops the others
+  and is named in the log; and the drop of an emptied collection writes an audit entry,
+  `file.stray_filemeta.drain`. The server's own audit entries (sweeps, alias heals, creator grants) now carry a
+  request id of their own instead of reading as older than the field.
+- **A file whose metadata arrived before its bytes never expired (`Q-250`).** 5.6.2's notes said a file new on
+  this instance is given its file retention window; that held only when the bytes arrived first. When a peer's
+  metadata arrived first — by push or by pull — it created the row with no expiry, and the bytes then found the
+  row and never stamped it. The row the metadata creates now takes this instance's file window too, once; a later
+  copy or the bytes never re-slide it, and a space with no window stores none.
+- **A stale push could delete a deletion written meanwhile (`Q-253`).** 5.6.2's notes said a stale tombstone is
+  deleted only once the record that supersedes it has landed; that held for a record that landed. For a record
+  older than the stored copy the cleanup deleted the id's tombstone by id alone, after reading it — so a tombstone
+  written for the id in between, at a higher seq, was deleted with it, and the record it was meant to remove lived
+  on. That cleanup is now bounded by the stored copy's seq in the delete itself.
+- **A record rewritten while it was being embedded could keep its old vector (`Q-249`).** The rewrite re-queued
+  the record's embed job, and the worker's late finish then matched the job by its id alone: a success deleted the
+  new job, so the new text was never embedded, and a failure wrote the old attempt's backoff over it. A finish now
+  names the claim it holds and matches nothing once that claim is gone.
+- **A restore left a file with chunks the backup does not hold (`Q-251`).** The import replaces one row per id, so
+  a file stored with more chunks than the backup has kept the extras — text the restored file no longer has, still
+  matched by recall. A file whose row the restore carried and wrote is now left with exactly the backup's derived
+  rows (chunks and face records). A file the backup does not carry, or carries without any derived rows, is left
+  alone, and the import's log line counts what was removed.
+- **A restore that stopped part-way could report records as restored while the counter was behind them
+  (`Q-252`).** When the writer stopped on a later chunk after an earlier chunk's counter move had failed, the
+  family reported the earlier chunk as restored, though the next local write could take a seq below it. The family
+  is now answered as errors, as a clean write with the counter behind already was, and the log says re-running the
+  import repairs it.
+
+### Changed
+
+- **`POST /api/sync/tombstones` checks each tombstone on its own, answers `refused`, and takes at most 5000 per
+  request.** A malformed tombstone, or one whose seq the counter cannot carry, is refused alone and the rest of the
+  page applies; the answer is `{ applied, refused }`, where `applied` keeps its meaning (the tombstones admitted by
+  shape and seq) and `refused` is new and additive. A malformed page used to be refused whole with a `400`, which
+  held the sender's watermark and stopped every deletion from it. A tombstone of a type the receiver does not know
+  still answers `400`, so the sender re-sends it after the receiver upgrades. More than 5000 tombstones in one
+  request is a `400`; this instance sends 500. A tombstone page also costs the same handful of database commands
+  whatever its size, on both doors, instead of several per tombstone.
+
 ## [5.6.2] — 2026-10-02
 
 **A patch release: every fix on `main` for a defect present in 5.6.1, and nothing else.** The ones to take first
