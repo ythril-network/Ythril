@@ -68,7 +68,7 @@
  * before it answers; the pull and the import rely on the writer's bump and read `counterBehind` — the pull then holds
  * the family's position, the import counts the family as errors (`Q-218` R3).
  */
-import { col, asBulk } from '../db/mongo.js';
+import { col, asBulk, asFilter } from '../db/mongo.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { readStoredById, READ_CHUNK } from '../db/read-by-id.js';
 import { bulkWriteFailures, DUPLICATE_KEY, isDocumentRefusal, isDocumentRefusalCode, writeErrorCode } from '../db/write-errors.js';
@@ -91,9 +91,9 @@ export interface ArrivalOptions {
   /**
    * An admin RESTORE (`POST /api/admin/spaces/:id/import`): what is stored is replaced whatever its seq, the
    * export's record-tier local fields are kept, a file row is REPLACED rather than merged and its derived records
-   * (chunks, face records) are restored as they were (cut `C6`), nothing is carried from the copy it replaces, and
-   * every restored record the space embeds is queued. Never set
-   * for a peer.
+   * (chunks, face records) are restored as they were (cut `C6`), a restored file keeps only the derived rows the
+   * backup carries for it (`Q-251`), nothing is carried from the copy it replaces, and every restored record the
+   * space embeds is queued. Never set for a peer.
    */
   restore?: boolean;
   /** Who sent it, for the log lines only. */
@@ -164,6 +164,11 @@ export interface ArrivalOutcome {
   complete: string[];
   /** `fillOnly`: no file row for it, so nothing was written — never created, because a stray record is old. */
   unstored: string[];
+  /**
+   * A RESTORE of file rows: the stored derived rows (chunks, face records) removed because the backup carries their
+   * file, and its derived rows, without them (`Q-251`, `replaceDerivedRows`). 0 for every other write.
+   */
+  derivedReplaced: number;
   /** The highest plausible seq received — what the counter has been bumped to at least, unless `counterBehind`. */
   maxReceived: number;
   /**
@@ -315,6 +320,48 @@ function replacementFor(doc: Doc, carried: readonly string[]): unknown[] {
   return [{ $replaceWith: { $mergeObjects: [fromStored, { $literal: doc }] } }];
 }
 
+/** The derived rows (chunks, face records) a page carries, by the file each names in `parentFileId`. */
+function derivedIdsByParent(docs: readonly Doc[]): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  for (const d of docs) {
+    if (!isDerived(d)) continue;
+    const parent = d['parentFileId'] as string;
+    if (!out.has(parent)) out.set(parent, []);
+    out.get(parent)!.push(d._id);
+  }
+  return out;
+}
+
+/**
+ * A RESTORE leaves every file row it LANDED with exactly the derived rows the backup carries for it (`Q-251`). The
+ * restore replaces one row per id, so a file stored with more chunks than the backup holds kept the extras: text the
+ * restored file no longer has, still matched by recall and still naming it.
+ *
+ * - **Only a file whose own row landed** in this chunk: one the backup does not carry, or whose write failed, is not
+ *   the restore's to change.
+ * - **Only a file the backup carries derived rows for**: a parents-only payload (a hand-made backup can be one) says
+ *   nothing about them, so it never wipes them.
+ * - **The database half only**: the rows, never a sidecar on disk, and no tombstone — derived rows never replicate.
+ *
+ * One delete per chunk. A failure is logged and never thrown: the records are restored either way. Returns how many
+ * rows it removed.
+ */
+async function replaceDerivedRows(
+  collName: string, backupDerived: ReadonlyMap<string, readonly string[]>, landed: readonly Doc[], where: string,
+): Promise<number> {
+  const parents = landed.filter(d => !isDerived(d) && backupDerived.has(d._id)).map(d => d._id);
+  if (parents.length === 0) return 0;
+  const keep = parents.flatMap(p => backupDerived.get(p)!);
+  try {
+    const r = await col<Doc>(collName).deleteMany(asFilter<Doc>({ parentFileId: { $in: parents }, _id: { $nin: keep } }));
+    return r.deletedCount;
+  } catch (err) {
+    log.warn(`${logSafe(where)}: the derived file rows the backup does not hold could not be removed for `
+      + `${parents.length} restored file(s): ${message(err)}. Re-running the import repairs it.`);
+    return 0;
+  }
+}
+
 const storeRefusal = (err: unknown): string =>
   `the store refused it (${writeErrorCode(err) !== undefined ? `error code ${writeErrorCode(err)}` : 'no error code'})`;
 
@@ -338,7 +385,7 @@ export async function writeArrivals(
   const where = `${restore ? 'import' : 'sync'} ${family}${opts.from ? ` from ${opts.from}` : ''}`;
   const out: ArrivalOutcome = {
     inserted: [], updated: [], newerLocal: [], duplicates: [], refused: [], storeRefused: [], derived: [],
-    collapsed: [], complete: [], unstored: [], maxReceived: 0, counterBehind: false,
+    collapsed: [], complete: [], unstored: [], derivedReplaced: 0, maxReceived: 0, counterBehind: false,
   };
   // A peer's file is queued by `ingestFileMeta` alone, when its blob is here; a RESTORED file row is replaced here,
   // not merged, so the writer queues it as 5.6.1's restore did.
@@ -404,6 +451,8 @@ export async function writeArrivals(
   };
   /** What each document's replace carries from its stored copy — decided once per document. */
   const carry = (d: Doc): readonly string[] => carriedFields(spaceId, recordType, d, restore);
+  /** A restore of file rows: the derived ids the backup carries, per parent file (`Q-251`). */
+  const backupDerived = restore && family === 'files' ? derivedIdsByParent(arriving) : undefined;
   for (const chunk of inChunks(toWrite, READ_CHUNK)) {
     const landed: Doc[] = [];
     const dupes: Doc[] = [];
@@ -512,6 +561,8 @@ export async function writeArrivals(
             + `'${spaceId}': ${message(err)}`);
         }
       }
+      // Over the file rows THIS chunk landed, so a write that failed deletes nothing; it never throws.
+      if (backupDerived) out.derivedReplaced += await replaceDerivedRows(collName, backupDerived, landed, where);
     }
   }
   // What was received and not written (newer locally, collapsed) still moves the counter: it is the peer's clock.

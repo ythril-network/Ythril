@@ -164,7 +164,7 @@ export async function applyPeerTombstones(
   }
   if (out.unknownTypes.length > 0) {
     log.warn(`${logSafe(where)}: a page carried tombstone type(s) this instance does not know `
-      + `(${[...new Set(out.unknownTypes)].slice(0, 5).map(logSafe).join(', ')}) for space '${localSpaceId}' — nothing `
+      + `(${logSafe([...new Set(out.unknownTypes)].slice(0, 5).map(logSafe).join(', '))}) for space '${logSafe(localSpaceId)}' — nothing `
       + 'of it was applied, so the sender holds it and re-sends once this instance knows the type.');
     return out;
   }
@@ -238,7 +238,7 @@ export async function applyPeerTombstones(
       await bumpSeq(localSpaceId, out.maxSeq);
     } catch (bumpErr) {
       if (!failed) throw new TombstoneCounterError(localSpaceId, out.maxSeq, bumpErr);
-      log.error(`${logSafe(where)}: the seq counter of space '${localSpaceId}' could not be advanced to ${out.maxSeq} `
+      log.error(`${logSafe(where)}: the seq counter of space '${logSafe(localSpaceId)}' could not be advanced to ${logSafe(out.maxSeq)} `
         + `either (${logSafe(messageOf(bumpErr))}); the apply's own failure is the one reported.`);
     }
   }

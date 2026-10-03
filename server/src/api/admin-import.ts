@@ -40,7 +40,7 @@
  *    `errors`.
  *  - **`C6`, derived file records**: a file chunk and a face record are restored by replace, as 5.6.1 did, so a
  *    face label survives a restore; a file row is replaced whole (its sizes and hashes kept), not merged. A file the
- *    backup carries WITH derived rows is then left with exactly those (`Q-251`, `replaceDerivedRows`).
+ *    backup carries WITH derived rows is then left with exactly those (`Q-251`, the writer's `replaceDerivedRows`).
  *  - **`C7`, no seq refusal**: an odd seq (a string, a negative, a fraction, one in the ceiling reserve) is stored
  *    as 5.6.1 stored it. It never moves the counter.
  *  - **`C4`, no receiver stamping**: an imported record with no stamp stays unstamped.
@@ -66,11 +66,6 @@ import { violationsAgainstLocalSchema } from './sync/_shared.js';
 import type { KnowledgeType } from '../config/types.js';
 import { writeArrivals, ArrivalWriteError, type ArrivalOutcome } from '../sync/arrivals.js';
 import { RECORD_TYPE_OF } from '../sync/replicated-families.js';
-import { col, asFilter } from '../db/mongo.js';
-import { spaceCollection } from '../db/space-collection.js';
-import { READ_CHUNK } from '../db/read-by-id.js';
-import { inChunks } from '../util/chunks.js';
-import { isDerived } from '../brain/embed-record.js';
 
 /** What an import may carry: every knowledge collection, so a new one is importable without an edit. */
 const IMPORT_TYPES = BRAIN_COLLECTIONS;
@@ -121,52 +116,6 @@ function countAs561(out: ArrivalOutcome, copies: ReadonlyMap<string, number>, re
   for (const id of unstored) result.errors += n(id);
   // A shape refusal is one document without a usable id — counted per document, as 5.6.1 did.
   result.errors += out.refused.length;
-}
-
-/**
- * Leave every file the restore LANDED with exactly the derived rows (chunks, face records — `parentFileId` naming it)
- * the backup carries for it (`Q-251`). A restore replaces one row per id, so a file stored with more chunks than the
- * backup holds kept the extras: text the restored file no longer has, still matched by recall and still naming it.
- *
- * - **Only a file whose own row landed**: a file the backup does not carry, or whose write failed, is not the
- *   restore's to change.
- * - **Only a file whose payload carries derived rows**: a parents-only payload (a hand-made backup can be one) says
- *   nothing about them, so it never wipes them.
- * - **The database half only**: the rows, never a sidecar on disk, and no tombstone — derived rows never replicate.
- *
- * Batched by `READ_CHUNK` parents per delete. A failure is logged and changes no count: the records are restored.
- * Returns how many rows it removed, for the import's log line.
- */
-async function replaceDerivedRows(spaceId: string, docs: readonly unknown[], landed: readonly string[]): Promise<number> {
-  const landedIds = new Set(landed);
-  const backupDerived = new Map<string, string[]>();
-  const parents: string[] = [];
-  for (const raw of docs) {
-    const id = importableId(raw);
-    if (id === null) continue;
-    const doc = raw as Record<string, unknown>;
-    if (isDerived(doc)) {
-      const parent = doc['parentFileId'] as string;
-      if (!backupDerived.has(parent)) backupDerived.set(parent, []);
-      backupDerived.get(parent)!.push(id);
-    } else if (landedIds.has(id)) {
-      parents.push(id);
-    }
-  }
-  const targets = [...new Set(parents)].filter(p => backupDerived.has(p));
-  let removed = 0;
-  try {
-    for (const chunk of inChunks(targets, READ_CHUNK)) {
-      const keep = chunk.flatMap(p => backupDerived.get(p)!);
-      const r = await col(spaceCollection(spaceId, 'files'))
-        .deleteMany(asFilter({ parentFileId: { $in: chunk }, _id: { $nin: keep } }));
-      removed += r.deletedCount;
-    }
-  } catch (err) {
-    log.warn(`Import into space '${spaceId}': the derived file rows the backup does not hold could not all be removed `
-      + `(${logSafe(err instanceof Error ? err.message : String(err))}); ${removed} were. Re-running the import repairs it.`);
-  }
-  return removed;
 }
 
 /**
@@ -224,8 +173,8 @@ export async function importDocuments(spaceId: string, payload: Record<string, u
       failure = err;
       if (err instanceof ArrivalWriteError && err.partial) written = err.partial;
     }
-    // `Q-251`: after the write, over the file rows it landed — never over one it did not.
-    if (t === 'files' && written) derivedRemoved += await replaceDerivedRows(spaceId, docs, [...written.inserted, ...written.updated]);
+    // `Q-251`: the writer's restore of file rows removed the derived rows the backup does not hold, for what landed.
+    if (written) derivedRemoved += written.derivedReplaced;
     if (failure !== undefined) {
       const err = failure;
       log.warn(`Import into space '${spaceId}': ${t} could not be written: ${logSafe(String(err))}`);
@@ -263,7 +212,7 @@ export async function importDocuments(spaceId: string, payload: Record<string, u
       const v = r.schemaViolations?.length ?? 0;
       return `${t}: +${logSafe(r.inserted)} ~${logSafe(r.updated)} !${logSafe(r.errors)}${v > 0 ? ` ?${logSafe(v)}` : ''}`;
     }).join(', ')
-    + (derivedRemoved > 0 ? `; removed ${derivedRemoved} derived file row(s) the backup does not hold` : ''),
+    + (derivedRemoved > 0 ? `; removed ${logSafe(derivedRemoved)} derived file row(s) the backup does not hold` : ''),
   );
 
   return { spaceId, results };

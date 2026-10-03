@@ -63,7 +63,7 @@ export async function drainStrayFileMeta({ pageSize = 500, maxPages = 4 }: { pag
       const now = Date.now();
       if (now - (lastReported.get(space.id) ?? 0) >= REPORT_EVERY_MS) {
         lastReported.set(space.id, now);
-        log.warn(`Stray file-metadata drain (${logSafe(space.id)}, ${step.name}): `
+        log.warn(`Stray file-metadata drain (${logSafe(space.id)}, ${logSafe(step.name)}): `
           + `${logSafe(err instanceof Error ? err.message : String(err))}; the collection is kept for the next cycle (Q-219).`);
       }
     }
@@ -134,9 +134,9 @@ async function drainSpace(spaceId: string, pageSize: number, maxPages: number, s
     logInternalAudit({ method: 'SWEEP', path: 'internal:stray-filemeta-drain', spaceId, operation: STRAY_FILEMETA_DRAIN_OPERATION, startedAt });
   }
   if (n.merged > 0 || n.deleted > 0 || empty) {
-    log.info(`Space '${spaceId}': merged ${n.merged} file metadata record(s) a 4.0-5.6.1 pull left in '${collName}' `
-      + `(${n.complete} already complete here, ${n.newer} newer here, ${n.deleted} for files deleted since, `
-      + `${n.waiting} waiting for their file, ${n.refused} refused)${empty ? ', and dropped the collection' : ''} (Q-219).`);
+    log.info(`Space '${spaceId}': merged ${logSafe(n.merged)} file metadata record(s) a 4.0-5.6.1 pull left in '${collName}' `
+      + `(${logSafe(n.complete)} already complete here, ${logSafe(n.newer)} newer here, ${logSafe(n.deleted)} for files deleted since, `
+      + `${logSafe(n.waiting)} waiting for their file, ${logSafe(n.refused)} refused)${empty ? ', and dropped the collection' : ''} (Q-219).`);
   }
   return empty;
 }
