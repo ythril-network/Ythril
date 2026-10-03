@@ -12,8 +12,8 @@ import { Router } from 'express';
 import { requireAuth, denyReadOnly, requireAuthMfa } from '../auth/middleware.js';
 import { globalRateLimit } from '../rate-limit/middleware.js';
 import { col, asFilter, asUpdate } from '../db/mongo.js';
-import { spacesWhereTokenMay } from '../auth/reachable-spaces.js';
-import type { TokenRights, Rung } from '../config/rights-shape.js';
+import { spacesWhereTokenMay, holdsRung } from '../auth/reachable-spaces.js';
+import { findWhereTokenMay } from '../auth/find-where-token-may.js';
 import { getConfig } from '../config/loader.js';
 import { concreteSpaces } from '../spaces/proxy.js';
 import { log } from '../util/log.js';
@@ -24,18 +24,6 @@ import type { DupeCandidateDoc, ContradictionCandidateDoc } from '../config/type
 import { spaceCollection } from '../db/space-collection.js';
 import { pageMemberList } from '../brain/list-page.js';
 import { defaultBudgetChars } from '../brain/result-budget.js';
-
-/** Find a candidate across the caller's accessible spaces. */
-async function findCandidate(id: string, rights?: TokenRights): Promise<{ doc: DupeCandidateDoc; spaceId: string } | null> {
-  // Same rule as `accessibleSpaces`, and deliberately not a second copy of it: resolving a candidate id
-  // reads the record, so `read` is the level, and an empty allowlist means none rather than all.
-  const spaces = spacesWhereTokenMay(rights, 'dataQuality', 'read');
-  for (const spaceId of spaces) {
-    const doc = await col<DupeCandidateDoc>(spaceCollection(spaceId, 'dupeCandidates')).findOne(asFilter<DupeCandidateDoc>({ _id: id })) as DupeCandidateDoc | null;
-    if (doc) return { doc, spaceId };
-  }
-  return null;
-}
 
 /**
  * The canonical key both candidate collections use for a pair: the two ids, lower first.
@@ -103,23 +91,13 @@ async function contradictionSignalsFor(
   return out;
 }
 
-export const duplicatesRouter = Router();
-
-/**
- * The space IDs this token may act on, at the Data-quality level the caller needs.
- *
- * These routes take no space in the path — they walk every space the token can reach — so this list IS the
- * enforcement point. Reading it from the rights matrix is what stops the Data quality column being
- * decorative.
- *
- * It also removes a conflation that lived here: `tokenSpaces.length === 0` used to mean "unrestricted". An
- * ABSENT allowlist means every space; an EMPTY one means none, and they are opposite. Anything holding
- * `spaces: []` was handed the whole instance.
+/*
+ * These routes take no space in the path: they walk every space the token can reach, so the space list each one
+ * walks IS its enforcement point (`auth/reachable-spaces.ts`). Every walk names its area and rung at the call —
+ * `spacesWhereTokenMay` for a list, `findWhereTokenMay` for a record by id — and neither has a default, because a
+ * default rung is how the merge door came to walk at `read` (`Q-304`).
  */
-function accessibleSpaces(req: { authToken?: unknown }, needs: Rung = 'read'): string[] {
-  const t = req.authToken as { rights?: TokenRights; spaces?: string[] } | undefined;
-  return spacesWhereTokenMay(t?.rights, 'dataQuality', needs);
-}
+export const duplicatesRouter = Router();
 
 /**
  * Negation tokens, for the lexical asymmetry cue.
@@ -211,7 +189,7 @@ duplicatesRouter.get('/', globalRateLimit, requireAuth, async (req, res) => {
     const status = statusRaw === 'dismissed' || statusRaw === 'all' ? statusRaw : 'open';
     const spaceFilter = typeof req.query['space'] === 'string' ? req.query['space'] : undefined;
 
-    let spaces = accessibleSpaces(req);
+    let spaces = spacesWhereTokenMay(req.authToken?.rights, 'dataQuality', 'read');
     if (spaceFilter) spaces = spaces.filter(id => id === spaceFilter);
 
     // Served by the {status, score, detectedAt} index (de-prefixed in P10): `status` is the leading equality field
@@ -253,20 +231,15 @@ duplicatesRouter.get('/', globalRateLimit, requireAuth, async (req, res) => {
 duplicatesRouter.post('/:id/dismiss', globalRateLimit, requireAuth, denyReadOnly, async (req, res) => {
   try {
     const id = req.params['id'] as string;
-    const spaces = accessibleSpaces(req, 'write');
-    for (const spaceId of spaces) {
-      const coll = col<DupeCandidateDoc>(spaceCollection(spaceId, 'dupeCandidates'));
-      const doc = await coll.findOne(asFilter<DupeCandidateDoc>({ _id: id })) as DupeCandidateDoc | null;
-      if (!doc) continue;
-      const dismissedContentHash = await pairContentHash(spaceId, doc.type, doc.aId, doc.bId);
-      await coll.updateOne(
-        asFilter<DupeCandidateDoc>({ _id: id }),
-        asUpdate<DupeCandidateDoc>({ $set: { status: 'dismissed', dismissedContentHash, updatedAt: new Date().toISOString() } }),
-      );
-      res.json({ status: 'dismissed' });
-      return;
-    }
-    res.status(404).json({ error: 'Duplicate candidate not found' });
+    const found = await findWhereTokenMay<DupeCandidateDoc>(req.authToken?.rights, 'dataQuality', 'write', 'dupeCandidates', id);
+    if (!found) { res.status(404).json({ error: 'Duplicate candidate not found' }); return; }
+    const { doc, spaceId } = found;
+    const dismissedContentHash = await pairContentHash(spaceId, doc.type, doc.aId, doc.bId);
+    await col<DupeCandidateDoc>(spaceCollection(spaceId, 'dupeCandidates')).updateOne(
+      asFilter<DupeCandidateDoc>({ _id: id }),
+      asUpdate<DupeCandidateDoc>({ $set: { status: 'dismissed', dismissedContentHash, updatedAt: new Date().toISOString() } }),
+    );
+    res.json({ status: 'dismissed' });
   } catch (err) {
     log.error(`POST /api/duplicates/:id/dismiss: ${err}`);
     res.status(500).json({ error: 'Internal error' });
@@ -280,8 +253,7 @@ duplicatesRouter.post('/:id/dismiss', globalRateLimit, requireAuth, denyReadOnly
 duplicatesRouter.post('/:id/reopen', globalRateLimit, requireAuth, denyReadOnly, async (req, res) => {
   try {
     const id = req.params['id'] as string;
-    const spaces = accessibleSpaces(req, 'write');
-    for (const spaceId of spaces) {
+    for (const spaceId of spacesWhereTokenMay(req.authToken?.rights, 'dataQuality', 'write')) {
       const r = await col<DupeCandidateDoc>(spaceCollection(spaceId, 'dupeCandidates')).updateOne(
         asFilter<DupeCandidateDoc>({ _id: id, status: 'dismissed' }),
         asUpdate<DupeCandidateDoc>({ $set: { status: 'open', updatedAt: new Date().toISOString() } }),
@@ -298,10 +270,19 @@ duplicatesRouter.post('/:id/reopen', globalRateLimit, requireAuth, denyReadOnly,
 // POST /api/duplicates/:id/merge — merge an entity candidate pair (lossless).
 // Survivor = the older record (lower seq), or the space's dupeMergeSurvivor policy.
 // Returns 409 with the merge plan if the pair has a property-value conflict.
+//
+// Governed like every merge (Q-304). The candidate is looked up only where the token holds dataQuality WRITE, the
+// rung its rights row names. A merge also deletes a knowledge record, so it needs knowledge WRITE in the pair's
+// space, as the REST entity merge and MCP graph_merge do. A candidate the token may not merge answers 404, as
+// dismiss and reopen do, so the refusal does not tell the caller the candidate exists.
 duplicatesRouter.post('/:id/merge', globalRateLimit, requireAuth, denyReadOnly, async (req, res) => {
   try {
-    const found = await findCandidate(req.params['id'] as string, (req.authToken as { rights?: TokenRights } | undefined)?.rights);
-    if (!found) { res.status(404).json({ error: 'Duplicate candidate not found' }); return; }
+    const rights = req.authToken?.rights;
+    const found = await findWhereTokenMay<DupeCandidateDoc>(rights, 'dataQuality', 'write', 'dupeCandidates', req.params['id'] as string);
+    if (!found || !rights || !holdsRung(rights, found.spaceId, 'knowledge', 'write')) {
+      res.status(404).json({ error: 'Duplicate candidate not found' });
+      return;
+    }
     const { doc, spaceId } = found;
     if (doc.type !== 'entity') { res.status(400).json({ error: 'Merge is only supported for entity candidates' }); return; }
 
@@ -337,7 +318,7 @@ duplicatesRouter.post('/scan', globalRateLimit, requireAuthMfa, denyReadOnly, as
     // Intersect with the token's space allowlist — a space-restricted admin must
     // not be able to trigger destructive rules (automerge/notify) on spaces it
     // cannot access.
-    const allowed = new Set(accessibleSpaces(req, 'write'));
+    const allowed = new Set(spacesWhereTokenMay(req.authToken?.rights, 'dataQuality', 'write'));
     const targets = concreteSpaces()
       .filter(s => allowed.has(s.id) && (!spaceFilter || s.id === spaceFilter))
       .map(s => s.id);

@@ -284,7 +284,7 @@ Knowledge are different permissions:
 | **Knowledge** | Facts, entities, relationships and timeline entries — the records the space is made of, and searching them |
 | **Files** | Documents stored in the space: reading them, writing them, and the folder structure they live in |
 | **Schema** | The shape the space expects its records to take — which types exist and which properties they carry |
-| **Data quality** | Finding and resolving duplicates, contradictions and gaps, and the review decisions that follow |
+| **Data quality** | Finding and resolving duplicates, contradictions and gaps, and the review decisions that follow. **Merging** a duplicate pair also needs **Knowledge** write in that space, because a merge deletes one of the two records |
 | **Networks** | Sharing the space with other instances: **read** sees the networks it is in, **write** creates a network with it and leaves a membership this token made, **admin** changes a network's settings and leaves anyone's |
 
 **Networks is different from the other four in two ways.** A network carries several spaces, so a token needs the

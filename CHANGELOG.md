@@ -613,6 +613,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   admitted peer's own tombstone; tombstones a peer already planted in a space it was not admitted to stay where they
   are, because they cannot be told apart from legitimate ones; a 5.5 peer serves tombstones without the settled
   horizon, as before.
+- **`POST /api/duplicates/:id/merge` merges only where the token may merge (`Q-304`).** It looked its candidate up
+  in every space where the token held `dataQuality` **read**, and the guard in front of it asked only whether the
+  token could write anywhere. So a token that could only read a space's duplicate candidates, and could write in
+  any other space, merged a pair in the first one, deleting an entity there. The candidate is now looked up only
+  where the token holds `dataQuality` **write**, the rung the route's rights row always named, and the merge also
+  needs `knowledge` **write** in the pair's space, the rung the REST entity merge and MCP `graph_merge` require.
+  A candidate the token may not merge answers `404`, as dismiss and reopen do. The duplicates, contradictions and
+  conflicts routes now look a record up by id through one function whose rung has no default.
 
 ### Internal
 

@@ -99,23 +99,33 @@ describe('the duplicates routes', () => {
     assert.match(dupes, /spacesWhereTokenMay\(/, 'the routes do not use the shared filter');
   });
 
+  /*
+   * Re-anchored by Q-304: the per-router `accessibleSpaces(req, needs = 'read')` wrapper is gone — its DEFAULT rung
+   * is how the merge door came to walk at `read` — and every walk now names its area and rung at the call, through
+   * `spacesWhereTokenMay` (a list) or `findWhereTokenMay` (a record by id). The rung each route walks at is checked
+   * against its rights row structurally by `an-iterates-row-loops-at-its-rung.test.js`; these keep the spelling.
+   */
+  const WALK_AT = rung => new RegExp(`(?:spacesWhereTokenMay|findWhereTokenMay)\\s*(?:<[^>(]*>)?\\s*\\([^;]*?'dataQuality',\\s*'${rung}'`, 'g');
+
   it('ask for WRITE on the mutating routes, not read', () => {
-    // Dismiss, reopen and scan change records. Filtering them at `read` would let a read-only token act on
+    // Dismiss, reopen, merge and scan change records. Filtering them at `read` would let a read-only token act on
     // every space it can see — the column would exist and permit everything anyway.
-    const writes = [...dupes.matchAll(/accessibleSpaces\(req, 'write'\)/g)];
-    assert.ok(writes.length >= 3, `expected the mutating routes to require write, found ${writes.length}`);
+    const writes = [...dupes.matchAll(WALK_AT('write'))];
+    assert.ok(writes.length >= 4, `expected the mutating routes to require write, found ${writes.length}`);
   });
 
   it('the listing route asks only for READ', () => {
-    assert.match(dupes, /accessibleSpaces\(req\)(?!\s*,)/,
+    const list = dupes.slice(dupes.indexOf("duplicatesRouter.get('/'"));
+    assert.match(list.slice(0, list.indexOf('duplicatesRouter.', 1)), WALK_AT('read'),
       'the list route demands write, which would hide findings from a read-only token');
   });
 
   it('scan intersects before acting, not after', () => {
     // `/scan` triggers automerge and notification. Filtering after the destructive step would be a log entry
     // rather than a guard.
-    const i = dupes.indexOf("accessibleSpaces(req, 'write')", dupes.indexOf('/scan'));
+    const scan = dupes.indexOf("'/scan'");
+    const i = dupes.indexOf("spacesWhereTokenMay(req.authToken?.rights, 'dataQuality', 'write')", scan);
     const j = dupes.indexOf('targets', i);
-    assert.ok(i > 0 && j > i, 'the scan route no longer intersects its targets with what the token may touch');
+    assert.ok(scan > 0 && i > scan && j > i, 'the scan route no longer intersects its targets with what the token may touch');
   });
 });

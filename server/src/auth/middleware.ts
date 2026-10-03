@@ -908,7 +908,7 @@ export async function requireAdminOrSpaceAdminMfa(req: Request, res: Response, n
  * `POST /api/conflicts/seed` -- take NO space. They walk every space the token can reach, and their
  * `ROUTE_RIGHTS` rows are `scope: 'iterates'`: the enforcement point is the ITERATION SET, not the call.
  *
- * That half was already right. Each handler narrows its loop with `accessibleSpaces(req, 'write')`, so a
+ * That half was already right. Each handler narrows its loop with `spacesWhereTokenMay(…, 'dataQuality', 'write')`, so a
  * token only ever scans spaces where it holds the rung. What made the rows unreachable was the guard in
  * front: `requireAdminMfa` refused everyone but an instance administrator before the loop was reached, so
  * the `dataQuality` column in the rights panel could never open these doors either.
