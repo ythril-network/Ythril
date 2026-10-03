@@ -51,7 +51,9 @@ describe('the pair key joins the two candidate collections', () => {
   it('joins with ONE batched query per space, not one per pair', () => {
     // 500 pairs × a round trip each would make this endpoint quietly slow, and the contradiction rows are
     // keyed by exactly this key — so an $in over the page is the whole cost.
-    assert.match(src, /_id: \{ \$in: keys \}/, 'the join must be batched');
+    // Re-anchored by Q-211: the `$in` over the page is read through the one by-id reader, which chunks it.
+    assert.match(src, /readStoredById<ContradictionCandidateDoc>\(\s*spaceCollection\(spaceId, 'contradictionCandidates'\), keys,/,
+      'the join must be batched');
     /*
      * EVERY such loop, and each bounded by its own body — which is not always a block.
      *

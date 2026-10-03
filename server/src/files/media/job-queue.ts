@@ -71,13 +71,8 @@ function nextClaimableAfter(nextAttempt: number): string {
   return new Date(Date.now() + withJitter(delay)).toISOString();
 }
 
-/** The media job collection's name: the by-id reader takes a name, every other read the handle below. */
-function jobCollectionName(spaceId: string): string {
-  return spaceCollection(spaceId, 'mediaJobs');
-}
-
 function jobCollection(spaceId: string) {
-  return col<MediaJobDoc>(jobCollectionName(spaceId));
+  return col<MediaJobDoc>(spaceCollection(spaceId, 'mediaJobs'));
 }
 
 function fileCollection(spaceId: string) {
@@ -537,7 +532,8 @@ export async function fetchJobProgress(
   const out = new Map<string, JobProgressView>();
   if (fileIds.length === 0) return out;   // never issue an empty $in
   try {
-    const docs = await readStoredById<JobProgressView>(jobCollectionName(spaceId), fileIds, { progress: 1, progressAt: 1 });
+    const docs = await readStoredById<JobProgressView>(
+      spaceCollection(spaceId, 'mediaJobs'), fileIds, { progress: 1, progressAt: 1 });
     for (const [id, d] of docs) out.set(id, { progress: d.progress, progressAt: d.progressAt });
   } catch { /* best-effort — the listing matters, the bar does not */ }
   return out;
