@@ -590,6 +590,12 @@ GET /api/sync/merkle?spaceId=general&networkId=net-uuid
 Each brain-document leaf hashes the document's **content** (canonical JSON, keys sorted), not just its
 `_id`/`seq` — so a mismatch detects tampered content, not only missing or version-skewed documents.
 
+**A root may come from leaves kept since an earlier call.** The instance keeps each collection's leaves while
+nothing has written to it, and re-reads only a collection that was written; the file manifest is walked on
+every call (unchanged bytes are not re-hashed). A call with no write and no file change in between returns the
+stored root as it was, so `computedAt` is when THIS root was computed — not necessarily now. A kept root is the
+root a full recompute gives, by construction.
+
 What is excluded follows one rule, worth knowing if you are comparing roots yourself: **a field that is hashed
 must replicate, as it is.** The local-only fields are out: `embedding`, `embeddingModel` and `matchedText` are
 derived by the local model, so peers running different models legitimately differ, and the retention stamps

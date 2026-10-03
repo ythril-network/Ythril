@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **A space's Merkle root is not re-read when nothing changed (`Q-107`, part 4).** Every sync cycle of a
+  `merkle: true` network and every peer's `GET /api/sync/merkle` streamed all six record collections of the
+  space. Each collection's leaves are now kept while nothing writes to it, and only a written collection is read
+  again; a call with nothing changed returns the stored root. Measured on the standalone harness, 40 000 records:
+  390 ms for the first call, 2 ms for the next with nothing changed, 179 ms after one fact was written (every
+  call was about 330 ms before). The file manifest is still walked on every call. `computedAt` is when the root
+  was computed, which for a kept root is not now.
 - **An entity delete with `cascadeToken` removes a hub's edges a chunk at a time (`Q-107`, part 3b).** It removed
   them one edge at a time — a read, a delete, a job retire, a seq and a tombstone per edge, so a hub of 1 500 edges
   was some 7 500 round trips while the caller waited. Each chunk of 500 is now one transaction: the edges' delete
