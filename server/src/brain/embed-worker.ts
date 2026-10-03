@@ -51,7 +51,8 @@ export async function runOneEmbedJob(): Promise<boolean> {
     // `gone` is a success: the record was deleted between the enqueue and the claim, so nothing is
     // owed. Retrying would keep a job alive for a document that will never come back.
     await embedStoredRecord(job.spaceId, job.recordType, job.recordId);
-    await completeEmbedJob(job.spaceId, job.recordType, job.recordId);
+    // Under the claim this worker holds (`Q-249`): a rewrite meanwhile re-queued the job, and its job must survive.
+    await completeEmbedJob(job.spaceId, job.recordType, job.recordId, job.claimToken);
 
     // The space-level insert rule runs HERE, not at the write, because it evaluates the STORED record
     // against its neighbours and a stored record has no vector until this job gives it one. Firing it at
@@ -65,7 +66,7 @@ export async function runOneEmbedJob(): Promise<boolean> {
     const msg = err instanceof Error ? err.message : String(err);
     // `transientFailures` comes from the job the worker already holds — no second read, and no
     // `findOneAndUpdate` to recover a post-increment value.
-    await failEmbedJob(job.spaceId, job.recordType, job.recordId, job.attempts, msg, job.transientFailures ?? 0);
+    await failEmbedJob(job.spaceId, job.recordType, job.recordId, job.attempts, msg, job.transientFailures ?? 0, job.claimToken);
     // debug, not warn: an embedder that is down produces one of these per queued record, and a
     // thousand warnings say nothing the first one did not. The failed count is the signal.
     log.debug(`Embed job ${job._id} in ${job.spaceId} failed (attempt ${job.attempts}): ${msg}`);

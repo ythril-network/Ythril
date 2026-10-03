@@ -28,7 +28,7 @@ import { spaceCollection } from '../db/space-collection.js';
 import { deleteStored } from './stored-bytes.js';
 import { SPILL_DIR, spillIdFromPath } from '../brain/spill-path.js';
 import { isProxy } from '../spaces/proxy.js';
-import { logAuditEntry } from '../audit/audit.js';
+import { logInternalAudit } from '../audit/audit.js';
 import { LEGACY_SPILL_SWEEP_OPERATION } from '../audit/middleware.js';
 import { log } from '../util/log.js';
 
@@ -82,9 +82,8 @@ export async function sweepLegacySpills(): Promise<LegacySpillSweep> {
     invalidateUsageCache();
 
     log.info(`Legacy spill sweep: removed ${removed.length} read spill(s) older versions wrote into '${spaceId}'`);
-    logAuditEntry({
-      ip: 'internal', method: 'SWEEP', path: 'internal:legacy-spill-sweep', spaceId,
-      operation: LEGACY_SPILL_SWEEP_OPERATION, status: 200, durationMs: Date.now() - started,
+    logInternalAudit({
+      method: 'SWEEP', path: 'internal:legacy-spill-sweep', spaceId, operation: LEGACY_SPILL_SWEEP_OPERATION, startedAt: started,
     });
   }
   return out;

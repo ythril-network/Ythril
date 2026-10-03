@@ -33,11 +33,14 @@
  *     and re-embedded from the backup's text — `carriedFields`.
  *  5. **No receiver stamping** (cut `C4`): main stamps an arrival with no stamp of its own from its `createdAt` by
  *     this instance's windows (`D-9`). 5.6.x stores it unstamped, as 5.6.1 did; a stamp the stored copy holds is
- *     carried (rule 4).
+ *     carried (rule 4). The one exception is a file ROW a peer's metadata merge creates (`ingestFileMeta`): it takes
+ *     this instance's file window from now, exactly as the row arriving bytes create does (`recordArrivedFile`), or
+ *     whichever of the two lands first would decide whether the file ever expires (`Q-250`).
  *  6. **The write guard**: `{ _id, seq < s or absent }`, on the insert half as well — a copy newer than the one
  *     planned, written meanwhile, fails the op with a duplicate `_id` and is kept. A RESTORE replaces, unguarded.
  *     File metadata from a peer is merged per document by `ingestFileMeta` (a `$set` on `_id` alone), so only the
- *     accept read guards it.
+ *     accept read guards it. The stray-filemeta drain's recovery (`fillOnly`, `fillFileMetaFromStray`) skips the
+ *     accept read and carries every condition in the write's own filter instead, creating nothing.
  *  7. **Failures by operation**: a duplicate is read back — a newer stored copy is "newer here", anything else is a
  *     unique-index duplicate (an edge triplet, a link's endpoints). A per-operation refusal of the document itself
  *     is retried ONCE alone and then reported in `storeRefused` — NOT in `refused` (cut `C3`: main counts a store
@@ -65,7 +68,7 @@
  * before it answers; the pull and the import rely on the writer's bump and read `counterBehind` — the pull then holds
  * the family's position, the import counts the family as errors (`Q-218` R3).
  */
-import { col, asBulk } from '../db/mongo.js';
+import { col, asBulk, asFilter } from '../db/mongo.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { readStoredById, READ_CHUNK } from '../db/read-by-id.js';
 import { bulkWriteFailures, DUPLICATE_KEY, isDocumentRefusal, isDocumentRefusalCode, writeErrorCode } from '../db/write-errors.js';
@@ -80,6 +83,7 @@ import { planSeqUpserts, retagToLocalSpace, isNewerCopy } from './upsert-plan.js
 import { enqueueIngestedRecords } from '../brain/embed-queue.js';
 import { isDerived } from '../brain/embed-record.js';
 import { ingestFileMeta, fileMetaForWire } from '../api/sync/_shared.js';
+import { fillFileMetaFromStray } from './fill-file-meta.js';
 
 type Doc = Record<string, unknown> & { _id: string; seq?: number };
 
@@ -87,13 +91,21 @@ export interface ArrivalOptions {
   /**
    * An admin RESTORE (`POST /api/admin/spaces/:id/import`): what is stored is replaced whatever its seq, the
    * export's record-tier local fields are kept, a file row is REPLACED rather than merged and its derived records
-   * (chunks, face records) are restored as they were (cut `C6`), nothing is carried from the copy it replaces, and
-   * every restored record the space embeds is queued. Never set
-   * for a peer.
+   * (chunks, face records) are restored as they were (cut `C6`), a restored file keeps only the derived rows the
+   * backup carries for it (`Q-251`), nothing is carried from the copy it replaces, and every restored record the
+   * space embeds is queued. Never set for a peer.
    */
   restore?: boolean;
   /** Who sent it, for the log lines only. */
   from?: string;
+  /**
+   * The stray-filemeta drain (`Q-219`) only: each file record is RECOVERED onto its row by `fillFileMetaFromStray`
+   * rather than merged by `ingestFileMeta` — a row this instance made by default is filled, a peer-written row keeps
+   * the seq accept AT THE WRITE, and no row is created. So the accept read is skipped: it would refuse exactly the
+   * rows the drain exists for. It changes how a files record is written, never whether one is admitted (shape and
+   * chunk refusal still run), and never applies to a restore.
+   */
+  fillOnly?: boolean;
   /**
    * The stored copies the CALLER read immediately before, by id, at least their `seq` — handed over so the writer
    * does not read them a second time (`Q-218` R4: a push page read every stored copy twice). An id absent from the
@@ -148,6 +160,15 @@ export interface ArrivalOutcome {
   derived: string[];
   /** Ids that arrived more than once; one version (the highest seq) was kept. */
   collapsed: string[];
+  /** `fillOnly`: the row this instance made already had everything the record could give it. */
+  complete: string[];
+  /** `fillOnly`: no file row for it, so nothing was written — never created, because a stray record is old. */
+  unstored: string[];
+  /**
+   * A RESTORE of file rows: the stored derived rows (chunks, face records) removed because the backup carries their
+   * file, and its derived rows, without them (`Q-251`, `replaceDerivedRows`). 0 for every other write.
+   */
+  derivedReplaced: number;
   /** The highest plausible seq received — what the counter has been bumped to at least, unless `counterBehind`. */
   maxReceived: number;
   /**
@@ -299,6 +320,48 @@ function replacementFor(doc: Doc, carried: readonly string[]): unknown[] {
   return [{ $replaceWith: { $mergeObjects: [fromStored, { $literal: doc }] } }];
 }
 
+/** The derived rows (chunks, face records) a page carries, by the file each names in `parentFileId`. */
+function derivedIdsByParent(docs: readonly Doc[]): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  for (const d of docs) {
+    if (!isDerived(d)) continue;
+    const parent = d['parentFileId'] as string;
+    if (!out.has(parent)) out.set(parent, []);
+    out.get(parent)!.push(d._id);
+  }
+  return out;
+}
+
+/**
+ * A RESTORE leaves every file row it LANDED with exactly the derived rows the backup carries for it (`Q-251`). The
+ * restore replaces one row per id, so a file stored with more chunks than the backup holds kept the extras: text the
+ * restored file no longer has, still matched by recall and still naming it.
+ *
+ * - **Only a file whose own row landed** in this chunk: one the backup does not carry, or whose write failed, is not
+ *   the restore's to change.
+ * - **Only a file the backup carries derived rows for**: a parents-only payload (a hand-made backup can be one) says
+ *   nothing about them, so it never wipes them.
+ * - **The database half only**: the rows, never a sidecar on disk, and no tombstone — derived rows never replicate.
+ *
+ * One delete per chunk. A failure is logged and never thrown: the records are restored either way. Returns how many
+ * rows it removed.
+ */
+async function replaceDerivedRows(
+  collName: string, backupDerived: ReadonlyMap<string, readonly string[]>, landed: readonly Doc[], where: string,
+): Promise<number> {
+  const parents = landed.filter(d => !isDerived(d) && backupDerived.has(d._id)).map(d => d._id);
+  if (parents.length === 0) return 0;
+  const keep = parents.flatMap(p => backupDerived.get(p)!);
+  try {
+    const r = await col<Doc>(collName).deleteMany(asFilter<Doc>({ parentFileId: { $in: parents }, _id: { $nin: keep } }));
+    return r.deletedCount;
+  } catch (err) {
+    log.warn(`${logSafe(where)}: the derived file rows the backup does not hold could not be removed for `
+      + `${parents.length} restored file(s): ${message(err)}. Re-running the import repairs it.`);
+    return 0;
+  }
+}
+
 const storeRefusal = (err: unknown): string =>
   `the store refused it (${writeErrorCode(err) !== undefined ? `error code ${writeErrorCode(err)}` : 'no error code'})`;
 
@@ -322,7 +385,7 @@ export async function writeArrivals(
   const where = `${restore ? 'import' : 'sync'} ${family}${opts.from ? ` from ${opts.from}` : ''}`;
   const out: ArrivalOutcome = {
     inserted: [], updated: [], newerLocal: [], duplicates: [], refused: [], storeRefused: [], derived: [],
-    collapsed: [], maxReceived: 0, counterBehind: false,
+    collapsed: [], complete: [], unstored: [], derivedReplaced: 0, maxReceived: 0, counterBehind: false,
   };
   // A peer's file is queued by `ingestFileMeta` alone, when its blob is here; a RESTORED file row is replaced here,
   // not merged, so the writer queues it as 5.6.1's restore did.
@@ -351,7 +414,11 @@ export async function writeArrivals(
 
   // ── the accept: strictly newer than what is stored, unless a restore ─────────────────────────────────────────
   const collName = spaceCollection(spaceId, family);
-  const { toWrite, stored } = await planArrivalWrites(collName, arriving, { restore, handed: opts.stored });
+  // A recovery decides per row at the write (`fillFileMetaFromStray`) and creates nothing, so it reads nothing first.
+  const fillOnly = opts.fillOnly === true && family === 'files' && !restore;
+  const { toWrite, stored } = fillOnly
+    ? { toWrite: arriving, stored: new Map<string, { seq?: unknown }>() }
+    : await planArrivalWrites(collName, arriving, { restore, handed: opts.stored });
   const writing = new Set(toWrite);
   for (const d of arriving) if (!writing.has(d)) out.newerLocal.push(d._id);
 
@@ -384,6 +451,8 @@ export async function writeArrivals(
   };
   /** What each document's replace carries from its stored copy — decided once per document. */
   const carry = (d: Doc): readonly string[] => carriedFields(spaceId, recordType, d, restore);
+  /** A restore of file rows: the derived ids the backup carries, per parent file (`Q-251`). */
+  const backupDerived = restore && family === 'files' ? derivedIdsByParent(arriving) : undefined;
   for (const chunk of inChunks(toWrite, READ_CHUNK)) {
     const landed: Doc[] = [];
     const dupes: Doc[] = [];
@@ -408,7 +477,25 @@ export async function writeArrivals(
       }
     };
     try {
-      if (merges) {
+      if (fillOnly) {
+        // Each outcome is the fill's own, recorded here rather than through `landed`: a filled row keeps its own seq,
+        // author and updatedAt, and the fill queues its own embedding when the bytes are here.
+        for (const d of chunk) {
+          try {
+            const r = await fillFileMetaFromStray(spaceId, d);
+            if (r === 'merged') {
+              out.updated.push(d._id);
+              const s = plausibleSeq(d.seq);
+              if (s !== undefined) noteSeqStored(spaceId, s);
+            } else if (r === 'complete') out.complete.push(d._id);
+            else if (r === 'newer') out.newerLocal.push(d._id);
+            else if (r === 'no-file') out.unstored.push(d._id);
+            else out.derived.push(d._id);
+          } catch (err) {
+            classify(d, err);
+          }
+        }
+      } else if (merges) {
         // `ingestFileMeta` returns false for a legacy read spill, which is never stored (counted `derived`).
         await oneByOne(chunk, (d) => ingestFileMeta(spaceId, d as never));
       } else {
@@ -474,6 +561,8 @@ export async function writeArrivals(
             + `'${spaceId}': ${message(err)}`);
         }
       }
+      // Over the file rows THIS chunk landed, so a write that failed deletes nothing; it never throws.
+      if (backupDerived) out.derivedReplaced += await replaceDerivedRows(collName, backupDerived, landed, where);
     }
   }
   // What was received and not written (newer locally, collapsed) still moves the counter: it is the peer's clock.

@@ -79,16 +79,19 @@ describe('all three writers carry it', () => {
 });
 
 describe('absent means "written before the field existed", not "no request"', () => {
-  it('the write OMITS the key rather than storing null', () => {
+  it('the write never stores null, and never leaves an entry written today without an id', () => {
     /*
-     * Same rule `changes` follows. A stored `null` would claim the request had no id, which cannot happen — every
-     * request is given one — so an absent KEY is the only honest way to mark a row that predates the field.
+     * A stored `null` would claim the request had no id, and an absent KEY is how a reader marks a row that
+     * predates the field. So an entry written today always carries one: the caller's, else the live request's,
+     * else `internal-<uuid>` for work no request asked for (a sweep, the config watcher). The fallback lives in
+     * this writer so no caller can drop it (bundle-46: the config-reload writer did).
      */
     const at = AUDIT.indexOf('export function logAuditEntry');
     assert.ok(at > -1, 're-anchor this gate');
     const body = blockAfter(AUDIT, at, 'logAuditEntry');
-    assert.match(body, /\.\.\.\(input\.requestId \? \{ requestId: input\.requestId \} : \{\}\)/,
-      'the write stores the id unconditionally, so a row with no id claims the request had none');
+    assert.match(body, /requestId: input\.requestId \|\| currentRequestId\(\) \|\| `internal-\$\{uuidv4\(\)\}`/,
+      'an entry written today can lack an id, which a reader takes for one written before the field existed');
+    assert.doesNotMatch(body, /requestId: [^,\n]*\?\? null/, 'the write can store a null id');
   });
 
   it('the stored type makes it optional, and says why', () => {

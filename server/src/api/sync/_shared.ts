@@ -20,6 +20,7 @@ import { isStrictLinkage } from '../../spaces/proxy.js';
 import type { FileMetaDoc, AuthorRef } from '../../config/types.js';
 import { emitWebhookEvent } from '../../webhooks/dispatcher.js';
 import { spillIdFromPath } from '../../brain/spill-path.js';
+import { expiryForCreate } from '../../brain/ttl.js';
 import type { FactDoc, EdgeDoc, LinkViolationDoc } from '../../config/types.js';
 
 export const UUID_V4_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -226,9 +227,14 @@ export async function ingestFileMeta(spaceId: string, incoming: z.infer<typeof I
   const existing = await col<FileMetaDoc>(spaceCollection(spaceId, 'files'))
     .findOne(asFilter<FileMetaDoc>({ _id: incoming._id }), { projection: { sha256: 1, sizeBytes: 1 } });
 
+  // A row this merge CREATES takes this instance's file retention window, as `recordArrivedFile` stamps a row the bytes
+  // create (`Q-250`): metadata often arrives first, and the bytes then find the row and never stamp it. Only on insert
+  // — an arrival is not an authored write and must not re-slide a stored expiry — and only when a window applies, so
+  // a space without one never stores the key.
+  const expireAt = expiryForCreate(spaceId, undefined, { collection: 'file' });
   await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).updateOne(
     asFilter<FileMetaDoc>({ _id: incoming._id }),
-    asUpdate<FileMetaDoc>({ $set }),
+    asUpdate<FileMetaDoc>({ $set, ...(expireAt ? { $setOnInsert: { _expireAt: expireAt } } : {}) } as never),
     { upsert: true },
   );
   // As the arrival writer's other families: a seq this process did not allocate, which the pull horizon must cover.

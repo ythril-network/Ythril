@@ -39,7 +39,7 @@
  * `brain/edge-rekey.ts` moves an edge at runtime and writes a real tombstone for the old id, because one
  * instance is making a change the others have to be told about. Here every instance makes the same change to
  * the same row on its own boot. A tombstone would be an instruction to delete a row the peer has already
- * migrated itself — noise at best. At worst it is wrong: `applyRemoteTombstone` only deletes a document
+ * migrated itself — noise at best. At worst it is wrong: `applyPeerTombstones` only deletes a document
  * authored by the tombstone's issuer, so of two peers holding one peer-authored edge the tombstone is
  * dropped on one side and applied on the other, and they end up disagreeing about a row they had agreed on.
  *

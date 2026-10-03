@@ -202,7 +202,7 @@ describe('the delete has to be one a PEER will actually apply', () => {
     /*
      * The half that turns this change from a fix into a regression if it is missed.
      *
-     * `applyRemoteTombstone` refuses to delete a local document whose `author.instanceId` differs from the
+     * `applyPeerTombstones` refuses to delete a local document whose `author.instanceId` differs from the
      * tombstone's issuer — that guard exists so a remote tombstone cannot delete locally-authored content,
      * and it fires silently. Edges replicate carrying their ORIGINAL author, so a tombstone this instance
      * issues for an edge a peer authored is dropped by that peer, while the insert half propagates normally

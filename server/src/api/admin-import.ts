@@ -39,7 +39,8 @@
  *    id counts `updated` (5.6.1 replaced it), a document with no usable `_id` and one the store refused count
  *    `errors`.
  *  - **`C6`, derived file records**: a file chunk and a face record are restored by replace, as 5.6.1 did, so a
- *    face label survives a restore; a file row is replaced whole (its sizes and hashes kept), not merged.
+ *    face label survives a restore; a file row is replaced whole (its sizes and hashes kept), not merged. A file the
+ *    backup carries WITH derived rows is then left with exactly those (`Q-251`, the writer's `replaceDerivedRows`).
  *  - **`C7`, no seq refusal**: an odd seq (a string, a negative, a fraction, one in the ceiling reserve) is stored
  *    as 5.6.1 stored it. It never moves the counter.
  *  - **`C4`, no receiver stamping**: an imported record with no stamp stays unstamped.
@@ -127,6 +128,8 @@ export async function importDocuments(spaceId: string, payload: Record<string, u
   const results = Object.fromEntries(
     IMPORT_TYPES.map(t => [t, { inserted: 0, updated: 0, errors: 0 } as ImportTypeResult]),
   ) as Record<ImportType, ImportTypeResult>;
+  /** Derived file rows the restore removed because the backup carries the file without them (`Q-251`). */
+  let derivedRemoved = 0;
 
   for (const t of IMPORT_TYPES) {
     const docs: unknown[] = Array.isArray(payload[t]) ? payload[t] as unknown[] : [];
@@ -152,9 +155,13 @@ export async function importDocuments(spaceId: string, payload: Record<string, u
       }
     }
 
-    let out: ArrivalOutcome;
+    let out: ArrivalOutcome | undefined;
+    /** What the writer reports LANDED, whether or not it then failed — what the derived-row cleanup may follow. */
+    let written: ArrivalOutcome | undefined;
+    let failure: unknown;
     try {
-      out = await writeArrivals(spaceId, t, RECORD_TYPE_OF[t], docs, { restore: true });
+      written = await writeArrivals(spaceId, t, RECORD_TYPE_OF[t], docs, { restore: true });
+      out = written;
       /*
        * `Q-218` R3: the writer's counter bump failed, so this counter may be behind what was restored and the next
        * local write could sort below a restored record every peer holds. Not a clean success: the family is answered
@@ -163,22 +170,38 @@ export async function importDocuments(spaceId: string, payload: Record<string, u
        */
       if (out.counterBehind) throw new Error('the seq counter could not be moved past the restored records');
     } catch (err) {
+      failure = err;
+      if (err instanceof ArrivalWriteError && err.partial) written = err.partial;
+    }
+    // `Q-251`: the writer's restore of file rows removed the derived rows the backup does not hold, for what landed.
+    if (written) derivedRemoved += written.derivedReplaced;
+    if (failure !== undefined) {
+      const err = failure;
       log.warn(`Import into space '${spaceId}': ${t} could not be written: ${logSafe(String(err))}`);
-      if (!(err instanceof ArrivalWriteError) || !err.partial) {
-        // Nothing of the family is vouched for, so every document is an error — as 5.6.1 counted a failed write.
+      const partial = err instanceof ArrivalWriteError ? err.partial : undefined;
+      if (!partial || partial.counterBehind) {
+        /*
+         * Nothing of the family is vouched for, so every document is an error — as 5.6.1 counted a failed write. That
+         * includes a writer that stopped part-way with the counter still behind what its earlier chunks committed
+         * (`Q-252`): reporting those chunks as restored would hide that the next local write can sort below them.
+         */
+        if (partial?.counterBehind) {
+          log.warn(`Import into space '${spaceId}': ${t} stopped part-way with the seq counter behind the records it `
+            + 'had already restored, so every document is counted as an error; re-running the import repairs it '
+            + '(a restore replaces).');
+        }
         result.errors = docs.length;
         if (violations.length > 0) result.schemaViolations = violations;
         continue;
       }
       // The writer stopped part-way: the chunks before the fault are COMMITTED. Report what landed, and count only
       // what did not as errors — a restore that says "nothing was written" over records it did write is the worse lie.
-      const partial = err.partial;
       const settled = new Set([...partial.inserted, ...partial.updated, ...partial.derived, ...partial.newerLocal,
         ...partial.duplicates, ...partial.storeRefused.map(r => r._id)]);
       const unwritten = [...copies.keys()].filter(id => !settled.has(id));
       out = { ...partial, storeRefused: [...partial.storeRefused, ...unwritten.map(_id => ({ _id, reason: String(err) }))] };
     }
-    countAs561(out, copies, result);
+    countAs561(out!, copies, result);
     if (violations.length > 0) result.schemaViolations = violations;
   }
 
@@ -188,7 +211,8 @@ export async function importDocuments(spaceId: string, payload: Record<string, u
       const r = results[t];
       const v = r.schemaViolations?.length ?? 0;
       return `${t}: +${logSafe(r.inserted)} ~${logSafe(r.updated)} !${logSafe(r.errors)}${v > 0 ? ` ?${logSafe(v)}` : ''}`;
-    }).join(', '),
+    }).join(', ')
+    + (derivedRemoved > 0 ? `; removed ${logSafe(derivedRemoved)} derived file row(s) the backup does not hold` : ''),
   );
 
   return { spaceId, results };

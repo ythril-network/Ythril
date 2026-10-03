@@ -136,9 +136,13 @@ What this instance derives is left out of what it stores: `embedding`, `embeddin
 dropped, and the record is queued for embedding by this instance's own model. The retention stamps
 (`_expireAt`, `_contentExpireAt`) are restored as dates, so the retention sweep acts on them; a stamp that does not
 parse as a date is dropped. A file's `syncBase` is kept. The restored record holds exactly the stamps and `syncBase`
-the document carried: none is taken from the copy it replaces. After the import this instance's seq counter is past
-every plausible `seq` it restored, so the next local write sorts above them; a collection whose counter could not
-be moved is answered with every document counted in `errors` although it is stored — run the import again.
+the document carried: none is taken from the copy it replaces. A restored file whose derived records (chunks, face
+records) the payload also carries keeps exactly those: a stored derived record of that file the payload does not hold
+is removed, so recall no longer matches text the restored file does not have. A payload that carries a file without
+any derived records leaves the stored ones alone. After the import this instance's seq counter is past every
+plausible `seq` it restored, so the next local write sorts above them; a collection whose counter could not be moved
+is answered with every document counted in `errors`, although what was written is stored, even when only part of the
+collection was written — run the import again, which replaces and so repairs it.
 
 **Response** `200`:
 

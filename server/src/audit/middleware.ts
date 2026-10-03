@@ -496,6 +496,13 @@ export const SPACE_ALIAS_HEAL_OPERATION = 'network.space_alias.heal';
  */
 export const CREATOR_GRANT_OPERATION = 'token.creator_grant';
 
+/**
+ * A space's stray `<space>_filemeta` collection, which a 4.0-5.6.1 pull filled, dropped once the drain has recovered
+ * what it could (`Q-219`, `sync/stray-filemeta-drain.ts`): one entry per space. The drop cannot be undone, so it is
+ * audited though no request asked for it.
+ */
+export const STRAY_FILEMETA_DRAIN_OPERATION = 'file.stray_filemeta.drain';
+
 /** Log a failed auth attempt — called explicitly from auth middleware when needed. */
 export function logAuthFailure(req: Request): void {
   const fullPath = (req.originalUrl || req.url).split('?')[0];

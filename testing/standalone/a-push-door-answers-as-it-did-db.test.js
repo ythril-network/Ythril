@@ -214,11 +214,15 @@ describe('the push door answers as it did (characterization, green before Q-107 
   });
 
   describe('POST /tombstones', () => {
-    it('answers applied with the count it parsed; a malformed page is a 400', async () => {
+    it('answers applied with the count it admitted and refused with the rest; an unknown type is a 400', async () => {
+      // Bundle-46 (plan row 8): `refused` is additive, and a malformed element is refused on its own rather than
+      // refusing the page. An element of a type this receiver does not know (a newer peer's) still answers 400.
       const ok = await door.push('/tombstones', { tombstones: [build.tombstone(S, 'x', 'fact', 3)] }, { spaceId: S });
-      assert.deepEqual([ok.code, ok.body], [200, { applied: 1 }]);
-      const bad = await door.push('/tombstones', { tombstones: [{ _id: 'x' }] }, { spaceId: S });
-      assert.deepEqual([bad.code, bad.body], [400, { error: 'Invalid tombstone format' }]);
+      assert.deepEqual([ok.code, ok.body], [200, { applied: 1, refused: 0 }]);
+      const bad = await door.push('/tombstones', { tombstones: [{ _id: 'y' }] }, { spaceId: S });
+      assert.deepEqual([bad.code, bad.body], [200, { applied: 0, refused: 1 }]);
+      const newer = await door.push('/tombstones', { tombstones: [build.tombstone(S, 'z', 'a-newer-type', 4)] }, { spaceId: S });
+      assert.deepEqual([newer.code, newer.body], [400, { error: 'Invalid tombstone format' }]);
     });
   });
 
