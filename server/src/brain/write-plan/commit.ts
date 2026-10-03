@@ -17,8 +17,9 @@
  *
  * A record that is stored and reported as failed is invited to be resent, and a resend without an id
  * duplicates it. So a failure past the first write becomes an item outcome or a warning, and the caller is told
- * what actually happened. A failure BEFORE anything landed (the seq block itself) still throws: nothing was
- * written and there is nothing to report but the error.
+ * what actually happened. A failure BEFORE anything landed (the seq block itself, or a stage's write that the
+ * write bound ended) still throws: nothing is known written and there is nothing to report but the error — for a
+ * timeout, the store-timeout every door answers 503 for.
  *
  * ## What it is not
  *
@@ -35,6 +36,7 @@ import { readStoredById, READ_CHUNK } from '../../db/read-by-id.js';
 import { mapLimit } from '../../util/map-limit.js';
 import { log } from '../../util/log.js';
 import { bulkWriteFailures, phraseWriteFailure, DUPLICATE_KEY } from '../../db/write-errors.js';
+import { isWriteTimeout } from '../../db/write-timeout.js';
 import { enqueueWriteEmbedJobs, EMBED_PRIORITY } from '../embed-queue.js';
 import { linkIdFor } from '../link-id.js';
 import { writeTombstones } from '../tombstones.js';
@@ -94,6 +96,13 @@ async function writeStage(
         const res = await coll.bulkWrite(asBulk(ready.map((i, k) => opFor(plans[i]!, block + k))), { ordered: false });
         matched = res.matchedCount;
       } catch (err) {
+        /*
+         * A write the bound ENDED is the store's failure, not an item's: rethrown, so the door answers the
+         * store-timeout 503 every door answers (`brain/store-failure.ts`) rather than "did not complete" per item.
+         * Only while nothing of this request has landed — after that the module's promise below wins (a stored
+         * record reported failed invites a duplicating resend), so the stage is read back as any ambiguous one.
+         */
+        if (isWriteTimeout(err) && !somethingLanded) throw err;
         failures = bulkWriteFailures(err);
         if (!failures) ambiguous = true;
         log.warn(`write commit: the ${kind} write to '${spaceId}' reported a failure: `
@@ -101,7 +110,7 @@ async function writeStage(
       }
     }, `write.${kind}`);
   } catch (err) {
-    // The seq block itself failed: nothing of this stage was written.
+    // The seq block itself failed, or its write timed out: nothing of this stage is known to be written.
     if (!somethingLanded) throw err;
     for (const i of ready) outcomes[i] = { ok: false, reason: phraseWriteFailure(undefined) };
     log.warn(`write commit: the ${kind} stage for '${spaceId}' could not start after earlier stages landed: ${String(err)}`);
