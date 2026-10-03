@@ -383,9 +383,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the backup lacks from this instance's retention (D-9), and nothing of the replaced copy's.
 - **A file-metadata arrival is held to the write guard.** It was merged by `_id` alone, so a newer copy written
   between the accept read and the merge was overwritten by an older one, with a `200` on the way back.
-- **A document whose own write the database driver refuses as an invalid argument is refused alone.** It failed the
-  whole page on every send, for ever; it is now counted in `rejected` with a reason (a single route answers `400`).
-  An argument error caused by the write bound itself, or raised by every document of a page, still fails the page.
 - **Suppression that a network turns on removes the vectors already stored (`Q-230`).** A space whose type or
   space-level `suppressEmbeddings` arrived from a network — a meta pull, a meta round, a space addition, leaving a
   network or changing its precedence — reported its records suppressed and went on ranking them by meaning until
@@ -448,8 +445,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and a counter left behind fails the page after what landed is booked and queued: a push answers `500`, a pull
   holds its position, and an import reports what it restored with the new per-family `counterBehind: true` (run the
   import again). The push door's own counter move follows the same rule.
-- **A driver argument error no longer drops a peer's document from its sync page for good.** It was read as the
-  document's own refusal; it names the call, not the document, and now fails the page so it is sent again.
+- **A driver argument error drops a peer's document only when the error is that document's own.** Every
+  `MongoInvalidArgumentError` was read as the refusal of the document being written, so one that the write bound or
+  the call itself raised dropped a peer's document from its sync page for good. A document whose own write the
+  driver refuses as an invalid argument is still refused alone, counted in `rejected` with a reason (a single route
+  answers `400`); an argument error the write bound caused, or one every document of a page raised, fails the page,
+  so it is sent again.
 - **A merge of a large entity no longer prints `MaxListenersExceededWarning` (`Q-311`).** Every write inside a
   transaction hung its own listener on the session until it ended, so a merge relinking thousands of edges hung
   thousands of them. A session now carries one, and every write is still reported once after the commit.
