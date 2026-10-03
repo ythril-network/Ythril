@@ -31,6 +31,8 @@ describe('a transaction holds one write listener', { skip }, () => {
   const heard = [];
   const warnings = [];
   const onWarning = (w) => { warnings.push(w); };
+  /** The session's `'ended'` listeners before the first write — the driver keeps one of its own. */
+  let ownListeners = -1;
   let peakListeners = 0;
   let reportedBeforeEnd = -1;
 
@@ -43,6 +45,7 @@ describe('a transaction holds one write listener', { skip }, () => {
     try {
       await session.withTransaction(async () => {
         const coll = mongo.col(COLL);
+        if (ownListeners < 0) ownListeners = session.listenerCount('ended');
         for (let i = 0; i < WRITES; i++) {
           await coll.insertOne({ _id: `w${i}` }, { session });
           peakListeners = Math.max(peakListeners, session.listenerCount('ended'));
@@ -61,7 +64,9 @@ describe('a transaction holds one write listener', { skip }, () => {
   });
 
   it(`${WRITES} writes in one transaction leave one 'ended' listener on the session`, () => {
-    assert.equal(peakListeners, 1, `the session carried ${peakListeners} 'ended' listeners for ${WRITES} writes — one per write`);
+    assert.equal(peakListeners - ownListeners, 1,
+      `the writes added ${peakListeners - ownListeners} 'ended' listeners to the session (beside the driver's own `
+      + `${ownListeners}) for ${WRITES} writes — one per write`);
     const leak = warnings.filter(w => w.name === 'MaxListenersExceededWarning');
     assert.deepEqual(leak.map(w => w.message), [], 'the transaction tripped the listener-leak warning');
   });

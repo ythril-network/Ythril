@@ -101,6 +101,27 @@ export const EVERY_COLLECTION = '*';
 
 interface SessionLike { inTransaction(): boolean; once(event: 'ended', fn: () => void): unknown }
 
+/**
+ * The reports a session owes once it ENDS, keyed by the session — and the one `'ended'` listener that pays them.
+ *
+ * ONE listener per session, not one per write (`Q-311`). It used to be `session.once('ended', …)` per write, so a
+ * merge of a hub — thousands of writes in one transaction — hung thousands of listeners on one session: Node's
+ * `MaxListenersExceededWarning` past ten, and a closure per write held until the end. The reports themselves are
+ * unchanged: every write is still reported once, after the session ends, in the order it was made.
+ */
+const owedAtEnd = new WeakMap<SessionLike, Array<() => void>>();
+
+function reportWhenEnded(session: SessionLike, report: () => void): void {
+  const owed = owedAtEnd.get(session);
+  if (owed) { owed.push(report); return; }
+  const list = [report];
+  owedAtEnd.set(session, list);
+  session.once('ended', () => {
+    owedAtEnd.delete(session);
+    for (const r of list) r();
+  });
+}
+
 function transactionSessionOf(args: unknown[]): SessionLike | null {
   for (const a of args) {
     const s = (a as { session?: unknown } | null)?.session as Partial<SessionLike> | undefined;
@@ -139,7 +160,7 @@ function observeCollection<T extends object>(coll: Collection<T>, name: string, 
       return (...args: unknown[]) => {
         const report = (): void => {
           const session = transactionSessionOf(args);
-          if (session) session.once('ended', () => safely(listener, name, effect));
+          if (session) reportWhenEnded(session, () => safely(listener, name, effect));
           else safely(listener, name, effect);
         };
         const out = (value as (...a: unknown[]) => unknown).apply(target, args);

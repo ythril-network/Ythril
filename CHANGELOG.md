@@ -312,6 +312,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A merge of a large entity no longer prints `MaxListenersExceededWarning` (`Q-311`).** Every write inside a
+  transaction hung its own listener on the session until it ended, so a merge relinking thousands of edges hung
+  thousands of them. A session now carries one, and every write is still reported once after the commit.
 - **A file a publisher pushed could freeze its subscriber's copy of the file's description and tags (`Q-239`, as
   in 5.6.2).** The pushed bytes reached the subscriber's upload door, which stored them as the subscriber's own
   upload: its own next seq, itself as the author of a new file, and a description it derived itself. That copy then
