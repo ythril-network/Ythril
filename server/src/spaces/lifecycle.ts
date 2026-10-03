@@ -31,7 +31,7 @@ import { envInt } from '../config/env-num.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { mapLimit } from '../util/map-limit.js';
 import { grantCreatorAdmin } from '../auth/creator-grant.js';
-import { logAuditEntry } from '../audit/audit.js';
+import { logInternalAudit } from '../audit/audit.js';
 import { CREATOR_GRANT_OPERATION } from '../audit/middleware.js';
 
 export async function initSpace(
@@ -482,9 +482,9 @@ export async function createSpace(opts: {
   const grant = grantCreatorAdmin(cfg, creator.tokenId, opts.id);
   saveConfig(cfg);
   if (grant === 'granted') {
-    logAuditEntry({
-      ip: 'internal', method: 'CREATE', path: 'internal:creator-grant', spaceId: opts.id, tokenId: creator.tokenId,
-      operation: CREATOR_GRANT_OPERATION, status: 200, durationMs: 0,
+    logInternalAudit({
+      method: 'CREATE', path: 'internal:creator-grant', spaceId: opts.id, tokenId: creator.tokenId,
+      operation: CREATOR_GRANT_OPERATION,
     });
   } else if (grant === 'not-stored') {
     // An OIDC session: its rights come from the identity provider's mapping, so the grant has nowhere to live.

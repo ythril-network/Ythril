@@ -163,7 +163,7 @@ Audit entries are recorded for all write operations and (when `logReads` is enab
 | Chrono | `chrono.create`, `chrono.update`, `chrono.delete`, `chrono.list` |
 | Bulk | `bulk.write` — one entry for the whole call, not one per record |
 | Ingest | `brain.ingest` — one entry for the start of a run; `brain.ingest.status` (a read, recorded only with `logReads`) |
-| File | `file.create`, `file.update`, `file.delete`, `file.read`, `file.list`, `file.mkdir`, `file.meta.update`, `file.retry_embedding`, `file.retry_embedding_all`, `file.legacy_spill.sweep` (the instance removing, from one space, the read spills versions before 5.6.0 wrote into it — one entry per space per run that removed any, with no token) |
+| File | `file.create`, `file.update`, `file.delete`, `file.read`, `file.list`, `file.mkdir`, `file.meta.update`, `file.retry_embedding`, `file.retry_embedding_all`, `file.legacy_spill.sweep` (the instance removing, from one space, the read spills versions before 5.6.0 wrote into it — one entry per space per run that removed any, with no token), `file.stray_filemeta.drain` (the instance dropping a space's stray `<space>_filemeta` collection, which a 4.0–5.6.1 pull filled, once it has recovered what it could into the space's files — one entry per space, with no token; the drop cannot be undone) |
 | Space | `space.create`, `space.update`, `space.delete`, `space.wipe`, `space.reload_added` / `space.reload_removed` / `space.reload_kept` (a config reload, by the watcher or `POST /api/admin/reload-config`, that added a space, removed one the file listed in `removeSpaces`, or kept one the file no longer lists), `space.list`, `space.rename`, `space.reorder`, `space.reindex`, `space.indexes.rebuild`, `space.embeddings.reembed`, `space.activity.reset`, `space.schema.update`, `space.schema.delete`, `space.schema.validate` |
 | Token | `token.create`, `token.update`, `token.regenerate`, `token.delete`, `token.creator_grant` (the instance giving a token admin of the space it just created — one entry per grant, the token and the space named; a create by a token that already administered the space writes none) |
 | MFA | `mfa.enable`, `mfa.disable` |
@@ -228,6 +228,11 @@ ask for the audit row *and* grep the log with one value, instead of two searches
 **An absent `requestId` means the entry was written before the field existed — never that there was no request.**
 Every audit entry has a request behind it; that is what the audit log is. The admin UI says so explicitly rather
 than rendering a blank, and an integration should do the same.
+
+**An entry the server wrote for its own work** — a sweep, an alias heal, a creator grant, the stray file-metadata
+drop — has `ip: "internal"`. Its `requestId` is the request's when the work ran inside one (a creator grant does),
+and otherwise its own `internal-<uuid>`, so it is never absent. Before 5.6.3 such entries carried no `requestId`
+and read as older than the field.
 
 **Response** `200`:
 
@@ -305,9 +310,9 @@ retry; `curl -f` plus a line count is enough to notice.
 | `tokenLabel` | `string \| null` | Human-readable token label |
 | `authMethod` | `"pat" \| "oidc" \| null` | Authentication method used |
 | `oidcSubject` | `string \| null` | OIDC subject claim when auth method is OIDC |
-| `ip` | `string` | Client IP address |
-| `method` | `string` | HTTP method (GET, POST, PUT, PATCH, DELETE) |
-| `path` | `string` | Request path |
+| `ip` | `string` | Client IP address, or `internal` on an entry for work the server did on its own (see below) |
+| `method` | `string` | HTTP method (GET, POST, PUT, PATCH, DELETE); on an `internal` entry, the kind of work: `SWEEP`, `SYNC` or `CREATE` |
+| `path` | `string` | Request path; on an `internal` entry, `internal:<what>` (for example `internal:legacy-spill-sweep`) |
 | `spaceId` | `string \| null` | Target space (null for non-space operations) |
 | `operation` | `string` | Structured event name (see tracked operations) |
 | `status` | `number` | HTTP status code of the response |

@@ -12,7 +12,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { getDb } from '../db/mongo.js';
 import { ensureExpiryIndex } from '../db/expiry-index.js';
 import { getConfig } from '../config/loader.js';
-import { log } from '../util/log.js';
+import { log, currentRequestId } from '../util/log.js';
 import type { AuditLogEntry } from './entry.js';
 import type { AuditChange } from './audit-changes.js';
 import type { Collection, Filter, Sort } from 'mongodb';
@@ -143,6 +143,41 @@ export function logAuditEntry(input: AuditEntryInput): void {
 
   col().insertOne(entry as any).catch((err: unknown) => {
     log.warn(`Audit log write failed: ${err}`);
+  });
+}
+
+/**
+ * Audit something the SERVER did on its own — a sweep, a heal, a grant — rather than a request it answered.
+ *
+ * One shape for every such entry, because each hand-written copy dropped a different part of it: none carried a
+ * request id, so the admin log showed every internal entry as "written before request ids existed", and the
+ * `durationMs` of half of them was a literal `0`. Here:
+ *  - `ip` is `internal`, which no client address can be, so a reader filters them out (or in) by that alone;
+ *  - `requestId` is the live request's when the work runs inside one (a creator grant does), and otherwise its own
+ *    `internal-<uuid>` — never absent, because absent is documented to mean "older than the field";
+ *  - `durationMs` is measured from `startedAt` when the caller has one.
+ */
+export function logInternalAudit(input: {
+  /** What kind of work it was, in the `method` column: `SWEEP`, `SYNC`, `CREATE`. */
+  method: string;
+  /** `internal:<what>`, so it never collides with a route path. */
+  path: string;
+  operation: string;
+  spaceId?: string;
+  startedAt?: number;
+  /** The token the work was done for, when there is one (a creator grant names the token it widened). */
+  tokenId?: string | null;
+}): void {
+  logAuditEntry({
+    ip: 'internal',
+    method: input.method,
+    path: input.path,
+    spaceId: input.spaceId,
+    operation: input.operation,
+    status: 200,
+    durationMs: input.startedAt === undefined ? 0 : Date.now() - input.startedAt,
+    tokenId: input.tokenId ?? null,
+    requestId: currentRequestId() ?? `internal-${uuidv4()}`,
   });
 }
 

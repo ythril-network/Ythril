@@ -75,8 +75,8 @@ export async function sweepExpired(now: Date = new Date()): Promise<number> {
   // sending them until they upgrade. Contained like the pass above.
   await sweepLegacySpills().catch(err => log.warn(`Legacy spill sweep: ${err}`));
 
-  // File metadata a 4.0-5.6.1 pull left in `<space>_filemeta` (Q-219). Contained like the passes above; a failed
-  // drain keeps its collection and is retried next cycle.
+  // File metadata a 4.0-5.6.1 pull left in `<space>_filemeta` (Q-219), a bounded amount per cycle. Each space is
+  // contained inside it and logs its own failure by name; this catch is for what happens before any space.
   await drainStrayFileMeta().catch(err => log.warn(`Stray file-metadata drain: ${err}`));
 
   return total;

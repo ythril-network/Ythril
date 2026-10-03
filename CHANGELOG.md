@@ -319,10 +319,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   peer pushes are now recorded as an arrival, as a download already was (`Q-143`). Arriving bytes, pushed or
   pulled, also make a soft-deleted path live again, and a file new on this instance is given its file retention
   window: a pushed file had that before, a pulled one did not.
-- **File metadata a 4.0-5.6.1 pull left in `<space>_filemeta` is merged into the space's files on upgrade, as in
-  5.6.2 (`Q-219`).** The next housekeeping cycle (within five minutes of start) merges each space's stray collection
-  into the files this instance still holds a record for — never over a newer copy, never over this instance's own
-  size and hash, never bringing back a file deleted since — then drops the collection and logs one line per space.
+- **File metadata a 4.0-5.6.1 pull left in `<space>_filemeta` is now actually recovered (`Q-219`).** 5.6.2's drain
+  merged it by seq, but a receiver before 5.6.0 had stamped its OWN seq on the file rows of peers' files it pulled,
+  so most stray descriptions counted as older than the stored copy and were dropped with the collection. The drain
+  now FILLS a row this instance made itself with the keys it lacks — never over a description or tags it has (an
+  automatic caption gives way to the sender's wording), never changing its seq, author or update time — and gives a
+  row another instance wrote the usual newer-wins rule. It never creates a row: a record whose file is missing waits
+  up to 30 days for the file's bytes, or is discarded when a file tombstone says the file was deleted. It works a
+  bounded amount per cycle and resumes, a failing space no longer stops the others and is named in the log, and the
+  drop of an emptied collection writes an audit entry, `file.stray_filemeta.drain`. The server's own audit entries
+  (sweeps, alias heals, creator grants) now carry a request id of their own instead of reading as older than the field.
 - **A peer with more than a thousand deletions of one kind to pass on now passes on all of them (`Q-237`).** The
   tombstone pull asked once, was served at most 1000 per kind, and called itself complete, so every later deletion
   was never applied and never asked for again. The push paged, but lost the part of a run of equal seqs that

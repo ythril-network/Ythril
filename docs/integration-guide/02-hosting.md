@@ -788,6 +788,18 @@ log line and one audit entry, `file.legacy_spill.sweep`, naming the space. Only 
 touched: a `_tmp` folder of your own deeper in the tree, and any other file under the root `_tmp`, are left
 alone. Copy the root `_tmp/` out of a space's file store first if you want to keep one.
 
+**Upgrading to 5.6.3 or later recovers the file metadata a 4.0–5.6.1 pull left in `<space>_filemeta`, then drops that
+collection, and the drop cannot be undone.** Those versions stored other instances' file descriptions and tags in a
+collection nothing read. A pass inside the retention cycle (every few minutes, at most 10,000 records per space per
+pass) fills each file row this instance made itself with the keys it lacks, gives a row another instance wrote the
+usual newer-wins rule, and never creates a row. A record whose file has no row here waits up to 30 days for the
+file's bytes, and is discarded sooner when a file tombstone says the file was deleted. The log line counts what was
+discarded; it does not list the records. When a space's collection is empty it is dropped, with one log line and one
+audit entry, `file.stray_filemeta.drain`, naming the space. To keep a copy first, `mongodump --collection
+<space>_filemeta` before upgrading. 5.6.2 ran an earlier drain that counted most of these records as older than the
+stored copy and dropped them; on an instance that already ran it, the collection is gone and this pass has nothing
+to recover.
+
 **Upgrading to 5.6.0 or later rebuilds every vector index once, with no gap in search.** Each index gains `_id` as a
 filter field, which is what lets a filtered recall complete its answer. Where the database can change an index in
 place (Atlas) it does; where it cannot (`mongodb-atlas-local`), the new definition is built under a second name,

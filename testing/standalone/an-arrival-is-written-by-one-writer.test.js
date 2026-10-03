@@ -69,6 +69,11 @@ const EXEMPT = {
   'server/src/api/sync/_shared.ts:ingestFileMeta':
     'file metadata is merged with $set of the authored keys and never replaced (CLAUDE.md, "What a receiver does '
     + 'after the write"); its page batching is Q-107 part 2',
+  'server/src/sync/fill-file-meta.ts:fillFileMetaFromStray':
+    'the stray-filemeta drain\'s recovery (Q-219), reached through writeArrivals only with `fillOnly`, which no door '
+    + 'sets: it fills a row this instance made, or applies the seq accept at the write, and never creates a row',
+  'server/src/sync/fill-file-meta.ts:fillReceiverMadeRow':
+    'the fill half of fillFileMetaFromStray, above',
   'server/src/files/file-meta.ts:recordArrivedFile':
     'file sync: the BYTES of a file arrived, and the receiver records what it derived from them',
   'server/src/files/file-meta.ts:deleteFileMeta':

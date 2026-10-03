@@ -37,7 +37,7 @@ import type { TokenRights } from '../config/rights-shape.js';
 import { createSpace, type SpaceCreator } from '../spaces/lifecycle.js';
 import { localToRemote, remoteToLocal, recordSpaceAlias, reverseSpaceMap, isSpaceId, forgetSpaceAliases } from '../sync/space-map.js';
 import { PER_SPACE_WATERMARKS } from '../config/types-networks.js';
-import { logAuditEntry } from '../audit/audit.js';
+import { logInternalAudit } from '../audit/audit.js';
 import { SPACE_ALIAS_HEAL_OPERATION } from '../audit/middleware.js';
 import { log } from '../util/log.js';
 import { networkRole } from './network-role.js';
@@ -360,9 +360,8 @@ export async function healAnnouncedAliases(networkId: string, fromInstanceId: st
     saveConfig(cfg);
     for (const h of recorded) {
       log.info(`Network ${networkId}: healed the alias '${h.networkId}' -> '${h.localId}' from upstream ${fromInstanceId}`);
-      logAuditEntry({
-        ip: 'internal', method: 'SYNC', path: 'internal:space-alias-heal', spaceId: h.localId,
-        operation: SPACE_ALIAS_HEAL_OPERATION, status: 200, durationMs: 0,
+      logInternalAudit({
+        method: 'SYNC', path: 'internal:space-alias-heal', spaceId: h.localId, operation: SPACE_ALIAS_HEAL_OPERATION,
       });
     }
   } catch (err) {

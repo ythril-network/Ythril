@@ -138,12 +138,16 @@ describe('every audited operation is documented', () => {
      * the rule is asserted against every caller rather than trusted: outside the two dispatchers, an
      * `operation:` given as a string literal is an operation no registry knows about.
      */
+    // Both writers: `logInternalAudit` (Q-219) wraps `logAuditEntry` for the server's own work, and a scan of the one
+    // name alone would stop reading every module that moved onto the other.
     const DISPATCHERS = new Set(['server/src/audit/middleware.ts', 'server/src/mcp/call-tool.ts']);
+    const WRITER = /\b(?:logAuditEntry|logInternalAudit)\(/;
     const callers = trackedSources(['server/src'], { floor: 50 })
       .filter(f => !DISPATCHERS.has(f))
-      .filter(f => /\blogAuditEntry\(/.test(stripComments(readFileSync(f, 'utf8'))));
-    assert.ok(callers.length >= 1, 'no direct logAuditEntry caller found — the scan reads nothing');
-    const literal = callers.filter(f => /\blogAuditEntry\(\{[\s\S]*?\boperation:\s*['"`]/.test(
+      .filter(f => WRITER.test(stripComments(readFileSync(f, 'utf8'))));
+    assert.ok(callers.some(f => /\blogInternalAudit\(\{/.test(stripComments(readFileSync(f, 'utf8')))),
+      'no logInternalAudit caller found — the scan reads none of the server\'s own audit entries');
+    const literal = callers.filter(f => /\b(?:logAuditEntry|logInternalAudit)\(\{[\s\S]*?\boperation:\s*['"`]/.test(
       stripComments(readFileSync(f, 'utf8'))));
     assert.deepEqual(literal, [],
       'these log an audit operation spelled as a literal: export it from audit/middleware.ts beside '
