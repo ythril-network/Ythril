@@ -51,11 +51,16 @@ import { col } from '../db/mongo.js';
 import { getEmbeddingConfig } from '../config/loader.js';
 import { atlasScoreFromParts, norm } from './vector-score.js';
 import { log } from '../util/log.js';
+import { warnOnce } from '../util/warn-once.js';
 import { envInt } from '../config/env-num.js';
 import { recallFreshWritesFoundTotal, recallFreshScanCappedTotal } from '../metrics/registry.js';
 
-/** When each collection last warned that its fresh-write scan was capped — see the warning. */
-const capWarnedAt = new Map<string, number>();
+/**
+ * Once per minute per collection that its fresh-write scan was capped — see the warning (`util/warn-once.ts`). The
+ * minute is the report's VERSION, read off the injected clock, so a test that sets `now` sets the window too.
+ */
+const capWarnings = warnOnce<string>();
+const CAP_WARN_WINDOW_MS = 60_000;
 
 /**
  * How far back "fresh" reaches.
@@ -170,16 +175,14 @@ export async function matchFreshWrites(
       recallFreshScanCappedTotal.inc();
       // Once a minute per collection: a space that sustains the write rate hits this on EVERY recall, and a
       // warning per call buries the one line that says what to change.
-      const last = capWarnedAt.get(collName) ?? 0;
-      if (now - last >= 60_000) {
-        capWarnedAt.set(collName, now);
+      capWarnings(collName, () => {
         log.warn(
           `Fresh-write scan hit its ${FRESH_SCAN_CAP}-document cap on ${collName}: only the newest ` +
           `${FRESH_SCAN_CAP} records of the last ${Math.round(FRESH_WINDOW_MS / 1000)}s were compared, so a record ` +
           'written in that window and not yet indexed may be missing from a search or a duplicate check. ' +
           'Raise DUPE_FRESH_SCAN_CAP if this space sustains that write rate.',
         );
-      }
+      }, Math.floor(now / CAP_WARN_WINDOW_MS));
     }
 
     const out: FreshMatch[] = [];

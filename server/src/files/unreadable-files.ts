@@ -1,3 +1,5 @@
+import { warnOnce } from '../util/warn-once.js';
+
 /**
  * Stored files this process found present but undecodable — a foreign key, altered bytes, or an encrypted file on
  * an instance with no secret (F-43).
@@ -11,8 +13,14 @@
  *
  * In memory on purpose: a restart re-finds every such file on the first manifest or migration pass, and a stored
  * list would outlive the fix that made a file readable again.
+ *
+ * "Is this news" is `util/warn-once.ts`'s question, with the file's version (size and mtime) as the report's version.
+ * Bounded there, at `MAX_TRACKED`: past it the least recently reported file is forgotten, so the posture count is a
+ * floor rather than growing without limit on a store full of unreadable files — a forgotten one is re-found, and
+ * counted again, on the next manifest pass.
  */
-const seen = new Map<string, string>();
+const MAX_TRACKED = 100_000;
+const seen = warnOnce<string>({ max: MAX_TRACKED });
 const keyOf = (spaceId: string, relPath: string): string => `${spaceId}\0${relPath}`;
 
 /**
@@ -20,14 +28,12 @@ const keyOf = (spaceId: string, relPath: string): string => `${spaceId}\0${relPa
  * changed — which is when a caller should log it.
  */
 export function noteUnreadable(spaceId: string, relPath: string, version: string): boolean {
-  const k = keyOf(spaceId, relPath);
-  if (seen.get(k) === version) return false;
-  seen.set(k, version);
-  return true;
+  // The report itself is the caller's (it logs the reason it has); here only "is this news" is answered.
+  return seen(keyOf(spaceId, relPath), () => {}, version);
 }
 
 /** Forget a file that has been read successfully, deleted, or replaced. */
-export function clearUnreadable(spaceId: string, relPath: string): void { seen.delete(keyOf(spaceId, relPath)); }
+export function clearUnreadable(spaceId: string, relPath: string): void { seen.forget(keyOf(spaceId, relPath)); }
 
 /** How many stored files are currently known to be unreadable. */
 export function unreadableCount(): number { return seen.size; }

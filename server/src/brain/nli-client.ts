@@ -20,6 +20,7 @@ import { boundedJson } from '../util/bounded-read.js';
 import { allowPrivateForSlot, isLocalModelEndpoint as isLocalEndpoint } from '../config/model-egress-policy.js';
 import { ssrfSafeFetch } from '../util/ssrf.js';
 import { log } from '../util/log.js';
+import { warnOnce } from '../util/warn-once.js';
 import { slotTimeoutMs } from '../config/model-slots.js';
 
 export type NliLabel = 'entailment' | 'neutral' | 'contradiction';
@@ -61,17 +62,15 @@ export function nliIsLocal(): boolean {
  * Once per label, not once per call: a wrong-shaped model produces one of these for every pair in a sweep,
  * and a thousand identical lines say nothing the first one did not while burying everything else.
  */
-const _warnedLabels = new Set<string>();
+const labelWarnings = warnOnce<string>();
 function logUnknownLabel(rawLabel: string): void {
   const key = rawLabel || '<missing>';
-  if (_warnedLabels.has(key)) return;
-  _warnedLabels.add(key);
-  log.warn(
+  labelWarnings(key, () => log.warn(
     `NLI judge returned the label '${key}', which is not one of entailment / neutral / contradiction ` +
     '(or LABEL_0..2). The contradiction scanner will treat every pair as unjudged, which looks identical ' +
     'to an unreachable endpoint. The most common cause is a 2-class head such as a zeroshot/NLI model ' +
     "emitting 'not_entailment' — this feature needs a 3-class MNLI head.",
-  );
+  ));
 }
 
 /** Exported for the tests: the pure label decision, which is where the wrong-shape trap lives. */
