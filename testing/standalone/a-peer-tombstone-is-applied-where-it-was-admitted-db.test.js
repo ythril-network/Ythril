@@ -292,5 +292,25 @@ describe('a peer tombstone is applied where it was admitted, element by element'
       assert.equal(res.code, 400, JSON.stringify(res.body));
       assert.equal(await stored(S, 'tombstones', 'u1'), null, 'a page answered 400 applied part of itself');
     });
+
+    /*
+     * The cap is read from the module, never written here: a page one over it is refused whole before anything is
+     * read or stored, and a page AT it is accepted, so the bound is neither missing nor off by one.
+     */
+    it('a page over the per-request cap answers 400 naming the cap and stores nothing; a page at the cap applies', async () => {
+      const { MAX_TOMBSTONES_PER_REQUEST: cap } = await import('../../server/dist/sync/tombstone-apply.js');
+      assert.ok(Number.isInteger(cap) && cap > 0, `the cap is not a positive integer: ${cap}`);
+      const page = (prefix, n) => Array.from({ length: n },
+        (_, i) => tomb(S, `${prefix}${i}`, 1000 + i, PEER_TOKEN.peerInstanceId));
+
+      const over = await door.push('/tombstones', { tombstones: page('cap-over-', cap + 1) }, { spaceId: S });
+      assert.equal(over.code, 400, JSON.stringify(over.body));
+      assert.match(String(over.body?.error), new RegExp(`At most ${cap}\\b`));
+      assert.equal(await stored(S, 'tombstones', 'cap-over-0'), null, 'a page over the cap stored part of itself');
+
+      const at = await door.push('/tombstones', { tombstones: page('cap-at-', cap) }, { spaceId: S });
+      assert.deepEqual([at.code, at.body], [200, { applied: cap, refused: 0 }]);
+      assert.notEqual(await stored(S, 'tombstones', `cap-at-${cap - 1}`), null, 'the last element of a page at the cap was not stored');
+    });
   });
 });
