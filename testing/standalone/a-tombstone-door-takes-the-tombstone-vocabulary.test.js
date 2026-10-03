@@ -29,6 +29,12 @@
  * would have caught it by exercise either — it was found by reading, and reading does not happen on a
  * schedule.
  *
+ * ## Where each half lives now
+ *
+ * Bundle-46 moved the ingest schema out of the route into the one apply both tombstone doors share
+ * (`sync/tombstone-apply.ts`), validated per element rather than as one array. The serving half stays in the
+ * route. The assertions are the same; each reads the file that holds its half.
+ *
  * Run: node --test testing/standalone/a-tombstone-door-takes-the-tombstone-vocabulary.test.js
  */
 import { describe, it } from 'node:test';
@@ -37,28 +43,33 @@ import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
 
 const SRC = 'server/src/api/sync/tombstones.ts';
+const APPLY = 'server/src/sync/tombstone-apply.ts';
 const code = stripComments(readFileSync(SRC, 'utf8'));
+const apply = stripComments(readFileSync(APPLY, 'utf8'));
 
 describe('the tombstone doors share one vocabulary', () => {
   it('the extractor finds the door at all — the check before the property', () => {
     // A rename that broke this anchor would make the assertions below run over an empty string and pass,
     // which is the failure mode a source-reading gate dies of.
-    assert.match(code, /z\.array\(z\.object\(\{/, 'the POST door\'s array schema was not found — re-anchor');
+    assert.match(apply, /const TombstoneShape = z\.object\(\{/, 'the ingest element schema was not found — re-anchor');
+    assert.match(code, /applyPeerTombstones\(/, 'the POST door no longer hands its page to the shared apply — re-anchor');
     assert.match(code, /listTombstones\(/, 'the GET door\'s read was not found — re-anchor');
   });
 
-  it('the POST door validates against the TOMBSTONE vocabulary, not the knowledge one', () => {
-    assert.match(code, /type: z\.enum\(TOMBSTONE_TYPES\)/,
+  it('the ingest validates against the TOMBSTONE vocabulary, not the knowledge one', () => {
+    assert.match(apply, /type: z\.enum\(TOMBSTONE_TYPES\)/,
       'the ingest door must accept every type the serving door can send — `KNOWLEDGE_TYPES` is four members '
       + 'and omits `link`, so a link tombstone in a push page 400s the whole page and wedges the watermark');
   });
 
-  it('and it does not mention the knowledge tuple at all any more', () => {
+  it('and neither half mentions the knowledge tuple at all any more', () => {
     // The narrower assertion above passes while a second, stale `z.enum(KNOWLEDGE_TYPES)` sits elsewhere in
-    // the file. This one is the sweep: the tombstone router has no business with the schema vocabulary.
-    assert.doesNotMatch(code, /KNOWLEDGE_TYPES/,
-      'the tombstone router reads the schema vocabulary again — it is a different question, and mixing them '
-      + 'is what put a four-member enum on a door that serves five');
+    // the file. This one is the sweep: the tombstone doors have no business with the schema vocabulary.
+    for (const [file, src] of [[SRC, code], [APPLY, apply]]) {
+      assert.doesNotMatch(src, /KNOWLEDGE_TYPES/,
+        `${file} reads the schema vocabulary again — it is a different question, and mixing them `
+        + 'is what put a four-member enum on a door that serves five');
+    }
   });
 
   it('the serving door still DERIVES what it sends, so the two cannot drift apart by one', () => {

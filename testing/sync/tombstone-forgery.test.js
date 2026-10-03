@@ -81,7 +81,8 @@ describe('Forged tombstone cross-instance deletion is refused', () => {
         deletedAt: new Date().toISOString(), instanceId: instanceIdA, seq: Date.now() + 1_000_000,
       }],
     });
-    // The endpoint accepts the tombstone document (records it) but must NOT delete.
+    // The page answers 200, but the forged element is refused: it neither deletes nor is stored (stored, it would
+    // refuse every later copy of the record from its real author).
     assert.equal(forged.status, 200, JSON.stringify(forged.body));
 
     // The victim memory must still exist.

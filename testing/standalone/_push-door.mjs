@@ -103,8 +103,11 @@ const REPLICATED_FAMILY_KEYS = (await import('../../server/dist/sync/replicated-
  * @param {object[]} o.spaces  config `spaces` entries
  * @param {object[]} [o.networks]
  * @param {boolean} [o.monitorCommands]  reconnect with command monitoring, for `commandsDuring`
+ * @param {object} [o.secrets]  a `secrets.json` to write beside the config BEFORE it is loaded — the loader reads
+ *   it once, at `loadConfig`, so a door whose engine calls out to a peer (`_pull-door.mjs`) must hand its peer
+ *   tokens in here rather than write them afterwards
  */
-export async function openPushDoor({ suite, spaces, networks = [], monitorCommands = false }) {
+export async function openPushDoor({ suite, spaces, networks = [], monitorCommands = false, secrets }) {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), `ythril-${suite}-`));
   process.env['CONFIG_PATH'] = path.join(tmpDir, 'config.json');
   // The space's files land under DATA_ROOT, whose default is /data: a directory Windows lets any process create at
@@ -114,6 +117,7 @@ export async function openPushDoor({ suite, spaces, networks = [], monitorComman
   fs.writeFileSync(process.env['CONFIG_PATH'], JSON.stringify({
     instanceId: `${suite}-receiver`, instanceLabel: 'Receiver', tokens: [], networks, spaces,
   }, null, 2), { mode: 0o600 });
+  if (secrets) fs.writeFileSync(path.join(tmpDir, 'secrets.json'), JSON.stringify(secrets), { mode: 0o600 });
 
   const mongo = await openTestMongo(suite);
   try {
@@ -250,5 +254,8 @@ async function assemblePushDoor({ suite, spaces, monitorCommands, mongo, tmpDir 
     await releaseHarness(tmpDir);
   }
 
-  return { mongo, push, pull, coll, counter, setCounter, settled, wipe, commandsDuring, close };
+  /** The route's own handler, past rate limit and auth — for a fake peer that serves a real route (`_pull-door.mjs`). */
+  const handler = (method, routePath) => handlerFor(method, routePath);
+
+  return { mongo, push, pull, coll, counter, setCounter, settled, wipe, commandsDuring, handler, close };
 }
