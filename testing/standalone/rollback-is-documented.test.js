@@ -34,7 +34,8 @@ import { readFileSync } from 'node:fs';
 
 const read = (p) => readFileSync(p, 'utf8');
 const LOADER = read('server/src/config/loader.ts');
-const DOC = read('docs/integration-guide/02-hosting.md');
+// The upgrade and rollback notes have their own page since 02-hosting reached the document size limit (bundle-46).
+const DOC = read('docs/integration-guide/02b-upgrading.md');
 
 /** Strip comments, so a migration named only in prose is not mistaken for a call. */
 const CODE = LOADER.replace(/^[ \t]*\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
@@ -57,10 +58,10 @@ function bootMigrations() {
 function rollbackSection() {
   // Matched as a WHOLE heading line. `indexOf('### Rolling Back')` also matched "### Rolling Back Someday",
   // so renaming the section away left the gate green.
-  const m = /^### Rolling Back$/m.exec(DOC);
+  const m = /^## Rolling Back\r?$/m.exec(DOC);
   assert.ok(m, 'the Rolling Back section is gone — a one-way upgrade with no documented way back');
   const at = m.index;
-  const end = DOC.indexOf('\n### ', at + 10);
+  const end = DOC.indexOf('\n## ', at + 10);
   return DOC.slice(at, end < 0 ? DOC.length : end);
 }
 
