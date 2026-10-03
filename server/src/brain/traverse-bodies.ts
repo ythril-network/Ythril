@@ -19,10 +19,9 @@
  *    edge. Those say how the answer hangs together; a projection that could drop `from` would return an edge
  *    list nobody can read.
  */
-import { col, asFilter } from '../db/mongo.js';
+import { readRowsById } from '../db/read-by-id.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { collectionForRefKind } from './entity-refs.js';
-import { NEVER_RETURNED_PROJECTION } from './read-projection.js';
 import { applyProjection, type NormalisedProjection } from './projection.js';
 import { RECALL_RECORD_DIAGNOSTICS, NEVER_RETURNED_FIELDS } from './recall-shape.js';
 import type { TraverseResult, TraverseNode } from './edges.js';
@@ -96,14 +95,12 @@ export async function withTraverseBodies(
   const edgeDocs = new Map<string, Doc>();
   await Promise.all(memberIds.flatMap((space) => [
     ...[...byKind].map(async ([kind, ids]) => {
-      const docs = await col<IdDoc>(spaceCollection(space, collectionForRefKind(kind)))
-        .find(asFilter<IdDoc>({ _id: { $in: ids } }), { projection: NEVER_RETURNED_PROJECTION }).toArray();
+      const docs = await readRowsById<IdDoc>(spaceCollection(space, collectionForRefKind(kind)), ids, 'all');
       for (const d of docs) if (!nodeDocs.has(d._id)) nodeDocs.set(d._id, d);
     }),
     (async () => {
       if (edgeIds.length === 0) return;
-      const docs = await col<IdDoc>(spaceCollection(space, 'edges'))
-        .find(asFilter<IdDoc>({ _id: { $in: edgeIds } }), { projection: NEVER_RETURNED_PROJECTION }).toArray();
+      const docs = await readRowsById<IdDoc>(spaceCollection(space, 'edges'), edgeIds, 'all');
       for (const d of docs) if (!edgeDocs.has(d._id)) edgeDocs.set(d._id, d);
     })(),
   ]));

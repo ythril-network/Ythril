@@ -14,7 +14,7 @@
  * later as a traversal that quietly returns nothing. One definition and one assert make "did we
  * validate this?" answerable by grep rather than by reading every handler.
  */
-import { col, asFilter } from '../db/mongo.js';
+import { readStoredById } from '../db/read-by-id.js';
 import { REF_KINDS } from '../config/types-knowledge.js';
 import type { RefKind } from '../config/types-knowledge.js';
 import type { SpacePart } from '../db/space-collection.js';
@@ -265,10 +265,7 @@ export async function assertRefsResolve(
 export async function missingRefs(spaceId: string, kind: RefKind, values: readonly string[]): Promise<string[]> {
   const unique = [...new Set(values)];
   if (unique.length === 0) return [];
-  const docs = await col<{ _id: string }>(`${spaceId}_${COLLECTION_FOR[kind]}`)
-    .find(asFilter<{ _id: string }>({ _id: { $in: unique } }), { projection: { _id: 1 } })
-    .toArray();
-  const found = new Set(docs.map(d => d._id));
+  const found = await readStoredById(`${spaceId}_${COLLECTION_FOR[kind]}`, unique, {});
   return unique.filter(id => !found.has(id));
 }
 

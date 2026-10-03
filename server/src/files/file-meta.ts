@@ -16,6 +16,7 @@ import { toDocId } from '../util/paths.js';
 import { escapeRegex } from '../util/redos.js';
 import { authorRef } from '../config/author.js';
 import { col, asFilter, asDoc, asUpdate } from '../db/mongo.js';
+import { readRowsById } from '../db/read-by-id.js';
 import { reconcileLinks, removeLinksFrom, assertDesiredLinks } from '../brain/links.js';
 import { linksStartingFrom } from '../brain/link-adjacency.js';
 import { withSeq } from '../util/seq.js';
@@ -43,7 +44,7 @@ export const DELETABLE_FILE_META_FIELDS: readonly string[] = [
   'description', 'excerpt', 'tags', 'properties',
 ];
 import { applyDeleteFields } from '../brain/delete-fields.js';
-import type { FileMetaDoc, EntityDoc, AuthorRef } from '../config/types.js';
+import type { FileMetaDoc, AuthorRef } from '../config/types.js';
 import { spaceCollection } from '../db/space-collection.js';
 
 
@@ -461,9 +462,8 @@ export async function updateFileMeta(
           }
         } else if (faceChunkCount === 1) {
           // Case B: face chunks exist — propagate label if exactly 1 person entity.
-          const entities = await col<EntityDoc>(spaceCollection(spaceId, 'entities'))
-            .find(asFilter<EntityDoc>({ _id: { $in: opts.linkEntities } }), { projection: { _id: 1, type: 1 } })
-            .toArray() as Array<{ _id: string; type: string }>;
+          const entities = await readRowsById<{ _id: string; type: string }>(
+            spaceCollection(spaceId, 'entities'), opts.linkEntities, { type: 1 });
           const personEntities = entities.filter(e =>
             faceCfg.personEntityTypes.some(t => t.toLowerCase() === e.type.toLowerCase()),
           );

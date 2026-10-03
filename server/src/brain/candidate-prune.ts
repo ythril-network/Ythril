@@ -32,6 +32,7 @@
  * state and were never user records; publishing `*.deleted` events for them would be wrong.
  */
 import { col, asFilter } from '../db/mongo.js';
+import { readStoredById } from '../db/read-by-id.js';
 import { RECORD_COLLECTION as COLLECTION_SUFFIX } from '../config/types.js';
 import { concreteSpaces } from '../spaces/proxy.js';
 import { log } from '../util/log.js';
@@ -115,10 +116,8 @@ export async function pruneSpaceCandidates(spaceId: string): Promise<PruneResult
         const recSuffix = COLLECTION_SUFFIX[type as DupeScanType];
         if (!recSuffix) { lookupFailed = true; break; }   // unknown type ⇒ cannot judge ⇒ keep everything
         try {
-          const found = await col<{ _id: string }>(`${spaceId}_${recSuffix}`)
-            .find(asFilter<{ _id: string }>({ _id: { $in: [...ids] } }), { projection: { _id: 1 } })
-            .toArray() as Array<{ _id: string }>;
-          existing.set(type, new Set(found.map(d => d._id)));
+          const found = await readStoredById(`${spaceId}_${recSuffix}`, [...ids], {});
+          existing.set(type, new Set(found.keys()));
         } catch {
           lookupFailed = true;
           break;

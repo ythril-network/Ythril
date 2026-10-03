@@ -249,7 +249,13 @@ describe('the scanner sees every spelling of a by-id read (fixtures)', () => {
 
 describe('a record is read by id through one reader', () => {
   it('the scan read the tree (floors, and the reader itself is found)', () => {
-    assert.ok(FOUND.length >= 30, `only ${FOUND.length} \`_id: { $in\` filters found in server/src — the matcher is broken`);
+    /*
+     * Re-anchored by the Q-211 change itself: this floor was 30 when the tree held the 19 hand-written reads the
+     * change moves onto the reader, so it could hold only while the defect did. What stays is the writes, the
+     * filter builders, the allowlisted reads and the reader — so the floor is set below that, and the writes and
+     * the reader keep floors of their own.
+     */
+    assert.ok(FOUND.length >= 20, `only ${FOUND.length} \`_id: { $in\` filters found in server/src — the matcher is broken`);
     assert.ok(FOUND.filter(f => f.kind === 'write').length >= 10,
       'fewer than 10 by-id WRITES classified — the walk is not reaching the collection method');
     assert.ok(READS.some(f => f.file === READER),

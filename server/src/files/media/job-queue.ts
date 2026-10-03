@@ -6,6 +6,7 @@
  */
 
 import { col, asFilter, asDoc, asUpdate } from '../../db/mongo.js';
+import { readStoredById } from '../../db/read-by-id.js';
 import { toDocId } from '../../util/paths.js';
 import { escapeRegex } from '../../util/redos.js';
 import type { StepProgress } from '../converters/types.js';
@@ -70,8 +71,13 @@ function nextClaimableAfter(nextAttempt: number): string {
   return new Date(Date.now() + withJitter(delay)).toISOString();
 }
 
+/** The media job collection's name: the by-id reader takes a name, every other read the handle below. */
+function jobCollectionName(spaceId: string): string {
+  return spaceCollection(spaceId, 'mediaJobs');
+}
+
 function jobCollection(spaceId: string) {
-  return col<MediaJobDoc>(spaceCollection(spaceId, 'mediaJobs'));
+  return col<MediaJobDoc>(jobCollectionName(spaceId));
 }
 
 function fileCollection(spaceId: string) {
@@ -531,11 +537,8 @@ export async function fetchJobProgress(
   const out = new Map<string, JobProgressView>();
   if (fileIds.length === 0) return out;   // never issue an empty $in
   try {
-    const docs = await jobCollection(spaceId)
-      .find(asFilter<MediaJobDoc>({ _id: { $in: fileIds } }))
-      .project({ progress: 1, progressAt: 1 })
-      .toArray() as Array<{ _id: string } & JobProgressView>;
-    for (const d of docs) out.set(d._id, { progress: d.progress, progressAt: d.progressAt });
+    const docs = await readStoredById<JobProgressView>(jobCollectionName(spaceId), fileIds, { progress: 1, progressAt: 1 });
+    for (const [id, d] of docs) out.set(id, { progress: d.progress, progressAt: d.progressAt });
   } catch { /* best-effort — the listing matters, the bar does not */ }
   return out;
 }

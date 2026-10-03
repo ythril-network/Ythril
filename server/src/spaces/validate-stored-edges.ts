@@ -1,4 +1,5 @@
 import { col } from '../db/mongo.js';
+import { readStoredById } from '../db/read-by-id.js';
 import { validateEdge } from './schema-validation.js';
 import type { SpaceMeta } from '../config/types.js';
 import type { SchemaViolation } from './schema-validation.js';
@@ -60,10 +61,8 @@ export async function validateStoredEdges(
   const endpointIds = [...new Set(docs.flatMap(e => [e.from, e.to]).filter((x): x is string => !!x))];
   const typeOf = new Map<string, string | null>();
   if (endpointIds.length > 0) {
-    const ents = await col(spaceCollection(spaceId, 'entities'))
-      .find({ _id: { $in: endpointIds } } as never, { projection: { _id: 1, type: 1 } })
-      .toArray() as unknown as Array<{ _id: string; type?: string }>;
-    for (const e of ents) typeOf.set(String(e._id), e.type ?? null);
+    const ents = await readStoredById<{ type?: string }>(spaceCollection(spaceId, 'entities'), endpointIds, { type: 1 });
+    for (const [id, e] of ents) typeOf.set(id, e.type ?? null);
   }
 
   /*

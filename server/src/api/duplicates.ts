@@ -14,6 +14,7 @@ import { globalRateLimit } from '../rate-limit/middleware.js';
 import { col, asFilter, asUpdate } from '../db/mongo.js';
 import { spacesWhereTokenMay, holdsRung } from '../auth/reachable-spaces.js';
 import { findWhereTokenMay } from '../auth/find-where-token-may.js';
+import { readStoredById } from '../db/read-by-id.js';
 import { getConfig } from '../config/loader.js';
 import { concreteSpaces } from '../spaces/proxy.js';
 import { log } from '../util/log.js';
@@ -67,10 +68,8 @@ async function contradictionSignalsFor(
   }
 
   const keys = [...new Set(pairs.map(pairKey))];
-  const found = await col<ContradictionCandidateDoc>(spaceCollection(spaceId, 'contradictionCandidates'))
-    .find(asFilter<ContradictionCandidateDoc>({ _id: { $in: keys } }))
-    .toArray() as ContradictionCandidateDoc[];
-  const byKey = new Map(found.map(f => [f._id, f]));
+  const byKey = await readStoredById<ContradictionCandidateDoc>(
+    spaceCollection(spaceId, 'contradictionCandidates'), keys, { basis: 1, confidence: 1, status: 1 });
 
   // "The collection is empty" is not "these pairs are clean" — an unscanned space and a clean space look
   // identical from a per-pair lookup, and only one of them licenses a merge.

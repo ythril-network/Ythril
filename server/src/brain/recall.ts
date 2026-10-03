@@ -12,6 +12,7 @@
  * fact CRUD, so the dependency runs one way: fact.ts -> recall.ts -> filter.ts.
  */
 import { col, isVectorSearchAvailable, asFilter } from '../db/mongo.js';
+import { readRowsById, readStoredById } from '../db/read-by-id.js';
 import { NotFoundError } from '../util/errors.js';
 import { embed } from './embedding.js';
 import type { EmbeddingResult } from './embedding.js';
@@ -763,10 +764,8 @@ export async function checkDuplicates(
       // Only now fetch the records themselves, and only the ones that actually cleared the threshold —
       // usually none. The scan deliberately returns ids and scores so it never carries record bodies.
       const { commonProject, typeProject } = recallProjection(type);
-      const docs = await col(collName).aggregate<Record<string, unknown>>([
-        { $match: { _id: { $in: unseen.map(f => f._id) } } },
-        { $project: { ...commonProject, ...typeProject } },
-      ]).toArray();
+      const docs = await readRowsById<Record<string, unknown>>(
+        collName, unseen.map(f => f._id), { ...commonProject, ...typeProject });
       const scoreById = new Map(unseen.map(f => [f._id, f.score]));
       for (const doc of docs) {
         doc['score'] = scoreById.get(doc['_id'] as string);
@@ -798,15 +797,15 @@ const KNOWLEDGE_COLLECTION: Record<RecallKnowledgeType, string> = {
  * happened to find it.
  */
 function recallProjection(knowledgeType: RecallKnowledgeType): {
-  commonProject: Record<string, number>;
-  typeProject: Record<string, number>;
+  commonProject: Record<string, 1>;
+  typeProject: Record<string, 1>;
 } {
   // An INCLUSION list, so a field absent from it never leaves Mongo — which is why `superseded` is here and
   // not only in `toRecallRecord`'s allowlist further down. Both are field-by-field rebuilds of one record,
   // and a new field has to be named in each: it was named in the second alone, and came back missing with
   // every gate green, because the record handed to the second had already lost it.
-  const commonProject = { _id: 1, spaceId: 1, _knowledgeType: 1, score: 1, createdAt: 1, updatedAt: 1, seq: 1, embeddingModel: 1, matchedText: 1, superseded: 1 };
-  let typeProject: Record<string, number> = {};
+  const commonProject: Record<string, 1> = { _id: 1, spaceId: 1, _knowledgeType: 1, score: 1, createdAt: 1, updatedAt: 1, seq: 1, embeddingModel: 1, matchedText: 1, superseded: 1 };
+  let typeProject: Record<string, 1> = {};
   if (knowledgeType === 'fact') {
     typeProject = { fact: 1, tags: 1, description: 1, properties: 1 };
   } else if (knowledgeType === 'entity') {
@@ -1025,10 +1024,8 @@ async function hydrateFreshHits(
     const { commonProject, typeProject } = recallProjection(type);
     const collName = `${spaceId}_${KNOWLEDGE_COLLECTION[type]}`;
     try {
-      const docs = await col(collName).aggregate<Record<string, unknown>>([
-        { $match: { _id: { $in: entries.map(e => e.id) } } },
-        { $project: { ...commonProject, ...typeProject } },
-      ]).toArray();
+      const docs = await readRowsById<Record<string, unknown>>(
+        collName, entries.map(e => e.id), { ...commonProject, ...typeProject });
       const scoreOf = new Map(entries.map(e => [e.id, e.score]));
       for (const d of docs) {
         out.push(mapToRecallResult({ ...d, score: scoreOf.get(d['_id'] as string) }, type));
@@ -1099,11 +1096,8 @@ async function enrichFileChunksWithParent(spaceId: string, results: RecallResult
   const parentIds = [...new Set(fileChunks.map(r => r.parentFileId as string))];
 
   // Batch-fetch parent file docs — projection only (no embedding field)
-  const parents = (await col(spaceCollection(spaceId, 'files'))
-    .find(asFilter({ _id: { $in: parentIds } }), { projection: { path: 1, description: 1, tags: 1 } })
-    .toArray()) as unknown as Array<{ _id: string; path?: string; description?: string; tags?: string[] }>;
-
-  const parentMap = new Map(parents.map(p => [p._id, p]));
+  const parentMap = await readStoredById<{ _id: string; path?: string; description?: string; tags?: string[] }>(
+    spaceCollection(spaceId, 'files'), parentIds, { path: 1, description: 1, tags: 1 });
 
   for (const chunk of fileChunks) {
     const parent = parentMap.get(chunk.parentFileId as string);

@@ -1,6 +1,7 @@
 import { brainWriteSeqTotal } from '../metrics/registry.js';
 import { type ContradictionWarning } from './insert-contradictions.js';
 import { col, asFilter, asUpdate } from '../db/mongo.js';
+import { readRowsById } from '../db/read-by-id.js';
 import { withSeq } from '../util/seq.js';
 import { writeTombstone } from './tombstones.js';
 import { parseLimit, parseSkip } from '../util/pagination.js';
@@ -164,11 +165,7 @@ export async function findEntitiesByName(spaceId: string, name: string): Promise
  * the likelier failure — but do not reach for it to build embed text. See `factEmbedText`.
  */
 export async function findEntitiesByIds(spaceId: string, ids: readonly string[]): Promise<EntityDoc[]> {
-  if (ids.length === 0) return [];
-  return col<EntityDoc>(spaceCollection(spaceId, 'entities'))
-    .find(asFilter<EntityDoc>({ _id: { $in: [...new Set(ids)] }, spaceId }),
-      { projection: NEVER_RETURNED_PROJECTION })
-    .toArray() as Promise<EntityDoc[]>;
+  return readRowsById<EntityDoc>(spaceCollection(spaceId, 'entities'), ids, 'all', { filter: { spaceId } });
 }
 
 /** Find an entity by exact ID */

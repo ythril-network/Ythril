@@ -648,6 +648,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `network_join_remote`'s schema silent on `inviteCode`'s 8 192-character limit, which the route and the act already
   refused; the schema now states it from the same constant. Routes that validate by hand are counted, and may only
   get fewer.
+- **Every read of stored records by a list of ids goes through one reader (`Q-211`).** `readStoredById` (a Map) and
+  `readRowsById` (rows in the caller's id order) read in chunks of 500 with a few chunks in flight, project to the
+  fields the caller names or to everything but the never-returned fields, AND a caller's predicate with the ids
+  instead of spreading it beside them, and give every chunk its share of the caller's deadline. The graph walk's
+  second reader, recall's fresh-hit hydration and duplicate check, the reference and delete guards, traverse
+  bodies and the rest moved onto it; several of them read every id in one query before. One fix came with it: the
+  walk's reader spread its narrowing beside `_id`, so a narrowing that named `_id` replaced the id list. A gate
+  (`a-record-is-read-by-id-through-one-reader`) fails on a by-id read anywhere else unless its function is
+  allowlisted with the reason it asks a different question.
+- **The call graph the source gates walk sees a call written as an argument of another call, and follows a
+  closure built at module scope (`Q-309`).** Its call scans consumed the character before a name, so in `f(g(x))`
+  the call to `g` was invisible to every gate built on it.
 
 ## [5.6.3] — 2026-10-03
 

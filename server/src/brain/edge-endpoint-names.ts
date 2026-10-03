@@ -23,11 +23,11 @@
  * with the endpoint.
  */
 import { col, asFilter } from '../db/mongo.js';
+import { readRowsById } from '../db/read-by-id.js';
 import { collectionForRefKind, edgeEndpointKind, endpointNameField } from './entity-refs.js';
 import type { RefKind } from '../config/types-knowledge.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { recordDisplayName, recordDisplayType } from './link-frontier.js';
-import { NEVER_RETURNED_PROJECTION } from './read-projection.js';
 import { readRecordsById, type RecordsById } from './walk-reads.js';
 import type { ChronoEntry, FactDoc, FileMetaDoc } from '../config/types.js';
 
@@ -129,9 +129,7 @@ export async function withEndpointNames<T extends EdgeEndpoints>(
     if (ids.size === 0) continue;
     const field = endpointNameField(kind);
     const docs = await readAcrossMembers(async mid =>
-      await col<Record<string, unknown>>(spaceCollection(mid, collectionForRefKind(kind)))
-        .find(asFilter<Record<string, unknown>>({ _id: { $in: [...ids] } }), { projection: { _id: 1, [field]: 1 } })
-        .toArray());
+      await readRowsById<Record<string, unknown>>(spaceCollection(mid, collectionForRefKind(kind)), [...ids], { [field]: 1 }));
     for (const d of docs) {
       const value = d[field];
       if (typeof value === 'string' && value.trim()) nameMap.set(String(d['_id']), value.trim());
@@ -256,10 +254,8 @@ export async function neighbourNodes(
   if (ids.length === 0) return out;
 
   for (const mid of memberIds) {
-    const entities = await col<Record<string, unknown>>(spaceCollection(mid, 'entities'))
-      .find(asFilter<Record<string, unknown>>({ _id: { $in: [...ids] }, spaceId: mid }),
-        { projection: NEVER_RETURNED_PROJECTION })
-      .toArray();
+    const entities = await readRowsById<Record<string, unknown>>(
+      spaceCollection(mid, 'entities'), ids, 'all', { filter: { spaceId: mid } });
     // No `kind` on an entity — see the docblock. This is the field whose ABSENCE is the contract.
     for (const e of entities) {
       out.set(String(e['_id']),
