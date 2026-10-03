@@ -32,7 +32,8 @@
 import { peerSafeFetch } from './peer-fetch.js';
 import { boundedJson } from '../util/bounded-read.js';
 import { listTombstones } from '../brain/tombstones.js';
-import { applyPeerTombstones, admitTombstone, MAX_TOMBSTONES_PER_REQUEST, TombstoneCounterError } from './tombstone-apply.js';
+import { applyPeerTombstones, admitTombstone, MAX_TOMBSTONES_PER_REQUEST } from './tombstone-apply.js';
+import { CounterBehindError } from './counter-after-page.js';
 import { log, logSafe } from '../util/log.js';
 import { TOMBSTONE_TYPES, TOMBSTONE_COLLECTION } from '../config/types.js';
 import type { NetworkMember } from '../config/types.js';
@@ -131,7 +132,7 @@ async function pageTombstones(o: {
  * Fetch the peer's tombstones since `sinceSeq` and apply them to the LOCAL space `spaceId`.
  *
  * Called BEFORE the record pull so deletions land before anything that would re-upsert a deleted doc. A counter
- * that could not be advanced past what was delivered is thrown (`TombstoneCounterError`), so the cycle counts an
+ * that could not be advanced past what was delivered is thrown (`CounterBehindError`), so the cycle counts an
  * error; any other failure holds the watermark and is logged.
  */
 export async function pullTombstones(opts: {
@@ -170,7 +171,7 @@ export async function pullTombstones(opts: {
         + `delivered through seq ${heldAt}, so the receive watermark is held there and the rest is asked for next cycle.`),
     });
   } catch (err) {
-    if (err instanceof TombstoneCounterError) throw err;
+    if (err instanceof CounterBehindError) throw err;
     outcome.truncated = true;
     log.warn(`Pull tombstones from ${peer} for space '${spaceId}' failed: `
       + `${logSafe(err instanceof Error ? err.message : String(err))} — delivered through seq `

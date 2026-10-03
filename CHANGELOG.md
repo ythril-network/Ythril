@@ -330,6 +330,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A stalled write is visible while it stalls (`Q-200`).** New gauge `ythril_seq_horizon_oldest_hold_seconds`
   per space (0 when nothing is held), and a `seq horizon held <age>s space=… seq=… holder=… ended=…` warning for
   every hold that lasted past half the deadline — once while still open, and when it ends.
+- **A record that landed was never queued for embedding when the counter could not move after it (`Q-224`).** The
+  arrival writer moved the counter, then booked and queued what landed, in one `finally`; a counter that could not
+  move threw out of it first, so the records were stored, never queued, and a re-sent page read them as current and
+  never queued them either — and the counter's error replaced the write's own, so an import called every document
+  refused over records it had written. Each step now runs whatever the one before did, the write's own error wins,
+  and a counter left behind fails the page after what landed is booked and queued: a push answers `500`, a pull
+  holds its position, and an import reports what it restored with the new per-family `counterBehind: true` (run the
+  import again). The push door's own counter move follows the same rule.
 - **A driver argument error no longer drops a peer's document from its sync page for good.** It was read as the
   document's own refusal; it names the call, not the document, and now fails the page so it is sent again.
 - **A merge of a large entity no longer prints `MaxListenersExceededWarning` (`Q-311`).** Every write inside a

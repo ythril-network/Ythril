@@ -18,7 +18,8 @@
  *     the page's — a poison document must not hold back everything sent with it.
  *  2. **Retag** to the local space, unconditionally: under a `spaceMap` alias the sender's id names another
  *     space, and every `spaceId`-filtered read on this instance would miss the record.
- *  3. **Collapse** a repeated `_id` to its highest seq (equal: the later). An unordered bulk write lets the LAST
+ *  3. **Collapse** a repeated `_id` to its highest seq (equal: the EARLIER, as the push planner reads a page —
+ *     `isNewerCopy` is strict). An unordered bulk write lets the LAST
  *     op for an id win whatever its seq, so a page carrying `[9, 3]` stored 3.
  *  4. **What never crosses**: the receiver's local-only fields are dropped from what arrived — and CARRIED from
  *     the stored copy across the replace (`LOCAL_ONLY_FIELDS`), server-side, in the same update, so a peer's
@@ -44,10 +45,14 @@
  *     pull holds `deliveredThrough`. **A write a bound ended is ambiguous, never a document's refusal**
  *     (`isWriteTimeout`): nothing says which documents landed, so the page fails whole without the per-document
  *     fallback, which would only spend the hold's time on the same stall.
- *  8. **The counter, then the queue**, in a `finally` per chunk: `bumpSeq` over what the chunk received
- *     (awaited), and only then the batched embed enqueue of what landed, by the RECEIVER's suppression. The
- *     bump is the only thing that makes an arrival visible to a seq-paged reader; nothing here notes a seq on
- *     its own, so a local write can never take a seq below an arrival a reader was already handed.
+ *  8. **The counter, then the queue**, in a `finally` per chunk: the counter over what the chunk received
+ *     (awaited, `advanceCounterPast`), and only then the batched embed enqueue of what landed, by the RECEIVER's
+ *     suppression. The bump is the only thing that makes an arrival visible to a seq-paged reader; nothing here
+ *     notes a seq on its own, so a local write can never take a seq below an arrival a reader was already
+ *     handed. **Each step runs whatever the one before it did** (`Q-224`): a counter that cannot move is logged
+ *     and stops the page after the chunk's records are booked and queued; the write's own error, and its
+ *     `partial`, always win; and a counter left behind with nothing else wrong throws `CounterBehindError`, which
+ *     carries `partial` too.
  *
  * ## The record type is an explicit argument
  *
@@ -65,7 +70,8 @@ import { col, asBulk } from '../db/mongo.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { readStoredById, READ_CHUNK } from '../db/read-by-id.js';
 import { bulkWriteFailures, DUPLICATE_KEY, isDocumentRefusal, isDocumentRefusalCode, writeErrorCode } from '../db/write-errors.js';
-import { bumpSeq, isSeqImplausible } from '../util/seq.js';
+import { isSeqImplausible } from '../util/seq.js';
+import { advanceCounterPast, CounterBehindError } from './counter-after-page.js';
 import { isWriteTimeout } from '../db/write-timeout.js';
 import { inChunks } from '../util/chunks.js';
 import { log, logSafe } from '../util/log.js';
@@ -334,10 +340,13 @@ export async function writeArrivals(
     return e;
   };
   let bumped = 0;
+  /** A counter that could not be moved past what was received: the page is not finished (`Q-224`). */
+  let behind: CounterBehindError | null = null;
+  /** Never throws: a failure is logged by the helper and kept, so the steps after it still run. */
   const bump = async (top: number): Promise<void> => {
-    if (top <= bumped) return;
-    await bumpSeq(spaceId, top);
-    bumped = top;
+    if (top <= bumped || behind) return;
+    behind = await advanceCounterPast(spaceId, top, where);
+    if (!behind) bumped = top;
   };
   for (const chunk of inChunks(toWrite, READ_CHUNK)) {
     const landed: Doc[] = [];
@@ -432,11 +441,19 @@ export async function writeArrivals(
       }
     } finally {
       // The counter over what this chunk RECEIVED, awaited, and only then the queue — see the module docblock.
+      // Each step runs whatever the one before it did (`Q-224`): a bump that threw from here used to skip the
+      // bookkeeping and the queue, so records that LANDED were never queued and the write's own error was lost.
       await bump(Math.max(0, ...chunk.map(d => d.seq ?? 0)));
       for (const d of landed) (stored.has(d._id) ? out.updated : out.inserted).push(d._id);
       queued.push(...landed);
-      if (!opts.deferEnqueue) await out.enqueue();
+      if (!opts.deferEnqueue) {
+        await out.enqueue().catch((err: unknown) => log.warn(`${logSafe(where)}: ${landed.length} landed record(s) in `
+          + `space '${spaceId}' could not be queued for embedding (${logSafe(err instanceof Error ? err.message : String(err))}); `
+          + 'they are stored, and a reindex queues them'));
+      }
     }
+    // The counter could not be moved past this chunk: the page stops here, what landed is booked and queued.
+    if (behind) break;
   }
   // What was received and not written (newer locally, collapsed) still moves the counter: it is the peer's clock.
   await bump(out.maxReceived);
@@ -447,5 +464,12 @@ export async function writeArrivals(
     [...new Set(out.collapsed)]);
   warnArrivalsNotStored(where, spaceId, family, 'not applied: a uniquely-indexed duplicate of a record held '
     + 'here under another id (the local copy is kept)', out.duplicates);
+  // A counter left behind what was received fails the call, carrying what landed: the push answers 500, the pull
+  // holds its watermark, the import reports what it restored AND that the counter is behind.
+  const counter = behind as CounterBehindError | null;
+  if (counter) {
+    counter.partial = out;
+    throw counter;
+  }
   return out;
 }

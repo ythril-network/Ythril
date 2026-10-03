@@ -55,6 +55,7 @@ import { log, logSafe } from '../util/log.js';
 import type { SchemaViolation } from '../spaces/schema-validation.js';
 import { violationsAgainstLocalSchema } from './sync/_shared.js';
 import { writeArrivals, arrivalId, arrivalRefusal, ArrivalWriteError, NAMED_IN_SUMMARY, type ArrivalOutcome } from '../sync/arrivals.js';
+import { CounterBehindError } from '../sync/counter-after-page.js';
 import { REPLICATED_FAMILIES, RECORD_TYPE_OF } from '../sync/replicated-families.js';
 import { readPageTombstones } from '../sync/push-reads.js';
 
@@ -89,6 +90,12 @@ export interface ImportTypeResult {
   refused?: ImportRefusal[];
   /** File chunks and face records left out because this instance derives them from the blob. */
   derived?: number;
+  /**
+   * The family's records were stored, and this instance's seq counter could not be moved past them (`Q-224`): the
+   * next local write may sort below a restored record. Present only when it happened; run the import again (a
+   * restore replaces, so it is idempotent) and it moves the counter.
+   */
+  counterBehind?: true;
   /**
    * Records restored over a tombstone this instance holds — a peer holding the same tombstone deletes them again.
    * The first `NAMED_IN_SUMMARY` ids; `restoredOverTombstoneTotal` is how many there were.
@@ -153,7 +160,11 @@ export async function importDocuments(spaceId: string, payload: Record<string, u
       out = await writeArrivals(spaceId, t, RECORD_TYPE_OF[t], docs, { restore: true });
     } catch (err) {
       log.warn(`Import into space '${spaceId}': ${t} could not be written: ${logSafe(String(err))}`);
-      if (!(err instanceof ArrivalWriteError) || !err.partial) {
+      // `Q-224`: the writer always says what it had done when it stopped — a record write that failed part-way, or
+      // a counter it could not move past what it restored. What it vouches for is reported as landed.
+      const partial = err instanceof ArrivalWriteError || err instanceof CounterBehindError ? err.partial : undefined;
+      if (err instanceof CounterBehindError) result.counterBehind = true;
+      if (!partial) {
         // Nothing of the family is vouched for, so every document is named.
         result.refused = docs.slice(0, NAMED_IN_SUMMARY).map(d => ({ _id: arrivalId(d), reason: familyFailed(err) }));
         result.errors = docs.length;
@@ -161,7 +172,7 @@ export async function importDocuments(spaceId: string, payload: Record<string, u
       }
       // The writer stopped part-way: the chunks before the fault are COMMITTED. Report what landed, and refuse only
       // what did not — a restore that says "nothing was written" over records it did write is the worse lie.
-      out = err.partial;
+      out = partial;
       const settled = new Set([...out.inserted, ...out.updated, ...out.derived, ...out.newerLocal,
         ...out.duplicates, ...out.refused.map(r => r._id)]);
       const unwritten = [...new Set(docs.map(arrivalId))].filter(id => !settled.has(id));

@@ -173,6 +173,7 @@ Per family, alongside the counts, and each present only when it has something to
 |---|---|
 | `refused` | the documents NOT stored, `{ _id, reason }` — a malformed id or seq, a value the store refuses, a uniquely-indexed duplicate of a record held under another id, or (when the store failed part-way through a family) every document after the fault. **The first 10 are named**; `errors` is the total. Documents written before a part-way fault are counted in `inserted`/`updated`, not here |
 | `derived` | how many file chunks and face records were left out because this instance derives them from the blob |
+| `counterBehind` | `true` when the family's records were stored and this instance's seq counter could not be moved past them: the next local write may take a seq below a restored record. What was stored is still counted in `inserted`/`updated`. **Run the import again** — a restore replaces, so it is safe, and the re-run moves the counter |
 | `restoredOverTombstone` | ids of records restored over a deletion this instance holds — a peer holding the same tombstone will delete them again on the next sync. **The first 10**; `restoredOverTombstoneTotal` is how many there were |
 | `schemaViolations` | documents stored despite breaking the space's schema (below) |
 

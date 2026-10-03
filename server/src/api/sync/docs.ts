@@ -15,7 +15,8 @@ import { requireAuth, denyReadOnly } from '../../auth/middleware.js';
 import { log, logSafe } from '../../util/log.js';
 import { reportServerFailure } from '../../util/report-failure.js';
 import { sendSyncWriteFailure } from './write-failure.js';
-import { bumpSeq, withAllocatedSeqs, settledSeqRange } from '../../util/seq.js';
+import { withAllocatedSeqs, settledSeqRange } from '../../util/seq.js';
+import { advanceCounterPast } from '../../sync/counter-after-page.js';
 import { withinWriteBound } from '../../db/write-bound.js';
 import type { FactDoc, EntityDoc, EdgeDoc, ChronoEntry, LinkDoc } from '../../config/types.js';
 import type { FileMetaDoc } from '../../config/types.js';
@@ -280,6 +281,7 @@ async function acceptPushedPage(
     }
 
     const forks: Array<{ key: PushKey; index: number; doc: Pushed }> = [];
+    let failure: { err: unknown } | undefined;
     try {
       const tombstones = await readPageTombstones(spaceId,
         PLANNED.flatMap(f => sound[f.key].map(s => s.doc._id)));
@@ -344,9 +346,14 @@ async function acceptPushedPage(
           results[key].reasons[s.index] = why.get(s.doc._id);
         }
       }
-    } finally {
-      if (maxReceived > 0) await bumpSeq(spaceId, maxReceived);
+    } catch (err) {
+      failure = { err };
     }
+    // Step 4, whatever became of the write — and the write's own error is the one thrown (`Q-224`): a bump that
+    // threw from a `finally` replaced it, so a page that failed on its records was reported as a counter fault.
+    const behind = await advanceCounterPast(spaceId, maxReceived, `sync push from ${from}`);
+    if (failure) throw failure.err;
+    if (behind) throw behind;
 
     if (forks.length > 0) {
       const now = new Date().toISOString();

@@ -30,7 +30,8 @@
  *     one delete per target collection and issuer — a page costs the same whatever its size.
  *  6. **The counter**, after the write whatever became of it, awaited, over every ADMITTED seq (a tombstone
  *     refused on authorship still tells us where that peer's clock is). A counter that could not move fails the
- *     call when nothing else did (`TombstoneCounterError`); under an apply error it is logged and the apply error
+ *     call when nothing else did (`CounterBehindError`, `sync/counter-after-page.ts` — the one post-step every page
+ *     door ends with); under an apply error it is logged and the apply error
  *     is the one thrown. Why a tombstone moves the counter at all, in `bumpSeq`'s own words — "future local writes
  *     always get a seq higher than any document received from this peer":
  *
@@ -50,7 +51,7 @@ import { spaceCollection } from '../db/space-collection.js';
 import { readStoredById } from '../db/read-by-id.js';
 import { TOMBSTONE_TYPES, TOMBSTONE_COLLECTION } from '../config/types.js';
 import type { TombstoneDoc } from '../config/types.js';
-import { bumpSeq } from '../util/seq.js';
+import { advanceCounterPast } from './counter-after-page.js';
 import { log, logSafe } from '../util/log.js';
 import { seqRefusal, arrivalId, warnArrivalsNotStored, type ArrivalRefusal } from './arrivals.js';
 import { retagToLocalSpace, tombstoneGoverns } from './upsert-plan.js';
@@ -117,17 +118,6 @@ export interface TombstoneApplyOutcome {
   /** The highest admitted seq — what the counter was advanced to at least. */
   maxSeq: number;
 }
-
-/** The counter could not be advanced past what a page delivered, and nothing else failed: the call must not succeed. */
-export class TombstoneCounterError extends Error {
-  constructor(readonly spaceId: string, readonly seq: number, readonly underlying: unknown) {
-    super(`the seq counter of space '${spaceId}' could not be advanced to ${seq}, past the tombstones a peer `
-      + `delivered: ${underlying instanceof Error ? underlying.message : String(underlying)}`);
-    this.name = 'TombstoneCounterError';
-  }
-}
-
-const messageOf = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
 /**
  * Apply a page of tombstones a peer delivered, to the space the door ADMITTED — see the module docblock.
@@ -221,16 +211,10 @@ export async function applyPeerTombstones(
   }
 
   // Step 6, after the write whatever became of it: a page that half-landed must not leave the counter behind it.
-  if (out.maxSeq > 0) {
-    try {
-      await bumpSeq(localSpaceId, out.maxSeq);
-    } catch (bumpErr) {
-      if (!failed) throw new TombstoneCounterError(localSpaceId, out.maxSeq, bumpErr);
-      log.error(`${logSafe(where)}: the seq counter of space '${localSpaceId}' could not be advanced to ${out.maxSeq} `
-        + `either (${logSafe(messageOf(bumpErr))}); the apply's own failure is the one reported.`);
-    }
-  }
+  // The apply's own failure is the one thrown; a counter left behind fails the call only when nothing else did.
+  const behind = await advanceCounterPast(localSpaceId, out.maxSeq, where);
   warnArrivalsNotStored(where, localSpaceId, 'tombstone', 'refused', [...out.refused, ...out.declined]);
   if (failed) throw failure;
+  if (behind) throw behind;
   return out;
 }
