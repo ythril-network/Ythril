@@ -12,7 +12,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { getDb } from '../db/mongo.js';
 import { ensureExpiryIndex } from '../db/expiry-index.js';
 import { getConfig } from '../config/loader.js';
-import { log } from '../util/log.js';
+import { log, currentRequestId } from '../util/log.js';
 import type { AuditLogEntry } from './entry.js';
 import type { AuditChange } from './audit-changes.js';
 import type { Collection, Filter, Sort } from 'mongodb';
@@ -130,12 +130,13 @@ export function logAuditEntry(input: AuditEntryInput): void {
     entryId: input.entryId ?? null,
     durationMs: input.durationMs,
     /*
-     * Omitted rather than written as null when there is no id, which is the same rule `changes` follows above
-     * and for the same reason: absent means "not recorded", and a stored `null` would claim the request had no
-     * id — which cannot happen, since every request is given one. The only entries without it are the ones
-     * written before the field existed, and an absent key is exactly how a reader tells them apart.
+     * Never absent on an entry written today: an absent key is how a reader tells an entry written before the
+     * field existed. So the id is the one the caller captured, else the live request's, else — for work no
+     * request asked for (a sweep, the config file watcher) — one of its own, `internal-<uuid>`. The guard sits
+     * HERE, in the one writer every entry goes through, so no caller can leave it out (Q-219: the config-reload
+     * writer did, after `logInternalAudit` had fixed the others).
      */
-    ...(input.requestId ? { requestId: input.requestId } : {}),
+    requestId: input.requestId || currentRequestId() || `internal-${uuidv4()}`,
     // Omitted entirely when there is nothing allowlisted to say, so an entry never carries an empty array
     // that reads as "we looked and nothing changed" when in fact we never looked.
     ...(input.changes && input.changes.length > 0 ? { changes: input.changes } : {}),
@@ -143,6 +144,38 @@ export function logAuditEntry(input: AuditEntryInput): void {
 
   col().insertOne(entry as any).catch((err: unknown) => {
     log.warn(`Audit log write failed: ${err}`);
+  });
+}
+
+/**
+ * Audit something the SERVER did on its own — a sweep, a heal, a grant — rather than a request it answered.
+ *
+ * One shape for every such entry, because each hand-written copy dropped a different part of it: the `durationMs`
+ * of half of them was a literal `0`, and none carried a request id (which `logAuditEntry` now guarantees for every
+ * entry). Here:
+ *  - `ip` is `internal`, which no client address can be, so a reader filters them out (or in) by that alone;
+ *  - `durationMs` is measured from `startedAt` when the caller has one.
+ */
+export function logInternalAudit(input: {
+  /** What kind of work it was, in the `method` column: `SWEEP`, `SYNC`, `CREATE`. */
+  method: string;
+  /** `internal:<what>`, so it never collides with a route path. */
+  path: string;
+  operation: string;
+  spaceId?: string;
+  startedAt?: number;
+  /** The token the work was done for, when there is one (a creator grant names the token it widened). */
+  tokenId?: string | null;
+}): void {
+  logAuditEntry({
+    ip: 'internal',
+    method: input.method,
+    path: input.path,
+    spaceId: input.spaceId,
+    operation: input.operation,
+    status: 200,
+    durationMs: input.startedAt === undefined ? 0 : Date.now() - input.startedAt,
+    tokenId: input.tokenId ?? null,
   });
 }
 

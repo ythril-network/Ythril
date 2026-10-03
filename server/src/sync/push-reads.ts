@@ -20,19 +20,19 @@ import { col, asFilter } from '../db/mongo.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { readStoredById } from '../db/read-by-id.js';
 import type { TombstoneType } from '../config/types.js';
-import { forkCandidates, MAX_FORK_DEPTH, type PushDoc, type PushFamily, type StoredCopy } from './upsert-plan.js';
+import { forkCandidates, MAX_FORK_DEPTH, type HeldTombstone, type PushDoc, type PushFamily, type StoredCopy } from './upsert-plan.js';
 
-/** Tombstone seq per record id, per tombstone type — for every id the request carries. */
+/** The tombstone held per record id — its seq and issuer — per tombstone type, for every id the request carries. */
 export async function readPageTombstones(
   spaceId: string, ids: readonly string[],
-): Promise<Map<TombstoneType, Map<string, number>>> {
-  const rows = await readStoredById<{ type?: TombstoneType; seq?: number }>(
-    spaceCollection(spaceId, 'tombstones'), ids, { type: 1, seq: 1 });
-  const out = new Map<TombstoneType, Map<string, number>>();
+): Promise<Map<TombstoneType, Map<string, HeldTombstone>>> {
+  const rows = await readStoredById<{ type?: TombstoneType; seq?: number; instanceId?: string }>(
+    spaceCollection(spaceId, 'tombstones'), ids, { type: 1, seq: 1, instanceId: 1 });
+  const out = new Map<TombstoneType, Map<string, HeldTombstone>>();
   for (const [id, t] of rows) {
     if (t.type === undefined || typeof t.seq !== 'number') continue;
     if (!out.has(t.type)) out.set(t.type, new Map());
-    out.get(t.type)!.set(id, t.seq);
+    out.get(t.type)!.set(id, { seq: t.seq, ...(typeof t.instanceId === 'string' ? { issuer: t.instanceId } : {}) });
   }
   return out;
 }

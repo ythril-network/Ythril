@@ -31,7 +31,7 @@ import { envInt } from '../config/env-num.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { mapLimit } from '../util/map-limit.js';
 import { grantCreatorAdmin } from '../auth/creator-grant.js';
-import { logAuditEntry } from '../audit/audit.js';
+import { logInternalAudit } from '../audit/audit.js';
 import { CREATOR_GRANT_OPERATION } from '../audit/middleware.js';
 
 export async function initSpace(
@@ -150,6 +150,9 @@ export async function initSpace(
    */
   for (const ix of LINK_INDEXES) await linksColl.createIndex(ix.keys, ix.unique ? { unique: true } : {});
   await tombstonesColl.createIndex({ seq: 1 });
+  // `GET /api/sync/tombstones` reads each type from a seq, and a pull now asks it a full page per type (bundle-46):
+  // without this, every page of every type scans the space's tombstones of all types. Local, so boot ensures it.
+  await tombstonesColl.createIndex({ type: 1, seq: 1 });
   await conflictsColl.createIndex({ detectedAt: -1 });
   // Serves the list query: equality on `status` (now the leading field) + sort by (score desc,
   // detectedAt desc).
@@ -479,9 +482,9 @@ export async function createSpace(opts: {
   const grant = grantCreatorAdmin(cfg, creator.tokenId, opts.id);
   saveConfig(cfg);
   if (grant === 'granted') {
-    logAuditEntry({
-      ip: 'internal', method: 'CREATE', path: 'internal:creator-grant', spaceId: opts.id, tokenId: creator.tokenId,
-      operation: CREATOR_GRANT_OPERATION, status: 200, durationMs: 0,
+    logInternalAudit({
+      method: 'CREATE', path: 'internal:creator-grant', spaceId: opts.id, tokenId: creator.tokenId,
+      operation: CREATOR_GRANT_OPERATION,
     });
   } else if (grant === 'not-stored') {
     // An OIDC session: its rights come from the identity provider's mapping, so the grant has nowhere to live.

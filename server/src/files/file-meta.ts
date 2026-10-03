@@ -160,12 +160,19 @@ export async function recordArrivedFile(
 ): Promise<void> {
   const normalised = toDocId(filePath);
   const now = new Date().toISOString();
+  // A record NEW here takes this instance's file retention window, as an upload does; one already stored keeps its
+  // expiry, because arriving bytes are not an authored write and must not re-slide it.
+  const expireAt = expiryForCreate(spaceId, undefined, { collection: 'file' });
   await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).updateOne(
     asFilter<FileMetaDoc>({ _id: normalised }),
     asUpdate<FileMetaDoc>({
       $set: { sizeBytes, sha256 },
+      // Bytes on disk mean the file is live: a path soft-deleted here and re-created upstream comes back, as the
+      // upload writer has always made it (`Q-239`).
+      $unset: { deletedAt: '' },
       $setOnInsert: {
         spaceId, path: normalised, tags: [], author: from, createdAt: now, updatedAt: now, seq: 0,
+        ...(expireAt ? { _expireAt: expireAt } : {}),
       },
     } as never),
     { upsert: true },

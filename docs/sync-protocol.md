@@ -60,7 +60,7 @@ Four high-water marks are kept per member. The first two prevent redundant data 
 
 All four are stored per member in the config file. After a successful sync they are written through the coalesced asynchronous config flush (`saveConfigSoon`) rather than a blocking synchronous write — sync bookkeeping never stalls the event loop. If a sync fails mid-way, the watermark is not advanced past the failure — the next cycle retries from the last safe point, giving at-least-once delivery semantics (re-delivery is harmless: everything is re-derived from `seq`).
 
-**One watermark, seven transfers, and that is what "the last safe point" has to mean.** A cycle runs seven independent transfers under each watermark — tombstones plus facts, entities, edges, chrono, links and FILE METADATA — and any one of them can stop early: a non-`2xx` from the peer, or its page cap. **The watermark advances only as far as EVERY transfer in the cycle is complete through.** A transfer that finished places no limit; one that stopped early limits the advance to the last position it actually delivered, and the lowest such limit wins.
+**One watermark, seven transfers, and that is what "the last safe point" has to mean.** A cycle runs seven independent transfers under each watermark — tombstones plus facts, entities, edges, chrono, links and FILE METADATA — and any one of them can stop early: a non-`2xx` from the peer, a throw, or its page cap — and for the tombstone transfer also a page of one seq it cannot page past, or an element of a type the receiver does not know. **The watermark advances only as far as EVERY transfer in the cycle is complete through.** A transfer that finished places no limit; one that stopped early limits the advance to the last position it actually delivered, and the lowest such limit wins.
 
 The watermark is never the *maximum* across the transfers: a facts push that failed at seq 300, in a cycle where the entities push succeeded to seq 500, leaves it no further than the facts push delivered, so the fact at seq 400 is re-sent next cycle. A held-back cycle says so in the log, naming which transfers stopped, because a watermark quietly staying put reads exactly like a cycle with nothing to do.
 
@@ -108,7 +108,7 @@ Spaces without an entry in `spaceMap` pass through unchanged (identity mapping).
 ## Pull phase
 
 ```http
-GET /api/sync/tombstones?spaceId=&networkId=&sinceSeq={lastSeqReceived}     (1 request)
+GET /api/sync/tombstones?spaceId=&networkId=&sinceSeq={cursor}&limit=5000  (paged, tie-safe — see below)
 GET /api/sync/facts?spaceId=&...&full=true&limit=200                     (ceil(N/200) requests)
 GET /api/sync/entities?...                                                  (ceil(N/200) requests)
 GET /api/sync/edges?...                                                     (ceil(N/200) requests)
@@ -137,16 +137,20 @@ Hitting that cap counts as a transfer stopping early (see [watermarks](#watermar
 
 ### Tombstones pulled first
 
-Tombstones are fetched before documents so that a deletion that arrived at the peer applies before the engine could accidentally re-insert the same document that was just deleted. After tombstones are applied, items appearing in the list with a `deletedAt` field are skipped (they're stubs that the tombstone phase already handled).
+Tombstones are fetched before documents so that a deletion that arrived at the peer applies before the engine could accidentally re-insert the same document that was just deleted. After tombstones are applied, items appearing in the list with a `deletedAt` field are skipped (they're stubs that the tombstone phase already handled — the riders are served but ignored).
+
+**The tombstone pull is paged, and it delivers everything up to the horizon or says where it stopped.** One `sinceSeq` — the member's one `lastSeqReceived` — covers tombstones and records alike. Each request asks for `limit=5000` per type from a cursor. A type that comes back full may hold more at its last seq, so the next cursor is the lowest last seq among the full types **minus one**: that seq is served again, whole, and what was already applied is skipped by `(type, _id)`. Equal seqs are legitimate — a peer relays tombstones from several issuers, each with its own clock — and this is what keeps a run of them across a page boundary from being lost. The cursor moves only over elements the receiver admitted, so a refused element at the top of a page cannot page past the real deletions after it. A full type that is all one seq cannot be paged past; the transfer then stops, warns naming the space, the peer and the seq, and holds the watermark below it. So does the 200-request bound per cycle; the next cycle resumes. The cost, accepted: the types that were not full are served again from the new cursor. A peer older than this one serves at most `limit` per type and is paged the same way.
 
 ### Tombstone deletion authorisation
 
-When `applyRemoteTombstone` processes an incoming tombstone it must satisfy **two** conditions before deleting the underlying document:
+Both doors — `POST /api/sync/tombstones` and the pull — apply a page through one function, `applyPeerTombstones` (`sync/tombstone-apply.ts`), and each element passes these, in order:
 
-1. **Author match** — `tombstone.instanceId` (the issuer of the delete) must equal `localDoc.author.instanceId` (the instance that created the document). A tombstone can only delete a document authored by its own issuer.
-2. **Issuer proof** — because `tombstone.instanceId` is attacker-controllable, matching it against the author is not enough on its own. The delete is authorised only when the tombstone was delivered by the issuer itself — the authenticated peer's identity (`peerInstanceId`, carried on production peer tokens; or `member.instanceId` on the pull path) equals the issuer — or the caller is a trusted local/admin token. A tombstone relayed by a third party on behalf of another author is **refused**; the authoring peer's own tombstone reaches each member first-hand on direct sync.
+1. **Shape and seq, per element** — a malformed element (no `type`, a missing field, a seq the counter cannot carry) is refused on its own and logged, and the rest of the page applies. An element whose `type` this instance does not know (a newer peer's) leaves the whole page unapplied — the push answers `400`, the pull holds its watermark — so the sender re-sends it once this instance upgrades.
+2. **The admitted space** — the element is applied to the LOCAL space the door admitted (the query's `spaceId` after the network alias is resolved, or the space the cycle is syncing), never to the `spaceId` it carries. Under a `spaceMap` an honest peer's deletion lands in the local space.
+3. **Issuer proof** — because `tombstone.instanceId` is attacker-controllable, it is authorised only when the tombstone was delivered by the issuer itself — the authenticated peer's identity (`peerInstanceId`, carried on production peer tokens; or `member.instanceId` on the pull path) equals the issuer — or the caller is a trusted local/admin token. A tombstone relayed by a third party on behalf of another author is **refused and not stored**; the authoring peer's own tombstone reaches each member first-hand on direct sync.
+4. **Author match** — when the target record is held here, `tombstone.instanceId` must equal `localDoc.author.instanceId`. A tombstone for another author's record is **refused and not stored**.
 
-Together this prevents a member from forging a tombstone with `instanceId` set to a victim instance in order to delete the victim's content across the network. Documents without `author` metadata (legacy, pre-author-field data) are deleted unconditionally since authorship cannot be determined.
+Only then is the tombstone stored and its record deleted — authorised before it is stored, because a stored tombstone refuses every later copy of its record. Together this prevents a member from forging a tombstone with `instanceId` set to a victim instance in order to delete, or block, the victim's content across the network. A tombstone whose target is absent is stored. Documents without `author` metadata (legacy, pre-author-field data) stay deletable by an admitted peer whose own tombstone it is, since authorship cannot be determined. Refusals are named in one warning per page. A page costs the same number of database operations whatever its size.
 
 ### Document ID collision safety
 
@@ -202,11 +206,11 @@ This matters more than the record half: `FileTombstoneDoc.path` is often persona
 ## Push phase
 
 ```http
-POST /api/sync/tombstones?spaceId=&networkId=                               (paged: 500/request, looped until drained)
+POST /api/sync/tombstones?spaceId=&networkId=                               (paged: 500/request, tie-safe, looped until drained)
 POST /api/sync/batch-upsert?spaceId=&networkId=                             (ceil(changed/200) requests)
 ```
 
-Tombstone push is deliberately **unbounded** (it loops in pages of 500 until every pending tombstone is delivered) so a peer that was offline for a long time never misses deletions.
+Tombstone push is deliberately **unbounded** (it loops in pages of 500 until every pending tombstone is delivered, up to 200 requests per cycle) so a peer that was offline for a long time never misses deletions. It pages with the same tie-safe cursor as the pull: a full page's next cursor is its last seq minus one, and a page that is all one seq is asked again once at 5000 — still full, the push stops, warns, and holds the push watermark below that seq. The receiver's `refused` count is logged once per transfer; a refusal is by shape or seq, which a re-send cannot change, so the push still advances past it.
 
 ### Incremental push via `lastSeqPushed`
 
@@ -227,7 +231,7 @@ Accepts `{ facts?: FactDoc[], entities?: EntityDoc[], edges?: EdgeDoc[], chrono?
 | Links | same as entities. Another id already holding the link's endpoints is that same link → `skipped` |
 | File metadata | `incoming.seq > stored.seq` (or no stored seq) → merged (`$set` of the authored keys) → `upserted`; else `skipped` |
 
-Every family checks a tombstone first: one at or above the incoming seq → `tombstoned`. A stale tombstone below it is deleted **only once the record has landed**, so a write that fails keeps the deletion.
+Every family checks a tombstone first: one at or above the incoming seq → `tombstoned` — except that a tombstone another instance issued for that id neither refuses nor is cleaned up by a record whose author is the peer pushing it, proven by its peer token. A claimed author is not proof: pushed by an admin token, or by a peer that is not the author, the record is `tombstoned` as before, so a forged author cannot resurrect a deleted id (a tombstone or record with no instance on it governs, as before). The pull's own arrivals consult no stored tombstone. A stale tombstone below it is deleted **only once the record has landed**, so a write that fails keeps the deletion.
 
 **What the counters count.** Each counts ITEMS of the request, as processing them in order would count them. When one page carries the same `_id` more than once, the copies are decided in order against each other (`[seq 5, seq 6]` for an entity is `upserted: 2`; `[seq 9, seq 3]` is one `upserted`/`inserted` and one `skipped`) and only the final winner is written, so the stored copy is the highest seq. If that final write fails (a unique-index duplicate, or a document the store refuses), the version the page accepted before it is written instead, and the counters follow what landed.
 
@@ -357,7 +361,7 @@ After document sync, the engine performs a manifest-based file sync. It is bidir
 2. **Manifest** — `GET /api/sync/manifest?spaceId=&networkId=` retrieves the peer's list of `{ path, sha256, size, modifiedAt }`, and `spaceId`: the peer's LOCAL id for the space it resolved the request to. The file transfers that follow use the plain file routes (`GET`/`POST /api/files/:spaceId`), which know only local ids, so they address the peer by that answer; a peer that predates the field is addressed by the network's id. Manifests are served from a per-space file-hash cache (`<spaceId>_file_hashes`), so the peer does not re-hash its whole tree per request.
 3. **Download** — files we lack entirely are downloaded via `GET /api/files/:spaceId?path=<relative path>` (the path travels as a query parameter). Downloaded bytes are SHA-256 verified before writing to disk; a mismatch is logged and the file discarded.
 4. **Divergence: who changed it decides** — each end remembers, per file and per peer, the hash both last held (`syncBase`, local to the instance, never replicated or hashed). When a file differs: if **our** copy is still that agreed version, only the peer changed it and theirs replaces ours (logged `FILE_REPLACED`); if the **peer's** is, only we changed it and our push carries it; otherwise both changed it and the peer's version is written as a conflict copy beside ours, with a `ConflictDoc` surfaced in **Workspace → Conflicts**. Nothing is overwritten on a real conflict. With no agreed version yet (data from before this rule), a difference is a conflict.
-5. **Push** — files the peer lacks, or holds only in the agreed version, are uploaded to it. With no agreed version yet, the newer `modifiedAt` wins as before.
+5. **Push** — files the peer lacks, or holds only in the agreed version, are uploaded to it. With no agreed version yet, the newer `modifiedAt` wins as before. The receiver records bytes that a peer token delivers to `POST /api/files/:spaceId` as an **arrival**, exactly as a download in step 3 is recorded: size and hash only, the peer as author of a record that is new there, and no seq of its own. The file's description, tags and properties come from its replicated metadata, and any metadata in the upload body is ignored. Stored as an upload, the receiver's copy took its own next seq and tied or outranked the publisher's next metadata edit, which then never landed.
 6. **Instance-local files never travel** — a conflict copy (`<name>_<time>_<peer>.<ext>`), a schema snapshot (`schemas/<space>_<kind>_<type>.json`) and a legacy read spill at the root (`_tmp/graph-<uuid>.json`, `_tmp/results-<uuid>.json`, written by versions before 5.6.0) are this instance's own: they are left out of the manifest it serves, never pushed, and refused when an older peer offers them.
 
 Manifest requests use the 10 s timeout and batch-style transfers the 60 s one. A whole file body gets the ten-minute transfer budget, because a 10 s ceiling on a multi-megabyte upload aborts it on any ordinary link.
@@ -442,7 +446,7 @@ The seven **data-write endpoints accept only peer or admin tokens** — see [Dir
 | `GET` | `/api/sync/links/:id` | `spaceId`, `networkId` | Full `LinkDoc` |
 | `GET` | `/api/sync/filemeta` | same as facts | `{ items[], nextCursor }` |
 | `GET` | `/api/sync/filemeta/:id` | `spaceId`, `networkId` | Full `FileMetaDoc` |
-| `GET` | `/api/sync/tombstones` | `spaceId`, `networkId`, `sinceSeq`, `limit` (default 1000, max 5000) | `{ facts[], entities[], edges[], chrono[], links[] }` |
+| `GET` | `/api/sync/tombstones` | `spaceId`, `networkId`, `sinceSeq`, `limit` (default 1000, max 5000 — PER TYPE) | `{ facts[], entities[], edges[], chrono[], links[] }`, each ascending by seq and at most `limit` long. A full array may have more at its last seq: page with the [tie-safe cursor](#tombstones-pulled-first), never by moving to the last seq |
 | `GET` | `/api/sync/file-tombstones` | `spaceId`, `networkId`, `since` | `{ tombstones[] }` |
 | `GET` | `/api/sync/manifest` | `spaceId`, `networkId`, `since` | `{ manifest[{ path, sha256, size, modifiedAt }], spaceId }` (`spaceId`: the responder's local id) |
 | `GET` | `/api/sync/merkle` | `spaceId`, `networkId` | `{ spaceId, root, leafCount, computedAt, networkId }` (only used when `network.merkle: true`) |
@@ -463,7 +467,7 @@ There is no dedicated identity endpoint — a peer that needs the instance's ide
 | `POST` | `/api/sync/edges` | `EdgeDoc` | `200 { status:'ok' }`, `'tombstoned'`, or **`'duplicate'`** when the unique `(from, to, label, fromKind, toKind)` index already holds the edge under another id (an insert, or an update moving onto it); `400` for a document the store refuses |
 | `POST` | `/api/sync/chrono` | `ChronoEntry` | `200 { status:'ok' }` (or `'tombstoned'`); `400` for a `type` outside this space's vocabulary, or a document the store refuses |
 | `POST` | `/api/sync/batch-upsert` | `{ facts?, entities?, edges?, chrono?, links?, filemeta? }` | `200 { status:'ok', facts:{…}, entities:{…}, edges:{…}, chrono:{…}, links:{…}, filemeta:{…} }` — six arrays in, six sets of counters out |
-| `POST` | `/api/sync/tombstones` | `{ tombstones[] }` | `200 { applied: N }` — `N` is the tombstones with a plausible seq; one inside the ingest ceiling is refused on its own (logged), never the page. The counter is bumped past the highest one, awaited, before the answer |
+| `POST` | `/api/sync/tombstones` | `{ tombstones[] }`, at most 5000 (`400` above) | `200 { applied: N, refused: R }` — `N` is the elements admitted by shape and seq (applied, or refused on authorisation and not stored); `R` is the elements refused on their own for their shape or seq (logged), never the page. `refused` is additive. An element of an unknown `type` answers `400 { error: 'Invalid tombstone format' }` and nothing of the page is applied. Applied to the space the query admitted, never the `spaceId` an element carries. The counter is bumped past the highest admitted seq, awaited, before the answer; a counter that could not move answers `500` |
 | `POST` | `/api/sync/file-tombstones` | **`{ spaceId, tombstones[] }`** — `spaceId` in the BODY, not the query; absent it answers `400 { error: 'spaceId required' }` | `200 { applied: N }` |
 | `POST` | `/api/sync/warm` | `{ networkId, spaces[] }` | `200` once the embedding model, token cache and collection handles are warm. It touches `facts`, `entities`, `edges` and `chrono` only, and results are discarded |
 

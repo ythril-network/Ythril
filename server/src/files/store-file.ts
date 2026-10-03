@@ -11,7 +11,8 @@
  * A quota refusal is thrown as `QuotaError` for the door to map (REST answers 507, MCP an error result).
  */
 import { writeFileBytes } from './files.js';
-import { upsertFileMeta } from './file-meta.js';
+import { upsertFileMeta, recordArrivedFile } from './file-meta.js';
+import type { AuthorRef } from '../config/types.js';
 import { dispatchFileProcessing, type DispatchResult } from './dispatch.js';
 import type { InputFormat } from './converters/pipeline.js';
 import { checkQuota } from '../quota/quota.js';
@@ -25,7 +26,17 @@ export interface StoreFileMeta {
 }
 
 type Stored = { sha256: string; sizeBytes: number } & DispatchResult;
-type StoreOpts = { meta?: StoreFileMeta; inputFormat?: InputFormat; contentType?: string; actor?: Record<string, unknown> };
+type StoreOpts = {
+  meta?: StoreFileMeta; inputFormat?: InputFormat; contentType?: string; actor?: Record<string, unknown>;
+  /**
+   * The peer these bytes ARRIVED from, when a peer pushes a file to the upload door. Then the bytes are an arrival,
+   * not an upload: recorded by `recordArrivedFile` (size and hash, the peer as author of a record new here, and no
+   * seq stamp) and `meta` is ignored. Stored as an upload, the receiver's copy took this instance's next seq and
+   * this instance as the author of a new file, so it tied or outranked the publisher's next description or tag
+   * edit, which then never landed (`Q-143` fixed the pull half of the same rule; this is the push half).
+   */
+  arrivedFrom?: AuthorRef;
+};
 
 /**
  * The half after the bytes are on disk: metadata, the processing queue, the webhook. For a door that wrote the
@@ -34,7 +45,8 @@ type StoreOpts = { meta?: StoreFileMeta; inputFormat?: InputFormat; contentType?
 export async function recordStoredFile(
   spaceId: string, filePath: string, sizeBytes: number, sha256: string, opts: StoreOpts = {},
 ): Promise<Stored> {
-  await upsertFileMeta(spaceId, filePath, sizeBytes, { ...(opts.meta ?? {}), sha256 });
+  if (opts.arrivedFrom) await recordArrivedFile(spaceId, filePath, sizeBytes, sha256, opts.arrivedFrom);
+  else await upsertFileMeta(spaceId, filePath, sizeBytes, { ...(opts.meta ?? {}), sha256 });
   const dispatched = await dispatchFileProcessing(spaceId, filePath, {
     bytes: sizeBytes, inputFormat: opts.inputFormat ?? 'auto', sha256,
     ...(opts.contentType ? { contentType: opts.contentType } : {}),

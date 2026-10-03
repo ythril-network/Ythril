@@ -10,15 +10,14 @@ import { z } from 'zod';
 import { col, asFilter, asUpdate } from '../../db/mongo.js';
 import { syncRateLimit } from '../../rate-limit/middleware.js';
 import { getDataRoot } from '../../config/loader.js';
-import { listTombstones, applyRemoteTombstone } from '../../brain/tombstones.js';
+import { listTombstones } from '../../brain/tombstones.js';
 import { requireAuth, denyReadOnly, isInstanceAdmin } from '../../auth/middleware.js';
 import { log } from '../../util/log.js';
-import { bumpSeq } from '../../util/seq.js';
 import { reportServerFailure } from '../../util/report-failure.js';
-import { warnArrivalsNotStored, seqRefusal } from '../../sync/arrivals.js';
+import { applyPeerTombstones, MAX_TOMBSTONES_PER_REQUEST } from '../../sync/tombstone-apply.js';
 import { deleteStored } from '../../files/stored-bytes.js';
 import path from 'node:path';
-import type { TombstoneDoc, FileTombstoneDoc } from '../../config/types.js';
+import type { FileTombstoneDoc } from '../../config/types.js';
 
 import { spaceAllowed, pushAllowed, callerPeerId } from './_shared.js';
 import { recordServedSeq } from '../../sync/served-watermark.js';
@@ -75,90 +74,43 @@ syncTombstonesRouter.get('/tombstones', syncRateLimit, requireAuth, async (req, 
 });
 
 
+/** The push body: an array of elements, unvalidated here, at most `MAX_TOMBSTONES_PER_REQUEST` of them. */
+export const TombstonePage = z.object({ tombstones: z.array(z.unknown()).max(MAX_TOMBSTONES_PER_REQUEST).default([]) });
+
 /** POST /api/sync/tombstones — apply tombstones received from a peer */
 syncTombstonesRouter.post('/tombstones', syncRateLimit, requireAuth, denyReadOnly, async (req, res) => {
   try {
     const { spaceId, networkId } = req.query as Record<string, string>;
     if (pushAllowed(res, spaceId, networkId, req.authToken) === null) return;
 
-    const body = req.body as { tombstones?: TombstoneDoc[] };
-    const tombstones = body?.tombstones ?? [];
+    // The envelope only — each element is the apply's. Over the cap is refused whole, before anything is read: an
+    // honest sender pages well below it (`pushTombstones`).
+    const parsed = TombstonePage.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      const tooMany = parsed.error.issues.some(i => i.code === 'too_big');
+      res.status(400).json({ error: tooMany ? `At most ${MAX_TOMBSTONES_PER_REQUEST} tombstones per request` : 'Invalid tombstone format' });
+      return;
+    }
+    const { tombstones } = parsed.data;
 
     /*
-     * `TOMBSTONE_TYPES`, not `KNOWLEDGE_TYPES` — and this door said the wrong one while the GET door 28
-     * lines above already served the right one. One rule, two doors, the weaker one winning silently.
+     * EVERY RULE IS THE APPLY'S (`sync/tombstone-apply.ts`, bundle-46), shared with the pull: the shape and seq of
+     * each element on its own, the space this door ADMITTED — `spaceId` here, after the alias middleware, never the
+     * one a tombstone names — authorisation before anything is stored, and the counter bump. A malformed element
+     * is refused alone and counted in `refused`; an element of a type this instance does not know answers 400 for
+     * the page, so the sender holds it and re-sends after this receiver upgrades.
      *
-     * The cost was not a rejected record. `pushTombstones` calls `listTombstones` with NO type filter, so a
-     * push page can carry a link tombstone; `z.array(...).safeParse` fails on one bad element and rejects the
-     * WHOLE page; the route answers 400; `sync/tombstone-transfer.ts` reads a non-ok push as truncated and
-     * holds the watermark at that cursor. So one undelivered link tombstone would stop EVERY deletion of
-     * every kind propagating from that instance by push, permanently, and the next cycle would fail
-     * identically.
-     *
-     * Latent only because no link delete path exists yet — it goes live the hour slice 2 ships one. Found by
-     * an audit of the link-as-collection decision rather than by a test, which is the part worth keeping:
-     * nothing gates 'use the tombstone tuple on the tombstone door', and the two agreed by luck.
+     * A peer token may only delete content its own instance issued and authored; a trusted local/admin token (no
+     * peerInstanceId) may relay any tombstone.
      */
-    const schema = z.array(z.object({
-      _id: z.string(),
-      type: z.enum(TOMBSTONE_TYPES),
-      spaceId: z.string(),
-      deletedAt: z.string(),
-      instanceId: z.string(),
-      seq: z.number(),
-      originalSeq: z.number().optional(),
-    }));
-    const parsed = schema.safeParse(tombstones);
-    if (!parsed.success) { res.status(400).json({ error: 'Invalid tombstone format' }); return; }
-    /*
-     * A tombstone seq is checked like a document's (`Q-107` part 1): `z.number()` alone let a 1e300 tombstone in,
-     * which refuses every later copy of its record and drags the counter into the ceiling reserve. One such
-     * tombstone is refused on its own — a 400 would hold the sender's tombstone watermark and stop EVERY deletion
-     * from that peer propagating by push.
-     */
-    const plausible = parsed.data.filter(t => seqRefusal(t.seq, { optional: false }) === null);
-    const kept = new Set(plausible);
-    warnArrivalsNotStored('sync POST tombstones', spaceId, 'tombstone', 'refused',
-      parsed.data.filter(t => !kept.has(t)).map(t => ({ _id: t._id, reason: seqRefusal(t.seq, { optional: false })! })));
-
-    // A peer token may only delete content it authored (peerInstanceId === tombstone issuer);
-    // a trusted local/admin token (no peerInstanceId) may relay any tombstone.
     const callerPeerId = (req.authToken as Record<string, unknown>)?.['peerInstanceId'] as string | undefined;
     const trustedRelay = !callerPeerId && !!req.authToken && isInstanceAdmin(req.authToken);
-    await Promise.all(plausible.map(t =>
-      applyRemoteTombstone(t as TombstoneDoc, { peerInstanceId: callerPeerId, trustedRelay }),
-    ));
+    const out = await applyPeerTombstones(spaceId, tombstones, { peerInstanceId: callerPeerId, trustedRelay },
+      `sync POST tombstones from ${callerPeerId ?? 'a local token'}`);
+    if (out.unknownTypes.length > 0) { res.status(400).json({ error: 'Invalid tombstone format' }); return; }
 
-    /*
-     * A TOMBSTONE MUST ADVANCE THE COUNTER, exactly as a document does.
-     *
-     * The bump exists so "future local writes always get a seq higher than any document received from this
-     * peer" — its own words. A tombstone was received from this peer and carries the deleting instance's seq,
-     * and skipping it breaks that invariant in the one place it costs a record:
-     *
-     *   a busy peer (counter 5001) deletes a record         -> tombstone, seq 5001
-     *   a quiet peer (counter 300) receives it              -> counter stays 300
-     *   the quiet peer re-creates that record with the same id -> local seq 301
-     *   it pushes back                                      -> `tombstone.seq >= incoming.seq`, refused as
-     *                                                          `tombstoned` with a 200
-     *
-     * The sender reads only `resp.ok`, so it advances past the record and never offers it again. Silent,
-     * permanent, and one-directional. It is reachable today wherever a caller supplies the id — facts,
-     * entities and chrono all take one — and it is what would make a derived edge id unsafe (P-23).
-     *
-     * Bumped on everything RECEIVED rather than on what `applyRemoteTombstone` accepted. A tombstone it
-     * refuses on authorship grounds still tells us where that peer's clock is, and the two errors are not
-     * symmetric: advancing too far only skips some seq numbers, while not advancing far enough loses a
-     * record.
-     *
-     * AWAITED, before the answer (`Q-198`): a fire-and-forget bump let the sender be told the page landed while
-     * this instance's counter was still behind it, and the next local write could take a seq below a deletion
-     * the peer already holds.
-     */
-    const maxTombstoneSeq = plausible.reduce((m, t) => Math.max(m, t.seq), 0);
-    if (maxTombstoneSeq > 0) await bumpSeq(spaceId, maxTombstoneSeq);
-
-    res.status(200).json({ applied: plausible.length });
+    // `applied` keeps its meaning — every element admitted by shape and seq — and `refused` is additive.
+    res.status(200).json({ applied: out.admitted, refused: out.refused.length });
   } catch (err) {
     reportServerFailure('sync POST tombstones', err);
     res.status(500).json({ error: 'Internal error' });

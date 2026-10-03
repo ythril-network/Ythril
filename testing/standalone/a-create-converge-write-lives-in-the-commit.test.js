@@ -90,7 +90,7 @@ const EXEMPT = {
   'server/src/brain/chrono-redaction.ts:backfillTypedExpiry': 'retention: stamps a computed expiry on stored entries',
   'server/src/brain/embed-record.ts:embedStoredRecord': 'the embed worker stores a vector on a record already written',
   'server/src/brain/suppression-sweep.ts:sweepSuppressedVectors': 'suppression: removes vectors from stored records',
-  'server/src/brain/tombstones.ts:applyRemoteTombstone': 'sync: a peer\'s tombstone deletes its record',
+  'server/src/sync/tombstone-apply.ts:applyPeerTombstones': 'sync: a peer\'s tombstones delete their records',
   'server/src/brain/candidate-prune.ts:pruneSpaceCandidates': 'prunes candidate rows; the collection name is computed',
   'server/src/spaces/lifecycle.ts:wipeSpace': 'the space wipe',
   'server/src/spaces/_shared.ts:repairStaleSpaceIds': 'repair: rewrites a stale spaceId field in every collection',

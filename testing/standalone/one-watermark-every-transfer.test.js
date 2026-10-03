@@ -233,8 +233,12 @@ describe('every transfer under a shared watermark is passed to the rule', () => 
     const ts = stripComments(readFileSync('server/src/sync/tombstone-transfer.ts', 'utf8'));
     assert.match(ts, /export async function pullTombstones/, 'the pull half must live here');
     assert.match(ts, /export async function pushTombstones/, 'and so must the push half');
-    assert.equal((ts.match(/outcome\.truncated = true;/g) ?? []).length, 3,
-      'expected three truncation points: the pull non-ok, the pull throw, and the push non-ok');
+    /*
+     * The COUNT of `outcome.truncated = true` that stood here is gone (bundle-46 plan row 10): it counted spellings,
+     * and the tie-safe pager adds stops (a page of one seq, the page bound) that are truncations by behaviour. What
+     * it stood for is held by `a-tombstone-transfer-delivers-all-or-holds-db`: a stop for any reason answers
+     * truncated, warns, and caps the record watermark.
+     */
     // And the engine must not have grown its own copy back.
     assert.doesNotMatch(src, /api\/sync\/tombstones\?spaceId=/,
       'the engine is building a tombstone URL again — that is the second implementation coming back');

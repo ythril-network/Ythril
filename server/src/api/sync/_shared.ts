@@ -17,7 +17,7 @@ import type { TokenRights } from '../../config/rights-shape.js';
 import { log } from '../../util/log.js';
 import { MAX_SYNC_SEQ } from '../../util/seq.js';
 import { isStrictLinkage } from '../../spaces/proxy.js';
-import type { FileMetaDoc } from '../../config/types.js';
+import type { FileMetaDoc, AuthorRef } from '../../config/types.js';
 import { emitWebhookEvent } from '../../webhooks/dispatcher.js';
 import { spillIdFromPath } from '../../brain/spill-path.js';
 import type { EdgeDoc, LinkViolationDoc } from '../../config/types.js';
@@ -211,8 +211,8 @@ export const IncomingFileMetaDoc = z.object({
  * `$set`, never `$unset`: an omitted key is left alone, so an older peer cannot erase a field it does
  * not know.
  *
- * Embedding is enqueued only when this instance HOLDS the blob; metadata can arrive first, and the file
- * transfer path enqueues via `upsertFileMeta` when the bytes land.
+ * Embedding is enqueued only when this instance HOLDS the blob; metadata can arrive first, and the bytes,
+ * pulled or pushed, enqueue it via `recordArrivedFile` when they land.
  *
  * Reached only through `writeArrivals` (`sync/arrivals.ts`), which shape-checks, collapses, accepts by seq,
  * stamps retention, and bumps the counter after the merge. The merge stays per document until `Q-107` part 2.
@@ -374,6 +374,17 @@ export function decodeCursor(token: string): number {
 export function callerPeerId(authToken: Record<string, unknown> | undefined): string | undefined {
   const v = authToken?.['peerInstanceId'];
   return typeof v === 'string' && v ? v : undefined;
+}
+
+/**
+ * The peer a peer-bound token belongs to, as the author of what it delivers — or undefined for any other token.
+ * The label is the member's as this instance lists it, or the id when no network lists the peer.
+ */
+export function callerPeerAuthor(authToken: Record<string, unknown> | undefined): AuthorRef | undefined {
+  const instanceId = callerPeerId(authToken);
+  if (!instanceId) return undefined;
+  const member = peerMemberNetworks(instanceId).flatMap(n => n.members).find(m => m.instanceId === instanceId);
+  return { instanceId, instanceLabel: member?.label ?? instanceId };
 }
 
 /**

@@ -293,6 +293,15 @@ second time under that old name. When this instance's upstream (its publisher, o
 the space both ways, the instance records the missing link itself and logs one entry per space, operation
 `network.space_alias.heal`, with the space named and no token. Nothing is created or deleted by it.
 
+**File descriptions recovered from an old sync collection.** Versions 4.0 to 5.6.1 stored the descriptions and tags
+other instances sent for their files in a side collection, where nothing read them. A clean-up every few minutes now
+copies them onto the files they belong to. On a file this instance recorded itself it only fills in what is missing,
+and never overwrites a description or tags the file already has; the one exception is an automatic caption, which
+gives way to the sender's own wording. A file another instance described keeps the usual rule: the newer version
+wins. A file this instance does not hold yet keeps its description waiting for up to 30 days, in
+case the file still arrives. Once nothing is left, the side collection is removed. That removal cannot be undone and
+appears as one entry, operation `file.stray_filemeta.drain`, with the space named and no token.
+
 **Exporting:** Download the current filtered view as JSON or CSV.
 
 **Live server log:** the **Server Log** sub-tab streams the instance's log in real time over Server-Sent Events (SSE). It loads the recent lines and then appends new ones as they happen, colour-coded by level. If the tab falls far

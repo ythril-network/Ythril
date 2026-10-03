@@ -246,11 +246,24 @@ describe('planPushArrivals — the push accept, decided as sequential processing
   });
 
   it('a tombstone at or above the seq tombstones; one below is cleaned only when the record lands', () => {
-    const tombstones = new Map([['a', 7], ['b', 3]]);
+    // A held tombstone is its seq and issuer (bundle-46); these carry no issuer, so they govern as they always did.
+    const tombstones = new Map([['a', { seq: 7 }], ['b', { seq: 3 }]]);
     const p = plan('entities', [doc('a', 7), doc('b', 4)], { tombstones });
     assert.deepEqual(p.verdicts, ['tombstoned', 'upserted']);
     assert.deepEqual(p.tombstoneCleanups.get('b'), { below: 4, onLanding: true });
     assert.equal(p.tombstoneCleanups.has('a'), false);
+  });
+
+  it('another issuer\'s tombstone does not refuse a record its PROVEN author pushes; unproven, it still does', () => {
+    const tombstones = new Map([['a', { seq: 9, issuer: 'X' }], ['b', { seq: 9, issuer: 'X' }], ['c', { seq: 9, issuer: 'X' }]]);
+    const docs = [doc('a', 4, { author: { instanceId: 'Y' } }), doc('b', 4, { author: { instanceId: 'X' } }), doc('c', 4)];
+    const proven = plan('entities', docs, { tombstones, deliveredBy: 'Y' });
+    assert.deepEqual(proven.verdicts, ['upserted', 'tombstoned', 'tombstoned']);
+    assert.equal(proven.tombstoneCleanups.has('a'), false, 'another issuer\'s tombstone is not cleaned up by this author\'s record');
+    // The author field is the sender's text: claimed by an admin token, or by a peer that is not the author, it is
+    // no proof, and the deleted id stays deleted.
+    assert.deepEqual(plan('entities', docs, { tombstones }).verdicts, ['tombstoned', 'tombstoned', 'tombstoned']);
+    assert.deepEqual(plan('entities', docs, { tombstones, deliveredBy: 'Z' }).verdicts, ['tombstoned', 'tombstoned', 'tombstoned']);
   });
 
   it('two ids on one edge triplet in a page: the first is written, the second is a duplicate', () => {

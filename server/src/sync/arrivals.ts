@@ -33,7 +33,9 @@
  *     planned, written meanwhile, fails the op with a duplicate `_id` and is kept. A RESTORE replaces, unguarded.
  *     **File metadata is the stated exception until `Q-107` part 2:** it is merged per document by
  *     `ingestFileMeta`, whose `$set` upsert filters on `_id` alone, so only the accept read (`batchUpsertBySeq`)
- *     guards it — a copy written between that read and the merge is overwritten.
+ *     guards it — a copy written between that read and the merge is overwritten. The stray-filemeta drain's
+ *     recovery (`fillOnly`, `fillFileMetaFromStray`) skips the accept read and carries every condition in the
+ *     write's own filter instead, creating nothing.
  *  7. **Failures by operation**: a duplicate is read back — a newer stored copy is "skipped", anything else is a
  *     unique-index duplicate (an edge triplet, a link's endpoints). Any other per-operation failure is retried
  *     ONCE alone and then refused by id. A failure with no per-operation shape falls back to one write per
@@ -72,6 +74,7 @@ import type { RetentionSpace } from '../brain/chrono-retention.js';
 import { retentionSpace, retentionStamps } from '../brain/ttl.js';
 import { isDerived } from '../brain/embed-record.js';
 import { ingestFileMeta, fileMetaForWire } from '../api/sync/_shared.js';
+import { fillFileMetaFromStray } from './fill-file-meta.js';
 
 type Doc = Record<string, unknown> & { _id: string; seq?: number };
 
@@ -86,6 +89,14 @@ export interface ArrivalOptions {
   deferEnqueue?: boolean;
   /** Who sent it, for the log lines only. */
   from?: string;
+  /**
+   * The stray-filemeta drain (`Q-219`) only: each file record is RECOVERED onto its row by `fillFileMetaFromStray`
+   * rather than merged by `ingestFileMeta` — a row this instance made by default is filled, a peer-written row keeps
+   * the seq accept AT THE WRITE, and no row is created. So the accept read and the retention stamping are skipped:
+   * the first would refuse exactly the rows the drain exists for, the second belongs to a record being created.
+   * It changes how a files record is written, never whether one is admitted (shape and chunk refusal still run).
+   */
+  fillOnly?: boolean;
 }
 
 /** One document refused, by id and in words a log reader and an integrator can act on. */
@@ -110,6 +121,10 @@ export interface ArrivalOutcome {
   derived: string[];
   /** Ids that arrived more than once; one version (the highest seq) was kept. */
   collapsed: string[];
+  /** `fillOnly`: the row this instance made already had everything the record could give it. */
+  complete: string[];
+  /** `fillOnly`: no file row for it, so nothing was written — never created, because a stray record is old. */
+  unstored: string[];
   /** The highest plausible seq received — what the counter has been bumped to at least. */
   maxReceived: number;
   /** Queue the landed records' embeddings, when `deferEnqueue` held it back; a no-op otherwise. */
@@ -261,7 +276,8 @@ export async function writeArrivals(
   const where = `${restore ? 'import' : 'sync'} ${family}${opts.from ? ` from ${opts.from}` : ''}`;
   const queued: Doc[] = [];
   const out: ArrivalOutcome = {
-    inserted: [], updated: [], newerLocal: [], duplicates: [], refused: [], derived: [], collapsed: [], maxReceived: 0,
+    inserted: [], updated: [], newerLocal: [], duplicates: [], refused: [], derived: [], collapsed: [], complete: [], unstored: [],
+    maxReceived: 0,
     enqueue: async () => {
       // A file is queued by `ingestFileMeta` alone — when its blob is here, or on a restore — never here as well.
       if (recordType === null || queued.length === 0 || family === 'files') return;
@@ -294,11 +310,16 @@ export async function writeArrivals(
   // ── the accept: strictly newer than what is stored, unless a restore ─────────────────────────────────────
   const collName = spaceCollection(spaceId, family);
   const stampFields = { _expireAt: 1, _contentExpireAt: 1 } as const;
-  const { toWrite, stored } = await batchUpsertBySeq(collName, arriving, { restore, fields: family === 'files' ? stampFields : {} });
+  // A recovery decides per row at the write (`fillFileMetaFromStray`), and creates nothing, so it stamps nothing.
+  const fillOnly = opts.fillOnly === true && family === 'files';
+  const { toWrite, stored } = fillOnly
+    ? { toWrite: arriving, stored: new Map<string, Doc>() }
+    : await batchUpsertBySeq(collName, arriving, { restore, fields: family === 'files' ? stampFields : {} });
   const writing = new Set(toWrite);
   for (const d of arriving) if (!writing.has(d)) out.newerLocal.push(d._id);
-  const space = recordType === null ? undefined : retentionSpace(spaceId);
-  const defaults = new Map(toWrite.map(d => [d._id, recordType === null ? {} as Doc : receiverStamps(d, recordType, space)]));
+  const space = recordType === null || fillOnly ? undefined : retentionSpace(spaceId);
+  const defaults = new Map(toWrite.map(d =>
+    [d._id, recordType === null || fillOnly ? {} as Doc : receiverStamps(d, recordType, space)]));
 
   // ── the write, a chunk at a time ──────────────────────────────────────────────────────────────────────────
   const coll = col<Doc>(collName);
@@ -339,7 +360,20 @@ export async function writeArrivals(
       }
     };
     try {
-      if (family === 'files') {
+      if (fillOnly) {
+        for (const d of chunk) {
+          try {
+            const r = await fillFileMetaFromStray(spaceId, d);
+            if (r === 'merged') out.updated.push(d._id);
+            else if (r === 'complete') out.complete.push(d._id);
+            else if (r === 'newer') out.newerLocal.push(d._id);
+            else if (r === 'no-file') out.unstored.push(d._id);
+            else out.derived.push(d._id);
+          } catch (err) {
+            classify(d, err);
+          }
+        }
+      } else if (family === 'files') {
         await oneByOne(chunk, async (d) => {
           const keep = stored.get(d._id);
           // D-9 for a file: a stamp the stored copy has is kept by the merge itself (`$set`, never `$unset`).

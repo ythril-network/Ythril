@@ -39,13 +39,28 @@ async function readFile(base, token) {
   return { status: r.status, text: r.ok ? await r.text() : '' };
 }
 
-/** Sync from both ends each poll: whichever end moves files, a passing test must not depend on guessing it. */
+/**
+ * Sync from both ends each poll: whichever end moves files, a passing test must not depend on guessing it.
+ *
+ * On a timeout it reports the last sync answer from each end, and `what` may be a function that goes and looks:
+ * the CI container dump keeps only the tail of each log, so a failure early in the run leaves nothing else.
+ */
 async function syncUntil(condition, what) {
+  const last = {};
   await waitFor(async () => {
-    await post(INSTANCES.b, tokenB, `/api/networks/${networkId}/sync?wait=true`, {});
-    await post(INSTANCES.a, tokenA, `/api/networks/${networkId}/sync?wait=true`, {});
+    last.b = await post(INSTANCES.b, tokenB, `/api/networks/${networkId}/sync?wait=true`, {});
+    last.a = await post(INSTANCES.a, tokenA, `/api/networks/${networkId}/sync?wait=true`, {});
     return condition();
-  }, 60_000, 2_000, () => what);
+  }, 60_000, 2_000, async () => `${typeof what === 'function' ? await what() : what}; last sync answers: `
+    + `B ${last.b?.status} ${JSON.stringify(last.b?.body)}, A ${last.a?.status} ${JSON.stringify(last.a?.body)}`);
+}
+
+/** The file's metadata record as one end holds it — the fields the Q-69 case decides on. */
+async function fileMetaOn(base, token) {
+  const q = await post(base, token, '/api/filter', { space: SPACE, collection: 'files', filter: { path: FILE }, limit: 1 });
+  // The tool door carries the page in `data` (`Q-111`), so `text` is not parsed.
+  const rows = q.body?.data?.results ?? q.body?.results ?? [];
+  return rows[0];
 }
 
 before(async () => {
@@ -82,6 +97,23 @@ describe('a published file reaches the subscriber', () => {
       'the new file never reached the subscriber');
   });
 
+  it('the subscriber holds the publisher\'s record of a pushed file, not one it stamped itself', async () => {
+    // The publisher PUSHES the bytes to the subscriber's upload door. That door stored them as a local upload: this
+    // instance's next seq, this instance as the author of a new file, and a description derived here — so the
+    // subscriber's copy tied or outranked the publisher's next edit, which then never landed (seen in CI as Q-69).
+    // An arrival is recorded as the publisher's, whichever door brought the bytes (Q-143, the push half).
+    await syncUntil(async () => {
+      const [a, b] = [await fileMetaOn(INSTANCES.a, tokenA), await fileMetaOn(INSTANCES.b, tokenB)];
+      return a !== undefined && b !== undefined && a.seq === b.seq;
+    }, async () => 'the subscriber never held the publisher\'s seq for the file: '
+      + `B ${JSON.stringify((await fileMetaOn(INSTANCES.b, tokenB))?.seq)}, A ${JSON.stringify((await fileMetaOn(INSTANCES.a, tokenA))?.seq)}`);
+    const [a, b] = [await fileMetaOn(INSTANCES.a, tokenA), await fileMetaOn(INSTANCES.b, tokenB)];
+    // Not `updatedAt` yet: local processing (the media worker's status marks) still stamps it on any instance's copy,
+    // which is its own defect, Q-240. This row holds the fields an arrival decides: seq, author and the metadata.
+    const authored = d => ({ seq: d.seq, author: d.author?.instanceId, description: d.description, tags: d.tags });
+    assert.deepEqual(authored(a), authored(b), 'the subscriber\'s copy of a pushed file is not the publisher\'s record');
+  });
+
   it('a change on the publisher replaces the subscriber\'s copy, without a conflict', async () => {
     assert.ok((await writeFile(INSTANCES.b, tokenB, `# Onboarding ${RUN}, second edition\n`)) < 300);
     await syncUntil(async () => (await readFile(INSTANCES.a, tokenA)).text.includes('second edition'),
@@ -99,12 +131,15 @@ describe('a published file reaches the subscriber', () => {
     });
     assert.ok(r.status < 300, `meta edit answered ${r.status}`);
     await syncUntil(async () => {
-      const q = await post(INSTANCES.a, tokenA, '/api/filter', { space: SPACE, collection: 'files', filter: { path: FILE }, limit: 1 });
-      // The tool door carries the page in `data` (`Q-111`), so `text` is not parsed.
-      const rows = q.body?.data?.results ?? q.body?.results ?? [];
-      const doc = rows[0];
+      const doc = await fileMetaOn(INSTANCES.a, tokenA);
       return doc?.description === `described ${RUN}` && (doc.tags ?? []).includes('onboarding');
-    }, 'the description and tags never reached the subscriber');
+    }, async () => {
+      const pick = d => d && { seq: d.seq, description: d.description, descriptionSource: d.descriptionSource, tags: d.tags,
+        author: d.author?.instanceId, createdAt: d.createdAt, updatedAt: d.updatedAt, sha256: d.sha256, embeddingStatus: d.embeddingStatus };
+      return 'the description and tags never reached the subscriber: '
+        + `B holds ${JSON.stringify(pick(await fileMetaOn(INSTANCES.b, tokenB)))}, `
+        + `A holds ${JSON.stringify(pick(await fileMetaOn(INSTANCES.a, tokenA)))}`;
+    });
   });
 
   it('a delete on the publisher removes the subscriber\'s copy', async () => {

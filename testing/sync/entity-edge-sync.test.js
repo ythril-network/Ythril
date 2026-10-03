@@ -243,11 +243,18 @@ describe('POST /api/sync/tombstones — apply incoming tombstones', () => {
     assert.equal(r.body.applied, 1);
   });
 
-  it('returns 400 for invalid tombstone format', async () => {
+  it('refuses a malformed tombstone on its own, and answers 400 for a type it does not know', async () => {
+    // Bundle-46: a malformed element is refused alone and counted in `refused` (a 400 held the sender's watermark
+    // and stopped every deletion from it); an element of an unknown type still answers 400 for the page.
     const r = await post(INSTANCES.a, token, `/api/sync/tombstones?spaceId=${SPACE}`, {
       tombstones: [{ _id: 'x' }],  // missing required fields
     });
-    assert.equal(r.status, 400, JSON.stringify(r.body));
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.deepEqual(r.body, { applied: 0, refused: 1 });
+    const u = await post(INSTANCES.a, token, `/api/sync/tombstones?spaceId=${SPACE}`, {
+      tombstones: [{ _id: 'y', type: 'a-newer-type', spaceId: SPACE, deletedAt: new Date().toISOString(), instanceId: 'i', seq: 3 }],
+    });
+    assert.equal(u.status, 400, JSON.stringify(u.body));
   });
 
   it('returns 400 without spaceId', async () => {
