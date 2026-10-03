@@ -167,6 +167,12 @@ export async function startConfiguredInstanceServices(): Promise<void> {
   const { startBrainEmbeddingWorker } = await import('./brain/embed-worker.js');
   startBrainEmbeddingWorker();
 
+  // Vectors a suppression already covers, stored before the sweep reached files, removed the model name, or ran on a
+  // network's layer (bundle-30 `R5`): cleared once per start, in the background. Here, because every configured start
+  // runs this function; local derived fields only, so it is not a migration of synced data.
+  const { sweepEverySpaceAtBoot } = await import('./brain/suppression-sweep.js');
+  sweepEverySpaceAtBoot();
+
   // Reindex runs this instance had when it stopped: here, beside the worker that rebuilds their records, because
   // every configured start runs this function — a first run included — where the database phase can be skipped.
   const { resumeReindexRuns } = await import('./brain/reindex.js');

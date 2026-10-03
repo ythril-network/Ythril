@@ -75,20 +75,27 @@ describe('a file skips the schema tier', () => {
 });
 
 describe('suppression removes a stale vector', () => {
-  it('unsets both the vector and its model', () => {
+  it('unsets both the vector and its model', async () => {
     // Declining to write a new vector is not enough: the old one still answers vector search, which is the whole
     // bug the flag exists to prevent.
-    const branch = CODE.slice(CODE.indexOf('embeddingSuppressed({'));
-    const unset = branch.slice(0, branch.indexOf("return 'excluded'"));
-    assert.match(unset, /\$unset/);
-    assert.match(unset, /embedding:/);
-    assert.match(unset, /embeddingModel:/);
+    //
+    // Re-anchored for bundle-30 `R12`: the removal is one constant (`UNSET_VECTOR`, `sync/local-only-fields.ts`)
+    // rather than four hand-spelled `$unset`s, so the branch must use it and the constant must name both fields —
+    // the second half read from the built module, so a constant that dropped the model fails here.
+    const branch = CODE.slice(CODE.indexOf('embeddingSuppressedFor(spaceId, recordType, doc)'));
+    const end = branch.indexOf("'excluded'");
+    assert.ok(end > 0, "the suppressed branch no longer ends in 'excluded' — re-anchor");
+    const unset = branch.slice(0, end);
+    assert.match(unset, /\$unset:\s*UNSET_VECTOR\b/);
+    const { UNSET_VECTOR } = await import('../../server/dist/sync/local-only-fields.js');
+    assert.deepEqual(Object.keys(UNSET_VECTOR).sort(), ['embedding', 'embeddingModel']);
   });
 
   it('returns a distinct outcome rather than reporting success', () => {
     // `'embedded'` here would make a suppressed record indistinguishable from an embedded one in every caller
-    // and every metric.
-    assert.match(CODE, /return 'excluded';/);
+    // and every metric. (The write is guarded by the seq it read since bundle-30, so a copy written meanwhile
+    // answers `superseded` instead — still never `embedded`.)
+    assert.match(CODE, /return [^;\n]*'excluded';/);
   });
 });
 

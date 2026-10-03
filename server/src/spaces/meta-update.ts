@@ -50,7 +50,8 @@ import { UpdateSpaceBody, findBrokenLibraryRefs, brokenRefsError, stripServerOwn
 import type { TypeSchemasZ } from './body-schemas.js';
 import type { z } from 'zod';
 import { isDeepStrictEqual } from 'node:util';
-import { sweepSuppressedVectors } from '../brain/suppression-sweep.js';
+// The trigger lives beside the sweep (bundle-30 `R5`): the effective-meta recompute fires it too.
+import { sweepAfterMetaWrite } from '../brain/suppression-sweep.js';
 
 /**
  * Deep-merge an incoming PATCH `meta` payload into the existing SpaceMeta.
@@ -544,18 +545,4 @@ export async function voteOnSchemaEditIfNetworked(
   if (result.outcome === 'not_found') return { status: 404, body: { error: `Space '${spaceId}' not found` } };
   // Every round passed on this instance's own yes (a club organiser, a publisher, a lone member): applied already.
   return { status: 200, body: { space: result.space, ...networkMergeNotice(result) } };
-}
-
-/**
- * Sweep the vectors a meta write newly suppresses, without blocking the write on it; a failure is logged, since the
- * sweep is idempotent and the next meta write repeats it.
- *
- * `meta` is undefined when the write carried no meta (a `textAnalysis`-only PATCH): suppression is read from meta
- * alone, so there is nothing to sweep. Both callers cast it to `SpaceMeta` instead, and the sweep then failed on
- * every such write with a warning that meant nothing (`Q-74`).
- */
-function sweepAfterMetaWrite(id: string, meta: SpaceMeta | undefined): void {
-  if (meta === undefined) return;
-  void sweepSuppressedVectors(id, meta)
-    .catch(err => log.warn(`Suppression sweep failed for ${id}: ${err instanceof Error ? err.message : String(err)}`));
 }

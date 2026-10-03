@@ -161,9 +161,18 @@ describe('an edge keys on LABEL, not on type', () => {
 
 describe('the sweep runs where the flag is written', () => {
   it('meta-update calls it', () => {
+    // Re-anchored for bundle-30 `R5`: the trigger (`sweepAfterMetaWrite`) moved beside the sweep, because the
+    // effective-meta recompute — where a network's suppression lands — fires it too.
     const body = src('server/src/spaces/meta-update.ts');
-    assert.match(body, /sweepSuppressedVectors\(/,
+    assert.match(body, /sweepAfterMetaWrite\(/,
       'nothing sweeps after a meta write, so the docs\' present tense is still a promise rather than behaviour');
+    assert.match(bodyOf(src('server/src/brain/suppression-sweep.ts'), 'sweepAfterMetaWrite'), /sweepSuppressedVectors\(/,
+      'the trigger no longer runs the sweep');
+  });
+
+  it('the effective-meta recompute calls it — every way a network changes the meta ends there', () => {
+    assert.match(bodyOf(src('server/src/spaces/effective-meta.ts'), 'recomputeEffectiveMeta'), /sweepAfterMetaWrite\(/,
+      'a network layer that turns suppression on leaves every stored vector in place');
   });
 
   it('it does not bump seq, because the vector is not replicated', () => {

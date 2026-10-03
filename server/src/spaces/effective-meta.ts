@@ -24,6 +24,7 @@ import type { Config, SpaceConfig, SpaceMeta } from '../config/types.js';
 import { getConfig, saveConfig } from '../config/loader.js';
 import { effectiveMeta, replicatedMetaOf, type MetaLayer } from '../sync/replicated-meta.js';
 import { updateSpace } from './spaces.js';
+import { sweepAfterMetaWrite } from '../brain/suppression-sweep.js';
 
 /** The layers that apply to `spaceId`, highest precedence first: the operator's order, then the order joined. */
 export function layersFor(cfg: Config, spaceId: string): MetaLayer[] {
@@ -63,6 +64,10 @@ export function recomputeEffectiveMeta(spaceId: string, persist = false): boolea
     return false;
   }
   updateSpace(spaceId, { meta: next });
+  // A layer may have turned suppression on: what it now suppresses holds no vector (bundle-30 `R5`). Every way a
+  // network changes the meta ends here — a meta pull, a meta round, a space addition, a network left, a precedence
+  // change — and swept nothing, so the space reported its records suppressed and went on ranking them by meaning.
+  sweepAfterMetaWrite(spaceId, next);
   return true;
 }
 

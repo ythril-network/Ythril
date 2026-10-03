@@ -64,6 +64,26 @@ for (const f of RESTORED_LOCAL_FIELDS) {
 }
 
 /**
+ * The VECTOR half of the derived fields: the vector and the model that made it, without `matchedText`.
+ *
+ * Two removals ask two different questions, and each had been spelled by hand at every site (four `$unset`s, one of
+ * which — the suppression sweep's — named `embedding` alone and left the model behind):
+ *  - **the content changed or is gone** (a textless record, an arrival this instance suppresses): every derived field
+ *    goes, `matchedText` too, because it is the lexical channel's copy of text the record no longer has (`Q-94`);
+ *  - **only the decision to embed changed** (suppression turned on, an embed that failed): the vector goes and
+ *    `matchedText` stays or is rewritten — the content did not change, and removing it is a content decision.
+ */
+export const VECTOR_FIELDS: ReadonlySet<string> = new Set(['embedding', 'embeddingModel']);
+for (const f of VECTOR_FIELDS) {
+  if (!DERIVED_LOCAL_FIELDS.has(f)) throw new Error(`VECTOR_FIELDS names '${f}', which is not a derived local field`);
+}
+
+/** `$unset` of every derived field — the content changed or is gone. */
+export const UNSET_DERIVED: Readonly<Record<string, ''>> = Object.fromEntries([...DERIVED_LOCAL_FIELDS].map(f => [f, '']));
+/** `$unset` of the vector half — only the decision to embed changed. */
+export const UNSET_VECTOR: Readonly<Record<string, ''>> = Object.fromEntries([...VECTOR_FIELDS].map(f => [f, '']));
+
+/**
  * The same set as a Mongo projection, for the SENDING side.
  *
  * Not the guarantee — the receiver's strip is, because a peer decides what it sends and this instance

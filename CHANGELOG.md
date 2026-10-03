@@ -322,6 +322,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Suppression that a network turns on removes the vectors already stored (`Q-230`).** A space whose type or
+  space-level `suppressEmbeddings` arrived from a network — a meta pull, a meta round, a space addition, leaving a
+  network or changing its precedence — reported its records suppressed and went on ranking them by meaning until
+  each was rewritten: only an operator's own edit swept. Every change of the effective meta now sweeps. The sweep
+  also covers files and their derived passages (it covered none), removes the model name with the vector (it left
+  it behind), keeps `matchedText` (the content did not change), and runs once at every start, so vectors stored
+  before this version are cleared without waiting for the next edit.
+- **An embed job no longer writes over a record that changed while it was embedding.** The job reads a record,
+  calls the model, then wrote the vector by id alone: a peer's newer copy landing during the model call received
+  the OLD text's vector and `matchedText` — and a copy this instance suppresses received a vector it must never
+  hold. Every write the job makes is now guarded by the seq it read; the newer copy's own job embeds it.
 - **A write that stalled could stop a space's replication indefinitely (`Q-213`).** While a write holds its
   sequence number, every peer pulling the space is served nothing past it, and nothing bounded the write: a
   document lock held elsewhere, a stalled socket or a transaction retrying a conflict for two minutes held every
