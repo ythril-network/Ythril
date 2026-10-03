@@ -214,8 +214,23 @@ export async function completeEmbedJob(
   spaceId: string,
   recordType: BrainEmbedRecordType,
   recordId: string,
+  claimToken?: string | null,
 ): Promise<void> {
-  await jobs(spaceId).deleteOne(asFilter<BrainEmbedJobDoc>({ _id: embedJobId(recordType, recordId) }));
+  await jobs(spaceId).deleteOne(asFilter<BrainEmbedJobDoc>(claimedBy(recordType, recordId, claimToken)));
+}
+
+/**
+ * The filter for a job this worker CLAIMED, when it says which claim that was (`Q-249`).
+ *
+ * A record rewritten while its job is being embedded re-queues it: the enqueue makes the job pending again and clears
+ * its claim. The worker's late `completeEmbedJob` (which deletes the job) or `failEmbedJob` would then act on the
+ * rewrite's job — deleting it, so the new text is never embedded, or writing the old attempt's backoff over it.
+ * Naming the token makes a finish under a claim that is no longer held match nothing. Without a token the filter is
+ * the job's id alone, which is how every caller that holds no claim (a delete path, a test) behaves as before.
+ */
+function claimedBy(recordType: BrainEmbedRecordType, recordId: string, claimToken?: string | null): { _id: string; claimToken?: string } {
+  const _id = embedJobId(recordType, recordId);
+  return claimToken ? { _id, claimToken } : { _id };
 }
 
 /**
@@ -292,6 +307,9 @@ export function isTransientEmbedError(message: string): boolean {
  * The wait then has to come from somewhere else, which is why `transientFailures` is a second counter and not
  * a flag: the backoff is a function of the attempt number, so holding `attempts` still would pin every retry
  * at the first step and hammer a dead embedder every five seconds — the opposite of what this is for.
+ *
+ * `claimToken` is the claim the failing worker holds (`claimedBy`, `Q-249`): a failure reported under a claim a
+ * rewrite has since taken back matches nothing, so the rewrite's fresh job keeps its own state.
  */
 export async function failEmbedJob(
   spaceId: string,
@@ -300,15 +318,16 @@ export async function failEmbedJob(
   attempts: number,
   errorMessage: string,
   transientFailures = 0,
+  claimToken?: string | null,
 ): Promise<void> {
   const now = new Date().toISOString();
-  const _id = embedJobId(recordType, recordId);
+  const filter = claimedBy(recordType, recordId, claimToken);
   const lastError = errorMessage.slice(0, 500);
 
   if (isTransientEmbedError(errorMessage)) {
     const failures = transientFailures + 1;
     await jobs(spaceId).updateOne(
-      asFilter<BrainEmbedJobDoc>({ _id }),
+      asFilter<BrainEmbedJobDoc>(filter),
       asUpdate<BrainEmbedJobDoc>({
         $set: {
           status: 'pending', claimedAt: null, claimToken: null, lastError, updatedAt: now,
@@ -327,7 +346,7 @@ export async function failEmbedJob(
 
   if (attempts < MAX_EMBED_ATTEMPTS) {
     await jobs(spaceId).updateOne(
-      asFilter<BrainEmbedJobDoc>({ _id }),
+      asFilter<BrainEmbedJobDoc>(filter),
       asUpdate<BrainEmbedJobDoc>({
         $set: {
           status: 'pending', claimedAt: null, claimToken: null, lastError, updatedAt: now,
@@ -340,7 +359,7 @@ export async function failEmbedJob(
   }
 
   await jobs(spaceId).updateOne(
-    asFilter<BrainEmbedJobDoc>({ _id }),
+    asFilter<BrainEmbedJobDoc>(filter),
     asUpdate<BrainEmbedJobDoc>({
       $set: { status: 'failed', claimedAt: null, claimToken: null, lastError, updatedAt: now },
     }),
