@@ -390,6 +390,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   calls the model, then wrote the vector by id alone: a peer's newer copy landing during the model call received
   the OLD text's vector and `matchedText` — and a copy this instance suppresses received a vector it must never
   hold. Every write the job makes is now guarded by the seq it read; the newer copy's own job embeds it.
+- **Two members holding the same data report the same Merkle root (`Q-307`).** The root hashed each record's
+  `spaceId` — which the receiver rewrites to its own id for the space, so a space held under a `spaceMap` alias
+  differed in every leaf — and the files that never leave an instance (a conflict copy, a schema snapshot). A
+  network with `merkle: true` logged `MERKLE_DIVERGENCE` for such a space on every cycle over identical content.
+  **Mixed versions:** a root from an earlier version never equals one from this version, so a `merkle: true`
+  network running both reports `MERKLE_DIVERGENCE` for every space until all its members have upgraded. The
+  check is advisory and blocks nothing.
 - **A refused entity cascade removes nothing.** A cascade a fact, chrono entry or file still blocked deleted every
   blocking edge, wrote their tombstones (so peers deleted them too), and only then answered "cannot delete". The
   whole set is now decided first, and a cascade that cannot finish removes no edge.

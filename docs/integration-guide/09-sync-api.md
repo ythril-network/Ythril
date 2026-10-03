@@ -590,12 +590,21 @@ GET /api/sync/merkle?spaceId=general&networkId=net-uuid
 Each brain-document leaf hashes the document's **content** (canonical JSON, keys sorted), not just its
 `_id`/`seq` — so a mismatch detects tampered content, not only missing or version-skewed documents.
 
-Five fields are excluded, and the rule behind the list is worth knowing if you are comparing roots yourself:
-**a field that is hashed must replicate.** `embedding`, `embeddingModel` and `matchedText` are derived by the
-local model, so peers running different models legitimately differ. `_expireAt` and `_contentExpireAt` are
-retention stamps each instance computes from its own policy — a peer's stamp is never adopted, in either
-direction, because the sweep that acts on it would then be following another operator's policy. Everything
-else is hashed, and everything else crosses the wire — a field in neither category means two peers can never agree about identical content. File leaves hash the file's SHA-256. The check is advisory: a root mismatch is reported as `MERKLE_DIVERGENCE`, it does not block sync.
+What is excluded follows one rule, worth knowing if you are comparing roots yourself: **a field that is hashed
+must replicate, as it is.** The local-only fields are out: `embedding`, `embeddingModel` and `matchedText` are
+derived by the local model, so peers running different models legitimately differ, and the retention stamps
+(`_expireAt`, `_contentExpireAt`) and the sync base are each instance's own — a peer's stamp is never adopted,
+in either direction, because the sweep that acts on it would then be following another operator's policy.
+`spaceId` is out too: it crosses the wire and the receiver rewrites it to its own id for the space, which under a
+`spaceMap` alias is not the sender's. Everything else is hashed, and everything else crosses the wire — a field
+in neither category means two peers can never agree about identical content. File leaves hash the file's
+SHA-256, and a file that never leaves an instance — a conflict copy, a schema snapshot, a legacy read spill — is
+not hashed at all, record or bytes. The check is advisory: a root mismatch is reported as `MERKLE_DIVERGENCE`, it
+does not block sync.
+
+**Mixed versions:** a root from a version before this rule (which hashed `spaceId` and the instance-local
+files) never equals one from a version after it, so a `merkle: true` network whose members run both reports
+`MERKLE_DIVERGENCE` for every space until all of them have upgraded.
 
 ### Gossip Endpoints
 

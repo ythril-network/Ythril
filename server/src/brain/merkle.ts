@@ -27,9 +27,10 @@
 import { createHash } from 'node:crypto';
 import { col, asFilter } from '../db/mongo.js';
 import { buildFileManifest } from '../files/manifest.js';
-import { spillIdFromPath } from './spill-path.js';
 import { BRAIN_COLLECTIONS } from '../config/types-knowledge.js';
-import { LOCAL_ONLY_FIELDS, LOCAL_ONLY_EXCLUSION } from '../sync/local-only-fields.js';
+import { LOCAL_ONLY_FIELDS } from '../sync/local-only-fields.js';
+import { RETAGGED_FIELDS } from '../sync/retagged-fields.js';
+import { isInstanceLocalFile } from '../sync/file-conflict.js';
 
 // ── Internal helpers ─────────────────────────────────────────────────────────
 
@@ -70,8 +71,16 @@ function sha256hex(input: string): string {
  * READ FROM `sync/local-only-fields.ts`, which is the same set for the same reason. `CLAUDE.md` states
  * the equivalence as a rule — a field that is hashed must replicate — so a field excluded here is exactly
  * a field ingest must drop, and two lists of one set is how one of them goes wrong.
+ *
+ * ## And the fields the receiver RETAGS (`Q-307`)
+ *
+ * `spaceId` replicates, and every arrival is then stored under THIS instance's id for the space
+ * (`sync/retagged-fields.ts`) — under a `spaceMap` alias, not the sender's. Hashed, two instances holding
+ * identical data under two ids differed in every leaf, for ever: `MERKLE_DIVERGENCE` every cycle on a space
+ * where nothing is wrong. It is its OWN list, never `LOCAL_ONLY_FIELDS`: the arrival writer strips those, and
+ * would strip the space id from every arrival.
  */
-const DERIVED_FIELDS = LOCAL_ONLY_FIELDS;
+const DERIVED_FIELDS: ReadonlySet<string> = new Set([...LOCAL_ONLY_FIELDS, ...RETAGGED_FIELDS]);
 
 /**
  * Canonical JSON of a document: keys sorted at every level, derived fields
@@ -136,8 +145,8 @@ export function docLeaf(collType: string, doc: Record<string, unknown>): string 
   return sha256hex(`doc:${collType}:${String(doc['_id'])}:${String(doc['seq'])}:${canonicalDocHash(doc)}`);
 }
 
-// Derived from the one list, like DERIVED_FIELDS: a hand-written copy here missed `syncBase` the day it was added (Q-66).
-const DERIVED_PROJECTION = LOCAL_ONLY_EXCLUSION;
+// Derived from DERIVED_FIELDS itself: a hand-written copy here missed `syncBase` the day it was added (Q-66).
+const DERIVED_PROJECTION: Readonly<Record<string, 0>> = Object.fromEntries([...DERIVED_FIELDS].map(f => [f, 0]));
 
 /**
  * What is INCLUDED from a file's metadata — and it is an inclusion projection, unlike every other collection.
@@ -154,7 +163,7 @@ const DERIVED_PROJECTION = LOCAL_ONLY_EXCLUSION;
  * **The two lists must name the same fields.** That gate is what says so.
  */
 const FILE_HASH_PROJECTION = {
-  _id: 1, spaceId: 1, path: 1, description: 1, descriptionSource: 1, tags: 1,
+  _id: 1, path: 1, description: 1, descriptionSource: 1, tags: 1,
   properties: 1,
   suppressEmbeddings: 1,
   author: 1, createdAt: 1, updatedAt: 1, seq: 1,
@@ -211,16 +220,20 @@ export async function computeMerkleRoot(spaceId: string): Promise<MerkleResult> 
       .project(collType === 'files' ? FILE_HASH_PROJECTION : DERIVED_PROJECTION);
 
     for await (const doc of cursor) {
-      // A legacy spill's FileMeta (Q-92) replicates in neither direction any more, so hashing it would report
-      // a divergence every cycle between an instance that swept its spills and one that has not.
-      if (collType === 'files' && spillIdFromPath(String((doc as { _id?: unknown })._id ?? ''))) continue;
+      // A file that never leaves this instance — a conflict copy, a schema snapshot, a legacy spill (Q-92) —
+      // replicates in neither direction, so hashing its record reports a divergence every cycle between two
+      // members that hold the same data. The predicate the peer manifest uses, imported (`Q-307`, `R8`).
+      if (collType === 'files' && isInstanceLocalFile(String((doc as { _id?: unknown })._id ?? ''))) continue;
       leaves.push(docLeaf(collType, doc as Record<string, unknown>));
     }
   }
 
   // ── File manifest ──────────────────────────────────────────────────────
+  // Only the files that replicate: a conflict copy or a schema snapshot is this instance's own, and the peer
+  // manifest leaves it out for the same reason (`isInstanceLocalFile`).
   const files = await buildFileManifest(spaceId);
   for (const f of files) {
+    if (isInstanceLocalFile(f.path)) continue;
     leaves.push(sha256hex(`file:${f.path}:${f.sha256}`));
   }
 

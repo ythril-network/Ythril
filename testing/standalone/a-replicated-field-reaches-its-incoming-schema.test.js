@@ -71,6 +71,11 @@ const MERKLE = 'server/src/brain/merkle.ts';
  * fields rather than a statement about which fields are local.
  */
 const LOCAL_ONLY = 'server/src/sync/local-only-fields.ts';
+/*
+ * The fields the RECEIVER rewrites on arrival (`spaceId`, `Q-307`): replicated, then retagged, so the hash leaves
+ * them out through their own list — never through `LOCAL_ONLY_FIELDS`, which the arrival writer strips.
+ */
+const RETAGGED = 'server/src/sync/retagged-fields.ts';
 
 /** Fields of a `*Doc` interface, in declaration order. */
 function docFields(src, name) {
@@ -112,10 +117,15 @@ function incomingKeys(src, name) {
  * So the extractor has to read both, and what it returns is the same thing either way: the set of fields
  * the hash does not see.
  */
-function merkleExcluded(src, docName, localOnlySrc) {
-  const set = localOnlySrc.match(/LOCAL_ONLY_FIELDS: ReadonlySet<string> = new Set\(\[([^\]]*)\]\)/);
+function merkleExcluded(src, docName, listsSrc) {
   const names = s => [...(s ?? '').matchAll(/([a-zA-Z_]\w*)/g)].map(m => m[1]).filter(n => n !== '0');
-  const fromSet = names(set?.[1]);
+  const listNamed = (name) => names(listsSrc.match(new RegExp(`${name}: ReadonlySet<string> = new Set\\(\\[([^\\]]*)\\]\\)`))?.[1]);
+  /*
+   * WHICH lists `DERIVED_FIELDS` is made of, read from merkle.ts — re-anchored (bundle-30, `Q-307`) when the retagged
+   * list joined the local-only one. A bare `= LOCAL_ONLY_FIELDS` (the shape before) reads as that one list.
+   */
+  const made = src.match(/const DERIVED_FIELDS(?::[^=]*)? = new Set\(\[([^\]]*)\]\)/);
+  const fromSet = (made ? names(made[1]) : ['LOCAL_ONLY_FIELDS']).flatMap(listNamed);
 
   /*
    * A file's list is INCLUSIVE, so 'excluded' is its complement against the document's own fields. Computed
@@ -131,6 +141,8 @@ function merkleExcluded(src, docName, localOnlySrc) {
   // DERIVED from the one list since Q-66 (a hand-written copy missed `syncBase`): then the two statements are one
   // by construction, which is the strongest form of the agreement asserted below.
   if (/const DERIVED_PROJECTION = LOCAL_ONLY_EXCLUSION;/.test(src)) return { fromSet, fromProjection: fromSet, inclusive: false };
+  // Built from DERIVED_FIELDS itself (`Q-307`): the same set by construction, as above.
+  if (/const DERIVED_PROJECTION[^=]*= Object\.fromEntries\(\[\.\.\.DERIVED_FIELDS\]/.test(src)) return { fromSet, fromProjection: fromSet, inclusive: false };
   const proj = src.match(/const DERIVED_PROJECTION = \{([^}]*)\}/);
   return { fromSet, fromProjection: names(proj?.[1]), inclusive: false };
 }
@@ -181,7 +193,7 @@ describe('a hashed field replicates, and a non-replicated field is not hashed', 
   const types = readFileSync(TYPES, 'utf8');
   const shared = readFileSync(SHARED, 'utf8');
   const merkle = readFileSync(MERKLE, 'utf8');
-  const localOnly = readFileSync(LOCAL_ONLY, 'utf8');
+  const localOnly = readFileSync(LOCAL_ONLY, 'utf8') + '\n' + readFileSync(RETAGGED, 'utf8');
   // Per document, because the two projection shapes are read differently — see `merkleExcluded`.
   const { fromSet, fromProjection } = merkleExcluded(merkle, null, localOnly);
   const REPLICATED = replicatedPairs(shared);
