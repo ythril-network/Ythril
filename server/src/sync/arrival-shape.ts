@@ -25,6 +25,15 @@
  * machinery — sizes, hashes, excerpts, the media pipeline's fields — is removed first (`fileMetaFromSender`, a list
  * the compiler holds complete); a key that is neither a wire key nor part of a file row is still refused, on both
  * doors alike.
+ *
+ * ## A fill (`{ fill: true }`, file metadata only)
+ *
+ * The stray-filemeta drain does not store a record: it FILLS the keys a record carries onto a row that already exists
+ * (`sync/fill-file-meta.ts`), and writes nothing it lacks. So it validates the keys PRESENT — their types, an
+ * undeclared key, a `parentFileId` of any type, a seq the counter cannot carry — and requires none but `_id`. Required
+ * as on the other doors, a record an older version stored without `tags`, `author` or `seq` was refused and then
+ * deleted as answered, losing the description it carried for good (bundle-30 I2b). The fill's schema is the family's
+ * own made partial, never a second copy of it, so a key added to the wire schema is checked here too.
  */
 import {
   IncomingFactDoc, IncomingEntityDoc, IncomingEdgeDoc, IncomingChronoDoc, IncomingLinkDoc, IncomingFileMetaDoc,
@@ -41,13 +50,14 @@ type SafeParser = { safeParse: (v: unknown) => { success: boolean; data?: unknow
  * it, so a family added to `REPLICATED_FAMILIES` without a schema stops the server rather than being stored
  * unchecked.
  */
-export const INCOMING_SCHEMA_OF: Readonly<Partial<Record<PayloadKey, { schema: SafeParser; name: string }>>> = {
+export const INCOMING_SCHEMA_OF: Readonly<Partial<Record<PayloadKey, { schema: SafeParser; name: string; fill?: SafeParser }>>> = {
   facts: { schema: IncomingFactDoc, name: 'IncomingFactDoc' },
   entities: { schema: IncomingEntityDoc, name: 'IncomingEntityDoc' },
   edges: { schema: IncomingEdgeDoc, name: 'IncomingEdgeDoc' },
   chrono: { schema: IncomingChronoDoc, name: 'IncomingChronoDoc' },
   links: { schema: IncomingLinkDoc, name: 'IncomingLinkDoc' },
-  filemeta: { schema: IncomingFileMetaDoc, name: 'IncomingFileMetaDoc' },
+  // `.partial()` keeps `.strict()` and the `never` on `parentFileId`: only the requirement goes.
+  filemeta: { schema: IncomingFileMetaDoc, name: 'IncomingFileMetaDoc', fill: IncomingFileMetaDoc.partial() },
 };
 {
   const keys: readonly string[] = REPLICATED_FAMILIES.map(f => f.payloadKey);
@@ -58,10 +68,15 @@ export const INCOMING_SCHEMA_OF: Readonly<Partial<Record<PayloadKey, { schema: S
   }
 }
 
+/** A whole wire record, as every door but a fill admits it. */
+export type WireArrival = Record<string, unknown> & { _id: string; seq: number };
+/** What a fill admits: the keys a record carries, of which only `_id` is required. */
+export type FillArrival = Record<string, unknown> & { _id: string; seq?: number };
+
 /** A document admitted, as its schema parsed it, at its index in what was handed in. */
-export interface AdmittedArrival {
+export interface AdmittedArrival<D extends FillArrival = WireArrival> {
   index: number;
-  doc: Record<string, unknown> & { _id: string; seq: number };
+  doc: D;
 }
 
 /** A document refused, at its index; `invalid` when its family's wire schema refused it. */
@@ -75,12 +90,17 @@ export interface RefusedArrival {
 /** How much of a schema's issue list a refusal quotes. */
 const ISSUES_QUOTED = 200;
 
-/** Validate a family's arriving documents — see the module docblock. */
-export function admitArrivals(key: PayloadKey, docs: readonly unknown[]): { admitted: AdmittedArrival[]; refused: RefusedArrival[] } {
+/** Validate a family's arriving documents — see the module docblock, and its section on a fill. */
+export function admitArrivals(key: PayloadKey, docs: readonly unknown[]): { admitted: AdmittedArrival[]; refused: RefusedArrival[] };
+export function admitArrivals(key: 'filemeta', docs: readonly unknown[], opts: { fill: true }): { admitted: AdmittedArrival<FillArrival>[]; refused: RefusedArrival[] };
+export function admitArrivals(key: PayloadKey, docs: readonly unknown[], { fill = false }: { fill?: boolean } = {}): { admitted: AdmittedArrival<FillArrival>[]; refused: RefusedArrival[] } {
   const entry = INCOMING_SCHEMA_OF[key];
   if (!entry) throw new Error(`admitArrivals: '${key}' is not a replicated family's wire key`);
-  const { schema, name } = entry;
-  const admitted: AdmittedArrival[] = [];
+  // Loud, never a silent whole-record check: a caller asking for a fill on a family that has none has a defect.
+  if (fill && !entry.fill) throw new Error(`admitArrivals: '${key}' has no fill`);
+  const schema = fill ? entry.fill! : entry.schema;
+  const name = fill ? `${entry.name} (fill)` : entry.name;
+  const admitted: AdmittedArrival<FillArrival>[] = [];
   const refused: RefusedArrival[] = [];
   docs.forEach((raw, index) => {
     const offered = key === 'filemeta' && raw && typeof raw === 'object' && !Array.isArray(raw) ? fileMetaFromSender(raw) : raw;
@@ -90,9 +110,9 @@ export function admitArrivals(key: PayloadKey, docs: readonly unknown[]): { admi
         reason: `not ${name}: ${JSON.stringify(parsed.error?.issues ?? []).slice(0, ISSUES_QUOTED)}` });
       return;
     }
-    const why = arrivalRefusal(parsed.data, { seqOptional: false });
+    const why = arrivalRefusal(parsed.data, { seqOptional: fill });
     if (why) { refused.push({ index, _id: arrivalId(raw), invalid: false, reason: why }); return; }
-    admitted.push({ index, doc: parsed.data as AdmittedArrival['doc'] });
+    admitted.push({ index, doc: parsed.data as FillArrival });
   });
   return { admitted, refused };
 }

@@ -303,7 +303,8 @@ copies them onto the files they belong to. On a file this instance recorded itse
 and never overwrites a description or tags the file already has; the one exception is an automatic caption, which
 gives way to the sender's own wording. A file another instance described keeps the usual rule: the newer version
 wins. A file this instance does not hold yet keeps its description waiting for up to 30 days, in
-case the file still arrives. Once nothing is left, the side collection is removed. That removal cannot be undone and
+case the file still arrives. A record that is damaged (a value of the wrong kind, or a piece of a file rather than
+a file) is discarded instead of copied. Once nothing is left, the side collection is removed. That removal cannot be undone and
 appears as one entry, operation `file.stray_filemeta.drain`, with the space named and no token.
 
 **Exporting:** Download the current filtered view as JSON or CSV.

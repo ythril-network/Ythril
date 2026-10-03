@@ -334,6 +334,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   outside this space's vocabulary is stored on pull (a push answers `unknownType`), because on pull the schema
   comes from the same upstream and dropping the record would lose it for good. Strict-linkage violations are now
   recorded for every landed edge and link on every door (only the single edge route and the batch's links did).
+  The stray-filemeta drain (`Q-219`) checks each record through the same schema as a FILL: the keys it carries must
+  be valid, and none it lacks is required, because it writes only what it carries. A record with a key of the wrong
+  type or a `parentFileId` of any kind is discarded and counted as refused, where it used to be partly filled; a
+  record with no `tags`, `author` or `seq` is still filled.
 - **Two peers pushing different text for one fact at one seq at the same moment keep both texts (`Q-232`).** The
   push whose write lost the race found a copy at its own seq and counted itself landed, while its text was stored
   nowhere. A same-seq copy with different content is now a divergence, and forks.

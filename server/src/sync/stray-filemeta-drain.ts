@@ -8,8 +8,9 @@
  * 5.6.2 pulls into the right collection; this recovers what the old one left.
  *
  * - **Through the one validation step and the arrival writer with `fillOnly`**, never a copy loop: each record's wire
- *   keys pass `IncomingFileMetaDoc` (`admitArrivals`, `Q-225` — a `parentFileId` of any type, a field of the wrong
- *   type is refused, never filled); the writer keeps the shape refusal, the chunk refusal and the local-only drop,
+ *   keys pass `IncomingFileMetaDoc` as a FILL (`admitArrivals(…, { fill: true })`, `Q-225` — a `parentFileId` of any
+ *   type, a field of the wrong type is refused, never filled; a key the record LACKS is not required, because the
+ *   fill writes only what it carries, and a record without `tags` or `author` was otherwise lost); the writer keeps the shape refusal, the chunk refusal and the local-only drop,
  *   and hands each record to `fillFileMetaFromStray`, which fills a row this instance made by default and gives a
  *   peer-written row the normal seq accept — at the write, creating nothing. One write PER RECORD, deliberately,
  *   where every other file arrival is a page of one bulk write (`Q-107` part 2): each row's own outcome (filled,
@@ -106,8 +107,9 @@ async function drainSpace(spaceId: string, pageSize: number, maxPages: number, s
       step.name = 'write';
       // The one validation step every arrival passes (`Q-225`), over the record's WIRE keys: an old pull stored the
       // peer's row whole, and what it held besides the wire keys was never the publisher's to give. A record its
-      // schema refuses — a `parentFileId` of any type, a field of the wrong type — is answered, and never filled.
-      const { admitted, refused } = admitArrivals('filemeta', page.map(({ keptSince: _k, ...doc }) => fileMetaForWire(doc)));
+      // schema refuses — a `parentFileId` of any type, a field of the wrong type — is answered, and never filled. As a
+      // FILL: the keys present are checked and none is required, since the fill writes nothing a record lacks.
+      const { admitted, refused } = admitArrivals('filemeta', page.map(({ keptSince: _k, ...doc }) => fileMetaForWire(doc)), { fill: true });
       warnArrivalsNotStored(FROM, spaceId, 'filemeta', 'refused', refused);
       const out = await writeArrivals(spaceId, 'files', 'file', admitted.map(a => a.doc), { from: FROM, fillOnly: true });
       n.merged += out.updated.length + out.inserted.length;

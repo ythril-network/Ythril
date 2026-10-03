@@ -534,6 +534,24 @@ describe('bodyOf still behaves, since the new code shares its module', () => {
     assert.ok(got.includes('return 1'));
     assert.ok(!got.includes('return 2'));
   });
+
+  it('an OVERLOADED function is read at its implementation, the last of its consecutive declarations', () => {
+    const src = [
+      'export function a(x: string): string;',
+      'export function a(x: number): number;',
+      'export function a(x: unknown): unknown {',
+      '  return x;',
+      '}',
+      'export function b() {',
+      '  return 2;',
+      '}',
+    ].join('\n');
+    const got = bodyOf(src, 'a');
+    assert.ok(got.includes('return x'), 'the window stopped at an overload signature');
+    assert.ok(!got.includes('return 2'));
+    // A function followed by a declaration of another name is bounded by it, as before.
+    assert.ok(bodyOf('function c() {\n  return 3;\n}\nfunction d() {}\n', 'c').includes('return 3'));
+  });
 });
 
 /**

@@ -52,12 +52,19 @@ export function bodyOf(src, name, label = name) {
   // updated — this repository's signature defect, arriving inside the helper written to prevent it.
   const declared = new RegExp(
     `^(?:export\\s+)?(?:async\\s+function|function|const|class|interface|type|abstract\\s+class)\\s+${name}\\b`);
-  const start = lines.findIndex(l => declared.test(l));
+  let start = lines.findIndex(l => declared.test(l));
   assert.ok(start > -1, `${label}: no top-level declaration of \`${name}\` — re-anchor this gate`);
 
-  let end = lines.length;
-  for (let i = start + 1; i < lines.length; i++) {
-    if (TOP_LEVEL.test(lines[i])) { end = i; break; }
+  const nextTopLevel = (from) => {
+    for (let i = from + 1; i < lines.length; i++) if (TOP_LEVEL.test(lines[i])) return i;
+    return lines.length;
+  };
+  // An OVERLOADED function declares its name once per signature, consecutively, and its body is the LAST one.
+  // Anchored on the first, the window was one signature line and held none of the code a gate asserts about.
+  let end = nextTopLevel(start);
+  while (end < lines.length && /\bfunction\s/.test(lines[start]) && /\bfunction\s/.test(lines[end]) && declared.test(lines[end])) {
+    start = end;
+    end = nextTopLevel(start);
   }
   return lines.slice(start, end).join('\n');
 }
