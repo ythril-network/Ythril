@@ -32,6 +32,7 @@ import { col, asFilter } from '../db/mongo.js';
 import { buildFileManifest } from '../files/manifest.js';
 import { BRAIN_COLLECTIONS, type BrainCollection } from '../config/types-knowledge.js';
 import { collectionStamp } from '../db/space-generation.js';
+import { LruMap } from '../util/lru-map.js';
 import { LOCAL_ONLY_FIELDS } from '../sync/local-only-fields.js';
 import { RETAGGED_FIELDS } from '../sync/retagged-fields.js';
 import { isInstanceLocalFile } from '../sync/file-conflict.js';
@@ -240,13 +241,13 @@ interface CachedSpace {
   collections: Map<BrainCollection, { stamp: string; leaves: string[] }>;
   last?: { stamps: string; files: string[]; result: MerkleResult };
 }
-const cached = new Map<string, CachedSpace>();
+const cached = new LruMap<string, CachedSpace>(MERKLE_CACHE_SPACES);
 
 function cacheOf(spaceId: string): CachedSpace {
-  const entry = cached.get(spaceId) ?? { collections: new Map() };
-  cached.delete(spaceId);
+  const hit = cached.get(spaceId);
+  if (hit) return hit;
+  const entry: CachedSpace = { collections: new Map() };
   cached.set(spaceId, entry);
-  while (cached.size > MERKLE_CACHE_SPACES) cached.delete(cached.keys().next().value as string);
   return entry;
 }
 

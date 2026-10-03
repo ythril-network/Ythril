@@ -22,6 +22,7 @@
  * stall floor raised from a different hop). A WINDOW is the same question asked of time — "reported within the
  * last `every` ms?" — so it is an option of the constructor, not a second module.
  */
+import { LruMap } from './lru-map.js';
 
 export interface WarnOnce<K> {
   /**
@@ -48,15 +49,13 @@ interface Seen { version: unknown; at: number }
 
 export function warnOnce<K>({ max = 1_000, every, now = Date.now }: WarnOnceOptions = {}): WarnOnce<K> {
   if (!Number.isInteger(max) || max < 1) throw new Error(`warnOnce: max must be a positive integer, got ${max}`);
-  const seen = new Map<K, Seen>();
+  const seen = new LruMap<K, Seen>(max);
   const fn = ((key: K, report: () => void, version?: unknown): boolean => {
     const t = now();
-    const was = seen.get(key);
+    // Peeked, not touched: a key is "used" when it is REPORTED, so the oldest forgotten is the least recently reported.
+    const was = seen.peek(key);
     if (was && Object.is(was.version, version) && (every === undefined || t - was.at < every)) return false;
-    // Re-inserted, so iteration order is least-recently-reported first and the oldest is the one forgotten.
-    seen.delete(key);
     seen.set(key, { version, at: t });
-    if (seen.size > max) seen.delete(seen.keys().next().value as K);
     report();
     return true;
   }) as WarnOnce<K>;

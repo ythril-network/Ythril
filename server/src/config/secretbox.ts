@@ -17,6 +17,7 @@
  */
 import crypto from 'node:crypto';
 import { Transform } from 'node:stream';
+import { LruMap } from '../util/lru-map.js';
 
 export type MasterSecret =
   | { kind: 'key'; key: Buffer }
@@ -287,19 +288,18 @@ const chunkAad = (header: Buffer, index: number, last: boolean): Buffer => {
  * Master-derived keys already computed for a salt. A passphrase key costs one scrypt; a reader that derived per
  * FILE would pay it on every read, which is the trap `DerivedKey` describes. Keyed on the secret's fingerprint as
  * well as the salt, so a changed secret can never be answered from the cache.
+ *
+ * Bounded: a passphrase instance adds one salt per boot, so real use holds a handful — and a volume someone can
+ * write could plant a new salt per file, which an unbounded map would keep for ever. The least recently used
+ * derivation goes first (`util/lru-map.ts`).
  */
-const baseKeyCache = new Map<string, Buffer>();
+const BASE_KEY_CACHE_MAX = 64;
+const baseKeyCache = new LruMap<string, Buffer>(BASE_KEY_CACHE_MAX);
 const secretFingerprint = (s: MasterSecret): string =>
   crypto.createHash('sha256').update(s.kind === 'key' ? s.key : Buffer.from(s.passphrase, 'utf8')).update(s.kind).digest('hex');
 
 /** Drop every cached derivation. For tests, and for a process whose secret changes under it. */
 export function resetChunkedKeyCache(): void { baseKeyCache.clear(); }
-
-/**
- * Bounded: a passphrase instance adds one salt per boot, so real use holds a handful — and a volume someone can
- * write could plant a new salt per file, which an unbounded map would keep for ever. Oldest entry out first.
- */
-const BASE_KEY_CACHE_MAX = 64;
 
 function baseKeyFor(secret: MasterSecret, scryptSalt: Buffer | null): Buffer {
   const id = `${secretFingerprint(secret)}:${scryptSalt ? scryptSalt.toString('hex') : 'raw'}`;
@@ -308,7 +308,6 @@ function baseKeyFor(secret: MasterSecret, scryptSalt: Buffer | null): Buffer {
     try { key = deriveKeyForSalt(secret, scryptSalt).key; } catch (err) {
       throw new ChunkedEnvelopeError('kind-mismatch', err instanceof Error ? err.message : String(err));
     }
-    if (baseKeyCache.size >= BASE_KEY_CACHE_MAX) baseKeyCache.delete(baseKeyCache.keys().next().value as string);
     baseKeyCache.set(id, key);
   }
   return key;
