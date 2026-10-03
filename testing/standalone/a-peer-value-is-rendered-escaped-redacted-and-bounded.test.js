@@ -161,9 +161,12 @@ describe('peerText: redacted, cut, escaped, never throws', () => {
           const out = render(`${'a'.repeat(pad)}${'\u0001\r\n'.repeat(50)}`);
           assert.doesNotMatch(out, LINE_BREAKING);
           const body = out.slice(0, out.lastIndexOf('…('));
-          // The input holds no backslash, so every one in the output starts an escape — which must be whole.
+          // The input holds no backslash, so every one in the output starts an escape — which must be whole. Read at
+          // the backslash by the escape's own grammar (a sticky match), not by a count of characters after it.
           for (const m of body.matchAll(/\\/g)) {
-            assert.match(body.slice(m.index, m.index + 6), /^\\(?:[rnt]|u[0-9a-f]{4})/, `pad ${pad}: an escape was cut: ${body.slice(m.index)}`);
+            const whole = /\\(?:[rnt]|u[0-9a-f]{4})/y;
+            whole.lastIndex = m.index;
+            assert.ok(whole.test(body), `pad ${pad}: an escape was cut: ${body.slice(m.index)}`);
           }
         }
       });
