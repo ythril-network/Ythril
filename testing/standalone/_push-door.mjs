@@ -96,6 +96,48 @@ const REPLICATED_FAMILY_KEYS = (await import('../../server/dist/sync/replicated-
   .REPLICATED_FAMILIES.map(f => f.payloadKey);
 
 /**
+ * Every push door that runs the TOMBSTONE ACCEPT (`pushVerdict` / `applyPushVerdict` in `api/sync/docs.ts`): each
+ * batch-upsert family whose collection takes tombstones, and each single route the sync docs router registers for
+ * such a family. Callable at load, before any door is open, so a file can register its cases per door.
+ *
+ * Derived, never listed: the batch families from `familiesCarriedByBatch()`, which families take tombstones from
+ * `TOMBSTONE_COLLECTION`, and the single routes from the router's own POST registrations in `api/sync/docs.ts` (read
+ * as source, because importing the router before a config is loaded leaves the loader pointed at the default path;
+ * `push()` then refuses a route the router does not really serve, so a stale reading fails loudly). So a family that gains a single
+ * route, or a new tombstoned family, is a door every rule over the accept is asserted on without an edit here — and
+ * a rule asserted on one door is the shape this exists to end: the accept is called from nine sites, and a rule held
+ * at one of them says nothing about the other eight. Floors on both halves, because an empty list passes every loop.
+ *
+ * Each door: `name`, `coll`, `type` (the tombstone and `build` type), and `body(doc)` — what that route is sent.
+ */
+export async function tombstoneAcceptDoors() {
+  const { TOMBSTONE_COLLECTION } = await import('../../server/dist/config/types.js');
+  const tombTypeOf = new Map(Object.entries(TOMBSTONE_COLLECTION).map(([type, coll]) => [coll, type]));
+  const docsSrc = fs.readFileSync('server/src/api/sync/docs.ts', 'utf8');
+  const posts = new Set([...docsSrc.matchAll(/\bsyncDocsRouter\.post\(\s*'([^']+)'/g)].map(m => m[1]));
+  if (!posts.has('/batch-upsert')) throw new Error('no POST /batch-upsert registration found in api/sync/docs.ts — re-anchor tombstoneAcceptDoors');
+  const doors = [];
+  for (const key of familiesCarriedByBatch()) {
+    const fam = FAMILIES[key];
+    if (!fam) throw new Error(`batch-upsert carries '${key}', which the FAMILIES fixture lacks — add it`);
+    const type = tombTypeOf.get(fam.coll);
+    if (!type) continue;   // file metadata takes no tombstone: the writer's own plan accepts it
+    if (typeof build[type] !== 'function') throw new Error(`no build.${type} for the tombstoned family '${key}' — add one`);
+    doors.push({ name: `batch-upsert ${key}`, route: '/batch-upsert', coll: fam.coll, type, body: (doc) => ({ [key]: [doc] }) });
+    if (posts.has(`/${fam.coll}`)) {
+      doors.push({ name: `POST /${fam.coll}`, route: `/${fam.coll}`, coll: fam.coll, type, body: (doc) => doc });
+    }
+  }
+  const batch = doors.filter(d => d.route === '/batch-upsert').length;
+  const single = doors.length - batch;
+  if (batch < 5 || single < 4) {
+    throw new Error(`derived ${batch} batch and ${single} single tombstone-accept door(s) — the derivation is broken: `
+      + doors.map(d => d.name).join(', '));
+  }
+  return doors;
+}
+
+/**
  * Open a push door.
  *
  * @param {object} o

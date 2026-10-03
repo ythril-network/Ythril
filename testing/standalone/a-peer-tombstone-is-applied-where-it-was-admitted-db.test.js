@@ -32,10 +32,12 @@ import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { privateAddressSkipReason } from './_private-address.mjs';
-import { build, PEER_TOKEN } from './_push-door.mjs';
+import { build, PEER_TOKEN, tombstoneAcceptDoors } from './_push-door.mjs';
 import { openPullDoor, PEER } from './_pull-door.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
+/** Every push door that runs the tombstone accept, derived — the cases are registered per door, so read at load. */
+const ACCEPT_DOORS = await tombstoneAcceptDoors();
 
 const S = 'tsadm';            // the admitted space, carried by the network
 const V = 'tsvictim';         // a space this instance has, outside the network
@@ -190,51 +192,73 @@ describe('a peer tombstone is applied where it was admitted, element by element'
     });
 
     /*
-     * WHO IS PROVEN THE AUTHOR (5.6.3, plan S1 / T3). The exemption above holds only when the PUSHER is proven to be
-     * the record's author: the authenticated peer id of the token, never the document's own `author` field, which any
-     * sender can write. An admin token proves no instance, and a peer pushing a record another instance wrote is not
-     * its author — both still meet a stored tombstone of a third issuer, or a relay could resurrect any deleted record
-     * by naming its author. The first three rows are controls that hold before the change and must keep holding; the
-     * single-route row is the rule, red until `pushVerdict` takes the proven pusher on every door.
+     * WHO IS PROVEN THE AUTHOR (5.6.3, plan S1 / T3), on EVERY door that runs the push accept. The exemption above
+     * holds only when the PUSHER is proven to be the record's author: the authenticated peer id of the token, never the
+     * document's own `author` field, which any sender can write. An admin token proves no instance, and a peer pushing
+     * a record another instance wrote is not its author — both still meet a stored tombstone of a third issuer, or a
+     * relay could resurrect any deleted record by naming its author. And a tombstone with no issuer (written before
+     * `instanceId` was required) keeps governing.
+     *
+     * The doors are DERIVED (`tombstoneAcceptDoors`: every batch-upsert family that takes tombstones and every single
+     * route the router registers for one), because the accept is called from nine sites and a rule held at one of them
+     * says nothing about the others. Per door: a control that the record lands with no tombstone (so a red rule row is
+     * the tombstone's doing, not the door refusing the document), the rule (red until the door takes the proven
+     * pusher), and three controls that hold before the change and must keep holding.
      */
     const ADMIN_TOKEN = Object.freeze({ rights: { instanceAdmin: true, perSpace: {}, spaceAdmin: { floor: true, spaces: [] } } });
-    const authoredBy = (id, a) => build.fact(S, id, 10, { author: { instanceId: a, instanceLabel: a } });
+    const ME = PEER_TOKEN.peerInstanceId;
+    const by = (a) => ({ author: { instanceId: a, instanceLabel: a } });
+    const tombOf = (d, id, issuer) => build.tombstone(S, id, d.type, 50, { instanceId: issuer });
+    const issuerless = (d, id) => { const { instanceId: _none, ...t } = tombOf(d, id, 'x'); return t; };
+    const pushTo = (d, doc, token) => door.push(d.route, d.body(doc), { spaceId: S, ...(token ? { token } : {}) });
 
-    it('control: an admin token pushing a record another instance authored still meets a third issuer\'s tombstone', async () => {
-      await door.coll(S, 'tombstones').insertOne(tomb(S, 'adm1', 50, 'third-party'));
-      const res = await door.push('/batch-upsert', { facts: [authoredBy('adm1', 'author-x')] }, { spaceId: S, token: ADMIN_TOKEN });
-      assert.equal(res.code, 200, JSON.stringify(res.body));
-      assert.equal(res.body.facts.tombstoned, 1,
-        `an admin token, which proves no instance, landed a record over a third issuer's tombstone: ${JSON.stringify(res.body.facts)}`);
-      assert.equal(await stored(S, 'facts', 'adm1'), null, 'the tombstoned record was stored');
+    it('the doors that run the push accept are derived: batch families and single routes both', () => {
+      assert.ok(ACCEPT_DOORS.some(d => d.route === '/batch-upsert') && ACCEPT_DOORS.some(d => d.route !== '/batch-upsert'),
+        `derived doors: ${ACCEPT_DOORS.map(d => d.name).join(', ')}`);
     });
 
-    it('control: a peer pushing a record another instance authored still meets a third issuer\'s tombstone', async () => {
-      await door.coll(S, 'tombstones').insertOne(tomb(S, 'rel1', 50, 'third-party'));
-      const res = await door.push('/batch-upsert', { facts: [authoredBy('rel1', 'author-x')] }, { spaceId: S });
-      assert.equal(res.code, 200, JSON.stringify(res.body));
-      assert.equal(res.body.facts.tombstoned, 1,
-        `'${PEER_TOKEN.peerInstanceId}' relayed a record 'author-x' wrote past a third issuer's tombstone: ${JSON.stringify(res.body.facts)}`);
-      assert.equal(await stored(S, 'facts', 'rel1'), null, 'the tombstoned record was stored');
-    });
+    for (const d of ACCEPT_DOORS) {
+      describe(`${d.name}: the proven author`, () => {
+        it('control: with no tombstone, the record lands through this door', async () => {
+          const id = `${d.coll}-free`;
+          const res = await pushTo(d, build[d.type](S, id, 10));
+          assert.equal((await stored(S, d.coll, id))?.seq, 10, `${d.name} did not store a plain record: ${res.code} ${JSON.stringify(res.body)}`);
+        });
 
-    it('control: a stored tombstone with no issuer still refuses a record its proven author pushes', async () => {
-      // A tombstone written before `instanceId` was required: unknown issuer, so it keeps governing.
-      const { instanceId: _drop, ...noIssuer } = tomb(S, 'old1', 50, 'ignored');
-      await door.coll(S, 'tombstones').insertOne(noIssuer);
-      const res = await door.push('/batch-upsert', { facts: [build.fact(S, 'old1', 10)] }, { spaceId: S });
-      assert.equal(res.body.facts.tombstoned, 1, `a tombstone with no issuer stopped governing: ${JSON.stringify(res.body.facts)}`);
-    });
+        it('the proven author lands its record over a third issuer\'s tombstone, which stays', async () => {
+          const id = `${d.coll}-proven`;
+          await door.coll(S, 'tombstones').insertOne(tombOf(d, id, 'third-party'));
+          const res = await pushTo(d, build[d.type](S, id, 10));
+          assert.equal((await stored(S, d.coll, id))?.seq, 10,
+            `${d.name} refused a record its proven author '${ME}' pushed, over a tombstone 'third-party' issued `
+            + `(answered ${res.code} ${JSON.stringify(res.body)}): this door does not take the proven pusher`);
+          assert.ok(await stored(S, 'tombstones', id), 'the third issuer\'s tombstone was dropped; it governs the records it authored');
+        });
 
-    it('the single route: the proven author lands its record over a third issuer\'s tombstone (POST /facts)', async () => {
-      await door.coll(S, 'tombstones').insertOne(tomb(S, 'one1', 50, 'third-party'));
-      const res = await door.push('/facts', build.fact(S, 'one1', 10), { spaceId: S });
-      assert.ok(res.code < 300, JSON.stringify(res.body));
-      assert.equal((await stored(S, 'facts', 'one1'))?.seq, 10,
-        `POST /facts refused a record its proven author '${PEER_TOKEN.peerInstanceId}' pushed, over a tombstone 'third-party' `
-        + `issued (answered ${JSON.stringify(res.body)}): the single route does not take the proven pusher`);
-      assert.ok(await stored(S, 'tombstones', 'one1'), 'the third issuer\'s tombstone was dropped; it governs records it authored');
-    });
+        it('control: an admin token pushing a record another instance authored still meets a third issuer\'s tombstone', async () => {
+          const id = `${d.coll}-admin`;
+          await door.coll(S, 'tombstones').insertOne(tombOf(d, id, 'third-party'));
+          const res = await pushTo(d, build[d.type](S, id, 10, by('author-x')), ADMIN_TOKEN);
+          assert.equal(await stored(S, d.coll, id), null,
+            `${d.name}: an admin token, which proves no instance, landed a record over a third issuer's tombstone (${JSON.stringify(res.body)})`);
+        });
+
+        it('control: a peer pushing a record another instance authored still meets a third issuer\'s tombstone', async () => {
+          const id = `${d.coll}-relay`;
+          await door.coll(S, 'tombstones').insertOne(tombOf(d, id, 'third-party'));
+          const res = await pushTo(d, build[d.type](S, id, 10, by('author-x')));
+          assert.equal(await stored(S, d.coll, id), null,
+            `${d.name}: '${ME}' relayed a record 'author-x' wrote past a third issuer's tombstone (${JSON.stringify(res.body)})`);
+        });
+
+        it('control: a tombstone with no issuer still refuses a record its proven author pushes', async () => {
+          const id = `${d.coll}-old`;
+          await door.coll(S, 'tombstones').insertOne(issuerless(d, id));
+          const res = await pushTo(d, build[d.type](S, id, 10));
+          assert.equal(await stored(S, d.coll, id), null, `${d.name}: a tombstone with no issuer stopped governing (${JSON.stringify(res.body)})`);
+        });
+      });
+    }
 
     /*
      * THE PULL, CHARACTERISED — not a rule. The pull's arrival path (`writeArrivals`) consults no stored tombstone at
