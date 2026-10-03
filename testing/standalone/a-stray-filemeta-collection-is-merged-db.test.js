@@ -56,6 +56,7 @@ const SPACE = 'stray-fm';
 const RACE = 'stray-fm-race';
 const BUDGET = 'stray-fm-budget';
 const LATE = 'stray-fm-late';
+const LEGACY = 'stray-fm-legacy';
 const STAMPED_AT = '2025-01-01T00:00:00.000Z';
 
 let door, sweepExpired, drainStrayFileMeta, logMod;
@@ -71,6 +72,14 @@ const stampedRow = (space, id, seq, extra = {}) =>
   ({ ...build.filemeta(space, id, seq, { author: LOCAL, createdAt: STAMPED_AT, updatedAt: STAMPED_AT }), ...extra });
 const stray = (space, id, seq, extra = {}) =>
   ({ ...build.filemeta(space, id, seq, { author: PEER }), sizeBytes: 999, sha256: 'sender-hash', ...extra });
+/**
+ * A record an older version stored with no `tags` and no `author` — the push schema requires both, the drain's fill
+ * writes neither onto a receiver-made row, so their absence is no reason to lose the keys the record does carry.
+ */
+const legacyStray = (space, id, seq, extra = {}) => {
+  const { tags: _t, author: _a, ...row } = stray(space, id, seq, extra);
+  return row;
+};
 /** What `recordArrivedFile` writes when bytes land before any metadata: a seq-0 row naming no author. */
 const arrivedRow = (space, id, extra = {}) => {
   const { author: _none, ...row } = build.filemeta(space, id, 0);
@@ -91,7 +100,7 @@ async function auditFor(space, operation) {
 
 describe('file metadata a 4.0-5.6.1 pull left in <space>_filemeta is recovered into the space files', { skip }, () => {
   before(async () => {
-    door = await openPushDoor({ suite: SUITE, spaces: [BAD, SPACE, RACE, BUDGET, LATE].map(id => ({ id, label: id, folders: [] })) });
+    door = await openPushDoor({ suite: SUITE, spaces: [BAD, SPACE, RACE, BUDGET, LATE, LEGACY].map(id => ({ id, label: id, folders: [] })) });
     ({ sweepExpired } = await import('../../server/dist/brain/ttl-sweep.js'));
     ({ drainStrayFileMeta } = await import('../../server/dist/sync/stray-filemeta-drain.js'));
     logMod = await import('../../server/dist/util/log.js');
@@ -246,6 +255,64 @@ describe('file metadata a 4.0-5.6.1 pull left in <space>_filemeta is recovered i
     await drainStrayFileMeta({ pageSize: 1, maxPages: 2 });
     assert.equal((await stored(BUDGET, 'b3.md'))?.description, 'd b3.md');
     assert.equal(await strayExists(BUDGET), false);
+  });
+
+  it('a record missing keys the fill does not write is still filled; one whose keys are invalid is refused', async () => {
+    /*
+     * Bundle-30 I2b. The drain FILLS the keys a stray record carries onto an existing row, so what it validates is
+     * those keys: a record with no `tags`, no `author` or no `seq` loses nothing by their absence, and was filled
+     * before the drain went through the one validation step. Required as on the push door, it was refused and then
+     * deleted as answered — the publisher's description lost for good.
+     */
+    await door.coll(LEGACY, 'files').insertMany([
+      stampedRow(LEGACY, 'no-tags.md', 700, { sizeBytes: 1, sha256: 'h-no-tags' }),
+      arrivedRow(LEGACY, 'no-seq.md'),
+      stampedRow(LEGACY, 'bad-type.md', 702),
+      stampedRow(LEGACY, 'bad-parent.md', 703),
+      { ...build.filemeta(LEGACY, 'legacy-peer.md', 5, { author: PEER }) },
+    ]);
+    const { seq: _s, ...noSeq } = legacyStray(LEGACY, 'no-seq.md', 0, { description: 'carried no seq' });
+    await door.coll(LEGACY, 'filemeta').insertMany([
+      legacyStray(LEGACY, 'no-tags.md', 20, { description: 'kept from an old pull', properties: { owner: 'ops' } }),
+      noSeq,
+      legacyStray(LEGACY, 'bad-type.md', 22, { description: 42 }),
+      legacyStray(LEGACY, 'bad-parent.md', 23, { parentFileId: 7, description: 'a chunk by another spelling' }),
+      legacyStray(LEGACY, 'legacy-peer.md', 30, { description: 'later than the peer row here' }),
+    ]);
+    await drainStrayFileMeta();
+
+    const filled = await stored(LEGACY, 'no-tags.md');
+    assert.equal(filled?.description, 'kept from an old pull', 'a record with no tags or author was dropped, not filled');
+    assert.deepEqual(filled?.properties, { owner: 'ops' });
+    assert.deepEqual(filled?.author, LOCAL, 'the fill wrote an author');
+    assert.equal(filled?.seq, 700);
+    assert.equal((await stored(LEGACY, 'no-seq.md'))?.description, 'carried no seq', 'a record with no seq was dropped, not filled');
+    const peer = await stored(LEGACY, 'legacy-peer.md');
+    assert.equal(peer?.description, 'later than the peer row here', 'a newer record with no tags or author did not land on a peer row');
+    assert.deepEqual(peer?.author, PEER, 'the absent author was written as something');
+    assert.deepEqual(peer?.tags, [], 'the absent tags were written as something');
+
+    assert.equal((await stored(LEGACY, 'bad-type.md'))?.description, undefined, 'a description of the wrong type was filled');
+    const chunk = await stored(LEGACY, 'bad-parent.md');
+    assert.equal(chunk?.description, undefined, 'a record with a parentFileId of another type was filled onto a file');
+    assert.equal(chunk?.parentFileId, undefined);
+    assert.equal(await strayExists(LEGACY), false, 'a refused record was kept, though nothing can ever make it valid');
+  });
+
+  it('the fill\'s validation is the one validation step: present keys checked, strict, nothing else required', async () => {
+    const { admitArrivals } = await import('../../server/dist/sync/arrival-shape.js');
+    const { admitted, refused } = admitArrivals('filemeta', [
+      { _id: 'only-a-description.md', description: 'd' },
+      { _id: 'undeclared.md', description: 'd', sizeInBlocks: 3 },
+      { _id: 'wrong-type.md', tags: 'one' },
+      { _id: 'chunk.md', parentFileId: 'file.md' },
+      { description: 'no id' },
+      { _id: 'bad-seq.md', seq: -1 },
+    ], { fill: true });
+    assert.deepEqual(admitted.map(a => a.doc._id), ['only-a-description.md']);
+    assert.deepEqual(refused.map(r => r._id), ['undeclared.md', 'wrong-type.md', 'chunk.md', '(no _id)', 'bad-seq.md']);
+    // Every other door still requires the whole wire record.
+    assert.equal(admitArrivals('filemeta', [{ _id: 'only-a-description.md', description: 'd' }]).refused.length, 1);
   });
 
   it('a file deleted while the drain is writing is not brought back', async () => {
