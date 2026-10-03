@@ -295,9 +295,10 @@ the space both ways, the instance records the missing link itself and logs one e
 
 **File descriptions recovered from an old sync collection.** Versions 4.0 to 5.6.1 stored the descriptions and tags
 other instances sent for their files in a side collection, where nothing read them. A clean-up every few minutes now
-copies them onto the files they belong to. It only fills in what a file is missing, and never overwrites a
-description or tags the file already has. The one exception is an automatic caption, which gives way to the
-sender's own wording. A file this instance does not hold yet keeps its description waiting for up to 30 days, in
+copies them onto the files they belong to. On a file this instance recorded itself it only fills in what is missing,
+and never overwrites a description or tags the file already has; the one exception is an automatic caption, which
+gives way to the sender's own wording. A file another instance described keeps the usual rule: the newer version
+wins. A file this instance does not hold yet keeps its description waiting for up to 30 days, in
 case the file still arrives. Once nothing is left, the side collection is removed. That removal cannot be undone and
 appears as one entry, operation `file.stray_filemeta.drain`, with the space named and no token.
 

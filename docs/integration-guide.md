@@ -11,7 +11,7 @@ stands on its own.
 
 1. [Getting Ythril](integration-guide/01-getting-ythril.md)
 2. [Hosting](integration-guide/02-hosting.md)
-   [Encryption at Rest](integration-guide/02a-encryption-at-rest.md)
+   [Encryption at Rest](integration-guide/02a-encryption-at-rest.md) · [Upgrading and Rolling Back](integration-guide/02b-upgrading.md)
 3. [Authentication, Errors & Rate Limits](integration-guide/03-auth-and-limits.md)
    Error Format · Rate Limits
 4. [Brain API](integration-guide/04-brain-api.md)

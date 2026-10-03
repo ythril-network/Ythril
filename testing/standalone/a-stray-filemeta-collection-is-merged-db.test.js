@@ -215,6 +215,20 @@ describe('file metadata a 4.0-5.6.1 pull left in <space>_filemeta is recovered i
     assert.equal(await strayExists(LATE), false);
   });
 
+  it('a record that has waited longer than its window for its file is discarded', async () => {
+    const longAgo = new Date(Date.now() - 31 * 86_400_000).toISOString();
+    await door.coll(LATE, 'filemeta').insertMany([
+      { ...stray(LATE, 'never-came.md', 40, { description: 'waited too long' }), keptSince: longAgo },
+      { ...stray(LATE, 'still-due.md', 41, { description: 'still waiting' }), keptSince: new Date().toISOString() },
+    ]);
+    await sweepExpired();
+    assert.equal(await door.coll(LATE, 'filemeta').findOne({ _id: 'never-came.md' }), null,
+      'a record past its wait window was kept for ever');
+    assert.ok(await door.coll(LATE, 'filemeta').findOne({ _id: 'still-due.md' }), 'a record inside its window was discarded');
+    assert.equal(await stored(LATE, 'never-came.md'), null);
+    await door.coll(LATE, 'filemeta').deleteMany({});
+  });
+
   it('the work per cycle is bounded, and the next cycle resumes where it stopped', async () => {
     await door.coll(BUDGET, 'files').insertMany(['b1.md', 'b2.md', 'b3.md'].map((id, i) => stampedRow(BUDGET, id, 800 + i)));
     await door.coll(BUDGET, 'filemeta').insertMany(['b1.md', 'b2.md', 'b3.md'].map((id, i) => stray(BUDGET, id, 10 + i, { description: `d ${id}` })));

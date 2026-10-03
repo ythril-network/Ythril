@@ -229,10 +229,10 @@ ask for the audit row *and* grep the log with one value, instead of two searches
 Every audit entry has a request behind it; that is what the audit log is. The admin UI says so explicitly rather
 than rendering a blank, and an integration should do the same.
 
-**An entry the server wrote for its own work** — a sweep, an alias heal, a creator grant, the stray file-metadata
-drop — has `ip: "internal"`. Its `requestId` is the request's when the work ran inside one (a creator grant does),
-and otherwise its own `internal-<uuid>`, so it is never absent. Before 5.6.3 such entries carried no `requestId`
-and read as older than the field.
+**An entry no request asked for** — a sweep, an alias heal, the stray file-metadata drop, a reload by the config
+file watcher — carries its own `requestId`, `internal-<uuid>`, so it is never absent. An entry the server wrote for
+its own work also has `ip: "internal"`; one written inside a request (a creator grant) carries that request's id.
+Before 5.6.3 these entries carried no `requestId` and read as older than the field.
 
 **Response** `200`:
 

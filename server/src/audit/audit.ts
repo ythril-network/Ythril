@@ -130,12 +130,13 @@ export function logAuditEntry(input: AuditEntryInput): void {
     entryId: input.entryId ?? null,
     durationMs: input.durationMs,
     /*
-     * Omitted rather than written as null when there is no id, which is the same rule `changes` follows above
-     * and for the same reason: absent means "not recorded", and a stored `null` would claim the request had no
-     * id — which cannot happen, since every request is given one. The only entries without it are the ones
-     * written before the field existed, and an absent key is exactly how a reader tells them apart.
+     * Never absent on an entry written today: an absent key is how a reader tells an entry written before the
+     * field existed. So the id is the one the caller captured, else the live request's, else — for work no
+     * request asked for (a sweep, the config file watcher) — one of its own, `internal-<uuid>`. The guard sits
+     * HERE, in the one writer every entry goes through, so no caller can leave it out (Q-219: the config-reload
+     * writer did, after `logInternalAudit` had fixed the others).
      */
-    ...(input.requestId ? { requestId: input.requestId } : {}),
+    requestId: input.requestId || currentRequestId() || `internal-${uuidv4()}`,
     // Omitted entirely when there is nothing allowlisted to say, so an entry never carries an empty array
     // that reads as "we looked and nothing changed" when in fact we never looked.
     ...(input.changes && input.changes.length > 0 ? { changes: input.changes } : {}),
@@ -149,12 +150,10 @@ export function logAuditEntry(input: AuditEntryInput): void {
 /**
  * Audit something the SERVER did on its own — a sweep, a heal, a grant — rather than a request it answered.
  *
- * One shape for every such entry, because each hand-written copy dropped a different part of it: none carried a
- * request id, so the admin log showed every internal entry as "written before request ids existed", and the
- * `durationMs` of half of them was a literal `0`. Here:
+ * One shape for every such entry, because each hand-written copy dropped a different part of it: the `durationMs`
+ * of half of them was a literal `0`, and none carried a request id (which `logAuditEntry` now guarantees for every
+ * entry). Here:
  *  - `ip` is `internal`, which no client address can be, so a reader filters them out (or in) by that alone;
- *  - `requestId` is the live request's when the work runs inside one (a creator grant does), and otherwise its own
- *    `internal-<uuid>` — never absent, because absent is documented to mean "older than the field";
  *  - `durationMs` is measured from `startedAt` when the caller has one.
  */
 export function logInternalAudit(input: {
@@ -177,7 +176,6 @@ export function logInternalAudit(input: {
     status: 200,
     durationMs: input.startedAt === undefined ? 0 : Date.now() - input.startedAt,
     tokenId: input.tokenId ?? null,
-    requestId: currentRequestId() ?? `internal-${uuidv4()}`,
   });
 }
 
