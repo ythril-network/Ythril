@@ -129,6 +129,30 @@ export const BOUNDED_OPTIONS_ARGUMENT: Readonly<Record<string, number>> = {
   findOne: 1, find: 1, aggregate: 1, countDocuments: 1, estimatedDocumentCount: 0, distinct: 2,
 };
 
+/** The first batch a cursor in a timed transaction asks for: everything, up to the server's own 16 MB per batch. */
+const IN_TRANSACTION_BATCH = 1_000_000;
+
+/**
+ * A cursor opened inside a TIMED transaction (`brain/held-transaction.ts`: a session with `defaultTimeoutMS`) is
+ * asked for all of its rows in its FIRST batch.
+ *
+ * The driver (7.1) sends `maxTimeMS` on such a cursor's `getMore`, which the server refuses for a non-awaitData
+ * cursor — so every read inside a held transaction that came back in more than one batch (more than 101 rows, the
+ * default first batch) failed the whole transaction with "cannot set maxTimeMS on getMore command for a
+ * non-awaitData cursor" (probe, bundle-30 I3). Asking for everything at once needs no `getMore` up to 16 MB, which
+ * is the server's cap on one batch; a read larger than that inside a transaction still fails, loudly — it reads in
+ * id chunks instead (`readStoredById`). A caller's own `batchSize` is kept.
+ */
+function inTimedTransactionCursor(method: string, args: unknown[], at: number, options: Record<string, unknown>): unknown[] {
+  if (method !== 'find' && method !== 'aggregate') return args;
+  const session = options['session'] as { inTransaction?: () => boolean; timeoutMS?: number } | undefined;
+  if (!session?.inTransaction?.() || typeof session.timeoutMS !== 'number' || options['batchSize'] !== undefined) return args;
+  const out = [...args];
+  while (out.length < at) out.push(undefined);
+  out[at] = { ...options, batchSize: IN_TRANSACTION_BATCH };
+  return out;
+}
+
 /**
  * The arguments `method` is to be called with, bounded when a scope is active — the same array when there is
  * nothing to do. THROWS `StoreTimeout` when the scope's deadline has passed: the operation is not sent.
@@ -141,7 +165,7 @@ export function boundArguments(method: string, args: unknown[]): unknown[] {
   const given = args[at];
   const options = given && typeof given === 'object' ? given as Record<string, unknown> : {};
   // A session's operations are bounded by the session (or are a transaction's, where a per-op timeout is refused).
-  if (options['session'] !== undefined) return args;
+  if (options['session'] !== undefined) return inTimedTransactionCursor(method, args, at, options);
   const left = scope.deadline - Date.now();
   if (left <= 0) throw new StoreTimeout();
   const bound = Math.min(writeTimeoutMs(), left);
