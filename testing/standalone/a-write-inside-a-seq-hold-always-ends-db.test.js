@@ -128,6 +128,9 @@ const CASES = {
   'server/src/brain/held-transaction.ts:inHeldTransaction': [
     { label: 'an edge label change: the transaction under the horizon hold', lock: 'counter',
       run: () => mods.edges.updateEdgeById(S, ED, { label: 'renamed_again' }) },
+    // Its second caller since bundle-30 §B3: one chunk of an entity cascade (delete + tombstones) per transaction.
+    { label: 'an entity cascade chunk: the transaction under the horizon hold', lock: 'counter',
+      run: async () => mods.cascade.deleteEntityCascade(S, E1, (await mods.cascade.previewEntityCascade(S, E1)).token) },
   ],
   'server/src/brain/edges.ts:updateEdgeById': [
     { label: 'an edge updated in place', lock: 'counter',
@@ -227,7 +230,9 @@ describe('a write inside a seq hold always ends', { skip }, () => {
   let restoreBound = () => {};
 
   before(async () => {
-    door = await openPushDoor({ suite: 'holdends', spaces: [S, R].map(id => ({ id, label: id, folders: [], meta: { suppressEmbeddings: true } })) });
+    // `completeLinkage`: the spaces' links are converted, as every space's are after its first boot — the cascade case
+    // reads an entity's references through the link records, which refuse a space that was never converted.
+    door = await openPushDoor({ suite: 'holdends', spaces: [S, R].map(id => ({ id, label: id, folders: [], completeLinkage: true, meta: { suppressEmbeddings: true } })) });
     seq = await import('../../server/dist/util/seq.js');
     mods = {
       plan: await import('../../server/dist/sync/upsert-plan.js'),
@@ -237,6 +242,7 @@ describe('a write inside a seq hold always ends', { skip }, () => {
       fact: await import('../../server/dist/brain/fact.js'),
       conversion: await import('../../server/dist/brain/links-conversion.js'),
       merge: await import('../../server/dist/brain/merge.js'),
+      cascade: await import('../../server/dist/brain/entity-delete-cascade.js'),
       tombstones: await import('../../server/dist/brain/tombstones.js'),
       commit: await import('../../server/dist/brain/write-plan/commit.js'),
       fileMeta: await import('../../server/dist/files/file-meta.js'),

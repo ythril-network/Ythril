@@ -192,7 +192,14 @@ and is unlabelled, which an ordinary delete already does.
 
 **What it does NOT remove:** a fact, chrono entry or file that names the entity. Those are records of
 their own rather than relationships, and they still block — the refusal names them, and you edit them to
-drop the reference.
+drop the reference. **That refusal comes before anything is removed:** a cascade a fact, chrono entry or file
+refuses deletes no edge either, and answers `409` with the current preview.
+
+**How the edges go:** a chunk at a time (500 a chunk), each chunk ONE transaction — the edges' delete and their
+tombstones land together or not at all, so an edge is never gone without the tombstone that tells peers to
+delete it too. Each tombstone carries the deleted edge's own `seq` (`originalSeq`). A failure part-way leaves
+the chunks before it removed and the rest untouched; preview again and repeat the delete to continue. Webhooks
+and live updates carry one `edge.deleted` per removed edge, sent after its chunk committed.
 
 **An empty list still needs the token.** Nothing would be removed today, and a delete that skipped the
 token when the list was empty would behave differently depending on a race.

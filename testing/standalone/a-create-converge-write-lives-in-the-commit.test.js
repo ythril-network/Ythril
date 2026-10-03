@@ -83,6 +83,7 @@ const EXEMPT = {
   'server/src/brain/chrono.ts:deleteChrono': 'delete path',
   'server/src/brain/edges.ts:updateEdgeById': 'update path',
   'server/src/brain/edges.ts:deleteEdge': 'delete path',
+  'server/src/brain/entity-delete-cascade.ts:removeEdgeChunk': 'delete path: one chunk of an entity cascade\'s edges',
   // whole-record operations that are not a create
   // Re-keyed (bundle-30, Q-107 part 3a): the merge's writes moved into its transaction's callback, and the re-key's
   // into the one batched implementation `rekeyEdge` now calls.

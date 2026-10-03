@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **An entity delete with `cascadeToken` removes a hub's edges a chunk at a time (`Q-107`, part 3b).** It removed
+  them one edge at a time — a read, a delete, a job retire, a seq and a tombstone per edge, so a hub of 1 500 edges
+  was some 7 500 round trips while the caller waited. Each chunk of 500 is now one transaction: the edges' delete
+  and their tombstones commit together, and a hub costs the same few commands per chunk whatever its size. One
+  `edge.deleted` webhook per removed edge, as before, sent after its chunk committed.
 - **An entity merge relinks a hub in one transaction of a few bulk writes, and a merge too large for one is
   refused before anything is written (`Q-107`, part 3a).** A merge used to relink the absorbed entity's edges,
   links and face labels one record at a time — five commands an edge, about 13 ms each with vectors on the test
@@ -385,6 +390,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   calls the model, then wrote the vector by id alone: a peer's newer copy landing during the model call received
   the OLD text's vector and `matchedText` — and a copy this instance suppresses received a vector it must never
   hold. Every write the job makes is now guarded by the seq it read; the newer copy's own job embeds it.
+- **A refused entity cascade removes nothing.** A cascade a fact, chrono entry or file still blocked deleted every
+  blocking edge, wrote their tombstones (so peers deleted them too), and only then answered "cannot delete". The
+  whole set is now decided first, and a cascade that cannot finish removes no edge.
+- **An edge a cascade removes is never gone without its tombstone.** The tombstone was written after the edge
+  was deleted, so a failed tombstone write left the edge gone here and alive on every peer, which brought it back
+  on the next pull pointing at the entity being deleted. Each chunk's delete and tombstones now commit together.
+- **`delete_entity` no longer says "There is no cascade."** It has one (`cascadeToken`, from
+  `delete_entity_preview`), and the description now says so where a caller reads first.
 - **A merge reported as failed after its commit landed is answered as merged, and still queues its edges and
   sends its webhooks.** A commit whose reply was lost used to throw past both, leaving re-keyed edges without a
   vector and subscribers never told the absorbed entity was deleted. The merge reads back, while still holding

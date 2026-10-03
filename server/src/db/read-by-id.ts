@@ -85,6 +85,10 @@ async function readChunks<T extends object>(
     const ms = timeLeft?.();
     const query = andPredicates({ _id: { $in: chunk } }, ...predicates)!;
     return await coll.find(asFilter<{ _id: string }>(query), {
+      // The whole chunk in the first batch, and one more so the server can say the cursor is done: one round trip a
+      // chunk. The default first batch is 101 rows, so a chunk of 500 cost a `getMore` too — and a held
+      // transaction refuses a `getMore` outright (`db/write-bound.ts`).
+      batchSize: chunk.length + 1,
       ...(projection ? { projection } : {}), ...(session ? { session } : {}), ...(ms !== undefined ? { maxTimeMS: ms } : {}),
     }).toArray();
   });
