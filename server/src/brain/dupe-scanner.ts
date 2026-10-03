@@ -193,7 +193,7 @@ async function tryAutoMerge(spaceId: string, seed: RecallResult, match: RecallRe
     const refusal = mergeRefusal(err);
     if (refusal) {
       log.warn(`Auto-merge REFUSED in '${spaceId}': '${absorbedId}' and '${survivorId}' remain as separate records — `
-        + `${refusal.error} Resolve by hand, or change what the merge would have broken.`);
+        + `${refusal.refusal.message} Resolve by hand, or change what the merge would have broken.`);
       return false;
     }
     log.warn(`Auto-merge failed in '${spaceId}': ${err}`);

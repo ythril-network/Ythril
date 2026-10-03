@@ -497,14 +497,15 @@ entitiesRouter.post('/spaces/:spaceId/entities/:survivorId/merge/:absorbedId', g
   // already carries the survivor's id and the path carries the absorbed one, but an id means nothing
   // once the record it pointed at is gone. The absorbed NAME is the only fact that becomes
   // unrecoverable, so it is recorded as name → null.
+  const { absorbed } = outcome;
   req.auditSnapshots = {
-    before: { absorbedName: outcome.absorbed.name },
+    before: { absorbedName: absorbed.name },
     after: { absorbedName: null },
   };
 
   res.json({
     merged: { ...outcome.entity, embedding: undefined },
-    absorbedId: outcome.absorbed._id,
+    absorbedId: absorbed._id,
     relinked: true,
     duplicateEdgeWarnings: outcome.plan.duplicateEdgeWarnings,
     /*

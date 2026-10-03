@@ -478,6 +478,11 @@ export class MergeSchemaViolation extends Error {
     );
     this.name = 'MergeSchemaViolation';
   }
+
+  /** What a door carries beside the message (`structuredContent` on MCP, the body on REST): the violations. */
+  toStructured(): Record<string, unknown> {
+    return { violations: this.violations };
+  }
 }
 
 /**
@@ -493,12 +498,18 @@ export class MergeSchemaViolation extends Error {
 export const MERGE_MAX_RELINKS = 2_500;
 
 /**
+ * The `code` a refused merge answers with — the one list, so a description that names one and a gate that checks
+ * a description against real names read the same words.
+ */
+export const MERGE_REFUSAL_CODES = ['merge_too_large'] as const;
+
+/**
  * A merge refused because it would relink more than `MERGE_MAX_RELINKS` records — refused before anything is
  * written, the seq counter included. `merge_too_large` is the code every door answers with, beside the count and
  * the bound, so a caller can tell how far over it is.
  */
 export class MergeTooLarge extends Error {
-  readonly code = 'merge_too_large';
+  readonly code = MERGE_REFUSAL_CODES[0];
   constructor(
     readonly survivorId: string,
     readonly absorbedId: string,
@@ -512,6 +523,11 @@ export class MergeTooLarge extends Error {
       + 'was written. Move or delete some of its edges first, then merge again.',
     );
     this.name = 'MergeTooLarge';
+  }
+
+  /** What a door carries beside the message: the code, the count and the bound. */
+  toStructured(): Record<string, unknown> {
+    return { code: this.code, relinks: this.relinks, bound: this.bound };
   }
 }
 
@@ -527,14 +543,17 @@ export class MergeTooLarge extends Error {
  * A store failure is not a merge refusal and is not answered here: every door already classifies one through
  * `brain/store-failure.ts` (503, retryable), and a second mapping of it is what `R1` refuses.
  */
-export function mergeRefusal(err: unknown): { status: 400 | 422; error: string; body: Record<string, unknown> } | null {
-  if (err instanceof MergeTooLarge) {
-    return { status: 422, error: err.message, body: { error: err.message, code: err.code, relinks: err.relinks, bound: err.bound } };
-  }
-  if (err instanceof MergeSchemaViolation) {
-    return { status: 400, error: err.message, body: { error: err.message, violations: err.violations } };
-  }
+export function mergeRefusal(err: unknown): MergeRefusal | null {
+  if (err instanceof MergeTooLarge) return { status: 422, refusal: err, body: { error: err.message, ...err.toStructured() } };
+  if (err instanceof MergeSchemaViolation) return { status: 400, refusal: err, body: { error: err.message, ...err.toStructured() } };
   return null;
+}
+
+/** A refused merge as a door answers it: the status, the refusal (its message and `toStructured()`), the REST body. */
+export interface MergeRefusal {
+  status: 400 | 422;
+  refusal: MergeTooLarge | MergeSchemaViolation;
+  body: Record<string, unknown>;
 }
 
 /** How many records a merge of `absorbedId` relinks, counted as the bound is: edges + links + face labels. */

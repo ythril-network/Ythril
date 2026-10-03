@@ -328,7 +328,7 @@ export async function callTool(req: ToolCallRequest): Promise<ToolCallOutcome> {
     // A refused merge answers what it answers on every merge door (`mergeRefusal`): 422 merge_too_large, or 400.
     const merge = mergeRefusal(err);
     if (merge) {
-      return { result: { content: [{ type: 'text' as const, text: `Error: ${merge.error}` }], isError: true, structuredContent: merge.body }, status: merge.status, callSpace };
+      return { result: { content: [{ type: 'text' as const, text: `Error: ${merge.refusal.message}` }], isError: true, structuredContent: merge.refusal.toStructured() }, status: merge.status, callSpace };
     }
     // The same 409 the REST door answers: another write kept moving the record, nothing was written, retry.
     if (err instanceof WriteConflict) {
