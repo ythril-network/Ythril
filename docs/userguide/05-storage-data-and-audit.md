@@ -126,6 +126,10 @@ file bytes) — and the import puts them back. What to expect from a restore:
 - **Nothing is refused silently.** A record the import could not store is listed by id with the reason; a record
   restored over a deletion this instance remembers is listed too, because a synced peer that remembers the same
   deletion will remove it again.
+- **A family marked `counterBehind` was restored, and needs the import run once more.** It means the records were
+  stored but the space's sequence counter could not be moved past them, so the next edit made here could be taken
+  for older than a restored record by a peer. Running the same import again is safe — it replaces — and moves the
+  counter.
 - File previews and passages are rebuilt from the file itself, so they are not part of the export.
 
 ### Uploaded files are encrypted at rest
