@@ -98,6 +98,12 @@ export async function openPullDoor({ suite, spaces, spaceMap, extraSpaces = [], 
     pushedRecords: [],
     /** remote space -> payloadKey -> items, served as one page of the record family. */
     records: {},
+    /**
+     * `(req, res, next) => void` — answers the governance routes under `/api/sync/networks` (member gossip, votes,
+     * change notes) as a case scripts them; `req.path` is what follows `/api/sync/networks`. Unset, they 404, as
+     * every route the fake peer does not serve does.
+     */
+    network: null,
   };
 
   const app = express();
@@ -131,6 +137,9 @@ export async function openPullDoor({ suite, spaces, spaceMap, extraSpaces = [], 
   app.post('/api/sync/batch-upsert', express.json({ limit: '100mb' }), (req, res) => {
     for (const [key, items] of Object.entries(req.body ?? {})) if (Array.isArray(items)) state.pushedRecords.push(...items.map(d => ({ key, ...d })));
     res.json({ status: 'ok' });
+  });
+  app.use('/api/sync/networks', express.json({ limit: '100mb' }), (req, res, next) => {
+    if (state.network) state.network(req, res, next); else next();
   });
   app.get('/api/sync/:family', (req, res) => {
     if (!families.includes(req.params.family)) { res.status(404).json({ error: 'not served by the fake peer' }); return; }
@@ -181,7 +190,7 @@ export async function openPullDoor({ suite, spaces, spaceMap, extraSpaces = [], 
     for (const p of peerSpaces) await door.mongo.col(`${p}_tombstones`).deleteMany({});
     const m = member();
     m.lastSeqReceived = {}; m.lastSeqPushed = {}; m.direction = d;
-    Object.assign(state, { tamper: null, requests: [], answers: [], received: [], pushedRecords: [], records: {} });
+    Object.assign(state, { tamper: null, requests: [], answers: [], received: [], pushedRecords: [], records: {}, network: null });
   }
 
   /** One sync cycle of the real engine with the fake peer. */
