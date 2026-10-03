@@ -26,7 +26,8 @@ said that were only partly true.
 
 Documents changed in this release: `docs/sync-protocol.md`, `docs/network-types.md`,
 `docs/integration-guide/02-hosting.md`, `docs/integration-guide/09-sync-api.md`,
-`docs/integration-guide/13-audit-log-api.md` and `docs/userguide/05-storage-data-and-audit.md`.
+`docs/integration-guide/12-admin-api.md`, `docs/integration-guide/13-audit-log-api.md`,
+`docs/userguide/04-settings.md` and `docs/userguide/05-storage-data-and-audit.md`.
 
 ### Security
 
