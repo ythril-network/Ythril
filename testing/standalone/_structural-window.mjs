@@ -501,6 +501,30 @@ export function enclosingBlockMatching(src, at, opener, label = 'enclosingBlockM
 }
 
 /**
+ * Every bracket of ANY kind still open at `at`, outermost first, as `{ c, i }` — or `null` when `at` is not real code
+ * (inside a string, a template literal, a regex or a comment).
+ *
+ * The bound for "which CALL is this expression an argument of?" — a filter literal inside `asFilter<T>({ … })` inside
+ * `.find(…)`, or a `$match` stage inside the array handed to `.aggregate(…)`. `enclosingBlocksMatching` keeps braces
+ * only, so it can say which block holds an anchor but never which call; this keeps parens and square brackets too,
+ * so a caller walks outward and reads the callee before each `(`.
+ *
+ * `null` rather than a throw for a non-code anchor, because the caller is usually a scan that matched text and must
+ * skip a match inside a message string rather than stop on it.
+ */
+export function bracketsOpenAt(src, at) {
+  const open = [];
+  let reached = null;
+  scanCode(src, 0, (c, i) => {
+    if (i >= at) { reached = i; return at; }
+    if (PAIRS[c]) open.push({ c, i });
+    else if (c === ')' || c === '}' || c === ']') open.pop();
+    return undefined;
+  });
+  return reached === at ? open : null;
+}
+
+/**
  * An Angular component's inline template — the text inside `template: ` + backtick … backtick.
  *
  * Needed because the JS scanner treats a template literal as a STRING and skips it whole, so every `@if (…) {` in
