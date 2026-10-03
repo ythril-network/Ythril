@@ -71,8 +71,11 @@ const SERVING_TOKEN = Object.freeze({
  * @param {string[]} [o.extraSpaces]  local spaces this instance has OUTSIDE the network (a victim of a forgery)
  * @param {'pull'|'push'|'both'} [o.direction]  the member's direction, from this instance's view
  * @param {boolean} [o.monitorCommands]
+ * @param {Record<string, object>} [o.meta]  local space id -> its `meta` (suppression tiers, type schemas, retention)
+ * @param {Record<string, object>} [o.spaceExtra]  local space id -> further space config (`recordTtlDays`, …)
  */
-export async function openPullDoor({ suite, spaces, spaceMap, extraSpaces = [], direction = 'pull', monitorCommands = false }) {
+export async function openPullDoor({ suite, spaces, spaceMap, extraSpaces = [], direction = 'pull', monitorCommands = false,
+  meta = {}, spaceExtra = {} }) {
   const host = privateHostAddress();
   assert.ok(host, 'no non-loopback IPv4 on this host — callers skip on privateAddressSkipReason() first');
   const NET = `${suite}-net`;
@@ -138,7 +141,7 @@ export async function openPullDoor({ suite, spaces, spaceMap, extraSpaces = [], 
   const server = await new Promise(resolve => { const s = app.listen(0, '0.0.0.0', () => resolve(s)); });
   const url = `http://${host}:${server.address().port}`;
 
-  const space = (id) => ({ id, label: id, folders: [], meta: {} });
+  const space = (id) => ({ id, label: id, folders: [], meta: meta[id] ?? {}, ...(spaceExtra[id] ?? {}) });
   const peerSpaces = [...remoteOf.values()].map(peerSide);
   try {
     door = await openPushDoor({
