@@ -39,19 +39,13 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { mountedRoutes } from './_routes.mjs';
-import { moduleIndex } from './_call-graph.mjs';
+import { moduleIndex, callSitesIn, memberCallSitesIn } from './_call-graph.mjs';
 import { argumentsOf } from './_structural-window.mjs';
 
 const { ROUTE_RIGHTS } = await import('../../server/dist/auth/space-rights.js');
 const { RUNGS } = await import('../../server/dist/config/rights-shape.js');
 
 const PRIMITIVES_FILE = 'server/src/auth/reachable-spaces.ts';
-
-/** Words followed by `(` that are not calls — the same exclusions the call graph makes. */
-const NOT_A_CALL = new Set([
-  'if', 'for', 'while', 'switch', 'catch', 'return', 'typeof', 'await', 'function', 'yield', 'delete',
-  'void', 'in', 'of', 'do', 'else', 'new', 'import', 'require', 'super', 'throw', 'case', 'instanceof',
-]);
 
 const index = moduleIndex(['server/src']);
 
@@ -129,20 +123,19 @@ function checksFrom(rootKey) {
     seen.add(memo);
     const entry = index.bodies.get(key);
     if (!entry) return;
-    // A declaration is not a call: `function x(` inside a body would otherwise read as calling `x`.
-    const body = entry.body.replace(/\bfunction\s*\*?\s*[A-Za-z_$][\w$]*\s*\(/g, 'function (');
+    const body = entry.body;
     /*
-     * LOOKBEHIND, not a consumed prefix character. `(^|[^.\w$])name\(` eats the `(` before a call, so in
-     * `new Set(accessibleSpaces(req, 'write'))` the match for `Set(` swallows the very character the inner call
-     * needs, and the call that IS the loop is never seen — `POST /api/duplicates/scan` read as enforced by nothing.
+     * The call graph's positioned scans, closures included (a handler's loop is often inside a `.map`). They match
+     * by LOOKBEHIND (`Q-309`): a consumed prefix character ate the `(` of `new Set(accessibleSpaces(req, 'write'))`,
+     * and the call that IS the loop was never seen — `POST /api/duplicates/scan` read as enforced by nothing. A
+     * declaration is not a call, and the offsets are offsets into `body`.
      */
     const calls = [];
-    for (const m of body.matchAll(/(?<![.\w$])([A-Za-z_$][\w$]*)\s*(?:<[^>(;]*>)?\s*\(/g)) {
-      if (NOT_A_CALL.has(m[1])) continue;
-      calls.push({ target: index.resolve(entry.file, m[1]), paren: m.index + m[0].length - 1, label: m[1] });
+    for (const s of callSitesIn(body, { closures: true })) {
+      calls.push({ target: index.resolve(entry.file, s.name), paren: s.paren, label: s.name });
     }
-    for (const m of body.matchAll(/(?<![.\w$?])([A-Za-z_$][\w$]*)\s*\??\.\s*([A-Za-z_$][\w$]*)\s*(?:<[^>(;]*>)?\s*\(/g)) {
-      calls.push({ target: index.resolveMember(entry.file, m[1], m[2]), paren: m.index + m[0].length - 1, label: `${m[1]}.${m[2]}` });
+    for (const s of memberCallSitesIn(body, { closures: true })) {
+      calls.push({ target: index.resolveMember(entry.file, s.obj, s.prop), paren: s.paren, label: `${s.obj}.${s.prop}` });
     }
     for (const c of calls) {
       if (!c.target) continue;
