@@ -1208,9 +1208,11 @@ async function getEntryEmbedding(
 ): Promise<{ vector: number[]; doc: Record<string, unknown> } | 'no-embedding' | null> {
   const collSuffix = KNOWLEDGE_COLLECTION[entryType];
   const collName = `${spaceId}_${collSuffix}`;
+  // `seq` too: the duplicate scanner records a pair at both records' seqs and skips it while they are unchanged,
+  // and a source with no seq made that depend on which end was the seed — a refused pair re-merged on every scan.
   const doc = await col(collName).findOne(
     asFilter({ _id: entryId, spaceId }),
-    { projection: { embedding: 1, _id: 1, spaceId: 1, name: 1, fact: 1, label: 1, title: 1, path: 1, type: 1, description: 1 } },
+    { projection: { embedding: 1, _id: 1, spaceId: 1, seq: 1, name: 1, fact: 1, label: 1, title: 1, path: 1, type: 1, description: 1 } },
   ) as Record<string, unknown> | null;
   if (!doc) return null;
   const vector = doc['embedding'] as number[] | undefined;

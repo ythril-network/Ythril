@@ -37,9 +37,11 @@
  * is the other caller — importing it from `edges.ts` would put the two biggest brain modules in a runtime
  * dependency for the sake of one function, where a leaf both can reach costs nothing.
  */
-import { col, asFilter, asDoc } from '../db/mongo.js';
+import { col, asFilter, asDoc, asBulk } from '../db/mongo.js';
 import type { ClientSession } from 'mongodb';
 import { withAllocatedSeqs } from '../util/seq.js';
+import { inChunks } from '../util/chunks.js';
+import { readStoredById } from '../db/read-by-id.js';
 import { getConfig } from '../config/loader.js';
 import { edgeIdFor } from './edge-id.js';
 import { withoutVector } from './read-projection.js';
@@ -97,7 +99,8 @@ export class EdgeIdentityTaken extends Error {
 }
 
 /**
- * Move an edge onto the id `(from, to, label)` derives, when that is not the id it is already under.
+ * Move an edge onto the id `(from, to, label)` derives, when that is not the id it is already under — one move
+ * through `rekeyEdges`, which is the one implementation (see its docblock for the rules).
  *
  * @param next     the identity to move onto. Fields it omits keep their stored value.
  * @param alsoSet   extra fields to write onto the re-inserted document, as the caller's own update would have.
@@ -118,83 +121,140 @@ export async function rekeyEdge(
   alsoUnset: readonly string[] = [],
   session?: ClientSession,
 ): Promise<EdgeRekey | null> {
-  const from = next.from ?? existing.from;
-  const to = next.to ?? existing.to;
-  const label = next.label ?? existing.label;
-  // The kinds come from the STORED edge: a rekey moves an endpoint or renames a label, and neither changes
-  // what kind of record an endpoint is. Omitting them here would derive the pre-M-3 id and rekey every
-  // widened edge onto a collision.
-  const newId = edgeIdFor(from, to, label, existing.fromKind, existing.toKind);
-  // The common case by far is an ordinary field patch. Delete-and-inserting one would write a tombstone and
-  // briefly remove the edge from every peer for a description edit.
-  if (newId === existing._id) return null;
+  const [moved] = await rekeyEdges(spaceId, [{ existing, next }], alsoSet, alsoUnset, session);
+  return moved ?? null;
+}
 
-  /*
-   * ── ONLY THE AUTHOR MAY MOVE IT ───────────────────────────────────────────────────────────────────────
-   *
-   * `applyPeerTombstones` deletes the underlying document **only if it was authored by the instance that
-   * issued the tombstone**. That guard exists so a remote tombstone cannot delete locally-authored content,
-   * it is what protects a pubsub subscriber's own data, and it returns silently.
-   *
-   * Edges replicate carrying their ORIGINAL author, so a tombstone this instance issues for an edge a peer
-   * authored is dropped by that peer — while the insert half propagates normally, because the edges pull has
-   * no author filter and the docs stream's tombstone stubs are skipped by the sync engine. The peer would
-   * keep the old row AND gain the new one: two rows for one relationship, and the old one still asserting a
-   * relationship that no longer exists. That is worse than the limit this function removes.
-   *
-   * Issuing the tombstone under `existing.author.instanceId` instead does not work either: it clears this
-   * guard and then fails the check below it, which requires the DELIVERING peer to be the issuer — a
-   * tombstone relayed on behalf of another author is refused and logged as cross-instance delete forgery.
-   *
-   * So an edge authored elsewhere is not moved. The caller falls through to its ordinary in-place update,
-   * which is what happened before this function existed and which converges — the edge simply keeps an id
-   * its identity no longer derives, exactly the documented limit, now narrowed to edges we did not write.
-   *
-   * Lifting it needs a delete a peer can apply without authorship: a tombstone that names its successor and
-   * is applied as a MOVE. That is a change to a sync contract two other parties consume, and it is not
-   * smuggled in behind a bug fix.
-   */
-  const author = existing.author?.instanceId;
-  if (author !== undefined && author !== getConfig().instanceId) return null;
+/** One edge a `rekeyEdges` call is asked to move: the stored document, and the identity to move it onto. */
+export interface EdgeMove {
+  existing: EdgeDoc;
+  next: { from?: string; to?: string; label?: string };
+}
 
-  const coll = col<EdgeDoc>(spaceCollection(spaceId, 'edges'));
-  // BEFORE anything is written. After the delete, a refused move would have destroyed the edge it declined
-  // to relocate.
-  const taken = await coll.findOne(asFilter<EdgeDoc>({ _id: newId }), { projection: { _id: 1 }, session });
-  if (taken) throw new EdgeIdentityTaken(newId, from, to, label);
+/** Rows per delete, tombstone and insert command: a hub merge moves thousands, and one command a row was the cost. */
+const REKEY_CHUNK = 1_000;
+
+/**
+ * Move many edges onto the ids their identities derive — THE re-key, for one edge (`rekeyEdge`) or a merge's
+ * thousands (`Q-107` part 3a). Each move is decided exactly as one is, and the writes are one command per chunk:
+ * a delete, the tombstones, the inserts.
+ *
+ * Every caller runs this inside a transaction under the horizon hold (`inHeldTransaction`), because the seq
+ * block's release here precedes the commit.
+ *
+ * @returns one entry per move, in order: the re-key, or `null` where the edge stays under its id — the derived id
+ *          is the one it already has, or a PEER authored it (see below). The caller writes those in place.
+ */
+export async function rekeyEdges(
+  spaceId: string,
+  moves: readonly EdgeMove[],
+  alsoSet: Record<string, unknown> = {},
+  alsoUnset: readonly string[] = [],
+  session?: ClientSession,
+): Promise<Array<EdgeRekey | null>> {
+  const instanceId = getConfig().instanceId;
+  const planned = moves.map(({ existing, next }) => {
+    const from = next.from ?? existing.from;
+    const to = next.to ?? existing.to;
+    const label = next.label ?? existing.label;
+    // The kinds come from the STORED edge: a rekey moves an endpoint or renames a label, and neither changes
+    // what kind of record an endpoint is. Omitting them here would derive the pre-M-3 id and rekey every
+    // widened edge onto a collision.
+    const newId = edgeIdFor(from, to, label, existing.fromKind, existing.toKind);
+    // The common case by far is an ordinary field patch. Delete-and-inserting one would write a tombstone and
+    // briefly remove the edge from every peer for a description edit.
+    if (newId === existing._id) return null;
+
+    /*
+     * ── ONLY THE AUTHOR MAY MOVE IT ─────────────────────────────────────────────────────────────────────
+     *
+     * `applyPeerTombstones` deletes the underlying document **only if it was authored by the instance that
+     * issued the tombstone**. That guard exists so a remote tombstone cannot delete locally-authored content,
+     * it is what protects a pubsub subscriber's own data, and it returns silently.
+     *
+     * Edges replicate carrying their ORIGINAL author, so a tombstone this instance issues for an edge a peer
+     * authored is dropped by that peer — while the insert half propagates normally, because the edges pull has
+     * no author filter and the docs stream's tombstone stubs are skipped by the sync engine. The peer would
+     * keep the old row AND gain the new one: two rows for one relationship, and the old one still asserting a
+     * relationship that no longer exists. That is worse than the limit this function removes.
+     *
+     * Issuing the tombstone under `existing.author.instanceId` instead does not work either: it clears this
+     * guard and then fails the check below it, which requires the DELIVERING peer to be the issuer — a
+     * tombstone relayed on behalf of another author is refused and logged as cross-instance delete forgery.
+     *
+     * So an edge authored elsewhere is not moved. The caller falls through to its ordinary in-place update,
+     * which is what happened before this function existed and which converges — the edge simply keeps an id
+     * its identity no longer derives, exactly the documented limit, now narrowed to edges we did not write.
+     *
+     * Lifting it needs a delete a peer can apply without authorship: a tombstone that names its successor and
+     * is applied as a MOVE. That is a change to a sync contract two other parties consume, and it is not
+     * smuggled in behind a bug fix.
+     */
+    const author = existing.author?.instanceId;
+    if (author !== undefined && author !== instanceId) return null;
+    return { existing, from, to, label, newId };
+  });
+  const moving = planned.filter((m): m is NonNullable<typeof m> => m !== null);
+  if (moving.length === 0) return planned.map(() => null);
+
+  const collName = spaceCollection(spaceId, 'edges');
+  const coll = col<EdgeDoc>(collName);
+  // BEFORE anything is written. After the delete, a refused move would have destroyed the edge it declined to
+  // relocate. Two moves onto ONE id are the same refusal: the second insert would hit the unique index.
+  const taken = await readStoredById<{ _id: string }>(collName, moving.map(m => m.newId), { _id: 1 }, session ? { session } : {});
+  const claimed = new Set<string>();
+  for (const m of moving) {
+    if (taken.has(m.newId) || claimed.has(m.newId)) throw new EdgeIdentityTaken(m.newId, m.from, m.to, m.label);
+    claimed.add(m.newId);
+  }
 
   const now = new Date().toISOString();
-  // One block of two, taken in THIS ORDER — see the docblock. The tombstone gets the lower seq; reversing
-  // them is the one ordering that loses the edge on a peer. Every caller runs this inside a transaction and
-  // holds the horizon across it (`withSeqHorizonHeld`), because the block's release here precedes the commit.
-  return withAllocatedSeqs(spaceId, 2, async (tombSeq) => {
-    const insertSeq = tombSeq + 1;
+  const n = moving.length;
+  // One block of 2n, taken in THIS ORDER — see the module docblock. Every tombstone gets a seq below every
+  // insert; reversing them is the one ordering that loses an edge on a peer.
+  const written = await withAllocatedSeqs(spaceId, 2 * n, async (tombSeq) => {
+    const insertSeq = tombSeq + n;
+    const opts = session ? { session } : {};
 
-    await coll.deleteOne(asFilter<EdgeDoc>({ _id: existing._id }), { session });
-    await col<TombstoneDoc>(spaceCollection(spaceId, 'tombstones')).replaceOne(
-      asFilter<TombstoneDoc>({ _id: existing._id }),
-      asDoc<TombstoneDoc>(tombstoneDoc(spaceId, tombSeq, { _id: existing._id, type: 'edge', deletedAt: now, originalSeq: existing.seq })),
-      { upsert: true, session },
-    );
+    for (const chunk of inChunks(moving, REKEY_CHUNK)) {
+      await coll.deleteMany(asFilter<EdgeDoc>({ _id: { $in: chunk.map(m => m.existing._id) } }), opts);
+    }
+    for (const [c, chunk] of inChunks(moving, REKEY_CHUNK).entries()) {
+      await col<TombstoneDoc>(spaceCollection(spaceId, 'tombstones')).bulkWrite(asBulk<TombstoneDoc>(chunk.map((m, k) => ({
+        replaceOne: {
+          filter: { _id: m.existing._id },
+          replacement: tombstoneDoc(spaceId, tombSeq + c * REKEY_CHUNK + k,
+            { _id: m.existing._id, type: 'edge', deletedAt: now, originalSeq: m.existing.seq }),
+          upsert: true,
+        },
+      }))), { ordered: false, ...opts });
+    }
 
     // The stored document carried forward, not rebuilt: `createdAt`, `author`, `tags`, `description` and
     // `properties` describe the relationship, and the relationship did not change — only which entities it
     // connects, or what it is called. Rebuilding would reset an edge's provenance on every entity merge.
-    const stored = { ...existing, ...alsoSet, _id: newId, from, to, label, updatedAt: now, seq: insertSeq } as EdgeDoc;
-    // BEFORE the write, never on the copy that is returned. Removing them from the response alone is what made
-    // a GET immediately contradict the 200 that created the row.
-    for (const key of alsoUnset) delete (stored as unknown as Record<string, unknown>)[key];
-    await coll.insertOne(asDoc<EdgeDoc>(stored), { session });
-
-    /*
-     * INSERTED with its vector, RETURNED without one.
-     *
-     * The stored document must keep the embedding — dropping it would blank the vector on every entity merge
-     * and take the edge out of recall until the queue caught up. But `merge.ts` reads its edges unprojected, so
-     * the document reaching here can carry a 768-float array, and `updateEdgeById` sends what this returns
-     * straight back as its 200. `upsertEdge` leaked exactly this way, measured against the live stack, and the
-     * fix was the same shape: strip at the return, not at the write.
-     */
-    return { edge: withoutVector(stored), previousId: existing._id };
+    const stored = moving.map(({ existing, newId, from, to, label }, i) => {
+      const doc = { ...existing, ...alsoSet, _id: newId, from, to, label, updatedAt: now, seq: insertSeq + i } as EdgeDoc;
+      // BEFORE the write, never on the copy that is returned. Removing them from the response alone is what made
+      // a GET immediately contradict the 200 that created the row.
+      for (const key of alsoUnset) delete (doc as unknown as Record<string, unknown>)[key];
+      return doc;
+    });
+    for (const chunk of inChunks(stored, REKEY_CHUNK)) {
+      await coll.insertMany(chunk.map(d => asDoc<EdgeDoc>(d)), { ordered: true, ...opts });
+    }
+    return stored;
   }, 'edge.rekey');
+
+  /*
+   * INSERTED with its vector, RETURNED without one.
+   *
+   * The stored document must keep the embedding — dropping it would blank the vector on every entity merge
+   * and take the edge out of recall until the queue caught up. But `merge.ts` reads its edges with their
+   * vectors, so the documents reaching here can carry 768-float arrays, and `updateEdgeById` sends what this
+   * returns straight back as its 200. `upsertEdge` leaked exactly this way, measured against the live stack,
+   * and the fix was the same shape: strip at the return, not at the write.
+   */
+  const byPrevious = new Map(moving.map((m, i) => [m.existing._id, { edge: withoutVector(written[i]!), previousId: m.existing._id }]));
+  return planned.map(p => (p === null ? null : byPrevious.get(p.existing._id) ?? null));
 }

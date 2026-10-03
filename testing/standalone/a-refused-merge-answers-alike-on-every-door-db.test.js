@@ -176,12 +176,24 @@ const DRIVERS = {
   },
 };
 
-/** The callers of `executeMerge`, read from the source with comments stripped, minus its definition. */
+/**
+ * The merge doors, read from the source with comments stripped: every caller of `mergeEntities` — the one sequence
+ * every door runs (bundle-30 `R12`) — minus its definition. Re-anchored from "the callers of `executeMerge`" when the
+ * four hand-written sequences became that one function; `mergeDoorsBypassing` holds that no door calls
+ * `executeMerge` past it.
+ */
 function mergeDoors() {
-  const files = readTrackedSources('server/src', { untracked: true, floor: 300 })
-    .filter(({ text }) => /\bexecuteMerge\s*\(/.test(stripComments(text).replace(/(?:async\s+)?function\s+executeMerge\s*\(/g, '')))
+  return readTrackedSources('server/src', { untracked: true, floor: 300 })
+    .filter(({ text }) => /\bmergeEntities\s*\(/.test(stripComments(text).replace(/(?:async\s+)?function\s+mergeEntities\s*\(/g, '')))
+    .map(f => f.file)
+    .filter(f => f !== 'server/src/brain/merge.ts');
+}
+
+/** Files outside the merge module that call `executeMerge` directly — a door that skips the one sequence. */
+function mergeDoorsBypassing() {
+  return readTrackedSources('server/src', { untracked: true, floor: 300 })
+    .filter(({ file, text }) => file !== 'server/src/brain/merge.ts' && /\bexecuteMerge\s*\(/.test(stripComments(text)))
     .map(f => f.file);
-  return files;
 }
 
 /** The module that exports `MERGE_MAX_RELINKS`, found in the source; its compiled twin is imported. */
@@ -250,12 +262,14 @@ describe('a refused merge answers alike on every door', { skip }, () => {
     return hub;
   }
 
-  it('every caller of executeMerge has a driver here, and there are at least four', () => {
+  it('every merge door has a driver here, and there are at least four', () => {
     const doors = mergeDoors();
-    assert.ok(doors.length >= 4, `only ${doors.length} caller(s) of executeMerge found — the derivation is broken: ${doors}`);
+    assert.ok(doors.length >= 4, `only ${doors.length} caller(s) of mergeEntities found — the derivation is broken: ${doors}`);
     assert.deepEqual([...doors].sort(), Object.keys(DRIVERS).sort(),
-      'a caller of executeMerge has no driver in this file (or a driver names a file that no longer merges) — every '
+      'a merge door has no driver in this file (or a driver names a file that no longer merges) — every '
       + 'door a merge can run through must be asked how it refuses one');
+    assert.deepEqual(mergeDoorsBypassing(), [],
+      'a file calls executeMerge past mergeEntities — a door that runs its own sequence is a door this file does not drive');
   });
 
   describe('a merge whose survivor breaks its strict schema', () => {

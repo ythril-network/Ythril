@@ -122,6 +122,22 @@ const CITED = [
     text: (v) => new RegExp(`default: ${v}% of the shorter image side`),
   },
   {
+    // Set from measurement (`testing/bench/merge-hub-in-one-transaction.mjs`), so it is a number that MOVES — and a
+    // caller sizes its own hub-splitting around the one the guide states.
+    what: 'the most records one merge relinks (integration guide)',
+    source: 'server/src/brain/merge.ts',
+    code: /export const MERGE_MAX_RELINKS = ([0-9_]+);/,
+    doc: 'docs/integration-guide.md',
+    text: (v) => new RegExp(`One merge relinks at most \\*\\*${v}\\*\\* records`),
+  },
+  {
+    what: 'the most records one merge relinks (user guide)',
+    source: 'server/src/brain/merge.ts',
+    code: /export const MERGE_MAX_RELINKS = ([0-9_]+);/,
+    doc: 'docs/userguide.md',
+    text: (v) => new RegExp(`more than \\*\\*${v}\\*\\* links, relationships`),
+  },
+  {
     what: 'contradiction-scanner similarity threshold',
     source: 'server/src/config/types.ts',
     code: /Default: (0\.[0-9]+)\./,

@@ -37,7 +37,7 @@ import { log } from '../../util/log.js';
 import { bulkWriteFailures, phraseWriteFailure, DUPLICATE_KEY } from '../../db/write-errors.js';
 import { enqueueWriteEmbedJobs, EMBED_PRIORITY } from '../embed-queue.js';
 import { linkIdFor } from '../link-id.js';
-import { tombstoneDoc } from '../tombstones.js';
+import { writeTombstones } from '../tombstones.js';
 import type { AuthorRef, LinkDoc, TombstoneDoc } from '../../config/types.js';
 import type { RefKind } from '../../config/types-knowledge.js';
 import type { DesiredLinks } from '../links.js';
@@ -236,16 +236,20 @@ export async function reconcileLinkRows(
 
   const linksColl = col<LinkDoc>(spaceCollection(spaceId, 'links'));
   const existingBy = records.map(() => [] as string[]);
+  const seqOfExisting = new Map<string, number | undefined>();
   const toRead = records.map((r, i) => ({ r, i })).filter(({ r }) => !r.minted && Object.keys(r.desired).length > 0);
   for (const chunk of inChunks(toRead, READ_CHUNK)) {
     const rows = await linksColl.find(asFilter<LinkDoc>({
       spaceId,
       // Only the classes each write TOUCHED: a patch naming `linkEntities` alone must not disturb fact links.
       $or: chunk.map(({ r }) => ({ from: r.from, fromKind: r.fromKind, toKind: { $in: Object.keys(r.desired) } })),
-    }), { projection: { _id: 1, from: 1, fromKind: 1, toKind: 1 } }).toArray() as Array<Pick<LinkDoc, '_id' | 'from' | 'fromKind' | 'toKind'>>;
+    }), { projection: { _id: 1, from: 1, fromKind: 1, toKind: 1, seq: 1 } }).toArray() as Array<Pick<LinkDoc, '_id' | 'from' | 'fromKind' | 'toKind' | 'seq'>>;
     for (const { r, i } of chunk) {
       const classes = new Set(Object.keys(r.desired));
-      existingBy[i] = rows.filter(row => row.from === r.from && row.fromKind === r.fromKind && classes.has(row.toKind)).map(row => row._id);
+      const mine = rows.filter(row => row.from === r.from && row.fromKind === r.fromKind && classes.has(row.toKind));
+      existingBy[i] = mine.map(row => row._id);
+      // The seq each row has, so the tombstone of one this reconcile removes carries it (`writeTombstones`).
+      for (const row of mine) seqOfExisting.set(row._id, row.seq);
     }
   }
 
@@ -263,12 +267,9 @@ export async function reconcileLinkRows(
   const tombstones = col<TombstoneDoc>(spaceCollection(spaceId, 'tombstones'));
   const now = new Date().toISOString();
   if (removals.length > 0) {
-    await withAllocatedSeqs(spaceId, removals.length, async (first) => {
-      await linksColl.deleteMany(asFilter<LinkDoc>({ _id: { $in: removals }, spaceId }));
-      await tombstones.bulkWrite(asBulk(removals.map((_id, i) => ({
-        replaceOne: { filter: { _id }, replacement: tombstoneDoc(spaceId, first + i, { _id, type: 'link', deletedAt: now }), upsert: true },
-      }))), { ordered: false });
-    }, 'link.reconcile.remove');
+    // The rows go, then their tombstones — one seq block taken at their write, each carrying the row's seq.
+    await linksColl.deleteMany(asFilter<LinkDoc>({ _id: { $in: removals }, spaceId }));
+    await writeTombstones(spaceId, removals.map(_id => ({ _id, type: 'link', deletedAt: now, originalSeq: seqOfExisting.get(_id) })));
   }
   if (additions.length > 0) {
     await withAllocatedSeqs(spaceId, additions.length, async (first) => {

@@ -19,7 +19,7 @@ import { getConfig } from '../config/loader.js';
 import { concreteSpaces } from '../spaces/proxy.js';
 import { log } from '../util/log.js';
 import { scanSpace, pairContentHash } from '../brain/dupe-scanner.js';
-import { computeMergePlan, applyResolutions, executeMerge } from '../brain/merge.js';
+import { mergeEntities, mergeRefusal } from '../brain/merge.js';
 import { nliConfigured } from '../brain/nli-client.js';
 import type { DupeCandidateDoc, ContradictionCandidateDoc } from '../config/types.js';
 import { spaceCollection } from '../db/space-collection.js';
@@ -291,21 +291,25 @@ duplicatesRouter.post('/:id/merge', globalRateLimit, requireAuth, denyReadOnly, 
     const survivorId = pref === 'newer' ? newerId : olderId;
     const absorbedId = pref === 'newer' ? olderId : newerId;
 
-    const plan = await computeMergePlan(spaceId, survivorId, absorbedId, []);
-    if ('error' in plan) { res.status(plan.status).json({ error: plan.error }); return; }
-    if (!plan.fullyResolved) { res.status(409).json({ error: 'Property value conflict — resolve manually', plan: plan.plan }); return; }
-
-    const mergedProps = applyResolutions(plan.survivor.properties ?? {}, plan.absorbed.properties ?? {}, plan.plan.propertyConflicts, plan.plan.absorbedOnlyProperties);
-    const result = await executeMerge(spaceId, plan.survivor, plan.absorbed, mergedProps, { tokenId: req.authToken?.id, tokenLabel: req.authToken?.name });
+    // The one merge sequence every door runs (`mergeEntities`); a refusal answers as it does on every door.
+    const outcome = await mergeEntities(spaceId, survivorId, absorbedId, [], { tokenId: req.authToken?.id, tokenLabel: req.authToken?.name });
+    if (outcome.kind === 'not-found') { res.status(outcome.status).json({ error: outcome.error }); return; }
+    if (outcome.kind !== 'merged') {
+      res.status(409).json({ error: 'Property value conflict — resolve manually', ...(outcome.kind === 'unresolved' ? { plan: outcome.plan } : {}) });
+      return;
+    }
 
     await col<DupeCandidateDoc>(spaceCollection(spaceId, 'dupeCandidates')).updateOne(
       asFilter<DupeCandidateDoc>({ _id: doc._id }),
       asUpdate<DupeCandidateDoc>({ $set: { status: 'resolved', resolution: 'merged', updatedAt: new Date().toISOString() } }),
     );
-    res.json({ status: 'merged', survivorId: result.entity._id });
+    res.json({ status: 'merged', survivorId: outcome.entity._id });
   } catch (err) {
-    log.error(`POST /api/duplicates/:id/merge: ${err}`);
-    res.status(500).json({ error: 'Internal error' });
+    const refusal = mergeRefusal(err);
+    if (refusal) { res.status(refusal.status).json(refusal.body); return; }
+    // Everything else to the global handler, which logs it: a store failure is a 503 there
+    // (`brain/store-failure.ts`) as on every door, where this catch used to answer every failure 500.
+    throw err;
   }
 });
 

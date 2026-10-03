@@ -187,9 +187,10 @@ describe('an identity change is re-keyed, and both paths do it', () => {
      * returns null. A `$set` that ran unconditionally would leave every edge under an id it no longer
      * derives, which is the limit this change removes.
      */
-    const merge = src('server/src/brain/merge.ts');
-    const loop = merge.slice(merge.indexOf('for (const edge of edgesToRelink)'));
-    const rekeyAt = loop.indexOf('rekeyEdge(');
+    // Re-anchored (bundle-30, `Q-107` part 3a): the relink is batched in `relinkAndAbsorb` through `rekeyEdges`,
+    // and the in-place write takes only the moves the re-key returned `null` for — the same order, by the batch.
+    const loop = bodyOf(src('server/src/brain/merge.ts'), 'relinkAndAbsorb');
+    const rekeyAt = loop.indexOf('rekeyEdges(');
     const setAt = loop.search(/updates\['from'\]|updates\['to'\]/);
     assert.ok(rekeyAt > 0, 'a relinked edge must move onto the id its new identity derives');
     assert.ok(setAt > rekeyAt,

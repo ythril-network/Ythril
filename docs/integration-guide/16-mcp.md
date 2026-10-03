@@ -323,7 +323,7 @@ row survives its own tool being built, so the list cannot keep advertising a gap
 | `update_entity` | Update an existing entity by ID (name, type, description, tags, properties, `suppressEmbeddings`); supports `deleteFields` for field removal |
 | `delete_entity` | Delete an entity by ID. Refused when the space has `strictLinkage` and another record still references it — the same rule the REST route enforces. Face labels are unlabelled rather than blocking |
 | `delete_entity_preview` | What deleting an entity would remove, and the token that lets you do it. Reads only. `delete_entity` takes that token as `cascadeToken` and refuses it if the list has changed since — so a record created after you looked cannot be deleted by a decision taken before it existed |
-| `graph_merge` | Merge two entities — relink all references and resolve per-property conflicts |
+| `graph_merge` | Merge two entities — relink all references and resolve per-property conflicts, in one transaction. An unresolved conflict plan comes back as an error result (`422` on `POST /api/graph_merge`; the REST merge route answers the same plan `409`). Refused before anything is written: `422 merge_too_large` past the merge bound — the absorbed entity's edges, links and face labels together, stated in [04b](04b-graph-api.md#merge-two-entities) — with `relinks` and `bound` in `structuredContent`, `400` when the merged survivor would break a `strict` space's schema |
 | `save_edge` | Create or update a directed relationship |
 | `update_edge` | Update an existing edge by ID (label, type, weight, description, tags, properties, `suppressEmbeddings`); supports `deleteFields` for field removal |
 | `delete_edge` | Delete an edge by ID |

@@ -118,7 +118,8 @@ const CASES = {
     label: 'a chrono update', lock: 'counter',
     run: () => mods.chrono.updateChrono(S, C, { title: 'changed' }),
   }],
-  'server/src/brain/edge-rekey.ts:rekeyEdge': [{
+  // Re-keyed (bundle-30, Q-107 part 3a): the re-key's block is in `rekeyEdges`, one implementation for one edge or a batch.
+  'server/src/brain/edge-rekey.ts:rekeyEdges': [{
     label: 'an edge re-keyed by a label change (its block, inside the update\'s transaction)', lock: 'counter',
     run: () => mods.edges.updateEdgeById(S, ED, { label: 'renamed' }),
   }],
@@ -144,12 +145,15 @@ const CASES = {
     label: 'a legacy file record stamped with a seq', lock: 'counter',
     run: () => mods.conversion.stampFileMetaSeqs(S),
   }],
-  'server/src/brain/merge.ts:executeMerge': [{
-    label: 'a merge: the transaction under the horizon hold', lock: 'counter',
+  // Re-keyed (bundle-30 §A4/§B2): the merge runs in `inHeldTransaction`, and its seq blocks are taken in the
+  // transaction's callback, `relinkAndAbsorb`; driven through `executeMerge`, its one caller.
+  'server/src/brain/merge.ts:relinkAndAbsorb': [{
+    label: 'a merge: the relink seq blocks, inside its held transaction', lock: 'counter',
     run: async () => mods.merge.executeMerge(S, await door.coll(S, 'entities').findOne({ _id: E1 }),
       await door.coll(S, 'entities').findOne({ _id: E2 }), {}),
   }],
-  'server/src/brain/tombstones.ts:writeTombstone': [{
+  // Re-keyed (bundle-30): `writeTombstone` is one tombstone through `writeTombstones`, whose block this is.
+  'server/src/brain/tombstones.ts:writeTombstones': [{
     label: 'a tombstone write', lock: 'counter',
     run: () => mods.tombstones.writeTombstone(S, { _id: 'deleted-fact', type: 'fact' }),
   }],

@@ -58,6 +58,16 @@ describe('graph_merge: the 409 is the question, not a failure', () => {
       'say the 409 is expected — otherwise it reads as an error to handle');
   });
 
+  it('names the statuses the doors really answer, and the refusals that write nothing', () => {
+    // Re-anchored (bundle-30, `Q-107` part 3a): the description said "status 409" for the plan, and the tool door
+    // answers an error result as 422 — a caller building a retry rule from the description read the wrong number.
+    // And the two refusals are part of the contract: a merge too large to run, and a strict schema.
+    assert.doesNotMatch(MERGE, /back with status 409/, 'the tool door does not answer the plan 409 — the REST route does');
+    assert.match(MERGE, /\b422\b/, 'say what status the tool door gives the plan and the merge_too_large refusal');
+    assert.match(MERGE, /merge_too_large/, 'name the refusal a hub gets, so a caller can recognise it');
+    assert.match(MERGE, /REFUSED BEFORE ANYTHING IS WRITTEN/, 'say that a refusal leaves the space as it was');
+  });
+
   it('says a partial resolution merges NOTHING', () => {
     assert.match(MERGE, /RESOLVE EVERY CONFLICT OR NOTHING HAPPENS/,
       'a half-merge would leave two records that are neither separate nor one');

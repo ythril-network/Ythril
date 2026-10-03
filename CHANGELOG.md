@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **An entity merge relinks a hub in one transaction of a few bulk writes, and a merge too large for one is
+  refused before anything is written (`Q-107`, part 3a).** A merge used to relink the absorbed entity's edges,
+  links and face labels one record at a time — five commands an edge, about 13 ms each with vectors on the test
+  store — so a hub of 10 000 edges could not commit at all. Each kind of record is now one bulk write with one
+  block of sequence numbers, and a merge of 2500 records takes seconds. What an integrator will notice:
+  - **BREAKING for a caller merging hubs: one merge relinks at most 2500 records** (the absorbed entity's
+    edges, links and face labels together). A larger merge answers `422` with `code: "merge_too_large"`,
+    `relinks` and `bound`, on the REST merge route, `POST /api/duplicates/:id/merge` and the `graph_merge` tool
+    alike, and automerge leaves such a pair open with one warning. Nothing is written, not even a sequence number.
+    The bound is set from measurement: half of the largest merge that still committed on the test store.
+  - **A merge a `strict` space refuses answers `400` on every door.** The REST merge route answered `500`
+    "Internal server error" and the duplicate route `500` "Internal error" while the tool answered `400`. The
+    refusal is now decided before anything is written, so it no longer spends sequence numbers either.
+  - **The `graph_merge` description states the statuses the doors really answer**: an unresolved conflict plan
+    is an error result (`422` on `POST /api/graph_merge`; the REST merge route still answers the plan `409`).
+  - The four doors run one merge sequence (plan, resolutions, merge), so a check added to it reaches all four.
 - **`POST /api/sync/tombstones` checks each tombstone on its own, answers `refused`, and takes at most 5000 per
   request (bundle-46).** A malformed tombstone, or one whose seq the counter cannot carry, is refused alone and the
   rest of the page applies; the answer is `{ applied, refused }`, where `applied` keeps its meaning (the tombstones
@@ -369,6 +385,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   calls the model, then wrote the vector by id alone: a peer's newer copy landing during the model call received
   the OLD text's vector and `matchedText` — and a copy this instance suppresses received a vector it must never
   hold. Every write the job makes is now guarded by the seq it read; the newer copy's own job embeds it.
+- **A merge reported as failed after its commit landed is answered as merged, and still queues its edges and
+  sends its webhooks.** A commit whose reply was lost used to throw past both, leaving re-keyed edges without a
+  vector and subscribers never told the absorbed entity was deleted. The merge reads back, while still holding
+  the sequence horizon, whether it landed.
+- **A merge's first-time model load no longer fails the merge.** The survivor's embedding is computed before the
+  merge takes its hold, so a slow model load can no longer outlast the hold's deadline and answer `503`.
+- **The tombstone of an edge a merge drops as a duplicate, and of a link it re-keys or a write unlinks, carries
+  the seq of the record it deletes** (`originalSeq`). Without it a peer whose watermark never reached the record
+  was sent its deletion.
+- **An automerge a space refuses is reported once per pair, not twice on every scan.** The scanner recorded a
+  pair at a seq it never read for the record it started from, so a refused pair never matched itself and was
+  merged again — a whole transaction, rolled back — and warned about from both ends on every scan. The survivor
+  of an automerge is now also the older record as configured, rather than whichever the scan reached first.
+- **A write the store could not finish in time answers `503` on the create and converge doors too.** A planned
+  write whose bulk write the write bound ended was answered per item as "did not complete" through a read-back
+  that ran after the deadline; while nothing of the request has landed it is now the store timeout every door
+  answers `503 retryable`.
+- **A transaction under the sequence hold can read more than one batch of rows.** The driver sends a time limit
+  on such a cursor's `getMore`, which the server refuses, so any read of more than 101 rows inside a held
+  transaction failed it. A cursor there now asks for every row in its first batch.
 - **A write that stalled could stop a space's replication indefinitely (`Q-213`).** While a write holds its
   sequence number, every peer pulling the space is served nothing past it, and nothing bounded the write: a
   document lock held elsewhere, a stalled socket or a transaction retrying a conflict for two minutes held every

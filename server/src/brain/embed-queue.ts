@@ -497,7 +497,20 @@ export async function retireEmbedJob(
   recordType: BrainEmbedRecordType,
   recordId: string,
 ): Promise<void> {
-  await jobs(spaceId).deleteOne(asFilter<BrainEmbedJobDoc>({ _id: embedJobId(recordType, recordId) }));
+  await retireEmbedJobs(spaceId, recordType, [recordId]);
+}
+
+/**
+ * Retire the jobs of many records of one kind that are gone — `retireEmbedJob`'s rule for a batch: a merge's
+ * re-keyed edges, a cascade's chunk. By `embedJobId`, never a hand-spelled `${kind}:${id}` (a second spelling of
+ * the id is how a retire comes to match nothing), and chunked, so a hub's thousands of ids are never one `$in`.
+ */
+export async function retireEmbedJobs(
+  spaceId: string, recordType: BrainEmbedRecordType, recordIds: readonly string[],
+): Promise<void> {
+  for (const batch of inChunks(recordIds, SWEEP_BATCH)) {
+    await jobs(spaceId).deleteMany(asFilter<BrainEmbedJobDoc>({ _id: { $in: batch.map(id => embedJobId(recordType, id)) } }));
+  }
 }
 
 /**

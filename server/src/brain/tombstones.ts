@@ -1,9 +1,10 @@
 import type { ClientSession } from 'mongodb';
-import { col, asFilter, asDoc } from '../db/mongo.js';
+import { col, asFilter, asBulk } from '../db/mongo.js';
 import { getConfig } from '../config/loader.js';
 import type { TombstoneDoc } from '../config/types.js';
 import { spaceCollection } from '../db/space-collection.js';
-import { settledSeqRange, withSeq } from '../util/seq.js';
+import { settledSeqRange, withAllocatedSeqs } from '../util/seq.js';
+import { inChunks } from '../util/chunks.js';
 
 /*
  * A tombstone a PEER delivered is applied by `applyPeerTombstones` (`sync/tombstone-apply.ts`), not here: this
@@ -55,8 +56,50 @@ export async function writeTombstone(
   t: { _id: string; type: TombstoneDoc['type']; originalSeq?: number | undefined; deletedAt?: string },
   session?: ClientSession,
 ): Promise<void> {
-  await withSeq(spaceId, (seq) => col<TombstoneDoc>(spaceCollection(spaceId, 'tombstones')).replaceOne(
-    asFilter<TombstoneDoc>({ _id: t._id }), asDoc<TombstoneDoc>(tombstoneDoc(spaceId, seq, t)),
-    { upsert: true, ...(session ? { session } : {}) },
-  ), 'tombstone.write');
+  await writeTombstones(spaceId, [{ ...t, originalSeq: t.originalSeq }], session);
+}
+
+/**
+ * A tombstone as `writeTombstones` takes it. `originalSeq` is a REQUIRED key whose value may be `undefined`: the
+ * deleted record's seq is the half `tombstoneDoc` calls forgettable, and a batch writer that let it be omitted
+ * is how the merge's duplicate-edge tombstones and the link reconcile's shipped without it. A caller that has no
+ * seq to give says so out loud, at the call.
+ */
+export interface IssuedTombstone {
+  _id: string;
+  type: TombstoneDoc['type'];
+  originalSeq: number | undefined;
+  deletedAt?: string;
+}
+
+/** Tombstones per bulk write: a hub's cascade or merge issues thousands, and one command per row was the cost. */
+const TOMBSTONE_CHUNK = 1_000;
+
+/**
+ * Issue many local tombstones: ONE seq block for all of them, taken at the write, and one bulk write per chunk.
+ *
+ * Extracted from the link reconcile in `write-plan/commit.ts`, the one batched copy, so the merge and the entity
+ * cascade stop issuing a seq and a round trip per deleted row. A seq PER ROW, never one shared: the seq-paged
+ * readers continue from the last item's seq with `seq > since`, so two tombstones sharing one at a page boundary
+ * would leave the rest unreachable. `session` puts the rows in the caller's transaction — the cascade's delete and
+ * its tombstones commit together or not at all.
+ */
+export async function writeTombstones(
+  spaceId: string, tombs: readonly IssuedTombstone[], session?: ClientSession,
+): Promise<void> {
+  if (tombs.length === 0) return;
+  const coll = col<TombstoneDoc>(spaceCollection(spaceId, 'tombstones'));
+  const deletedAt = new Date().toISOString();
+  await withAllocatedSeqs(spaceId, tombs.length, async (first) => {
+    let next = first;
+    for (const chunk of inChunks(tombs, TOMBSTONE_CHUNK)) {
+      await coll.bulkWrite(asBulk<TombstoneDoc>(chunk.map(t => ({
+        replaceOne: {
+          filter: { _id: t._id },
+          replacement: tombstoneDoc(spaceId, next++, { deletedAt, ...t }),
+          upsert: true,
+        },
+      }))), { ordered: false, ...(session ? { session } : {}) });
+    }
+  }, 'tombstone.write');
 }

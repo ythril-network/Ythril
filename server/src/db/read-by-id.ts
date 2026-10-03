@@ -25,7 +25,9 @@
  * - **Chunked** (`READ_CHUNK` ids per query), whatever the caller hands it, with at most `READ_PARALLEL` chunks in
  *   flight. Inside a session the chunks run one at a time, because a driver session is not used concurrently.
  * - **Projected**: the caller names the fields it reads (`fields`, an inclusion), or asks for `'all'`, which is
- *   every field but the never-returned ones (`NEVER_RETURNED_PROJECTION`). There is no raw whole-document mode.
+ *   every field but the never-returned ones (`NEVER_RETURNED_PROJECTION`). The one exception is named for its one
+ *   question: `'carried'`, the stored document whole, vector included, for a WRITER that carries a stored document
+ *   forward under a new id (the edge re-key of a merge) — a read that answers a caller never asks for it.
  * - **A Map keyed by the stored `_id` as a string** (`readStoredById`), never a plain object: an id is
  *   peer-supplied text, and `__proto__` as a key of a plain object is a prototype write rather than an entry. Or
  *   rows in the CALLER's id order (`readRowsById`), each id once, so the answer never depends on which chunk or
@@ -50,8 +52,12 @@ export const READ_PARALLEL = 4;
 /** Milliseconds a read may still take, from its caller's deadline. Throws once it is spent; `undefined` is unbounded. */
 export type TimeLeft = () => number | undefined;
 
-/** The fields a reader returns: an inclusion of the ones the caller reads, or `'all'` but the never-returned ones. */
-export type ReadFields = Readonly<Record<string, 1>> | 'all';
+/**
+ * The fields a reader returns: an inclusion of the ones the caller reads, `'all'` but the never-returned ones, or
+ * `'carried'` — every stored field, the vector included, for a writer re-inserting the document it read (a re-key
+ * carries the edge's vector across; `'all'` would drop it, and the edge would leave recall until it re-embedded).
+ */
+export type ReadFields = Readonly<Record<string, 1>> | 'all' | 'carried';
 
 export interface ReadByIdOptions {
   /**
@@ -72,14 +78,14 @@ async function readChunks<T extends object>(
   const unique = [...new Set(ids)];
   if (unique.length === 0) return [];
   const coll = col<{ _id: string }>(collName);
-  const projection = fields === 'all' ? NEVER_RETURNED_PROJECTION : { _id: 1, ...fields };
+  const projection = fields === 'carried' ? undefined : fields === 'all' ? NEVER_RETURNED_PROJECTION : { _id: 1, ...fields };
   const predicates = Array.isArray(opts.filter) ? opts.filter : [opts.filter as Readonly<Record<string, unknown>> | undefined];
   const { session, timeLeft } = opts;
   const chunks = await mapLimit(inChunks(unique, READ_CHUNK), session ? 1 : READ_PARALLEL, async (chunk) => {
     const ms = timeLeft?.();
     const query = andPredicates({ _id: { $in: chunk } }, ...predicates)!;
     return await coll.find(asFilter<{ _id: string }>(query), {
-      projection, ...(session ? { session } : {}), ...(ms !== undefined ? { maxTimeMS: ms } : {}),
+      ...(projection ? { projection } : {}), ...(session ? { session } : {}), ...(ms !== undefined ? { maxTimeMS: ms } : {}),
     }).toArray();
   });
   return chunks.flat() as unknown as T[];

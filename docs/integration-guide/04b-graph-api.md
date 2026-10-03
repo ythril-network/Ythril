@@ -228,6 +228,12 @@ Merge two entities into one. The **survivor** keeps its identity (ID, name, type
 | Unresolved property conflicts remain | `409` | `MergePlan` with conflict details |
 | Survivor or absorbed entity not found | `404` | Error |
 | Invalid resolution | `400` | Error |
+| The merged survivor would break a `strict` space's schema | `400` | `{ error, violations }` — nothing written |
+| The merge would relink more than 2500 records | `422` | `{ error, code: "merge_too_large", relinks, bound }` — nothing written |
+| The store did not finish the merge in time | `503` | `{ error, retryable: true }` — retry |
+
+The same refusals answer the same statuses on every door that merges: this route, the duplicate review's
+`POST /api/duplicates/:id/merge`, and the `graph_merge` tool (MCP, or `POST /api/graph_merge`).
 
 **Response `200`** (merge executed):
 
@@ -244,7 +250,9 @@ Merge two entities into one. The **survivor** keeps its identity (ID, name, type
       "to": "target-uuid",
       "label": "depends_on"
     }
-  ]
+  ],
+  "endpointRuleWarnings": [],
+  "deletedDuplicateEdgeIds": ["edge-2-uuid"]
 }
 ```
 
@@ -280,7 +288,9 @@ Merge two entities into one. The **survivor** keeps its identity (ID, name, type
 | `boolean` | `"survivor"`, `"absorbed"`, `"fn:and"`, `"fn:or"`, `"fn:xor"` |
 | `string` / other | `"survivor"`, `"absorbed"`, `"custom"` (with `customValue`) |
 
-**Relinking:** All edges, facts, and chrono entries referencing the absorbed entity are unconditionally rewritten to reference the survivor. Edges where `(from, to, label)` become identical after relinking appear in `duplicateEdgeWarnings[]` — the agent resolves them via `DELETE /api/brain/spaces/:spaceId/edges/:id`.
+**Relinking:** Every edge, every link (how a fact, chrono entry or file names an entity) and every face label that references the absorbed entity is rewritten to reference the survivor, and the absorbed entity is deleted — all in ONE transaction, so a merge lands whole or not at all. An absorbed edge whose relinked identity `(from, to, label, endpoint kinds)` a survivor edge already holds is deleted rather than relinked, with its tombstone, and listed in `deletedDuplicateEdgeIds[]`; `duplicateEdgeWarnings[]` on the plan names those pairs in advance.
+
+**How large a merge may be.** One merge relinks at most **2500** records — the absorbed entity's edges, links and face labels together. A merge over that is refused with `422 merge_too_large`, naming the count and the bound, **before anything is written**: the transaction a hub needs would hold every sync reader of the space for its whole length, and past a size the store cannot hold it at all. The bound is set from measurement (half of the largest merge that still committed on the test store). To merge a hub over it, move or delete some of the absorbed entity's edges first — or merge the other way round, absorbing the entity with fewer relationships.
 
 **`endpointRuleWarnings[]` — edges the relink moves onto an end their label forbids.** A merge is the only
 operation that can produce one: every path that CREATES an edge refuses a broken `endpoints` or `functional`

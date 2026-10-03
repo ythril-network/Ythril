@@ -48,9 +48,13 @@ describe('the re-key is one implementation, not one per path', () => {
      * this repo produces most — and a re-key written twice would be two chances to get the tombstone wrong,
      * on the one collection where getting it wrong loses a record on a peer rather than locally.
      */
-    assert.match(src('server/src/brain/edge-rekey.ts'), /export async function rekeyEdge\b/,
+    // Re-anchored (bundle-30, `Q-107` part 3a): the re-key is `rekeyEdges`, one implementation for one edge or a
+    // merge's thousands; `rekeyEdge` is its single-edge door and must stay exactly that.
+    assert.match(src('server/src/brain/edge-rekey.ts'), /export async function rekeyEdges\b/,
       'the re-key must be a named function, not an inline delete-and-insert at each call site');
-    assert.match(src('server/src/brain/merge.ts'), /rekeyEdge\(/,
+    assert.match(bodyOf(src('server/src/brain/edge-rekey.ts'), 'rekeyEdge'), /rekeyEdges\(/,
+      'the single-edge re-key is a second implementation instead of a call to the one');
+    assert.match(src('server/src/brain/merge.ts'), /rekeyEdges\(/,
       'merge still mutates an endpoint in place, so a relinked edge keeps an id its identity does not derive');
     assert.match(bodyOf(src('server/src/brain/edges.ts'), 'updateEdgeById'), /rekeyEdge\(/,
       'a label change still leaves the edge under its old id');
@@ -65,7 +69,7 @@ describe('the re-key is one implementation, not one per path', () => {
 
   it('the new id is DERIVED, never composed here', () => {
     // A second spelling of the identity is how the two would drift. `edgeIdFor` is the only one.
-    const body = bodyOf(src('server/src/brain/edge-rekey.ts'), 'rekeyEdge');
+    const body = bodyOf(src('server/src/brain/edge-rekey.ts'), 'rekeyEdges');
     assert.match(body, /edgeIdFor\(/, 'the new id must come from the derivation the unique index agrees with');
     assert.doesNotMatch(body, /uuidv4|randomUUID/, 'a re-keyed edge must not be given a fresh random id');
   });
@@ -73,14 +77,14 @@ describe('the re-key is one implementation, not one per path', () => {
   it('an unchanged identity is not re-keyed', () => {
     // The common case by far: an ordinary field patch. Delete-and-inserting it would write a tombstone and a
     // new seq for every description edit, and briefly remove the edge from every peer for no reason at all.
-    const body = bodyOf(src('server/src/brain/edge-rekey.ts'), 'rekeyEdge');
+    const body = bodyOf(src('server/src/brain/edge-rekey.ts'), 'rekeyEdges');
     assert.match(body, /=== existing\._id|=== oldId|newId === /,
       'the helper must return early when the derived id is the one already stored');
   });
 });
 
 describe('the delete half leaves a tombstone a peer can act on', () => {
-  const body = () => bodyOf(src('server/src/brain/edge-rekey.ts'), 'rekeyEdge');
+  const body = () => bodyOf(src('server/src/brain/edge-rekey.ts'), 'rekeyEdges');
 
   it('a tombstone is written, not a bare delete', () => {
     /*
@@ -103,12 +107,14 @@ describe('the delete half leaves a tombstone a peer can act on', () => {
      * than for ever.
      */
     const b = body();
-    // ONE block of two (`withAllocatedSeqs`, `Q-196`): the tombstone takes the block's first seq and the insert
-    // the one after it, so the order is in the arithmetic rather than in which of two calls came first.
-    assert.match(b, /withAllocatedSeqs\(\s*spaceId\s*,\s*2\s*,\s*async\s*\(\s*tombSeq\s*\)/,
-      'both seqs must come from one block whose FIRST is the tombstone\'s, so their ORDER is visible here');
-    assert.match(b, /const insertSeq = tombSeq \+ 1/,
-      'the insert seq must be the one AFTER the tombstone\'s, or a peer can advance past the insert and keep only the delete');
+    // ONE block of 2n (`withAllocatedSeqs`, `Q-196`) for n moves — re-anchored from "a block of two" when the re-key
+    // became one implementation for a batch (bundle-30): the tombstones take the block's first half and the inserts
+    // the half after it, so every tombstone is below every insert and the order is in the arithmetic rather than in
+    // which of two calls came first.
+    assert.match(b, /withAllocatedSeqs\(\s*spaceId\s*,\s*2\s*\*\s*n\s*,\s*async\s*\(\s*tombSeq\s*\)/,
+      'both halves must come from one block whose FIRST half is the tombstones\', so their ORDER is visible here');
+    assert.match(b, /const insertSeq = tombSeq \+ n\b/,
+      'the insert seqs must be the half AFTER the tombstones\', or a peer can advance past an insert and keep only the delete');
 
     /*
      * AND each write must use the one it was given. Checking the declaration order alone pins a SPELLING:
@@ -148,13 +154,20 @@ describe('the delete half leaves a tombstone a peer can act on', () => {
     assert.match(upd.slice(at), /retireEmbedJob\(/, 'the PATCH path never retires the job for the old id');
     assert.match(upd.slice(at), /enqueueEmbedJob\(/, 'the re-keyed edge is never queued for embedding');
 
+    // Re-anchored (bundle-30 §A4/§B2): the merge's transaction is `inHeldTransaction`'s, whose callback is
+    // `relinkAndAbsorb` — so "after the commit" is after `inHeldTransaction(` returns in `executeMerge`, and
+    // "inside the transaction" is the whole of `relinkAndAbsorb`. Both halves are asserted, batched or not.
     const merge = src('server/src/brain/merge.ts');
-    const commitAt = merge.indexOf('await session.endSession()');
-    assert.ok(commitAt > 0, 'merge no longer ends its session here — re-point this gate');
-    assert.match(merge.slice(commitAt), /enqueueEmbedJob\(/,
+    const exec = bodyOf(merge, 'executeMerge');
+    const commitAt = exec.indexOf('inHeldTransaction(');
+    assert.ok(commitAt > 0, 'merge no longer runs its transaction through inHeldTransaction — re-point this gate');
+    assert.match(exec.slice(commitAt), /enqueue\w*EmbedJobs?\(/,
       'merge queues the embedding before the transaction has committed, or not at all');
-    assert.doesNotMatch(merge.slice(0, commitAt), /enqueueEmbedJob\(/,
-      'merge still enqueues inside the transaction, which is what wakes the worker too early');
+    assert.match(exec.slice(commitAt), /retireEmbedJobs?\(/, 'merge never retires the jobs of the old edge ids');
+    assert.doesNotMatch(exec.slice(0, commitAt), /enqueue\w*EmbedJobs?\(|retireEmbedJobs?\(/,
+      'merge touches the queue before its transaction, for edges it has not moved yet');
+    assert.doesNotMatch(bodyOf(merge, 'relinkAndAbsorb'), /enqueue\w*EmbedJobs?\(|retireEmbedJobs?\(/,
+      'merge still touches the queue inside the transaction, which is what wakes the worker too early');
   });
 });
 
@@ -171,7 +184,7 @@ describe('a field the caller REMOVED does not survive the move', () => {
      * the dangerous one — the owner is told with a 200 that the edge will no longer expire, and the sweep
      * deletes it on the original schedule.
      */
-    const sig = bodyOf(src('server/src/brain/edge-rekey.ts'), 'rekeyEdge');
+    const sig = bodyOf(src('server/src/brain/edge-rekey.ts'), 'rekeyEdges');
     assert.match(sig, /alsoUnset|unset/i,
       'rekeyEdge cannot honour a removal it is never told about');
     const call = bodyOf(src('server/src/brain/edges.ts'), 'updateEdgeById');
@@ -186,8 +199,9 @@ describe('a field the caller REMOVED does not survive the move', () => {
   it('the removal is applied to the STORED document, not to the response copy', () => {
     // The distinction the previous shape got wrong. Deleting the keys from the object that is returned makes
     // the response and the row disagree, which a GET immediately after the PATCH contradicts.
-    const body = bodyOf(src('server/src/brain/edge-rekey.ts'), 'rekeyEdge');
-    const insertAt = body.indexOf('insertOne');
+    const body = bodyOf(src('server/src/brain/edge-rekey.ts'), 'rekeyEdges');
+    // `insertMany` since the re-key took a batch (bundle-30); the removal must still precede the write.
+    const insertAt = body.search(/\binsert(One|Many)\(/);
     assert.ok(insertAt > 0);
     const beforeInsert = body.slice(0, insertAt);
     assert.match(beforeInsert, /delete .*\[|delete stored/,
@@ -196,7 +210,7 @@ describe('a field the caller REMOVED does not survive the move', () => {
 });
 
 describe('the delete has to be one a PEER will actually apply', () => {
-  const body = () => bodyOf(src('server/src/brain/edge-rekey.ts'), 'rekeyEdge');
+  const body = () => bodyOf(src('server/src/brain/edge-rekey.ts'), 'rekeyEdges');
 
   it('an edge this instance did not author is NOT re-keyed', () => {
     /*
@@ -222,7 +236,7 @@ describe('the delete has to be one a PEER will actually apply', () => {
       'the re-key must compare the document author against this instance, or a peer silently keeps both rows');
     assert.match(b, /getConfig\(\)\.instanceId/, 'it has to know which instance it is');
     const at = b.search(/author[^\n]*instanceId/);
-    assert.ok(at > 0 && at < b.indexOf('deleteOne'),
+    assert.ok(at > 0 && at < b.search(/\bdelete(One|Many)\(/),
       'the authorship check runs after the delete, so the row is gone before the decision is made');
   });
 
@@ -238,9 +252,12 @@ describe('the delete has to be one a PEER will actually apply', () => {
   it('merge falls back to relinking in place rather than dropping the edge', () => {
     // Phase 1b used to `$set` from/to. It must still do that for an edge it may not re-key, or a merge
     // would leave the endpoint pointing at the absorbed entity.
-    const merge = src('server/src/brain/merge.ts');
-    const body1b = merge.slice(merge.indexOf('for (const edge of edgesToRelink)'));
-    assert.match(body1b.slice(0, 1400), /updateOne|\$set/,
+    // Re-anchored (bundle-30): the relink is batched in `relinkAndAbsorb`, so the fallback is read from where the
+    // re-key's answer is consumed — the moves it declined (`null`) — to the end of the edge phase.
+    const relink = bodyOf(src('server/src/brain/merge.ts'), 'relinkAndAbsorb');
+    const body1b = relink.slice(relink.indexOf('rekeyEdges('), relink.indexOf('const fileColl'));
+    assert.match(body1b, /=== null/, 'the moves the re-key declined are never picked out for the in-place write');
+    assert.match(body1b, /updateOne|\$set/,
       'a relink the re-key declines has no fallback, so the absorbed endpoint survives the merge');
   });
 });
@@ -292,7 +309,7 @@ describe('the caller-facing contract of a re-key', () => {
 });
 
 describe('the insert half is the same relationship, not a new one', () => {
-  const body = () => bodyOf(src('server/src/brain/edge-rekey.ts'), 'rekeyEdge');
+  const body = () => bodyOf(src('server/src/brain/edge-rekey.ts'), 'rekeyEdges');
 
   it('the stored document is carried over rather than rebuilt', () => {
     // `createdAt`, `author`, `tags`, `description` and `properties` describe the relationship, and the
@@ -309,7 +326,8 @@ describe('the insert half is the same relationship, not a new one', () => {
      * they did wrong.
      */
     const b = body();
-    assert.match(b, /findOne\([\s\S]*_id: newId/,
+    // Read through the one by-id reader since the re-key took a batch (bundle-30): every target id, before any write.
+    assert.match(b, /readStoredById\b[^;]*newId/,
       'the target id must be checked before the insert, or the driver reports it as an index violation');
     assert.match(b, /throw new EdgeIdentityTaken\(/,
       'the refusal must be a named error carrying which edge is in the way');
@@ -325,7 +343,7 @@ describe('the insert half is the same relationship, not a new one', () => {
     assert.match(route, /status\(409\)/,
       'a taken identity is a conflict, not a server fault');
     // And it must be thrown BEFORE anything is written, or a refused re-key leaves the edge deleted.
-    assert.ok(b.indexOf('EdgeIdentityTaken') < b.indexOf('deleteOne'),
+    assert.ok(b.indexOf('EdgeIdentityTaken') < b.search(/\bdelete(One|Many)\(/),
       'the check runs after the delete, so a taken identity destroys the edge it refused to move');
   });
 });

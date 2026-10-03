@@ -12,7 +12,7 @@ import { globalRateLimit } from '../../rate-limit/middleware.js';
 import { deleteEntity, upsertEntity, getEntityById, updateEntityById } from '../../brain/entities.js';
 import { entityDeleteBlockers } from '../../brain/entity-delete-guard.js';
 import { deleteEntityCascade, previewEntityCascade } from '../../brain/entity-delete-cascade.js';
-import { computeMergePlan, applyResolutions, executeMerge, validateResolution, type PropertyResolution } from '../../brain/merge.js';
+import { mergeEntities, mergeRefusal, type PropertyResolution } from '../../brain/merge.js';
 import { validateDeleteFields } from '../../brain/delete-fields.js';
 import { primitivePropertyError } from '../../brain/property-values.js';
 import { getConfig } from '../../config/loader.js';
@@ -477,63 +477,43 @@ entitiesRouter.post('/spaces/:spaceId/entities/:survivorId/merge/:absorbedId', g
     }
   }
 
-  // Compute merge plan
-  const result = await computeMergePlan(spaceId, survivorId, absorbedId, resolutions);
-  if ('error' in result) {
-    res.status(result.status).json({ error: result.error });
+  // The plan, the resolutions and the merge are `mergeEntities`' — the one sequence every merge door runs.
+  let outcome: Awaited<ReturnType<typeof mergeEntities>>;
+  try {
+    outcome = await mergeEntities(spaceId, survivorId, absorbedId, resolutions, webhookToken(req));
+  } catch (err) {
+    // A refused merge (too large, or a strict schema) answers as on every door; anything else is the handler's.
+    const refusal = mergeRefusal(err);
+    if (!refusal) throw err;
+    res.status(refusal.status).json(refusal.body);
     return;
   }
-
-  const { plan, fullyResolved, survivor, absorbed } = result;
-
-  // Validate all provided resolutions
-  for (const conflict of plan.propertyConflicts) {
-    if (!conflict.resolved) continue;
-    const err = validateResolution(conflict.resolution!, conflict.type, conflict.customValue !== undefined);
-    if (err) {
-      res.status(400).json({ error: `Invalid resolution for property '${conflict.key}': ${err}` });
-      return;
-    }
-  }
-
-  // If not fully resolved, return 409 with the plan
-  if (!fullyResolved) {
-    res.status(409).json(plan);
-    return;
-  }
-
-  // All conflicts resolved — execute merge atomically
-  const mergedProperties = applyResolutions(
-    survivor.properties ?? {},
-    absorbed.properties ?? {},
-    plan.propertyConflicts,
-    plan.absorbedOnlyProperties,
-  );
+  if (outcome.kind === 'not-found') { res.status(outcome.status).json({ error: outcome.error }); return; }
+  if (outcome.kind === 'invalid-resolution') { res.status(400).json({ error: outcome.error }); return; }
+  // Not fully resolved — 409 with the plan: the question being asked, not a failure.
+  if (outcome.kind === 'unresolved') { res.status(409).json(outcome.plan); return; }
 
   // Snapshot for the audit change list. A merge is a deletion wearing an edit's clothes: the entry
   // already carries the survivor's id and the path carries the absorbed one, but an id means nothing
   // once the record it pointed at is gone. The absorbed NAME is the only fact that becomes
   // unrecoverable, so it is recorded as name → null.
   req.auditSnapshots = {
-    before: { absorbedName: absorbed.name },
+    before: { absorbedName: outcome.absorbed.name },
     after: { absorbedName: null },
   };
 
-  const mergeResult = await executeMerge(spaceId, survivor, absorbed, mergedProperties, webhookToken(req));
-  const mergedEntity = mergeResult.entity;
-
   res.json({
-    merged: { ...mergedEntity, embedding: undefined },
-    absorbedId: absorbed._id,
+    merged: { ...outcome.entity, embedding: undefined },
+    absorbedId: outcome.absorbed._id,
     relinked: true,
-    duplicateEdgeWarnings: plan.duplicateEdgeWarnings,
+    duplicateEdgeWarnings: outcome.plan.duplicateEdgeWarnings,
     /*
      * Reported on the SUCCESS body as well as on the 409 preview, because that is when it matters: the merge
      * has happened and these edges are now stored breaking their label's rule. A caller that only reads the
      * 409 would never see them, since a plan with no property conflicts never produces one.
      */
-    endpointRuleWarnings: plan.endpointRuleWarnings,
-    deletedDuplicateEdgeIds: mergeResult.deletedDuplicateEdgeIds,
+    endpointRuleWarnings: outcome.plan.endpointRuleWarnings,
+    deletedDuplicateEdgeIds: outcome.deletedDuplicateEdgeIds,
   });
 });
 
