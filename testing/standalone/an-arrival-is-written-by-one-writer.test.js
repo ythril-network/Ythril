@@ -83,6 +83,9 @@ const EXEMPT = {
   'server/src/spaces/_shared.ts:repairStaleSpaceIds':
     'space creation reached from membership gossip repairs a stale spaceId on records already stored; it stores '
     + 'no arriving document',
+  'server/src/api/admin-import.ts:replaceDerivedRows':
+    'a restore removes the derived file rows (chunks, face records) the backup does not hold for a file whose row it '
+    + 'carried and landed (Q-251), after the writer stored what the backup holds. A delete, not an arrival',
 };
 
 const INDEX = moduleIndex('server/src');
