@@ -65,10 +65,10 @@ Base path: `/api/duplicates`.
 | `POST` | `/api/duplicates/:id/dismiss` | `dataQuality` write | Mark a pair reviewed / not-a-duplicate. A later re-embed/re-sync will not resurface it; a real content change will. |
 | `POST` | `/api/duplicates/:id/reopen` | `dataQuality` write | Manually re-rate a **dismissed** pair back onto the open list. `404` if the pair is not currently dismissed. |
 | `POST` | `/api/duplicates/:id/merge` | `dataQuality` write **and** `knowledge` write, in the pair's space | Merge an entity candidate losslessly. `409` with the merge plan if there is a value conflict. A merge deletes the absorbed entity, so it needs the same `knowledge` write as the entity merge and `graph_merge`. A candidate in a space where the token lacks either answers `404`, so the refusal does not reveal that the candidate exists. |
+| `POST` | `/api/duplicates/scan?space=<id>` | `dataQuality` write + MFA | Trigger an on-demand full re-scan. It only ever touches spaces where the token holds `dataQuality` write — naming one it does not answers `404`. Requires `X-TOTP-Code` when MFA is enabled. |
 
 These routes name no space: each one looks the candidate up only in the spaces where the token holds the rung in
 the Auth column, so a candidate in any other space is `404`, never `403`.
-| `POST` | `/api/duplicates/scan?space=<id>` | `dataQuality` write + MFA | Trigger an on-demand full re-scan. It only ever touches spaces where the token holds `dataQuality` write — naming one it does not answers `404`. Requires `X-TOTP-Code` when MFA is enabled. |
 
 **Paged, and it says so** (`Q-127`): `limit` (default 100, held to 500) and `skip`, and every answer carries `count` (rows in this page), `total` (every matching candidate across the spaces), `limit`, `skip`, `truncated` and `nextSkip` exactly when there are more — the fields every paged list answers with. It used to stop at 500 with nothing saying so. Across several spaces `skip + limit` is held to 5000 and refused past it; page one space for a deeper sweep. `maxChars` / `maxBytes` bound the body. The web UI reads every page.
 
