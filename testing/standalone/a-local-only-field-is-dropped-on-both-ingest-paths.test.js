@@ -85,8 +85,12 @@ describe('the two ingest paths agree about local-only fields', () => {
      * drops what arrived of the local-only set — the derived half always, the record-tier half unless the write
      * is a RESTORE — by the module's own sets, never by a list spelled here. The engine hands the page over whole.
      */
-    assert.match(src(ENGINE), /await writeArrivals\(/,
-      'the pull path no longer stores its page through the arrival writer, so nothing drops what never crosses');
+    // Re-anchored for bundle-30 `Q-204`: the engine hands the page to the page accept the push uses, which validates
+    // it and writes it through `writeArrivals`.
+    assert.match(src(ENGINE), /await acceptArrivingPage\(/,
+      'the pull path no longer stores its page through the page accept, so nothing drops what never crosses');
+    assert.match(src('server/src/sync/accept-page.ts'), /await writeArrivals\(/,
+      'the page accept no longer stores through the arrival writer, so nothing drops what never crosses');
     const prep = bodyOf(src(ARRIVALS), 'prepared');
     assert.match(prep, /for \(const f of DERIVED_LOCAL_FIELDS\) delete doc\[f\];/,
       'the writer no longer drops the derived local-only fields (vector, model, matchedText) from what arrived');

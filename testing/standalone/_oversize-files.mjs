@@ -158,7 +158,9 @@ export const FROZEN = {
   // writer, `sync/arrivals.ts`, which every door now stores through. The ceiling follows the file down.
   // LOWERED 746 -> 740 with bundle-30: the two peer budgets moved into `sync/peer-timeouts.ts`, because the
   // receiver's hold deadline is derived from the batch one (`db/write-bound.ts`).
-  'server/src/sync/engine.ts': 740,
+  // LOWERED 740 -> 739 with bundle-30 §D (`Q-204`): the pull hands its page to the push's page accept
+  // (`sync/accept-page.ts`) and reads its verdicts, instead of writing it and reading the writer's refusals.
+  'server/src/sync/engine.ts': 739,
   // 958 -> 684: the per-type editor body moved into `schema-type-editor.component` so the Brain Overview
   // could open the same editor. Lowered rather than left — a frozen number 274 lines above the real size
   // is 274 lines this file could regrow into without the gate saying a word.

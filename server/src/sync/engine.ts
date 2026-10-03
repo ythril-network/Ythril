@@ -40,7 +40,7 @@ import { enqueueMediaJob } from '../files/media/job-queue.js';
 import { resolveInputFormat } from '../files/converters/pipeline.js';
 import { mimeTypeForPath } from '../files/mime.js';
 import { createCoalescingRunner } from './coalescing-runner.js';
-import { writeArrivals, arrivalId, type ArrivalOutcome } from './arrivals.js';
+import { acceptArrivingPage, type AcceptedFamily } from './accept-page.js';
 import { syncFiles } from './file-sync.js';
 import {
   syncCyclesTotal,
@@ -62,7 +62,7 @@ import { resolveSafePath } from '../files/sandbox.js';
 import type { FileMetaDoc } from '../config/types.js';
 import { acceptVoteCast, pinMemberSigningKey, castForWire } from '../util/signing.js';
 import { assertPeerAtFloor } from './peer-floor.js';
-import { REPLICATED_FAMILIES, RECORD_TYPE_OF, type PayloadKey, type ReplicatedFamily } from './replicated-families.js';
+import { REPLICATED_FAMILIES, type PayloadKey, type ReplicatedFamily } from './replicated-families.js';
 import { spaceCollection } from '../db/space-collection.js';
 
 // Every outbound fetch's budget, and the longer one for batch payloads — in their own module because the
@@ -857,21 +857,18 @@ async function pullFromPeer(
       // The page's documents; the tombstones riding in it were applied by `pullTombstones` above.
       const pageDocs = items.filter(item => !('deletedAt' in item && (item as { deletedAt?: string }).deletedAt)) as T[];
       /*
-       * THE RECEIVER DECIDES WHAT IT STORES, through the one arrival writer (`sync/arrivals.ts`): a malformed id
-       * or an implausible seq refused per document, the retag to the local space, a repeated id collapsed to its
-       * highest seq, the sender's local-only fields dropped and this instance's own carried across the replace,
-       * this instance's retention stamped (D-9), the guard against a newer stored copy, the counter bumped per
-       * landed chunk, and every landed record queued for embedding by THIS instance's rules (`Q-203` — a pulled
-       * record used to be stored and never queued at all).
+       * THE RECEIVER DECIDES WHAT IT STORES, by the push's own accept (`sync/accept-page.ts`, `Q-204`): the wire
+       * schema per document, held tombstones, forks within the caps, then the one arrival writer (`sync/arrivals.ts`)
+       * and its guards — the deliverer is the member this page was read from.
        *
        * A write the store could not do is a RECORD-WRITE failure, not an unreachable peer: the transfer stops,
        * holds `deliveredThrough` below the page, and fetches it again next cycle. It used to escape to the
        * member-level catch, which counts toward PEER UNREACHABLE and names the driver error and nothing else.
        */
-      let written: ArrivalOutcome;
+      let written: AcceptedFamily;
       try {
-        written = await writeArrivals(spaceId, family.collection, RECORD_TYPE_OF[family.collection], pageDocs,
-          { from: member.label ?? member.instanceId });
+        written = (await acceptArrivingPage(spaceId, { [urlSuffix]: pageDocs },
+          { door: 'pull', deliveredBy: member.instanceId, from: member.label ?? member.instanceId }))[urlSuffix];
       } catch (err) {
         truncated = true;
         log.warn(`Pull ${urlSuffix} from ${logSafe(member.label ?? member.instanceId)}: a record write failed in space `
@@ -879,9 +876,8 @@ async function pullFromPeer(
           + `the peer: the transfer holds at ${deliveredThrough} and the page is fetched again next cycle.`);
         break;
       }
-      const refused = new Set(written.refused.map(r => r._id));
-      for (const doc of pageDocs as FactDoc[]) {
-        if (refused.has(arrivalId(doc))) continue;
+      for (const [i, doc] of (pageDocs as FactDoc[]).entries()) {
+        if (written.verdicts[i] === 'rejected') continue;
         count++;
         if (doc.seq > maxSeq) maxSeq = doc.seq;
         if (doc.seq > highSeq && doc.author?.instanceId === member.instanceId) highSeq = doc.seq;
@@ -937,8 +933,8 @@ async function pullFromPeer(
     seqOf: (t) => t.highSeq,
     warn: log.warn,
   });
-  // No counter bump here: every record this pull handed over was bumped over by the arrival writer, per landed
-  // chunk (`writeArrivals`), and every tombstone by the one tombstone apply, per page (`applyPeerTombstones`).
+  // No counter bump here: every record this pull received was bumped over by the page accept, per page
+  // (`acceptArrivingPage`), and every tombstone by the one tombstone apply, per page (`applyPeerTombstones`).
 
   // Persist the high-water mark
   if (highestSeq > sinceSeq) {

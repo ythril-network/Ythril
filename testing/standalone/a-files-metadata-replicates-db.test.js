@@ -62,10 +62,12 @@ const ENT = 'aaaaaaaa-0000-4000-8000-000000000001';
 const MEM = 'bbbbbbbb-0000-4000-8000-000000000001';
 const AUTHOR = { instanceId: 'peer', instanceLabel: 'Peer' };
 
-let mongo, shared, merkleMod;
+let mongo, shared, arrivals, merkleMod;
 
 const coll = (n) => mongo.col(`${SPACE}_${n}`);
 const meta = () => coll('files').findOne({ _id: FILE });
+/** One arriving file's metadata, through the one writer every door hands it to (`writeArrivals`, `Q-107` part 2). */
+const ingest = (doc) => arrivals.writeArrivals(SPACE, 'files', 'file', [doc]);
 
 /** What a peer sends: the authored half, and nothing it could not know. */
 const arriving = (over = {}) => ({
@@ -102,6 +104,7 @@ describe("a file's metadata replicates", { skip }, () => {
     const loader = await import('../../server/dist/config/loader.js');
     loader.loadConfig();
     shared = await import('../../server/dist/api/sync/_shared.js');
+    arrivals = await import('../../server/dist/sync/arrivals.js');
     merkleMod = await import('../../server/dist/brain/merkle.js');
   });
 
@@ -127,13 +130,15 @@ describe("a file's metadata replicates", { skip }, () => {
   });
 
   it('the ingest schema and the door exist', () => {
+    // Re-anchored for `Q-107` part 2: the per-document `ingestFileMeta` is gone; the one arrival writer merges a
+    // page of file metadata (a `$set` of the authored keys, because a replace would wipe what the receiver derived).
     assert.ok(shared.IncomingFileMetaDoc, 'IncomingFileMetaDoc');
-    assert.equal(typeof shared.ingestFileMeta, 'function',
-      'ingestFileMeta — a $set of the authored keys, because a replace would wipe what the receiver derived');
+    assert.equal(typeof arrivals.writeArrivals, 'function', 'writeArrivals — the one writer of an arriving file\'s metadata');
+    assert.equal(shared.ingestFileMeta, undefined, 'a second writer of file metadata is back beside the arrival writer');
   });
 
   it('the AUTHORED half lands', async () => {
-    await shared.ingestFileMeta(SPACE, shared.IncomingFileMetaDoc.parse(arriving()));
+    await ingest(shared.IncomingFileMetaDoc.parse(arriving()));
     const m = await meta();
     assert.equal(m.description, 'the spec, as the peer describes it');
     assert.equal(m.descriptionSource, 'extracted');
@@ -148,7 +153,7 @@ describe("a file's metadata replicates", { skip }, () => {
      * and hash, lose its vector, and stop being findable by its own text — with nothing failing, until
      * somebody notices a document that used to answer a search and no longer does.
      */
-    await shared.ingestFileMeta(SPACE, shared.IncomingFileMetaDoc.parse(arriving()));
+    await ingest(shared.IncomingFileMetaDoc.parse(arriving()));
     const m = await meta();
     for (const [k, v] of Object.entries(LOCAL_DERIVED)) {
       assert.deepEqual(m[k], v, `${k} was overwritten by the peer's copy — the receiver derived it from bytes`);
@@ -158,14 +163,14 @@ describe("a file's metadata replicates", { skip }, () => {
   it('a field the receiver has and the peer omits is NOT cleared', async () => {
     // `$set` of what arrived, never `$unset` of what did not. A peer on an older build sends fewer keys, and
     // reading absence as deletion would let it erase a description it has never heard of.
-    await shared.ingestFileMeta(SPACE, shared.IncomingFileMetaDoc.parse(arriving({ description: undefined })));
+    await ingest(shared.IncomingFileMetaDoc.parse(arriving({ description: undefined })));
     const m = await meta();
     assert.equal(m.description, 'my own description', 'an omitted field must be left alone, not cleared');
   });
 
   it('a file arriving for the FIRST time is created, not skipped', async () => {
     await coll('files').deleteMany({});
-    await shared.ingestFileMeta(SPACE, shared.IncomingFileMetaDoc.parse(arriving()));
+    await ingest(shared.IncomingFileMetaDoc.parse(arriving()));
     const m = await meta();
     assert.ok(m, 'a file whose bytes have not arrived yet still gets its metadata');
     assert.equal(m.description, 'the spec, as the peer describes it');
@@ -187,7 +192,7 @@ describe("a file's metadata replicates", { skip }, () => {
       assert.throws(() => shared.IncomingFileMetaDoc.parse(arriving({ [field]: [ENT] })),
         `${field} was accepted on an arriving file — a link is a record of its own now`);
     }
-    await shared.ingestFileMeta(SPACE, shared.IncomingFileMetaDoc.parse(arriving()));
+    await ingest(shared.IncomingFileMetaDoc.parse(arriving()));
     assert.deepEqual(await coll('links').find({}).toArray(), [],
       'the ingest invented link records from a document that carries none');
   });

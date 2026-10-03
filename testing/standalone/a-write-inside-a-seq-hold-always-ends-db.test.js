@@ -106,7 +106,9 @@ let door, seq, mods;
  * is owed, not this table.
  */
 const CASES = {
-  'server/src/api/sync/docs.ts:acceptPushedPage': [{
+  // Re-anchored (bundle-30 §D, Q-204): the push's page accept moved to `sync/accept-page.ts` and serves the pull too;
+  // the case still drives it through the push door, which forks the same way.
+  'server/src/sync/accept-page.ts:acceptArrivingPage': [{
     label: 'a pushed fact that forks: the fork write, inside its block hold',
     lock: async () => holdDocumentLock(door.mongo, `${S}_facts`,
       { insert: { _id: mods.plan.forkIdFor(F, 3, DIVERGENT), spaceId: S, fact: 'lock', seq: 0 } }),

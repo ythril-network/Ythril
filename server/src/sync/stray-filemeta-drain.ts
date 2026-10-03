@@ -7,10 +7,14 @@
  * records, so they are never pulled again: a publisher's descriptions and tags never reached the subscriber's files.
  * 5.6.2 pulls into the right collection; this recovers what the old one left.
  *
- * - **Through the arrival writer with `fillOnly`**, never a copy loop: it keeps the shape refusal, the chunk refusal
- *   and the local-only drop, and hands each record to `fillFileMetaFromStray`, which fills a row this instance made by
- *   default and gives a peer-written row the normal seq accept — at the write, creating nothing. 5.6.2's drain used
- *   the seq-accepted merge, and a pre-5.6.0 receiver had stamped its own seq on those very rows, so it counted almost
+ * - **Through the one validation step and the arrival writer with `fillOnly`**, never a copy loop: each record's wire
+ *   keys pass `IncomingFileMetaDoc` (`admitArrivals`, `Q-225` — a `parentFileId` of any type, a field of the wrong
+ *   type is refused, never filled); the writer keeps the shape refusal, the chunk refusal and the local-only drop,
+ *   and hands each record to `fillFileMetaFromStray`, which fills a row this instance made by default and gives a
+ *   peer-written row the normal seq accept — at the write, creating nothing. One write PER RECORD, deliberately,
+ *   where every other file arrival is a page of one bulk write (`Q-107` part 2): each row's own outcome (filled,
+ *   complete, newer, no file) is what the drain's summary line reports and what decides whether a record waits.
+ *   5.6.2's drain used the seq-accepted merge, and a pre-5.6.0 receiver had stamped its own seq on those very rows, so it counted almost
  *   every stray description as "older than the stored copy" and dropped it.
  * - **Bounded, and resumed by deletion.** At most `maxPages` pages per space per cycle. Each record the writer
  *   answered is deleted from the stray collection; the collection is dropped only when it is EMPTY, so it is never
@@ -30,7 +34,9 @@
 import { concreteSpaces } from '../spaces/proxy.js';
 import { getDb, col, asFilter } from '../db/mongo.js';
 import { spaceCollection } from '../db/space-collection.js';
-import { writeArrivals } from './arrivals.js';
+import { writeArrivals, warnArrivalsNotStored } from './arrivals.js';
+import { admitArrivals } from './arrival-shape.js';
+import { fileMetaForWire } from '../api/sync/_shared.js';
 import { logInternalAudit } from '../audit/audit.js';
 import { STRAY_FILEMETA_DRAIN_OPERATION } from '../audit/middleware.js';
 import { log, logSafe } from '../util/log.js';
@@ -48,6 +54,9 @@ const REPORT_EVERY_MS = 10 * 60_000;
 const STEP_MS = 30_000;
 
 type StrayDoc = { _id: string; keptSince?: string };
+
+/** Who the drain's records came from, for the log lines. */
+const FROM = 'a 4.0-5.6.1 pull (stray filemeta collection)';
 
 /** One report per space per `REPORT_EVERY_MS` (`util/warn-once.ts`). */
 const failureReports = warnOnce<string>({ every: REPORT_EVERY_MS });
@@ -95,12 +104,16 @@ async function drainSpace(spaceId: string, pageSize: number, maxPages: number, s
       pages++;
       after = page[page.length - 1]!._id;
       step.name = 'write';
-      const out = await writeArrivals(spaceId, 'files', 'file', page.map(({ keptSince: _k, ...doc }) => doc),
-        { from: 'a 4.0-5.6.1 pull (stray filemeta collection)', fillOnly: true });
+      // The one validation step every arrival passes (`Q-225`), over the record's WIRE keys: an old pull stored the
+      // peer's row whole, and what it held besides the wire keys was never the publisher's to give. A record its
+      // schema refuses — a `parentFileId` of any type, a field of the wrong type — is answered, and never filled.
+      const { admitted, refused } = admitArrivals('filemeta', page.map(({ keptSince: _k, ...doc }) => fileMetaForWire(doc)));
+      warnArrivalsNotStored(FROM, spaceId, 'filemeta', 'refused', refused);
+      const out = await writeArrivals(spaceId, 'files', 'file', admitted.map(a => a.doc), { from: FROM, fillOnly: true });
       n.merged += out.updated.length + out.inserted.length;
       n.complete += out.complete.length;
       n.newer += out.newerLocal.length;
-      n.refused += out.refused.length + out.derived.length + out.duplicates.length;
+      n.refused += refused.length + out.refused.length + out.derived.length + out.duplicates.length;
       step.name = 'settle';
       const { discard, wait } = await settleUnstored(spaceId, page, out.unstored);
       n.deleted += discard.length;

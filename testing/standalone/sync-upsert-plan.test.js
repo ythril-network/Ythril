@@ -1,12 +1,12 @@
 /**
- * Which pulled documents sync actually writes, and how they are scoped.
+ * Which arriving documents sync actually writes, and how they are scoped.
  *
  * Extracted from `batchUpsertBySeq` in `sync/engine.ts` (god-file split, slice 2). Since `Q-107` part 1 the IO
- * is the arrival writer's (`sync/arrivals.ts`, where `batchUpsertBySeq` moved as the writer's by-seq accept); the
- * decisions still live in `upsert-plan.ts` — the pull's `planSeqUpserts` and the push's `planPushArrivals` — and
- * are tested here with no database at all. Re-anchored: the writer is asserted to apply THIS `planSeqUpserts`,
- * so the rule tested below is the one every door's write runs (seen red by mutation, restored by hand: the
- * writer's accept replaced by a hand-written `>=`).
+ * is the arrival writer's (`sync/arrivals.ts`). Re-anchored for bundle-30 `Q-204`: the pull's own by-seq accept
+ * (`planSeqUpserts`, then `batchUpsertBySeq`) is gone — a pulled page is planned by `planArrivals` exactly as a
+ * pushed one (`sync/accept-page.ts`), and the writer applies the accept only AT the write (`seqGuard`). So the
+ * last-writer-wins cases below run against `planArrivals` for a family that never forks, and the writer is
+ * asserted to plan nothing of its own.
  *
  * Every mistake in this decision is silent:
  *
@@ -27,35 +27,44 @@
 import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 
-let planSeqUpserts, retagToLocalSpace;
+let planArrivals, retagToLocalSpace;
 
 before(async () => {
-  ({ planSeqUpserts, retagToLocalSpace } = await import('../../server/dist/sync/upsert-plan.js'));
+  ({ planArrivals, retagToLocalSpace } = await import('../../server/dist/sync/upsert-plan.js'));
 });
 
 const doc = (id, seq, extra = {}) => ({ _id: id, seq, ...extra });
 const ids = (list) => list.map(d => d._id);
+/**
+ * The ids a PULLED page writes, given the seq each id has locally: the accepted winners, in page order. An entity
+ * never forks, so last-writer-wins by seq is the whole of its rule — the rule the pull's `planSeqUpserts` was.
+ */
+const writes = (docs, existing) => {
+  const stored = new Map([...existing].map(([id, seq]) => [id, { seq }]));
+  const p = planArrivals(docs, { kind: 'entities', door: 'pull', stored, tombstones: new Map(), deliveredBy: undefined });
+  return [...p.accepts.values()].map(list => list.at(-1).doc);
+};
 
-describe('planSeqUpserts — last-writer-wins by seq', () => {
+describe('planArrivals — last-writer-wins by seq, as a pulled page is decided', () => {
   it('writes a document that does not exist locally', () => {
-    assert.deepEqual(ids(planSeqUpserts([doc('a', 1)], new Map())), ['a']);
+    assert.deepEqual(ids(writes([doc('a', 1)], new Map())), ['a']);
   });
 
   it('writes a document whose incoming seq is HIGHER', () => {
-    assert.deepEqual(ids(planSeqUpserts([doc('a', 5)], new Map([['a', 4]]))), ['a']);
+    assert.deepEqual(ids(writes([doc('a', 5)], new Map([['a', 4]]))), ['a']);
   });
 
   it('does NOT rewrite when the seqs are EQUAL — a re-sync must be a no-op', () => {
     // The `>=` trap. Both sides already agree, so rewriting changes nothing and costs a full
     // replaceOne per document, every cycle, forever — invisible except in write volume.
-    assert.deepEqual(planSeqUpserts([doc('a', 7)], new Map([['a', 7]])), []);
+    assert.deepEqual(writes([doc('a', 7)], new Map([['a', 7]])), []);
   });
 
   it('does NOT write when the incoming seq is LOWER — the data-loss guard', () => {
     // A peer restored from a backup, or offline across several local edits, arrives with stale
     // versions. Without this the older document replaces the newer one and the only symptom is
     // records silently reverting.
-    assert.deepEqual(planSeqUpserts([doc('a', 2)], new Map([['a', 9]])), []);
+    assert.deepEqual(writes([doc('a', 2)], new Map([['a', 9]])), []);
   });
 
   it('decides per document, not per batch', () => {
@@ -63,36 +72,36 @@ describe('planSeqUpserts — last-writer-wins by seq', () => {
     // must not drag stale ones in with it.
     const batch = [doc('new', 1), doc('higher', 9), doc('equal', 3), doc('lower', 1)];
     const existing = new Map([['higher', 8], ['equal', 3], ['lower', 5]]);
-    assert.deepEqual(ids(planSeqUpserts(batch, existing)), ['new', 'higher']);
+    assert.deepEqual(ids(writes(batch, existing)), ['new', 'higher']);
   });
 
   it('preserves input order', () => {
     const batch = [doc('c', 1), doc('a', 1), doc('b', 1)];
-    assert.deepEqual(ids(planSeqUpserts(batch, new Map())), ['c', 'a', 'b']);
+    assert.deepEqual(ids(writes(batch, new Map())), ['c', 'a', 'b']);
   });
 
-  it('returns an empty array for an empty batch, so the caller can skip the write', () => {
-    assert.deepEqual(planSeqUpserts([], new Map()), []);
+  it('writes nothing for an empty batch, so the caller can skip the write', () => {
+    assert.deepEqual(writes([], new Map()), []);
   });
 
   it('treats seq 0 as a real value, not as absent', () => {
-    // `prev === undefined` is the existence check precisely so that a legitimate seq of 0 is not
+    // `held === undefined` is the existence check precisely so that a legitimate seq of 0 is not
     // mistaken for "not present" by a falsy test.
-    assert.deepEqual(planSeqUpserts([doc('a', 0)], new Map([['a', 0]])), [], 'equal at zero: no write');
-    assert.deepEqual(ids(planSeqUpserts([doc('a', 1)], new Map([['a', 0]]))), ['a'], 'zero is beatable');
-    assert.deepEqual(planSeqUpserts([doc('a', 0)], new Map([['a', 1]])), [], 'zero cannot clobber');
+    assert.deepEqual(writes([doc('a', 0)], new Map([['a', 0]])), [], 'equal at zero: no write');
+    assert.deepEqual(ids(writes([doc('a', 1)], new Map([['a', 0]]))), ['a'], 'zero is beatable');
+    assert.deepEqual(writes([doc('a', 0)], new Map([['a', 1]])), [], 'zero cannot clobber');
   });
 
   it('returns the caller\'s own objects, not copies', () => {
     // The caller writes these straight to Mongo. Returning copies would mean the re-tag applied to
     // one object and the write carrying another.
     const d = doc('a', 1);
-    assert.equal(planSeqUpserts([d], new Map())[0], d);
+    assert.equal(writes([d], new Map())[0], d);
   });
 
   it('does not mutate the batch it was given', () => {
     const batch = [doc('a', 1), doc('b', 2)];
-    planSeqUpserts(batch, new Map([['a', 5]]));
+    writes(batch, new Map([['a', 5]]));
     assert.deepEqual(ids(batch), ['a', 'b']);
   });
 });
@@ -129,15 +138,31 @@ describe('retagToLocalSpace — synced documents belong to the local space', () 
   });
 });
 
-describe('the arrival writer applies this accept, and no copy of it', () => {
-  it('batchUpsertBySeq in sync/arrivals.ts calls planSeqUpserts for every write but a restore', async () => {
+describe('every door plans by this accept, and the writer applies it only at the write', () => {
+  it('the page accept plans with planArrivals for push and pull; the pull hands it its pages; the writer guards with seqGuard', async () => {
+    /*
+     * Re-anchored for `Q-204`: the writer's own accept read (`batchUpsertBySeq` over `planSeqUpserts`) was the
+     * pull's whole rule, and a second one beside the push planner. Seen red by mutation, restored by hand: the
+     * engine's pull handing its page to `writeArrivals` directly again.
+     */
     const { readFileSync } = await import('node:fs');
     const { stripComments } = await import('./_strip-comments.mjs');
     const { bodyOf } = await import('./_structural-window.mjs');
-    const body = bodyOf(stripComments(readFileSync('server/src/sync/arrivals.ts', 'utf8')), 'batchUpsertBySeq');
-    assert.match(body, /if \(restore\) return \{ toWrite: docs, stored \};/, 'a restore no longer bypasses the accept');
-    assert.match(body, /toWrite: planSeqUpserts\(/, 'the writer accepts by a rule of its own instead of planSeqUpserts');
-    assert.doesNotMatch(body, /\.seq\s*>=?\s*\w+\.seq|seq\s*>=\s*prev/, 'a hand-written seq comparison is back beside planSeqUpserts');
+    const accept = bodyOf(stripComments(readFileSync('server/src/sync/accept-page.ts', 'utf8')), 'acceptArrivingPage');
+    assert.match(accept, /planArrivals\(docs, \{/, 'the page accept no longer plans with planArrivals');
+    const engine = bodyOf(stripComments(readFileSync('server/src/sync/engine.ts', 'utf8')), 'pullFromPeer');
+    assert.match(engine, /acceptArrivingPage\([^)]*door: 'pull'/s, 'the pull no longer hands its pages to the page accept');
+    assert.doesNotMatch(engine, /writeArrivals\(/, 'the pull writes its pages without the page accept again');
+    const writer = bodyOf(stripComments(readFileSync('server/src/sync/arrivals.ts', 'utf8')), 'writeArrivals');
+    assert.match(writer, /seqGuard\(d\._id, d\.seq\)/, 'the writer no longer guards its write with seqGuard');
+    assert.doesNotMatch(writer, /planArrivals\(|planSeqUpserts\(/, 'the writer plans a page of its own again');
+  });
+
+  it('seqGuard: below the incoming seq or no seq at all; a seq-less arrival by _id alone', async () => {
+    const { seqGuard } = await import('../../server/dist/sync/upsert-plan.js');
+    assert.deepEqual(seqGuard('a', 5), { _id: 'a', $or: [{ seq: { $lt: 5 } }, { seq: { $exists: false } }] });
+    assert.deepEqual(seqGuard('a', 0), { _id: 'a', $or: [{ seq: { $lt: 0 } }, { seq: { $exists: false } }] });
+    assert.deepEqual(seqGuard('a', undefined), { _id: 'a' });
   });
 });
 
@@ -159,7 +184,7 @@ describe('one accept rule: isNewerCopy', () => {
     const { bodyOf } = await import('./_structural-window.mjs');
     const plan = stripComments(readFileSync('server/src/sync/upsert-plan.ts', 'utf8'));
     const writer = bodyOf(stripComments(readFileSync('server/src/sync/arrivals.ts', 'utf8')), 'writeArrivals');
-    for (const [where, body] of [['planSeqUpserts', bodyOf(plan, 'planSeqUpserts')], ['planPushArrivals', bodyOf(plan, 'planPushArrivals')]]) {
+    for (const [where, body] of [['planArrivals', bodyOf(plan, 'planArrivals')]]) {
       assert.match(body, /isNewerCopy\(/, `${where} no longer asks isNewerCopy`);
     }
     assert.equal((writer.match(/isNewerCopy\(/g) ?? []).length, 2, 'the writer\'s collapse and read-back do not both ask isNewerCopy');
@@ -199,7 +224,10 @@ describe('one fork rule: divergesFrom', () => {
     assert.deepEqual([P.divergesFrom({ seq: 5, fact: 'a' }, { seq: 5, fact: 'b' }), P.divergesFrom({ seq: 5, fact: 'a' }, { seq: 5, fact: 'a' }),
       P.divergesFrom({ seq: 5, fact: 'a' }, { seq: 4, fact: 'b' }), P.divergesFrom({ seq: 5, fact: 'a' }, undefined)], [true, false, false, false]);
     const src = stripComments(readFileSync('server/src/sync/upsert-plan.ts', 'utf8'));
-    for (const fn of ['forkCandidates', 'planPushArrivals']) assert.match(bodyOf(src, fn), /divergesFrom\(/, `${fn} no longer asks divergesFrom`);
+    for (const fn of ['forkCandidates', 'planArrivals']) assert.match(bodyOf(src, fn), /divergesFrom\(/, `${fn} no longer asks divergesFrom`);
+    // Q-232: the writer's read-back asks it too, so a same-seq copy with other text is a divergence, never "landed".
+    const writer = bodyOf(stripComments(readFileSync('server/src/sync/arrivals.ts', 'utf8')), 'writeArrivals');
+    assert.match(writer, /divergesFrom\(d, held\)/, 'the writer\'s read-back no longer asks divergesFrom');
     const inline = [...src.matchAll(/\.fact\s*!==\s*[\w.]+\.fact/g)].length;
     assert.equal(inline, 1, 'a fact-text comparison is written outside divergesFrom');
   });
@@ -220,10 +248,22 @@ describe('the planner keys a unique index by the family\'s own derived identity'
   });
 });
 
-describe('planPushArrivals — the push accept, decided as sequential processing decided it', () => {
+describe('planArrivals — the page accept, decided as sequential processing decided it', () => {
   let P;
   before(async () => { P = await import('../../server/dist/sync/upsert-plan.js'); });
-  const plan = (kind, docs, over = {}) => P.planPushArrivals(docs, { kind, stored: new Map(), tombstones: new Map(), ...over });
+  const plan = (kind, docs, over = {}) => P.planArrivals(docs, { kind, door: 'push', stored: new Map(), tombstones: new Map(), ...over });
+
+  it('the one door difference: a chrono type outside the vocabulary is unknownType on push and planned on pull', () => {
+    const allowedTypes = new Set(['event']);
+    const odd = [doc('c', 5, { type: 'not-a-type' })];
+    assert.deepEqual(plan('chrono', odd, { allowedTypes }).verdicts, ['unknownType']);
+    assert.deepEqual(plan('chrono', odd, { allowedTypes, door: 'pull' }).verdicts, ['upserted']);
+    // Every other verdict is the same on both doors.
+    const tombstones = new Map([['a', { seq: 7 }]]);
+    for (const door of ['push', 'pull']) {
+      assert.deepEqual(plan('entities', [doc('a', 7), doc('b', 4)], { tombstones, door }).verdicts, ['tombstoned', 'upserted']);
+    }
+  });
 
   it('facts [9, 3] for one id: inserted then skipped, and the 9 is the one write', () => {
     const p = plan('facts', [doc('f', 9, { fact: 'nine' }), doc('f', 3, { fact: 'three' })]);

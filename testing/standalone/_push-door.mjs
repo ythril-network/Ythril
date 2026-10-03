@@ -82,7 +82,8 @@ export const FAMILIES = Object.freeze({
  */
 export function familiesCarriedByBatch() {
   const src = fs.readFileSync('server/src/api/sync/docs.ts', 'utf8');
-  if (!/Array\.isArray\(body\?\.\[k\]\)/.test(src) || !/REPLICATED_FAMILIES\.map\(\(\{ payloadKey: k \}\)/.test(src)) {
+  // Re-anchored for bundle-30 §D: the route reads each family's array in a loop over the registry.
+  if (!/for \(const \{ payloadKey: (\w+) \} of REPLICATED_FAMILIES\) \{\s*const \w+ = Array\.isArray\(body\?\.\[\1\]\)/.test(src)) {
     throw new Error('batch-upsert no longer reads its body keys from REPLICATED_FAMILIES — re-anchor familiesCarriedByBatch');
   }
   const keys = REPLICATED_FAMILY_KEYS;

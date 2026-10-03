@@ -164,9 +164,17 @@ describe('file metadata a 4.0-5.6.1 pull left in <space>_filemeta is recovered i
     assert.equal(d?.deletedAt, STAMPED_AT, 'the fill brought a deleted file back');
   });
 
-  it('a fill that retires a file from search queues the job that removes its vector', async () => {
-    assert.equal((await stored(SPACE, 'retire.md'))?.suppressEmbeddings, true);
-    assert.ok(await embedJob(SPACE, 'retire.md'), 'the vector of a retired file is never removed');
+  it('a fill that retires a file from search removes its vector', async () => {
+    /*
+     * Re-anchored for bundle-30 `R12`: this pinned the MECHANISM — a job queued past the receiver's suppression
+     * (`queueIfHeld` called `enqueueEmbedJob` directly), for the worker to discard and unset. The drain now settles
+     * a filled file by the same rule as every arrival (`embedArrivedFiles`): a file the receiver suppresses has its
+     * vector removed at once and is not queued. The outcome this case exists for is the vector, so it asserts that.
+     */
+    const d = await stored(SPACE, 'retire.md');
+    assert.equal(d?.suppressEmbeddings, true);
+    assert.equal(d?.embedding, undefined, 'the vector of a retired file is never removed');
+    assert.equal(await embedJob(SPACE, 'retire.md'), null, 'a file the receiver suppresses was queued, to be claimed and discarded');
   });
 
   it('pin: a row a peer wrote keeps the normal seq accept, so a field the publisher removed is not restored', async () => {

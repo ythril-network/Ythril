@@ -58,8 +58,16 @@ import { embeddableIncomingSchemas } from '../_shared/incoming-sync-schemas.mjs'
 const { BRAIN_COLLECTIONS, KNOWLEDGE_TYPES, COLLECTION_SUFFIX } = await import('../../server/dist/config/types-knowledge.js');
 
 const DOCS = 'server/src/api/sync/docs.ts';
-/** The three files that store what arrived from elsewhere: the push router, the pull engine, the importer. */
-const INGEST_FILES = [DOCS, 'server/src/sync/engine.ts', 'server/src/api/admin-import.ts'];
+const ENGINE = 'server/src/sync/engine.ts';
+/**
+ * The files that STORE what arrived from elsewhere, each through the one arrival writer: the page accept the push
+ * routes and the pull engine share (`sync/accept-page.ts`, bundle-30 `Q-204`), and the importer. Re-anchored: the
+ * push router and the engine called the writer themselves until the accept moved; they are still door files, so no
+ * raw record write may survive in them either (`DOOR_FILES`).
+ */
+const ACCEPT = 'server/src/sync/accept-page.ts';
+const INGEST_FILES = [ACCEPT, 'server/src/api/admin-import.ts'];
+const DOOR_FILES = [DOCS, ENGINE, ...INGEST_FILES];
 const QUEUE_FILE = 'server/src/brain/embed-queue.ts';
 
 const src = (p) => stripComments(readFileSync(p, 'utf8'));
@@ -96,9 +104,11 @@ describe('nothing writes an arriving record without offering it to the embedder'
   it('the ingest files are the ones this gate thinks they are', () => {
     // Floors every assertion below: a moved file would read as an empty string and pass everything.
     const s = src(DOCS);
-    assert.ok(s.includes('IncomingFactDoc'), `${DOCS} is not the sync ingest router any more — re-anchor`);
+    assert.ok(/syncDocsRouter\.post\('\/batch-upsert'/.test(s), `${DOCS} is not the sync ingest router any more — re-anchor`);
     assert.ok(s.length > 10_000, 'the ingest router is suspiciously small — re-anchor this gate');
-    for (const f of INGEST_FILES) assert.ok(INDEX.files.includes(f), `${f} is gone — re-anchor this gate`);
+    // The push router and the pull engine hand every page to the accept that stores it.
+    for (const f of [DOCS, ENGINE]) assert.match(src(f), /acceptArrivingPage\(/, `${f} no longer hands its pages to ${ACCEPT} — re-anchor`);
+    for (const f of DOOR_FILES) assert.ok(INDEX.files.includes(f), `${f} is gone — re-anchor this gate`);
   });
 
   it('the sweep finds the arrival writes, so it cannot pass by finding nothing', () => {
@@ -131,7 +141,7 @@ describe('nothing writes an arriving record without offering it to the embedder'
      * was looking for a spelling nothing wrote any more, and passed. And it covered one of the three ingest
      * files; the pull engine's `bulkWrite` was outside it for as long as it existed.
      */
-    const files = new Set(INGEST_FILES);
+    const files = new Set(DOOR_FILES);
     const raw = [...RECORDS.sites, ...RECORDS.orphans]
       .filter(s => files.has(s.file))
       .map(s => `${s.file}:${s.line} ${s.op} (${s.collection ?? s.why})`);
@@ -255,20 +265,27 @@ describe('and the receiver decides whether to embed it', () => {
 });
 
 describe('a merged file is queued in one place', () => {
-  it('ingestFileMeta queues a file, and the arrival writer never queues one beside it', () => {
+  it('embedArrivedFiles decides an arrived file\'s vector by the receiver\'s suppression; nothing queues one beside it', () => {
     /*
      * Dup pass: a restored file was queued twice — by `ingestFileMeta` when its blob was here, and by the writer
-     * for every restore. Idempotent at the jobs collection, so nothing failed; two owners of one decision is the
-     * shape that drifts. Seen red by mutation, restored by hand: the writer's `family === 'files'` exclusion
-     * narrowed back to `!restore`.
+     * for every restore. Re-anchored for `Q-107` part 2 (bundle-30 `R12`): `ingestFileMeta` is gone and the
+     * blob-held check had a second copy in the stray drain (`queueIfHeld`), which queued with `enqueueEmbedJob`
+     * directly and so skipped the receiver's suppression. Now one function decides — held bytes, or a restore —
+     * and queues through `enqueueIngestedRecords`, for the writer and the drain alike.
      */
-    const shared = src('server/src/api/sync/_shared.ts');
-    assert.match(bodyOf(shared, 'ingestFileMeta'), /if \(haveBytes \|\| restore\) await enqueueIngestedRecord\(spaceId, 'file', incoming\);/,
-      'ingestFileMeta no longer decides when a merged file is queued');
+    const files = src('server/src/sync/file-meta-write.ts');
+    const queue = bodyOf(files, 'embedArrivedFiles');
+    assert.match(queue, /restore \|\| holdsBlob\(r\)/, 'embedArrivedFiles no longer decides on held bytes or a restore');
+    assert.match(queue, /enqueueIngestedRecords\(spaceId, 'file', /, 'embedArrivedFiles queues past the receiver\'s suppression');
+    assert.match(queue, /embeddingSuppressedFor\(spaceId, 'file', doc, meta\)\) quiet\.push/,
+      'embedArrivedFiles no longer asks the receiver whether a landed file is suppressed');
+    assert.match(queue, /dropFileVectors\(spaceId, quiet\)/, 'a file the receiver suppresses keeps its vectors');
     const writer = bodyOf(src('server/src/sync/arrivals.ts'), 'writeArrivals');
-    assert.match(writer, /if \(recordType === null \|\| queued\.length === 0 \|\| family === 'files'\) return;/,
-      'the arrival writer queues file metadata itself, beside ingestFileMeta');
-    assert.match(writer, /ingestFileMeta\([^;]*\{ restore \}\)/, 'the writer does not tell ingestFileMeta it is a restore');
+    assert.match(writer, /if \(family === 'files'\) await embedArrivedFiles\(spaceId, batch\.map\(d => d\._id\), \{ restore \}\);/,
+      'the arrival writer no longer queues file metadata through embedArrivedFiles');
+    const fill = src('server/src/sync/fill-file-meta.ts');
+    assert.match(fill, /embedArrivedFiles\(/, 'the stray drain\'s fill no longer queues through embedArrivedFiles');
+    assert.doesNotMatch(fill, /enqueueEmbedJob\(/, 'the stray drain queues a file past the receiver\'s suppression again');
   });
 });
 

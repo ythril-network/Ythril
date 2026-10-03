@@ -4,8 +4,8 @@
  * A recall's remainder and an over-cap traversal used to be a root `_tmp/results-<uuid>.json` or
  * `_tmp/graph-<uuid>.json` with a `<space>_files` record. They replicated, and a pulled copy never expired
  * (`_expireAt` is local-only), so peers have accumulated them since spills existed. Spills now live in the
- * instance's read-spill store, sync carries this path shape in neither direction (`isInstanceLocalFile`,
- * `ingestFileMeta`, the manifest and the space hash), and this sweep removes what is left locally.
+ * instance's read-spill store, sync carries this path shape in neither direction (`isInstanceLocalFile`, the
+ * arrival writer's `isLegacyReadSpill`, the manifest and the space hash), and this sweep removes what is left locally.
  *
  * - **By PATH, not by tag**: metadata can arrive before its blob and a blob can outlive its record, so a sweep
  *   keyed on the FileMeta's tag leaves one half behind — and finds it again every run.

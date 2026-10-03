@@ -134,9 +134,16 @@ describe('a record arriving by sync is queued in the BACKGROUND lane', () => {
    * `writeArrivals` of sync/arrivals.ts, which stores every other family (`Q-107` part 1). Read from both files,
    * so the writer that replaced `ingestBrainDoc` cannot leave the lane rule behind with it.
    */
+  /*
+   * Re-anchored for `Q-107` part 2: `ingestFileMeta` (the `ingest…` export above) is gone, and file metadata is
+   * queued by `embedArrivedFiles` (sync/file-meta-write.ts), which the writer and the stray drain share — so that
+   * file's exported queuers are the second writer this reads, beside `writeArrivals`.
+   */
   const ARRIVALS = SOURCES.find(s => s.file === 'server/src/sync/arrivals.ts');
+  const FILE_META = SOURCES.find(s => s.file === 'server/src/sync/file-meta-write.ts');
   const WRITERS = [
     ...(SYNC ? [...SYNC.code.matchAll(/^export\s+async\s+function\s+(ingest\w*)/gm)].map(m => ({ src: SYNC, name: m[1] })) : []),
+    ...(FILE_META ? [...FILE_META.code.matchAll(/^export\s+async\s+function\s+(embedArrivedFiles)\b/gm)].map(m => ({ src: FILE_META, name: m[1] })) : []),
     ...(ARRIVALS ? [...ARRIVALS.code.matchAll(/^export\s+async\s+function\s+(writeArrivals)\b/gm)].map(m => ({ src: ARRIVALS, name: m[1] })) : []),
   ];
 

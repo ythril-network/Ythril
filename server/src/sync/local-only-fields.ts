@@ -9,10 +9,13 @@
  * ingest drops are the same set, and writing them separately means one of them is eventually wrong.
  *
  * `merkle.ts` excludes them from the hash. The arrival writer (`sync/arrivals.ts`, `writeArrivals`) drops
- * them from every document a peer delivers, by push or by pull — push zod-strips them as well, because no
- * `Incoming*` schema declares one, but the writer does not rely on it — and CARRIES the receiver's own values
- * across the replace, so a peer's edit does not erase what only this instance knows. The admin export leaves
- * out the derived half and a restore keeps the record-tier half (`RESTORED_LOCAL_FIELDS` below).
+ * them from every document a peer delivers, by push or by pull — the one validation step zod-strips them as
+ * well, because no `Incoming*` schema declares one, but the writer does not rely on it — and CARRIES the
+ * receiver's own values across the replace, so a peer's edit does not erase what only this instance knows.
+ * What it carries is decided per document (`carriedFields`): an arrival this instance SUPPRESSES carries the
+ * record-tier half only, because the derived half describes content it no longer embeds (`Q-230`), and a
+ * RESTORE carries nothing from the copy it replaces. The admin export leaves out the derived half and a restore
+ * keeps the backup's record-tier half (`RESTORED_LOCAL_FIELDS` below) — never the replaced copy's (`Q-234`).
  *
  * ## What each one is, and what taking a peer's copy would do
  *

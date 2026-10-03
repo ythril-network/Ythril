@@ -27,31 +27,18 @@ import { describe, it, before, after, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { openPushDoor, build } from './_push-door.mjs';
+import { parkWrites } from './_write-faults.mjs';
 
 const skip = await mongoSkipReason();
 
 const S = 'divrace';
-let door, proto, originalBulkWrite;
+let door, park;
 
-/**
- * Park the FIRST `bulkWrite` to `<S>_facts` until released. Inline for now: the shared park module
- * (`_write-faults.mjs`) is extracted by this bundle's fault-injection tests; this moves onto it when both land.
- */
+/** Park the FIRST `bulkWrite` to `<S>_facts` until released — the shared park (`_write-faults.mjs`). */
 function parkFirstFactsWrite() {
-  let release;
-  let reached;
-  const gate = new Promise(r => { release = r; });
-  const parked = new Promise(r => { reached = r; });
-  let armed = true;
-  proto.bulkWrite = async function parkedOnce(...args) {
-    if (armed && this.collectionName === `${S}_facts`) {
-      armed = false;
-      reached();
-      await gate;
-    }
-    return originalBulkWrite.apply(this, args);
-  };
-  return { parked, release };
+  park = parkWrites(Object.getPrototypeOf(door.mongo.col('probe')));
+  const { reached, release } = park.arm(`${S}_facts`, { when: (method) => method === 'bulkWrite' });
+  return { parked: reached, release };
 }
 
 /** Every text stored for fact `f`: the record itself and every fork of it. */
@@ -63,11 +50,10 @@ async function textsOf(id) {
 describe('two divergent pushes at one seq keep both texts (Q-232)', { skip }, () => {
   before(async () => {
     door = await openPushDoor({ suite: 'divrace', spaces: [{ id: S, label: 'Race', folders: [], meta: {} }] });
-    proto = Object.getPrototypeOf(door.mongo.col('probe'));
-    originalBulkWrite = proto.bulkWrite;
   });
-  afterEach(() => { proto.bulkWrite = originalBulkWrite; });
-  after(async () => { proto.bulkWrite = originalBulkWrite; await door?.close(); });
+  // Restored before the door closes: the door's own restore would otherwise put the park back (`parkWrites`).
+  afterEach(() => { park?.restore(); park = undefined; });
+  after(async () => { park?.restore(); await door?.close(); });
   beforeEach(async () => { await door.wipe(S); });
 
   const send = {

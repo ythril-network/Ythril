@@ -25,10 +25,11 @@
  *
  * ## Why this is local, and takes no seq
  *
- * The vector does not replicate — `sync/local-only-fields.ts` is the list and names the three mechanisms
- * that hold it: no `Incoming*` schema declares it, so a PUSHED document loses it to zod; the pull path
- * strips it explicitly, because it validates nothing; and the sending side projects it away so the bytes
- * never travel. So removing one is a purely local change — no tombstone, no seq bump, nothing to converge.
+ * The vector does not replicate — `sync/local-only-fields.ts` is the list and names the mechanisms that hold
+ * it: no `Incoming*` schema declares it, so an arriving document, pushed or pulled, loses it to the one
+ * validation step (`sync/arrival-shape.ts`); the arrival writer drops it besides; and the sending side
+ * projects it away so the bytes never travel. So removing one is a purely local change — no tombstone, no seq
+ * bump, nothing to converge.
  *
  * This paragraph used to say `api/sync/docs.ts` *"strips `embedding` before sending, in all five places"*.
  * There was no such strip in that file and there never had been: the push path dropped it by OMISSION and
@@ -51,7 +52,7 @@ import { TYPE_FIELD } from './ttl.js';
 import { recordNotSuppressedFilter, RECORD_SUPPRESS_FIELD } from './suppress-embeddings.js';
 import type { BrainEmbedRecordType, KnowledgeType, SpaceMeta } from '../config/types.js';
 import { spaceCollection, type SpacePart } from '../db/space-collection.js';
-import { READ_CHUNK } from '../db/read-by-id.js';
+import { READ_CHUNK, readStoredById } from '../db/read-by-id.js';
 import { inChunks } from '../util/chunks.js';
 import { UNSET_VECTOR } from '../sync/local-only-fields.js';
 import { embedJobId } from './embed-queue.js';
@@ -154,29 +155,41 @@ export async function sweepSuppressedVectors(spaceId: string, meta: SpaceMeta): 
  *  files and the rows derived from them. Returns their ids, vectors removed and jobs retired. */
 async function sweepFiles(spaceId: string, meta: SpaceMeta): Promise<string[]> {
   const files = col<Record<string, unknown>>(spaceCollection(spaceId, 'files'));
-  const withVector = { embedding: { $exists: true } };
-  let ids: string[];
-  if (meta.suppressEmbeddings === true) {
-    ids = (await files.find(asFilter(withVector), { projection: { _id: 1 } }).toArray()).map(d => String(d['_id']));
-  } else {
+  if (meta.suppressEmbeddings !== true) {
     // The record tier: a flagged file whether or not it holds a vector itself, since its derived rows may.
-    let frontier = (await files.find(asFilter({ [RECORD_SUPPRESS_FIELD]: true }), { projection: { _id: 1 } }).toArray())
-      .map(d => String(d['_id']));
-    const reached = new Set(frontier);
-    for (let depth = 0; depth < MAX_ANCESTRY && frontier.length > 0; depth++) {
-      const next: string[] = [];
-      for (const part of inChunks(frontier, READ_CHUNK)) {
-        const rows = await files.find(asFilter({ parentFileId: { $in: part } }), { projection: { _id: 1 } }).toArray();
-        for (const r of rows) { const id = String(r['_id']); if (!reached.has(id)) { reached.add(id); next.push(id); } }
-      }
-      frontier = next;
-    }
-    ids = [];
-    for (const part of inChunks([...reached], READ_CHUNK)) {
-      const rows = await files.find(asFilter({ _id: { $in: part }, ...withVector }), { projection: { _id: 1 } }).toArray();
-      ids.push(...rows.map(r => String(r['_id'])));
-    }
+    const flagged = await files.find(asFilter({ [RECORD_SUPPRESS_FIELD]: true }), { projection: { _id: 1 } }).toArray();
+    return dropFileVectors(spaceId, flagged.map(d => String(d['_id'])));
   }
+  // The space tier reaches every file row, parents and derived alike: one write, no walk.
+  const ids = (await files.find(asFilter(WITH_VECTOR), { projection: { _id: 1 } }).toArray()).map(d => String(d['_id']));
+  if (ids.length === 0) return [];
+  await files.updateMany(asFilter(WITH_VECTOR), { $unset: UNSET_VECTOR });
+  await retireJobs(spaceId, 'file', ids);
+  return ids;
+}
+
+const WITH_VECTOR = { embedding: { $exists: true } };
+
+/**
+ * These files, and every row derived from them down to `MAX_ANCESTRY`, hold no vector afterwards; returns the ids
+ * that held one. The record tier of the sweep, and the arrival writer's for a file this instance suppresses on
+ * arrival (`Q-230`) — the file row's own fields go with its write, its chunks' here.
+ */
+export async function dropFileVectors(spaceId: string, fileIds: readonly string[]): Promise<string[]> {
+  if (fileIds.length === 0) return [];
+  const files = col<Record<string, unknown>>(spaceCollection(spaceId, 'files'));
+  const reached = new Set(fileIds);
+  let frontier = [...reached];
+  for (let depth = 0; depth < MAX_ANCESTRY && frontier.length > 0; depth++) {
+    const next: string[] = [];
+    for (const part of inChunks(frontier, READ_CHUNK)) {
+      const rows = await files.find(asFilter({ parentFileId: { $in: part } }), { projection: { _id: 1 } }).toArray();
+      for (const r of rows) { const id = String(r['_id']); if (!reached.has(id)) { reached.add(id); next.push(id); } }
+    }
+    frontier = next;
+  }
+  // The ones that hold a vector, through the one by-id reader.
+  const ids = [...(await readStoredById(spaceCollection(spaceId, 'files'), [...reached], {}, { filter: WITH_VECTOR })).keys()];
   for (const part of inChunks(ids, READ_CHUNK)) {
     await files.updateMany(asFilter({ _id: { $in: part } }), { $unset: UNSET_VECTOR });
   }

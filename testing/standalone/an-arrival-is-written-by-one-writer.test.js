@@ -66,9 +66,16 @@ const EXEMPT = {
   'server/src/sync/tombstone-apply.ts:applyPeerTombstones':
     'a peer\'s tombstones delete their records — POST /api/sync/tombstones and the pull\'s tombstone transfer, one '
     + 'apply for both doors (bundle-46). A delete, not an arrival',
-  'server/src/api/sync/_shared.ts:ingestFileMeta':
-    'file metadata is merged with $set of the authored keys and never replaced (CLAUDE.md, "What a receiver does '
-    + 'after the write"); its page batching is Q-107 part 2',
+  // `api/sync/_shared.ts:ingestFileMeta` was exempt here until `Q-107` part 2: file metadata is now merged by the
+  // writer itself (`fileMetaUpdate`, under its write guard), so its exemption went with it.
+  'server/src/brain/suppression-sweep.ts:dropFileVectors':
+    'a file this instance suppresses on arrival (Q-230): the vectors of the rows DERIVED from it are removed — local '
+    + 'derived fields of rows no peer sends; the arriving record itself is written by writeArrivals',
+  'server/src/brain/suppression-sweep.ts:sweepSuppressedVectors':
+    'a network\'s meta change (a concluded round, a pulled layer) that turns suppression on removes the stored vectors '
+    + 'of what it now suppresses (bundle-30 R5) — local derived fields of records already held; no arriving record',
+  'server/src/brain/suppression-sweep.ts:sweepFiles':
+    'the files half of sweepSuppressedVectors, above',
   'server/src/sync/fill-file-meta.ts:fillFileMetaFromStray':
     'the stray-filemeta drain\'s recovery (Q-219), reached through writeArrivals only with `fillOnly`, which no door '
     + 'sets: it fills a row this instance made, or applies the seq accept at the write, and never creates a row',

@@ -196,9 +196,10 @@ describe('every transfer under a shared watermark is passed to the rule', () => 
     // Vouching before the write would promise records that a throw between the two would have lost — the same
     // class of mistake one layer down. Re-anchored for `Q-107` part 1: the page is written by the arrival writer
     // (`writeArrivals`), and a failed write `break`s out of the page loop before the advance is reached.
-    const write = src.search(/=\s*await writeArrivals\(/);
+    // Re-anchored for bundle-30 `Q-204`: the page goes through the accept the push uses (`acceptArrivingPage`).
+    const write = src.search(/=\s*\(?await acceptArrivingPage\(/);
     const advance = src.indexOf('if (maxSeq > deliveredThrough) deliveredThrough = maxSeq;');
-    assert.ok(write > 0, 'the pull no longer writes its page through writeArrivals — re-anchor this gate');
+    assert.ok(write > 0, 'the pull no longer writes its page through the page accept — re-anchor this gate');
     assert.ok(advance > write, 'deliveredThrough must be advanced after the page write, not before');
     assert.equal(src.split('deliveredThrough = maxSeq').length - 1, 1, 'a second advance of deliveredThrough is back');
     assert.match(src.slice(write, advance), /catch \(err\) \{\s*\n\s*truncated = true;[\s\S]*?break;/,

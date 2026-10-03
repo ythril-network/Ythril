@@ -14,7 +14,8 @@
  * A page of 200 new, fork-free documents issues EXACTLY as many commands as a page of 20, for each of the five
  * brain families, once the collection is warm (the first write to a fresh collection triggers the search-index
  * presence reconcile, which is not the page's cost). Both sizes sit inside one write chunk (500), so a chunked
- * writer cannot make them differ. File metadata is not held to it: it stays per document until `Q-107` part 2.
+ * writer cannot make them differ. File metadata is held to the same rule by its own twin since `Q-107` part 2
+ * (`a-file-metadata-page-costs-the-same-at-any-size-db`), so its evidence can be read on its own.
  *
  * Counted: the commands addressed to the family's own collection, the tombstones, the embed queue and the
  * counter — what the page itself costs. A link's violation check (fire-and-forget reads of its endpoints'
@@ -33,7 +34,7 @@ const skip = await mongoSkipReason();
 
 const S = 'pushcost';
 const KIND = { facts: 'fact', entities: 'entity', edges: 'edge', chrono: 'chrono', links: 'link' };
-/** The five brain families: every batch family but file metadata, which is per document until part 2. */
+/** The five brain families: every batch family but file metadata, which its twin file holds to the rule. */
 const BRAIN = Object.entries(FAMILIES).filter(([k]) => k !== 'filemeta').map(([key, f]) => ({ key, ...f }));
 
 let door, searchIndexPresenceSettled;

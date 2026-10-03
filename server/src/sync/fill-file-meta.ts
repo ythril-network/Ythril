@@ -26,13 +26,14 @@
  *
  * Reached only through `writeArrivals` with `fillOnly`, the drain's call.
  */
-import { col, asFilter, asUpdate } from '../db/mongo.js';
+import { col, asFilter } from '../db/mongo.js';
 import { writeTimeoutMs } from '../db/write-bound.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { authorRef } from '../config/author.js';
-import { enqueueEmbedJob, EMBED_PRIORITY } from '../brain/embed-queue.js';
-import { spillIdFromPath } from '../brain/spill-path.js';
 import { IncomingFileMetaDoc } from '../api/sync/_shared.js';
+import { isLegacyReadSpill } from './file-conflict.js';
+import { fileMetaUpdate, embedArrivedFiles } from './file-meta-write.js';
+import { seqGuard } from './upsert-plan.js';
 import type { FileMetaDoc } from '../config/types.js';
 
 /** What a stray record did to its file row. */
@@ -87,7 +88,7 @@ function fillUpdate(incoming: Incoming): object[] | null {
 
 /** Recover one stray record onto its file row. See the module docblock for the rule. */
 export async function fillFileMetaFromStray(spaceId: string, incoming: Incoming): Promise<StrayFileMetaOutcome> {
-  if (spillIdFromPath(String(incoming._id))) return 'derived';
+  if (isLegacyReadSpill(String(incoming._id))) return 'derived';
   const files = col<FileMetaDoc>(spaceCollection(spaceId, 'files'));
   const receiverMade = {
     $or: [
@@ -100,17 +101,16 @@ export async function fillFileMetaFromStray(spaceId: string, incoming: Incoming)
   const filled = await fillReceiverMadeRow(spaceId, incoming, receiverMade);
   if (filled) return filled;
 
-  // A peer-written row: the normal accept, at the write — the record lands only over an older row.
+  // A peer-written row: the normal accept, at the write — the record lands only over an older row. The merge and the
+  // guard are the arrival writer's own (`fileMetaUpdate`, `seqGuard`), so the two cannot drift again (bundle-30 `R12`).
   if (typeof incoming.seq === 'number') {
-    const $set: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(incoming)) if (v !== undefined) $set[k] = v;
     const r = await files.updateOne(
-      asFilter<FileMetaDoc>({ _id: incoming._id, seq: { $lt: incoming.seq } } as never),
-      asUpdate<FileMetaDoc>({ $set }),
+      asFilter<FileMetaDoc>(seqGuard(incoming._id, incoming.seq) as never),
+      fileMetaUpdate(incoming) as never,
       { upsert: false, maxTimeMS: writeTimeoutMs() },
     );
     if (r.matchedCount > 0) {
-      await queueIfHeld(spaceId, incoming._id);
+      await embedArrivedFiles(spaceId, [incoming._id]);
       return 'merged';
     }
   }
@@ -130,18 +130,9 @@ async function fillReceiverMadeRow(spaceId: string, incoming: Incoming, receiver
   const r = await files.updateOne(filter, update as never, { upsert: false, maxTimeMS: writeTimeoutMs() });
   if (r.matchedCount === 0) return null;
   if (r.modifiedCount === 0) return 'complete';
-  await queueIfHeld(spaceId, incoming._id);
+  // Queued when its bytes are here, by the receiver's suppression (`embedArrivedFiles`) — the drain's own copy of
+  // this skipped the suppression check. The job reads the stored row, so a fill that set `suppressEmbeddings` is
+  // honoured, and its vector removed, by the worker.
+  await embedArrivedFiles(spaceId, [incoming._id]);
   return 'merged';
-}
-
-/**
- * Queue a merged file for embedding when its bytes are here. The job, not this function, reads the stored row, so a
- * fill that set `suppressEmbeddings` is honoured — and its vector removed — by the worker. Never throws: the queue's
- * own failure is logged there, and the fill has landed either way.
- */
-async function queueIfHeld(spaceId: string, id: string): Promise<void> {
-  const row = await col<FileMetaDoc>(spaceCollection(spaceId, 'files'))
-    .findOne(asFilter<FileMetaDoc>({ _id: id }), { projection: { sha256: 1, sizeBytes: 1 }, maxTimeMS: READ_MS });
-  if (row?.sha256 === undefined && row?.sizeBytes === undefined) return;
-  await enqueueEmbedJob(spaceId, 'file', id, { priority: EMBED_PRIORITY.background });
 }

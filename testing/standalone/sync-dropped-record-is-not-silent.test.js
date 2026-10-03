@@ -33,7 +33,12 @@ import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
 import { enclosingBlockFrom, balancedFrom, blockAfter } from './_structural-window.mjs';
 
-const receiver = stripComments(readFileSync('server/src/api/sync/docs.ts', 'utf8'));
+/*
+ * Re-anchored for bundle-30 §D (`Q-204`): the receiver is the push routes and the page accept they share with the
+ * pull (`sync/accept-page.ts`), which now names the dropped forks — for a pull as well as a push.
+ */
+const receiver = ['server/src/api/sync/docs.ts', 'server/src/sync/accept-page.ts']
+  .map(f => stripComments(readFileSync(f, 'utf8'))).join('\n');
 const planner = stripComments(readFileSync('server/src/sync/upsert-plan.ts', 'utf8'));
 const sender = stripComments(readFileSync('server/src/sync/engine.ts', 'utf8'));
 /*

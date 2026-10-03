@@ -21,7 +21,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   part 1).** Every record that arrives from elsewhere — a peer's push (batch or single record), a pulled page, an
   admin import — is now stored by one writer. A fork-free page of 200 facts, entities, edges, chrono entries or
   links went from 801 commands to the same small number as a page of 20 (measured on the standalone harness).
-  File metadata is still merged one document at a time. What an integrator will notice:
+  File metadata now too (`Q-107` part 2): a 200-document page went from 403 commands (two per document) to the same
+  number as a page of 20, pushed or pulled — one guarded bulk merge, one read for which files' bytes are here, one
+  batched enqueue. What an integrator will notice:
   - **BREAKING for a peer relying on it: `batch-upsert` now caps fork fan-out too.** A fact may have at most 10
     forks; the forks one request creates count with the stored ones. An eleventh is counted in `forkDepthRefused`
     and `rejected`, as a deep chain always was. An older receiver accepts it, so a network mixing versions can hold
@@ -322,6 +324,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A pulled page is decided by the same rules as a pushed one (`Q-204`, `Q-225`).** The pull accepted whatever was
+  newer by seq and validated nothing, so the same document delivered the other way round was decided differently:
+  a record this instance holds a tombstone for was stored again, an equal-seq divergent fact lost one side instead of
+  forking, a field of the wrong type and a key the schema strips were stored, and a file whose `parentFileId` was a
+  number, `0`, `false` or an object became a top-level file. A pulled document now passes its family's `Incoming*`
+  schema (a refusal is that document's alone, and the rest of the page lands), is planned against held tombstones and
+  the fork caps exactly as on push, and is written by the same writer. One stated difference: a chrono `type`
+  outside this space's vocabulary is stored on pull (a push answers `unknownType`), because on pull the schema
+  comes from the same upstream and dropping the record would lose it for good. Strict-linkage violations are now
+  recorded for every landed edge and link on every door (only the single edge route and the batch's links did).
+- **Two peers pushing different text for one fact at one seq at the same moment keep both texts (`Q-232`).** The
+  push whose write lost the race found a copy at its own seq and counted itself landed, while its text was stored
+  nowhere. A same-seq copy with different content is now a divergence, and forks.
+- **A fork keeps the divergent copy's `createdAt` and `updatedAt`.** It was stamped with the moment this instance
+  forked it, so its retention window ignored its age and two receivers forking one divergence stored two documents
+  under one derived fork id — which the space hash reported as a divergence for ever.
+- **An arrival this instance suppresses holds no vector (`Q-230`).** The writer carried the stored copy's vector,
+  model and `matchedText` across a peer's update whatever the receiver's suppression said, so a record its author,
+  its type or its space retired from semantic search stayed findable by the content it no longer had. A suppressed
+  arrival now carries the retention stamps and `syncBase` only, on every door, and a file's derived passages lose
+  their vectors with it.
+- **An admin import never keeps the stamps or `syncBase` of the copy it replaces (`Q-234`).** A record whose export
+  carried no retention stamp kept the replaced copy's, so a record restored to "never expires" went on expiring on
+  the old date, and a file kept a `syncBase` the backup never recorded. It now stores the backup's values, a stamp
+  the backup lacks from this instance's retention (D-9), and nothing of the replaced copy's.
+- **A file-metadata arrival is held to the write guard.** It was merged by `_id` alone, so a newer copy written
+  between the accept read and the merge was overwritten by an older one, with a `200` on the way back.
 - **Suppression that a network turns on removes the vectors already stored (`Q-230`).** A space whose type or
   space-level `suppressEmbeddings` arrived from a network — a meta pull, a meta round, a space addition, leaving a
   network or changing its precedence — reported its records suppressed and went on ranking them by meaning until

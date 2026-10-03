@@ -223,11 +223,16 @@ ${stmt}`,
      * per-page summary (`warnArrivalsNotStored`) for every other refusal. A poison page then floods the log ring
      * with one fact. Seen red by mutation, restored by hand: the per-document `log.warn` put back.
      */
-    const batch = docs.slice(docs.indexOf("syncDocsRouter.post('/batch-upsert'"));
-    const parse = batch.slice(batch.indexOf('.flatMap((d) => {'), batch.indexOf('warnArrivalsNotStored('));
-    assert.ok(parse.includes('schema.safeParse(d)'), 'the per-document parse moved — re-anchor this case');
+    // Re-anchored for bundle-30 `Q-225`: the parse is the one validation step every door shares
+    // (`sync/arrival-shape.ts admitArrivals`), and the page accept names what it refused in one warning per page.
+    const shape = stripComments(readFileSync('server/src/sync/arrival-shape.ts', 'utf8'));
+    const parse = bodyOf(shape, 'admitArrivals');
+    assert.ok(parse.includes('schema.safeParse(offered)'), 'the per-document parse moved — re-anchor this case');
     assert.doesNotMatch(parse, /\blog\.\w+\(/, 'a rejected document is logged one line at a time again');
-    assert.match(batch, /warnArrivalsNotStored\([^;]*misfits\)/, 'the rejected documents are not reported at all');
+    const accept = bodyOf(stripComments(readFileSync('server/src/sync/accept-page.ts', 'utf8')), 'acceptArrivingPage');
+    assert.match(accept, /admitArrivals\(key, docs\)/, 'the page accept no longer validates through the one step');
+    assert.match(accept, /warnArrivalsNotStored\(where, spaceId, key, 'refused', refused\.map\(/,
+      'the rejected documents are not reported at all');
   });
 
   it('a chrono type nobody understands IS refused, on BOTH paths', () => {
@@ -251,12 +256,18 @@ ${stmt}`,
      * the planner input.
      */
     assert.match(single, /verdict === 'unknownType'/, 'the single-record route does not answer the planner\'s refusal');
-    const accept = docs.slice(docs.indexOf('async function acceptPushedPage('), docs.indexOf("syncDocsRouter.post('/facts'"));
-    assert.match(accept, /getAllowedChronoTypes\(/, 'the page accept does not read this space\'s chrono vocabulary');
-    assert.match(accept, /allowedTypes: kind === 'chrono' \? allowedChrono : undefined/,
-      'the vocabulary is not handed to the planner, so the rule applies on neither path');
+    /*
+     * Re-anchored again for bundle-30 §D (`Q-204`): the page accept moved to `sync/accept-page.ts` and serves the
+     * PULL too, where the drop is the one stated door difference — on pull the receiver's schema comes from the same
+     * upstream, and dropping would lose the record for good. So the vocabulary is read for a push, and the planner
+     * refuses on push only; `push-and-pull-decide-alike-db` holds the difference as a row.
+     */
+    const accept = bodyOf(stripComments(readFileSync('server/src/sync/accept-page.ts', 'utf8')), 'acceptArrivingPage');
+    assert.match(accept, /door === 'push' \? getAllowedChronoTypes\(/, 'the page accept does not read this space\'s chrono vocabulary on push');
+    assert.match(accept, /kind === 'chrono' \? \{ allowedTypes \} : \{\}/,
+      'the vocabulary is not handed to the planner, so the rule applies on neither push path');
     const planner = stripComments(readFileSync('server/src/sync/upsert-plan.ts', 'utf8'));
-    assert.match(planner, /kind === 'chrono' && input\.allowedTypes && !input\.allowedTypes\.has\([^)]*\)\)\s*\{\s*plan\.verdicts\[i\] = 'unknownType'/,
+    assert.match(planner, /kind === 'chrono' && input\.door === 'push' && input\.allowedTypes && !input\.allowedTypes\.has\([^)]*\)\)\s*\{\s*plan\.verdicts\[i\] = 'unknownType'/,
       'the planner no longer refuses a chrono type outside the vocabulary');
     const batch = docs.slice(docs.indexOf("syncDocsRouter.post('/batch-upsert'"));
     assert.match(

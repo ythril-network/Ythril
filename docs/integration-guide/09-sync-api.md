@@ -419,14 +419,21 @@ models — or different versions of one — hold legitimately different vectors 
 ranking one against the other produces plausible-looking nonsense rather than an error. Facts were the
 last type that carried theirs; now none do.
 
-**The same holds when this instance PULLS from you, and until 4.0 it did not.** The schemas above run on the
-push path; a pull fetches whole documents and validates nothing, so a pulled record kept the sender's vector
-— and, more expensively, the sender's `_expireAt`, which the receiving instance's retention sweep then
-acted on. Both directions now drop the same local-only fields, and the serving side leaves them out of the page
-altogether, so a sync page is materially smaller than it was. **And the receiver keeps its own:** a peer's update
-of a record no longer erases the receiver's vector, its model, `matchedText`, its retention stamps or its file sync
-bases — they are carried across the replace, so an update whose embedded text did not change is not re-embedded and
-the record stays searchable meanwhile.
+**The same holds when this instance PULLS from you.** A pulled page is accepted by the same rules as a push: every
+document is validated against the schema above for its type (a document that fails is refused on its own and the
+rest of the page lands), a tombstone this instance holds refuses it, and an equal-seq divergent fact forks within
+the caps. The one difference is stated in [Sync Protocol → How a pulled page is stored](../sync-protocol.md#how-a-pulled-page-is-stored):
+a chrono `type` outside the vocabulary is stored on pull. Until 4.0 a pull kept the sender's vector — and, more
+expensively, the sender's `_expireAt`, which the receiving instance's retention sweep then acted on — and until this
+release it validated nothing. Both directions drop the same local-only fields, and the serving side leaves them out
+of the page altogether, so a sync page is materially smaller than it was. **And the receiver keeps its own:** a
+peer's update of a record no longer erases the receiver's vector, its model, `matchedText`, its retention stamps or
+its file sync bases — they are carried across the replace, so an update whose embedded text did not change is not
+re-embedded and the record stays searchable meanwhile. **Unless the receiver suppresses it:** an arriving record its
+own mark, this instance's type schema or this space keeps out of semantic search carries the retention stamps and
+`syncBase` only, and holds no vector, model or `matchedText` afterwards — they described content the receiver no
+longer embeds, and `matchedText` would keep removed text findable by lexical search. A file's derived passages lose
+their vectors with it.
 
 **The receiver embeds what it accepts, on its own terms.** Every accepted document is queued for embedding
 against the receiving instance's own model, at the moment it is written — by push (batch or single route, a new

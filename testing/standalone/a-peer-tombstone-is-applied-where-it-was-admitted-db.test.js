@@ -190,20 +190,20 @@ describe('a peer tombstone is applied where it was admitted, element by element'
     });
 
     /*
-     * THE PULL, CHARACTERISED — not a rule. The pull's arrival path (`writeArrivals`) consults no stored tombstone at
-     * all: the planner's tombstone check is the push's, and giving the pull one is `Q-204`, outside this bundle (plan
-     * decision 3). So both rows pin what the pull does today — a pulled record lands whoever issued the stored
-     * tombstone — and they go red if this bundle adds a pull-side tombstone refusal the plan does not make.
+     * THE PULL, by the same rule (`Q-204`, bundle-30). These rows were a characterisation while the pull consulted no
+     * stored tombstone at all, written to go red the day it did; `Q-204` gave the pull the push's planner, so they now
+     * state the rule, mirroring the two push rows above: another issuer's tombstone does not refuse a record whose
+     * author is the member it was pulled from, and the author's own tombstone does.
      */
-    for (const [label, issuer] of [['a DIFFERENT issuer', 'third-party'], ['the record\'s own author', PEER]]) {
-      it(`pull, characterised: a stored tombstone from ${label} does not refuse a pulled record (Q-204 is open)`, async () => {
+    for (const [label, issuer, lands] of [['a DIFFERENT issuer', 'third-party', true], ['the record\'s own author', PEER, false]]) {
+      it(`pull: a stored tombstone from ${label} ${lands ? 'does not refuse' : 'refuses'} a pulled record`, async () => {
         const id = `pulled-${issuer}`;
         await door.coll(S, 'tombstones').insertOne(tomb(S, id, 50, issuer));
         door.state.records[S] = { facts: [build.fact(S, id, 10, { author: { instanceId: PEER, instanceLabel: PEER } })] };
         await door.sync();
-        assert.equal((await stored(S, 'facts', id))?.seq, 10,
-          `a pulled record was refused by a stored tombstone issued by '${issuer}' — a pull-side tombstone check arrived, `
-          + 'which is Q-204 and not this bundle');
+        assert.equal((await stored(S, 'facts', id))?.seq, lands ? 10 : undefined, lands
+          ? `a tombstone issued by '${issuer}' refused a record its author '${PEER}' delivered by pull`
+          : `a pulled record was stored past its own author's tombstone at a higher seq — the deletion was undone by a pull`);
       });
     }
   });

@@ -142,7 +142,8 @@ What the import stores of each document:
 - **Kept**: everything the export carried as the record's content, plus its retention stamps (as dates — they ARE
   the record's own retention, since a per-record `ttlDays` is never stored) and a file's `syncBase`. A record that
   carries no stamp is stamped by THIS space's retention policy (type schema over space), counted from its own
-  `createdAt`.
+  `createdAt`. **Never the replaced copy's**: a stamp or `syncBase` the export does not carry is not taken from the
+  record the import overwrites — a record restored to "never expires" no longer keeps the replaced copy's expiry.
 - **Dropped**: `embedding`, `embeddingModel` and `matchedText` (re-embedded here); every file chunk and face record
   (`parentFileId` set — re-derived from the blob); and every file-metadata key that is not on the sync wire
   (`sizeBytes`, `sha256`, `excerpt` and the like describe bytes this instance may not hold). File metadata is merged
