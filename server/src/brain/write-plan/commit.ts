@@ -37,6 +37,7 @@ import { mapLimit } from '../../util/map-limit.js';
 import { log } from '../../util/log.js';
 import { bulkWriteFailures, phraseWriteFailure, DUPLICATE_KEY } from '../../db/write-errors.js';
 import { isWriteTimeout } from '../../db/write-timeout.js';
+import { atReadSeq } from '../../db/at-read-seq.js';
 import { enqueueWriteEmbedJobs, EMBED_PRIORITY } from '../embed-queue.js';
 import { linkIdFor } from '../link-id.js';
 import { writeTombstones } from '../tombstones.js';
@@ -153,9 +154,8 @@ async function writeStage(
 /** The driver operation for one plan, stamped with its seq. */
 function opFor(plan: WritePlan, seq: number): object {
   if (plan.op === 'insert') return { insertOne: { document: { ...plan.doc, seq } } };
-  const filter = plan.expectSeq === undefined ? { _id: plan.id }
-    : plan.expectSeq === null ? { _id: plan.id, seq: { $exists: false } }
-      : { _id: plan.id, seq: plan.expectSeq };
+  // A converge lands only on the version it planned against: `atReadSeq`, the one spelling of that filter.
+  const filter = plan.expectSeq === undefined ? { _id: plan.id } : atReadSeq(plan.id, plan.expectSeq);
   const update: Record<string, unknown> = { $set: { ...plan.set, seq } };
   if (plan.unset && Object.keys(plan.unset).length > 0) update['$unset'] = plan.unset;
   return { updateOne: { filter, update } };

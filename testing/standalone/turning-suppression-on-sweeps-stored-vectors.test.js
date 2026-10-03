@@ -187,8 +187,12 @@ describe('the sweep runs where the flag is written', () => {
   it('it clears BOTH the field and any queued job to recompute it', () => {
     // Leaving a queued embed job behind would have the worker write the vector straight back, which is the
     // whole defect returning by a different route within seconds.
+    // Re-anchored (bundle-30, I4b): the sweep's own `deleteMany` on `'embedJobs'` moved onto the queue's one retire,
+    // `retireEmbedJobs` — so the rule is now read per path that removes a vector, not as a spelling anywhere in the file.
     const sweep = src('server/src/brain/suppression-sweep.ts');
-    assert.match(sweep, /'embedJobs'|cancelEmbedJobs|dequeue/i,
-      'a pending embed job would restore the vector the sweep just removed');
+    for (const fn of ['sweepSuppressedVectors', 'sweepFiles', 'dropFileVectors']) {
+      assert.match(bodyOf(sweep, fn), /\bretireEmbedJobs\(/,
+        `${fn}: a pending embed job would restore the vector the sweep just removed`);
+    }
   });
 });

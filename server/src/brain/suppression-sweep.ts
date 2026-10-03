@@ -50,12 +50,12 @@ import { col, asFilter } from '../db/mongo.js';
 import { log } from '../util/log.js';
 import { TYPE_FIELD } from './ttl.js';
 import { recordNotSuppressedFilter, RECORD_SUPPRESS_FIELD } from './suppress-embeddings.js';
-import type { BrainEmbedRecordType, KnowledgeType, SpaceMeta } from '../config/types.js';
+import type { KnowledgeType, SpaceMeta } from '../config/types.js';
 import { spaceCollection, type SpacePart } from '../db/space-collection.js';
 import { READ_CHUNK, readStoredById } from '../db/read-by-id.js';
 import { inChunks } from '../util/chunks.js';
 import { UNSET_VECTOR } from '../sync/local-only-fields.js';
-import { embedJobId } from './embed-queue.js';
+import { retireEmbedJobs } from './embed-queue.js';
 import { MAX_ANCESTRY } from './embed-record.js';
 import { concreteSpaces } from '../spaces/proxy.js';
 
@@ -142,7 +142,7 @@ export async function sweepSuppressedVectors(spaceId: string, meta: SpaceMeta): 
       const ids = (await coll.find(asFilter(filter), { projection: { _id: 1 } }).toArray()).map(d => String(d['_id']));
       if (ids.length === 0) return [];
       await coll.updateMany(asFilter(filter), { $unset: UNSET_VECTOR });
-      await retireJobs(spaceId, kind, ids);
+      await retireEmbedJobs(spaceId, kind, ids);
       return ids;
     });
   }
@@ -164,7 +164,7 @@ async function sweepFiles(spaceId: string, meta: SpaceMeta): Promise<string[]> {
   const ids = (await files.find(asFilter(WITH_VECTOR), { projection: { _id: 1 } }).toArray()).map(d => String(d['_id']));
   if (ids.length === 0) return [];
   await files.updateMany(asFilter(WITH_VECTOR), { $unset: UNSET_VECTOR });
-  await retireJobs(spaceId, 'file', ids);
+  await retireEmbedJobs(spaceId, 'file', ids);
   return ids;
 }
 
@@ -193,17 +193,8 @@ export async function dropFileVectors(spaceId: string, fileIds: readonly string[
   for (const part of inChunks(ids, READ_CHUNK)) {
     await files.updateMany(asFilter({ _id: { $in: part } }), { $unset: UNSET_VECTOR });
   }
-  await retireJobs(spaceId, 'file', ids);
+  await retireEmbedJobs(spaceId, 'file', ids);
   return ids;
-}
-
-/** Cancel the queued embed jobs of swept records, a chunk of ids at a time — by `embedJobId`, never a spelling of it. */
-async function retireJobs(spaceId: string, recordType: BrainEmbedRecordType, ids: readonly string[]): Promise<void> {
-  for (const part of inChunks(ids, READ_CHUNK)) {
-    await col(spaceCollection(spaceId, 'embedJobs')).deleteMany(
-      asFilter({ _id: { $in: part.map(id => embedJobId(recordType, id)) } }),
-    );
-  }
 }
 
 /**

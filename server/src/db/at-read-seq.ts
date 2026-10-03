@@ -10,9 +10,10 @@
  * then got the OLD text's vector; a newer copy this instance suppresses got a vector it must never hold; and
  * because `matchedText` doubles as the "unchanged" fingerprint, the stale vector could be taken as current.
  *
- * The rule was already written once, in the write plan's commit (`brain/write-plan/commit.ts` `opFor`): a stored
- * copy that had NO seq is matched by `$exists: false`, never by `seq: undefined` (which matches a `null` field and
- * nothing that is absent in the way a reader expects). One spelling, so a second writer cannot get that half wrong.
+ * The rule was first written in the write plan's commit (`brain/write-plan/commit.ts` `opFor`, a converge's
+ * `expectSeq`), which now builds its filter here too: a stored copy that had NO seq is matched by `$exists: false`,
+ * never by `seq: undefined` (which matches a `null` field and nothing that is absent in the way a reader expects).
+ * One spelling, so a second writer cannot get that half wrong.
  *
  * @param seq the seq the writer read, or `null` when the record it read carried none (file metadata from before 4.0,
  *   a chunk row)

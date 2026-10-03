@@ -48,6 +48,10 @@ export interface Replicable {
  *
  * In place because the caller writes these same objects straight to Mongo — copying would mean the
  * copy is tagged and the written original is not, which is the exact bug this prevents.
+ *
+ * The one writer of `RETAGGED_FIELDS` (`sync/retagged-fields.ts`): a field this rewrites is replicated yet local,
+ * so it is on that list and out of the space hash. A field added here and not there makes every space held under a
+ * `spaceMap` alias report a Merkle divergence on identical content.
  */
 export function retagToLocalSpace(docs: readonly unknown[], localSpaceId: string): void {
   for (const doc of docs) {
