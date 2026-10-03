@@ -32,9 +32,10 @@ On connect, the server sends global instructions listing all available space IDs
 > record being maintained. Until 3.1 both kinds blocked, which meant tightening a schema made every record that no
 > longer fitted uneditable until an unrelated field was repaired in the same request.
 >
-> **A STORE failure is machine-readable too, and it is the one to branch on hardest.** When a read fails
-> because the store could not answer — a search index re-initialising after a restart, a replica set stepping
-> down, a search process that died — the result carries:
+> **A STORE failure is machine-readable too, and it is the one to branch on hardest.** When a read OR a write
+> fails because the store could not answer — a search index re-initialising after a restart, a replica set stepping
+> down, a search process that died, a write the database could not complete in time (its bound ended it; the
+> message is then ours, never the driver's) — the result carries:
 >
 > ```json
 > { "retryable": true, "storeSideFailure": true,

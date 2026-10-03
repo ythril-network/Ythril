@@ -196,5 +196,5 @@ export async function rekeyEdge(
      * fix was the same shape: strip at the return, not at the write.
      */
     return { edge: withoutVector(stored), previousId: existing._id };
-  });
+  }, 'edge.rekey');
 }

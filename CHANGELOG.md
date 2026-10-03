@@ -310,8 +310,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   where the resolver honours any `maxBytes` and raises a small `maxChars` to 1000. The schema now follows the
   resolver, so MCP accepts what REST always did; `recall`'s `maxTokens` text no longer says it converts onto bytes.
 
+- **A store that cannot complete a write in time answers `503`, retryable, on every door (`Q-213`).** Every
+  database operation a write issues while it holds its sequence number, and every operation of a sync push page,
+  is now bounded: `YTHRIL_WRITE_TIMEOUT_MS` (default 30 s) per operation and `YTHRIL_HOLD_DEADLINE_MS` (default
+  45 s, below the 60 s a peer waits for a push answer) per hold, both new and both refusing `0`. A write the bound
+  ends answers `503` with `retryable: true`, a `Retry-After` and a message of ours (never the driver's text) on the
+  REST record routes, `POST /api/<tool>`, the MCP tools and every sync push route. A REST write used to answer the
+  same store failure `500` while the tool door answered `503`; a sync push route answered `500` for every store
+  failure, and now answers `503` when the store is the cause — a sender holds its watermark and re-sends on either.
+  A `timeoutMS` in `MONGO_URI` does not apply to these operations: the bound is set on each.
+
 ### Fixed
 
+- **A write that stalled could stop a space's replication indefinitely (`Q-213`).** While a write holds its
+  sequence number, every peer pulling the space is served nothing past it, and nothing bounded the write: a
+  document lock held elsewhere, a stalled socket or a transaction retrying a conflict for two minutes held every
+  pull of the space with it, while each cycle reported success. The write now ends within the bound above, its
+  hold is released when it ends, and the pull continues.
+- **A stalled write is visible while it stalls (`Q-200`).** New gauge `ythril_seq_horizon_oldest_hold_seconds`
+  per space (0 when nothing is held), and a `seq horizon held <age>s space=… seq=… holder=… ended=…` warning for
+  every hold that lasted past half the deadline — once while still open, and when it ends.
+- **A driver argument error no longer drops a peer's document from its sync page for good.** It was read as the
+  document's own refusal; it names the call, not the document, and now fails the page so it is sent again.
 - **A merge of a large entity no longer prints `MaxListenersExceededWarning` (`Q-311`).** Every write inside a
   transaction hung its own listener on the session until it ended, so a merge relinking thousands of edges hung
   thousands of them. A session now carries one, and every write is still reported once after the commit.

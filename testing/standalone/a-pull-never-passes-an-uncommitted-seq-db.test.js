@@ -32,7 +32,7 @@
  * `nextSeq` returning a number cannot be released when its write settles — nothing tells the registry — so the
  * allocation must take the write with it. `util/seq.ts` must export:
  *
- *   - `withAllocatedSeqs(spaceId, n, write: (first: number) => Promise<T>): Promise<T>` — one `$inc: n`,
+ *   - `withAllocatedSeqs(spaceId, n, write: (first: number) => Promise<T>, holder): Promise<T>` — one `$inc: n`,
  *     registers `first .. first+n-1` as in flight BEFORE `write` runs, and releases them in a `finally`, so a
  *     write that throws cannot leave the horizon stuck (the guard a hand-written copy would drop).
  *   - `lowestUncommittedSeq(spaceId): number | undefined` — the lowest registered seq; every seq-paged pull
@@ -321,7 +321,7 @@ describe('a pull never passes an uncommitted seq', { skip }, () => {
           { _id: 'held-a', spaceId: SPACE, fact: 'a', tags: [], seq: first },
           { _id: 'held-b', spaceId: SPACE, fact: 'b', tags: [], seq: first + 1 },
         ]);
-      });
+      }, 'test.held-block');
       const first = await inside;
       let during;
       try {
@@ -397,7 +397,7 @@ describe('a pull never passes an uncommitted seq', { skip }, () => {
 
     it('a write that throws releases its block, so the horizon cannot stick', async () => {
       assert.equal(typeof seqMod.withAllocatedSeqs, 'function', 'withAllocatedSeqs is not exported');
-      await assert.rejects(seqMod.withAllocatedSeqs(SPACE, 1, async () => { throw new Error('write failed'); }), /write failed/);
+      await assert.rejects(seqMod.withAllocatedSeqs(SPACE, 1, async () => { throw new Error('write failed'); }, 'test.failing-write'), /write failed/);
       assert.equal(seqMod.lowestUncommittedSeq(SPACE), undefined,
         'a failed write left its seq registered — every pull of this space would stall below it for ever');
     });

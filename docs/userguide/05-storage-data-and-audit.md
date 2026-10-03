@@ -310,6 +310,17 @@ streaming stops; turn it on again to resume. At most 200 such streams are open o
 
 **Every line an API request's own work produces carries that request's id**, shown in square brackets after the level. It is the same id the response returned in its `X-Request-Id` header, so when somebody reports a failing call and quotes the id, searching for it here finds every line that request produced — the refusal, and anything a background step logged on its way. Lines that belong to no request (startup, the auto-delete sweep, the background storage measurement) carry no id, which is what keeps a search for a real one from matching them.
 
+**`seq horizon held …` names a write that held up replication.** While a write is being stored it holds a place
+in its space's sequence, and every peer pulling that space is served nothing past that place until the write
+ends. A write that took longer than half its limit (`YTHRIL_HOLD_DEADLINE_MS`) is named once while it is still
+open — `seq horizon held 23.0s and still open: space=… seq=… holder=…` — and again when it ends:
+`seq horizon held 45.1s space=… seq=… holder=… ended=timeout`. `holder` says which kind of write it was
+(`fact.update`, `sync.push.fork`, `entity.merge`, …); `ended=` says how it ended: `ok` (slow, but it finished),
+`timeout` (the database did not complete it in time, so it was stopped and the caller told to retry) or `error`.
+One such line now and then is a slow moment; the same space appearing repeatedly is a lock or a stalled
+database connection to look into. The gauge `ythril_seq_horizon_oldest_hold_seconds` shows the same thing as a
+number per space.
+
 ---
 
 ---

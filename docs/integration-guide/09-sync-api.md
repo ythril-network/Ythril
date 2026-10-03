@@ -355,7 +355,7 @@ Each array is capped at 500 items; documents past the cap are counted in `reject
 
 **The counters count the items you sent, as processing them in order would.** A page carrying one `_id` twice is decided copy by copy (an entity at seq 5 then 6 is `upserted: 2`; a fact at seq 9 then 3 is `inserted: 1, skipped: 1`), and only the highest seq is stored. The single-record routes are the same code with one document, so they decide exactly as the batch does.
 
-**A `500` from `batch-upsert` means a fault that was not one document's** — the receiver's store was unavailable, or a connection dropped. Re-sending the page is safe and is what the engine does: records that landed come back `skipped`, and a fork that landed comes back as the same fork, because a fork's id is derived from the parent id, the seq and the text. A document the store refuses for what it is (a schema validator, a value it cannot store) is counted in `rejected` and named in the receiver's log, and never fails the page.
+**A `503` from any push route means the receiver's store could not take the page in time** — a write the bound ended (a lock held elsewhere, a stalled socket), a step-down, a dropped connection. The body carries `retryable: true` and words of the receiver's own, and the response a `Retry-After`; hold your watermark and send the page again. **A `500` means a fault that was not one document's and not the store's**, or a seq counter the receiver could not move past what you sent. Re-sending the page is safe and is what the engine does: records that landed come back `skipped`, and a fork that landed comes back as the same fork, because a fork's id is derived from the parent id, the seq and the text. A document the store refuses for what it is (a schema validator, a value it cannot store) is counted in `rejected` and named in the receiver's log, and never fails the page.
 
 **`skipped` is benign and `forkDepthRefused` is not — read the second one.** They were one counter until now,
 which is the whole reason this paragraph exists.
@@ -524,7 +524,7 @@ reader rather than merely non-conforming, and nothing else in the pipeline would
   - Each element is checked on its own: one that is malformed (no `type`, a missing field) or whose seq the counter cannot carry is refused alone, counted in `refused`, and the rest applies. `refused` is additive — an older receiver answers `{ applied }` only. A refusal is by shape, so re-sending it changes nothing; advance past it.
   - An element of a `type` the receiver does not know answers `400 { error: 'Invalid tombstone format' }` and nothing of the page is applied: hold your watermark and re-send after the receiver upgrades.
   - A tombstone is applied to the space your request names (after the network alias), never to the `spaceId` in its body. It deletes a record only when your peer identity issued it and authored the record; one that fails that is refused and **not stored**, so a forged tombstone cannot block the real author's record either. Symmetrically, a record you push as its author with your own peer token is not refused by a tombstone another instance issued for its id; a record whose author you only claim still is.
-  - The receiver's counter is moved past the highest admitted seq before it answers; a counter that could not move answers `500`, and you should re-send.
+  - The receiver's counter is moved past the highest admitted seq before it answers; a counter that could not move answers `500`, and you should re-send. A store that could not take the page in time answers a retryable `503`, as every push route does.
 
 **The `sinceSeq` you send is recorded.** The serving instance stores it as `lastSeqServed` for your peer identity and prunes tombstones that every member has pulled past — that is the only retention bound on the collection, because an age-based one would let a long-absent peer resurrect a deleted record. Two consequences for an integrator:
 
@@ -539,6 +539,15 @@ could hand you a later seq while an earlier one was still being written — and 
 seq would never come back for the earlier record. So it is safe to move your watermark to the highest seq a
 page returned, and a page that seems shorter than expected during heavy writes is the horizon holding the rest
 back for a cycle, not a gap. The push side applies the same horizon to what it sends.
+
+**A write that stalls holds the horizon for a bounded time, never for good.** Every database operation issued
+while a write holds its seq is bounded (`YTHRIL_WRITE_TIMEOUT_MS` per operation, `YTHRIL_HOLD_DEADLINE_MS` for the
+whole hold — see [Hosting](02-hosting.md)), and the bound ends the write on the server too, so the horizon is
+released when the write ENDS and the page serves what committed above it. What you see while one stalls: pages
+from that space stop short of the stalled seq for at most the hold deadline, then continue. The promise above
+still holds throughout, because a hold is released only once its write has ended — a transaction whose commit
+answer is lost is read back while the hold is still held. On the serving instance the stall shows as the gauge
+`ythril_seq_horizon_oldest_hold_seconds` and a `seq horizon held …` line in its log.
 
 ### File Sync Artifacts
 

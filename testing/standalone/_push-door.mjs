@@ -197,8 +197,10 @@ async function assemblePushDoor({ suite, spaces, monitorCommands, mongo, tmpDir 
     await new Promise((resolve, reject) => resolveNetworkSpaceAlias(req, {}, (e) => (e ? reject(e) : resolve())));
     const localSpace = req.query.spaceId;
     const res = {
-      code: 200, body: undefined, sent: false, counterAtResponse: undefined,
+      code: 200, body: undefined, sent: false, counterAtResponse: undefined, headers: {},
       status(c) { this.code = c; return this; },
+      // A door that answers a retryable 503 says when to retry (`Retry-After`, bundle-30).
+      setHeader(name, value) { this.headers[name.toLowerCase()] = value; return this; },
       json(b) {
         this.body = b; this.sent = true;
         this.counterAtResponse = landed.get(localSpace) ?? 0;

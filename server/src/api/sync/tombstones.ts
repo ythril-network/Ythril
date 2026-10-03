@@ -13,7 +13,8 @@ import { getDataRoot } from '../../config/loader.js';
 import { listTombstones } from '../../brain/tombstones.js';
 import { requireAuth, denyReadOnly, isInstanceAdmin } from '../../auth/middleware.js';
 import { log } from '../../util/log.js';
-import { reportServerFailure } from '../../util/report-failure.js';
+import { sendSyncWriteFailure } from './write-failure.js';
+import { withinWriteBound } from '../../db/write-bound.js';
 import { applyPeerTombstones, MAX_TOMBSTONES_PER_REQUEST } from '../../sync/tombstone-apply.js';
 import { deleteStored } from '../../files/stored-bytes.js';
 import path from 'node:path';
@@ -105,15 +106,15 @@ syncTombstonesRouter.post('/tombstones', syncRateLimit, requireAuth, denyReadOnl
      */
     const callerPeerId = (req.authToken as Record<string, unknown>)?.['peerInstanceId'] as string | undefined;
     const trustedRelay = !callerPeerId && !!req.authToken && isInstanceAdmin(req.authToken);
-    const out = await applyPeerTombstones(spaceId, tombstones, { peerInstanceId: callerPeerId, trustedRelay },
-      `sync POST tombstones from ${callerPeerId ?? 'a local token'}`);
+    // Bounded like every push door (bundle-30 `B2`): a stalled lock answers a retryable 503, never a hung request.
+    const out = await withinWriteBound(async () => await applyPeerTombstones(spaceId, tombstones,
+      { peerInstanceId: callerPeerId, trustedRelay }, `sync POST tombstones from ${callerPeerId ?? 'a local token'}`));
     if (out.unknownTypes.length > 0) { res.status(400).json({ error: 'Invalid tombstone format' }); return; }
 
     // `applied` keeps its meaning — every element admitted by shape and seq — and `refused` is additive.
     res.status(200).json({ applied: out.admitted, refused: out.refused.length });
   } catch (err) {
-    reportServerFailure('sync POST tombstones', err);
-    res.status(500).json({ error: 'Internal error' });
+    sendSyncWriteFailure(res, 'sync POST tombstones', err);
   }
 });
 

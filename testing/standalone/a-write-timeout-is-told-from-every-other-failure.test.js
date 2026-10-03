@@ -57,7 +57,9 @@ const TIMEOUTS = [
   ['MongoServerError code 50 (any write + maxTimeMS)',
     () => serverError({ code: 50, codeName: 'MaxTimeMSExpired', errmsg: 'operation exceeded time limit' })],
   ['MongoBulkWriteError code 50 (bulkWrite / insertMany + maxTimeMS)',
-    () => bulkError({ code: 50, codeName: 'MaxTimeMSExpired', message: 'operation exceeded time limit', errmsg: 'operation exceeded time limit' })],
+    // No `errmsg` key: on a MongoBulkWriteError it is a getter over `message`, and the driver's constructor throws
+    // assigning it (driver 7.1.1) — the fixture could never have built the error it names.
+    () => bulkError({ code: 50, codeName: 'MaxTimeMSExpired', message: 'operation exceeded time limit' })],
   ['MongoBulkWriteError, no code: "Timed out during socket read" (bulkWrite + timeoutMS, client side)',
     () => bulkError({ message: 'Timed out during socket read (2000ms)' })],
   ['MongoBulkWriteError, no code: "Server reported a timeout error" (bulkWrite + timeoutMS, server side)',

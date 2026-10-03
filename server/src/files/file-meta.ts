@@ -110,7 +110,7 @@ export async function upsertFileMeta(
     await withSeq(spaceId, (seq) => col<FileMetaDoc>(spaceCollection(spaceId, 'files')).updateOne(
       asFilter<FileMetaDoc>({ _id: normalised }),
       asUpdate<FileMetaDoc>({ $set: { ...$set, seq }, $unset }),
-    ));
+    ), 'file.upsert');
   } else {
     // A per-record ttlDays wins; otherwise the space's `file` retention bucket applies. Files have their OWN
     // bucket rather than sharing one with a knowledge collection: they are the largest and most obviously
@@ -133,7 +133,7 @@ export async function upsertFileMeta(
         ...(expireAt ? { _expireAt: expireAt } : {}),
       };
       return col<FileMetaDoc>(spaceCollection(spaceId, 'files')).insertOne(asDoc<FileMetaDoc>(doc));
-    });
+    }, 'file.upsert');
   }
 
   // Both branches, unconditionally. A create enqueues for the reason every brain create does — the write
@@ -245,7 +245,7 @@ export async function setDerivedDescriptionIfUnset(
       $set: { description, updatedAt: new Date().toISOString(), seq, ...(descriptionSource ? { descriptionSource } : {}) },
       ...(descriptionSource ? {} : { $unset: { descriptionSource: '' } }),
     }),
-  ));
+  ), 'file.describe');
   return r.modifiedCount > 0;
 }
 
@@ -402,7 +402,7 @@ export async function updateFileMeta(
     return Object.keys(update).length === 0 ? Promise.resolve() : col<FileMetaDoc>(spaceCollection(spaceId, 'files'))
       .updateOne(asFilter<FileMetaDoc>({ _id: normalised }), asUpdate<FileMetaDoc>(update)).then(() => undefined);
   };
-  if (authored) await withSeq(spaceId, write);
+  if (authored) await withSeq(spaceId, write, 'file.update');
   else await write();
 
   // ONE enqueue, unconditionally, after the write. Not gated on which fields moved: any such condition
@@ -525,7 +525,7 @@ export async function markFileMetaDeleted(
     // seq is what pages the soft-deleted record itself, so a peer sees the flag rather than a record
     // that simply stopped changing.
     asUpdate<FileMetaDoc>({ $set: { deletedAt: new Date().toISOString(), seq } }),
-  ));
+  ), 'file.delete');
 }
 
 /**

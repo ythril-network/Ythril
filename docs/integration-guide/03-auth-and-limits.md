@@ -106,6 +106,14 @@ and they are an operator's fastest route to the real condition.
 conditions behind it (a search index re-initialising after a restart, a replica set stepping down, a search
 process that died) clear on their own, in seconds for a blip and in hours for a large reindex.
 
+**Writes answer the same way, on every door.** A write the database could not complete in time — every
+operation a write issues while it holds its sequence number is bounded (`YTHRIL_WRITE_TIMEOUT_MS`,
+`YTHRIL_HOLD_DEADLINE_MS`, see [Hosting](02-hosting.md)) — answers `503` with `retryable: true`, a `Retry-After`
+and a message of ours: the driver's text names internal collections and is never returned. The REST record routes,
+`POST /api/<tool>`, the MCP tools and the sync push routes classify it alike; until this release a REST write answered
+the same store failure `500` that the tool door answered `503`. Nothing was confirmed written, so retrying is
+the remedy.
+
 **We do not retry internally, deliberately.** A transparent retry would turn a dead search process into slow
 successes and hide it from the operator who can fix it. You get told, and you decide.
 

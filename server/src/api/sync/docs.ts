@@ -14,7 +14,9 @@ import { listTombstones } from '../../brain/tombstones.js';
 import { requireAuth, denyReadOnly } from '../../auth/middleware.js';
 import { log, logSafe } from '../../util/log.js';
 import { reportServerFailure } from '../../util/report-failure.js';
+import { sendSyncWriteFailure } from './write-failure.js';
 import { bumpSeq, withAllocatedSeqs, settledSeqRange } from '../../util/seq.js';
+import { withinWriteBound } from '../../db/write-bound.js';
 import type { FactDoc, EntityDoc, EdgeDoc, ChronoEntry, LinkDoc } from '../../config/types.js';
 import type { FileMetaDoc } from '../../config/types.js';
 import { LOCAL_ONLY_EXCLUSION } from '../../sync/local-only-fields.js';
@@ -250,112 +252,119 @@ async function writePushed(spaceId: string, key: PushKey, docs: readonly Pushed[
 async function acceptPushedPage(
   spaceId: string, page: Partial<Record<PushKey, Pushed[]>>, pusher: string | undefined,
 ): Promise<Record<PushKey, PushedFamilyResult>> {
-  // `pusher` is the peer identity the token PROVES (undefined for an admin or local token); `from` names it in logs.
-  const from = pusher ?? 'unknown';
-  const results = {} as Record<PushKey, PushedFamilyResult>;
-  const sound = {} as Record<PushKey, Array<{ index: number; doc: Pushed }>>;
-  const refusedAt = {} as Record<PushKey, ArrivalRefusal[]>;
-  let maxReceived = 0;
-  for (const { payloadKey: key } of REPLICATED_FAMILIES) {
-    const docs = page[key] ?? [];
-    results[key] = { verdicts: docs.map(() => 'rejected' as PushVerdict), forkIds: docs.map(() => undefined),
-      reasons: docs.map(() => undefined), landed: [] };
-    sound[key] = [];
-    refusedAt[key] = [];
-    docs.forEach((doc, index) => {
-      const why = arrivalRefusal(doc, { seqOptional: false });
-      if (why) { refusedAt[key].push({ _id: arrivalId(doc), reason: why }); results[key].reasons[index] = why; return; }
-      sound[key].push({ index, doc });
-      if (doc.seq > maxReceived) maxReceived = doc.seq;
-    });
-    warnArrivalsNotStored(`sync push from ${from}`, spaceId, key, 'refused', refusedAt[key]);
-  }
-
-  const forks: Array<{ key: PushKey; index: number; doc: Pushed }> = [];
-  try {
-    const tombstones = await readPageTombstones(spaceId,
-      PLANNED.flatMap(f => sound[f.key].map(s => s.doc._id)));
-    const allowedChrono = getAllowedChronoTypes(getConfig().spaces.find(sp => sp.id === spaceId)?.meta);
-    for (const { key, kind, tombstone } of PLANNED) {
-      const items = sound[key];
-      if (items.length === 0) continue;
-      const docs = items.map(s => s.doc);
-      const stored = await readPushStored(spaceId, kind, docs);
-      const plan = planPushArrivals(docs, {
-        kind, stored, tombstones: tombstones.get(tombstone) ?? new Map(), deliveredBy: pusher,
-        allowedTypes: kind === 'chrono' ? allowedChrono : undefined,
-        ...(kind === 'facts' ? await readForkContext(spaceId, docs, stored) : {}),
+  /*
+   * Every operation of the page is bounded (bundle-30 `B2`), not only the fork's inside its hold: a stalled lock on
+   * a record or on the counter row would otherwise hang the request with no bound at all, so the door could never
+   * answer the retryable 503 a stall is. The fork's hold, nested inside, keeps whichever deadline is sooner.
+   */
+  return withinWriteBound(async () => {
+    // `pusher` is the peer identity the token PROVES (undefined for an admin or local token); `from` names it in logs.
+    const from = pusher ?? 'unknown';
+    const results = {} as Record<PushKey, PushedFamilyResult>;
+    const sound = {} as Record<PushKey, Array<{ index: number; doc: Pushed }>>;
+    const refusedAt = {} as Record<PushKey, ArrivalRefusal[]>;
+    let maxReceived = 0;
+    for (const { payloadKey: key } of REPLICATED_FAMILIES) {
+      const docs = page[key] ?? [];
+      results[key] = { verdicts: docs.map(() => 'rejected' as PushVerdict), forkIds: docs.map(() => undefined),
+        reasons: docs.map(() => undefined), landed: [] };
+      sound[key] = [];
+      refusedAt[key] = [];
+      docs.forEach((doc, index) => {
+        const why = arrivalRefusal(doc, { seqOptional: false });
+        if (why) { refusedAt[key].push({ _id: arrivalId(doc), reason: why }); results[key].reasons[index] = why; return; }
+        sound[key].push({ index, doc });
+        if (doc.seq > maxReceived) maxReceived = doc.seq;
       });
-      const res = results[key];
-      plan.verdicts.forEach((v, k) => { res.verdicts[items[k]!.index] = v; res.forkIds[items[k]!.index] = plan.forkIds[k]; });
-      for (const f of plan.forks) forks.push({ key, index: items[f.index]!.index, doc: f.doc });
+      warnArrivalsNotStored(`sync push from ${from}`, spaceId, key, 'refused', refusedAt[key]);
+    }
 
-      // The winners, then — for any whose write failed — the version accepted before it, until each id lands
-      // or runs out of versions.
-      let pending = [...plan.accepts.values()].map(list => [...list]);
-      const cleanups: Array<{ id: string; below: number }> = [];
-      while (pending.length > 0) {
-        const out = await writePushed(spaceId, key, pending.map(l => l.at(-1)!.doc), { from });
-        const newer = new Set(out.newerLocal);
-        const dup = new Set(out.duplicates);
-        const refused = new Map(out.refused.map(r => [r._id, r.reason]));
-        const next: typeof pending = [];
-        for (const list of pending) {
-          const top = list.at(-1)!;
-          const id = top.doc._id;
-          if (newer.has(id)) { for (const a of list) res.verdicts[items[a.index]!.index] = 'skipped'; continue; }
-          if (dup.has(id) || refused.has(id)) {
-            res.verdicts[items[top.index]!.index] = dup.has(id) ? 'duplicate' : 'rejected';
-            res.reasons[items[top.index]!.index] = refused.get(id);
-            list.pop();
-            if (list.length > 0) next.push(list);
-            continue;
+    const forks: Array<{ key: PushKey; index: number; doc: Pushed }> = [];
+    try {
+      const tombstones = await readPageTombstones(spaceId,
+        PLANNED.flatMap(f => sound[f.key].map(s => s.doc._id)));
+      const allowedChrono = getAllowedChronoTypes(getConfig().spaces.find(sp => sp.id === spaceId)?.meta);
+      for (const { key, kind, tombstone } of PLANNED) {
+        const items = sound[key];
+        if (items.length === 0) continue;
+        const docs = items.map(s => s.doc);
+        const stored = await readPushStored(spaceId, kind, docs);
+        const plan = planPushArrivals(docs, {
+          kind, stored, tombstones: tombstones.get(tombstone) ?? new Map(), deliveredBy: pusher,
+          allowedTypes: kind === 'chrono' ? allowedChrono : undefined,
+          ...(kind === 'facts' ? await readForkContext(spaceId, docs, stored) : {}),
+        });
+        const res = results[key];
+        plan.verdicts.forEach((v, k) => { res.verdicts[items[k]!.index] = v; res.forkIds[items[k]!.index] = plan.forkIds[k]; });
+        for (const f of plan.forks) forks.push({ key, index: items[f.index]!.index, doc: f.doc });
+
+        // The winners, then — for any whose write failed — the version accepted before it, until each id lands
+        // or runs out of versions.
+        let pending = [...plan.accepts.values()].map(list => [...list]);
+        const cleanups: Array<{ id: string; below: number }> = [];
+        while (pending.length > 0) {
+          const out = await writePushed(spaceId, key, pending.map(l => l.at(-1)!.doc), { from });
+          const newer = new Set(out.newerLocal);
+          const dup = new Set(out.duplicates);
+          const refused = new Map(out.refused.map(r => [r._id, r.reason]));
+          const next: typeof pending = [];
+          for (const list of pending) {
+            const top = list.at(-1)!;
+            const id = top.doc._id;
+            if (newer.has(id)) { for (const a of list) res.verdicts[items[a.index]!.index] = 'skipped'; continue; }
+            if (dup.has(id) || refused.has(id)) {
+              res.verdicts[items[top.index]!.index] = dup.has(id) ? 'duplicate' : 'rejected';
+              res.reasons[items[top.index]!.index] = refused.get(id);
+              list.pop();
+              if (list.length > 0) next.push(list);
+              continue;
+            }
+            const clean = plan.tombstoneCleanups.get(id);
+            if (clean?.onLanding) cleanups.push({ id, below: top.doc.seq });
+            if (RECORD_TYPE_OF[kind] === null) res.landed.push(top.doc);
           }
-          const clean = plan.tombstoneCleanups.get(id);
-          if (clean?.onLanding) cleanups.push({ id, below: top.doc.seq });
-          if (RECORD_TYPE_OF[kind] === null) res.landed.push(top.doc);
+          pending = next;
         }
-        pending = next;
+        for (const [id, c] of plan.tombstoneCleanups) if (!c.onLanding) cleanups.push({ id, below: c.below });
+        await deleteSupersededTombstones(spaceId, tombstone, cleanups);
       }
-      for (const [id, c] of plan.tombstoneCleanups) if (!c.onLanding) cleanups.push({ id, below: c.below });
-      await deleteSupersededTombstones(spaceId, tombstone, cleanups);
+
+      // A file's metadata: merged, never replaced, and per document until `Q-107` part 2. No tombstone rides here
+      // — a deleted file has its own route (`/api/sync/file-tombstones`).
+      for (const key of MERGED) {
+        if (sound[key].length === 0) continue;
+        const out = await writePushed(spaceId, key, sound[key].map(s => s.doc), { from });
+        const verdictOf = new Map<string, PushVerdict>();
+        for (const id of [...out.inserted, ...out.updated]) verdictOf.set(id, 'upserted');
+        for (const id of [...out.newerLocal, ...out.derived]) verdictOf.set(id, 'skipped');
+        for (const r of out.refused) verdictOf.set(r._id, 'rejected');
+        const why = new Map(out.refused.map(r => [r._id, r.reason]));
+        for (const s of sound[key]) {
+          results[key].verdicts[s.index] = verdictOf.get(s.doc._id) ?? 'skipped';
+          results[key].reasons[s.index] = why.get(s.doc._id);
+        }
+      }
+    } finally {
+      if (maxReceived > 0) await bumpSeq(spaceId, maxReceived);
     }
 
-    // A file's metadata: merged, never replaced, and per document until `Q-107` part 2. No tombstone rides here
-    // — a deleted file has its own route (`/api/sync/file-tombstones`).
-    for (const key of MERGED) {
-      if (sound[key].length === 0) continue;
-      const out = await writePushed(spaceId, key, sound[key].map(s => s.doc), { from });
-      const verdictOf = new Map<string, PushVerdict>();
-      for (const id of [...out.inserted, ...out.updated]) verdictOf.set(id, 'upserted');
-      for (const id of [...out.newerLocal, ...out.derived]) verdictOf.set(id, 'skipped');
-      for (const r of out.refused) verdictOf.set(r._id, 'rejected');
-      const why = new Map(out.refused.map(r => [r._id, r.reason]));
-      for (const s of sound[key]) {
-        results[key].verdicts[s.index] = verdictOf.get(s.doc._id) ?? 'skipped';
-        results[key].reasons[s.index] = why.get(s.doc._id);
+    if (forks.length > 0) {
+      const now = new Date().toISOString();
+      let forkOut: ArrivalOutcome | undefined;
+      await withAllocatedSeqs(spaceId, forks.length, async (first) => {
+        forkOut = await writePushed(spaceId, 'facts',
+          forks.map((f, k) => ({ ...f.doc, seq: first + k, createdAt: now, updatedAt: now })), { from, deferEnqueue: true });
+      }, 'sync.push.fork');
+      await forkOut?.enqueue();
+      const failed = new Set([...(forkOut?.refused.map(r => r._id) ?? []), ...(forkOut?.duplicates ?? [])]);
+      for (const f of forks) {
+        if (!failed.has(f.doc._id)) continue;
+        results[f.key].verdicts[f.index] = 'rejected';
+        results[f.key].forkIds[f.index] = undefined;
       }
     }
-  } finally {
-    if (maxReceived > 0) await bumpSeq(spaceId, maxReceived);
-  }
-
-  if (forks.length > 0) {
-    const now = new Date().toISOString();
-    let forkOut: ArrivalOutcome | undefined;
-    await withAllocatedSeqs(spaceId, forks.length, async (first) => {
-      forkOut = await writePushed(spaceId, 'facts',
-        forks.map((f, k) => ({ ...f.doc, seq: first + k, createdAt: now, updatedAt: now })), { from, deferEnqueue: true });
-    });
-    await forkOut?.enqueue();
-    const failed = new Set([...(forkOut?.refused.map(r => r._id) ?? []), ...(forkOut?.duplicates ?? [])]);
-    for (const f of forks) {
-      if (!failed.has(f.doc._id)) continue;
-      results[f.key].verdicts[f.index] = 'rejected';
-      results[f.key].forkIds[f.index] = undefined;
-    }
-  }
-  return results;
+    return results;
+  });
 }
 
 /** The peer identity the request's token proves, or undefined (an admin or local token). */
@@ -393,8 +402,7 @@ syncDocsRouter.post('/facts', syncRateLimit, requireAuth, denyReadOnly, async (r
     if (verdict === 'rejected') { res.status(400).json(refusedError(facts)); return; }
     res.status(200).json({ status: 'skipped' });
   } catch (err) {
-    reportServerFailure('sync POST facts', err);
-    res.status(500).json({ error: 'Internal error' });
+    sendSyncWriteFailure(res, 'sync POST facts', err);
   }
 });
 
@@ -418,8 +426,7 @@ syncDocsRouter.post('/entities', syncRateLimit, requireAuth, denyReadOnly, async
     if (verdict === 'rejected') { res.status(400).json(refusedError(entities)); return; }
     res.status(200).json(withSchemaViolations({ status: 'ok' }, violations));
   } catch (err) {
-    reportServerFailure('sync POST entities', err);
-    res.status(500).json({ error: 'Internal error' });
+    sendSyncWriteFailure(res, 'sync POST entities', err);
   }
 });
 
@@ -446,8 +453,7 @@ syncDocsRouter.post('/edges', syncRateLimit, requireAuth, denyReadOnly, async (r
     checkEdgeLinkViolations(spaceId, incoming as unknown as EdgeDoc, peerOf(req)).catch(() => {});
     res.status(200).json(withSchemaViolations({ status: verdict === 'duplicate' ? 'duplicate' : 'ok' }, violations));
   } catch (err) {
-    reportServerFailure('sync POST edges', err);
-    res.status(500).json({ error: 'Internal error' });
+    sendSyncWriteFailure(res, 'sync POST edges', err);
   }
 });
 
@@ -480,8 +486,7 @@ syncDocsRouter.post('/chrono', syncRateLimit, requireAuth, denyReadOnly, async (
     if (verdict === 'rejected') { res.status(400).json(refusedError(chrono)); return; }
     res.status(200).json(withSchemaViolations({ status: 'ok' }, violations));
   } catch (err) {
-    reportServerFailure('sync POST chrono', err);
-    res.status(500).json({ error: 'Internal error' });
+    sendSyncWriteFailure(res, 'sync POST chrono', err);
   }
 });
 
@@ -625,7 +630,6 @@ syncDocsRouter.post('/batch-upsert', syncRateLimit, requireAuth, denyReadOnly, a
       filemeta: { ...fileMetaStats, rejected: rejected('filemeta') },
     });
   } catch (err) {
-    reportServerFailure('sync POST batch-upsert', err);
-    res.status(500).json({ error: 'Internal error' });
+    sendSyncWriteFailure(res, 'sync POST batch-upsert', err);
   }
 });

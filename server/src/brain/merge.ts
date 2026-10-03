@@ -584,7 +584,7 @@ export async function executeMerge(
           asFilter<EdgeDoc>({ _id: edge._id }),
           asUpdate<EdgeDoc>({ $set: { ...updates, seq } }),
           { session },
-        ));
+        ), 'entity.merge.edge');
       }
 
       /*
@@ -653,7 +653,7 @@ export async function executeMerge(
           asFilter<FileMetaDoc>({ _id: f._id }),
           asUpdate<FileMetaDoc>({ $set: { ...set, seq } }),
           { session },
-        ));
+        ), 'entity.merge.file');
       }
 
       /*
@@ -687,7 +687,7 @@ export async function executeMerge(
           asFilter<LinkDoc>({ _id: newId, spaceId }),
           asDoc<LinkDoc>({ ...link, _id: newId, to: survivor._id, updatedAt: now, seq: linkSeq }),
           { upsert: true, session },
-        ));
+        ), 'entity.merge.link');
         if (newId !== link._id) {
           await linkColl.deleteOne(asFilter<LinkDoc>({ _id: link._id, spaceId }), { session });
           await writeTombstone(spaceId, { _id: link._id, type: 'link', deletedAt: now }, session);
@@ -774,7 +774,7 @@ export async function executeMerge(
           { session },
         );
         return s;
-      });
+      }, 'entity.merge.survivor');
 
       // ── 5. Delete absorbed entity + write tombstone ────────────────────
       await entityColl.deleteOne(asFilter<EntityDoc>({ _id: absorbed._id, spaceId }), { session });
@@ -788,7 +788,7 @@ export async function executeMerge(
         seq,
         ...embeddingFields,
       });
-    }));
+    }), 'entity.merge');
   } finally {
     await session.endSession();
   }

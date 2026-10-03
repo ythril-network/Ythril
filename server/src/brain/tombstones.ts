@@ -58,5 +58,5 @@ export async function writeTombstone(
   await withSeq(spaceId, (seq) => col<TombstoneDoc>(spaceCollection(spaceId, 'tombstones')).replaceOne(
     asFilter<TombstoneDoc>({ _id: t._id }), asDoc<TombstoneDoc>(tombstoneDoc(spaceId, seq, t)),
     { upsert: true, ...(session ? { session } : {}) },
-  ));
+  ), 'tombstone.write');
 }

@@ -27,6 +27,7 @@
  * Reached only through `writeArrivals` with `fillOnly`, the drain's call.
  */
 import { col, asFilter, asUpdate } from '../db/mongo.js';
+import { writeTimeoutMs } from '../db/write-bound.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { authorRef } from '../config/author.js';
 import { enqueueEmbedJob, EMBED_PRIORITY } from '../brain/embed-queue.js';
@@ -47,8 +48,11 @@ export type StrayFileMetaOutcome =
   /** A legacy read spill, which travels in neither direction. */
   | 'derived';
 
-/** Long enough for any single-document write, short enough that one stuck write cannot hold the sweep cycle. */
-const WRITE_MS = 30_000;
+/**
+ * A READ here: short enough that one stuck read cannot hold the sweep cycle. The WRITES take the one write bound,
+ * `writeTimeoutMs()` (`db/write-bound.ts`) — a second literal for "how long a write may take" was a second copy of it.
+ */
+const READ_MS = 30_000;
 const MACHINE_SOURCES = ['generated', 'extracted'];
 
 type Incoming = Record<string, unknown> & { _id: string; seq?: number };
@@ -103,14 +107,14 @@ export async function fillFileMetaFromStray(spaceId: string, incoming: Incoming)
     const r = await files.updateOne(
       asFilter<FileMetaDoc>({ _id: incoming._id, seq: { $lt: incoming.seq } } as never),
       asUpdate<FileMetaDoc>({ $set }),
-      { upsert: false, maxTimeMS: WRITE_MS },
+      { upsert: false, maxTimeMS: writeTimeoutMs() },
     );
     if (r.matchedCount > 0) {
       await queueIfHeld(spaceId, incoming._id);
       return 'merged';
     }
   }
-  const here = await files.findOne(asFilter<FileMetaDoc>({ _id: incoming._id }), { projection: { _id: 1 }, maxTimeMS: WRITE_MS });
+  const here = await files.findOne(asFilter<FileMetaDoc>({ _id: incoming._id }), { projection: { _id: 1 }, maxTimeMS: READ_MS });
   return here ? 'newer' : 'no-file';
 }
 
@@ -120,10 +124,10 @@ async function fillReceiverMadeRow(spaceId: string, incoming: Incoming, receiver
   const filter = asFilter<FileMetaDoc>({ _id: incoming._id, ...receiverMade } as never);
   const update = fillUpdate(incoming);
   if (!update) {
-    return (await files.findOne(filter, { projection: { _id: 1 }, maxTimeMS: WRITE_MS })) ? 'complete' : null;
+    return (await files.findOne(filter, { projection: { _id: 1 }, maxTimeMS: READ_MS })) ? 'complete' : null;
   }
   // A pipeline that changes nothing reports no modification, which is exactly "already complete".
-  const r = await files.updateOne(filter, update as never, { upsert: false, maxTimeMS: WRITE_MS });
+  const r = await files.updateOne(filter, update as never, { upsert: false, maxTimeMS: writeTimeoutMs() });
   if (r.matchedCount === 0) return null;
   if (r.modifiedCount === 0) return 'complete';
   await queueIfHeld(spaceId, incoming._id);
@@ -137,7 +141,7 @@ async function fillReceiverMadeRow(spaceId: string, incoming: Incoming, receiver
  */
 async function queueIfHeld(spaceId: string, id: string): Promise<void> {
   const row = await col<FileMetaDoc>(spaceCollection(spaceId, 'files'))
-    .findOne(asFilter<FileMetaDoc>({ _id: id }), { projection: { sha256: 1, sizeBytes: 1 }, maxTimeMS: WRITE_MS });
+    .findOne(asFilter<FileMetaDoc>({ _id: id }), { projection: { sha256: 1, sizeBytes: 1 }, maxTimeMS: READ_MS });
   if (row?.sha256 === undefined && row?.sizeBytes === undefined) return;
   await enqueueEmbedJob(spaceId, 'file', id, { priority: EMBED_PRIORITY.background });
 }

@@ -283,7 +283,7 @@ export async function updateEntityById(
       asUpdate<EntityDoc>(updateOp),
       { returnDocument: 'before' },
     );
-  }) as EntityDoc | null;
+  }, 'entity.update') as EntityDoc | null;
   brainWriteSeqTotal.labels({
     collection: 'entities',
     outcome: writeOutcome(!!beforeWrite, ifMatchSeq !== undefined, !!beforeWrite && beforeWrite.seq !== existing.seq),

@@ -303,6 +303,8 @@ async function main(): Promise<void> {
     stopSyncScheduler();
     stopBackupScheduler();
     stopDupeScanner();
+    const { stopSeqHoldWatchdog } = await import('./util/seq.js');
+    stopSeqHoldWatchdog();
     // The media worker was never stopped here, though `stopMediaEmbeddingWorker` exists and promises to
     // complete the in-flight batch. Without it the worker kept CLAIMING new jobs while the process drained —
     // a job picked up in the last second of life is abandoned instantly — and whatever it held died

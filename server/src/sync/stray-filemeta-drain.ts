@@ -34,17 +34,23 @@ import { writeArrivals } from './arrivals.js';
 import { logInternalAudit } from '../audit/audit.js';
 import { STRAY_FILEMETA_DRAIN_OPERATION } from '../audit/middleware.js';
 import { log, logSafe } from '../util/log.js';
+import { warnOnce } from '../util/warn-once.js';
+import { writeTimeoutMs } from '../db/write-bound.js';
 
 /** How long a record whose file has no row waits for the file's bytes before it is discarded. */
 const WAIT_DAYS = 30;
 /** How often one space's repeating failure is logged. */
 const REPORT_EVERY_MS = 10 * 60_000;
-/** One page read or delete; a stuck one must not hold the sweep cycle. */
+/**
+ * One page READ; a stuck one must not hold the sweep cycle. The page's writes (the delete, the wait stamp) take the
+ * one write bound, `writeTimeoutMs()` (`db/write-bound.ts`), rather than a second literal for the same question.
+ */
 const STEP_MS = 30_000;
 
 type StrayDoc = { _id: string; keptSince?: string };
 
-const lastReported = new Map<string, number>();
+/** One report per space per `REPORT_EVERY_MS` (`util/warn-once.ts`). */
+const failureReports = warnOnce<string>({ every: REPORT_EVERY_MS });
 
 /** Drain every space's stray file-metadata collection. Returns the spaces whose collection was dropped. */
 export async function drainStrayFileMeta({ pageSize = 500, maxPages = 20 }: { pageSize?: number; maxPages?: number } = {}): Promise<string[]> {
@@ -55,12 +61,8 @@ export async function drainStrayFileMeta({ pageSize = 500, maxPages = 20 }: { pa
     try {
       if (await drainSpace(space.id, pageSize, maxPages, step)) dropped.push(space.id);
     } catch (err) {
-      const now = Date.now();
-      if (now - (lastReported.get(space.id) ?? 0) >= REPORT_EVERY_MS) {
-        lastReported.set(space.id, now);
-        log.warn(`Stray file-metadata drain (${logSafe(space.id)}, ${step.name}): `
-          + `${logSafe(err instanceof Error ? err.message : String(err))}; the collection is kept for the next cycle (Q-219).`);
-      }
+      failureReports(space.id, () => log.warn(`Stray file-metadata drain (${logSafe(space.id)}, ${step.name}): `
+        + `${logSafe(err instanceof Error ? err.message : String(err))}; the collection is kept for the next cycle (Q-219).`));
     }
   }
   return dropped;
@@ -105,10 +107,10 @@ async function drainSpace(spaceId: string, pageSize: number, maxPages: number, s
       n.waiting += wait.length;
       const unstored = new Set(out.unstored);
       const answered = [...page.map(d => d._id).filter(id => !unstored.has(id)), ...discard];
-      if (answered.length > 0) await stray.deleteMany(asFilter<StrayDoc>({ _id: { $in: answered } }), { maxTimeMS: STEP_MS });
+      if (answered.length > 0) await stray.deleteMany(asFilter<StrayDoc>({ _id: { $in: answered } }), { maxTimeMS: writeTimeoutMs() });
       if (wait.length > 0) {
         await stray.updateMany(asFilter<StrayDoc>({ _id: { $in: wait }, keptSince: { $exists: false } } as never),
-          { $set: { keptSince: new Date().toISOString() } }, { maxTimeMS: STEP_MS });
+          { $set: { keptSince: new Date().toISOString() } }, { maxTimeMS: writeTimeoutMs() });
       }
     }
   }

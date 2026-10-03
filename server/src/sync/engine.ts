@@ -65,14 +65,9 @@ import { assertPeerAtFloor } from './peer-floor.js';
 import { REPLICATED_FAMILIES, RECORD_TYPE_OF, type PayloadKey, type ReplicatedFamily } from './replicated-families.js';
 import { spaceCollection } from '../db/space-collection.js';
 
-// Timeout for every outbound fetch to a peer.
-// Without this, the OS TCP timeout (~75 s on Linux) applies, which means one
-// offline peer can block an entire sync cycle by that duration per attempt.
-const FETCH_TIMEOUT_MS = 10_000;
-
-// Longer timeout for batch push/pull payloads: 200 docs × a few KB each can be
-// several hundred KB over a slow WAN link.
-const BATCH_FETCH_TIMEOUT_MS = 60_000;
+// Every outbound fetch's budget, and the longer one for batch payloads — in their own module because the
+// receiver's hold deadline is derived from the batch one (`db/write-bound.ts`).
+import { FETCH_TIMEOUT_MS, BATCH_FETCH_TIMEOUT_MS } from './peer-timeouts.js';
 
 // Docs pushed per batch-upsert request (caps per-request payload size).
 const PUSH_BATCH_SIZE = 200;

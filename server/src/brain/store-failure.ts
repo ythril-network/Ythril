@@ -49,6 +49,11 @@
  * A retry loop would have turned that into slow successes and hidden a process death from the only two
  * parties who could see it. Say what happened, say it can be retried, and let the caller decide.
  */
+import { isWriteTimeout } from '../db/write-timeout.js';
+
+/** What every door answers for an operation a bound ended: the store's condition, said without the store's text. */
+export const STORE_TIMEOUT_MESSAGE = 'The database did not complete this operation in time. Nothing was confirmed '
+  + 'written by it; retry the request (store-side failure; retryable).';
 
 /** Query-time conditions that are the STORE's, never the request's. */
 const STORE_ERROR_NAMES = new Set([
@@ -141,6 +146,16 @@ const text = (v: unknown): string | undefined => (typeof v === 'string' && v.tri
  * answer from outside.
  */
 export function classifyReadFailure(err: unknown): ReadFailure {
+  /*
+   * A BOUND ENDED IT — first, and in words of our own (bundle-30, `Q-213`). An operation inside a seq hold, or on a
+   * push door, carries a write bound (`db/write-bound.ts`), and the driver reports the bound ending it in five
+   * shapes, none of which the allowlist below recognised: a timed-out batched write answered 400 here and 500 on a
+   * REST write route. The answer is the store's condition, retryable, on every door alike — and never the driver's
+   * text, which names internal collections and differs by which side of the socket fired first.
+   */
+  if (isWriteTimeout(err)) {
+    return { status: 503, retryable: true, retryAfterSeconds: 5, error: STORE_TIMEOUT_MESSAGE };
+  }
   const message = err instanceof Error ? err.message : String(err);
   const name = text((err as { name?: unknown } | null)?.name) ?? '';
   const code = numeric((err as { code?: unknown } | null)?.code);

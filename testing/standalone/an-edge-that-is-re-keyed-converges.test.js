@@ -273,9 +273,13 @@ describe('the caller-facing contract of a re-key', () => {
     const b = body();
     const at = b.indexOf('rekeyEdge(');
     assert.ok(at > 0, 'the re-key branch is gone — re-point this gate');
-    assert.match(b.slice(0, at), /withTransaction\(/,
+    // Re-anchored (bundle-30 §A4): the transaction is `inHeldTransaction`'s (`brain/held-transaction.ts`), which
+    // runs `withTransaction` under the seq hold and ends its session in a `finally` — read there, not here.
+    assert.match(b.slice(0, at), /inHeldTransaction\(/,
       'the delete and the insert are not in a transaction, so a failure between them loses the edge');
-    assert.match(b, /endSession\(\)/, 'the session is never ended');
+    const held = readFileSync(new URL('../../server/src/brain/held-transaction.ts', import.meta.url), 'utf8');
+    assert.match(held, /\.withTransaction\(/, 'inHeldTransaction no longer runs a transaction');
+    assert.match(held, /finally\s*\{\s*await session\.endSession\(\)/, 'the session is never ended');
   });
 
   it('the re-key branch counts as a write, like every other outcome', () => {

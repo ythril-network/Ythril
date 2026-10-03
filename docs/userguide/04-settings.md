@@ -669,6 +669,12 @@ was cut short, the cycle shows **partial** (some members completed) or **failed*
 the space, the direction and what stopped. A network that shows **failed** on every cycle is not syncing at all,
 even though it looks connected.
 
+**A push answered `503` is the peer's database, and it is retried.** When the receiving brain's database cannot
+take a page in time — a write it had to stop, a database restarting — it answers that it could not, rather than
+leaving the request hanging; this brain keeps its place and sends the page again next cycle, so the cycle counts that transfer as
+stopped until the peer's database recovers. The peer's own Server Log names the stalled write
+(`seq horizon held …`).
+
 Each member row in the expanded card also shows its **last successful sync** (or *Never synced*) and, when a peer's recent sync attempts have been failing, a red **Failing (N)** badge counting the consecutive failures since the last success — so you can spot a stuck peer without opening the full history.
 
 **A *Version too old* badge is a different thing from *Failing (N)*, and telling them apart saves an

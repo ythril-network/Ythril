@@ -88,8 +88,16 @@ const DOCUMENT_REFUSAL_CODES = new Set([
   17419,  // a resulting document over the size limit
 ]);
 
-/** Driver errors raised before anything is sent, about the document itself (a `$`-prefixed key, unserialisable BSON). */
-const DOCUMENT_REFUSAL_NAMES = new Set(['MongoInvalidArgumentError', 'BSONError', 'BSONVersionError']);
+/**
+ * Driver errors raised before anything is sent, about the document itself (unserialisable BSON).
+ *
+ * NOT `MongoInvalidArgumentError` (bundle-30). It names the CALL's arguments, and since operations inside a seq
+ * hold carry a bound, the driver raises it for a misused bound too ("cannot be given a timeoutMS setting…", "a
+ * Timeout with a negative duration") — a defect of ours that, read as a refusal, dropped a peer's document from its
+ * sync page for good. The allowlist's own rule decides it: only an error that positively identifies the DOCUMENT is
+ * a document's refusal, and this one does not. `a-write-timeout-is-told-from-every-other-failure` pins it.
+ */
+const DOCUMENT_REFUSAL_NAMES = new Set(['BSONError', 'BSONVersionError']);
 
 /** Is this failure one document's, so refusing that document (and only it) is the right answer? */
 export function isDocumentRefusal(err: unknown): boolean {

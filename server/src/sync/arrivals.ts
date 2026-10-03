@@ -40,7 +40,10 @@
  *     unique-index duplicate (an edge triplet, a link's endpoints). Any other per-operation failure is retried
  *     ONCE alone and then refused by id. A failure with no per-operation shape falls back to one write per
  *     document; if that fails for every document, or for a reason the store owns (network, step-down), it
- *     THROWS — the push answers 500 so the sender keeps its watermark, the pull holds `deliveredThrough`.
+ *     THROWS — the push answers 500 (503 when the store is the cause) so the sender keeps its watermark, the
+ *     pull holds `deliveredThrough`. **A write a bound ended is ambiguous, never a document's refusal**
+ *     (`isWriteTimeout`): nothing says which documents landed, so the page fails whole without the per-document
+ *     fallback, which would only spend the hold's time on the same stall.
  *  8. **The counter, then the queue**, in a `finally` per chunk: `bumpSeq` over what the chunk received
  *     (awaited), and only then the batched embed enqueue of what landed, by the RECEIVER's suppression. The
  *     bump is the only thing that makes an arrival visible to a seq-paged reader; nothing here notes a seq on
@@ -63,6 +66,7 @@ import { spaceCollection } from '../db/space-collection.js';
 import { readStoredById, READ_CHUNK } from '../db/read-by-id.js';
 import { bulkWriteFailures, DUPLICATE_KEY, isDocumentRefusal, isDocumentRefusalCode, writeErrorCode } from '../db/write-errors.js';
 import { bumpSeq, isSeqImplausible } from '../util/seq.js';
+import { isWriteTimeout } from '../db/write-timeout.js';
 import { inChunks } from '../util/chunks.js';
 import { log, logSafe } from '../util/log.js';
 import { BRAIN_COLLECTIONS } from '../config/types.js';
@@ -388,6 +392,9 @@ export async function writeArrivals(
           }))), { ordered: false });
           landed.push(...chunk);
         } catch (err) {
+          // A bound ended the write: nothing says which documents landed, and asking each one again would only
+          // spend the hold's time on more of the same stall. The page fails whole, to be offered again.
+          if (isWriteTimeout(err)) throw stopped(err);
           const failures = bulkWriteFailures(err);
           const writeOne = async (d: Doc): Promise<boolean> => {
             await coll.updateOne(filterFor(d, restore), update(d), { upsert: true });

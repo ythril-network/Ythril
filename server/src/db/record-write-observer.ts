@@ -43,6 +43,7 @@
  * would make every reader of a collection depend on the index lifecycle.
  */
 import type { Collection, Db } from 'mongodb';
+import { BOUNDED_OPTIONS_ARGUMENT, boundArguments } from './write-bound.js';
 
 /** What a method does to the set of records in its collection. */
 export interface MethodEffect {
@@ -132,38 +133,61 @@ function transactionSessionOf(args: unknown[]): SessionLike | null {
   return null;
 }
 
+/** The bounded methods that hand back a cursor synchronously: a refused bound throws, it cannot reject. */
+const RETURNS_CURSOR = new Set(['find', 'aggregate']);
+
 /**
- * Wrap `db` so the collections `isObserved` names report each write to `listener`.
+ * Wrap `db` so the collections `isObserved` names report each write to `listener` — and so EVERY collection's
+ * operations carry the write bound while a bound scope is active (`db/write-bound.ts`, `Q-213`).
  *
- * Every other collection is returned untouched, so the cost is paid only on the collections that asked.
+ * ## Why the bound is composed here
+ *
+ * This proxy is the one door every collection is reached through, and a seq hold must bound EVERY operation issued
+ * inside it — the counter `$inc`, the tombstones, the embed jobs, not only the record collections this observer
+ * reports on. A second wrapper would be a second door, which the gate refuses; so the door gained a second
+ * duty, and each duty stays in its own module: what a bound IS, and which argument carries it, is
+ * `write-bound.ts`'s; this file only applies it. Outside a scope `boundArguments` hands the arguments back
+ * unchanged, so an unobserved collection pays a closure per method call and nothing else.
  */
 export function observeRecordWrites(db: Db, isObserved: (name: string) => boolean, listener: RecordWriteListener): Db {
   return new Proxy(db, {
     get(target, prop, receiver) {
       if (prop !== 'collection') return Reflect.get(target, prop, receiver);
-      return (name: string, options?: object) => {
-        const coll = target.collection(name, options as never);
-        return isObserved(name) ? observeCollection(coll, name, listener) : coll;
-      };
+      return (name: string, options?: object) =>
+        observeCollection(target.collection(name, options as never), name, isObserved(name) ? listener : null);
     },
   });
 }
 
-function observeCollection<T extends object>(coll: Collection<T>, name: string, listener: RecordWriteListener): Collection<T> {
+function observeCollection<T extends object>(
+  coll: Collection<T>, name: string, listener: RecordWriteListener | null,
+): Collection<T> {
   return new Proxy(coll, {
     get(target, prop, receiver) {
       const value = Reflect.get(target, prop, receiver) as unknown;
       if (typeof prop !== 'string' || typeof value !== 'function') return value;
+      const bounded = BOUNDED_OPTIONS_ARGUMENT[prop] !== undefined;
       const classified = COLLECTION_METHOD_EFFECT[prop];
-      if (classified === 'read') return value;
-      const effect = classified ?? UNKNOWN_EFFECT;
-      return (...args: unknown[]) => {
+      const reports = listener !== null && classified !== 'read';
+      if (!bounded && !reports) return value;
+      const effect = classified === 'read' ? UNKNOWN_EFFECT : classified ?? UNKNOWN_EFFECT;
+      return (...given: unknown[]) => {
+        let args = given;
+        if (bounded) {
+          // A hold whose time is spent refuses the operation unsent; nothing was written, so nothing is reported.
+          try { args = boundArguments(prop, given); } catch (err) {
+            if (RETURNS_CURSOR.has(prop)) throw err;
+            return Promise.reject(err);
+          }
+        }
+        const out = (value as (...a: unknown[]) => unknown).apply(target, args);
+        if (!reports || listener === null) return out;
+        const heard = listener;
         const report = (): void => {
           const session = transactionSessionOf(args);
-          if (session) reportWhenEnded(session, () => safely(listener, name, effect));
-          else safely(listener, name, effect);
+          if (session) reportWhenEnded(session, () => safely(heard, name, effect));
+          else safely(heard, name, effect);
         };
-        const out = (value as (...a: unknown[]) => unknown).apply(target, args);
         if (out && typeof (out as Promise<unknown>).then === 'function') {
           return (out as Promise<unknown>).then(r => { report(); return r; }, err => { report(); throw err; });
         }

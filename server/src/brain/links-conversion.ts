@@ -127,7 +127,7 @@ export async function stampFileMetaSeqs(spaceId: string): Promise<number> {
     // because the cursor continues from the last item with `seq > since` and would step straight over them.
     await withSeq(spaceId, (seq) => col(spaceCollection(spaceId, 'files')).updateOne(
       asFilter({ _id: doc._id }), { $set: { seq } } as never,
-    ));
+    ), 'file.stamp-seq');
     stamped++;
   }
   return stamped;

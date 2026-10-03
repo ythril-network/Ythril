@@ -30,6 +30,7 @@
  */
 import { log } from '../util/log.js';
 import { DUAL_DOOR_BOUNDS, ENV_TO_CONFIG_PATH } from './setting-bounds.js';
+import { BATCH_FETCH_TIMEOUT_MS } from '../sync/peer-timeouts.js';
 
 /** A numeric setting: its name, its bounds, and what it means, for the error message. */
 interface NumericSetting {
@@ -98,6 +99,12 @@ export const NUMERIC_SETTINGS: readonly NumericSetting[] = [
   { name: 'READ_SPILL_TOKEN_MAX_MB', min: 1, max: 16_384, what: 'the raw megabytes of read spills one token may hold' },
   { name: 'READ_SPILL_TOKEN_MAX_COUNT', min: 1, max: 100_000, what: 'how many read spills one token may hold' },
   { name: 'READ_SPILL_INSTANCE_MAX_MB', min: 1, max: 1_048_576, what: 'the raw megabytes of read spills the instance holds in all' },
+  // `Q-213`: the bound on a write inside a seq hold, and on the hold. A minimum and never 0, because a `timeoutMS`
+  // of 0 is NO bound to the driver. The hold's ceiling stays under what a peer waits for a push answer, so a stalled
+  // push answers 503 before the sender gives up (`db/write-bound.ts`).
+  { name: 'YTHRIL_WRITE_TIMEOUT_MS', min: 1_000, max: 600_000, what: 'how long one database operation inside a seq hold may take' },
+  { name: 'YTHRIL_HOLD_DEADLINE_MS', min: 1_000, max: BATCH_FETCH_TIMEOUT_MS - 1_000,
+    what: 'how long one seq hold may last, below the time a peer waits for a push answer' },
 ] as const;
 
 const BY_NAME = new Map(NUMERIC_SETTINGS.map(s => [s.name, s]));

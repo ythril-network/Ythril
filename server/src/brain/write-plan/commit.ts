@@ -99,7 +99,7 @@ async function writeStage(
         log.warn(`write commit: the ${kind} write to '${spaceId}' reported a failure: `
           + `${failures ? `${failures.length} item(s)` : 'no per-item detail'}`);
       }
-    });
+    }, `write.${kind}`);
   } catch (err) {
     // The seq block itself failed: nothing of this stage was written.
     if (!somethingLanded) throw err;
@@ -268,7 +268,7 @@ export async function reconcileLinkRows(
       await tombstones.bulkWrite(asBulk(removals.map((_id, i) => ({
         replaceOne: { filter: { _id }, replacement: tombstoneDoc(spaceId, first + i, { _id, type: 'link', deletedAt: now }), upsert: true },
       }))), { ordered: false });
-    });
+    }, 'link.reconcile.remove');
   }
   if (additions.length > 0) {
     await withAllocatedSeqs(spaceId, additions.length, async (first) => {
@@ -283,7 +283,7 @@ export async function reconcileLinkRows(
         },
       }))), { ordered: false });
       await tombstones.deleteMany(asFilter<TombstoneDoc>({ _id: { $in: additions.map(a => a._id) } }));
-    });
+    }, 'link.reconcile.add');
   }
   return counts;
 }

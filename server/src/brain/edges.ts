@@ -1,8 +1,9 @@
 import { type RecordFlags } from './record-flag.js';
 import { rekeyEdge, embedQueueWorkFor, type EdgeRekey } from './edge-rekey.js';
 import { brainWriteSeqTotal } from '../metrics/registry.js';
-import { col, getMongo, asFilter, asUpdate } from '../db/mongo.js';
-import { withSeq, withSeqHorizonHeld } from '../util/seq.js';
+import { col, asFilter, asUpdate } from '../db/mongo.js';
+import { withSeq } from '../util/seq.js';
+import { inHeldTransaction } from './held-transaction.js';
 import { writeTombstone } from './tombstones.js';
 import { parseLimit, parseSkip } from '../util/pagination.js';
 import { toMongoSort, type SortSpec } from './list-sort.js';
@@ -373,18 +374,12 @@ export async function updateEdgeById(
      * relationship simply gone, with a 500 that does not say what happened to it. `merge.ts` already runs its
      * re-keys inside `withTransaction` for the same reason; this path had nothing.
      */
-    const session = getMongo().startSession();
-    let moved: EdgeRekey | null;
-    try {
-      // The callback's value is the transaction's value, so the result is read out rather than assigned into
-      // an outer variable — a closure write is invisible to the type narrowing and would type as `never`.
-      // The horizon held across the session: the re-key's seqs are not committed until the session is.
-      moved = await withSeqHorizonHeld(spaceId, () => session.withTransaction(
-        async () => rekeyEdge(spaceId, existing, { label: newLabel }, carried, Object.keys($unset), session),
-      ));
-    } finally {
-      await session.endSession();
-    }
+    // Under the horizon hold, bounded, and read back inside the hold when the commit's answer is lost
+    // (`brain/held-transaction.ts`): the moved edge under its new id at the seq the re-key gave it IS the commit.
+    const moved: EdgeRekey | null = await inHeldTransaction(spaceId, 'edge.relabel',
+      (session) => rekeyEdge(spaceId, existing, { label: newLabel }, carried, Object.keys($unset), session),
+      { landed: async (r) => r === null || (await collection.countDocuments(
+        asFilter<EdgeDoc>({ _id: r.edge._id, seq: r.edge.seq }), { limit: 1 })) === 1 });
     if (moved) {
       // The queue AFTER the write, and here rather than inside `rekeyEdge` — see `embedQueueWorkFor`. There
       // is no transaction on this path, so the write is already durable. The embed text is built from the
@@ -423,7 +418,7 @@ export async function updateEdgeById(
       asUpdate<EdgeDoc>(updateOp),
       { returnDocument: 'before' },
     );
-  }) as EdgeDoc | null;
+  }, 'edge.update') as EdgeDoc | null;
   brainWriteSeqTotal.labels({
     collection: 'edges',
     outcome: writeOutcome(!!beforeWrite, ifMatchSeq !== undefined, !!beforeWrite && beforeWrite.seq !== existing.seq),

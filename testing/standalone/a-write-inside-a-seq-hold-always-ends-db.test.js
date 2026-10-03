@@ -120,9 +120,13 @@ const CASES = {
     label: 'an edge re-keyed by a label change (its block, inside the update\'s transaction)', lock: 'counter',
     run: () => mods.edges.updateEdgeById(S, ED, { label: 'renamed' }),
   }],
-  'server/src/brain/edges.ts:updateEdgeById': [
+  // Re-anchored (bundle-30 §A4): the edge label change's transaction is `inHeldTransaction`'s hold now, so the
+  // derivation finds the holder there; driven through the edge label change, its first caller.
+  'server/src/brain/held-transaction.ts:inHeldTransaction': [
     { label: 'an edge label change: the transaction under the horizon hold', lock: 'counter',
       run: () => mods.edges.updateEdgeById(S, ED, { label: 'renamed_again' }) },
+  ],
+  'server/src/brain/edges.ts:updateEdgeById': [
     { label: 'an edge updated in place', lock: 'counter',
       run: () => mods.edges.updateEdgeById(S, ED, { tags: ['changed'] }) },
   ],

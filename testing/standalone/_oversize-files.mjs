@@ -156,7 +156,9 @@ export const FROZEN = {
   // fix for a renamed space's files and the last-agreed-hash conflict rule both change.
   // LOWERED 802 -> 746 with `Q-107` part 1: the pull's page write (`batchUpsertBySeq`) moved into the one arrival
   // writer, `sync/arrivals.ts`, which every door now stores through. The ceiling follows the file down.
-  'server/src/sync/engine.ts': 746,
+  // LOWERED 746 -> 740 with bundle-30: the two peer budgets moved into `sync/peer-timeouts.ts`, because the
+  // receiver's hold deadline is derived from the batch one (`db/write-bound.ts`).
+  'server/src/sync/engine.ts': 740,
   // 958 -> 684: the per-type editor body moved into `schema-type-editor.component` so the Brain Overview
   // could open the same editor. Lowered rather than left — a frozen number 274 lines above the real size
   // is 274 lines this file could regrow into without the gate saying a word.
@@ -569,7 +571,9 @@ export const FROZEN = {
   // joins it on the commit that declares it.
   // NO DECOMPOSITION: one derived export beside the three it completes. Moving it would separate a set from
   // its members.
-  'server/src/brain/edges.ts': 491,
+  // LOWERED 491 -> 376 with bundle-30: the re-key's hand-written session, hold and transaction moved into
+  // `brain/held-transaction.ts` (`inHeldTransaction`), the one held transaction; the ceiling follows the file down.
+  'server/src/brain/edges.ts': 376,
   /*
    * A BARREL of API response shapes, and the one entry here that is not a decomposition debt.
    *

@@ -63,7 +63,7 @@ const read = (rel) => {
 const CITED = [
   {
     what: 'sync peer request timeout',
-    source: 'server/src/sync/engine.ts',
+    source: 'server/src/sync/peer-timeouts.ts',
     code: /const FETCH_TIMEOUT_MS = ([0-9_]+);/,
     scale: 1000,   // ms in code, seconds in prose
     doc: 'docs/network-types.md',
@@ -71,7 +71,7 @@ const CITED = [
   },
   {
     what: 'sync batch transfer timeout',
-    source: 'server/src/sync/engine.ts',
+    source: 'server/src/sync/peer-timeouts.ts',
     code: /const BATCH_FETCH_TIMEOUT_MS = ([0-9_]+);/,
     scale: 1000,
     doc: 'docs/network-types.md',

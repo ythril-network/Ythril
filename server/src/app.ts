@@ -1,5 +1,6 @@
 import { ReferenceRefusal } from './brain/entity-refs.js';
 import { WriteConflict } from './brain/write-plan/types.js';
+import { classifyReadFailure } from './brain/store-failure.js';
 import express from 'express';
 import compression from 'compression';
 import { shouldCompress, staticCacheControl } from './util/transfer.js';
@@ -56,7 +57,7 @@ import { clearOidcCache } from './auth/oidc.js';
 import { initSpace, ensureGeneralSpace, wipeSpace, reconcilePendingSpaceOp, WIPE_COLLECTION_TYPES, type WipeCollectionType } from './spaces/lifecycle.js';
 import { concreteSpaces } from './spaces/proxy.js';
 import { col } from './db/mongo.js';
-import { log, runWithRequestId } from './util/log.js';
+import { log, logSafe, runWithRequestId } from './util/log.js';
 import { rearmCronSchedulers } from './schedulers.js';
 import { getReadiness, classifyCheckError } from './ready.js';
 import { isShuttingDown } from './lifecycle.js';
@@ -719,6 +720,19 @@ export function createApp() {
     // Another write kept moving the record (`WriteConflict`): nothing was written and a retry is the remedy.
     if (err instanceof WriteConflict) {
       res.status(409).json({ error: err.message });
+      return;
+    }
+    /*
+     * The STORE's condition is the store's on every door (bundle-30, `R1`). A write the bound ended, a step-down, a
+     * dropped socket: retryable, `503` — the classification the MCP door and the read routes already answer from,
+     * so a REST write and the same write through a tool no longer disagree (this answered `500` while the tool
+     * door answered `503`). Everything the classifier does not positively identify stays the `500` below.
+     */
+    const store = classifyReadFailure(err);
+    if (store.retryable) {
+      if (store.retryAfterSeconds !== undefined) res.setHeader('Retry-After', String(store.retryAfterSeconds));
+      log.warn(`Store-side failure answered 503: ${logSafe(err instanceof Error ? err.message : String(err))}`);
+      res.status(503).json({ error: store.error, retryable: true });
       return;
     }
     const message = err instanceof Error ? err.message : String(err);
