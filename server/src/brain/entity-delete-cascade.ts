@@ -43,23 +43,8 @@ import { createHash } from 'node:crypto';
 import { entityDeleteBlockers } from './entity-delete-guard.js';
 import { deleteEntity } from './entities.js';
 import type { BacklinkEntry } from './entities.js';
-import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';
-import { col, asFilter } from '../db/mongo.js';
-import { spaceCollection } from '../db/space-collection.js';
-import { readStoredById } from '../db/read-by-id.js';
-import { inChunks } from '../util/chunks.js';
-import { log } from '../util/log.js';
-import { inHeldTransaction } from './held-transaction.js';
-import { writeTombstones } from './tombstones.js';
-import { retireEmbedJobs } from './embed-queue.js';
-import type { EdgeDoc } from '../config/types.js';
-
-/**
- * Edges removed per transaction. A hub of thousands is removed a chunk at a time, each chunk one held transaction
- * (its delete and its tombstones together): small enough that a chunk never nears the hold's deadline, large enough
- * that a hub costs a handful of round trips per chunk rather than five per edge.
- */
-export const CASCADE_CHUNK = 500;
+import type { WebhookActor } from '../webhooks/dispatcher.js';
+import { removeEdges } from './edge-removal.js';
 
 /** What a preview answers: the set, and the token that authorises removing exactly it. */
 export interface CascadePreview {
@@ -154,7 +139,7 @@ export async function deleteEntityCascade(
 
   /*
    * The EDGES first, then the entity — a chunk at a time, each chunk ONE held transaction: its delete and its
-   * tombstones commit together or not at all (`removeEdgeChunk`).
+   * tombstones commit together or not at all (`removeEdges`, `brain/edge-removal.ts`, which `deleteEdge` uses too).
    *
    * The tombstone is not optional. Without one, the next pull from any peer that still holds the edge brings it
    * back, pointing at an entity that no longer exists: the dangling reference `strictLinkage` refused the delete
@@ -162,42 +147,9 @@ export async function deleteEntityCascade(
    * tombstone left exactly that; per chunk in a transaction, a failure removes nothing of the chunk, and a re-run
    * (a new preview, a new token) continues with what is left.
    */
-  const removed: BacklinkEntry[] = [];
-  for (const chunk of inChunks(preview.removes, CASCADE_CHUNK)) {
-    const gone = await removeEdgeChunk(spaceId, chunk.map(b => b._id));
-    removed.push(...chunk.filter(b => gone.has(b._id)));
-    if (gone.size === 0) continue;
-    // The records are gone, so their embed jobs have nothing left to embed — eager, as `deleteEdge` is: a job gone
-    // terminal `failed` is never claimed again and would outlive its record for ever. After the commit, never in it.
-    try {
-      await retireEmbedJobs(spaceId, 'edge', [...gone]);
-    } catch (err) {
-      log.warn(`entity cascade: ${gone.size} edge(s) of '${entityId}' were deleted in '${spaceId}' but their embed jobs `
-        + `were not retired: ${err instanceof Error ? err.message : String(err)}`);
-    }
-    // One event per deleted edge — the contract a subscriber mirrors the graph by — after the chunk committed.
-    if (actor) for (const _id of gone) emitWebhookEvent({ event: 'edge.deleted', spaceId, entry: { _id }, ...actor });
-  }
+  const gone = await removeEdges(spaceId, preview.removes.map(b => b._id), actor);
+  const removed = preview.removes.filter(b => gone.has(b._id));
 
   await deleteEntity(spaceId, entityId, actor);
   return { ok: true, removed };
-}
-
-/**
- * Remove one chunk of edges with their tombstones, in ONE transaction under the seq horizon hold. Each tombstone
- * carries the seq of the edge it deletes (`writeTombstones`). Returns the ids that were stored and are now gone: an
- * edge already removed by someone else since the preview is simply not among them.
- */
-async function removeEdgeChunk(spaceId: string, ids: readonly string[]): Promise<Set<string>> {
-  const collName = spaceCollection(spaceId, 'edges');
-  return inHeldTransaction(spaceId, 'entity.cascade', async (session) => {
-    const stored = await readStoredById<Pick<EdgeDoc, '_id' | 'seq'>>(collName, ids, { seq: 1 }, { session, filter: { spaceId } });
-    if (stored.size === 0) return new Set<string>();
-    await col<EdgeDoc>(collName).deleteMany(asFilter<EdgeDoc>({ _id: { $in: [...stored.keys()] }, spaceId }), { session });
-    await writeTombstones(spaceId, [...stored.values()].map(e => ({ _id: e._id, type: 'edge' as const, originalSeq: e.seq })), session);
-    return new Set(stored.keys());
-  }, {
-    // A commit whose answer was lost may have landed: it did when none of the chunk's edges is stored any more.
-    landed: async (gone) => gone.size === 0 || (await readStoredById(collName, [...gone], { _id: 1 })).size === 0,
-  });
 }

@@ -575,7 +575,9 @@ export const FROZEN = {
   // its members.
   // LOWERED 491 -> 376 with bundle-30: the re-key's hand-written session, hold and transaction moved into
   // `brain/held-transaction.ts` (`inHeldTransaction`), the one held transaction; the ceiling follows the file down.
-  'server/src/brain/edges.ts': 376,
+  // LOWERED 376 -> 366 with bundle-30 (Q-107 part 3b): `deleteEdge`'s read, delete, retire, tombstone and emit moved
+  // into `brain/edge-removal.ts` (`removeEdges`), the one remover the entity cascade uses too.
+  'server/src/brain/edges.ts': 366,
   /*
    * A BARREL of API response shapes, and the one entry here that is not a decomposition debt.
    *

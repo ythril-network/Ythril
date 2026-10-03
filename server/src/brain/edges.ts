@@ -4,7 +4,7 @@ import { brainWriteSeqTotal } from '../metrics/registry.js';
 import { col, asFilter, asUpdate } from '../db/mongo.js';
 import { withSeq } from '../util/seq.js';
 import { inHeldTransaction } from './held-transaction.js';
-import { writeTombstone } from './tombstones.js';
+import { removeEdges } from './edge-removal.js';
 import { parseLimit, parseSkip } from '../util/pagination.js';
 import { toMongoSort, type SortSpec } from './list-sort.js';
 import { NEVER_RETURNED_PROJECTION, withoutVector } from './read-projection.js';
@@ -184,24 +184,13 @@ export async function listEdges(
     .toArray() as Promise<EdgeDoc[]>;
 }
 
-/** Delete an edge by ID and write tombstone */
+/**
+ * Delete an edge by ID, with its tombstone, its embed job retired and `edge.deleted` emitted — through
+ * `removeEdges` (`brain/edge-removal.ts`), the one remover, so the delete and the tombstone commit together: two
+ * separate writes left an edge gone here and alive on every peer when the tombstone failed.
+ */
 export async function deleteEdge(spaceId: string, edgeId: string, actor?: WebhookActor): Promise<boolean> {
-  const existing = await col<EdgeDoc>(spaceCollection(spaceId, 'edges'))
-    .findOne(asFilter<EdgeDoc>({ _id: edgeId, spaceId }), { projection: { seq: 1 } }) as { seq?: number } | null;
-  const result = await col<EdgeDoc>(spaceCollection(spaceId, 'edges')).deleteOne({
-    _id: edgeId,
-    spaceId,
-  });
-  if (result.deletedCount === 0) return false;
-  // The record is gone, so its embed job has nothing left to embed. Eager rather than left to the worker: the
-  // worker only claims `pending` jobs, so a job that had already gone terminal `failed` would never be claimed
-  // again and would outlive the record for ever — visible since #861 as a permanent failure naming a recordId
-  // that 404s.
-  await retireEmbedJob(spaceId, 'edge', edgeId);
-
-  await writeTombstone(spaceId, { _id: edgeId, type: 'edge', originalSeq: existing?.seq });
-  if (actor) emitWebhookEvent({ event: 'edge.deleted', spaceId, entry: { _id: edgeId }, ...actor });
-  return true;
+  return (await removeEdges(spaceId, [edgeId], actor)).has(edgeId);
 }
 
 /** Find an edge by exact ID */
