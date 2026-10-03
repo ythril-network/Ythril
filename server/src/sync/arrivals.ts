@@ -47,7 +47,9 @@
  *     (network, step-down), it THROWS — the push answers 500 (503 when the store is the cause) so the sender keeps
  *     its watermark, the pull holds `deliveredThrough`. **A write a bound ended is ambiguous, never a document's
  *     refusal** (`isWriteTimeout`): nothing says which documents landed, so the page fails whole without the
- *     per-document fallback, which would only spend the hold's time on the same stall.
+ *     per-document fallback, which would only spend the hold's time on the same stall. **A driver argument error
+ *     raised on one document's own write** is that document's refusal (`isArgumentErrorOfOneWrite`) — unless it is
+ *     the bound's (a defect of ours), or every document of the chunk raised it (the call's, not theirs).
  *  8. **The counter, then the queue**, in a `finally` per chunk: the counter over what the chunk received
  *     (awaited, `advanceCounterPast`), and only then the batched embed enqueue of what landed, by the RECEIVER's
  *     suppression. The bump is the only thing that makes an arrival visible to a seq-paged reader; nothing here
@@ -73,7 +75,7 @@ import { col, asBulk } from '../db/mongo.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { readStoredById, READ_CHUNK } from '../db/read-by-id.js';
 import {
-  bulkWriteFailures, DUPLICATE_KEY, isDocumentRefusal, isDocumentRefusalCode, writeErrorCode,
+  bulkWriteFailures, DUPLICATE_KEY, isDocumentRefusal, isDocumentRefusalCode, writeErrorCode, isArgumentErrorOfOneWrite,
 } from '../db/write-errors.js';
 import { isSeqImplausible } from '../util/seq.js';
 import { advanceCounterPast, CounterBehindError } from './counter-after-page.js';
@@ -271,6 +273,10 @@ function replacementFor(doc: Doc, defaults: Doc, carried: ReadonlySet<string>): 
 
 const storeRefusal = (err: unknown): string =>
   `the store refused it (${writeErrorCode(err) !== undefined ? `error code ${writeErrorCode(err)}` : 'no error code'})`;
+/** How much of a driver's message an argument refusal quotes: enough to act on, never a page of it. */
+const ARGUMENT_QUOTED = 200;
+const argumentRefusal = (err: unknown): string =>
+  `the database driver refused it as an invalid argument (${String((err as Error).message ?? '').slice(0, ARGUMENT_QUOTED)})`;
 
 /** The ids a bulk write reports as UPSERTED (inserted), from its result or its error's partial result. */
 function upsertedIdsOf(r: unknown): unknown[] {
@@ -382,15 +388,22 @@ export async function writeArrivals(
       else if (isDocumentRefusal(err)) out.refused.push({ _id: d._id, reason: storeRefusal(err) });
       else throw stopped(err);
     };
-    /** One write per document, for an ambiguous bulk failure and the retry of a refused one. */
+    /**
+     * One write per document, for an ambiguous bulk failure and the retry of a refused one. An argument error the
+     * driver raises on one document's own write refuses that document — unless every document here raised it, which
+     * makes it the CALL's (the options all of them share), and the page fails so the defect is seen.
+     */
     const oneByOne = async (docsHere: readonly Doc[], write: (d: Doc) => Promise<boolean>): Promise<void> => {
+      const argued: Array<{ d: Doc; err: unknown }> = [];
       for (const d of docsHere) {
         try {
           if (await write(d)) landed.push(d); else out.derived.push(d._id);
         } catch (err) {
-          classify(d, err);
+          if (isArgumentErrorOfOneWrite(err)) argued.push({ d, err }); else classify(d, err);
         }
       }
+      if (argued.length > 1 && argued.length === docsHere.length) throw stopped(argued[0]!.err);
+      for (const { d, err } of argued) out.refused.push({ _id: d._id, reason: argumentRefusal(err) });
     };
     const writeOne = async (d: Doc): Promise<boolean> => {
       const r = await coll.updateOne(filterOf(d), updateOf(d) as never, { upsert: true });

@@ -351,6 +351,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the backup lacks from this instance's retention (D-9), and nothing of the replaced copy's.
 - **A file-metadata arrival is held to the write guard.** It was merged by `_id` alone, so a newer copy written
   between the accept read and the merge was overwritten by an older one, with a `200` on the way back.
+- **A document whose own write the database driver refuses as an invalid argument is refused alone.** It failed the
+  whole page on every send, for ever; it is now counted in `rejected` with a reason (a single route answers `400`).
+  An argument error caused by the write bound itself, or raised by every document of a page, still fails the page.
 - **Suppression that a network turns on removes the vectors already stored (`Q-230`).** A space whose type or
   space-level `suppressEmbeddings` arrived from a network — a meta pull, a meta round, a space addition, leaving a
   network or changing its precedence — reported its records suppressed and went on ranking them by meaning until

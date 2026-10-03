@@ -107,6 +107,27 @@ export function isDocumentRefusal(err: unknown): boolean {
   return typeof e?.name === 'string' && DOCUMENT_REFUSAL_NAMES.has(e.name);
 }
 
+/**
+ * The driver's own timeout machinery refusing a BOUND this instance set ("cannot be given a timeoutMS setting…", "a
+ * Timeout with a negative duration") — a defect of ours, never a document's, whichever document it was raised on.
+ */
+const BOUND_ARGUMENT_MESSAGE = /timeoutMS|Timeout with a negative duration/i;
+export function isBoundArgumentError(err: unknown): boolean {
+  const e = err as { name?: unknown; message?: unknown } | null;
+  return e?.name === 'MongoInvalidArgumentError' && BOUND_ARGUMENT_MESSAGE.test(String(e.message ?? ''));
+}
+
+/**
+ * A `MongoInvalidArgumentError` that is NOT the bound's — on ONE document's own write, the arrival writer's
+ * one-document fallback, where the call's arguments are that document and the options every other document is
+ * written with. There it is that document's refusal: read as the page's, the same document failed the whole page on
+ * every send, for ever (bundle-30, `I1` finding). It is not one in `isDocumentRefusal`, which also reads a whole
+ * write's failure, and the writer still treats it as the CALL's when every document of a chunk raises it.
+ */
+export function isArgumentErrorOfOneWrite(err: unknown): boolean {
+  return (err as { name?: unknown } | null)?.name === 'MongoInvalidArgumentError' && !isBoundArgumentError(err);
+}
+
 /** The per-operation shape of the same question, for a code read off a bulk write's failure list. */
 export function isDocumentRefusalCode(code: number | undefined): boolean {
   return code !== undefined && DOCUMENT_REFUSAL_CODES.has(code);
