@@ -26,6 +26,7 @@ import { recordSyncResult, type SyncCounts } from './history.js';
 import { log, logSafe } from '../util/log.js';
 import { resolveWatermark, truncationWarn, type TransferOutcome } from './watermark.js';
 import { pullTombstones, pushTombstones } from './tombstone-transfer.js';
+import { TombstoneCounterError } from './tombstone-apply.js';
 import { applyConcludedSpaceRounds } from '../spaces/apply-wipe-round.js';
 import { bumpSeq, settledSeqRange } from '../util/seq.js';
 import { adoptAnnouncedSpaces, announcedSpaces, healAnnouncedAliases } from '../networks/network-spaces.js';
@@ -936,9 +937,17 @@ async function pullFromPeer(
   // would be the same rule in two places. A tombstone is not written by the writer, and it IS received from this
   // peer with the deleting instance's seq: left out, a quiet peer's counter stays behind a busy peer's deletions,
   // and a record re-created there (same id, lower seq) is refused by every peer holding the tombstone, for good.
+  // The one tombstone apply hands the pull its highest ADMITTED seq instead of bumping per page (`deferBump`), so on
+  // 5.6.x the bump stays here, after the records: it also raises the settled horizon, which must not run ahead of
+  // records still being written (vet R3). Thrown when it fails, before the watermark is persisted, so the cycle
+  // counts an error and the position is held.
   overallMaxSeq = tombstones.maxSeq;
   if (overallMaxSeq > 0) {
-    await bumpSeq(spaceId, overallMaxSeq);
+    try {
+      await bumpSeq(spaceId, overallMaxSeq);
+    } catch (err) {
+      throw new TombstoneCounterError(spaceId, overallMaxSeq, err);
+    }
   }
 
   // Persist the high-water mark

@@ -53,6 +53,16 @@ export function retagToLocalSpace(docs: readonly unknown[], localSpaceId: string
 }
 
 /**
+ * May a tombstone `issuer` issued speak for a record `author` wrote? Only when they are the same instance — or when
+ * either is unknown (a legacy tombstone, an author-less record), which governs as it always did. The one spelling of
+ * the rule, for the two questions that ask it: whether a peer's tombstone may delete a record held here
+ * (`applyPeerTombstones`) and whether a held tombstone refuses an arriving record (`pushVerdict`, `api/sync/docs.ts`).
+ */
+export function tombstoneGoverns(issuer: string | undefined, author: string | undefined): boolean {
+  return !(issuer && author && issuer !== author);
+}
+
+/**
  * Which of `docs` should be written, given the seq each id currently has locally.
  *
  * An id missing from `existingSeq` means the document does not exist locally yet. Returns the subset
