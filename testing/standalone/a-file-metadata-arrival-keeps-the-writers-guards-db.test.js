@@ -38,6 +38,8 @@ import { mongoSkipReason } from './_mongo-harness.mjs';
 import { privateAddressSkipReason } from './_private-address.mjs';
 import { build, FAMILIES } from './_push-door.mjs';
 import { openPullDoor, PEER_AUTHOR } from './_pull-door.mjs';
+import { parkWrites } from './_write-faults.mjs';
+import { ASYNC_MUTATORS } from './_document-mutators.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 
@@ -47,10 +49,9 @@ const LOCAL_AUTHOR = { instanceId: 'filemetaguards-receiver', instanceLabel: 'Re
 
 let door;
 /** The write methods of a collection, as the server's own write observer classifies them. */
-let WRITE_METHODS;
 /** `{ collection, before }`: run `before(collection)` ahead of the next write to that collection, once. */
-let armed = null;
-let proto, originals;
+/** The shared park (`_write-faults.mjs`), over the methods the server's own table says change a document. */
+let park;
 
 const files = () => door.coll(S, 'files');
 const stored = (id) => files().findOne({ _id: id });
@@ -69,38 +70,23 @@ const DOORS = {
 describe('arriving file metadata keeps the writer\'s guards', { skip }, () => {
   before(async () => {
     door = await openPullDoor({ suite: 'filemetaguards', spaces: [S] });
-    const { COLLECTION_METHOD_EFFECT } = await import('../../server/dist/db/record-write-observer.js');
-    WRITE_METHODS = Object.entries(COLLECTION_METHOD_EFFECT)
-      .filter(([, e]) => typeof e === 'object' && e.write).map(([m]) => m);
-    assert.ok(WRITE_METHODS.length >= 8, `the write observer classifies only ${WRITE_METHODS.length} write methods`);
     // Installed AFTER the door, which patches the same prototype, and removed before it closes (it restores its
-    // own saved originals, which would clobber or leak this one otherwise).
-    proto = Object.getPrototypeOf(door.mongo.col('probe'));
-    originals = Object.fromEntries(WRITE_METHODS.filter(m => typeof proto[m] === 'function').map(m => [m, proto[m]]));
-    for (const [m, orig] of Object.entries(originals)) {
-      proto[m] = async function interleaved(...args) {
-        if (armed && this.collectionName === armed.collection) {
-          const a = armed;
-          armed = null;
-          await a.before(this);
-        }
-        return orig.apply(this, args);
-      };
-    }
+    // own saved originals, which would clobber or leak this one otherwise). The shared park, not a hand copy of it
+    // (bundle-30 I6, C17): its method list is derived from the server's own table.
+    park = parkWrites(Object.getPrototypeOf(door.mongo.col('probe')));
   });
   after(async () => {
-    if (proto) for (const [m, orig] of Object.entries(originals)) proto[m] = orig;
+    park?.restore();
     await door?.close();
   });
   beforeEach(async () => {
-    armed = null;
     await door.reset();
   });
 
   it('the family and the write methods are found', () => {
     assert.ok(KEY, 'the push door has no family stored in the files collection — re-anchor this test');
     for (const m of ['bulkWrite', 'updateOne', 'replaceOne', 'insertMany']) {
-      assert.ok(WRITE_METHODS.includes(m), `'${m}' is not a write method to the observer, so it would not be intercepted`);
+      assert.ok(ASYNC_MUTATORS.includes(m), `'${m}' is not a write method to the observer, so it would not be intercepted`);
     }
   });
 
@@ -109,17 +95,17 @@ describe('arriving file metadata keeps the writer\'s guards', { skip }, () => {
       const id = `docs/${via}/raced.md`;
       // What this instance holds when the page is planned: older than what arrives, so the accept admits it.
       await files().insertOne(build.filemeta(S, id, 5, { author: LOCAL_AUTHOR, description: 'as it was' }));
-      let intercepted = false;
-      armed = {
-        collection: `${S}_files`,
-        // A local edit lands meanwhile, at a seq above the arriving copy's.
-        before: async (coll) => {
-          intercepted = true;
-          await originals.replaceOne.call(coll, { _id: id },
-            build.filemeta(S, id, 50, { author: LOCAL_AUTHOR, description: 'written here meanwhile' }));
-        },
-      };
-      await DOORS[via]([build.filemeta(S, id, 10, { author: PEER_AUTHOR, description: 'the peer, older' })]);
+      // The writer's first write to the files collection is held; a local edit lands meanwhile, at a seq above the
+      // arriving copy's; then the held write goes on.
+      const held = park.arm(`${S}_files`);
+      const run = DOORS[via]([build.filemeta(S, id, 10, { author: PEER_AUTHOR, description: 'the peer, older' })]);
+      const intercepted = (await Promise.race([held.reached.then(() => true), run.then(() => false)])) === true;
+      if (intercepted) {
+        await files().replaceOne({ _id: id },
+          build.filemeta(S, id, 50, { author: LOCAL_AUTHOR, description: 'written here meanwhile' }));
+      }
+      held.release();
+      await run;
       assert.ok(intercepted, 'the writer never wrote to the files collection, so the race was never made');
       const now = await stored(id);
       assert.equal(now?.seq, 50,
