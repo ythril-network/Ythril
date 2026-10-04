@@ -241,6 +241,8 @@ Covers: closed-network sync, braintree governance, democratic voting, pubsub top
 
 **The test stack's database memory is a ceiling, not a recommendation.** `ythril-mongo-a` runs at 2.5 GB (its `mem_limit` in `testing/docker-compose.test.yml`, with a comment there). A space of 44 000 records ran the database out of memory there, and 5 GB held. A test that seeds tens of thousands of records into the test stack needs that limit raised; the same number in production is `YTHRIL_MONGO_MEM_LIMIT` (default 4g, not measured at that size).
 
+**The test database frees a dropped collection within seconds, and a run that skips that runs out of memory.** MongoDB keeps a dropped collection's storage open for `minSnapshotHistoryWindowInSeconds` (default five minutes), and the suites drop thousands of collections in that window — enough to take `ythril-mongo-a` to its cap before the standalone suite starts. The image fixes mongod's command line, so the window is set at runtime by `tuneTestMongo` in `testing/standalone/_mongo-harness.mjs`, which `testing/sync/setup.js` and every database-backed test file call. A test stack brought up some other way gets it the first time a database-backed file opens the harness; one that runs the Docker suites without `setup.js` does not.
+
 ### Red-team tests
 
 ```bash

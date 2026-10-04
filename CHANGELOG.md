@@ -833,6 +833,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Internal
 
+- **The test database no longer runs out of memory by the time CI reaches the standalone suite.** MongoDB keeps a
+  dropped collection open for five minutes for snapshot reads, and the suites drop thousands in that window: after
+  the integration suite alone, `ythril-mongo-a` held 9 766 dropped collections and 25 714 open storage handles over
+  147 live collections, at 2.06 GiB of its 2.5 GiB cap, with the standalone suite still to run on it. The test
+  stack now sets that window to five seconds (`tuneTestMongo`, called by `testing/sync/setup.js` and by every
+  database-backed test file), which freed the 9 000 within 40 seconds; nothing in the server reads an old snapshot.
+  The database-backed standalone files also run in their own batches, four at a time, in `test:standalone` and
+  `preflight` alike: at the full width some timed out on the one-CPU test database, and four finished in half the
+  time.
 - **A database test whose setup fails now fails, instead of hanging the run.** The test harness kept its Mongo
   connection open when a setup step threw after connecting, and node's test runner waits for every file's process
   to exit, so one such file held `test:standalone` with no output for as long as the CI job lived. The harness now

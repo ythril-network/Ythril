@@ -14,6 +14,7 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { tuneTestMongo } from '../standalone/_mongo-harness.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS_DIR = path.join(__dirname, 'configs');
@@ -99,6 +100,11 @@ async function setupInstance(inst) {
 async function main() {
   console.log('Ythril test setup');
   console.log('=================');
+
+  // The test Mongo frees dropped collections within seconds rather than five minutes, before the suites churn
+  // thousands of them (see a-test-mongo-reaps-dropped-collections-promptly-db.test.js).
+  await tuneTestMongo();
+  console.log('  test Mongo: dropped collections reaped promptly ✓');
 
   const results = [];
   let failed = false;
