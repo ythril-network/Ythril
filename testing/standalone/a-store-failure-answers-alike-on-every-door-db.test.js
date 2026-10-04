@@ -36,6 +36,7 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
+import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 import { mongoSkipReason } from './_mongo-harness.mjs';
@@ -60,8 +61,32 @@ const PER_DOOR_MS = 20_000;
 const requireFromServer = createRequire(path.resolve('server/package.json'));
 const driverLib = path.dirname(requireFromServer.resolve('mongodb'));
 const { Server } = requireFromServer(path.join(driverLib, 'sdam', 'server.js'));
+const { Topology } = requireFromServer(path.join(driverLib, 'sdam', 'topology.js'));
+const { BulkOperationBase } = requireFromServer(path.join(driverLib, 'bulk', 'common.js'));
 const { PoolClearedError } = requireFromServer(path.join(driverLib, 'cmap', 'errors.js'));
-const { MongoNetworkTimeoutError } = requireFromServer('mongodb');
+const { MongoNetworkTimeoutError, MongoServerSelectionError } = requireFromServer('mongodb');
+
+/**
+ * The two ways the store is gone, each raised where the driver raises it, and each run over every door.
+ *
+ * **One fault was not enough (bundle-30 I14, verify-drive-4 D1).** A pool cleared under a command is a
+ * `MongoNetworkError` carrying the driver's `PoolRequestedRetry` label. When a BULK write (`insertMany`, `bulkWrite`)
+ * meets it, the driver wraps it in a `MongoBulkWriteError` that keeps the label — so the wrapper was recognised, and
+ * the gate passed. With the store paused, the driver instead fails to SELECT a server: a `MongoServerSelectionError`
+ * with no label, wrapped the same way into an error carrying neither class nor label, which every door answered `400`
+ * with the store's address. So both faults run, and the second must reach a bulk write on enough doors (floored
+ * below) for its run to say anything about one.
+ */
+const FAULTS = [
+  { id: 'pool-cleared', what: 'a pooled connection cleared under a command' },
+  { id: 'no-server', what: 'no server can be selected — the paused store, which a bulk write wraps without a label' },
+];
+/**
+ * How many doors must meet a failed BULK write under the selection fault, or that run proves nothing about one. Most
+ * doors read before they write, and a failed read is not wrapped; the file deletes reach the tombstone `insertMany`
+ * first once a probe has left a file at their path. Raise it; never lower it.
+ */
+const BULK_REACHED_FLOOR = 2;
 
 /** A body that gets past the commonest validation, so a write door reaches the store rather than a 400. */
 const BODY = {
@@ -144,8 +169,18 @@ const markAnswered = (id) => {
   linesAtAnswer.set(id, lines.length);
 };
 let failing = false;
+/** Which of {@link FAULTS} is failing the store while `failing` is set. */
+let fault = FAULTS[0].id;
+/** Request ids whose answer came after a bulk write the driver wrapped a failure of — the D1 shape. */
+const bulkWrapped = new Set();
 const realCommand = Server.prototype.command;
+const realSelectServer = Topology.prototype.selectServer;
+const realBulkExecute = BulkOperationBase.prototype.execute;
 const realWriteHead = http.ServerResponse.prototype.writeHead;
+const countFailure = () => {
+  const id = log.currentRequestId() ?? '(none)';
+  if (!answered.has(id)) failedByRequest.set(id, (failedByRequest.get(id) ?? 0) + 1);
+};
 
 /**
  * Doors excused from the leak check, each for a reason that is the door's own: the log viewer serves the operator's
@@ -169,6 +204,8 @@ const REPORTS_THE_STORE = new Map([
   // The listing is the Brain overview's load; `counts` is an optional extra per space (`Promise.allSettled`), so a
   // space whose count failed is listed without one rather than failing the whole listing.
   ['GET /api/spaces?counts=true', 'the space listing with optional counts: a space whose count failed is listed without them'],
+  // Asked since the probes find a stored file (bundle-30 I14): an empty directory never reached the store.
+  ['GET /api/files/:spaceId', 'the Files listing is read from disk; the metadata it adds (status, tags, folder sizes, live stage) is optional per member, and a member whose read failed is listed without it (`enrichEntries`)'],
 ]);
 
 describe('a store failure answers alike on every door', { skip }, () => {
@@ -197,22 +234,61 @@ describe('a store failure answers alike on every door', { skip }, () => {
       return realWriteHead.apply(this, args);
     };
     Server.prototype.command = async function storeDown(...args) {
-      if (!failing) return realCommand.apply(this, args);
-      const id = log.currentRequestId() ?? '(none)';
-      if (!answered.has(id)) failedByRequest.set(id, (failedByRequest.get(id) ?? 0) + 1);
+      if (!failing || fault !== 'pool-cleared') return realCommand.apply(this, args);
+      countFailure();
       throw new PoolClearedError({
         address: HOST,
         serverError: new MongoNetworkTimeoutError(`connection <monitor> to ${ADDRESS}:27017 timed out`),
       });
     };
+    // Raised where the driver raises it, with the topology's own description as its reason, as `selectServer` does.
+    Topology.prototype.selectServer = async function noServer(...args) {
+      if (!failing || fault !== 'no-server') return realSelectServer.apply(this, args);
+      // A real selection fails when its timeout runs out, never in the same tick it was asked: thrown synchronously,
+      // the audit row a finished tool call starts (and does not wait for) was counted against a request already
+      // answered, as if its failure had been that request's.
+      await new Promise(r => setImmediate(r));
+      countFailure();
+      throw new MongoServerSelectionError(`connection <monitor> to ${ADDRESS}:27017 timed out`, this.description);
+    };
+    // Observes, changes nothing: which requests met a bulk write the driver wrapped a failure of.
+    BulkOperationBase.prototype.execute = async function observed(...args) {
+      try { return await realBulkExecute.apply(this, args); } catch (err) {
+        if (failing && err?.name === 'MongoBulkWriteError' && err.errorResponse instanceof Error) {
+          bulkWrapped.add(log.currentRequestId() ?? '(none)');
+        }
+        throw err;
+      }
+    };
   });
   after(async () => {
     Server.prototype.command = realCommand;
+    Topology.prototype.selectServer = realSelectServer;
+    BulkOperationBase.prototype.execute = realBulkExecute;
     http.ServerResponse.prototype.writeHead = realWriteHead;
     failing = false;
     await new Promise(r => server?.close(r));
     await door?.close();
   });
+
+  /**
+   * The space as the first fault found it, for each fault: no files, no records. A door's reach depends on what the
+   * doors before it left behind (a probe file written while the store was down is still on disk), so a second run
+   * over the first one's leftovers would be asked different questions and conclude about neither.
+   */
+  async function freshSpace() {
+    const files = path.join(process.env['DATA_ROOT'], 'files', S);
+    fs.rmSync(files, { recursive: true, force: true });
+    fs.mkdirSync(files, { recursive: true });
+    for (const { name } of await door.mongo.getDb().listCollections({}, { nameOnly: true }).toArray()) {
+      if (name.startsWith(`${S}_`)) await door.mongo.getDb().collection(name).deleteMany({});
+    }
+    // A stored file at the probes' path, so a file delete's first store write is its tombstone — a BULK write — and
+    // every file door is asked about a file that exists rather than refused for one that does not.
+    fs.writeFileSync(path.join(files, BODY.path), 'probe');
+    await door.mongo.col(`${S}_files`).insertOne({ _id: BODY.path, spaceId: S, path: BODY.path, sizeBytes: 5, tags: [],
+      createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' });
+  }
 
   /** Every door: REST from the mounts (the tool door per tool), then MCP per tool. */
   function doors() {
@@ -263,7 +339,9 @@ describe('a store failure answers alike on every door', { skip }, () => {
       retryable, error: typeof body?.error === 'string' ? body.error : null, raw };
   }
 
-  it('every door that reached the failing store answers 503, Retry-After, retryable, one message, no driver text', { timeout: 30 * 60_000 }, async (t) => {
+  for (const { id: faultId, what } of FAULTS) it(`every door that reached the failing store answers 503, Retry-After, retryable, one message, no driver text — ${what}`, { timeout: 30 * 60_000 }, async (t) => {
+    fault = faultId;
+    await freshSpace();
     const all = doors();
     // The derivation's floor: the sync trigger's `wait` is the flag this case was written from.
     assert.ok(all.some(d => d.variant && d.name === 'POST /api/networks/:id/sync?wait=true'),
@@ -317,10 +395,15 @@ describe('a store failure answers alike on every door', { skip }, () => {
       wrong.push(`one failure, ${messages.size} spellings: ${[...messages].map(([m, ds]) => `${JSON.stringify(m)} (${ds.length} doors, e.g. ${ds[0]})`).join(' | ')}`);
     }
 
-    t.diagnostic(`${all.length} doors from the mounts and the tool registry; ${reached.length} reached the failing store before answering`);
+    const viaBulk = reached.filter(({ a }) => bulkWrapped.has(a.requestId));
+    t.diagnostic(`${all.length} doors from the mounts and the tool registry; ${reached.length} reached the failing store before answering, ${viaBulk.length} through a failed bulk write (${viaBulk.map(({ d, a }) => `${d.name} ${a.status}`).join(', ')})`);
     assert.ok(reached.length >= REACHED_FLOOR,
       `only ${reached.length} of ${all.length} doors reached the failing store — the fault or the probe bodies stopped `
       + 'working, and a short list concludes nothing');
+    if (faultId === 'no-server') {
+      assert.ok(viaBulk.length >= BULK_REACHED_FLOOR,
+        `only ${viaBulk.length} door(s) met a failed bulk write under ${faultId} — the run says nothing about the wrapper D1 was`);
+    }
     assert.deepEqual(wrong, [], `${wrong.length} door(s) of the ${reached.length} that reached the store (of ${all.length}) answer it differently:\n  ${wrong.join('\n  ')}`);
   });
 });
