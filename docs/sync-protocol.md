@@ -219,6 +219,23 @@ POST /api/sync/batch-upsert?spaceId=&networkId=                             (cei
 
 Tombstone push is deliberately **unbounded** (it loops in pages of 500 until every pending tombstone is delivered, up to 200 requests per cycle) so a peer that was offline for a long time never misses deletions. It pages with the same tie-safe cursor as the pull: a full page's next cursor is its last seq minus one, and a page that is all one seq is asked again once at 5000 — still full, the push stops, warns, and holds the push watermark below that seq. The receiver's `refused` count is logged once per transfer; a refusal is by shape or seq, which a re-send cannot change, so the push still advances past it.
 
+### Push order: one family per request, targets first
+
+A sender pushes **one record family per `batch-upsert` request**, in the order `REPLICATED_FAMILIES` declares
+(`server/src/sync/replicated-families.ts` — the list is the authority, and this page does not copy it): every
+family a reference can point at comes before the families that hold references, so edges and links go after
+the records and file metadata they name. A receiver relies on that order. On a strict-linkage space it checks
+the references a request carried once the request is answered, and leaves unjudged only the families that
+come after the last family the request carries, in that order — they are still to come in the same cycle. So a target pushed in
+the same cycle as the edge or link naming it is never recorded missing.
+
+**A sender that pushes references first** — an edge before the chrono entry it points at, a link before the
+file — has each such reference recorded by a strict-linkage receiver as a link violation
+(`GET /api/conflicts/link-violations`, `link_violation.created`), because the target was not there when the
+request was checked and its family was not one still to come. The records themselves are stored as usual; a
+violation is a record of what was missing at that moment, dismissed once the target is there. A sender
+older than the release that introduced this order pushes in its old order and can cause exactly that.
+
 ### Incremental push via `lastSeqPushed`
 
 The engine queries only documents with `seq > lastSeqPushed[spaceId]`. If nothing has changed since the last cycle, no HTTP requests are made for that type.
@@ -239,6 +256,8 @@ Accepts `{ facts?: FactDoc[], entities?: EntityDoc[], edges?: EdgeDoc[], chrono?
 | File metadata | `incoming.seq > stored.seq` (or no stored seq) → merged (`$set` of the authored keys, under the same write guard as every family) → `upserted`; else `skipped` |
 
 Every document is first validated against its family's `Incoming*` schema — the same step a pull runs ([how a pulled page is stored](#how-a-pulled-page-is-stored)); a failure is counted in `rejected` and, on a single route, answers `400 Invalid <kind> document`.
+
+**Send one family per request, in `REPLICATED_FAMILIES` order** ([push order](#push-order-one-family-per-request-targets-first)). The route accepts several arrays at once, and checks a request's references after the whole request has landed; but it treats only the families after the LAST one the request carries as still to come. A reference whose target travels in a LATER request of the same cycle is therefore recorded missing unless the target's family comes after that one — which is exactly what pushing targets first guarantees.
 
 Every family checks a tombstone first: one at or above the incoming seq → `tombstoned` — except that a tombstone another instance issued for that id neither refuses nor is cleaned up by a record whose author is the peer pushing it, proven by its peer token. A claimed author is not proof: pushed by an admin token, or by a peer that is not the author, the record is `tombstoned` as before, so a forged author cannot resurrect a deleted id (a tombstone or record with no instance on it governs, as before). A pull applies the same rule, the member it reads from being the deliverer. A stale tombstone below it is deleted **only once the record has landed**, so a write that fails keeps the deletion.
 

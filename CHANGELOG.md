@@ -387,7 +387,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   file metadata, edges, links), and the push door leaves the families still to come in that order unjudged. A sender
   older than this release still pushes the old order, and from it an edge to a chrono entry or a link to a file
   created in the same interval can still be recorded; a receiver older than this release, sent the new order, records
-  none of them.
+  none of them. The protocol reference (`docs/sync-protocol.md`, Push phase and `POST /batch-upsert`) now states
+  the order a receiver relies on, where it is read from (`REPLICATED_FAMILIES`), and what a receiver records from a
+  sender that pushes references first (bundle-30 I15).
 
   The push door also no longer waits for the check before answering: it awaited it after the page, outside the
   door's write bound and with no deadline on its read, so a stalled store held the push answer past the sender's
