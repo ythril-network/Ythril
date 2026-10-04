@@ -426,7 +426,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   among them `POST /api/brain/spaces/:spaceId/entities`, the UI's create form, which showed an operator *"Internal
   server error"* for a condition a retry clears, and every `/api/conflicts`, `/api/contradictions`,
   `/api/duplicates`, webhook, network and sync read route. An edge or link write whose reference lookup failed on
-  the store answered `400` with the driver's text; `space_rename` answered it as `Error (500)` with the driver's text;
+  the store answered `400` with the driver's text — and a missing reference whose own text names `mongot`, `$search`
+  or a vector search index (a file `notes/mongot-setup.md`, a space `mongotest`) is the caller's `400`, not a
+  retryable `503`, because the store's message patterns are read only from the driver's own errors; `space_rename` answered it as `Error (500)` with the driver's text;
   a space create answered `500 Failed to create space` and logged nothing. A file delete through a store failure
   answered `200` with no sync tombstone written, so a peer re-pushed the file; it now answers `503`, and the retried
   delete writes the tombstone — see the next entry for why the retry can. Every one now answers through one sender.

@@ -248,9 +248,14 @@ export function classifyReadFailure(err: unknown): ReadFailure {
   const code = numeric((coded as { code?: unknown } | null)?.code);
   const codeName = text((coded as { codeName?: unknown } | null)?.codeName);
 
+  /*
+   * The message patterns are read only from an error the DRIVER raised (bundle-30 I13, pre-ship reliability R3). Read
+   * from any error, they matched our own refusals: a strict-linkage reference refusal quotes the caller's reference
+   * and the space id, so `to: "notes/mongot-setup.md"`, or any reference in a space named `mongotest`, was answered
+   * `503 retryable` — a client told to retry its own refusal for ever.
+   */
   const isStore = chain.some(isStoreCondition)
-    || EXECUTOR_ERROR.test(message)
-    || SEARCH_STAGE_ERROR.test(message);
+    || (chain.some(e => e instanceof MongoError) && (EXECUTOR_ERROR.test(message) || SEARCH_STAGE_ERROR.test(message)));
 
   if (!isStore) {
     /*

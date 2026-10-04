@@ -28,8 +28,18 @@ const { classifyReadFailure, storeFailureDetail } = await import('../../server/d
 // look like one (a plain Error carrying a driver name) is exactly what the classifier must no longer be fooled by.
 const driver = createRequire(path.resolve('server/package.json'))('mongodb');
 
-/** A driver error, shaped the way the MongoDB node driver actually shapes one — a message-only shape, by name. */
-const mongoErr = (name, fields = {}) => Object.assign(new Error(fields.message ?? 'boom'), { name, ...fields });
+/**
+ * The reported condition as the driver delivers it: a REAL error of the named class, carrying the reported message and
+ * whatever fields the case attaches. It was a plain `Error` with the driver's name, which the classifier read by its
+ * message alone — and reading any error's message is what made a refusal quoting `mongot` a store failure, so the
+ * message patterns are now read only from the driver's own errors (bundle-30 I13).
+ */
+const mongoErr = (name, fields = {}) => {
+  const e = new driver[name]({ errmsg: fields.message ?? 'boom' });
+  // Defined, not assigned: the driver's `errmsg` is a getter, and a case attaches one that differs from the message.
+  for (const [k, v] of Object.entries(fields)) Object.defineProperty(e, k, { value: v, enumerable: true, configurable: true, writable: true });
+  return e;
+};
 
 /** A REAL driver error of the named class: a server error from its response document, any other from a message. */
 function realErr(name, fields = {}) {
