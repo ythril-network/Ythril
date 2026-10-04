@@ -49,11 +49,12 @@
  * A retry loop would have turned that into slow successes and hidden a process death from the only two
  * parties who could see it. Say what happened, say it can be retried, and let the caller decide.
  */
-import { isWriteTimeout } from '../db/write-timeout.js';
+import { isWriteTimeout, STORE_RETRY_SENTENCE } from '../db/write-timeout.js';
 
 /** What every door answers for an operation a bound ended: the store's condition, said without the store's text. */
-export const STORE_TIMEOUT_MESSAGE = 'The database did not complete this operation in time. Nothing was confirmed '
-  + 'written by it; retry the request (store-side failure; retryable).';
+export const STORE_TIMEOUT_MESSAGE = `The database did not complete this operation in time. ${STORE_RETRY_SENTENCE}`;
+/** What a PEER is told for any other store failure: the condition, never our collection names or the driver's text. */
+const STORE_FAILURE_FOR_PEER = `A store-side failure stopped this operation. ${STORE_RETRY_SENTENCE}`;
 
 /** Query-time conditions that are the STORE's, never the request's. */
 const STORE_ERROR_NAMES = new Set([
@@ -191,5 +192,45 @@ export function classifyReadFailure(err: unknown): ReadFailure {
     error,
     ...(code !== undefined ? { code } : {}),
     ...(codeName ? { codeName } : {}),
+  };
+}
+
+/** The answer every door gives a failure that is positively the store's: one status, one wait, one body. */
+export interface StoreFailureAnswer {
+  status: 503;
+  retryAfterSeconds: number;
+  body: { error: string; retryable: true; code?: number; codeName?: string };
+}
+
+/**
+ * The store's failure answered — or `null` when the classifier does not positively identify it as the store's, and
+ * the door keeps its own answer (a `400` for a read's refusal, a `500` for a write's unknown fault).
+ *
+ * ## Why one function (bundle-30 I6, `C1`)
+ *
+ * Four doors built this answer by hand — the REST read helper, the REST error handler, the MCP dispatcher and the
+ * sync push helper — and they differed: the write handler dropped the store's code that the read helper and the tool
+ * carry, and the push helper decided its own sentence. The `Retry-After`, the `retryable: true` and the code are now
+ * put in here, where no door can leave one out.
+ *
+ * **The one real difference is the audience, and it is a parameter.** A `caller` (REST, MCP) is told the store's
+ * condition with its code — the operator reads it. A `peer` (a sync push) is told the condition in our words only:
+ * another instance is not told our collection names or the driver's internals.
+ */
+export function storeFailureAnswer(err: unknown, { audience }: { audience: 'caller' | 'peer' }): StoreFailureAnswer | null {
+  const f = classifyReadFailure(err);
+  if (!f.retryable) return null;
+  const retryAfterSeconds = f.retryAfterSeconds ?? 5;
+  if (audience === 'peer') {
+    const error = isWriteTimeout(err) ? STORE_TIMEOUT_MESSAGE : STORE_FAILURE_FOR_PEER;
+    return { status: 503, retryAfterSeconds, body: { error, retryable: true } };
+  }
+  return {
+    status: 503, retryAfterSeconds,
+    body: {
+      error: f.error, retryable: true,
+      ...(f.code !== undefined ? { code: f.code } : {}),
+      ...(f.codeName ? { codeName: f.codeName } : {}),
+    },
   };
 }

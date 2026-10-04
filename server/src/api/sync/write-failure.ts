@@ -13,23 +13,17 @@
  *
  * A `503`, `retryable: true`, `Retry-After`, and words of our own — a peer is not told our collection names or the
  * driver's internals. Anything the classifier does not positively identify as the store's stays a `500`, and is
- * reported to the operator either way (`reportServerFailure`: a 5xx leaves evidence behind).
+ * reported to the operator either way (`reportServerFailure`: a 5xx leaves evidence behind). The answer itself is
+ * `storeFailureAnswer`'s, for a peer, put on the wire by the one HTTP sender (bundle-30 I6, `C1`).
  */
 import type express from 'express';
-import { classifyReadFailure, STORE_TIMEOUT_MESSAGE } from '../../brain/store-failure.js';
-import { isWriteTimeout } from '../../db/write-timeout.js';
+import { storeFailureAnswer } from '../../brain/store-failure.js';
+import { sendStoreFailure } from '../brain/_read-failure.js';
 import { reportServerFailure } from '../../util/report-failure.js';
-
-const STORE_FAILURE_MESSAGE = 'A store-side failure stopped this page; nothing about it is the sender\'s, and it can '
-  + 'be sent again (retryable).';
 
 export function sendSyncWriteFailure(res: express.Response, where: string, err: unknown): void {
   reportServerFailure(where, err);
-  const f = classifyReadFailure(err);
-  if (!f.retryable) {
-    res.status(500).json({ error: 'Internal error' });
-    return;
-  }
-  if (f.retryAfterSeconds !== undefined) res.setHeader('Retry-After', String(f.retryAfterSeconds));
-  res.status(503).json({ error: isWriteTimeout(err) ? STORE_TIMEOUT_MESSAGE : STORE_FAILURE_MESSAGE, retryable: true });
+  const store = storeFailureAnswer(err, { audience: 'peer' });
+  if (store) { sendStoreFailure(res, store); return; }
+  res.status(500).json({ error: 'Internal error' });
 }

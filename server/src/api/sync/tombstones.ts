@@ -198,7 +198,6 @@ syncTombstonesRouter.post('/file-tombstones', syncRateLimit, requireAuth, denyRe
 
     res.json({ applied });
   } catch (err) {
-    log.error(`sync POST file-tombstones: ${peerText(err)}`);
-    res.status(500).json({ error: 'Internal error' });
+    sendSyncWriteFailure(res, 'sync POST file-tombstones', err);
   }
 });

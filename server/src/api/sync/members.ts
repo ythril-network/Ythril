@@ -17,6 +17,7 @@ import type { NetworkMember } from '../../config/types.js';
 import { adoptAnnouncedSpaces, healAnnouncedAliases } from '../../networks/network-spaces.js';
 import { selfRecordFor } from '../../networks/self-record.js';
 import { rosterIsAuthority } from '../../networks/member-introductions.js';
+import { sendSyncWriteFailure } from './write-failure.js';
 
 export const syncMembersRouter = Router();
 
@@ -182,7 +183,6 @@ syncMembersRouter.post('/networks/:networkId/members', syncRateLimit, requireAut
     const liveNet = getConfig().networks.find(n => n.id === net.id) ?? net;
     res.status(200).json({ status: 'ok', self: selfRecordFor(cfg, liveNet, existing) });
   } catch (err) {
-    log.error(`sync POST members: ${peerText(err)}`);
-    res.status(500).json({ error: 'Internal error' });
+    sendSyncWriteFailure(res, 'sync POST members', err);
   }
 });

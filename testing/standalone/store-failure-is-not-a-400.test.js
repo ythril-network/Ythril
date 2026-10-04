@@ -190,14 +190,27 @@ describe('a delegating route keeps what the response does not carry', () => {
 });
 
 describe('both doors, and all three routes', () => {
-  it('`retryable` is on EVERY failure body, not only the retryable ones', () => {
+  it('`retryable` is on EVERY failure body, not only the retryable ones', async () => {
     // A field that appears only when it is true is a field whose absence has to be interpreted, and the caller
     // who most needs it is the one who does not know to look — the same argument as the budget's accounting.
-    const src = stripComments(readFileSync('server/src/api/brain/_read-failure.ts', 'utf8'));
-    assert.match(src, /retryable: f\.retryable/,
+    // Asserted on what is SENT, for a store failure and a request's own: the spelling moved into the one answer
+    // (`storeFailureAnswer`, bundle-30 I6 C1), and a gate on the spelling would follow it rather than the rule.
+    const { sendReadFailure } = await import('../../server/dist/api/brain/_read-failure.js');
+    const sent = (err) => {
+      const out = { headers: {} };
+      const res = {
+        setHeader: (k, v) => { out.headers[k] = v; },
+        status: (s) => { out.status = s; return res; },
+        json: (b) => { out.body = b; return res; },
+      };
+      sendReadFailure(res, err);
+      return out;
+    };
+    const store = sent(mongoErr('MongoNetworkError', { message: 'socket closed' }));
+    const own = sent(new Error('unknown operator $nope'));
+    assert.deepEqual([store.status, store.body?.retryable, store.headers['Retry-After'] !== undefined], [503, true, true]);
+    assert.deepEqual([own.status, own.body?.retryable], [400, false],
       'the field must be sent unconditionally, not spread in behind a condition');
-    assert.doesNotMatch(src, /f\.retryable \? \{ retryable/,
-      'a conditional `retryable` is the shape this exists to avoid');
   });
 
   it('`retryable` reaches the EARLY refusals too, not only the throws', () => {
@@ -290,7 +303,7 @@ describe('both doors, and all three routes', () => {
 
   it('MCP carries the same classification, because it has no status to correct', () => {
     const src = dispatchSource();
-    assert.match(src, /classifyReadFailure\(err\)/,
+    assert.match(src, /storeFailureAnswer\(err, \{ audience: 'caller' \}\)/,
       'the MCP dispatcher must classify too, or an agent gets the truncated prose a REST caller no longer sees');
     assert.match(src, /storeSideFailure: true/,
       'and say so in structuredContent, which is this transport\'s equivalent of a 5xx');

@@ -369,6 +369,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and discarded, and kept any vector it had. It now takes the same step as arriving file metadata: a suppressed
   file holds no vector, any other is queued.
 
+- **A store failure is answered by one function on every door** (bundle-30). The REST read helper, the REST error
+  handler, the MCP dispatcher and the sync push helper each built the `503` by hand: a REST write's body dropped the
+  store's `code` and `codeName` that a read and the tool carry, and five sync POSTs (file tombstones, members, votes,
+  change notes, both pairing steps) still answered a store failure `500`. They now all answer `503`, `Retry-After`,
+  `retryable: true` — with the store's code for a caller, in words of our own for a peer — and one retry sentence.
+
 - **A pulled page is decided by the same rules as a pushed one (`Q-204`, `Q-225`).** The pull accepted whatever was
   newer by seq and validated nothing, so the same document delivered the other way round was decided differently:
   a record this instance holds a tombstone for was stored again, an equal-seq divergent fact lost one side instead of

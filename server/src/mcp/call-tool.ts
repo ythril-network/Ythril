@@ -40,7 +40,7 @@ import { toolIsVisible } from './tool-visibility.js';
 import { createSpacesRefusal } from '../auth/create-spaces.js';
 import type { TokenRights } from '../config/rights-shape.js';
 import { memberSpacesWithin } from '../spaces/proxy-scoped.js';
-import { classifyReadFailure } from '../brain/store-failure.js';
+import { storeFailureAnswer } from '../brain/store-failure.js';
 import { SchemaViolationError } from '../brain/write-validation.js';
 import { NotFoundError } from '../util/errors.js';
 import { WriteConflict } from '../brain/write-plan/types.js';
@@ -334,17 +334,17 @@ export async function callTool(req: ToolCallRequest): Promise<ToolCallOutcome> {
     if (err instanceof WriteConflict) {
       return { result: { content: [{ type: 'text' as const, text: `Error: ${message}` }], isError: true }, status: 409, callSpace };
     }
-    const readFailure = classifyReadFailure(err);
-    if (readFailure.retryable) {
+    // The store's condition, answered as every door answers it (`storeFailureAnswer`, bundle-30 I6 `C1`); this
+    // transport has no status line to carry it, so `storeSideFailure: true` says it in the body.
+    const store = storeFailureAnswer(err, { audience: 'caller' });
+    if (store) {
       return {
         result: {
-          content: [{ type: 'text' as const, text: `Error: ${readFailure.error}` }],
+          content: [{ type: 'text' as const, text: `Error: ${store.body.error}` }],
           isError: true,
-          structuredContent: { retryable: true, storeSideFailure: true, error: readFailure.error,
-            ...(readFailure.code !== undefined ? { code: readFailure.code } : {}),
-            ...(readFailure.codeName ? { codeName: readFailure.codeName } : {}) },
+          structuredContent: { ...store.body, storeSideFailure: true },
         },
-        status: 503, callSpace,
+        status: store.status, callSpace,
       };
     }
     return { result: { content: [{ type: 'text' as const, text: `Error: ${message}` }], isError: true }, status: 400, callSpace };

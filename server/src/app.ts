@@ -1,6 +1,7 @@
 import { ReferenceRefusal } from './brain/entity-refs.js';
 import { WriteConflict } from './brain/write-plan/types.js';
-import { classifyReadFailure } from './brain/store-failure.js';
+import { storeFailureAnswer } from './brain/store-failure.js';
+import { sendStoreFailure } from './api/brain/_read-failure.js';
 import express from 'express';
 import compression from 'compression';
 import { shouldCompress, staticCacheControl } from './util/transfer.js';
@@ -728,11 +729,10 @@ export function createApp() {
      * so a REST write and the same write through a tool no longer disagree (this answered `500` while the tool
      * door answered `503`). Everything the classifier does not positively identify stays the `500` below.
      */
-    const store = classifyReadFailure(err);
-    if (store.retryable) {
-      if (store.retryAfterSeconds !== undefined) res.setHeader('Retry-After', String(store.retryAfterSeconds));
+    const store = storeFailureAnswer(err, { audience: 'caller' });
+    if (store) {
       log.warn(`Store-side failure answered 503: ${logSafe(err instanceof Error ? err.message : String(err))}`);
-      res.status(503).json({ error: store.error, retryable: true });
+      sendStoreFailure(res, store);
       return;
     }
     const message = err instanceof Error ? err.message : String(err);

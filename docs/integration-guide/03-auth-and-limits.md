@@ -112,7 +112,9 @@ operation a write issues while it holds its sequence number is bounded (`YTHRIL_
 and a message of ours: the driver's text names internal collections and is never returned. The REST record routes,
 `POST /api/<tool>`, the MCP tools and the sync push routes classify it alike; until this release a REST write answered
 the same store failure `500` that the tool door answered `503`. Nothing was confirmed written, so retrying is
-the remedy.
+the remedy. Any other store failure on a write (a step-down, a dropped connection) answers as a read does — the
+store's condition, with its `code` and `codeName` — on REST and MCP alike; one function builds the answer for every
+door.
 
 **We do not retry internally, deliberately.** A transparent retry would turn a dead search process into slow
 successes and hide it from the operator who can fix it. You get told, and you decide.

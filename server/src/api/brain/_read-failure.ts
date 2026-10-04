@@ -10,7 +10,17 @@
  * says `retryable` in a field rather than in prose.
  */
 import type express from 'express';
-import { classifyReadFailure } from '../../brain/store-failure.js';
+import { storeFailureAnswer, type StoreFailureAnswer } from '../../brain/store-failure.js';
+
+/**
+ * Put a store failure's answer on the wire: status, `Retry-After`, body — every HTTP door's one sender (the read
+ * routes, the REST error handler, the sync push doors), so none of them can drop the header or the field
+ * (bundle-30 I6, `C1`). What the answer SAYS is `storeFailureAnswer`'s.
+ */
+export function sendStoreFailure(res: express.Response, answer: StoreFailureAnswer): void {
+  res.setHeader('Retry-After', String(answer.retryAfterSeconds));
+  res.status(answer.status).json(answer.body);
+}
 
 /**
  * Answer a read failure with the truth about whose fault it is.
@@ -22,14 +32,10 @@ import { classifyReadFailure } from '../../brain/store-failure.js';
  * doing on the 4xx-shaped failures.
  */
 export function sendReadFailure(res: express.Response, err: unknown): void {
-  const f = classifyReadFailure(err);
-  if (f.retryAfterSeconds !== undefined) res.setHeader('Retry-After', String(f.retryAfterSeconds));
-  res.status(f.status).json({
-    error: f.error,
-    retryable: f.retryable,
-    ...(f.code !== undefined ? { code: f.code } : {}),
-    ...(f.codeName ? { codeName: f.codeName } : {}),
-  });
+  const store = storeFailureAnswer(err, { audience: 'caller' });
+  if (store) { sendStoreFailure(res, store); return; }
+  // Not the store's: the request's, which the caller is the one who can fix.
+  res.status(400).json({ error: err instanceof Error ? err.message : String(err), retryable: false });
 }
 
 /**

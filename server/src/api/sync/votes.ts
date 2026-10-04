@@ -15,6 +15,7 @@ import { roundForPeer } from '../../networks/round-local-state.js';
 import { acceptVoteCast, castFromBody } from '../../util/signing.js';
 import { concludeRoundIfReady, sendMemberRemovedNotify } from '../../sync/governance.js';
 import { applyPassedJoin } from '../../networks/member-introductions.js';
+import { sendSyncWriteFailure } from './write-failure.js';
 
 export const syncVotesRouter = Router();
 
@@ -134,7 +135,6 @@ syncVotesRouter.post('/networks/:networkId/votes/:roundId', syncRateLimit, requi
     saveConfig(cfg);
     res.status(200).json({ status: 'ok' });
   } catch (err) {
-    log.error(`sync POST votes: ${peerText(err)}`);
-    res.status(500).json({ error: 'Internal error' });
+    sendSyncWriteFailure(res, 'sync POST votes', err);
   }
 });

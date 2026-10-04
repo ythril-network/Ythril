@@ -39,9 +39,15 @@ import { writeErrorCode } from './write-errors.js';
  * unbounded (a `timeoutMS` of 0 means NO bound to the driver). The message is ours and says nothing about the
  * store's internals, because it is what a door answers.
  */
+/**
+ * The one sentence every store failure ends with, on every door and in this error alike: what the caller may rely on
+ * (nothing was confirmed written) and what to do (retry). Three spellings of it had grown (bundle-30 I6, C1).
+ */
+export const STORE_RETRY_SENTENCE = 'Nothing was confirmed written by it; retry the request (store-side failure; retryable).';
+
 export class StoreTimeout extends Error {
   constructor(what = 'the database operation') {
-    super(`${what} could not be completed in time; nothing was confirmed written — retry`);
+    super(`${what} could not be completed in time. ${STORE_RETRY_SENTENCE}`);
     this.name = 'StoreTimeout';
   }
 }
