@@ -1,4 +1,5 @@
 import { log } from './util/log.js';
+import { afterListening } from './util/after-listening.js';
 
 /**
  * Initialise space collections + indexes and start every background service a
@@ -169,9 +170,10 @@ export async function startConfiguredInstanceServices(): Promise<void> {
 
   // Vectors a suppression already covers, stored before the sweep reached files, removed the model name, or ran on a
   // network's layer (bundle-30 `R5`): cleared once per start, in the background. Here, because every configured start
-  // runs this function; local derived fields only, so it is not a migration of synced data.
+  // runs this function; local derived fields only, so it is not a migration of synced data. Once the server listens,
+  // one space at a time (bundle-30 I8): a scan per kind of every space must not compete with the boot.
   const { sweepEverySpaceAtBoot } = await import('./brain/suppression-sweep.js');
-  sweepEverySpaceAtBoot();
+  afterListening(() => { void sweepEverySpaceAtBoot().catch(err => log.warn('Boot suppression sweep stopped:', err)); });
 
   // Reindex runs this instance had when it stopped: here, beside the worker that rebuilds their records, because
   // every configured start runs this function — a first run included — where the database phase can be skipped.

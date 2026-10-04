@@ -436,7 +436,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   change applied by a vote was swept two or three times, each a pass over every collection of the space. The sweep
   also covers files and their derived passages (it covered none), removes the model name with the vector (it left
   it behind), keeps `matchedText` (the content did not change), and runs once at every start, so vectors stored
-  before this version are cleared without waiting for the next edit.
+  before this version are cleared without waiting for the next edit. That start sweep begins once the server is
+  listening and sweeps one space at a time, so its scans never compete with each other or with the boot.
 - **An embed job no longer writes over a record that changed while it was embedding.** The job reads a record,
   calls the model, then wrote the vector by id alone: a peer's newer copy landing during the model call received
   the OLD text's vector and `matchedText` — and a copy this instance suppresses received a vector it must never

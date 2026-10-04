@@ -217,9 +217,14 @@ export async function dropFileVectors(spaceId: string, fileIds: readonly string[
  * every such write with a warning that meant nothing (`Q-74`).
  */
 export function sweepAfterMetaWrite(id: string, meta: SpaceMeta | undefined): void {
+  void queueSweep(id, meta);
+}
+
+/** Queue `id`'s coalesced sweep against `meta`, settling when it has run; nothing to sweep without a meta. */
+async function queueSweep(id: string, meta: SpaceMeta | undefined): Promise<void> {
   if (meta === undefined) return;
   nextSweep.set(id, meta);
-  void metaSweeps.run(id, () => sweepLatestMeta(id));
+  await metaSweeps.run(id, () => sweepLatestMeta(id));
 }
 
 /** Per space, the meta its next sweep runs against: the last one written and not yet swept. */
@@ -244,7 +249,13 @@ async function sweepLatestMeta(id: string): Promise<void> {
  * At boot, one sweep of every concrete space: vectors stored before this version swept files, removed the model
  * name, or heard of a network's suppression are cleared once, without waiting for the next meta write. Local derived
  * fields only — no seq, nothing replicated — so it is not a migration of synced data, and it is idempotent.
+ *
+ * **One space at a time** (bundle-30 I8): each sweep is an unindexed scan per record kind, and starting every space's
+ * at once put all of them in flight together on a large instance. Each is awaited before the next; a failure is the
+ * sweep's own warning (`sweepLatestMeta`) and never stops the walk. The bootstrap starts it once the server listens.
  */
-export function sweepEverySpaceAtBoot(): void {
-  for (const space of concreteSpaces()) sweepAfterMetaWrite(space.id, space.meta);
+export async function sweepEverySpaceAtBoot(): Promise<void> {
+  for (const space of concreteSpaces()) {
+    await queueSweep(space.id, space.meta);
+  }
 }

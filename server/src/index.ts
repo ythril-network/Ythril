@@ -5,6 +5,7 @@ import { configureConnections } from './http-connections.js';
 import { connectMongo, closeMongo, checkVectorSearchAvailability } from './db/mongo.js';
 import { createApp } from './app.js';
 import { startConfiguredInstanceServices } from './bootstrap.js';
+import { markListening } from './util/after-listening.js';
 import { stopSyncScheduler } from './sync/scheduler.js';
 import { stopBackupScheduler } from './db/backup-scheduler.js';
 import { stopDupeScanner } from './brain/dupe-scanner.js';
@@ -237,6 +238,8 @@ async function main(): Promise<void> {
   chunkCleanupInterval.unref(); // don't block shutdown
 
   server.listen(PORT, () => {
+    // Work the bootstrap held for the listen (`util/after-listening.ts`) starts now.
+    markListening();
     const url = `http://localhost:${PORT}`;
     console.log('');
     if (isFirstRun) {

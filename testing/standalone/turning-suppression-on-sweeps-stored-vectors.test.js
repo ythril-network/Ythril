@@ -171,7 +171,9 @@ describe('the sweep runs where the flag is written', () => {
     assert.match(bodyOf(src('server/src/spaces/spaces.ts'), 'updateSpace'), /sweepAfterMetaWrite\(/,
       'nothing sweeps after a meta write, so the docs\' present tense is still a promise rather than behaviour');
     const sweep = src('server/src/brain/suppression-sweep.ts');
-    assert.match(bodyOf(sweep, 'sweepAfterMetaWrite'), /\bsweepLatestMeta\(/, 'the trigger no longer runs the sweep');
+    // Re-anchored a third time (bundle-30 I8): the trigger and the boot sweep share `queueSweep`, which runs it.
+    assert.match(bodyOf(sweep, 'sweepAfterMetaWrite'), /\bqueueSweep\(/, 'the trigger no longer runs the sweep');
+    assert.match(bodyOf(sweep, 'queueSweep'), /\bsweepLatestMeta\(/, 'the trigger no longer runs the sweep');
     assert.match(bodyOf(sweep, 'sweepLatestMeta'), /\bsweepSuppressedVectors\(/, 'the trigger no longer runs the sweep');
   });
 
