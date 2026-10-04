@@ -83,7 +83,9 @@ const EXEMPT = {
   'server/src/brain/chrono.ts:deleteChrono': 'delete path',
   'server/src/brain/edges.ts:updateEdgeById': 'update path',
   // `deleteEdge` and the entity cascade both remove edges through the one remover (bundle-30, Q-107 part 3b).
-  'server/src/brain/edge-removal.ts:removeEdgeChunk': 'delete path: one chunk of edges with their tombstones',
+  // Re-anchored (bundle-30 I6, C11): the delete moved into the one remover, which the edge removal's chunk, the merge's
+  // duplicate edges and moved links, and the re-key's old rows all call.
+  'server/src/brain/tombstones.ts:removeWithTombstones': 'delete path: rows deleted by id, each with its tombstone',
   // whole-record operations that are not a create
   // Re-keyed (bundle-30, Q-107 part 3a): the merge's writes moved into its transaction's callback, and the re-key's
   // into the one batched implementation `rekeyEdge` now calls.
