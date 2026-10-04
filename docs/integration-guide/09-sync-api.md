@@ -58,7 +58,10 @@ Authorization: Bearer <instance-admin token>
 
 Both answer the same shape: `{ "ok": true, "status": "triggered", ... }` when fire-and-forget, and with
 `?wait=true` either `completed`, `504 timeout` (still running) or `500 error`. `ok` is the one-bit summary
-and `status` the detail.
+and `status` the detail. A cycle that fails on the store is answered as every door answers a store failure —
+`503`, `Retry-After`, `{ "error": …, "retryable": true, "code": … }` in our words — and never with the
+database driver's message (it names internal hosts and ports). A member whose own run failed is not a failed
+cycle: it is counted in `errors` of a `completed` answer.
 
 `?timeoutMs` (default `30000`, clamped `1000`–`120000`) bounds the WAIT on the network door only. A peer
 cycle is already bounded by that peer's own request timeouts, so racing it would report a timeout for

@@ -817,7 +817,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   retryable)."*, with `retryable: true`, `Retry-After` (on every HTTP door), and the store's own `code` and
   `codeName` when it gave them. The driver's message, with any cause it attached, is logged once per request as a
   `Store-side failure answered 503:` warning. A client that matched the old prose should read `retryable` and
-  `code` instead.
+  `code` instead. That includes `POST /api/networks/:id/sync?wait=true` and `POST /api/networks/peers/:peerId/sync?wait=true`,
+  which answered a cycle's failure as `500 { error }` with the exception's own message.
 
   A store failure is recognised by what the driver says it IS — its class, its error labels, the server's code —
   not by a list of error names. The list could not see a subclass: the error the driver raises when it clears its
