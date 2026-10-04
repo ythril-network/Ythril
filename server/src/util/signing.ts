@@ -123,7 +123,7 @@ export function signMessage(privateKeyPem: string, message: string): string {
     const key = crypto.createPrivateKey(privateKeyPem);
     return crypto.sign(null, Buffer.from(message, 'utf8'), key).toString('base64');
   } catch (err) {
-    log.warn(`signMessage failed: ${err instanceof Error ? peerText(err.message) : peerText(String(err))}`);
+    log.warn(`signMessage failed: ${peerText(err)}`);
     return '';
   }
 }

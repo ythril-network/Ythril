@@ -61,7 +61,7 @@ async function keepSpill(
     }
     return r;
   } catch (err) {
-    log.warn(`Read spill (${kind}) failed: ${err instanceof Error ? peerText(err.message) : peerText(String(err))}`);
+    log.warn(`Read spill (${kind}) failed: ${peerText(err)}`);
     return { spillRefused: 'failed' };
   }
 }

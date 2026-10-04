@@ -295,7 +295,7 @@ export async function enqueueWriteEmbedJobs(
   } catch (err) {
     const failed = records.length;
     log.warn(`embed queue: ${failed} record(s) written to '${peerText(spaceId)}' were NOT queued for embedding `
-      + `(${err instanceof Error ? peerText(err.message) : peerText(String(err))}). They are stored and findable by text; `
+      + `(${peerText(err)}). They are stored and findable by text; `
       + 'POST /api/spaces/:id/reembed queues every record that has no vector.');
     return { queued: 0, failed };
   }
@@ -580,7 +580,9 @@ export async function failEmbedJob(
 ): Promise<void> {
   const now = new Date().toISOString();
   const filter = claimedBy(recordType, recordId, opts.claimToken);
-  const lastError = errorMessage.slice(0, 500);
+  // Stored, and read back by `list_embed_jobs`: the one renderer — redacted, cut on a code point, saying it was cut —
+  // rather than a code-unit slice that can split a surrogate (bundle-30 I6, C16).
+  const lastError = peerText(errorMessage, { max: 500 });
 
   // A lost inference process is transient, but it is also how an input that kills the runtime looks, so it is the one
   // failure of the embedder's that is counted per record and ends one: see `MAX_LOST_CHILD_FAILURES`. Decided BEFORE

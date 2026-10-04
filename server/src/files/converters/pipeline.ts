@@ -538,7 +538,7 @@ async function rmArtifactPath(spaceId: string, relPath: string): Promise<void> {
     const abs = await resolveSafePathChecked(spaceId, relPath);
     await removeTree(abs);
   } catch (err) {
-    log.warn(`Failed to remove conversion artifact path ${peerText(spaceId)}/${peerText(relPath)}: ${err instanceof Error ? peerText(err.message) : peerText(String(err))}`);
+    log.warn(`Failed to remove conversion artifact path ${peerText(spaceId)}/${peerText(relPath)}: ${peerText(err)}`);
   }
 }
 

@@ -465,7 +465,7 @@ export async function propagateFaceLabel(
   } catch (err) {
     log.warn(
       `Face recogniser: propagateFaceLabel failed for ${peerText(spaceId)}/${peerText(fileId)}: ` +
-      `${err instanceof Error ? peerText(err.message) : peerText(String(err))}`,
+      `${peerText(err)}`,
     );
   }
 }

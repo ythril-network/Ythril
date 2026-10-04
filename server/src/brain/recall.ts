@@ -634,7 +634,7 @@ async function introduceLexicalOnly(
     return out;
   } catch (err) {
     // Best-effort like the rest of this path: a failure here leaves the vector order untouched.
-    log.debug(`Lexical introduction skipped for ${peerText(collName)}: ${err instanceof Error ? peerText(err.message) : peerText(String(err))}`);
+    log.debug(`Lexical introduction skipped for ${peerText(collName)}: ${peerText(err)}`);
     return [];
   }
 }

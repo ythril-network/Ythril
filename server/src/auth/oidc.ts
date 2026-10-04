@@ -448,7 +448,7 @@ export async function validateOidcJwt(bearer: string): Promise<OidcTokenRecord |
       source: 'oidc',
     };
   } catch (err) {
-    log.warn(`OIDC JWT validation failed: ${err instanceof Error ? peerText(err.message) : peerText(String(err))}`);
+    log.warn(`OIDC JWT validation failed: ${peerText(err)}`);
     return null;
   }
 }

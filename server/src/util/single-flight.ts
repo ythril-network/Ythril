@@ -53,7 +53,7 @@ export async function runExclusive(label: string, fn: () => Promise<unknown>): P
     await fn();
     return true;
   } catch (err) {
-    log.error(`${peerText(label)} failed: ${err instanceof Error ? peerText(err.message) : peerText(String(err))}`);
+    log.error(`${peerText(label)} failed: ${peerText(err)}`);
     return true;   // it ran; it simply did not succeed
   } finally {
     // A `finally` and not a trailing statement: a throw that escaped the catch above (an error thrown while

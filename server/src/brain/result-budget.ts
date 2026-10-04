@@ -434,7 +434,7 @@ async function keepRemainder<S>(fields: Record<string, unknown>, spill: () => Pr
   } catch (err) {
     // `spillResultSet` reports its own failures and never throws; this guards any other spiller handed in,
     // and says so rather than swallowing it.
-    log.warn(`Result spill failed: ${err instanceof Error ? peerText(err.message) : peerText(String(err))}`);
+    log.warn(`Result spill failed: ${peerText(err)}`);
     kept = null;
     fields['spillRefused'] = 'failed';
   }

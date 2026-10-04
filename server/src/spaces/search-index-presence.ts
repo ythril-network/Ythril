@@ -169,7 +169,7 @@ async function reconcileNow(name: string, st: CollectionState, opts: ReconcileOp
       holds = await collectionHoldsRecord(name);
     } catch (err) {
       st.belief = before === 'settling' ? undefined : before;
-      log.debug(`Search index presence: could not read ${peerText(name)} (${err instanceof Error ? peerText(err.message) : peerText(String(err))})`);
+      log.debug(`Search index presence: could not read ${peerText(name)} (${peerText(err)})`);
       return st.belief;
     }
 
@@ -203,7 +203,7 @@ async function reconcileNow(name: string, st: CollectionState, opts: ReconcileOp
     return (st.belief = 'unindexed');
   } catch (err) {
     st.belief = undefined;
-    log.warn(`Search index presence: reconciling ${peerText(name)} failed (${err instanceof Error ? peerText(err.message) : peerText(String(err))}); the next write retries`);
+    log.warn(`Search index presence: reconciling ${peerText(name)} failed (${peerText(err)}); the next write retries`);
     return undefined;
   }
 }

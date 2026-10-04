@@ -53,6 +53,7 @@
  */
 import { fork } from 'node:child_process';
 import { backoffDelayMs } from './backoff.js';
+import { peerText } from './log.js';
 
 export type Lane = 'query' | 'document';
 export type WorkerPhase = 'none' | 'starting' | 'ready' | 'backoff';
@@ -295,10 +296,14 @@ export function createSupervisedWorker(opts: SupervisedWorkerOptions) {
   const inBackoff = (): boolean => current === null && backoffUntil > now();
   const stoppedError = (): Error => new Error(`${label} is stopped`);
 
-  /** Text from a child, bounded BEFORE it is processed (a megabyte of "error" costs a regex pass) and after. */
+  /**
+   * Text from a child, bounded BEFORE it is processed (a megabyte of "error" costs a regex pass) and after — the
+   * second bound by the one renderer (`peerText`: redacted, cut on a code point, saying it was cut), where a
+   * code-unit slice could split a surrogate (bundle-30 I6, C16).
+   */
   const fromChild = (value: unknown): string => {
     const raw = (typeof value === 'string' ? value : String(value)).slice(0, maxErrorChars * 4);
-    return (opts.childText ? opts.childText(raw) : raw).slice(0, maxErrorChars);
+    return peerText(opts.childText ? opts.childText(raw) : raw, { max: maxErrorChars });
   };
 
   function phase(): WorkerPhase {

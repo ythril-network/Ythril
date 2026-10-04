@@ -290,7 +290,7 @@ async function stageTwo(args: PredicateRecallArgs, stageOneHits: Record<string, 
     // Anything else, after stage 1 answered: the collection is readable and the completion is not. Throwing would
     // discard stage 1's hits with it (the caller reads an unknown index error as an empty collection), so the
     // answer keeps them and says it is incomplete — and the reason reaches the log rather than vanishing.
-    log.warn(`Filtered recall on ${peerText(collName)}: completing the answer failed (${err instanceof Error ? peerText(err.message) : peerText(String(err))}) `
+    log.warn(`Filtered recall on ${peerText(collName)}: completing the answer failed (${peerText(err)}) `
       + '— returning what the first stage found, flagged filter_window');
     return answer(['filter_window']);
   }

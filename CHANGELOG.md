@@ -747,6 +747,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ` (+N more)`. A sync refusal that quotes a schema's issues or the driver's message (200 characters) now says where
   it was cut and never splits a character in two.
   An error logged with its stack keeps the stack, escaped onto its line, with its message bounded.
+  Error text that is STORED and read back goes through the same renderer: an embed job's `lastError`, a reindex
+  run's `error`, a media job's error and a webhook delivery's `error`, and a supervised worker's child error, where
+  each was cut by code unit (and the webhook's not at all). The `500` bodies of the admin wipe, export, config
+  reload and signing-key routes bound the message they quote, and the uncaught-exception, unhandled-rejection,
+  readiness and unhandled-error lines pass the error itself, so the stack is kept and the message bounded.
 - **Redacting a log line no longer takes time that grows with the square of a value (`R9`).** The userinfo pattern
   (`scheme://user:pass@`) could start a match at every character of a run of letters and scan the rest of the run
   from each: 40 000 letters took 0.7 s, so a peer's megabyte `_id` of letters held the event loop for minutes on

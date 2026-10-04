@@ -58,7 +58,7 @@ import { clearOidcCache } from './auth/oidc.js';
 import { initSpace, ensureGeneralSpace, wipeSpace, reconcilePendingSpaceOp, WIPE_COLLECTION_TYPES, type WipeCollectionType } from './spaces/lifecycle.js';
 import { concreteSpaces } from './spaces/proxy.js';
 import { col } from './db/mongo.js';
-import { log, logSafe, runWithRequestId } from './util/log.js';
+import { log, logSafe, peerText, runWithRequestId } from './util/log.js';
 import { rearmCronSchedulers } from './schedulers.js';
 import { getReadiness, classifyCheckError } from './ready.js';
 import { isShuttingDown } from './lifecycle.js';
@@ -213,7 +213,7 @@ export function createApp() {
       // A code, not the message. This endpoint is public by necessity — an orchestrator cannot carry a token —
       // and driver messages name internal hosts and addresses (`getaddrinfo ENOTFOUND mongo-a.internal`). The
       // detail is logged instead, which is also where it was missing entirely before. See `ready.ts`.
-      log.error(`Readiness check itself failed: ${err instanceof Error ? err.message : String(err)}`);
+      log.error('Readiness check itself failed:', err);
       res.status(503).json({
         ready: false,
         checks: {
@@ -407,7 +407,7 @@ export function createApp() {
       const deleted = await wipeSpace(spaceId, rawTypes);
       res.json({ deleted });
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = peerText(err instanceof Error ? err.message : String(err));
       res.status(500).json({ error: msg });
     }
   });
@@ -471,14 +471,14 @@ export function createApp() {
       await write('}');
       res.end();
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = peerText(err instanceof Error ? err.message : String(err));
       if (!res.headersSent) {
         res.status(500).json({ error: msg });
       } else {
         // We have already sent `200` and a partial body, so we cannot change the status.
         // Destroy the socket so the client sees a TRUNCATED/aborted response rather than a
         // syntactically-valid JSON that is silently missing documents.
-        log.error(`Space export for '${spaceId}' failed mid-stream: ${msg}`);
+        log.error(`Space export for '${peerText(spaceId)}' failed mid-stream: ${msg}`);
         res.destroy(err instanceof Error ? err : new Error(msg));
       }
     }
@@ -606,7 +606,7 @@ export function createApp() {
       await applyConfigFromDisk({ tokenId: req.authToken?.id ?? null, tokenLabel: req.authToken?.name ?? null, ip: req.ip ?? '-', method: 'POST', path: '/api/admin/reload-config' });
       res.json({ ok: true });
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = peerText(err instanceof Error ? err.message : String(err));
       res.status(500).json({ error: msg });
     }
   });
@@ -641,7 +641,7 @@ export function createApp() {
       }
       res.json({ ok: true, signingPublicKey: result.publicKeyPem });
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = peerText(err instanceof Error ? err.message : String(err));
       res.status(500).json({ error: msg });
     }
   });
@@ -735,12 +735,12 @@ export function createApp() {
       sendStoreFailure(res, store);
       return;
     }
-    const message = err instanceof Error ? err.message : String(err);
     /*
      * The id is no longer spelled out here: every line emitted during a request carries it now, so writing it
-     * again produced it twice on the one line that already had it.
+     * again produced it twice on the one line that already had it. The error is the META argument, so the line
+     * keeps its stack and bounds its message (`fmt`) — interpolated, the stack was dropped (bundle-30 I6, C16).
      */
-    log.error(`Unhandled error: ${message}`);
+    log.error('Unhandled error:', err);
     res.status(500).json({ error: 'Internal server error' });
   });
 

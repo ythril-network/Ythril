@@ -300,7 +300,8 @@ async function attemptDelivery(
     }
   } catch (err) {
     delivery.latencyMs = Date.now() - start;
-    delivery.error = err instanceof Error ? err.message : String(err);
+    // Stored and listed to the operator: bounded by the one renderer (bundle-30 I6, C16).
+    delivery.error = peerText(err, { max: 500 });
   }
 
   // Record delivery — fire and forget

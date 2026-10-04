@@ -222,7 +222,7 @@ export async function initSpace(
     try {
       await col(`${spaceId}_${collName}`).createIndex({ matchedText: 'text' }, { name: 'lexical_text' });
     } catch (err) {
-      log.warn(`Space '${peerText(spaceId)}': lexical text index on ${collName} not created — hybrid search will fall back to vector-only for it (${err instanceof Error ? peerText(err.message) : peerText(String(err))})`);
+      log.warn(`Space '${peerText(spaceId)}': lexical text index on ${collName} not created — hybrid search will fall back to vector-only for it (${peerText(err)})`);
     }
   }
 
@@ -355,7 +355,7 @@ async function confirmSpaceIndexesInBackground(spaceIds: readonly string[]): Pro
       else if (!verdict) failed.push(spaceId);
     } catch (err) {
       failed.push(spaceId);
-      log.warn(`Space '${peerText(spaceId)}': index readiness check failed: ${err instanceof Error ? peerText(err.message) : peerText(String(err))}`);
+      log.warn(`Space '${peerText(spaceId)}': index readiness check failed: ${peerText(err)}`);
     }
   });
 

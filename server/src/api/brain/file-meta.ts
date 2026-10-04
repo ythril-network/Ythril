@@ -185,7 +185,7 @@ fileMetaRouter.get('/spaces/:spaceId/files/extract', globalRateLimit, requireSpa
       // The record exists and the bytes do not. Worth reporting as its own state rather than as an
       // empty document: it means the sidecar was removed out from under the record, which is exactly
       // the kind of drift this view exists to make visible.
-      log.warn(`extract: could not read ${peerText(member)}/${peerText(convertedRecord.path)}: ${err instanceof Error ? peerText(err.message) : peerText(String(err))}`);
+      log.warn(`extract: could not read ${peerText(member)}/${peerText(convertedRecord.path)}: ${peerText(err)}`);
       // PRESENT but undecodable (a foreign key, altered bytes, no secret for an encrypted file) is a different
       // drift from "removed", and the view says which — `unreadable` carries the reason (F-43).
       converted = { path: convertedRecord.path, markdown: '', truncated: false, sizeBytes: convertedRecord.sizeBytes,

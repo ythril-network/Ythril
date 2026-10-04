@@ -194,7 +194,7 @@ export async function matchFreshWrites(
     }
     return out;
   } catch (err) {
-    log.debug(`Fresh-write scan skipped for ${peerText(collName)}: ${err instanceof Error ? peerText(err.message) : peerText(String(err))}`);
+    log.debug(`Fresh-write scan skipped for ${peerText(collName)}: ${peerText(err)}`);
     return [];
   }
 }

@@ -186,7 +186,7 @@ async function afterStage(
       // The records are stored, so their outcomes stay `ok`: reporting them failed would invite a resend that
       // duplicates. What did not land is the links, and this is what says so.
       log.warn(`write commit: ${withLinks.length} record(s) in '${peerText(spaceId)}' were written but their link rows were not: `
-        + `${err instanceof Error ? peerText(err.message) : peerText(String(err))}. Re-sending the same write (with its id) repairs them.`);
+        + `${peerText(err)}. Re-sending the same write (with its id) repairs them.`);
     }
   }
   const toQueue = landed.filter(i => plans[i]!.enqueue).map(i => ({ recordType: plans[i]!.kind, recordId: plans[i]!.id }));

@@ -686,7 +686,7 @@ export async function executeMerge(
       await retireEmbedJobs(spaceId, 'edge', written.rekeyed.map(m => embedQueueWorkFor(m).retire));
     } catch (err) {
       log.warn(`merge: '${peerText(absorbed._id)}' was merged into '${peerText(survivor._id)}' in '${peerText(spaceId)}', but the embed jobs of `
-        + `${written.rekeyed.length} re-keyed edge(s) were not retired: ${err instanceof Error ? peerText(err.message) : peerText(String(err))}`);
+        + `${written.rekeyed.length} re-keyed edge(s) were not retired: ${peerText(err)}`);
     }
     await enqueueWriteEmbedJobs(spaceId, written.rekeyed.map(m => ({ recordType: 'edge' as const, recordId: embedQueueWorkFor(m).enqueue })),
       { priority: EMBED_PRIORITY.background });

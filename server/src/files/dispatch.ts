@@ -135,7 +135,7 @@ export async function dispatchFileProcessing(
     }
     await setMediaStatus('pending');
     await enqueueMediaJob(spaceId, filePath, mimeType, mediaType).catch(err => {
-      log.warn(`enqueueMediaJob error for ${peerText(spaceId)}/${peerText(filePath)}: ${err instanceof Error ? peerText(err.message) : peerText(String(err))}`);
+      log.warn(`enqueueMediaJob error for ${peerText(spaceId)}/${peerText(filePath)}: ${peerText(err)}`);
     });
     return { resolvedFormat, embeddingStatus: 'pending' };
   }
@@ -158,10 +158,10 @@ export async function dispatchFileProcessing(
     // Clear stale conversion artifacts first so overwriting a document does not leave
     // duplicate chunk records behind.
     await deleteConversionArtifacts(spaceId, filePath).catch(err => {
-      log.warn(`deleteConversionArtifacts error for ${peerText(spaceId)}/${peerText(filePath)}: ${err instanceof Error ? peerText(err.message) : peerText(String(err))}`);
+      log.warn(`deleteConversionArtifacts error for ${peerText(spaceId)}/${peerText(filePath)}: ${peerText(err)}`);
     });
     await enqueueTextJob(spaceId, filePath, resolvedFormat, mimeType).catch(err => {
-      log.warn(`enqueueTextJob error for ${peerText(spaceId)}/${peerText(filePath)}: ${err instanceof Error ? peerText(err.message) : peerText(String(err))}`);
+      log.warn(`enqueueTextJob error for ${peerText(spaceId)}/${peerText(filePath)}: ${peerText(err)}`);
     });
     return { resolvedFormat, embeddingStatus: 'pending' };
   }

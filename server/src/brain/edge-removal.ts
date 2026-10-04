@@ -48,7 +48,7 @@ export async function removeEdges(spaceId: string, ids: readonly string[], actor
       await retireEmbedJobs(spaceId, 'edge', [...removed]);
     } catch (err) {
       log.warn(`edge removal: ${removed.size} edge(s) were deleted in '${peerText(spaceId)}' but their embed jobs were not retired: `
-        + `${err instanceof Error ? peerText(err.message) : peerText(String(err))}`);
+        + `${peerText(err)}`);
     }
     if (actor) for (const _id of removed) emitWebhookEvent({ event: 'edge.deleted', spaceId, entry: { _id }, ...actor });
   }

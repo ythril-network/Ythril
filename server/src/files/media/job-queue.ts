@@ -281,7 +281,7 @@ export async function enqueueTextJob(
     asFilter<FileMetaDoc>({ _id: id }),
     { $set: { embeddingStatus: 'pending', updatedAt: now } },
   ).catch(err => {
-    log.debug(`enqueueTextJob: could not set embeddingStatus on file meta ${peerText(spaceId)}/${peerText(id)}: ${err instanceof Error ? peerText(err.message) : peerText(String(err))}`);
+    log.debug(`enqueueTextJob: could not set embeddingStatus on file meta ${peerText(spaceId)}/${peerText(id)}: ${peerText(err)}`);
   });
 }
 
@@ -847,6 +847,7 @@ function sanitiseError(raw: string): string {
   let s = raw.replace(/https?:\/\/[^\s,;)]+/g, '[url]');
   // Remove Unix-style absolute paths
   s = s.replace(/\/[a-z][a-z0-9_/-]+/gi, '[path]');
-  // Truncate to 200 chars to keep the field reasonable
-  return s.slice(0, 200);
+  // Bounded by the one renderer (redacted, cut on a code point, saying it was cut) — the URL and path scrubbing above
+  // is a different question (internal topology, not secrets), so it stays here (bundle-30 I6, C16).
+  return peerText(s, { max: 200 });
 }

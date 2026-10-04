@@ -249,10 +249,10 @@ async function sweepRun(spaceId: string): Promise<void> {
     log.error(`Reindex of '${peerText(spaceId)}' could not queue its records after ${SWEEP_ATTEMPTS} attempts${peerText(at)}: ${peerText(lastError)}`);
     await runs(spaceId).updateOne(
       asFilter<ReindexRunDoc>({ _id: RUN_ID }),
-      { $set: { error: `the sweep failed after ${SWEEP_ATTEMPTS} attempts: ${lastError.slice(0, 300)}` } },
+      { $set: { error: `the sweep failed after ${SWEEP_ATTEMPTS} attempts: ${peerText(lastError, { max: 300 })}` } },
     );
   } catch (err) {
-    log.error(`Reindex of '${peerText(spaceId)}': could not record the sweep's failure: ${err instanceof Error ? peerText(err.message) : peerText(String(err))}`);
+    log.error(`Reindex of '${peerText(spaceId)}': could not record the sweep's failure: ${peerText(err)}`);
   }
   await refreshGauge().catch(() => { /* the next tick recomputes it */ });
 }
@@ -334,7 +334,7 @@ export async function reindexRunTick(): Promise<void> {
       await runs(s.id).deleteOne(asFilter<ReindexRunDoc>({ _id: RUN_ID }));
       active--;
     } catch (err) {
-      log.warn(`Reindex watcher: '${peerText(s.id)}': ${err instanceof Error ? peerText(err.message) : peerText(String(err))}`);
+      log.warn(`Reindex watcher: '${peerText(s.id)}': ${peerText(err)}`);
     }
   }
   // Counted on the same pass rather than by reading every run document again.

@@ -28,6 +28,6 @@ export async function writeFileTombstones(spaceId: string, paths: string[]): Pro
   try {
     await col<FileTombstoneDoc>(spaceCollection(spaceId, 'fileTombstones')).insertMany(docs.map(d => asDoc<FileTombstoneDoc>(d)));
   } catch (err) {
-    log.warn(`writeFileTombstones error for space ${peerText(spaceId)} (${unique.length} paths): ${err instanceof Error ? peerText(err.message) : peerText(String(err))}`);
+    log.warn(`writeFileTombstones error for space ${peerText(spaceId)} (${unique.length} paths): ${peerText(err)}`);
   }
 }

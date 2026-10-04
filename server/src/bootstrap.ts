@@ -176,5 +176,5 @@ export async function startConfiguredInstanceServices(): Promise<void> {
   // Reindex runs this instance had when it stopped: here, beside the worker that rebuilds their records, because
   // every configured start runs this function — a first run included — where the database phase can be skipped.
   const { resumeReindexRuns } = await import('./brain/reindex.js');
-  void resumeReindexRuns().catch(err => log.warn(`Reindex: could not resume runs: ${err instanceof Error ? err.message : String(err)}`));
+  void resumeReindexRuns().catch(err => log.warn('Reindex: could not resume runs:', err));
 }

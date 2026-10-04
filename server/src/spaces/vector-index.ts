@@ -193,7 +193,7 @@ export async function ensureVectorSearchIndex(
     // actually failed. The old message hardcoded `_facts` for all five, which sent the diagnosis
     // in the wrong direction for a long time.
     log.warn(
-      `Could not list search indexes for ${peerText(spaceId)}_${collectionSuffix}: ${err instanceof Error ? peerText(err.message) : peerText(String(err))}. ` +
+      `Could not list search indexes for ${peerText(spaceId)}_${collectionSuffix}: ${peerText(err)}. ` +
         `Semantic recall will return empty for it until the index is built — rebuild from ` +
         `Settings → Space → Danger Zone, or POST /api/spaces/${peerText(spaceId)}/rebuild-indexes.`,
     );
@@ -373,7 +373,7 @@ async function swapIndexDefinition(
     await coll.dropSearchIndex(standIn).catch(() => {});
     log.info(`Vector index ${peerText(indexName)} now has its new definition, with no gap in search`);
   } catch (err) {
-    log.warn(`Vector index swap for ${peerText(indexName)} stopped (${err instanceof Error ? peerText(err.message) : peerText(String(err))}); searches stay on ${peerText(liveIndexName(indexName))}`);
+    log.warn(`Vector index swap for ${peerText(indexName)} stopped (${peerText(err)}); searches stay on ${peerText(liveIndexName(indexName))}`);
   } finally {
     swapsInFlight.delete(indexName);
   }
@@ -787,7 +787,7 @@ export async function dropCollectionSearchIndexes(spaceId: string, suffix: Vecto
   try {
     listed = await coll.listSearchIndexes().toArray() as Array<{ name?: string }>;
   } catch (err) {
-    log.debug(`Could not list search indexes on ${peerText(spaceId)}_${suffix} to drop them: ${err instanceof Error ? peerText(err.message) : peerText(String(err))}`);
+    log.debug(`Could not list search indexes on ${peerText(spaceId)}_${suffix} to drop them: ${peerText(err)}`);
     return false;
   }
   const names = listed.map(i => i.name ?? '').filter(n => n.startsWith(prefix));
@@ -800,7 +800,7 @@ export async function dropCollectionSearchIndexes(spaceId: string, suffix: Vecto
       log.debug(`Dropped search index ${peerText(name)}: its collection holds no record`);
     } catch (err) {
       clean = false;
-      log.warn(`Could not drop search index ${peerText(name)} from empty collection ${peerText(spaceId)}_${suffix}: ${err instanceof Error ? peerText(err.message) : peerText(String(err))}`);
+      log.warn(`Could not drop search index ${peerText(name)} from empty collection ${peerText(spaceId)}_${suffix}: ${peerText(err)}`);
     }
   }
   return clean;
@@ -907,7 +907,7 @@ export async function finalizeSpaceIndexReady(
   try {
     ok = await waitForSpaceIndexesReady(spaceId, opts);
   } catch (err) {
-    log.warn(`Space '${peerText(spaceId)}': error awaiting vector index readiness: ${err instanceof Error ? peerText(err.message) : peerText(String(err))}`);
+    log.warn(`Space '${peerText(spaceId)}': error awaiting vector index readiness: ${peerText(err)}`);
   }
   // Search is not answering: there is nothing true to record. The space stays `building`, which is what it is, and
   // the caller registers for the service's return. Returned BEFORE any write, so no status can be set for it.
@@ -1000,7 +1000,7 @@ export async function faceIndexWidth(spaceId: string): Promise<number | null> {
     return typeof dims === 'number' && dims > 0 ? dims : null;
   } catch (err) {
     log.debug(`Could not read ${peerText(indexName)} to establish its width `
-      + `(${err instanceof Error ? peerText(err.message) : peerText(String(err))}); treating it as absent`);
+      + `(${peerText(err)}); treating it as absent`);
     return null;
   }
 }

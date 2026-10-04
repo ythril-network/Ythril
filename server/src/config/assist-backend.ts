@@ -144,7 +144,7 @@ function scheduleFlush(): void {
   flushTimer = setTimeout(() => {
     flushTimer = null;
     try { fs.writeFileSync(usageFile(), JSON.stringify(usage ?? [])); }
-    catch (err) { log.warn(`assist budget: could not persist usage (${err instanceof Error ? peerText(err.message) : peerText(String(err))}) — the window still counts in memory`); }
+    catch (err) { log.warn(`assist budget: could not persist usage (${peerText(err)}) — the window still counts in memory`); }
   }, 5_000);
   flushTimer.unref?.();
 }
