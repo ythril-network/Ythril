@@ -34,6 +34,7 @@ import os from 'node:os';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 import { openTestMongo, closeTestMongo, testMongoUri } from './_mongo-harness.mjs';
+import { wipeParts, RECORD_PARTS } from './_space-snapshot.mjs';
 
 /** A peer-bound token that reaches every space by its own scope (an unknown peer falls through to space scope). */
 export const PEER_TOKEN = Object.freeze({
@@ -233,9 +234,7 @@ async function assemblePushDoor({ suite, spaces, monitorCommands, mongo, tmpDir 
   }
   async function wipe(space) {
     await settled();
-    for (const part of ['facts', 'entities', 'edges', 'chrono', 'links', 'files', 'tombstones', 'embed_jobs']) {
-      await coll(space, part).deleteMany({});
-    }
+    await wipeParts(mongo, space, RECORD_PARTS);
     await mongo.col('ythril_counters').deleteMany({ _id: space });
     landed.delete(space);
   }

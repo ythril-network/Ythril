@@ -32,6 +32,21 @@ export async function snapshotParts(mongo, space, parts) {
 }
 
 /** The keys of two snapshots whose contents differ, but for `ignore` — named, so a failure says WHAT changed. */
+/**
+ * The record parts a refusal or a push test seeds and clears: the knowledge collections, the tombstones and the embed
+ * jobs. One list for the snapshot and the wipe, so a part seeded is a part compared and cleared.
+ */
+export const RECORD_PARTS = Object.freeze(['facts', 'entities', 'edges', 'chrono', 'links', 'files', 'tombstones', 'embed_jobs']);
+
+/**
+ * Empty `parts` of `space` — the push door's wipe and a refusal test's, one loop (bundle-30 I6, T4). Throws on no
+ * parts, like the snapshot: a wipe of nothing leaves the last case's records for the next to trip over, silently.
+ */
+export async function wipeParts(mongo, space, parts) {
+  assert.ok(parts.length > 0, 'a wipe of no parts clears nothing');
+  for (const p of parts) await mongo.col(`${space}_${p}`).deleteMany({});
+}
+
 export function changedParts(before, after, { ignore = [] } = {}) {
   const keys = [...new Set([...Object.keys(before), ...Object.keys(after)])];
   assert.ok(keys.length > 0, 'two empty snapshots compare equal whatever happened');

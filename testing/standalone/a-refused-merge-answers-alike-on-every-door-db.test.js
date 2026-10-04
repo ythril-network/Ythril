@@ -47,7 +47,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
-import { snapshotParts, changedParts } from './_space-snapshot.mjs';
+import { snapshotParts, changedParts, wipeParts, RECORD_PARTS } from './_space-snapshot.mjs';
 import { readTrackedSources } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import { seedHub, relinkProblems, vectorOf } from './_merge-hub.mjs';
@@ -72,7 +72,7 @@ const handlers = {};
 let tokenSerial = 0;
 
 const coll = (space) => (part) => mongo.col(`${space}_${part}`);
-const PARTS = ['entities', 'edges', 'facts', 'chrono', 'links', 'files', 'tombstones', 'embed_jobs'];
+const PARTS = RECORD_PARTS;
 
 /** Everything a merge could have written, whole and in a stable order. */
 async function snapshot(space) {
@@ -85,7 +85,7 @@ async function snapshot(space) {
 const changed = changedParts;
 
 async function wipe(space) {
-  for (const p of [...PARTS, 'dupe_candidates']) await coll(space)(p).deleteMany({});
+  await wipeParts(mongo, space, [...PARTS, 'dupe_candidates']);
 }
 
 // ── the doors: each answers { status, text } — status a number for HTTP doors, 'merged' / 'refused' for automerge ──
