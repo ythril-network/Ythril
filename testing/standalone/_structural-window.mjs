@@ -604,12 +604,20 @@ export function enclosingMarkupBlocksMatching(text, at, opener) {
     .filter(head => opener.test(head));
 }
 
-/** The last non-empty line before `at` — for a marker whose rule IS "immediately above". */
-export function lineBefore(src, at, label = 'lineBefore') {
+/**
+ * The last non-empty line before `at` — for a marker whose rule IS "immediately above" — or, when `at` is mid-line,
+ * what precedes it on its own line. Trailing whitespace is never part of the answer: `x => {` asks about `=>`.
+ *
+ * `{ orEmpty: true }` answers `''` where nothing precedes `at` (the start of the source), for a caller to whom "nothing
+ * before" is a legitimate answer; without it that is a broken anchor and throws. A scanner's `leadIn` was a second
+ * copy of this question (bundle-30 I6, T6).
+ */
+export function lineBefore(src, at, label = 'lineBefore', { orEmpty = false } = {}) {
   const lines = src.slice(0, at).split(/\r?\n/);
   while (lines.length && lines[lines.length - 1].trim() === '') lines.pop();
+  if (!lines.length && orEmpty) return '';
   assert.ok(lines.length, `${label}: nothing precedes index ${at} — re-anchor this gate`);
-  return lines[lines.length - 1];
+  return lines[lines.length - 1].trimEnd();
 }
 
 /**

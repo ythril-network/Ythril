@@ -40,7 +40,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readTrackedSources } from './_sources.mjs';
 import { blankComments } from './_strip-comments.mjs';
-import { bracketsOpenAt, balancedFrom } from './_structural-window.mjs';
+import { bracketsOpenAt, balancedFrom, lineBefore } from './_structural-window.mjs';
 import { topLevelFunctionSpans, topLevelObjects } from './_call-graph.mjs';
 
 const { COLLECTION_METHOD_EFFECT } = await import('../../server/dist/db/record-write-observer.js');
@@ -96,16 +96,8 @@ function calleeBefore(code, paren) {
   return { name, member: code[k] === '.' || (code[k] === '?' && code[k + 1] === '.') };
 }
 
-/** What precedes `at` on its line — or, when nothing does, on the last non-blank line before it. */
-function leadIn(code, at) {
-  let end = at;
-  for (;;) {
-    const start = code.lastIndexOf('\n', end - 1) + 1;
-    const text = code.slice(start, end).trimEnd();
-    if (text.trim() !== '' || start === 0) return text;
-    end = start - 1;
-  }
-}
+/** What precedes `at` on its line — or, when nothing does, on the last non-blank line before it (`lineBefore`, T6). */
+const leadIn = (code, at) => lineBefore(code, at, 'leadIn', { orEmpty: true });
 
 /** Is the `{` at `brace` a BLOCK (function body, if, try…) rather than an object literal? */
 function isBlock(code, brace) {

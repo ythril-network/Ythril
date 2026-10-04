@@ -483,6 +483,13 @@ describe('lineBefore — for a marker whose rule is literally "immediately above
     const doc = '**Response**\n\nSome prose.\n\n```json\n{}\n```\n';
     assert.equal(lineBefore(doc, doc.indexOf('```json')), 'Some prose.');
   });
+
+  it('mid-line, answers what precedes on that line without its trailing space; orEmpty answers the start', () => {
+    const src = 'const f = (x) => {\n  return x;\n}';
+    assert.equal(lineBefore(src, src.indexOf('{')), 'const f = (x) =>');
+    assert.equal(lineBefore(src, 0, 'start', { orEmpty: true }), '');
+    assert.throws(() => lineBefore(src, 0, 'start'), /nothing precedes/);
+  });
 });
 
 describe('docCommentBefore — the comment block above a declaration', () => {
