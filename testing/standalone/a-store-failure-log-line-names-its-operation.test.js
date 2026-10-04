@@ -36,8 +36,8 @@ describe('a store failure\'s log line names its operation', () => {
     const calls = [];
     for (const f of trackedSources('server/src')) {
       const code = blankComments(readFileSync(path.join(REPO_ROOT, f), 'utf8'));
-      for (const m of code.matchAll(/\bstoreFailureAnswer\(/g)) {
-        if (/function\s+$/.test(code.slice(Math.max(0, m.index - 20), m.index))) continue;   // the declaration
+      // Every call; the declaration (`function storeFailureAnswer(`) is not one.
+      for (const m of code.matchAll(/(?<!function\s+)\bstoreFailureAnswer\(/g)) {
         const args = argumentsOf(code, m.index + m[0].length - 1, `${f} storeFailureAnswer`);
         calls.push({ at: `${f}:${code.slice(0, m.index).split('\n').length}`, args });
       }

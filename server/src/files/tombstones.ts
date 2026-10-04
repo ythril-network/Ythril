@@ -90,11 +90,6 @@ const publishedNow = () => ({ $set: { deletedAt: new Date().toISOString() }, $un
 /** The marker a move writes on its tombstones, as a filter. */
 const moveMarker = (from: string, to: string) => ({ 'move.from': toDocId(from), 'move.to': toDocId(to) });
 
-/** Publish the pending tombstones `filter` selects. */
-async function publishPending(spaceId: string, filter: Record<string, unknown>): Promise<void> {
-  await tombstonesOf(spaceId).updateMany(asFilter<StoredFileTombstone>({ ...filter, pending: true }), asUpdate<StoredFileTombstone>(publishedNow()));
-}
-
 /** Drops still running, so a test (and nothing else) can wait for them: `whenPendingFileTombstoneDropsSettle`. */
 const drops = new DetachedWork('dropPendingFileTombstones');
 
@@ -209,7 +204,9 @@ export async function settleStalePendingFileTombstones(spaceId: string, now: Dat
   const tombstones = tombstonesOf(spaceId);
   if (drop.length > 0) await tombstones.deleteMany(asFilter<StoredFileTombstone>({ _id: { $in: drop }, pending: true }));
   // Stamped with the real time, never the sweep's `now` (`publishedNow`).
-  if (confirm.length > 0) await publishPending(spaceId, { _id: { $in: confirm } });
+  if (confirm.length > 0) {
+    await tombstones.updateMany(asFilter<StoredFileTombstone>({ _id: { $in: confirm }, pending: true }), asUpdate<StoredFileTombstone>(publishedNow()));
+  }
   if (drop.length + confirm.length > 0) {
     log.info(`File tombstones of ${peerText(spaceId)} settled from the disk: ${confirm.length} published (the path is gone), `
       + `${drop.length} dropped (the path still has its file)`);
@@ -230,7 +227,8 @@ export async function moveWasBegun(spaceId: string, from: string, to: string): P
  */
 export async function confirmBegunMove(spaceId: string, from: string, to: string): Promise<void> {
   await unlessTheStoreFailed(`confirmBegunMove for space ${peerText(spaceId)}, ${peerText(from)} → ${peerText(to)}`,
-    () => publishPending(spaceId, moveMarker(from, to)));
+    () => tombstonesOf(spaceId).updateMany(asFilter<StoredFileTombstone>({ ...moveMarker(from, to), pending: true }),
+      asUpdate<StoredFileTombstone>(publishedNow())));
 }
 
 /**
