@@ -8,7 +8,7 @@ import { syncRateLimit } from '../../rate-limit/middleware.js';
 import { getConfig, loadConfig, saveConfig } from '../../config/loader.js';
 import { requireAuth, denyReadOnly } from '../../auth/middleware.js';
 import { peerRelayCaller, PEER_RELAY_REFUSAL } from '../../auth/peer-relay.js';
-import { log } from '../../util/log.js';
+import { log, peerText } from '../../util/log.js';
 import { reportServerFailure } from '../../util/report-failure.js';
 import { applyConcludedSpaceRounds } from '../../spaces/apply-wipe-round.js';
 import { roundForPeer } from '../../networks/round-local-state.js';
@@ -128,13 +128,13 @@ syncVotesRouter.post('/networks/:networkId/votes/:roundId', syncRateLimit, requi
     // If a join round just passed via this vote relay, add the pending member.
     // A passed join: the credential holder admits, every other member of a voted network introduces (Q-154).
     if (applyPassedJoin(net, cfg.instanceId, round) === 'admitted') {
-      log.info(`Join round ${round.roundId} passed via vote relay — added ${round.subjectLabel} to network ${net.id}`);
+      log.info(`Join round ${peerText(round.roundId)} passed via vote relay — added ${peerText(round.subjectLabel)} to network ${peerText(net.id)}`);
     }
 
     saveConfig(cfg);
     res.status(200).json({ status: 'ok' });
   } catch (err) {
-    log.error(`sync POST votes: ${err}`);
+    log.error(`sync POST votes: ${peerText(err)}`);
     res.status(500).json({ error: 'Internal error' });
   }
 });

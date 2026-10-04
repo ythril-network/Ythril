@@ -20,7 +20,7 @@
 
 import crypto from 'node:crypto';
 import { getConfig, saveConfig, getSecrets, saveSecrets } from '../config/loader.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
 import { comparePeerVersions } from '../sync/peer-floor.js';
 import type { NetworkConfig, NetworkMember, VoteRound, VoteCast } from '../config/types.js';
 
@@ -123,7 +123,7 @@ export function signMessage(privateKeyPem: string, message: string): string {
     const key = crypto.createPrivateKey(privateKeyPem);
     return crypto.sign(null, Buffer.from(message, 'utf8'), key).toString('base64');
   } catch (err) {
-    log.warn(`signMessage failed: ${err instanceof Error ? err.message : String(err)}`);
+    log.warn(`signMessage failed: ${err instanceof Error ? peerText(err.message) : peerText(String(err))}`);
     return '';
   }
 }
@@ -319,12 +319,12 @@ export function pinMemberSigningKey(
   if (member.signingPublicKey === incomingKey) return false;
 
   if (isValidKeyRotation(member.instanceId, member.signingPublicKey, incomingKey, rotation)) {
-    log.info(`Accepted signed key rotation for member '${member.instanceId}' — re-pinning to the new key.`);
+    log.info(`Accepted signed key rotation for member '${peerText(member.instanceId)}' — re-pinning to the new key.`);
     member.signingPublicKey = incomingKey;
     return true;
   }
   log.warn(
-    `Refusing to change pinned signing key for member '${member.instanceId}' — no valid rotation proof (possible impersonation).`,
+    `Refusing to change pinned signing key for member '${peerText(member.instanceId)}' — no valid rotation proof (possible impersonation).`,
   );
   return false;
 }
@@ -336,7 +336,7 @@ export function pinMemberSigningKey(
  */
 export function forceSetMemberSigningKey(member: NetworkMember, key: string): void {
   member.signingPublicKey = key;
-  log.warn(`Admin force-set signing key for member '${member.instanceId}' (manual re-pin).`);
+  log.warn(`Admin force-set signing key for member '${peerText(member.instanceId)}' (manual re-pin).`);
 }
 
 // ── Vote-cast verification & relay acceptance ────────────────────────────────

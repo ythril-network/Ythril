@@ -34,7 +34,7 @@ import { withAllocatedSeqs } from '../../util/seq.js';
 import { inChunks } from '../../util/chunks.js';
 import { readStoredById, READ_CHUNK } from '../../db/read-by-id.js';
 import { mapLimit } from '../../util/map-limit.js';
-import { log } from '../../util/log.js';
+import { log, peerText } from '../../util/log.js';
 import { bulkWriteFailures, phraseWriteFailure, DUPLICATE_KEY } from '../../db/write-errors.js';
 import { isWriteTimeout } from '../../db/write-timeout.js';
 import { atReadSeq } from '../../db/at-read-seq.js';
@@ -106,7 +106,7 @@ async function writeStage(
         if (isWriteTimeout(err) && !somethingLanded) throw err;
         failures = bulkWriteFailures(err);
         if (!failures) ambiguous = true;
-        log.warn(`write commit: the ${kind} write to '${spaceId}' reported a failure: `
+        log.warn(`write commit: the ${kind} write to '${peerText(spaceId)}' reported a failure: `
           + `${failures ? `${failures.length} item(s)` : 'no per-item detail'}`);
       }
     }, `write.${kind}`);
@@ -114,7 +114,7 @@ async function writeStage(
     // The seq block itself failed, or its write timed out: nothing of this stage is known to be written.
     if (!somethingLanded) throw err;
     for (const i of ready) outcomes[i] = { ok: false, reason: phraseWriteFailure(undefined) };
-    log.warn(`write commit: the ${kind} stage for '${spaceId}' could not start after earlier stages landed: ${String(err)}`);
+    log.warn(`write commit: the ${kind} stage for '${peerText(spaceId)}' could not start after earlier stages landed: ${peerText(String(err))}`);
     return [];
   }
 
@@ -184,15 +184,15 @@ async function afterStage(
     } catch (err) {
       // The records are stored, so their outcomes stay `ok`: reporting them failed would invite a resend that
       // duplicates. What did not land is the links, and this is what says so.
-      log.warn(`write commit: ${withLinks.length} record(s) in '${spaceId}' were written but their link rows were not: `
-        + `${err instanceof Error ? err.message : String(err)}. Re-sending the same write (with its id) repairs them.`);
+      log.warn(`write commit: ${withLinks.length} record(s) in '${peerText(spaceId)}' were written but their link rows were not: `
+        + `${err instanceof Error ? peerText(err.message) : peerText(String(err))}. Re-sending the same write (with its id) repairs them.`);
     }
   }
   const toQueue = landed.filter(i => plans[i]!.enqueue).map(i => ({ recordType: plans[i]!.kind, recordId: plans[i]!.id }));
   // The write lane never throws by contract; this holds the commit to its own promise whatever the lane does.
   if (toQueue.length > 0) {
     await enqueueWriteEmbedJobs(spaceId, toQueue, { priority: EMBED_PRIORITY.write }).catch((err: unknown) => {
-      log.warn(`write commit: ${toQueue.length} record(s) in '${spaceId}' were written but not queued for embedding: ${String(err)}`);
+      log.warn(`write commit: ${toQueue.length} record(s) in '${peerText(spaceId)}' were written but not queued for embedding: ${peerText(String(err))}`);
     });
   }
 }

@@ -18,7 +18,7 @@ import { revokePeerCredentialsIfOrphaned } from '../auth/tokens.js';
 import { concludeRoundIfReady, sendMemberRemovedNotify } from '../sync/governance.js';
 import { buildBraintreeAncestors } from '../util/braintree.js';
 import { makeSignedOwnCast, forceSetMemberSigningKey } from '../util/signing.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
 import type { NetworkMember, VoteRound } from '../config/types.js';
 import { BCRYPT_ROUNDS, SSRF_SAFE_URL, safeMemberList } from '../api/networks/_shared.js';
 import type { NetworkActResult } from './network-acts.js';
@@ -84,7 +84,7 @@ export async function addMemberAct(networkId: string, input: unknown): Promise<N
     openRoundHere(freshNet, round);
     storePeerToken(instanceId, token);
     saveConfig(freshCfg);
-    log.info(`Opened join vote round ${round.roundId} for ${label} in network ${freshNet.id}`);
+    log.info(`Opened join vote round ${peerText(round.roundId)} for ${peerText(label)} in network ${peerText(freshNet.id)}`);
     return { status: 202, body: { status: 'vote_pending', roundId: round.roundId } };
   }
 
@@ -97,7 +97,7 @@ export async function addMemberAct(networkId: string, input: unknown): Promise<N
     freshNet.members.push(member);
     storePeerToken(instanceId, token);
     saveConfig(freshCfg);
-    log.info(`Added member ${label} (${instanceId}) to network ${freshNet.id}`);
+    log.info(`Added member ${peerText(label)} (${peerText(instanceId)}) to network ${peerText(freshNet.id)}`);
     return { status: 201, body: safe(member) };
   }
 
@@ -110,11 +110,11 @@ export async function addMemberAct(networkId: string, input: unknown): Promise<N
   if (concludeRoundIfReady(freshNet, round)) {
     freshNet.members.push(member);
     saveConfig(freshCfg);
-    log.info(`Braintree join immediate (root): added ${label} (${instanceId}) to network ${freshNet.id}`);
+    log.info(`Braintree join immediate (root): added ${peerText(label)} (${peerText(instanceId)}) to network ${peerText(freshNet.id)}`);
     return { status: 201, body: safe(member) };
   }
   saveConfig(freshCfg);
-  log.info(`Opened braintree join round ${round.roundId} for ${label} (${instanceId}) in network ${freshNet.id}`);
+  log.info(`Opened braintree join round ${peerText(round.roundId)} for ${peerText(label)} (${peerText(instanceId)}) in network ${peerText(freshNet.id)}`);
   return { status: 202, body: { status: 'vote_pending', roundId: round.roundId } };
 }
 
@@ -143,7 +143,7 @@ export function removeMemberAct(networkId: string, instanceId: string): NetworkA
     const round = removeRound();
     openRoundHere(net, round);
     saveConfig(cfg);
-    log.info(`Opened remove vote round ${round.roundId} for ${subject.label} in network ${net.id}`);
+    log.info(`Opened remove vote round ${peerText(round.roundId)} for ${peerText(subject.label)} in network ${peerText(net.id)}`);
     return { status: 202, body: { status: 'vote_pending', roundId: round.roundId } };
   }
 
@@ -154,7 +154,7 @@ export function removeMemberAct(networkId: string, instanceId: string): NetworkA
     recordRemoval(net, subject.instanceId);
     saveConfig(cfg);
     revokePeerCredentialsIfOrphaned(subject.instanceId)
-      .catch(err => log.error(`peer credential revocation for ${subject.instanceId}: ${err}`));
+      .catch(err => log.error(`peer credential revocation for ${peerText(subject.instanceId)}: ${peerText(err)}`));
     return { status: 204 };
   }
 
@@ -168,11 +168,11 @@ export function removeMemberAct(networkId: string, instanceId: string): NetworkA
     // Ancestor path is only [self] → removed at once (concludeRoundIfReady spliced the member)
     saveConfig(cfg);
     sendMemberRemovedNotify(round.subjectUrl, round.subjectInstanceId, net.id);
-    log.info(`Braintree remove immediate: removed ${subject.label} (${subject.instanceId}) from network ${net.id}`);
+    log.info(`Braintree remove immediate: removed ${peerText(subject.label)} (${peerText(subject.instanceId)}) from network ${peerText(net.id)}`);
     return { status: 204 };
   }
   saveConfig(cfg);
-  log.info(`Opened braintree remove round ${round.roundId} for ${subject.label} (${subject.instanceId}) in network ${net.id}`);
+  log.info(`Opened braintree remove round ${peerText(round.roundId)} for ${peerText(subject.label)} (${peerText(subject.instanceId)}) in network ${peerText(net.id)}`);
   return { status: 202, body: { status: 'vote_pending', roundId: round.roundId } };
 }
 
@@ -278,7 +278,7 @@ export async function admitByInviteKeyAct(networkId: string, input: unknown): Pr
     secrets.peerTokens[instanceId] = token;
     saveSecrets(secrets);
     saveConfig(freshCfg);
-    log.info(`Join via invite key opened vote round ${round.roundId} for ${label}`);
+    log.info(`Join via invite key opened vote round ${peerText(round.roundId)} for ${peerText(label)}`);
     return { status: 202, body: { status: 'vote_pending', roundId: round.roundId } };
   }
 
@@ -316,11 +316,11 @@ export async function admitByInviteKeyAct(networkId: string, input: unknown): Pr
       // Root case: the ancestor path is only [self] → admit immediately
       freshNet.members.push(member);
       saveConfig(freshCfg);
-      log.info(`Braintree join via invite key immediate (root): added ${label} (${instanceId}) to network ${freshNet.id}`);
+      log.info(`Braintree join via invite key immediate (root): added ${peerText(label)} (${peerText(instanceId)}) to network ${peerText(freshNet.id)}`);
       return { status: 200, body: { status: 'joined', members: safeMemberList(freshNet, instanceId), networkId: freshNet.id } };
     }
     saveConfig(freshCfg);
-    log.info(`Join via invite key opened braintree ancestor round ${round.roundId} for ${label} (${instanceId}) in network ${freshNet.id}`);
+    log.info(`Join via invite key opened braintree ancestor round ${peerText(round.roundId)} for ${peerText(label)} (${peerText(instanceId)}) in network ${peerText(freshNet.id)}`);
     return { status: 202, body: { status: 'vote_pending', roundId: round.roundId } };
   }
 
@@ -333,7 +333,7 @@ export async function admitByInviteKeyAct(networkId: string, input: unknown): Pr
   // All other types consume the key after use to prevent replay.
   if (freshNet.type !== 'pubsub') freshNet.inviteKeyHash = undefined;
   saveConfig(freshCfg);
-  log.info(`Member ${label} joined network ${freshNet.id} via invite key`);
+  log.info(`Member ${peerText(label)} joined network ${peerText(freshNet.id)} via invite key`);
 
   // Return peer the member list and network metadata (enough to start syncing)
   return { status: 200, body: { status: 'joined', members: safeMemberList(freshNet, instanceId), networkId: freshNet.id } };
@@ -354,7 +354,7 @@ export function acceptIntroductionAct(networkId: string, instanceId: string): Ne
     return { status: 404, error: 'No introduction of that instance is waiting for an OK on this network' };
   }
   saveConfig(cfg);
-  log.info(`Network ${net.id}: introduction of ${instanceId} accepted; pairing follows on the next sync`);
+  log.info(`Network ${peerText(net.id)}: introduction of ${peerText(instanceId)} accepted; pairing follows on the next sync`);
   return { status: 200, body: { status: 'accepted', instanceId } };
 }
 

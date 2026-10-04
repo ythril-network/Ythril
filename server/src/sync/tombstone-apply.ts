@@ -52,7 +52,7 @@ import { readStoredById } from '../db/read-by-id.js';
 import { TOMBSTONE_TYPES, TOMBSTONE_COLLECTION } from '../config/types.js';
 import type { TombstoneDoc } from '../config/types.js';
 import { advanceCounterPast } from './counter-after-page.js';
-import { log, logSafe } from '../util/log.js';
+import { log, logSafe, peerList, peerText } from '../util/log.js';
 import { seqRefusal, arrivalId, warnArrivalsNotStored, type ArrivalRefusal } from './arrivals.js';
 import { retagToLocalSpace, tombstoneGoverns } from './upsert-plan.js';
 
@@ -97,7 +97,8 @@ export function admitTombstone(raw: unknown): TombstoneAdmission {
   if (typeof type === 'string' && !(TOMBSTONE_TYPES as readonly string[]).includes(type)) return { unknownType: type };
   const parsed = TombstoneShape.safeParse(raw);
   if (!parsed.success) {
-    const fields = [...new Set(parsed.error.issues.map(i => i.path.join('.') || '(element)'))].join(', ');
+    // A path names a peer's keys: bounded where the reason is built (`Q-270`).
+    const fields = peerList(new Set(parsed.error.issues.map(i => i.path.join('.') || '(element)')), ', ');
     return { refused: { _id: arrivalId(raw), reason: `not a tombstone (${fields})` } };
   }
   const t = parsed.data as TombstoneDoc;
@@ -144,7 +145,7 @@ export async function applyPeerTombstones(
   }
   if (out.unknownTypes.length > 0) {
     log.warn(`${logSafe(where)}: a page carried tombstone type(s) this instance does not know `
-      + `(${[...new Set(out.unknownTypes)].slice(0, 5).map(logSafe).join(', ')}) for space '${localSpaceId}' — nothing `
+      + `(${peerList([...new Set(out.unknownTypes)].slice(0, 5).map(logSafe), ', ')}) for space '${peerText(localSpaceId)}' — nothing `
       + 'of it was applied, so the sender holds it and re-sends once this instance knows the type.');
     return out;
   }
@@ -175,13 +176,14 @@ export async function applyPeerTombstones(
         const authorised = auth.trustedRelay === true
           || (auth.peerInstanceId !== undefined && auth.peerInstanceId === issuer);
         if (!authorised) {
-          out.declined.push({ _id: t._id, reason: `issuer '${issuer}' is not the delivering peer `
-            + `'${auth.peerInstanceId ?? '-'}' — possible cross-instance delete forgery` });
+          // Both ids are text a peer chose: bounded where the reason is built (`Q-270`).
+          out.declined.push({ _id: t._id, reason: `issuer '${peerText(issuer)}' is not the delivering peer `
+            + `'${peerText(auth.peerInstanceId ?? '-')}' — possible cross-instance delete forgery` });
           continue;
         }
         const author = targets.get(t._id)?.author?.instanceId;
         if (!tombstoneGoverns(issuer, author)) {
-          out.declined.push({ _id: t._id, reason: `the record here was written by '${author}', not by the issuer '${issuer}'` });
+          out.declined.push({ _id: t._id, reason: `the record here was written by '${peerText(author)}', not by the issuer '${peerText(issuer)}'` });
           continue;
         }
         store.push(t);

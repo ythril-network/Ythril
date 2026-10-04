@@ -12,7 +12,7 @@ import { getDb, col } from '../db/mongo.js';
 import { getConfig, saveConfig, mutateConfig, getEmbeddingConfig, getDataRoot } from '../config/loader.js';
 import { ensureSpaceFilesDir } from '../files/files.js';
 import { invalidateUsageCache } from '../quota/quota.js';
-import { log } from '../util/log.js';
+import { log, peerList, peerText } from '../util/log.js';
 import type { SpaceConfig, SpaceMeta, FactDoc } from '../config/types.js';
 import { VECTOR_INDEXED_COLLECTIONS, finalizeSpaceIndexReady } from './vector-index.js';
 import { armSearchIndexPresence, reconcileSpaceSearchIndexes, forgetSpaceSearchIndexWaiters } from './search-index-presence.js';
@@ -54,7 +54,7 @@ export async function initSpace(
     const name = `${spaceId}_${suffix}`;
     if (!existing.has(name)) {
       await db.createCollection(name);
-      log.debug(`Created collection ${name}`);
+      log.debug(`Created collection ${peerText(name)}`);
     }
   }
 
@@ -221,7 +221,7 @@ export async function initSpace(
     try {
       await col(`${spaceId}_${collName}`).createIndex({ matchedText: 'text' }, { name: 'lexical_text' });
     } catch (err) {
-      log.warn(`Space '${spaceId}': lexical text index on ${collName} not created — hybrid search will fall back to vector-only for it (${err instanceof Error ? err.message : String(err)})`);
+      log.warn(`Space '${peerText(spaceId)}': lexical text index on ${collName} not created — hybrid search will fall back to vector-only for it (${err instanceof Error ? peerText(err.message) : peerText(String(err))})`);
     }
   }
 
@@ -243,9 +243,9 @@ export async function initSpace(
   );
   if (sample?.embeddingModel && sample.embeddingModel !== embCfg2.model) {
     log.warn(
-      `Space '${spaceId}': stored embeddings use model '${sample.embeddingModel}' ` +
-      `but config specifies '${embCfg2.model}'. ` +
-      `Semantic recall is disabled until re-indexed (POST /api/brain/spaces/${spaceId}/reindex).`,
+      `Space '${peerText(spaceId)}': stored embeddings use model '${peerText(sample.embeddingModel)}' ` +
+      `but config specifies '${peerText(embCfg2.model)}'. ` +
+      `Semantic recall is disabled until re-indexed (POST /api/brain/spaces/${peerText(spaceId)}/reindex).`,
     );
     setReindexNeeded(spaceId, true);
   } else {
@@ -354,7 +354,7 @@ async function confirmSpaceIndexesInBackground(spaceIds: readonly string[]): Pro
       else if (!verdict) failed.push(spaceId);
     } catch (err) {
       failed.push(spaceId);
-      log.warn(`Space '${spaceId}': index readiness check failed: ${err instanceof Error ? err.message : String(err)}`);
+      log.warn(`Space '${peerText(spaceId)}': index readiness check failed: ${err instanceof Error ? peerText(err.message) : peerText(String(err))}`);
     }
   });
 
@@ -386,14 +386,14 @@ async function confirmSpaceIndexesInBackground(spaceIds: readonly string[]): Pro
     log.warn(
       `Vector index readiness is deferred for ${deferred.length} of ${spaceIds.length} space(s): database search is `
       + 'not answering yet. They stay "building" and are confirmed by themselves when it returns.'
-      + (failed.length > 0 ? ` ${failed.length} other(s) did not reach ready: ${failed.join(', ')}.` : ''),
+      + (failed.length > 0 ? ` ${failed.length} other(s) did not reach ready: ${peerList(failed, ', ')}.` : ''),
     );
   } else if (failed.length === 0) {
     log.info(`Vector index readiness confirmed for all ${spaceIds.length} space(s).`);
   } else {
     log.warn(
       `Vector indexes did not reach ready for ${failed.length} of ${spaceIds.length} space(s): ` +
-      `${failed.join(', ')}. Recall may still work — check the per-index lines above for what was ` +
+      `${peerList(failed, ', ')}. Recall may still work — check the per-index lines above for what was ` +
       'actually observed, and Settings → Space → Danger Zone can rebuild them.',
     );
   }
@@ -489,7 +489,7 @@ export async function createSpace(opts: {
     });
   } else if (grant === 'not-stored') {
     // An OIDC session: its rights come from the identity provider's mapping, so the grant has nowhere to live.
-    log.warn(`Space '${opts.id}' was created by a session with no stored rights; its creator reaches it only if its identity mapping does`);
+    log.warn(`Space '${peerText(opts.id)}' was created by a session with no stored rights; its creator reaches it only if its identity mapping does`);
   }
   if (!isProxy(opts)) {
     // The same confirmation boot runs: a space created while search is down is deferred, not failed, and is
@@ -515,10 +515,10 @@ export async function dropSpaceData(spaceId: string): Promise<string[]> {
       const indexes = await coll.listSearchIndexes().toArray() as Array<{ name?: string }>;
       if (indexes.some(i => i.name === indexName)) {
         await coll.dropSearchIndex(indexName);
-        log.debug(`Dropped vector search index ${indexName}`);
+        log.debug(`Dropped vector search index ${peerText(indexName)}`);
       }
     } catch (err) {
-      log.warn(`Could not drop vector search index ${indexName}: ${err}`);
+      log.warn(`Could not drop vector search index ${peerText(indexName)}: ${peerText(err)}`);
       // Vector index failure is non-fatal — the collection drop below will clean it up
     }
   }
@@ -537,10 +537,10 @@ export async function dropSpaceData(spaceId: string): Promise<string[]> {
   for (const coll of existingColls.filter(c => c.name.startsWith(prefix))) {
     try {
       await db.collection(coll.name).drop();
-      log.debug(`Dropped collection ${coll.name}`);
+      log.debug(`Dropped collection ${peerText(coll.name)}`);
     } catch (err) {
       const msg = `Could not drop collection ${coll.name}: ${err}`;
-      log.warn(msg);
+      log.warn(peerText(msg));
       errors.push(msg);
     }
   }
@@ -553,10 +553,10 @@ export async function dropSpaceData(spaceId: string): Promise<string[]> {
   try {
     const { purgeSpaceActivity } = await import('../metrics/space-activity-store.js');
     const purged = await purgeSpaceActivity(spaceId);
-    if (purged > 0) log.debug(`Purged ${purged} activity bucket(s) for space '${spaceId}'`);
+    if (purged > 0) log.debug(`Purged ${purged} activity bucket(s) for space '${peerText(spaceId)}'`);
   } catch (err) {
     const msg = `Could not purge activity for '${spaceId}': ${err}`;
-    log.warn(msg);
+    log.warn(peerText(msg));
     errors.push(msg);
   }
 
@@ -567,7 +567,7 @@ export async function dropSpaceData(spaceId: string): Promise<string[]> {
     await dropSpillsForSpace(spaceId);
   } catch (err) {
     const msg = `Could not drop read spills for '${spaceId}': ${err}`;
-    log.warn(msg);
+    log.warn(peerText(msg));
     errors.push(msg);
   }
   // 3. Delete the space files directory
@@ -576,10 +576,10 @@ export async function dropSpaceData(spaceId: string): Promise<string[]> {
     // Through `removeTree`: a writer that started before this space stopped taking writes may still be adding
     // entries, and a bare recursive rm loses that race with ENOTEMPTY (see the helper).
     await removeTree(filesDir);
-    log.debug(`Deleted files directory ${filesDir}`);
+    log.debug(`Deleted files directory ${peerText(filesDir)}`);
   } catch (err) {
     const msg = `Could not delete files directory ${filesDir}: ${err}`;
-    log.warn(msg);
+    log.warn(peerText(msg));
     errors.push(msg);
   }
 
@@ -587,10 +587,10 @@ export async function dropSpaceData(spaceId: string): Promise<string[]> {
   const chunksDir = path.resolve(getDataRoot(), '.chunks', spaceId);
   try {
     await removeTree(chunksDir);
-    log.debug(`Deleted chunk uploads directory ${chunksDir}`);
+    log.debug(`Deleted chunk uploads directory ${peerText(chunksDir)}`);
   } catch (err) {
     const msg = `Could not delete chunk uploads directory ${chunksDir}: ${err}`;
-    log.warn(msg);
+    log.warn(peerText(msg));
     errors.push(msg);
   }
 
@@ -830,7 +830,7 @@ export async function wipeSpace(spaceId: string, types?: WipeCollectionType[]): 
       await removeTree(filesDir);
       await fs.mkdir(filesDir, { recursive: true });
     } catch (err) {
-      log.warn(`wipeSpace: could not clear files directory for '${spaceId}': ${err}`);
+      log.warn(`wipeSpace: could not clear files directory for '${peerText(spaceId)}': ${peerText(err)}`);
     }
   }
   invalidateUsageCache(); // a wipe frees disk + shrinks brain — honour it in the next quota check
@@ -844,7 +844,7 @@ export async function wipeSpace(spaceId: string, types?: WipeCollectionType[]): 
     links: linkRes.deletedCount ?? 0,
   };
   const typesLabel = isFullWipe ? 'all' : Array.from(targets).join(', ');
-  log.info(`Wiped space '${spaceId}' [${typesLabel}]: ${result.facts} facts, ${result.entities} entities, ${result.edges} edges, ${result.chrono} chrono, ${result.files} files, ${result.links} links`);
+  log.info(`Wiped space '${peerText(spaceId)}' [${peerText(typesLabel)}]: ${result.facts} facts, ${result.entities} entities, ${result.edges} edges, ${result.chrono} chrono, ${result.files} files, ${result.links} links`);
   return result;
 }
 
@@ -895,12 +895,12 @@ async function resumePendingSpaceOp(opts: { callerHoldsOp: boolean }): Promise<R
   //
   // A caller that is itself a space op counts once; anything beyond that is the marker's own op, still running.
   if (spaceOpsInFlight() > (opts.callerHoldsOp ? 1 : 0)) {
-    log.debug(`Pending space ${op.type} for '${op.spaceId}' is being performed right now — recovery stands aside`);
+    log.debug(`Pending space ${op.type} for '${peerText(op.spaceId)}' is being performed right now — recovery stands aside`);
     return { completed: false, reason: 'in-flight' };
   }
 
   const target = op.type === 'rename' ? `'${op.spaceId}' → '${op.newId}'` : `'${op.spaceId}'`;
-  log.warn(`Resuming interrupted space ${op.type} ${target} (started ${op.startedAt})`);
+  log.warn(`Resuming interrupted space ${op.type} ${peerText(target)} (started ${peerText(op.startedAt)})`);
 
   try {
     if (op.type === 'rename' && op.newId) {
@@ -908,14 +908,14 @@ async function resumePendingSpaceOp(opts: { callerHoldsOp: boolean }): Promise<R
       if (!space) {
         // The space is no longer under its old id — the commit already happened and
         // only the marker survived. Just clear it.
-        log.warn(`Pending rename target '${op.spaceId}' not found in config — clearing stale marker`);
+        log.warn(`Pending rename target '${peerText(op.spaceId)}' not found in config — clearing stale marker`);
         delete cfg.pendingSpaceOp;
         saveConfig(cfg);
         return { completed: true };
       }
       const errors = await moveSpaceData(op.spaceId, op.newId);
       if (errors.length > 0) {
-        log.error(`Could not complete pending rename ${target}; marker kept for the next space op or restart. Errors: ${errors.join('; ')}`);
+        log.error(`Could not complete pending rename ${peerText(target)}; marker kept for the next space op or restart. Errors: ${peerList(errors, '; ')}`);
         return { completed: false, reason: errors.join('; ') };
       }
       // Re-resolve inside the write. `space` was looked up before `moveSpaceData`, which renames
@@ -931,12 +931,12 @@ async function resumePendingSpaceOp(opts: { callerHoldsOp: boolean }): Promise<R
         if (live) applySpaceRenameToConfig(fresh, live, fromId, toId);
         delete fresh.pendingSpaceOp;
       });
-      log.info(`Completed interrupted rename ${target}`);
+      log.info(`Completed interrupted rename ${peerText(target)}`);
       return { completed: true };
     } else if (op.type === 'delete') {
       const errors = await dropSpaceData(op.spaceId);
       if (errors.length > 0) {
-        log.error(`Could not complete pending delete ${target}; marker kept for the next space op or restart. Errors: ${errors.join('; ')}`);
+        log.error(`Could not complete pending delete ${peerText(target)}; marker kept for the next space op or restart. Errors: ${peerList(errors, '; ')}`);
         return { completed: false, reason: errors.join('; ') };
       }
       // Same treatment: `dropSpaceData` is slow, so re-read before committing rather than writing
@@ -945,7 +945,7 @@ async function resumePendingSpaceOp(opts: { callerHoldsOp: boolean }): Promise<R
         fresh.spaces = fresh.spaces.filter(sp => sp.id !== op.spaceId);
         delete fresh.pendingSpaceOp;
       });
-      log.info(`Completed interrupted deletion ${target}`);
+      log.info(`Completed interrupted deletion ${peerText(target)}`);
       return { completed: true };
     } else {
       log.error(`Unknown pendingSpaceOp type '${op.type}' — clearing marker`);
@@ -954,7 +954,7 @@ async function resumePendingSpaceOp(opts: { callerHoldsOp: boolean }): Promise<R
       return { completed: true };
     }
   } catch (err) {
-    log.error(`reconcilePendingSpaceOp for ${target} failed; marker kept for the next space op or restart: ${err}`);
+    log.error(`reconcilePendingSpaceOp for ${peerText(target)} failed; marker kept for the next space op or restart: ${peerText(err)}`);
     return { completed: false, reason: err instanceof Error ? err.message : String(err) };
   }
 }

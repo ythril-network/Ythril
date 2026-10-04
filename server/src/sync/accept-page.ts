@@ -49,7 +49,7 @@
  */
 import { getAllowedChronoTypes } from '../spaces/schema-validation.js';
 import { getConfig } from '../config/loader.js';
-import { log } from '../util/log.js';
+import { log, peerList, peerText } from '../util/log.js';
 import { withAllocatedSeqs } from '../util/seq.js';
 import { withinWriteBound, outsideWriteBound } from '../db/write-bound.js';
 import { advanceCounterPast } from './counter-after-page.js';
@@ -234,8 +234,8 @@ export async function acceptArrivingPage(
         if (key === 'links') void checkLinkViolations(spaceId, doc as never, sender).catch(() => {});
       }
     });
-    log.debug(`${where}: page accepted for space '${spaceId}': ${REPLICATED_FAMILIES.map(({ payloadKey: k }) =>
-      `${k} ${summary(results[k].verdicts)}`).join('; ')}`);
+    log.debug(`${peerText(where)}: page accepted for space '${peerText(spaceId)}': ${peerList(REPLICATED_FAMILIES.map(({ payloadKey: k }) =>
+      `${k} ${summary(results[k].verdicts)}`), '; ')}`);
     return results;
   });
 }

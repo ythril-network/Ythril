@@ -35,7 +35,7 @@
  */
 
 import { col, asFilter, asUpdate, asBulk } from '../db/mongo.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
 import { inChunks } from '../util/chunks.js';
 import { withJitter } from '../util/backoff.js';
 import { createWorkSignal } from '../util/work-signal.js';
@@ -294,8 +294,8 @@ export async function enqueueWriteEmbedJobs(
     return { queued, failed: 0 };
   } catch (err) {
     const failed = records.length;
-    log.warn(`embed queue: ${failed} record(s) written to '${spaceId}' were NOT queued for embedding `
-      + `(${err instanceof Error ? err.message : String(err)}). They are stored and findable by text; `
+    log.warn(`embed queue: ${failed} record(s) written to '${peerText(spaceId)}' were NOT queued for embedding `
+      + `(${err instanceof Error ? peerText(err.message) : peerText(String(err))}). They are stored and findable by text; `
       + 'POST /api/spaces/:id/reembed queues every record that has no vector.');
     return { queued: 0, failed };
   }

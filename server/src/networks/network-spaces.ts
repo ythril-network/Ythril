@@ -39,7 +39,7 @@ import { localToRemote, remoteToLocal, recordSpaceAlias, reverseSpaceMap, isSpac
 import { PER_SPACE_WATERMARKS } from '../config/types-networks.js';
 import { logInternalAudit } from '../audit/audit.js';
 import { SPACE_ALIAS_HEAL_OPERATION } from '../audit/middleware.js';
-import { log } from '../util/log.js';
+import { log, peerList, peerText } from '../util/log.js';
 import { networkRole } from './network-role.js';
 
 /** The shape a space id has everywhere else it is accepted — create, rename, the join's space map. */
@@ -149,16 +149,16 @@ export async function addSpacesToNetwork(
     for (const e of entries) {
       if (e.localId === e.networkId || !added.includes(e.localId)) continue;
       const why = recordSpaceAlias(net, e.networkId, e.localId);
-      if (why) log.warn(`Network ${networkId}: alias '${e.networkId}' -> '${e.localId}' not recorded: ${why}`);
+      if (why) log.warn(`Network ${peerText(networkId)}: alias '${peerText(e.networkId)}' -> '${peerText(e.localId)}' not recorded: ${peerText(why)}`);
     }
     net.spaces.push(...added);
     clearSettledProposals(net, entries.filter(e => added.includes(e.localId)).map(e => e.networkId));
     widenPeerTokens(cfg, net, added);
     saveConfig(cfg);
-    log.info(`Network ${networkId}: added space(s) ${added.join(', ')} (${why})`);
+    log.info(`Network ${peerText(networkId)}: added space(s) ${peerList(added, ', ')} (${peerText(why)})`);
     return added;
   } catch (err) {
-    log.warn(`Network ${networkId}: could not add space(s) (${why}): ${err}`);
+    log.warn(`Network ${peerText(networkId)}: could not add space(s) (${peerText(why)}): ${peerText(err)}`);
     return [];
   }
 }
@@ -267,7 +267,7 @@ function holdAsPending(
   const at = new Date().toISOString();
   net.pendingSpaces = [...(net.pendingSpaces ?? []), ...fresh.map(p => ({ ...p, from, at }))];
   saveConfig(cfg);
-  log.warn(`Network ${net.id}: ${what} ${fresh.map(p => p.networkId).join(', ')}; held as pending, not adopted (${fresh[0]!.why})`);
+  log.warn(`Network ${peerText(net.id)}: ${peerText(what)} ${peerList(fresh.map(p => p.networkId), ', ')}; held as pending, not adopted (${peerText(fresh[0]!.why)})`);
 }
 
 /**
@@ -333,7 +333,7 @@ export function healSpaceAliases(
   for (const p of proposed) targets.set(p.localId, (targets.get(p.localId) ?? 0) + 1);
   const ambiguous = proposed.filter(p => targets.get(p.localId)! > 1);
   if (ambiguous.length) {
-    log.warn(`Network: not healing ${ambiguous.map(p => `'${p.networkId}'`).join(', ')} — they point at the same local space '${ambiguous[0]!.localId}'`);
+    log.warn(`Network: not healing ${peerList(ambiguous.map(p => `'${p.networkId}'`), ', ')} — they point at the same local space '${peerText(ambiguous[0]!.localId)}'`);
   }
   return proposed.filter(p => targets.get(p.localId) === 1);
 }
@@ -352,20 +352,20 @@ export async function healAnnouncedAliases(networkId: string, fromInstanceId: st
     const heals = healSpaceAliases(net, fromInstanceId, announced, spaceNames);
     const recorded = heals.filter(h => {
       const why = recordSpaceAlias(net, h.networkId, h.localId);
-      if (why) log.warn(`Network ${networkId}: heal of '${h.networkId}' -> '${h.localId}' not recorded: ${why}`);
+      if (why) log.warn(`Network ${peerText(networkId)}: heal of '${peerText(h.networkId)}' -> '${peerText(h.localId)}' not recorded: ${peerText(why)}`);
       return why === null;
     });
     if (!recorded.length) return;
     clearSettledProposals(net, recorded.map(h => h.networkId));
     saveConfig(cfg);
     for (const h of recorded) {
-      log.info(`Network ${networkId}: healed the alias '${h.networkId}' -> '${h.localId}' from upstream ${fromInstanceId}`);
+      log.info(`Network ${peerText(networkId)}: healed the alias '${peerText(h.networkId)}' -> '${peerText(h.localId)}' from upstream ${peerText(fromInstanceId)}`);
       logInternalAudit({
         method: 'SYNC', path: 'internal:space-alias-heal', spaceId: h.localId, operation: SPACE_ALIAS_HEAL_OPERATION,
       });
     }
   } catch (err) {
-    log.warn(`Network ${networkId}: alias heal from ${fromInstanceId} failed: ${err}`);
+    log.warn(`Network ${peerText(networkId)}: alias heal from ${peerText(fromInstanceId)} failed: ${peerText(err)}`);
   }
 }
 

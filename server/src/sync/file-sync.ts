@@ -14,7 +14,7 @@ import { col, asFilter, asDoc, asUpdate } from '../db/mongo.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { boundedJson } from '../util/bounded-read.js';
 import { toSafeRelPath } from '../util/paths.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
 import { buildFileManifest } from '../files/manifest.js';
 import { readStored, writeStored, deleteStored } from '../files/stored-bytes.js';
 import { resolveSafePathChecked } from '../files/sandbox.js';
@@ -60,11 +60,11 @@ export async function syncFiles(
           } catch { /* ignore per-file errors */ }
         }
       } else {
-        log.warn(`File tombstones from ${member.label}: ${tsResp.status}`);
+        log.warn(`File tombstones from ${peerText(member.label)}: ${tsResp.status}`);
       }
     } catch (err) {
       // Tombstone fetch is best-effort; continue with manifest sync.
-      log.warn(`File tombstone fetch from ${member.label}: ${err}`);
+      log.warn(`File tombstone fetch from ${peerText(member.label)}: ${peerText(err)}`);
     }
 
     // ── 1b. Push our file tombstones to the peer ──────────────────────────
@@ -93,11 +93,11 @@ export async function syncFiles(
         if (ackResp.ok) {
           recordFileTombstoneAck(member.instanceId, spaceId, ackedPositionFrom(ourTombstones));
         } else {
-          log.debug(`Push file tombstones to ${member.label}: ${ackResp.status} — position not advanced`);
+          log.debug(`Push file tombstones to ${peerText(member.label)}: ${ackResp.status} — position not advanced`);
         }
       }
     } catch (err) {
-      log.warn(`Push file tombstones to ${member.label}: ${err}`);
+      log.warn(`Push file tombstones to ${peerText(member.label)}: ${peerText(err)}`);
     }
 
     // ── 2. Fetch peer manifest and download new/changed files ─────────────
@@ -105,7 +105,7 @@ export async function syncFiles(
     // drives both directions). When neither direction needs manifest, skip entirely.
     if (!doPull && !doPush) return { pulledFiles, pushedFiles, pulledPaths };
     const resp = await peerSafeFetch(`${member.url}/api/sync/manifest?spaceId=${encodeURIComponent(remoteSpaceId)}&networkId=${encodeURIComponent(networkId)}`, opts());
-    if (!resp.ok) { log.warn(`File manifest from ${member.label}: ${resp.status}`); return { pulledFiles, pushedFiles, pulledPaths }; }
+    if (!resp.ok) { log.warn(`File manifest from ${peerText(member.label)}: ${resp.status}`); return { pulledFiles, pushedFiles, pulledPaths }; }
     const { manifest, spaceId: peerSpaceId } = await boundedJson<{ manifest: { path: string; sha256: string; size: number; modifiedAt: string }[]; spaceId?: string }>(resp, 'sync peer');
     const fileSpaceId = peerFileSpaceId(peerSpaceId, remoteSpaceId); // Q-68: the plain file routes know only the peer's local id
 
@@ -150,10 +150,10 @@ export async function syncFiles(
           transferInit(opts()),
           { timeoutMs: PEER_TRANSFER_TIMEOUT_MS },
         );
-        if (!dl.ok) { log.warn(`DL file ${remote.path} from ${member.label}: ${dl.status}`); continue; }
+        if (!dl.ok) { log.warn(`DL file ${peerText(remote.path)} from ${peerText(member.label)}: ${dl.status}`); continue; }
         const buf = Buffer.from(await dl.arrayBuffer());
         const sha = createHash('sha256').update(buf).digest('hex');
-        if (sha !== remote.sha256) { log.warn(`SHA mismatch for ${remote.path} from ${member.label}`); continue; }
+        if (sha !== remote.sha256) { log.warn(`SHA mismatch for ${peerText(remote.path)} from ${peerText(member.label)}`); continue; }
 
         pulledFiles++;
         if (!local || action === 'replace') {
@@ -168,7 +168,7 @@ export async function syncFiles(
           await recordArrivedFile(spaceId, remote.path, buf.length, sha, { instanceId: member.instanceId, instanceLabel: member.label })
             .catch(() => { /* best-effort */ });
           await recordSyncBase(spaceId, remote.path, member.instanceId, remote.sha256);
-          if (action === 'replace') log.info(`FILE_REPLACED: '${remote.path}' changed only on peer '${member.label}' since the last agreed version; took theirs.`);
+          if (action === 'replace') log.info(`FILE_REPLACED: '${peerText(remote.path)}' changed only on peer '${peerText(member.label)}' since the last agreed version; took theirs.`);
           pulledPaths.push(remote.path);
         } else {
           // File exists locally with a different hash — keep local, save incoming
@@ -192,12 +192,12 @@ export async function syncFiles(
           await col<ConflictDoc>(spaceCollection(spaceId, 'conflicts')).insertOne(asDoc<ConflictDoc>(conflictDoc));
 
           log.warn(
-            `FILE_CONFLICT: '${remote.path}' from peer '${member.label}' differs from local copy. ` +
-            `Conflict copy saved as '${conflictRelPath}'. Resolve in Settings → Conflicts.`,
+            `FILE_CONFLICT: '${peerText(remote.path)}' from peer '${peerText(member.label)}' differs from local copy. ` +
+            `Conflict copy saved as '${peerText(conflictRelPath)}'. Resolve in Settings → Conflicts.`,
           );
         }
       } catch (err) {
-        log.warn(`File sync error for ${remote.path}: ${err}`);
+        log.warn(`File sync error for ${peerText(remote.path)}: ${peerText(err)}`);
       }
     }
 
@@ -232,18 +232,18 @@ export async function syncFiles(
           },
         );
         if (!pushResp.ok) {
-          log.warn(`Push file '${localPath}' to ${member.label}: HTTP ${pushResp.status}`);
+          log.warn(`Push file '${peerText(localPath)}' to ${peerText(member.label)}: HTTP ${pushResp.status}`);
         } else {
           pushedFiles++;
           await recordSyncBase(spaceId, localPath, member.instanceId, localEntry.sha256);
         }
       } catch (err) {
-        log.warn(`Push file '${localPath}' to ${member.label}: ${err}`);
+        log.warn(`Push file '${peerText(localPath)}' to ${peerText(member.label)}: ${peerText(err)}`);
       }
     }
     } // end doPush
   } catch (err) {
-    log.warn(`syncFiles for ${member.label} space ${spaceId}: ${err}`);
+    log.warn(`syncFiles for ${peerText(member.label)} space ${peerText(spaceId)}: ${peerText(err)}`);
   }
   return { pulledFiles, pushedFiles, pulledPaths };
 }
@@ -266,5 +266,5 @@ async function syncBasesFor(spaceId: string, peerId: string): Promise<Map<string
 async function recordSyncBase(spaceId: string, filePath: string, peerId: string, sha256: string): Promise<void> {
   await col<SyncedFileMeta>(spaceCollection(spaceId, 'files'))
     .updateOne(asFilter<SyncedFileMeta>({ _id: filePath }), asUpdate<SyncedFileMeta>({ $set: { [`syncBase.${peerId}`]: sha256 } }))
-    .catch(err => log.warn(`recordSyncBase ${filePath}: ${err}`));
+    .catch(err => log.warn(`recordSyncBase ${peerText(filePath)}: ${peerText(err)}`));
 }

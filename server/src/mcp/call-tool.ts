@@ -33,7 +33,7 @@
  * whichever door its author was not using that day.
  */
 import { getConfig } from '../config/loader.js';
-import { log, currentRequestId } from '../util/log.js';
+import { log, currentRequestId, peerText } from '../util/log.js';
 import { reachableSpaceIds } from '../auth/space-reach.js';
 import { toolRightsRefusal, spaceAdminRefusal, toolReach } from './tool-rights-guard.js';
 import { toolIsVisible } from './tool-visibility.js';
@@ -300,7 +300,7 @@ export async function callTool(req: ToolCallRequest): Promise<ToolCallOutcome> {
     return { result, status, callSpace };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    log.warn(`tool '${name}' error in space '${callSpace || 'global'}': ${message}`);
+    log.warn(`tool '${peerText(name)}' error in space '${peerText(callSpace || 'global')}': ${peerText(message)}`);
     /*
      * Classified HERE, once, rather than in each tool — every write funnels through this catch, and the
      * alternative was editing a dozen throw sites, which is how the introduced/pre-existing split came to

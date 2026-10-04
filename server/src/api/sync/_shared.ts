@@ -13,7 +13,7 @@ import { REF_KINDS } from '../../config/types-knowledge.js';
 import type { KnowledgeType } from '../../config/types-knowledge.js';
 import { isWellFormedRef, collectionForRefKind, edgeEndpointKind } from '../../brain/entity-refs.js';
 import type { TokenRights } from '../../config/rights-shape.js';
-import { log } from '../../util/log.js';
+import { log, peerText } from '../../util/log.js';
 import { MAX_SYNC_SEQ } from '../../util/seq.js';
 import { isStrictLinkage } from '../../spaces/proxy.js';
 import type { FileMetaDoc, AuthorRef } from '../../config/types.js';
@@ -51,7 +51,7 @@ export async function recordLinkViolation(
     await col<LinkViolationDoc>(spaceCollection(spaceId, 'linkViolations')).insertOne(asDoc<LinkViolationDoc>(doc));
     emitWebhookEvent({ event: 'link_violation.created', spaceId, entry: doc as unknown as Record<string, unknown> });
   } catch (err) {
-    log.error(`Failed to record link violation for ${docType} ${docId}: ${err}`);
+    log.error(`Failed to record link violation for ${docType} ${peerText(docId)}: ${peerText(err)}`);
   }
 }
 

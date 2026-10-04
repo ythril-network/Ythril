@@ -56,7 +56,7 @@ import { announcedSpaces, widenPeerTokensOf } from '../networks/network-spaces.j
 import { concludeRoundIfReady } from '../sync/governance.js';
 import { buildBraintreeAncestors } from '../util/braintree.js';
 import { makeSignedOwnCast } from '../util/signing.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
 import { SSRF_SAFE_URL, safeMemberList } from './networks/_shared.js';
 import { stampAdmission, isMeshNetwork } from '../networks/member-introductions.js';
 import type { NetworkMember, VoteRound } from '../config/types.js';
@@ -167,7 +167,7 @@ inviteRouter.post('/generate', globalRateLimit, requireAuth, denyReadOnly, async
     }
     if ((target.consecutiveFailures ?? 0) < 10) {
       // Warn but don't block — admin may want to reparent proactively
-      log.warn(`Reparent invite generated for '${target.label}' whose parent does not yet appear offline (${target.consecutiveFailures ?? 0} consecutive failures)`);
+      log.warn(`Reparent invite generated for '${peerText(target.label)}' whose parent does not yet appear offline (${target.consecutiveFailures ?? 0} consecutive failures)`);
     }
   }
 
@@ -206,8 +206,8 @@ async function openHandshakeSession(
     ...(opts.redeemed ? { redeemed: opts.redeemed } : {}),
   });
 
-  log.info(`Invite handshake ${opts.redeemed ? 'redeemed by key' : 'generated'} for network ${networkId} (session ${sessionKey})${
-    reparentInstanceId ? ` [reparent target: ${reparentInstanceId}]` : ''
+  log.info(`Invite handshake ${opts.redeemed ? 'redeemed by key' : 'generated'} for network ${peerText(networkId)} (session ${peerText(sessionKey)})${
+    reparentInstanceId ? ` [reparent target: ${peerText(reparentInstanceId)}]` : ''
   }`);
 
   // Re-read config AFTER the awaits above rather than reusing the snapshot taken at the top of the
@@ -346,7 +346,7 @@ inviteRouter.post('/apply', authRateLimit, async (req, res) => {
   // the real peer's networks. A reparent is exempt: its session is already bound to one member, and the grandchild
   // holds no token of ours to present.
   if (!session.reparentInstanceId && !(await claimedPeerIsProven(cfg, instanceId, req.get('authorization')))) {
-    log.warn(`Invite apply refused: '${instanceLabel}' claimed the id of an existing peer (${instanceId}) without proof, for network ${networkId}`);
+    log.warn(`Invite apply refused: '${peerText(instanceLabel)}' claimed the id of an existing peer (${peerText(instanceId)}) without proof, for network ${peerText(networkId)}`);
     res.status(403).json({ error: 'This instance id is already a peer here: apply with the token this instance issued to it, to prove it is that peer' });
     return;
   }
@@ -385,7 +385,7 @@ inviteRouter.post('/apply', authRateLimit, async (req, res) => {
   session.pendingMember = { instanceId, instanceLabel, instanceUrl };
   updateSession(sessionKey, session);
 
-  log.info(`Invite apply from ${instanceLabel} (${instanceId}) for network ${networkId}`);
+  log.info(`Invite apply from ${peerText(instanceLabel)} (${peerText(instanceId)}) for network ${peerText(networkId)}`);
 
   res.json({
     encryptedTokenForB,
@@ -516,7 +516,7 @@ inviteRouter.post('/finalize', authRateLimit, async (req, res) => {
       selfInNet.children.push(session.reparentInstanceId);
     }
 
-    log.info(`Reparent handshake complete: '${instanceLabel}' (${instanceId}) temporarily re-parented to this instance in network ${session.networkId}`);
+    log.info(`Reparent handshake complete: '${peerText(instanceLabel)}' (${peerText(instanceId)}) temporarily re-parented to this instance in network ${peerText(session.networkId)}`);
     responseStatus = 'reparented';
   } else {
     // ── Normal join path ────────────────────────────────────────────────────
@@ -545,7 +545,7 @@ inviteRouter.post('/finalize', authRateLimit, async (req, res) => {
       // Direct join — documented behavior for these types.
       stampAdmission(net, newMember);
       net.members.push(newMember);
-      log.info(`Invite handshake complete: ${instanceLabel} (${instanceId}) joined network ${session.networkId}`);
+      log.info(`Invite handshake complete: ${peerText(instanceLabel)} (${peerText(instanceId)}) joined network ${peerText(session.networkId)}`);
       responseStatus = 'joined';
     } else {
       // ── Vote-governed types (closed / democratic / braintree) — S9 ────────
@@ -574,10 +574,10 @@ inviteRouter.post('/finalize', authRateLimit, async (req, res) => {
       if (concludeRoundIfReady(net, round)) {
         // Sole-voter case (braintree root / no other members): admit immediately.
         net.members.push(newMember);
-        log.info(`Invite handshake complete: ${instanceLabel} (${instanceId}) joined network ${session.networkId}`);
+        log.info(`Invite handshake complete: ${peerText(instanceLabel)} (${peerText(instanceId)}) joined network ${peerText(session.networkId)}`);
         responseStatus = 'joined';
       } else {
-        log.info(`Invite handshake held: join round ${round.roundId} opened for ${instanceLabel} (${instanceId}) in network ${session.networkId}`);
+        log.info(`Invite handshake held: join round ${peerText(round.roundId)} opened for ${peerText(instanceLabel)} (${peerText(instanceId)}) in network ${peerText(session.networkId)}`);
         responseStatus = 'vote_pending';
         pendingRoundId = round.roundId;
       }

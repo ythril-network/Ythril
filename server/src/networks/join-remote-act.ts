@@ -23,7 +23,7 @@ import { getConfig, saveConfig, getSecrets, saveSecrets } from '../config/loader
 import { createToken, revokeToken, adoptPeerToken } from '../auth/tokens.js';
 import { peerTokenSpaces } from '../auth/peer-token-scope.js';
 import { createSpace } from '../spaces/lifecycle.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
 import type { NetworkConfig, NetworkMember } from '../config/types.js';
 import { mergePeerRoster } from './member-introductions.js';
 import { peerSafeFetch } from '../sync/peer-fetch.js';
@@ -144,7 +144,7 @@ export async function joinRemoteAct(caller: Caller, input: unknown): Promise<Net
       signal: AbortSignal.timeout(15_000),
     });
   } catch (err) {
-    log.warn(`join-remote: could not reach ${inviteUrl}: ${err}`);
+    log.warn(`join-remote: could not reach ${peerText(inviteUrl)}: ${peerText(err)}`);
     return { status: 502, error: `Could not reach inviting brain: ${err}` };
   }
 
@@ -232,7 +232,7 @@ export async function joinRemoteAct(caller: Caller, input: unknown): Promise<Net
         // Credited to the joining token, which then administers what the join created (Q-134).
         await createSpace({ id: localId, label: localId.charAt(0).toUpperCase() + localId.slice(1) }, { tokenId: caller.id ?? null });
         createdSpaces.push(localId);
-        log.info(`join-remote: auto-created space '${localId}'${localId !== remoteId ? ` (alias for remote '${remoteId}')` : ''} for network ${networkId}`);
+        log.info(`join-remote: auto-created space '${peerText(localId)}'${localId !== remoteId ? ` (alias for remote '${peerText(remoteId)}')` : ''} for network ${peerText(networkId)}`);
       } catch (err) {
         return { status: 500, error: `Failed to create space '${localId}': ${err}` };
       }
@@ -332,7 +332,7 @@ export async function joinRemoteAct(caller: Caller, input: unknown): Promise<Net
     for (const s of allNetworkSpaces) if (!net.spaces.includes(s)) net.spaces.push(s);
     for (const [remote, local] of Object.entries(spaceMap)) {
       const why = recordSpaceAlias(net, remote, local);
-      if (why) log.warn(`join-remote: network ${networkId}: alias '${remote}' -> '${local}' not recorded: ${why}`);
+      if (why) log.warn(`join-remote: network ${peerText(networkId)}: alias '${peerText(remote)}' -> '${peerText(local)}' not recorded: ${peerText(why)}`);
     }
   }
   // Who established each membership, so the leave rule can tell this token's own from another's.
@@ -365,7 +365,7 @@ export async function joinRemoteAct(caller: Caller, input: unknown): Promise<Net
   widenPeerTokensOf(freshCfg, [applyData.instanceId], allNetworkSpaces);
   saveConfig(freshCfg);
   if (armSchedule) scheduleSyncForNetwork(networkId, armSchedule);
-  log.info(`join-remote: joined '${applyData.networkLabel}' (${networkId}) via RSA handshake`);
+  log.info(`join-remote: joined '${peerText(applyData.networkLabel)}' (${peerText(networkId)}) via RSA handshake`);
 
   return { status: 200, body: {
     status: finalizeData.status ?? 'joined',
@@ -417,7 +417,7 @@ export async function joinByInviteKeyAct(caller: Caller, input: unknown): Promis
       body: JSON.stringify({ inviteKey }), signal: AbortSignal.timeout(30_000),
     });
   } catch (err) {
-    log.warn(`join-by-key: could not reach ${redeemUrl}: ${err}`);
+    log.warn(`join-by-key: could not reach ${peerText(redeemUrl)}: ${peerText(err)}`);
     return { status: 502, error: `Could not reach the publisher: ${err}` };
   }
   if (!r.ok) return relay(r);

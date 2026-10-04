@@ -50,7 +50,7 @@
 import { col } from '../db/mongo.js';
 import { getEmbeddingConfig } from '../config/loader.js';
 import { atlasScoreFromParts, norm } from './vector-score.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
 import { warnOnce } from '../util/warn-once.js';
 import { envInt } from '../config/env-num.js';
 import { recallFreshWritesFoundTotal, recallFreshScanCappedTotal } from '../metrics/registry.js';
@@ -177,7 +177,7 @@ export async function matchFreshWrites(
       // warning per call buries the one line that says what to change.
       capWarnings(collName, () => {
         log.warn(
-          `Fresh-write scan hit its ${FRESH_SCAN_CAP}-document cap on ${collName}: only the newest ` +
+          `Fresh-write scan hit its ${FRESH_SCAN_CAP}-document cap on ${peerText(collName)}: only the newest ` +
           `${FRESH_SCAN_CAP} records of the last ${Math.round(FRESH_WINDOW_MS / 1000)}s were compared, so a record ` +
           'written in that window and not yet indexed may be missing from a search or a duplicate check. ' +
           'Raise DUPE_FRESH_SCAN_CAP if this space sustains that write rate.',
@@ -194,7 +194,7 @@ export async function matchFreshWrites(
     }
     return out;
   } catch (err) {
-    log.debug(`Fresh-write scan skipped for ${collName}: ${err instanceof Error ? err.message : String(err)}`);
+    log.debug(`Fresh-write scan skipped for ${peerText(collName)}: ${err instanceof Error ? peerText(err.message) : peerText(String(err))}`);
     return [];
   }
 }

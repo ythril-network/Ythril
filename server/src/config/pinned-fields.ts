@@ -27,7 +27,7 @@
  * pin-that-did-not-apply is visible either way — the same posture the storage pins already take with a malformed
  * number ("ignored, loudly").
  */
-import { log } from '../util/log.js';
+import { log, peerList } from '../util/log.js';
 
 /**
  * Every field path a pin may name.
@@ -132,9 +132,9 @@ export function pinnedFieldsFromEnv(raw: string | undefined = process.env['YTHRI
     // Telling an operator it does not exist would send them looking for a typo they did not make.
     log.warn(
       `YTHRIL_PINNED_FIELDS names ${result.unknown.length} entr(y/ies) that are not pinnable: `
-      + `${result.unknown.join(', ')}. Those are NOT pinned. A path must be a field the admin API can write — `
+      + `${peerList(result.unknown, ', ')}. Those are NOT pinned. A path must be a field the admin API can write — `
       + 'check the spelling, and note that fields the API never accepts are already fixed and need no pin. '
-      + `Pinned and applied: ${result.paths.length > 0 ? result.paths.join(', ') : 'none'}.`,
+      + `Pinned and applied: ${result.paths.length > 0 ? peerList(result.paths, ', ') : 'none'}.`,
     );
   }
   return result;

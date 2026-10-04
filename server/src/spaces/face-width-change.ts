@@ -53,7 +53,7 @@ import { col, asFilter } from '../db/mongo.js';
 import type { FileMetaDoc } from '../config/types.js';
 import { FACE_DESCRIPTOR_DIMS } from '../files/media/face-descriptor.js';
 import { faceIndexWidth } from './vector-index.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
 import { spaceCollection } from '../db/space-collection.js';
 
 /** Why a width change is refused, or `null` when it may proceed. */
@@ -117,7 +117,7 @@ export async function refuseFaceWidthChange(
     };
   }
 
-  log.info(`Space '${spaceId}': face descriptor width ${effective} -> ${requested} (gallery empty, `
+  log.info(`Space '${peerText(spaceId)}': face descriptor width ${effective} -> ${requested} (gallery empty, `
     + `index ${built === null ? 'not built' : `already ${built}`}).`);
   return null;
 }

@@ -3,7 +3,7 @@ import { getEmbeddingConfig, getModelSlots } from '../config/loader.js';
 import { ssrfSafeFetch } from '../util/ssrf.js';
 import { allowPrivateForSlot } from '../config/model-egress-policy.js';
 import { embeddingsUrlFor } from '../files/converters/vlm-endpoint.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
 import { withJitter } from '../util/backoff.js';
 import { embeddingDurationSeconds, embeddingQueueDepth, embeddingRetryTotal } from '../metrics/registry.js';
 import { slotTimeoutMs } from '../config/model-slots.js';
@@ -203,7 +203,7 @@ async function embedViaHttp(
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    log.warn(`Embedding endpoint unreachable (${cfg.baseUrl}): ${msg}`);
+    log.warn(`Embedding endpoint unreachable (${peerText(cfg.baseUrl)}): ${peerText(msg)}`);
     throw new Error(
       `Could not reach embedding endpoint at ${cfg.baseUrl}. ` +
       `Make sure an embedding server (e.g. Ollama) is running and configured.`,

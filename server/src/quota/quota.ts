@@ -36,7 +36,7 @@ import path from 'node:path';
 import { getDataRoot, getStorageConfig } from '../config/loader.js';
 import { getDb } from '../db/mongo.js';
 import { READ_SPILL_COLLECTIONS } from '../brain/read-spill-store.js';
-import { log } from '../util/log.js';
+import { log, peerList } from '../util/log.js';
 
 const GiB = 1024 ** 3;
 
@@ -340,7 +340,7 @@ async function measureUsageUncached(): Promise<UsageGiB> {
   const reasons = [...incomplete.files.map(r => `files: ${r}`), ...incomplete.brain.map(r => `brain: ${r}`)];
   if (reasons.length > 0) {
     log.warn('Storage usage measurement is INCOMPLETE, so every figure below is a floor and a quota compared '
-      + `against it can only under-report: ${reasons.join('; ')}`);
+      + `against it can only under-report: ${peerList(reasons, '; ')}`);
   }
 
   const filesGiB = files.bytes / GiB;

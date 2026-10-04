@@ -20,7 +20,7 @@ import { embed } from './embedding.js';
 import { entityEmbedText } from './embed-text.js';
 import { getEntityById } from './entities.js';
 import { getConfig } from '../config/loader.js';
-import { log } from '../util/log.js';
+import { log, peerList, peerText } from '../util/log.js';
 import { mergeTags } from './merge-fields.js';
 import { edgeIdFor } from './edge-id.js';
 import { linkIdFor } from './links.js';
@@ -418,7 +418,7 @@ export function applyResolutions(
   // Apply absorbed-only properties
   for (const p of absorbedOnly) {
     if (!isSafeKey(p.key)) {
-      log.warn(`merge: skipping prototype-polluting property key '${p.key}'`);
+      log.warn(`merge: skipping prototype-polluting property key '${peerText(p.key)}'`);
       continue;
     }
     result[p.key] = p.value as string | number | boolean;
@@ -427,7 +427,7 @@ export function applyResolutions(
   // Apply conflict resolutions
   for (const c of conflicts) {
     if (!isSafeKey(c.key)) {
-      log.warn(`merge: skipping prototype-polluting property key '${c.key}'`);
+      log.warn(`merge: skipping prototype-polluting property key '${peerText(c.key)}'`);
       continue;
     }
     const resolution = c.resolution!;
@@ -448,7 +448,7 @@ export function applyResolutions(
         result[c.key] = BOOLEAN_FNS[fnName](c.survivorValue as boolean, c.absorbedValue as boolean);
       } else {
         // Validation should prevent reaching this branch — log a warning so mismatches are diagnosable.
-        log.warn(`merge: fn '${fnName}' not applicable for type '${c.type}' on property '${c.key}' — keeping survivor value`);
+        log.warn(`merge: fn '${peerText(fnName)}' not applicable for type '${peerText(c.type)}' on property '${peerText(c.key)}' — keeping survivor value`);
       }
     }
   }
@@ -619,10 +619,10 @@ export async function executeMerge(
   if (verdict.blocked) throw new MergeSchemaViolation(survivor._id, absorbed._id, spaceId, violations);
   if (verdict.warnings.length > 0) {
     log.warn(
-      `merge: the survivor '${survivor._id}' in space '${spaceId}' violates its own schema after merging `
-      + `'${absorbed._id}' — the merged properties are a value neither input had. The space is in 'warn' `
+      `merge: the survivor '${peerText(survivor._id)}' in space '${peerText(spaceId)}' violates its own schema after merging `
+      + `'${peerText(absorbed._id)}' — the merged properties are a value neither input had. The space is in 'warn' `
       + `mode so the merge PROCEEDED; these would have been refused on a direct write: `
-      + verdict.warnings.map(v => `${v.field}: ${v.reason}`).join('; '),
+      + peerList(verdict.warnings.map(v => `${v.field}: ${v.reason}`), '; '),
     );
   }
 
@@ -668,8 +668,8 @@ export async function executeMerge(
     try {
       await retireEmbedJobs(spaceId, 'edge', written.rekeyed.map(m => embedQueueWorkFor(m).retire));
     } catch (err) {
-      log.warn(`merge: '${absorbed._id}' was merged into '${survivor._id}' in '${spaceId}', but the embed jobs of `
-        + `${written.rekeyed.length} re-keyed edge(s) were not retired: ${err instanceof Error ? err.message : String(err)}`);
+      log.warn(`merge: '${peerText(absorbed._id)}' was merged into '${peerText(survivor._id)}' in '${peerText(spaceId)}', but the embed jobs of `
+        + `${written.rekeyed.length} re-keyed edge(s) were not retired: ${err instanceof Error ? peerText(err.message) : peerText(String(err))}`);
     }
     await enqueueWriteEmbedJobs(spaceId, written.rekeyed.map(m => ({ recordType: 'edge' as const, recordId: embedQueueWorkFor(m).enqueue })),
       { priority: EMBED_PRIORITY.background });

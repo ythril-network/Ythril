@@ -18,7 +18,7 @@
 
 import { ssrfSafeFetch, isPeerUrlSafe } from '../util/ssrf.js';
 import { getConfig } from '../config/loader.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
 import { warnOnce } from '../util/warn-once.js';
 import { requireEncryptedTransport, allowInsecurePeersRaw, isPeerSchemeAllowed } from '../config/transport-security.js';
 
@@ -92,7 +92,7 @@ export function peerSafeFetch(
       return Promise.reject(new Error(`Refusing plaintext sync to ${host}: requireEncryptedTransport is enabled`));
     }
     if (!allowInsecurePeersRaw()) {
-      plaintextWarnings(host, () => log.warn(`Syncing to plaintext peer ${host} over http:// — data and tokens are unencrypted in transit. Use https:// or set allowInsecurePeers to acknowledge.`));
+      plaintextWarnings(host, () => log.warn(`Syncing to plaintext peer ${peerText(host)} over http:// — data and tokens are unencrypted in transit. Use https:// or set allowInsecurePeers to acknowledge.`));
     }
   }
   // A timeout the CALLER does not have to remember. `fetch` has none by default, and a peer that

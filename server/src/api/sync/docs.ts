@@ -12,7 +12,7 @@ import { getAllowedChronoTypes } from '../../spaces/schema-validation.js';
 import { getConfig } from '../../config/loader.js';
 import { listTombstones } from '../../brain/tombstones.js';
 import { requireAuth, denyReadOnly } from '../../auth/middleware.js';
-import { log, logSafe } from '../../util/log.js';
+import { log, logSafe, peerText } from '../../util/log.js';
 import { reportServerFailure } from '../../util/report-failure.js';
 import { sendSyncWriteFailure } from './write-failure.js';
 import { settledSeqRange } from '../../util/seq.js';
@@ -200,7 +200,7 @@ type PushKey = PayloadKey;
 /** The peer identity the request's token proves, or undefined (an admin or local token). */
 const pusherOf = (req: Request): string | undefined => callerPeerId(req.authToken as Record<string, unknown>);
 const peerOf = (req: Request): string => pusherOf(req) ?? 'unknown';
-const forkCapError = (id: string) => ({ error: `Fork depth limit (${MAX_FORK_DEPTH}) exceeded for _id '${id}'` });
+const forkCapError = (id: string) => ({ error: `Fork depth limit (${MAX_FORK_DEPTH}) exceeded for _id '${peerText(id)}'` });
 /**
  * A refused document's 400, in the words of the rule that refused it — the arrival writer's shape check
  * (`arrivalRefusal`: an implausible seq answers `seq N is too close to the protocol ceiling and was refused`, as
@@ -360,7 +360,7 @@ syncDocsRouter.post('/batch-upsert', syncRateLimit, requireAuth, denyReadOnly, a
       overflow[key] = Math.max(0, sent.length - BATCH_FAMILY_CAP);
       if (overflow[key] > 0) {
         log.warn(`batch-upsert: ${overflow[key]} ${key} document(s) past the ${BATCH_FAMILY_CAP}-per-family cap for space `
-          + `'${spaceId}' from peer '${logSafe(peer)}' were REJECTED; the sender offers them again in its next page.`);
+          + `'${peerText(spaceId)}' from peer '${logSafe(peer)}' were REJECTED; the sender offers them again in its next page.`);
       }
       page[key] = sent.slice(0, BATCH_FAMILY_CAP);
     }
@@ -396,10 +396,10 @@ syncDocsRouter.post('/batch-upsert', syncRateLimit, requireAuth, denyReadOnly, a
       const seqs = parsed(key).map(d => d.seq);
       return seqs.length === 0 ? '-' : `${Math.min(...seqs)}..${Math.max(...seqs)}`;
     };
-    log.debug(`Batch-upsert accepted for space '${spaceId}': facts ${JSON.stringify(memStats)} seq ${range('facts')}; `
-      + `entities ${JSON.stringify(entStats)} seq ${range('entities')}; edges ${JSON.stringify(edgeStats)} seq ${range('edges')}; `
-      + `chrono ${JSON.stringify(chronoStats)} seq ${range('chrono')}; links ${JSON.stringify(linkStats)} seq ${range('links')}; `
-      + `filemeta ${JSON.stringify(fileMetaStats)} seq ${range('filemeta')}`);
+    log.debug(`Batch-upsert accepted for space '${peerText(spaceId)}': facts ${peerText(JSON.stringify(memStats))} seq ${peerText(range('facts'))}; `
+      + `entities ${peerText(JSON.stringify(entStats))} seq ${peerText(range('entities'))}; edges ${peerText(JSON.stringify(edgeStats))} seq ${peerText(range('edges'))}; `
+      + `chrono ${peerText(JSON.stringify(chronoStats))} seq ${peerText(range('chrono'))}; links ${peerText(JSON.stringify(linkStats))} seq ${peerText(range('links'))}; `
+      + `filemeta ${peerText(JSON.stringify(fileMetaStats))} seq ${peerText(range('filemeta'))}`);
 
     /*
      * ALL SIX FAMILIES answer, with `rejected` per family (Q-59): what the sender must NOT count as delivered —

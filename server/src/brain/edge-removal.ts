@@ -25,7 +25,7 @@ import { col, asFilter } from '../db/mongo.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { readStoredById } from '../db/read-by-id.js';
 import { inChunks } from '../util/chunks.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
 import { inHeldTransaction } from './held-transaction.js';
 import { writeTombstones } from './tombstones.js';
 import { retireEmbedJobs } from './embed-queue.js';
@@ -48,8 +48,8 @@ export async function removeEdges(spaceId: string, ids: readonly string[], actor
     try {
       await retireEmbedJobs(spaceId, 'edge', [...removed]);
     } catch (err) {
-      log.warn(`edge removal: ${removed.size} edge(s) were deleted in '${spaceId}' but their embed jobs were not retired: `
-        + `${err instanceof Error ? err.message : String(err)}`);
+      log.warn(`edge removal: ${removed.size} edge(s) were deleted in '${peerText(spaceId)}' but their embed jobs were not retired: `
+        + `${err instanceof Error ? peerText(err.message) : peerText(String(err))}`);
     }
     if (actor) for (const _id of removed) emitWebhookEvent({ event: 'edge.deleted', spaceId, entry: { _id }, ...actor });
   }

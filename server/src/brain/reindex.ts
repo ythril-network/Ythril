@@ -51,7 +51,7 @@ import { getEmbeddingConfig } from '../config/loader.js';
 import { needsReindex, clearReindexFlag, setReindexNeeded } from '../spaces/_shared.js';
 import { isProxy, concreteSpaces } from '../spaces/proxy.js';
 import { reindexInProgress } from '../metrics/registry.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { queueEmbedSweep, countUnswept, type SweepCursor } from './queue-embed-sweep.js';
 import { EMBED_PRIORITY, getEmbedJobCounts } from './embed-queue.js';
@@ -246,13 +246,13 @@ async function sweepRun(spaceId: string): Promise<void> {
   try {
     const run = await runs(spaceId).findOne(asFilter<ReindexRunDoc>({ _id: RUN_ID })) as ReindexRunDoc | null;
     const at = run?.cursor ? ` (stopped after ${run.cursor.kind} ${run.cursor.lastId})` : '';
-    log.error(`Reindex of '${spaceId}' could not queue its records after ${SWEEP_ATTEMPTS} attempts${at}: ${lastError}`);
+    log.error(`Reindex of '${peerText(spaceId)}' could not queue its records after ${SWEEP_ATTEMPTS} attempts${peerText(at)}: ${peerText(lastError)}`);
     await runs(spaceId).updateOne(
       asFilter<ReindexRunDoc>({ _id: RUN_ID }),
       { $set: { error: `the sweep failed after ${SWEEP_ATTEMPTS} attempts: ${lastError.slice(0, 300)}` } },
     );
   } catch (err) {
-    log.error(`Reindex of '${spaceId}': could not record the sweep's failure: ${err instanceof Error ? err.message : String(err)}`);
+    log.error(`Reindex of '${peerText(spaceId)}': could not record the sweep's failure: ${err instanceof Error ? peerText(err.message) : peerText(String(err))}`);
   }
   await refreshGauge().catch(() => { /* the next tick recomputes it */ });
 }
@@ -322,19 +322,19 @@ export async function reindexRunTick(): Promise<void> {
           await runs(s.id).updateOne(asFilter<ReindexRunDoc>({ _id: RUN_ID }),
             { $set: { lastRemaining: remaining, progressAt: new Date(now).toISOString(), warnedStalled: false } });
         } else if (!run.warnedStalled && now - Date.parse(run.progressAt ?? run.startedAt) > STALLED_MS) {
-          log.warn(`Reindex of '${s.id}' has made no progress for ${Math.round(STALLED_MS / 60_000)} minutes: `
+          log.warn(`Reindex of '${peerText(s.id)}' has made no progress for ${Math.round(STALLED_MS / 60_000)} minutes: `
             + `${remaining} record(s) still to rebuild${run.sweepComplete ? '' : ', and the sweep has not finished'}`);
           await runs(s.id).updateOne(asFilter<ReindexRunDoc>({ _id: RUN_ID }), { $set: { warnedStalled: true } });
         }
         continue;
       }
       for (const mid of run.members) clearReindexFlag(mid);
-      log.info(`Reindex completed for space '${s.id}': queued=${run.queued ?? 0}, `
+      log.info(`Reindex completed for space '${peerText(s.id)}': queued=${run.queued ?? 0}, `
         + `suppressed=${run.skippedSuppressed ?? 0}, failed=${failed}`);
       await runs(s.id).deleteOne(asFilter<ReindexRunDoc>({ _id: RUN_ID }));
       active--;
     } catch (err) {
-      log.warn(`Reindex watcher: '${s.id}': ${err instanceof Error ? err.message : String(err)}`);
+      log.warn(`Reindex watcher: '${peerText(s.id)}': ${err instanceof Error ? peerText(err.message) : peerText(String(err))}`);
     }
   }
   // Counted on the same pass rather than by reading every run document again.

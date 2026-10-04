@@ -27,7 +27,7 @@
  * is where the code already is. Put the new behaviour beside it rather than inside it."* It refused this
  * change inside the engine, correctly, so the behaviour lives here and the engine calls it.
  */
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
 import { boundedJson } from '../util/bounded-read.js';
 
 /**
@@ -62,8 +62,8 @@ export async function reportPushRefusals(
     // Clamped: a peer's number is a claim, and one larger than the batch must not make `pushed` negative.
     const refused = Math.min(Math.max(0, Number(stats?.rejected ?? stats?.forkDepthRefused ?? 0) || 0), batchSize);
     if (refused > 0) {
-      log.warn(`Batch push ${payloadKey} to ${peerLabel}: ${refused} of ${batchSize} record(s) DROPPED, refused by the peer `
-        + `in space '${spaceId}' (invalid for its schema, an undeclared type, an implausible seq, or a fork chain at `
+      log.warn(`Batch push ${peerText(payloadKey)} to ${peerText(peerLabel)}: ${refused} of ${batchSize} record(s) DROPPED, refused by the peer `
+        + `in space '${peerText(spaceId)}' (invalid for its schema, an undeclared type, an implausible seq, or a fork chain at `
         + 'its cap). They are not counted as pushed and will not be offered again — the log on the peer names the records.');
     }
     return refused;

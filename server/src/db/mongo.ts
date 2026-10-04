@@ -1,6 +1,6 @@
 ﻿import { MongoClient, type Db, type Collection, type Filter, type UpdateFilter, type OptionalUnlessRequiredId, type AnyBulkWriteOperation } from 'mongodb';
 import { getMongoUri } from '../config/loader.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
 import { dbNameFromUri } from './db-name.js';
 import { backoffDelayMs } from '../util/backoff.js';
 import { envInt } from '../config/env-num.js';
@@ -98,7 +98,7 @@ export async function connectMongo(): Promise<MongoClient> {
   const uri = getMongoUri();
   _dbName = dbNameFromUri(uri);
   const safeUri = uri.replace(/\/\/[^@]*@/, '//[credentials]@');
-  log.debug(`Connecting to MongoDB at ${safeUri} (database: ${_dbName})`);
+  log.debug(`Connecting to MongoDB at ${peerText(safeUri)} (database: ${peerText(_dbName)})`);
 
   const deadline = Date.now() + CONNECT_RETRY_BUDGET_MS;
   for (let attempt = 1; ; attempt++) {
@@ -115,7 +115,7 @@ export async function connectMongo(): Promise<MongoClient> {
       if (!isTransientConnectError(err) || Date.now() >= deadline) throw err;
       // 250 ms doubling to 4 s, equal-jittered: attempt 1 of the loop is the helper's attempt 0.
       const wait = backoffDelayMs(attempt - 1, 250, 4_000);
-      log.warn(`MongoDB not ready yet (${name}, attempt ${attempt}); retrying in ${wait}ms.`);
+      log.warn(`MongoDB not ready yet (${peerText(name)}, attempt ${attempt}); retrying in ${wait}ms.`);
       await new Promise(r => setTimeout(r, wait));
     }
   }

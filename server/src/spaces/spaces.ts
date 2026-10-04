@@ -5,7 +5,7 @@
  * `lifecycle.ts` (init/create/remove/wipe/recovery), `rename.ts`, and `_shared.ts`.
  */
 import { getConfig, saveConfig } from '../config/loader.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
 import type { SpaceConfig, SpaceMeta, DupeActionRule, DocExtractionMode, ImageLevel, AudioLevel, VideoLevel, TextLevel, RecordTtlWindows } from '../config/types.js';
 import { reconcileSpaceSearchIndexes } from './search-index-presence.js';
 import { syncSchemaFiles, META_VERSION_CAP } from './_shared.js';
@@ -132,13 +132,13 @@ export function updateSpace(
     const schemaChanged = JSON.stringify(prev?.typeSchemas ?? null) !== JSON.stringify(updates.meta.typeSchemas ?? null);
     if (schemaChanged) {
       reconcileSpaceSearchIndexes(spaceId, { waitForReady: false }).catch(err =>
-        log.warn(`P6: vector filter-field rebuild after schema change on '${spaceId}': ${err}`));
+        log.warn(`P6: vector filter-field rebuild after schema change on '${peerText(spaceId)}': ${peerText(err)}`));
     }
   }
 
   saveConfig(cfg);
   // Fire-and-forget schema file sync
-  syncSchemaFiles(spaceId, space.meta).catch(err => log.warn(`syncSchemaFiles: ${err}`));
+  syncSchemaFiles(spaceId, space.meta).catch(err => log.warn(`syncSchemaFiles: ${peerText(err)}`));
   return space;
 }
 

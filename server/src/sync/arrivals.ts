@@ -81,7 +81,7 @@ import { isSeqImplausible } from '../util/seq.js';
 import { advanceCounterPast, CounterBehindError } from './counter-after-page.js';
 import { isWriteTimeout } from '../db/write-timeout.js';
 import { inChunks } from '../util/chunks.js';
-import { log, logSafe } from '../util/log.js';
+import { log, logSafe, peerList, peerText } from '../util/log.js';
 import { BRAIN_COLLECTIONS } from '../config/types.js';
 import type { BrainCollection, BrainEmbedRecordType } from '../config/types.js';
 import { LOCAL_ONLY_FIELDS, RESTORED_LOCAL_FIELDS, DERIVED_LOCAL_FIELDS } from './local-only-fields.js';
@@ -191,7 +191,8 @@ export function arrivalRefusal(doc: unknown, { seqOptional }: { seqOptional: boo
 export function seqRefusal(seq: unknown, { optional }: { optional: boolean }): string | null {
   if (seq === undefined && optional) return null;
   if (typeof seq !== 'number' || !Number.isInteger(seq) || seq < 0) {
-    return `seq ${JSON.stringify(seq) ?? String(seq)} is not a non-negative integer`;
+    // Bounded where the reason is BUILT (`Q-270`): it travels to a log line and back in an answer.
+    return `seq ${peerText(typeof seq === 'string' ? JSON.stringify(seq) : seq)} is not a non-negative integer`;
   }
   if (isSeqImplausible(seq)) return `seq ${seq} is too close to the protocol ceiling and was refused`;
   return null;
@@ -218,7 +219,7 @@ export function warnArrivalsNotStored(
   // Every id, every reason and the caller's `where` (it names the peer) may carry what a peer sent: `logSafe`.
   const shown = items.slice(0, NAMED_IN_SUMMARY)
     .map(i => (typeof i === 'string' ? logSafe(i) : `${logSafe(i._id)} (${logSafe(i.reason)})`));
-  log.warn(`${logSafe(where)}: ${items.length} ${family} record(s) ${what} in space '${spaceId}': ${shown.join(', ')}`
+  log.warn(`${logSafe(where)}: ${items.length} ${peerText(family)} record(s) ${peerText(what)} in space '${peerText(spaceId)}': ${peerList(shown, ', ')}`
     + (items.length > shown.length ? `, and ${items.length - shown.length} more` : ''));
 }
 
@@ -479,7 +480,7 @@ export async function writeArrivals(
       queued.push(...landed);
       if (!opts.deferEnqueue) {
         await out.enqueue().catch((err: unknown) => log.warn(`${logSafe(where)}: ${landed.length} landed record(s) in `
-          + `space '${spaceId}' could not be queued for embedding (${logSafe(err instanceof Error ? err.message : String(err))}); `
+          + `space '${peerText(spaceId)}' could not be queued for embedding (${logSafe(err instanceof Error ? err.message : String(err))}); `
           + 'they are stored, and a reindex queues them'));
       }
     }

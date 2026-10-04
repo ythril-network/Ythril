@@ -20,7 +20,7 @@ import type { RefKind } from '../config/types-knowledge.js';
 import { type SimilarMatch } from './recall.js';
 import type { DupeCheckOpts } from './write-options.js';
 import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
 import type { EntityDoc, EdgeDoc, FileMetaDoc } from '../config/types.js';
 import { PROPERTIES_SCAN_MAX_MS, textContains } from './tag-filter.js';
 import { spaceCollection } from '../db/space-collection.js';
@@ -77,7 +77,7 @@ async function unlabelFacesWhere(spaceId: string, match: Record<string, unknown>
     asUpdate<FileMetaDoc>({ $unset: { faceEntityId: '', faceScore: '' } }),
   );
   const n = res.modifiedCount ?? 0;
-  if (n > 0) log.info(`Unlabelled ${n} face record(s) in '${spaceId}' after entity deletion`);
+  if (n > 0) log.info(`Unlabelled ${n} face record(s) in '${peerText(spaceId)}' after entity deletion`);
   return n;
 }
 

@@ -12,7 +12,7 @@ import { syncRateLimit } from '../../rate-limit/middleware.js';
 import { getDataRoot } from '../../config/loader.js';
 import { listTombstones } from '../../brain/tombstones.js';
 import { requireAuth, denyReadOnly, isInstanceAdmin } from '../../auth/middleware.js';
-import { log } from '../../util/log.js';
+import { log, peerText } from '../../util/log.js';
 import { sendSyncWriteFailure } from './write-failure.js';
 import { withinWriteBound } from '../../db/write-bound.js';
 import { applyPeerTombstones, MAX_TOMBSTONES_PER_REQUEST } from '../../sync/tombstone-apply.js';
@@ -69,7 +69,7 @@ syncTombstonesRouter.get('/tombstones', syncRateLimit, requireAuth, async (req, 
     recordServedSeq(callerPeerId(req.authToken as Record<string, unknown>), spaceId, since);
     res.json(grouped);
   } catch (err) {
-    log.error(`sync GET tombstones: ${err}`);
+    log.error(`sync GET tombstones: ${peerText(err)}`);
     res.status(500).json({ error: 'Internal error' });
   }
 });
@@ -144,7 +144,7 @@ syncTombstonesRouter.get('/file-tombstones', syncRateLimit, requireAuth, async (
       .toArray();
     res.json({ tombstones });
   } catch (err) {
-    log.error(`sync GET file-tombstones: ${err}`);
+    log.error(`sync GET file-tombstones: ${peerText(err)}`);
     res.status(500).json({ error: 'Internal error' });
   }
 });
@@ -198,7 +198,7 @@ syncTombstonesRouter.post('/file-tombstones', syncRateLimit, requireAuth, denyRe
 
     res.json({ applied });
   } catch (err) {
-    log.error(`sync POST file-tombstones: ${err}`);
+    log.error(`sync POST file-tombstones: ${peerText(err)}`);
     res.status(500).json({ error: 'Internal error' });
   }
 });

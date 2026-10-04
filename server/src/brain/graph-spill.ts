@@ -30,7 +30,7 @@ import { spillPathFor } from './spill-path.js';
 import {
   putSpill, type PutSpillInput, type PutSpillResult, SPILL_TTL_DAYS, suppressEmbeddings,
 } from './read-spill-store.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
 
 // Re-exported: the lifetime and the vector strip belong to the store, which applies both itself.
 export { SPILL_TTL_DAYS, suppressEmbeddings };
@@ -56,12 +56,12 @@ async function keepSpill(
   try {
     const r = await pending;
     if ('refused' in r) {
-      log.info(`Read spill (${kind}) not kept: ${r.refused}`);
+      log.info(`Read spill (${kind}) not kept: ${peerText(r.refused)}`);
       return { spillRefused: refusalCode(r.refused) };
     }
     return r;
   } catch (err) {
-    log.warn(`Read spill (${kind}) failed: ${err instanceof Error ? err.message : String(err)}`);
+    log.warn(`Read spill (${kind}) failed: ${err instanceof Error ? peerText(err.message) : peerText(String(err))}`);
     return { spillRefused: 'failed' };
   }
 }

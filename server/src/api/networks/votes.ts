@@ -7,7 +7,7 @@
 import { Router } from 'express';
 import { requireAdmin } from '../../auth/middleware.js';
 import { globalRateLimit } from '../../rate-limit/middleware.js';
-import { log } from '../../util/log.js';
+import { log, peerText } from '../../util/log.js';
 import { CastVoteBody, castVoteAct, listOpenVotesAct } from '../../networks/vote-acts.js';
 import { sendAct } from './_shared.js';
 
@@ -30,7 +30,7 @@ votesRouter.post('/:id/votes/:roundId', globalRateLimit, requireAdmin, (req, res
     if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
     sendAct(res, castVoteAct(req.params['id'] as string, req.params['roundId'] as string, parsed.data));
   } catch (err) {
-    log.error(`POST /api/networks votes: ${err}`);
+    log.error(`POST /api/networks votes: ${peerText(err)}`);
     res.status(500).json({ error: 'Internal error' });
   }
 });

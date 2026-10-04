@@ -11,7 +11,7 @@ import { toDocId } from '../../util/paths.js';
 import { escapeRegex } from '../../util/redos.js';
 import type { StepProgress } from '../converters/types.js';
 import type { MediaJobDoc, FileMetaDoc } from '../../config/types.js';
-import { log } from '../../util/log.js';
+import { log, peerText } from '../../util/log.js';
 import { withJitter } from '../../util/backoff.js';
 import { newClaimToken, stalledJobWarning } from './lease.js';
 import { createWorkSignal } from '../../util/work-signal.js';
@@ -281,7 +281,7 @@ export async function enqueueTextJob(
     asFilter<FileMetaDoc>({ _id: id }),
     { $set: { embeddingStatus: 'pending', updatedAt: now } },
   ).catch(err => {
-    log.debug(`enqueueTextJob: could not set embeddingStatus on file meta ${spaceId}/${id}: ${err instanceof Error ? err.message : String(err)}`);
+    log.debug(`enqueueTextJob: could not set embeddingStatus on file meta ${peerText(spaceId)}/${peerText(id)}: ${err instanceof Error ? peerText(err.message) : peerText(String(err))}`);
   });
 }
 

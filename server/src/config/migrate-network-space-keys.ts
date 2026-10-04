@@ -19,7 +19,7 @@
  * and applied in one assignment per map, and it never throws out of `loadConfig`.
  */
 import type { Config } from './types.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
 
 type Keyed = Record<string, unknown>;
 
@@ -34,9 +34,9 @@ function rekey(map: Keyed | undefined, carried: readonly string[], alias: Record
       next[target] = next[key];
       delete next[key];
       changed = true;
-      log.info(`Network ${networkId}: moved the ${what} kept under '${key}' to the space now called '${target}'`);
+      log.info(`Network ${peerText(networkId)}: moved the ${peerText(what)} kept under '${peerText(key)}' to the space now called '${peerText(target)}'`);
     } else {
-      log.info(`Network ${networkId}: left the ${what} under '${key}' in place — no carried space it belongs to`);
+      log.info(`Network ${peerText(networkId)}: left the ${peerText(what)} under '${peerText(key)}' in place — no carried space it belongs to`);
     }
   }
   return changed ? next : null;
@@ -53,7 +53,7 @@ export function migrateNetworkSpaceKeys(config: Pick<Config, 'networks'>): boole
       if (layers) { net.schemaLayers = layers as typeof net.schemaLayers; changed = true; }
       if (origins) { net.spaceOrigins = origins as typeof net.spaceOrigins; changed = true; }
     } catch (err) {
-      log.warn(`Network ${net.id}: could not re-key its per-space entries (will retry next boot): ${err}`);
+      log.warn(`Network ${peerText(net.id)}: could not re-key its per-space entries (will retry next boot): ${peerText(err)}`);
     }
   }
   return changed;

@@ -9,7 +9,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { getDb, col, asDoc, asFilter } from '../db/mongo.js';
 import { getConfig, saveConfig, getDataRoot, mutateConfig } from '../config/loader.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
 import type { Config, SpaceConfig } from '../config/types.js';
 import { PER_SPACE_WATERMARKS } from '../config/types-networks.js';
 import { retargetSpaceAliases, spaceNameInUseRefusal, SpaceNameInUseError } from '../sync/space-map.js';
@@ -40,10 +40,10 @@ export async function moveSpaceData(oldId: string, newId: string): Promise<strin
     const newName = `${newId}_${suffix}`;
     try {
       await db.collection(coll.name).rename(newName);
-      log.debug(`Renamed collection ${coll.name} → ${newName}`);
+      log.debug(`Renamed collection ${peerText(coll.name)} → ${peerText(newName)}`);
     } catch (err) {
       const msg = `Could not rename collection ${coll.name} → ${newName}: ${err}`;
-      log.warn(msg);
+      log.warn(peerText(msg));
       errors.push(msg);
     }
   }
@@ -61,10 +61,10 @@ export async function moveSpaceData(oldId: string, newId: string): Promise<strin
   // `newId` by definition, so we only touch the ones that disagree.
   try {
     const repaired = await repairStaleSpaceIds(newId);
-    if (repaired > 0) log.debug(`Rewrote spaceId on ${repaired} document(s) for renamed space ${newId}`);
+    if (repaired > 0) log.debug(`Rewrote spaceId on ${repaired} document(s) for renamed space ${peerText(newId)}`);
   } catch (err) {
     const msg = `Could not rewrite spaceId field for renamed space ${newId}: ${err}`;
-    log.warn(msg);
+    log.warn(peerText(msg));
     errors.push(msg);
   }
 
@@ -75,7 +75,7 @@ export async function moveSpaceData(oldId: string, newId: string): Promise<strin
     await renameReindexRun(oldId, newId);
   } catch (err) {
     const msg = `Could not move the reindex run from ${oldId} to ${newId}: ${err}`;
-    log.warn(msg);
+    log.warn(peerText(msg));
     errors.push(msg);
   }
 
@@ -86,7 +86,7 @@ export async function moveSpaceData(oldId: string, newId: string): Promise<strin
     await renameSpillsForSpace(oldId, newId);
   } catch (err) {
     const msg = `Could not move read spills from ${oldId} to ${newId}: ${err}`;
-    log.warn(msg);
+    log.warn(peerText(msg));
     errors.push(msg);
   }
 
@@ -115,11 +115,11 @@ export async function moveSpaceData(oldId: string, newId: string): Promise<strin
         { upsert: true },
       );
       await counters.deleteOne(asFilter<{ _id: string; seq: number }>({ _id: oldId }));
-      log.debug(`Migrated seq counter ${oldId} → ${newId} (seq=${seq})`);
+      log.debug(`Migrated seq counter ${peerText(oldId)} → ${peerText(newId)} (seq=${seq})`);
     }
   } catch (err) {
     const msg = `Could not migrate the seq counter ${oldId} → ${newId}: ${err}`;
-    log.warn(msg);
+    log.warn(peerText(msg));
     errors.push(msg);
   }
 
@@ -138,7 +138,7 @@ export async function moveSpaceData(oldId: string, newId: string): Promise<strin
     }
   } catch (err) {
     // Non-fatal: worst case the renamed space re-scans for duplicates from scratch.
-    log.warn(`Could not migrate the dupe-scan cursor ${oldId} → ${newId}: ${err}`);
+    log.warn(`Could not migrate the dupe-scan cursor ${peerText(oldId)} → ${peerText(newId)}: ${peerText(err)}`);
   }
 
   // 2. Move the files directory (skip if already moved — old dir gone)
@@ -148,13 +148,13 @@ export async function moveSpaceData(oldId: string, newId: string): Promise<strin
   try {
     await fs.access(oldDir);
     await fs.rename(oldDir, newDir);
-    log.debug(`Moved files directory ${oldDir} → ${newDir}`);
+    log.debug(`Moved files directory ${peerText(oldDir)} → ${peerText(newDir)}`);
   } catch (err) {
     // If old dir doesn't exist, that's fine — space had no files, or it was already moved.
     const code = (err as NodeJS.ErrnoException).code;
     if (code !== 'ENOENT') {
       const msg = `Could not move files directory: ${err}`;
-      log.warn(msg);
+      log.warn(peerText(msg));
       errors.push(msg);
     }
   }
@@ -173,10 +173,10 @@ export async function moveSpaceData(oldId: string, newId: string): Promise<strin
   try {
     const { renameSpaceActivity } = await import('../metrics/space-activity-store.js');
     const moved = await renameSpaceActivity(oldId, newId);
-    if (moved > 0) log.debug(`Moved ${moved} activity bucket(s) from '${oldId}' to '${newId}'`);
+    if (moved > 0) log.debug(`Moved ${moved} activity bucket(s) from '${peerText(oldId)}' to '${peerText(newId)}'`);
   } catch (err) {
     // Non-fatal: a rename that otherwise succeeded must not fail over its usage history.
-    log.warn(`Could not move activity buckets for the rename ${oldId} -> ${newId}: ${err}`);
+    log.warn(`Could not move activity buckets for the rename ${peerText(oldId)} -> ${peerText(newId)}: ${peerText(err)}`);
   }
 
   return errors;
@@ -398,9 +398,9 @@ async function renameSpaceInner(oldId: string, newId: string): Promise<SpaceConf
     // failing a rename that has, in fact, happened.
     const committed = getConfig().spaces.find(s => s.id === newId);
     if (!committed) throw new Error(`Space '${oldId}' rename committed no config change — refusing to report success`);
-    log.info(`Renamed space '${oldId}' → '${newId}' (config already committed)`);
+    log.info(`Renamed space '${peerText(oldId)}' → '${peerText(newId)}' (config already committed)`);
     return committed;
   }
-  log.info(`Renamed space '${oldId}' → '${newId}'`);
+  log.info(`Renamed space '${peerText(oldId)}' → '${peerText(newId)}'`);
   return renamed;
 }

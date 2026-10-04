@@ -39,7 +39,7 @@ import { atlasVectorScore, scoresAgree } from './vector-score.js';
 import { matchFreshWrites, addFreshWrites } from './fresh-writes.js';
 import type { ChronoStatus, RecordType } from '../config/types.js';
 import { RECORD_TYPES } from '../config/types.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
 import { recallDegradedTotal } from '../metrics/registry.js';
 import { envInt } from '../config/env-num.js';
 import { spaceCollection } from '../db/space-collection.js';
@@ -106,7 +106,7 @@ async function settleSearches(
   for (const s of settled) {
     if (s.status === 'fulfilled') { kept.push(s.value); continue; }
     if (s.reason instanceof RecallSearchTimeout) {
-      log.warn(`Recall: ${s.reason.message} — returning a partial answer`);
+      log.warn(`Recall: ${peerText(s.reason.message)} — returning a partial answer`);
       noteDegraded('search_timeout');
       continue;
     }
@@ -610,8 +610,8 @@ async function introduceLexicalOnly(
       const local = atlasVectorScore(vec as number[], queryVector, similarity);
       if (local === null || !scoresAgree(local, known)) {
         log.warn(
-          `Hybrid recall: local score reproduction disagrees with the search engine for ${collName} ` +
-          `(local ${local === null ? 'n/a' : local.toFixed(6)} vs reported ${known.toFixed(6)}, ` +
+          `Hybrid recall: local score reproduction disagrees with the search engine for ${peerText(collName)} ` +
+          `(local ${local === null ? 'n/a' : peerText(local.toFixed(6))} vs reported ${peerText(known.toFixed(6))}, ` +
           `similarity '${similarity}'). Not introducing lexical-only records.`,
         );
         return [];
@@ -634,7 +634,7 @@ async function introduceLexicalOnly(
     return out;
   } catch (err) {
     // Best-effort like the rest of this path: a failure here leaves the vector order untouched.
-    log.debug(`Lexical introduction skipped for ${collName}: ${err instanceof Error ? err.message : String(err)}`);
+    log.debug(`Lexical introduction skipped for ${peerText(collName)}: ${err instanceof Error ? peerText(err.message) : peerText(String(err))}`);
     return [];
   }
 }
@@ -752,8 +752,8 @@ export async function checkDuplicates(
       const known = reported.get(f._id);
       if (typeof known === 'number' && !scoresAgree(f.score, known)) {
         log.warn(
-          `Duplicate check: fresh-write score disagrees with the search engine for ${collName} ` +
-          `(local ${f.score.toFixed(6)} vs reported ${known.toFixed(6)}). Using the index alone.`,
+          `Duplicate check: fresh-write score disagrees with the search engine for ${peerText(collName)} ` +
+          `(local ${peerText(f.score.toFixed(6))} vs reported ${peerText(known.toFixed(6))}). Using the index alone.`,
         );
         return [...matches.values()];
       }

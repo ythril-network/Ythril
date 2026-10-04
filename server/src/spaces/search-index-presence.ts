@@ -80,7 +80,7 @@
  */
 import { onRecordCollectionWrite } from '../db/mongo.js';
 import { EVERY_COLLECTION, type MethodEffect } from '../db/record-write-observer.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
 import { envInt } from '../config/env-num.js';
 import {
   VECTOR_INDEXED_COLLECTIONS, type VectorIndexedCollection,
@@ -173,7 +173,7 @@ async function reconcileNow(name: string, st: CollectionState, opts: ReconcileOp
       holds = await collectionHoldsRecord(name);
     } catch (err) {
       st.belief = before === 'settling' ? undefined : before;
-      log.debug(`Search index presence: could not read ${name} (${err instanceof Error ? err.message : String(err)})`);
+      log.debug(`Search index presence: could not read ${peerText(name)} (${err instanceof Error ? peerText(err.message) : peerText(String(err))})`);
       return st.belief;
     }
 
@@ -207,7 +207,7 @@ async function reconcileNow(name: string, st: CollectionState, opts: ReconcileOp
     return (st.belief = 'unindexed');
   } catch (err) {
     st.belief = undefined;
-    log.warn(`Search index presence: reconciling ${name} failed (${err instanceof Error ? err.message : String(err)}); the next write retries`);
+    log.warn(`Search index presence: reconciling ${peerText(name)} failed (${err instanceof Error ? peerText(err.message) : peerText(String(err))}); the next write retries`);
     return undefined;
   }
 }

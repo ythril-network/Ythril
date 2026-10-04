@@ -16,7 +16,7 @@ import { boundedJson } from '../util/bounded-read.js';
 import type { JWTPayload } from 'jose';
 import { getConfig } from '../config/loader.js';
 import { allowPrivateOidcIssuer } from '../config/oidc-egress-policy.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
 import { isSsrfSafeUrl, ssrfSafeFetch, SsrfBlockedError } from '../util/ssrf.js';
 import type { OidcConfig, OidcClaimRule, OidcClaimMapping } from '../config/types.js';
 import { migrateToken } from './rights-migration.js';
@@ -448,7 +448,7 @@ export async function validateOidcJwt(bearer: string): Promise<OidcTokenRecord |
       source: 'oidc',
     };
   } catch (err) {
-    log.warn(`OIDC JWT validation failed: ${err instanceof Error ? err.message : String(err)}`);
+    log.warn(`OIDC JWT validation failed: ${err instanceof Error ? peerText(err.message) : peerText(String(err))}`);
     return null;
   }
 }

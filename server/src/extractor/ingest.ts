@@ -25,7 +25,7 @@ import type { Extraction } from './conversation/assemble.js';
 import type { SchemaEntry } from './validate-extraction.js';
 import type { WriteOutcome } from './conversation/write-extraction.js';
 import { ingestRuns, type IngestRun } from './ingest-runs.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
 import { unknownBodyFields } from '../brain/query.js';
 
 export const INGEST_KINDS = ['conversation'] as const;
@@ -196,7 +196,7 @@ export async function runIngest(
   } catch (err) {
     run.phase = 'failed';
     run.error = err instanceof Error ? err.message : String(err);
-    log.warn(`ingest ${run.runId} into ${spaceId} failed: ${run.error}`);
+    log.warn(`ingest ${peerText(run.runId)} into ${peerText(spaceId)} failed: ${peerText(run.error)}`);
   } finally {
     run.finishedAt = new Date().toISOString();
   }

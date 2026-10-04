@@ -15,7 +15,7 @@ import { getMatchingWebhooks, getWebhookFull, recordDelivery, markWebhookSuccess
 import { col } from '../db/mongo.js';
 import { getConfig } from '../config/loader.js';
 import { ssrfSafeFetch } from '../util/ssrf.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
 import { publishBrainChange } from '../brain/brain-events.js';
 import type { WebhookEventType, WebhookEventPayload, WebhookDelivery, WebhookSubscription } from './types.js';
 import { withJitter } from '../util/backoff.js';
@@ -154,7 +154,7 @@ export function emitWebhookEvent(opts: EmitWebhookEventOptions): void {
   // webhook subscription matches.
   publishBrainChange({ event: opts.event, spaceId: opts.spaceId, entry: opts.entry });
   _emitAsync(opts).catch(err => {
-    log.warn(`Webhook emit error: ${err}`);
+    log.warn(`Webhook emit error: ${peerText(err)}`);
   });
 }
 
@@ -185,7 +185,7 @@ async function _emitAsync(opts: EmitWebhookEventOptions): Promise<void> {
     if (!full) continue;
 
     deliverFirst(full, body, event, spaceId).catch(err => {
-      log.warn(`Webhook delivery error for ${sub.id}: ${err}`);
+      log.warn(`Webhook delivery error for ${peerText(sub.id)}: ${peerText(err)}`);
     });
   }
 }
@@ -208,7 +208,7 @@ async function deliverFirst(
   } else {
     // Enqueue first retry (attempt 2)
     await enqueueRetry(sub.id, body, event, spaceId, deliveryId, 2);
-    log.warn(`Webhook first delivery failed for ${sub.id}: ${result.error ?? `HTTP ${result.responseStatus}`} — queued for retry`);
+    log.warn(`Webhook first delivery failed for ${peerText(sub.id)}: ${peerText(result.error ?? `HTTP ${result.responseStatus}`)} — queued for retry`);
   }
 }
 

@@ -50,7 +50,7 @@ import { peerTokenSpaces } from '../auth/peer-token-scope.js';
 import { peerSafeFetch, isPeerUrlAllowed } from '../sync/peer-fetch.js';
 import { widenPeerTokensOf } from './network-spaces.js';
 import { BCRYPT_ROUNDS } from '../api/networks/_shared.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
 import { boundedErrorText } from '../util/bounded-read.js';
 import type { NetworkConfig, NetworkMember } from '../config/types.js';
 import type { MemberIntroduction, MemberRemoval } from '../config/types-networks.js';
@@ -142,7 +142,7 @@ export function mergePeerRoster(
       if (time(r.removedAt) <= time(net.members[idx]!.admittedAt)) continue;
       net.members.splice(idx, 1);
       out.removed.push(r.instanceId);
-      log.info(`Club ${net.id}: ${r.instanceId} removed here too — ${fromId} removed it at ${r.removedAt}`);
+      log.info(`Club ${peerText(net.id)}: ${peerText(r.instanceId)} removed here too — ${peerText(fromId)} removed it at ${peerText(r.removedAt)}`);
     }
     const known = net.removedMembers?.find(x => x.instanceId === r.instanceId);
     if (!known || time(known.removedAt) < time(r.removedAt)) {
@@ -161,7 +161,7 @@ export function mergePeerRoster(
     const removal = net.removedMembers?.find(x => x.instanceId === id);
     if (removal && time(removal.removedAt) >= time(rec.admittedAt)) continue;
     if (!isPeerUrlAllowed(rec.url)) {
-      log.warn(`Club ${net.id}: ${fromId} introduced ${id} at an address this instance refuses to call: ${rec.url}`);
+      log.warn(`Club ${peerText(net.id)}: ${peerText(fromId)} introduced ${peerText(id)} at an address this instance refuses to call: ${peerText(rec.url)}`);
       continue;
     }
     const intro: MemberIntroduction = {
@@ -171,7 +171,7 @@ export function mergePeerRoster(
     };
     (net.introductions ??= []).push(intro);
     out.changed = true;
-    log.info(`Network ${net.id}: ${fromId} introduced ${rec.label} (${id}); ${vouched ? 'pairing follows' : 'waiting for this instance\'s operator to accept it'}`);
+    log.info(`Network ${peerText(net.id)}: ${peerText(fromId)} introduced ${peerText(rec.label)} (${peerText(id)}); ${vouched ? 'pairing follows' : 'waiting for this instance\'s operator to accept it'}`);
   }
   return out;
 }
@@ -197,7 +197,7 @@ export function introduceFromPassedJoin(net: NetworkConfig, selfId: string, roun
     instanceId: id, label: round.subjectLabel || id, url: round.subjectUrl, introducedBy: `round:${round.roundId}`,
     introducedAt: nowIso(),
   });
-  log.info(`Network ${net.id}: join round ${round.roundId} passed — pairing with ${round.subjectLabel} (${id}) follows`);
+  log.info(`Network ${peerText(net.id)}: join round ${peerText(round.roundId)} passed — pairing with ${peerText(round.subjectLabel)} (${peerText(id)}) follows`);
   return true;
 }
 
@@ -234,7 +234,7 @@ export function acceptIntroduction(net: NetworkConfig, instanceId: string): bool
 /** Revoke what removed members held here, once the removal is saved. Never throws. */
 export function revokeRemoved(ids: readonly string[]): void {
   for (const id of ids) {
-    revokePeerCredentialsIfOrphaned(id).catch(err => log.error(`peer credential revocation for ${id}: ${err}`));
+    revokePeerCredentialsIfOrphaned(id).catch(err => log.error(`peer credential revocation for ${peerText(id)}: ${peerText(err)}`));
   }
 }
 
@@ -265,7 +265,7 @@ async function admitIntroduced(networkId: string, instanceId: string, outboundTo
   widenPeerTokensOf(cfg, [instanceId], net.spaces);
   saveConfig(cfg);
   await adoptPeerToken(tokenId);   // live now, and it replaces what an earlier handshake gave that peer (Q-163)
-  log.info(`Club ${networkId}: paired with ${intro.label} (${instanceId})`);
+  log.info(`Club ${peerText(networkId)}: paired with ${peerText(intro.label)} (${peerText(instanceId)})`);
   return true;
 }
 
@@ -311,7 +311,7 @@ export async function pairIntroduced(networkId: string): Promise<void> {
     if (!(cfg.instanceId < intro.instanceId)) continue;
     if (intro.needsApproval) continue;   // proposed, not accepted (`Q-154`)
     if (!pairRetryDue(intro, Date.now())) continue;
-    await openPairing(networkId, intro.instanceId).catch(err => log.warn(`Club ${networkId}: pairing with ${intro.instanceId}: ${err}`));
+    await openPairing(networkId, intro.instanceId).catch(err => log.warn(`Club ${peerText(networkId)}: pairing with ${peerText(intro.instanceId)}: ${peerText(err)}`));
   }
 }
 
@@ -338,7 +338,7 @@ async function openPairing(networkId: string, instanceId: string): Promise<void>
     if (paired) { tokenId = undefined; return; }
     const why = r.ok ? 'the newcomer answered without confirming the pairing' : await errorText(r);
     noteAttempt(networkId, instanceId, { lastError: why });
-    log.warn(`Club ${networkId}: pairing with ${intro.label} (${instanceId}) failed: ${why}`);
+    log.warn(`Club ${peerText(networkId)}: pairing with ${peerText(intro.label)} (${peerText(instanceId)}) failed: ${peerText(why)}`);
   } catch (err) {
     noteAttempt(networkId, instanceId, { lastError: String(err) });
     throw err;

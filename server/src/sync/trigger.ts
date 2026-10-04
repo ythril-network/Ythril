@@ -40,7 +40,7 @@
  * fire-and-forget helper is worth having rather than two lines at each call site.
  */
 import type { Response } from 'express';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
 
 /** Distinguishes "the race timed out" from "the cycle threw", which need different status codes. */
 const TIMEOUT = Symbol('sync-trigger-timeout');
@@ -66,7 +66,7 @@ export async function triggerNetworkSync(
 
   if (!opts.wait) {
     void runSyncForNetwork(networkId)
-      .catch(err => log.error(`Triggered sync for network ${networkId} failed: ${err}`));
+      .catch(err => log.error(`Triggered sync for network ${peerText(networkId)} failed: ${peerText(err)}`));
     res.json({ ok: true, status: 'triggered', networkId, ...note });
     return;
   }
@@ -84,7 +84,7 @@ export async function triggerNetworkSync(
       // looking for a fault that does not exist.
       res.status(504).json({ ok: false, status: 'timeout', networkId, timeoutMs: opts.timeoutMs, ...note });
     } else {
-      log.error(`Synchronous trigger for network ${networkId} failed: ${err}`);
+      log.error(`Synchronous trigger for network ${peerText(networkId)} failed: ${peerText(err)}`);
       res.status(500).json({ ok: false, status: 'error', networkId, error: err instanceof Error ? err.message : String(err), ...note });
     }
   } finally {
@@ -104,7 +104,7 @@ export async function triggerPeerSync(
   const { runSyncForPeer } = await import('./engine.js');
 
   if (!opts.wait) {
-    void runSyncForPeer(peerId).catch(err => log.error(`Triggered sync for peer ${peerId} failed: ${err}`));
+    void runSyncForPeer(peerId).catch(err => log.error(`Triggered sync for peer ${peerText(peerId)} failed: ${peerText(err)}`));
     res.json({ ok: true, status: 'triggered', peerId });
     return;
   }
@@ -112,7 +112,7 @@ export async function triggerPeerSync(
     const r = await runSyncForPeer(peerId);
     res.json({ ok: true, status: 'completed', peerId, networksSynced: r.networksSynced, errors: r.errors });
   } catch (err) {
-    log.error(`Synchronous trigger for peer ${peerId} failed: ${err}`);
+    log.error(`Synchronous trigger for peer ${peerText(peerId)} failed: ${peerText(err)}`);
     res.status(500).json({ ok: false, status: 'error', peerId, error: err instanceof Error ? err.message : String(err) });
   }
 }

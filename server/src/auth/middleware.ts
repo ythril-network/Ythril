@@ -1,5 +1,5 @@
 import type { Request, Response, NextFunction } from 'express';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
 import { tokenRateLimit } from '../rate-limit/middleware.js';
 import { findMatchingToken, touchToken } from './tokens.js';
 import { consumeSseTicket } from './sse-ticket.js';
@@ -419,7 +419,7 @@ function enforceAreaRung(
   // four routes guaranteed could never be reached. See the note on NOT_AREA_SCOPED for the whole account.
   if (verdict.kind === 'not-area-scoped') return true;
   if (verdict.kind === 'unclassified') {
-    log.warn(`Space rights: no inventory entry for '${req.method} ${routePath}' — reach enforced, area not. `
+    log.warn(`Space rights: no inventory entry for '${peerText(req.method)} ${peerText(routePath)}' — reach enforced, area not. `
       + 'Add it to ROUTE_RIGHTS with its area and lowest rung, or to NOT_AREA_SCOPED with the reason it is not '
       + 'a view of the space\'s data; misses become refusals once the log is clean.');
     return true;

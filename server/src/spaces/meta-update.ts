@@ -41,7 +41,7 @@ import { proposedMetaFields } from '../sync/meta-round-merge.js';
 import { concludeRoundIfReady } from '../sync/governance.js';
 import { openRoundHere } from '../networks/round-local-state.js';
 import { makeSignedOwnCast } from '../util/signing.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
 import { v4 as uuidv4 } from 'uuid';
 import { capDocExtractionMode } from '../files/converters/extraction-level.js';
 import { checkMetaPrecondition, preconditionErrorBody } from './meta-precondition.js';
@@ -383,7 +383,7 @@ export async function applySpaceMetaUpdate(plan: MetaUpdatePlan): Promise<MetaUp
   // `hasRecordTtl` gates the write so a CLEAR is applied rather than skipped as if the field were absent.
   if (plan.hasRecordTtl) {
     updateSpace(id, { recordTtlDays: plan.recordTtlDays });
-    if (plan.recordTtlDays !== undefined) void ensureTtlIndex(id).catch(err => log.warn(`ensureTtlIndex ${id}: ${err}`));
+    if (plan.recordTtlDays !== undefined) void ensureTtlIndex(id).catch(err => log.warn(`ensureTtlIndex ${peerText(id)}: ${peerText(err)}`));
   }
 
   // `M-2`: the conversion marker. Local like the two above and applied here for the same reason plus one of
@@ -478,7 +478,7 @@ export async function applySpaceMetaUpdate(plan: MetaUpdatePlan): Promise<MetaUp
               data: { spaceId: id, spaceLabel: space.label },
             }),
             signal: AbortSignal.timeout(5_000),
-          }).catch(err => log.warn(`notify ${member.label} of meta_change_pending: ${err}`));
+          }).catch(err => log.warn(`notify ${peerText(member.label)} of meta_change_pending: ${peerText(err)}`));
         }
       }
 

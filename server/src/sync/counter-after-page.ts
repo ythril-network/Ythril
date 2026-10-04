@@ -27,7 +27,7 @@
  * and this one only when it has none.
  */
 import { bumpSeq } from '../util/seq.js';
-import { log, logSafe } from '../util/log.js';
+import { log, logSafe, peerText } from '../util/log.js';
 import type { ArrivalOutcome } from './arrivals.js';
 
 /**
@@ -55,7 +55,7 @@ export async function advanceCounterPast(spaceId: string, seq: number, where: st
     await bumpSeq(spaceId, seq);
     return null;
   } catch (err) {
-    log.warn(`${logSafe(where)}: the seq counter of space '${spaceId}' could not be advanced to ${seq} `
+    log.warn(`${logSafe(where)}: the seq counter of space '${peerText(spaceId)}' could not be advanced to ${seq} `
       + `(${logSafe(err instanceof Error ? err.message : String(err))}); the page is not finished until it is, and a `
       + 'local write meanwhile could take a seq below a record this instance holds.');
     return new CounterBehindError(spaceId, seq, err);

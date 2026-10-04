@@ -1,6 +1,6 @@
 import { col, asFilter, asUpdate } from '../db/mongo.js';
 import { getConfig, saveConfig } from '../config/loader.js';
-import { log } from './log.js';
+import { log, peerText } from './log.js';
 import type { SpaceCounterDoc } from '../config/types.js';
 import { spaceCollection, type SpacePart } from '../db/space-collection.js';
 import { withinWriteBound, holdWarnMs } from '../db/write-bound.js';
@@ -81,7 +81,7 @@ function release(spaceId: string, s: SeqState, h: Hold, ended: HoldEnd): void {
   holdWarnings.forget(h);
   const age = Date.now() - h.since;
   if (age >= holdWarnMs()) {
-    log.warn(`seq horizon held ${(age / 1000).toFixed(1)}s space=${spaceId} seq=${h.seq} holder=${h.holder} ended=${ended}`
+    log.warn(`seq horizon held ${peerText((age / 1000).toFixed(1))}s space=${peerText(spaceId)} seq=${h.seq} holder=${peerText(h.holder)} ended=${ended}`
       + ' — every seq-paged reader of the space was held below this seq for that long');
   }
 }
@@ -328,7 +328,7 @@ export function isSeqImplausible(seq: number): boolean {
 export async function bumpSeq(spaceId: string, minSeq: number): Promise<void> {
   if (minSeq > MAX_INGEST_SEQ) {
     log.warn(
-      `Clamped seq bump for space '${spaceId}': requested ${minSeq} exceeds ` +
+      `Clamped seq bump for space '${peerText(spaceId)}': requested ${minSeq} exceeds ` +
       `MAX_INGEST_SEQ (${MAX_INGEST_SEQ}) — advancing to the ceiling reserve instead.`,
     );
     minSeq = MAX_INGEST_SEQ;

@@ -51,7 +51,7 @@
  */
 import { KNOWLEDGE_TYPES, TOMBSTONE_TYPE_OF } from '../config/types.js';
 import type { BrainCollection, KnowledgeType } from '../config/types.js';
-import { log, logSafe } from '../util/log.js';
+import { log, logSafe, peerList, peerText } from '../util/log.js';
 import type { SchemaViolation } from '../spaces/schema-validation.js';
 import { violationsAgainstLocalSchema } from './sync/_shared.js';
 import { writeArrivals, arrivalId, arrivalRefusal, ArrivalWriteError, NAMED_IN_SUMMARY, type ArrivalOutcome } from '../sync/arrivals.js';
@@ -118,7 +118,7 @@ export interface ImportResult {
 
 /** Why a family could not be written at all — every document of it is refused with this reason. */
 const familyFailed = (err: unknown): string =>
-  `the store could not write this family (${err instanceof Error ? err.message : String(err)}); retry the import`;
+  `the store could not write this family (${peerText(err)}); retry the import`;
 
 /**
  * Import a payload of exported documents into one space.
@@ -151,7 +151,7 @@ export async function importDocuments(spaceId: string, payload: Record<string, u
         // The document as it arrived: the schema check reads its type and properties, never its `spaceId`, and the
         // retag to this space is the writer's (`retagToLocalSpace`, in `writeArrivals`) — not a second one here.
         const found = violationsAgainstLocalSchema(spaceId, kind as KnowledgeType, doc as Record<string, unknown>);
-        if (found.length > 0) violations.push({ _id: id, violations: found });
+        if (found.length > 0) violations.push({ _id: peerText(id), violations: found });
       }
     }
 
@@ -159,14 +159,14 @@ export async function importDocuments(spaceId: string, payload: Record<string, u
     try {
       out = await writeArrivals(spaceId, t, RECORD_TYPE_OF[t], docs, { restore: true });
     } catch (err) {
-      log.warn(`Import into space '${spaceId}': ${t} could not be written: ${logSafe(String(err))}`);
+      log.warn(`Import into space '${peerText(spaceId)}': ${t} could not be written: ${logSafe(String(err))}`);
       // `Q-224`: the writer always says what it had done when it stopped — a record write that failed part-way, or
       // a counter it could not move past what it restored. What it vouches for is reported as landed.
       const partial = err instanceof ArrivalWriteError || err instanceof CounterBehindError ? err.partial : undefined;
       if (err instanceof CounterBehindError) result.counterBehind = true;
       if (!partial) {
         // Nothing of the family is vouched for, so every document is named.
-        result.refused = docs.slice(0, NAMED_IN_SUMMARY).map(d => ({ _id: arrivalId(d), reason: familyFailed(err) }));
+        result.refused = docs.slice(0, NAMED_IN_SUMMARY).map(d => ({ _id: peerText(arrivalId(d)), reason: familyFailed(err) }));
         result.errors = docs.length;
         continue;
       }
@@ -185,7 +185,11 @@ export async function importDocuments(spaceId: string, payload: Record<string, u
       ...out.duplicates.map(_id => ({ _id, reason: 'a uniquely-indexed duplicate of a record held here under another id' })),
     ];
     result.errors = refused.length;
-    if (refused.length > 0) result.refused = refused.slice(0, NAMED_IN_SUMMARY);
+    // Named in the answer bounded (`Q-270`): a megabyte `_id` or seq is cut where it is SHOWN, never where it is a
+    // key — `settled` above and the writer match refusals to documents by the id as it arrived.
+    if (refused.length > 0) {
+      result.refused = refused.slice(0, NAMED_IN_SUMMARY).map(r => ({ ...r, _id: peerText(r._id), reason: peerText(r.reason) }));
+    }
     if (out.derived.length > 0) result.derived = out.derived.length;
     if (violations.length > 0) result.schemaViolations = violations;
 
@@ -196,20 +200,20 @@ export async function importDocuments(spaceId: string, payload: Record<string, u
       const held = (await readPageTombstones(spaceId, landed)).get(tombType);
       const over = landed.filter(id => held?.has(id));
       if (over.length > 0) {
-        result.restoredOverTombstone = over.slice(0, NAMED_IN_SUMMARY);
+        result.restoredOverTombstone = over.slice(0, NAMED_IN_SUMMARY).map(id => peerText(id));
         result.restoredOverTombstoneTotal = over.length;
       }
     }
   }
 
   log.info(
-    `Import into space '${spaceId}': `
-    + IMPORT_TYPES.map(t => {
+    `Import into space '${peerText(spaceId)}': `
+    + peerList(IMPORT_TYPES.map(t => {
       const r = results[t];
       const v = r.schemaViolations?.length ?? 0;
       const tomb = r.restoredOverTombstoneTotal ?? 0;
       return `${t}: +${r.inserted} ~${r.updated} !${r.errors}${v > 0 ? ` ?${v}` : ''}${tomb > 0 ? ` over-tombstone ${tomb}` : ''}`;
-    }).join(', '),
+    }), ', '),
   );
 
   return { spaceId, results };

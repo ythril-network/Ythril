@@ -47,7 +47,7 @@
  * un-suppressed, or sweep a type whose schema deliberately opted out.
  */
 import { col, asFilter } from '../db/mongo.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
 import { TYPE_FIELD } from './ttl.js';
 import { recordNotSuppressedFilter, RECORD_SUPPRESS_FIELD } from './suppress-embeddings.js';
 import type { KnowledgeType, SpaceMeta } from '../config/types.js';
@@ -130,7 +130,7 @@ export async function sweepSuppressedVectors(spaceId: string, meta: SpaceMeta): 
       const ids = await sweep();
       if (ids.length === 0) return;
       total += ids.length;
-      log.info(`Suppression sweep: removed ${ids.length} ${kind} vector(s) in ${spaceId}`);
+      log.info(`Suppression sweep: removed ${ids.length} ${peerText(kind)} vector(s) in ${peerText(spaceId)}`);
     } catch (err) {
       failed.push(`${kind} (${err instanceof Error ? err.message : String(err)})`);
     }
@@ -211,7 +211,7 @@ export async function dropFileVectors(spaceId: string, fileIds: readonly string[
 export function sweepAfterMetaWrite(id: string, meta: SpaceMeta | undefined): void {
   if (meta === undefined) return;
   void sweepSuppressedVectors(id, meta)
-    .catch(err => log.warn(`Suppression sweep failed for ${id}: ${err instanceof Error ? err.message : String(err)}`));
+    .catch(err => log.warn(`Suppression sweep failed for ${peerText(id)}: ${err instanceof Error ? peerText(err.message) : peerText(String(err))}`));
 }
 
 /**

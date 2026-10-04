@@ -7,7 +7,7 @@
 import { Router } from 'express';
 import { requireAdmin, requireAuth, denyReadOnly } from '../../auth/middleware.js';
 import { globalRateLimit } from '../../rate-limit/middleware.js';
-import { log } from '../../util/log.js';
+import { log, peerText } from '../../util/log.js';
 import { ForkNetworkBody, forkNetworkAct, inviteKeyAct } from '../../networks/network-acts.js';
 import { JoinRemoteBody, JoinByKeyBody, joinByInviteKeyAct, joinRemoteAct } from '../../networks/join-remote-act.js';
 import { JoinNetworkBody, admitByInviteKeyAct } from '../../networks/member-acts.js';
@@ -25,7 +25,7 @@ joinRouter.post('/join-remote', globalRateLimit, requireAuth, denyReadOnly, asyn
     if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
     sendAct(res, await joinRemoteAct(req.authToken as Parameters<typeof joinRemoteAct>[0], parsed.data));
   } catch (err) {
-    log.error(`POST /api/networks/join-remote: ${err}`);
+    log.error(`POST /api/networks/join-remote: ${peerText(err)}`);
     res.status(500).json({ error: 'Internal error' });
   }
 });
@@ -40,7 +40,7 @@ joinRouter.post('/join-by-key', globalRateLimit, requireAuth, denyReadOnly, asyn
     if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
     sendAct(res, await joinByInviteKeyAct(req.authToken as Parameters<typeof joinByInviteKeyAct>[0], parsed.data));
   } catch (err) {
-    log.error(`POST /api/networks/join-by-key: ${err}`);
+    log.error(`POST /api/networks/join-by-key: ${peerText(err)}`);
     res.status(500).json({ error: 'Internal error' });
   }
 });
@@ -54,7 +54,7 @@ joinRouter.post('/:id/invite', globalRateLimit, requireAuth, denyReadOnly, async
   try {
     sendAct(res, await inviteKeyAct(req.authToken as Parameters<typeof inviteKeyAct>[0], req.params['id'] as string));
   } catch (err) {
-    log.error(`POST /api/networks/:id/invite: ${err}`);
+    log.error(`POST /api/networks/:id/invite: ${peerText(err)}`);
     res.status(500).json({ error: 'Internal error' });
   }
 });
@@ -69,7 +69,7 @@ joinRouter.post('/:id/join', globalRateLimit, requireAdmin, async (req, res) => 
     if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
     sendAct(res, await admitByInviteKeyAct(String(req.params['id']), parsed.data));
   } catch (err) {
-    log.error(`POST /api/networks/:id/join: ${err}`);
+    log.error(`POST /api/networks/:id/join: ${peerText(err)}`);
     res.status(500).json({ error: 'Internal error' });
   }
 });
@@ -92,7 +92,7 @@ joinRouter.post('/:id/fork', globalRateLimit, requireAdmin, (req, res) => {
     if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
     sendAct(res, forkNetworkAct(String(req.params['id'] ?? ''), parsed.data));
   } catch (err) {
-    log.error(`POST /api/networks/:id/fork: ${err}`);
+    log.error(`POST /api/networks/:id/fork: ${peerText(err)}`);
     res.status(500).json({ error: 'Internal error' });
   }
 });

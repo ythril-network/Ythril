@@ -7,7 +7,7 @@
  * Size is the only limit. It already prices a dense subtree above a sparse one, and a second limit (records,
  * nodes) would let two rules disagree about the same response.
  */
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
 
 /**
  * TWO DEFAULTS, ONE PER DOOR — a sanctioned divergence, not drift (`CLAUDE.md`, "MCP and REST are ONE API").
@@ -434,7 +434,7 @@ async function keepRemainder<S>(fields: Record<string, unknown>, spill: () => Pr
   } catch (err) {
     // `spillResultSet` reports its own failures and never throws; this guards any other spiller handed in,
     // and says so rather than swallowing it.
-    log.warn(`Result spill failed: ${err instanceof Error ? err.message : String(err)}`);
+    log.warn(`Result spill failed: ${err instanceof Error ? peerText(err.message) : peerText(String(err))}`);
     kept = null;
     fields['spillRefused'] = 'failed';
   }
