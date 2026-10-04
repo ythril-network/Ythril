@@ -99,6 +99,11 @@ export async function openPullDoor({ suite, spaces, spaceMap, extraSpaces = [], 
     /** remote space -> payloadKey -> items, served as one page of the record family. */
     records: {},
     /**
+     * A payloadKey whose page GET is answered by destroying the socket — the receiver's fetch REJECTS rather than
+     * reading a non-ok status, which is the failure a transfer meets mid-cycle when the peer goes away.
+     */
+    failFamily: null,
+    /**
      * `(req, res, next) => void` — answers the governance routes under `/api/sync/networks` (member gossip, votes,
      * change notes) as a case scripts them; `req.path` is what follows `/api/sync/networks`. Unset, they 404, as
      * every route the fake peer does not serve does.
@@ -143,6 +148,7 @@ export async function openPullDoor({ suite, spaces, spaceMap, extraSpaces = [], 
   });
   app.get('/api/sync/:family', (req, res) => {
     if (!families.includes(req.params.family)) { res.status(404).json({ error: 'not served by the fake peer' }); return; }
+    if (state.failFamily === req.params.family) { req.socket.destroy(); return; }
     const items = state.records[req.query.spaceId]?.[req.params.family] ?? [];
     res.json({ items: req.query.cursor ? [] : items, nextCursor: null });
   });
@@ -190,7 +196,7 @@ export async function openPullDoor({ suite, spaces, spaceMap, extraSpaces = [], 
     for (const p of peerSpaces) await door.mongo.col(`${p}_tombstones`).deleteMany({});
     const m = member();
     m.lastSeqReceived = {}; m.lastSeqPushed = {}; m.direction = d;
-    Object.assign(state, { tamper: null, requests: [], answers: [], received: [], pushedRecords: [], records: {}, network: null });
+    Object.assign(state, { tamper: null, requests: [], answers: [], received: [], pushedRecords: [], records: {}, failFamily: null, network: null });
   }
 
   /** One sync cycle of the real engine with the fake peer. */

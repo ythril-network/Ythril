@@ -316,6 +316,25 @@ describe('a refused merge answers alike on every door', { skip }, () => {
   });
 
   describe('the merge bound', () => {
+    /*
+     * The refusal COUNTS each kind only up to bound + 1 (`relinkTally`'s `{ limit }`, bundle-30 I8): past that the merge
+     * is refused whatever the true number, so counting a hub in full bought nothing but the read. Every case below
+     * uses a hub of exactly bound + 1, where a full count and a capped one agree — so dropping the limit passed them
+     * all (bundle-30 I13, pre-ship testing F3). A hub well past the bound tells the two apart.
+     */
+    it('a hub well over the bound is counted only to bound + 1 per kind', { timeout: 600_000 }, async () => {
+      const bound = await mergeBound();
+      const over = 50;
+      const hub = await hubOf(OPEN, bound + over);   // edges: bound + over - 2, one link, one face label
+      const out = await DRIVERS['server/src/api/brain/entities.ts'](OPEN, hub);
+      assert.equal(out.status, 422, `a merge far over the bound was not refused: ${out.text}`);
+      const capped = (bound + 1) + 1 + 1;
+      assert.match(out.text, new RegExp(`\\b${capped}\\b`),
+        `the refusal does not name the capped count ${capped} (edges stopped at ${bound + 1}, one link, one face): ${out.text}`);
+      assert.doesNotMatch(out.text, new RegExp(`\\b${bound + over}\\b`),
+        `the refusal names the full count ${bound + over} — the hub was counted in full, past the bound: ${out.text}`);
+    });
+
     for (const [door, drive] of Object.entries(DRIVERS)) {
       it(`${door}: a merge of exactly MERGE_MAX_RELINKS relinks succeeds`, { timeout: 600_000 }, async () => {
         const bound = await mergeBound();

@@ -15,7 +15,8 @@
  * ## The doors are read from the mounts, never from the sender
  *
  * Every route the server mounts (`_routes.mjs`, the mount graph), with `/api/:tool` expanded over every tool, plus every
- * tool through `callTool` as MCP reaches it. Each is called with the store failing BELOW the server — the driver's
+ * tool through `callTool` as MCP reaches it — and each boolean query flag a route reads, as a door of its own
+ * (`flagsOf`): a sync trigger answers `triggered` before its cycle touches the store unless asked to `wait`. Each is called with the store failing BELOW the server — the driver's
  * own `Server.command`, the one function every operation the driver sends goes through, throws the error the drive
  * saw (a real `PoolClearedError`, built by the driver's own constructor). Nothing here names a server module's
  * catch, so a door added next month is asked the day it is mounted.
@@ -39,7 +40,7 @@ import http from 'node:http';
 import path from 'node:path';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { openPushDoor } from './_push-door.mjs';
-import { mountedRoutes } from './_routes.mjs';
+import { mountedRoutesWithSource } from './_routes.mjs';
 
 const skip = await mongoSkipReason();
 process.env['YTHRIL_MODELS_OFFLINE'] = '1';
@@ -79,6 +80,28 @@ function fill(routePath) {
   });
 }
 
+/**
+ * The boolean query flags a route reads (`req.query['wait'] === 'true'`), from the route's own source. A door whose
+ * store work sits behind a flag answers before it reaches the store unless the probe sets the flag — `POST
+ * /api/networks/:id/sync` answers `triggered` and runs the cycle after the answer, so only `?wait=true` reaches the
+ * catch that answers the cycle's failure (bundle-30 I13: that catch answered the driver's text, and no probe sent
+ * `wait`). Derived, so a flag added to a route next month is probed the day it is read.
+ */
+function flagsOf(source) {
+  return [...new Set([...source.matchAll(/req\.query(?:\['(\w+)'\]|\.(\w+))\s*===\s*'(?:true|1)'/g)].map(m => m[1] ?? m[2]))];
+}
+
+/**
+ * The network the flag variants find. Its id is the probe's `:id` (`fill`), so a network door whose work is behind a
+ * flag reaches it instead of a `404 Network not found`; one member, so a sync cycle has a member to run. Present only
+ * while the variants are asked, so it changes the reach of no other door.
+ */
+const NETWORK = {
+  id: UUID, label: 'Store down network', type: 'pubsub', spaces: [S], pendingRounds: [], votingDeadlineHours: 24,
+  createdAt: '2026-01-01T00:00:00.000Z',
+  members: [{ instanceId: UUID, label: 'Store down peer', url: 'http://127.0.0.1:9', tokenHash: 'x', direction: 'both' }],
+};
+
 /** Arguments a tool's own schema admits: every required property, given a value of its type. */
 function argsFor(schema) {
   const valueOf = (key, s = {}) => {
@@ -103,7 +126,7 @@ function argsFor(schema) {
   return out;
 }
 
-let door, base, adminKey, callTool, ADMIN, server, TOOLS, schemaOf, log;
+let door, base, adminKey, callTool, ADMIN, server, TOOLS, schemaOf, log, getConfig;
 
 /**
  * Operations the fault failed BEFORE the request was answered, per request id — so a door is judged only on what it
@@ -138,12 +161,18 @@ const REPORTS_THE_STORE = new Map([
   ['GET /metrics', 'a scrape answers what its collectors could gather — partial beats nothing (the budget in metrics/registry.ts)'],
   ['GET /api/admin/pipeline-status', 'a status report: a failing store is one of the conditions it reports, in its body'],
   ['GET /ready', 'a readiness probe: its 503 and `{ready: false, checks}` ARE its contract with the orchestrator'],
+  // A waited sync cycle answers what each member's run came to: a member whose run failed on the store is counted in
+  // `errors` (the per-member catch in `sync/engine.ts`), and the cycle itself completed. Its own failure path —
+  // `sync/trigger.ts`'s catch — answers through `sendCaughtFailure` like every route catch.
+  ['POST /api/networks/:id/sync?wait=true', 'a waited sync trigger reports the cycle: a member that failed on the store is counted in `errors`'],
+  ['POST /api/networks/peers/:peerId/sync?wait=true', 'a waited peer sync reports the cycle: a member that failed on the store is counted in `errors`'],
 ]);
 
 describe('a store failure answers alike on every door', { skip }, () => {
   before(async () => {
     door = await openPushDoor({ suite: 'storedown', spaces: [{ id: S, label: S, folders: [], meta: { suppressEmbeddings: true } }] });
     ({ callTool } = await import('../../server/dist/mcp/call-tool.js'));
+    ({ getConfig } = await import('../../server/dist/config/loader.js'));
     log = await import('../../server/dist/util/log.js');
     const { SPACE_AREAS } = await import('../../server/dist/config/rights-shape.js');
     ADMIN = { instanceAdmin: true, createSpaces: true, perSpace: {}, floor: Object.fromEntries(SPACE_AREAS.map(a => [a, 'admin'])) };
@@ -185,12 +214,15 @@ describe('a store failure answers alike on every door', { skip }, () => {
   /** Every door: REST from the mounts (the tool door per tool), then MCP per tool. */
   function doors() {
     const out = [];
-    for (const r of mountedRoutes()) {
+    for (const r of mountedRoutesWithSource()) {
       if (r.path.includes(':tool')) {
         for (const t of TOOLS) out.push({ kind: 'rest', name: `${r.method} ${r.path.replace(':tool', t)}`, method: r.method, url: r.path.replace(':tool', t), body: argsFor(schemaOf(t)) });
         continue;
       }
       out.push({ kind: 'rest', name: `${r.method} ${r.path}`, method: r.method, url: fill(r.path), body: BODY });
+      for (const flag of flagsOf(r.source)) {
+        out.push({ kind: 'rest', name: `${r.method} ${r.path}?${flag}=true`, method: r.method, url: `${fill(r.path)}?${flag}=true`, body: BODY, variant: true });
+      }
     }
     for (const t of TOOLS) out.push({ kind: 'mcp', name: `MCP ${t}`, tool: t, args: argsFor(schemaOf(t)) });
     return out;
@@ -230,13 +262,24 @@ describe('a store failure answers alike on every door', { skip }, () => {
 
   it('every door that reached the failing store answers 503, Retry-After, retryable, one message, no driver text', { timeout: 30 * 60_000 }, async (t) => {
     const all = doors();
+    // The derivation's floor: the sync trigger's `wait` is the flag this case was written from.
+    assert.ok(all.some(d => d.variant && d.name === 'POST /api/networks/:id/sync?wait=true'),
+      `no flag variant of the network sync trigger was derived — flagsOf no longer reads the routes: ${all.filter(d => d.variant).map(d => d.name)}`);
     const stop = log.subscribeLogLines(l => lines.push(l));
     const saved = { log: console.log, warn: console.warn, error: console.error };
     console.log = console.warn = console.error = () => {};
     const results = [];
     try {
+      const networks = getConfig().networks;
       failing = true;
-      for (const d of all) results.push({ d, a: await ask(d) });
+      for (const d of all) {
+        if (!d.variant) { results.push({ d, a: await ask(d) }); continue; }
+        networks.push(structuredClone(NETWORK));
+        try { results.push({ d, a: await ask(d) }); } finally {
+          const at = networks.findIndex(n => n.id === NETWORK.id);
+          if (at > -1) networks.splice(at, 1);
+        }
+      }
     } finally {
       failing = false;
       Object.assign(console, saved);

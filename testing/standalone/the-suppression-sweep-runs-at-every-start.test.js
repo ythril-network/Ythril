@@ -7,7 +7,13 @@
  * instance would never run it; placed under a condition inside the bootstrap, some starts would skip it.
  *
  * So: both places that make an instance configured — the boot of a configured instance and the setup route — call
- * the one bootstrap function, and that function calls the sweep unconditionally (at the top level of its body).
+ * the one bootstrap function; that function hands the sweep to `afterListening` unconditionally (a statement at the
+ * top level of its body); and the callback it hands over starts the sweep unconditionally (a statement at the top
+ * level of the callback's block).
+ *
+ * Re-anchored by bundle-30 I13 (pre-ship testing F2): I8.7 moved the call into the `afterListening` callback, and this
+ * gate kept passing because its pattern rejected only a LEADING `if` on the line — `afterListening(() => { if (cond)
+ * void sweepEverySpaceAtBoot(); })` matched it. Both levels are now read by structure.
  *
  * Run: node --test testing/standalone/the-suppression-sweep-runs-at-every-start.test.js
  */
@@ -15,10 +21,27 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
-import { bodyOf } from './_structural-window.mjs';
+import { bodyOf, blockAfter } from './_structural-window.mjs';
 
 const src = (f) => stripComments(readFileSync(f, 'utf8'));
 const BOOT_FN = 'startConfiguredInstanceServices';
+const SWEEP = 'sweepEverySpaceAtBoot';
+
+/**
+ * Whether the statement holding `at` sits at the top level of `block` (the text between its braces) with nothing
+ * conditional before it in that statement: no enclosing bracket, and only `void` / `await` ahead of the call.
+ */
+function unconditionalAt(block, at) {
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < at; i++) {
+    const c = block[i];
+    if ('([{'.includes(c)) depth++;
+    else if (')]}'.includes(c)) depth--;
+    if (depth === 0 && (c === ';' || c === '}' || c === '\n')) start = i + 1;
+  }
+  return depth === 0 && /^\s*(?:void\s+|await\s+)?$/.test(block.slice(start, at));
+}
 
 describe('the suppression sweep runs at every start', () => {
   it('both doors to a configured instance run the one bootstrap function', () => {
@@ -27,12 +50,28 @@ describe('the suppression sweep runs at every start', () => {
     }
   });
 
-  it('the bootstrap function starts the sweep unconditionally', () => {
+  it('the bootstrap hands the sweep to afterListening unconditionally, and the callback starts it unconditionally', () => {
     const body = bodyOf(src('server/src/bootstrap.ts'), BOOT_FN);
-    const calls = body.split(/\r?\n/).filter(l => /sweepEverySpaceAtBoot\b/.test(l) && !/\bimport\(/.test(l));
-    assert.equal(calls.length, 1, `${BOOT_FN} calls the boot sweep ${calls.length} time(s) — expected exactly one call`);
-    // Top level of the function body: two spaces, so not inside an `if`, a loop or a callback that may not run.
-    assert.match(calls[0], /^ {2}(?!if\b|for\b|while\b|switch\b|else\b)[^?&|]*sweepEverySpaceAtBoot\b/,
-      `the boot sweep is called under a condition or inside a callback: ${calls[0].trim()}`);
+    const inner = body.slice(body.indexOf('{') + 1, body.lastIndexOf('}'));
+    const mentions = [...inner.matchAll(new RegExp(`\\b${SWEEP}\\b`, 'g'))].map(m => m.index)
+      .filter(i => !/import\(/.test(inner.slice(inner.lastIndexOf('\n', i), i)) && !/const \{[^}]*$/.test(inner.slice(inner.lastIndexOf('\n', i), i)));
+    assert.equal(mentions.length, 1, `${BOOT_FN} starts the boot sweep ${mentions.length} time(s) — expected exactly one call`);
+
+    // Level 1: the afterListening call holding it is a top-level statement of the bootstrap body.
+    const handOff = inner.lastIndexOf('afterListening(', mentions[0]);
+    assert.ok(handOff > -1, `the boot sweep is not handed to afterListening — it would compete with the boot (bundle-30 I8)`);
+    assert.ok(unconditionalAt(inner, handOff),
+      `the afterListening hand-off is under a condition or inside another block: ${inner.slice(handOff, handOff + 80)}`);
+
+    // Level 2: the callback has a block body, and the sweep is a top-level statement of it.
+    const call = inner.slice(handOff);
+    assert.match(call, /^afterListening\(\s*(?:async\s*)?\(\)\s*=>\s*\{/,
+      'the afterListening callback has no block body — an expression body can make the sweep conditional (`cond && …`)');
+    const block = blockAfter(call, 0, 'the afterListening callback');
+    const blockInner = block.slice(1, -1);
+    const sweepAt = blockInner.search(new RegExp(`\\b${SWEEP}\\(`));
+    assert.ok(sweepAt > -1, 'the afterListening callback does not start the sweep');
+    assert.ok(unconditionalAt(blockInner, sweepAt),
+      `the boot sweep is started under a condition inside the afterListening callback: ${blockInner.trim().slice(0, 120)}`);
   });
 });

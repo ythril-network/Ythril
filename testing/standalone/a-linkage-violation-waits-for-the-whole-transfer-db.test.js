@@ -82,4 +82,37 @@ describe('a linkage violation waits for the whole transfer, and is recorded once
     const twice = await violationsOf(edge);
     assert.deepEqual(twice.map(x => x.field), ['to'], 'a re-check recorded the same violation a second time');
   });
+
+  /*
+   * A pull that THROWS part-way — the peer goes away and a page fetch rejects — still checks what landed before it
+   * (bundle-30 I13, pre-ship data-integrity DI-2). The check ran after the family loop, so a rejected fetch skipped
+   * it, and the landed edges were never checked again: re-served next cycle at an equal seq they plan as skipped.
+   */
+  it('a pull that fails on a later family still records a real dangling end from an earlier one', async () => {
+    const [from, missing, edge] = [randomUUID(), randomUUID(), randomUUID()];
+    const remote = door.remoteOf(S);
+    door.state.records[remote] = {
+      entities: [build.entity(remote, from, 1, { author: { ...PEER_AUTHOR } })],
+      edges: [build.edge(remote, edge, 2, { from, to: missing, author: { ...PEER_AUTHOR } })],
+    };
+    door.state.failFamily = 'links';
+    await door.sync();
+    assert.ok(await door.mongo.col(`${S}_edges`).findOne({ _id: edge }), 'the edge did not land — the fixture is broken');
+    const v = await violationsOf(edge);
+    assert.deepEqual(v.map(x => x.field), ['to'], 'a dangling end that landed before the transfer failed was never checked');
+  });
+
+  it('and records nothing for an end whose family never arrived', async () => {
+    // The chrono family fails; an edge to a chrono entry must not be recorded missing for a target that never came.
+    const [from, to, edge] = [randomUUID(), randomUUID(), randomUUID()];
+    const remote = door.remoteOf(S);
+    door.state.records[remote] = {
+      edges: [build.edge(remote, edge, 3, { from, to, fromKind: 'chrono', toKind: 'chrono', author: { ...PEER_AUTHOR } })],
+      chrono: [from, to].map((id, i) => build.chrono(remote, id, 1 + i, { author: { ...PEER_AUTHOR } })),
+    };
+    door.state.failFamily = 'chrono';
+    await door.sync();
+    assert.deepEqual((await violationsOf(edge)).map(x => `${x.field}: ${x.reason}`), [],
+      'an end in a family the transfer never reached was recorded missing');
+  });
 });
