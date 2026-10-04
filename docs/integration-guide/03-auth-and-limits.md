@@ -87,15 +87,19 @@ of your request from a failure underneath us.** Every failure body from those th
 true or false, whether or not it bit:
 
 ```json
-{ "error": "A store-side failure stopped this operation. Nothing was confirmed written by it; retry the request
-           (store-side failure; retryable).",
+{ "error": "A store-side failure stopped this operation. It did not complete as far as this server can confirm;
+           retry the request (store-side failure; retryable).",
   "retryable": true, "code": 8, "codeName": "InternalError" }
 ```
 
-A `503` also carries `Retry-After`. `code` and `codeName` are the store's own, present when it supplied them,
-and they are an operator's fastest route to the real condition. **The error text is ours, on every door and for
-every caller**: the database driver's own message names internal hosts, addresses and ports, so it goes to the
-server log (a `Store-side failure answered 503:` warning) and never into an answer.
+A `503` also carries `Retry-After`, on every HTTP door. `code` and `codeName` are the store's own, present when it
+supplied them, and they are an operator's fastest route to the real condition. **The error text is ours, on every
+door and for every caller, in one spelling**: the database driver's own message names internal hosts, addresses
+and ports, so it goes to the server log — once per request, as a `Store-side failure answered 503:` warning — and
+never into an answer. A driver error the server does not recognise as a store condition is not passed through
+either: it answers `500` with `retryable: false` and *"An internal database fault stopped this operation; its
+cause is in the server log."* What the database itself refused (a malformed query, a validation failure) is still
+a `400` in its own words.
 
 > **Why this exists, because the cost was not the confusing message.** Until this release those routes
 > answered **400 for every failure**, including a vector-search stage that had simply stopped answering. A
@@ -114,9 +118,10 @@ operation a write issues while it holds its sequence number is bounded (`YTHRIL_
 and a message of ours: the driver's text names internal collections and is never returned. The REST record routes,
 `POST /api/<tool>`, the MCP tools and the sync push routes classify it alike; until this release a REST write answered
 the same store failure `500` that the tool door answered `503`. Nothing was confirmed written, so retrying is
-the remedy. Any other store failure on a write (a step-down, a dropped connection) answers as a read does — the
-store's condition, with its `code` and `codeName` — on REST and MCP alike; one function builds the answer for every
-door.
+the remedy. Any other store failure on a write (a step-down, a dropped connection, a connection pool the driver
+cleared) answers as a read does — the store's condition, with its `code` and `codeName` — on every REST route and
+on MCP alike; one function builds the answer and one sender puts it on the wire, so no route answers a store
+failure with a `500` of its own.
 
 **We do not retry internally, deliberately.** A transparent retry would turn a dead search process into slow
 successes and hide it from the operator who can fix it. You get told, and you decide.

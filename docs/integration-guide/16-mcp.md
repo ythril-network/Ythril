@@ -38,13 +38,17 @@ On connect, the server sends global instructions listing all available space IDs
 >
 > ```json
 > { "retryable": true, "storeSideFailure": true,
->   "error": "A store-side failure stopped this operation. Nothing was confirmed written by it; retry the
->            request (store-side failure; retryable).",
+>   "error": "A store-side failure stopped this operation. It did not complete as far as this server can
+>            confirm; retry the request (store-side failure; retryable).",
 >   "code": 8, "codeName": "InternalError" }
 > ```
 >
 > The message is ours, never the database driver's, which names internal hosts and ports: the driver's text goes
-> to the server log. `code` and `codeName` are the store's own, when it supplied them.
+> to the server log. `code` and `codeName` are the store's own, when it supplied them. The text in `content` is the
+> same sentence as `error`, word for word — the REST doors answer it in the same spelling. A driver error the
+> server does not recognise as a store condition arrives the same way with `retryable: false` and *"An internal
+> database fault stopped this operation; its cause is in the server log."*: not yours to fix, and not known to
+> clear on a retry.
 >
 > **Retry it.** The REST doors answer these with `503` and `Retry-After`; this transport answers `200` with
 > `isError: true` and has no status to correct, so the classification lives in `structuredContent` instead —

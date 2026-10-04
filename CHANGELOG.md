@@ -404,6 +404,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   change notes, both pairing steps) still answered a store failure `500`. They now all answer `503`, `Retry-After`,
   `retryable: true` — with the store's code for a caller, in words of our own for a peer — and one retry sentence.
 
+  The rest of the HTTP doors now answer it the same way. `POST /api/brain/recall`, `POST /api/brain/similar`,
+  `POST /api/brain/spaces/:spaceId/traverse` and every `POST /api/<tool>` answered `503` without `Retry-After`. About
+  forty route handlers answered their own `500 Internal error` without asking whether the failure was the store's —
+  among them `POST /api/brain/spaces/:spaceId/entities`, the UI's create form, which showed an operator *"Internal
+  server error"* for a condition a retry clears, and every `/api/conflicts`, `/api/contradictions`,
+  `/api/duplicates`, webhook, network and sync read route. An edge or link write whose reference lookup failed on
+  the store answered `400` with the driver's text; `space_rename` answered it as `Error (500)` with the driver's text;
+  a space create answered `500 Failed to create space` and logged nothing. A file delete through a store failure
+  answered `200` with no sync tombstone written, so a peer re-pushed the file; it now answers `503`, and the retried
+  delete writes the tombstone. Every one now answers through one sender. The store message's retry sentence used to
+  say *"Nothing was confirmed written by it"*, also on a list load or a search, which wrote nothing; it now says what
+  is true of both.
+
 - **A pulled page is decided by the same rules as a pushed one (`Q-204`, `Q-225`).** The pull accepted whatever was
   newer by seq and validated nothing, so the same document delivered the other way round was decided differently:
   a record this instance holds a tombstone for was stored again, an equal-seq divergent fact lost one side instead of
@@ -768,12 +781,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   selection or a step-down arrives with a driver message that names internal hosts, addresses and ports
   (`connection 5 to 172.16.0.9:27017 closed`). The REST brain read routes and the MCP tools put that message in their
   `503` body, and the REST error handler did the same for every route that lets a store failure reach it, including
-  routes a peer or an unauthenticated caller reaches. Every door — REST reads and writes, MCP tools and sync push —
-  now answers one message of ours, *"A store-side failure stopped this operation. Nothing was confirmed written by
-  it; retry the request (store-side failure; retryable)."*, with `retryable: true`, `Retry-After`, and the store's
-  own `code` and `codeName` when it gave them. The driver's message, with any cause it attached, is logged once as a
+  routes a peer or an unauthenticated caller reaches. Every door — REST reads and writes, `POST /api/<tool>`, MCP
+  tools and sync push — now answers one message of ours, in one spelling, *"A store-side failure stopped this
+  operation. It did not complete as far as this server can confirm; retry the request (store-side failure;
+  retryable)."*, with `retryable: true`, `Retry-After` (on every HTTP door), and the store's own `code` and
+  `codeName` when it gave them. The driver's message, with any cause it attached, is logged once per request as a
   `Store-side failure answered 503:` warning. A client that matched the old prose should read `retryable` and
   `code` instead.
+
+  A store failure is recognised by what the driver says it IS — its class, its error labels, the server's code —
+  not by a list of error names. The list could not see a subclass: the error the driver raises when it clears its
+  connection pool (`MongoPoolClearedError`, a network error by class) answered `400` with the driver's text, naming
+  the internal host, address and port, to whichever request was in flight when a store went away. A driver error
+  that is recognised as nothing in particular now answers `500` with *"An internal database fault stopped this
+  operation; its cause is in the server log."* rather than a `400` carrying its message. What the database server
+  itself refused — a malformed query, a validation failure — still answers `400` in its own words.
 
 - **Every log line is one line, and every value in it is bounded (`Q-231`, `Q-214`, `Q-270`).** The escaping above
   covered the push, pull and import paths; a member label arriving by gossip, a vote round id, a caller's parameter
