@@ -790,7 +790,8 @@ async function storedEdgeIdentities(
   relinked: ReadonlyArray<{ edge: EdgeDoc; from: string; to: string }>, session: ClientSession,
 ): Promise<Set<string>> {
   const kindIs = (k: string | undefined): unknown => (edgeEndpointKind(k as RefKind | undefined) === 'entity' ? { $in: [null, 'entity'] } : k);
-  const keys = new Set<string>();
+  // The dedupe the collision rule rests on: one key per identity, however many stored edges hold it.
+  const keys: Set<string> = new Set();
   for (let i = 0; i < relinked.length; i += IDENTITIES_PER_READ) {
     const tuples = relinked.slice(i, i + IDENTITIES_PER_READ).map(r => ({
       from: r.from, to: r.to, label: r.edge.label, fromKind: kindIs(r.edge.fromKind), toKind: kindIs(r.edge.toKind),

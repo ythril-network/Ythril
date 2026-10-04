@@ -12,8 +12,8 @@
  * every landed edge cost two unawaited `findOne`s, every link one — about twenty thousand on a 50-page pull.
  *
  * So a door collects what landed (`add`) and checks once (`run`) when its transfer is whole: a pull after every
- * family of the space's transfer, a push after the request's page. The check is one `$in` read per target kind per
- * chunk, awaited, so its cost is bounded by the transfer rather than by the pool. A target in a family whose
+ * family of the space's transfer, a push after the request's page. The check is one by-id read per target kind
+ * (`readStoredById`, chunked), awaited, so its cost is bounded by the transfer rather than by the pool. A target in a family whose
  * transfer stopped early (`stillToCome`) is not checked: it may be in what was not served yet, and recording it
  * would be the false violation this exists to prevent.
  *
@@ -30,6 +30,7 @@ import { createHash } from 'node:crypto';
 import { col } from '../db/mongo.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { outsideWriteBound } from '../db/write-bound.js';
+import { readStoredById } from '../db/read-by-id.js';
 import { isWellFormedRef, collectionForRefKind, edgeEndpointKind } from '../brain/entity-refs.js';
 import { isStrictLinkage } from '../spaces/proxy.js';
 import { emitWebhookEvent } from '../webhooks/dispatcher.js';
@@ -37,9 +38,6 @@ import { log, peerText } from '../util/log.js';
 import type { RefKind } from '../config/types-knowledge.js';
 import type { LinkViolationDoc } from '../config/types.js';
 import type { SpacePart } from '../db/space-collection.js';
-
-/** How many target ids one existence read asks for. */
-const IDS_PER_READ = 1000;
 
 interface Arrived { _id: string; [k: string]: unknown }
 
@@ -106,50 +104,55 @@ export class LinkageCheck {
     if (targets.length === 0) return;
     await outsideWriteBound(async () => {
       try {
-        const missing: Array<Target & { reason: string }> = [];
-        const byKind = new Map<RefKind, Target[]>();
-        for (const t of targets) {
-          if (t.malformed) { missing.push({ ...t, reason: t.malformed }); continue; }
-          if (stillToCome.includes(collectionForRefKind(t.kind))) continue;
-          byKind.set(t.kind, [...(byKind.get(t.kind) ?? []), t]);
-        }
-        for (const [kind, ofKind] of byKind) {
-          const ids = [...new Set(ofKind.map(t => t.id))];
-          const present = new Set<string>();
-          for (let i = 0; i < ids.length; i += IDS_PER_READ) {
-            const found = await col<{ _id: string }>(spaceCollection(this.spaceId, collectionForRefKind(kind)))
-              .find({ _id: { $in: ids.slice(i, i + IDS_PER_READ) } } as never, { projection: { _id: 1 } }).toArray();
-            for (const d of found) present.add(d._id);
-          }
-          for (const t of ofKind) {
-            if (!present.has(t.id)) missing.push({ ...t, reason: `${t.field} references non-existent ${kind} '${t.id}'` });
-          }
-        }
-        await this.record(missing);
+        await recordViolations(this.spaceId, this.sender, await missingTargets(this.spaceId, targets, stillToCome));
       } catch (err) {
         log.error(`Could not check the strict-linkage targets of ${targets.length} landed reference(s) in space `
           + `'${peerText(this.spaceId)}': ${peerText(err)}`);
       }
     });
   }
+}
 
-  private async record(missing: Array<Target & { reason: string }>): Promise<void> {
-    if (missing.length === 0) return;
-    const detectedAt = new Date().toISOString();
-    const docs = new Map<string, LinkViolationDoc>();
-    for (const t of missing) {
-      const _id = violationId(t);
-      docs.set(_id, { _id, spaceId: this.spaceId, docId: t.docId, docType: t.docType, field: t.field,
-        reason: t.reason, peerInstanceId: this.sender, detectedAt });
+/**
+ * The targets that are not here: a malformed one always, a well-formed one when no record of its kind holds its id.
+ * One read per target kind (`readStoredById`, chunked); a target whose family is `stillToCome` is not judged.
+ */
+async function missingTargets(
+  spaceId: string, targets: readonly Target[], stillToCome: readonly SpacePart[],
+): Promise<Array<Target & { reason: string }>> {
+  const missing: Array<Target & { reason: string }> = [];
+  const byKind = new Map<RefKind, Target[]>();
+  for (const t of targets) {
+    if (t.malformed) { missing.push({ ...t, reason: t.malformed }); continue; }
+    if (stillToCome.includes(collectionForRefKind(t.kind))) continue;
+    byKind.set(t.kind, [...(byKind.get(t.kind) ?? []), t]);
+  }
+  for (const [kind, ofKind] of byKind) {
+    const present = await readStoredById(spaceCollection(spaceId, collectionForRefKind(kind)), ofKind.map(t => t.id), {});
+    for (const t of ofKind) {
+      if (!present.has(t.id)) missing.push({ ...t, reason: `${t.field} references non-existent ${kind} '${t.id}'` });
     }
-    const all = [...docs.values()];
-    const res = await col<LinkViolationDoc>(spaceCollection(this.spaceId, 'linkViolations')).bulkWrite(
-      all.map(doc => ({ updateOne: { filter: { _id: doc._id } as never, update: { $setOnInsert: doc } as never, upsert: true } })),
-      { ordered: false },
-    );
-    for (const index of Object.keys(res.upsertedIds ?? {})) {
-      const doc = all[Number(index)]!;
-      emitWebhookEvent({ event: 'link_violation.created', spaceId: this.spaceId, entry: doc as unknown as Record<string, unknown> });
-    }
+  }
+  return missing;
+}
+
+/** Record each dangling end once — by its derived id, `$setOnInsert` — and announce only the ones that are new. */
+async function recordViolations(spaceId: string, sender: string, missing: ReadonlyArray<Target & { reason: string }>): Promise<void> {
+  if (missing.length === 0) return;
+  const detectedAt = new Date().toISOString();
+  const docs = new Map<string, LinkViolationDoc>();
+  for (const t of missing) {
+    const _id = violationId(t);
+    docs.set(_id, { _id, spaceId, docId: t.docId, docType: t.docType, field: t.field,
+      reason: t.reason, peerInstanceId: sender, detectedAt });
+  }
+  const all = [...docs.values()];
+  const res = await col<LinkViolationDoc>(spaceCollection(spaceId, 'linkViolations')).bulkWrite(
+    all.map(doc => ({ updateOne: { filter: { _id: doc._id } as never, update: { $setOnInsert: doc } as never, upsert: true } })),
+    { ordered: false },
+  );
+  for (const index of Object.keys(res.upsertedIds ?? {})) {
+    const doc = all[Number(index)]!;
+    emitWebhookEvent({ event: 'link_violation.created', spaceId, entry: doc as unknown as Record<string, unknown> });
   }
 }

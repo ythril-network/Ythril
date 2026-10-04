@@ -181,8 +181,8 @@ describe('the sync ingest door checks each endpoint against its own kind', () =>
     // Re-anchored (bundle-30 I8): the per-record half of the check moved to `sync/linkage-check.ts` as `targetsOf`,
     // and the existence read is one `$in` per kind in `run`; both halves are read.
     const mod = src('server/src/sync/linkage-check.ts');
-    const body = bodyOf(mod, 'targetsOf') + bodyOf(mod, 'LinkageCheck');
-    assert.ok(body.length > 400, 'targetsOf/LinkageCheck in sync/linkage-check.ts are gone or renamed — re-anchor this gate');
+    const body = bodyOf(mod, 'targetsOf') + bodyOf(mod, 'missingTargets');
+    assert.ok(body.length > 400, 'targetsOf/missingTargets in sync/linkage-check.ts are gone or renamed — re-anchor this gate');
     assert.match(body, /edgeEndpointKind\(/,
       'sync decides the kind of an endpoint for itself instead of reading what the edge declares');
     assert.match(body, /collectionForRefKind\(/,

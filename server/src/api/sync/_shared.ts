@@ -13,10 +13,6 @@ import { MAX_SYNC_SEQ } from '../../util/seq.js';
 import type { FileMetaDoc, AuthorRef } from '../../config/types.js';
 import { LOCAL_ONLY_FIELDS } from '../../sync/local-only-fields.js';
 
-export const UUID_V4_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
-
-
 /*
  * What a landed edge or link points at that is not here is `sync/linkage-check.ts`'s question (bundle-30 I8): checked
  * once a transfer is whole, and recorded once per dangling end.
