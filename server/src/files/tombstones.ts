@@ -160,6 +160,8 @@ async function publishOnePerPath(spaceId: string, docs: readonly ToPublish[]): P
   const alreadyPublished = new Set(stored.filter(t => !t.pending).map(t => t._id));
   const { $set, $unset } = publishedNow();
   const ops: unknown[] = [];
+  /** Pending tombstones a newer publication for their path already covers: dropped, not published. */
+  const superseded: string[] = [];
   let published = 0;
   let dropped = 0;
   for (const path of paths) {
@@ -175,13 +177,13 @@ async function publishOnePerPath(spaceId: string, docs: readonly ToPublish[]): P
       ops.push({ deleteMany: { filter: asFilter<StoredFileTombstone>({ path, pending: true, _id: { $ne: winner._id } }) } });
       published += 1;
       dropped += candidates.length - 1;
-    } else if (candidates.length > 0) {
-      ops.push({ deleteMany: { filter: asFilter<StoredFileTombstone>({ _id: { $in: candidates.map(d => d._id) }, pending: true }) } });
-      dropped += candidates.length;
+    } else {
+      superseded.push(...candidates.map(d => d._id));
     }
   }
   if (ops.length > 0) await tombstones.bulkWrite(asBulk<StoredFileTombstone>(ops), { ordered: false });
-  return { published, dropped };
+  if (superseded.length > 0) await tombstones.deleteMany(asFilter<StoredFileTombstone>({ _id: { $in: superseded }, pending: true }));
+  return { published, dropped: dropped + superseded.length };
 }
 
 /** The marker a move writes on its tombstones, as a filter. */
