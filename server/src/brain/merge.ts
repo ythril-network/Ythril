@@ -12,7 +12,6 @@
 import type { ClientSession } from 'mongodb';
 import { col, asFilter, asUpdate, asBulk } from '../db/mongo.js';
 import { withSeq, withAllocatedSeqs } from '../util/seq.js';
-import { inChunks } from '../util/chunks.js';
 import { readStoredById } from '../db/read-by-id.js';
 import { inHeldTransaction } from './held-transaction.js';
 import { NUMERIC_MERGE_FNS, BOOLEAN_MERGE_FNS } from '../config/types-knowledge.js';
@@ -32,7 +31,7 @@ import type { ResolvedEdgeEnds } from '../spaces/schema-validation.js';
 import { validateEntity, getSpaceMeta, applyValidation, type SchemaViolation } from '../spaces/schema-validation.js';
 import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';
 import type { EntityDoc, EdgeDoc, FileMetaDoc, LinkDoc, PropertySchema } from '../config/types.js';
-import { writeTombstone, writeTombstones } from './tombstones.js';
+import { writeTombstone, removeWithTombstones } from './tombstones.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { atReadSeq } from '../db/at-read-seq.js';
 
@@ -574,8 +573,6 @@ interface MergeWrite {
   deletedDuplicateEdgeIds: string[];
 }
 
-/** Rows per delete command over a merge's ids — a hub's thousands are never one `$in`. */
-const MERGE_CHUNK = 1_000;
 
 /**
  * Execute the merge: relink edges, links and face labels, drop an absorbed edge whose relinked identity a survivor
@@ -738,10 +735,8 @@ async function relinkAndAbsorb(
   }
 
   // 1a. The duplicates: one delete, and their tombstones in one block, each carrying the seq of the edge it deletes.
-  for (const chunk of inChunks(duplicates, MERGE_CHUNK)) {
-    await edgeColl.deleteMany(asFilter<EdgeDoc>({ _id: { $in: chunk.map(e => e._id) } }), { session });
-  }
-  await writeTombstones(spaceId, duplicates.map(e => ({ _id: e._id, type: 'edge' as const, deletedAt: now, originalSeq: e.seq })), session);
+  await removeWithTombstones(spaceId, 'edges',
+    duplicates.map(e => ({ _id: e._id, type: 'edge' as const, deletedAt: now, originalSeq: e.seq })), { session });
 
   /*
    * 1b. RE-KEYED rather than `$set`, since 3.6. Relinking an endpoint changes what the edge IS, and its `_id` is
@@ -813,11 +808,10 @@ async function relinkAndAbsorb(
     const linkMoves = affectedLinks.map(link => ({ link, newId: linkIdFor(link.from, link.fromKind, survivor._id, 'entity') }));
     const held = await readStoredById<{ _id: string }>(spaceCollection(spaceId, 'links'), linkMoves.map(m => m.newId), { _id: 1 }, { session });
     const fresh = linkMoves.filter(m => !held.has(m.newId));
-    for (const chunk of inChunks(linkMoves, MERGE_CHUNK)) {
-      await linkColl.deleteMany(asFilter<LinkDoc>({ _id: { $in: chunk.map(m => m.link._id) }, spaceId }), { session });
-    }
     // The old rows' tombstones BELOW the new rows' seqs — the re-key's order (`edge-rekey.ts`).
-    await writeTombstones(spaceId, linkMoves.map(({ link }) => ({ _id: link._id, type: 'link' as const, deletedAt: now, originalSeq: link.seq })), session);
+    await removeWithTombstones(spaceId, 'links',
+      linkMoves.map(({ link }) => ({ _id: link._id, type: 'link' as const, deletedAt: now, originalSeq: link.seq })),
+      { session, filter: { spaceId } });
     if (fresh.length > 0) {
       await withAllocatedSeqs(spaceId, fresh.length, (first) => linkColl.bulkWrite(asBulk<LinkDoc>(fresh.map(({ link, newId }, i) => ({
         replaceOne: {

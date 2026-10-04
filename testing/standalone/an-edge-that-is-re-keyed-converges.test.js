@@ -94,7 +94,9 @@ describe('the delete half leaves a tombstone a peer can act on', () => {
      * for ever, beside the new one — two rows for one relationship, which is what the unique index exists to
      * prevent.
      */
-    assert.match(body(), /spaceCollection\([A-Za-z]+, 'tombstones'\)/,
+    // Re-anchored (bundle-30 I6, C11): the delete and its tombstones are the one remover's, `removeWithTombstones`,
+    // which writes a tombstone per row it deletes — the hand loop over the tombstones collection is gone.
+    assert.match(body(), /removeWithTombstones\(\s*spaceId\s*,\s*'edges'/,
       'without a tombstone a peer keeps the old id for ever, beside the new one');
     assert.match(body(), /type: 'edge'/, 'the tombstone must name the collection it belongs to');
   });
@@ -121,8 +123,8 @@ describe('the delete half leaves a tombstone a peer can act on', () => {
      * swapping which variable each write consumes leaves the declarations in place and inverts the property,
      * and the gate would not notice. That is the same wrong-axis mistake this file was written to replace.
      */
-    const tombWrite = b.slice(b.indexOf("'tombstones'"));
-    assert.match(tombWrite.slice(0, 400), /seq: tombSeq|tombstoneDoc\(\s*spaceId\s*,\s*tombSeq\b/,
+    const tombWrite = b.slice(b.indexOf('removeWithTombstones('));
+    assert.match(tombWrite.slice(0, 400), /firstSeq: tombSeq\b/,
       'the tombstone is stamped with the later seq, so a peer can advance past the insert');
     const insertDoc = b.slice(b.indexOf('const stored ='));
     assert.match(insertDoc.slice(0, 300), /seq: insertSeq/,
@@ -236,7 +238,7 @@ describe('the delete has to be one a PEER will actually apply', () => {
       'the re-key must compare the document author against this instance, or a peer silently keeps both rows');
     assert.match(b, /getConfig\(\)\.instanceId/, 'it has to know which instance it is');
     const at = b.search(/author[^\n]*instanceId/);
-    assert.ok(at > 0 && at < b.search(/\bdelete(One|Many)\(/),
+    assert.ok(at > 0 && at < b.search(/\bdelete(One|Many)\(|removeWithTombstones\(/),
       'the authorship check runs after the delete, so the row is gone before the decision is made');
   });
 
@@ -343,7 +345,7 @@ describe('the insert half is the same relationship, not a new one', () => {
     assert.match(route, /status\(409\)/,
       'a taken identity is a conflict, not a server fault');
     // And it must be thrown BEFORE anything is written, or a refused re-key leaves the edge deleted.
-    assert.ok(b.indexOf('EdgeIdentityTaken') < b.search(/\bdelete(One|Many)\(/),
+    assert.ok(b.indexOf('EdgeIdentityTaken') < b.search(/\bdelete(One|Many)\(|removeWithTombstones\(/),
       'the check runs after the delete, so a taken identity destroys the edge it refused to move');
   });
 });

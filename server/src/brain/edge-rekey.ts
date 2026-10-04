@@ -37,16 +37,16 @@
  * is the other caller — importing it from `edges.ts` would put the two biggest brain modules in a runtime
  * dependency for the sake of one function, where a leaf both can reach costs nothing.
  */
-import { col, asFilter, asDoc, asBulk } from '../db/mongo.js';
+import { col, asDoc } from '../db/mongo.js';
 import type { ClientSession } from 'mongodb';
 import { withAllocatedSeqs } from '../util/seq.js';
-import { inChunks } from '../util/chunks.js';
+import { inChunks, ROWS_PER_BULK_COMMAND } from '../util/chunks.js';
 import { readStoredById } from '../db/read-by-id.js';
 import { getConfig } from '../config/loader.js';
 import { edgeIdFor } from './edge-id.js';
 import { withoutVector } from './read-projection.js';
-import type { EdgeDoc, TombstoneDoc } from '../config/types.js';
-import { tombstoneDoc } from './tombstones.js';
+import type { EdgeDoc } from '../config/types.js';
+import { removeWithTombstones } from './tombstones.js';
 import { spaceCollection } from '../db/space-collection.js';
 
 /**
@@ -131,8 +131,6 @@ export interface EdgeMove {
   next: { from?: string; to?: string; label?: string };
 }
 
-/** Rows per delete, tombstone and insert command: a hub merge moves thousands, and one command a row was the cost. */
-const REKEY_CHUNK = 1_000;
 
 /**
  * Move many edges onto the ids their identities derive — THE re-key, for one edge (`rekeyEdge`) or a merge's
@@ -216,19 +214,10 @@ export async function rekeyEdges(
     const insertSeq = tombSeq + n;
     const opts = session ? { session } : {};
 
-    for (const chunk of inChunks(moving, REKEY_CHUNK)) {
-      await coll.deleteMany(asFilter<EdgeDoc>({ _id: { $in: chunk.map(m => m.existing._id) } }), opts);
-    }
-    for (const [c, chunk] of inChunks(moving, REKEY_CHUNK).entries()) {
-      await col<TombstoneDoc>(spaceCollection(spaceId, 'tombstones')).bulkWrite(asBulk<TombstoneDoc>(chunk.map((m, k) => ({
-        replaceOne: {
-          filter: { _id: m.existing._id },
-          replacement: tombstoneDoc(spaceId, tombSeq + c * REKEY_CHUNK + k,
-            { _id: m.existing._id, type: 'edge', deletedAt: now, originalSeq: m.existing.seq }),
-          upsert: true,
-        },
-      }))), { ordered: false, ...opts });
-    }
+    // The old rows go, their tombstones at `tombSeq…` — the block's lower half (`removeWithTombstones`).
+    await removeWithTombstones(spaceId, 'edges',
+      moving.map(m => ({ _id: m.existing._id, type: 'edge' as const, deletedAt: now, originalSeq: m.existing.seq })),
+      { session, firstSeq: tombSeq });
 
     // The stored document carried forward, not rebuilt: `createdAt`, `author`, `tags`, `description` and
     // `properties` describe the relationship, and the relationship did not change — only which entities it
@@ -240,7 +229,7 @@ export async function rekeyEdges(
       for (const key of alsoUnset) delete (doc as unknown as Record<string, unknown>)[key];
       return doc;
     });
-    for (const chunk of inChunks(stored, REKEY_CHUNK)) {
+    for (const chunk of inChunks(stored, ROWS_PER_BULK_COMMAND)) {
       await coll.insertMany(chunk.map(d => asDoc<EdgeDoc>(d)), { ordered: true, ...opts });
     }
     return stored;

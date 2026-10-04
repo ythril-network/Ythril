@@ -6,6 +6,14 @@
  * or a size of 0 that loops for ever. A non-positive size is refused rather than read as "no slicing", because a
  * caller passing 0 has a bug and an unbounded `$in` is exactly what the size exists to prevent.
  */
+/**
+ * Rows per bulk write or `$in` delete command — the one number for "how many rows one command may carry", where a
+ * hub's merge, cascade or re-key issues thousands and one command per row was the cost. It was three constants of one
+ * value (`REKEY_CHUNK`, `MERGE_CHUNK`, `TOMBSTONE_CHUNK`, bundle-30 I6, C13). A different question keeps its own
+ * number: `EDGE_REMOVAL_CHUNK` sizes a TRANSACTION (the read, delete and tombstones of one chunk commit together).
+ */
+export const ROWS_PER_BULK_COMMAND = 1_000;
+
 export function inChunks<T>(items: readonly T[], size: number): T[][] {
   if (!Number.isInteger(size) || size < 1) throw new Error(`inChunks: size must be a positive integer, got ${size}`);
   const out: T[][] = [];

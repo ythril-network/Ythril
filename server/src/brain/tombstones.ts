@@ -2,9 +2,10 @@ import type { ClientSession } from 'mongodb';
 import { col, asFilter, asBulk } from '../db/mongo.js';
 import { getConfig } from '../config/loader.js';
 import type { TombstoneDoc } from '../config/types.js';
-import { spaceCollection } from '../db/space-collection.js';
+import { spaceCollection, type SpacePart } from '../db/space-collection.js';
+import { andPredicates } from '../db/and-predicates.js';
 import { settledSeqRange, withAllocatedSeqs } from '../util/seq.js';
-import { inChunks } from '../util/chunks.js';
+import { inChunks, ROWS_PER_BULK_COMMAND } from '../util/chunks.js';
 
 /*
  * A tombstone a PEER delivered is applied by `applyPeerTombstones` (`sync/tombstone-apply.ts`), not here: this
@@ -72,8 +73,6 @@ export interface IssuedTombstone {
   deletedAt?: string;
 }
 
-/** Tombstones per bulk write: a hub's cascade or merge issues thousands, and one command per row was the cost. */
-const TOMBSTONE_CHUNK = 1_000;
 
 /**
  * Issue many local tombstones: ONE seq block for all of them, taken at the write, and one bulk write per chunk.
@@ -83,16 +82,20 @@ const TOMBSTONE_CHUNK = 1_000;
  * readers continue from the last item's seq with `seq > since`, so two tombstones sharing one at a page boundary
  * would leave the rest unreachable. `session` puts the rows in the caller's transaction — the cascade's delete and
  * its tombstones commit together or not at all.
+ *
+ * `firstSeq`: a block the CALLER already allocated — the edge re-key takes one block for its tombstones and its
+ * inserts together, tombstones first, and hand-copied this loop to use it (bundle-30 I6, C11). Seqs run
+ * `firstSeq, firstSeq + 1, …` in the order given.
  */
 export async function writeTombstones(
-  spaceId: string, tombs: readonly IssuedTombstone[], session?: ClientSession,
+  spaceId: string, tombs: readonly IssuedTombstone[], session?: ClientSession, { firstSeq }: { firstSeq?: number } = {},
 ): Promise<void> {
   if (tombs.length === 0) return;
   const coll = col<TombstoneDoc>(spaceCollection(spaceId, 'tombstones'));
   const deletedAt = new Date().toISOString();
-  await withAllocatedSeqs(spaceId, tombs.length, async (first) => {
+  const write = async (first: number): Promise<void> => {
     let next = first;
-    for (const chunk of inChunks(tombs, TOMBSTONE_CHUNK)) {
+    for (const chunk of inChunks(tombs, ROWS_PER_BULK_COMMAND)) {
       await coll.bulkWrite(asBulk<TombstoneDoc>(chunk.map(t => ({
         replaceOne: {
           filter: { _id: t._id },
@@ -101,5 +104,26 @@ export async function writeTombstones(
         },
       }))), { ordered: false, ...(session ? { session } : {}) });
     }
-  }, 'tombstone.write');
+  };
+  if (firstSeq !== undefined) await write(firstSeq);
+  else await withAllocatedSeqs(spaceId, tombs.length, write, 'tombstone.write');
+}
+
+/**
+ * Delete rows of one of a space's collections by id, a command per `ROWS_PER_BULK_COMMAND`, and issue their
+ * tombstones — the one spelling of "chunked `$in` delete, then `writeTombstones`" (bundle-30 I6, C11: the merge's
+ * duplicate edges and moved links, the re-key's moved edges and the edge removal each wrote it by hand). `filter`
+ * narrows the delete (ANDed, never spread beside the id); `session` and `firstSeq` are `writeTombstones`'.
+ */
+export async function removeWithTombstones(
+  spaceId: string, part: SpacePart, tombs: readonly IssuedTombstone[],
+  { session, filter, firstSeq }: { session?: ClientSession; filter?: Record<string, unknown>; firstSeq?: number } = {},
+): Promise<void> {
+  if (tombs.length === 0) return;
+  const coll = col<{ _id: string }>(spaceCollection(spaceId, part));
+  for (const chunk of inChunks(tombs, ROWS_PER_BULK_COMMAND)) {
+    await coll.deleteMany(asFilter<{ _id: string }>(andPredicates({ _id: { $in: chunk.map(t => t._id) } }, filter) as never),
+      session ? { session } : {});
+  }
+  await writeTombstones(spaceId, tombs, session, { firstSeq });
 }

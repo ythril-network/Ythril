@@ -21,13 +21,12 @@
  * An edge already removed by somebody else is simply not in the answer; a failure part-way leaves the chunks before
  * it removed and the rest untouched, so a re-run continues.
  */
-import { col, asFilter } from '../db/mongo.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { readStoredById } from '../db/read-by-id.js';
 import { inChunks } from '../util/chunks.js';
 import { log, peerText } from '../util/log.js';
 import { inHeldTransaction } from './held-transaction.js';
-import { writeTombstones } from './tombstones.js';
+import { removeWithTombstones } from './tombstones.js';
 import { retireEmbedJobs } from './embed-queue.js';
 import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';
 import type { EdgeDoc } from '../config/types.js';
@@ -62,8 +61,8 @@ async function removeEdgeChunk(spaceId: string, ids: readonly string[]): Promise
   return inHeldTransaction(spaceId, 'edge.remove', async (session) => {
     const stored = await readStoredById<Pick<EdgeDoc, '_id' | 'seq'>>(collName, ids, { seq: 1 }, { session, filter: { spaceId } });
     if (stored.size === 0) return new Set<string>();
-    await col<EdgeDoc>(collName).deleteMany(asFilter<EdgeDoc>({ _id: { $in: [...stored.keys()] }, spaceId }), { session });
-    await writeTombstones(spaceId, [...stored.values()].map(e => ({ _id: e._id, type: 'edge' as const, originalSeq: e.seq })), session);
+    await removeWithTombstones(spaceId, 'edges',
+      [...stored.values()].map(e => ({ _id: e._id, type: 'edge' as const, originalSeq: e.seq })), { session, filter: { spaceId } });
     return new Set(stored.keys());
   }, {
     // A commit whose answer was lost may have landed: it did when none of the chunk's edges is stored any more.
