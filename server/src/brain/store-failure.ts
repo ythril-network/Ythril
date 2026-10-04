@@ -374,12 +374,13 @@ export interface StoreFailureAnswer {
  * every door and every reader gets our words plus the store's stable `code`/`codeName`, and the driver's text —
  * internal hosts, addresses, ports — is logged HERE, once, where no door can answer with it or forget to log it.
  */
-export function storeFailureAnswer(err: unknown, where?: string): StoreFailureAnswer | null {
+export function storeFailureAnswer(err: unknown, where: string): StoreFailureAnswer | null {
   const f = classifyReadFailure(err);
   if (f.status < 500) return null;
-  // The operation it failed, when the door names one: a route's catch (`sendCaughtFailure`) logged its name for a
-  // non-store failure and nothing for the store's, so `GET /api/conflicts` failing on the store left a line naming no
-  // route and no access log beside it (bundle-30 I13, pre-ship observability O2).
+  // The operation it failed — REQUIRED, because this is the one place the line is built and every door writes it
+  // through here. Optional, only a route's own catch passed it (bundle-30 I13, O2): the read helper, the app's error
+  // handler and the MCP dispatcher logged a store failure naming no route and no tool (I15, preship-3 P3-4).
+  // `a-store-failure-log-line-names-its-operation.test.js` holds every call to it.
   const at = where ? ` (${logSafe(where)})` : '';
   if (!f.retryable) {
     // Not recognised, so the stack is what an operator needs: the meta argument keeps it (`fmt`).

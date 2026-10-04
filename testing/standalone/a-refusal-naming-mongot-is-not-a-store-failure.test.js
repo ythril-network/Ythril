@@ -50,7 +50,7 @@ describe('a refusal naming mongot is not a store failure', () => {
       const res = { code: 0, body: undefined, headers: {},
         status(c) { this.code = c; return this; }, setHeader(k, v) { this.headers[k] = v; return this; },
         json(b) { this.body = b; return this; } };
-      sendReadFailure(res, refusal);
+      sendReadFailure(res, 'brain POST /spaces/:spaceId/edges (reference check)', refusal);
       assert.equal(res.code, 400, `the REST door answered ${res.code} for the caller's own reference`);
       assert.equal(res.headers['Retry-After'], undefined, 'a refusal must not invite a retry');
     });

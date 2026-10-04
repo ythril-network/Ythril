@@ -84,7 +84,7 @@ edgesRouter.post('/spaces/:spaceId/edges', globalRateLimit, requireSpaceAuth, de
       await assertRefsResolve(wt.target, 'to', edgeEndpointKind(toKind as RefKind | undefined), [to as string]);
     } catch (err) {
       // A missing reference is the caller's 400; a store failure under the lookup is the store's (bundle-30 I12).
-      sendReadFailure(res, err);
+      sendReadFailure(res, 'brain POST /spaces/:spaceId/edges (reference check)', err);
       return;
     }
   }
@@ -292,7 +292,7 @@ edgesRouter.patch('/spaces/:spaceId/edges/:id', globalRateLimit, requireSpaceAut
         }
       } catch (err) {
         // A missing reference is the caller's 400; a store failure under the lookup is the store's (bundle-30 I12).
-        sendReadFailure(res, err);
+        sendReadFailure(res, 'brain PATCH /spaces/:spaceId/edges/:id (reference check)', err);
         return;
       }
     }

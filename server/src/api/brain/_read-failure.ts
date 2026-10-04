@@ -25,8 +25,9 @@ import { sendStoreFailure } from '../send-failure.js';
  * branch on one boolean instead of matching our prose, which is what `Retry-After` alone would have left them
  * doing on the 4xx-shaped failures.
  */
-export function sendReadFailure(res: express.Response, err: unknown): void {
-  const store = storeFailureAnswer(err);
+export function sendReadFailure(res: express.Response, where: string, err: unknown): void {
+  // `where` names the operation in the store failure's log line, as `sendCaughtFailure` does (bundle-30 I15).
+  const store = storeFailureAnswer(err, where);
   if (store) { sendStoreFailure(res, store); return; }
   // Not the store's: the request's, which the caller is the one who can fix.
   res.status(400).json({ error: err instanceof Error ? err.message : String(err), retryable: false });

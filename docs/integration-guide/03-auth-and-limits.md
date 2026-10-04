@@ -96,7 +96,8 @@ A `503` also carries `Retry-After`, on every HTTP door. `code` and `codeName` ar
 supplied them, and they are an operator's fastest route to the real condition. **The error text is ours, on every
 door and for every caller, in one spelling**: the database driver's own message names internal hosts, addresses
 and ports, so it goes to the server log — once per request, as a `Store-side failure answered 503` warning that
-names the route when a route answered it (`Store-side failure answered 503 (GET /api/conflicts): …`) — and never
+names the operation that failed, on every door: the route (`Store-side failure answered 503 (GET /api/conflicts): …`,
+or the method and path when the app's error handler answered it) or the MCP tool (`(tool delete_file)`) — and never
 into an answer. A driver error the server does not recognise as a store condition is not passed through
 either: it answers `500` with `retryable: false` and *"An internal database fault stopped this operation; its
 cause is in the server log."* What the database itself refused (a malformed query, a validation failure) is still

@@ -849,7 +849,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   operation. It did not complete as far as this server can confirm; retry the request (store-side failure;
   retryable)."*, with `retryable: true`, `Retry-After` (on every HTTP door), and the store's own `code` and
   `codeName` when it gave them. The driver's message, with any cause it attached, is logged once per request as a
-  `Store-side failure answered 503` warning, naming the route when a route's own catch answered it. A client that
+  `Store-side failure answered 503` warning naming the operation that failed — the route, the method and path when
+  the app's error handler answered it, or `tool <name>` from MCP (bundle-30 I15: only a route's own catch named it,
+  so a store failure under an edge or link reference check, one reaching the error handler, and every MCP tool's
+  logged a line naming nothing; the operation is now a required argument of the one function that writes it). A client that
   matched the old prose should read `retryable` and `code` instead. That includes
   `POST /api/networks/:id/sync?wait=true` and `POST /api/networks/peers/:peerId/sync?wait=true`, which answered a
   cycle's failure as `500 { error }` with the exception's own message.

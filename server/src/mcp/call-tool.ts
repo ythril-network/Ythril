@@ -312,7 +312,7 @@ export async function callTool(req: ToolCallRequest): Promise<ToolCallOutcome> {
      * still names the tool and the space; for the store's failure it says so instead of repeating the text. None of
      * the refusals below is a driver error, so classifying before them changes none of their answers.
      */
-    const store = storeFailureAnswer(err);
+    const store = storeFailureAnswer(err, `tool ${name}`);
     log.warn(`tool '${peerText(name)}' error in space '${peerText(callSpace || 'global')}': ${store ? `store-side failure, answered ${store.status}` : peerText(message)}`);
     /*
      * Classified HERE, once, rather than in each tool — every write funnels through this catch, and the

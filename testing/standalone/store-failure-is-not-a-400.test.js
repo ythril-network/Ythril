@@ -239,7 +239,7 @@ describe('both doors, and all three routes', () => {
         status: (s) => { out.status = s; return res; },
         json: (b) => { out.body = b; return res; },
       };
-      sendReadFailure(res, err);
+      sendReadFailure(res, 'test read', err);
       return out;
     };
     const store = sent(realErr('MongoNetworkError', { message: 'socket closed' }));
@@ -322,7 +322,8 @@ describe('both doors, and all three routes', () => {
     for (const body of routes) {
       const name = body.slice(0, body.indexOf(','));
       const catches = (body.match(/\}\s*catch\s*\(/g) ?? []).length;
-      const delegated = (body.match(/sendReadFailure\(res, err\)/g) ?? []).length;
+      // `sendReadFailure(res, <operation>, err)` since bundle-30 I15: the operation names the store failure's log line.
+      const delegated = (body.match(/sendReadFailure\(res, [^;]*\berr\)/g) ?? []).length;
       assert.equal(delegated, catches,
         `${name} catches ${catches} failure(s) and only ${delegated} answer through sendReadFailure`);
       if (/callTool\(/.test(body)) {
@@ -339,7 +340,7 @@ describe('both doors, and all three routes', () => {
 
   it('MCP carries the same classification, because it has no status to correct', () => {
     const src = dispatchSource();
-    assert.match(src, /storeFailureAnswer\(err\)/,
+    assert.match(src, /storeFailureAnswer\(err, /,
       'the MCP dispatcher must classify too, or an agent gets the truncated prose a REST caller no longer sees');
     assert.match(src, /storeSideFailure: true/,
       'and say so in structuredContent, which is this transport\'s equivalent of a 5xx');

@@ -73,7 +73,7 @@ describe('no door answers with the driver\'s text', () => {
     });
 
     it(`${what}: the REST read routes answer without it`, () => {
-      const { out } = withLog(() => sent(sendReadFailure, err));
+      const { out } = withLog(() => sent((res, e) => sendReadFailure(res, 'test read', e), err));
       assert.equal(out.status, 503);
       assert.doesNotMatch(JSON.stringify(out.body), HOSTLIKE);
     });

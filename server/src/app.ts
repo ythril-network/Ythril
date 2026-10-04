@@ -690,7 +690,7 @@ export function createApp() {
   });
 
   // ── Global error handler ─────────────────────────────────────────────────
-  app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  app.use((err: unknown, req: express.Request, res: express.Response, _next: express.NextFunction) => {
     // Propagate HTTP-level errors from body-parser (e.g. 413 Payload Too Large)
     if (err && typeof err === 'object' && 'status' in err && typeof (err as { status: unknown }).status === 'number') {
       const httpErr = err as { status: number; message: string };
@@ -727,7 +727,8 @@ export function createApp() {
      * door answered `503`). An unrecognised driver error is answered there too, as a `500` in our words and logged
      * with its stack; everything else stays the `500` below.
      */
-    const store = storeFailureAnswer(err);
+    // Named by method and path (never the query, which can carry a file path), as a route's own catch names itself.
+    const store = storeFailureAnswer(err, `${req.method} ${req.baseUrl}${req.path}`);
     if (store) {
       sendStoreFailure(res, store);
       return;

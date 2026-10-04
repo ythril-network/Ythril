@@ -93,7 +93,7 @@ linksRouter.post('/spaces/:spaceId/links', globalRateLimit, requireSpaceAuth, de
       await assertRefsResolve(wt.target, 'to', toKind as RefKind, [to]);
     } catch (err) {
       // A missing reference is the caller's 400; a store failure under the lookup is the store's (bundle-30 I12).
-      sendReadFailure(res, err);
+      sendReadFailure(res, 'brain POST /spaces/:spaceId/links (reference check)', err);
       return;
     }
   }
