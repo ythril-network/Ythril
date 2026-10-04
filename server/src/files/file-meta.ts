@@ -521,9 +521,10 @@ export async function deleteFileMetaByPrefix(
 export async function fileRecordPaths(spaceId: string, path: string): Promise<string[]> {
   const norm = toDocId(path).replace(/\/?$/, '');
   if (!norm) return []; // guard: empty path would match everything
+  const under = '^' + escapeRegex(norm + '/');
   const rows = await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).find(
     asFilter<FileMetaDoc>({
-      $or: [{ _id: norm }, { _id: { $regex: `^${escapeRegex(`${norm}/`)}` } }],
+      $or: [{ _id: norm }, { _id: { $regex: under } }],
       parentFileId: { $exists: false },
       deletedAt: { $exists: false },
     }),

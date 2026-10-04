@@ -323,6 +323,58 @@ export async function driverWriteFailures(dbName) {
   }
 }
 
+// ── A write that fails the way the driver fails it ───────────────────────────────────────────────────────────
+
+/**
+ * Make chosen collection methods throw a chosen error — one `driverWriteFailures` produced, so the code under test is
+ * handed exactly what the driver hands it in an outage — for the next calls on one collection.
+ *
+ * Three ways an outage reports a write, because they leave three different stores (bundle-30 I14, verify-drive-4 D2):
+ * it failed (the default); it LANDED and was reported failed (`land`); it was reported failed and lands `lateMs`
+ * later (`lateMs`), which is how a paused store applies what it had buffered once it comes back.
+ *
+ * ## The guard a hand-written copy drops
+ *
+ * **A fault on a method that was never wrapped.** Arming `deleteOne` on a patcher that only wrapped `insertMany`
+ * fails nothing, and the test of "the delete answers 503" passes having injected no failure at all. `fail` THROWS for
+ * a method this patcher did not install, and for an error that is not an `Error`.
+ *
+ * Installed over whatever is on the prototype now, so — as for `parkWrites` — `restore()` before the door closes.
+ *
+ * @param {object} proto  `Collection.prototype` (`Object.getPrototypeOf(mongo.col('x'))`)
+ * @param {string[]} methods  the methods to wrap
+ */
+export function failWrites(proto, methods) {
+  const originals = {};
+  let armed = new Map();
+  for (const m of methods) {
+    const orig = proto[m];
+    originals[m] = orig;
+    proto[m] = async function failing(...args) {
+      const f = armed.get(`${m} ${this.collectionName}`);
+      if (!f || f.times <= 0) return orig.apply(this, args);
+      f.times -= 1;
+      if (f.land) await orig.apply(this, args);
+      if (f.lateMs !== undefined) setTimeout(() => { void orig.apply(this, args).catch(() => {}); }, f.lateMs);
+      throw f.err;
+    };
+  }
+  return {
+    /** The next `times` calls of `method` on `collectionName` throw `err` (`land` / `lateMs`: see above). */
+    fail(method, collectionName, err, { times = 1, land = false, lateMs } = {}) {
+      assert.ok(methods.includes(method), `failWrites: ${method} is not wrapped (only ${methods.join(', ')}) — the fault would fail nothing`);
+      assert.ok(err instanceof Error, `failWrites: the fault for ${method} is not an error: ${err}`);
+      armed.set(`${method} ${collectionName}`, { err, times, land, lateMs });
+    },
+    /** Disarm every fault; the wrappers stay. */
+    clear() { armed = new Map(); },
+    restore() {
+      armed = new Map();
+      for (const [m, f] of Object.entries(originals)) proto[m] = f;
+    },
+  };
+}
+
 // ── A commit that lands and whose reply does not ─────────────────────────────────────────────────────────────
 
 /**

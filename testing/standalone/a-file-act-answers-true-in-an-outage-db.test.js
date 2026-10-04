@@ -31,7 +31,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { openPushDoor } from './_push-door.mjs';
-import { driverWriteFailures, eventually } from './_write-faults.mjs';
+import { driverWriteFailures, eventually, failWrites } from './_write-faults.mjs';
 
 const skip = await mongoSkipReason();
 process.env['YTHRIL_MODELS_OFFLINE'] = '1';
@@ -39,10 +39,7 @@ process.env['YTHRIL_MODELS_OFFLINE'] = '1';
 const S = 'fileoutage';
 const T0 = '2026-09-01T00:00:00.000Z';
 
-let door, files, tombstones, F, handlers, callTool, ADMIN, proto;
-/** The faults armed for the current case, by `method collection`; each is `{ err, times, land, late }`. */
-let faults = new Map();
-const originals = {};
+let door, files, tombstones, F, handlers, callTool, ADMIN, faults;
 
 const root = () => path.join(process.env['DATA_ROOT'], 'files', S);
 const onDisk = (p) => fs.existsSync(path.join(root(), p));
@@ -54,26 +51,8 @@ async function seed(p) {
   await door.mongo.col(`${S}_files`).insertOne({ _id: p, spaceId: S, path: p, sizeBytes: 10, tags: [], createdAt: T0, updatedAt: T0 });
 }
 
-/**
- * The next `times` calls of `method` on `S_<part>` throw `err`. `land`: the write is applied first and THEN reported
- * failed. `lateMs`: it is reported failed at once and applied that many ms later — the insert a paused store
- * applies from its buffer when it comes back.
- */
-function fail(method, part, err, { times = 1, land = false, lateMs } = {}) {
-  faults.set(`${method} ${S}_${part}`, { err, times, land, lateMs });
-}
-
-function install(method) {
-  originals[method] = proto[method];
-  proto[method] = async function faulty(...args) {
-    const f = faults.get(`${method} ${this.collectionName}`);
-    if (!f || f.times <= 0) return originals[method].apply(this, args);
-    f.times -= 1;
-    if (f.land) await originals[method].apply(this, args);
-    if (f.lateMs !== undefined) setTimeout(() => { void originals[method].apply(this, args).catch(() => {}); }, f.lateMs);
-    throw f.err;
-  };
-}
+/** The next calls of `method` on `S_<part>` fail as `failWrites` fails them (`land`, `lateMs`: see there). */
+const fail = (method, part, err, opts) => faults.fail(method, `${S}_${part}`, err, opts);
 
 /** A route handler as a caller reaches it past rate limit and auth, with a response that records what was sent. */
 async function rest(method, query, body = {}) {
@@ -120,19 +99,18 @@ describe('a file act answers true in an outage, and its retry repairs it', { ski
       return layer.route.stack.at(-1).handle;
     };
     handlers = { DELETE: handlerOf('delete'), PATCH: handlerOf('patch') };
-    proto = Object.getPrototypeOf(door.mongo.col('probe'));
-    for (const m of ['insertMany', 'deleteOne', 'deleteMany']) install(m);
+    faults = failWrites(Object.getPrototypeOf(door.mongo.col('probe')), ['insertMany', 'deleteOne', 'deleteMany']);
   });
   after(async () => {
-    for (const [m, f] of Object.entries(originals)) proto[m] = f;
+    faults?.restore();
     await door?.close();
   });
   beforeEach(async () => {
-    faults = new Map();
+    faults.clear();
     for (const part of ['files', 'file_tombstones']) await door.mongo.col(`${S}_${part}`).deleteMany({});
     fs.rmSync(root(), { recursive: true, force: true });
   });
-  afterEach(() => { faults = new Map(); });
+  afterEach(() => { faults.clear(); });
 
   it('the injected errors are the driver\'s: the bulk wrapper the drive saw, and a failed selection', () => {
     assert.equal(F.storeGone.bulk.name, 'MongoBulkWriteError');

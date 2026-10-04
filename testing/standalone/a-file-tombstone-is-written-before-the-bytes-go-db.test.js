@@ -28,6 +28,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { openPushDoor } from './_push-door.mjs';
+import { failWrites } from './_write-faults.mjs';
 
 const skip = await mongoSkipReason();
 process.env['YTHRIL_MODELS_OFFLINE'] = '1';
@@ -37,8 +38,10 @@ const T0 = '2026-09-01T00:00:00.000Z';
 // The driver the SERVER loads, so the store failure is classified by the class the server sees.
 const { MongoNetworkError } = createRequire(path.resolve('server/package.json'))('mongodb');
 
-let door, files, cascade, move, ttl, deleteHandler, proto, realInsertMany;
-let failTombstones = false;
+let door, files, cascade, move, ttl, deleteHandler, faults;
+/** The store fails ONLY the tombstone write, with an error the server classifies as the store's — until `faults.clear()`. */
+const tombstoneStoreDown = () => faults.fail('insertMany', `${S}_file_tombstones`,
+  new MongoNetworkError('connection 7 to 10.9.9.9:27017 closed'), { times: Infinity });
 
 const onDisk = (p) => fs.existsSync(path.join(process.env['DATA_ROOT'], 'files', S, p));
 const meta = (p) => door.mongo.col(`${S}_files`).findOne({ _id: p });
@@ -73,33 +76,25 @@ describe('a file tombstone is written before the bytes go', { skip }, () => {
     const layer = fileStoreRouter.stack.find(l => l.route?.path === '/:spaceId' && l.route.methods.delete);
     assert.ok(layer, 'no DELETE /:spaceId on the file router — re-anchor this test');
     deleteHandler = layer.route.stack.at(-1).handle;
-    // The store fails ONLY the tombstone write, with an error the server classifies as the store's.
-    proto = Object.getPrototypeOf(door.mongo.col('probe'));
-    realInsertMany = proto.insertMany;
-    proto.insertMany = async function maybeDown(...args) {
-      if (failTombstones && this.collectionName === `${S}_file_tombstones`) {
-        throw new MongoNetworkError('connection 7 to 10.9.9.9:27017 closed');
-      }
-      return realInsertMany.apply(this, args);
-    };
+    faults = failWrites(Object.getPrototypeOf(door.mongo.col('probe')), ['insertMany']);
   });
   after(async () => {
-    if (proto) proto.insertMany = realInsertMany;
+    faults?.restore();
     await door?.close();
   });
   beforeEach(async () => {
-    failTombstones = false;
+    faults.clear();
     for (const part of ['files', 'file_tombstones']) await door.mongo.col(`${S}_${part}`).deleteMany({});
     fs.rmSync(path.join(process.env['DATA_ROOT'], 'files', S), { recursive: true, force: true });
   });
 
   it('a file delete through a tombstone store failure leaves the file, and the retry tombstones it', async () => {
     await seed('a.txt');
-    failTombstones = true;
+    tombstoneStoreDown();
     await assert.rejects(cascade.deleteFileCascade(S, 'a.txt'), 'the delete must fail when its tombstone cannot be written');
     assert.ok(onDisk('a.txt'), 'the bytes went before the tombstone was written — the retry can never write it');
     assert.ok(await meta('a.txt'), 'the metadata went with a failed delete');
-    failTombstones = false;
+    faults.clear();
     await cascade.deleteFileCascade(S, 'a.txt');
     assert.equal(onDisk('a.txt'), false, 'the retried delete did not remove the bytes');
     assert.equal(await meta('a.txt'), null, 'the retried delete did not remove the metadata');
@@ -109,11 +104,11 @@ describe('a file tombstone is written before the bytes go', { skip }, () => {
   it('a directory delete through a tombstone store failure leaves the tree, and the retry tombstones every file', async () => {
     await seed('dir/one.txt');
     await seed('dir/two.txt');
-    failTombstones = true;
+    tombstoneStoreDown();
     const first = await restDelete('dir', { confirm: true });
     assert.equal(first.code, 503, `a store failure on the tombstones must answer 503: ${JSON.stringify(first.body)}`);
     assert.ok(onDisk('dir/one.txt') && onDisk('dir/two.txt'), 'the tree went before its tombstones were written');
-    failTombstones = false;
+    faults.clear();
     const retry = await restDelete('dir', { confirm: true });
     assert.equal(retry.code, 204, `the retried directory delete: ${retry.code} ${JSON.stringify(retry.body)}`);
     assert.equal(onDisk('dir/one.txt'), false);
@@ -122,12 +117,12 @@ describe('a file tombstone is written before the bytes go', { skip }, () => {
 
   it('a move through a tombstone store failure leaves the source in place, and the retry moves and tombstones it', async () => {
     await seed('src.txt');
-    failTombstones = true;
+    tombstoneStoreDown();
     await assert.rejects(move.moveFileCascade(S, 'src.txt', 'dst.txt'), 'the move must fail when its tombstones cannot be written');
     assert.ok(onDisk('src.txt'), 'the bytes moved before the tombstone was written — the retry finds no source');
     assert.equal(onDisk('dst.txt'), false, 'a failed move left a copy at the destination');
     assert.deepEqual(await tombstoned(), [], 'a failed move left a tombstone for a file that did not move');
-    failTombstones = false;
+    faults.clear();
     await move.moveFileCascade(S, 'src.txt', 'dst.txt');
     assert.ok(onDisk('dst.txt') && !onDisk('src.txt'), 'the retried move did not move the file');
     assert.deepEqual(await tombstoned(), ['src.txt'], 'the retried move did not tombstone the path it left');
@@ -135,11 +130,11 @@ describe('a file tombstone is written before the bytes go', { skip }, () => {
 
   it('the TTL sweep through a tombstone store failure leaves the file, and the next sweep tombstones it', async () => {
     await seed('old.txt', { _expireAt: new Date('2026-01-01T00:00:00Z') });
-    failTombstones = true;
+    tombstoneStoreDown();
     await ttl.sweepExpired(new Date());
     assert.ok(onDisk('old.txt'), 'the sweep removed the bytes before the tombstone was written');
     assert.ok(await meta('old.txt'), 'the sweep removed the metadata through a failed delete');
-    failTombstones = false;
+    faults.clear();
     await ttl.sweepExpired(new Date());
     assert.equal(onDisk('old.txt'), false, 'the next sweep did not remove the bytes');
     assert.equal(await meta('old.txt'), null, 'the next sweep did not remove the expired metadata');

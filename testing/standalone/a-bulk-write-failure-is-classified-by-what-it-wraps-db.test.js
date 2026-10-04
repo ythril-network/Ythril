@@ -7,7 +7,7 @@
  *
  * With the store paused during a file delete, the tombstone write (`insertMany`) failed with
  *
- *     MongoBulkWriteError: connection <monitor> to 172.18.0.3:27017 timed out
+ *     MongoBulkWriteError: connection <monitor> to 172.16.0.9:27017 timed out
  *
  * and the classifier answered it `{ status: 400, retryable: false, error: <that text> }`. So `throwIfStoreSide` did not
  * throw, `writeFileTombstones` swallowed it as "not the store's", and the delete removed the bytes with no tombstone

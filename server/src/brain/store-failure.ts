@@ -340,7 +340,7 @@ export async function unlessTheStoreFailed(what: string, step: () => Promise<unk
     await step();
   } catch (err) {
     throwIfStoreSide(err);
-    log.warn(`${what}: ${logSafe(err instanceof Error ? err.message : String(err))}`);
+    log.warn(`${logSafe(what)}: ${logSafe(err instanceof Error ? err.message : String(err))}`);
   }
 }
 
