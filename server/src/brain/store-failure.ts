@@ -45,7 +45,10 @@
  * **What deliberately stays 400:** every validation refusal we raise ourselves (a bad filter, an unknown
  * operator, a projection conflict, an out-of-range parameter) — all of which are refused before Mongo is
  * reached, which is why this classifier sees so few of them — and what the SERVER refused in its own words: a
- * `MongoServerError` whose code is not a store condition is a malformed query or a validation failure.
+ * `MongoServerError` whose code is not a store condition is a malformed query or a validation failure. A bulk
+ * write's `MongoBulkWriteError` is one only when the server answered it (a document refused, a duplicate key): the
+ * same class also wraps whatever was THROWN under a bulk write, and that is classified by what it wraps
+ * (`db/error-chain.ts`) — read by its class, a paused store was a `400` naming its address (bundle-30 I14).
  *
  * **What is never a 400, recognised or not: a driver-side error.** Anything else the driver raises on its own side
  * (`MongoError`, not `MongoServerError`) is not the caller's to fix and its message is the driver's — so an
@@ -59,10 +62,11 @@
  * parties who could see it. Say what happened, say it can be retried, and let the caller decide.
  */
 import {
-  MongoClientClosedError, MongoError, MongoErrorLabel, MongoNetworkError, MongoNotConnectedError,
+  MongoBulkWriteError, MongoClientClosedError, MongoError, MongoErrorLabel, MongoNetworkError, MongoNotConnectedError,
   MongoServerClosedError, MongoServerError, MongoStalePrimaryError, MongoSystemError, MongoTopologyClosedError,
+  MongoWriteConcernError,
 } from 'mongodb';
-import { errorChain } from '../db/error-chain.js';
+import { errorChain, wrapsAThrownError } from '../db/error-chain.js';
 import { isWriteTimeout, STORE_RETRY_SENTENCE } from '../db/write-timeout.js';
 import { log, logSafe } from '../util/log.js';
 
@@ -130,12 +134,29 @@ const STORE_ERROR_CODES = new Set([
   134,    // ReadConcernMajorityNotAvailableYet
 ]);
 
-/** Is this one error — not what it wraps — the store's condition, by class, label or server code? */
+/** Is this one error — not what it wraps — the store's condition, by class, label, server code or write concern? */
 function isStoreCondition(e: object): boolean {
   if (!(e instanceof MongoError)) return false;
   if (STORE_CONDITION_CLASSES.some(C => e instanceof C)) return true;
   if (STORE_CONDITION_LABELS.some(label => hasLabel(e, label))) return true;
+  if (isWriteConcernFailure(e)) return true;
   return e instanceof MongoServerError && typeof e.code === 'number' && STORE_ERROR_CODES.has(e.code);
+}
+
+/**
+ * The store applied a write and could not confirm the durability it was asked for — a single write's
+ * `MongoWriteConcernError`, or a bulk write that reports a write concern failure and refused no document
+ * (`bulk/common.js` raises a document's refusal first, so a bulk error with `writeErrors` is the documents').
+ *
+ * The store's condition, not the caller's (bundle-30 I14): no caller chooses a write concern here, so nothing the
+ * caller sends differently changes it — and the sentence every door answers it with, "it did not complete as far as
+ * this server can confirm", is exactly what a write concern failure is. Both shapes answered `400` before.
+ */
+function isWriteConcernFailure(e: MongoError): boolean {
+  if (e instanceof MongoWriteConcernError) return true;
+  if (!(e instanceof MongoBulkWriteError)) return false;
+  const refusedDocuments = ([] as unknown[]).concat(e.writeErrors ?? []);  // typed one-or-many; an array at runtime
+  return refusedDocuments.length === 0 && !!e.result?.getWriteConcernError();
 }
 
 /**
@@ -243,8 +264,14 @@ export function classifyReadFailure(err: unknown): ReadFailure {
   const message = err instanceof Error ? err.message : String(err);
   // Looked through our wrappers and the driver's own nesting: a store failure wrapped by a writer is still the store's.
   const chain = errorChain(err);
+  /*
+   * What the SERVER answered with, wherever it sits in the chain. A bulk write's wrapper around a thrown error is a
+   * `MongoServerError` by class and the server's answer by nothing else (`wrapsAThrownError`): counted as one, a
+   * driver refusal under a bulk write was answered `400` in the driver's words (bundle-30 I14).
+   */
+  const serverAnswered = chain.filter(e => e instanceof MongoServerError && !wrapsAThrownError(e));
   // The store's code, from the server's error wherever it sits in the chain — else from the outermost error.
-  const coded = chain.find(e => e instanceof MongoServerError) ?? err;
+  const coded = serverAnswered[0] ?? err;
   const code = numeric((coded as { code?: unknown } | null)?.code);
   const codeName = text((coded as { codeName?: unknown } | null)?.codeName);
 
@@ -264,7 +291,7 @@ export function classifyReadFailure(err: unknown): ReadFailure {
      * SERVER refused (`MongoServerError`) is a malformed query or a validation failure, in the server's own words.
      */
     const driverSide = chain.find(e => e instanceof MongoError);
-    if (driverSide && !chain.some(e => e instanceof MongoServerError)) {
+    if (driverSide && serverAnswered.length === 0) {
       return { status: 500, retryable: false, error: DRIVER_FAULT_MESSAGE };
     }
     // Unchanged: a validation refusal, and the caller is the one who can fix it.

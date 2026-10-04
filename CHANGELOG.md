@@ -825,11 +825,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `POST /api/networks/:id/sync?wait=true` and `POST /api/networks/peers/:peerId/sync?wait=true`, which answered a
   cycle's failure as `500 { error }` with the exception's own message.
 
-- **A model server's error text is bounded and escaped where it is quoted** (bundle-30). When a chat model server
-  answered with an `error`, its text was quoted whole into the error the call raised — and from there into a log
-  line and an answer. It now goes through the one renderer every peer-supplied text uses, cut at 200 characters
-  (saying how much it cut) and escaped.
-
   A store failure is recognised by what the driver says it IS — its class, its error labels, the server's code —
   not by a list of error names. The list could not see a subclass: the error the driver raises when it clears its
   connection pool (`MongoPoolClearedError`, a network error by class) answered `400` with the driver's text, naming
@@ -837,6 +832,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that is recognised as nothing in particular now answers `500` with *"An internal database fault stopped this
   operation; its cause is in the server log."* rather than a `400` carrying its message. What the database server
   itself refused — a malformed query, a validation failure — still answers `400` in its own words.
+
+  A failure under a bulk write (`insertMany`, `bulkWrite`) is classified by the error the driver wrapped (bundle-30
+  I14). The driver rethrows whatever is thrown under one as a `MongoBulkWriteError`: a server error by class, with no
+  code, and — for a server it could not select, which is how a paused store arrives — no label. So a paused store
+  answered `400` with the store's address on any door a bulk write reached, and the file delete it reached took it
+  for "not the store's" and went on without its tombstone. A write concern failure, bulk or single, is the store's
+  too (`503`): no caller chooses one here. A bulk write's refused documents — a duplicate key — are still the
+  caller's `400`.
+
+- **A model server's error text is bounded and escaped where it is quoted** (bundle-30). When a chat model server
+  answered with an `error`, its text was quoted whole into the error the call raised — and from there into a log
+  line and an answer. It now goes through the one renderer every peer-supplied text uses, cut at 200 characters
+  (saying how much it cut) and escaped.
 
 - **Every log line is one line, and every value in it is bounded (`Q-231`, `Q-214`, `Q-270`).** The escaping above
   covered the push, pull and import paths; a member label arriving by gossip, a vote round id, a caller's parameter
