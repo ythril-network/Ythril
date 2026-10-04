@@ -78,9 +78,10 @@ describe('every embed-job enqueue names its lane', () => {
   it('the scan found the call sites (floor)', () => {
     // 15 before Q-99 part 3. Six single-record enqueues legitimately left: the create and converge paths of
     // saveFact, upsertEntity (2), createChrono and upsertEdge (2) are now ONE `enqueueWriteEmbedJobs` call in
-    // write-plan/commit.ts, which this scan now also reads.
-    assert.ok(CALLS.length >= 12,
-      `found ${CALLS.length} call site(s) of ${DOORS.join('/')} in server/src; expected at least 12 — the scan is broken`);
+    // write-plan/commit.ts, which this scan now also reads. More left in bundle-30 I6: the bytes writer now
+    // queues through `embedArrivedFiles` (D3), and the single-record ingest enqueue had no caller and went (C10).
+    assert.ok(CALLS.length >= 11,
+      `found ${CALLS.length} call site(s) of ${DOORS.join('/')} in server/src; expected at least 11 — the scan is broken`);
     assert.ok(CALLS.some(c => c.file === 'server/src/brain/write-plan/commit.ts' && c.door === 'enqueueWriteEmbedJobs'),
       'the write commit no longer enqueues through enqueueWriteEmbedJobs — re-anchor this gate');
   });
@@ -111,8 +112,9 @@ describe('a record arriving by sync is queued in the BACKGROUND lane', () => {
     ? [...QUEUE.code.matchAll(/^export\s+async\s+function\s+(enqueueIngested\w*)\s*[<(]/gm)].map(m => m[1])
     : [];
 
-  it('the ingest enqueues were found — the single record and its batched twin (floor)', () => {
-    for (const name of ['enqueueIngestedRecord', 'enqueueIngestedRecords']) {
+  it('the ingest enqueue was found — the batched one every arrival is queued with (floor)', () => {
+    // The single-record twin had no caller left and was removed (bundle-30 I6, C10).
+    for (const name of ['enqueueIngestedRecords']) {
       assert.ok(INGESTED.includes(name), `embed-queue.ts exports no ${name}`);
     }
   });

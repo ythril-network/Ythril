@@ -192,8 +192,9 @@ describe('nothing writes an arriving record without offering it to the embedder'
 });
 
 describe('and the receiver decides whether to embed it', () => {
-  it('the ingest enqueues were found — the single record and its batched twin (floor)', () => {
-    for (const name of ['enqueueIngestedRecord', 'enqueueIngestedRecords']) {
+  it('the ingest enqueue was found — the batched one every arrival is queued with (floor)', () => {
+    // The single-record twin had no caller left and was removed (bundle-30 I6, C10); a record is a chunk of one.
+    for (const name of ['enqueueIngestedRecords']) {
       assert.ok(INGEST_ENQUEUES.includes(name),
         `${QUEUE_FILE} exports no ${name} — ${name === 'enqueueIngestedRecords'
           ? 'the arrival writer has no batched enqueue to queue a landed chunk with'
