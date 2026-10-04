@@ -40,6 +40,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { logLinesDuring } from './_log-lines.mjs';
 
 const mod = await import('../../server/dist/util/log.js');
 
@@ -235,18 +236,14 @@ describe('peerList: a joined list bounded by count and length', () => {
 });
 
 describe('the meta argument is escaped and bounded where every line is built', () => {
-  /** The lines `fn` emitted, with the console silenced — a megabyte line on stderr helps nobody. */
-  function emitted(fn) {
-    const lines = [];
-    const stop = mod.subscribeLogLines(l => lines.push(l));
-    const saved = { log: console.log, warn: console.warn, error: console.error };
-    console.log = console.warn = console.error = () => {};
-    try { fn(); } finally { Object.assign(console, saved); stop(); }
-    return lines;
-  }
+  /**
+   * The lines `fn` emitted, as written, with the console silenced — a megabyte line on stderr helps nobody. The
+   * shared capture (`_log-lines.mjs`), not a copy of it (bundle-30 I6, T3).
+   */
+  const emitted = async (fn) => (await logLinesDuring(fn)).emitted;
 
-  it('a meta value carrying CR LF starts no line of its own', () => {
-    const lines = emitted(() => {
+  it('a meta value carrying CR LF starts no line of its own', async () => {
+    const lines = await emitted(() => {
       mod.log.warn('a peer said', { id: 'x\r\nFORGED [ERROR] meta' });
       mod.log.warn('a peer failed', new Error('boom\r\nFORGED [ERROR] stack'));
       mod.log.warn('a peer sent', `raw${LS}FORGED [ERROR] string`);
@@ -255,17 +252,17 @@ describe('the meta argument is escaped and bounded where every line is built', (
     for (const l of lines) assert.doesNotMatch(l, LINE_BREAKING, `a line carries a line-breaking character: ${JSON.stringify(l.slice(0, 200))}`);
   });
 
-  it('a long meta value of letters is written in bounded time (fmt redacts the line it builds)', () => {
+  it('a long meta value of letters is written in bounded time (fmt redacts the line it builds)', async () => {
     const t = performance.now();
-    const lines = emitted(() => mod.log.warn('a peer sent', { id: 'm'.repeat(100_000) }));
+    const lines = await emitted(() => mod.log.warn('a peer sent', { id: 'm'.repeat(100_000) }));
     const ms = performance.now() - t;
     assert.equal(lines.length, 1);
     assert.ok(ms < 1_000, `a meta value of 100 000 letters took ${Math.round(ms)} ms to log`);
   });
 
-  it('a megabyte meta value makes a bounded line', () => {
+  it('a megabyte meta value makes a bounded line', async () => {
     const max = ceiling();
-    const lines = emitted(() => {
+    const lines = await emitted(() => {
       mod.log.warn('a peer sent', { seq: '9'.repeat(1_048_576) });
       mod.log.warn('a peer sent', '9'.repeat(1_048_576));
       // Digits, not letters: a run of letters is what the time case below is about, and here it would only slow

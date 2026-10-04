@@ -49,6 +49,7 @@ import { trackedSources } from './_sources.mjs';
 import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
 import { blockAfter, enclosingBlockMatching } from './_structural-window.mjs';
+import { logLinesDuring } from './_log-lines.mjs';
 
 /**
  * Every route file, tracked AND untracked-but-not-ignored.
@@ -143,12 +144,8 @@ describe('a 5xx never discards the exception that caused it', () => {
     // Re-anchored (bundle-30, B4): the helper hands its cause to the logger as the meta argument, where `fmt` keeps
     // an Error's stack and bounds its message — so the rule is read off the LINE it writes, not off a spelling.
     const { reportServerFailure } = await import('../../server/dist/util/report-failure.js');
-    const { subscribeLogLines } = await import('../../server/dist/util/log.js');
-    const lines = [];
-    const stop = subscribeLogLines(l => lines.push(l));
-    const saved = console.error;
-    console.error = () => {};
-    try { reportServerFailure('revoke token', new Error('Cannot read properties of undefined')); } finally { console.error = saved; stop(); }
+    // The shared capture (`_log-lines.mjs`, bundle-30 I6 T3): the lines as written, the console silenced.
+    const { emitted: lines } = await logLinesDuring(() => reportServerFailure('revoke token', new Error('Cannot read properties of undefined')));
     assert.equal(lines.length, 1, 'reportServerFailure must write exactly one line');
     const [line] = lines;
     assert.match(line, /\[ERROR\]/, 'a 5xx is an error, not a warning — it must be findable at that level');
