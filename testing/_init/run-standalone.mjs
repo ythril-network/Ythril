@@ -27,16 +27,22 @@
  *
  * A `-db` file opens `ythril_harness_<suite>` and DROPS it on entry and exit. Two files sharing a suite
  * name would therefore wipe each other's data — invisibly, and only sometimes, because it depends which
- * worker got there first. All 48 names are unique today and
+ * worker got there first. Every name is unique and
  * `a-db-harness-name-is-unique.test.js` is what keeps them so; it exists because parallelism is what
  * turns a duplicate from harmless into a race.
+ *
+ * ## Why the DB-backed half runs NARROWER
+ *
+ * Every `-db` file shares one MongoDB, and at full width they ran it out of memory: the offline run is one
+ * plan, `offlineRuns` in `standalone-split.mjs`, which runs the pure files at node's default width and the
+ * database-backed ones at `DB_TEST_CONCURRENCY`. The measurement is beside the constant.
  *
  * Run: node testing/_init/run-standalone.mjs
  */
 import { spawnSync } from 'node:child_process';
 import { statSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { splitStandalone, batched } from '../_shared/standalone-split.mjs';
+import { splitStandalone, batched, offlineRuns, DB_TEST_CONCURRENCY } from '../_shared/standalone-split.mjs';
 
 /**
  * REFUSE a stale `server/dist`, rather than testing the wrong build and reporting either answer.
@@ -78,18 +84,19 @@ function refuseStaleDist() {
 
 refuseStaleDist();
 
-const { all, offline, needsInstance } = splitStandalone();
+const split = splitStandalone();
+const { all, offline, offlineDb, needsInstance } = split;
 const path = (f) => `testing/standalone/${f}`;
 
-console.log(`standalone: ${all.length} files — ${offline.length} offline (parallel), `
-  + `${needsInstance.length} need a running instance (serial)`);
+console.log(`standalone: ${all.length} files — ${offline.length} offline (parallel; the ${offlineDb.length} `
+  + `database-backed ones ${DB_TEST_CONCURRENCY} at a time), ${needsInstance.length} need a running instance (serial)`);
 
 let failed = 0;
 const t0 = Date.now();
 
-/** Default concurrency: node uses one worker per core, and these files share nothing. */
-for (const batch of batched(offline.map(path))) {
-  const r = spawnSync('node', ['--test', ...batch], { stdio: 'inherit' });
+/** The pure files at node's default width (one worker per core); the database-backed ones capped. */
+for (const run of offlineRuns(split)) {
+  const r = spawnSync('node', ['--test', ...run.args, ...run.files], { stdio: 'inherit' });
   if (r.status !== 0) failed++;
 }
 

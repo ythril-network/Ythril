@@ -27,7 +27,7 @@ import { readdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 
 import { join } from 'node:path';
 import { Socket } from 'node:net';
-import { splitStandalone, batched } from '../testing/_shared/standalone-split.mjs';
+import { splitStandalone, offlineRuns } from '../testing/_shared/standalone-split.mjs';
 
 /** Gates that read SOURCE only — no build required, so they run first and fail fastest. */
 const SOURCE_GATES = [
@@ -90,7 +90,8 @@ for (const [file, why] of BUILT_GATES) gate(file, why, file);
 // measurements that produced them. `test:standalone` asks the same question, and two copies of it is two
 // places for preflight and the suite to disagree about which gates exist — which is the one divergence
 // that makes a green preflight worthless.
-const { all: allStandalone, offline: pure } = splitStandalone();
+const standaloneSplit = splitStandalone();
+const { all: allStandalone, offline: pure, offlineDb } = standaloneSplit;
 console.log(`
 ── standalone tests that need no running instance (${pure.length} of ${allStandalone.length}; `
   + `${allStandalone.length - pure.length} declare @needs-instance and run in CI) ──`);
@@ -107,12 +108,16 @@ let skippedForDb = 0;
  * Measured over the 591 offline files on this machine: 191.0s serialised, 46.6s parallel, both green.
  * Preflight ran them serially too, so the offline set cost about three and a half minutes twice per
  * cycle — once here and once in `test:all:core`.
+ *
+ * EXCEPT the database-backed files, which share one MongoDB and ran it out of memory at full width: they run
+ * capped, and the plan that says so is `offlineRuns`, the one `test:standalone` runs too — see
+ * `DB_TEST_CONCURRENCY` in the shared split.
  */
-const batches = batched(pure.map(f => `testing/standalone/${f}`));
+const runs = offlineRuns(standaloneSplit);
 let standaloneFailed = false;
-for (const [i, batch] of batches.entries()) {
-  if (batches.length > 1) console.log(`  batch ${i + 1}/${batches.length} — ${batch.length} file(s)`);
-  try { run(`node --test ${batch.join(' ')}`); } catch {
+for (const [i, r] of runs.entries()) {
+  if (runs.length > 1) console.log(`  batch ${i + 1}/${runs.length} — ${r.files.length} ${r.kind} file(s)`);
+  try { run(`node --test ${[...r.args, ...r.files].join(' ')}`); } catch {
     // Keep going: one batch failing must not hide a second failure in a later batch, which is exactly the
     // information a single all-or-nothing invocation used to give.
     standaloneFailed = true;
@@ -138,10 +143,9 @@ if (standaloneFailed) {
  * cannot have run if the port is closed, and that is knowable without reading a single line of the report.
  */
 {
-  const needsDb = pure.filter(f => {
-    try { return readFileSync(`testing/standalone/${f}`, 'utf8').includes('_mongo-harness'); }
-    catch { return false; }
-  });
+  // The split's own answer, not a second spelling of it: the substring match that was here also counted a gate
+  // that only NAMES the harness.
+  const needsDb = offlineDb;
   const port = Number(process.env['YTHRIL_TEST_MONGO_PORT'] ?? 27117);
   const host = process.env['YTHRIL_TEST_MONGO_HOST'] ?? '127.0.0.1';
 
