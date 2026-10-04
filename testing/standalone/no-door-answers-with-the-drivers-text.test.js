@@ -5,7 +5,7 @@
  * ## Why
  *
  * A network, server-selection or step-down failure arrives with a message that names internal hosts and ports
- * (`connection 5 to 172.18.0.3:27017 closed`, `getaddrinfo ENOTFOUND mongo-a.internal`). `/ready` and the sync push
+ * (`connection 5 to 172.16.0.9:27017 closed`, `getaddrinfo ENOTFOUND mongo-a.internal`). `/ready` and the sync push
  * doors already withheld it; the REST read routes, the MCP door and — new in this bundle — the global REST error
  * handler put it in the body, where any caller, including one the handler cannot identify, read it. The global
  * handler cannot tell an operator from an anonymous caller, so the only safe rule is one answer for every audience.
@@ -30,14 +30,14 @@ const mongoErr = (name, fields = {}) => Object.assign(new Error(fields.message ?
 
 /** Driver failures as the driver shapes them, each naming an internal host, address or port. */
 const LEAKS = [
-  ['a dropped socket', mongoErr('MongoNetworkError', { message: 'connection 5 to 172.18.0.3:27017 closed' })],
+  ['a dropped socket', mongoErr('MongoNetworkError', { message: 'connection 5 to 172.16.0.9:27017 closed' })],
   ['no server to select', mongoErr('MongoServerSelectionError', { message: 'getaddrinfo ENOTFOUND mongo-a.internal' })],
   ['a step-down', mongoErr('MongoServerError', {
     message: 'Executor error during find command :: caused by :: not primary',
     code: 189, codeName: 'PrimarySteppedDown', cause: new Error('connection 9 to mongo-b.internal:27018 closed'),
   })],
 ];
-const HOSTLIKE = /172\.18\.0\.3|27017|27018|mongo-a\.internal|mongo-b\.internal|ENOTFOUND|caused by/;
+const HOSTLIKE = /172\.16\.0\.9|27017|27018|mongo-a\.internal|mongo-b\.internal|ENOTFOUND|caused by/;
 
 /** Run `fn` with the log captured, so a test can see what went to the operator rather than to the caller. */
 function withLog(fn) {

@@ -56,7 +56,7 @@ import { log, logSafe } from '../util/log.js';
 const STORE_TIMEOUT_MESSAGE = `The database did not complete this operation in time. ${STORE_RETRY_SENTENCE}`;
 /**
  * What every door answers for any other store failure: the condition, never our collection names or the driver's
- * text. The driver's message names internal hosts, addresses and ports (`connection 5 to 172.18.0.3:27017 closed`),
+ * text. The driver's message names internal hosts, addresses and ports (`connection 5 to 172.16.0.9:27017 closed`),
  * and the REST error handler that answers with this cannot tell an operator from an anonymous caller — so there is
  * one answer for every audience, and the driver's text goes to the log (`storeFailureDetail`), bundle-30 I8.
  */

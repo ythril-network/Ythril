@@ -758,7 +758,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **No door answers a store failure with the database driver's text.** A dropped connection, a failed server
   selection or a step-down arrives with a driver message that names internal hosts, addresses and ports
-  (`connection 5 to 172.18.0.3:27017 closed`). The REST brain read routes and the MCP tools put that message in their
+  (`connection 5 to 172.16.0.9:27017 closed`). The REST brain read routes and the MCP tools put that message in their
   `503` body, and the REST error handler did the same for every route that lets a store failure reach it, including
   routes a peer or an unauthenticated caller reaches. Every door — REST reads and writes, MCP tools and sync push —
   now answers one message of ours, *"A store-side failure stopped this operation. Nothing was confirmed written by
