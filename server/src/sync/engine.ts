@@ -64,6 +64,7 @@ import type { FileMetaDoc } from '../config/types.js';
 import { acceptVoteCast, pinMemberSigningKey, castForWire } from '../util/signing.js';
 import { assertPeerAtFloor } from './peer-floor.js';
 import { REPLICATED_FAMILIES, type PayloadKey, type ReplicatedFamily } from './replicated-families.js';
+import { isRoundPrunable, pruneExpiredRounds } from './vote-round-retention.js';
 import { spaceCollection } from '../db/space-collection.js';
 
 // Every outbound fetch's budget, and the longer one for batch payloads — in their own module because the
@@ -108,33 +109,6 @@ function _setFailureCount(networkId: string, instanceId: string, value: number |
   // write — a lost counter on crash is cosmetic (it re-derives on the next cycle).
   saveConfigSoon(cfg);
   return newValue;
-}
-
-// ── Vote-round retention ────────────────────────────────────────────────────
-
-/** A round is prunable once it is concluded AND past its deadline. After the deadline
- *  every peer concludes the round independently (the deadline path in
- *  `concludeRoundIfReady`), so such a round can no longer influence any decision and
- *  never needs re-serving or re-propagating. A malformed/unparseable deadline yields
- *  `NaN`, and `NaN < now` is false, so we keep the round rather than prune on doubt. */
-export function isRoundPrunable(
-  round: { concluded?: boolean; deadline: string },
-  now: number = Date.now(),
-): boolean {
-  return Boolean(round.concluded) && new Date(round.deadline).getTime() < now;
-}
-
-/** Drop concluded-and-expired rounds from a network's `pendingRounds` in place.
- *  `concludeRoundIfReady` marks a round `concluded` but never removes it, so without
- *  this `pendingRounds` grows for the life of the network — bloating `config.json`, the
- *  `GET /votes` scan, and gossip payloads. Returns the number of rounds removed. */
-export function pruneExpiredRounds(net: NetworkConfig, now: number = Date.now()): number {
-  const rounds = net.pendingRounds;
-  if (!rounds || rounds.length === 0) return 0;
-  const kept = rounds.filter(r => !isRoundPrunable(r, now));
-  const removed = rounds.length - kept.length;
-  if (removed > 0) net.pendingRounds = kept;
-  return removed;
 }
 
 // ── Per-network sync dedup lock ─────────────────────────────────────────────

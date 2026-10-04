@@ -160,7 +160,10 @@ export const FROZEN = {
   // receiver's hold deadline is derived from the batch one (`db/write-bound.ts`).
   // LOWERED 740 -> 739 with bundle-30 §D (`Q-204`): the pull hands its page to the push's page accept
   // (`sync/accept-page.ts`) and reads its verdicts, instead of writing it and reading the writer's refusals.
-  'server/src/sync/engine.ts': 739,
+  // LOWERED 739 -> 733 with bundle-30 I13: the pull's linkage check moved into a `finally` (+4 lines past 739), and
+  // vote-round retention (`isRoundPrunable`, `pruneExpiredRounds`) moved out to `sync/vote-round-retention.ts`, a
+  // rule about rounds rather than transfers with its own tests.
+  'server/src/sync/engine.ts': 733,
   // 958 -> 684: the per-type editor body moved into `schema-type-editor.component` so the Brain Overview
   // could open the same editor. Lowered rather than left — a frozen number 274 lines above the real size
   // is 274 lines this file could regrow into without the gate saying a word.
