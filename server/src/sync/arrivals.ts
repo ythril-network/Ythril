@@ -211,11 +211,12 @@ export function warnArrivalsNotStored(
   where: string, spaceId: string, family: string, what: string, items: ReadonlyArray<string | ArrivalRefusal>,
 ): void {
   if (items.length === 0) return;
-  // Every id, every reason and the caller's `where` (it names the peer) may carry what a peer sent: `logSafe`.
-  const shown = items.slice(0, NAMED_IN_SUMMARY)
-    .map(i => (typeof i === 'string' ? logSafe(i) : `${logSafe(i._id)} (${logSafe(i.reason)})`));
-  log.warn(`${logSafe(where)}: ${items.length} ${peerText(family)} record(s) ${peerText(what)} in space '${peerText(spaceId)}': ${peerList(shown, ', ')}`
-    + (items.length > shown.length ? `, and ${items.length - shown.length} more` : ''));
+  // Every id, every reason and the caller's `where` (it names the peer) may carry what a peer sent: each item is
+  // rendered by `peerList`, which names the first `NAMED_IN_SUMMARY` and says how many more — never a slice before
+  // it and a hand-written tail after it, which bounded the count twice and the text not at all (bundle-30 I6, C15).
+  const named = items.map(i => (typeof i === 'string' ? i : `${i._id} (${i.reason})`));
+  log.warn(`${logSafe(where)}: ${items.length} ${peerText(family)} record(s) ${peerText(what)} in space '${peerText(spaceId)}': `
+    + peerList(named, ', ', { count: NAMED_IN_SUMMARY }));
 }
 
 /** A copy of what arrived with what never crosses removed, and a restore's stamps turned back into Dates. */

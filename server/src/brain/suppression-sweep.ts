@@ -51,6 +51,7 @@ import { log, peerText } from '../util/log.js';
 import { TYPE_FIELD } from './ttl.js';
 import { recordNotSuppressedFilter, RECORD_SUPPRESS_FIELD } from './suppress-embeddings.js';
 import type { KnowledgeType, SpaceMeta } from '../config/types.js';
+import { COLLECTION_SUFFIX } from '../config/types.js';
 import { spaceCollection, type SpacePart } from '../db/space-collection.js';
 import { READ_CHUNK, readStoredById } from '../db/read-by-id.js';
 import { inChunks } from '../util/chunks.js';
@@ -60,10 +61,11 @@ import { MAX_ANCESTRY } from './embed-record.js';
 import { concreteSpaces } from '../spaces/proxy.js';
 import { createCoalescingRunner } from '../sync/coalescing-runner.js';
 
-/** The collection suffix for each record kind, in the one place that has to agree with the schema keys. */
-const COLLECTION: Record<KnowledgeType, SpacePart> = {
-  fact: 'facts', entity: 'entities', edge: 'edges', chrono: 'chrono',
-};
+/**
+ * The collection of each record kind: the shared map (`COLLECTION_SUFFIX`, derived from the knowledge map), never a
+ * hand copy of it — a fifth knowledge type would have been missing from the copy alone (bundle-30 I6, C14).
+ */
+const COLLECTION: Readonly<Record<KnowledgeType, SpacePart>> = COLLECTION_SUFFIX;
 
 /**
  * Records of `kind` that resolve to suppressed **and** still hold a vector.
