@@ -18,7 +18,7 @@ import { createHash } from 'crypto';
 import { getDataRoot } from '../config/loader.js';
 import { col, asFilter, asBulk } from '../db/mongo.js';
 import { spaceCollection } from '../db/space-collection.js';
-import { openStoredRead, StoredFileUnreadable } from './stored-bytes.js';
+import { isMissingPath, openStoredRead, StoredFileUnreadable } from './stored-bytes.js';
 import { log, peerText } from '../util/log.js';
 import { noteUnreadable, clearUnreadable } from './unreadable-files.js';
 import { spillIdFromPath } from '../brain/spill-path.js';
@@ -94,7 +94,15 @@ export async function buildFileManifest(
     }
     for (const name of names) {
       const abs = path.join(dir, name);
-      const stat = await fs.stat(abs).catch(() => null);
+      // Gone since the listing: nothing to offer. A file that cannot be looked at is left out too — offering it
+      // would advertise bytes this instance cannot serve — but said once, as an unreadable file is (preship-4 P4-5).
+      const stat = await fs.stat(abs).catch((err: unknown) => {
+        const rel = path.relative(root, abs).replace(/\\/g, '/');
+        if (!isMissingPath(err) && noteUnreadable(spaceId, rel, String((err as NodeJS.ErrnoException).code))) {
+          log.warn(`manifest: skipped '${peerText(rel)}' in ${peerText(spaceId)}: it cannot be looked at: ${peerText(err)}`);
+        }
+        return null;
+      });
       if (!stat) continue;
       if (stat.isDirectory()) {
         await walk(abs);

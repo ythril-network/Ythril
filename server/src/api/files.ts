@@ -25,7 +25,7 @@ import { requireSpaceAuth, denyReadOnly } from '../auth/middleware.js';
 import { globalRateLimit } from '../rate-limit/middleware.js';
 import { getConfig } from '../config/loader.js';
 import { log } from '../util/log.js';
-import { openStoredRead, statStored, StoredFileUnreadable } from '../files/stored-bytes.js';
+import { isMissingPath, openStoredRead, statStored, StoredFileUnreadable } from '../files/stored-bytes.js';
 import {
   listDir,
   createDir,
@@ -493,7 +493,7 @@ fileStoreRouter.delete('/:spaceId', globalRateLimit, requireSpaceAuth, denyReadO
     // — tombstone, record, jobs, artifacts — and a path with neither is its NotFoundError, answered 404 there. This
     // branch used to clean the orphan's record itself and write no tombstone, so a peer re-pushed the file
     // (bundle-30 I13).
-    if ((statErr as NodeJS.ErrnoException).code !== 'ENOENT') {
+    if (!isMissingPath(statErr)) {
       res.status(404).json({ error: 'Path not found' });
       return;
     }

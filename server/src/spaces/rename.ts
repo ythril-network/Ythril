@@ -18,6 +18,7 @@ import { RenameSpaceBody } from './body-schemas.js';
 import { isProxy } from './proxy.js';
 import type { NetworkRefusalCode } from '../networks/refusal-codes.js';
 import { throwIfStoreSide } from '../brain/store-failure.js';
+import { isMissingPath } from '../files/stored-bytes.js';
 
 /** Physically move a space's MongoDB collections and file directories from
  *  {oldId}_* / files/oldId to {newId}_* / files/newId. Idempotent — after a partial
@@ -152,8 +153,7 @@ export async function moveSpaceData(oldId: string, newId: string): Promise<strin
     log.debug(`Moved files directory ${peerText(oldDir)} → ${peerText(newDir)}`);
   } catch (err) {
     // If old dir doesn't exist, that's fine — space had no files, or it was already moved.
-    const code = (err as NodeJS.ErrnoException).code;
-    if (code !== 'ENOENT') {
+    if (!isMissingPath(err)) {
       const msg = `Could not move files directory: ${err}`;
       log.warn(peerText(msg));
       errors.push(msg);

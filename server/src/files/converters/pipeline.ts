@@ -12,8 +12,8 @@ import path from 'path';
 import { toDocId } from '../../util/paths.js';
 import { escapeRegex } from '../../util/redos.js';
 import { authorRef } from '../../config/author.js';
-import fs from 'fs/promises';
 import { removeTree } from '../remove-tree.js';
+import { bytesPresent } from '../stored-bytes.js';
 import { UnstructuredConverter } from './unstructured.js';
 import type { ExtractedImage } from './unstructured.js';
 import { HtmlConverter } from './html.js';
@@ -515,7 +515,14 @@ export async function storeConversionResults(
     // The sidecar FILES were written before the commit, so a refused commit can leave them at a path whose file has
     // gone — moved or deleted mid-run — where sync would advertise them for ever. Only when the file is gone: under a
     // claim lost to stall recovery the file is still there, and the same paths now belong to the run that replaced us.
-    const sourceGone = await resolveSafePathChecked(spaceId, originalId).then(p => fs.stat(p)).then(() => false, () => true);
+    // Gone means the path does not exist (`bytesPresent`). A failure to look is NOT gone: it keeps the sidecars, which
+    // is what every case but a deleted source wants (preship-4 P4-5).
+    let sourceGone = false;
+    try {
+      sourceGone = !(await bytesPresent(await resolveSafePathChecked(spaceId, originalId)));
+    } catch (lookErr) {
+      log.warn(`Could not tell whether ${peerText(spaceId)}/${peerText(originalId)} is still here; its sidecars are kept: ${peerText(lookErr)}`);
+    }
     if (isLeaseLost(err) && sourceGone && (convertedFileId || extractedImages.length > 0)) {
       await rmArtifactPath(spaceId, `_converted/${originalId}.md`);
       await rmArtifactPath(spaceId, `_extracted/${originalId}`);

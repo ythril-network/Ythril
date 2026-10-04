@@ -193,8 +193,19 @@ export async function bytesPresent(abs: string): Promise<boolean> {
   }
 }
 
-/** Whether a filesystem failure says the path does not exist — the one failure {@link bytesPresent} reads as an answer. */
-export const isMissingPath = (err: unknown): boolean => (err as NodeJS.ErrnoException | null)?.code === 'ENOENT';
+/**
+ * Whether a filesystem failure says the path does not exist — the one failure {@link bytesPresent} reads as an answer,
+ * and the one place a failure's code is read that way (`are-the-bytes-here-has-one-answer.test.js`).
+ *
+ * `ENOTDIR` too: a path THROUGH a regular file (`a.txt/x`) names nothing. Linux, the deployment, says `ENOTDIR` for
+ * it where Windows says `ENOENT`, so an ENOENT-only test passed every Windows run and on Linux threw the condition as
+ * "cannot look" — a move answering `400` with the absolute data path, and the settle leaving such a tombstone pending
+ * for ever (bundle-30 I16, preship-4 P4-1).
+ */
+export const isMissingPath = (err: unknown): boolean => {
+  const code = (err as NodeJS.ErrnoException | null)?.code;
+  return code === 'ENOENT' || code === 'ENOTDIR';
+};
 
 /** Delete a stored file under its path lock. */
 export async function deleteStored(abs: string): Promise<void> {
@@ -234,7 +245,7 @@ export async function encryptInPlace(abs: string): Promise<EncryptInPlaceResult>
     let before: fs.Stats;
     let head: Buffer;
     try { ({ head, stat: before } = await peek(abs)); } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return { outcome: 'vanished' as const };
+      if (isMissingPath(err)) return { outcome: 'vanished' as const };
       throw err;
     }
     if (isChunkedEnvelope(head, before.size)) return { outcome: 'already-encrypted' as const };
@@ -246,7 +257,8 @@ export async function encryptInPlace(abs: string): Promise<EncryptInPlaceResult>
       await pipeline(fs.createReadStream(abs), tap, createChunkedEncryptor(writerKey(secret)), fs.createWriteStream(tmp, { mode: FILE_MODE }));
       const fh = await fsp.open(tmp, 'r+');
       try { await fh.sync(); } finally { await fh.close(); }
-      const now = await fsp.stat(abs).catch(() => null);
+      // Gone meanwhile is an answer; a failure to look is the caller's, as the peek above has it.
+      const now = await fsp.stat(abs).catch((err: unknown) => { if (isMissingPath(err)) return null; throw err; });
       if (!now) { await fsp.rm(tmp, { force: true }); return { outcome: 'vanished' as const }; }
       if (now.ino !== before.ino || now.size !== before.size || now.mtimeMs !== before.mtimeMs || plainSize !== before.size) {
         await fsp.rm(tmp, { force: true });
