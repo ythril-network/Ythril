@@ -314,6 +314,11 @@ in MCP — it used to answer `204` or `200` when it came after the bytes, with t
   remove. One that outlives its act — a write the store reported failed that landed later, a settle that
   failed, a restart in between — is settled the same way by the record TTL sweep within minutes, oldest
   first; one whose path cannot be looked at is tried again on a later sweep, behind the rest.
+- **One tombstone per path per act, retries included.** Publishing a path's tombstone removes every other
+  pending tombstone for that path — the one a failed attempt left behind is the same intent, not an act of
+  its own — and the TTL sweep drops a leftover whose path already has a tombstone published after it was
+  written, rather than publish a second. A retried act used to end with two: a peer deletes its copy for
+  every tombstone it is sent, so the later one deleted a re-upload of that path made in between.
 - **After the bytes.** The metadata record is removed (or, for a move, re-keyed) LAST, so it is still there,
   and the same request retried completes the act. A delete completes as an orphan, as above. A move finds
   the file at `destination`, the record at the old path and the mark its first attempt left with its

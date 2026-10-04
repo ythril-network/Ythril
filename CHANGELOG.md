@@ -484,6 +484,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   coming back first every cycle and starving the rest of the space. `<space>_file_tombstones` gains the two indexes
   those questions need (the settle's, partial on `pending`, and the move marker's), on new and existing spaces.
 
+  **One tombstone per path per act, retries included (bundle-30 I17).** A file act a store failure stopped left its
+  pending tombstone behind, and its retry published one of its own — and then the first as well: a retried move at
+  once, because its settle took every tombstone carrying the move's mark, and a retried delete (one file, MCP
+  `delete_file`, a directory) ten minutes later, when the TTL sweep found the path's bytes gone — gone because the
+  retry had removed them. A peer deletes its copy for every tombstone it is sent, so the late one deleted a re-upload
+  of that path made in between. Now there is one way a tombstone is published, and publishing a path's removes every
+  other pending tombstone for that path; the sweep drops a leftover whose path already has a tombstone published
+  after it was written (a failed write the store applied late) rather than publish a second. File tombstones gain
+  an index on `path` for it.
+
   **A retried move completes only a move it began (bundle-30 I15).** The completion took any source with records and
   no bytes beside an existing destination for a move still owed — so moving an orphan `a.txt` (its file gone out of
   band) onto an unrelated `b.txt` replaced `b.txt`'s jobs, chunks and sidecars, lost `a.txt`'s record and answered

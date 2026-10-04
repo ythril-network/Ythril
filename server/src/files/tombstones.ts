@@ -36,8 +36,14 @@
  *   caller, because nothing irreversible happened and nothing depends on it.
  * - **Settled** once it outlives its act ({@link settleStalePendingFileTombstones}, every TTL sweep cycle): its drop
  *   failed, its write was reported failed and landed later, or a restart came between. The same rule.
+ * - **One per path per act** ({@link publishOnePerPath}, every one of the ways above): publishing a path's tombstone
+ *   removes every other pending tombstone for that path, and one written before a tombstone already published for its
+ *   path is dropped rather than published. A retried act's first attempt left its pending tombstone behind, and it
+ *   used to be published as a second one — at once for a move, by the TTL settle minutes later for a delete — which a
+ *   receiver applies like the first, deleting a re-upload of the path made in between (bundle-30 I17, verify-drive-5
+ *   F1).
  *
- * **The invariant: a peer is told a path is gone only once it is gone here.**
+ * **The invariants: a peer is told a path is gone only once it is gone here, and once per act.**
  *
  * ## What crosses the wire
  *
@@ -57,7 +63,7 @@
 
 import { v4 as uuidv4 } from 'uuid';
 import { toDocId } from '../util/paths.js';
-import { col, asDoc, asFilter, asUpdate } from '../db/mongo.js';
+import { col, asBulk, asDoc, asFilter, asUpdate } from '../db/mongo.js';
 import type { FileTombstoneDoc } from '../config/types.js';
 import { log, peerText } from '../util/log.js';
 import { throwIfStoreSide, unlessTheStoreFailed } from '../brain/store-failure.js';
@@ -97,6 +103,9 @@ export const FILE_TOMBSTONE_INDEXES = [
   // A move's marker: `moveWasBegun`, `settleBegunMove` and `forgetFinishedMove`, once or more per move. Sparse: only a
   // move's tombstones carry it, and only until the move is finished.
   { keys: { 'move.from': 1, 'move.to': 1 }, options: { sparse: true } },
+  // One tombstone per path: `publishOnePerPath` reads a path's tombstones and removes its other pending ones, on every
+  // publish (bundle-30 I17); `tombstonedFilePaths` asks by path too.
+  { keys: { path: 1 }, options: {} },
 ] as const;
 
 /**
@@ -111,10 +120,69 @@ export async function ensureFileTombstoneIndexes(spaceId: string): Promise<void>
 /**
  * What publishing a tombstone writes: `pending` gone, and `deletedAt` stamped NOW — the real time, never a caller's
  * clock — because `deletedAt` is the push position peers acknowledge, and a tombstone published under an older stamp
- * could fall below a position acknowledged while it was pending and be pruned unsent. One builder for the three
- * ways a tombstone is published (confirmed by its act, by a retried move, by the settle).
+ * could fall below a position acknowledged while it was pending and be pruned unsent. Written only by
+ * {@link publishOnePerPath}, the one way a tombstone is published.
  */
 const publishedNow = () => ({ $set: { deletedAt: new Date().toISOString() }, $unset: { pending: '' as const } });
+
+/** A pending tombstone about to be published: while pending, `deletedAt` is when it was written. */
+type ToPublish = Pick<StoredFileTombstone, '_id' | 'path' | 'deletedAt' | 'move'>;
+
+/**
+ * THE one way a tombstone is published — confirmed by its act, settled from the disk by a failed step, a retried
+ * move or the TTL sweep — and the rule it carries: **per path, an act publishes exactly one tombstone, and publishing
+ * it removes every other pending tombstone for that path** (bundle-30 I17, verify-drive-5 F1).
+ *
+ * Those others are the same intent. An act a store failure stopped leaves its pending tombstone behind — its write
+ * landed and its clean-up could not reach the store — and its retry writes one of its own. Both used to be published:
+ * a retried move's at once (its settle took every tombstone carrying the move's marker), a retried delete's ten
+ * minutes later, when the TTL settle found the path's bytes gone — gone because the RETRY removed them. A receiver
+ * deletes its copy for every tombstone it is sent, with no time comparison, so the late one deleted a re-upload a peer
+ * had made of that path in between.
+ *
+ * So, per path:
+ * - **One already published** (an act confirmed it meanwhile) is left exactly as it is: re-stamped, it would be pushed
+ *   again.
+ * - **One written no later than a tombstone already published for its path is not published**, and is dropped: that
+ *   publication was made after this act began, so it already told every peer — this one is the leftover of an
+ *   attempt the publication finished, or a failed write the store applied late.
+ * - Otherwise the newest-written is published — upserted, so one the stale settle dropped while its act was still
+ *   running is written again — and every other pending tombstone for that path is removed.
+ *
+ * Its failures are thrown; every caller decides what a store failure means for its act.
+ */
+async function publishOnePerPath(spaceId: string, docs: readonly ToPublish[]): Promise<{ published: number; dropped: number }> {
+  if (docs.length === 0) return { published: 0, dropped: 0 };
+  const tombstones = tombstonesOf(spaceId);
+  const paths = [...new Set(docs.map(d => d.path))];
+  const stored = await tombstones.find(asFilter<StoredFileTombstone>({ path: { $in: paths } }),
+    { projection: { _id: 1, path: 1, deletedAt: 1, pending: 1 } }).toArray();
+  const alreadyPublished = new Set(stored.filter(t => !t.pending).map(t => t._id));
+  const { $set, $unset } = publishedNow();
+  const ops: unknown[] = [];
+  let published = 0;
+  let dropped = 0;
+  for (const path of paths) {
+    const newestPublished = stored.filter(t => t.path === path && !t.pending).reduce((m, t) => (t.deletedAt > m ? t.deletedAt : m), '');
+    const candidates = docs.filter(d => d.path === path && !alreadyPublished.has(d._id));
+    const winner = candidates.filter(d => d.deletedAt > newestPublished).sort((a, b) => b.deletedAt.localeCompare(a.deletedAt))[0];
+    if (winner) {
+      ops.push({ updateOne: {
+        filter: asFilter<StoredFileTombstone>({ _id: winner._id }),
+        update: asUpdate<StoredFileTombstone>({ $set: { ...$set, spaceId, path, ...(winner.move ? { move: winner.move } : {}) }, $unset }),
+        upsert: true,
+      } });
+      ops.push({ deleteMany: { filter: asFilter<StoredFileTombstone>({ path, pending: true, _id: { $ne: winner._id } }) } });
+      published += 1;
+      dropped += candidates.length - 1;
+    } else if (candidates.length > 0) {
+      ops.push({ deleteMany: { filter: asFilter<StoredFileTombstone>({ _id: { $in: candidates.map(d => d._id) }, pending: true }) } });
+      dropped += candidates.length;
+    }
+  }
+  if (ops.length > 0) await tombstones.bulkWrite(asBulk<StoredFileTombstone>(ops), { ordered: false });
+  return { published, dropped };
+}
 
 /** The marker a move writes on its tombstones, as a filter. */
 const moveMarker = (from: string, to: string) => ({ 'move.from': toDocId(from), 'move.to': toDocId(to) });
@@ -155,23 +223,14 @@ export async function writePendingFileTombstones(
 }
 
 /**
- * Publish an act's tombstones: its bytes are gone or moved. Upserted, so a pending one the settle dropped meanwhile is
- * written again, and stamped with this moment. A store failure is thrown (the act answers `503` and its retry
- * completes it); any other is logged, and the settle confirms what it left pending.
+ * Publish an act's tombstones: its bytes are gone or moved. One per path ({@link publishOnePerPath}): every other
+ * pending tombstone for the path — an earlier attempt's — goes with it. A store failure is thrown (the act answers
+ * `503` and its retry completes it); any other is logged, and the settle confirms what it left pending.
  */
 export async function confirmFileTombstones(pending: PendingFileTombstones): Promise<void> {
   if (pending.docs.length === 0) return;
-  const { $set, $unset } = publishedNow();
   await unlessTheStoreFailed(`confirmFileTombstones for space ${peerText(pending.spaceId)} (${pending.docs.length})`,
-    () => tombstonesOf(pending.spaceId).bulkWrite(pending.docs.map(d => ({
-      updateOne: {
-        filter: asFilter<StoredFileTombstone>({ _id: d._id }),
-        update: asUpdate<StoredFileTombstone>({
-          $set: { ...$set, spaceId: d.spaceId, path: d.path, ...(d.move ? { move: d.move } : {}) }, $unset,
-        }),
-        upsert: true,
-      },
-    })), { ordered: false }));
+    () => publishOnePerPath(pending.spaceId, pending.docs));
 }
 
 /** The part of an act's pending tombstones that names one of `paths` — those one step of the act removes. */
@@ -231,32 +290,43 @@ export async function whenPendingFileTombstoneDropsSettle(): Promise<void> {
   await drops.settled();
 }
 
-/** What settling some pending tombstones from the disk did, by id. */
-interface Settled { dropped: string[]; confirmed: string[]; unresolved: string[] }
+/** What settling some pending tombstones from the disk did. */
+interface Settled {
+  /** Dropped because the path still has its bytes: the act did not remove it. */
+  dropped: number;
+  /** Published: the path has no bytes. */
+  confirmed: number;
+  /** Dropped because a tombstone for the path was already published after it was written (one per path). */
+  superseded: number;
+  /** Ids of those whose path could not be looked at: left pending. */
+  unresolved: string[];
+}
+
+/** The fields a settle reads of a pending tombstone: what {@link publishOnePerPath} needs to publish it. */
+const TO_PUBLISH = { _id: 1, path: 1, deletedAt: 1, move: 1 } as const;
 
 /**
  * THE settle rule, one copy for every caller: the disk decides each pending tombstone. Its path still has bytes, so
- * the act did not remove it: dropped. It has none, so the act did: published, stamped now (`publishedNow`, never a
- * caller's clock). A path that cannot be looked at is neither — it stays pending, served to nobody, and is returned
- * as `unresolved` for the caller to decide when to ask again. Only tombstones still pending are touched, so one an
- * act confirmed meanwhile is left as it is. A store failure is thrown.
+ * the act did not remove it: dropped. It has none, so the act did: published ({@link publishOnePerPath} — one per
+ * path, stamped now, never a caller's clock). A path that cannot be looked at is neither — it stays pending, served
+ * to nobody, and is returned as `unresolved` for the caller to decide when to ask again. Only tombstones still
+ * pending are dropped, and one an act published meanwhile is left as it is. A store failure is thrown.
  */
-async function settleFromTheDisk(spaceId: string, rows: ReadonlyArray<{ _id: string; path: string }>): Promise<Settled> {
-  const out: Settled = { dropped: [], confirmed: [], unresolved: [] };
+async function settleFromTheDisk(spaceId: string, rows: readonly ToPublish[]): Promise<Settled> {
+  const here: string[] = [];
+  const gone: ToPublish[] = [];
+  const unresolved: string[] = [];
   for (const t of rows) {
     try {
-      (await bytesPresent(await resolveSafePathChecked(spaceId, t.path)) ? out.dropped : out.confirmed).push(t._id);
+      if (await bytesPresent(await resolveSafePathChecked(spaceId, t.path))) here.push(t._id); else gone.push(t);
     } catch (err) {
-      out.unresolved.push(t._id);
+      unresolved.push(t._id);
       log.warn(`File tombstone for ${peerText(spaceId)}/${peerText(t.path)} left pending: its path cannot be looked at: ${peerText(err)}`);
     }
   }
-  const tombstones = tombstonesOf(spaceId);
-  if (out.dropped.length > 0) await tombstones.deleteMany(asFilter<StoredFileTombstone>({ _id: { $in: out.dropped }, pending: true }));
-  if (out.confirmed.length > 0) {
-    await tombstones.updateMany(asFilter<StoredFileTombstone>({ _id: { $in: out.confirmed }, pending: true }), asUpdate<StoredFileTombstone>(publishedNow()));
-  }
-  return out;
+  if (here.length > 0) await tombstonesOf(spaceId).deleteMany(asFilter<StoredFileTombstone>({ _id: { $in: here }, pending: true }));
+  const { published, dropped } = await publishOnePerPath(spaceId, gone);
+  return { dropped: here.length, confirmed: published, superseded: dropped, unresolved };
 }
 
 /**
@@ -279,22 +349,28 @@ export async function settlePendingFileTombstones(pending: PendingFileTombstones
  * it afresh), so it is asked again only once it is stale again, behind every tombstone that went stale before it.
  * Unordered and left where it was, a batch's worth of paths it could not look at came back first every cycle and
  * starved the rest of the space for ever.
+ *
+ * **A leftover whose path already has a newer published tombstone is dropped, not published** (bundle-30 I17,
+ * verify-drive-5 F1): the act's retry published that one, or the failed write landed after it did. Published, it was
+ * a second tombstone for one removal, stamped minutes later — see {@link publishOnePerPath}.
  */
-export async function settleStalePendingFileTombstones(spaceId: string, now: Date = new Date()): Promise<{ dropped: number; confirmed: number }> {
+export async function settleStalePendingFileTombstones(
+  spaceId: string, now: Date = new Date(),
+): Promise<{ dropped: number; confirmed: number; superseded: number }> {
   const before = new Date(now.getTime() - STALE_AFTER_MS).toISOString();
   const stale = await tombstonesOf(spaceId)
-    .find(asFilter<StoredFileTombstone>({ pending: true, deletedAt: { $lte: before } }), { projection: { _id: 1, path: 1 } })
+    .find(asFilter<StoredFileTombstone>({ pending: true, deletedAt: { $lte: before } }), { projection: TO_PUBLISH })
     .sort({ deletedAt: 1 }).limit(FILE_TOMBSTONE_SETTLE_BATCH).toArray();
-  const { dropped, confirmed, unresolved } = await settleFromTheDisk(spaceId, stale);
+  const { dropped, confirmed, superseded, unresolved } = await settleFromTheDisk(spaceId, stale);
   if (unresolved.length > 0) {
     await tombstonesOf(spaceId).updateMany(asFilter<StoredFileTombstone>({ _id: { $in: unresolved }, pending: true }),
       asUpdate<StoredFileTombstone>({ $set: { deletedAt: now.toISOString() } }));
   }
-  if (dropped.length + confirmed.length > 0) {
-    log.info(`File tombstones of ${peerText(spaceId)} settled from the disk: ${confirmed.length} published (the path is gone), `
-      + `${dropped.length} dropped (the path still has its file)`);
+  if (dropped + confirmed + superseded > 0) {
+    log.info(`File tombstones of ${peerText(spaceId)} settled from the disk: ${confirmed} published (the path is gone), `
+      + `${dropped} dropped (the path still has its file), ${superseded} dropped (the path already has its published tombstone)`);
   }
-  return { dropped: dropped.length, confirmed: confirmed.length };
+  return { dropped, confirmed, superseded };
 }
 
 // ── The move's marker ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -308,12 +384,14 @@ export async function moveWasBegun(spaceId: string, from: string, to: string): P
  * Settle every tombstone a move from `from` to `to` left pending, from the disk, by its marker — once the move has
  * done all it will to its bytes (the file's, then its sidecars'). A path whose bytes went is published, one whose
  * bytes stayed (a sidecar that could not move) is dropped. By the marker, because a retry that completes the move holds
- * no handle on what its first attempt wrote. Fails as {@link confirmFileTombstones} fails.
+ * no handle on what its first attempt wrote — and one per path ({@link publishOnePerPath}), because an earlier
+ * attempt's tombstone carries the same marker as the retry's, and both used to be published (verify-drive-5 F1).
+ * Fails as {@link confirmFileTombstones} fails.
  */
 export async function settleBegunMove(spaceId: string, from: string, to: string): Promise<void> {
   await unlessTheStoreFailed(`settleBegunMove for space ${peerText(spaceId)}, ${peerText(from)} → ${peerText(to)}`, async () => {
     const left = await tombstonesOf(spaceId)
-      .find(asFilter<StoredFileTombstone>({ ...moveMarker(from, to), pending: true }), { projection: { _id: 1, path: 1 } }).toArray();
+      .find(asFilter<StoredFileTombstone>({ ...moveMarker(from, to), pending: true }), { projection: TO_PUBLISH }).toArray();
     await settleFromTheDisk(spaceId, left);
   });
 }
