@@ -55,7 +55,7 @@ export function sendStoreFailure(res: express.Response, answer: StoreFailureAnsw
 export function sendCaughtFailure(res: express.Response, where: string, err: unknown,
   fallback: Record<string, unknown> = { error: 'Internal server error' }): void {
   if (res.headersSent) { reportServerFailure(where, err); return; }
-  const store = storeFailureAnswer(err);
+  const store = storeFailureAnswer(err, where);
   if (store) { sendStoreFailure(res, store); return; }
   reportServerFailure(where, err);
   res.status(500).json(fallback);

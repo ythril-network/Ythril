@@ -328,15 +328,19 @@ export interface StoreFailureAnswer {
  * every door and every reader gets our words plus the store's stable `code`/`codeName`, and the driver's text —
  * internal hosts, addresses, ports — is logged HERE, once, where no door can answer with it or forget to log it.
  */
-export function storeFailureAnswer(err: unknown): StoreFailureAnswer | null {
+export function storeFailureAnswer(err: unknown, where?: string): StoreFailureAnswer | null {
   const f = classifyReadFailure(err);
   if (f.status < 500) return null;
+  // The operation it failed, when the door names one: a route's catch (`sendCaughtFailure`) logged its name for a
+  // non-store failure and nothing for the store's, so `GET /api/conflicts` failing on the store left a line naming no
+  // route and no access log beside it (bundle-30 I13, pre-ship observability O2).
+  const at = where ? ` (${logSafe(where)})` : '';
   if (!f.retryable) {
     // Not recognised, so the stack is what an operator needs: the meta argument keeps it (`fmt`).
-    log.error('Database driver failure answered 500:', err);
+    log.error(`Database driver failure answered 500${at}:`, err);
     return { status: 500, body: { error: f.error, retryable: false } };
   }
-  log.warn(`Store-side failure answered 503: ${logSafe(storeFailureDetail(err))}`);
+  log.warn(`Store-side failure answered 503${at}: ${logSafe(storeFailureDetail(err))}`);
   return {
     status: 503, retryAfterSeconds: f.retryAfterSeconds ?? 5,
     body: {

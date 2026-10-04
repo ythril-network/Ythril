@@ -43,7 +43,7 @@ import { readFileSync } from 'node:fs';
 export const NEEDS_INSTANCE = /^\s*\*\s*@needs-instance/m;
 
 /** The module every database-backed standalone file opens the test MongoDB through. */
-export const DB_HARNESS = '_mongo-harness.mjs';
+const DB_HARNESS = '_mongo-harness.mjs';
 
 /**
  * How many database-backed files run at once — against ONE MongoDB that every one of them shares.

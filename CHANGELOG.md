@@ -418,7 +418,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   handler, the MCP dispatcher and the sync push helper each built the `503` by hand: a REST write's body dropped the
   store's `code` and `codeName` that a read and the tool carry, and five sync POSTs (file tombstones, members, votes,
   change notes, both pairing steps) still answered a store failure `500`. They now all answer `503`, `Retry-After`,
-  `retryable: true` — with the store's code for a caller, in words of our own for a peer — and one retry sentence.
+  `retryable: true` — in words of our own, with the store's `code` and `codeName`, on every door and to every
+  reader alike — and one retry sentence.
 
   The rest of the HTTP doors now answer it the same way. `POST /api/brain/recall`, `POST /api/brain/similar`,
   `POST /api/brain/spaces/:spaceId/traverse` and every `POST /api/<tool>` answered `503` without `Retry-After`. About
@@ -428,10 +429,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `/api/duplicates`, webhook, network and sync read route. An edge or link write whose reference lookup failed on
   the store answered `400` with the driver's text — and a missing reference whose own text names `mongot`, `$search`
   or a vector search index (a file `notes/mongot-setup.md`, a space `mongotest`) is the caller's `400`, not a
-  retryable `503`, because the store's message patterns are read only from the driver's own errors; `space_rename` answered it as `Error (500)` with the driver's text;
-  a space create answered `500 Failed to create space` and logged nothing. A file delete through a store failure
-  answered `200` with no sync tombstone written, so a peer re-pushed the file; it now answers `503`, and the retried
-  delete writes the tombstone — see the next entry for why the retry can. Every one now answers through one sender.
+  retryable `503`, because the store's message patterns are read only from the driver's own errors; `space_rename`
+  answered it as `Error (500)` with the driver's text; a space create answered `500 Failed to create space` and
+  logged nothing. A file delete through a store failure answered `200` with no sync tombstone written, so a peer
+  re-pushed the file; it now answers `503`, and the retried delete writes the tombstone — see the next entry for why
+  the retry can. Every one now answers through one sender. A failure on those routes that is NOT the store's still
+  answers `500`, now with the body `{"error":"Internal server error"}` (it read `Internal error` on most of them),
+  logged with its stack under the route's name — and so is a store failure's log line.
   The store message's retry sentence used to say *"Nothing was confirmed written by it"*, also on a list load or a
   search, which wrote nothing; it now says what is true of both.
 
@@ -816,9 +820,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   operation. It did not complete as far as this server can confirm; retry the request (store-side failure;
   retryable)."*, with `retryable: true`, `Retry-After` (on every HTTP door), and the store's own `code` and
   `codeName` when it gave them. The driver's message, with any cause it attached, is logged once per request as a
-  `Store-side failure answered 503:` warning. A client that matched the old prose should read `retryable` and
-  `code` instead. That includes `POST /api/networks/:id/sync?wait=true` and `POST /api/networks/peers/:peerId/sync?wait=true`,
-  which answered a cycle's failure as `500 { error }` with the exception's own message.
+  `Store-side failure answered 503` warning, naming the route when a route's own catch answered it. A client that
+  matched the old prose should read `retryable` and `code` instead. That includes
+  `POST /api/networks/:id/sync?wait=true` and `POST /api/networks/peers/:peerId/sync?wait=true`, which answered a
+  cycle's failure as `500 { error }` with the exception's own message.
+
+- **A model server's error text is bounded and escaped where it is quoted** (bundle-30). When a chat model server
+  answered with an `error`, its text was quoted whole into the error the call raised — and from there into a log
+  line and an answer. It now goes through the one renderer every peer-supplied text uses, cut at 200 characters
+  (saying how much it cut) and escaped.
 
   A store failure is recognised by what the driver says it IS — its class, its error labels, the server's code —
   not by a list of error names. The list could not see a subclass: the error the driver raises when it clears its

@@ -86,16 +86,28 @@ describe('no door answers with the driver\'s text', () => {
 
     it(`${what}: every audience gets the same answer — the one answer takes no audience`, () => {
       // An audience that is told more is the leak this rule closes; the REST handler cannot tell one from another.
-      const a = withLog(() => storeFailureAnswer(err, { audience: 'caller' })).out;
-      const b = withLog(() => storeFailureAnswer(err, { audience: 'peer' })).out;
-      assert.deepEqual(a, b);
-      assert.equal(storeFailureAnswer.length, 1, 'storeFailureAnswer grew a second parameter — an audience by another name?');
+      // Whatever is handed in beside the error — an old audience, the route a catch names for the LOG (bundle-30 I13)
+      // — the answer is the same. Asserted on the answer rather than on the arity: the route name is a second
+      // parameter that changes only the operator's line, and an arity check could not tell it from an audience.
+      const answers = [undefined, { audience: 'caller' }, { audience: 'peer' }, 'GET /api/conflicts', 'sync POST edges']
+        .map(second => withLog(() => storeFailureAnswer(err, second)).out);
+      for (const a of answers.slice(1)) assert.deepEqual(a, answers[0], 'the answer depends on what is passed beside the error');
+      assert.ok(storeFailureAnswer.length <= 2, 'storeFailureAnswer grew a third parameter — what does the answer depend on now?');
     });
 
     it(`${what}: the operator still reads the driver's text, in the log`, () => {
       const { lines } = withLog(() => storeFailureAnswer(err));
       assert.ok(lines.some(l => l.includes(err.message.split(' :: ')[0])),
         `the driver's message must reach the log — logged: ${JSON.stringify(lines)}`);
+    });
+
+    // A route's catch names its operation for a non-store failure; the store's line named nothing, and there is no
+    // access log beside it (bundle-30 I13, pre-ship observability O2). One line, naming the route and the driver's text.
+    it(`${what}: a route's catch logs it once, naming the route`, () => {
+      const { lines } = withLog(() => sent((res, e) => sendCaughtFailure(res, 'GET /api/conflicts', e), err));
+      const named = lines.filter(l => l.includes('GET /api/conflicts'));
+      assert.equal(named.length, 1, `expected one line naming the route — logged: ${JSON.stringify(lines)}`);
+      assert.ok(named[0].includes(err.message.split(' :: ')[0]), `the route's line does not carry the driver's text: ${named[0]}`);
     });
   }
 

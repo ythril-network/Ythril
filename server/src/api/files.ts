@@ -378,7 +378,7 @@ fileStoreRouter.post(
         res.status(400).json({ error: err.message });
         return;
       }
-      sendCaughtFailure(res, `createDir error for space ${targetSpace}, path ${dirPath}`, err, { error: 'Failed to create directory' });
+      sendCaughtFailure(res, `createDir for space ${targetSpace}, path ${dirPath}`, err, { error: 'Failed to create directory' });
     }
   },
 );
@@ -558,7 +558,7 @@ fileStoreRouter.delete('/:spaceId', globalRateLimit, requireSpaceAuth, denyReadO
       });
       res.status(204).end();
     } catch (err) {
-      sendCaughtFailure(res, `rm dir error for space ${targetSpace}, path ${filePath}`, err, { error: 'Failed to delete directory' });
+      sendCaughtFailure(res, `directory delete for space ${targetSpace}, path ${filePath}`, err, { error: 'Failed to delete directory' });
     }
     return;
   }
@@ -577,7 +577,7 @@ fileStoreRouter.delete('/:spaceId', globalRateLimit, requireSpaceAuth, denyReadO
       res.status(404).json({ error: 'Path not found' });
       return;
     }
-    sendCaughtFailure(res, `deleteFile error for space ${targetSpace}, path ${filePath}`, err, { error: 'Failed to delete file' });
+    sendCaughtFailure(res, `file delete for space ${targetSpace}, path ${filePath}`, err, { error: 'Failed to delete file' });
   }
 });
 
@@ -618,7 +618,7 @@ fileStoreRouter.patch('/:spaceId', globalRateLimit, requireSpaceAuth, denyReadOn
       res.status(404).json({ error: 'Path not found' });
       return;
     }
-    sendCaughtFailure(res, `moveFile error for space ${targetSpace}, ${srcPath} → ${destination}`, err, { error: 'Failed to move path' });
+    sendCaughtFailure(res, `file move for space ${targetSpace}, ${srcPath} → ${destination}`, err, { error: 'Failed to move path' });
   }
 });
 

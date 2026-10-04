@@ -6,8 +6,10 @@
  * produces most, and the reason this is a function rather than three edits.
  *
  * The classification itself lives in `brain/store-failure.ts`, which is where the reasoning and the two
- * independent reports are recorded. This file is only the HTTP half of a READ: a body that says `retryable` in a
- * field rather than in prose. The store failure itself is put on the wire by `sendStoreFailure` (`api/send-failure.ts`),
+ * independent reports are recorded. This file is only the HTTP half of a read-shaped failure: a body that says
+ * `retryable` in a field rather than in prose — for the read routes, and for the READ a write route makes before it
+ * writes (the edge and link routes' strict-linkage reference lookups, since bundle-30 I12), whose missing reference
+ * is the caller's `400` and whose store failure is the store's `503`. The store failure itself is put on the wire by `sendStoreFailure` (`api/send-failure.ts`),
  * the one sender every door uses.
  */
 import type express from 'express';

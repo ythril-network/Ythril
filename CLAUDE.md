@@ -322,8 +322,8 @@ dropped on push only. `push-and-pull-decide-alike-db.test.js` holds both doors t
   authored keys, peer values inside `$literal`; it never `$unset`s an AUTHORED key, and removes only the local-only
   fields `carriedFields` says not to carry — on a restore or a suppressed arrival) under the same seq write guard,
   in one bulk write per page — the receiver would otherwise publish the sender's `sizeBytes` and `sha256` for bytes
-  it does not have. A peer's file is queued **only when this instance holds the blob** (`embedArrivedFiles`); a restore queues
-  every file; a file this instance suppresses loses its vectors instead.
+  it does not have. A peer's file is queued **only when this instance holds the blob** (`embedArrivedFiles`); a
+  restore queues every file; a file this instance suppresses loses its vectors instead.
 - **D-9, owner decision 2026-10-01: an arrival takes this instance's retention.** A record that carries no
   receiver stamp is stamped from its OWN `createdAt` by this instance's `schema > space` windows — never from now,
   never the sender's. A stamp already on the stored copy is carried, never recomputed. So an arrival older than

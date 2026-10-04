@@ -29,7 +29,7 @@ import { CreateSpaceBody, TypeSchemasZ, findBrokenLibraryRefs, brokenRefsError, 
 import { refuseRemovedDescription } from './spaces.js';
 import { isProxy, isWildcardProxy } from './proxy.js';
 import { throwIfStoreSide } from '../brain/store-failure.js';
-import { log } from '../util/log.js';
+import { reportServerFailure } from '../util/report-failure.js';
 
 /** A refusal, carrying the status the contract suite pins. */
 export type SpaceCreateRefusal = {
@@ -154,7 +154,7 @@ export async function applySpaceCreate(plan: SpaceCreatePlan, creator: SpaceCrea
     // The store's failure is not this function's to word: each door answers it as every door does (bundle-30 I12).
     throwIfStoreSide(err);
     // Anything else keeps its generic sentence — and is logged, where it used to be discarded with nothing left behind.
-    log.error('space create failed:', err);
+    reportServerFailure(`space create '${plan.args.id}'`, err);
     return { outcome: 'failed', error: 'Failed to create space' };
   }
 }
