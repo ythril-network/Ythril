@@ -5,16 +5,22 @@
  * ## What this prevents (bundle-30 I8, pre-ship data-integrity and performance lenses)
  *
  * The check ran fire-and-forget right after each PAGE landed. A pull lands its families one page at a time in
- * `REPLICATED_FAMILIES` order — facts, entities, edges, chrono, links, filemeta — so an edge to a chrono entry, or a
+ * `REPLICATED_FAMILIES` order — then facts, entities, edges, chrono, links, filemeta — so an edge to a chrono entry, or a
  * link to a file, created in the same interval was checked while its target was still to be pulled, and recorded as a
  * violation. Each record had a fresh uuid that nothing dedupes, so every later re-landing of the edge added another.
  * This is the copy that RECORDS rather than refuses (CLAUDE.md): an operator reads each of those as real damage. And
  * every landed edge cost two unawaited `findOne`s, every link one — about twenty thousand on a 50-page pull.
  *
  * So a door collects what landed (`add`) and checks once (`run`) when its transfer is whole: a pull after every
- * family of the space's transfer, a push after the request's page. The check is one by-id read per target kind
- * (`readStoredById`, chunked), awaited, so its cost is bounded by the transfer rather than by the pool. A target in a family whose
- * transfer stopped early (`stillToCome`) is not checked: it may be in what was not served yet, and recording it
+ * family of the space's transfer, a push after the request's page — with the families the sender has still to push
+ * after it named as `stillToCome` (`familiesAfter`). The push door's request is ONE family, because the sender pushes
+ * one per request; that is why the families travel targets first (`REPLICATED_FAMILIES`, bundle-30 I13), and why an
+ * edge to a chrono entry pushed in the old order (edges before chrono) was still recorded after I8.
+ *
+ * The check is one by-id read per target kind (`readStoredById`, chunked), in a write bound of its own, so its cost is
+ * bounded by the transfer rather than by the pool and its time by the bound. The pull awaits it (in a `finally`, so a
+ * fetch that rejects mid-cycle still checks what landed); the push door STARTS it and answers (`start`). A target in a
+ * family that may still arrive (`stillToCome`) is not checked: it may be in what was not served yet, and recording it
  * would be the false violation this exists to prevent.
  *
  * ## Once per dangling end
@@ -29,7 +35,7 @@
 import { createHash } from 'node:crypto';
 import { col } from '../db/mongo.js';
 import { spaceCollection } from '../db/space-collection.js';
-import { outsideWriteBound } from '../db/write-bound.js';
+import { outsideWriteBound, withinWriteBound } from '../db/write-bound.js';
 import { readStoredById } from '../db/read-by-id.js';
 import { isWellFormedRef, collectionForRefKind, edgeEndpointKind } from '../brain/entity-refs.js';
 import { isStrictLinkage } from '../spaces/proxy.js';
@@ -38,6 +44,7 @@ import { log, peerText } from '../util/log.js';
 import type { RefKind } from '../config/types-knowledge.js';
 import type { LinkViolationDoc } from '../config/types.js';
 import type { SpacePart } from '../db/space-collection.js';
+import type { PayloadKey } from './replicated-families.js';
 
 interface Arrived { _id: string; [k: string]: unknown }
 
@@ -82,6 +89,14 @@ function violationId(t: Target): string {
   return `${h.slice(0, 8)}-${h.slice(8, 12)}-4${h.slice(13, 16)}-${'89ab'[parseInt(h[16]!, 16) % 4]}${h.slice(17, 20)}-${h.slice(20, 32)}`;
 }
 
+/**
+ * The families whose records hold references — the ones this check collects. Every family a reference can point at
+ * travels before these (`REPLICATED_FAMILIES`), which the order gate derives from this list and `REF_KINDS`.
+ */
+export const REFERENCE_FAMILIES = ['edges', 'links'] as const satisfies readonly PayloadKey[];
+const holdsReferences = (key: string): key is typeof REFERENCE_FAMILIES[number] =>
+  (REFERENCE_FAMILIES as readonly string[]).includes(key);
+
 export class LinkageCheck {
   private readonly landed: Target[] = [];
 
@@ -90,27 +105,52 @@ export class LinkageCheck {
 
   /** Note a record that LANDED. Anything but an edge or a link has no targets and is ignored. */
   add(key: string, doc: Arrived): void {
-    if (key !== 'edges' && key !== 'links') return;
+    if (!holdsReferences(key)) return;
     if (!isStrictLinkage(this.spaceId)) return;
     this.landed.push(...targetsOf(key, doc));
   }
 
   /**
-   * Check what landed, once, and record each dangling end once. `stillToCome` names the collections whose transfer
-   * stopped early this cycle: a target there is not checked. Never throws.
+   * Check what landed, once, and record each dangling end once. `stillToCome` names the collections a target may
+   * still arrive in this cycle — a transfer that stopped early, or a family the sender pushes after this request: a
+   * target there is not checked. Never throws.
+   *
+   * **In a write bound of its own** (bundle-30 I13): every read and write it issues ends within the per-operation
+   * bound and the scope's deadline (`db/write-bound.ts`), never inheriting a hold's scope and never left unbounded. A
+   * check the store stalls is logged as failed rather than waited on for ever.
    */
   async run({ stillToCome = [] }: { stillToCome?: readonly SpacePart[] } = {}): Promise<void> {
     const targets = this.landed.splice(0);
     if (targets.length === 0) return;
-    await outsideWriteBound(async () => {
+    await outsideWriteBound(() => withinWriteBound(async () => {
       try {
         await recordViolations(this.spaceId, this.sender, await missingTargets(this.spaceId, targets, stillToCome));
       } catch (err) {
         log.error(`Could not check the strict-linkage targets of ${targets.length} landed reference(s) in space `
           + `'${peerText(this.spaceId)}': ${peerText(err)}`);
       }
-    });
+    }));
   }
+
+  /**
+   * Start the check WITHOUT waiting for it — for the push door, which answers first (bundle-30 I13). The door's
+   * write bound is what promises a stalled push a `503` before the sender's timeout, and awaiting the check after the
+   * page, outside that bound, held the answer for as long as the store stalled. The records it checks have landed and
+   * the check only records, so nothing the answer says depends on it.
+   */
+  start(opts: { stillToCome?: readonly SpacePart[] } = {}): void {
+    const p = this.run(opts);
+    inFlight.add(p);
+    void p.finally(() => inFlight.delete(p));
+  }
+}
+
+/** Checks started and not yet finished (`start`). */
+const inFlight = new Set<Promise<void>>();
+
+/** Test seam: resolves once every check already started has finished. Never called by the server. */
+export async function whenLinkageChecksSettle(): Promise<void> {
+  while (inFlight.size > 0) await Promise.allSettled([...inFlight]);
 }
 
 /**
@@ -125,7 +165,9 @@ async function missingTargets(
   for (const t of targets) {
     if (t.malformed) { missing.push({ ...t, reason: t.malformed }); continue; }
     if (stillToCome.includes(collectionForRefKind(t.kind))) continue;
-    byKind.set(t.kind, [...(byKind.get(t.kind) ?? []), t]);
+    // Pushed onto the kind's own list: copying it per target was quadratic, ~0.8 s at 20 000 (bundle-30 I13).
+    const ofKind = byKind.get(t.kind);
+    if (ofKind) ofKind.push(t); else byKind.set(t.kind, [t]);
   }
   for (const [kind, ofKind] of byKind) {
     const present = await readStoredById(spaceCollection(spaceId, collectionForRefKind(kind)), ofKind.map(t => t.id), {});

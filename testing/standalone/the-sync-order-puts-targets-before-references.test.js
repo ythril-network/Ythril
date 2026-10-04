@@ -52,7 +52,8 @@ describe('the sync order puts targets before references', () => {
     assert.match(engine, /for \(const family of REPLICATED_FAMILIES\) \{\s*pushed\[family\.payloadKey\] = await pushCollection\(/,
       'the push cycle no longer iterates REPLICATED_FAMILIES — the order above is not the order sent');
     const docs = src('server/src/api/sync/docs.ts');
-    const runs = [...docs.matchAll(/linkage\.run\(([^)]*)\)/g)].map(m => m[1]);
+    // `run` awaits the check, `start` starts it and answers (bundle-30 I13); either must say what is still to come.
+    const runs = [...docs.matchAll(/linkage\.(?:run|start)\(([^)]*)\)/g)].map(m => m[1]);
     assert.ok(runs.length >= 2, `expected the single and the batch push door to run the check, found ${runs.length}`);
     for (const args of runs) {
       assert.match(args, /stillToCome:\s*familiesAfter\(/,

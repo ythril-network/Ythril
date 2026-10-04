@@ -910,11 +910,20 @@ async function pullFromPeer(
    * and interleaves the writes a truncated transfer's watermark has to reason about.
    */
   const pulled = {} as Record<PayloadKey, PullResult>;
-  for (const family of REPLICATED_FAMILIES) {
-    pulled[family.payloadKey] = await pullType(family);
+  try {
+    for (const family of REPLICATED_FAMILIES) {
+      pulled[family.payloadKey] = await pullType(family);
+    }
+  } finally {
+    /*
+     * What landed is checked even when a fetch REJECTS part-way (bundle-30 I13): edges that landed before it are
+     * re-served next cycle at an equal seq and plan as skipped, so they are never checked again. A family whose
+     * transfer stopped early, or never ran (the one that threw and every one after), may still hold a target: its
+     * ends are not judged missing this cycle.
+     */
+    await linkage.run({ stillToCome: REPLICATED_FAMILIES
+      .filter(f => pulled[f.payloadKey] === undefined || pulled[f.payloadKey].truncated).map(f => f.collection) });
   }
-  // A family whose transfer stopped early may still hold a target: its ends are not judged missing this cycle.
-  await linkage.run({ stillToCome: REPLICATED_FAMILIES.filter(f => pulled[f.payloadKey].truncated).map(f => f.collection) });
 
   pulledMemories = pulled.facts.count;
   pulledEntities = pulled.entities.count;

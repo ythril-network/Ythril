@@ -208,12 +208,20 @@ GET /api/conflicts/link-violations
 Returns sync-ingested documents that violate strict linkage rules.
 
 **A reference is checked once its transfer is whole, and a dangling end is ONE record.** A pull checks the edges
-and links it received after every record family of the space's transfer has landed, and a push after the
-request's whole page — so an edge to a chrono entry or a file that arrives in the same transfer is never recorded
-missing. A family whose transfer stopped early (a page cap, a failed write) leaves its targets unchecked that cycle.
-A violation's `_id` is derived from the document, the field and the target, so receiving the same edge again adds
-no second record, and `link_violation.created` fires once, for the new one. A push carries one family per request,
-so an edge pushed before the chrono entry it points at can still be recorded; dismiss it once the target is here.
+and links it received after every record family of the space's transfer has landed — and still checks what landed
+when a later family's fetch fails mid-cycle. A sender pushes one family per request, **targets first**: facts,
+entities, chrono, file metadata, then edges, then links. So when an edge or a link is pushed, every record it may
+point at that the same cycle carries is already here, and the push door checks after each request with the
+families still to come in that order left unjudged. Either way, an edge to a chrono entry or a link to a file that
+arrives in the same transfer is never recorded missing. A family whose transfer stopped early (a page cap, a failed
+write, a failed fetch) leaves its targets unchecked that cycle. A violation's `_id` is derived from the document,
+the field and the target, so receiving the same edge again adds no second record, and `link_violation.created` fires
+once, for the new one.
+
+**From a sender older than this release**, which pushes in the old order (edges before chrono entries, links
+before file metadata), an edge to a chrono entry or a link to a file created in the same interval can still be
+recorded missing; dismiss it once the target is here. The check runs after the push is answered, so a slow store
+never holds the push past the sender's timeout.
 
 `docType` is `entity`, `edge`, `fact`, `chrono` or **`file`**. A file's links are checked like any other
 record's, so `docType: "file"` is a value a caller must expect — and for that one `docId` is the file's

@@ -126,7 +126,8 @@ describe('a push cycle records no violation for a target later in it', { skip },
     proto.find = function maybeHang(filter, ...rest) {
       if (this.collectionName === `${S}_chrono` && filter?._id?.$in) {
         timeLeftAtRead.push(writeBound.boundTimeLeft());
-        return { toArray: async () => { await released; return []; } };
+        // Released, the read answers what the store holds — so the check's outcome is the real one.
+        return { toArray: async () => { await released; return realFind.call(this, filter, ...rest).toArray(); } };
       }
       return realFind.call(this, filter, ...rest);
     };

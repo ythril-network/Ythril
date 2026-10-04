@@ -381,6 +381,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   of one or two per record, a family whose transfer stopped early is not judged, and a violation's id is derived from
   what it says, so the same dangling end is one record and one `link_violation.created`.
 
+  A push request carries ONE family — the sender pushes them one request each — so checking "after the request" was
+  not enough on its own: the families were sent edges before chrono entries and links before file metadata, and the
+  push door still recorded those edges and links. **The families now travel targets first** (facts, entities, chrono,
+  file metadata, edges, links), and the push door leaves the families still to come in that order unjudged. A sender
+  older than this release still pushes the old order, and from it an edge to a chrono entry or a link to a file
+  created in the same interval can still be recorded; a receiver older than this release, sent the new order, records
+  none of them.
+
+  The push door also no longer waits for the check before answering: it awaited it after the page, outside the
+  door's write bound and with no deadline on its read, so a stalled store held the push answer past the sender's
+  60 s — the timeout the bound exists to beat. The check now starts after the page lands and runs in a write bound
+  of its own. A pull whose fetch failed part-way skipped the check altogether, and the edges that had landed were
+  never checked again (re-served, they plan as already current); it now checks what landed, with the family that
+  failed and every one after it left unjudged. And grouping the targets copied the list per target, ~1.3 s of
+  blocked event loop at 20 000 targets (one 50-page pull); it is now under a millisecond.
+
 - **An error that names `maxTimeMS` because the option was misused is no longer read as a deadline the store
   missed** (bundle-30). The deadline question matched the word `maxTimeMS` in any message, so the store's refusal of a
   misplaced bound (`cannot set maxTimeMS on getMore …`, a `BadValue`) was answered as a retryable `503` timeout on a

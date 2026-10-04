@@ -259,7 +259,8 @@ export function forkCandidates(docs: readonly ArrivalDoc[], stored: ReadonlyMap<
   for (const d of docs) {
     if (divergesFrom(d, stored.get(d._id))) out.add(d._id);
     for (const other of seen.get(d._id) ?? []) if (divergesFrom(d, other)) out.add(d._id);
-    seen.set(d._id, [...(seen.get(d._id) ?? []), d]);
+    const copies = seen.get(d._id);
+    if (copies) copies.push(d); else seen.set(d._id, [d]);
   }
   return [...out];
 }

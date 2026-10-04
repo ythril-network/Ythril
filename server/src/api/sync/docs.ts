@@ -22,7 +22,7 @@ import { MAX_FORK_DEPTH, encodeCursor, decodeCursor, callerPeerId, spaceAllowed,
 import { acceptArrivingPage, type AcceptedFamily } from '../../sync/accept-page.js';
 import { LinkageCheck } from '../../sync/linkage-check.js';
 import type { ArrivalVerdict } from '../../sync/upsert-plan.js';
-import { REPLICATED_FAMILIES, RECORD_TYPE_OF, familyOf, type PayloadKey } from '../../sync/replicated-families.js';
+import { REPLICATED_FAMILIES, RECORD_TYPE_OF, familyOf, familiesAfter, type PayloadKey } from '../../sync/replicated-families.js';
 import { KNOWLEDGE_TYPES, type KnowledgeType } from '../../config/types.js';
 
 export const syncDocsRouter = Router();
@@ -213,10 +213,11 @@ const refusedError = (r: AcceptedFamily) => ({ error: r.reasons[0] ?? 'the docum
  */
 async function acceptOne(req: Request, res: Response, key: PushKey, kind: string): Promise<{ r: AcceptedFamily; doc: Record<string, unknown> } | null> {
   const { spaceId } = req.query as Record<string, string>;
-  // The request is this door's whole transfer, so its references are checked once it has landed (bundle-30 I8).
+  // Its references are checked once it has landed (bundle-30 I8), with every family the sender pushes after this one
+  // still to come — and the answer does not wait for the check (bundle-30 I13, `LinkageCheck.start`).
   const linkage = new LinkageCheck(spaceId, pusherOf(req) ?? 'unknown');
   const r = (await acceptArrivingPage(spaceId, { [key]: [req.body] }, { door: 'push', deliveredBy: pusherOf(req), linkage }))[key];
-  await linkage.run();
+  linkage.start({ stillToCome: familiesAfter([key]) });
   if (r.invalid[0]) { res.status(400).json({ error: `Invalid ${kind} document` }); return null; }
   return { r, doc: r.docs[0] ?? {} };
 }
@@ -366,10 +367,12 @@ syncDocsRouter.post('/batch-upsert', syncRateLimit, requireAuth, denyReadOnly, a
       page[key] = sent.slice(0, BATCH_FAMILY_CAP);
     }
 
-    // Every family of the request lands before its references are checked, once (bundle-30 I8).
+    // Every family of the request lands before its references are checked, once (bundle-30 I8). A sender pushes one
+    // family per request, so a target in a family it pushes AFTER this request's is still to come (bundle-30 I13). The
+    // answer does not wait for the check: this door's bound promises a stalled push a 503 before the sender gives up.
     const linkage = new LinkageCheck(spaceId, pusherOf(req) ?? 'unknown');
     const out = await acceptArrivingPage(spaceId, page, { door: 'push', deliveredBy: pusherOf(req), linkage });
-    await linkage.run();
+    linkage.start({ stillToCome: familiesAfter(REPLICATED_FAMILIES.map(f => f.payloadKey).filter(k => page[k].length > 0)) });
 
     const parsed = (key: PushKey) => out[key].docs.filter((d): d is NonNullable<typeof d> => d !== undefined);
     // P-21 = C: validated against THIS space's schema, counted, and let in — never refused for it.

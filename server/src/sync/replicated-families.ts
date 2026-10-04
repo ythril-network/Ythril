@@ -55,14 +55,37 @@ export type ReplicatedFamily = {
   readonly pushFilter?: Record<string, unknown>;
 };
 
+/**
+ * **The ORDER is a rule: every family a reference can point at comes before every family that holds references**
+ * (bundle-30 I13). A sender pushes one family per `batch-upsert` request in this order, and the receiver checks strict
+ * linkage after each request (`sync/linkage-check.ts`). The order was facts, entities, edges, chrono, links, filemeta,
+ * so an edge to a chrono entry and a link to a file created in the same interval arrived ahead of their targets and
+ * were recorded missing for good. Targets first, the receiver never sees a reference before a target the same cycle
+ * carries — and neither does a receiver that predates this order, since it checks the same way.
+ *
+ * A SENDER that predates it still pushes the old order, and the receiver cannot tell: from such a sender an edge to a
+ * chrono entry, or a link to a file, created in the same interval can still be recorded. `familiesAfter` is what the
+ * push door tells the check is still to come, read from this list. Held by
+ * `the-sync-order-puts-targets-before-references.test.js`, which derives both sets from the code.
+ */
 export const REPLICATED_FAMILIES: readonly ReplicatedFamily[] = [
   { payloadKey: 'facts', collection: 'facts' },
   { payloadKey: 'entities', collection: 'entities' },
-  { payloadKey: 'edges', collection: 'edges' },
   { payloadKey: 'chrono', collection: 'chrono' },
-  { payloadKey: 'links', collection: 'links' },
   { payloadKey: 'filemeta', collection: 'files', pushFilter: { parentFileId: { $exists: false } } },
+  { payloadKey: 'edges', collection: 'edges' },
+  { payloadKey: 'links', collection: 'links' },
 ] as const;
+
+/**
+ * The collections a sender pushing in `REPLICATED_FAMILIES` order has still to send after a request carrying `keys`:
+ * every family after the LAST one the request carries. What the push door passes the linkage check as `stillToCome`,
+ * so a target in one of them is not judged missing before its request arrives.
+ */
+export function familiesAfter(keys: readonly PayloadKey[]): BrainCollection[] {
+  const last = Math.max(-1, ...keys.map(k => REPLICATED_FAMILIES.indexOf(familyOf(k))));
+  return REPLICATED_FAMILIES.slice(last + 1).map(f => f.collection);
+}
 
 /** A family's payload key. One declaration, on the row type, so the union cannot drift from the rows. */
 export type PayloadKey = ReplicatedFamily['payloadKey'];
