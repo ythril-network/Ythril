@@ -33,8 +33,17 @@ process.env['DATA_ROOT'] = path.join(tmpDir, 'data');
 const S = 'mergebighub';
 const AUTHOR = { instanceId: 'merge-bighub-test', instanceLabel: 'Here' };
 const T0 = '2026-09-01T00:00:00.000Z';
-/** Survivor edges: their identities alone are past the 16 MB one batch holds (~250 bytes each with this label). */
-const HUB_EDGES = 100_000;
+/**
+ * Survivor edges: just past what one read batch holds of their identities, and no further — this file shares the test
+ * database with every other -db file, and the seed is most of its cost.
+ *
+ * Measured (bundle-30 I9): the identity projection the old read made, `{_id, from, to, label}` of an edge seeded here
+ * (no kinds), is 226 bytes of BSON with this 71-character label, and a batch element costs ~7 bytes more (type byte,
+ * decimal index key, NUL). 16 MiB (16 777 216 bytes) holds about 72 000 of them; 75 000 is 17.5 MB, about 4 % past
+ * the limit, so the read needed a second batch. With the old survivor read put back by hand: red at 75 000 ("cannot
+ * set maxTimeMS on getMore"), green at 70 000 — the boundary sits where the arithmetic puts it.
+ */
+const HUB_EDGES = 75_000;
 const LABEL = 'a-relationship-label-long-enough-that-the-identity-set-passes-one-batch';
 
 let mongo, merge;
