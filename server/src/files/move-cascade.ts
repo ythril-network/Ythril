@@ -19,8 +19,11 @@
  * cleaning up after "a deleted source" — which, mid-move, would delete what the move is carrying. Then the held jobs
  * are re-keyed to the new path and released, so the moved file is processed where it now is.
  *
- * The bytes move or the call throws; everything after is best-effort and logged, because the file has already moved
- * and a failed secondary step must not report the move itself as failed.
+ * The tombstones for every path left behind are written FIRST, before a byte moves (bundle-30 I13, see
+ * `files/tombstones.ts`), and withdrawn if the move then fails. The bytes move or the call throws; everything after is
+ * best-effort and logged, because the file has already moved and a failed secondary step must not report the move
+ * itself as failed. A source that is not there is a `NotFoundError` (404 on both doors), checked before anything is
+ * written.
  */
 import fs from 'fs/promises';
 import { moveFile, listFilesRecursive } from './files.js';
@@ -28,7 +31,8 @@ import { renameFileMeta, renameFileMetaByPrefix } from './file-meta.js';
 import { holdJobsForMove, releaseMoveHold, rekeyJobsForMove } from './media/job-queue.js';
 import { movedId, movedSidecars, parentIdsUnder } from './moved-paths.js';
 import { resolveSafePathChecked } from './sandbox.js';
-import { writeFileTombstones } from './tombstones.js';
+import { writeFileTombstones, withdrawFileTombstones } from './tombstones.js';
+import { NotFoundError } from '../util/errors.js';
 import { col, asFilter, asDoc } from '../db/mongo.js';
 import { spaceCollection } from '../db/space-collection.js';
 import type { FileMetaDoc } from '../config/types.js';
@@ -94,12 +98,25 @@ async function relocateDerivedFileMeta(spaceId: string, src: string, dst: string
 
 /** Move `src` to `dst` in `spaceId`, and everything that belongs to it with it. See the module docblock for the order. */
 export async function moveFileCascade(spaceId: string, src: string, dst: string, actor?: WebhookActor): Promise<void> {
+  // Both paths resolved and the source found BEFORE anything is written: a refusal of either is the caller's, and
+  // must not leave a tombstone behind it.
+  await resolveSafePathChecked(spaceId, src);
+  await resolveSafePathChecked(spaceId, dst);
+  if (!(await exists(spaceId, src))) throw new NotFoundError(`Path '${src}' not found in space '${spaceId}'`);
   const leaving = await pathsLeaving(spaceId, src, dst);
 
-  const held = await holdJobsForMove(spaceId, src);
+  // The tombstones BEFORE the bytes move (bundle-30 I13, `files/tombstones.ts`): a store failure here leaves the
+  // source where it was, so the retry repeats the move — written after, the retry found no source and the paths left
+  // behind were never tombstoned. A move that then fails withdraws them: nobody asked for those paths to go.
+  const tombstones = await writeFileTombstones(spaceId, leaving);
+  const held = await holdJobsForMove(spaceId, src).catch(async (err) => {
+    await withdrawFileTombstones(spaceId, tombstones);
+    throw err;
+  });
   try {
     await moveFile(spaceId, src, dst);
   } catch (err) {
+    await withdrawFileTombstones(spaceId, tombstones);
     await releaseMoveHold(spaceId, held).catch(e => log.warn(`releaseMoveHold error for ${peerText(spaceId)}/${peerText(src)}: ${peerText(why(e))}`));
     throw err;
   }
@@ -118,6 +135,5 @@ export async function moveFileCascade(spaceId: string, src: string, dst: string,
   await relocateDerivedFileMeta(spaceId, src, dst).catch(err =>
     log.warn(`relocateDerivedFileMeta error for ${peerText(spaceId)}, ${peerText(src)} → ${peerText(dst)}: ${peerText(why(err))}`));
 
-  await writeFileTombstones(spaceId, leaving);
   emitWebhookEvent({ event: 'file.updated', spaceId, entry: { path: dst, previousPath: src }, ...(actor ?? {}) });
 }

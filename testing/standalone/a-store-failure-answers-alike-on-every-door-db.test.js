@@ -166,6 +166,9 @@ const REPORTS_THE_STORE = new Map([
   // `sync/trigger.ts`'s catch — answers through `sendCaughtFailure` like every route catch.
   ['POST /api/networks/:id/sync?wait=true', 'a waited sync trigger reports the cycle: a member that failed on the store is counted in `errors`'],
   ['POST /api/networks/peers/:peerId/sync?wait=true', 'a waited peer sync reports the cycle: a member that failed on the store is counted in `errors`'],
+  // The listing is the Brain overview's load; `counts` is an optional extra per space (`Promise.allSettled`), so a
+  // space whose count failed is listed without one rather than failing the whole listing.
+  ['GET /api/spaces?counts=true', 'the space listing with optional counts: a space whose count failed is listed without them'],
 ]);
 
 describe('a store failure answers alike on every door', { skip }, () => {

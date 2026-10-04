@@ -289,8 +289,15 @@ UI; re-uploading the same path clears the flag. Derived records (conversion chun
 
 **Deleting the file deletes its metadata.** There is no metadata-only delete and does not need to be:
 every file has a metadata record, and `DELETE /api/files/:spaceId?path=…` removes both. An **orphan** —
-a record whose bytes went missing out of band — is cleaned up by that same call, which answers `204`
-rather than `404` when it finds one.
+a record whose bytes went missing out of band — is completed by that same call, which answers `204`
+rather than `404` when it finds one and writes the sync tombstone the file never got, so a peer does not
+push it back. MCP `delete_file` and the record TTL sweep complete an orphan the same way. A path with
+neither bytes nor a record is `404` on both doors (an error result in MCP, which used to carry the
+filesystem's `ENOENT` and the absolute data path); a move whose source is not there is `404` too.
+
+**A delete or a move that fails is safe to retry.** The tombstone is written BEFORE the bytes are removed
+or moved, so a store failure on it answers `503` (retryable) with the file exactly where it was, and the
+retry repeats the whole act. A move that fails after writing its tombstones withdraws them.
 
 > **Removed at 5.0.** A `DELETE` on the file-meta path purged a metadata record without
 > touching disk, guarded by a `409` when the file was still there. It was a second door onto half of one

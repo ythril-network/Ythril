@@ -413,9 +413,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the store answered `400` with the driver's text; `space_rename` answered it as `Error (500)` with the driver's text;
   a space create answered `500 Failed to create space` and logged nothing. A file delete through a store failure
   answered `200` with no sync tombstone written, so a peer re-pushed the file; it now answers `503`, and the retried
-  delete writes the tombstone. Every one now answers through one sender. The store message's retry sentence used to
-  say *"Nothing was confirmed written by it"*, also on a list load or a search, which wrote nothing; it now says what
-  is true of both.
+  delete writes the tombstone — see the next entry for why the retry can. Every one now answers through one sender.
+  The store message's retry sentence used to say *"Nothing was confirmed written by it"*, also on a list load or a
+  search, which wrote nothing; it now says what is true of both.
+
+- **A file's sync tombstone is written before its bytes go, so a failed delete or move is safe to retry**
+  (bundle-30 I13). The tombstone was written after the unlink, after a directory's tree was removed and after a move.
+  A store failure on it then left the file gone with no tombstone, and the retry could not repair it: the REST delete
+  found no bytes and answered `204` writing no tombstone, a directory delete answered `404`, a move found no source,
+  and the TTL sweep failed on the missing file every cycle — while a peer's manifest pushed the file back. Every path
+  that removes a file now writes the tombstone first, so a store failure answers `503` with the file where it was; a
+  move that fails afterwards withdraws its tombstones. A file whose bytes are gone while its metadata remains is
+  completed on every door (REST delete, MCP `delete_file`, the TTL sweep): tombstone written, record, jobs and
+  artifacts removed. A path with neither bytes nor metadata, and a move whose source is not there, answer `404` on
+  both doors; MCP answered them with the filesystem's `ENOENT` and the absolute data path. `delete_file`'s description
+  said a missing path "succeeds quietly", which was not true; it now says what each door answers.
 
 - **A pulled page is decided by the same rules as a pushed one (`Q-204`, `Q-225`).** The pull accepted whatever was
   newer by seq and validated nothing, so the same document delivered the other way round was decided differently:

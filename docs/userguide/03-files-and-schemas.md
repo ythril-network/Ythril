@@ -43,6 +43,10 @@ succeeded, delete it and upload it again.
 | Rename | Click **Rename** |
 | Delete | Click ✕ and confirm |
 
+**A delete or a rename that fails on a database outage changes nothing** — the file is still there, under its old
+name — so trying again is safe. A file whose bytes were removed outside Ythril while its row stayed is deleted the same
+way, and synced peers are told to remove their copy too.
+
 **New folder:** Click **New folder** in the toolbar.
 
 **Navigation:** A breadcrumb bar (`root / docs / guides`) at the top lets you jump to any parent directory. The **tree sidebar** (toggle with **Show tree** / **Hide tree**) provides a full directory view.

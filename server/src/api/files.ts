@@ -41,7 +41,8 @@ import { invalidateUsageCache } from '../quota/quota.js';
 import { resolveSafePath, resolveSafePathChecked, assertNoSymlinkEscape, spaceRoot } from '../files/sandbox.js';
 import { col, asFilter } from '../db/mongo.js';
 import type { FileMetaDoc } from '../config/types.js';
-import { deleteFileMeta, deleteFileMetaByPrefix, markFileMetaDeletedByPrefix } from '../files/file-meta.js';
+import { deleteFileMetaByPrefix, markFileMetaDeletedByPrefix } from '../files/file-meta.js';
+import { NotFoundError } from '../util/errors.js';
 import { moveFileCascade } from '../files/move-cascade.js';
 import { writeFileTombstones } from '../files/tombstones.js';
 import { deleteFileCascade } from '../files/delete-cascade.js';
@@ -491,34 +492,21 @@ fileStoreRouter.delete('/:spaceId', globalRateLimit, requireSpaceAuth, denyReadO
     return;
   }
 
-  let stat: Awaited<ReturnType<typeof fs.stat>> | null;
+  let stat: Awaited<ReturnType<typeof fs.stat>> | null = null;
   try {
     stat = await fs.stat(absPath);
   } catch (statErr: unknown) {
-    const code = (statErr as NodeJS.ErrnoException).code;
-    if (code === 'ENOENT') {
-      // Check for an orphaned meta record (file deleted externally, meta still exists).
-      // If there is one, clean it up and return 204 so the UI can remove it.
-      // If there is none, the path was never known — return 404.
-      const normalisedPath = toDocId(filePath);
-      const orphan = await col<FileMetaDoc>(spaceCollection(targetSpace, 'files')).findOne(
-        asFilter<FileMetaDoc>({ _id: normalisedPath }),
-      );
-      if (orphan) {
-        await deleteFileMeta(targetSpace, filePath).catch(err => {
-          log.warn(`deleteFileMeta (orphan cleanup) error for space ${targetSpace}, path ${filePath}: ${err}`);
-        });
-        res.status(204).end();
-        return;
-      }
+    // No bytes at this path. A metadata record whose file went missing (an ORPHAN) is completed by the cascade below
+    // — tombstone, record, jobs, artifacts — and a path with neither is its NotFoundError, answered 404 there. This
+    // branch used to clean the orphan's record itself and write no tombstone, so a peer re-pushed the file
+    // (bundle-30 I13).
+    if ((statErr as NodeJS.ErrnoException).code !== 'ENOENT') {
       res.status(404).json({ error: 'Path not found' });
       return;
     }
-    res.status(404).json({ error: 'Path not found' });
-    return;
   }
 
-  if (stat.isDirectory()) {
+  if (stat?.isDirectory()) {
     if (!req.body || req.body.confirm !== true) {
       res.status(422).json({
         error:
@@ -540,6 +528,9 @@ fileStoreRouter.delete('/:spaceId', globalRateLimit, requireSpaceAuth, denyReadO
         listFilesRecursive(targetSpace, `_extracted/${filePath}`),
       ])).flat();
 
+      // BEFORE the tree goes (bundle-30 I13, `files/tombstones.ts`): a store failure here leaves the tree in place and
+      // the retry repeats the delete; written after, the retry answered 404 and no tombstone was ever written.
+      await writeFileTombstones(targetSpace, removedPaths);
       await removeTree(absPath, { mustExist: true });   // a converter may still be writing under it
       log.info(`Deleted directory ${absPath} (space: ${targetSpace})`);
       invalidateUsageCache(); // freed disk — reflect it in the next quota check
@@ -565,8 +556,6 @@ fileStoreRouter.delete('/:spaceId', globalRateLimit, requireSpaceAuth, denyReadO
       await deleteConversionArtifactsByPrefix(targetSpace, filePath).catch(err => {
         log.warn(`deleteConversionArtifactsByPrefix error for space ${targetSpace}, path ${filePath}: ${err}`);
       });
-      // Propagate the deletion to sync peers.
-      await writeFileTombstones(targetSpace, removedPaths);
       res.status(204).end();
     } catch (err) {
       sendCaughtFailure(res, `rm dir error for space ${targetSpace}, path ${filePath}`, err, { error: 'Failed to delete directory' });
@@ -582,6 +571,10 @@ fileStoreRouter.delete('/:spaceId', globalRateLimit, requireSpaceAuth, denyReadO
   } catch (err) {
     if (err instanceof RangeError) {
       res.status(400).json({ error: err.message });
+      return;
+    }
+    if (err instanceof NotFoundError) {
+      res.status(404).json({ error: 'Path not found' });
       return;
     }
     sendCaughtFailure(res, `deleteFile error for space ${targetSpace}, path ${filePath}`, err, { error: 'Failed to delete file' });
@@ -619,6 +612,10 @@ fileStoreRouter.patch('/:spaceId', globalRateLimit, requireSpaceAuth, denyReadOn
   } catch (err) {
     if (err instanceof RangeError) {
       res.status(400).json({ error: err.message });
+      return;
+    }
+    if (err instanceof NotFoundError) {
+      res.status(404).json({ error: 'Path not found' });
       return;
     }
     sendCaughtFailure(res, `moveFile error for space ${targetSpace}, ${srcPath} → ${destination}`, err, { error: 'Failed to move path' });
