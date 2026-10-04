@@ -20,14 +20,16 @@
  * are re-keyed to the new path and released, so the moved file is processed where it now is.
  *
  * The tombstones for every path left behind are written FIRST, before a byte moves (bundle-30 I13, see
- * `files/tombstones.ts`), and withdrawn if the move then fails. The bytes move or the call throws; everything after is
- * best-effort and logged, because the file has already moved and a failed secondary step must not report the move
- * itself as failed. A source that is not there is a `NotFoundError` (404 on both doors), checked before anything is
- * written.
+ * `files/tombstones.ts`), and withdrawn if the move then fails. The bytes move or the call throws. Everything after
+ * them survives its own failure, logged — but not the STORE's (bundle-30 I14): with the store paused, a move used to
+ * carry the bytes, fail every record step and answer `200`, its metadata left at a path with no file. Now that answers
+ * `503`, the metadata record is renamed last, and the retried move finds the bytes at `dst` and the record at `src`
+ * and completes the steps it owes (`afterTheBytesMoved`). A source that is not there, and owes nothing, is a
+ * `NotFoundError` (404 on both doors), checked before anything is written.
  */
 import fs from 'fs/promises';
 import { moveFile, listFilesRecursive } from './files.js';
-import { renameFileMeta, renameFileMetaByPrefix } from './file-meta.js';
+import { fileRecordPaths, renameFileMeta, renameFileMetaByPrefix } from './file-meta.js';
 import { holdJobsForMove, releaseMoveHold, rekeyJobsForMove } from './media/job-queue.js';
 import { movedId, movedSidecars, parentIdsUnder } from './moved-paths.js';
 import { resolveSafePathChecked } from './sandbox.js';
@@ -37,6 +39,7 @@ import { col, asFilter, asDoc } from '../db/mongo.js';
 import { spaceCollection } from '../db/space-collection.js';
 import type { FileMetaDoc } from '../config/types.js';
 import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';
+import { unlessTheStoreFailed } from '../brain/store-failure.js';
 import { log, peerText } from '../util/log.js';
 
 const why = (err: unknown): string => (err instanceof Error ? err.message : String(err));
@@ -102,38 +105,52 @@ export async function moveFileCascade(spaceId: string, src: string, dst: string,
   // must not leave a tombstone behind it.
   await resolveSafePathChecked(spaceId, src);
   await resolveSafePathChecked(spaceId, dst);
-  if (!(await exists(spaceId, src))) throw new NotFoundError(`Path '${src}' not found in space '${spaceId}'`);
+  if (!(await exists(spaceId, src))) {
+    // The bytes already moved and the records did not: a move a store failure stopped after its bytes, completed. Its
+    // tombstones were written before those bytes moved, so none is owed here.
+    const owed = await exists(spaceId, dst) ? await fileRecordPaths(spaceId, src) : [];
+    if (owed.length === 0) throw new NotFoundError(`Path '${src}' not found in space '${spaceId}'`);
+    await afterTheBytesMoved(spaceId, src, dst, await holdJobsForMove(spaceId, src));
+    emitWebhookEvent({ event: 'file.updated', spaceId, entry: { path: dst, previousPath: src }, ...(actor ?? {}) });
+    return;
+  }
   const leaving = await pathsLeaving(spaceId, src, dst);
 
   // The tombstones BEFORE the bytes move (bundle-30 I13, `files/tombstones.ts`): a store failure here leaves the
   // source where it was, so the retry repeats the move — written after, the retry found no source and the paths left
-  // behind were never tombstoned. A move that then fails withdraws them: nobody asked for those paths to go.
+  // behind were never tombstoned. A failed write withdraws its own; a move that fails after it withdraws these:
+  // nobody asked for those paths to go.
   const tombstones = await writeFileTombstones(spaceId, leaving);
-  const held = await holdJobsForMove(spaceId, src).catch(async (err) => {
-    await withdrawFileTombstones(spaceId, tombstones);
-    throw err;
-  });
+  let held: string[] = [];
   try {
+    held = await holdJobsForMove(spaceId, src);
     await moveFile(spaceId, src, dst);
   } catch (err) {
-    await withdrawFileTombstones(spaceId, tombstones);
+    withdrawFileTombstones(spaceId, tombstones);
     await releaseMoveHold(spaceId, held).catch(e => log.warn(`releaseMoveHold error for ${peerText(spaceId)}/${peerText(src)}: ${peerText(why(e))}`));
     throw err;
   }
+  await afterTheBytesMoved(spaceId, src, dst, held);
+  emitWebhookEvent({ event: 'file.updated', spaceId, entry: { path: dst, previousPath: src }, ...(actor ?? {}) });
+}
 
+/**
+ * Everything that follows the bytes, in the order a retry can finish (bundle-30 I14, verify-drive-4 D1): each step's
+ * own failure is logged and survived, the STORE's fails the move (`unlessTheStoreFailed`, so the door answers `503`),
+ * and the metadata record is renamed LAST — while it is still at `src`, the retry finds the move owed and completes
+ * it here. Each step finds its work at `src`, so a step that already ran finds none.
+ */
+async function afterTheBytesMoved(spaceId: string, src: string, dst: string, held: string[]): Promise<void> {
   for (const sidecar of movedSidecars(src, dst)) {
     if (!(await exists(spaceId, sidecar.from))) continue;
     await moveFile(spaceId, sidecar.from, sidecar.to).catch(err =>
       log.warn(`move sidecar error for ${peerText(spaceId)}, ${peerText(sidecar.from)} → ${peerText(sidecar.to)}: ${peerText(why(err))}`));
   }
-  await rekeyJobsForMove(spaceId, src, dst, held).catch(err =>
-    log.warn(`rekeyJobsForMove error for ${peerText(spaceId)}, ${peerText(src)} → ${peerText(dst)}: ${peerText(why(err))}`));
-  await Promise.all([
+  const at = `for ${peerText(spaceId)}, ${peerText(src)} → ${peerText(dst)}`;
+  await unlessTheStoreFailed(`rekeyJobsForMove error ${at}`, () => rekeyJobsForMove(spaceId, src, dst, held));
+  await unlessTheStoreFailed(`relocateDerivedFileMeta error ${at}`, () => relocateDerivedFileMeta(spaceId, src, dst));
+  await unlessTheStoreFailed(`renameFileMeta error ${at}`, () => Promise.all([
     renameFileMeta(spaceId, src, dst),
     renameFileMetaByPrefix(spaceId, src, dst),
-  ]).catch(err => log.warn(`renameFileMeta error for ${peerText(spaceId)}, ${peerText(src)} → ${peerText(dst)}: ${peerText(why(err))}`));
-  await relocateDerivedFileMeta(spaceId, src, dst).catch(err =>
-    log.warn(`relocateDerivedFileMeta error for ${peerText(spaceId)}, ${peerText(src)} → ${peerText(dst)}: ${peerText(why(err))}`));
-
-  emitWebhookEvent({ event: 'file.updated', spaceId, entry: { path: dst, previousPath: src }, ...(actor ?? {}) });
+  ]));
 }

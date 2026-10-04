@@ -260,9 +260,11 @@ export const delete_fileTool: ToolHandler = {
     + 'So a success means something was there. A path whose bytes are gone but whose metadata record remains is '
     + 'COMPLETED rather than refused: the tombstone is written and the record removed, so a peer does not push '
     + 'the file back.\n\n'
-    + 'A FAILED DELETE IS SAFE TO RETRY. The tombstone is written before the bytes go, so a store failure (a '
-    + 'retryable error) leaves the file exactly as it was, and the retry repeats the whole cascade. A retry '
-    + 'after a delete that DID complete answers not found — read that as "already gone".\n\n'
+    + 'A FAILED DELETE IS SAFE TO RETRY. A store failure anywhere in the cascade is a retryable error, never a '
+    + 'success. Before the bytes go it leaves the file exactly as it was (the tombstone is written first, and '
+    + 'withdrawn when its own write fails); after they go, the metadata record is still there, so the retry '
+    + 'completes the delete as above. A retry after a delete that DID complete answers not found — read that as '
+    + '"already gone".\n\n'
     + 'THE TOMBSTONE IS WHY RE-UPLOADING TO THE SAME PATH DOES NOT UNDO THIS cleanly on a synced space — the '
     + 'tombstone propagates and outranks the old copy on peers. Upload the file again by all means; just do '
     + 'not expect the deletion to be forgotten.\n\n'
@@ -270,7 +272,7 @@ export const delete_fileTool: ToolHandler = {
     + '- `path` — the file path relative to the space root, as `list_dir` reports it. One FILE: this is not '
     + 'the tool for removing a directory tree.\n'
     + '- `targetSpace` — required when `space` is a proxy: the member space holding the file.\n\n'
-    + 'RESPONSE: one line naming the path that was deleted.',
+    + 'RESPONSE: one line naming the path that was deleted, with `{ path, deleted: true }` as structured content.',
   mutating: true,
   spaceRequired: true,
   inputSchema: (s: ToolSchemas) => ({
@@ -357,6 +359,9 @@ export const move_fileTool: ToolHandler = {
     + 'content did not change, only where it lives. A file that failed extraction at the old path is still '
     + 'failed at the new one — use `retry_embed_file` for that, which is a different question from where the '
     + 'file sits.\n\n'
+    + 'A FAILED MOVE IS SAFE TO RETRY with the same `src` and `dst`. A store failure is a retryable error, never a '
+    + 'success. Before the bytes move nothing changes, and the tombstones it wrote are withdrawn; after they move, '
+    + 'the metadata is still at `src`, and the retry finds the file at `dst` and completes the move.\n\n'
     + 'PARAMETERS:\n'
     + '- `src` — the existing path, relative to the space root, exactly as `list_dir` reports it. A file or a '
     + 'directory.\n'

@@ -442,7 +442,9 @@ export const FROZEN = {
   // 455 -> 456: the same single `spaceCollection` import as `recall.ts` above, for the same reason.
   // 456 -> 458 (Q-92): one import and one line handing a spill's deprecated `path` to `answerSpillPath` in
   // `api/brain/spills.ts`, where the rest of it lives. Removed with `path` at the next major.
-  'server/src/api/files.ts': 458,
+  // 458 -> 422 (bundle-30 I14): the directory delete's cascade — tombstones, tree, jobs, sidecars, metadata — moved
+  // to `files/delete-cascade.ts` beside the one-file cascade whose order it shares, and with it eight imports.
+  'server/src/api/files.ts': 422,
   // 645 -> 660: the data-model panel’s mount and its card header. The panel ITSELF is a separate
   // component (er-model-panel) and its geometry a separate module (er-layout) — which is what this
   // ratchet asks for. What landed here is the 13 lines that place it in the grid, plus the two inputs

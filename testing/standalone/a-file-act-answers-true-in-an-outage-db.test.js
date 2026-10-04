@@ -205,7 +205,8 @@ describe('a file act answers true in an outage, and its retry repairs it', { ski
     assert.equal(retry.code, 204, `the retried directory delete: ${retry.code} ${JSON.stringify(retry.body)}`);
     assert.equal(await meta('dir/one.txt'), null, 'the retry left the metadata of a file whose bytes are gone');
     assert.equal(await meta('dir/two.txt'), null);
-    assert.deepEqual(await tombstoned(), ['dir/one.txt', 'dir/two.txt']);
+    // Each path at least once: the retry tombstones what it completes, as the orphan rule does for one file.
+    assert.deepEqual([...new Set(await tombstoned())], ['dir/one.txt', 'dir/two.txt']);
   });
 
   it('a tombstone that lands after its withdrawal was first refused is still withdrawn', async () => {

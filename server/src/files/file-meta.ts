@@ -513,6 +513,26 @@ export async function deleteFileMetaByPrefix(
 }
 
 /**
+ * The paths of the live file records at `path` or under `path/` — files only, never their derived records, and never
+ * one already soft-deleted. What a delete or move whose bytes have already gone still owes, which is how a retry
+ * after a store failure finds the act it has to complete (bundle-30 I14): the record is the marker, and the cascades
+ * remove it last.
+ */
+export async function fileRecordPaths(spaceId: string, path: string): Promise<string[]> {
+  const norm = toDocId(path).replace(/\/?$/, '');
+  if (!norm) return []; // guard: empty path would match everything
+  const rows = await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).find(
+    asFilter<FileMetaDoc>({
+      $or: [{ _id: norm }, { _id: { $regex: `^${escapeRegex(`${norm}/`)}` } }],
+      parentFileId: { $exists: false },
+      deletedAt: { $exists: false },
+    }),
+    { projection: { _id: 1 } },
+  ).toArray();
+  return rows.map(r => String(r._id));
+}
+
+/**
  * Soft-delete: flag a single file's metadata record as deleted (`deletedAt = now`)
  * instead of removing it. No-op if the record does not exist. Used when
  * `softDeleteFileMeta` is enabled so a deleted file leaves an auditable record.

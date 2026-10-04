@@ -41,6 +41,7 @@ import { isWellFormedRef, collectionForRefKind, edgeEndpointKind } from '../brai
 import { isStrictLinkage } from '../spaces/proxy.js';
 import { emitWebhookEvent } from '../webhooks/dispatcher.js';
 import { log, peerText } from '../util/log.js';
+import { DetachedWork } from '../util/detached-work.js';
 import type { RefKind } from '../config/types-knowledge.js';
 import type { LinkViolationDoc } from '../config/types.js';
 import type { SpacePart } from '../db/space-collection.js';
@@ -141,18 +142,16 @@ export class LinkageCheck {
    * the check only records, so nothing the answer says depends on it.
    */
   start(opts: { stillToCome?: readonly SpacePart[] } = {}): void {
-    const p = this.run(opts);
-    inFlight.add(p);
-    void p.finally(() => inFlight.delete(p));
+    started.start(() => this.run(opts));
   }
 }
 
 /** Checks started and not yet finished (`start`). */
-const inFlight = new Set<Promise<void>>();
+const started = new DetachedWork('strict-linkage check');
 
 /** Test seam: resolves once every check already started has finished. Never called by the server. */
 export async function whenLinkageChecksSettle(): Promise<void> {
-  while (inFlight.size > 0) await Promise.allSettled([...inFlight]);
+  await started.settled();
 }
 
 /**

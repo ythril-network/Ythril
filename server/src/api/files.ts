@@ -20,7 +20,6 @@
 import { Router } from 'express';
 import { toDocId } from '../util/paths.js';
 import fs from 'fs/promises';
-import { removeTree } from '../files/remove-tree.js';
 import path from 'path';
 import { requireSpaceAuth, denyReadOnly } from '../auth/middleware.js';
 import { globalRateLimit } from '../rate-limit/middleware.js';
@@ -30,26 +29,20 @@ import { openStoredRead, statStored, StoredFileUnreadable } from '../files/store
 import {
   listDir,
   createDir,
-  listFilesRecursive,
   type FileEntry,
 } from '../files/files.js';
 import { fetchJobProgress } from '../files/media/job-queue.js';
 import {
   getUploadReceived,
 } from '../files/chunks.js';
-import { invalidateUsageCache } from '../quota/quota.js';
 import { resolveSafePath, resolveSafePathChecked, assertNoSymlinkEscape, spaceRoot } from '../files/sandbox.js';
 import { col, asFilter } from '../db/mongo.js';
 import type { FileMetaDoc } from '../config/types.js';
-import { deleteFileMetaByPrefix, markFileMetaDeletedByPrefix } from '../files/file-meta.js';
 import { NotFoundError } from '../util/errors.js';
 import { moveFileCascade } from '../files/move-cascade.js';
-import { writeFileTombstones } from '../files/tombstones.js';
-import { deleteFileCascade } from '../files/delete-cascade.js';
+import { deleteDirectoryCascade, deleteFileCascade, isUnfinishedDirectoryDelete } from '../files/delete-cascade.js';
 import { resolveWriteTarget } from '../spaces/proxy.js';
 import { memberSpacesForRequest } from '../spaces/proxy-scoped.js';
-import { deleteConversionArtifactsByPrefix } from '../files/converters/pipeline.js';
-import { cancelMediaJobsByPrefix } from '../files/media/job-queue.js';
 import { contentTypeForDownload } from '../files/mime.js';
 import { hideDerivedTrees } from '../files/derived-trees.js';
 import { registerUploadRoute } from './files-upload.js';
@@ -506,8 +499,20 @@ fileStoreRouter.delete('/:spaceId', globalRateLimit, requireSpaceAuth, denyReadO
     }
   }
 
-  if (stat?.isDirectory()) {
-    if (!req.body || req.body.confirm !== true) {
+  // A directory — or one whose tree a store failure left gone with its records still there, which only a delete the
+  // caller confirmed as a directory's may complete (bundle-30 I14).
+  const confirmed = req.body?.confirm === true;
+  let isDirectory = !!stat?.isDirectory();
+  if (!stat && confirmed) {
+    try {
+      isDirectory = await isUnfinishedDirectoryDelete(targetSpace, filePath);
+    } catch (err) {
+      sendCaughtFailure(res, `directory delete for space ${targetSpace}, path ${filePath}`, err, { error: 'Failed to delete directory' });
+      return;
+    }
+  }
+  if (isDirectory) {
+    if (!confirmed) {
       res.status(422).json({
         error:
           'Deleting a directory requires { "confirm": true } in the request body.',
@@ -519,43 +524,8 @@ fileStoreRouter.delete('/:spaceId', globalRateLimit, requireSpaceAuth, denyReadO
       return;
     }
     try {
-      // Enumerate every file about to be removed — the folder tree AND its conversion
-      // sidecars — BEFORE deleting, so we can write a sync tombstone for each. Without
-      // tombstones a peer would re-push the files on the next sync (resurrection).
-      const removedPaths = (await Promise.all([
-        listFilesRecursive(targetSpace, filePath),
-        listFilesRecursive(targetSpace, `_converted/${filePath}`),
-        listFilesRecursive(targetSpace, `_extracted/${filePath}`),
-      ])).flat();
-
-      // BEFORE the tree goes (bundle-30 I13, `files/tombstones.ts`): a store failure here leaves the tree in place and
-      // the retry repeats the delete; written after, the retry answered 404 and no tombstone was ever written.
-      await writeFileTombstones(targetSpace, removedPaths);
-      await removeTree(absPath, { mustExist: true });   // a converter may still be writing under it
-      log.info(`Deleted directory ${absPath} (space: ${targetSpace})`);
-      invalidateUsageCache(); // freed disk — reflect it in the next quota check
-
-      // Metadata: soft-flag the user-visible file records (retain for audit) or hard-delete
-      // them, per the softDeleteFileMeta setting. Derived chunk records are always removed.
-      if (getConfig().softDeleteFileMeta === true) {
-        await markFileMetaDeletedByPrefix(targetSpace, filePath).catch(err => {
-          log.warn(`markFileMetaDeletedByPrefix error for space ${targetSpace}, path ${filePath}: ${err}`);
-        });
-      } else {
-        await deleteFileMetaByPrefix(targetSpace, filePath).catch(err => {
-          log.warn(`deleteFileMetaByPrefix error for space ${targetSpace}, path ${filePath}: ${err}`);
-        });
-      }
-      // Cancel any queued media/text jobs for files under this folder, or they would
-      // outlive their sources and retry forever against paths that no longer exist.
-      await cancelMediaJobsByPrefix(targetSpace, filePath).catch(err => {
-        log.warn(`cancelMediaJobsByPrefix error for space ${targetSpace}, path ${filePath}: ${err}`);
-      });
-      // Remove conversion sidecar records + on-disk files (`_converted/<path>`,
-      // `_extracted/<path>`), which live outside the folder prefix and would otherwise orphan.
-      await deleteConversionArtifactsByPrefix(targetSpace, filePath).catch(err => {
-        log.warn(`deleteConversionArtifactsByPrefix error for space ${targetSpace}, path ${filePath}: ${err}`);
-      });
+      // Tombstones, tree, jobs, sidecars, metadata — in the order `files/delete-cascade.ts` explains.
+      await deleteDirectoryCascade(targetSpace, filePath);
       res.status(204).end();
     } catch (err) {
       sendCaughtFailure(res, `directory delete for space ${targetSpace}, path ${filePath}`, err, { error: 'Failed to delete directory' });

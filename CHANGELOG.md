@@ -444,12 +444,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   A store failure on it then left the file gone with no tombstone, and the retry could not repair it: the REST delete
   found no bytes and answered `204` writing no tombstone, a directory delete answered `404`, a move found no source,
   and the TTL sweep failed on the missing file every cycle — while a peer's manifest pushed the file back. Every path
-  that removes a file now writes the tombstone first, so a store failure answers `503` with the file where it was; a
-  move that fails afterwards withdraws its tombstones. A file whose bytes are gone while its metadata remains is
+  that removes a file now writes the tombstone first, so a store failure on it answers `503` with the file where it
+  was. A file whose bytes are gone while its metadata remains is
   completed on every door (REST delete, MCP `delete_file`, the TTL sweep): tombstone written, record, jobs and
   artifacts removed. A path with neither bytes nor metadata, and a move whose source is not there, answer `404` on
   both doors; MCP answered them with the filesystem's `ENOENT` and the absolute data path. `delete_file`'s description
   said a missing path "succeeds quietly", which was not true; it now says what each door answers.
+
+  A store failure AFTER the bytes now fails the act too (bundle-30 I14). With the store paused, a delete unlinked
+  the bytes, failed its job, artifact and metadata steps — each caught and logged — and answered `204`; a move
+  carried the bytes, failed to re-key its records and answered `200`. Each step's own failure is still survived,
+  but the store's answers `503` on REST and MCP, and the metadata record goes last, so the same request retried
+  completes the act: a delete as an orphan, a move by finding the file at its destination and the record at the
+  old path, a directory delete (`confirm: true`) by finding records under a folder whose tree is gone. A tombstone
+  write the store reports failed is withdrawn by ids allocated before it was sent, retried until the store takes
+  it — the write could land when the store came back, and a failed move left peers told to delete a file that
+  was still here. A move that fails after its tombstones were written withdraws them the same way. The
+  directory delete's cascade moved from the REST route into `files/delete-cascade.ts`.
 
 - **A pulled page is decided by the same rules as a pushed one (`Q-204`, `Q-225`).** The pull accepted whatever was
   newer by seq and validated nothing, so the same document delivered the other way round was decided differently:

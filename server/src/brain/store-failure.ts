@@ -326,6 +326,25 @@ export function throwIfStoreSide(err: unknown): void {
 }
 
 /**
+ * Run a step whose OWN failure an act survives — logged, and the act goes on — unless the store failed it: that is
+ * rethrown, so the door answers `503` and the caller retries.
+ *
+ * For the steps after an act's irreversible one (a file's bytes unlinked or moved). Each used to be a
+ * `.catch(log.warn)`, so with the store paused a delete removed the bytes, failed every store step after them, and
+ * answered `204` — leaving metadata for a file that no longer existed and telling nobody to retry (bundle-30 I14,
+ * verify-drive-4 D1). The step that marks an act as still owed (a file's metadata record) runs last, so the retry
+ * finds it and completes the act.
+ */
+export async function unlessTheStoreFailed(what: string, step: () => Promise<unknown>): Promise<void> {
+  try {
+    await step();
+  } catch (err) {
+    throwIfStoreSide(err);
+    log.warn(`${what}: ${logSafe(err instanceof Error ? err.message : String(err))}`);
+  }
+}
+
+/**
  * The answer every door gives a failure on the store's side: one status, one wait, one body.
  *
  * `503` with `retryAfterSeconds` for the store's condition; `500` with neither for a driver error nothing recognises —
