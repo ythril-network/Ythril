@@ -44,6 +44,7 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
 import { stripComments } from './_strip-comments.mjs';
+import { MUTATORS } from './_document-mutators.mjs';
 
 // Before ANY import of the store: a module that reads its caps at load time must see these.
 process.env['READ_SPILL_TOKEN_MAX_MB'] = '1';
@@ -201,9 +202,6 @@ describe('a read spill lives in the instance store, never in a space', { skip },
   });
 
   describe('a reader never sees a partial spill, and the space is never written', () => {
-    const MUTATORS = ['insertOne', 'insertMany', 'updateOne', 'updateMany', 'replaceOne', 'bulkWrite',
-      'findOneAndUpdate', 'findOneAndReplace', 'findOneAndDelete', 'deleteOne', 'deleteMany'];
-
     /** Record every write the driver is asked to make, by collection, in order. The server's OWN driver. */
     async function recordingWrites(fn) {
       const require = createRequire(path.resolve('server/package.json'));

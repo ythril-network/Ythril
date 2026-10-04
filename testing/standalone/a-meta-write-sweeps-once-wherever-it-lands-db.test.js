@@ -37,6 +37,7 @@ import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { openPushDoor } from './_push-door.mjs';
+import { eventually } from './_write-faults.mjs';
 
 const skip = await mongoSkipReason();
 const S = 'metasweep';
@@ -50,15 +51,10 @@ const suppressing = (...types) => ({
 });
 const hasVector = async (id) => (await door.coll(S, 'facts').findOne({ _id: id }))?.embedding !== undefined;
 
-/** Until `check` holds, or fail naming `what` — the sweep is not awaited by the write, by design. */
-async function until(check, what, ms = 10_000) {
-  const end = Date.now() + ms;
-  while (Date.now() < end) {
-    if (await check()) return;
-    await new Promise(r => setTimeout(r, 50));
-  }
-  assert.fail(`${what} within ${ms} ms`);
-}
+/** How long a sweep may take to land — it is not awaited by the write, by design. */
+const SWEEP_DEADLINE_MS = 10_000;
+/** Until `check` holds, or fail naming `what` (`_write-faults.mjs` polls). */
+const until = async (check, what) => assert.ok(await eventually(check, SWEEP_DEADLINE_MS, 50), `${what} within ${SWEEP_DEADLINE_MS} ms`);
 
 describe('a meta write sweeps once, wherever it lands', { skip }, () => {
   before(async () => {

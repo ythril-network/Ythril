@@ -46,6 +46,7 @@ import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { openPushDoor, build } from './_push-door.mjs';
+import { parkWrites, withCollectionAsView } from './_write-faults.mjs';
 
 const skip = await mongoSkipReason();
 const SUITE = 'strayfm';
@@ -326,38 +327,32 @@ describe('file metadata a 4.0-5.6.1 pull left in <space>_filemeta is recovered i
       stray(RACE, 'a-first.md', 30, { description: 'first' }),
       stray(RACE, 'race.md', 31, { description: 'for a file about to be deleted' }),
     ]);
-    const proto = Object.getPrototypeOf(door.mongo.col('probe'));
-    const original = proto.updateOne;
-    let reached, release;
-    const atHold = new Promise(r => { reached = r; });
-    const held = new Promise(r => { release = r; });
-    proto.updateOne = async function holding(filter, ...rest) {
-      if (this.collectionName === `${RACE}_files` && filter?._id === 'a-first.md') { reached(); await held; }
-      return original.call(this, filter, ...rest);
-    };
+    // Parked after the door's own patch and restored before it closes (`parkWrites`).
+    const park = parkWrites(Object.getPrototypeOf(door.mongo.col('probe')));
+    const { reached: atHold, release } = park.arm(`${RACE}_files`,
+      { when: (method, [filter]) => method === 'updateOne' && filter?._id === 'a-first.md' });
     try {
       const cycle = sweepExpired();
       await within(atHold, 'the held write');
       await door.coll(RACE, 'files').deleteOne({ _id: 'race.md' });
       release();
       await cycle;
-    } finally { proto.updateOne = original; }
+    } finally { park.restore(); }
     assert.equal(await stored(RACE, 'race.md'), null, 'a file deleted during the drain came back with no bytes');
   });
 
   it('a space that fails keeps its collection, is named in the log, and does not stop the spaces after it', async () => {
-    const db = door.mongo.getDb();
-    await db.collection(`${BAD}_files`).drop();
-    await db.createCollection(`${BAD}_files`, { viewOn: `${BAD}_files_source`, pipeline: [] });
-    await door.coll(BAD, 'filemeta').insertOne(stray(BAD, 'x.md', 10, { description: 'cannot land' }));
-    await door.coll(SPACE, 'files').insertOne(stampedRow(SPACE, 'after-bad.md', 950));
-    await door.coll(SPACE, 'filemeta').insertOne(stray(SPACE, 'after-bad.md', 10, { description: 'reached despite the bad space' }));
-    lines.length = 0;
-    await sweepExpired();
-    assert.equal((await stored(SPACE, 'after-bad.md'))?.description, 'reached despite the bad space',
-      'a failing space stopped the drain of the spaces after it');
-    assert.equal(await strayExists(BAD), true, 'the failing space lost its collection');
-    assert.ok(lines.some(l => l.includes('Stray file-metadata drain') && l.includes(BAD)), 'the failure line does not name the space');
-    assert.equal(await door.mongo.getDb().collection('audit_log').findOne({ spaceId: BAD, operation: 'file.stray_filemeta.drain' }), null);
+    await withCollectionAsView(door.mongo.getDb(), `${BAD}_files`, `${BAD}_files_source`, async () => {
+      await door.coll(BAD, 'filemeta').insertOne(stray(BAD, 'x.md', 10, { description: 'cannot land' }));
+      await door.coll(SPACE, 'files').insertOne(stampedRow(SPACE, 'after-bad.md', 950));
+      await door.coll(SPACE, 'filemeta').insertOne(stray(SPACE, 'after-bad.md', 10, { description: 'reached despite the bad space' }));
+      lines.length = 0;
+      await sweepExpired();
+      assert.equal((await stored(SPACE, 'after-bad.md'))?.description, 'reached despite the bad space',
+        'a failing space stopped the drain of the spaces after it');
+      assert.equal(await strayExists(BAD), true, 'the failing space lost its collection');
+      assert.ok(lines.some(l => l.includes('Stray file-metadata drain') && l.includes(BAD)), 'the failure line does not name the space');
+      assert.equal(await door.mongo.getDb().collection('audit_log').findOne({ spaceId: BAD, operation: 'file.stray_filemeta.drain' }), null);
+    });
   });
 });

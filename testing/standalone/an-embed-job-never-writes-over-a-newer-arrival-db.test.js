@@ -30,28 +30,19 @@ import assert from 'node:assert/strict';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { openPushDoor, build } from './_push-door.mjs';
 import { startStubEmbedder } from './_vector-harness.mjs';
+import { parkWrites } from './_write-faults.mjs';
 
 const skip = await mongoSkipReason();
 
 const S = 'embedrace';
-let door, embedder, proto, beforePark, embedStoredRecord, dims;
+let door, embedder, proto, park, embedStoredRecord, dims;
 
 /** Park the FIRST vector write (`$set.embedding`) to `<S>_facts` until released. */
 function parkTheJobsVectorWrite() {
-  let release;
-  let reached;
-  const gate = new Promise(r => { release = r; });
-  const parked = new Promise(r => { reached = r; });
-  let armed = true;
-  proto.updateOne = async function parkedOnce(filter, update, ...rest) {
-    if (armed && this.collectionName === `${S}_facts` && update?.$set?.embedding !== undefined) {
-      armed = false;
-      reached();
-      await gate;
-    }
-    return beforePark.call(this, filter, update, ...rest);
-  };
-  return { parked, release };
+  park = parkWrites(proto);
+  const { reached, release } = park.arm(`${S}_facts`,
+    { when: (method, [, update]) => method === 'updateOne' && update?.$set?.embedding !== undefined });
+  return { parked: reached, release };
 }
 
 describe('an embed job never writes over a newer arrival', { skip }, () => {
@@ -61,10 +52,10 @@ describe('an embed job never writes over a newer arrival', { skip }, () => {
     ({ embedStoredRecord } = await import('../../server/dist/brain/embed-record.js'));
     dims = (await import('../../server/dist/config/loader.js')).getEmbeddingConfig().dimensions;
     proto = Object.getPrototypeOf(door.mongo.col('probe'));
-    beforePark = proto.updateOne;
   });
-  afterEach(() => { proto.updateOne = beforePark; });
-  after(async () => { proto.updateOne = beforePark; await door?.close(); await embedder?.close(); });
+  // Restored before the door closes: the door's own restore would otherwise put the park back (`parkWrites`).
+  afterEach(() => { park?.restore(); park = undefined; });
+  after(async () => { park?.restore(); await door?.close(); await embedder?.close(); });
   beforeEach(async () => {
     await door.wipe(S);
     await door.coll(S, 'facts').insertOne(build.fact(S, 'f', 5, { fact: 'the old text' }));

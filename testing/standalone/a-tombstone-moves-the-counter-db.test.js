@@ -44,6 +44,7 @@ import { mongoSkipReason } from './_mongo-harness.mjs';
 import { privateAddressSkipReason } from './_private-address.mjs';
 import { build, PEER_TOKEN } from './_push-door.mjs';
 import { openPullDoor, PEER } from './_pull-door.mjs';
+import { withCollectionAsView, withCounterCeiling as counterCeiling } from './_write-faults.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 
@@ -68,24 +69,13 @@ async function deliver(name, space, tombstones) {
 async function withFactsAView(space, targets, fn) {
   const db = door.mongo.getDb();
   if (targets.length > 0) await db.collection(`${space}_entities`).insertMany(targets);
-  await db.collection(`${space}_facts`).drop();
-  await db.createCollection(`${space}_facts`, { viewOn: `${space}_entities`, pipeline: [] });
-  try { return await fn(); } finally {
-    await db.collection(`${space}_facts`).drop();
-    await db.createCollection(`${space}_facts`);
+  try { return await withCollectionAsView(db, `${space}_facts`, `${space}_entities`, fn); } finally {
     await db.collection(`${space}_entities`).deleteMany({});
   }
 }
 
-/** The counter collection refuses a seq above `ceiling` for `space` while `fn` runs. */
-async function withCounterCeiling(space, ceiling, fn) {
-  const db = door.mongo.getDb();
-  await db.command({ collMod: 'ythril_counters', validationLevel: 'strict', validationAction: 'error',
-    validator: { $or: [{ _id: { $ne: space } }, { seq: { $lte: ceiling } }] } });
-  try { return await fn(); } finally {
-    await db.command({ collMod: 'ythril_counters', validator: {} });
-  }
-}
+/** The counter collection refuses a seq above `ceiling` for `space` while `fn` runs (`_write-faults.mjs`). */
+const withCounterCeiling = (space, ceiling, fn) => counterCeiling(door.mongo.getDb(), space, ceiling, fn);
 
 describe('a delivered tombstone moves the counter, and a counter that could not move is never success', { skip }, () => {
   before(async () => {

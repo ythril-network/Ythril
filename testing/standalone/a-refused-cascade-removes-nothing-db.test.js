@@ -29,6 +29,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
+import { snapshotParts, changedParts } from './_space-snapshot.mjs';
 
 const skip = await mongoSkipReason();
 
@@ -57,11 +58,8 @@ const RECORD = {
   file: (id) => ({ _id: id, spaceId: S, path: id, tags: [], author: AUTHOR, createdAt: T0, updatedAt: T0, seq: ++seq }),
 };
 
-async function snapshot() {
-  const out = {};
-  for (const p of PARTS) out[p] = await coll(p).find({}).sort({ _id: 1 }).toArray();
-  return out;
-}
+/** Every part this file seeds, whole and in a stable order (`_space-snapshot.mjs`). */
+const snapshot = () => snapshotParts(mongo, S, PARTS);
 
 describe('a refused cascade removes nothing', { skip }, () => {
   before(async () => {
@@ -130,7 +128,7 @@ describe('a refused cascade removes nothing', { skip }, () => {
       assert.deepEqual(goneEdges, [],
         `the cascade was REFUSED by a ${kind}, and it had already deleted ${goneEdges.length} edge(s) — a refused cascade `
         + 'must remove nothing');
-      const changed = PARTS.filter(p_ => JSON.stringify(before_[p_]) !== JSON.stringify(after_[p_]));
+      const changed = changedParts(before_, after_);
       assert.deepEqual(changed, [], `a refused cascade changed ${changed.join(', ')}`);
     });
   }

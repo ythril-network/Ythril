@@ -3,8 +3,8 @@
  *
  * ## Why a module
  *
- * Three -db tests ask "what did the log say": the forge test (`a-peer-value-cannot-forge-a-log-line-db`, which still
- * carries its own copy) and the two `Q-214` / `Q-270` tests beside it. The question has one honest answer and two
+ * Three -db tests ask "what did the log say": the forge test (`a-peer-value-cannot-forge-a-log-line-db`, whose own copy
+ * it replaced) and the two `Q-214` / `Q-270` tests beside it. The question has one honest answer and two
  * ways to get it subtly wrong, which is what this module is for.
  *
  * ## The two things a hand-written copy drops

@@ -26,6 +26,7 @@ import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { openPushDoor } from './_push-door.mjs';
+import { eventually } from './_write-faults.mjs';
 
 const skip = await mongoSkipReason();
 
@@ -44,15 +45,8 @@ function record(kind, space, id, typeValue) {
     [TYPE_FIELD[kind]]: typeValue, ...VEC };
 }
 
-/** Wait until `ok()` holds or the deadline passes; returns whether it held. */
-async function eventually(ok) {
-  const until = Date.now() + SWEEP_DEADLINE_MS;
-  for (;;) {
-    if (await ok()) return true;
-    if (Date.now() > until) return false;
-    await new Promise(r => setTimeout(r, 50));
-  }
-}
+/** Wait until `ok()` holds or the sweep's deadline passes; returns whether it held (`_write-faults.mjs`). */
+const swept = (ok) => eventually(ok, SWEEP_DEADLINE_MS, 50);
 
 /** The vector fields still on a stored row, and whether its matchedText survived. */
 async function stateOf(space, coll, id) {
@@ -102,7 +96,7 @@ describe('a network layer that suppresses sweeps the stored vectors', { skip }, 
       ...KINDS.flatMap(k => [[COLLECTION_OF[k], `${k}-muted`], [COLLECTION_OF[k], `${k}-plain`]]),
       ['files', 'docs/a.md'], ['files', 'docs/a.md#chunk0'],
     ];
-    await eventually(async () => {
+    await swept(async () => {
       for (const [c, id] of rows) if ((await stateOf(SPACE_TIER, c, id)).vector.length) return false;
       return true;
     });
@@ -123,7 +117,7 @@ describe('a network layer that suppresses sweeps the stored vectors', { skip }, 
     assert.equal(meta.typeSchemas?.fact?.[MUTED]?.suppressEmbeddings, true, 'fixture check: the layer did not reach the meta');
     const gone = KINDS.map(k => [COLLECTION_OF[k], `${k}-muted`]);
     const kept = [...KINDS.map(k => [COLLECTION_OF[k], `${k}-plain`]), ['files', 'docs/a.md'], ['files', 'docs/a.md#chunk0']];
-    await eventually(async () => {
+    await swept(async () => {
       for (const [c, id] of gone) if ((await stateOf(SCHEMA_TIER, c, id)).vector.length) return false;
       return true;
     });

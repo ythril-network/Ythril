@@ -48,10 +48,10 @@ import { argumentsOf } from './_structural-window.mjs';
 import { callSitesIn } from './_call-graph.mjs';
 import { REPO_ROOT } from './_sources.mjs';
 import { SPACE_COLLECTIONS } from '../../server/dist/db/space-collection.js';
+import { MUTATORS } from './_document-mutators.mjs';
 
-/** Every MongoDB driver method that changes a document. */
-export const MUTATORS = ['insertOne', 'insertMany', 'updateOne', 'updateMany', 'replaceOne', 'findOneAndUpdate',
-  'findOneAndReplace', 'findOneAndDelete', 'deleteOne', 'deleteMany', 'bulkWrite'];
+/** Every MongoDB driver method that changes a document — `_document-mutators.mjs`, re-exported for this module's readers. */
+export { MUTATORS };
 
 /** Every `node:fs` method that changes the filesystem. `open` counts only with a writing flag. */
 const FS_MUTATORS = ['writeFile', 'appendFile', 'rename', 'rm', 'rmdir', 'unlink', 'mkdir', 'copyFile', 'cp',

@@ -47,6 +47,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
+import { snapshotParts, changedParts } from './_space-snapshot.mjs';
 import { readTrackedSources } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import { seedHub, relinkProblems, vectorOf } from './_merge-hub.mjs';
@@ -75,16 +76,13 @@ const PARTS = ['entities', 'edges', 'facts', 'chrono', 'links', 'files', 'tombst
 
 /** Everything a merge could have written, whole and in a stable order. */
 async function snapshot(space) {
-  const out = {};
-  for (const p of PARTS) out[p] = await coll(space)(p).find({}).sort({ _id: 1 }).toArray();
+  const out = await snapshotParts(mongo, space, PARTS);
   out.counter = (await mongo.col('ythril_counters').findOne({ _id: space }))?.seq ?? 0;
   return out;
 }
 
 /** The parts of two snapshots that differ — named, so a failure says WHAT a refused merge wrote. */
-function changed(before_, after_, { ignore = [] } = {}) {
-  return Object.keys(before_).filter(k => !ignore.includes(k) && JSON.stringify(before_[k]) !== JSON.stringify(after_[k]));
-}
+const changed = changedParts;
 
 async function wipe(space) {
   for (const p of [...PARTS, 'dupe_candidates']) await coll(space)(p).deleteMany({});

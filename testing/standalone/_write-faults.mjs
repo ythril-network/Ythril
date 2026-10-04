@@ -44,6 +44,7 @@
  */
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { ASYNC_MUTATORS } from './_document-mutators.mjs';
 
 // ── A real lock ──────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -174,8 +175,8 @@ export async function withCollectionAsView(db, name, viewOn, fn, { restore } = {
 
 // ── A write parked behind a gate ─────────────────────────────────────────────────────────────────────────────
 
-const WRITE_METHODS = ['insertOne', 'insertMany', 'updateOne', 'updateMany', 'replaceOne', 'bulkWrite',
-  'findOneAndUpdate', 'findOneAndReplace', 'deleteOne', 'deleteMany'];
+/** The write methods a park wraps: every document-changing one that returns a promise (`_document-mutators.mjs`). */
+const WRITE_METHODS = ASYNC_MUTATORS;
 
 /** The seq a write carries — the LOWEST, for a block — or undefined. */
 export function seqCarriedBy(method, args) {

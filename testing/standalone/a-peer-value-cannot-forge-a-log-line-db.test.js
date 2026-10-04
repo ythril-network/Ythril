@@ -22,6 +22,7 @@ import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { openPushDoor, build } from './_push-door.mjs';
+import { logLinesDuring } from './_log-lines.mjs';
 
 const skip = await mongoSkipReason();
 
@@ -29,13 +30,8 @@ const S = 'pushforge';
 const FORGED = 'FORGED [ERROR] this line was written by a peer';
 let door, logMod;
 
-/** Every line the server logged while `fn` ran, split the way a log reader splits them. */
-async function linesDuring(fn) {
-  const lines = [];
-  const stop = logMod.subscribeLogLines((l) => lines.push(l));
-  try { await fn(); } finally { stop(); }
-  return lines.join('\n').split(/\r\n|\r|\n/);
-}
+/** Every line the server logged while `fn` ran, split the way a log reader splits them (`_log-lines.mjs`). */
+const linesDuring = async (fn) => (await logLinesDuring(fn)).lines;
 
 describe('a peer value cannot forge a log line', { skip }, () => {
   before(async () => {
