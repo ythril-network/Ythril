@@ -84,7 +84,7 @@ import { inChunks } from '../util/chunks.js';
 import { log, logSafe, peerList, peerText } from '../util/log.js';
 import { BRAIN_COLLECTIONS } from '../config/types.js';
 import type { BrainCollection, BrainEmbedRecordType } from '../config/types.js';
-import { LOCAL_ONLY_FIELDS, RESTORED_LOCAL_FIELDS, DERIVED_LOCAL_FIELDS } from './local-only-fields.js';
+import { RESTORED_LOCAL_FIELDS, DERIVED_LOCAL_FIELDS, carriedFields } from './local-only-fields.js';
 import { retagToLocalSpace, isNewerCopy, seqGuard, divergesFrom } from './upsert-plan.js';
 import { enqueueIngestedRecords } from '../brain/embed-queue.js';
 import type { RetentionSpace } from '../brain/chrono-retention.js';
@@ -250,17 +250,6 @@ function receiverStamps(doc: Doc, recordType: BrainEmbedRecordType, space: Reten
   return (space ? retentionStamps(space, recordType, doc) : {}) as Doc;
 }
 
-const NOTHING: ReadonlySet<string> = new Set();
-
-/**
- * What crosses the replace from the stored copy, per document (`Q-230`, `Q-234`) — see rule 4 of the module
- * docblock. A restore takes nothing; an arrival this instance suppresses, the record tier only; any other peer
- * arrival, every local-only field.
- */
-export function carriedFields({ restore, suppressed }: { restore: boolean; suppressed: boolean }): ReadonlySet<string> {
-  if (restore) return NOTHING;
-  return suppressed ? RESTORED_LOCAL_FIELDS : LOCAL_ONLY_FIELDS;
-}
 
 /**
  * The replace, as an update pipeline so the carried fields cross IN THE SAME WRITE: the stored values of `carried`

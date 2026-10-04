@@ -24,7 +24,8 @@
  *
  * - **A restore** stores the backup's record-tier fields (`RESTORED_LOCAL_FIELDS`: the retention stamps, `syncBase`)
  *   as the backup carried them, a missing stamp from D-9 (the record's own `createdAt` by this instance's window), and
- *   NEVER the replaced copy's — a field the backup does not carry is removed.
+ *   NEVER the replaced copy's — a field the backup does not carry is removed, the replaced copy's vector, model and
+ *   `matchedText` included (`carriedFields`, the arrival writer's own answer; the merge once kept them, D2).
  * - **A peer's arrival** keeps a stamp the stored row has and is given D-9's where it has none.
  * - **An arrival this instance suppresses** loses every derived field (`embedding`, `embeddingModel`,
  *   `matchedText`): they describe content it no longer embeds, and `matchedText` would keep removed text findable.
@@ -35,7 +36,7 @@ import { enqueueIngestedRecords } from '../brain/embed-queue.js';
 import { embeddingSuppressedFor } from '../brain/suppress-embeddings.js';
 import { dropFileVectors } from '../brain/suppression-sweep.js';
 import { getSpaceMeta } from '../spaces/schema-validation.js';
-import { DERIVED_LOCAL_FIELDS, RESTORED_LOCAL_FIELDS } from './local-only-fields.js';
+import { carriedFields, LOCAL_ONLY_FIELDS, RESTORED_LOCAL_FIELDS } from './local-only-fields.js';
 
 /** What `fileMetaUpdate` is told besides the document. */
 export interface FileMetaUpdateOptions {
@@ -53,18 +54,25 @@ export interface FileMetaUpdateOptions {
  */
 export function fileMetaUpdate(doc: Readonly<Record<string, unknown>>, opts: FileMetaUpdateOptions = {}): object[] {
   const { defaults = {}, restore = false, suppressed = false } = opts;
+  // What the stored row keeps of its local-only fields is the arrival writer's one answer, not this merge's own: a
+  // field it does not carry is the backup's (a restore's record tier), D-9's, or gone (bundle-30 I6, D2).
+  const carried = carriedFields({ restore, suppressed });
   const set: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(doc)) {
-    if (k === '_id' || v === undefined || RESTORED_LOCAL_FIELDS.has(k)) continue;
+    if (k === '_id' || v === undefined || LOCAL_ONLY_FIELDS.has(k)) continue;
     set[k] = { $literal: v };
   }
-  for (const f of RESTORED_LOCAL_FIELDS) {
-    const given = restore ? doc[f] : undefined;
+  for (const f of LOCAL_ONLY_FIELDS) {
+    // Only a restore brings a local-only field of its own (its record tier); a peer's was dropped before here.
+    const given = restore && RESTORED_LOCAL_FIELDS.has(f) ? doc[f] : undefined;
     const fallback = defaults[f];
-    if (restore) set[f] = given !== undefined ? { $literal: given } : fallback !== undefined ? { $literal: fallback } : '$$REMOVE';
-    else if (fallback !== undefined) set[f] = { $ifNull: [`$${f}`, { $literal: fallback }] };
+    if (carried.has(f)) {
+      if (fallback !== undefined) set[f] = { $ifNull: [`$${f}`, { $literal: fallback }] };
+    } else {
+      set[f] = given !== undefined ? { $literal: given } : fallback !== undefined ? { $literal: fallback } : '$$REMOVE';
+    }
   }
-  return [{ $set: set }, ...(suppressed ? [{ $unset: [...DERIVED_LOCAL_FIELDS] }] : [])];
+  return [{ $set: set }];
 }
 
 /** Does this instance hold the file's bytes? Its row then carries the size or hash it derived from them. */

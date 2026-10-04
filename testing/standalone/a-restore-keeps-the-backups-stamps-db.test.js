@@ -111,6 +111,28 @@ describe('a restore keeps the backup\'s stamps, never the replaced copy\'s (Q-23
     assert.deepEqual(wrong, [], 'a restore did not store what the backup carried');
   });
 
+  it('the replaced copy\'s DERIVED fields never survive a restore either, on every family (D2, bundle-30 I6)', async () => {
+    // `carriedFields` says a restore carries NOTHING from the copy it replaces. A file is merged rather than replaced,
+    // and its merge only `$set` the authored keys, so a restored file kept the replaced copy's vector, model and
+    // matched text — the one family the rule was not true of. The derived set is read from the server, never listed.
+    const { DERIVED_LOCAL_FIELDS: DERIVED } = await import('../../server/dist/sync/local-only-fields.js');
+    assert.ok(DERIVED.size >= 3, `only ${DERIVED.size} derived fields`);
+    const sentinel = { embedding: [0.25, 0.5], embeddingModel: 'the-replaced-copys-model', matchedText: 'the replaced copy' };
+    const wrong = [];
+    for (const fam of stamped()) {
+      const id = idFor(fam, 'derived');
+      const stored = { ...backupOf(fam, id), seq: 39 };
+      for (const f of DERIVED) stored[f] = sentinel[f] ?? `the replaced copy's ${f}`;
+      await door.coll(S, fam.collection).insertOne(stored);
+      await importMod.importDocuments(S, { [fam.collection]: [backupOf(fam, id)] });
+      const after = await door.coll(S, fam.collection).findOne({ _id: id });
+      if (after?.seq !== 40) { wrong.push(`${fam.collection}/${id}: fixture check — the restore did not land`); continue; }
+      for (const f of DERIVED) if (f in after) wrong.push(`${fam.collection}/${id}: ${f} ${show(after[f])} — the replaced copy's`);
+    }
+    assert.deepEqual(wrong, [], 'a restore kept a derived field of the copy it replaced: a vector of content the backup '
+      + 'may not hold, findable by text the backup may not have');
+  });
+
   it('PIN D-9: an unstamped record restored where nothing is stored is stamped from its own createdAt', async () => {
     const wrong = [];
     for (const fam of stamped()) {

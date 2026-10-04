@@ -81,6 +81,21 @@ for (const f of VECTOR_FIELDS) {
   if (!DERIVED_LOCAL_FIELDS.has(f)) throw new Error(`VECTOR_FIELDS names '${f}', which is not a derived local field`);
 }
 
+const NOTHING: ReadonlySet<string> = new Set();
+
+/**
+ * What crosses a write from the STORED copy, per document (`Q-230`, `Q-234`): a restore takes nothing; an arrival this
+ * instance suppresses, the record tier only; any other peer arrival, every local-only field.
+ *
+ * Both of the arrival writer's write shapes read it — the replace (`sync/arrivals.ts`) and the file merge
+ * (`sync/file-meta-write.ts`) — because the merge once decided for itself and kept a restored file's replaced vector
+ * (bundle-30 I6, D2): one answer, so neither shape can carry what the other drops.
+ */
+export function carriedFields({ restore, suppressed }: { restore: boolean; suppressed: boolean }): ReadonlySet<string> {
+  if (restore) return NOTHING;
+  return suppressed ? RESTORED_LOCAL_FIELDS : LOCAL_ONLY_FIELDS;
+}
+
 /** `$unset` of every derived field — the content changed or is gone. */
 export const UNSET_DERIVED: Readonly<Record<string, ''>> = Object.fromEntries([...DERIVED_LOCAL_FIELDS].map(f => [f, '']));
 /** `$unset` of the vector half — only the decision to embed changed. */
