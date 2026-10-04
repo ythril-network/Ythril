@@ -54,7 +54,8 @@ import type { BrainCollection, KnowledgeType } from '../config/types.js';
 import { log, logSafe, peerList, peerText } from '../util/log.js';
 import type { SchemaViolation } from '../spaces/schema-validation.js';
 import { violationsAgainstLocalSchema } from './sync/_shared.js';
-import { writeArrivals, arrivalId, arrivalRefusal, ArrivalWriteError, NAMED_IN_SUMMARY, type ArrivalOutcome } from '../sync/arrivals.js';
+import { writeArrivals, arrivalId, arrivalRefusal, NAMED_IN_SUMMARY, type ArrivalOutcome } from '../sync/arrivals.js';
+import { PageStoppedError } from '../sync/page-stopped.js';
 import { CounterBehindError } from '../sync/counter-after-page.js';
 import { REPLICATED_FAMILIES, RECORD_TYPE_OF } from '../sync/replicated-families.js';
 import { readPageTombstones } from '../sync/push-reads.js';
@@ -162,7 +163,7 @@ export async function importDocuments(spaceId: string, payload: Record<string, u
       log.warn(`Import into space '${peerText(spaceId)}': ${t} could not be written: ${logSafe(String(err))}`);
       // `Q-224`: the writer always says what it had done when it stopped — a record write that failed part-way, or
       // a counter it could not move past what it restored. What it vouches for is reported as landed.
-      const partial = err instanceof ArrivalWriteError || err instanceof CounterBehindError ? err.partial : undefined;
+      const partial = err instanceof PageStoppedError ? err.partial : undefined;
       if (err instanceof CounterBehindError) result.counterBehind = true;
       if (!partial) {
         // Nothing of the family is vouched for, so every document is named.

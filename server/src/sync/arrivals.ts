@@ -79,6 +79,7 @@ import {
 } from '../db/write-errors.js';
 import { isSeqImplausible } from '../util/seq.js';
 import { advanceCounterPast, CounterBehindError } from './counter-after-page.js';
+import { PageStoppedError } from './page-stopped.js';
 import { isWriteTimeout } from '../db/write-timeout.js';
 import { inChunks } from '../util/chunks.js';
 import { log, logSafe, peerList, peerText } from '../util/log.js';
@@ -158,15 +159,9 @@ export interface ArrivalOutcome {
 }
 
 /** A record write the store could not do for reasons that are not one document's — transient, retry the page. */
-export class ArrivalWriteError extends Error {
-  /**
-   * What the writer had already done when it stopped: earlier chunks are committed (and bumped and queued) before a
-   * later one fails, so a caller reporting per document must not call them refused. Set by `writeArrivals`.
-   */
-  partial?: ArrivalOutcome;
-  constructor(readonly spaceId: string, readonly family: string, readonly underlying: unknown) {
-    super(`record write failed for ${family} in space '${spaceId}': `
-      + `${underlying instanceof Error ? underlying.message : String(underlying)}`);
+export class ArrivalWriteError extends PageStoppedError {
+  constructor(spaceId: string, readonly family: string, underlying: unknown) {
+    super(`record write failed for ${family} in space '${spaceId}'`, spaceId, underlying);
     this.name = 'ArrivalWriteError';
   }
 }

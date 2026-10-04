@@ -28,18 +28,15 @@
  */
 import { bumpSeq } from '../util/seq.js';
 import { log, logSafe, peerText } from '../util/log.js';
-import type { ArrivalOutcome } from './arrivals.js';
+import { PageStoppedError } from './page-stopped.js';
 
 /**
  * The counter could not be advanced past what a page delivered, and nothing else failed: the call must not succeed.
  * ONE class for every door — it replaced `TombstoneCounterError` and the arrival writer's planned twin.
  */
-export class CounterBehindError extends Error {
-  /** What the arrival writer had done when it stopped; set by `writeArrivals`, absent for a tombstone page. */
-  partial?: ArrivalOutcome;
-  constructor(readonly spaceId: string, readonly seq: number, readonly underlying: unknown) {
-    super(`the seq counter of space '${spaceId}' could not be advanced to ${seq}, past what a page delivered: `
-      + `${underlying instanceof Error ? underlying.message : String(underlying)}`);
+export class CounterBehindError extends PageStoppedError {
+  constructor(spaceId: string, readonly seq: number, underlying: unknown) {
+    super(`the seq counter of space '${spaceId}' could not be advanced to ${seq}, past what a page delivered`, spaceId, underlying);
     this.name = 'CounterBehindError';
   }
 }
