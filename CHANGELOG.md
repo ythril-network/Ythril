@@ -358,6 +358,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A small entity merges into a hub of any size** (bundle-30). The merge looked for edge collisions by reading every
+  edge of the survivor inside its transaction, where a read must come back in one batch, so merging an entity with
+  one edge into a survivor with about eighty thousand failed as a store error. It now looks up only the identities
+  the relink produces. A too-large merge counts each kind only up to one past the bound, so refusing a hub no
+  longer counts all of it: the refusal then says *more than* the bound, and `relinks` is a lower bound.
+
 - **A strict-linkage violation is no longer recorded for a target later in the same transfer, nor twice for one
   dangling end** (bundle-30). Edges and links received by pull or batch push were checked right after each page
   landed, and a pull lands its families one page at a time — edges before chrono entries, links and files — so an

@@ -74,6 +74,15 @@ describe('a too-large merge refusal says what its reader can see or do', () => {
     assert.match(refusal({ reverse: BOUND }).message, /other way round/i, 'a merge of exactly the bound runs, so it must be offered');
   });
 
+  it('a count stopped at bound + 1 is said as "more than the bound", never as a number or a deletion count (bundle-30 I8)', () => {
+    // The tally counts each kind with a limit of bound + 1, so a hub is refused without reading all of it.
+    const msg = refusal({ edges: BOUND + 1, links: 2, faces: 0 }).message;
+    assert.match(msg, new RegExp(`relink more than ${BOUND} records`), `a capped total is stated as a count: ${msg}`);
+    assert.match(msg, new RegExp(`edges \\(more than ${BOUND}\\)`), `a capped kind is stated as a count: ${msg}`);
+    assert.doesNotMatch(msg, /\bdelete at least\b/i, `a capped count cannot say how many to delete: ${msg}`);
+    assert.match(msg, /\bedges\b[^.]*\blinks\b/i, `the refusal no longer says what to delete: ${msg}`);
+  });
+
   it('never tells the reader to move an edge — no door can', () => {
     for (const c of [{}, { reverse: 0 }, { edges: 0, links: 0, faces: BOUND + 1 }, { edges: 3, faces: BOUND, reverse: 1 }]) {
       const msg = refusal(c).message;

@@ -22,6 +22,8 @@ import { getConfig } from '../config/loader.js';
 import { log, peerList, peerText } from '../util/log.js';
 import { mergeTags } from './merge-fields.js';
 import { edgeIdFor } from './edge-id.js';
+import { edgeEndpointKind } from './entity-refs.js';
+import type { RefKind } from '../config/types-knowledge.js';
 import { linkIdFor } from './links.js';
 import { rekeyEdges, embedQueueWorkFor, type EdgeRekey } from './edge-rekey.js';
 import { enqueueWriteEmbedJobs, retireEmbedJobs, EMBED_PRIORITY } from './embed-queue.js';
@@ -561,6 +563,10 @@ const nameOf = (e: Pick<EntityDoc, '_id' | 'name'>): string => `'${peerText(e.na
 function mergeTooLargeMessage({ survivor, absorbed, spaceId, tally, bound, reverseRelinks }: MergeTooLargeFacts): string {
   const relinks = relinkTotal(tally);
   const over = relinks - bound;
+  // A count stops at bound + 1 (`relinkTally`), so that number means "more than the bound": said so, never as a count.
+  const capped = (n: number): boolean => n === bound + 1;
+  const n = (k: number): string => (capped(k) ? `more than ${bound}` : String(k));
+  const anyCapped = capped(tally.edges) || capped(tally.links) || capped(tally.faces);
   // The ids follow each name once, for an API caller. A pair with ONE name (a duplicate usually is) keeps them on
   // every mention, or "keep 'X' and absorb 'X'" would say nothing.
   const withId = (e: Pick<EntityDoc, '_id' | 'name'>): string => `${nameOf(e)} [${peerText(e._id)}]`;
@@ -569,12 +575,14 @@ function mergeTooLargeMessage({ survivor, absorbed, spaceId, tally, bound, rever
   const kept = sameName ? withId(survivor) : nameOf(survivor);
   const out = [
     `merge_too_large: merging ${withId(absorbed)} into ${withId(survivor)} in space '${peerText(spaceId)}' would relink`
-    + ` ${relinks} records — the edges (${tally.edges}), links (${tally.links}) and face labels (${tally.faces}) of ${gone}`
-    + ` — and one merge relinks at most ${bound}.`,
+    + ` ${anyCapped ? `more than ${bound}` : relinks} records — the edges (${n(tally.edges)}), links (${n(tally.links)}) and`
+    + ` face labels (${n(tally.faces)}) of ${gone} — and one merge relinks at most ${bound}.`,
     'Nothing was written.',
-    tally.edges + tally.links >= over
-      ? `Delete at least ${over} of the edges or links of ${gone} that are no longer needed, then merge again.`
-      : `Deleting edges and links cannot bring this merge under the bound: the ${tally.faces} face labels of ${gone} alone exceed it.`,
+    capped(tally.faces) || tally.edges + tally.links < over
+      ? `Deleting edges and links cannot bring this merge under the bound: the ${n(tally.faces)} face labels of ${gone} alone exceed it.`
+      : anyCapped
+        ? `Delete the edges or links of ${gone} that are no longer needed until at most ${bound} records are left to relink, then merge again.`
+        : `Delete at least ${over} of the edges or links of ${gone} that are no longer needed, then merge again.`,
   ];
   if (reverseRelinks <= bound) {
     out.push(`Or merge the other way round — keep ${gone} and absorb ${kept}: that relinks ${reverseRelinks} records, within the bound.`);
@@ -625,13 +633,20 @@ function relinkFilters(spaceId: string, absorbedId: string) {
   };
 }
 
-/** What a merge of `absorbedId` relinks, by kind, counted as the bound is: the bound is their sum. */
+/**
+ * What a merge of `absorbedId` relinks, by kind, counted as the bound is: the bound is their sum.
+ *
+ * Each count STOPS at `MERGE_MAX_RELINKS + 1` (bundle-30 I8): past that the merge is refused whatever the true number,
+ * so counting a hub's hundred thousand edges in full bought nothing but the read. A count of exactly bound + 1 is
+ * therefore "more than the bound", and the refusal says it that way (`mergeTooLargeMessage`).
+ */
 async function relinkTally(spaceId: string, absorbedId: string): Promise<RelinkTally> {
   const relinked = relinkFilters(spaceId, absorbedId);
+  const limit = MERGE_MAX_RELINKS + 1;
   const [edges, links, faces] = await Promise.all([
-    col<EdgeDoc>(spaceCollection(spaceId, 'edges')).countDocuments(relinked.edges),
-    col<LinkDoc>(spaceCollection(spaceId, 'links')).countDocuments(relinked.links),
-    col<FileMetaDoc>(spaceCollection(spaceId, 'files')).countDocuments(relinked.faces),
+    col<EdgeDoc>(spaceCollection(spaceId, 'edges')).countDocuments(relinked.edges, { limit }),
+    col<LinkDoc>(spaceCollection(spaceId, 'links')).countDocuments(relinked.links, { limit }),
+    col<FileMetaDoc>(spaceCollection(spaceId, 'files')).countDocuments(relinked.faces, { limit }),
   ]);
   return { edges, links, faces };
 }
@@ -761,6 +776,34 @@ export async function executeMerge(
   return { entity: survivor, deletedDuplicateEdgeIds: written.deletedDuplicateEdgeIds };
 }
 
+/** How many identities one collision read asks for: an `$or` of this many exact tuples. */
+const IDENTITIES_PER_READ = 200;
+
+/**
+ * Which of the identities a relink would produce are already held by a stored edge — as `edgeIdFor` keys.
+ *
+ * Read by the five identity fields, never by `_id` (see the caller), and only for the tuples asked: the cost is the
+ * relink's, not the survivor's degree. An absent kind is stored for an entity end, so an `entity` end matches both.
+ */
+async function storedEdgeIdentities(
+  edgeColl: ReturnType<typeof col<EdgeDoc>>, spaceId: string,
+  relinked: ReadonlyArray<{ edge: EdgeDoc; from: string; to: string }>, session: ClientSession,
+): Promise<Set<string>> {
+  const kindIs = (k: string | undefined): unknown => (edgeEndpointKind(k as RefKind | undefined) === 'entity' ? { $in: [null, 'entity'] } : k);
+  const keys = new Set<string>();
+  for (let i = 0; i < relinked.length; i += IDENTITIES_PER_READ) {
+    const tuples = relinked.slice(i, i + IDENTITIES_PER_READ).map(r => ({
+      from: r.from, to: r.to, label: r.edge.label, fromKind: kindIs(r.edge.fromKind), toKind: kindIs(r.edge.toKind),
+    }));
+    const found = await edgeColl
+      .find(asFilter<EdgeDoc>({ spaceId, $or: tuples }),
+        { session, projection: { _id: 1, from: 1, to: 1, label: 1, fromKind: 1, toKind: 1 } })
+      .toArray() as EdgeDoc[];
+    for (const e of found) keys.add(edgeIdFor(e.from, e.to, e.label, e.fromKind, e.toKind));
+  }
+  return keys;
+}
+
 /**
  * The merge's writes, inside its transaction: every class of record one bulk write and one seq block.
  *
@@ -780,24 +823,23 @@ async function relinkAndAbsorb(
     .find(relinkFilters(spaceId, absorbed._id).edges, { session, projection: { _id: 1 } })
     .toArray() as Array<Pick<EdgeDoc, '_id'>>).map(e => e._id);
   const absorbedEdges = [...(await readStoredById<EdgeDoc>(spaceCollection(spaceId, 'edges'), absorbedIds, 'carried', { session })).values()];
-  // Their IDENTITY only — the five fields the unique index is over, never the vector.
-  const survivorEdges = await edgeColl
-    .find(asFilter<EdgeDoc>({ spaceId, $or: [{ from: survivor._id }, { to: survivor._id }] }),
-      { session, projection: { _id: 1, from: 1, to: 1, label: 1, fromKind: 1, toKind: 1 } })
-    .toArray() as EdgeDoc[];
+  const relinked = absorbedEdges.map(edge => ({
+    edge,
+    from: edge.from === absorbed._id ? survivor._id : edge.from,
+    to: edge.to === absorbed._id ? survivor._id : edge.to,
+  }));
 
   /*
    * Collisions are found by IDENTITY — `(from, to, label, fromKind, toKind)`, keyed through `edgeIdFor` because it
    * length-prefixes each part (a joined string collides two relationships the moment a label holds the separator).
    * Never by the survivor edge's stored `_id`: an edge from before 3.6, or a peer's edge an earlier merge relinked
    * in place, is stored under an id its identity does not derive, and looked up by id its collision is invisible.
+   *
+   * And only the identities the relink PRODUCES are looked up — at most `MERGE_MAX_RELINKS` — never the survivor's
+   * whole edge set (bundle-30 I8): a survivor hub of eighty thousand edges was read inside the transaction, past the
+   * one batch a read there may take, and the merge of a small entity into it failed as a store error.
    */
-  const survivorKeys = new Set(survivorEdges.map(e => edgeIdFor(e.from, e.to, e.label, e.fromKind, e.toKind)));
-  const relinked = absorbedEdges.map(edge => ({
-    edge,
-    from: edge.from === absorbed._id ? survivor._id : edge.from,
-    to: edge.to === absorbed._id ? survivor._id : edge.to,
-  }));
+  const survivorKeys = await storedEdgeIdentities(edgeColl, spaceId, relinked, session);
   const duplicates: EdgeDoc[] = [];
   const edgesToRelink: typeof relinked = [];
   for (const r of relinked) {
