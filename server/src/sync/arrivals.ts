@@ -274,10 +274,13 @@ function replacementFor(doc: Doc, defaults: Doc, carried: ReadonlySet<string>): 
 
 const storeRefusal = (err: unknown): string =>
   `the store refused it (${writeErrorCode(err) !== undefined ? `error code ${writeErrorCode(err)}` : 'no error code'})`;
-/** How much of a driver's message an argument refusal quotes: enough to act on, never a page of it. */
+/**
+ * How much of a driver's error an argument refusal quotes: enough to act on, never a page of it. Through `peerText`,
+ * because the driver's message can carry the peer's value: escaped, cut on a code point, and saying it was cut.
+ */
 const ARGUMENT_QUOTED = 200;
 const argumentRefusal = (err: unknown): string =>
-  `the database driver refused it as an invalid argument (${String((err as Error).message ?? '').slice(0, ARGUMENT_QUOTED)})`;
+  `the database driver refused it as an invalid argument (${peerText(err, { max: ARGUMENT_QUOTED })})`;
 
 /** The ids a bulk write reports as UPSERTED (inserted), from its result or its error's partial result. */
 function upsertedIdsOf(r: unknown): unknown[] {

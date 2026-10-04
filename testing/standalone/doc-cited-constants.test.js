@@ -145,6 +145,20 @@ const CITED = [
     text: (v) => new RegExp(`cut at \\*\\*${v}\\*\\* characters per value`),
   },
   {
+    what: 'how many references a write\'s reference refusal names (integration guide)',
+    source: 'server/src/brain/entity-refs.ts',
+    code: /const REFS_NAMED = ([0-9_]+);/,
+    doc: 'docs/integration-guide.md',
+    text: (v) => new RegExp(`names its first \\*\\*${v}\\*\\* references`),
+  },
+  {
+    what: 'how much of one reference a reference refusal quotes (integration guide)',
+    source: 'server/src/brain/entity-refs.ts',
+    code: /const REF_QUOTED = ([0-9_]+);/,
+    doc: 'docs/integration-guide.md',
+    text: (v) => new RegExp(`references, each cut at \\*\\*${v}\\*\\* characters`),
+  },
+  {
     what: 'contradiction-scanner similarity threshold',
     source: 'server/src/config/types.ts',
     code: /Default: (0\.[0-9]+)\./,

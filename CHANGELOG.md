@@ -715,6 +715,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   through it (a gate holds them to it), the meta argument goes through it where every line is built, and the line
   as a whole is escaped. The same bound applies where such a value is named back in an answer: a sync refusal's
   reason, the fork-limit `400`, and an admin import's `refused`, `schemaViolations` and `restoredOverTombstone`.
+  A reference refusal on the REST and MCP write doors (a link, an edge end or a file reference that is malformed
+  or names nothing) names its first five references each cut at 256 characters and escaped, where it echoed a
+  caller's megabyte reference whole — and the count of the rest is now written `…(+N more)`, where it read
+  ` (+N more)`. A sync refusal that quotes a schema's issues or the driver's message (200 characters) now says where
+  it was cut and never splits a character in two.
   An error logged with its stack keeps the stack, escaped onto its line, with its message bounded.
 - **Redacting a log line no longer takes time that grows with the square of a value (`R9`).** The userinfo pattern
   (`scheme://user:pass@`) could start a match at every character of a run of letters and scan the rest of the run

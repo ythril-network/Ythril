@@ -41,6 +41,7 @@ import {
 } from '../api/sync/_shared.js';
 import { arrivalRefusal, arrivalId } from './arrivals.js';
 import { REPLICATED_FAMILIES, type PayloadKey } from './replicated-families.js';
+import { peerText } from '../util/log.js';
 
 type SafeParser = { safeParse: (v: unknown) => { success: boolean; data?: unknown; error?: { issues: unknown[] } } };
 
@@ -87,7 +88,10 @@ export interface RefusedArrival {
   invalid: boolean;
 }
 
-/** How much of a schema's issue list a refusal quotes. */
+/**
+ * How much of a schema's issue list a refusal quotes. Through `peerText`: an issue quotes peer text (a key the
+ * schema does not declare, a record key in its path), so it is escaped, cut on a code point, and says it was cut.
+ */
 const ISSUES_QUOTED = 200;
 
 /** Validate a family's arriving documents — see the module docblock, and its section on a fill. */
@@ -107,7 +111,7 @@ export function admitArrivals(key: PayloadKey, docs: readonly unknown[], { fill 
     const parsed = schema.safeParse(offered);
     if (!parsed.success) {
       refused.push({ index, _id: arrivalId(raw), invalid: true,
-        reason: `not ${name}: ${JSON.stringify(parsed.error?.issues ?? []).slice(0, ISSUES_QUOTED)}` });
+        reason: `not ${name}: ${peerText(parsed.error?.issues ?? [], { max: ISSUES_QUOTED })}` });
       return;
     }
     const why = arrivalRefusal(parsed.data, { seqOptional: fill });

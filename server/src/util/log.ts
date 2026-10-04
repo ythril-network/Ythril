@@ -233,13 +233,29 @@ const LINE_BREAKING_ANY = new RegExp(LINE_BREAKING.source);
  * An Error renders its message (`name: message` for a subclass), not `{}`. Escape rather than strip, so the
  * operator still sees what was sent. Use it where the value enters the text; `a-steerable-value-reaches-a-log-line-
  * only-bounded.test.js` holds every door's log lines to it.
+ *
+ * `max` narrows the bound for a quote that needs less — a refusal reason quoting a driver's message or a schema's
+ * issue list. It exists so such a quote is never a `.slice(0, N)` of its own, which cuts by code unit (half a
+ * surrogate pair), escapes nothing and does not say it cut (bundle-30 `I5`). It can only NARROW: a `max` above
+ * `LOG_VALUE_MAX`, or one that is not a whole number, gets `LOG_VALUE_MAX` (`within`). An options object rather than
+ * a number, so `.map(peerText)` — which would hand it each element's index as the cap — does not type-check.
  */
-export function peerText(value: unknown): string {
+export function peerText(value: unknown, { max }: { max?: number } = {}): string {
   try {
-    return render(textOf(value), LOG_VALUE_MAX);
+    return render(textOf(value), within(max, LOG_VALUE_MAX));
   } catch {
     return UNRENDERABLE;
   }
+}
+
+/**
+ * `requested` when it is a whole number from 0 to `ceiling`, else `ceiling`: a caller's bound narrows the renderer's
+ * and never widens or disables it. `NaN` compares false with everything, so a NaN cap taken as given would never be
+ * reached — an unbounded value from a call site that looks bounded.
+ */
+function within(requested: unknown, ceiling: number): number {
+  return typeof requested === 'number' && Number.isInteger(requested) && requested >= 0
+    ? Math.min(requested, ceiling) : ceiling;
 }
 
 /** The older name of `peerText` — the same function, never a second rule. */
@@ -249,14 +265,19 @@ export const logSafe = peerText;
  * A joined list of outside values, bounded twice: at most `LIST_MAX` elements and `LOG_VALUE_MAX` characters,
  * each element rendered by `peerText`'s rule, then `…(+K more)` naming how many were left out. `values.join(sep)`
  * bounds neither — ten thousand refused ids are ten thousand ids on one line.
+ *
+ * `count` narrows the element bound for a message that names a few (a reference refusal names five); like
+ * `peerText`'s `max` it can only narrow (`within`). One number, not a flag per caller: what an element looks like is
+ * the caller's to decide by what it passes in (`bad.map(v => JSON.stringify(v))` for quoted ids).
  */
-export function peerList(values: Iterable<unknown>, sep = ', '): string {
+export function peerList(values: Iterable<unknown>, sep = ', ', { count }: { count?: number } = {}): string {
   try {
     const all = [...values];
+    const most = within(count, LIST_MAX);
     let out = '';
     let shown = 0;
     for (const v of all) {
-      if (shown >= LIST_MAX) break;
+      if (shown >= most) break;
       const room = LOG_VALUE_MAX - out.length - (shown > 0 ? sep.length : 0);
       if (room <= 0) break;
       const item = render(textOf(v), Math.min(room, LOG_VALUE_MAX));

@@ -145,7 +145,7 @@ export async function applyPeerTombstones(
   }
   if (out.unknownTypes.length > 0) {
     log.warn(`${logSafe(where)}: a page carried tombstone type(s) this instance does not know `
-      + `(${peerList([...new Set(out.unknownTypes)].slice(0, 5).map(logSafe), ', ')}) for space '${peerText(localSpaceId)}' — nothing `
+      + `(${peerList(new Set(out.unknownTypes), ', ', { count: 5 })}) for space '${peerText(localSpaceId)}' — nothing `
       + 'of it was applied, so the sender holds it and re-sends once this instance knows the type.');
     return out;
   }

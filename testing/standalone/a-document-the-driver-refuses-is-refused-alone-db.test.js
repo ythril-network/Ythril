@@ -93,6 +93,8 @@ describe('a document the driver refuses is refused alone', { skip }, () => {
     assert.equal(r.code, 400, JSON.stringify(r.body));
     assert.match(r.body.error, /invalid argument/);
     assert.ok(r.body.error.length < 400, `the reason is not bounded: ${r.body.error.length} characters`);
+    // Bundle-30 I5: the driver's message is quoted through `peerText`, so the cut says it was made.
+    assert.match(r.body.error, /…\(\+\d+ chars\)/, `the driver's message was cut without saying so: ${r.body.error}`);
   });
 
   it('the bound\'s own argument error fails the page — a defect of ours, never a document dropped for good', async () => {

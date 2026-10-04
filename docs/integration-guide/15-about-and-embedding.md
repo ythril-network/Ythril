@@ -41,8 +41,9 @@ any other control character as `\u001b`), with credentials redacted, and cut at 
 `…(+N chars)` saying how much was left out; a list of such values shows at most 100 of them and then `…(+K more)`.
 So a peer cannot start a line of its own, and a megabyte `_id` or `seq` makes a line, not a megabyte of one. The same
 bound applies where such a value is named back in an answer: a sync refusal's reason, the fork-limit `400`, and an
-admin import's `refused`, `schemaViolations` and `restoredOverTombstone` entries. An error passed with its stack keeps
-the stack (escaped onto the line) with its message bounded.
+admin import's `refused`, `schemaViolations` and `restoredOverTombstone` entries; a write refused for a malformed or
+missing reference names its first **5** references, each cut at **256** characters, then `…(+N more)`. An error passed
+with its stack keeps the stack (escaped onto the line) with its message bounded.
 
 **Response** `200`:
 
