@@ -358,6 +358,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A recall straight after a space's first write no longer answers 503 while its search index initialises**
+  (Q-325). A collection's vector index is built after its first record, and until it serves the search service
+  refuses queries in several wordings. Recall, `similar` and the write-time duplicate check answer that refusal as
+  "nothing from the index yet" and find the new record through the fresh-write scan, but the first wording
+  (`Index <name> not initialized`) was not recognised, so for the first moments of a space's life the same recall
+  answered 503 or 200 depending on timing. All the wordings are now recognised in one place. The write-time
+  duplicate check also keeps its fresh-write matches through that refusal instead of answering none.
+
 - **A small entity merges into a hub of any size** (bundle-30). The merge looked for edge collisions by reading every
   edge of the survivor inside its transaction, where a read must come back in one batch, so merging an entity with
   one edge into a survivor with about eighty thousand failed as a store error. It now looks up only the identities

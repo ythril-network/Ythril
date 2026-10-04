@@ -37,6 +37,7 @@ import { rerankPool } from './rerank-pool.js';
 import { lexicalSearch, stampFusion, fuseAcrossSpaces, hybridSearchEnabled, LEXICAL_LIMIT_MULTIPLIER, type LexicalHit } from './lexical-search.js';
 import { atlasVectorScore, scoresAgree } from './vector-score.js';
 import { matchFreshWrites, addFreshWrites } from './fresh-writes.js';
+import { isIndexNotQueryableYet } from './index-not-queryable.js';
 import type { ChronoStatus, RecordType } from '../config/types.js';
 import { RECORD_TYPES } from '../config/types.js';
 import { log, peerText } from '../util/log.js';
@@ -941,14 +942,11 @@ async function recallByType(
     }
   }
 
+  // A missing OR not-yet-queryable vector index means "no results from this collection", not a failure: a
+  // collection's index is built after its first record, asynchronously. Every wording mongot uses for it is
+  // `isIndexNotQueryableYet`'s to know (Q-325) — the copy that lived here missed the first one and answered 503.
   const swallowIndexError = (err: unknown): RecallResult[] => {
-    const msg = err instanceof Error ? err.message : String(err);
-    // A missing OR not-yet-queryable vector index means "no results from this collection", not a
-    // failure: a new space builds its indexes asynchronously (B1) and Atlas refuses queries against
-    // an index still in INITIAL_SYNC. Transient empty state, not an error to surface.
-    if (/index.*not.*found|no.*such.*index|search.*index|cannot query.*vector index|while in state (INITIAL_SYNC|PENDING|BUILDING|STARTING)/i.test(msg)) {
-      return [];
-    }
+    if (isIndexNotQueryableYet(err)) return [];
     throw err;
   };
 
