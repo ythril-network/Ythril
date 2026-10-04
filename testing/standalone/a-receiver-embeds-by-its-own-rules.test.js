@@ -90,9 +90,9 @@ const WRITER_CALLS = INGEST_FILES.flatMap((file) => {
 
 /**
  * The enqueue functions an ARRIVAL goes through — every exported `enqueueIngested…` of the embed queue, derived.
- * Since `Q-107` part 1 there are two: the single record (`enqueueIngestedRecord`, file metadata's) and the
- * batched twin the arrival writer queues a landed chunk with (`enqueueIngestedRecords`). A rule asserted of one
- * of them by name is a rule the other is free to break.
+ * Today there is one, `enqueueIngestedRecords`, which the arrival writer queues a landed chunk with (the single
+ * `enqueueIngestedRecord` it was a twin of is gone). Derived anyway: a second one added later is held to the same
+ * rule without anybody naming it here.
  */
 const QUEUE_CODE = src(QUEUE_FILE);
 const INGEST_ENQUEUES = [...QUEUE_CODE.matchAll(/^export\s+async\s+function\s+(enqueueIngested\w*)\s*[<(]/gm)].map(m => m[1]);

@@ -50,8 +50,8 @@ const refusals = stripComments(readFileSync('server/src/sync/push-refusals.ts', 
 
 describe('the receiver separates a drop from an already-current skip', () => {
   /*
-   * Re-anchored for `Q-107` part 1: what each pushed document became is decided once, by the pure push planner
-   * (`planPushArrivals`, `sync/upsert-plan.ts`), as a VERDICT — and the batch route counts verdicts. So "counted
+   * Re-anchored for `Q-107` part 1: what each pushed document became is decided once, by the pure planner
+   * (`planArrivals`, `sync/upsert-plan.ts`, which every door's page accept runs), as a VERDICT — and the batch route counts verdicts. So "counted
    * apart" is two verdicts, the drop is logged by the route that knows why, by id, and the benign skip stays
    * silent because the planner logs nothing at all. Seen red by mutation, restored by hand: the fork-cap branch
    * answering `skipped`.

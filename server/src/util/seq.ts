@@ -234,7 +234,7 @@ let watchdog: NodeJS.Timeout | null = null;
 const holdWarnings = warnOnce<Hold>();
 
 /** Check every open hold now: warn once for each older than `holdWarnMs()`. Exported for the watchdog's test. */
-export function warnStalledHolds(now = Date.now()): void {
+function warnStalledHolds(now = Date.now()): void {
   for (const [spaceId, s] of seqState) {
     for (const h of s.holds) {
       const age = now - h.since;

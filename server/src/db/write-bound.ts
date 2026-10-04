@@ -46,9 +46,9 @@ import { BATCH_FETCH_TIMEOUT_MS } from '../sync/peer-timeouts.js';
 import { StoreTimeout } from './write-timeout.js';
 
 /** The per-operation bound when `YTHRIL_WRITE_TIMEOUT_MS` is unset. */
-export const DEFAULT_WRITE_TIMEOUT_MS = 30_000;
+const DEFAULT_WRITE_TIMEOUT_MS = 30_000;
 /** The per-hold deadline when `YTHRIL_HOLD_DEADLINE_MS` is unset: three quarters of what a sender waits for a push. */
-export const DEFAULT_HOLD_DEADLINE_MS = Math.floor(BATCH_FETCH_TIMEOUT_MS * 3 / 4);
+const DEFAULT_HOLD_DEADLINE_MS = Math.floor(BATCH_FETCH_TIMEOUT_MS * 3 / 4);
 // The least either may be set to is `config/env-num.ts`'s (1 000): never 0, which to the driver means unbounded.
 
 interface Bounds { writeTimeoutMs: number; holdDeadlineMs: number }

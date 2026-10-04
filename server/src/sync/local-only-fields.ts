@@ -76,7 +76,7 @@ for (const f of RESTORED_LOCAL_FIELDS) {
  *  - **only the decision to embed changed** (suppression turned on, an embed that failed): the vector goes and
  *    `matchedText` stays or is rewritten — the content did not change, and removing it is a content decision.
  */
-export const VECTOR_FIELDS: ReadonlySet<string> = new Set(['embedding', 'embeddingModel']);
+const VECTOR_FIELDS: ReadonlySet<string> = new Set(['embedding', 'embeddingModel']);
 for (const f of VECTOR_FIELDS) {
   if (!DERIVED_LOCAL_FIELDS.has(f)) throw new Error(`VECTOR_FIELDS names '${f}', which is not a derived local field`);
 }

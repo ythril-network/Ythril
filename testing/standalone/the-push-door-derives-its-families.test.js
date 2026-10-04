@@ -9,7 +9,8 @@
  * family — or a renamed one — would have been seven edits, and the one forgotten is a family a peer pushes and this
  * instance drops with a 200 (the `filemeta` story, once already). Now they come from `REPLICATED_FAMILIES`,
  * `RECORD_TYPE_OF` and `TOMBSTONE_TYPE_OF`. Two family-keyed tables stay, each because it is a fact the registry
- * cannot hold: the zod schema per family (`BATCH_SCHEMAS`, checked at load against the registry) and the response
+ * cannot hold: the zod schema per family (`INCOMING_SCHEMA_OF` in `sync/arrival-shape.ts`, checked at load against
+ * the registry) and the response
  * literal (the wire contract — each family's counters differ).
  *
  * ## What is asserted

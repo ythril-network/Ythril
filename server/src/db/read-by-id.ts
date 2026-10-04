@@ -47,7 +47,7 @@ export const READ_CHUNK = 500;
  * Chunks of one read in flight at once. A 50 000-id read is a hundred chunks: one at a time is a hundred round trips
  * end to end, all at once is a hundred queries queued on one connection pool that every request shares.
  */
-export const READ_PARALLEL = 4;
+const READ_PARALLEL = 4;
 
 /** Milliseconds a read may still take, from its caller's deadline. Throws once it is spent; `undefined` is unbounded. */
 export type TimeLeft = () => number | undefined;

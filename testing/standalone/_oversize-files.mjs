@@ -96,9 +96,9 @@ export const FROZEN = {
   'client/src/app/pages/schema-library/schema-library.component.ts': 1112,
   // RAISED 966 -> 975 for `P-32`: a sixth sync family. The push call, the pull call, both watermark
   // entries, and the two signatures widened to accept it — every line of it is the engine deciding what
-  // crosses the wire, which is what this file is for. The MERGE it needs is already elsewhere:
-  // `applyFileMetaPage` lives in `api/sync/_shared.ts` beside the push path's `ingestFileMeta`, so the two
-  // directions share one implementation instead of this file holding a second.
+  // crosses the wire, which is what this file is for. The MERGE it needs is already elsewhere: both
+  // directions write file metadata through the one arrival writer (`sync/arrivals.ts`, with the pipelines of
+  // `sync/file-meta-write.ts`), instead of this file holding a second.
   //
   // NO DECOMPOSITION: PAID. This raise owed `A-12`, and it has shipped — so the marker is the settled form
   // the three raises above use, not an annotated live one.

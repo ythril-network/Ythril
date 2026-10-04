@@ -15,7 +15,7 @@
  *
  * ## What this pins
  *
- * The decision, not the route. `enqueueIngestedRecord` and its batched twin `enqueueIngestedRecords` are what every ingest write site reaches, so this tests
+ * The decision, not the route. `enqueueIngestedRecords` is what every ingest write site reaches, so this tests
  * the thing all of them share: an arrival is queued, the job names the right record, and a record the
  * RECEIVER does not want embedded is not queued at all.
  *

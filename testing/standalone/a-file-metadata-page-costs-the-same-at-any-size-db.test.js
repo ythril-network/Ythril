@@ -9,11 +9,12 @@
  * excluded, on BOTH doors that hand a page of it to the one writer (`writeArrivals`). The old file stays as it is,
  * so its five families keep their own evidence and this one can be read red on its own.
  *
- * ## What it costs today
+ * ## What it cost before part 2
  *
- * The writer's files branch merges each document through `ingestFileMeta`: a `findOne` for the stored copy's
+ * The writer's files branch merged each document through `ingestFileMeta` (gone since; a page is one bulk write of
+ * the pipelines `sync/file-meta-write.ts` builds): a `findOne` for the stored copy's
  * hashes and an `updateOne` upsert — `2N` commands on the files collection, on top of the page's one accept read.
- * A 200-document page is 400 commands where the page form is a handful, and a pull of a large tree pays it on
+ * A 200-document page was 400 commands where the page form is a handful, and a pull of a large tree paid it on
  * every page of every cycle.
  *
  * ## The rule
