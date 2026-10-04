@@ -42,17 +42,17 @@ import { logInternalAudit } from '../audit/audit.js';
 import { STRAY_FILEMETA_DRAIN_OPERATION } from '../audit/middleware.js';
 import { log, logSafe } from '../util/log.js';
 import { warnOnce } from '../util/warn-once.js';
-import { writeTimeoutMs } from '../db/write-bound.js';
+import { withinWriteBound } from '../db/write-bound.js';
 
 /** How long a record whose file has no row waits for the file's bytes before it is discarded. */
 const WAIT_DAYS = 30;
 /** How often one space's repeating failure is logged. */
 const REPORT_EVERY_MS = 10 * 60_000;
-/**
- * One page READ; a stuck one must not hold the sweep cycle. The page's writes (the delete, the wait stamp) take the
- * one write bound, `writeTimeoutMs()` (`db/write-bound.ts`), rather than a second literal for the same question.
+/*
+ * A stuck read or write must not hold the sweep cycle: every step below runs inside the one write bound
+ * (`withinWriteBound`, `db/write-bound.ts`), which bounds each operation it issues — rather than a literal per call
+ * restating how long that is (bundle-30 I6, C5). Each record's own fill is bounded by `fillFileMetaFromStray`.
  */
-const STEP_MS = 30_000;
 
 type StrayDoc = { _id: string; keptSince?: string };
 
@@ -99,8 +99,8 @@ async function drainSpace(spaceId: string, pageSize: number, maxPages: number, s
         keptSince: waiting ? { $lt: cycleStart } : { $exists: false },
         ...(after === undefined ? {} : { _id: { $gt: after } }),
       };
-      const page = await stray.find(asFilter<StrayDoc>(filter as never), { maxTimeMS: STEP_MS })
-        .sort({ _id: 1 }).limit(pageSize).toArray();
+      const page = await withinWriteBound(() => stray.find(asFilter<StrayDoc>(filter as never))
+        .sort({ _id: 1 }).limit(pageSize).toArray());
       if (page.length === 0) break;
       pages++;
       after = page[page.length - 1]!._id;
@@ -117,21 +117,24 @@ async function drainSpace(spaceId: string, pageSize: number, maxPages: number, s
       n.newer += out.newerLocal.length;
       n.refused += refused.length + out.refused.length + out.derived.length + out.duplicates.length;
       step.name = 'settle';
-      const { discard, wait } = await settleUnstored(spaceId, page, out.unstored);
+      const { discard, wait } = await withinWriteBound(async () => {
+        const settled = await settleUnstored(spaceId, page, out.unstored);
+        const unstored = new Set(out.unstored);
+        const answered = [...page.map(d => d._id).filter(id => !unstored.has(id)), ...settled.discard];
+        if (answered.length > 0) await stray.deleteMany(asFilter<StrayDoc>({ _id: { $in: answered } }));
+        if (settled.wait.length > 0) {
+          await stray.updateMany(asFilter<StrayDoc>({ _id: { $in: settled.wait }, keptSince: { $exists: false } } as never),
+            { $set: { keptSince: new Date().toISOString() } });
+        }
+        return settled;
+      });
       n.deleted += discard.length;
       n.waiting += wait.length;
-      const unstored = new Set(out.unstored);
-      const answered = [...page.map(d => d._id).filter(id => !unstored.has(id)), ...discard];
-      if (answered.length > 0) await stray.deleteMany(asFilter<StrayDoc>({ _id: { $in: answered } }), { maxTimeMS: writeTimeoutMs() });
-      if (wait.length > 0) {
-        await stray.updateMany(asFilter<StrayDoc>({ _id: { $in: wait }, keptSince: { $exists: false } } as never),
-          { $set: { keptSince: new Date().toISOString() } }, { maxTimeMS: writeTimeoutMs() });
-      }
     }
   }
 
   step.name = 'drop';
-  const empty = (await stray.countDocuments({}, { maxTimeMS: STEP_MS })) === 0;
+  const empty = (await withinWriteBound(() => stray.countDocuments({}))) === 0;
   if (empty) {
     await getDb().dropCollection(collName);
     logInternalAudit({ method: 'SWEEP', path: 'internal:stray-filemeta-drain', spaceId, operation: STRAY_FILEMETA_DRAIN_OPERATION, startedAt });
@@ -147,11 +150,12 @@ async function drainSpace(spaceId: string, pageSize: number, maxPages: number, s
 /**
  * Which of a page's records with no file row to discard, and which wait: discarded when a file tombstone holds the
  * path (the file was deleted here or by a peer) or the record has waited `WAIT_DAYS`; otherwise it waits for bytes.
+ * Read inside the caller's bound (`withinWriteBound`).
  */
 async function settleUnstored(spaceId: string, page: StrayDoc[], unstored: string[]): Promise<{ discard: string[]; wait: string[] }> {
   if (unstored.length === 0) return { discard: [], wait: [] };
   const tombstoned = new Set((await col<{ _id: string; path: string }>(spaceCollection(spaceId, 'fileTombstones'))
-    .find(asFilter<{ _id: string; path: string }>({ path: { $in: unstored } }), { projection: { path: 1 }, maxTimeMS: STEP_MS })
+    .find(asFilter<{ _id: string; path: string }>({ path: { $in: unstored } }), { projection: { path: 1 } })
     .toArray()).map(t => t.path));
   const since = new Map(page.map(d => [d._id, d.keptSince]));
   const expired = Date.now() - WAIT_DAYS * 86_400_000;

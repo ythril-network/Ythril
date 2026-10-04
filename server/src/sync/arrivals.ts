@@ -411,8 +411,7 @@ export async function writeArrivals(
             if (r === 'merged') out.updated.push(d._id);
             else if (r === 'complete') out.complete.push(d._id);
             else if (r === 'newer') out.newerLocal.push(d._id);
-            else if (r === 'no-file') out.unstored.push(d._id);
-            else out.derived.push(d._id);
+            else out.unstored.push(d._id);
           } catch (err) {
             classify(d, err);
           }
