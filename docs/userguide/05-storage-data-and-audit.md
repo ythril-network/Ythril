@@ -313,6 +313,13 @@ appears as one entry, operation `file.stray_filemeta.drain`, with the space name
 behind — a sleeping laptop, a stalled connection — the server drops the stream rather than queue lines for it, and
 streaming stops; turn it on again to resume. At most 200 such streams are open on an instance at once.
 
+**Every line is one line, and none is longer than it can be read.** A value that came from outside this instance —
+a peer's label, a document id, a parameter somebody sent, a database error — is shown escaped (a line break reads
+`\r\n`), with any credential replaced by `[redacted]`, and cut after a few thousand characters with `…(+N chars)`
+saying how much was left out; a long list of ids shows the first ones and `…(+K more)`. So what looks like a line of
+this server's own is one, and a peer sending a megabyte id cannot fill the log. An error's stack trace stays on its
+line, escaped, after the message.
+
 **Every line an API request's own work produces carries that request's id**, shown in square brackets after the level. It is the same id the response returned in its `X-Request-Id` header, so when somebody reports a failing call and quotes the id, searching for it here finds every line that request produced — the refusal, and anything a background step logged on its way. Lines that belong to no request (startup, the auto-delete sweep, the background storage measurement) carry no id, which is what keeps a search for a real one from matching them.
 
 **`seq horizon held …` names a write that held up replication.** While a write is being stored it holds a place

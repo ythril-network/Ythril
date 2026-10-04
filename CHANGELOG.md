@@ -706,6 +706,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **Every log line is one line, and every value in it is bounded (`Q-231`, `Q-214`, `Q-270`).** The escaping above
+  covered the push, pull and import paths; a member label arriving by gossip, a vote round id, a caller's parameter
+  on a REST brain or MCP door, a driver's error text and the meta argument of any log call still reached a line raw,
+  so a peer could still forge a governance line, and a megabyte `seq` or `_id` made a megabyte line in the ring,
+  the container log and every aggregator after it. One renderer (`peerText`, `peerList` for a list) now redacts,
+  cuts at 4096 characters per value (100 per list) saying how much it cut, and escapes; every door's log lines go
+  through it (a gate holds them to it), the meta argument goes through it where every line is built, and the line
+  as a whole is escaped. The same bound applies where such a value is named back in an answer: a sync refusal's
+  reason, the fork-limit `400`, and an admin import's `refused`, `schemaViolations` and `restoredOverTombstone`.
+  An error logged with its stack keeps the stack, escaped onto its line, with its message bounded.
+- **Redacting a log line no longer takes time that grows with the square of a value (`R9`).** The userinfo pattern
+  (`scheme://user:pass@`) could start a match at every character of a run of letters and scan the rest of the run
+  from each: 40 000 letters took 0.7 s, so a peer's megabyte `_id` of letters held the event loop for minutes on
+  the line that logged it. The pattern now starts a scheme only where no scheme character precedes it, which is
+  linear, and a value is redacted over a bounded window before it is cut. The 5.6.x line carries the same pattern.
+
 - **A peer's tombstone is applied to the space its sync admitted, never to the space the tombstone names
   (`Q-236`).** Both tombstone doors — a peer's push and this instance's pull — applied each tombstone to the space
   written inside it. So a peer admitted to one space could delete records it authored in any other space this

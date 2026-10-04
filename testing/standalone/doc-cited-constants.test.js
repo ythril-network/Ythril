@@ -138,6 +138,13 @@ const CITED = [
     text: (v) => new RegExp(`more than \\*\\*${v}\\*\\* links, relationships`),
   },
   {
+    what: 'the most characters of one value a log line carries (integration guide)',
+    source: 'server/src/util/log.ts',
+    code: /export const LOG_VALUE_MAX = ([0-9_]+);/,
+    doc: 'docs/integration-guide.md',
+    text: (v) => new RegExp(`cut at \\*\\*${v}\\*\\* characters per value`),
+  },
+  {
     what: 'contradiction-scanner similarity threshold',
     source: 'server/src/config/types.ts',
     code: /Default: (0\.[0-9]+)\./,

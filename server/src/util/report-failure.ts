@@ -42,7 +42,7 @@
  * whole point is that the next person reading this line is an operator on another team who cannot grep our
  * source at all.
  */
-import { log } from './log.js';
+import { log, peerText } from './log.js';
 
 /**
  * Record the cause of a 5xx the route is about to send.
@@ -51,8 +51,7 @@ import { log } from './log.js';
  * `'tokens.ts:683'`. A line number is stale the next commit; the operation is what appears in their ticket.
  */
 export function reportServerFailure(where: string, cause: unknown): void {
-  const detail = cause instanceof Error
-    ? (cause.stack ?? `${cause.name}: ${cause.message}`)
-    : String(cause);
-  log.error(`${where} failed with a 5xx: ${detail}`);
+  // The cause goes as the meta argument: `fmt` keeps an Error's stack (this server's frames) and bounds its message,
+  // which a driver may have built from a peer's `_id` (bundle-30 `B4`) — and bounds any other cause like any value.
+  log.error(`${peerText(where)} failed with a 5xx:`, cause);
 }
