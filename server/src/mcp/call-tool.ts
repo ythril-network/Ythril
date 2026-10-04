@@ -336,7 +336,7 @@ export async function callTool(req: ToolCallRequest): Promise<ToolCallOutcome> {
     }
     // The store's condition, answered as every door answers it (`storeFailureAnswer`, bundle-30 I6 `C1`); this
     // transport has no status line to carry it, so `storeSideFailure: true` says it in the body.
-    const store = storeFailureAnswer(err, { audience: 'caller' });
+    const store = storeFailureAnswer(err);
     if (store) {
       return {
         result: {

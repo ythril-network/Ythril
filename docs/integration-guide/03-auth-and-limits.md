@@ -87,13 +87,15 @@ of your request from a failure underneath us.** Every failure body from those th
 true or false, whether or not it bit:
 
 ```json
-{ "error": "Executor error during aggregate command on namespace: … :: caused by :: the store reported no
-           cause (this is a store-side failure, not a problem with your request — it can be retried)",
+{ "error": "A store-side failure stopped this operation. Nothing was confirmed written by it; retry the request
+           (store-side failure; retryable).",
   "retryable": true, "code": 8, "codeName": "InternalError" }
 ```
 
 A `503` also carries `Retry-After`. `code` and `codeName` are the store's own, present when it supplied them,
-and they are an operator's fastest route to the real condition.
+and they are an operator's fastest route to the real condition. **The error text is ours, on every door and for
+every caller**: the database driver's own message names internal hosts, addresses and ports, so it goes to the
+server log (a `Store-side failure answered 503:` warning) and never into an answer.
 
 > **Why this exists, because the cost was not the confusing message.** Until this release those routes
 > answered **400 for every failure**, including a vector-search stage that had simply stopped answering. A

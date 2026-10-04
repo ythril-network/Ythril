@@ -34,15 +34,17 @@ On connect, the server sends global instructions listing all available space IDs
 >
 > **A STORE failure is machine-readable too, and it is the one to branch on hardest.** When a read OR a write
 > fails because the store could not answer — a search index re-initialising after a restart, a replica set stepping
-> down, a search process that died, a write the database could not complete in time (its bound ended it; the
-> message is then ours, never the driver's) — the result carries:
+> down, a search process that died, a write the database could not complete in time — the result carries:
 >
 > ```json
 > { "retryable": true, "storeSideFailure": true,
->   "error": "Executor error during aggregate command … :: caused by :: the store reported no cause (this is a
->            store-side failure, not a problem with your request — it can be retried)",
+>   "error": "A store-side failure stopped this operation. Nothing was confirmed written by it; retry the
+>            request (store-side failure; retryable).",
 >   "code": 8, "codeName": "InternalError" }
 > ```
+>
+> The message is ours, never the database driver's, which names internal hosts and ports: the driver's text goes
+> to the server log. `code` and `codeName` are the store's own, when it supplied them.
 >
 > **Retry it.** The REST doors answer these with `503` and `Retry-After`; this transport answers `200` with
 > `isError: true` and has no status to correct, so the classification lives in `structuredContent` instead —

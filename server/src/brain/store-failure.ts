@@ -50,11 +50,17 @@
  * parties who could see it. Say what happened, say it can be retried, and let the caller decide.
  */
 import { isWriteTimeout, STORE_RETRY_SENTENCE } from '../db/write-timeout.js';
+import { log, logSafe } from '../util/log.js';
 
 /** What every door answers for an operation a bound ended: the store's condition, said without the store's text. */
-export const STORE_TIMEOUT_MESSAGE = `The database did not complete this operation in time. ${STORE_RETRY_SENTENCE}`;
-/** What a PEER is told for any other store failure: the condition, never our collection names or the driver's text. */
-const STORE_FAILURE_FOR_PEER = `A store-side failure stopped this operation. ${STORE_RETRY_SENTENCE}`;
+const STORE_TIMEOUT_MESSAGE = `The database did not complete this operation in time. ${STORE_RETRY_SENTENCE}`;
+/**
+ * What every door answers for any other store failure: the condition, never our collection names or the driver's
+ * text. The driver's message names internal hosts, addresses and ports (`connection 5 to 172.18.0.3:27017 closed`),
+ * and the REST error handler that answers with this cannot tell an operator from an anonymous caller — so there is
+ * one answer for every audience, and the driver's text goes to the log (`storeFailureDetail`), bundle-30 I8.
+ */
+const STORE_FAILURE_MESSAGE = `A store-side failure stopped this operation. ${STORE_RETRY_SENTENCE}`;
 
 /** Query-time conditions that are the STORE's, never the request's. */
 const STORE_ERROR_NAMES = new Set([
@@ -105,7 +111,7 @@ export interface ReadFailure {
   retryable: boolean;
   /** Seconds to wait before retrying, for `Retry-After`. Only on a retryable failure. */
   retryAfterSeconds?: number;
-  /** The message to return, with the cause filled in as far as it can be. */
+  /** The message to return: the caller's own refusal, or the store's condition in our words (never the driver's). */
   error: string;
   /** The store's own code, when it had one — an operator's fastest route to the real condition. */
   code?: number;
@@ -138,16 +144,27 @@ const numeric = (v: unknown): number | undefined => (typeof v === 'number' ? v :
 const text = (v: unknown): string | undefined => (typeof v === 'string' && v.trim() ? v : undefined);
 
 /**
- * Classify a throw from a read path into a status, a retryability, and a message that says what happened.
+ * The driver's account of a store failure, for the OPERATOR's log — never for an answer.
  *
  * ## The dangling `caused by ::` is REPLACED rather than passed on
  *
  * When MongoDB reports an executor error with an empty cause and the driver attached nothing either, the
- * message ends mid-sentence — and a caller reads that as a truncated complaint about their request. So the
- * fragment is closed with the fact itself: **the store reported no cause.** An operator then knows the gap is
- * the store's and not our logging, which is exactly the question the canary operator opened with and could not
- * answer from outside.
+ * message ends mid-sentence — and a reader takes that as a truncated line. So the fragment is closed with the
+ * fact itself: **the store reported no cause.** An operator then knows the gap is the store's and not our
+ * logging, which is exactly the question the canary operator opened with and could not answer from outside.
+ *
+ * It names internal hosts and ports, which is why it lives in the log line `storeFailureAnswer` writes and no
+ * door's body carries it (bundle-30 I8).
  */
+export function storeFailureDetail(err: unknown): string {
+  const message = err instanceof Error ? err.message : String(err);
+  const cause = causeOf(err);
+  return /caused by ::\s*$/.test(message)
+    ? `${message}${cause ?? 'the store reported no cause'}`
+    : `${message}${cause && !message.includes(cause) ? ` — ${cause}` : ''}`;
+}
+
+/** Classify a throw from a read path into a status, a retryability, and a message that says what happened. */
 export function classifyReadFailure(err: unknown): ReadFailure {
   /*
    * A BOUND ENDED IT — first, and in words of our own (bundle-30, `Q-213`). An operation inside a seq hold, or on a
@@ -174,22 +191,14 @@ export function classifyReadFailure(err: unknown): ReadFailure {
     return { status: 400, retryable: false, error: message };
   }
 
-  const cause = causeOf(err);
-  // A message that ENDS at `caused by ::` is the reported symptom. Close the sentence either way.
-  const dangling = /caused by ::\s*$/.test(message);
-  const error = dangling
-    ? `${message}${cause ?? 'the store reported no cause'}`
-      + ' (this is a store-side failure, not a problem with your request — it can be retried)'
-    : `${message}${cause && !message.includes(cause) ? ` — ${cause}` : ''}`
-      + ' (store-side failure; retryable)';
-
   return {
     status: 503,
     retryable: true,
     // Short, because the condition clears in seconds when it is a blip and in hours when an index is
     // rebuilding — a number that pretends to know which would be worse than a small one plus `retryable`.
     retryAfterSeconds: 5,
-    error,
+    // In our words; the store's code below is the stable identifier, and the driver's text is the log's.
+    error: STORE_FAILURE_MESSAGE,
     ...(code !== undefined ? { code } : {}),
     ...(codeName ? { codeName } : {}),
   };
@@ -213,20 +222,17 @@ export interface StoreFailureAnswer {
  * carry, and the push helper decided its own sentence. The `Retry-After`, the `retryable: true` and the code are now
  * put in here, where no door can leave one out.
  *
- * **The one real difference is the audience, and it is a parameter.** A `caller` (REST, MCP) is told the store's
- * condition with its code — the operator reads it. A `peer` (a sync push) is told the condition in our words only:
- * another instance is not told our collection names or the driver's internals.
+ * **There is no audience (bundle-30 I8).** A `caller` used to be told the driver's text and a `peer` our words; but
+ * the REST error handler answers routes a peer or an unauthenticated caller reaches, and cannot tell them apart. So
+ * every door and every reader gets our words plus the store's stable `code`/`codeName`, and the driver's text —
+ * internal hosts, addresses, ports — is logged HERE, once, where no door can answer with it or forget to log it.
  */
-export function storeFailureAnswer(err: unknown, { audience }: { audience: 'caller' | 'peer' }): StoreFailureAnswer | null {
+export function storeFailureAnswer(err: unknown): StoreFailureAnswer | null {
   const f = classifyReadFailure(err);
   if (!f.retryable) return null;
-  const retryAfterSeconds = f.retryAfterSeconds ?? 5;
-  if (audience === 'peer') {
-    const error = isWriteTimeout(err) ? STORE_TIMEOUT_MESSAGE : STORE_FAILURE_FOR_PEER;
-    return { status: 503, retryAfterSeconds, body: { error, retryable: true } };
-  }
+  log.warn(`Store-side failure answered 503: ${logSafe(storeFailureDetail(err))}`);
   return {
-    status: 503, retryAfterSeconds,
+    status: 503, retryAfterSeconds: f.retryAfterSeconds ?? 5,
     body: {
       error: f.error, retryable: true,
       ...(f.code !== undefined ? { code: f.code } : {}),

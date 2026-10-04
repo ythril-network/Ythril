@@ -23,7 +23,7 @@ import { reportServerFailure } from '../../util/report-failure.js';
 
 export function sendSyncWriteFailure(res: express.Response, where: string, err: unknown): void {
   reportServerFailure(where, err);
-  const store = storeFailureAnswer(err, { audience: 'peer' });
+  const store = storeFailureAnswer(err);
   if (store) { sendStoreFailure(res, store); return; }
   res.status(500).json({ error: 'Internal error' });
 }

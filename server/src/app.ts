@@ -58,7 +58,7 @@ import { clearOidcCache } from './auth/oidc.js';
 import { initSpace, ensureGeneralSpace, wipeSpace, reconcilePendingSpaceOp, WIPE_COLLECTION_TYPES, type WipeCollectionType } from './spaces/lifecycle.js';
 import { concreteSpaces } from './spaces/proxy.js';
 import { col } from './db/mongo.js';
-import { log, logSafe, peerText, runWithRequestId } from './util/log.js';
+import { log, peerText, runWithRequestId } from './util/log.js';
 import { rearmCronSchedulers } from './schedulers.js';
 import { getReadiness, classifyCheckError } from './ready.js';
 import { isShuttingDown } from './lifecycle.js';
@@ -729,9 +729,8 @@ export function createApp() {
      * so a REST write and the same write through a tool no longer disagree (this answered `500` while the tool
      * door answered `503`). Everything the classifier does not positively identify stays the `500` below.
      */
-    const store = storeFailureAnswer(err, { audience: 'caller' });
+    const store = storeFailureAnswer(err);
     if (store) {
-      log.warn(`Store-side failure answered 503: ${logSafe(err instanceof Error ? err.message : String(err))}`);
       sendStoreFailure(res, store);
       return;
     }

@@ -20,7 +20,7 @@ import { dispatchSource } from './_tool-dispatch.mjs';
 import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
 
-const { classifyReadFailure } = await import('../../server/dist/brain/store-failure.js');
+const { classifyReadFailure, storeFailureDetail } = await import('../../server/dist/brain/store-failure.js');
 
 /** A driver error, shaped the way the MongoDB node driver actually shapes one. */
 const mongoErr = (name, fields = {}) => Object.assign(new Error(fields.message ?? 'boom'), { name, ...fields });
@@ -43,34 +43,42 @@ describe('the reported condition, verbatim from both reports', () => {
   it('closes the dangling `caused by ::` rather than shipping a half sentence', () => {
     // THE symptom: the message ends mid-sentence, which a caller reads as a truncated complaint about their
     // own request. An operator could not tell whether the gap was the store's or our logging.
-    const f = classifyReadFailure(mongoErr('MongoServerError', { message: REPORTED }));
-    assert.doesNotMatch(f.error, /caused by ::\s*$/, 'the message must not still end at `caused by ::`');
-    assert.match(f.error, /the store reported no cause/,
+    // Since bundle-30 I8 the driver's account is the operator's LOG line (`storeFailureDetail`) and the answer is in
+    // our words — it names internal hosts and ports (`no-door-answers-with-the-drivers-text`). So the half sentence
+    // is closed where it is read now, and the caller is told whose fault it is.
+    const err = mongoErr('MongoServerError', { message: REPORTED });
+    const detail = storeFailureDetail(err);
+    assert.doesNotMatch(detail, /caused by ::\s*$/, 'the logged line must not still end at `caused by ::`');
+    assert.match(detail, /the store reported no cause/,
       'when nothing was attached, say so — that is the answer to "is the gap yours or ours?"');
-    assert.match(f.error, /not a problem with your request/i,
-      'and say whose fault it is, because the status alone is not read by a human');
+    assert.match(classifyReadFailure(err).error, /store-side failure/i,
+      'and the caller is told whose fault it is, because the status alone is not read by a human');
+    assert.doesNotMatch(classifyReadFailure(err).error, /caused by/, 'and is never told the driver\'s text');
   });
 
-  it('fills the cause in from the driver when there IS one', () => {
-    const f = classifyReadFailure(mongoErr('MongoServerError', {
+  it('fills the cause in from the driver when there IS one — in the log, and the code in the answer', () => {
+    const err = mongoErr('MongoServerError', {
       message: REPORTED,
       errmsg: 'mongot connection closed',
       codeName: 'InternalError',
       code: 8,
-    }));
-    assert.match(f.error, /mongot connection closed/, 'the real reason must reach the caller');
-    assert.equal(f.code, 8, 'and the code, which is an operator\'s fastest route to the condition');
+    });
+    const f = classifyReadFailure(err);
+    assert.match(storeFailureDetail(err), /mongot connection closed/, 'the real reason must reach the operator');
+    assert.doesNotMatch(f.error, /mongot connection closed/, 'and not the caller');
+    assert.equal(f.code, 8, 'the code is stable, names no host, and is an operator\'s fastest route to the condition');
     assert.equal(f.codeName, 'InternalError');
-    assert.doesNotMatch(f.error, /the store reported no cause/,
+    assert.doesNotMatch(storeFailureDetail(err), /the store reported no cause/,
       'that phrase is for an EMPTY cause and would be a lie next to a real one');
   });
 
   it('reads a nested `cause`, which is where the empty one was hiding', () => {
-    const f = classifyReadFailure(mongoErr('MongoServerError', {
+    const err = mongoErr('MongoServerError', {
       message: 'Executor error during find command',
       cause: new Error('connection 4 to 10.1.2.3:27017 closed'),
-    }));
-    assert.match(f.error, /connection 4 to 10\.1\.2\.3:27017 closed/);
+    });
+    assert.match(storeFailureDetail(err), /connection 4 to 10\.1\.2\.3:27017 closed/);
+    assert.doesNotMatch(classifyReadFailure(err).error, /10\.1\.2\.3/);
   });
 });
 
@@ -303,7 +311,7 @@ describe('both doors, and all three routes', () => {
 
   it('MCP carries the same classification, because it has no status to correct', () => {
     const src = dispatchSource();
-    assert.match(src, /storeFailureAnswer\(err, \{ audience: 'caller' \}\)/,
+    assert.match(src, /storeFailureAnswer\(err\)/,
       'the MCP dispatcher must classify too, or an agent gets the truncated prose a REST caller no longer sees');
     assert.match(src, /storeSideFailure: true/,
       'and say so in structuredContent, which is this transport\'s equivalent of a 5xx');

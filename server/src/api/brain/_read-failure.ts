@@ -32,7 +32,7 @@ export function sendStoreFailure(res: express.Response, answer: StoreFailureAnsw
  * doing on the 4xx-shaped failures.
  */
 export function sendReadFailure(res: express.Response, err: unknown): void {
-  const store = storeFailureAnswer(err, { audience: 'caller' });
+  const store = storeFailureAnswer(err);
   if (store) { sendStoreFailure(res, store); return; }
   // Not the store's: the request's, which the caller is the one who can fix.
   res.status(400).json({ error: err instanceof Error ? err.message : String(err), retryable: false });
