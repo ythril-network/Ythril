@@ -119,3 +119,46 @@ describe('every refusal that quotes an outside value quotes it through the rende
     });
   }
 });
+
+describe('a caller\'s unknown key is quoted by the same bound on both doors (C18)', () => {
+  /*
+   * Bundle-30 I6, C18. REST's strict read bodies (`unknownBodyFields`) and the MCP argument validator both name a key
+   * the caller sent that the door does not take — REST as `Unknown field(s): …` (and `unrecognized_keys`), MCP as
+   * `unexpected property '…'` with the key's path. Both echoed the key whole: the MCP list bounded the COUNT of errors
+   * and never the element. One door at a time, each reading complete alone, is how one stays weaker: asserted on both.
+   */
+  const HUGE = 'k'.repeat(1_000_000);
+  const doors = {
+    async rest() {
+      const { unknownBodyFields } = await import('../../server/dist/brain/query.js');
+      const r = unknownBodyFields({ [HUGE]: 1, [`bad${LS}FORGED`]: 2 }, new Set(['query']));
+      return [r.error, ...r.unrecognized_keys];
+    },
+    async mcp() {
+      const { makeArgsValidator } = await import('../../server/dist/mcp/validate-args.js');
+      const { ALL_TOOLS } = await import('../../server/dist/mcp/tools/index.js');
+      const v = makeArgsValidator({ requiredSpace: { type: 'string', enum: ['general'] }, optionalSpace: { type: 'string', enum: ['general'] } }, ['general']);
+      const recall = ALL_TOOLS.find(t => t.name === 'recall');
+      return [v.validate(recall, { query: 'x', [HUGE]: 1, filter: { [HUGE]: { eq: 1 } }, [`bad${LS}FORGED`]: 2 })];
+    },
+  };
+  it('each door names the key bounded, escaped, and still names the one after it', async () => {
+    const wrong = [];
+    for (const [door, answer] of Object.entries(doors)) {
+      const texts = await answer();
+      const all = texts.join(' ');
+      if (all.length > 2 * log.LOG_VALUE_MAX) wrong.push(`${door}: ${all.length} characters — the key came back whole`);
+      if (LINE_BREAKING.test(all)) wrong.push(`${door}: a key's line-breaking character came back raw`);
+      if (!/FORGED/.test(all)) wrong.push(`${door}: the second unknown key is no longer named`);
+    }
+    assert.deepEqual(wrong, []);
+  });
+  it('an ordinary unknown key is named exactly as before on both doors', async () => {
+    const { unknownBodyFields } = await import('../../server/dist/brain/query.js');
+    assert.match(unknownBodyFields({ maxDeptth: 1 }, new Set(['query'])).error, /^Unknown field\(s\): maxDeptth\. Allowed: query$/);
+    const { makeArgsValidator } = await import('../../server/dist/mcp/validate-args.js');
+    const { ALL_TOOLS } = await import('../../server/dist/mcp/tools/index.js');
+    const v = makeArgsValidator({ requiredSpace: { type: 'string', enum: ['general'] }, optionalSpace: { type: 'string', enum: ['general'] } }, ['general']);
+    assert.match(v.validate(ALL_TOOLS.find(t => t.name === 'recall'), { query: 'x', maxDeptth: 1 }), /unexpected property 'maxDeptth'/);
+  });
+});

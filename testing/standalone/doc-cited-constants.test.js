@@ -159,6 +159,20 @@ const CITED = [
     text: (v) => new RegExp(`references, each cut at \\*\\*${v}\\*\\* characters`),
   },
   {
+    what: 'how many unknown keys a REST body refusal names (integration guide, bundle-30 I6 C18)',
+    source: 'server/src/brain/query.ts',
+    code: /const UNKNOWN_NAMED = ([0-9_]+);/,
+    doc: 'docs/integration-guide.md',
+    text: (v) => new RegExp(`its first \\*\\*${v}\\*\\* unknown keys`),
+  },
+  {
+    what: 'how much of one unknown key either door quotes (integration guide, bundle-30 I6 C18)',
+    source: 'server/src/util/log.ts',
+    code: /export const NAME_QUOTED = ([0-9_]+);/,
+    doc: 'docs/integration-guide.md',
+    text: (v) => new RegExp(`each unknown key\\s+cut at \\*\\*${v}\\*\\* characters`),
+  },
+  {
     what: 'contradiction-scanner similarity threshold',
     source: 'server/src/config/types.ts',
     code: /Default: (0\.[0-9]+)\./,

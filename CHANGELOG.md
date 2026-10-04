@@ -744,7 +744,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   A reference refusal on the REST and MCP write doors (a link, an edge end or a file reference that is malformed
   or names nothing) names its first five references each cut at 256 characters and escaped, where it echoed a
   caller's megabyte reference whole — and the count of the rest is now written `…(+N more)`, where it read
-  ` (+N more)`. A sync refusal that quotes a schema's issues or the driver's message (200 characters) now says where
+  ` (+N more)`. A key a door does not take is quoted by the same bound on both doors: a REST body's
+  `Unknown field(s)` and `unrecognized_keys` name the first 10 unknown keys, and an MCP call's `unexpected property`
+  its key and path, each cut at 256 characters and escaped — both echoed a caller's key whole. A sync refusal that quotes a schema's issues or the driver's message (200 characters) now says where
   it was cut and never splits a character in two.
   An error logged with its stack keeps the stack, escaped onto its line, with its message bounded.
   Error text that is STORED and read back goes through the same renderer: an embed job's `lastError`, a reindex

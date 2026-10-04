@@ -42,7 +42,10 @@ any other control character as `\u001b`), with credentials redacted, and cut at 
 So a peer cannot start a line of its own, and a megabyte `_id` or `seq` makes a line, not a megabyte of one. The same
 bound applies where such a value is named back in an answer: a sync refusal's reason, the fork-limit `400`, and an
 admin import's `refused`, `schemaViolations` and `restoredOverTombstone` entries; a write refused for a malformed or
-missing reference names its first **5** references, each cut at **256** characters, then `…(+N more)`. An error passed
+missing reference names its first **5** references, each cut at **256** characters, then `…(+N more)`; and a key a door
+does not take is quoted the same way on both doors — a REST body's `Unknown field(s)` names (and `unrecognized_keys`
+lists) its first **10** unknown keys, and an MCP call's `unexpected property` names its key and path, each unknown key
+cut at **256** characters. An error passed
 with its stack keeps the stack (escaped onto the line) with its message bounded.
 
 **Response** `200`:

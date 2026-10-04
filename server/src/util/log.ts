@@ -262,6 +262,14 @@ function within(requested: unknown, ceiling: number): number {
 export const logSafe = peerText;
 
 /**
+ * How much of one name a caller sent — an unknown key, a reference — a refusal quotes: any honest key or id whole, and
+ * short enough that one oversized name cannot crowd out the others named beside it. One number for every door that
+ * names a caller's keys back (REST `unknownBodyFields`, the MCP argument validator), so the same mistake is quoted
+ * the same way whichever client the caller picked (bundle-30 I6, C18).
+ */
+export const NAME_QUOTED = 256;
+
+/**
  * A joined list of outside values, bounded twice: at most `LIST_MAX` elements and `LOG_VALUE_MAX` characters,
  * each element rendered by `peerText`'s rule, then `…(+K more)` naming how many were left out. `values.join(sep)`
  * bounds neither — ten thousand refused ids are ten thousand ids on one line.
@@ -269,18 +277,23 @@ export const logSafe = peerText;
  * `count` narrows the element bound for a message that names a few (a reference refusal names five); like
  * `peerText`'s `max` it can only narrow (`within`). One number, not a flag per caller: what an element looks like is
  * the caller's to decide by what it passes in (`bad.map(v => JSON.stringify(v))` for quoted ids).
+ *
+ * `each` narrows how much of ONE element is shown, so one oversized element cannot take the list's whole budget and
+ * leave the rest unnamed — a refusal naming a caller's keys or references (`NAME_QUOTED`). Like the others it only
+ * narrows. It replaced rendering each element with `peerText` first and the list again (bundle-30 I6, C18).
  */
-export function peerList(values: Iterable<unknown>, sep = ', ', { count }: { count?: number } = {}): string {
+export function peerList(values: Iterable<unknown>, sep = ', ', { count, each }: { count?: number; each?: number } = {}): string {
   try {
     const all = [...values];
     const most = within(count, LIST_MAX);
+    const eachMax = within(each, LOG_VALUE_MAX);
     let out = '';
     let shown = 0;
     for (const v of all) {
       if (shown >= most) break;
       const room = LOG_VALUE_MAX - out.length - (shown > 0 ? sep.length : 0);
       if (room <= 0) break;
-      const item = render(textOf(v), Math.min(room, LOG_VALUE_MAX));
+      const item = render(textOf(v), Math.min(room, eachMax));
       if (shown > 0 && item.length > room) break;
       out += (shown > 0 ? escapeLineBreaks(sep) : '') + item;
       shown++;

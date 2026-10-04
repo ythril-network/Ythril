@@ -18,7 +18,7 @@ import { readStoredById } from '../db/read-by-id.js';
 import { REF_KINDS } from '../config/types-knowledge.js';
 import type { RefKind } from '../config/types-knowledge.js';
 import type { SpacePart } from '../db/space-collection.js';
-import { peerList, peerText } from '../util/log.js';
+import { peerList } from '../util/log.js';
 
 /** Canonical UUID v4 matcher. The only copy — import it, never re-declare it. */
 export const UUID_V4_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -95,7 +95,7 @@ const REF_QUOTED = 256;
  * never the element, so the 400 on the REST and MCP write doors echoed whatever the caller sent.
  */
 const quotedRefs = (values: readonly string[]): string =>
-  peerList(values.map(v => peerText(JSON.stringify(v), { max: REF_QUOTED })), ', ', { count: REFS_NAMED });
+  peerList(values.map(v => JSON.stringify(v)), ', ', { count: REFS_NAMED, each: REF_QUOTED });
 
 /** The values of a reference field that are the wrong SHAPE for the kind it points at. */
 function malformedRefs(kind: RefKind, values: readonly string[]): string[] {
