@@ -23,6 +23,7 @@ import { concreteSpaces, isProxy } from './proxy.js';
 import { removeTree } from '../files/remove-tree.js';
 import { unlabelAllFaces } from '../brain/entities.js';
 import { forgetMerkleLeaves } from '../brain/merkle.js';
+import { forgetSpaceShape } from '../brain/space-shape.js';
 import { ensureMediaJobIndexes } from '../files/media/job-queue.js';
 import { ensureEmbedJobIndexes } from '../brain/embed-queue.js';
 import { LINK_INDEXES } from '../brain/link-adjacency.js';
@@ -660,8 +661,9 @@ async function removeSpaceInner(spaceId: string): Promise<boolean> {
   // Nothing is waiting for a space that no longer exists: its deferred confirmation and its collections' index waiters.
   forgetSearchWaiter(confirmWaiterKey(spaceId));
   forgetSpaceSearchIndexWaiters(spaceId);
-  // And no Merkle leaves outlive it (the cache is bounded anyway; a deleted space's entry would only take a slot).
+  // And no Merkle leaves or space shape outlive it (both caches are bounded; a deleted space's entry would only take a slot).
   forgetMerkleLeaves(spaceId);
+  forgetSpaceShape(spaceId);
   return true;
 }
 

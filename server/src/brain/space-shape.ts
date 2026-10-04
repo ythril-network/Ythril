@@ -43,7 +43,8 @@
  * members mean different things and must never be merged.
  */
 import { col } from '../db/mongo.js';
-import { spaceStamp } from '../db/space-generation.js';
+import { spaceStamp, readAtStamp, type Stamped } from '../db/space-generation.js';
+import { LruMap } from '../util/lru-map.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { readErShape, joinDeclared, declaredEntityTypes, type ErModel, type ErObserved } from './er-model.js';
 
@@ -55,7 +56,13 @@ interface SpaceShape { observed: ErObserved; stats: SpaceStats }
 /** The collections the answer is read from — a write to any of them can change it. */
 const READ_PARTS = ['entities', 'edges', 'links', 'facts', 'chrono', 'files'] as const;
 
-const cache = new Map<string, { stamp: string; shape: SpaceShape }>();
+/**
+ * Spaces whose shape is kept, least recently read dropped first — bounded (it was a Map that only grew, and a
+ * deleted space's entry outlived it), and an entry is forgotten when its space is deleted (`forgetSpaceShape`).
+ * A shape is counts plus the observed type model, small beside the scans it spares (bundle-30 I6, C7).
+ */
+const SPACE_SHAPE_CACHE_SPACES = 256;
+const cache = new LruMap<string, Stamped<SpaceShape>>(SPACE_SHAPE_CACHE_SPACES);
 const building = new Map<string, { stamp: string; promise: Promise<SpaceShape> }>();
 let builds = 0;
 
@@ -75,17 +82,14 @@ async function build(spaceId: string): Promise<SpaceShape> {
 async function shapeOf(spaceId: string): Promise<SpaceShape> {
   const stamp = stampOf(spaceId);
   const hit = cache.get(spaceId);
-  if (hit && hit.stamp === stamp) return hit.shape;
+  if (hit && hit.stamp === stamp) return hit.value;
 
   // One build per space and stamp: concurrent readers share it rather than each scanning.
   const inflight = building.get(spaceId);
   if (inflight && inflight.stamp === stamp) return inflight.promise;
 
-  const promise = build(spaceId).then(shape => {
-    // Kept only if nothing was written while it read — otherwise it may predate a committed write.
-    if (stampOf(spaceId) === stamp) cache.set(spaceId, { stamp, shape });
-    return shape;
-  }).finally(() => {
+  // Kept only if nothing was written while it read — `readAtStamp`, the one spelling of that rule.
+  const promise = readAtStamp(cache, spaceId, () => stampOf(spaceId), () => build(spaceId)).then(r => r.value).finally(() => {
     if (building.get(spaceId)?.promise === promise) building.delete(spaceId);
   });
   building.set(spaceId, { stamp, promise });
@@ -100,6 +104,11 @@ export async function spaceStatsOf(spaceId: string): Promise<SpaceStats> {
 /** A concrete space's actual schema: the observed half, joined with the schema it declares right now. */
 export async function actualSchemaOf(spaceId: string): Promise<ErModel> {
   return joinDeclared((await shapeOf(spaceId)).observed, declaredEntityTypes(spaceId));
+}
+
+/** Drop what is kept for a space — when it is deleted, so its shape does not outlive it. */
+export function forgetSpaceShape(spaceId: string): void {
+  cache.delete(spaceId);
 }
 
 /** How many times the expensive read has run. For the test that holds the cache to caching. */

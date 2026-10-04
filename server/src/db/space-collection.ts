@@ -103,6 +103,21 @@ const SAFE_SPACE_ID = /^[a-z0-9-]+$/;
  *   one space's delete reach another's data, the second builds a collection nothing else reads or writes,
  *   which presents as an empty result rather than as an error.
  */
+/**
+ * `<spaceId>_<suffix>` parsed back — the inverse of `spaceCollection`, for the observers that are handed a collection
+ * NAME and ask whose it is: `null` for a name no space's collection has (an unsafe space id, an unknown suffix). Each
+ * caller narrows the suffix to the set it watches. One parser, because two hand copies already differed on whether
+ * the space id was checked (bundle-30 I6, C7).
+ */
+const KNOWN_SUFFIXES: ReadonlySet<string> = new Set(Object.values(SPACE_COLLECTIONS));
+export function parseSpaceCollection(name: string): { spaceId: string; suffix: string } | null {
+  const cut = name.indexOf('_');
+  if (cut <= 0) return null;
+  const spaceId = name.slice(0, cut);
+  const suffix = name.slice(cut + 1);
+  return SAFE_SPACE_ID.test(spaceId) && KNOWN_SUFFIXES.has(suffix) ? { spaceId, suffix } : null;
+}
+
 export function spaceCollection(spaceId: string, part: SpacePart): string {
   if (typeof spaceId !== 'string' || !SAFE_SPACE_ID.test(spaceId)) {
     throw new Error(

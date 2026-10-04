@@ -88,6 +88,7 @@ import {
 } from './vector-index.js';
 import { searchAvailable, afterSearchUp, forgetSearchWaiter, SEARCH_RETRY_BASE_MS } from './search-readiness.js';
 import { collectionHoldsRecord } from './record-presence.js';
+import { parseSpaceCollection } from '../db/space-collection.js';
 
 /** How long after the last delete of a burst the collection is checked for emptiness. */
 export const DROP_CHECK_DELAY_MS = envInt('SEARCH_INDEX_DROP_DELAY_MS', 60_000);
@@ -121,16 +122,11 @@ interface CollectionState {
 const states = new Map<string, CollectionState>();
 let armed = false;
 
-const SPACE_ID = /^[a-z0-9-]+$/;
-
 /** `<spaceId>_<suffix>` for a collection that carries search indexes, parsed — or null for any other name. */
 export function parseIndexedCollection(name: string): { spaceId: string; suffix: VectorIndexedCollection } | null {
-  const cut = name.indexOf('_');
-  if (cut <= 0) return null;
-  const spaceId = name.slice(0, cut);
-  const suffix = name.slice(cut + 1);
-  if (!SPACE_ID.test(spaceId) || !(VECTOR_INDEXED_COLLECTIONS as readonly string[]).includes(suffix)) return null;
-  return { spaceId, suffix: suffix as VectorIndexedCollection };
+  const parsed = parseSpaceCollection(name);
+  if (!parsed || !(VECTOR_INDEXED_COLLECTIONS as readonly string[]).includes(parsed.suffix)) return null;
+  return { spaceId: parsed.spaceId, suffix: parsed.suffix as VectorIndexedCollection };
 }
 
 function stateOf(name: string): CollectionState {

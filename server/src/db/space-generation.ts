@@ -30,10 +30,12 @@
  *
  * It subscribes when this module loads, and a collection handle taken from `getDb()` before then is not observed for
  * it — see `brain/space-shape.ts` for why that holds in this codebase (no module caches a handle at load).
+ * The rule is written once, as `readAtStamp`, and both caches read through it.
  */
 import { onRecordCollectionWrite } from './mongo.js';
 import { EVERY_COLLECTION } from './record-write-observer.js';
 import { BRAIN_COLLECTIONS, type BrainCollection } from '../config/types-knowledge.js';
+import { parseSpaceCollection, spaceCollection } from './space-collection.js';
 
 /** The record collections a stamp is kept for: every brain collection, the set both caches read. */
 const WATCHED_SUFFIXES = new Set<string>(BRAIN_COLLECTIONS);
@@ -42,10 +44,10 @@ let epoch = 0;
 let counter = 0;
 const generation = new Map<string, number>();
 
-/** True for `<spaceId>_<suffix>` of a watched record collection. */
+/** True for `<spaceId>_<suffix>` of a watched record collection — parsed by the one parser (`parseSpaceCollection`). */
 function isWatched(name: string): boolean {
-  const cut = name.indexOf('_');
-  return cut > 0 && WATCHED_SUFFIXES.has(name.slice(cut + 1));
+  const parsed = parseSpaceCollection(name);
+  return parsed !== null && WATCHED_SUFFIXES.has(parsed.suffix);
 }
 
 onRecordCollectionWrite(isWatched, (name) => {
@@ -55,10 +57,45 @@ onRecordCollectionWrite(isWatched, (name) => {
 
 /** The stamp of one space's record collection now — see the module docblock for what changes it. */
 export function collectionStamp(spaceId: string, part: BrainCollection): string {
-  return `${epoch}:${generation.get(`${spaceId}_${part}`) ?? 0}`;
+  return `${epoch}:${generation.get(spaceCollection(spaceId, part)) ?? 0}`;
 }
 
 /** One stamp over several of a space's collections: it changes when any of them does. */
 export function spaceStamp(spaceId: string, parts: readonly BrainCollection[]): string {
-  return parts.map(p => collectionStamp(spaceId, p)).join('|');
+  return joinStamps(parts.map(p => collectionStamp(spaceId, p)));
+}
+
+/** Stamps already taken, as one — what `spaceStamp` is over stamps a caller took one by one, before each read. */
+export function joinStamps(stamps: readonly string[]): string {
+  return stamps.join('|');
+}
+
+/** A value read at a stamp. */
+export interface Stamped<V> { stamp: string; value: V }
+
+/** Where `readAtStamp` keeps values: a `Map` or a bounded `LruMap` — anything with these three. */
+export interface StampedStore<K, V> {
+  get(key: K): Stamped<V> | undefined;
+  set(key: K, value: Stamped<V>): unknown;
+  delete(key: K): unknown;
+}
+
+/**
+ * The one rule a consumer must keep (module docblock), as a function: the value `held` keeps for `key` while its
+ * stamp is current; otherwise `read` runs with the stamp taken BEFORE it, and what it read is kept only if the stamp
+ * did not move while it ran (a value that may predate a committed write is answered once and never kept).
+ *
+ * Both caches over a space's records hand-wrote this — the space-meta shape and the Merkle leaves — and the half a
+ * copy drops is the second stamp read, which makes it cache a read that raced a write (bundle-30 I6, C7).
+ */
+export async function readAtStamp<K, V>(
+  held: StampedStore<K, V>, key: K, stampNow: () => string, read: () => Promise<V>,
+): Promise<{ value: V; stamp: string; kept: boolean }> {
+  const stamp = stampNow();
+  const hit = held.get(key);
+  if (hit && hit.stamp === stamp) return { value: hit.value, stamp, kept: true };
+  const value = await read();
+  const kept = stampNow() === stamp;
+  if (kept) held.set(key, { stamp, value }); else held.delete(key);
+  return { value, stamp, kept };
 }

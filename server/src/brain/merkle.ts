@@ -31,7 +31,8 @@ import { createHash } from 'node:crypto';
 import { col, asFilter } from '../db/mongo.js';
 import { buildFileManifest } from '../files/manifest.js';
 import { BRAIN_COLLECTIONS, type BrainCollection } from '../config/types-knowledge.js';
-import { collectionStamp } from '../db/space-generation.js';
+import { collectionStamp, joinStamps, readAtStamp, type Stamped } from '../db/space-generation.js';
+import { spaceCollection } from '../db/space-collection.js';
 import { LruMap } from '../util/lru-map.js';
 import { LOCAL_ONLY_FIELDS } from '../sync/local-only-fields.js';
 import { RETAGGED_FIELDS } from '../sync/retagged-fields.js';
@@ -194,7 +195,7 @@ const FILE_HASH_PROJECTION = {
  */
 async function collectionLeaves(spaceId: string, collType: BrainCollection): Promise<string[]> {
   const leaves: string[] = [];
-  const cursor = col<Record<string, unknown>>(`${spaceId}_${collType}`)
+  const cursor = col<Record<string, unknown>>(spaceCollection(spaceId, collType))
     // A CHUNK never replicates: it is derived from the blob and the receiver makes its own, with its own
     // chunker and its own model. Hashed, two correct instances report divergence whenever those differ.
     .find(asFilter(collType === 'files' ? { parentFileId: { $exists: false } } : {}))
@@ -238,7 +239,7 @@ const MERKLE_CACHE_SPACES = 16;
 
 /** What is kept for one space: each collection's leaves at the stamp they were read at, and the last root. */
 interface CachedSpace {
-  collections: Map<BrainCollection, { stamp: string; leaves: string[] }>;
+  collections: Map<BrainCollection, Stamped<string[]>>;
   last?: { stamps: string; files: string[]; result: MerkleResult };
 }
 const cached = new LruMap<string, CachedSpace>(MERKLE_CACHE_SPACES);
@@ -280,18 +281,12 @@ export async function computeMerkleRoot(spaceId: string): Promise<MerkleResult> 
 
   // DERIVED: every brain collection is hashed, so the list IS the tuple.
   for (const collType of BRAIN_COLLECTIONS) {
-    const stamp = collectionStamp(spaceId, collType);
-    const held = entry.collections.get(collType);
-    if (held && held.stamp === stamp) {
-      parts.push(held.leaves);
-    } else {
-      const leaves = await collectionLeaves(spaceId, collType);
-      parts.push(leaves);
-      // Kept only if nothing was written while it read — otherwise it may predate a committed write.
-      if (collectionStamp(spaceId, collType) === stamp) entry.collections.set(collType, { stamp, leaves });
-      else { entry.collections.delete(collType); stable = false; }
-    }
-    stamps.push(stamp);
+    // Kept only if nothing was written while it read — `readAtStamp`, the one spelling of that rule.
+    const read = await readAtStamp(entry.collections, collType,
+      () => collectionStamp(spaceId, collType), () => collectionLeaves(spaceId, collType));
+    parts.push(read.value);
+    if (!read.kept) stable = false;
+    stamps.push(read.stamp);
   }
 
   // ── File manifest ──────────────────────────────────────────────────────
@@ -302,7 +297,7 @@ export async function computeMerkleRoot(spaceId: string): Promise<MerkleResult> 
     .map(f => sha256hex(`file:${f.path}:${f.sha256}`))
     .sort();
 
-  const key = stamps.join('|');
+  const key = joinStamps(stamps);
   if (entry.last && entry.last.stamps === key && sameList(entry.last.files, files)) return entry.last.result;
 
   const leaves = mergeSorted([...parts, files]);
