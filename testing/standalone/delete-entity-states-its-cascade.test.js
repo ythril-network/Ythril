@@ -25,24 +25,14 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { ALL_TOOLS } from '../../server/dist/mcp/tools/index.js';
 import { toolSchemasFor } from '../../server/dist/mcp/tool-schema.js';
+import { schemaDescriptions } from './_schema-descriptions.mjs';
 
 const schemas = toolSchemasFor(['general']);
 
-/** Every description string in a schema, however deeply it is nested. */
-function descriptionsIn(node, out = []) {
-  if (Array.isArray(node)) { for (const n of node) descriptionsIn(n, out); return out; }
-  if (node && typeof node === 'object') {
-    for (const [k, v] of Object.entries(node)) {
-      if (k === 'description' && typeof v === 'string') out.push(v);
-      else descriptionsIn(v, out);
-    }
-  }
-  return out;
-}
 
 const served = ALL_TOOLS.map(t => {
   const schema = typeof t.inputSchema === 'function' ? t.inputSchema(schemas) : t.inputSchema;
-  return { name: t.name, description: t.description, schema, text: [t.description, ...descriptionsIn(schema)].join('\n') };
+  return { name: t.name, description: t.description, schema, text: [t.description, ...schemaDescriptions(schema)].join('\n') };
 });
 
 /** The tools a cascade concerns: those that take a `cascadeToken`, and those that tell a caller about one. */
