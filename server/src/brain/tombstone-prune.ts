@@ -29,8 +29,9 @@ import { tombstoneFloorForSpace } from '../sync/served-watermark.js';
 import type { TombstoneFloor } from '../sync/served-watermark.js';
 import { fileTombstoneFloorForSpace } from '../sync/file-tombstone-ack.js';
 import type { FileTombstoneFloor } from '../sync/file-tombstone-ack.js';
-import type { TombstoneDoc, FileTombstoneDoc } from '../config/types.js';
+import type { TombstoneDoc } from '../config/types.js';
 import { spaceCollection } from '../db/space-collection.js';
+import { pruneFileTombstonesUpTo } from '../files/tombstones.js';
 
 /** Housekeeping, not correctness — a tombstone kept six hours too long costs nothing. */
 const PRUNE_INTERVAL_MS = 6 * 60 * 60 * 1000;   // 6h
@@ -124,9 +125,8 @@ export async function pruneAllTombstones(): Promise<TombstonePruneResult> {
 export async function pruneFileTombstonesToFloor(spaceId: string, floor: FileTombstoneFloor): Promise<number> {
   if (!floor.prune) return -1;
   try {
-    const res = await col<FileTombstoneDoc>(spaceCollection(spaceId, 'fileTombstones'))
-      .deleteMany(asFilter<FileTombstoneDoc>({ deletedAt: { $lte: floor.upTo } }));
-    return res.deletedCount ?? 0;
+    // Published ones only: a pending tombstone was sent to no peer, so no acknowledgement covers it (bundle-30 I15).
+    return await pruneFileTombstonesUpTo(spaceId, floor.upTo);
   } catch (err) {
     log.warn(`File tombstone prune (${spaceId}): ${err instanceof Error ? err.message : String(err)}`);
     return -1;

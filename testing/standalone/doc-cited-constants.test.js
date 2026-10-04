@@ -63,7 +63,7 @@ const read = (rel) => {
 const CITED = [
   {
     what: 'sync peer request timeout',
-    source: 'server/src/sync/engine.ts',
+    source: 'server/src/sync/peer-timeouts.ts',
     code: /const FETCH_TIMEOUT_MS = ([0-9_]+);/,
     scale: 1000,   // ms in code, seconds in prose
     doc: 'docs/network-types.md',
@@ -71,7 +71,7 @@ const CITED = [
   },
   {
     what: 'sync batch transfer timeout',
-    source: 'server/src/sync/engine.ts',
+    source: 'server/src/sync/peer-timeouts.ts',
     code: /const BATCH_FETCH_TIMEOUT_MS = ([0-9_]+);/,
     scale: 1000,
     doc: 'docs/network-types.md',
@@ -120,6 +120,57 @@ const CITED = [
     scale: 0.01,   // fraction in code, percent in prose
     doc: 'docs/integration-guide.md',
     text: (v) => new RegExp(`default: ${v}% of the shorter image side`),
+  },
+  {
+    // Set from measurement (`testing/bench/merge-hub-in-one-transaction.mjs`), so it is a number that MOVES — and a
+    // caller sizes its own hub-splitting around the one the guide states.
+    what: 'the most records one merge relinks (integration guide)',
+    source: 'server/src/brain/merge.ts',
+    code: /export const MERGE_MAX_RELINKS = ([0-9_]+);/,
+    doc: 'docs/integration-guide.md',
+    text: (v) => new RegExp(`One merge relinks at most \\*\\*${v}\\*\\* records`),
+  },
+  {
+    what: 'the most records one merge relinks (user guide)',
+    source: 'server/src/brain/merge.ts',
+    code: /export const MERGE_MAX_RELINKS = ([0-9_]+);/,
+    doc: 'docs/userguide.md',
+    text: (v) => new RegExp(`more than \\*\\*${v}\\*\\* links, relationships`),
+  },
+  {
+    what: 'the most characters of one value a log line carries (integration guide)',
+    source: 'server/src/util/log.ts',
+    code: /export const LOG_VALUE_MAX = ([0-9_]+);/,
+    doc: 'docs/integration-guide.md',
+    text: (v) => new RegExp(`cut at \\*\\*${v}\\*\\* characters per value`),
+  },
+  {
+    what: 'how many references a write\'s reference refusal names (integration guide)',
+    source: 'server/src/brain/entity-refs.ts',
+    code: /const REFS_NAMED = ([0-9_]+);/,
+    doc: 'docs/integration-guide.md',
+    text: (v) => new RegExp(`names its first \\*\\*${v}\\*\\* references`),
+  },
+  {
+    what: 'how much of one reference a reference refusal quotes (integration guide)',
+    source: 'server/src/brain/entity-refs.ts',
+    code: /const REF_QUOTED = ([0-9_]+);/,
+    doc: 'docs/integration-guide.md',
+    text: (v) => new RegExp(`references, each cut at \\*\\*${v}\\*\\* characters`),
+  },
+  {
+    what: 'how many unknown keys a REST body refusal names (integration guide, bundle-30 I6 C18)',
+    source: 'server/src/brain/query.ts',
+    code: /const UNKNOWN_NAMED = ([0-9_]+);/,
+    doc: 'docs/integration-guide.md',
+    text: (v) => new RegExp(`its first \\*\\*${v}\\*\\* unknown keys`),
+  },
+  {
+    what: 'how much of one unknown key either door quotes (integration guide, bundle-30 I6 C18)',
+    source: 'server/src/util/log.ts',
+    code: /export const NAME_QUOTED = ([0-9_]+);/,
+    doc: 'docs/integration-guide.md',
+    text: (v) => new RegExp(`each unknown key\\s+cut at \\*\\*${v}\\*\\* characters`),
   },
   {
     what: 'contradiction-scanner similarity threshold',

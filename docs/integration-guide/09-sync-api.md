@@ -58,7 +58,10 @@ Authorization: Bearer <instance-admin token>
 
 Both answer the same shape: `{ "ok": true, "status": "triggered", ... }` when fire-and-forget, and with
 `?wait=true` either `completed`, `504 timeout` (still running) or `500 error`. `ok` is the one-bit summary
-and `status` the detail.
+and `status` the detail. A cycle that fails on the store is answered as every door answers a store failure —
+`503`, `Retry-After`, `{ "error": …, "retryable": true, "code": … }` in our words — and never with the
+database driver's message (it names internal hosts and ports). A member whose own run failed is not a failed
+cycle: it is counted in `errors` of a `completed` answer.
 
 `?timeoutMs` (default `30000`, clamped `1000`–`120000`) bounds the WAIT on the network door only. A peer
 cycle is already bounded by that peer's own request timeouts, so racing it would report a timeout for
@@ -355,7 +358,7 @@ Each array is capped at 500 items; documents past the cap are counted in `reject
 
 **The counters count the items you sent, as processing them in order would.** A page carrying one `_id` twice is decided copy by copy (an entity at seq 5 then 6 is `upserted: 2`; a fact at seq 9 then 3 is `inserted: 1, skipped: 1`), and only the highest seq is stored. The single-record routes are the same code with one document, so they decide exactly as the batch does.
 
-**A `500` from `batch-upsert` means a fault that was not one document's** — the receiver's store was unavailable, or a connection dropped. Re-sending the page is safe and is what the engine does: records that landed come back `skipped`, and a fork that landed comes back as the same fork, because a fork's id is derived from the parent id, the seq and the text. A document the store refuses for what it is (a schema validator, a value it cannot store) is counted in `rejected` and named in the receiver's log, and never fails the page.
+**A `503` from any push route means the receiver's store could not take the page in time** — every sync POST (the record and tombstone pages, file tombstones, members, votes, change notes, pairing) answers it alike — a write the bound ended (a lock held elsewhere, a stalled socket), a step-down, a dropped connection. The body carries `retryable: true` and words of the receiver's own, and the response a `Retry-After`; hold your watermark and send the page again. **A `500` means a fault that was not one document's and not the store's**, or a seq counter the receiver could not move past what you sent. Re-sending the page is safe and is what the engine does: records that landed come back `skipped`, and a fork that landed comes back as the same fork, because a fork's id is derived from the parent id, the seq and the text. A document the store refuses for what it is (a schema validator, a value it cannot store) is counted in `rejected` and named in the receiver's log, and never fails the page.
 
 **`skipped` is benign and `forkDepthRefused` is not — read the second one.** They were one counter until now,
 which is the whole reason this paragraph exists.
@@ -419,14 +422,21 @@ models — or different versions of one — hold legitimately different vectors 
 ranking one against the other produces plausible-looking nonsense rather than an error. Facts were the
 last type that carried theirs; now none do.
 
-**The same holds when this instance PULLS from you, and until 4.0 it did not.** The schemas above run on the
-push path; a pull fetches whole documents and validates nothing, so a pulled record kept the sender's vector
-— and, more expensively, the sender's `_expireAt`, which the receiving instance's retention sweep then
-acted on. Both directions now drop the same local-only fields, and the serving side leaves them out of the page
-altogether, so a sync page is materially smaller than it was. **And the receiver keeps its own:** a peer's update
-of a record no longer erases the receiver's vector, its model, `matchedText`, its retention stamps or its file sync
-bases — they are carried across the replace, so an update whose embedded text did not change is not re-embedded and
-the record stays searchable meanwhile.
+**The same holds when this instance PULLS from you.** A pulled page is accepted by the same rules as a push: every
+document is validated against the schema above for its type (a document that fails is refused on its own and the
+rest of the page lands), a tombstone this instance holds refuses it, and an equal-seq divergent fact forks within
+the caps. The one difference is stated in [Sync Protocol → How a pulled page is stored](../sync-protocol.md#how-a-pulled-page-is-stored):
+a chrono `type` outside the vocabulary is stored on pull. Until 4.0 a pull kept the sender's vector — and, more
+expensively, the sender's `_expireAt`, which the receiving instance's retention sweep then acted on — and until this
+release it validated nothing. Both directions drop the same local-only fields, and the serving side leaves them out
+of the page altogether, so a sync page is materially smaller than it was. **And the receiver keeps its own:** a
+peer's update of a record no longer erases the receiver's vector, its model, `matchedText`, its retention stamps or
+its file sync bases — they are carried across the replace, so an update whose embedded text did not change is not
+re-embedded and the record stays searchable meanwhile. **Unless the receiver suppresses it:** an arriving record its
+own mark, this instance's type schema or this space keeps out of semantic search carries the retention stamps and
+`syncBase` only, and holds no vector, model or `matchedText` afterwards — they described content the receiver no
+longer embeds, and `matchedText` would keep removed text findable by lexical search. A file's derived passages lose
+their vectors with it.
 
 **The receiver embeds what it accepts, on its own terms.** Every accepted document is queued for embedding
 against the receiving instance's own model, at the moment it is written — by push (batch or single route, a new
@@ -524,7 +534,7 @@ reader rather than merely non-conforming, and nothing else in the pipeline would
   - Each element is checked on its own: one that is malformed (no `type`, a missing field) or whose seq the counter cannot carry is refused alone, counted in `refused`, and the rest applies. `refused` is additive — an older receiver answers `{ applied }` only. A refusal is by shape, so re-sending it changes nothing; advance past it.
   - An element of a `type` the receiver does not know answers `400 { error: 'Invalid tombstone format' }` and nothing of the page is applied: hold your watermark and re-send after the receiver upgrades.
   - A tombstone is applied to the space your request names (after the network alias), never to the `spaceId` in its body. It deletes a record only when your peer identity issued it and authored the record; one that fails that is refused and **not stored**, so a forged tombstone cannot block the real author's record either. Symmetrically, a record you push as its author with your own peer token is not refused by a tombstone another instance issued for its id; a record whose author you only claim still is.
-  - The receiver's counter is moved past the highest admitted seq before it answers; a counter that could not move answers `500`, and you should re-send.
+  - The receiver's counter is moved past the highest admitted seq before it answers; a counter that could not move answers `500`, and you should re-send. A store that could not take the page in time answers a retryable `503`, as every push route does.
 
 **The `sinceSeq` you send is recorded.** The serving instance stores it as `lastSeqServed` for your peer identity and prunes tombstones that every member has pulled past — that is the only retention bound on the collection, because an age-based one would let a long-absent peer resurrect a deleted record. Two consequences for an integrator:
 
@@ -539,6 +549,15 @@ could hand you a later seq while an earlier one was still being written — and 
 seq would never come back for the earlier record. So it is safe to move your watermark to the highest seq a
 page returned, and a page that seems shorter than expected during heavy writes is the horizon holding the rest
 back for a cycle, not a gap. The push side applies the same horizon to what it sends.
+
+**A write that stalls holds the horizon for a bounded time, never for good.** Every database operation issued
+while a write holds its seq is bounded (`YTHRIL_WRITE_TIMEOUT_MS` per operation, `YTHRIL_HOLD_DEADLINE_MS` for the
+whole hold — see [Hosting](02-hosting.md)), and the bound ends the write on the server too, so the horizon is
+released when the write ENDS and the page serves what committed above it. What you see while one stalls: pages
+from that space stop short of the stalled seq for at most the hold deadline, then continue. The promise above
+still holds throughout, because a hold is released only once its write has ended — a transaction whose commit
+answer is lost is read back while the hold is still held. On the serving instance the stall shows as the gauge
+`ythril_seq_horizon_oldest_hold_seconds` and a `seq horizon held …` line in its log.
 
 ### File Sync Artifacts
 
@@ -574,12 +593,27 @@ GET /api/sync/merkle?spaceId=general&networkId=net-uuid
 Each brain-document leaf hashes the document's **content** (canonical JSON, keys sorted), not just its
 `_id`/`seq` — so a mismatch detects tampered content, not only missing or version-skewed documents.
 
-Five fields are excluded, and the rule behind the list is worth knowing if you are comparing roots yourself:
-**a field that is hashed must replicate.** `embedding`, `embeddingModel` and `matchedText` are derived by the
-local model, so peers running different models legitimately differ. `_expireAt` and `_contentExpireAt` are
-retention stamps each instance computes from its own policy — a peer's stamp is never adopted, in either
-direction, because the sweep that acts on it would then be following another operator's policy. Everything
-else is hashed, and everything else crosses the wire — a field in neither category means two peers can never agree about identical content. File leaves hash the file's SHA-256. The check is advisory: a root mismatch is reported as `MERKLE_DIVERGENCE`, it does not block sync.
+**A root may come from leaves kept since an earlier call.** The instance keeps each collection's leaves while
+nothing has written to it, and re-reads only a collection that was written; the file manifest is walked on
+every call (unchanged bytes are not re-hashed). A call with no write and no file change in between returns the
+stored root as it was, so `computedAt` is when THIS root was computed — not necessarily now. A kept root is the
+root a full recompute gives, by construction.
+
+What is excluded follows one rule, worth knowing if you are comparing roots yourself: **a field that is hashed
+must replicate, as it is.** The local-only fields are out: `embedding`, `embeddingModel` and `matchedText` are
+derived by the local model, so peers running different models legitimately differ, and the retention stamps
+(`_expireAt`, `_contentExpireAt`) and the sync base are each instance's own — a peer's stamp is never adopted,
+in either direction, because the sweep that acts on it would then be following another operator's policy.
+`spaceId` is out too: it crosses the wire and the receiver rewrites it to its own id for the space, which under a
+`spaceMap` alias is not the sender's. Everything else is hashed, and everything else crosses the wire — a field
+in neither category means two peers can never agree about identical content. File leaves hash the file's
+SHA-256, and a file that never leaves an instance — a conflict copy, a schema snapshot, a legacy read spill — is
+not hashed at all, record or bytes. The check is advisory: a root mismatch is reported as `MERKLE_DIVERGENCE`, it
+does not block sync.
+
+**Mixed versions:** a root from a version before this rule (which hashed `spaceId` and the instance-local
+files) never equals one from a version after it, so a `merkle: true` network whose members run both reports
+`MERKLE_DIVERGENCE` for every space until all of them have upgraded.
 
 ### Gossip Endpoints
 

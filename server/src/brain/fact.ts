@@ -220,7 +220,7 @@ export async function updateFact(
       asUpdate<FactDoc>(updateOp),
       { returnDocument: 'before' },
     );
-  }) as FactDoc | null;
+  }, 'fact.update') as FactDoc | null;
   brainWriteSeqTotal
     .labels({
       collection: 'facts',

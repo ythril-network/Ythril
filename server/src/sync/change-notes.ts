@@ -34,7 +34,7 @@ import { localToRemote, remoteToLocal } from './space-map.js';
 import { peerSafeFetch } from './peer-fetch.js';
 import { upstreamOf } from '../networks/network-spaces.js';
 import { emitWebhookEvent } from '../webhooks/dispatcher.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
 import type { NetworkActResult } from '../networks/network-acts.js';
 
 const COLLECTION = '_change_notes';
@@ -184,9 +184,9 @@ export async function queueGeneratedNote(networkId: string, note: string, spaces
     const net = getConfig().networks.find(n => n.id === networkId);
     if (!net || changeNoteRefusal(net)) return;
     const r = await queueChangeNote(net, { note, spaces, author: 'generated', generated: true });
-    if ('refusal' in r) log.warn(`Network ${networkId}: generated change note not queued: ${r.refusal}`);
+    if ('refusal' in r) log.warn(`Network ${peerText(networkId)}: generated change note not queued: ${peerText(r.refusal)}`);
   } catch (err) {
-    log.warn(`Network ${networkId}: generated change note not queued: ${err}`);
+    log.warn(`Network ${peerText(networkId)}: generated change note not queued: ${peerText(err)}`);
   }
 }
 
@@ -217,23 +217,23 @@ export async function deliverChangeNotes(net: NetworkConfig, member: NetworkMemb
     const status = await send(due);
     if (status >= 200 && status < 300) {
       await delivered(due.map(n => n._id));
-      log.info(`Delivered ${due.length} change note(s) to ${member.label} on '${net.label}'`);
+      log.info(`Delivered ${due.length} change note(s) to ${peerText(member.label)} on '${peerText(net.label)}'`);
       return;
     }
     // A 400 says the BODY is wrong, and the receiver validates a batch whole — so one bad note would hold every note
     // behind it back for ever. Send them one by one instead: a note refused on its own is taken out of this member's
     // queue and recorded in `refusedBy`, and the rest go through. Any other status (an older peer with no route, a
     // 403, a 5xx) is about the member rather than a note, so everything stays queued for the next cycle.
-    if (status !== 400) { log.warn(`Change notes to ${member.label} (${member.instanceId}) on '${net.label}': ${status}; kept for the next cycle`); return; }
+    if (status !== 400) { log.warn(`Change notes to ${peerText(member.label)} (${peerText(member.instanceId)}) on '${peerText(net.label)}': ${status}; kept for the next cycle`); return; }
     for (const n of due) {
       const one = await send([n]);
       if (one >= 200 && one < 300) { await delivered([n._id]); continue; }
-      if (one !== 400) { log.warn(`Change notes to ${member.label} on '${net.label}': ${one}; the rest kept for the next cycle`); return; }
+      if (one !== 400) { log.warn(`Change notes to ${peerText(member.label)} on '${peerText(net.label)}': ${one}; the rest kept for the next cycle`); return; }
       await coll.updateOne(asFilter<ChangeNote>({ _id: n._id }), { $pull: { pendingFor: member.instanceId }, $addToSet: { refusedBy: member.instanceId } } as never);
-      log.warn(`Change note ${n._id} on '${net.label}' was refused by ${member.label} (400) and will not be offered to it again`);
+      log.warn(`Change note ${peerText(n._id)} on '${peerText(net.label)}' was refused by ${peerText(member.label)} (400) and will not be offered to it again`);
     }
   } catch (err) {
-    log.warn(`Change notes to ${member.label} (${member.instanceId}) on '${net.label}': ${err}; kept for the next cycle`);
+    log.warn(`Change notes to ${peerText(member.label)} (${peerText(member.instanceId)}) on '${peerText(net.label)}': ${peerText(err)}; kept for the next cycle`);
   }
 }
 

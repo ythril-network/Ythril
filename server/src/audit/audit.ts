@@ -12,10 +12,11 @@ import { v4 as uuidv4 } from 'uuid';
 import { getDb } from '../db/mongo.js';
 import { ensureExpiryIndex } from '../db/expiry-index.js';
 import { getConfig } from '../config/loader.js';
-import { log, currentRequestId } from '../util/log.js';
+import { log, currentRequestId, peerText } from '../util/log.js';
 import type { AuditLogEntry } from './entry.js';
 import type { AuditChange } from './audit-changes.js';
 import type { Collection, Filter, Sort } from 'mongodb';
+import { LruMap } from '../util/lru-map.js';
 
 /**
  * The audit collection, EXPORTED so nothing has to spell it a second time.
@@ -143,7 +144,7 @@ export function logAuditEntry(input: AuditEntryInput): void {
   };
 
   col().insertOne(entry as any).catch((err: unknown) => {
-    log.warn(`Audit log write failed: ${err}`);
+    log.warn(`Audit log write failed: ${peerText(err)}`);
   });
 }
 
@@ -296,7 +297,7 @@ export async function queryAuditLog(params: AuditQueryParams): Promise<AuditQuer
 // sending endless distinct filters.
 const TOTAL_TTL_MS = 30_000;
 const TOTAL_CACHE_MAX = 64;
-const _totalCache = new Map<string, { total: number; at: number }>();
+const _totalCache = new LruMap<string, { total: number; at: number }>(TOTAL_CACHE_MAX);
 
 async function cachedTotal(filter: Filter<AuditLogEntry>): Promise<number> {
   const key = JSON.stringify(filter);
@@ -307,11 +308,7 @@ async function cachedTotal(filter: Filter<AuditLogEntry>): Promise<number> {
 
   const total = await col().countDocuments(filter);
 
-  // Simple bound: drop the oldest insertion when full. Map preserves insertion order.
-  if (_totalCache.size >= TOTAL_CACHE_MAX) {
-    const oldest = _totalCache.keys().next();
-    if (!oldest.done) _totalCache.delete(oldest.value);
-  }
+  // Bounded (`util/lru-map.ts`): the least recently used filter is dropped once the cache is full.
   _totalCache.set(key, { total, at: now });
   return total;
 }

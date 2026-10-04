@@ -5,7 +5,7 @@
  */
 import { z } from 'zod';
 import { getConfig, saveConfig, getSecrets, saveSecrets } from '../config/loader.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
 import { SSRF_SAFE_URL } from '../api/networks/_shared.js';
 import type { NetworkActResult } from './network-acts.js';
 
@@ -60,7 +60,7 @@ export function reparentSelfAct(networkId: string, input: unknown): NetworkActRe
   };
 
   saveConfig(cfg);
-  log.info(`reparent-self: network ${net.id} — new parent ${newParentInstanceId} (was ${originalParentInstanceId})`);
+  log.info(`reparent-self: network ${peerText(net.id)} — new parent ${peerText(newParentInstanceId)} (was ${peerText(originalParentInstanceId)})`);
   return { status: 200, body: { status: 'reparented', newParentInstanceId, originalParentInstanceId } };
 }
 
@@ -83,7 +83,7 @@ export function adoptMemberAct(networkId: string, instanceId: string): NetworkAc
   delete member.originalParentInstanceId;
   saveConfig(cfg);
 
-  log.info(`Permanent adoption: '${member.label}' (${member.instanceId}) adopted from ${oldOriginal} in network ${net.id}`);
+  log.info(`Permanent adoption: '${peerText(member.label)}' (${peerText(member.instanceId)}) adopted from ${peerText(oldOriginal)} in network ${peerText(net.id)}`);
   return { status: 200, body: { status: 'adopted', instanceId: member.instanceId, parentInstanceId: member.parentInstanceId } };
 }
 
@@ -123,6 +123,6 @@ export function revertParentAct(networkId: string, instanceId: string): NetworkA
   saveSecrets(secrets);
 
   saveConfig(cfg);
-  log.info(`Parent reverted: '${member.label}' (${member.instanceId}) re-parented back to ${restoredParentId} in network ${net.id}`);
+  log.info(`Parent reverted: '${peerText(member.label)}' (${peerText(member.instanceId)}) re-parented back to ${peerText(restoredParentId)} in network ${peerText(net.id)}`);
   return { status: 200, body: { status: 'reverted', instanceId: member.instanceId, parentInstanceId: restoredParentId } };
 }

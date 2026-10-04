@@ -159,7 +159,7 @@ never put to a network vote.
 
 **Retention** is the space-wide default: **Delete records after (days)**, as **five fields** — Entities, Facts, Edges, Chrono, Files — each applying to records of that kind with no TTL of their own and no window on their type. Five, not one, because a `tickets` space keeps ticket entities for a year and their status-change chrono entries for a month; **Files** gets its own because uploads share this setting and have no type for the Schema tab to reach.
 
-> **In a space that syncs, every instance applies its own windows — and a deletion travels.** Each instance works out an expiry from the fields above for every record it holds, including records that arrived from a peer or an import: a record that has no expiry here yet is given **this** instance's window, **counted from when the record was created**, not from when it arrived. So a record older than your window arrives already due, and the next retention sweep removes it. **That removal is a normal delete, and its tombstone is passed on to peers** — and a peer applies a tombstone to the records its issuer AUTHORED. So on a synced space, the shortest window any member has decides how long an old record lives on that member; and when the record's author is the one with the short window, its sweep deletes the record on every peer. An instance keeping tickets for a year loses the year-old tickets written by a peer that keeps them for a week, as soon as that peer sweeps them. Give every member of a network the same windows if they must keep the same records. Once a record has an expiry here, a peer's later edit keeps it rather than restarting the clock; a local write recomputes it.
+> **In a space that syncs, every instance applies its own windows — and a deletion travels.** Each instance works out an expiry from the fields above for every record it holds, including records that arrived from a peer or an import: a record that has no expiry here yet is given **this** instance's window, **counted from when the record was created**, not from when it arrived. So a record older than your window arrives already due, and the next retention sweep removes it. **That removal is a normal delete, and its tombstone is passed on to peers** — and a peer applies a tombstone to the records its issuer AUTHORED. So on a synced space, the shortest window any member has decides how long an old record lives on that member; and when the record's author is the one with the short window, its sweep deletes the record on every peer. An instance keeping tickets for a year loses the year-old tickets written by a peer that keeps them for a week, as soon as that peer sweeps them. Give every member of a network the same windows if they must keep the same records. Once a record has an expiry here, a peer's later edit keeps it rather than restarting the clock; a local write recomputes it. An **import** is a restore: it keeps the expiry the backup recorded (or gives this instance's window to a record the backup recorded none for) and never the expiry of the record it overwrites — a record backed up as "never expires" stays that way.
 >
 > Upgrading from before 4.0: records a peer's window already deleted are not restored, and a stamp that came from a peer is replaced by your own the next time that record is written.
 
@@ -284,7 +284,7 @@ Knowledge are different permissions:
 | **Knowledge** | Facts, entities, relationships and timeline entries — the records the space is made of, and searching them |
 | **Files** | Documents stored in the space: reading them, writing them, and the folder structure they live in |
 | **Schema** | The shape the space expects its records to take — which types exist and which properties they carry |
-| **Data quality** | Finding and resolving duplicates, contradictions and gaps, and the review decisions that follow |
+| **Data quality** | Finding and resolving duplicates, contradictions and gaps, and the review decisions that follow. **Merging** a duplicate pair also needs **Knowledge** write in that space, because a merge deletes one of the two records |
 | **Networks** | Sharing the space with other instances: **read** sees the networks it is in, **write** creates a network with it and leaves a membership this token made, **admin** changes a network's settings and leaves anyone's |
 
 **Networks is different from the other four in two ways.** A network carries several spaces, so a token needs the
@@ -668,6 +668,12 @@ A cycle shows **success** only when every member's transfers completed and nothi
 was cut short, the cycle shows **partial** (some members completed) or **failed** (none did), and its errors name
 the space, the direction and what stopped. A network that shows **failed** on every cycle is not syncing at all,
 even though it looks connected.
+
+**A push answered `503` is the peer's database, and it is retried.** When the receiving brain's database cannot
+take a page in time — a write it had to stop, a database restarting — it answers that it could not, rather than
+leaving the request hanging; this brain keeps its place and sends the page again next cycle, so the cycle counts that transfer as
+stopped until the peer's database recovers. The peer's own Server Log names the stalled write
+(`seq horizon held …`).
 
 Each member row in the expanded card also shows its **last successful sync** (or *Never synced*) and, when a peer's recent sync attempts have been failing, a red **Failing (N)** badge counting the consecutive failures since the last success — so you can spot a stuck peer without opening the full history.
 

@@ -20,6 +20,8 @@
  * Existing v4 ids are not migrated; only peers creating an edge from now on have to agree.
  */
 import { v5 as uuidv5 } from 'uuid';
+// Length-prefixed so no part can forge the separator; shared with every derived id (`util/derived-id.ts`).
+import { idPart } from '../util/derived-id.js';
 import { edgeEndpointKind } from './entity-refs.js';
 import type { RefKind } from '../config/types-knowledge.js';
 
@@ -32,12 +34,6 @@ import type { RefKind } from '../config/types-knowledge.js';
  */
 const EDGE_NAMESPACE = '8fdb66f3-a72f-574e-91a9-55e2a04e19a7';
 
-/**
- * Length-prefixed so no part can forge the separator. See the docblock. Exported because a derived id elsewhere
- * (`forkIdFor`, `sync/upsert-plan.ts`) needs the same injective encoding, and a second spelling of it is a
- * second place for the separator to become forgeable.
- */
-export const idPart = (s: string): string => `${s.length}:${s}`;
 
 /**
  * The `_id` for the relationship `(from) -[label]-> (to)`.

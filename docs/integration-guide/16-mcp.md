@@ -32,16 +32,23 @@ On connect, the server sends global instructions listing all available space IDs
 > record being maintained. Until 3.1 both kinds blocked, which meant tightening a schema made every record that no
 > longer fitted uneditable until an unrelated field was repaired in the same request.
 >
-> **A STORE failure is machine-readable too, and it is the one to branch on hardest.** When a read fails
-> because the store could not answer — a search index re-initialising after a restart, a replica set stepping
-> down, a search process that died — the result carries:
+> **A STORE failure is machine-readable too, and it is the one to branch on hardest.** When a read OR a write
+> fails because the store could not answer — a search index re-initialising after a restart, a replica set stepping
+> down, a search process that died, a write the database could not complete in time — the result carries:
 >
 > ```json
 > { "retryable": true, "storeSideFailure": true,
->   "error": "Executor error during aggregate command … :: caused by :: the store reported no cause (this is a
->            store-side failure, not a problem with your request — it can be retried)",
+>   "error": "A store-side failure stopped this operation. It did not complete as far as this server can
+>            confirm; retry the request (store-side failure; retryable).",
 >   "code": 8, "codeName": "InternalError" }
 > ```
+>
+> The message is ours, never the database driver's, which names internal hosts and ports: the driver's text goes
+> to the server log. `code` and `codeName` are the store's own, when it supplied them. The text in `content` is the
+> same sentence as `error`, word for word — the REST doors answer it in the same spelling. A driver error the
+> server does not recognise as a store condition arrives the same way with `retryable: false` and *"An internal
+> database fault stopped this operation; its cause is in the server log."*: not yours to fix, and not known to
+> clear on a retry.
 >
 > **Retry it.** The REST doors answer these with `503` and `Retry-After`; this transport answers `200` with
 > `isError: true` and has no status to correct, so the classification lives in `structuredContent` instead —
@@ -320,9 +327,9 @@ row survives its own tool being built, so the list cannot keep advertising a gap
 | `space_meta` | Return the space's DECLARED schema, purpose, usage notes, stats, `needsReindex`, `reindexRun` ({running, remaining, failed}), and `actualSchema` — what the space really holds, in the declared schema's own format, so a type can be promoted into it. Absorbed `er_model` at 5.0. `reindexRun.running` is the field to poll after `space_reindex`, which returns as soon as the run starts; recall in the space refuses while `needsReindex` is true. Counts and `actualSchema` are current as of the last committed write, and cheap to read again. A schema-library type carries its `$ref` AND the entry's definition side by side; sent back as it came, the link is kept, and an edited field beside a `$ref` is a `400` naming it. **`resolve`** (default `true`, the same on REST `GET /api/spaces/:id/meta?resolve=`): `false` returns only the stored `{ $ref }` |
 | `save_entity` | Create or update a named entity (with optional properties) |
 | `update_entity` | Update an existing entity by ID (name, type, description, tags, properties, `suppressEmbeddings`); supports `deleteFields` for field removal |
-| `delete_entity` | Delete an entity by ID. Refused when the space has `strictLinkage` and another record still references it — the same rule the REST route enforces. Face labels are unlabelled rather than blocking |
+| `delete_entity` | Delete an entity by ID. Refused when the space has `strictLinkage` and another record still references it — the same rule the REST route enforces. Face labels are unlabelled rather than blocking. With `cascadeToken` (from `delete_entity_preview`) it removes the blocking edges too, a chunk at a time with each chunk's delete and tombstones in one transaction, then the entity; a fact, chrono entry or file that still names the entity refuses the cascade before anything is removed |
 | `delete_entity_preview` | What deleting an entity would remove, and the token that lets you do it. Reads only. `delete_entity` takes that token as `cascadeToken` and refuses it if the list has changed since — so a record created after you looked cannot be deleted by a decision taken before it existed |
-| `graph_merge` | Merge two entities — relink all references and resolve per-property conflicts |
+| `graph_merge` | Merge two entities — relink all references and resolve per-property conflicts, in one transaction. An unresolved conflict plan comes back as an error result (`422` on `POST /api/graph_merge`; the REST merge route answers the same plan `409`). Refused before anything is written: `422 merge_too_large` past the merge bound — the absorbed entity's edges, links and face labels together, stated in [04b](04b-graph-api.md#merge-two-entities) — with `relinks` and `bound` in `structuredContent`, `400` when the merged survivor would break a `strict` space's schema |
 | `save_edge` | Create or update a directed relationship |
 | `update_edge` | Update an existing edge by ID (label, type, weight, description, tags, properties, `suppressEmbeddings`); supports `deleteFields` for field removal |
 | `delete_edge` | Delete an edge by ID |

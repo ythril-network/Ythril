@@ -7,9 +7,9 @@
 import { Router } from 'express';
 import { requireAdmin } from '../../auth/middleware.js';
 import { globalRateLimit } from '../../rate-limit/middleware.js';
-import { log } from '../../util/log.js';
 import { AddMemberBody, SigningKeyBody, addMemberAct, removeMemberAct, setSigningKeyAct, acceptIntroductionAct } from '../../networks/member-acts.js';
 import { sendAct } from './_shared.js';
+import { sendCaughtFailure } from '../send-failure.js';
 
 export const membersRouter = Router();
 
@@ -35,8 +35,7 @@ membersRouter.post('/:id/members', globalRateLimit, requireAdmin, async (req, re
     if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
     sendAct(res, await addMemberAct(String(req.params['id']), parsed.data));
   } catch (err) {
-    log.error(`POST /api/networks/:id/members: ${err}`);
-    res.status(500).json({ error: 'Internal error' });
+    sendCaughtFailure(res, `POST /api/networks/:id/members`, err);
   }
 });
 

@@ -25,7 +25,7 @@
  * gossip hands this every round the network ever held, so an old deletion re-applied to a space re-created under
  * the same name. `appliedHere` is local state — adopting or serving a round strips it.
  */
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
 import type { NetworkConfig, VoteRound } from '../config/types.js';
 import type { WipeCollectionType } from './lifecycle.js';
 import { roundSpaceLocalId } from '../sync/space-map.js';
@@ -71,7 +71,7 @@ export function applyConcludedSpaceRounds(net: NetworkConfig, rounds: readonly V
     if (round.concluded && round.passed && round.type === 'space_addition') {
       void import('../networks/network-spaces.js')
         .then(({ applySpaceAdditionRound }) => applySpaceAdditionRound(net, round, where))
-        .catch((err: unknown) => log.error(`space_addition side-effect (${where}): ${err}`));
+        .catch((err: unknown) => log.error(`space_addition side-effect (${peerText(where)}): ${peerText(err)}`));
     }
     const action = spaceRoundAction(net, round);
     if (!action) continue;
@@ -86,24 +86,24 @@ export function applyConcludedSpaceRounds(net: NetworkConfig, rounds: readonly V
         setImmediate(() => {
           void import('../config/loader.js').then(async ({ getConfig }) => {
             if (getConfig().networks.some(n => n.spaces.includes(action.localId))) {
-              log.info(`space_deletion round ${round.roundId} passed (${where}): '${action.localId}' is still in another network, kept until that round passes`);
+              log.info(`space_deletion round ${peerText(round.roundId)} passed (${peerText(where)}): '${peerText(action.localId)}' is still in another network, kept until that round passes`);
               return;
             }
             const { removeSpace } = await import('./lifecycle.js');
             await removeSpace(action.localId);
-            log.info(`space_deletion round ${round.roundId} passed (${where}): removed this instance's own '${action.localId}'`);
-          }).catch((err: unknown) => log.error(`space_deletion side-effect (${where}): ${err}`));
+            log.info(`space_deletion round ${peerText(round.roundId)} passed (${peerText(where)}): removed this instance's own '${peerText(action.localId)}'`);
+          }).catch((err: unknown) => log.error(`space_deletion side-effect (${peerText(where)}): ${peerText(err)}`));
         });
-      }).catch((err: unknown) => log.error(`space_deletion side-effect (${where}): ${err}`));
+      }).catch((err: unknown) => log.error(`space_deletion side-effect (${peerText(where)}): ${peerText(err)}`));
     } else {
       void import('./lifecycle.js').then(({ wipeSpace }) =>
         wipeSpace(action.localId, action.types)
           .then(r => log.info(
-            `space_wipe round ${round.roundId} passed (${where}): emptied '${action.localId}' — `
+            `space_wipe round ${peerText(round.roundId)} passed (${peerText(where)}): emptied '${peerText(action.localId)}' — `
             + `${r.facts} facts, ${r.entities} entities, ${r.edges} edges, ${r.chrono} chrono, ${r.files} files`,
           ))
-          .catch((err: unknown) => log.error(`space_wipe side-effect (${where}): ${err}`)),
-      ).catch((err: unknown) => log.error(`space_wipe import (${where}): ${err}`));
+          .catch((err: unknown) => log.error(`space_wipe side-effect (${peerText(where)}): ${peerText(err)}`)),
+      ).catch((err: unknown) => log.error(`space_wipe import (${peerText(where)}): ${peerText(err)}`));
     }
   }
 }

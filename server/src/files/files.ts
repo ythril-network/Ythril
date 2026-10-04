@@ -3,7 +3,7 @@ import path from 'path';
 import { createHash } from 'crypto';
 import { resolveSafePathChecked, spaceRoot } from './sandbox.js';
 import { hardenPath, mkdirPrivate } from '../util/fs-modes.js';
-import { readStored, writeStored, statStored, deleteStored, moveStored } from './stored-bytes.js';
+import { readStored, writeStored, statStored, moveStored } from './stored-bytes.js';
 import { assertSpaceTakesWrites } from '../spaces/space-write-gate.js';
 
 export interface FileEntry {
@@ -91,23 +91,6 @@ export async function listDir(spaceId: string, dirPath: string): Promise<FileEnt
     }
   }
   return result;
-}
-
-/** Delete a file (not a directory) */
-export async function deleteFile(spaceId: string, filePath: string): Promise<void> {
-  const abs = await resolveSafePathChecked(spaceId, filePath);
-  await deleteStored(abs);   // under the path lock, so a rewrite in flight cannot bring it back (F-43)
-}
-
-/** True if a regular file exists at the given space-relative path. */
-export async function fileExists(spaceId: string, filePath: string): Promise<boolean> {
-  try {
-    const abs = await resolveSafePathChecked(spaceId, filePath);
-    const st = await fs.stat(abs);
-    return st.isFile();
-  } catch {
-    return false;
-  }
 }
 
 /** Create a directory (including parents) */

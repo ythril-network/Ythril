@@ -30,7 +30,8 @@
  *     one delete per target collection and issuer — a page costs the same whatever its size.
  *  6. **The counter**, after the write whatever became of it, awaited, over every ADMITTED seq (a tombstone
  *     refused on authorship still tells us where that peer's clock is). A counter that could not move fails the
- *     call when nothing else did (`TombstoneCounterError`); under an apply error it is logged and the apply error
+ *     call when nothing else did (`CounterBehindError`, `sync/counter-after-page.ts` — the one post-step every page
+ *     door ends with); under an apply error it is logged and the apply error
  *     is the one thrown. Why a tombstone moves the counter at all, in `bumpSeq`'s own words — "future local writes
  *     always get a seq higher than any document received from this peer":
  *
@@ -50,8 +51,8 @@ import { spaceCollection } from '../db/space-collection.js';
 import { readStoredById } from '../db/read-by-id.js';
 import { TOMBSTONE_TYPES, TOMBSTONE_COLLECTION } from '../config/types.js';
 import type { TombstoneDoc } from '../config/types.js';
-import { bumpSeq } from '../util/seq.js';
-import { log, logSafe } from '../util/log.js';
+import { advanceCounterPast } from './counter-after-page.js';
+import { log, logSafe, peerList, peerText } from '../util/log.js';
 import { seqRefusal, arrivalId, warnArrivalsNotStored, type ArrivalRefusal } from './arrivals.js';
 import { retagToLocalSpace, tombstoneGoverns } from './upsert-plan.js';
 
@@ -96,7 +97,8 @@ export function admitTombstone(raw: unknown): TombstoneAdmission {
   if (typeof type === 'string' && !(TOMBSTONE_TYPES as readonly string[]).includes(type)) return { unknownType: type };
   const parsed = TombstoneShape.safeParse(raw);
   if (!parsed.success) {
-    const fields = [...new Set(parsed.error.issues.map(i => i.path.join('.') || '(element)'))].join(', ');
+    // A path names a peer's keys: bounded where the reason is built (`Q-270`).
+    const fields = peerList(new Set(parsed.error.issues.map(i => i.path.join('.') || '(element)')), ', ');
     return { refused: { _id: arrivalId(raw), reason: `not a tombstone (${fields})` } };
   }
   const t = parsed.data as TombstoneDoc;
@@ -117,17 +119,6 @@ export interface TombstoneApplyOutcome {
   /** The highest admitted seq — what the counter was advanced to at least. */
   maxSeq: number;
 }
-
-/** The counter could not be advanced past what a page delivered, and nothing else failed: the call must not succeed. */
-export class TombstoneCounterError extends Error {
-  constructor(readonly spaceId: string, readonly seq: number, readonly underlying: unknown) {
-    super(`the seq counter of space '${spaceId}' could not be advanced to ${seq}, past the tombstones a peer `
-      + `delivered: ${underlying instanceof Error ? underlying.message : String(underlying)}`);
-    this.name = 'TombstoneCounterError';
-  }
-}
-
-const messageOf = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
 /**
  * Apply a page of tombstones a peer delivered, to the space the door ADMITTED — see the module docblock.
@@ -154,7 +145,7 @@ export async function applyPeerTombstones(
   }
   if (out.unknownTypes.length > 0) {
     log.warn(`${logSafe(where)}: a page carried tombstone type(s) this instance does not know `
-      + `(${[...new Set(out.unknownTypes)].slice(0, 5).map(logSafe).join(', ')}) for space '${localSpaceId}' — nothing `
+      + `(${peerList(new Set(out.unknownTypes), ', ', { count: 5 })}) for space '${peerText(localSpaceId)}' — nothing `
       + 'of it was applied, so the sender holds it and re-sends once this instance knows the type.');
     return out;
   }
@@ -185,13 +176,14 @@ export async function applyPeerTombstones(
         const authorised = auth.trustedRelay === true
           || (auth.peerInstanceId !== undefined && auth.peerInstanceId === issuer);
         if (!authorised) {
-          out.declined.push({ _id: t._id, reason: `issuer '${issuer}' is not the delivering peer `
-            + `'${auth.peerInstanceId ?? '-'}' — possible cross-instance delete forgery` });
+          // Both ids are text a peer chose: bounded where the reason is built (`Q-270`).
+          out.declined.push({ _id: t._id, reason: `issuer '${peerText(issuer)}' is not the delivering peer `
+            + `'${peerText(auth.peerInstanceId ?? '-')}' — possible cross-instance delete forgery` });
           continue;
         }
         const author = targets.get(t._id)?.author?.instanceId;
         if (!tombstoneGoverns(issuer, author)) {
-          out.declined.push({ _id: t._id, reason: `the record here was written by '${author}', not by the issuer '${issuer}'` });
+          out.declined.push({ _id: t._id, reason: `the record here was written by '${peerText(author)}', not by the issuer '${peerText(issuer)}'` });
           continue;
         }
         store.push(t);
@@ -221,16 +213,10 @@ export async function applyPeerTombstones(
   }
 
   // Step 6, after the write whatever became of it: a page that half-landed must not leave the counter behind it.
-  if (out.maxSeq > 0) {
-    try {
-      await bumpSeq(localSpaceId, out.maxSeq);
-    } catch (bumpErr) {
-      if (!failed) throw new TombstoneCounterError(localSpaceId, out.maxSeq, bumpErr);
-      log.error(`${logSafe(where)}: the seq counter of space '${localSpaceId}' could not be advanced to ${out.maxSeq} `
-        + `either (${logSafe(messageOf(bumpErr))}); the apply's own failure is the one reported.`);
-    }
-  }
+  // The apply's own failure is the one thrown; a counter left behind fails the call only when nothing else did.
+  const behind = await advanceCounterPast(localSpaceId, out.maxSeq, where);
   warnArrivalsNotStored(where, localSpaceId, 'tombstone', 'refused', [...out.refused, ...out.declined]);
   if (failed) throw failure;
+  if (behind) throw behind;
   return out;
 }

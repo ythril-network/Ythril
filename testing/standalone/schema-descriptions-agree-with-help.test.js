@@ -26,6 +26,7 @@
  */
 import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
+import { schemaDescriptions } from './_schema-descriptions.mjs';
 
 let ALL_TOOLS, helpSections;
 
@@ -35,16 +36,8 @@ const schemas = {
 };
 
 /** Every description string in a tool's schema, flattened. */
-function descriptionsOf(tool) {
-  const out = [];
-  const walk = (node) => {
-    if (!node || typeof node !== 'object') return;
-    if (typeof node.description === 'string') out.push(node.description);
-    for (const v of Object.values(node)) if (v && typeof v === 'object') walk(v);
-  };
-  walk(tool.inputSchema(schemas));
-  return out;
-}
+/** Every description in a tool's schema — the shared walk (`_schema-descriptions.mjs`, bundle-30 I6 T7). */
+const descriptionsOf = (tool) => schemaDescriptions(tool.inputSchema(schemas));
 
 before(async () => {
   ALL_TOOLS = (await import('../../server/dist/mcp/tools/index.js')).ALL_TOOLS;

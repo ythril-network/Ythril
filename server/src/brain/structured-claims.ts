@@ -32,7 +32,7 @@
  * something the nightly scan then never flagged (or the reverse), which is the sort of inconsistency nobody
  * reports as a bug and everybody stops trusting.
  */
-import { col, asFilter } from '../db/mongo.js';
+import { readStoredById } from '../db/read-by-id.js';
 import { RECORD_COLLECTION as COLLECTION_SUFFIX } from '../config/types.js';
 
 /** A record's single-valued claims, keyed by field name. */
@@ -94,14 +94,12 @@ export async function fetchStructuredClaims(
   const suffix = (COLLECTION_SUFFIX as Record<string, string | undefined>)[type];
   if (!suffix || ids.length === 0) return out;
 
-  const projection: Record<string, number> = { _id: 1, properties: 1 };
-  for (const f of extraClaimFields(type)) projection[f] = 1;
+  const fields: Record<string, 1> = { properties: 1 };
+  for (const f of extraClaimFields(type)) fields[f] = 1;
 
   try {
-    const docs = await col<{ _id: string }>(`${spaceId}_${suffix}`)
-      .find(asFilter<{ _id: string }>({ _id: { $in: ids } }), { projection })
-      .toArray() as Array<{ _id: string } & Record<string, unknown>>;
-    for (const d of docs) out.set(d._id, structuredClaims(type, d as { properties?: ClaimMap } & Record<string, unknown>));
+    const docs = await readStoredById<{ properties?: ClaimMap } & Record<string, unknown>>(`${spaceId}_${suffix}`, ids, fields);
+    for (const [id, d] of docs) out.set(id, structuredClaims(type, d));
   } catch { /* best-effort — an unjudged pair is recoverable, a failed write is not */ }
   return out;
 }

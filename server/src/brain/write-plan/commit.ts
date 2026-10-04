@@ -17,8 +17,9 @@
  *
  * A record that is stored and reported as failed is invited to be resent, and a resend without an id
  * duplicates it. So a failure past the first write becomes an item outcome or a warning, and the caller is told
- * what actually happened. A failure BEFORE anything landed (the seq block itself) still throws: nothing was
- * written and there is nothing to report but the error.
+ * what actually happened. A failure BEFORE anything landed (the seq block itself, or a stage's write that the
+ * write bound ended) still throws: nothing is known written and there is nothing to report but the error — for a
+ * timeout, the store-timeout every door answers 503 for.
  *
  * ## What it is not
  *
@@ -33,11 +34,13 @@ import { withAllocatedSeqs } from '../../util/seq.js';
 import { inChunks } from '../../util/chunks.js';
 import { readStoredById, READ_CHUNK } from '../../db/read-by-id.js';
 import { mapLimit } from '../../util/map-limit.js';
-import { log } from '../../util/log.js';
+import { log, peerText } from '../../util/log.js';
 import { bulkWriteFailures, phraseWriteFailure, DUPLICATE_KEY } from '../../db/write-errors.js';
+import { isWriteTimeout } from '../../db/write-timeout.js';
+import { writeFilterFor } from '../write-precondition.js';
 import { enqueueWriteEmbedJobs, EMBED_PRIORITY } from '../embed-queue.js';
 import { linkIdFor } from '../link-id.js';
-import { tombstoneDoc } from '../tombstones.js';
+import { writeTombstones } from '../tombstones.js';
 import type { AuthorRef, LinkDoc, TombstoneDoc } from '../../config/types.js';
 import type { RefKind } from '../../config/types-knowledge.js';
 import type { DesiredLinks } from '../links.js';
@@ -94,17 +97,24 @@ async function writeStage(
         const res = await coll.bulkWrite(asBulk(ready.map((i, k) => opFor(plans[i]!, block + k))), { ordered: false });
         matched = res.matchedCount;
       } catch (err) {
+        /*
+         * A write the bound ENDED is the store's failure, not an item's: rethrown, so the door answers the
+         * store-timeout 503 every door answers (`brain/store-failure.ts`) rather than "did not complete" per item.
+         * Only while nothing of this request has landed — after that the module's promise below wins (a stored
+         * record reported failed invites a duplicating resend), so the stage is read back as any ambiguous one.
+         */
+        if (isWriteTimeout(err) && !somethingLanded) throw err;
         failures = bulkWriteFailures(err);
         if (!failures) ambiguous = true;
-        log.warn(`write commit: the ${kind} write to '${spaceId}' reported a failure: `
+        log.warn(`write commit: the ${kind} write to '${peerText(spaceId)}' reported a failure: `
           + `${failures ? `${failures.length} item(s)` : 'no per-item detail'}`);
       }
-    });
+    }, `write.${kind}`);
   } catch (err) {
-    // The seq block itself failed: nothing of this stage was written.
+    // The seq block itself failed, or its write timed out: nothing of this stage is known to be written.
     if (!somethingLanded) throw err;
     for (const i of ready) outcomes[i] = { ok: false, reason: phraseWriteFailure(undefined) };
-    log.warn(`write commit: the ${kind} stage for '${spaceId}' could not start after earlier stages landed: ${String(err)}`);
+    log.warn(`write commit: the ${kind} stage for '${peerText(spaceId)}' could not start after earlier stages landed: ${peerText(String(err))}`);
     return [];
   }
 
@@ -144,9 +154,9 @@ async function writeStage(
 /** The driver operation for one plan, stamped with its seq. */
 function opFor(plan: WritePlan, seq: number): object {
   if (plan.op === 'insert') return { insertOne: { document: { ...plan.doc, seq } } };
-  const filter = plan.expectSeq === undefined ? { _id: plan.id }
-    : plan.expectSeq === null ? { _id: plan.id, seq: { $exists: false } }
-      : { _id: plan.id, seq: plan.expectSeq };
+  // A converge lands only on the version it planned against; any other plan, unconditionally — the one filter
+  // every update writes through (`writeFilterFor`, over `atReadSeq`).
+  const filter = writeFilterFor(plan.id, plan.expectSeq);
   const update: Record<string, unknown> = { $set: { ...plan.set, seq } };
   if (plan.unset && Object.keys(plan.unset).length > 0) update['$unset'] = plan.unset;
   return { updateOne: { filter, update } };
@@ -175,15 +185,15 @@ async function afterStage(
     } catch (err) {
       // The records are stored, so their outcomes stay `ok`: reporting them failed would invite a resend that
       // duplicates. What did not land is the links, and this is what says so.
-      log.warn(`write commit: ${withLinks.length} record(s) in '${spaceId}' were written but their link rows were not: `
-        + `${err instanceof Error ? err.message : String(err)}. Re-sending the same write (with its id) repairs them.`);
+      log.warn(`write commit: ${withLinks.length} record(s) in '${peerText(spaceId)}' were written but their link rows were not: `
+        + `${peerText(err)}. Re-sending the same write (with its id) repairs them.`);
     }
   }
   const toQueue = landed.filter(i => plans[i]!.enqueue).map(i => ({ recordType: plans[i]!.kind, recordId: plans[i]!.id }));
   // The write lane never throws by contract; this holds the commit to its own promise whatever the lane does.
   if (toQueue.length > 0) {
     await enqueueWriteEmbedJobs(spaceId, toQueue, { priority: EMBED_PRIORITY.write }).catch((err: unknown) => {
-      log.warn(`write commit: ${toQueue.length} record(s) in '${spaceId}' were written but not queued for embedding: ${String(err)}`);
+      log.warn(`write commit: ${toQueue.length} record(s) in '${peerText(spaceId)}' were written but not queued for embedding: ${peerText(String(err))}`);
     });
   }
 }
@@ -236,16 +246,20 @@ export async function reconcileLinkRows(
 
   const linksColl = col<LinkDoc>(spaceCollection(spaceId, 'links'));
   const existingBy = records.map(() => [] as string[]);
+  const seqOfExisting = new Map<string, number | undefined>();
   const toRead = records.map((r, i) => ({ r, i })).filter(({ r }) => !r.minted && Object.keys(r.desired).length > 0);
   for (const chunk of inChunks(toRead, READ_CHUNK)) {
     const rows = await linksColl.find(asFilter<LinkDoc>({
       spaceId,
       // Only the classes each write TOUCHED: a patch naming `linkEntities` alone must not disturb fact links.
       $or: chunk.map(({ r }) => ({ from: r.from, fromKind: r.fromKind, toKind: { $in: Object.keys(r.desired) } })),
-    }), { projection: { _id: 1, from: 1, fromKind: 1, toKind: 1 } }).toArray() as Array<Pick<LinkDoc, '_id' | 'from' | 'fromKind' | 'toKind'>>;
+    }), { projection: { _id: 1, from: 1, fromKind: 1, toKind: 1, seq: 1 } }).toArray() as Array<Pick<LinkDoc, '_id' | 'from' | 'fromKind' | 'toKind' | 'seq'>>;
     for (const { r, i } of chunk) {
       const classes = new Set(Object.keys(r.desired));
-      existingBy[i] = rows.filter(row => row.from === r.from && row.fromKind === r.fromKind && classes.has(row.toKind)).map(row => row._id);
+      const mine = rows.filter(row => row.from === r.from && row.fromKind === r.fromKind && classes.has(row.toKind));
+      existingBy[i] = mine.map(row => row._id);
+      // The seq each row has, so the tombstone of one this reconcile removes carries it (`writeTombstones`).
+      for (const row of mine) seqOfExisting.set(row._id, row.seq);
     }
   }
 
@@ -263,12 +277,9 @@ export async function reconcileLinkRows(
   const tombstones = col<TombstoneDoc>(spaceCollection(spaceId, 'tombstones'));
   const now = new Date().toISOString();
   if (removals.length > 0) {
-    await withAllocatedSeqs(spaceId, removals.length, async (first) => {
-      await linksColl.deleteMany(asFilter<LinkDoc>({ _id: { $in: removals }, spaceId }));
-      await tombstones.bulkWrite(asBulk(removals.map((_id, i) => ({
-        replaceOne: { filter: { _id }, replacement: tombstoneDoc(spaceId, first + i, { _id, type: 'link', deletedAt: now }), upsert: true },
-      }))), { ordered: false });
-    });
+    // The rows go, then their tombstones — one seq block taken at their write, each carrying the row's seq.
+    await linksColl.deleteMany(asFilter<LinkDoc>({ _id: { $in: removals }, spaceId }));
+    await writeTombstones(spaceId, removals.map(_id => ({ _id, type: 'link', deletedAt: now, originalSeq: seqOfExisting.get(_id) })));
   }
   if (additions.length > 0) {
     await withAllocatedSeqs(spaceId, additions.length, async (first) => {
@@ -283,7 +294,7 @@ export async function reconcileLinkRows(
         },
       }))), { ordered: false });
       await tombstones.deleteMany(asFilter<TombstoneDoc>({ _id: { $in: additions.map(a => a._id) } }));
-    });
+    }, 'link.reconcile.add');
   }
   return counts;
 }

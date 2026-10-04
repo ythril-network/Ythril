@@ -13,6 +13,7 @@ import { normaliseProjection, toMongoProjection } from './projection.js';
 import { sanitizeFilter, type CallerCheckedFilter } from './filter-sanitizer.js';
 import { CONVENIENCE_KEYS } from './list-conveniences.js';
 import { UNSUPPORTED_PAGE_PARAMS } from '../util/pagination.js';
+import { peerList, peerText, NAME_QUOTED } from '../util/log.js';
 
 /*
  * Re-exported, not re-implemented. Several callers and gates import `sanitizeFilter` from here because this
@@ -149,6 +150,9 @@ export const FIND_SIMILAR_BODY_FIELDS: ReadonlySet<string> = new Set([
  * zero. `unrecognized_keys` matches the shape the spaces routes already return, so a client that already handles that
  * one needs no new branch.
  */
+/** How many unknown keys a refusal names (and lists in `unrecognized_keys`); the rest are counted in the text. */
+const UNKNOWN_NAMED = 10;
+
 export function unknownBodyFields(
   body: Record<string, unknown>,
   allowed: ReadonlySet<string>,
@@ -168,9 +172,11 @@ export function unknownBodyFields(
   const aliases = unknown.filter(k => k in UNSUPPORTED_PAGE_PARAMS)
     .map(k => `'${k}' is not a parameter of this endpoint — use '${UNSUPPORTED_PAGE_PARAMS[k]}'`);
   return {
-    error: [...aliases, `Unknown field(s): ${unknown.join(', ')}. Allowed: ${[...allowed].join(', ')}`]
-      .join('; '),
-    unrecognized_keys: unknown,
+    // The caller's keys through the one renderer (`peerList`, each cut at `NAME_QUOTED`) — the MCP validator quotes
+    // an unknown property by the same bound (bundle-30 I6, C18); a key echoed whole could be any size the body was.
+    error: [...aliases, `Unknown field(s): ${peerList(unknown, ', ', { count: UNKNOWN_NAMED, each: NAME_QUOTED })}. `
+      + `Allowed: ${[...allowed].join(', ')}`].join('; '),
+    unrecognized_keys: unknown.slice(0, UNKNOWN_NAMED).map(k => peerText(k, { max: NAME_QUOTED })),
   };
 }
 

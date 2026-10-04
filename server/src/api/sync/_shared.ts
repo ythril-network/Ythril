@@ -1,122 +1,22 @@
 /**
  * Shared machinery for the /api/sync sub-routers: the incoming-document schemas, peer/space
- * authorisation, cursor codec, fork-depth and implausible-seq guards, and the strict-linkage
- * violation recorders.
+ * authorisation, cursor codec, and the fork-depth and implausible-seq guards.
  */
 import { z } from 'zod';
-import { v4 as uuidv4 } from 'uuid';
-import { col, asFilter, asDoc, asUpdate } from '../../db/mongo.js';
 import { getConfig } from '../../config/loader.js';
 import { reachesSpace } from '../../auth/space-reach.js';
 import { isInstanceAdmin } from '../../auth/instance-admin.js';
 import { REF_KINDS } from '../../config/types-knowledge.js';
 import type { KnowledgeType } from '../../config/types-knowledge.js';
-import { enqueueIngestedRecord } from '../../brain/embed-queue.js';
-import { isWellFormedRef, collectionForRefKind, edgeEndpointKind } from '../../brain/entity-refs.js';
 import type { TokenRights } from '../../config/rights-shape.js';
-import { log } from '../../util/log.js';
 import { MAX_SYNC_SEQ } from '../../util/seq.js';
-import { isStrictLinkage } from '../../spaces/proxy.js';
 import type { FileMetaDoc, AuthorRef } from '../../config/types.js';
-import { emitWebhookEvent } from '../../webhooks/dispatcher.js';
-import { spillIdFromPath } from '../../brain/spill-path.js';
-import type { EdgeDoc, LinkViolationDoc } from '../../config/types.js';
+import { LOCAL_ONLY_FIELDS } from '../../sync/local-only-fields.js';
 
-export const UUID_V4_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
-
-
-/**
- * Record a link violation detected during sync ingest.
- * Fire-and-forget: violations are informational, never block sync.
+/*
+ * What a landed edge or link points at that is not here is `sync/linkage-check.ts`'s question (bundle-30 I8): checked
+ * once a transfer is whole, and recorded once per dangling end.
  */
-export async function recordLinkViolation(
-  spaceId: string,
-  docId: string,
-  docType: LinkViolationDoc['docType'],
-  field: string,
-  reason: string,
-  peerInstanceId: string,
-): Promise<void> {
-  try {
-    const doc: LinkViolationDoc = {
-      _id: uuidv4(),
-      spaceId,
-      docId,
-      docType,
-      field,
-      reason,
-      peerInstanceId,
-      detectedAt: new Date().toISOString(),
-    };
-    await col<LinkViolationDoc>(spaceCollection(spaceId, 'linkViolations')).insertOne(asDoc<LinkViolationDoc>(doc));
-    emitWebhookEvent({ event: 'link_violation.created', spaceId, entry: doc as unknown as Record<string, unknown> });
-  } catch (err) {
-    log.error(`Failed to record link violation for ${docType} ${docId}: ${err}`);
-  }
-}
-
-/**
- * Validate an edge's from/to references against strict linkage rules.
- * Records violations but never blocks the ingest.
- *
- * Each endpoint is checked against the kind it DECLARES, with shape and collection taken from
- * `brain/entity-refs.ts` — assuming entity would record a legitimate file endpoint as two violations.
- */
-export async function checkEdgeLinkViolations(
-  spaceId: string,
-  edge: EdgeDoc,
-  peerInstanceId: string,
-): Promise<void> {
-  if (!isStrictLinkage(spaceId)) return;
-
-  for (const field of ['from', 'to'] as const) {
-    const val = edge[field];
-    const kind = edgeEndpointKind(field === 'from' ? edge.fromKind : edge.toKind);
-    if (!isWellFormedRef(kind, val)) {
-      await recordLinkViolation(spaceId, edge._id, 'edge', field,
-        `${field} '${val}' is not a valid ${kind} reference`, peerInstanceId);
-    } else {
-      const coll = `${spaceId}_${collectionForRefKind(kind)}`;
-      const exists = await col<{ _id: string }>(coll).findOne(asFilter<{ _id: string }>({ _id: val }));
-      if (!exists) {
-        await recordLinkViolation(spaceId, edge._id, 'edge', field,
-          `${field} references non-existent ${kind} '${val}'`, peerInstanceId);
-      }
-    }
-  }
-}
-
-/**
- * Record what an arriving LINK points at that is not there.
- *
- * It only RECORDS, never throws: sync ingest is validated, counted and let in, and a refusal would hold
- * the watermark and stop the channel. An operator reads an empty violation list as "all fine", so every
- * `fromKind` is checked — no narrowing to a list of kinds here.
- *
- * A file is keyed by its path, not a UUID, so the UUID check skips `file` targets; otherwise every
- * legitimate file reference would be logged as malformed.
- */
-export async function checkLinkViolations(
-  spaceId: string,
-  link: { _id: string; from: string; fromKind: RefKind; to: string; toKind: string } | undefined,
-  peerInstanceId: string,
-): Promise<void> {
-  if (!isStrictLinkage(spaceId) || !link) return;
-
-  const field = `${link.fromKind}.${link.toKind}`;
-  if (link.toKind !== 'file' && !UUID_V4_RE.test(link.to)) {
-    await recordLinkViolation(spaceId, link.from, link.fromKind, field,
-      `${field} contains non-UUID value '${link.to}'`, peerInstanceId);
-    return;
-  }
-  const coll = `${spaceId}_${collectionForRefKind(link.toKind as RefKind)}`;
-  const exists = await col<{ _id: string }>(coll).findOne(asFilter<{ _id: string }>({ _id: link.to }));
-  if (!exists) {
-    await recordLinkViolation(spaceId, link.from, link.fromKind, field,
-      `${field} references non-existent ${link.toKind} '${link.to}'`, peerInstanceId);
-  }
-}
 
 /*
  * An arriving brain document is written by `writeArrivals` (`sync/arrivals.ts`, `Q-107` part 1), which replaced
@@ -128,19 +28,17 @@ export async function checkLinkViolations(
 
 /**
  * Maximum chain depth for forkOf links — prevents a "fork chain bomb" of repeated equal-seq docs with
- * different content. Enforced twice, on both push doors: chain depth (walk forkOf upward) and sibling fan-out
+ * different content. Enforced twice, on every door (push and pull): chain depth (walk forkOf upward) and sibling fan-out
  * (count forks of the same parent, the ones a page is creating included). Defined beside the planner that
- * enforces it (`planPushArrivals`, `sync/upsert-plan.ts`) and re-exported here for the routes and their tests.
+ * enforces it (`planArrivals`, `sync/upsert-plan.ts`) and re-exported here for the routes and their tests.
  */
 export { MAX_FORK_DEPTH } from '../../sync/upsert-plan.js';
 
 // ── Incoming document schemas (Zod validation for peer-submitted docs) ─────
 
-import type { RefKind } from '../../config/types-knowledge.js';
 import { CHRONO_STATUSES } from '../../config/types.js';
 import { validateEntity, validateEdge, validateChrono, validateFact, getSpaceMeta, type SchemaViolation }
   from '../../spaces/schema-validation.js';
-import { spaceCollection } from '../../db/space-collection.js';
 import { MAX_FACT_LENGTH, MAX_TAGS } from '../../util/request-bounds.js';
 
 export const AuthorRefSchema = z.object({
@@ -204,51 +102,12 @@ export const IncomingFileMetaDoc = z.object({
   parentFileId: z.never().optional(),
 }).strict();
 
-/**
- * Write an arriving file's metadata — a `$set` of the authored keys, NOT a whole-document replace, or the
- * receiver would report the SENDER's size and hash for bytes it derived itself, with no vector.
- *
- * `$set`, never `$unset`: an omitted key is left alone, so an older peer cannot erase a field it does
- * not know.
- *
- * Embedding is enqueued only when this instance HOLDS the blob; metadata can arrive first, and the bytes,
- * pulled or pushed, enqueue it via `recordArrivedFile` when they land.
- *
- * Reached only through `writeArrivals` (`sync/arrivals.ts`), which shape-checks, collapses, accepts by seq,
- * stamps retention, and bumps the counter after the merge. The merge stays per document until `Q-107` part 2.
+/*
+ * An arriving file's metadata is written by the arrival writer's files branch (`sync/arrivals.ts`, `Q-107` part 2):
+ * a page of guarded `$set` upserts built by `sync/file-meta-write.ts`. `ingestFileMeta`, its per-document
+ * predecessor, filtered on `_id` alone, so a newer copy written between the accept read and the merge was
+ * overwritten by an older one.
  */
-export async function ingestFileMeta(
-  spaceId: string,
-  incoming: z.infer<typeof IncomingFileMetaDoc>,
-  /**
-   * An admin RESTORE queues the file whether or not its blob is here — the export carries no bytes, and the
-   * restore's promise is "search comes back on its own". This function is the one place a merged file is queued,
-   * so the writer never queues one beside it.
-   */
-  { restore = false }: { restore?: boolean } = {},
-): Promise<boolean> {
-  // A legacy read spill (Q-92) is one caller's search result an older peer wrote into the space. It travels in
-  // neither direction now, and this is the one function both push and pull write file metadata through.
-  if (spillIdFromPath(String(incoming._id))) return false;
-  const $set: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(incoming)) {
-    if (v !== undefined) $set[k] = v;
-  }
-
-  const existing = await col<FileMetaDoc>(spaceCollection(spaceId, 'files'))
-    .findOne(asFilter<FileMetaDoc>({ _id: incoming._id }), { projection: { sha256: 1, sizeBytes: 1 } });
-
-  await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).updateOne(
-    asFilter<FileMetaDoc>({ _id: incoming._id }),
-    asUpdate<FileMetaDoc>({ $set }),
-    { upsert: true },
-  );
-  // No seq is noted here: the writer's counter bump after the merge is what makes the seq visible (`Q-107`).
-
-  const haveBytes = existing?.sha256 !== undefined || existing?.sizeBytes !== undefined;
-  if (haveBytes || restore) await enqueueIngestedRecord(spaceId, 'file', incoming);
-  return true;
-}
 
 export const IncomingEntityDoc = z.object({
   _id: z.string().min(1),
@@ -603,7 +462,7 @@ export function withSchemaViolations<T extends Record<string, unknown>>(
  * The stored record carries the local machinery too (`sizeBytes`, `sha256`, the vector and its model, `matchedText`,
  * `embeddingStatus`, `chunkCount`, `excerpt`). The push sent it whole and the receiver's STRICT schema refused it
  * whole, so a file's bytes replicated and its description and tags never did. The pull side handed the same record
- * straight to `ingestFileMeta`, which `$set`s every key, publishing the sender's size and hash for bytes this instance
+ * straight to the merge, which `$set` every key, publishing the sender's size and hash for bytes this instance
  * derived itself. Both ends go through this one function, and the key list is read from the schema, so a key added to
  * the schema travels and a key added to the document does not.
  */
@@ -611,4 +470,31 @@ const FILE_META_WIRE_KEYS = Object.keys(IncomingFileMetaDoc.shape);
 export function fileMetaForWire(doc: object): Record<string, unknown> {
   const src = doc as Record<string, unknown>;
   return Object.fromEntries(FILE_META_WIRE_KEYS.filter(k => src[k] !== undefined).map(k => [k, src[k]]));
+}
+
+/**
+ * Every key a stored file row carries that is NOT on the wire — the sender's own machinery, which a peer's
+ * `GET /filemeta` page serves (a 5.6 peer serves the stored row whole, less the local-only fields).
+ *
+ * Typed against `FileMetaDoc` minus the wire keys, so the COMPILER holds it complete: a key added to the document
+ * and to neither list fails the build rather than turning every pulled file into a strict-schema refusal. A chunk's
+ * `parentFileId` is a wire key (declared `never`), so it is not here and a pulled chunk is refused, never stripped
+ * into a top-level file.
+ */
+type FileMetaWireKey = keyof typeof IncomingFileMetaDoc.shape;
+const FILE_META_SENDER_KEYS: Readonly<Record<Exclude<keyof FileMetaDoc, FileMetaWireKey>, true>> = {
+  excerpt: true, matchedText: true, sizeBytes: true, sha256: true, deletedAt: true, embedding: true,
+  embeddingModel: true, chunkIndex: true, headingText: true, content: true, convertedFileId: true, chunkCount: true,
+  conversionError: true, mediaType: true, embeddingStatus: true, chunkOffsetMs: true, chunkDurationMs: true,
+  mediaJobError: true, faceEmbedding: true, faceEntityId: true, faceBbox: true, faceScore: true,
+};
+
+/**
+ * A file's metadata as a SENDER may serve it, with the sender's own machinery and every local-only field removed —
+ * what the receiver validates with the strict `IncomingFileMetaDoc` (`sync/arrival-shape.ts`, `Q-225`). A key that
+ * is neither a wire key nor a known part of a file row is kept, so the strict schema refuses it as it does on push.
+ */
+export function fileMetaFromSender(doc: object): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(doc as Record<string, unknown>)
+    .filter(([k]) => !Object.hasOwn(FILE_META_SENDER_KEYS, k) && !LOCAL_ONLY_FIELDS.has(k)));
 }

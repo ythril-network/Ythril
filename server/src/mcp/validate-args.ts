@@ -18,7 +18,8 @@ import type { ToolHandler, ToolSchemas } from './tools/types.js';
 import { materialisedSchema, toolSchemasFor } from './tool-schema.js';
 import { retiredWriteFieldHint } from '../brain/retired-write-fields.js';
 import { toolValidatorCacheTotal } from '../metrics/registry.js';
-import { log } from '../util/log.js';
+import { log, peerText, NAME_QUOTED } from '../util/log.js';
+import { LruMap } from '../util/lru-map.js';
 
 export interface ArgsValidator {
   /** The schemas `tools/list` advertises for this reach: the SAME objects this validator compiles from. */
@@ -61,7 +62,10 @@ export function makeArgsValidator(schemas: ToolSchemas, accessibleSpaceIds: read
       // every call on this reach, so any await between the call and this read would let an overlapping call
       // overwrite it.
       const detail = (validate.errors ?? []).slice(0, 6).map(e => {
-        const at = e.instancePath || '(arguments)';
+        // The path and an unknown property's name are the CALLER's keys: quoted through the one renderer, each cut at
+        // `NAME_QUOTED` — the bound REST's `unknownBodyFields` names them by (bundle-30 I6, C18). The count was
+        // bounded and the element was not, so one megabyte key came back whole.
+        const at = e.instancePath ? peerText(e.instancePath, { max: NAME_QUOTED }) : '(arguments)';
         const p = e.params as Record<string, unknown>;
         switch (e.keyword) {
           case 'additionalProperties': {
@@ -70,7 +74,7 @@ export function makeArgsValidator(schemas: ToolSchemas, accessibleSpaceIds: read
             // on the other, and which one a caller meets depends on the client they picked.
             const prop = String(p['additionalProperty']);
             const retired = retiredWriteFieldHint(prop);
-            return retired ?? `${at}: unexpected property '${prop}'`;
+            return retired ?? `${at}: unexpected property '${peerText(prop, { max: NAME_QUOTED })}'`;
           }
           case 'required':             return `(arguments): missing required property '${String(p['missingProperty'])}'`;
           case 'enum':                 return `${at}: ${e.message} (${(p['allowedValues'] as unknown[] ?? []).join(', ')})`;
@@ -87,7 +91,8 @@ export function makeArgsValidator(schemas: ToolSchemas, accessibleSpaceIds: read
 export const VALIDATOR_CACHE_LIMIT = 64;
 
 const SAFE_ID = /^[a-z0-9-]+$/;
-const entries = new Map<string, ArgsValidator>();
+// Dropping an entry is what frees its Ajv; the count of drops is what the bound costs.
+const entries = new LruMap<string, ArgsValidator>(VALIDATOR_CACHE_LIMIT, () => toolValidatorCacheTotal.inc({ result: 'evict' }));
 let warnedUnkeyable = false;
 
 /** `null` when any id is not a plain space id, so the caller takes the uncached path rather than use a key that could alias. */
@@ -139,21 +144,15 @@ export function validatorFor(accessibleSpaceIds: readonly string[]): ArgsValidat
     }
     return buildValidator(accessibleSpaceIds);
   }
+  // `get` makes the entry the most recently used (`util/lru-map.ts`).
   const hit = entries.get(key);
   if (hit) {
-    // Map order is insertion order, so delete + set moves the entry to most recently used.
-    entries.delete(key);
-    entries.set(key, hit);
     toolValidatorCacheTotal.inc({ result: 'hit' });
     return hit;
   }
   toolValidatorCacheTotal.inc({ result: 'miss' });
   const built = buildValidator(accessibleSpaceIds);
   entries.set(key, built);
-  if (entries.size > VALIDATOR_CACHE_LIMIT) {
-    entries.delete(entries.keys().next().value as string);
-    toolValidatorCacheTotal.inc({ result: 'evict' });
-  }
   return built;
 }
 

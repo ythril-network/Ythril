@@ -12,8 +12,8 @@ import path from 'path';
 import { toDocId } from '../../util/paths.js';
 import { escapeRegex } from '../../util/redos.js';
 import { authorRef } from '../../config/author.js';
-import fs from 'fs/promises';
 import { removeTree } from '../remove-tree.js';
+import { bytesPresent } from '../stored-bytes.js';
 import { UnstructuredConverter } from './unstructured.js';
 import type { ExtractedImage } from './unstructured.js';
 import { HtmlConverter } from './html.js';
@@ -32,7 +32,7 @@ import { getConfig, getDocumentProcessingConfig, getEmbeddingConfig } from '../.
 import { vlmExtractDocument } from './vlm-extract.js';
 import type { FileMetaDoc, DocExtractionMode, TextLevel } from '../../config/types.js';
 import type { StepProgress } from './types.js';
-import { log } from '../../util/log.js';
+import { log, peerText } from '../../util/log.js';
 import { enqueueMediaJob } from '../media/job-queue.js';
 import { embedConcurrency } from './embed-concurrency.js';
 import { JobLeaseLostError, isLeaseLost, shouldHeartbeat, writeUnderClaim, type JobClaim } from '../media/lease.js';
@@ -515,7 +515,14 @@ export async function storeConversionResults(
     // The sidecar FILES were written before the commit, so a refused commit can leave them at a path whose file has
     // gone — moved or deleted mid-run — where sync would advertise them for ever. Only when the file is gone: under a
     // claim lost to stall recovery the file is still there, and the same paths now belong to the run that replaced us.
-    const sourceGone = await resolveSafePathChecked(spaceId, originalId).then(p => fs.stat(p)).then(() => false, () => true);
+    // Gone means the path does not exist (`bytesPresent`). A failure to look is NOT gone: it keeps the sidecars, which
+    // is what every case but a deleted source wants (preship-4 P4-5).
+    let sourceGone = false;
+    try {
+      sourceGone = !(await bytesPresent(await resolveSafePathChecked(spaceId, originalId)));
+    } catch (lookErr) {
+      log.warn(`Could not tell whether ${peerText(spaceId)}/${peerText(originalId)} is still here; its sidecars are kept: ${peerText(lookErr)}`);
+    }
     if (isLeaseLost(err) && sourceGone && (convertedFileId || extractedImages.length > 0)) {
       await rmArtifactPath(spaceId, `_converted/${originalId}.md`);
       await rmArtifactPath(spaceId, `_extracted/${originalId}`);
@@ -538,7 +545,7 @@ async function rmArtifactPath(spaceId: string, relPath: string): Promise<void> {
     const abs = await resolveSafePathChecked(spaceId, relPath);
     await removeTree(abs);
   } catch (err) {
-    log.warn(`Failed to remove conversion artifact path ${spaceId}/${relPath}: ${err instanceof Error ? err.message : String(err)}`);
+    log.warn(`Failed to remove conversion artifact path ${peerText(spaceId)}/${peerText(relPath)}: ${peerText(err)}`);
   }
 }
 
@@ -563,7 +570,7 @@ export async function deleteConversionArtifacts(
   await rmArtifactPath(spaceId, `_converted/${originalId}.md`);
   await rmArtifactPath(spaceId, `_extracted/${originalId}`);
 
-  log.info(`Deleted conversion artifacts for ${spaceId}/${originalId}`);
+  log.info(`Deleted conversion artifacts for ${peerText(spaceId)}/${peerText(originalId)}`);
 }
 
 /**

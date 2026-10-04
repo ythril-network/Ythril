@@ -35,6 +35,7 @@ import { testConnection } from '../db/conn-test.js';
 import { isSsrfSafeMongoUri } from '../util/ssrf.js';
 import { log } from '../util/log.js';
 import { mapLimit } from '../util/map-limit.js';
+import { sendCaughtFailure } from './send-failure.js';
 
 export const dataRouter = Router();
 
@@ -144,8 +145,7 @@ dataRouter.get('/config', (_req, res) => {
     const migrationEnabled = isDbMigrationEnabled();
     res.json({ source, mongoUriRedacted, migrationEnabled });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    res.status(500).json({ error: msg });
+    sendCaughtFailure(res, 'GET /api/admin/data/config', err, { error: err instanceof Error ? err.message : String(err) });
   }
 });
 
@@ -162,6 +162,11 @@ dataRouter.post('/config/test', requireAdminMfa, async (req, res) => {
     const result = await testConnection(validation.uri);
     res.json(result);
   } catch (err) {
+    /*
+     * NOT `sendCaughtFailure`, deliberately: the store this answers about is the CANDIDATE the operator is testing,
+     * not this instance's own. A driver failure here is the answer they asked for — read as our store failing, it
+     * would be a 503 telling them to retry a URI that will never connect (bundle-30 I12).
+     */
     const msg = err instanceof Error ? err.message : String(err);
     res.status(500).json({ error: msg });
   }
@@ -207,9 +212,7 @@ dataRouter.post('/backup', requireAdminMfa, async (_req, res) => {
       ...(result.offsite ? { offsite: result.offsite } : {}),
     });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    log.error(`POST /api/admin/data/backup: ${err}`);
-    res.status(500).json({ error: msg });
+    sendCaughtFailure(res, `POST /api/admin/data/backup`, err, { error: err instanceof Error ? err.message : String(err) });
   }
 });
 
@@ -220,8 +223,7 @@ dataRouter.get('/backups', (_req, res) => {
     const backups = listBackups();
     res.json({ backups });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    res.status(500).json({ error: msg });
+    sendCaughtFailure(res, 'GET /api/admin/data/backups', err, { error: err instanceof Error ? err.message : String(err) });
   }
 });
 
@@ -354,8 +356,7 @@ dataRouter.put('/backup-config', requireAdminMfa, (req, res) => {
     startBackupScheduler();
     res.json({ ok: true, config: cfg });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    res.status(500).json({ error: msg });
+    sendCaughtFailure(res, 'PUT /api/admin/data/backup-config', err, { error: err instanceof Error ? err.message : String(err) });
   }
 });
 
@@ -424,9 +425,7 @@ dataRouter.post('/restore', requireAdminMfa, async (req, res) => {
     }
     res.json({ ok: true, vectorIndexes: { rebuilding: rebuilt, failed } });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    log.error(`POST /api/admin/data/restore: ${err}`);
-    res.status(500).json({ error: msg });
+    sendCaughtFailure(res, `POST /api/admin/data/restore`, err, { error: err instanceof Error ? err.message : String(err) });
   } finally {
     setMaintenanceActive(wasMaintenance);
   }
@@ -538,8 +537,6 @@ dataRouter.post('/migrate', requireAdminMfa, async (req, res) => {
     setMaintenanceActive(false);
     // If the marker was written before the error, clean it up
     try { if (fs.existsSync(migrationMarkerPath())) fs.unlinkSync(migrationMarkerPath()); } catch { /* best-effort */ }
-    const msg = err instanceof Error ? err.message : String(err);
-    log.error(`POST /api/admin/data/migrate: ${err}`);
-    res.status(500).json({ error: msg });
+    sendCaughtFailure(res, `POST /api/admin/data/migrate`, err, { error: err instanceof Error ? err.message : String(err) });
   }
 });

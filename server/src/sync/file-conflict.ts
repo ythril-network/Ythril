@@ -92,7 +92,17 @@ export function decideFilePush(
 const CONFLICT_COPY = /_\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z_[A-Za-z0-9_-]{1,20}(\.[^/]*)?$/;
 const SCHEMA_SNAPSHOT = /^schemas\/[a-z0-9][a-z0-9-]*_(entity|fact|edge|chrono)_[A-Za-z0-9_-]+\.json$/;
 export function isInstanceLocalFile(relPath: string): boolean {
-  return CONFLICT_COPY.test(relPath) || SCHEMA_SNAPSHOT.test(relPath) || spillIdFromPath(relPath) !== null;
+  return CONFLICT_COPY.test(relPath) || SCHEMA_SNAPSHOT.test(relPath) || isLegacyReadSpill(relPath);
+}
+
+/**
+ * The spill half of `isInstanceLocalFile`, for the file-METADATA arrivals (the arrival writer and the stray drain):
+ * a legacy read spill's metadata is refused there as its bytes are here. Named for its question, so the three
+ * near-copies that spelled `spillIdFromPath` at a writer are one predicate (bundle-30 `R8`). Whether those arrivals
+ * should refuse a conflict copy's or a schema snapshot's metadata as well is a behaviour change, filed, not folded in.
+ */
+export function isLegacyReadSpill(relPath: string): boolean {
+  return spillIdFromPath(relPath) !== null;
 }
 
 export function safePeerLabel(label: string): string {

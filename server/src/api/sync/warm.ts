@@ -9,9 +9,10 @@ import { warmEmbeddingModel } from '../../brain/embedding.js';
 import { syncRateLimit } from '../../rate-limit/middleware.js';
 import { getConfig } from '../../config/loader.js';
 import { requireAuth } from '../../auth/middleware.js';
-import { log } from '../../util/log.js';
+import { log, peerText } from '../../util/log.js';
 import { spaceCollection } from '../../db/space-collection.js';
 import { carriedLocalId } from '../../sync/space-map.js';
+import { sendCaughtFailure } from '../send-failure.js';
 
 export const syncWarmRouter = Router();
 
@@ -57,7 +58,7 @@ syncWarmRouter.post('/warm', syncRateLimit, requireAuth, async (req, res) => {
     // Warm embedding model and MongoDB collections in parallel
     await Promise.all([
       warmEmbeddingModel().catch(err =>
-        log.warn(`Warm: embedding model failed: ${err}`),
+        log.warn(`Warm: embedding model failed: ${peerText(err)}`),
       ),
       ...targets.flatMap(sid => [
         col(spaceCollection(sid, 'facts')).findOne(asFilter({}), { projection: { _id: 1 } }).catch(() => {}),
@@ -69,7 +70,6 @@ syncWarmRouter.post('/warm', syncRateLimit, requireAuth, async (req, res) => {
 
     res.json({ status: 'ready' });
   } catch (err) {
-    log.error(`sync POST warm: ${err}`);
-    res.status(500).json({ error: 'Internal error' });
+    sendCaughtFailure(res, `sync POST warm`, err);
   }
 });

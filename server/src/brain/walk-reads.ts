@@ -26,12 +26,11 @@
  * Mongo compares strings by their UTF-8 bytes, which is code-point order. JavaScript's `<` compares UTF-16
  * units, which disagrees above U+D7FF — so `storedStringOrder` maps the units first rather than trusting `<`.
  */
-import { col, asFilter } from '../db/mongo.js';
-import { NEVER_RETURNED_PROJECTION } from './read-projection.js';
+import { readRowsById, type TimeLeft } from '../db/read-by-id.js';
 import type { EdgeDoc } from '../config/types.js';
 
-/** Milliseconds a read may still take, from the walk's deadline. Throws once it is spent; `undefined` is unbounded. */
-export type TimeLeft = () => number | undefined;
+/** Milliseconds a read may still take, from the walk's deadline — the by-id reader's own type, named here too. */
+export type { TimeLeft };
 
 /**
  * Records of one collection by id, with every never-returned field projected away. `extra` narrows the query
@@ -49,8 +48,12 @@ export const RECORD_ID = '$recordId';
 export type RankedEdge = EdgeDoc & { [RECORD_ID]?: unknown };
 
 /**
- * The records `ids` name, in the database's own order. The one query both the per-seed walk and the shared one
- * make; the order is imposed by the caller, never assumed here.
+ * The records `ids` name, in the order the ids were named. The one query both the per-seed walk and the shared one
+ * make; the order the walk needs is imposed by the caller, never assumed here.
+ *
+ * Read through the one by-id reader (`Q-211`), which this used to be a second copy of: unchunked, and with
+ * `extra` SPREAD beside `_id`, so an `extra` naming `_id` replaced the id restriction. `extra` is now ANDed, the
+ * read is chunked, and the deadline is kept — every chunk gets `maxTimeMS` from what is left.
  *
  * An empty id list reads nothing — but still asks the deadline, so a spent walk stops at the same step whether
  * or not the step had anything to fetch.
@@ -58,13 +61,9 @@ export type RankedEdge = EdgeDoc & { [RECORD_ID]?: unknown };
 export const readRecordsById: RecordsById = async <T extends { _id: string }>(
   collection: string, ids: readonly string[], extra?: Record<string, unknown>, timeLeft?: TimeLeft,
 ): Promise<T[]> => {
-  const ms = timeLeft?.();
+  timeLeft?.();
   if (ids.length === 0) return [];
-  const cursor = col<T>(collection)
-    .find(asFilter<T>({ _id: { $in: [...ids] }, ...(extra ?? {}) }))
-    .project(NEVER_RETURNED_PROJECTION);
-  if (ms !== undefined) cursor.maxTimeMS(ms);
-  return await cursor.toArray() as T[];
+  return await readRowsById<T>(collection, ids, 'all', { filter: extra, timeLeft });
 };
 
 /** Mongo's order for two stored strings: code point, which UTF-16 `<` is not above U+D7FF. */

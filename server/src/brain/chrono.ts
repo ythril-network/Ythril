@@ -259,7 +259,7 @@ export async function updateChrono(
       asUpdate<ChronoEntry>(updateOp),
       { returnDocument: 'before' },
     );
-  }) as ChronoEntry | null;
+  }, 'chrono.update') as ChronoEntry | null;
   brainWriteSeqTotal.labels({
     collection: 'chrono',
     outcome: writeOutcome(!!beforeWrite, ifMatchSeq !== undefined, !!beforeWrite && beforeWrite.seq !== existing.seq),

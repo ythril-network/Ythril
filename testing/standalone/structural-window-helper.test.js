@@ -483,6 +483,13 @@ describe('lineBefore — for a marker whose rule is literally "immediately above
     const doc = '**Response**\n\nSome prose.\n\n```json\n{}\n```\n';
     assert.equal(lineBefore(doc, doc.indexOf('```json')), 'Some prose.');
   });
+
+  it('mid-line, answers what precedes on that line without its trailing space; orEmpty answers the start', () => {
+    const src = 'const f = (x) => {\n  return x;\n}';
+    assert.equal(lineBefore(src, src.indexOf('{')), 'const f = (x) =>');
+    assert.equal(lineBefore(src, 0, 'start', { orEmpty: true }), '');
+    assert.throws(() => lineBefore(src, 0, 'start'), /nothing precedes/);
+  });
 });
 
 describe('docCommentBefore — the comment block above a declaration', () => {
@@ -533,6 +540,24 @@ describe('bodyOf still behaves, since the new code shares its module', () => {
     const got = bodyOf(src, 'a');
     assert.ok(got.includes('return 1'));
     assert.ok(!got.includes('return 2'));
+  });
+
+  it('an OVERLOADED function is read at its implementation, the last of its consecutive declarations', () => {
+    const src = [
+      'export function a(x: string): string;',
+      'export function a(x: number): number;',
+      'export function a(x: unknown): unknown {',
+      '  return x;',
+      '}',
+      'export function b() {',
+      '  return 2;',
+      '}',
+    ].join('\n');
+    const got = bodyOf(src, 'a');
+    assert.ok(got.includes('return x'), 'the window stopped at an overload signature');
+    assert.ok(!got.includes('return 2'));
+    // A function followed by a declaration of another name is bounded by it, as before.
+    assert.ok(bodyOf('function c() {\n  return 3;\n}\nfunction d() {}\n', 'c').includes('return 3'));
   });
 });
 

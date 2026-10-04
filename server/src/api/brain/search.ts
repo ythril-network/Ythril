@@ -17,6 +17,7 @@ import { planReindex, startReindex, reindexStateFor } from '../../brain/reindex.
 import { memberSpacesForRequest } from '../../spaces/proxy-scoped.js';
 import { rankOf } from '../../brain/recall-shape.js';
 import { statesRetryability } from './_read-failure.js';
+import { sendToolAnswer } from '../send-failure.js';
 import { spaceCollection } from '../../db/space-collection.js';
 
 /*
@@ -112,7 +113,7 @@ searchRouter.post('/spaces/:spaceId/traverse', globalRateLimit, requireSpaceAuth
   });
   const text = outcome.result.content.map(c => c.text).join('\n');
   if (outcome.result.isError) {
-    res.status(outcome.status).json({ error: text, ...(outcome.result.structuredContent ?? {}) });
+    sendToolAnswer(res, outcome, { error: text, ...(outcome.result.structuredContent ?? {}) });
     return;
   }
   res.status(outcome.status).json(JSON.parse(text));
@@ -173,8 +174,11 @@ searchRouter.post('/recall', globalRateLimit, requireAuth, statesRetryability, a
      * failure, and a REST caller who cannot tell "retry this" from "your query is wrong" is the defect
      * `_read-failure.ts` exists to prevent. `statesRetryability` above still fills the field in on the
      * refusals that carry no structured body at all, so it is on every failure either way.
+     *
+     * Sent by `sendToolAnswer`, so a store failure carries `Retry-After` — written by hand here, it did not
+     * (bundle-30 I12, verify-drive-2 finding 2).
      */
-    res.status(outcome.status).json({ error: text, ...(outcome.result.structuredContent ?? {}) });
+    sendToolAnswer(res, outcome, { error: text, ...(outcome.result.structuredContent ?? {}) });
     return;
   }
 
@@ -231,7 +235,7 @@ searchRouter.post('/similar', globalRateLimit, requireAuth, statesRetryability, 
   });
   const text = outcome.result.content.map(c => c.text).join('\n');
   if (outcome.result.isError) {
-    res.status(outcome.status).json({ error: text, ...(outcome.result.structuredContent ?? {}) });
+    sendToolAnswer(res, outcome, { error: text, ...(outcome.result.structuredContent ?? {}) });
     return;
   }
   res.status(outcome.status).json(JSON.parse(text));

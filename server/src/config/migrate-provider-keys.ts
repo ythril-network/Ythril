@@ -1,5 +1,5 @@
 import type { Config, SecretsFile } from './types.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
 
 /**
  * Lift any provider API key still sitting in `config.json` into `secrets.json`, and delete it from the
@@ -95,6 +95,6 @@ export function migrateProviderApiKeysOnBoot(
     saveConfig(config);
     log.info('Moved provider API key(s) from config.json into secrets.json (0o600)');
   } catch (err) {
-    log.warn(`Could not persist provider API key migration (will retry next boot): ${err}`);
+    log.warn(`Could not persist provider API key migration (will retry next boot): ${peerText(err)}`);
   }
 }

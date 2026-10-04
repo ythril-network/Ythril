@@ -9,10 +9,13 @@
  * ingest drops are the same set, and writing them separately means one of them is eventually wrong.
  *
  * `merkle.ts` excludes them from the hash. The arrival writer (`sync/arrivals.ts`, `writeArrivals`) drops
- * them from every document a peer delivers, by push or by pull — push zod-strips them as well, because no
- * `Incoming*` schema declares one, but the writer does not rely on it — and CARRIES the receiver's own values
- * across the replace, so a peer's edit does not erase what only this instance knows. The admin export leaves
- * out the derived half and a restore keeps the record-tier half (`RESTORED_LOCAL_FIELDS` below).
+ * them from every document a peer delivers, by push or by pull — the one validation step zod-strips them as
+ * well, because no `Incoming*` schema declares one, but the writer does not rely on it — and CARRIES the
+ * receiver's own values across the replace, so a peer's edit does not erase what only this instance knows.
+ * What it carries is decided per document (`carriedFields`): an arrival this instance SUPPRESSES carries the
+ * record-tier half only, because the derived half describes content it no longer embeds (`Q-230`), and a
+ * RESTORE carries nothing from the copy it replaces. The admin export leaves out the derived half and a restore
+ * keeps the backup's record-tier half (`RESTORED_LOCAL_FIELDS` below) — never the replaced copy's (`Q-234`).
  *
  * ## What each one is, and what taking a peer's copy would do
  *
@@ -62,6 +65,41 @@ for (const f of RESTORED_LOCAL_FIELDS) {
   // A restored field that is not local-only would be a field the hash covers and the restore treats as local.
   if (!LOCAL_ONLY_FIELDS.has(f)) throw new Error(`RESTORED_LOCAL_FIELDS names '${f}', which is not a local-only field`);
 }
+
+/**
+ * The VECTOR half of the derived fields: the vector and the model that made it, without `matchedText`.
+ *
+ * Two removals ask two different questions, and each had been spelled by hand at every site (four `$unset`s, one of
+ * which — the suppression sweep's — named `embedding` alone and left the model behind):
+ *  - **the content changed or is gone** (a textless record, an arrival this instance suppresses): every derived field
+ *    goes, `matchedText` too, because it is the lexical channel's copy of text the record no longer has (`Q-94`);
+ *  - **only the decision to embed changed** (suppression turned on, an embed that failed): the vector goes and
+ *    `matchedText` stays or is rewritten — the content did not change, and removing it is a content decision.
+ */
+const VECTOR_FIELDS: ReadonlySet<string> = new Set(['embedding', 'embeddingModel']);
+for (const f of VECTOR_FIELDS) {
+  if (!DERIVED_LOCAL_FIELDS.has(f)) throw new Error(`VECTOR_FIELDS names '${f}', which is not a derived local field`);
+}
+
+const NOTHING: ReadonlySet<string> = new Set();
+
+/**
+ * What crosses a write from the STORED copy, per document (`Q-230`, `Q-234`): a restore takes nothing; an arrival this
+ * instance suppresses, the record tier only; any other peer arrival, every local-only field.
+ *
+ * Both of the arrival writer's write shapes read it — the replace (`sync/arrivals.ts`) and the file merge
+ * (`sync/file-meta-write.ts`) — because the merge once decided for itself and kept a restored file's replaced vector
+ * (bundle-30 I6, D2): one answer, so neither shape can carry what the other drops.
+ */
+export function carriedFields({ restore, suppressed }: { restore: boolean; suppressed: boolean }): ReadonlySet<string> {
+  if (restore) return NOTHING;
+  return suppressed ? RESTORED_LOCAL_FIELDS : LOCAL_ONLY_FIELDS;
+}
+
+/** `$unset` of every derived field — the content changed or is gone. */
+export const UNSET_DERIVED: Readonly<Record<string, ''>> = Object.fromEntries([...DERIVED_LOCAL_FIELDS].map(f => [f, '']));
+/** `$unset` of the vector half — only the decision to embed changed. */
+export const UNSET_VECTOR: Readonly<Record<string, ''>> = Object.fromEntries([...VECTOR_FIELDS].map(f => [f, '']));
 
 /**
  * The same set as a Mongo projection, for the SENDING side.

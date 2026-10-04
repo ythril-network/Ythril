@@ -62,6 +62,9 @@ export function recomputeEffectiveMeta(spaceId: string, persist = false): boolea
     if (setApart || persist) saveConfig(cfg);
     return false;
   }
+  // A layer may have turned suppression on (bundle-30 `R5`): `updateSpace` sweeps what the new meta suppresses — every
+  // way a network changes the meta ends here, and swept nothing, so the space reported its records suppressed and
+  // went on ranking them by meaning.
   updateSpace(spaceId, { meta: next });
   return true;
 }

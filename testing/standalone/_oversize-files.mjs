@@ -96,9 +96,9 @@ export const FROZEN = {
   'client/src/app/pages/schema-library/schema-library.component.ts': 1112,
   // RAISED 966 -> 975 for `P-32`: a sixth sync family. The push call, the pull call, both watermark
   // entries, and the two signatures widened to accept it — every line of it is the engine deciding what
-  // crosses the wire, which is what this file is for. The MERGE it needs is already elsewhere:
-  // `applyFileMetaPage` lives in `api/sync/_shared.ts` beside the push path's `ingestFileMeta`, so the two
-  // directions share one implementation instead of this file holding a second.
+  // crosses the wire, which is what this file is for. The MERGE it needs is already elsewhere: both
+  // directions write file metadata through the one arrival writer (`sync/arrivals.ts`, with the pipelines of
+  // `sync/file-meta-write.ts`), instead of this file holding a second.
   //
   // NO DECOMPOSITION: PAID. This raise owed `A-12`, and it has shipped — so the marker is the settled form
   // the three raises above use, not an annotated live one.
@@ -156,7 +156,14 @@ export const FROZEN = {
   // fix for a renamed space's files and the last-agreed-hash conflict rule both change.
   // LOWERED 802 -> 746 with `Q-107` part 1: the pull's page write (`batchUpsertBySeq`) moved into the one arrival
   // writer, `sync/arrivals.ts`, which every door now stores through. The ceiling follows the file down.
-  'server/src/sync/engine.ts': 746,
+  // LOWERED 746 -> 740 with bundle-30: the two peer budgets moved into `sync/peer-timeouts.ts`, because the
+  // receiver's hold deadline is derived from the batch one (`db/write-bound.ts`).
+  // LOWERED 740 -> 739 with bundle-30 §D (`Q-204`): the pull hands its page to the push's page accept
+  // (`sync/accept-page.ts`) and reads its verdicts, instead of writing it and reading the writer's refusals.
+  // LOWERED 739 -> 733 with bundle-30 I13: the pull's linkage check moved into a `finally` (+4 lines past 739), and
+  // vote-round retention (`isRoundPrunable`, `pruneExpiredRounds`) moved out to `sync/vote-round-retention.ts`, a
+  // rule about rounds rather than transfers with its own tests.
+  'server/src/sync/engine.ts': 733,
   // 958 -> 684: the per-type editor body moved into `schema-type-editor.component` so the Brain Overview
   // could open the same editor. Lowered rather than left — a frozen number 274 lines above the real size
   // is 274 lines this file could regrow into without the gate saying a word.
@@ -435,7 +442,9 @@ export const FROZEN = {
   // 455 -> 456: the same single `spaceCollection` import as `recall.ts` above, for the same reason.
   // 456 -> 458 (Q-92): one import and one line handing a spill's deprecated `path` to `answerSpillPath` in
   // `api/brain/spills.ts`, where the rest of it lives. Removed with `path` at the next major.
-  'server/src/api/files.ts': 458,
+  // 458 -> 422 (bundle-30 I14): the directory delete's cascade — tombstones, tree, jobs, sidecars, metadata — moved
+  // to `files/delete-cascade.ts` beside the one-file cascade whose order it shares, and with it eight imports.
+  'server/src/api/files.ts': 422,
   // 645 -> 660: the data-model panel’s mount and its card header. The panel ITSELF is a separate
   // component (er-model-panel) and its geometry a separate module (er-layout) — which is what this
   // ratchet asks for. What landed here is the 13 lines that place it in the grid, plus the two inputs
@@ -569,7 +578,11 @@ export const FROZEN = {
   // joins it on the commit that declares it.
   // NO DECOMPOSITION: one derived export beside the three it completes. Moving it would separate a set from
   // its members.
-  'server/src/brain/edges.ts': 491,
+  // LOWERED 491 -> 376 with bundle-30: the re-key's hand-written session, hold and transaction moved into
+  // `brain/held-transaction.ts` (`inHeldTransaction`), the one held transaction; the ceiling follows the file down.
+  // LOWERED 376 -> 366 with bundle-30 (Q-107 part 3b): `deleteEdge`'s read, delete, retire, tombstone and emit moved
+  // into `brain/edge-removal.ts` (`removeEdges`), the one remover the entity cascade uses too.
+  'server/src/brain/edges.ts': 366,
   /*
    * A BARREL of API response shapes, and the one entry here that is not a decomposition debt.
    *

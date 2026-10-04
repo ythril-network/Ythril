@@ -6,11 +6,12 @@
  */
 
 import { col, asFilter, asDoc, asUpdate } from '../../db/mongo.js';
+import { readStoredById } from '../../db/read-by-id.js';
 import { toDocId } from '../../util/paths.js';
 import { escapeRegex } from '../../util/redos.js';
 import type { StepProgress } from '../converters/types.js';
 import type { MediaJobDoc, FileMetaDoc } from '../../config/types.js';
-import { log } from '../../util/log.js';
+import { log, peerText } from '../../util/log.js';
 import { withJitter } from '../../util/backoff.js';
 import { newClaimToken, stalledJobWarning } from './lease.js';
 import { createWorkSignal } from '../../util/work-signal.js';
@@ -280,7 +281,7 @@ export async function enqueueTextJob(
     asFilter<FileMetaDoc>({ _id: id }),
     { $set: { embeddingStatus: 'pending', updatedAt: now } },
   ).catch(err => {
-    log.debug(`enqueueTextJob: could not set embeddingStatus on file meta ${spaceId}/${id}: ${err instanceof Error ? err.message : String(err)}`);
+    log.debug(`enqueueTextJob: could not set embeddingStatus on file meta ${peerText(spaceId)}/${peerText(id)}: ${peerText(err)}`);
   });
 }
 
@@ -531,11 +532,9 @@ export async function fetchJobProgress(
   const out = new Map<string, JobProgressView>();
   if (fileIds.length === 0) return out;   // never issue an empty $in
   try {
-    const docs = await jobCollection(spaceId)
-      .find(asFilter<MediaJobDoc>({ _id: { $in: fileIds } }))
-      .project({ progress: 1, progressAt: 1 })
-      .toArray() as Array<{ _id: string } & JobProgressView>;
-    for (const d of docs) out.set(d._id, { progress: d.progress, progressAt: d.progressAt });
+    const docs = await readStoredById<JobProgressView>(
+      spaceCollection(spaceId, 'mediaJobs'), fileIds, { progress: 1, progressAt: 1 });
+    for (const [id, d] of docs) out.set(id, { progress: d.progress, progressAt: d.progressAt });
   } catch { /* best-effort — the listing matters, the bar does not */ }
   return out;
 }
@@ -848,6 +847,7 @@ function sanitiseError(raw: string): string {
   let s = raw.replace(/https?:\/\/[^\s,;)]+/g, '[url]');
   // Remove Unix-style absolute paths
   s = s.replace(/\/[a-z][a-z0-9_/-]+/gi, '[path]');
-  // Truncate to 200 chars to keep the field reasonable
-  return s.slice(0, 200);
+  // Bounded by the one renderer (redacted, cut on a code point, saying it was cut) — the URL and path scrubbing above
+  // is a different question (internal topology, not secrets), so it stays here (bundle-30 I6, C16).
+  return peerText(s, { max: 200 });
 }

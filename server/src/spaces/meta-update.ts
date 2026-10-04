@@ -41,7 +41,7 @@ import { proposedMetaFields } from '../sync/meta-round-merge.js';
 import { concludeRoundIfReady } from '../sync/governance.js';
 import { openRoundHere } from '../networks/round-local-state.js';
 import { makeSignedOwnCast } from '../util/signing.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
 import { v4 as uuidv4 } from 'uuid';
 import { capDocExtractionMode } from '../files/converters/extraction-level.js';
 import { checkMetaPrecondition, preconditionErrorBody } from './meta-precondition.js';
@@ -50,7 +50,7 @@ import { UpdateSpaceBody, findBrokenLibraryRefs, brokenRefsError, stripServerOwn
 import type { TypeSchemasZ } from './body-schemas.js';
 import type { z } from 'zod';
 import { isDeepStrictEqual } from 'node:util';
-import { sweepSuppressedVectors } from '../brain/suppression-sweep.js';
+// The trigger lives beside the sweep (bundle-30 `R5`): the effective-meta recompute fires it too.
 
 /**
  * Deep-merge an incoming PATCH `meta` payload into the existing SpaceMeta.
@@ -382,7 +382,7 @@ export async function applySpaceMetaUpdate(plan: MetaUpdatePlan): Promise<MetaUp
   // `hasRecordTtl` gates the write so a CLEAR is applied rather than skipped as if the field were absent.
   if (plan.hasRecordTtl) {
     updateSpace(id, { recordTtlDays: plan.recordTtlDays });
-    if (plan.recordTtlDays !== undefined) void ensureTtlIndex(id).catch(err => log.warn(`ensureTtlIndex ${id}: ${err}`));
+    if (plan.recordTtlDays !== undefined) void ensureTtlIndex(id).catch(err => log.warn(`ensureTtlIndex ${peerText(id)}: ${peerText(err)}`));
   }
 
   // `M-2`: the conversion marker. Local like the two above and applied here for the same reason plus one of
@@ -477,16 +477,16 @@ export async function applySpaceMetaUpdate(plan: MetaUpdatePlan): Promise<MetaUp
               data: { spaceId: id, spaceLabel: space.label },
             }),
             signal: AbortSignal.timeout(5_000),
-          }).catch(err => log.warn(`notify ${member.label} of meta_change_pending: ${err}`));
+          }).catch(err => log.warn(`notify ${peerText(member.label)} of meta_change_pending: ${peerText(err)}`));
         }
       }
 
       if (rounds.length > 0) return { outcome: 'vote_pending', rounds, ...kept };
 
-      // Every round passed on the proposer's own vote, so the meta is already written by the conclusion.
+      // Every round passed on the proposer's own vote, so the meta is already written by the conclusion — and swept by
+      // it: the conclusion writes through `updateSpace`, which asks for the sweep (a second one here swept it twice).
       const applied = getConfig().spaces.find(s => s.id === id);
       if (!applied) return { outcome: 'not_found' };
-      sweepAfterMetaWrite(id, applied.meta);
       return { outcome: 'applied', space: applied, ...kept };
     }
   }
@@ -505,15 +505,8 @@ export async function applySpaceMetaUpdate(plan: MetaUpdatePlan): Promise<MetaUp
     meta: mergedMeta,
     ...(plan.hasDocExtraction ? { documentExtraction: plan.documentExtraction } : {}),
   });
-  /*
-   * The stored vectors follow the flag, which is what the userguide has always said happens.
-   *
-   * Not awaited: this runs on every meta write and a space may hold many records, so blocking the PATCH on it
-   * would make an unrelated `purpose` edit feel slow. The sweep is idempotent and local — the vector does not
-   * replicate — so a failure costs nothing beyond the next meta write repeating it, which is why a rejection
-   * is logged rather than surfaced to the caller who was not asking about embeddings.
-   */
-  if (updated) sweepAfterMetaWrite(id, mergedMeta);
+  // The stored vectors follow the flag, which is what the userguide has always said happens: `updateSpace` asks for
+  // the sweep, not awaited — see `sweepAfterMetaWrite` for why a failure is logged rather than surfaced here.
   return updated ? { outcome: 'applied', space: updated } : { outcome: 'not_found' };
 }
 
@@ -544,18 +537,4 @@ export async function voteOnSchemaEditIfNetworked(
   if (result.outcome === 'not_found') return { status: 404, body: { error: `Space '${spaceId}' not found` } };
   // Every round passed on this instance's own yes (a club organiser, a publisher, a lone member): applied already.
   return { status: 200, body: { space: result.space, ...networkMergeNotice(result) } };
-}
-
-/**
- * Sweep the vectors a meta write newly suppresses, without blocking the write on it; a failure is logged, since the
- * sweep is idempotent and the next meta write repeats it.
- *
- * `meta` is undefined when the write carried no meta (a `textAnalysis`-only PATCH): suppression is read from meta
- * alone, so there is nothing to sweep. Both callers cast it to `SpaceMeta` instead, and the sweep then failed on
- * every such write with a warning that meant nothing (`Q-74`).
- */
-function sweepAfterMetaWrite(id: string, meta: SpaceMeta | undefined): void {
-  if (meta === undefined) return;
-  void sweepSuppressedVectors(id, meta)
-    .catch(err => log.warn(`Suppression sweep failed for ${id}: ${err instanceof Error ? err.message : String(err)}`));
 }

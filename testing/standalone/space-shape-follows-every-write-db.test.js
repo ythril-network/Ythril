@@ -33,8 +33,11 @@ import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness
 
 const skip = await mongoSkipReason();
 const SPACE = 'shapecache';
+/** A space deleted by the last case, so its kept shape is shown to go with it. */
+const GONE = 'shapegone';
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ythril-shape-cache-'));
 process.env['CONFIG_PATH'] = path.join(tmpDir, 'config.json');
+process.env['DATA_ROOT'] = path.join(tmpDir, 'data');
 
 describe('the space meta is cached and never behind a write', { skip }, () => {
   let mongo, loader, answer, shape;
@@ -45,7 +48,8 @@ describe('the space meta is cached and never behind a write', { skip }, () => {
     fs.writeFileSync(process.env['CONFIG_PATH'], JSON.stringify({
       instanceId: 'shape-cache', instanceLabel: 'test', tokens: [], networks: [],
       spaces: [{ id: SPACE, label: 'Shape cache', builtIn: true, folders: [], completeLinkage: true,
-        meta: { typeSchemas: { entity: { service: {} } } } }],
+        meta: { typeSchemas: { entity: { service: {} } } } },
+      { id: GONE, label: 'Shape gone', folders: [], meta: {} }],
     }, null, 2), { mode: 0o600 });
     loader = await import('../../server/dist/config/loader.js');
     loader.loadConfig();
@@ -135,5 +139,13 @@ describe('the space meta is cached and never behind a write', { skip }, () => {
     } finally { await raw.close(); }
     mongo.reportDatabaseReplaced();
     assert.equal(typeCount(await read(), 'restored'), 1, 'a replaced database left the cached answer in place');
+  });
+
+  it('a deleted space leaves no kept shape behind (bundle-30 I8)', async () => {
+    await answer.spaceMetaAnswer({ spaceId: GONE, memberIds: [GONE], resolveRefs: false });
+    assert.equal(shape._shapeCached(GONE), true, 'fixture: the shape was never kept, so its removal proves nothing');
+    const { removeSpace } = await import('../../server/dist/spaces/lifecycle.js');
+    assert.equal(await removeSpace(GONE), true, 'fixture: the space was not removed');
+    assert.equal(shape._shapeCached(GONE), false, 'a deleted space\'s shape outlived it, taking a slot of the bounded cache');
   });
 });

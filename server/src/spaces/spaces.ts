@@ -5,10 +5,11 @@
  * `lifecycle.ts` (init/create/remove/wipe/recovery), `rename.ts`, and `_shared.ts`.
  */
 import { getConfig, saveConfig } from '../config/loader.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
 import type { SpaceConfig, SpaceMeta, DupeActionRule, DocExtractionMode, ImageLevel, AudioLevel, VideoLevel, TextLevel, RecordTtlWindows } from '../config/types.js';
 import { reconcileSpaceSearchIndexes } from './search-index-presence.js';
 import { syncSchemaFiles, META_VERSION_CAP } from './_shared.js';
+import { sweepAfterMetaWrite } from '../brain/suppression-sweep.js';
 
 /**
  * A space's MCP-facing directive, under the one name that still has a store behind it.
@@ -132,13 +133,20 @@ export function updateSpace(
     const schemaChanged = JSON.stringify(prev?.typeSchemas ?? null) !== JSON.stringify(updates.meta.typeSchemas ?? null);
     if (schemaChanged) {
       reconcileSpaceSearchIndexes(spaceId, { waitForReady: false }).catch(err =>
-        log.warn(`P6: vector filter-field rebuild after schema change on '${spaceId}': ${err}`));
+        log.warn(`P6: vector filter-field rebuild after schema change on '${peerText(spaceId)}': ${peerText(err)}`));
     }
   }
 
   saveConfig(cfg);
   // Fire-and-forget schema file sync
-  syncSchemaFiles(spaceId, space.meta).catch(err => log.warn(`syncSchemaFiles: ${err}`));
+  syncSchemaFiles(spaceId, space.meta).catch(err => log.warn(`syncSchemaFiles: ${peerText(err)}`));
+  /*
+   * What the new meta suppresses holds no vector afterwards — asked for HERE, by the one writer of `space.meta`, so
+   * no meta write can skip it (bundle-30 `I5`): a schema route's edit of a space no network carries wrote through
+   * here and swept nothing, while the callers that did sweep swept one vote-applied change two or three times. Not
+   * awaited, and coalesced per space (`sweepAfterMetaWrite`).
+   */
+  if (updates.meta !== undefined) sweepAfterMetaWrite(spaceId, space.meta);
   return space;
 }
 

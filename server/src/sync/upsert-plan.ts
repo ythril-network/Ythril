@@ -1,9 +1,10 @@
 /**
- * Deciding which pulled documents actually get written, and re-tagging them to the local space.
+ * Deciding which arriving documents — pushed or pulled — actually get written, and re-tagging them to the local
+ * space.
  *
- * Extracted from `sync/engine.ts` as slice 2 of the god-file split. Pure: no Mongo, no network. The
- * engine keeps the IO (the `find` for existing seqs, the `bulkWrite`); everything that decides is here,
- * because every mistake in this decision is silent and expensive.
+ * Extracted from `sync/engine.ts` as slice 2 of the god-file split. Pure: no Mongo, no network. The page
+ * accept (`sync/accept-page.ts`) and the writer (`sync/arrivals.ts`) keep the IO; everything that decides is
+ * here, because every mistake in this decision is silent and expensive.
  *
  * ── Last-writer-wins by `seq`, and why the comparison is strict ─────────────────────────────────
  *
@@ -31,10 +32,10 @@
  * belongs to `localSpaceId` by definition.
  */
 
-import { createHash } from 'node:crypto';
-import { idPart, edgeIdFor } from '../brain/edge-id.js';
+import { edgeIdFor } from '../brain/edge-id.js';
+import { derivedV4Id } from '../util/derived-id.js';
 import { linkIdFor } from '../brain/link-id.js';
-import type { RefKind } from '../config/types-knowledge.js';
+import type { BrainCollection, RefKind } from '../config/types-knowledge.js';
 
 /** The minimum shape this module needs: everything sync replicates carries an id and a seq. */
 export interface Replicable {
@@ -47,6 +48,10 @@ export interface Replicable {
  *
  * In place because the caller writes these same objects straight to Mongo — copying would mean the
  * copy is tagged and the written original is not, which is the exact bug this prevents.
+ *
+ * The one writer of `RETAGGED_FIELDS` (`sync/retagged-fields.ts`): a field this rewrites is replicated yet local,
+ * so it is on that list and out of the space hash. A field added here and not there makes every space held under a
+ * `spaceMap` alias report a Merkle divergence on identical content.
  */
 export function retagToLocalSpace(docs: readonly unknown[], localSpaceId: string): void {
   for (const doc of docs) {
@@ -55,29 +60,11 @@ export function retagToLocalSpace(docs: readonly unknown[], localSpaceId: string
 }
 
 /**
- * Which of `docs` should be written, given the seq each id currently has locally.
- *
- * An id missing from `existingSeq` means the document does not exist locally yet. Returns the subset
- * to replace, preserving input order; an empty result means the caller should skip the write entirely
- * rather than issue an empty bulkWrite.
- */
-export function planSeqUpserts<T extends Replicable>(
-  docs: readonly T[],
-  existingSeq: ReadonlyMap<string, number>,
-): T[] {
-  const out: T[] = [];
-  for (const doc of docs) {
-    if (isNewerCopy(doc.seq, existingSeq.get(doc._id))) out.push(doc);
-  }
-  return out;
-}
-
-/**
  * Is a copy at seq `incoming` newer than one held at `held` — the ONE accept rule of every arrival door: the
- * pull (`planSeqUpserts`), the push (`planPushArrivals`), the writer's collapse of a repeated id within one page,
- * and its read-back of a guarded write. Strictly greater, so an equal seq is NOT newer: across peers that makes a
- * re-sync a no-op, and inside one page it means the EARLIER of two equal copies stands — the push planner's
- * sequential reading, applied on pull and restore too.
+ * page planner (`planArrivals`, push and pull alike), the writer's collapse of a repeated id within one page, and
+ * its read-back of a guarded write. Strictly greater, so an equal seq is NOT newer: across peers that makes a
+ * re-sync a no-op, and inside one page it means the EARLIER of two equal copies stands — the planner's sequential
+ * reading, applied on restore too.
  *
  * Nothing held is beaten by anything; a copy that has no seq (file metadata from before 4.0) beats nothing held
  * at a seq — but a held copy with no seq is overwritten by anything that arrives.
@@ -88,13 +75,24 @@ export function isNewerCopy(incoming: number | undefined, held: number | undefin
   return incoming > held;
 }
 
+/**
+ * The same rule AT THE WRITE: the filter under which an arriving copy at `seq` may replace what is stored — a
+ * stored copy below it, or one with no seq, or none (the upsert). A copy newer than the one planned, written between
+ * the accept read and the write, then fails the write with a duplicate `_id` and is kept. A copy that itself has no
+ * seq is written by `_id` alone, as `isNewerCopy` lets anything replace a seq-less copy.
+ */
+export function seqGuard(id: string, seq: number | undefined): Record<string, unknown> {
+  if (typeof seq !== 'number') return { _id: id };
+  return { _id: id, $or: [{ seq: { $lt: seq } }, { seq: { $exists: false } }] };
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════════════════════════════════
-// THE PUSH ACCEPT PLANNER (`Q-107` part 1 §2)
+// THE PAGE ACCEPT PLANNER (`Q-107` part 1 §2; every door since `Q-204`)
 // ═══════════════════════════════════════════════════════════════════════════════════════════════════════════
 
 /**
  * The fork cap, twice over: a fork chain may be this deep, and one parent may have this many forks. It lives
- * with the planner that enforces it on both push doors; `api/sync/_shared.ts` re-exports it.
+ * with the planner that enforces it on every door; `api/sync/_shared.ts` re-exports it.
  */
 export const MAX_FORK_DEPTH = 10;
 
@@ -109,13 +107,20 @@ export const FORK_INDEXES: readonly { keys: Record<string, 1>; sparse: true }[] 
 ]);
 
 /**
- * The push families the planner decides — NOT ALL BRAIN COLLECTIONS: file metadata is merged per document, not
- * planned (`Q-107` part 2), so `files` is absent on purpose.
+ * The families the planner decides: every replicated family, by its collection — derived, so a seventh is planned by
+ * being a brain collection. File metadata has no tombstone type (a deleted file has its own route) and never forks,
+ * so it is planned by seq alone — the same verdicts as any family with no unique key.
  */
-export type PushFamily = 'facts' | 'entities' | 'edges' | 'chrono' | 'links';
+export type PlannedFamily = BrainCollection;
+
+/**
+ * Which door a page came through. The planner decides alike for both but for ONE stated difference — see
+ * `ArrivalPlanInput.door`. An admin import is a restore, not a door of this planner: it replaces, unplanned.
+ */
+export type ArrivalDoor = 'push' | 'pull';
 
 /** The fields of an arriving document the planner reads. */
-export interface PushDoc extends Replicable {
+export interface ArrivalDoc extends Replicable {
   fact?: string;
   forkOf?: string;
   type?: string;
@@ -151,17 +156,24 @@ export interface StoredCopy {
  * stored copies; `siblings` the stored fork count per candidate parent; `existingForks` the ids of forks already
  * stored for those parents. All three are empty for a fork-free page, and the door does not read them.
  */
-export interface PushPlanInput {
-  kind: PushFamily;
+export interface ArrivalPlanInput {
+  kind: PlannedFamily;
+  /**
+   * The door, for the one deliberate difference: a chrono `type` outside this space's vocabulary is `unknownType` on
+   * PUSH only. On pull the receiver's schema comes from the same upstream as the record, and dropping it would lose
+   * the record for good — the receiver's watermark moves past it either way.
+   */
+  door: ArrivalDoor;
   stored: ReadonlyMap<string, StoredCopy>;
   /** The tombstone held per id, for this family's tombstone type only. */
   tombstones: ReadonlyMap<string, HeldTombstone>;
   /**
-   * The peer identity the pushing token PROVES, or undefined for an admin or local token. Required, so a door has to
-   * say it: a record escapes another issuer's tombstone only when the peer delivering it IS its author.
+   * The peer identity the delivering door PROVES — the pushing token's peer, or the member a pull read from — or
+   * undefined for an admin or local token. Required, so a door has to say it: a record escapes another issuer's
+   * tombstone only when the peer delivering it IS its author.
    */
   deliveredBy: string | undefined;
-  /** The chrono vocabulary this space allows; ignored for the other families. */
+  /** The chrono vocabulary this space allows; ignored for the other families, and on pull. */
   allowedTypes?: ReadonlySet<string>;
   forkParent?: ReadonlyMap<string, string | undefined>;
   siblings?: ReadonlyMap<string, number>;
@@ -173,12 +185,12 @@ export interface PushPlanInput {
  * `duplicate` and `rejected` are never decided here — they are what a WRITE can still say (a unique index other
  * than `_id`, a store refusal), and the door overwrites the winner's verdict with them.
  */
-export type PushVerdict = 'inserted' | 'updated' | 'upserted' | 'skipped' | 'tombstoned' | 'forked'
+export type ArrivalVerdict = 'inserted' | 'updated' | 'upserted' | 'skipped' | 'tombstoned' | 'forked'
   | 'forkRefused' | 'unknownType' | 'duplicate' | 'rejected';
 
-export interface PushPlan<T extends PushDoc> {
+export interface ArrivalPlan<T extends ArrivalDoc> {
   /** One verdict per input document, in input order — what sequential processing would have answered. */
-  verdicts: PushVerdict[];
+  verdicts: ArrivalVerdict[];
   /** The fork id behind each `forked` verdict. */
   forkIds: Array<string | undefined>;
   /**
@@ -205,17 +217,12 @@ export interface PushPlan<T extends PushDoc> {
  * two peers forking the same divergence arrive at one id.
  *
  * Shaped as a v4 UUID (version and variant bits set) rather than v5, because a fork id is a fact id and every
- * reader that validates one — link endpoints, the fork-id response — expects that shape. The encoding is
- * `edge-id.ts`'s length-prefixed parts, so no text can forge a separator. The namespace is fixed for ever.
+ * reader that validates one — link endpoints, the fork-id response — expects that shape. Derived by
+ * `util/derived-id.ts`, whose length-prefixed parts no text can forge a separator in, byte-for-byte what it was
+ * before it moved there (pinned by `a-derived-id-is-shaped-in-one-place.test.js`). The namespace is fixed for ever.
  */
 export function forkIdFor(parentId: string, seq: number, text: string): string {
-  const h = createHash('sha256')
-    .update(`ythril.fork-identity${idPart(parentId)}${idPart(String(seq))}${idPart(text)}`)
-    .digest();
-  h[6] = (h[6]! & 0x0f) | 0x40;
-  h[8] = (h[8]! & 0x3f) | 0x80;
-  const x = h.subarray(0, 16).toString('hex');
-  return `${x.slice(0, 8)}-${x.slice(8, 12)}-${x.slice(12, 16)}-${x.slice(16, 20)}-${x.slice(20, 32)}`;
+  return derivedV4Id('ythril.fork-identity', parentId, String(seq), text);
 }
 
 /**
@@ -241,20 +248,21 @@ export function forkDepth(id: string, parentOf: (id: string) => string | undefin
  * The fact ids in a page that may FORK — the only ones the door reads a fork chain and a sibling count for.
  * Divergent text at an equal seq, against the stored copy or against another copy in the same page.
  */
-export function forkCandidates(docs: readonly PushDoc[], stored: ReadonlyMap<string, StoredCopy>): string[] {
+export function forkCandidates(docs: readonly ArrivalDoc[], stored: ReadonlyMap<string, StoredCopy>): string[] {
   const out = new Set<string>();
-  const seen = new Map<string, PushDoc[]>();
+  const seen = new Map<string, ArrivalDoc[]>();
   for (const d of docs) {
     if (divergesFrom(d, stored.get(d._id))) out.add(d._id);
     for (const other of seen.get(d._id) ?? []) if (divergesFrom(d, other)) out.add(d._id);
-    seen.set(d._id, [...(seen.get(d._id) ?? []), d]);
+    const copies = seen.get(d._id);
+    if (copies) copies.push(d); else seen.set(d._id, [d]);
   }
   return [...out];
 }
 
 /**
  * Does an arriving fact DIVERGE from a copy of it — the same seq, different `fact` text? The one fork rule, asked
- * by `forkCandidates` (which facts the door reads a fork context for) and `planPushArrivals` (which facts fork),
+ * by `forkCandidates` (which facts the door reads a fork context for) and `planArrivals` (which facts fork),
  * so the reads and the decision cannot disagree about what a fork is.
  */
 export function divergesFrom(doc: { seq?: number; fact?: string }, copy: { seq?: number; fact?: string } | undefined): boolean {
@@ -267,7 +275,7 @@ export function divergesFrom(doc: { seq?: number; fact?: string }, copy: { seq?:
  * kinds, coalesced by the shared `edgeEndpointKind`), a link's is `linkIdFor`. Two copies with one key are one
  * row under the index, so they collide here exactly when they would collide in the store.
  */
-function uniqueKey(kind: PushFamily, d: PushDoc): string | undefined {
+function uniqueKey(kind: PlannedFamily, d: ArrivalDoc): string | undefined {
   if (kind === 'edges') return edgeIdFor(String(d.from ?? ''), String(d.to ?? ''), String(d.label ?? ''), d.fromKind, d.toKind);
   if (kind === 'links') {
     return linkIdFor(String(d.from ?? ''), d.fromKind as RefKind, String(d.to ?? ''), d.toKind as RefKind);
@@ -275,33 +283,6 @@ function uniqueKey(kind: PushFamily, d: PushDoc): string | undefined {
   return undefined;
 }
 
-/**
- * Decide a pushed page the way processing it one document at a time decided it — pure, so every outcome is
- * testable without a database, and so the WRITE can be one bulk operation instead of one per document.
- *
- * ## The rules, exactly as the per-document handler applied them
- *
- * - A tombstone from another issuer than the record's author is ignored when the pushing peer proves it is that
- *   author (`tombSeqFor`); otherwise every held tombstone governs.
- * - A tombstone at or above the incoming seq: `tombstoned`. One below it is stale — superseded by this copy, so
- *   later copies of the id in the page no longer see it, and it is deleted once the record lands.
- * - Chrono only: a type outside this space's vocabulary is `unknownType`, before anything else is consulted.
- * - Facts: no copy -> `inserted`; a higher seq -> `updated`; an equal seq with different `fact` text -> a FORK;
- *   anything else -> `skipped`. The other families: no copy or a higher seq -> `upserted`, else `skipped` — an
- *   equal seq never forks there.
- * - "The copy" is the stored one OVERLAID by every version this page accepted before it, so `[5, 6]` is
- *   inserted-then-updated and `[9, 3]` is inserted-then-skipped. The counters count ITEMS, as processing them in
- *   order counted them; the write is the final winner per id.
- * - A unique-index collision WITHIN the page (two ids, one edge triplet or one link's endpoints) is decided here,
- *   first accepted wins, rather than left to the execution order of an unordered bulk write.
- *
- * ## The fork caps, on both doors
- *
- * A fork is refused (`forkRefused`) when the parent's chain is already `MAX_FORK_DEPTH` deep, or when the parent
- * already has `MAX_FORK_DEPTH` forks — stored ones and the ones this page is creating together, because a cap
- * that counts only stored siblings lets one page past it by any amount. A fork whose derived id is already stored
- * (or already created by this page) is that same fork: `forked`, with no second write and no cap consulted.
- */
 /**
  * The seq of the tombstone that governs `doc`, or `undefined` when none does.
  *
@@ -312,7 +293,7 @@ function uniqueKey(kind: PushFamily, d: PushDoc): string | undefined {
  * passes (`applyPeerTombstones`: its issuer must be the delivering peer). When either side carries no instance (a
  * legacy tombstone, an author-less record) the tombstone governs, as it always did.
  */
-function tombSeqFor(doc: PushDoc, held: HeldTombstone | undefined, deliveredBy: string | undefined): number | undefined {
+function tombSeqFor(doc: ArrivalDoc, held: HeldTombstone | undefined, deliveredBy: string | undefined): number | undefined {
   if (held === undefined) return undefined;
   const author = doc.author?.instanceId;
   const provenOtherAuthor = !tombstoneGoverns(held.issuer, author) && deliveredBy !== undefined && author === deliveredBy;
@@ -323,15 +304,45 @@ function tombSeqFor(doc: PushDoc, held: HeldTombstone | undefined, deliveredBy: 
  * May a tombstone `issuer` issued speak for a record `author` wrote? Only when they are the same instance — or when
  * either is unknown (a legacy tombstone, an author-less record), which governs as it always did. The one spelling of
  * the rule, for the two questions that ask it: whether a peer's tombstone may delete a record held here
- * (`applyPeerTombstones`) and whether a held tombstone refuses an arriving record (`planPushArrivals`).
+ * (`applyPeerTombstones`) and whether a held tombstone refuses an arriving record (`planArrivals`).
  */
 export function tombstoneGoverns(issuer: string | undefined, author: string | undefined): boolean {
   return !(issuer && author && issuer !== author);
 }
 
-export function planPushArrivals<T extends PushDoc>(docs: readonly T[], input: PushPlanInput): PushPlan<T> {
+/**
+ * Decide an arriving page — PUSHED or PULLED, one rule (`Q-204`) — the way processing it one document at a time
+ * decided it: pure, so every outcome is testable without a database, and so the WRITE can be one bulk operation
+ * instead of one per document. The pull used to accept by seq alone, so the same document delivered the other way
+ * round resurrected a deleted record and dropped one side of a divergence.
+ *
+ * ## The rules
+ *
+ * - A tombstone from another issuer than the record's author is ignored when the delivering peer proves it is that
+ *   author (`tombSeqFor`); otherwise every held tombstone governs.
+ * - A tombstone at or above the incoming seq: `tombstoned`. One below it is stale — superseded by this copy, so
+ *   later copies of the id in the page no longer see it, and it is deleted once the record lands.
+ * - Chrono, on PUSH only: a type outside this space's vocabulary is `unknownType`, before anything else is
+ *   consulted (the one door difference — `ArrivalPlanInput.door` says why).
+ * - Facts: no copy -> `inserted`; a higher seq -> `updated`; an equal seq with different `fact` text -> a FORK;
+ *   anything else -> `skipped`. The other families: no copy or a higher seq -> `upserted`, else `skipped` — an
+ *   equal seq never forks there.
+ * - "The copy" is the stored one OVERLAID by every version this page accepted before it, so `[5, 6]` is
+ *   inserted-then-updated and `[9, 3]` is inserted-then-skipped. The counters count ITEMS, as processing them in
+ *   order counted them; the write is the final winner per id.
+ * - A unique-index collision WITHIN the page (two ids, one edge triplet or one link's endpoints) is decided here,
+ *   first accepted wins, rather than left to the execution order of an unordered bulk write.
+ *
+ * ## The fork caps, on every door
+ *
+ * A fork is refused (`forkRefused`) when the parent's chain is already `MAX_FORK_DEPTH` deep, or when the parent
+ * already has `MAX_FORK_DEPTH` forks — stored ones and the ones this page is creating together, because a cap
+ * that counts only stored siblings lets one page past it by any amount. A fork whose derived id is already stored
+ * (or already created by this page) is that same fork: `forked`, with no second write and no cap consulted.
+ */
+export function planArrivals<T extends ArrivalDoc>(docs: readonly T[], input: ArrivalPlanInput): ArrivalPlan<T> {
   const { kind, stored, tombstones } = input;
-  const plan: PushPlan<T> = {
+  const plan: ArrivalPlan<T> = {
     verdicts: [], forkIds: [], accepts: new Map(), forks: [], tombstoneCleanups: new Map(),
   };
   /** The version of each id this page has accepted so far — what a later copy is compared against. */
@@ -351,7 +362,7 @@ export function planPushArrivals<T extends PushDoc>(docs: readonly T[], input: P
   };
   const siblingsOf = (id: string): number => (input.siblings?.get(id) ?? 0) + (forksMade.get(id) ?? 0);
 
-  const accept = (i: number, doc: T, verdict: PushVerdict, tomb: number | undefined): void => {
+  const accept = (i: number, doc: T, verdict: ArrivalVerdict, tomb: number | undefined): void => {
     plan.verdicts[i] = verdict;
     const prev = parentOf(doc._id);
     overlay.set(doc._id, doc);
@@ -374,7 +385,7 @@ export function planPushArrivals<T extends PushDoc>(docs: readonly T[], input: P
 
   docs.forEach((doc, i) => {
     plan.forkIds[i] = undefined;
-    if (kind === 'chrono' && input.allowedTypes && !input.allowedTypes.has(doc.type ?? '')) {
+    if (kind === 'chrono' && input.door === 'push' && input.allowedTypes && !input.allowedTypes.has(doc.type ?? '')) {
       plan.verdicts[i] = 'unknownType';
       return;
     }

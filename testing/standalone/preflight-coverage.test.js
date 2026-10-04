@@ -155,7 +155,12 @@ describe('preflight invokes the offline subset within the platform limit', () =>
     assert.match(SPLIT, /budget = 8_000/, 'the batch budget is gone — the full list will not fit on Windows');
     assert.match(SPLIT, /len \+ p\.length \+ 1 > budget/,
       'batching by a fixed file count drifts back over the limit as names grow');
-    assert.match(script, /batched\(/, 'preflight must batch through the shared helper, not its own copy');
+    // Re-anchored (bundle-30 I9): preflight no longer calls `batched` itself. It runs `offlineRuns`, the shared plan
+    // that batches inside it and caps the database-backed files — the same plan `test:standalone` runs.
+    assert.match(SPLIT, /export function offlineRuns\([^]*?batched\(split\.offlinePure[^]*?batched\(split\.offlineDb/,
+      'the shared plan must batch both halves through `batched`');
+    assert.match(script, /offlineRuns\(/, 'preflight must run the shared plan, not its own copy');
+    assert.doesNotMatch(script, /batched\(/, 'preflight builds its own command lines again — a second copy of the plan');
   });
 
   it('keeps running after a batch fails, so a later failure is not hidden', () => {

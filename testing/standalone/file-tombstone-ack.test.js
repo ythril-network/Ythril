@@ -188,7 +188,9 @@ describe('file sync is wired to ack only a 200', () => {
     // The trap: `find()` again after the push, catching a tombstone created in between and marking it delivered.
     const block = src.slice(src.indexOf('1b. Push our file tombstones'), src.indexOf('2. Fetch peer manifest'));
     assert.ok(block.length > 200, 'the push block was not located');
-    assert.equal((block.match(/\.find\(/g) ?? []).length, 1, 'more than one query in the push block');
+    // The read is `publishedFileTombstones` since bundle-30 I15 (a pending tombstone is never pushed); a raw `.find(`
+    // beside it is the second query this guards against.
+    assert.equal((block.match(/\.find\(|\bpublishedFileTombstones\(/g) ?? []).length, 1, 'more than one query in the push block');
   });
 
   it('the rename carries EVERY per-space watermark, and the type has not grown one it misses', async () => {

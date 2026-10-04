@@ -213,8 +213,10 @@ describe('every inline embed honours suppression', () => {
     const rec = stripComments(readFileSync('server/src/brain/embed-record.ts', 'utf8'));
     const body = bodyOf(rec, 'embedStoredRecord');
     assert.match(body, /embeddingSuppressedFor\(/, 'the queue path must keep its own check');
+    // Re-anchored for bundle-30 `R12`: the removal is the one constant `UNSET_VECTOR` (its fields are pinned by
+    // `suppress-embeddings-wiring`), not a hand-spelled `$unset` of `embedding`.
     assert.match(
-      body, /\$unset:\s*\{\s*embedding/,
+      body, /\$unset:\s*UNSET_VECTOR\b/,
       'and must UNSET a stale vector rather than only skipping — that is what cleans up a record embedded '
       + 'before the flag was set',
     );

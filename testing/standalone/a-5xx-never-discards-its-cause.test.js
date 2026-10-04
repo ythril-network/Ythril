@@ -49,6 +49,7 @@ import { trackedSources } from './_sources.mjs';
 import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
 import { blockAfter, enclosingBlockMatching } from './_structural-window.mjs';
+import { logLinesDuring } from './_log-lines.mjs';
 
 /**
  * Every route file, tracked AND untracked-but-not-ignored.
@@ -63,7 +64,13 @@ function routeFiles() {
   return trackedSources('server/src/api', { untracked: true, floor: 10 });
 }
 
-const FIVE_XX = /res\.status\((5\d\d)\)/g;
+/*
+ * A 5xx written by hand, OR handed to the one sender a route's catch answers through (`sendCaughtFailure`, bundle-30
+ * I12). Forty-odd catches moved from the first to the second; a scan of the first alone would have read that as the
+ * sites disappearing, when they are the same catches answering the same failures — and the sender is handed the
+ * binding, so the rule below (the binding is read) holds for it as for a hand-written one.
+ */
+const FIVE_XX = /res\.status\((5\d\d)\)|(sendCaughtFailure)\(/g;
 
 /*
  * Both spellings of catching, because both discard a cause the same way.
@@ -94,7 +101,7 @@ function catchesAnswering5xx() {
       const block = enclosingBlockMatching(src, at, CATCH_HEAD, `${file} @${at}`);
       if (block === null) continue;                         // not in a catch — a deliberate status, not a swallow
       const binding = CATCH_BINDING.exec(block)?.[1] ?? null;
-      out.push({ file, status: m[1], binding, block });
+      out.push({ file, status: m[1] ?? m[2], binding, block });
     }
   }
   return out;
@@ -137,16 +144,21 @@ describe('a 5xx never discards the exception that caused it', () => {
     );
   });
 
-  it('the helper reports the stack, not only the message', () => {
+  it('the helper reports the stack, not only the message', async () => {
     // "Cannot read properties of undefined" without a stack sends the reader back to grep for which of eleven
     // `undefined`s it was — and the reader is an operator on another team who cannot grep this source at all.
-    const helper = stripComments(readFileSync('server/src/util/report-failure.ts', 'utf8'));
-    assert.match(helper, /cause\.stack/, 'reportServerFailure must include the stack');
-    assert.match(helper, /log\.error\(/, 'a 5xx is an error, not a warning — it must be findable at that level');
-    assert.match(
-      helper, /\$\{where\}/,
-      'the report must name the operation, or an operator greping for the route they called finds nothing',
-    );
+    // Re-anchored (bundle-30, B4): the helper hands its cause to the logger as the meta argument, where `fmt` keeps
+    // an Error's stack and bounds its message — so the rule is read off the LINE it writes, not off a spelling.
+    const { reportServerFailure } = await import('../../server/dist/util/report-failure.js');
+    // The shared capture (`_log-lines.mjs`, bundle-30 I6 T3): the lines as written, the console silenced.
+    const { emitted: lines } = await logLinesDuring(() => reportServerFailure('revoke token', new Error('Cannot read properties of undefined')));
+    assert.equal(lines.length, 1, 'reportServerFailure must write exactly one line');
+    const [line] = lines;
+    assert.match(line, /\[ERROR\]/, 'a 5xx is an error, not a warning — it must be findable at that level');
+    assert.match(line, /revoke token failed with a 5xx/,
+      'the report must name the operation, or an operator greping for the route they called finds nothing');
+    assert.match(line, /Cannot read properties of undefined/, 'reportServerFailure must include the message');
+    assert.match(line, /\\n {4}at /, 'reportServerFailure must include the stack (its frames, escaped onto the line)');
   });
 
   it('the revoke route reports its unreachable branch', () => {

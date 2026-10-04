@@ -9,7 +9,8 @@
  * family — or a renamed one — would have been seven edits, and the one forgotten is a family a peer pushes and this
  * instance drops with a 200 (the `filemeta` story, once already). Now they come from `REPLICATED_FAMILIES`,
  * `RECORD_TYPE_OF` and `TOMBSTONE_TYPE_OF`. Two family-keyed tables stay, each because it is a fact the registry
- * cannot hold: the zod schema per family (`BATCH_SCHEMAS`, checked at load against the registry) and the response
+ * cannot hold: the zod schema per family (`INCOMING_SCHEMA_OF` in `sync/arrival-shape.ts`, checked at load against
+ * the registry) and the response
  * literal (the wire contract — each family's counters differ).
  *
  * ## What is asserted
@@ -31,7 +32,13 @@ import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
 
 const { REPLICATED_FAMILIES } = await import('../../server/dist/sync/replicated-families.js');
-const DOCS = stripComments(readFileSync('server/src/api/sync/docs.ts', 'utf8'));
+/*
+ * Re-anchored for bundle-30 §D (`Q-204`, `Q-225`): the door is three files now — the routes (`api/sync/docs.ts`), the
+ * page accept they share with the pull (`sync/accept-page.ts`) and the one validation step that holds the schema
+ * table (`sync/arrival-shape.ts`). Read as one, so a table moved between them is still counted.
+ */
+const DOOR_FILES = ['server/src/api/sync/docs.ts', 'server/src/sync/accept-page.ts', 'server/src/sync/arrival-shape.ts'];
+const DOCS = DOOR_FILES.map(f => stripComments(readFileSync(f, 'utf8'))).join('\n');
 const KEYS = REPLICATED_FAMILIES.map(f => f.payloadKey);
 const KEY_LINE = new RegExp(`^\\s*(?:${KEYS.join('|')})\\s*:`);
 
@@ -66,7 +73,7 @@ describe('the push door derives its families', () => {
 
   it('the body is read by the registry\'s keys', () => {
     assert.doesNotMatch(DOCS, /body\?\.[a-z]+\b/, 'a body key is read one family at a time again');
-    assert.match(DOCS, /REPLICATED_FAMILIES\.map\(\(\{ payloadKey: k \}\) =>\s*\[k, Array\.isArray\(body\?\.\[k\]\)/,
+    assert.match(DOCS, /for \(const \{ payloadKey: (\w+) \} of REPLICATED_FAMILIES\) \{\s*const \w+ = Array\.isArray\(body\?\.\[\1\]\)/,
       'the body is not read through REPLICATED_FAMILIES');
   });
 
@@ -76,7 +83,7 @@ describe('the push door derives its families', () => {
       `the push door holds ${tables.length} family-keyed table(s) (lines ${tables.map(r => r[0]).join(', ')}); the `
       + 'schema table and the response literal are the two the registry cannot hold. Derive any other from '
       + 'REPLICATED_FAMILIES, RECORD_TYPE_OF or TOMBSTONE_TYPE_OF');
-    assert.match(DOCS, /const missing = keys\.filter\(k => !\(k in BATCH_SCHEMAS\)\);/,
+    assert.match(DOCS, /const missing = keys\.filter\(k => !\(k in INCOMING_SCHEMA_OF\)\);/,
       'the schema table is no longer checked against the registry at load');
   });
 });

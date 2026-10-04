@@ -82,10 +82,15 @@ const EXEMPT = {
   'server/src/brain/chrono.ts:updateChrono': 'update path',
   'server/src/brain/chrono.ts:deleteChrono': 'delete path',
   'server/src/brain/edges.ts:updateEdgeById': 'update path',
-  'server/src/brain/edges.ts:deleteEdge': 'delete path',
+  // `deleteEdge` and the entity cascade both remove edges through the one remover (bundle-30, Q-107 part 3b).
+  // Re-anchored (bundle-30 I6, C11): the delete moved into the one remover, which the edge removal's chunk, the merge's
+  // duplicate edges and moved links, and the re-key's old rows all call.
+  'server/src/brain/tombstones.ts:removeWithTombstones': 'delete path: rows deleted by id, each with its tombstone',
   // whole-record operations that are not a create
-  'server/src/brain/merge.ts:executeMerge': 'merge: rewrites a survivor and retires the merged records',
-  'server/src/brain/edge-rekey.ts:rekeyEdge': 're-key: moves an edge to a new identity, delete + insert',
+  // Re-keyed (bundle-30, Q-107 part 3a): the merge's writes moved into its transaction's callback, and the re-key's
+  // into the one batched implementation `rekeyEdge` now calls.
+  'server/src/brain/merge.ts:relinkAndAbsorb': 'merge: rewrites a survivor and retires the merged records',
+  'server/src/brain/edge-rekey.ts:rekeyEdges': 're-key: moves an edge to a new identity, delete + insert',
   'server/src/brain/chrono-redaction.ts:redactLapsedChronoContent': 'redaction: a retention schedule clears content',
   'server/src/brain/chrono-redaction.ts:backfillTypedExpiry': 'retention: stamps a computed expiry on stored entries',
   'server/src/brain/embed-record.ts:embedStoredRecord': 'the embed worker stores a vector on a record already written',

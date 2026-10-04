@@ -42,9 +42,9 @@
 import { createHash } from 'node:crypto';
 import { entityDeleteBlockers } from './entity-delete-guard.js';
 import { deleteEntity } from './entities.js';
-import { deleteEdge } from './edges.js';
 import type { BacklinkEntry } from './entities.js';
 import type { WebhookActor } from '../webhooks/dispatcher.js';
+import { removeEdges } from './edge-removal.js';
 
 /** What a preview answers: the set, and the token that authorises removing exactly it. */
 export interface CascadePreview {
@@ -116,38 +116,40 @@ export async function deleteEntityCascade(
   }
 
   /*
-   * The EDGES first, then the entity — and each edge through `deleteEdge`, not a bulk delete.
+   * Anything blocking that is NOT an edge refuses the cascade — BEFORE anything is deleted.
    *
-   * `deleteEdge` writes the tombstone. Without one, the next pull from any peer that still holds the edge
-   * brings it back, pointing at an entity that no longer exists: the dangling reference `strictLinkage`
-   * refused the delete for in the first place, restored by the sync that was supposed to spread the fix.
-   */
-  const removed: BacklinkEntry[] = [];
-  for (const b of preview.removes) {
-    if (b.type !== 'edge') continue;
-    if (await deleteEdge(spaceId, b._id, actor)) removed.push(b);
-  }
-
-  /*
-   * Anything blocking that is NOT an edge is left, and the delete below then refuses again.
+   * `M-2` made a fact, a chrono entry or a file able to block a delete through its links, and removing one of
+   * those is deleting somebody's RECORD — not the relationship between two records, which is all an edge is. The
+   * owner's ruling is about edges: *"either remove edges by hand or use A when you are sure."*
    *
-   * That is deliberate rather than unfinished. `M-2` made a fact, a chrono entry or a file able to block a
-   * delete through its link arrays, and removing one of those is deleting somebody's RECORD — not the
-   * relationship between two records, which is all an edge is. The owner's ruling is about edges: *"either
-   * remove edges by hand or use A when you are sure."*
+   * It refused AFTER the edges until `Q-107` part 3b: every blocking edge deleted, its tombstone spread to every
+   * peer, and only then "cannot delete" — a refusal over an operation that had removed every relationship of the
+   * entity. The whole set is the preview's, so the refusal is decided on it, and a refused cascade removes nothing.
    */
   const stillBlocking = preview.removes.filter(b => b.type !== 'edge');
   if (stillBlocking.length > 0) {
     return {
       ok: false,
-      preview: await previewEntityCascade(spaceId, entityId),
+      preview,
       error: `Cannot delete: ${stillBlocking.map(b => `${b.type} ${b._id}`).join(', ')} still reference this `
         + 'entity, and a cascade removes EDGES only — a fact, chrono entry or file that names it is a '
-        + 'record of its own, not a relationship. Edit those to drop the reference first.',
+        + 'record of its own, not a relationship. Edit those to drop the reference first. Nothing was removed.',
     };
   }
+
+  /*
+   * The EDGES first, then the entity — a chunk at a time, each chunk ONE held transaction: its delete and its
+   * tombstones commit together or not at all (`removeEdges`, `brain/edge-removal.ts`, which `deleteEdge` uses too).
+   *
+   * The tombstone is not optional. Without one, the next pull from any peer that still holds the edge brings it
+   * back, pointing at an entity that no longer exists: the dangling reference `strictLinkage` refused the delete
+   * for, restored by the sync that was supposed to spread the fix. Per edge, delete then tombstone, a failed
+   * tombstone left exactly that; per chunk in a transaction, a failure removes nothing of the chunk, and a re-run
+   * (a new preview, a new token) continues with what is left.
+   */
+  const gone = await removeEdges(spaceId, preview.removes.map(b => b._id), actor);
+  const removed = preview.removes.filter(b => gone.has(b._id));
 
   await deleteEntity(spaceId, entityId, actor);
   return { ok: true, removed };
 }
-

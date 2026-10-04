@@ -7,21 +7,20 @@ import { Router } from 'express';
 import { TOMBSTONE_TYPES, TOMBSTONE_COLLECTION } from '../../config/types.js';
 import { toSafeRelPath } from '../../util/paths.js';
 import { z } from 'zod';
-import { col, asFilter, asUpdate } from '../../db/mongo.js';
 import { syncRateLimit } from '../../rate-limit/middleware.js';
 import { getDataRoot } from '../../config/loader.js';
 import { listTombstones } from '../../brain/tombstones.js';
 import { requireAuth, denyReadOnly, isInstanceAdmin } from '../../auth/middleware.js';
-import { log } from '../../util/log.js';
-import { reportServerFailure } from '../../util/report-failure.js';
+import { sendCaughtFailure } from '../send-failure.js';
+import { withinWriteBound } from '../../db/write-bound.js';
 import { applyPeerTombstones, MAX_TOMBSTONES_PER_REQUEST } from '../../sync/tombstone-apply.js';
 import { deleteStored } from '../../files/stored-bytes.js';
+import { publishedFileTombstones, storePeerFileTombstone } from '../../files/tombstones.js';
 import path from 'node:path';
 import type { FileTombstoneDoc } from '../../config/types.js';
 
 import { spaceAllowed, pushAllowed, callerPeerId } from './_shared.js';
 import { recordServedSeq } from '../../sync/served-watermark.js';
-import { spaceCollection } from '../../db/space-collection.js';
 
 export const syncTombstonesRouter = Router();
 
@@ -68,8 +67,7 @@ syncTombstonesRouter.get('/tombstones', syncRateLimit, requireAuth, async (req, 
     recordServedSeq(callerPeerId(req.authToken as Record<string, unknown>), spaceId, since);
     res.json(grouped);
   } catch (err) {
-    log.error(`sync GET tombstones: ${err}`);
-    res.status(500).json({ error: 'Internal error' });
+    sendCaughtFailure(res, `sync GET tombstones`, err);
   }
 });
 
@@ -105,15 +103,15 @@ syncTombstonesRouter.post('/tombstones', syncRateLimit, requireAuth, denyReadOnl
      */
     const callerPeerId = (req.authToken as Record<string, unknown>)?.['peerInstanceId'] as string | undefined;
     const trustedRelay = !callerPeerId && !!req.authToken && isInstanceAdmin(req.authToken);
-    const out = await applyPeerTombstones(spaceId, tombstones, { peerInstanceId: callerPeerId, trustedRelay },
-      `sync POST tombstones from ${callerPeerId ?? 'a local token'}`);
+    // Bounded like every push door (bundle-30 `B2`): a stalled lock answers a retryable 503, never a hung request.
+    const out = await withinWriteBound(async () => await applyPeerTombstones(spaceId, tombstones,
+      { peerInstanceId: callerPeerId, trustedRelay }, `sync POST tombstones from ${callerPeerId ?? 'a local token'}`));
     if (out.unknownTypes.length > 0) { res.status(400).json({ error: 'Invalid tombstone format' }); return; }
 
     // `applied` keeps its meaning — every element admitted by shape and seq — and `refused` is additive.
     res.status(200).json({ applied: out.admitted, refused: out.refused.length });
   } catch (err) {
-    reportServerFailure('sync POST tombstones', err);
-    res.status(500).json({ error: 'Internal error' });
+    sendCaughtFailure(res, 'sync POST tombstones', err);
   }
 });
 
@@ -133,18 +131,11 @@ syncTombstonesRouter.get('/file-tombstones', syncRateLimit, requireAuth, async (
     if (!spaceId) { res.status(400).json({ error: 'spaceId required' }); return; }
     if (!spaceAllowed(spaceId, networkId, req.authToken as Record<string, unknown>)) { res.status(403).json({ error: 'Forbidden' }); return; }
 
-    const filter = since
-      ? { spaceId, deletedAt: { $gt: since } }
-      : { spaceId };
-    const tombstones = await col<FileTombstoneDoc>(spaceCollection(spaceId, 'fileTombstones'))
-      .find(asFilter<FileTombstoneDoc>(filter))
-      .sort({ deletedAt: 1 })
-      .limit(5000)
-      .toArray();
+    // Published ones only, in their wire shape: a tombstone whose act has not happened is never served (bundle-30 I15).
+    const tombstones = await publishedFileTombstones(spaceId, { ...(since ? { since } : {}), limit: 5000 });
     res.json({ tombstones });
   } catch (err) {
-    log.error(`sync GET file-tombstones: ${err}`);
-    res.status(500).json({ error: 'Internal error' });
+    sendCaughtFailure(res, `sync GET file-tombstones`, err);
   }
 });
 
@@ -187,17 +178,12 @@ syncTombstonesRouter.post('/file-tombstones', syncRateLimit, requireAuth, denyRe
         path: rel,
         deletedAt: typeof ts.deletedAt === 'string' ? ts.deletedAt : new Date().toISOString(),
       };
-      await col<FileTombstoneDoc>(spaceCollection(spaceId, 'fileTombstones')).updateOne(
-        asFilter<FileTombstoneDoc>({ _id: doc._id }),
-        asUpdate<FileTombstoneDoc>({ $setOnInsert: doc }),
-        { upsert: true },
-      );
+      await storePeerFileTombstone(spaceId, doc);
       applied++;
     }
 
     res.json({ applied });
   } catch (err) {
-    log.error(`sync POST file-tombstones: ${err}`);
-    res.status(500).json({ error: 'Internal error' });
+    sendCaughtFailure(res, 'sync POST file-tombstones', err);
   }
 });

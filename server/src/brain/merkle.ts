@@ -22,14 +22,21 @@
  *
  * Enabled per-network via `network.merkle === true` (opt-in, advisory: a
  * mismatch is reported as MERKLE_DIVERGENCE, it does not block sync).
+ *
+ * A root may be built from leaves kept since an earlier call, per collection, while nothing has written to that
+ * collection (`computeMerkleRoot`): it equals a full recompute by construction, and a gate holds it to that.
  */
 
 import { createHash } from 'node:crypto';
 import { col, asFilter } from '../db/mongo.js';
 import { buildFileManifest } from '../files/manifest.js';
-import { spillIdFromPath } from './spill-path.js';
-import { BRAIN_COLLECTIONS } from '../config/types-knowledge.js';
-import { LOCAL_ONLY_FIELDS, LOCAL_ONLY_EXCLUSION } from '../sync/local-only-fields.js';
+import { BRAIN_COLLECTIONS, type BrainCollection } from '../config/types-knowledge.js';
+import { collectionStamp, joinStamps, readAtStamp, type Stamped } from '../db/space-generation.js';
+import { spaceCollection } from '../db/space-collection.js';
+import { LruMap } from '../util/lru-map.js';
+import { LOCAL_ONLY_FIELDS } from '../sync/local-only-fields.js';
+import { RETAGGED_FIELDS } from '../sync/retagged-fields.js';
+import { isInstanceLocalFile } from '../sync/file-conflict.js';
 
 // ── Internal helpers ─────────────────────────────────────────────────────────
 
@@ -70,8 +77,16 @@ function sha256hex(input: string): string {
  * READ FROM `sync/local-only-fields.ts`, which is the same set for the same reason. `CLAUDE.md` states
  * the equivalence as a rule — a field that is hashed must replicate — so a field excluded here is exactly
  * a field ingest must drop, and two lists of one set is how one of them goes wrong.
+ *
+ * ## And the fields the receiver RETAGS (`Q-307`)
+ *
+ * `spaceId` replicates, and every arrival is then stored under THIS instance's id for the space
+ * (`sync/retagged-fields.ts`) — under a `spaceMap` alias, not the sender's. Hashed, two instances holding
+ * identical data under two ids differed in every leaf, for ever: `MERKLE_DIVERGENCE` every cycle on a space
+ * where nothing is wrong. It is its OWN list, never `LOCAL_ONLY_FIELDS`: the arrival writer strips those, and
+ * would strip the space id from every arrival.
  */
-const DERIVED_FIELDS = LOCAL_ONLY_FIELDS;
+const DERIVED_FIELDS: ReadonlySet<string> = new Set([...LOCAL_ONLY_FIELDS, ...RETAGGED_FIELDS]);
 
 /**
  * Canonical JSON of a document: keys sorted at every level, derived fields
@@ -136,8 +151,8 @@ export function docLeaf(collType: string, doc: Record<string, unknown>): string 
   return sha256hex(`doc:${collType}:${String(doc['_id'])}:${String(doc['seq'])}:${canonicalDocHash(doc)}`);
 }
 
-// Derived from the one list, like DERIVED_FIELDS: a hand-written copy here missed `syncBase` the day it was added (Q-66).
-const DERIVED_PROJECTION = LOCAL_ONLY_EXCLUSION;
+// Derived from DERIVED_FIELDS itself: a hand-written copy here missed `syncBase` the day it was added (Q-66).
+const DERIVED_PROJECTION: Readonly<Record<string, 0>> = Object.fromEntries([...DERIVED_FIELDS].map(f => [f, 0]));
 
 /**
  * What is INCLUDED from a file's metadata — and it is an inclusion projection, unlike every other collection.
@@ -154,83 +169,145 @@ const DERIVED_PROJECTION = LOCAL_ONLY_EXCLUSION;
  * **The two lists must name the same fields.** That gate is what says so.
  */
 const FILE_HASH_PROJECTION = {
-  _id: 1, spaceId: 1, path: 1, description: 1, descriptionSource: 1, tags: 1,
+  _id: 1, path: 1, description: 1, descriptionSource: 1, tags: 1,
   properties: 1,
   suppressEmbeddings: 1,
   author: 1, createdAt: 1, updatedAt: 1, seq: 1,
 } as const;
+
 /**
- * Compute the Merkle root for a single space.
+ * The sorted leaves of one record collection of a space, read in full.
  *
- * Documents are streamed with a cursor (not `toArray`) because the content hash
- * needs the full document, and a large space would otherwise be materialised in
- * fact all at once. Embedding vectors are excluded at the projection level, so
- * the biggest field never leaves MongoDB.
+ * ALL SIX COLLECTIONS are hashed, and `files` joined the list on the owner's `P-32` ruling — each for the same
+ * reason, stated once: **a replicated document that is not hashed makes two instances holding different data report
+ * themselves IDENTICAL.** `MERKLE_DIVERGENCE` is the only signal that says data really is missing, and a permanent
+ * false NEGATIVE is silent for ever. `links` was added when a link became a record; `files` when its metadata began
+ * to replicate.
+ *
+ * **What is hashed for a file is the AUTHORED half only**, and the two halves fail in opposite directions. Hash
+ * `sizeBytes` or the vector and two instances that agree about everything anybody wrote diverge for ever over a
+ * number they each computed from their own copy of the bytes — a permanent false POSITIVE, which teaches an operator
+ * to ignore the warning. Hash nothing and you get the false negative.
+ *
+ * Streamed with a cursor (not `toArray`), because the content hash needs the whole document and a large space would
+ * otherwise be materialised at once; the vectors are excluded at the projection, so the largest field never leaves
+ * MongoDB.
  */
+async function collectionLeaves(spaceId: string, collType: BrainCollection): Promise<string[]> {
+  const leaves: string[] = [];
+  const cursor = col<Record<string, unknown>>(spaceCollection(spaceId, collType))
+    // A CHUNK never replicates: it is derived from the blob and the receiver makes its own, with its own
+    // chunker and its own model. Hashed, two correct instances report divergence whenever those differ.
+    .find(asFilter(collType === 'files' ? { parentFileId: { $exists: false } } : {}))
+    // The same set as `DERIVED_FIELDS`, and it has to STAY the same set: this one decides what is fetched,
+    // that one decides what is skipped while canonicalising. A field in only one of them is either hashed
+    // when it must not be, or pulled out of MongoDB for nothing.
+    // `a-replicated-field-reaches-its-incoming-schema.test.js` asserts the two agree.
+    .project(collType === 'files' ? FILE_HASH_PROJECTION : DERIVED_PROJECTION);
+
+  for await (const doc of cursor) {
+    // A file that never leaves this instance — a conflict copy, a schema snapshot, a legacy spill (Q-92) —
+    // replicates in neither direction, so hashing its record reports a divergence every cycle between two
+    // members that hold the same data. The predicate the peer manifest uses, imported (`Q-307`, `R8`).
+    if (collType === 'files' && isInstanceLocalFile(String((doc as { _id?: unknown })._id ?? ''))) continue;
+    leaves.push(docLeaf(collType, doc as Record<string, unknown>));
+  }
+  return leaves.sort();
+}
+
 /**
- * What is EXCLUDED from the hash for the five document collections — the derived five.
+ * The sorted lists merged into one sorted list — which is the global sort of their union, the invariant the cached
+ * root rests on: leaves sorted per collection and merged give the same order as all of them sorted at once, so a
+ * root built from cached leaves is the root a full recompute builds (`a-cached-merkle-root-equals-a-recompute-db`).
+ * Hex digests of one length compare as plain strings, as `Array.prototype.sort` compares them.
+ */
+function mergeSorted(lists: readonly (readonly string[])[]): string[] {
+  let out: string[] = [];
+  for (const list of lists) {
+    const merged: string[] = new Array(out.length + list.length);
+    let i = 0, j = 0, k = 0;
+    while (i < out.length && j < list.length) merged[k++] = out[i]! <= list[j]! ? out[i++]! : list[j++]!;
+    while (i < out.length) merged[k++] = out[i++]!;
+    while (j < list.length) merged[k++] = list[j++]!;
+    out = merged;
+  }
+  return out;
+}
+
+/** Spaces whose leaves are kept, least recently asked for dropped first: one sync cycle asks for a handful. */
+const MERKLE_CACHE_SPACES = 16;
+
+/** What is kept for one space: each collection's leaves at the stamp they were read at, and the last root. */
+interface CachedSpace {
+  collections: Map<BrainCollection, Stamped<string[]>>;
+  last?: { stamps: string; files: string[]; result: MerkleResult };
+}
+const cached = new LruMap<string, CachedSpace>(MERKLE_CACHE_SPACES);
+
+function cacheOf(spaceId: string): CachedSpace {
+  const hit = cached.get(spaceId);
+  if (hit) return hit;
+  const entry: CachedSpace = { collections: new Map() };
+  cached.set(spaceId, entry);
+  return entry;
+}
+
+/** Drop what is kept for a space — when it is deleted, so its leaves do not outlive it. */
+export function forgetMerkleLeaves(spaceId: string): void {
+  cached.delete(spaceId);
+}
+
+const sameList = (a: readonly string[], b: readonly string[]): boolean => a.length === b.length && a.every((x, i) => x === b[i]);
+
+/**
+ * Compute the Merkle root for a single space — reading only what changed since the last one (`Q-107` part 4).
  *
- * An EXCLUSION projection, which is the right shape here: a new AUTHORED field joins the hash on the commit
- * that declares it, and a new DERIVED one has to be added here deliberately. The reverse would make every
- * new field silently unhashed, and an unhashed replicated field is the false negative this module exists to
- * prevent.
+ * It is asked on every sync cycle for every `merkle: true` space and on every peer's `GET /api/sync/merkle`, and it
+ * used to stream every record of all six collections each time, whether or not one had moved. Now each collection's
+ * sorted leaves are kept at the stamp they were read at (`db/space-generation.ts`: a write this process makes, or a
+ * database replaced under it, moves the stamp), and a collection is read again only when its stamp moved. The file
+ * manifest is built on every call — it stats every file, and its own hash cache spares re-hashing unchanged bytes —
+ * and a call whose stamps and file leaves are both unchanged returns the stored root, `computedAt` included: that is
+ * when THIS root was computed.
+ *
+ * The leaves of a collection whose stamp moved while it was read are used for this answer and not kept, so a write
+ * that landed during the read is never cached away.
  */
 export async function computeMerkleRoot(spaceId: string): Promise<MerkleResult> {
-  const leaves: string[] = [];
+  const entry = cacheOf(spaceId);
+  const parts: string[][] = [];
+  const stamps: string[] = [];
+  let stable = true;
 
-  /*
-   * ── Brain documents ────────────────────────────────────────────────────
-   *
-   * ALL SIX COLLECTIONS, and `files` joined the list on the owner's `P-32` ruling — each for the same
-   * reason, stated once: **a replicated document that is not hashed makes two instances holding different
-   * data report themselves IDENTICAL.** `MERKLE_DIVERGENCE` is the only signal that says data really is
-   * missing, and a permanent false NEGATIVE is silent for ever.
-   *
-   * `links` was added when a link became a record. `files` was excluded while a file's metadata did not
-   * replicate — the comment here said so, and it was right at the time: the bytes were hashed from the
-   * manifest below and the document was meta about a blob. `P-32` made the metadata replicate, so leaving
-   * it out became exactly the false negative the paragraph above describes.
-   *
-   * **What is hashed for a file is the AUTHORED half only**, and the two halves fail in opposite
-   * directions. Hash `sizeBytes` or the vector and two instances that agree about everything anybody wrote
-   * diverge for ever over a number they each computed from their own copy of the bytes — a permanent false
-   * POSITIVE, which teaches an operator to ignore the warning. Hash nothing and you get the false negative.
-   */
-  // DERIVED. This was the sixth place the collection names were written out, and it is no longer a SUBSET
-  // of them: `files` joining the hash means every brain collection is hashed, so the list IS the tuple.
+  // DERIVED: every brain collection is hashed, so the list IS the tuple.
   for (const collType of BRAIN_COLLECTIONS) {
-    const collName = `${spaceId}_${collType}`;
-    const cursor = col<Record<string, unknown>>(collName)
-      // A CHUNK never replicates: it is derived from the blob and the receiver makes its own, with its own
-      // chunker and its own model. Hashed, two correct instances report divergence whenever those differ.
-      .find(asFilter(collType === 'files' ? { parentFileId: { $exists: false } } : {}))
-      // The same set as `DERIVED_FIELDS`, and it has to STAY the same set: this one decides what is fetched,
-      // that one decides what is skipped while canonicalising. A field in only one of them is either hashed
-      // when it must not be, or pulled out of MongoDB for nothing.
-      // `a-replicated-field-reaches-its-incoming-schema.test.js` asserts the two agree.
-      .project(collType === 'files' ? FILE_HASH_PROJECTION : DERIVED_PROJECTION);
-
-    for await (const doc of cursor) {
-      // A legacy spill's FileMeta (Q-92) replicates in neither direction any more, so hashing it would report
-      // a divergence every cycle between an instance that swept its spills and one that has not.
-      if (collType === 'files' && spillIdFromPath(String((doc as { _id?: unknown })._id ?? ''))) continue;
-      leaves.push(docLeaf(collType, doc as Record<string, unknown>));
-    }
+    // Kept only if nothing was written while it read — `readAtStamp`, the one spelling of that rule.
+    const read = await readAtStamp(entry.collections, collType,
+      () => collectionStamp(spaceId, collType), () => collectionLeaves(spaceId, collType));
+    parts.push(read.value);
+    if (!read.kept) stable = false;
+    stamps.push(read.stamp);
   }
 
   // ── File manifest ──────────────────────────────────────────────────────
-  const files = await buildFileManifest(spaceId);
-  for (const f of files) {
-    leaves.push(sha256hex(`file:${f.path}:${f.sha256}`));
-  }
+  // Only the files that replicate: a conflict copy or a schema snapshot is this instance's own, and the peer
+  // manifest leaves it out for the same reason (`isInstanceLocalFile`).
+  const files = (await buildFileManifest(spaceId))
+    .filter(f => !isInstanceLocalFile(f.path))
+    .map(f => sha256hex(`file:${f.path}:${f.sha256}`))
+    .sort();
 
-  // Deterministic ordering
-  leaves.sort();
+  const key = joinStamps(stamps);
+  if (entry.last && entry.last.stamps === key && sameList(entry.last.files, files)) return entry.last.result;
 
-  return {
+  const leaves = mergeSorted([...parts, files]);
+  const result: MerkleResult = {
     spaceId,
     root: merkleRoot(leaves),
     leafCount: leaves.length,
     computedAt: new Date().toISOString(),
   };
+  if (stable) entry.last = { stamps: key, files, result };
+  else delete entry.last;
+  return result;
 }

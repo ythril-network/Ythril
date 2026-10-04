@@ -35,6 +35,19 @@ Authorization: Bearer <admin-token>   # admin required
 
 Returns recent log lines from the in-memory ring buffer. **Requires an admin token** — logs may contain space IDs, peer URLs, and internal error details.
 
+**Every log line is one line, and bounded.** A value the server did not choose — a peer's document id, label or
+round id, a caller's parameter, a database driver's error text — is written escaped (a line break reads as `\r\n`,
+any other control character as `\u001b`), with credentials redacted, and cut at **4096** characters per value with
+`…(+N chars)` saying how much was left out; a list of such values shows at most 100 of them and then `…(+K more)`.
+So a peer cannot start a line of its own, and a megabyte `_id` or `seq` makes a line, not a megabyte of one. The same
+bound applies where such a value is named back in an answer: a sync refusal's reason, the fork-limit `400`, and an
+admin import's `refused`, `schemaViolations` and `restoredOverTombstone` entries; a write refused for a malformed or
+missing reference names its first **5** references, each cut at **256** characters, then `…(+N more)`; and a key a door
+does not take is quoted the same way on both doors — a REST body's `Unknown field(s)` names (and `unrecognized_keys`
+lists) its first **10** unknown keys, and an MCP call's `unexpected property` names its key and path, each unknown key
+cut at **256** characters. An error passed
+with its stack keeps the stack (escaped onto the line) with its message bounded.
+
 **Response** `200`:
 
 ```json

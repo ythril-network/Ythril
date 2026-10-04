@@ -1,7 +1,7 @@
 /**
- * What the push accept planner (`planPushArrivals`, `sync/upsert-plan.ts`) is told, read in a number of queries
+ * What the page accept planner (`planArrivals`, `sync/upsert-plan.ts`) is told, read in a number of queries
  * that does not grow with the page — and the one write it decides that is not a record's, the stale-tombstone
- * cleanup (`Q-107` part 1 §2, §4).
+ * cleanup (`Q-107` part 1 §2, §4). The pull reads through it too since `Q-204`: one planner, one set of reads.
  *
  * ## Why the reads are their own module
  *
@@ -20,7 +20,7 @@ import { col, asFilter } from '../db/mongo.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { readStoredById } from '../db/read-by-id.js';
 import type { TombstoneType } from '../config/types.js';
-import { forkCandidates, MAX_FORK_DEPTH, type HeldTombstone, type PushDoc, type PushFamily, type StoredCopy } from './upsert-plan.js';
+import { forkCandidates, MAX_FORK_DEPTH, type HeldTombstone, type ArrivalDoc, type PlannedFamily, type StoredCopy } from './upsert-plan.js';
 
 /** The tombstone held per record id — its seq and issuer — per tombstone type, for every id the request carries. */
 export async function readPageTombstones(
@@ -39,7 +39,7 @@ export async function readPageTombstones(
 
 /** The stored copies the planner compares a page against: the seq, and for facts the text and the fork parent. */
 export async function readPushStored(
-  spaceId: string, family: PushFamily, docs: readonly PushDoc[],
+  spaceId: string, family: PlannedFamily, docs: readonly ArrivalDoc[],
 ): Promise<Map<string, StoredCopy>> {
   const fields: Record<string, 1> = family === 'facts' ? { seq: 1, fact: 1, forkOf: 1 } : { seq: 1 };
   return readStoredById<StoredCopy>(spaceCollection(spaceId, family), docs.map(d => d._id), fields);
@@ -50,7 +50,7 @@ export async function readPushStored(
  * stored, and the `forkOf` of every ancestor above the candidates. Empty, and nothing read, when no fact can fork.
  */
 export async function readForkContext(
-  spaceId: string, docs: readonly PushDoc[], stored: ReadonlyMap<string, StoredCopy>,
+  spaceId: string, docs: readonly ArrivalDoc[], stored: ReadonlyMap<string, StoredCopy>,
 ): Promise<{ forkParent?: Map<string, string | undefined>; siblings?: Map<string, number>; existingForks?: Set<string> }> {
   const candidates = forkCandidates(docs, stored);
   if (candidates.length === 0) return {};

@@ -18,12 +18,40 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { dispatchSource } from './_tool-dispatch.mjs';
 import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import path from 'node:path';
 import { stripComments } from './_strip-comments.mjs';
 
-const { classifyReadFailure } = await import('../../server/dist/brain/store-failure.js');
+const { classifyReadFailure, storeFailureDetail } = await import('../../server/dist/brain/store-failure.js');
 
-/** A driver error, shaped the way the MongoDB node driver actually shapes one. */
-const mongoErr = (name, fields = {}) => Object.assign(new Error(fields.message ?? 'boom'), { name, ...fields });
+// The driver the SERVER loads: since bundle-30 I12 a store failure is recognised by its CLASS, so an error built to
+// look like one (a plain Error carrying a driver name) is exactly what the classifier must no longer be fooled by.
+const driver = createRequire(path.resolve('server/package.json'))('mongodb');
+
+/**
+ * The reported condition as the driver delivers it: a REAL error of the named class, carrying the reported message and
+ * whatever fields the case attaches. It was a plain `Error` with the driver's name, which the classifier read by its
+ * message alone — and reading any error's message is what made a refusal quoting `mongot` a store failure, so the
+ * message patterns are now read only from the driver's own errors (bundle-30 I13).
+ */
+const mongoErr = (name, fields = {}) => {
+  const e = new driver[name]({ errmsg: fields.message ?? 'boom' });
+  // Defined, not assigned: the driver's `errmsg` is a getter, and a case attaches one that differs from the message.
+  for (const [k, v] of Object.entries(fields)) Object.defineProperty(e, k, { value: v, enumerable: true, configurable: true, writable: true });
+  return e;
+};
+
+/** A REAL driver error of the named class: a server error from its response document, any other from a message. */
+function realErr(name, fields = {}) {
+  const C = driver[name];
+  if (C === driver.MongoServerError || C.prototype instanceof driver.MongoServerError) {
+    return new C({ errmsg: fields.message ?? 'boom', ...fields });
+  }
+  // A system error (server selection) takes the topology description it gave up on as its second argument.
+  const made = C === driver.MongoSystemError || C.prototype instanceof driver.MongoSystemError
+    ? new C(fields.message ?? 'boom', {}) : new C(fields.message ?? 'boom');
+  return Object.assign(made, fields.code !== undefined ? { code: fields.code } : {});
+}
 
 describe('the reported condition, verbatim from both reports', () => {
   /**
@@ -43,34 +71,42 @@ describe('the reported condition, verbatim from both reports', () => {
   it('closes the dangling `caused by ::` rather than shipping a half sentence', () => {
     // THE symptom: the message ends mid-sentence, which a caller reads as a truncated complaint about their
     // own request. An operator could not tell whether the gap was the store's or our logging.
-    const f = classifyReadFailure(mongoErr('MongoServerError', { message: REPORTED }));
-    assert.doesNotMatch(f.error, /caused by ::\s*$/, 'the message must not still end at `caused by ::`');
-    assert.match(f.error, /the store reported no cause/,
+    // Since bundle-30 I8 the driver's account is the operator's LOG line (`storeFailureDetail`) and the answer is in
+    // our words — it names internal hosts and ports (`no-door-answers-with-the-drivers-text`). So the half sentence
+    // is closed where it is read now, and the caller is told whose fault it is.
+    const err = mongoErr('MongoServerError', { message: REPORTED });
+    const detail = storeFailureDetail(err);
+    assert.doesNotMatch(detail, /caused by ::\s*$/, 'the logged line must not still end at `caused by ::`');
+    assert.match(detail, /the store reported no cause/,
       'when nothing was attached, say so — that is the answer to "is the gap yours or ours?"');
-    assert.match(f.error, /not a problem with your request/i,
-      'and say whose fault it is, because the status alone is not read by a human');
+    assert.match(classifyReadFailure(err).error, /store-side failure/i,
+      'and the caller is told whose fault it is, because the status alone is not read by a human');
+    assert.doesNotMatch(classifyReadFailure(err).error, /caused by/, 'and is never told the driver\'s text');
   });
 
-  it('fills the cause in from the driver when there IS one', () => {
-    const f = classifyReadFailure(mongoErr('MongoServerError', {
+  it('fills the cause in from the driver when there IS one — in the log, and the code in the answer', () => {
+    const err = mongoErr('MongoServerError', {
       message: REPORTED,
       errmsg: 'mongot connection closed',
       codeName: 'InternalError',
       code: 8,
-    }));
-    assert.match(f.error, /mongot connection closed/, 'the real reason must reach the caller');
-    assert.equal(f.code, 8, 'and the code, which is an operator\'s fastest route to the condition');
+    });
+    const f = classifyReadFailure(err);
+    assert.match(storeFailureDetail(err), /mongot connection closed/, 'the real reason must reach the operator');
+    assert.doesNotMatch(f.error, /mongot connection closed/, 'and not the caller');
+    assert.equal(f.code, 8, 'the code is stable, names no host, and is an operator\'s fastest route to the condition');
     assert.equal(f.codeName, 'InternalError');
-    assert.doesNotMatch(f.error, /the store reported no cause/,
+    assert.doesNotMatch(storeFailureDetail(err), /the store reported no cause/,
       'that phrase is for an EMPTY cause and would be a lie next to a real one');
   });
 
   it('reads a nested `cause`, which is where the empty one was hiding', () => {
-    const f = classifyReadFailure(mongoErr('MongoServerError', {
+    const err = mongoErr('MongoServerError', {
       message: 'Executor error during find command',
       cause: new Error('connection 4 to 10.1.2.3:27017 closed'),
-    }));
-    assert.match(f.error, /connection 4 to 10\.1\.2\.3:27017 closed/);
+    });
+    assert.match(storeFailureDetail(err), /connection 4 to 10\.1\.2\.3:27017 closed/);
+    assert.doesNotMatch(classifyReadFailure(err).error, /10\.1\.2\.3/);
   });
 });
 
@@ -78,7 +114,7 @@ describe('the store cases, each identified positively', () => {
   for (const name of ['MongoNetworkError', 'MongoNetworkTimeoutError', 'MongoServerSelectionError',
     'MongoTopologyClosedError', 'MongoNotConnectedError']) {
     it(`${name} is the store`, () => {
-      const f = classifyReadFailure(mongoErr(name));
+      const f = classifyReadFailure(realErr(name));
       assert.equal(f.status, 503, `${name} means the store did not answer`);
       assert.equal(f.retryable, true);
     });
@@ -88,14 +124,14 @@ describe('the store cases, each identified positively', () => {
     [11602, 'InterruptedDueToReplStateChange'], [189, 'PrimarySteppedDown'],
     [13436, 'NotPrimaryOrSecondary'], [50, 'MaxTimeMSExpired'], [262, 'ExceededTimeLimit']]) {
     it(`MongoServerError code ${code} (${why}) is the store`, () => {
-      const f = classifyReadFailure(mongoErr('MongoServerError', { code }));
+      const f = classifyReadFailure(realErr('MongoServerError', { code }));
       assert.equal(f.status, 503, `${why} is not answerable right now, and will be`);
       assert.equal(f.retryable, true);
     });
   }
 
   it('a $vectorSearch failure is the store even without a recognised code', () => {
-    const f = classifyReadFailure(mongoErr('MongoServerError',
+    const f = classifyReadFailure(realErr('MongoServerError',
       { message: 'PlanExecutor error :: $vectorSearch index not queryable' }));
     assert.equal(f.status, 503);
   });
@@ -122,8 +158,8 @@ describe('everything we refuse ourselves is UNCHANGED — the direction that mus
     });
   }
 
-  it('a MongoServerError with an unlisted code stays 400 — the name is not enough', () => {
-    const f = classifyReadFailure(mongoErr('MongoServerError',
+  it('a MongoServerError with an unlisted code stays 400 — the class is not enough', () => {
+    const f = classifyReadFailure(realErr('MongoServerError',
       { code: 18, message: 'Authentication failed.' }));
     assert.equal(f.status, 400, 'AuthenticationFailed will never succeed on a retry');
     assert.equal(f.retryable, false);
@@ -190,14 +226,27 @@ describe('a delegating route keeps what the response does not carry', () => {
 });
 
 describe('both doors, and all three routes', () => {
-  it('`retryable` is on EVERY failure body, not only the retryable ones', () => {
+  it('`retryable` is on EVERY failure body, not only the retryable ones', async () => {
     // A field that appears only when it is true is a field whose absence has to be interpreted, and the caller
     // who most needs it is the one who does not know to look — the same argument as the budget's accounting.
-    const src = stripComments(readFileSync('server/src/api/brain/_read-failure.ts', 'utf8'));
-    assert.match(src, /retryable: f\.retryable/,
+    // Asserted on what is SENT, for a store failure and a request's own: the spelling moved into the one answer
+    // (`storeFailureAnswer`, bundle-30 I6 C1), and a gate on the spelling would follow it rather than the rule.
+    const { sendReadFailure } = await import('../../server/dist/api/brain/_read-failure.js');
+    const sent = (err) => {
+      const out = { headers: {} };
+      const res = {
+        setHeader: (k, v) => { out.headers[k] = v; },
+        status: (s) => { out.status = s; return res; },
+        json: (b) => { out.body = b; return res; },
+      };
+      sendReadFailure(res, 'test read', err);
+      return out;
+    };
+    const store = sent(realErr('MongoNetworkError', { message: 'socket closed' }));
+    const own = sent(new Error('unknown operator $nope'));
+    assert.deepEqual([store.status, store.body?.retryable, store.headers['Retry-After'] !== undefined], [503, true, true]);
+    assert.deepEqual([own.status, own.body?.retryable], [400, false],
       'the field must be sent unconditionally, not spread in behind a condition');
-    assert.doesNotMatch(src, /f\.retryable \? \{ retryable/,
-      'a conditional `retryable` is the shape this exists to avoid');
   });
 
   it('`retryable` reaches the EARLY refusals too, not only the throws', () => {
@@ -273,7 +322,8 @@ describe('both doors, and all three routes', () => {
     for (const body of routes) {
       const name = body.slice(0, body.indexOf(','));
       const catches = (body.match(/\}\s*catch\s*\(/g) ?? []).length;
-      const delegated = (body.match(/sendReadFailure\(res, err\)/g) ?? []).length;
+      // `sendReadFailure(res, <operation>, err)` since bundle-30 I15: the operation names the store failure's log line.
+      const delegated = (body.match(/sendReadFailure\(res, [^;]*\berr\)/g) ?? []).length;
       assert.equal(delegated, catches,
         `${name} catches ${catches} failure(s) and only ${delegated} answer through sendReadFailure`);
       if (/callTool\(/.test(body)) {
@@ -290,7 +340,7 @@ describe('both doors, and all three routes', () => {
 
   it('MCP carries the same classification, because it has no status to correct', () => {
     const src = dispatchSource();
-    assert.match(src, /classifyReadFailure\(err\)/,
+    assert.match(src, /storeFailureAnswer\(err, /,
       'the MCP dispatcher must classify too, or an agent gets the truncated prose a REST caller no longer sees');
     assert.match(src, /storeSideFailure: true/,
       'and say so in structuredContent, which is this transport\'s equivalent of a 5xx');

@@ -18,7 +18,7 @@
  */
 import { schedule as cronSchedule, type ScheduledTask } from 'node-cron';
 import { getConfig } from '../config/loader.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
 import { armedSchedules } from '../util/armed-schedule.js';
 import { resolveSyncCron } from './schedule.js';
 import { runSyncForNetwork } from './engine.js';
@@ -78,7 +78,7 @@ export function scheduleSyncForNetwork(networkId: string, schedule?: string): vo
   if (!schedule) return;
 
   if (!cronExpr) {
-    log.warn(`Unrecognised sync schedule '${schedule}' for network ${networkId} — using manual sync only`);
+    log.warn(`Unrecognised sync schedule '${peerText(schedule)}' for network ${peerText(networkId)} — using manual sync only`);
     return;
   }
 
@@ -86,7 +86,7 @@ export function scheduleSyncForNetwork(networkId: string, schedule?: string): vo
 
   _scheduledTasks.set(networkId, task);
   _armed.note(networkId, cronExpr);
-  log.info(`Sync scheduled for network ${networkId} (cron: "${cronExpr}")`);
+  log.info(`Sync scheduled for network ${peerText(networkId)} (cron: "${peerText(cronExpr)}")`);
 }
 
 /**
@@ -100,11 +100,11 @@ export function scheduleSyncForNetwork(networkId: string, schedule?: string): vo
 export async function runScheduledSync(networkId: string): Promise<void> {
   if (!getConfig().networks.some(n => n.id === networkId)) {
     stopScheduledSync(networkId);
-    log.info(`Sync schedule for network ${networkId} stopped: the network is no longer configured`);
+    log.info(`Sync schedule for network ${peerText(networkId)} stopped: the network is no longer configured`);
     return;
   }
   await runSyncForNetwork(networkId).catch(err =>
-    log.error(`Scheduled sync failed for network ${networkId}: ${err}`),
+    log.error(`Scheduled sync failed for network ${peerText(networkId)}: ${peerText(err)}`),
   );
 }
 

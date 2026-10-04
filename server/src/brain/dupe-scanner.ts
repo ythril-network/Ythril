@@ -37,7 +37,7 @@ import {
   type RecallResult,
   type RecallKnowledgeType,
 } from './recall.js';
-import { computeMergePlan, applyResolutions, executeMerge, MergeSchemaViolation } from './merge.js';
+import { mergeEntities, mergeRefusal } from './merge.js';
 import { emitWebhookEvent } from '../webhooks/dispatcher.js';
 import type { DupeCandidateDoc, DupeScanStateDoc, DupeScanType, DupeActionRule } from '../config/types.js';
 import { runExclusive } from '../util/single-flight.js';
@@ -161,7 +161,12 @@ async function upsertCandidate(
   );
 }
 
-/** Attempt a lossless entity merge. Returns true only if it actually merged. */
+/**
+ * Attempt a lossless entity merge. Returns true only if it actually merged.
+ *
+ * Through `mergeEntities`, the sequence every merge door runs, with no resolutions: a plan with a property conflict
+ * is not lossless, so it is left for review rather than resolved by a rule nobody chose.
+ */
 async function tryAutoMerge(spaceId: string, seed: RecallResult, match: RecallResult): Promise<boolean> {
   const pref = getConfig().spaces.find(s => s.id === spaceId)?.dupeMergeSurvivor ?? 'older';
   const seedOlder = (seed.seq ?? 0) <= (match.seq ?? 0);
@@ -171,31 +176,24 @@ async function tryAutoMerge(spaceId: string, seed: RecallResult, match: RecallRe
   const absorbedId = pref === 'newer' ? olderId : newerId;
 
   try {
-    const result = await computeMergePlan(spaceId, survivorId, absorbedId, []);
-    if ('error' in result) return false;
-    const { plan, fullyResolved, survivor, absorbed } = result;
-    if (!fullyResolved) return false;   // a property value conflict — not lossless, leave for review
-    const mergedProps = applyResolutions(survivor.properties ?? {}, absorbed.properties ?? {}, plan.propertyConflicts, plan.absorbedOnlyProperties);
-    await executeMerge(spaceId, survivor, absorbed, mergedProps, { tokenLabel: 'dupe-scanner' });
-    log.info(`Auto-merged entity ${absorbed._id} → ${survivor._id} in '${spaceId}' (score ${(match.score ?? 0).toFixed(3)})`);
+    const outcome = await mergeEntities(spaceId, survivorId, absorbedId, [], { tokenLabel: 'dupe-scanner' });
+    if (outcome.kind !== 'merged') return false;   // gone, or a property value conflict — not lossless
+    log.info(`Auto-merged entity ${absorbedId} → ${survivorId} in '${spaceId}' (score ${(match.score ?? 0).toFixed(3)})`);
     return true;
   } catch (err) {
     /*
      * A REFUSAL is not a failure, and reporting it as one is how the strict ruling becomes silent inaction.
      *
-     * Since a `strict` space refuses a merge whose survivor would violate its schema, this path now sees a
-     * refusal as an ordinary outcome — the duplicates stay, deliberately, because the space said it would
-     * rather keep two valid records than hold one invalid one. Nobody is watching an automerge, so the log
-     * line has to say WHICH rule refused and WHICH records are still duplicated, or the operator sees a
-     * quiet scanner and assumes it found nothing.
+     * A `strict` space refuses a merge whose survivor would violate its schema, and a hub over `MERGE_MAX_RELINKS`
+     * is refused before anything is written: the duplicates stay, deliberately. Nobody is watching an automerge, so
+     * the line has to say WHICH rule refused and WHICH records are still duplicated — `mergeRefusal`'s reason, the
+     * one every merge door gives. ONE line per pair: the pair is recorded open with the seqs it was seen at, so the
+     * next scan skips it until either record changes (`handlePair`), and it is not asked again until then.
      */
-    if (err instanceof MergeSchemaViolation) {
-      log.warn(
-        `Auto-merge REFUSED in '${spaceId}': the merged survivor would violate the space's schema, so `
-        + `'${err.absorbedId}' and '${err.survivorId}' remain as separate records. `
-        + `${err.violations.map(v => `${v.field}: ${v.reason}`).join('; ')}. `
-        + 'Resolve by hand, or relax the rule the merge would have broken.',
-      );
+    const refusal = mergeRefusal(err);
+    if (refusal) {
+      log.warn(`Auto-merge REFUSED in '${spaceId}': '${absorbedId}' and '${survivorId}' remain as separate records — `
+        + `${refusal.refusal.message} Resolve by hand, or change what the merge would have broken.`);
       return false;
     }
     log.warn(`Auto-merge failed in '${spaceId}': ${err}`);

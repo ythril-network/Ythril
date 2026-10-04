@@ -12,6 +12,7 @@
  * fact CRUD, so the dependency runs one way: fact.ts -> recall.ts -> filter.ts.
  */
 import { col, isVectorSearchAvailable, asFilter } from '../db/mongo.js';
+import { readRowsById, readStoredById } from '../db/read-by-id.js';
 import { NotFoundError } from '../util/errors.js';
 import { embed } from './embedding.js';
 import type { EmbeddingResult } from './embedding.js';
@@ -36,9 +37,10 @@ import { rerankPool } from './rerank-pool.js';
 import { lexicalSearch, stampFusion, fuseAcrossSpaces, hybridSearchEnabled, LEXICAL_LIMIT_MULTIPLIER, type LexicalHit } from './lexical-search.js';
 import { atlasVectorScore, scoresAgree } from './vector-score.js';
 import { matchFreshWrites, addFreshWrites } from './fresh-writes.js';
+import { isIndexNotQueryableYet } from './index-not-queryable.js';
 import type { ChronoStatus, RecordType } from '../config/types.js';
 import { RECORD_TYPES } from '../config/types.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
 import { recallDegradedTotal } from '../metrics/registry.js';
 import { envInt } from '../config/env-num.js';
 import { spaceCollection } from '../db/space-collection.js';
@@ -105,7 +107,7 @@ async function settleSearches(
   for (const s of settled) {
     if (s.status === 'fulfilled') { kept.push(s.value); continue; }
     if (s.reason instanceof RecallSearchTimeout) {
-      log.warn(`Recall: ${s.reason.message} — returning a partial answer`);
+      log.warn(`Recall: ${peerText(s.reason.message)} — returning a partial answer`);
       noteDegraded('search_timeout');
       continue;
     }
@@ -609,8 +611,8 @@ async function introduceLexicalOnly(
       const local = atlasVectorScore(vec as number[], queryVector, similarity);
       if (local === null || !scoresAgree(local, known)) {
         log.warn(
-          `Hybrid recall: local score reproduction disagrees with the search engine for ${collName} ` +
-          `(local ${local === null ? 'n/a' : local.toFixed(6)} vs reported ${known.toFixed(6)}, ` +
+          `Hybrid recall: local score reproduction disagrees with the search engine for ${peerText(collName)} ` +
+          `(local ${local === null ? 'n/a' : peerText(local.toFixed(6))} vs reported ${peerText(known.toFixed(6))}, ` +
           `similarity '${similarity}'). Not introducing lexical-only records.`,
         );
         return [];
@@ -633,7 +635,7 @@ async function introduceLexicalOnly(
     return out;
   } catch (err) {
     // Best-effort like the rest of this path: a failure here leaves the vector order untouched.
-    log.debug(`Lexical introduction skipped for ${collName}: ${err instanceof Error ? err.message : String(err)}`);
+    log.debug(`Lexical introduction skipped for ${peerText(collName)}: ${peerText(err)}`);
     return [];
   }
 }
@@ -751,8 +753,8 @@ export async function checkDuplicates(
       const known = reported.get(f._id);
       if (typeof known === 'number' && !scoresAgree(f.score, known)) {
         log.warn(
-          `Duplicate check: fresh-write score disagrees with the search engine for ${collName} ` +
-          `(local ${f.score.toFixed(6)} vs reported ${known.toFixed(6)}). Using the index alone.`,
+          `Duplicate check: fresh-write score disagrees with the search engine for ${peerText(collName)} ` +
+          `(local ${peerText(f.score.toFixed(6))} vs reported ${peerText(known.toFixed(6))}). Using the index alone.`,
         );
         return [...matches.values()];
       }
@@ -763,10 +765,8 @@ export async function checkDuplicates(
       // Only now fetch the records themselves, and only the ones that actually cleared the threshold —
       // usually none. The scan deliberately returns ids and scores so it never carries record bodies.
       const { commonProject, typeProject } = recallProjection(type);
-      const docs = await col(collName).aggregate<Record<string, unknown>>([
-        { $match: { _id: { $in: unseen.map(f => f._id) } } },
-        { $project: { ...commonProject, ...typeProject } },
-      ]).toArray();
+      const docs = await readRowsById<Record<string, unknown>>(
+        collName, unseen.map(f => f._id), { ...commonProject, ...typeProject });
       const scoreById = new Map(unseen.map(f => [f._id, f.score]));
       for (const doc of docs) {
         doc['score'] = scoreById.get(doc['_id'] as string);
@@ -798,15 +798,15 @@ const KNOWLEDGE_COLLECTION: Record<RecallKnowledgeType, string> = {
  * happened to find it.
  */
 function recallProjection(knowledgeType: RecallKnowledgeType): {
-  commonProject: Record<string, number>;
-  typeProject: Record<string, number>;
+  commonProject: Record<string, 1>;
+  typeProject: Record<string, 1>;
 } {
   // An INCLUSION list, so a field absent from it never leaves Mongo — which is why `superseded` is here and
   // not only in `toRecallRecord`'s allowlist further down. Both are field-by-field rebuilds of one record,
   // and a new field has to be named in each: it was named in the second alone, and came back missing with
   // every gate green, because the record handed to the second had already lost it.
-  const commonProject = { _id: 1, spaceId: 1, _knowledgeType: 1, score: 1, createdAt: 1, updatedAt: 1, seq: 1, embeddingModel: 1, matchedText: 1, superseded: 1 };
-  let typeProject: Record<string, number> = {};
+  const commonProject: Record<string, 1> = { _id: 1, spaceId: 1, _knowledgeType: 1, score: 1, createdAt: 1, updatedAt: 1, seq: 1, embeddingModel: 1, matchedText: 1, superseded: 1 };
+  let typeProject: Record<string, 1> = {};
   if (knowledgeType === 'fact') {
     typeProject = { fact: 1, tags: 1, description: 1, properties: 1 };
   } else if (knowledgeType === 'entity') {
@@ -942,14 +942,11 @@ async function recallByType(
     }
   }
 
+  // A missing OR not-yet-queryable vector index means "no results from this collection", not a failure: a
+  // collection's index is built after its first record, asynchronously. Every wording mongot uses for it is
+  // `isIndexNotQueryableYet`'s to know (Q-325) — the copy that lived here missed the first one and answered 503.
   const swallowIndexError = (err: unknown): RecallResult[] => {
-    const msg = err instanceof Error ? err.message : String(err);
-    // A missing OR not-yet-queryable vector index means "no results from this collection", not a
-    // failure: a new space builds its indexes asynchronously (B1) and Atlas refuses queries against
-    // an index still in INITIAL_SYNC. Transient empty state, not an error to surface.
-    if (/index.*not.*found|no.*such.*index|search.*index|cannot query.*vector index|while in state (INITIAL_SYNC|PENDING|BUILDING|STARTING)/i.test(msg)) {
-      return [];
-    }
+    if (isIndexNotQueryableYet(err)) return [];
     throw err;
   };
 
@@ -1025,10 +1022,8 @@ async function hydrateFreshHits(
     const { commonProject, typeProject } = recallProjection(type);
     const collName = `${spaceId}_${KNOWLEDGE_COLLECTION[type]}`;
     try {
-      const docs = await col(collName).aggregate<Record<string, unknown>>([
-        { $match: { _id: { $in: entries.map(e => e.id) } } },
-        { $project: { ...commonProject, ...typeProject } },
-      ]).toArray();
+      const docs = await readRowsById<Record<string, unknown>>(
+        collName, entries.map(e => e.id), { ...commonProject, ...typeProject });
       const scoreOf = new Map(entries.map(e => [e.id, e.score]));
       for (const d of docs) {
         out.push(mapToRecallResult({ ...d, score: scoreOf.get(d['_id'] as string) }, type));
@@ -1099,11 +1094,8 @@ async function enrichFileChunksWithParent(spaceId: string, results: RecallResult
   const parentIds = [...new Set(fileChunks.map(r => r.parentFileId as string))];
 
   // Batch-fetch parent file docs — projection only (no embedding field)
-  const parents = (await col(spaceCollection(spaceId, 'files'))
-    .find(asFilter({ _id: { $in: parentIds } }), { projection: { path: 1, description: 1, tags: 1 } })
-    .toArray()) as unknown as Array<{ _id: string; path?: string; description?: string; tags?: string[] }>;
-
-  const parentMap = new Map(parents.map(p => [p._id, p]));
+  const parentMap = await readStoredById<{ _id: string; path?: string; description?: string; tags?: string[] }>(
+    spaceCollection(spaceId, 'files'), parentIds, { path: 1, description: 1, tags: 1 });
 
   for (const chunk of fileChunks) {
     const parent = parentMap.get(chunk.parentFileId as string);
@@ -1214,9 +1206,11 @@ async function getEntryEmbedding(
 ): Promise<{ vector: number[]; doc: Record<string, unknown> } | 'no-embedding' | null> {
   const collSuffix = KNOWLEDGE_COLLECTION[entryType];
   const collName = `${spaceId}_${collSuffix}`;
+  // `seq` too: the duplicate scanner records a pair at both records' seqs and skips it while they are unchanged,
+  // and a source with no seq made that depend on which end was the seed — a refused pair re-merged on every scan.
   const doc = await col(collName).findOne(
     asFilter({ _id: entryId, spaceId }),
-    { projection: { embedding: 1, _id: 1, spaceId: 1, name: 1, fact: 1, label: 1, title: 1, path: 1, type: 1, description: 1 } },
+    { projection: { embedding: 1, _id: 1, spaceId: 1, seq: 1, name: 1, fact: 1, label: 1, title: 1, path: 1, type: 1, description: 1 } },
   ) as Record<string, unknown> | null;
   if (!doc) return null;
   const vector = doc['embedding'] as number[] | undefined;

@@ -120,8 +120,10 @@ describe('one duplicate key does not wedge a member', () => {
   });
 
   it('the pull holds its watermark on a failed page write instead of escalating it', () => {
-    const write = engine.search(/=\s*await writeArrivals\(/);
-    assert.ok(write > 0, `${ENGINE} no longer writes a pulled page through writeArrivals — re-point this gate`);
+    // Re-pointed for bundle-30 `Q-204`: the pull hands its page to the page accept the push uses, which writes it
+    // through `writeArrivals`.
+    const write = engine.search(/=\s*\(?await acceptArrivingPage\(/);
+    assert.ok(write > 0, `${ENGINE} no longer writes a pulled page through the page accept — re-point this gate`);
     const after = engine.slice(write, engine.indexOf('deliveredThrough = maxSeq', write));
     assert.match(after, /catch \(err\) \{\s*\n\s*truncated = true;[\s\S]*?log\.warn\([\s\S]*?break;/,
       'a failed page write must be caught in the transfer — logged as a record write, the transfer stopped — and '

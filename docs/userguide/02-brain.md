@@ -100,6 +100,16 @@ That is deliberate. Merging is often exactly how you fix a record that was the w
 so a rule added later must never leave you stuck with two copies of something. Fix the listed links
 afterwards, or widen the rule on the space's Schema tab.
 
+**A merge happens whole or not at all — and a very large one is refused before it starts.** Everything that
+pointed at the absorbed record moves in one step. If that record has more than **2500** links, relationships and
+face labels between them, the merge is refused with *merge_too_large*, and nothing changes: a step that size
+would pause syncing of the whole space while it ran. The message names both records and how many of each kind
+the absorbed one has, and says what would fit: delete at least as many of its relationships or links as it is
+over — a relationship cannot be moved to another record, only deleted — or, when the message says so, keep the
+other record instead. On the Review page the record that is kept follows the space's **Merge survivor** setting
+(Settings → the space → **Duplicates**). A space set to **strict** likewise refuses a merge whose result would
+break its own rules, and says which.
+
 **Deleting:** Each row has an inline **✕ → confirm** flow.
 
 **A delete can be refused, and that is usually the right answer.** If anything else in the space still points
@@ -126,6 +136,12 @@ is holding the delete, not the neighbourhood.
 **A change made while you were looking is not swept up.** The confirmation is bound to the exact set it
 showed you, so if anything gained a link to this entity in the meantime, the delete stops and asks again
 with the new list rather than removing something you were never shown.
+
+**A fact, event or file that names the entity stops the whole thing, before anything is removed.** Those are
+records of their own, so the cascade never deletes them — and when one is there, the cascade removes no link
+either. Edit those records to drop the reference, then try again. A very large hub is removed a few hundred
+links at a time; if something fails part-way, what was removed stays removed (with the note peers need to
+remove it too) and repeating the delete finishes the rest.
 
 If a space has turned linkage checking off in its settings, none of this applies there and the delete just
 happens.
@@ -504,6 +520,11 @@ What it does is remove the record's embedding, not hide the record. So a suppres
 next to it — it simply stops competing on meaning. If a record you know exists never appears in a search, check
 these three levels before treating it as a fault.
 
+Turning it **on** removes the vectors already stored for what it now covers — whether you turned it on, for the
+space or in a type's schema, or a network whose schema this space follows did — files and their passages included. A record's text is kept, so
+**Lexical** search still finds it. A record that arrives from a peer while its type or space is suppressed here
+is stored without a vector, whatever this instance held for it before.
+
 > Turning suppression off does not go back and embed what was written while it was on. Use **Backfill
 > embeddings** on the space's Danger tab, which embeds only what has no vector, or re-save an individual record.
 > **Reindex** works too, but it rebuilds every vector in the space to fill that gap.
@@ -752,6 +773,6 @@ A summary row at the top shows how many pairs are **open**, the **average match 
 
 The scanner sweeps **facts, entities and chrono entries** by default — logging the same event twice is one of the commonest ways a knowledge base goes redundant.
 
-**Per-space rules:** how the scanner reacts is configured per space on the **Settings → Spaces → (space) → Duplicates** tab. Each rule pairs a **minimum-confidence slider** with an action — `flag` a pair for review, `automerge` it (asks for confirmation, since it's destructive and unattended), or `notify` a webhook. With no rules, pairs are simply flagged for review. You also choose which record survives a merge (older or newer). The scanner is opt-in and off by default.
+**Per-space rules:** how the scanner reacts is configured per space on the **Settings → Spaces → (space) → Duplicates** tab. Each rule pairs a **minimum-confidence slider** with an action — `flag` a pair for review, `automerge` it (asks for confirmation, since it's destructive and unattended), or `notify` a webhook. An automerge the space would refuse — a result its **strict** rules break, or a record with more relationships to move than one merge takes (see *A merge happens whole or not at all* above) — is left open for you to review, with one line in the **Server Log** naming the pair and why; it is not retried until one of the two records changes. With no rules, pairs are simply flagged for review. You also choose which record survives a merge (older or newer). The scanner is opt-in and off by default.
 
 ---

@@ -248,6 +248,9 @@ export const ROUTE_RIGHTS: readonly RouteRight[] = [
   { route: '/api/networks/join-by-key', method: 'POST', area: 'networks', needs: 'write', scope: 'iterates' },
   { route: '/api/duplicates', method: 'GET', area: 'dataQuality', needs: 'read', scope: 'iterates' },
   { route: '/api/duplicates/scan', method: 'POST', area: 'dataQuality', needs: 'write', scope: 'iterates' },
+  // The merge row names `dataQuality` write, the rung its candidate lookup walks at. A merge also DELETES a knowledge
+  // record, so the handler further requires `knowledge` write in the pair's space (the rung the entity merge and
+  // `graph_merge` need) and answers 404 without it (`Q-304`). A row names one area, so that half is the handler's.
   { route: '/api/duplicates/:id/merge', method: 'POST', area: 'dataQuality', needs: 'write', scope: 'iterates' },
   { route: '/api/duplicates/:id/dismiss', method: 'POST', area: 'dataQuality', needs: 'write', scope: 'iterates' },
   { route: '/api/duplicates/:id/reopen', method: 'POST', area: 'dataQuality', needs: 'write', scope: 'iterates' },

@@ -23,8 +23,7 @@
  * So the message states no direction, and each ROW carries the end that matched — which is what the reporter
  * actually needed, because it names the query that clears it.
  */
-import { col, asFilter } from '../db/mongo.js';
-import type { EdgeDoc } from '../config/types.js';
+import { readStoredById } from '../db/read-by-id.js';
 import { isStrictLinkage } from '../spaces/proxy.js';
 import { findEntityReferences, type BacklinkEntry } from './entities.js';
 import type { RefKind } from '../config/types-knowledge.js';
@@ -64,11 +63,10 @@ function describe(b: BacklinkEntry): string {
  */
 async function endsOfEdges(spaceId: string, entityId: string, ids: readonly string[]): Promise<Map<string, 'from' | 'to' | 'both'>> {
   if (ids.length === 0) return new Map();
-  const docs = await col<EdgeDoc>(spaceCollection(spaceId, 'edges'))
-    .find(asFilter<EdgeDoc>({ _id: { $in: ids } } as never), { projection: { _id: 1, from: 1, to: 1 } })
-    .toArray() as Array<{ _id: string; from?: string; to?: string }>;
+  const docs = await readStoredById<{ _id: string; from?: string; to?: string }>(
+    spaceCollection(spaceId, 'edges'), ids, { from: 1, to: 1 });
   const out = new Map<string, 'from' | 'to' | 'both'>();
-  for (const d of docs) {
+  for (const d of docs.values()) {
     const isFrom = d.from === entityId;
     const isTo = d.to === entityId;
     // A self-loop is one document with two matching ends. Reporting `from` alone would send the caller

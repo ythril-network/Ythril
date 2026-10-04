@@ -47,6 +47,7 @@ function bounded(path: keyof typeof DUAL_DOOR_BOUNDS) {
 import { mergeEmbeddingPatch } from '../config/embedding-patch.js';
 import { egressConsented, refuseUnacknowledgedEgress } from '../config/egress-consent.js';
 import { DecisionModelPatchSchema, refuseDecisionModelPatch, applyDecisionModelPatch, decisionModelView } from '../config/decision-model.js';
+import { sendCaughtFailure } from './send-failure.js';
 // Re-exported: its unit tests import it from here, where its two callers are.
 export { refuseUnacknowledgedEgress };
 
@@ -823,8 +824,7 @@ mediaConfigRouter.patch('/', requireAdminMfa, (req, res) => {
     respBody['decisionModel'] = decisionModelView();
     res.json({ ok: true, config: respBody });
   } catch (err) {
-    log.warn(`Failed to save media config: ${err}`);
-    res.status(500).json({ error: 'Failed to save configuration' });
+    sendCaughtFailure(res, `Failed to save media config`, err, { error: 'Failed to save configuration' });
   }
 });
 

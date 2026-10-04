@@ -63,8 +63,10 @@ describe('the exclusion is a missing vector, never a read-time filter', () => {
      * gate went red over a property that still holds, which is how a match on the wrong thing announces
      * itself: only when the thing it was really matching disappears.
      */
+    // Re-anchored for bundle-30 `R12`: the removal is the one constant `UNSET_VECTOR` (its fields pinned by
+    // `suppress-embeddings-wiring`), not a hand-spelled `$unset` of `embedding`.
     const store = strip(read('server/src/brain/embed-record.ts'));
-    assert.match(store, /\$unset: \{ embedding/,
+    assert.match(store, /\$unset: UNSET_VECTOR\b/,
       'setting it must REMOVE the vector, not mark the record');
   });
 });

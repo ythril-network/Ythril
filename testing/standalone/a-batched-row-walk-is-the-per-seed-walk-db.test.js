@@ -221,7 +221,21 @@ function readsAsShipped() {
     },
     linksPointingAt: adjacency.linksPointingAt,
     linksStartingFrom: adjacency.linksStartingFrom,
-    docsFromCollection: adjacency.docsFromCollection,
+    /*
+     * Written out too, as it shipped: one query, the class scope and the narrowing beside the ids, no sort. This
+     * used to be the live `adjacency.docsFromCollection`, which made the reference only as literal as that
+     * function's order — and Q-211 moved it onto the one by-id reader, which answers in the caller's id order
+     * (the walk sorts what it reads either way). The scope and projection are still the code's own: those are the
+     * class definitions, not the read being compared.
+     */
+    async docsFromCollection(spaceId, collection, ids, projection, extra) {
+      if (ids.length === 0) return [];
+      const scope = adjacency.LINK_CLASSES.find(c => c.collection === collection)?.scope ?? {};
+      return await mongo.col(`${spaceId}_${collection}`)
+        .find({ _id: { $in: [...ids] }, ...scope, ...(extra ?? {}) },
+          { projection: projection ?? adjacency.projectionForCollection(collection) })
+        .toArray();
+    },
   };
 }
 

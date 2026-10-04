@@ -45,12 +45,13 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { argumentsOf } from './_structural-window.mjs';
+import { callSitesIn } from './_call-graph.mjs';
 import { REPO_ROOT } from './_sources.mjs';
 import { SPACE_COLLECTIONS } from '../../server/dist/db/space-collection.js';
+import { MUTATORS } from './_document-mutators.mjs';
 
-/** Every MongoDB driver method that changes a document. */
-export const MUTATORS = ['insertOne', 'insertMany', 'updateOne', 'updateMany', 'replaceOne', 'findOneAndUpdate',
-  'findOneAndReplace', 'findOneAndDelete', 'deleteOne', 'deleteMany', 'bulkWrite'];
+/** Every MongoDB driver method that changes a document — `_document-mutators.mjs`, re-exported for this module's readers. */
+export { MUTATORS };
 
 /** Every `node:fs` method that changes the filesystem. `open` counts only with a writing flag. */
 const FS_MUTATORS = ['writeFile', 'appendFile', 'rename', 'rm', 'rmdir', 'unlink', 'mkdir', 'copyFile', 'cp',
@@ -106,10 +107,12 @@ export function spaceWriters(index, { floors = {} } = {}) {
     && list.some(s => s.kind === 'local')).map(([k]) => k));
   for (const [key, entry] of index.bodies) {
     if (!entry.file.startsWith('server/src/files/') || entry.alias) continue;
-    for (const m of entry.body.matchAll(/(^|[^.\w$])([A-Za-z_$][\w$]*)\s*\(/g)) {
-      const target = index.resolve(entry.file, m[2]);
+    // The call graph's own positioned scan: a hand-written `(^|[^.\w$])name\(` here consumed the `(` a call
+    // nested as an argument needs, the same defect `Q-309` fixed in `_call-graph.mjs`.
+    for (const call of callSitesIn(entry.body, { closures: true })) {
+      const target = index.resolve(entry.file, call.name);
       if (!target || !fsPrimitives.has(target)) continue;
-      add(key, { key, file: entry.file, line: siteLine(index, entry, m.index + m[0].length), op: m[2],
+      add(key, { key, file: entry.file, line: siteLine(index, entry, call.paren + 1), op: call.name,
         receiver: target, kind: 'files', alias: false, why: `a util filesystem primitive called from files/` });
     }
   }
@@ -390,16 +393,20 @@ function fsWritesIn(body, src) {
   const out = [];
   const opens = ['open', 'openSync'];
   if (objects.size > 0) {
-    const re = new RegExp(`(^|[^.\\w$])(${[...objects].join('|')})\\s*(?:\\.\\s*promises\\s*)?\\.\\s*(${[...FS_MUTATORS, ...opens].join('|')})\\s*\\(`, 'g');
+    // Lookbehind, not a consumed prefix character: `x(fs.rm(…))` must not lose the inner call (`Q-309`). Not
+    // `memberCallSitesIn`, which reads `obj.prop(` only — `fs.promises.rm(` is one hop longer.
+    const re = new RegExp(`(?<![.\\w$])(${[...objects].join('|')})\\s*(?:\\.\\s*promises\\s*)?\\.\\s*(${[...FS_MUTATORS, ...opens].join('|')})\\s*\\(`, 'g');
     for (const m of body.matchAll(re)) {
-      if (opens.includes(m[3]) && !writingFlag(body, m.index + m[0].length - 1)) continue;
-      out.push({ at: m.index, op: m[3], receiver: m[2] });
+      if (opens.includes(m[2]) && !writingFlag(body, m.index + m[0].length - 1)) continue;
+      out.push({ at: m.index, op: m[2], receiver: m[1] });
     }
   }
-  for (const [local, exported] of named) {
-    for (const m of body.matchAll(new RegExp(`(^|[^.\\w$])${local}\\s*\\(`, 'g'))) {
-      if (opens.includes(exported) && !writingFlag(body, m.index + m[0].length - 1)) continue;
-      out.push({ at: m.index, op: exported, receiver: 'node:fs' });
+  if (named.size > 0) {
+    for (const call of callSitesIn(body, { closures: true })) {
+      const exported = named.get(call.name);
+      if (!exported) continue;
+      if (opens.includes(exported) && !writingFlag(body, call.paren)) continue;
+      out.push({ at: call.at, op: exported, receiver: 'node:fs' });
     }
   }
   return out;

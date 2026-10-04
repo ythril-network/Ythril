@@ -39,6 +39,7 @@
  * Nothing here changes what is stored, what is embedded, or what crosses a sync.
  */
 import { col, asFilter } from '../db/mongo.js';
+import { readRowsById } from '../db/read-by-id.js';
 import { getConfig } from '../config/loader.js';
 import type { RefKind } from '../config/types-knowledge.js';
 import type { LinkDoc } from '../config/types.js';
@@ -395,11 +396,11 @@ export async function docsFromCollection<T extends { _id: string }>(
   extra?: Record<string, unknown>,
 ): Promise<T[]> {
   if (ids.length === 0) return [];
-  const scope = LINK_CLASSES.find(c => c.collection === collection)?.scope ?? {};
-  return await col<T>(`${spaceId}_${collection}`)
-    .find(asFilter<T>({ _id: { $in: [...ids] }, ...scope, ...(extra ?? {}) }),
-          { projection: projection ?? projectionForCollection(collection) })
-    .toArray() as T[];
+  const scope = LINK_CLASSES.find(c => c.collection === collection)?.scope;
+  // The scope and the narrowing are ANDed, never spread together: a narrowing naming a scope key would have
+  // replaced the scope (the chunk exclusion) rather than narrowed it.
+  return await readRowsById<T>(`${spaceId}_${collection}`, ids, projection ?? projectionForCollection(collection),
+    { filter: [scope, extra] });
 }
 
 /**
@@ -417,7 +418,5 @@ export async function scopedDocs<T extends { _id: string }>(
   spaceId: string, cls: LinkClass, ids: readonly string[],
 ): Promise<T[]> {
   if (ids.length === 0) return [];
-  return await col<T>(`${spaceId}_${cls.collection}`)
-    .find(asFilter<T>({ _id: { $in: [...ids] }, ...cls.scope }), { projection: cls.projection })
-    .toArray() as T[];
+  return await readRowsById<T>(`${spaceId}_${cls.collection}`, ids, cls.projection, { filter: cls.scope });
 }

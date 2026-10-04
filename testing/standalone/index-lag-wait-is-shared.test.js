@@ -90,6 +90,27 @@ describe('the vector-index wait is shared, and its deadline is the measured one'
       'it must ask the capability that actually needs the index — polling recall is the question it replaces');
   });
 
+  it('a file that searches by similarity waits for the index, not for recall', () => {
+    /*
+     * The second question asked with the first helper. `a-search-never-writes-a-space` waited with `waitForIndexed`
+     * and then called `similar`: recall found the seeds through its fresh-write scan while mongot had not yet
+     * ingested them, so `similar` answered `results: []` on one CI-order run and the full graph on the next
+     * (bundle-30 verify, 2026-10-04). Derived from what each file CALLS, so a new file is in scope the day it is
+     * written; a file that waits for recall only is fine until it also searches by similarity.
+     */
+    const callsSimilar = /\/api\/brain\/similar|callTool\(\s*['"]similar['"]|\btool:\s*['"]similar['"]/;
+    const files = testFiles().filter(f => f !== HELPERS);
+    const similarCallers = files.filter(f => callsSimilar.test(readFileSync(join(ROOT, f), 'utf8')));
+    assert.ok(similarCallers.length >= 5, `only ${similarCallers.length} file(s) call similar — the sweep is blind`);
+    const offenders = similarCallers.filter(f => {
+      const src = readFileSync(join(ROOT, f), 'utf8');
+      return /\bwaitForIndexed\(/.test(src) && !/\bwaitForSimilarityIndex\(/.test(src);
+    });
+    assert.deepEqual(offenders, [],
+      'these files call similar after waiting only for recall, which also finds a record the index has not '
+      + 'ingested yet — wait with waitForSimilarityIndex for what the similar call expects to find');
+  });
+
   it('no test file re-implements the poll', () => {
     // Matched on the SHAPE (a bounded loop that polls recall for ids), not on the name `waitForIndexed` — a fifth
     // copy will be called something else. The two markers together are what a re-implementation cannot avoid:

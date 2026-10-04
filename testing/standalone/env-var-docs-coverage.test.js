@@ -84,6 +84,7 @@ const NOT_A_SETTING = new Map([
   ['EGRESS_SLOTS', 'a TypeScript constant the egress matrix is checked against'],
   ['FETCH_TIMEOUT_MS', 'a sync-engine constant, not settable'],
   ['BATCH_FETCH_TIMEOUT_MS', 'a sync-engine constant, not settable'],
+  ['REPLICATED_FAMILIES', 'a TypeScript constant: the order a sender pushes record families, named in sync-protocol.md as its source'],
   // Placeholders in copy-paste examples.
   ['YOUR_TENANT_ID', 'placeholder in an OIDC example'],
   ['YOUR_CLIENT_ID', 'placeholder in an OIDC example'],

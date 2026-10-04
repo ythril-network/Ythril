@@ -80,7 +80,7 @@
  */
 import { onRecordCollectionWrite } from '../db/mongo.js';
 import { EVERY_COLLECTION, type MethodEffect } from '../db/record-write-observer.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
 import { envInt } from '../config/env-num.js';
 import {
   VECTOR_INDEXED_COLLECTIONS, type VectorIndexedCollection,
@@ -88,6 +88,7 @@ import {
 } from './vector-index.js';
 import { searchAvailable, afterSearchUp, forgetSearchWaiter, SEARCH_RETRY_BASE_MS } from './search-readiness.js';
 import { collectionHoldsRecord } from './record-presence.js';
+import { parseSpaceCollection } from '../db/space-collection.js';
 
 /** How long after the last delete of a burst the collection is checked for emptiness. */
 export const DROP_CHECK_DELAY_MS = envInt('SEARCH_INDEX_DROP_DELAY_MS', 60_000);
@@ -121,16 +122,11 @@ interface CollectionState {
 const states = new Map<string, CollectionState>();
 let armed = false;
 
-const SPACE_ID = /^[a-z0-9-]+$/;
-
 /** `<spaceId>_<suffix>` for a collection that carries search indexes, parsed — or null for any other name. */
 export function parseIndexedCollection(name: string): { spaceId: string; suffix: VectorIndexedCollection } | null {
-  const cut = name.indexOf('_');
-  if (cut <= 0) return null;
-  const spaceId = name.slice(0, cut);
-  const suffix = name.slice(cut + 1);
-  if (!SPACE_ID.test(spaceId) || !(VECTOR_INDEXED_COLLECTIONS as readonly string[]).includes(suffix)) return null;
-  return { spaceId, suffix: suffix as VectorIndexedCollection };
+  const parsed = parseSpaceCollection(name);
+  if (!parsed || !(VECTOR_INDEXED_COLLECTIONS as readonly string[]).includes(parsed.suffix)) return null;
+  return { spaceId: parsed.spaceId, suffix: parsed.suffix as VectorIndexedCollection };
 }
 
 function stateOf(name: string): CollectionState {
@@ -173,7 +169,7 @@ async function reconcileNow(name: string, st: CollectionState, opts: ReconcileOp
       holds = await collectionHoldsRecord(name);
     } catch (err) {
       st.belief = before === 'settling' ? undefined : before;
-      log.debug(`Search index presence: could not read ${name} (${err instanceof Error ? err.message : String(err)})`);
+      log.debug(`Search index presence: could not read ${peerText(name)} (${peerText(err)})`);
       return st.belief;
     }
 
@@ -207,7 +203,7 @@ async function reconcileNow(name: string, st: CollectionState, opts: ReconcileOp
     return (st.belief = 'unindexed');
   } catch (err) {
     st.belief = undefined;
-    log.warn(`Search index presence: reconciling ${name} failed (${err instanceof Error ? err.message : String(err)}); the next write retries`);
+    log.warn(`Search index presence: reconciling ${peerText(name)} failed (${peerText(err)}); the next write retries`);
     return undefined;
   }
 }

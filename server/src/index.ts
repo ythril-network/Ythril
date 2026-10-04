@@ -5,11 +5,12 @@ import { configureConnections } from './http-connections.js';
 import { connectMongo, closeMongo, checkVectorSearchAvailability } from './db/mongo.js';
 import { createApp } from './app.js';
 import { startConfiguredInstanceServices } from './bootstrap.js';
+import { markListening } from './util/after-listening.js';
 import { stopSyncScheduler } from './sync/scheduler.js';
 import { stopBackupScheduler } from './db/backup-scheduler.js';
 import { stopDupeScanner } from './brain/dupe-scanner.js';
 import { cleanupStaleChunks } from './files/chunks.js';
-import { log, redactSecrets } from './util/log.js';
+import { log, redactSecrets, peerText } from './util/log.js';
 import { envInt, assertNumericEnvOrExit } from './config/env-num.js';
 import { assertNoRemovedEnvVarsOrExit } from './config/env-removed.js';
 
@@ -237,6 +238,8 @@ async function main(): Promise<void> {
   chunkCleanupInterval.unref(); // don't block shutdown
 
   server.listen(PORT, () => {
+    // Work the bootstrap held for the listen (`util/after-listening.ts`) starts now.
+    markListening();
     const url = `http://localhost:${PORT}`;
     console.log('');
     if (isFirstRun) {
@@ -303,6 +306,8 @@ async function main(): Promise<void> {
     stopSyncScheduler();
     stopBackupScheduler();
     stopDupeScanner();
+    const { stopSeqHoldWatchdog } = await import('./util/seq.js');
+    stopSeqHoldWatchdog();
     // The media worker was never stopped here, though `stopMediaEmbeddingWorker` exists and promises to
     // complete the in-flight batch. Without it the worker kept CLAIMING new jobs while the process drained —
     // a job picked up in the last second of life is abandoned instantly — and whatever it held died
@@ -361,11 +366,11 @@ async function main(): Promise<void> {
   // its buffer read. Both go through redactSecrets first — an unhandled fetch rejection quotes the
   // endpoint it failed on, and that endpoint may carry a credential in its userinfo or query string.
   process.on('unhandledRejection', (reason, promise) => {
-    log.error(`Unhandled rejection at: ${promise}, reason: ${reason}`);
+    log.error(`Unhandled rejection at: ${peerText(promise)}, reason:`, reason);
     console.error(redactSecrets(`UNHANDLED REJECTION: ${String(reason)}`));
   });
   process.on('uncaughtException', (err) => {
-    log.error(`Uncaught exception: ${err.stack ?? err}`);
+    log.error('Uncaught exception:', err);
     console.error(redactSecrets(`UNCAUGHT EXCEPTION: ${err.stack ?? String(err)}`));
     process.exit(1);
   });

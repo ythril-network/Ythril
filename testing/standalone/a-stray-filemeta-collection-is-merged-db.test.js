@@ -46,6 +46,7 @@ import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { openPushDoor, build } from './_push-door.mjs';
+import { parkWrites, withCollectionAsView } from './_write-faults.mjs';
 
 const skip = await mongoSkipReason();
 const SUITE = 'strayfm';
@@ -56,6 +57,7 @@ const SPACE = 'stray-fm';
 const RACE = 'stray-fm-race';
 const BUDGET = 'stray-fm-budget';
 const LATE = 'stray-fm-late';
+const LEGACY = 'stray-fm-legacy';
 const STAMPED_AT = '2025-01-01T00:00:00.000Z';
 
 let door, sweepExpired, drainStrayFileMeta, logMod;
@@ -71,6 +73,14 @@ const stampedRow = (space, id, seq, extra = {}) =>
   ({ ...build.filemeta(space, id, seq, { author: LOCAL, createdAt: STAMPED_AT, updatedAt: STAMPED_AT }), ...extra });
 const stray = (space, id, seq, extra = {}) =>
   ({ ...build.filemeta(space, id, seq, { author: PEER }), sizeBytes: 999, sha256: 'sender-hash', ...extra });
+/**
+ * A record an older version stored with no `tags` and no `author` — the push schema requires both, the drain's fill
+ * writes neither onto a receiver-made row, so their absence is no reason to lose the keys the record does carry.
+ */
+const legacyStray = (space, id, seq, extra = {}) => {
+  const { tags: _t, author: _a, ...row } = stray(space, id, seq, extra);
+  return row;
+};
 /** What `recordArrivedFile` writes when bytes land before any metadata: a seq-0 row naming no author. */
 const arrivedRow = (space, id, extra = {}) => {
   const { author: _none, ...row } = build.filemeta(space, id, 0);
@@ -91,7 +101,7 @@ async function auditFor(space, operation) {
 
 describe('file metadata a 4.0-5.6.1 pull left in <space>_filemeta is recovered into the space files', { skip }, () => {
   before(async () => {
-    door = await openPushDoor({ suite: SUITE, spaces: [BAD, SPACE, RACE, BUDGET, LATE].map(id => ({ id, label: id, folders: [] })) });
+    door = await openPushDoor({ suite: SUITE, spaces: [BAD, SPACE, RACE, BUDGET, LATE, LEGACY].map(id => ({ id, label: id, folders: [] })) });
     ({ sweepExpired } = await import('../../server/dist/brain/ttl-sweep.js'));
     ({ drainStrayFileMeta } = await import('../../server/dist/sync/stray-filemeta-drain.js'));
     logMod = await import('../../server/dist/util/log.js');
@@ -164,9 +174,17 @@ describe('file metadata a 4.0-5.6.1 pull left in <space>_filemeta is recovered i
     assert.equal(d?.deletedAt, STAMPED_AT, 'the fill brought a deleted file back');
   });
 
-  it('a fill that retires a file from search queues the job that removes its vector', async () => {
-    assert.equal((await stored(SPACE, 'retire.md'))?.suppressEmbeddings, true);
-    assert.ok(await embedJob(SPACE, 'retire.md'), 'the vector of a retired file is never removed');
+  it('a fill that retires a file from search removes its vector', async () => {
+    /*
+     * Re-anchored for bundle-30 `R12`: this pinned the MECHANISM — a job queued past the receiver's suppression
+     * (`queueIfHeld` called `enqueueEmbedJob` directly), for the worker to discard and unset. The drain now settles
+     * a filled file by the same rule as every arrival (`embedArrivedFiles`): a file the receiver suppresses has its
+     * vector removed at once and is not queued. The outcome this case exists for is the vector, so it asserts that.
+     */
+    const d = await stored(SPACE, 'retire.md');
+    assert.equal(d?.suppressEmbeddings, true);
+    assert.equal(d?.embedding, undefined, 'the vector of a retired file is never removed');
+    assert.equal(await embedJob(SPACE, 'retire.md'), null, 'a file the receiver suppresses was queued, to be claimed and discarded');
   });
 
   it('pin: a row a peer wrote keeps the normal seq accept, so a field the publisher removed is not restored', async () => {
@@ -240,6 +258,85 @@ describe('file metadata a 4.0-5.6.1 pull left in <space>_filemeta is recovered i
     assert.equal(await strayExists(BUDGET), false);
   });
 
+  it('a record missing keys the fill does not write is still filled; one whose keys are invalid is refused', async () => {
+    /*
+     * Bundle-30 I2b. The drain FILLS the keys a stray record carries onto an existing row, so what it validates is
+     * those keys: a record with no `tags`, no `author` or no `seq` loses nothing by their absence, and was filled
+     * before the drain went through the one validation step. Required as on the push door, it was refused and then
+     * deleted as answered — the publisher's description lost for good.
+     */
+    await door.coll(LEGACY, 'files').insertMany([
+      stampedRow(LEGACY, 'no-tags.md', 700, { sizeBytes: 1, sha256: 'h-no-tags' }),
+      arrivedRow(LEGACY, 'no-seq.md'),
+      stampedRow(LEGACY, 'bad-type.md', 702),
+      stampedRow(LEGACY, 'bad-parent.md', 703),
+      { ...build.filemeta(LEGACY, 'legacy-peer.md', 5, { author: PEER }) },
+    ]);
+    const { seq: _s, ...noSeq } = legacyStray(LEGACY, 'no-seq.md', 0, { description: 'carried no seq' });
+    await door.coll(LEGACY, 'filemeta').insertMany([
+      legacyStray(LEGACY, 'no-tags.md', 20, { description: 'kept from an old pull', properties: { owner: 'ops' } }),
+      noSeq,
+      legacyStray(LEGACY, 'bad-type.md', 22, { description: 42 }),
+      legacyStray(LEGACY, 'bad-parent.md', 23, { parentFileId: 7, description: 'a chunk by another spelling' }),
+      legacyStray(LEGACY, 'legacy-peer.md', 30, { description: 'later than the peer row here' }),
+    ]);
+    await drainStrayFileMeta();
+
+    const filled = await stored(LEGACY, 'no-tags.md');
+    assert.equal(filled?.description, 'kept from an old pull', 'a record with no tags or author was dropped, not filled');
+    assert.deepEqual(filled?.properties, { owner: 'ops' });
+    assert.deepEqual(filled?.author, LOCAL, 'the fill wrote an author');
+    assert.equal(filled?.seq, 700);
+    assert.equal((await stored(LEGACY, 'no-seq.md'))?.description, 'carried no seq', 'a record with no seq was dropped, not filled');
+    const peer = await stored(LEGACY, 'legacy-peer.md');
+    assert.equal(peer?.description, 'later than the peer row here', 'a newer record with no tags or author did not land on a peer row');
+    assert.deepEqual(peer?.author, PEER, 'the absent author was written as something');
+    assert.deepEqual(peer?.tags, [], 'the absent tags were written as something');
+
+    assert.equal((await stored(LEGACY, 'bad-type.md'))?.description, undefined, 'a description of the wrong type was filled');
+    const chunk = await stored(LEGACY, 'bad-parent.md');
+    assert.equal(chunk?.description, undefined, 'a record with a parentFileId of another type was filled onto a file');
+    assert.equal(chunk?.parentFileId, undefined);
+    assert.equal(await strayExists(LEGACY), false, 'a refused record was kept, though nothing can ever make it valid');
+  });
+
+  it('the drain hands the one validation step WIRE keys: a key no version serves is dropped there, where a door refuses it (D4)', async () => {
+    /*
+     * Bundle-30 I6, D4 — the order decided, and a PIN (the drain already picked first; the arrival-shape docblock said
+     * "still refused, on both doors alike" without saying the drain is not a door). A stray record is a row an OLD
+     * pull stored whole, from a sender of any version since 4.0: a key that is neither a wire key nor part of today's
+     * file row is a retired field, and refusing the record for it would delete it as answered — the publisher's
+     * description lost, the loss I2b's fill exists to prevent. A live sender's page is refused for the same key,
+     * because the sender can still be fixed and send it again.
+     */
+    await door.coll(LEGACY, 'files').insertOne(stampedRow(LEGACY, 'retired-key.md', 710));
+    await door.coll(LEGACY, 'filemeta').insertOne(
+      legacyStray(LEGACY, 'retired-key.md', 40, { description: 'beside a retired key', aKeyNoVersionServes: 1 }));
+    await drainStrayFileMeta();
+    const filled = await stored(LEGACY, 'retired-key.md');
+    assert.equal(filled?.description, 'beside a retired key', 'a stray record was refused for a key no version serves');
+    assert.equal('aKeyNoVersionServes' in (filled ?? {}), false, 'the retired key was written to the row');
+    const { admitArrivals } = await import('../../server/dist/sync/arrival-shape.js');
+    const onTheDoor = admitArrivals('filemeta', [{ ...build.filemeta(LEGACY, 'retired-key.md', 41, { author: PEER }), aKeyNoVersionServes: 1 }]);
+    assert.deepEqual(onTheDoor.refused.map(r => r._id), ['retired-key.md'], 'a door stopped refusing an undeclared key');
+  });
+
+  it('the fill\'s validation is the one validation step: present keys checked, strict, nothing else required', async () => {
+    const { admitArrivals } = await import('../../server/dist/sync/arrival-shape.js');
+    const { admitted, refused } = admitArrivals('filemeta', [
+      { _id: 'only-a-description.md', description: 'd' },
+      { _id: 'undeclared.md', description: 'd', sizeInBlocks: 3 },
+      { _id: 'wrong-type.md', tags: 'one' },
+      { _id: 'chunk.md', parentFileId: 'file.md' },
+      { description: 'no id' },
+      { _id: 'bad-seq.md', seq: -1 },
+    ], { fill: true });
+    assert.deepEqual(admitted.map(a => a.doc._id), ['only-a-description.md']);
+    assert.deepEqual(refused.map(r => r._id), ['undeclared.md', 'wrong-type.md', 'chunk.md', '(no _id)', 'bad-seq.md']);
+    // Every other door still requires the whole wire record.
+    assert.equal(admitArrivals('filemeta', [{ _id: 'only-a-description.md', description: 'd' }]).refused.length, 1);
+  });
+
   it('a file deleted while the drain is writing is not brought back', async () => {
     // a-first.md is written before race.md in the same page; its write is held while race.md is deleted. Both are
     // peer rows below the stray's seq, so the unchanged code writes them too and reaches the hold.
@@ -251,38 +348,32 @@ describe('file metadata a 4.0-5.6.1 pull left in <space>_filemeta is recovered i
       stray(RACE, 'a-first.md', 30, { description: 'first' }),
       stray(RACE, 'race.md', 31, { description: 'for a file about to be deleted' }),
     ]);
-    const proto = Object.getPrototypeOf(door.mongo.col('probe'));
-    const original = proto.updateOne;
-    let reached, release;
-    const atHold = new Promise(r => { reached = r; });
-    const held = new Promise(r => { release = r; });
-    proto.updateOne = async function holding(filter, ...rest) {
-      if (this.collectionName === `${RACE}_files` && filter?._id === 'a-first.md') { reached(); await held; }
-      return original.call(this, filter, ...rest);
-    };
+    // Parked after the door's own patch and restored before it closes (`parkWrites`).
+    const park = parkWrites(Object.getPrototypeOf(door.mongo.col('probe')));
+    const { reached: atHold, release } = park.arm(`${RACE}_files`,
+      { when: (method, [filter]) => method === 'updateOne' && filter?._id === 'a-first.md' });
     try {
       const cycle = sweepExpired();
       await within(atHold, 'the held write');
       await door.coll(RACE, 'files').deleteOne({ _id: 'race.md' });
       release();
       await cycle;
-    } finally { proto.updateOne = original; }
+    } finally { park.restore(); }
     assert.equal(await stored(RACE, 'race.md'), null, 'a file deleted during the drain came back with no bytes');
   });
 
   it('a space that fails keeps its collection, is named in the log, and does not stop the spaces after it', async () => {
-    const db = door.mongo.getDb();
-    await db.collection(`${BAD}_files`).drop();
-    await db.createCollection(`${BAD}_files`, { viewOn: `${BAD}_files_source`, pipeline: [] });
-    await door.coll(BAD, 'filemeta').insertOne(stray(BAD, 'x.md', 10, { description: 'cannot land' }));
-    await door.coll(SPACE, 'files').insertOne(stampedRow(SPACE, 'after-bad.md', 950));
-    await door.coll(SPACE, 'filemeta').insertOne(stray(SPACE, 'after-bad.md', 10, { description: 'reached despite the bad space' }));
-    lines.length = 0;
-    await sweepExpired();
-    assert.equal((await stored(SPACE, 'after-bad.md'))?.description, 'reached despite the bad space',
-      'a failing space stopped the drain of the spaces after it');
-    assert.equal(await strayExists(BAD), true, 'the failing space lost its collection');
-    assert.ok(lines.some(l => l.includes('Stray file-metadata drain') && l.includes(BAD)), 'the failure line does not name the space');
-    assert.equal(await door.mongo.getDb().collection('audit_log').findOne({ spaceId: BAD, operation: 'file.stray_filemeta.drain' }), null);
+    await withCollectionAsView(door.mongo.getDb(), `${BAD}_files`, `${BAD}_files_source`, async () => {
+      await door.coll(BAD, 'filemeta').insertOne(stray(BAD, 'x.md', 10, { description: 'cannot land' }));
+      await door.coll(SPACE, 'files').insertOne(stampedRow(SPACE, 'after-bad.md', 950));
+      await door.coll(SPACE, 'filemeta').insertOne(stray(SPACE, 'after-bad.md', 10, { description: 'reached despite the bad space' }));
+      lines.length = 0;
+      await sweepExpired();
+      assert.equal((await stored(SPACE, 'after-bad.md'))?.description, 'reached despite the bad space',
+        'a failing space stopped the drain of the spaces after it');
+      assert.equal(await strayExists(BAD), true, 'the failing space lost its collection');
+      assert.ok(lines.some(l => l.includes('Stray file-metadata drain') && l.includes(BAD)), 'the failure line does not name the space');
+      assert.equal(await door.mongo.getDb().collection('audit_log').findOne({ spaceId: BAD, operation: 'file.stray_filemeta.drain' }), null);
+    });
   });
 });

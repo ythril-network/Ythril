@@ -9,6 +9,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **A space's Merkle root is not re-read when nothing changed (`Q-107`, part 4).** Every sync cycle of a
+  `merkle: true` network and every peer's `GET /api/sync/merkle` streamed all six record collections of the
+  space. Each collection's leaves are now kept while nothing writes to it, and only a written collection is read
+  again; a call with nothing changed returns the stored root. Measured on the standalone harness, 40 000 records:
+  390 ms for the first call, 2 ms for the next with nothing changed, 179 ms after one fact was written (every
+  call was about 330 ms before). The file manifest is still walked on every call. `computedAt` is when the root
+  was computed, which for a kept root is not now.
+- **An entity delete with `cascadeToken` removes a hub's edges a chunk at a time (`Q-107`, part 3b).** It removed
+  them one edge at a time — a read, a delete, a job retire, a seq and a tombstone per edge, so a hub of 1 500 edges
+  was some 7 500 round trips while the caller waited. Each chunk of 500 is now one transaction: the edges' delete
+  and their tombstones commit together, and a hub costs the same few commands per chunk whatever its size. One
+  `edge.deleted` webhook per removed edge, as before, sent after its chunk committed.
+- **An entity merge relinks a hub in one transaction of a few bulk writes, and a merge too large for one is
+  refused before anything is written (`Q-107`, part 3a).** A merge used to relink the absorbed entity's edges,
+  links and face labels one record at a time — five commands an edge, about 13 ms each with vectors on the test
+  store — so a hub of 10 000 edges could not commit at all. Each kind of record is now one bulk write with one
+  block of sequence numbers, and a merge of 2500 records takes seconds. What an integrator will notice:
+  - **BREAKING for a caller merging hubs: one merge relinks at most 2500 records** (the absorbed entity's
+    edges, links and face labels together). A larger merge answers `422` with `code: "merge_too_large"`,
+    `relinks` and `bound`, on the REST merge route, `POST /api/duplicates/:id/merge` and the `graph_merge` tool
+    alike, and automerge leaves such a pair open with one warning. Nothing is written, not even a sequence number.
+    The bound is set from measurement: half of the largest merge that still committed on the test store.
+  - **The `merge_too_large` text says what its reader can see and do** (bundle-30). It named the two entities by
+    id, which the Review page never shows, and said to "move or delete some of its edges", although no door can
+    move an edge. It now names both entities by name (each id follows in brackets), states the absorbed entity's
+    edges, links and face labels separately, and suggests deleting at least as many edges or links as the merge
+    is over — or says the face labels alone exceed the bound — and merging the other way round only when that
+    merge fits, with what it would relink. `code`, `relinks` and `bound` are unchanged.
+  - **A merge a `strict` space refuses answers `400` on every door.** The REST merge route answered `500`
+    "Internal server error" and the duplicate route `500` "Internal error" while the tool answered `400`. The
+    refusal is now decided before anything is written, so it no longer spends sequence numbers either.
+  - **The `graph_merge` description states the statuses the doors really answer**: an unresolved conflict plan
+    is an error result (`422` on `POST /api/graph_merge`; the REST merge route still answers the plan `409`).
+  - The four doors run one merge sequence (plan, resolutions, merge), so a check added to it reaches all four.
 - **`POST /api/sync/tombstones` checks each tombstone on its own, answers `refused`, and takes at most 5000 per
   request (bundle-46).** A malformed tombstone, or one whose seq the counter cannot carry, is refused alone and the
   rest of the page applies; the answer is `{ applied, refused }`, where `applied` keeps its meaning (the tombstones
@@ -21,7 +55,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   part 1).** Every record that arrives from elsewhere — a peer's push (batch or single record), a pulled page, an
   admin import — is now stored by one writer. A fork-free page of 200 facts, entities, edges, chrono entries or
   links went from 801 commands to the same small number as a page of 20 (measured on the standalone harness).
-  File metadata is still merged one document at a time. What an integrator will notice:
+  File metadata now too (`Q-107` part 2): a 200-document page went from 403 commands (two per document) to the same
+  number as a page of 20, pushed or pulled — one guarded bulk merge, one read for which files' bytes are here, one
+  batched enqueue. What an integrator will notice:
   - **BREAKING for a peer relying on it: `batch-upsert` now caps fork fan-out too.** A fact may have at most 10
     forks; the forks one request creates count with the stored ones. An eleventh is counted in `forkDepthRefused`
     and `rejected`, as a deep chain always was. An older receiver accepts it, so a network mixing versions can hold
@@ -310,8 +346,274 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   where the resolver honours any `maxBytes` and raises a small `maxChars` to 1000. The schema now follows the
   resolver, so MCP accepts what REST always did; `recall`'s `maxTokens` text no longer says it converts onto bytes.
 
+- **A store that cannot complete a write in time answers `503`, retryable, on every door (`Q-213`).** Every
+  database operation a write issues while it holds its sequence number, and every operation of a sync push page,
+  is now bounded: `YTHRIL_WRITE_TIMEOUT_MS` (default 30 s) per operation and `YTHRIL_HOLD_DEADLINE_MS` (default
+  45 s, below the 60 s a peer waits for a push answer) per hold, both new and both refusing `0`. A write the bound
+  ends answers `503` with `retryable: true`, a `Retry-After` and a message of ours (never the driver's text) on the
+  REST record routes, `POST /api/<tool>`, the MCP tools and every sync push route. A REST write used to answer the
+  same store failure `500` while the tool door answered `503`; a sync push route answered `500` for every store
+  failure, and now answers `503` when the store is the cause — a sender holds its watermark and re-sends on either.
+  A `timeoutMS` in `MONGO_URI` does not apply to these operations: the bound is set on each.
+
 ### Fixed
 
+- **A recall straight after a space's first write no longer answers 503 while its search index initialises**
+  (Q-325). A collection's vector index is built after its first record, and until it serves the search service
+  refuses queries in several wordings. Recall, `similar` and the write-time duplicate check answer that refusal as
+  "nothing from the index yet" and find the new record through the fresh-write scan, but the first wording
+  (`Index <name> not initialized`) was not recognised, so for the first moments of a space's life the same recall
+  answered 503 or 200 depending on timing. All the wordings are now recognised in one place. The write-time
+  duplicate check also keeps its fresh-write matches through that refusal instead of answering none.
+
+- **A small entity merges into a hub of any size** (bundle-30). The merge looked for edge collisions by reading every
+  edge of the survivor inside its transaction, where a read must come back in one batch, so merging an entity with
+  one edge into a survivor with about eighty thousand failed as a store error. It now looks up only the identities
+  the relink produces. A too-large merge counts each kind only up to one past the bound, so refusing a hub no
+  longer counts all of it: the refusal then says *more than* the bound, and `relinks` is a lower bound.
+
+- **A strict-linkage violation is no longer recorded for a target later in the same transfer, nor twice for one
+  dangling end** (bundle-30). Edges and links received by pull or batch push were checked right after each page
+  landed, and a pull lands its families one page at a time — edges before chrono entries, links and files — so an
+  edge to a chrono entry created in the same interval was recorded as pointing at nothing. Each record had a fresh
+  id, so every re-delivery of the edge added another. A transfer's references are now checked once it is whole (a
+  pull after every family of the space, a push after the request), with one existence read per target kind instead
+  of one or two per record, a family whose transfer stopped early is not judged, and a violation's id is derived from
+  what it says, so the same dangling end is one record and one `link_violation.created`.
+
+  A push request carries ONE family — the sender pushes them one request each — so checking "after the request" was
+  not enough on its own: the families were sent edges before chrono entries and links before file metadata, and the
+  push door still recorded those edges and links. **The families now travel targets first** (facts, entities, chrono,
+  file metadata, edges, links), and the push door leaves the families still to come in that order unjudged. A sender
+  older than this release still pushes the old order, and from it an edge to a chrono entry or a link to a file
+  created in the same interval can still be recorded; a receiver older than this release, sent the new order, records
+  none of them. The protocol reference (`docs/sync-protocol.md`, Push phase and `POST /batch-upsert`) now states
+  the order a receiver relies on, where it is read from (`REPLICATED_FAMILIES`), and what a receiver records from a
+  sender that pushes references first (bundle-30 I15).
+
+  The push door also no longer waits for the check before answering: it awaited it after the page, outside the
+  door's write bound and with no deadline on its read, so a stalled store held the push answer past the sender's
+  60 s — the timeout the bound exists to beat. The check now starts after the page lands and runs in a write bound
+  of its own. A pull whose fetch failed part-way skipped the check altogether, and the edges that had landed were
+  never checked again (re-served, they plan as already current); it now checks what landed, with the family that
+  failed and every one after it left unjudged. And grouping the targets copied the list per target, ~1.3 s of
+  blocked event loop at 20 000 targets (one 50-page pull); it is now under a millisecond.
+
+- **An error that names `maxTimeMS` because the option was misused is no longer read as a deadline the store
+  missed** (bundle-30). The deadline question matched the word `maxTimeMS` in any message, so the store's refusal of a
+  misplaced bound (`cannot set maxTimeMS on getMore …`, a `BadValue`) was answered as a retryable `503` timeout on a
+  write door and as "the search ran out of time" on recall, predicate recall, the row graphs and the face gallery.
+  A deadline is now code 50 or 262, or — only for an error that lost its code — the store's own "exceeded time limit"
+  wording.
+
+- **A restored file no longer keeps the replaced copy's vector** (`Q-234`, bundle-30). A restore carries nothing from
+  the copy it replaces, and every family did that except file metadata, which is merged rather than replaced: the
+  merge removed the replaced copy's retention stamps but kept its `embedding`, `embeddingModel` and `matchedText`.
+  The merge now asks the arrival writer's own rule for what the stored row keeps.
+
+- **A peer's file bytes landing here follow this instance's suppression** (bundle-30). The bytes writer queued the
+  file for embedding directly, so a file this instance suppresses (its own flag, or the space) was queued, claimed
+  and discarded, and kept any vector it had. It now takes the same step as arriving file metadata: a suppressed
+  file holds no vector, any other is queued.
+
+- **A store failure is answered by one function on every door** (bundle-30). The REST read helper, the REST error
+  handler, the MCP dispatcher and the sync push helper each built the `503` by hand: a REST write's body dropped the
+  store's `code` and `codeName` that a read and the tool carry, and five sync POSTs (file tombstones, members, votes,
+  change notes, both pairing steps) still answered a store failure `500`. They now all answer `503`, `Retry-After`,
+  `retryable: true` — in words of our own, with the store's `code` and `codeName`, on every door and to every
+  reader alike — and one retry sentence.
+
+  The rest of the HTTP doors now answer it the same way. `POST /api/brain/recall`, `POST /api/brain/similar`,
+  `POST /api/brain/spaces/:spaceId/traverse` and every `POST /api/<tool>` answered `503` without `Retry-After`. About
+  forty route handlers answered their own `500 Internal error` without asking whether the failure was the store's —
+  among them `POST /api/brain/spaces/:spaceId/entities`, the UI's create form, which showed an operator *"Internal
+  server error"* for a condition a retry clears, and every `/api/conflicts`, `/api/contradictions`,
+  `/api/duplicates`, webhook, network and sync read route. An edge or link write whose reference lookup failed on
+  the store answered `400` with the driver's text — and a missing reference whose own text names `mongot`, `$search`
+  or a vector search index (a file `notes/mongot-setup.md`, a space `mongotest`) is the caller's `400`, not a
+  retryable `503`, because the store's message patterns are read only from the driver's own errors; `space_rename`
+  answered it as `Error (500)` with the driver's text; a space create answered `500 Failed to create space` and
+  logged nothing. A file delete through a store failure answered `200` with no sync tombstone written, so a peer
+  re-pushed the file; it now answers `503`, and the retried delete writes the tombstone — see the next entry for why
+  the retry can. Every one now answers through one sender. A failure on those routes that is NOT the store's still
+  answers `500`, now with the body `{"error":"Internal server error"}` (it read `Internal error` on most of them),
+  logged with its stack under the route's name — and so is a store failure's log line.
+  The store message's retry sentence used to say *"Nothing was confirmed written by it"*, also on a list load or a
+  search, which wrote nothing; it now says what is true of both.
+
+- **A file's sync tombstone is written before its bytes go, so a failed delete or move is safe to retry**
+  (bundle-30 I13). The tombstone was written after the unlink, after a directory's tree was removed and after a move.
+  A store failure on it then left the file gone with no tombstone, and the retry could not repair it: the REST delete
+  found no bytes and answered `204` writing no tombstone, a directory delete answered `404`, a move found no source,
+  and the TTL sweep failed on the missing file every cycle — while a peer's manifest pushed the file back. Every path
+  that removes a file now writes the tombstone first, so a store failure on it answers `503` with the file where it
+  was. A file whose bytes are gone while its metadata remains is
+  completed on every door (REST delete, MCP `delete_file`, the TTL sweep): tombstone written, record, jobs and
+  artifacts removed. A path with neither bytes nor metadata, and a move whose source is not there, answer `404` on
+  both doors; MCP answered them with the filesystem's `ENOENT` and the absolute data path. `delete_file`'s description
+  said a missing path "succeeds quietly", which was not true; it now says what each door answers.
+
+  A store failure AFTER the bytes now fails the act too (bundle-30 I14). With the store paused, a delete unlinked
+  the bytes, failed its job, artifact and metadata steps — each caught and logged — and answered `204`; a move
+  carried the bytes, failed to re-key its records and answered `200`. Each step's own failure is still survived,
+  but the store's answers `503` on REST and MCP, and the metadata record goes last, so the same request retried
+  completes the act: a delete as an orphan, a move by finding the file at its destination and the record at the
+  old path, a directory delete (`confirm: true`) by finding records under a folder whose tree is gone. The
+  directory delete's cascade moved from the REST route into `files/delete-cascade.ts`.
+
+  **A file tombstone is published only once the file is gone (bundle-30 I15).** Written before the bytes, a
+  tombstone was served and pushed at once, and a peer that receives one deletes its copy, keeps the tombstone and
+  serves it back — so when the delete or move then failed, the next cycles deleted this instance's own copy, the
+  only one left. Withdrawing it afterwards (retried in memory) lost that race to a sync cycle, and to a restart
+  outright; a delete whose unlink failed for a reason that was not the store's (a directory, a permission) never
+  withdrew it, and the TTL sweep added another every cycle. Now the tombstone is written PENDING and confirmed once
+  the bytes are gone or moved; nothing that serves, pushes, prunes or counts file tombstones sees a pending one
+  (`GET /api/sync/file-tombstones`, the sync push, the prune, the stray-metadata drain all read them through
+  `files/tombstones.ts`). A failed act settles its own from the disk at once, and one that outlives its act is
+  settled the same way by the TTL sweep — dropped while the path still has its file, published once it has none.
+  `pending` never crosses the wire: served tombstones carry `_id`, `spaceId`, `path` and `deletedAt` only, and a
+  confirmed one is stamped with the time it was confirmed.
+
+  **Per path, not per act (bundle-30 I16).** One act's paths lose their bytes at different steps, and a tombstone is
+  now published only after its own path's: a move's and a directory delete's conversion sidecars (`_converted/…`,
+  `_extracted/…`) are published after the sidecar itself moved or went, and dropped when that step failed, where they
+  used to be published with the file — so a sidecar still here was deleted back by every peer. A directory delete
+  whose tree removal stopped part way dropped every tombstone, including those of the files it HAD removed, and the
+  retry lists only what remains, so peers pushed those back; a failed step is now settled per path from the disk. The
+  TTL sweep settles the oldest first, and one whose path it cannot look at goes to the back of the queue rather than
+  coming back first every cycle and starving the rest of the space. `<space>_file_tombstones` gains the two indexes
+  those questions need (the settle's, partial on `pending`, and the move marker's), on new and existing spaces.
+
+  **One tombstone per path per act, retries included (bundle-30 I17).** A file act a store failure stopped left its
+  pending tombstone behind, and its retry published one of its own — and then the first as well: a retried move at
+  once, because its settle took every tombstone carrying the move's mark, and a retried delete (one file, MCP
+  `delete_file`, a directory) ten minutes later, when the TTL sweep found the path's bytes gone — gone because the
+  retry had removed them. A peer deletes its copy for every tombstone it is sent, so the late one deleted a re-upload
+  of that path made in between. Now there is one way a tombstone is published, and publishing a path's removes every
+  other pending tombstone for that path; the sweep drops a leftover whose path already has a tombstone published
+  after it was written (a failed write the store applied late) rather than publish a second. File tombstones gain
+  an index on `path` for it.
+
+  **A retried move completes only a move it began (bundle-30 I15).** The completion took any source with records and
+  no bytes beside an existing destination for a move still owed — so moving an orphan `a.txt` (its file gone out of
+  band) onto an unrelated `b.txt` replaced `b.txt`'s jobs, chunks and sidecars, lost `a.txt`'s record and answered
+  `200`. A move's tombstones now carry a mark of the move, the completion requires it, and without it the move is
+  `404` and `b.txt` is untouched. "Are the bytes here" has one answer (`bytesPresent`): only a path that does not
+  exist is absent, and a failure to look (a permission) is an error rather than an absent source sent down that
+  path. The completions ask the store for one record instead of loading every record id under a folder. **A path
+  through a regular file (`a.txt/x`) is a path that does not exist (bundle-30 I16):** Linux answers it `ENOTDIR`,
+  not `ENOENT`, so MCP `move_file` and `delete_file` of one answered `400` carrying the server's absolute data path,
+  REST answered `500`, and the TTL sweep kept such a tombstone pending for ever — all now `404`, and published. Every
+  "does this path exist" test in the server reads the one predicate, `isMissingPath`, and a gate holds it there. The
+  media worker's "was the source deleted mid-job" check read ANY failure to look as "deleted" and removed what the
+  job wrote; it now asks `bytesPresent`, and the conversion's and the manifest's own swallowed stats are gone too.
+
+- **A pulled page is decided by the same rules as a pushed one (`Q-204`, `Q-225`).** The pull accepted whatever was
+  newer by seq and validated nothing, so the same document delivered the other way round was decided differently:
+  a record this instance holds a tombstone for was stored again, an equal-seq divergent fact lost one side instead of
+  forking, a field of the wrong type and a key the schema strips were stored, and a file whose `parentFileId` was a
+  number, `0`, `false` or an object became a top-level file. A pulled document now passes its family's `Incoming*`
+  schema (a refusal is that document's alone, and the rest of the page lands), is planned against held tombstones and
+  the fork caps exactly as on push, and is written by the same writer. One stated difference: a chrono `type`
+  outside this space's vocabulary is stored on pull (a push answers `unknownType`), because on pull the schema
+  comes from the same upstream and dropping the record would lose it for good. Strict-linkage violations are now
+  recorded for every landed edge and link on every door (only the single edge route and the batch's links did).
+  The stray-filemeta drain (`Q-219`) checks each record through the same schema as a FILL: the keys it carries must
+  be valid, and none it lacks is required, because it writes only what it carries. A record with a key of the wrong
+  type or a `parentFileId` of any kind is discarded and counted as refused, where it used to be partly filled; a
+  record with no `tags`, `author` or `seq` is still filled.
+- **Two peers pushing different text for one fact at one seq at the same moment keep both texts (`Q-232`).** The
+  push whose write lost the race found a copy at its own seq and counted itself landed, while its text was stored
+  nowhere. A same-seq copy with different content is now a divergence, and forks.
+- **A fork keeps the divergent copy's `createdAt` and `updatedAt`.** It was stamped with the moment this instance
+  forked it, so its retention window ignored its age and two receivers forking one divergence stored two documents
+  under one derived fork id — which the space hash reported as a divergence for ever.
+- **An arrival this instance suppresses holds no vector (`Q-230`).** The writer carried the stored copy's vector,
+  model and `matchedText` across a peer's update whatever the receiver's suppression said, so a record its author,
+  its type or its space retired from semantic search stayed findable by the content it no longer had. A suppressed
+  arrival now carries the retention stamps and `syncBase` only, on every door, and a file's derived passages lose
+  their vectors with it.
+- **An admin import never keeps the stamps or `syncBase` of the copy it replaces (`Q-234`).** A record whose export
+  carried no retention stamp kept the replaced copy's, so a record restored to "never expires" went on expiring on
+  the old date, and a file kept a `syncBase` the backup never recorded. It now stores the backup's values, a stamp
+  the backup lacks from this instance's retention (D-9), and nothing of the replaced copy's.
+- **A file-metadata arrival is held to the write guard.** It was merged by `_id` alone, so a newer copy written
+  between the accept read and the merge was overwritten by an older one, with a `200` on the way back.
+- **Suppression that a network turns on removes the vectors already stored (`Q-230`).** A space whose type or
+  space-level `suppressEmbeddings` arrived from a network — a meta pull, a meta round, a space addition, leaving a
+  network or changing its precedence — reported its records suppressed and went on ranking them by meaning until
+  each was rewritten: only an operator's own edit swept. Every change of the effective meta now sweeps — and so
+  does a type schema saved on a space no network carries (`PUT /schema`, the per-type upsert and delete, a schema
+  library apply), which swept nothing while the same edit on a networked space did. One change is swept once: a meta
+  change applied by a vote was swept two or three times, each a pass over every collection of the space. The sweep
+  also covers files and their derived passages (it covered none), removes the model name with the vector (it left
+  it behind), keeps `matchedText` (the content did not change), and runs once at every start, so vectors stored
+  before this version are cleared without waiting for the next edit. That start sweep begins once the server is
+  listening and sweeps one space at a time, so its scans never compete with each other or with the boot.
+- **An embed job no longer writes over a record that changed while it was embedding.** The job reads a record,
+  calls the model, then wrote the vector by id alone: a peer's newer copy landing during the model call received
+  the OLD text's vector and `matchedText` — and a copy this instance suppresses received a vector it must never
+  hold. Every write the job makes is now guarded by the seq it read; the newer copy's own job embeds it.
+- **Two members holding the same data report the same Merkle root (`Q-307`).** The root hashed each record's
+  `spaceId` — which the receiver rewrites to its own id for the space, so a space held under a `spaceMap` alias
+  differed in every leaf — and the files that never leave an instance (a conflict copy, a schema snapshot). A
+  network with `merkle: true` logged `MERKLE_DIVERGENCE` for such a space on every cycle over identical content.
+  **Mixed versions:** a root from an earlier version never equals one from this version, so a `merkle: true`
+  network running both reports `MERKLE_DIVERGENCE` for every space until all its members have upgraded. The
+  check is advisory and blocks nothing.
+- **A refused entity cascade removes nothing.** A cascade a fact, chrono entry or file still blocked deleted every
+  blocking edge, wrote their tombstones (so peers deleted them too), and only then answered "cannot delete". The
+  whole set is now decided first, and a cascade that cannot finish removes no edge.
+- **An edge a cascade removes is never gone without its tombstone.** The tombstone was written after the edge
+  was deleted, so a failed tombstone write left the edge gone here and alive on every peer, which brought it back
+  on the next pull pointing at the entity being deleted. Each chunk's delete and tombstones now commit together.
+- **`delete_entity` no longer says "There is no cascade."** It has one (`cascadeToken`, from
+  `delete_entity_preview`), and the description now says so where a caller reads first.
+- **A merge reported as failed after its commit landed is answered as merged, and still queues its edges and
+  sends its webhooks.** A commit whose reply was lost used to throw past both, leaving re-keyed edges without a
+  vector and subscribers never told the absorbed entity was deleted. The merge reads back, while still holding
+  the sequence horizon, whether it landed.
+- **A merge's first-time model load no longer fails the merge.** The survivor's embedding is computed before the
+  merge takes its hold, so a slow model load can no longer outlast the hold's deadline and answer `503`.
+- **The tombstone of an edge a merge drops as a duplicate, and of a link it re-keys or a write unlinks, carries
+  the seq of the record it deletes** (`originalSeq`). Without it a peer whose watermark never reached the record
+  was sent its deletion.
+- **An automerge a space refuses is reported once per pair, not twice on every scan.** The scanner recorded a
+  pair at a seq it never read for the record it started from, so a refused pair never matched itself and was
+  merged again — a whole transaction, rolled back — and warned about from both ends on every scan. The survivor
+  of an automerge is now also the older record as configured, rather than whichever the scan reached first.
+- **A write the store could not finish in time answers `503` on the create and converge doors too.** A planned
+  write whose bulk write the write bound ended was answered per item as "did not complete" through a read-back
+  that ran after the deadline; while nothing of the request has landed it is now the store timeout every door
+  answers `503 retryable`.
+- **A transaction under the sequence hold can read more than one batch of rows.** The driver sends a time limit
+  on such a cursor's `getMore`, which the server refuses, so any read of more than 101 rows inside a held
+  transaction failed it. A cursor there now asks for every row in its first batch.
+- **A write that stalled could stop a space's replication indefinitely (`Q-213`).** While a write holds its
+  sequence number, every peer pulling the space is served nothing past it, and nothing bounded the write: a
+  document lock held elsewhere, a stalled socket or a transaction retrying a conflict for two minutes held every
+  pull of the space with it, while each cycle reported success. The write now ends within the bound above, its
+  hold is released when it ends, and the pull continues.
+- **A stalled write is visible while it stalls (`Q-200`).** New gauge `ythril_seq_horizon_oldest_hold_seconds`
+  per space (0 when nothing is held), and a `seq horizon held <age>s space=… seq=… holder=… ended=…` warning for
+  every hold that lasted past half the deadline — once while still open, and when it ends.
+- **A record that landed was never queued for embedding when the counter could not move after it (`Q-224`).** The
+  arrival writer moved the counter, then booked and queued what landed, in one `finally`; a counter that could not
+  move threw out of it first, so the records were stored, never queued, and a re-sent page read them as current and
+  never queued them either — and the counter's error replaced the write's own, so an import called every document
+  refused over records it had written. Each step now runs whatever the one before did, the write's own error wins,
+  and a counter left behind fails the page after what landed is booked and queued: a push answers `500`, a pull
+  holds its position, and an import reports what it restored with the new per-family `counterBehind: true` (run the
+  import again). The push door's own counter move follows the same rule.
+- **A driver argument error drops a peer's document only when the error is that document's own.** Every
+  `MongoInvalidArgumentError` was read as the refusal of the document being written, so one that the write bound or
+  the call itself raised dropped a peer's document from its sync page for good. A document whose own write the
+  driver refuses as an invalid argument is still refused alone, counted in `rejected` with a reason (a single route
+  answers `400`); an argument error the write bound caused, or one every document of a page raised, fails the page,
+  so it is sent again.
+- **A merge of a large entity no longer prints `MaxListenersExceededWarning` (`Q-311`).** Every write inside a
+  transaction hung its own listener on the session until it ended, so a merge relinking thousands of edges hung
+  thousands of them. A session now carries one, and every write is still reported once after the commit.
 - **A file a publisher pushed could freeze its subscriber's copy of the file's description and tags (`Q-239`, as
   in 5.6.2).** The pushed bytes reached the subscriber's upload door, which stored them as the subscriber's own
   upload: its own next seq, itself as the author of a new file, and a description it derived itself. That copy then
@@ -354,7 +656,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   written with a seq above the arrival that caused it.
 - **A peer's edit erased this instance's own vector and retention stamps.** A pushed or pulled update replaced the
   whole document, so the record stopped expiring here, dropped out of vector search until re-embedded, and was
-  re-embedded even when its text had not changed. They are now kept across the update.
+  re-embedded even when its text had not changed. They are now kept across the update — the vector only while this
+  instance still embeds the record: an arrival this instance suppresses (by the record's own mark, its type's
+  schema or the space) keeps no vector, model or matched text (`Q-230`, above).
 - **A record pushed under a `spaceMap` alias kept the sender's space id**, so every list and lookup on this
   instance missed it. It is now stored under the local space id, as a pulled record always was.
 - **A stale tombstone was deleted before the record that superseded it was written**, so a write that then failed
@@ -564,6 +868,73 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **No door answers a store failure with the database driver's text.** A dropped connection, a failed server
+  selection or a step-down arrives with a driver message that names internal hosts, addresses and ports
+  (`connection 5 to 172.16.0.9:27017 closed`). The REST brain read routes and the MCP tools put that message in their
+  `503` body, and the REST error handler did the same for every route that lets a store failure reach it, including
+  routes a peer or an unauthenticated caller reaches. Every door — REST reads and writes, `POST /api/<tool>`, MCP
+  tools and sync push — now answers one message of ours, in one spelling, *"A store-side failure stopped this
+  operation. It did not complete as far as this server can confirm; retry the request (store-side failure;
+  retryable)."*, with `retryable: true`, `Retry-After` (on every HTTP door), and the store's own `code` and
+  `codeName` when it gave them. The driver's message, with any cause it attached, is logged once per request as a
+  `Store-side failure answered 503` warning naming the operation that failed — the route, the method and path when
+  the app's error handler answered it, or `tool <name>` from MCP (bundle-30 I15: only a route's own catch named it,
+  so a store failure under an edge or link reference check, one reaching the error handler, and every MCP tool's
+  logged a line naming nothing; the operation is now a required argument of the one function that writes it). A client that
+  matched the old prose should read `retryable` and `code` instead. That includes
+  `POST /api/networks/:id/sync?wait=true` and `POST /api/networks/peers/:peerId/sync?wait=true`, which answered a
+  cycle's failure as `500 { error }` with the exception's own message.
+
+  A store failure is recognised by what the driver says it IS — its class, its error labels, the server's code —
+  not by a list of error names. The list could not see a subclass: the error the driver raises when it clears its
+  connection pool (`MongoPoolClearedError`, a network error by class) answered `400` with the driver's text, naming
+  the internal host, address and port, to whichever request was in flight when a store went away. A driver error
+  that is recognised as nothing in particular now answers `500` with *"An internal database fault stopped this
+  operation; its cause is in the server log."* rather than a `400` carrying its message. What the database server
+  itself refused — a malformed query, a validation failure — still answers `400` in its own words.
+
+  A failure under a bulk write (`insertMany`, `bulkWrite`) is classified by the error the driver wrapped (bundle-30
+  I14). The driver rethrows whatever is thrown under one as a `MongoBulkWriteError`: a server error by class, with no
+  code, and — for a server it could not select, which is how a paused store arrives — no label. So a paused store
+  answered `400` with the store's address on any door a bulk write reached, and the file delete it reached took it
+  for "not the store's" and went on without its tombstone. A write concern failure, bulk or single, is the store's
+  too (`503`): no caller chooses one here. A bulk write's refused documents — a duplicate key — are still the
+  caller's `400`.
+
+- **A model server's error text is bounded and escaped where it is quoted** (bundle-30). When a chat model server
+  answered with an `error`, its text was quoted whole into the error the call raised — and from there into a log
+  line and an answer. It now goes through the one renderer every peer-supplied text uses, cut at 200 characters
+  (saying how much it cut) and escaped.
+
+- **Every log line is one line, and every value in it is bounded (`Q-231`, `Q-214`, `Q-270`).** The escaping above
+  covered the push, pull and import paths; a member label arriving by gossip, a vote round id, a caller's parameter
+  on a REST brain or MCP door, a driver's error text and the meta argument of any log call still reached a line raw,
+  so a peer could still forge a governance line, and a megabyte `seq` or `_id` made a megabyte line in the ring,
+  the container log and every aggregator after it. One renderer (`peerText`, `peerList` for a list) now redacts,
+  cuts at 4096 characters per value (100 per list) saying how much it cut, and escapes; every door's log lines go
+  through it (a gate holds them to it), the meta argument goes through it where every line is built, and the line
+  as a whole is escaped. The same bound applies where such a value is named back in an answer: a sync refusal's
+  reason, the fork-limit `400`, and an admin import's `refused`, `schemaViolations` and `restoredOverTombstone`.
+  A reference refusal on the REST and MCP write doors (a link, an edge end or a file reference that is malformed
+  or names nothing) names its first five references each cut at 256 characters and escaped, where it echoed a
+  caller's megabyte reference whole — and the count of the rest is now written `…(+N more)`, where it read
+  ` (+N more)`. A key a door does not take is quoted by the same bound on both doors: a REST body's
+  `Unknown field(s)` and `unrecognized_keys` name the first 10 unknown keys, and an MCP call's `unexpected property`
+  its key and path, each cut at 256 characters and escaped — both echoed a caller's key whole. A sync refusal that
+  quotes a schema's issues or the driver's message (200 characters) now says where it was cut and never splits a
+  character in two.
+  An error logged with its stack keeps the stack, escaped onto its line, with its message bounded.
+  Error text that is STORED and read back goes through the same renderer: an embed job's `lastError`, a reindex
+  run's `error`, a media job's error and a webhook delivery's `error`, and a supervised worker's child error, where
+  each was cut by code unit (and the webhook's not at all). The `500` bodies of the admin wipe, export, config
+  reload and signing-key routes bound the message they quote, and the uncaught-exception, unhandled-rejection,
+  readiness and unhandled-error lines pass the error itself, so the stack is kept and the message bounded.
+- **Redacting a log line no longer takes time that grows with the square of a value (`R9`).** The userinfo pattern
+  (`scheme://user:pass@`) could start a match at every character of a run of letters and scan the rest of the run
+  from each: 40 000 letters took 0.7 s, so a peer's megabyte `_id` of letters held the event loop for minutes on
+  the line that logged it. The pattern now starts a scheme only where no scheme character precedes it, which is
+  linear, and a value is redacted over a bounded window before it is cut. The 5.6.x line carries the same pattern.
+
 - **A peer's tombstone is applied to the space its sync admitted, never to the space the tombstone names
   (`Q-236`).** Both tombstone doors — a peer's push and this instance's pull — applied each tombstone to the space
   written inside it. So a peer admitted to one space could delete records it authored in any other space this
@@ -582,9 +953,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   admitted peer's own tombstone; tombstones a peer already planted in a space it was not admitted to stay where they
   are, because they cannot be told apart from legitimate ones; a 5.5 peer serves tombstones without the settled
   horizon, as before.
+- **`POST /api/duplicates/:id/merge` merges only where the token may merge (`Q-304`).** It looked its candidate up
+  in every space where the token held `dataQuality` **read**, and the guard in front of it asked only whether the
+  token could write anywhere. So a token that could only read a space's duplicate candidates, and could write in
+  any other space, merged a pair in the first one, deleting an entity there. The candidate is now looked up only
+  where the token holds `dataQuality` **write**, the rung the route's rights row always named, and the merge also
+  needs `knowledge` **write** in the pair's space, the rung the REST entity merge and MCP `graph_merge` require.
+  A candidate the token may not merge answers `404`, as dismiss and reopen do. The duplicates, contradictions and
+  conflicts routes now look a record up by id through one function whose rung has no default.
 
 ### Internal
 
+- **The test database no longer runs out of memory by the time CI reaches the standalone suite.** MongoDB keeps a
+  dropped collection open for five minutes for snapshot reads, and the suites drop thousands in that window: after
+  the integration suite alone, `ythril-mongo-a` held 9 766 dropped collections and 25 714 open storage handles over
+  147 live collections, at 2.06 GiB of its 2.5 GiB cap, with the standalone suite still to run on it. The test
+  stack now sets that window to five seconds (`tuneTestMongo`, called by `testing/sync/setup.js` and by every
+  database-backed test file), which freed the 9 000 within 40 seconds; nothing in the server reads an old snapshot.
+  The database-backed standalone files also run in their own batches, four at a time, in `test:standalone` and
+  `preflight` alike: at the full width some timed out on the one-CPU test database, and four finished in half the
+  time.
 - **A database test whose setup fails now fails, instead of hanging the run.** The test harness kept its Mongo
   connection open when a setup step threw after connecting, and node's test runner waits for every file's process
   to exit, so one such file held `test:standalone` with no output for as long as the CI job lived. The harness now
@@ -609,6 +997,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `network_join_remote`'s schema silent on `inviteCode`'s 8 192-character limit, which the route and the act already
   refused; the schema now states it from the same constant. Routes that validate by hand are counted, and may only
   get fewer.
+- **Every read of stored records by a list of ids goes through one reader (`Q-211`).** `readStoredById` (a Map) and
+  `readRowsById` (rows in the caller's id order) read in chunks of 500 with a few chunks in flight, project to the
+  fields the caller names or to everything but the never-returned fields, AND a caller's predicate with the ids
+  instead of spreading it beside them, and give every chunk its share of the caller's deadline. The graph walk's
+  second reader, recall's fresh-hit hydration and duplicate check, the reference and delete guards, traverse
+  bodies and the rest moved onto it; several of them read every id in one query before. One fix came with it: the
+  walk's reader spread its narrowing beside `_id`, so a narrowing that named `_id` replaced the id list. A gate
+  (`a-record-is-read-by-id-through-one-reader`) fails on a by-id read anywhere else unless its function is
+  allowlisted with the reason it asks a different question.
+- **The call graph the source gates walk sees a call written as an argument of another call, and follows a
+  closure built at module scope (`Q-309`).** Its call scans consumed the character before a name, so in `f(g(x))`
+  the call to `g` was invisible to every gate built on it.
 
 ## [5.6.3] — 2026-10-03
 

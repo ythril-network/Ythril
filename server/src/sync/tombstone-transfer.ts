@@ -32,8 +32,9 @@
 import { peerSafeFetch } from './peer-fetch.js';
 import { boundedJson } from '../util/bounded-read.js';
 import { listTombstones } from '../brain/tombstones.js';
-import { applyPeerTombstones, admitTombstone, MAX_TOMBSTONES_PER_REQUEST, TombstoneCounterError } from './tombstone-apply.js';
-import { log, logSafe } from '../util/log.js';
+import { applyPeerTombstones, admitTombstone, MAX_TOMBSTONES_PER_REQUEST } from './tombstone-apply.js';
+import { CounterBehindError } from './counter-after-page.js';
+import { log, logSafe, peerText } from '../util/log.js';
 import { TOMBSTONE_TYPES, TOMBSTONE_COLLECTION } from '../config/types.js';
 import type { NetworkMember } from '../config/types.js';
 import type { TransferOutcome } from './watermark.js';
@@ -131,7 +132,7 @@ async function pageTombstones(o: {
  * Fetch the peer's tombstones since `sinceSeq` and apply them to the LOCAL space `spaceId`.
  *
  * Called BEFORE the record pull so deletions land before anything that would re-upsert a deleted doc. A counter
- * that could not be advanced past what was delivered is thrown (`TombstoneCounterError`), so the cycle counts an
+ * that could not be advanced past what was delivered is thrown (`CounterBehindError`), so the cycle counts an
  * error; any other failure holds the watermark and is logged.
  */
 export async function pullTombstones(opts: {
@@ -166,13 +167,13 @@ export async function pullTombstones(opts: {
         const out = await applyPeerTombstones(spaceId, fresh, { peerInstanceId: member.instanceId }, where);
         return out.unknownTypes.length > 0 ? 'a tombstone type this instance does not know' : null;
       },
-      stopped: (why, heldAt) => log.warn(`Pull tombstones from ${peer} for space '${spaceId}' stopped: ${logSafe(why)} — `
+      stopped: (why, heldAt) => log.warn(`Pull tombstones from ${peerText(peer)} for space '${peerText(spaceId)}' stopped: ${logSafe(why)} — `
         + `delivered through seq ${heldAt}, so the receive watermark is held there and the rest is asked for next cycle.`),
     });
   } catch (err) {
-    if (err instanceof TombstoneCounterError) throw err;
+    if (err instanceof CounterBehindError) throw err;
     outcome.truncated = true;
-    log.warn(`Pull tombstones from ${peer} for space '${spaceId}' failed: `
+    log.warn(`Pull tombstones from ${peerText(peer)} for space '${peerText(spaceId)}' failed: `
       + `${logSafe(err instanceof Error ? err.message : String(err))} — delivered through seq `
       + `${outcome.deliveredThrough}, so the receive watermark is held there.`);
   }
@@ -194,7 +195,7 @@ export async function pushTombstones(opts: {
   const endpoint = `${member.url}/api/sync/tombstones?spaceId=${encodeURIComponent(remoteSpaceId)}`
     + `&networkId=${encodeURIComponent(networkId)}`;
   let refused = 0;
-  const stopped = (why: string, heldAt: number): void => log.warn(`Push tombstones to ${peer} for space '${spaceId}' `
+  const stopped = (why: string, heldAt: number): void => log.warn(`Push tombstones to ${peerText(peer)} for space '${peerText(spaceId)}' `
     + `stopped: ${logSafe(why)} — delivered through seq ${heldAt}, so the push watermark is held there.`);
   // A throw (an unreachable peer, this instance's own store) fails the member's sync, as it always has.
   await pageTombstones({
@@ -215,7 +216,7 @@ export async function pushTombstones(opts: {
     stopped,
   });
   if (refused > 0) {
-    log.warn(`Push tombstones to ${peer} for space '${spaceId}': the peer refused ${refused} tombstone(s) by shape or `
+    log.warn(`Push tombstones to ${peerText(peer)} for space '${peerText(spaceId)}': the peer refused ${refused} tombstone(s) by shape or `
       + 'seq; its own log names them.');
   }
   return outcome;

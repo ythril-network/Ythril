@@ -36,7 +36,8 @@ import path from 'node:path';
 import { getDataRoot, getStorageConfig } from '../config/loader.js';
 import { getDb } from '../db/mongo.js';
 import { READ_SPILL_COLLECTIONS } from '../brain/read-spill-store.js';
-import { log } from '../util/log.js';
+import { log, peerList } from '../util/log.js';
+import { isMissingPath } from '../files/stored-bytes.js';
 
 const GiB = 1024 ** 3;
 
@@ -135,7 +136,7 @@ export async function measureDirSize(dirPath: string): Promise<DirSize> {
       // ENOENT on the ROOT is "nothing stored here yet", which is a complete answer of zero. ENOENT deeper in
       // means something vanished mid-walk; any other code means we were refused.
       const code = (err as { code?: string }).code;
-      if (!(isRoot && code === 'ENOENT')) unreadable.push(`${p}: ${code ?? String(err)}`);
+      if (!(isRoot && isMissingPath(err))) unreadable.push(`${p}: ${code ?? String(err)}`);
       return;
     }
     for (const e of entries) {
@@ -340,7 +341,7 @@ async function measureUsageUncached(): Promise<UsageGiB> {
   const reasons = [...incomplete.files.map(r => `files: ${r}`), ...incomplete.brain.map(r => `brain: ${r}`)];
   if (reasons.length > 0) {
     log.warn('Storage usage measurement is INCOMPLETE, so every figure below is a floor and a quota compared '
-      + `against it can only under-report: ${reasons.join('; ')}`);
+      + `against it can only under-report: ${peerList(reasons, '; ')}`);
   }
 
   const filesGiB = files.bytes / GiB;

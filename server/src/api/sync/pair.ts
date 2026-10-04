@@ -14,7 +14,7 @@ import { authRateLimit, syncRateLimit } from '../../rate-limit/middleware.js';
 import { requireAuth, denyReadOnly } from '../../auth/middleware.js';
 import { getConfig } from '../../config/loader.js';
 import { answerPairing, confirmPairing } from '../../networks/member-introductions.js';
-import { reportServerFailure } from '../../util/report-failure.js';
+import { sendCaughtFailure } from '../send-failure.js';
 
 export const syncPairRouter = Router();
 
@@ -36,8 +36,7 @@ syncPairRouter.post('/networks/:networkId/pair', authRateLimit, async (req, res)
     const r = await answerPairing(req.params['networkId'] as string, parsed.data);
     res.status(r.status).json(r.body);
   } catch (err) {
-    reportServerFailure('sync POST /networks/:networkId/pair', err);
-    res.status(500).json({ error: 'Internal error' });
+    sendCaughtFailure(res, 'sync POST /networks/:networkId/pair', err);
   }
 });
 
@@ -48,7 +47,6 @@ syncPairRouter.post('/networks/:networkId/pair/confirm', syncRateLimit, requireA
     const r = await confirmPairing(req.params['networkId'] as string, req.authToken as { id?: string; peerInstanceId?: string }, parsed.data);
     res.status(r.status).json(r.body);
   } catch (err) {
-    reportServerFailure('sync POST /networks/:networkId/pair/confirm', err);
-    res.status(500).json({ error: 'Internal error' });
+    sendCaughtFailure(res, 'sync POST /networks/:networkId/pair/confirm', err);
   }
 });

@@ -1,4 +1,5 @@
 import { log } from './util/log.js';
+import { afterListening } from './util/after-listening.js';
 
 /**
  * Initialise space collections + indexes and start every background service a
@@ -101,6 +102,9 @@ export async function startConfiguredInstanceServices(): Promise<void> {
 
   const { startSyncScheduler } = await import('./sync/scheduler.js');
   startSyncScheduler();
+  // Names a seq hold that has stalled while it is still open (`Q-200`); the release line names it when it ends.
+  const { startSeqHoldWatchdog } = await import('./util/seq.js');
+  startSeqHoldWatchdog();
   const { startBackupScheduler } = await import('./db/backup-scheduler.js');
   startBackupScheduler();
   const { startDupeScanner } = await import('./brain/dupe-scanner.js');
@@ -164,8 +168,15 @@ export async function startConfiguredInstanceServices(): Promise<void> {
   const { startBrainEmbeddingWorker } = await import('./brain/embed-worker.js');
   startBrainEmbeddingWorker();
 
+  // Vectors a suppression already covers, stored before the sweep reached files, removed the model name, or ran on a
+  // network's layer (bundle-30 `R5`): cleared once per start, in the background. Here, because every configured start
+  // runs this function; local derived fields only, so it is not a migration of synced data. Once the server listens,
+  // one space at a time (bundle-30 I8): a scan per kind of every space must not compete with the boot.
+  const { sweepEverySpaceAtBoot } = await import('./brain/suppression-sweep.js');
+  afterListening(() => { void sweepEverySpaceAtBoot().catch(err => log.warn('Boot suppression sweep stopped:', err)); });
+
   // Reindex runs this instance had when it stopped: here, beside the worker that rebuilds their records, because
   // every configured start runs this function — a first run included — where the database phase can be skipped.
   const { resumeReindexRuns } = await import('./brain/reindex.js');
-  void resumeReindexRuns().catch(err => log.warn(`Reindex: could not resume runs: ${err instanceof Error ? err.message : String(err)}`));
+  void resumeReindexRuns().catch(err => log.warn('Reindex: could not resume runs:', err));
 }

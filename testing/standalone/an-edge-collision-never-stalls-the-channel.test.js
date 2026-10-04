@@ -40,8 +40,13 @@ import { bodyOf, enclosingBlockMatching } from './_structural-window.mjs';
 const { isDuplicateKeyOnly } = await import('../../server/dist/api/sync/_shared.js');
 const REGISTRY = await import('../../server/dist/sync/replicated-families.js');
 
-const DOCS = 'server/src/api/sync/docs.ts';
-const docs = stripComments(readFileSync(DOCS, 'utf8'));
+/*
+ * Re-anchored for bundle-30 §D (`Q-204`): the push door is its routes (`api/sync/docs.ts`) and the page accept they
+ * share with the pull (`sync/accept-page.ts`), which now holds the writer call and the verdict mapping — read as one.
+ */
+const DOCS = 'server/src/api/sync/docs.ts + server/src/sync/accept-page.ts';
+const docs = ['server/src/api/sync/docs.ts', 'server/src/sync/accept-page.ts']
+  .map(f => stripComments(readFileSync(f, 'utf8'))).join('\n');
 
 describe('the duplicate-key predicate knows both error shapes', () => {
   it('absorbs a single-write rejection', () => {

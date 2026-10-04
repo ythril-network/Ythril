@@ -89,6 +89,30 @@ export async function mongoSkipReason() {
   return `needs the test MongoDB at ${where} — run \`npm run test:up\``;
 }
 
+/**
+ * Seconds the test Mongo keeps a dropped collection open for snapshot reads (MongoDB's default is 300).
+ * See `a-test-mongo-reaps-dropped-collections-promptly-db.test.js` for what the default cost.
+ */
+export const TEST_SNAPSHOT_HISTORY_SECONDS = 5;
+
+/**
+ * Make the test Mongo free dropped collections within seconds. The suites drop thousands of collections inside
+ * MongoDB's default five-minute window, and each one holds its storage handles open until the window passes —
+ * enough to take mongo-a to its memory cap. A runtime parameter, because the image fixes mongod's command line,
+ * so it is lost on restart and set again by every caller. It THROWS rather than warning: a run that silently
+ * keeps the default is the out-of-memory failure this exists to prevent, blamed on whichever test was unlucky.
+ */
+export async function tuneTestMongo() {
+  const { MongoClient } = await import('mongodb');
+  const client = new MongoClient(testMongoUri('admin'), { serverSelectionTimeoutMS: 10_000 });
+  try {
+    await client.connect();
+    await client.db('admin').command({ setParameter: 1, minSnapshotHistoryWindowInSeconds: TEST_SNAPSHOT_HISTORY_SECONDS });
+  } finally {
+    await client.close();
+  }
+}
+
 let _mongo = null;
 
 /**
@@ -115,6 +139,7 @@ export async function openTestMongo(suite) {
   // otherwise leave documents behind and the next run would inherit them, which is how a
   // database-backed suite starts passing for the wrong reason.
   try {
+    await tuneTestMongo();
     await mongo.getDb().dropDatabase();
   } catch (err) {
     await closeTestMongo();

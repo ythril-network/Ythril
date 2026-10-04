@@ -18,7 +18,8 @@
 
 import { ssrfSafeFetch, isPeerUrlSafe } from '../util/ssrf.js';
 import { getConfig } from '../config/loader.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
+import { warnOnce } from '../util/warn-once.js';
 import { requireEncryptedTransport, allowInsecurePeersRaw, isPeerSchemeAllowed } from '../config/transport-security.js';
 
 /** Whether sync peers may use private/reserved (non-crown-jewel) addresses. */
@@ -34,7 +35,7 @@ export function isPeerUrlAllowed(url: string): boolean {
 
 // Warn at most once per plaintext peer host, so a pre-existing `http://` peer (added before the
 // https-default, without opting in) nags rather than spams every sync cycle.
-const _warnedPlaintextHosts = new Set<string>();
+const plaintextWarnings = warnOnce<string>();
 
 /**
  * Default budget for a CONTROL-PLANE peer call — members, votes, tombstones, manifests, record
@@ -90,9 +91,8 @@ export function peerSafeFetch(
     if (requireEncryptedTransport()) {
       return Promise.reject(new Error(`Refusing plaintext sync to ${host}: requireEncryptedTransport is enabled`));
     }
-    if (!allowInsecurePeersRaw() && !_warnedPlaintextHosts.has(host)) {
-      _warnedPlaintextHosts.add(host);
-      log.warn(`Syncing to plaintext peer ${host} over http:// — data and tokens are unencrypted in transit. Use https:// or set allowInsecurePeers to acknowledge.`);
+    if (!allowInsecurePeersRaw()) {
+      plaintextWarnings(host, () => log.warn(`Syncing to plaintext peer ${peerText(host)} over http:// — data and tokens are unencrypted in transit. Use https:// or set allowInsecurePeers to acknowledge.`));
     }
   }
   // A timeout the CALLER does not have to remember. `fetch` has none by default, and a peer that

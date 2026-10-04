@@ -16,11 +16,13 @@ import { toDocId } from '../util/paths.js';
 import { escapeRegex } from '../util/redos.js';
 import { authorRef } from '../config/author.js';
 import { col, asFilter, asDoc, asUpdate } from '../db/mongo.js';
+import { readRowsById } from '../db/read-by-id.js';
 import { reconcileLinks, removeLinksFrom, assertDesiredLinks } from '../brain/links.js';
 import { linksStartingFrom } from '../brain/link-adjacency.js';
 import { withSeq } from '../util/seq.js';
 import { expiryForCreate } from '../brain/ttl.js';
 import { enqueueEmbedJob, EMBED_PRIORITY } from '../brain/embed-queue.js';
+import { embedArrivedFiles } from '../sync/file-meta-write.js';
 import { mergePropertiesOrKeep } from '../brain/merge-fields.js';
 
 /**
@@ -43,7 +45,8 @@ export const DELETABLE_FILE_META_FIELDS: readonly string[] = [
   'description', 'excerpt', 'tags', 'properties',
 ];
 import { applyDeleteFields } from '../brain/delete-fields.js';
-import type { FileMetaDoc, EntityDoc, AuthorRef } from '../config/types.js';
+import type { FileMetaDoc, AuthorRef } from '../config/types.js';
+import type { Filter } from 'mongodb';
 import { spaceCollection } from '../db/space-collection.js';
 
 
@@ -110,7 +113,7 @@ export async function upsertFileMeta(
     await withSeq(spaceId, (seq) => col<FileMetaDoc>(spaceCollection(spaceId, 'files')).updateOne(
       asFilter<FileMetaDoc>({ _id: normalised }),
       asUpdate<FileMetaDoc>({ $set: { ...$set, seq }, $unset }),
-    ));
+    ), 'file.upsert');
   } else {
     // A per-record ttlDays wins; otherwise the space's `file` retention bucket applies. Files have their OWN
     // bucket rather than sharing one with a knowledge collection: they are the largest and most obviously
@@ -133,7 +136,7 @@ export async function upsertFileMeta(
         ...(expireAt ? { _expireAt: expireAt } : {}),
       };
       return col<FileMetaDoc>(spaceCollection(spaceId, 'files')).insertOne(asDoc<FileMetaDoc>(doc));
-    });
+    }, 'file.upsert');
   }
 
   // Both branches, unconditionally. A create enqueues for the reason every brain create does — the write
@@ -177,8 +180,10 @@ export async function recordArrivedFile(
     } as never),
     { upsert: true },
   );
-  // A peer's bytes, not a local write: nobody here is waiting on it, so it yields to the writes that are.
-  await enqueueEmbedJob(spaceId, 'file', normalised, { priority: EMBED_PRIORITY.background });
+  // A peer's bytes, not a local write: queued in the background lane, and by the RECEIVER's rules — the same step
+  // every arriving file's metadata takes, so a file this instance suppresses is not queued and holds no vector
+  // (bundle-30 I6, D3: this called `enqueueEmbedJob` directly, past the suppression check).
+  await embedArrivedFiles(spaceId, [normalised]);
 }
 
 /**
@@ -245,7 +250,7 @@ export async function setDerivedDescriptionIfUnset(
       $set: { description, updatedAt: new Date().toISOString(), seq, ...(descriptionSource ? { descriptionSource } : {}) },
       ...(descriptionSource ? {} : { $unset: { descriptionSource: '' } }),
     }),
-  ));
+  ), 'file.describe');
   return r.modifiedCount > 0;
 }
 
@@ -402,7 +407,7 @@ export async function updateFileMeta(
     return Object.keys(update).length === 0 ? Promise.resolve() : col<FileMetaDoc>(spaceCollection(spaceId, 'files'))
       .updateOne(asFilter<FileMetaDoc>({ _id: normalised }), asUpdate<FileMetaDoc>(update)).then(() => undefined);
   };
-  if (authored) await withSeq(spaceId, write);
+  if (authored) await withSeq(spaceId, write, 'file.update');
   else await write();
 
   // ONE enqueue, unconditionally, after the write. Not gated on which fields moved: any such condition
@@ -461,9 +466,8 @@ export async function updateFileMeta(
           }
         } else if (faceChunkCount === 1) {
           // Case B: face chunks exist — propagate label if exactly 1 person entity.
-          const entities = await col<EntityDoc>(spaceCollection(spaceId, 'entities'))
-            .find(asFilter<EntityDoc>({ _id: { $in: opts.linkEntities } }), { projection: { _id: 1, type: 1 } })
-            .toArray() as Array<{ _id: string; type: string }>;
+          const entities = await readRowsById<{ _id: string; type: string }>(
+            spaceCollection(spaceId, 'entities'), opts.linkEntities, { type: 1 });
           const personEntities = entities.filter(e =>
             faceCfg.personEntityTypes.some(t => t.toLowerCase() === e.type.toLowerCase()),
           );
@@ -510,6 +514,53 @@ export async function deleteFileMetaByPrefix(
 }
 
 /**
+ * The paths of the live file records at `path` or under `path/` — files only, never their derived records, and never
+ * one already soft-deleted. What a delete or move whose bytes have already gone still owes, which is how a retry
+ * after a store failure finds the act it has to complete (bundle-30 I14): the record is the marker, and the cascades
+ * remove it last.
+ */
+export async function fileRecordPaths(spaceId: string, path: string): Promise<string[]> {
+  const filter = liveFileRecords(path, { self: true });
+  if (!filter) return [];
+  const rows = await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).find(filter, { projection: { _id: 1 } }).toArray();
+  return rows.map(r => String(r._id));
+}
+
+/**
+ * Whether any live file record is at `path` or under `path/` — the yes/no form of {@link fileRecordPaths}, read as one
+ * record (bundle-30 I15, preship-3 P3-7). A retried move asks it of its source; the list it used to load held every
+ * record id under a folder to answer one bit.
+ */
+export async function hasLiveFileRecordAt(spaceId: string, path: string): Promise<boolean> {
+  return anyLiveFileRecord(spaceId, liveFileRecords(path, { self: true }));
+}
+
+/** Whether any live file record is strictly under `dir/` — what a directory delete a store failure stopped still owes. */
+export async function hasLiveFileRecordUnder(spaceId: string, dir: string): Promise<boolean> {
+  return anyLiveFileRecord(spaceId, liveFileRecords(dir, { self: false }));
+}
+
+async function anyLiveFileRecord(spaceId: string, filter: Filter<FileMetaDoc> | null): Promise<boolean> {
+  if (!filter) return false;
+  return (await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).findOne(filter, { projection: { _id: 1 } })) !== null;
+}
+
+/**
+ * The live FILE records under `path/` (and at `path`, with `self`): never a derived record, never a soft-deleted one.
+ * `null` for an empty path, which would match everything.
+ */
+function liveFileRecords(path: string, { self }: { self: boolean }): Filter<FileMetaDoc> | null {
+  const norm = toDocId(path).replace(/\/?$/, '');
+  if (!norm) return null;
+  const under = { _id: { $regex: '^' + escapeRegex(norm + '/') } };
+  return asFilter<FileMetaDoc>({
+    ...(self ? { $or: [{ _id: norm }, under] } : under),
+    parentFileId: { $exists: false },
+    deletedAt: { $exists: false },
+  });
+}
+
+/**
  * Soft-delete: flag a single file's metadata record as deleted (`deletedAt = now`)
  * instead of removing it. No-op if the record does not exist. Used when
  * `softDeleteFileMeta` is enabled so a deleted file leaves an auditable record.
@@ -525,7 +576,7 @@ export async function markFileMetaDeleted(
     // seq is what pages the soft-deleted record itself, so a peer sees the flag rather than a record
     // that simply stopped changing.
     asUpdate<FileMetaDoc>({ $set: { deletedAt: new Date().toISOString(), seq } }),
-  ));
+  ), 'file.delete');
 }
 
 /**

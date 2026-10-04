@@ -33,7 +33,7 @@ import path from 'node:path';
 import { assistConsented, type AssistUse } from './egress-consent.js';
 import { isLocalModelEndpoint } from './model-egress-policy.js';
 import { getDataRoot, getDocumentProcessingConfig, getDocAssistApiKey, getDocAssistFallbackApiKey } from './loader.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
 import { endpointCooldown, endpointUnavailable } from '../util/endpoint-cooldown.js';
 
 /** One assist endpoint as the config holds it. */
@@ -144,7 +144,7 @@ function scheduleFlush(): void {
   flushTimer = setTimeout(() => {
     flushTimer = null;
     try { fs.writeFileSync(usageFile(), JSON.stringify(usage ?? [])); }
-    catch (err) { log.warn(`assist budget: could not persist usage (${err instanceof Error ? err.message : String(err)}) — the window still counts in memory`); }
+    catch (err) { log.warn(`assist budget: could not persist usage (${peerText(err)}) — the window still counts in memory`); }
   }, 5_000);
   flushTimer.unref?.();
 }
@@ -214,7 +214,7 @@ export async function viaAssist<T>(
     if (first.which !== 'primary' || !(refused || endpointUnavailable(status))) throw err;
     const next = assistBackend(use);
     if (!next || next.which !== 'fallback') throw err;
-    log.info(`assist model: answering on the fallback ${next.model} after the primary ${refused ? 'declined' : 'failed'}`);
+    log.info(`assist model: answering on the fallback ${peerText(next.model)} after the primary ${refused ? 'declined' : 'failed'}`);
     return (await run(next)).value;
   }
 }

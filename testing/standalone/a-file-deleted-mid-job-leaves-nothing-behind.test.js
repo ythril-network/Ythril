@@ -33,7 +33,8 @@ describe('the worker reconciles a source deleted during its job', () => {
 
   it('re-checks the source after the embedder has written, and before the job completes', () => {
     const embedderDone = body.indexOf('Unknown mediaType');
-    const recheck = body.indexOf('fs.stat(absolutePath)', embedderDone);
+    // Asked of `bytesPresent`, the one answer to "are the bytes here" (bundle-30 I16, preship-4 P4-5).
+    const recheck = body.indexOf('bytesPresent(absolutePath)', embedderDone);
     const complete = body.indexOf('await completeJob(', embedderDone);
     assert.ok(recheck > embedderDone, 'no source re-check after the embedder: chunks written after a delete stay as orphans');
     assert.ok(complete > recheck, 'the re-check must come before the job is completed');

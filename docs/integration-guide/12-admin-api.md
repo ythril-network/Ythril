@@ -142,7 +142,8 @@ What the import stores of each document:
 - **Kept**: everything the export carried as the record's content, plus its retention stamps (as dates — they ARE
   the record's own retention, since a per-record `ttlDays` is never stored) and a file's `syncBase`. A record that
   carries no stamp is stamped by THIS space's retention policy (type schema over space), counted from its own
-  `createdAt`.
+  `createdAt`. **Never the replaced copy's**: a stamp or `syncBase` the export does not carry is not taken from the
+  record the import overwrites — a record restored to "never expires" no longer keeps the replaced copy's expiry.
 - **Dropped**: `embedding`, `embeddingModel` and `matchedText` (re-embedded here); every file chunk and face record
   (`parentFileId` set — re-derived from the blob); and every file-metadata key that is not on the sync wire
   (`sizeBytes`, `sha256`, `excerpt` and the like describe bytes this instance may not hold). File metadata is merged
@@ -173,6 +174,7 @@ Per family, alongside the counts, and each present only when it has something to
 |---|---|
 | `refused` | the documents NOT stored, `{ _id, reason }` — a malformed id or seq, a value the store refuses, a uniquely-indexed duplicate of a record held under another id, or (when the store failed part-way through a family) every document after the fault. **The first 10 are named**; `errors` is the total. Documents written before a part-way fault are counted in `inserted`/`updated`, not here |
 | `derived` | how many file chunks and face records were left out because this instance derives them from the blob |
+| `counterBehind` | `true` when the family's records were stored and this instance's seq counter could not be moved past them: the next local write may take a seq below a restored record. What was stored is still counted in `inserted`/`updated`. **Run the import again** — a restore replaces, so it is safe, and the re-run moves the counter |
 | `restoredOverTombstone` | ids of records restored over a deletion this instance holds — a peer holding the same tombstone will delete them again on the next sync. **The first 10**; `restoredOverTombstoneTotal` is how many there were |
 | `schemaViolations` | documents stored despite breaking the space's schema (below) |
 

@@ -36,7 +36,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { statementFrom } from './_structural-window.mjs';
+import { statementFrom, bodyOf } from './_structural-window.mjs';
 import { readFileSync } from 'node:fs';
 
 const TYPES = 'server/src/config/types.ts';
@@ -181,9 +181,15 @@ describe('executeMerge relinks every collection that can reference an entity', (
         .map(u => statementFrom(merge, u.index, `a use of ${varName}`));
       // EVERY entity-id field this record type declares, not only the plural one. A type carrying two of them
       // was relinked on one and left dangling on the other, which is the defect this gate now covers.
+      // Since bundle-30 I6 (C12) the merge's selections are ONE definition, `relinkFilters(spaceId, absorbedId)`,
+      // shared with the bound's count. A use reading `relinkFilters(spaceId, absorbed._id).<key>` counts when that
+      // key's filter in `relinkFilters` aims `${field}` at the absorbed id — followed by name, not by proximity.
+      const relinkFiltersBody = bodyOf(merge, 'relinkFilters');
+      const aimedVia = (u, field) => [...u.matchAll(/relinkFilters\(spaceId, absorbed\._id\)\.(\w+)/g)]
+        .some(([, key]) => new RegExp(`\\b${key}: asFilter<[^>]*>\\(\\{[^\\n]*\\b${field}: absorbedId\\b`).test(relinkFiltersBody));
       for (const { field } of entityRefFields().filter(f => f.type === type)) {
         assert.ok(
-          uses.some(u => new RegExp(`${field}: absorbed\\._id`).test(u)),
+          uses.some(u => new RegExp(`${field}: absorbed\\._id`).test(u) || aimedVia(u, field)),
           `the merge opens ${suffix} as \`${varName}\` and never searches THAT collection for `
           + `\`${field}: absorbed._id\` — so records there keep pointing at the entity phase 5 deletes. `
           + `${field === 'faceEntityId'
@@ -213,8 +219,11 @@ describe('executeMerge relinks every collection that can reference an entity', (
     assert.match(merge, /spaceCollection\(spaceId, 'links'\)/,
       'the merge never opens the links collection, so every link naming the absorbed entity survives it '
       + 'pointing at the record phase 5 deletes');
-    assert.match(merge, /to: absorbed\._id, toKind: 'entity'/,
+    // Through the one selection since bundle-30 I6 (C12): the links key of `relinkFilters`, read by the writer.
+    assert.match(bodyOf(merge, 'relinkFilters'), /\blinks: asFilter<[^>]*>\(\{[^\n]*\bto: absorbedId, toKind: 'entity'/,
       'the link search is not aimed at the absorbed entity as a link TARGET — an entity is only ever a `to`');
+    assert.match(merge, /relinkFilters\(spaceId, absorbed\._id\)\.links/,
+      'the merge writer does not read the links it re-keys through the one selection the bound counts');
     /*
      * RE-KEYED, not `$set`. A link's `_id` is derived from both endpoints, so moving the `to` changes the
      * identity — an update in place leaves an id that disagrees with its own contents and nothing finds it

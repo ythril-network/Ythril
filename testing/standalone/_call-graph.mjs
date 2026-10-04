@@ -42,6 +42,13 @@
  *   boot walk keeps the default, for the reason `withoutNestedClosures` gives.
  * - **A dispatch the caller knows.** `edges` lets a gate add what the text does not say, such as a
  *   `callTool({ name: 'recall' })` running the `recall` handler, without this module learning the registry.
+ * - **A closure built at module scope (`Q-309`).** A top-level binding whose initializer builds a closure
+ *   (`const _syncRunner = createCoalescingRunner({ onQueued: … })`) is a key of its own, flagged `binding`. The
+ *   closure walk enters it the way it enters anything a body hands on — `_syncRunner` in `_syncRunner.run(…)` is
+ *   a reference — so what its closures call is reached. The walk of what one call does, once, does not enter it
+ *   through a member call; a bare call of one (`run()`) resolves like any call.
+ * - **A call wherever it is written** — as an argument of another call included. The scans match by lookbehind,
+ *   and `callSitesIn` / `memberCallSitesIn` say WHERE as well as what, as offsets into the body.
  *
  * ## What it deliberately does not see, stated rather than implied
  *
@@ -51,6 +58,8 @@
  *   the answer. (`routeHandlerRoots` is the one place a reference IS followed: it is the door itself.)
  * - **A method on a class instance or a value.** `runs.get()` on a `new IngestRuns()`, `this.x()`, and
  *   `handler.handle(ctx)` on a looked-up tool are not resolved — the receiver's type is not in the text.
+ * - **A module-scope STATEMENT that is not a binding** — `setInterval(() => …)` or `process.on(…, () => …)` written
+ *   at top level — has no key, so its closures are reached by no walk.
  *
  * Each of those is a hole a determined boot migration could hide in. They are named here so a gate built
  * on this module can say what it covers instead of implying it covers everything.
@@ -60,7 +69,7 @@ import assert from 'node:assert/strict';
 import { join, dirname } from 'node:path';
 import { REPO_ROOT, trackedSources } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
-import { argumentsOf, balancedFrom } from './_structural-window.mjs';
+import { argumentsOf, balancedFrom, statementFrom } from './_structural-window.mjs';
 
 /** Words that are followed by `(` and are not calls. */
 const NOT_A_CALL = new Set([
@@ -219,6 +228,38 @@ export function topLevelObjects(src) {
 }
 
 /**
+ * Every top-level BINDING whose initializer builds a closure, as `name -> { body, start }` — `body` the initializer
+ * expression, `start` its offset in `src`. A name `taken` already (a top-level function or object) is not one.
+ *
+ * **What this is for: a closure built at module scope runs when the file's functions use what it was handed to.**
+ * The sync engine holds `const _syncRunner = createCoalescingRunner({ onQueued: (id) => log.debug(…) })`, and
+ * `runSyncForNetwork` calls `_syncRunner.run(…)` — so the request that runs the cycle runs `onQueued`. With no key
+ * for the binding, no walk could reach what its closures call (`Q-309`; the log gate read every reached file's module
+ * scope by hand to cover it). As a key, it is reached the way a function handed on is: the closure walk follows a
+ * body's REFERENCES, and `_syncRunner` is one.
+ *
+ * Only an initializer that is not itself a function: `const f = (x) => { … }` is a top-level function already, and
+ * a concise one (`const f = (x) => g(x)`) is a gap of its own that `_space-writers.mjs` reads by hand. A binding
+ * with no closure in it (`const LIMIT = 10`, `const c = col('x')`) is not a key — it calls nothing later.
+ */
+export function topLevelBindings(src, taken = new Set()) {
+  const out = new Map();
+  for (const m of src.matchAll(/(?:^|\n)(?:export\s+)?(?:const|let)\s+([A-Za-z_$][\w$]*)\s*(?::[^=\n]*)?=(?![=>])\s*/g)) {
+    if (taken.has(m[1])) continue;
+    const start = m.index + m[0].length;
+    const fnValue = /(?:async\s+)?(?:function\b|(?:<[^>(]*>)?\s*\(|[A-Za-z_$][\w$]*\s*=>)/y;
+    fnValue.lastIndex = start;
+    if (fnValue.test(src)) continue;
+    let statement;
+    try { statement = statementFrom(src, start, `the binding ${m[1]}`); } catch { continue; }
+    const body = statement.slice(0, -1);
+    if (!/=>|\bfunction\b/.test(body)) continue;
+    out.set(m[1], { body, start });
+  }
+  return out;
+}
+
+/**
  * `localName -> file` for every relative NAMESPACE import: `import * as x from './…'` and the dynamic
  * `const x = await import('./…')`. `x.foo()` then resolves to `file:foo`.
  */
@@ -303,7 +344,7 @@ export function withoutNestedClosures(body) {
       const brace = body.indexOf('{', i);
       const end = matchFrom(body, brace, '{', '}');
       if (end < 0) break;
-      out += '=>{}';
+      out += body.slice(i, brace + 1) + blanked(body.slice(brace + 1, end)) + '}';
       i = end;
       continue;
     }
@@ -313,7 +354,7 @@ export function withoutNestedClosures(body) {
       const brace = close < 0 ? -1 : body.indexOf('{', close);
       const end = brace < 0 ? -1 : matchFrom(body, brace, '{', '}');
       if (end < 0) { out += body[i]; continue; }
-      out += 'function(){}';
+      out += `function${blanked(body.slice(i + 'function'.length, brace))}{${blanked(body.slice(brace + 1, end))}}`;
       i = end;
       continue;
     }
@@ -323,26 +364,61 @@ export function withoutNestedClosures(body) {
 }
 
 /**
- * Every bare `name(` this body calls when it runs — less the keywords, less anything reached through a
- * dot, and less everything inside a closure it merely hands to somebody else.
+ * `text` with every character but a line break turned into a space.
+ *
+ * What a cut closure is replaced BY, so the text a call scan reads keeps every offset and every line of the body
+ * it was cut from. A cut that shortened the text (it used to write `=>{}`) made an offset found in it point at
+ * some other character of the real body, so a scan could say WHAT was called and never WHERE — and a gate that
+ * reports a line kept its own copy of the scan instead (`_space-writers.mjs` did, with the same consumed-prefix
+ * bug as this module's).
  */
-export function callsIn(body, { closures = false } = {}) {
-  const names = new Set();
-  for (const m of callableText(body, closures).matchAll(/(^|[^.\w$])([A-Za-z_$][\w$]*)\s*(?:<[^>(;]*>)?\s*\(/g)) {
-    if (!NOT_A_CALL.has(m[2])) names.add(m[2]);
+function blanked(text) {
+  return text.replace(/[^\r\n]/g, ' ');
+}
+
+/*
+ * The three scans below match a name by LOOKBEHIND — `(?<![.\w$])` — and never by a consumed prefix character
+ * (`(^|[^.\w$])name\(`). The consumed form eats the character before a name, and in `f(g(x))` the match for `f(`
+ * has already eaten the `(` that `g` needs as its prefix, so a call written as the first argument of another call
+ * was invisible: `new Set(accessibleSpaces(req, 'write'))` read as a route enforced by nothing, and every walk
+ * built here lost that edge without saying so (`Q-309`, pinned in `call-graph-helper.test.js`).
+ */
+
+/**
+ * Every bare `name(` this body calls when it runs, as `{ name, at, paren }` in source order — `at` the offset of
+ * the name and `paren` of its bracket, both offsets into `body` itself. Less the keywords, less anything reached
+ * through a dot, and less everything inside a closure it merely hands to somebody else.
+ */
+export function callSitesIn(body, { closures = false } = {}) {
+  const sites = [];
+  for (const m of callableText(body, closures).matchAll(/(?<![.\w$])([A-Za-z_$][\w$]*)\s*(?:<[^>(;]*>)?\s*\(/g)) {
+    if (!NOT_A_CALL.has(m[1])) sites.push({ name: m[1], at: m.index, paren: m.index + m[0].length - 1 });
   }
-  return names;
+  return sites;
+}
+
+/** The names `callSitesIn` finds: what this body calls, without where. */
+export function callsIn(body, opts = {}) {
+  return new Set(callSitesIn(body, opts).map(s => s.name));
 }
 
 /**
- * Every `obj.prop(` this body calls, as `[obj, prop]` — `obj` a bare identifier, never itself reached
- * through a dot, so `a.b.c()` is not read as `b.c()`. Optional chaining (`obj?.prop(`) counts.
+ * Every `obj.prop(` this body calls, as `{ obj, prop, at, paren }` in source order — `obj` a bare identifier,
+ * never itself reached through a dot, so `a.b.c()` is not read as `b.c()`. Optional chaining (`obj?.prop(`)
+ * counts. Offsets as in `callSitesIn`.
  */
-export function memberCallsIn(body, { closures = false } = {}) {
-  const pairs = new Map();
-  for (const m of callableText(body, closures).matchAll(/(^|[^.\w$?])([A-Za-z_$][\w$]*)\s*\??\.\s*([A-Za-z_$][\w$]*)\s*(?:<[^>(;]*>)?\s*\(/g)) {
-    pairs.set(`${m[2]}.${m[3]}`, [m[2], m[3]]);
+export function memberCallSitesIn(body, { closures = false } = {}) {
+  const sites = [];
+  for (const m of callableText(body, closures).matchAll(/(?<![.\w$?])([A-Za-z_$][\w$]*)\s*\??\.\s*([A-Za-z_$][\w$]*)\s*(?:<[^>(;]*>)?\s*\(/g)) {
+    sites.push({ obj: m[1], prop: m[2], at: m.index, paren: m.index + m[0].length - 1 });
   }
+  return sites;
+}
+
+/** The distinct `[obj, prop]` pairs `memberCallSitesIn` finds. */
+export function memberCallsIn(body, opts = {}) {
+  const pairs = new Map();
+  for (const s of memberCallSitesIn(body, opts)) pairs.set(`${s.obj}.${s.prop}`, [s.obj, s.prop]);
   return [...pairs.values()];
 }
 
@@ -354,14 +430,15 @@ export function memberCallsIn(body, { closures = false } = {}) {
  */
 export function referencesIn(body) {
   const names = new Set();
-  for (const m of callableText(body, true).matchAll(/(^|[^.\w$])([A-Za-z_$][\w$]*)(?![\w$])(?!\s*(?:\(|:(?!:)|<[^>(;]*>\s*\())/g)) {
-    if (!NOT_A_CALL.has(m[2])) names.add(m[2]);
+  for (const m of callableText(body, true).matchAll(/(?<![.\w$])([A-Za-z_$][\w$]*)(?![\w$])(?!\s*(?:\(|:(?!:)|<[^>(;]*>\s*\())/g)) {
+    if (!NOT_A_CALL.has(m[1])) names.add(m[1]);
   }
   return names;
 }
 
 /**
- * What a call scan reads: the body, closures cut unless the walk asks for them, declarations neutralised.
+ * What a call scan reads: the body, closures cut unless the walk asks for them, declarations neutralised —
+ * every change length-preserving, so an offset found in the result is an offset into `body`.
  *
  * A DECLARATION is not a call, and reading one as a call is how a boot walk loses its shape. Scanning
  * `index.ts`'s startup section reads `async function main(…)` and sees `main(` — so `main` became a boot
@@ -370,7 +447,8 @@ export function referencesIn(body) {
  * covered the whole boot.
  */
 function callableText(body, closures) {
-  return (closures ? body : withoutNestedClosures(body)).replace(/\bfunction\s*\*?\s*[A-Za-z_$][\w$]*\s*\(/g, 'function (');
+  return (closures ? body : withoutNestedClosures(body))
+    .replace(/(\bfunction\s*\*?\s*)([A-Za-z_$][\w$]*)(?=\s*\()/g, (_, kw, name) => kw + blanked(name));
 }
 
 /**
@@ -382,6 +460,19 @@ function callableText(body, closures) {
 export function moduleIndex(dirs, opts = {}) {
   const { functionFloor = 500, ...sourceOpts } = opts;
   const files = trackedSources(dirs, { untracked: true, ...sourceOpts });
+  const sources = new Map(files.map(file => [file, readFileSync(join(REPO_ROOT, file), 'utf8')]));
+  return indexSources(sources, { functionFloor, label: [dirs].flat().join(', ') });
+}
+
+/**
+ * The same index over sources already in hand, `path -> text` — what `moduleIndex` builds once it has read the
+ * tree, and what a test builds over a fixture without writing files into the repo. Comments are stripped here.
+ *
+ * @param {Map<string, string>} rawSources
+ * @param {{functionFloor?: number, label?: string}} [opts]  `functionFloor` as `moduleIndex` takes it
+ */
+export function indexSources(rawSources, { functionFloor = 500, label = 'the given sources' } = {}) {
+  const files = [...rawSources.keys()];
   const set = new Set(files);
   const has = f => set.has(f);
 
@@ -391,16 +482,21 @@ export function moduleIndex(dirs, opts = {}) {
   const objects = new Map();
   const sources = new Map();
   for (const file of files) {
-    const src = stripComments(readFileSync(join(REPO_ROOT, file), 'utf8'));
+    const src = stripComments(rawSources.get(file));
     sources.set(file, src);
-    for (const [name, { body, start }] of topLevelFunctionSpans(src)) {
+    const functions = topLevelFunctionSpans(src);
+    for (const [name, { body, start }] of functions) {
       bodies.set(`${file}:${name}`, { file, name, body, start, end: start + body.length });
     }
-    for (const [name, obj] of topLevelObjects(src)) {
+    const fileObjects = topLevelObjects(src);
+    for (const [name, obj] of fileObjects) {
       objects.set(`${file}:${name}`, { file, name, ...obj });
       for (const [prop, { body, start }] of obj.methods) {
         bodies.set(`${file}:${name}.${prop}`, { file, name: `${name}.${prop}`, body, start, end: start + body.length });
       }
+    }
+    for (const [name, { body, start }] of topLevelBindings(src, new Set([...functions.keys(), ...fileObjects.keys()]))) {
+      bodies.set(`${file}:${name}`, { file, name, body, start, end: start + body.length, binding: true });
     }
     imports.set(file, relativeImports(src, file, has));
     namespaces.set(file, namespaceImports(src, file, has));
@@ -411,7 +507,7 @@ export function moduleIndex(dirs, opts = {}) {
     // map, a small map produces an empty reachable set, and an empty set passes every assertion written
     // over it — the silent pass this module exists to prevent, arriving inside the module itself.
     throw new Error(
-      `the call graph parsed only ${bodies.size} function(s) under ${[dirs].flat().join(', ')} with a floor of `
+      `the call graph parsed only ${bodies.size} function(s) under ${label} with a floor of `
       + `${functionFloor}. The parse is broken, not the code: a thin index makes every reachability question `
       + 'answer "no" and every gate built on it pass about code it never read.');
   }

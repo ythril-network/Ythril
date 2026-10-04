@@ -36,8 +36,9 @@ collection, and the drop cannot be undone.** Those versions stored other instanc
 collection nothing read. A pass inside the retention cycle (every few minutes, at most 10,000 records per space per
 pass) fills each file row this instance made itself with the keys it lacks, gives a row another instance wrote the
 usual newer-wins rule, and never creates a row. A record whose file has no row here waits up to 30 days for the
-file's bytes, and is discarded sooner when a file tombstone says the file was deleted. The log line counts what was
-discarded; it does not list the records. When a space's collection is empty it is dropped, with one log line and one
+file's bytes, and is discarded sooner when a file tombstone says the file was deleted. A record with a key of the
+wrong type, or a chunk's `parentFileId`, is discarded and counted as refused; a key a record lacks is never required,
+because only the keys it carries are filled. The log line counts what was discarded; it does not list the records. When a space's collection is empty it is dropped, with one log line and one
 audit entry, `file.stray_filemeta.drain`, naming the space. To keep a copy first, `mongodump --collection
 <space>_filemeta` before upgrading. 5.6.2 ran an earlier drain that counted most of these records as older than the
 stored copy and dropped them; on an instance that already ran it, the collection is gone and this pass has nothing

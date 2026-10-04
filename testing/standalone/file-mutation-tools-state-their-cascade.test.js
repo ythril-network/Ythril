@@ -66,25 +66,42 @@ describe('delete_file describes the cascade it really performs', () => {
     // set-claim: the functions the delete cascade calls, pinned so the tool's PROSE cannot outlive them.
     // Both halves are literal on purpose: the case exists to compare a description against an implementation.
     // Pinned to the implementation: prose about a cascade is worthless if the cascade changed underneath it.
-    for (const fn of ['writeFileTombstones', 'cancelMediaJob', 'deleteConversionArtifacts',
+    for (const fn of ['writePendingFileTombstones', 'actUnderPendingTombstones', 'cancelMediaJob', 'deleteConversionArtifacts',
       'invalidateUsageCache', 'emitWebhookEvent']) {
       assert.match(CASCADE, new RegExp(`${fn}\\(`), `${fn} left the cascade — the description now overclaims`);
     }
   });
 
-  it('says it is IDEMPOTENT, and contrasts it with the brain deletes', () => {
-    // The asymmetry that makes a success misleading: this returns fine for a path that was never there,
-    // while delete_memory/edge/entity/chrono all throw on an unknown id.
-    assert.match(DELETE, /IDEMPOTENT/, 'a caller must not read success as proof the file existed');
-    assert.match(DELETE, /delete_memory|brain deletes/i, 'name what behaves differently');
+  /*
+   * Rewritten by bundle-30 I13. This pinned "IT IS IDEMPOTENT … a path that is not there succeeds quietly" to a handler
+   * shape, and the claim was false: the unlink threw ENOENT, so a missing path was an error carrying the absolute data
+   * path, while the path parameter's own description said "is an error". The cascade now answers a missing path as
+   * not found on every door, and an orphan (metadata, no bytes) is completed — so the description says that, and these
+   * cases pin each sentence to the code that makes it true.
+   */
+  it('says a missing path is an error on every door, like the brain deletes, and a failed delete is safe to retry', () => {
+    assert.match(DELETE, /NOT THERE IS AN ERROR/, 'a caller must be told a success means something was there');
+    assert.match(DELETE, /delete_fact[^]*delete_chrono/, 'name the deletes that behave the same');
+    assert.match(DELETE, /`404` on `DELETE \/api\/files\/:spaceId` and `POST \/api\/delete_file`/, 'say what each door answers');
+    assert.match(DELETE, /COMPLETED/, 'an orphan (metadata, no bytes) is completed, not refused');
+    assert.match(DELETE, /SAFE TO RETRY/, 'a store failure leaves the file, so the retry repeats the cascade');
+    assert.doesNotMatch(DELETE, /IDEMPOTENT|succeeds\s+quietly/, 'the old, false claim is back');
   });
 
-  it('and that is still true — the handler returns success unconditionally', () => {
+  it('and that is still true — the cascade refuses only what has neither bytes nor metadata, after the tombstone order', () => {
+    // The handler hands the path straight to the cascade, which decides; no second not-found check of its own.
     const handler = FILE_TOOLS.slice(FILE_TOOLS.indexOf("name: 'delete_file'"));
     const end = handler.indexOf('\nexport const ');
-    const body = stripComments(end === -1 ? handler : handler.slice(0, end));
-    assert.match(body, /await deleteFileCascade\([^)]*\);\s*return \{/,
-      'a not-found check appeared — delete_file is no longer idempotent and the description must change');
+    assert.match(stripComments(end === -1 ? handler : handler.slice(0, end)), /await deleteFileCascade\([^)]*\);\s*return \{/,
+      'delete_file decides something itself before the cascade — the description describes the cascade');
+    const notFound = CASCADE.indexOf('throw new NotFoundError(');
+    const tombstone = CASCADE.indexOf('writePendingFileTombstones(');
+    const unlink = CASCADE.indexOf('deleteStored(');
+    assert.ok(notFound > -1, 'the cascade no longer answers a missing path as not found');
+    assert.ok(notFound < tombstone && tombstone < unlink,
+      'the cascade must refuse a path that is not there, then write the tombstone, then remove the bytes — in that order');
+    assert.match(CASCADE.slice(CASCADE.lastIndexOf('if', notFound), notFound), /!known/,
+      'the not-found refusal is no longer conditional on the metadata being absent too — an orphan would be refused');
   });
 });
 

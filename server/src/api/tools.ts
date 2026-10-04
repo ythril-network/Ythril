@@ -24,7 +24,8 @@
  *   the identical delete through `delete_fact`.
  * - **No space parsing.** `space` is a body field — one name or a list — parsed once, in the shared module.
  * - **No status decisions.** The status comes back with the result. Deriving it here from the message text
- *   would be this door deciding what the other door's refusal meant.
+ *   would be this door deciding what the other door's refusal meant. It is SENT by `sendToolAnswer`, so a store
+ *   failure carries the `Retry-After` the tool's own transport has no place for.
  * - **No audit row.** `callTool` writes one for both doors, from `mcpAuditOperation`. Forty-five
  *   `ROUTE_RULES` patterns would be forty-five chances to forget one, and the forgotten one is an
  *   unaudited mutation.
@@ -44,6 +45,7 @@ import { globalRateLimit } from '../rate-limit/middleware.js';
 import { restToolCaller } from './rest-tool-caller.js';
 import { TOOLS_BY_NAME } from '../mcp/tools/index.js';
 import { callTool } from '../mcp/call-tool.js';
+import { sendToolAnswer } from './send-failure.js';
 
 export const toolsRouter = Router();
 
@@ -76,7 +78,7 @@ const serveTool: RequestHandler = async (req, res) => {
     caller: restToolCaller(req),
   });
 
-  res.status(outcome.status).json(restToolBody(outcome));
+  sendToolAnswer(res, outcome, restToolBody(outcome));
 };
 
 /**

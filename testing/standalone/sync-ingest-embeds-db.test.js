@@ -15,7 +15,7 @@
  *
  * ## What this pins
  *
- * The decision, not the route. `enqueueIngestedRecord` and its batched twin `enqueueIngestedRecords` are what every ingest write site reaches, so this tests
+ * The decision, not the route. `enqueueIngestedRecords` is what every ingest write site reaches, so this tests
  * the thing all of them share: an arrival is queued, the job names the right record, and a record the
  * RECEIVER does not want embedded is not queued at all.
  *
@@ -76,7 +76,7 @@ describe('a synced-in record is queued for embedding', { skip }, () => {
   beforeEach(async () => { await jobs().deleteMany({}); });
 
   it('an arrival with no vector is queued', async () => {
-    await queue.enqueueIngestedRecord(SPACE, 'fact', { _id: 'm-1' });
+    await queue.enqueueIngestedRecords(SPACE, 'fact', [{ _id: 'm-1' }]);
     const job = await jobs().findOne({ _id: 'fact:m-1' });
     assert.ok(job, 'the peer stripped the embedding, so this instance must compute one');
     assert.equal(job.status, 'pending');
@@ -93,7 +93,7 @@ describe('a synced-in record is queued for embedding', { skip }, () => {
      * The deeper reason is not the strip: a vector computed by another instance's model cannot be ranked
      * against this instance's own, and a mixed-model search produces plausible nonsense rather than an error.
      */
-    await queue.enqueueIngestedRecord(SPACE, 'entity', { _id: 'e-1', embedding: [0.1, 0.2, 0.3] });
+    await queue.enqueueIngestedRecords(SPACE, 'entity', [{ _id: 'e-1', embedding: [0.1, 0.2, 0.3] }]);
     assert.ok(await jobs().findOne({ _id: 'entity:e-1' }),
       'the arriving vector was trusted. It was computed by the sending peer with ITS model, and the ingest '
       + 'schema stripped it in any case, so the stored record has no vector at all');
@@ -108,7 +108,7 @@ describe('a synced-in record is queued for embedding', { skip }, () => {
      * Exercised against a real queue rather than read off the source, because "the code consults the resolver"
      * is a decision being MADE, not a decision coming out right.
      */
-    await queue.enqueueIngestedRecord(SPACE, 'edge', { _id: 'g-1', suppressEmbeddings: true });
+    await queue.enqueueIngestedRecords(SPACE, 'edge', [{ _id: 'g-1', suppressEmbeddings: true }]);
     assert.equal(await jobs().countDocuments({}), 0,
       'a suppressed record was queued. The job would be claimed and discarded on every sync of that record, '
       + 'and a queue full of work that exists to be thrown away hides a real backlog');
@@ -121,7 +121,7 @@ describe('a synced-in record is queued for embedding', { skip }, () => {
   it('but `false` is "not stated" and still queues', async () => {
     // The tier resolution treats `false` as absent so it falls through to the schema and the space rather than
     // overriding them. That is stated in the field's own docblock, so it is worth one case.
-    await queue.enqueueIngestedRecord(SPACE, 'fact', { _id: 'm-2', suppressEmbeddings: false });
+    await queue.enqueueIngestedRecords(SPACE, 'fact', [{ _id: 'm-2', suppressEmbeddings: false }]);
     assert.ok(await jobs().findOne({ _id: 'fact:m-2' }), '`false` was read as a suppression');
   });
 

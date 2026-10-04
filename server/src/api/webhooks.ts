@@ -25,6 +25,7 @@ import { ALL_WEBHOOK_EVENTS } from '../webhooks/types.js';
 import type { WebhookEventType } from '../webhooks/types.js';
 import { log } from '../util/log.js';
 import { MAX_SPACE_IDS } from '../util/request-bounds.js';
+import { sendCaughtFailure } from './send-failure.js';
 
 export const webhooksRouter = Router();
 
@@ -61,8 +62,7 @@ webhooksRouter.get('/', async (_req, res) => {
     const webhooks = await listWebhooks();
     res.json({ webhooks });
   } catch (err) {
-    log.error(`GET /api/admin/webhooks: ${err}`);
-    res.status(500).json({ error: 'Internal error' });
+    sendCaughtFailure(res, `GET /api/admin/webhooks`, err);
   }
 });
 
@@ -77,8 +77,7 @@ webhooksRouter.get('/:id', async (req, res) => {
     }
     res.json(webhook);
   } catch (err) {
-    log.error(`GET /api/admin/webhooks/:id: ${err}`);
-    res.status(500).json({ error: 'Internal error' });
+    sendCaughtFailure(res, `GET /api/admin/webhooks/:id`, err);
   }
 });
 
@@ -101,8 +100,7 @@ webhooksRouter.post('/', async (req, res) => {
     });
     res.status(201).json({ ...subscription, id });
   } catch (err) {
-    log.error(`POST /api/admin/webhooks: ${err}`);
-    res.status(500).json({ error: 'Internal error' });
+    sendCaughtFailure(res, `POST /api/admin/webhooks`, err);
   }
 });
 
@@ -129,8 +127,7 @@ webhooksRouter.patch('/:id', async (req, res) => {
     }
     res.json(updated);
   } catch (err) {
-    log.error(`PATCH /api/admin/webhooks/:id: ${err}`);
-    res.status(500).json({ error: 'Internal error' });
+    sendCaughtFailure(res, `PATCH /api/admin/webhooks/:id`, err);
   }
 });
 
@@ -145,8 +142,7 @@ webhooksRouter.delete('/:id', async (req, res) => {
     }
     res.status(204).end();
   } catch (err) {
-    log.error(`DELETE /api/admin/webhooks/:id: ${err}`);
-    res.status(500).json({ error: 'Internal error' });
+    sendCaughtFailure(res, `DELETE /api/admin/webhooks/:id`, err);
   }
 });
 
@@ -177,8 +173,7 @@ webhooksRouter.post('/:id/test', async (req, res) => {
 
     res.json({ ok: true, message: 'Test event queued for delivery' });
   } catch (err) {
-    log.error(`POST /api/admin/webhooks/:id/test: ${err}`);
-    res.status(500).json({ error: 'Internal error' });
+    sendCaughtFailure(res, `POST /api/admin/webhooks/:id/test`, err);
   }
 });
 
@@ -196,7 +191,6 @@ webhooksRouter.get('/:id/deliveries', async (req, res) => {
     const deliveries = await listDeliveries(req.params['id'] as string, limit);
     res.json({ deliveries });
   } catch (err) {
-    log.error(`GET /api/admin/webhooks/:id/deliveries: ${err}`);
-    res.status(500).json({ error: 'Internal error' });
+    sendCaughtFailure(res, `GET /api/admin/webhooks/:id/deliveries`, err);
   }
 });

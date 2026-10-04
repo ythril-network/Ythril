@@ -57,7 +57,6 @@ import type { StepProgress } from '../converters/types.js';
 import { isLeaseLost, isAbandonment, holdsClaim, JobLeaseLostError, type JobClaim } from './lease.js';
 import { effectiveDocExtractionMode } from '../converters/extraction-level.js';
 import { effectiveTextLevel, effectiveVideoLevel, videoDoesKeyframes } from '../converters/media-level.js';
-import fs from 'fs/promises';
 import path from 'path';
 import { spaceRoot } from '../sandbox.js';
 import {
@@ -75,7 +74,7 @@ import { assistHopMs } from '../../config/assist-backend.js';
 import { AUDIO_STEPS, VIDEO_STEPS } from './progress.js';
 import { spaceCollection } from '../../db/space-collection.js';
 import { runSlotPool } from './slot-pool.js';
-import { readStored, StoredFileUnreadable } from '../stored-bytes.js';
+import { bytesPresent, isMissingPath, readStored, StoredFileUnreadable } from '../stored-bytes.js';
 
 let running = false;
 /** Bumped by every start, so a pool left over from a stop that raced this start sees it is no longer the current one and winds down. */
@@ -427,7 +426,7 @@ async function processJob(
       // Present but undecodable — a foreign key, altered bytes, or no secret for an encrypted file. Rethrown as it
       // is, so the failure path below can see it is TERMINAL: no retry reads different bytes.
       if (err instanceof StoredFileUnreadable) throw err;
-      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+      if (isMissingPath(err)) {
         // The source file is gone — it was deleted after this job was queued. Retrying can
         // never succeed, so this is TERMINAL, not a failure: reconcile to disk truth by
         // dropping the job and any orphaned metadata/artifacts, and stop (no retry, no
@@ -583,8 +582,9 @@ async function processJob(
     // The source can be deleted while the embedder runs, and the embedder's own writes (the chunk records a text
     // conversion inserts at the end) then land AFTER the delete removed the file's metadata, as orphans. Checked
     // after those writes and not before, so either the delete's removal of the blob comes first and this
-    // reconciles, or it comes after and the delete's own metadata cleanup follows it.
-    if (!(await fs.stat(absolutePath).then(() => true, () => false))) {
+    // reconciles, or it comes after and the delete's own metadata cleanup follows it. Asked of `bytesPresent`, which
+    // throws a failure to look: read as "deleted", a permission refused here removed what this job wrote (preship-4 P4-5).
+    if (!(await bytesPresent(absolutePath))) {
       await reconcileDeletedSource(spaceId, claim);
       log.info(`Media worker: source file ${spaceId}/${fileId} was deleted during its job — removed what the job wrote`);
       return;

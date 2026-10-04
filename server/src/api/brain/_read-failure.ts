@@ -6,11 +6,15 @@
  * produces most, and the reason this is a function rather than three edits.
  *
  * The classification itself lives in `brain/store-failure.ts`, which is where the reasoning and the two
- * independent reports are recorded. This file is only the HTTP half: status, `Retry-After`, and a body that
- * says `retryable` in a field rather than in prose.
+ * independent reports are recorded. This file is only the HTTP half of a read-shaped failure: a body that says
+ * `retryable` in a field rather than in prose — for the read routes, and for the READ a write route makes before it
+ * writes (the edge and link routes' strict-linkage reference lookups, since bundle-30 I12), whose missing reference
+ * is the caller's `400` and whose store failure is the store's `503`. The store failure itself is put on the wire by `sendStoreFailure` (`api/send-failure.ts`),
+ * the one sender every door uses.
  */
 import type express from 'express';
-import { classifyReadFailure } from '../../brain/store-failure.js';
+import { storeFailureAnswer } from '../../brain/store-failure.js';
+import { sendStoreFailure } from '../send-failure.js';
 
 /**
  * Answer a read failure with the truth about whose fault it is.
@@ -21,15 +25,12 @@ import { classifyReadFailure } from '../../brain/store-failure.js';
  * branch on one boolean instead of matching our prose, which is what `Retry-After` alone would have left them
  * doing on the 4xx-shaped failures.
  */
-export function sendReadFailure(res: express.Response, err: unknown): void {
-  const f = classifyReadFailure(err);
-  if (f.retryAfterSeconds !== undefined) res.setHeader('Retry-After', String(f.retryAfterSeconds));
-  res.status(f.status).json({
-    error: f.error,
-    retryable: f.retryable,
-    ...(f.code !== undefined ? { code: f.code } : {}),
-    ...(f.codeName ? { codeName: f.codeName } : {}),
-  });
+export function sendReadFailure(res: express.Response, where: string, err: unknown): void {
+  // `where` names the operation in the store failure's log line, as `sendCaughtFailure` does (bundle-30 I15).
+  const store = storeFailureAnswer(err, where);
+  if (store) { sendStoreFailure(res, store); return; }
+  // Not the store's: the request's, which the caller is the one who can fix.
+  res.status(400).json({ error: err instanceof Error ? err.message : String(err), retryable: false });
 }
 
 /**

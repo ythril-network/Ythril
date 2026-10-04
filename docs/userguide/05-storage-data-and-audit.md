@@ -126,6 +126,10 @@ file bytes) — and the import puts them back. What to expect from a restore:
 - **Nothing is refused silently.** A record the import could not store is listed by id with the reason; a record
   restored over a deletion this instance remembers is listed too, because a synced peer that remembers the same
   deletion will remove it again.
+- **A family marked `counterBehind` was restored, and needs the import run once more.** It means the records were
+  stored but the space's sequence counter could not be moved past them, so the next edit made here could be taken
+  for older than a restored record by a peer. Running the same import again is safe — it replaces — and moves the
+  counter.
 - File previews and passages are rebuilt from the file itself, so they are not part of the export.
 
 ### Uploaded files are encrypted at rest
@@ -299,7 +303,8 @@ copies them onto the files they belong to. On a file this instance recorded itse
 and never overwrites a description or tags the file already has; the one exception is an automatic caption, which
 gives way to the sender's own wording. A file another instance described keeps the usual rule: the newer version
 wins. A file this instance does not hold yet keeps its description waiting for up to 30 days, in
-case the file still arrives. Once nothing is left, the side collection is removed. That removal cannot be undone and
+case the file still arrives. A record that is damaged (a value of the wrong kind, or a piece of a file rather than
+a file) is discarded instead of copied. Once nothing is left, the side collection is removed. That removal cannot be undone and
 appears as one entry, operation `file.stray_filemeta.drain`, with the space named and no token.
 
 **Exporting:** Download the current filtered view as JSON or CSV.
@@ -308,7 +313,25 @@ appears as one entry, operation `file.stray_filemeta.drain`, with the space name
 behind — a sleeping laptop, a stalled connection — the server drops the stream rather than queue lines for it, and
 streaming stops; turn it on again to resume. At most 200 such streams are open on an instance at once.
 
+**Every line is one line, and none is longer than it can be read.** A value that came from outside this instance —
+a peer's label, a document id, a parameter somebody sent, a database error — is shown escaped (a line break reads
+`\r\n`), with any credential replaced by `[redacted]`, and cut after a few thousand characters with `…(+N chars)`
+saying how much was left out; a long list of ids shows the first ones and `…(+K more)`. So what looks like a line of
+this server's own is one, and a peer sending a megabyte id cannot fill the log. An error's stack trace stays on its
+line, escaped, after the message.
+
 **Every line an API request's own work produces carries that request's id**, shown in square brackets after the level. It is the same id the response returned in its `X-Request-Id` header, so when somebody reports a failing call and quotes the id, searching for it here finds every line that request produced — the refusal, and anything a background step logged on its way. Lines that belong to no request (startup, the auto-delete sweep, the background storage measurement) carry no id, which is what keeps a search for a real one from matching them.
+
+**`seq horizon held …` names a write that held up replication.** While a write is being stored it holds a place
+in its space's sequence, and every peer pulling that space is served nothing past that place until the write
+ends. A write that took longer than half its limit (`YTHRIL_HOLD_DEADLINE_MS`) is named once while it is still
+open — `seq horizon held 23.0s and still open: space=… seq=… holder=…` — and again when it ends:
+`seq horizon held 45.1s space=… seq=… holder=… ended=timeout`. `holder` says which kind of write it was
+(`fact.update`, `sync.push.fork`, `entity.merge`, …); `ended=` says how it ended: `ok` (slow, but it finished),
+`timeout` (the database did not complete it in time, so it was stopped and the caller told to retry) or `error`.
+One such line now and then is a slow moment; the same space appearing repeatedly is a lock or a stalled
+database connection to look into. The gauge `ythril_seq_horizon_oldest_hold_seconds` shows the same thing as a
+number per space.
 
 ---
 

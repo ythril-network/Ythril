@@ -35,7 +35,7 @@
  */
 
 import { col, asFilter, asUpdate, asBulk } from '../db/mongo.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
 import { inChunks } from '../util/chunks.js';
 import { withJitter } from '../util/backoff.js';
 import { createWorkSignal } from '../util/work-signal.js';
@@ -294,8 +294,8 @@ export async function enqueueWriteEmbedJobs(
     return { queued, failed: 0 };
   } catch (err) {
     const failed = records.length;
-    log.warn(`embed queue: ${failed} record(s) written to '${spaceId}' were NOT queued for embedding `
-      + `(${err instanceof Error ? err.message : String(err)}). They are stored and findable by text; `
+    log.warn(`embed queue: ${failed} record(s) written to '${peerText(spaceId)}' were NOT queued for embedding `
+      + `(${peerText(err)}). They are stored and findable by text; `
       + 'POST /api/spaces/:id/reembed queues every record that has no vector.');
     return { queued: 0, failed };
   }
@@ -497,7 +497,20 @@ export async function retireEmbedJob(
   recordType: BrainEmbedRecordType,
   recordId: string,
 ): Promise<void> {
-  await jobs(spaceId).deleteOne(asFilter<BrainEmbedJobDoc>({ _id: embedJobId(recordType, recordId) }));
+  await retireEmbedJobs(spaceId, recordType, [recordId]);
+}
+
+/**
+ * Retire the jobs of many records of one kind that are gone — `retireEmbedJob`'s rule for a batch: a merge's
+ * re-keyed edges, a cascade's chunk. By `embedJobId`, never a hand-spelled `${kind}:${id}` (a second spelling of
+ * the id is how a retire comes to match nothing), and chunked, so a hub's thousands of ids are never one `$in`.
+ */
+export async function retireEmbedJobs(
+  spaceId: string, recordType: BrainEmbedRecordType, recordIds: readonly string[],
+): Promise<void> {
+  for (const batch of inChunks(recordIds, SWEEP_BATCH)) {
+    await jobs(spaceId).deleteMany(asFilter<BrainEmbedJobDoc>({ _id: { $in: batch.map(id => embedJobId(recordType, id)) } }));
+  }
 }
 
 /**
@@ -567,7 +580,9 @@ export async function failEmbedJob(
 ): Promise<void> {
   const now = new Date().toISOString();
   const filter = claimedBy(recordType, recordId, opts.claimToken);
-  const lastError = errorMessage.slice(0, 500);
+  // Stored, and read back by `list_embed_jobs`: the one renderer — redacted, cut on a code point, saying it was cut —
+  // rather than a code-unit slice that can split a surrogate (bundle-30 I6, C16).
+  const lastError = peerText(errorMessage, { max: 500 });
 
   // A lost inference process is transient, but it is also how an input that kills the runtime looks, so it is the one
   // failure of the embedder's that is counted per record and ends one: see `MAX_LOST_CHILD_FAILURES`. Decided BEFORE
@@ -862,31 +877,18 @@ export const resetEmbedPendingHint = (): void => _signal.reset();
  * is not duplication for its own sake: a suppressed record would otherwise be queued, claimed, and discarded
  * on every sync of every suppressed record, and a queue full of work that exists to be thrown away is how a
  * real backlog becomes invisible.
- */
-export async function enqueueIngestedRecord(
-  spaceId: string,
-  recordType: BrainEmbedRecordType,
-  doc: { _id: string; suppressEmbeddings?: boolean;},
-): Promise<void> {
-  // Cast for the resolver's `Record<string, unknown>` signature, exactly as `reindex.ts` does. The parameter
-  // above is narrow on purpose: it names the two fields this decision reads, so a caller can see at the call
-  // site that the record's own mark is what travels here.
-  if (embeddingSuppressedFor(spaceId, recordType, doc as unknown as Record<string, unknown>)) return;
-  // The background lane: a record a peer sent is not a write anybody here is waiting on. It still keeps one claim in
-  // eight under load (`claimOrder`), so a busy instance cannot leave a peer's records unsearchable for ever.
-  await enqueueEmbedJob(spaceId, recordType, doc._id, { priority: EMBED_PRIORITY.background });
-}
-
-/**
- * `enqueueIngestedRecord` for a whole landed chunk of arrivals — what the arrival writer (`sync/arrivals.ts`)
- * queues a page with, so a 500-record pulled page is one bulk write onto the jobs collection and not 500.
  *
- * The same two rules as the single record, and they are the reason this is a twin beside it rather than a loop
- * at the call site: the RECEIVER's suppression decides (`record > schema > space`, resolved against this
- * instance's configuration — the space's meta read ONCE for the batch, never per record), and an arrival goes on
- * the BACKGROUND lane. `enqueueWriteEmbedJobs` never throws into the write it announces: the records are stored
- * by the time they are queued, and failing the arrival over a queue fault would make the sender re-send records
- * this instance already holds.
+ * ## One call per landed chunk
+ *
+ * What the arrival writer (`sync/arrivals.ts`) queues a page with, so a 500-record pulled page is one bulk write onto
+ * the jobs collection and not 500. The single-record twin it was written beside had no caller left once every
+ * arrival went through the writer, and was removed (bundle-30 I6, C10); a single record is a chunk of one.
+ *
+ * The RECEIVER's suppression decides (`record > schema > space`, resolved against this instance's configuration — the
+ * space's meta read ONCE for the batch, never per record), and an arrival goes on the BACKGROUND lane.
+ * `enqueueWriteEmbedJobs` never throws into the write it announces: the records are stored by the time they are
+ * queued, and failing the arrival over a queue fault would make the sender re-send records this instance already
+ * holds.
  */
 export async function enqueueIngestedRecords(
   spaceId: string,

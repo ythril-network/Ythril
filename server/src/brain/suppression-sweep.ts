@@ -25,10 +25,11 @@
  *
  * ## Why this is local, and takes no seq
  *
- * The vector does not replicate — `sync/local-only-fields.ts` is the list and names the three mechanisms
- * that hold it: no `Incoming*` schema declares it, so a PUSHED document loses it to zod; the pull path
- * strips it explicitly, because it validates nothing; and the sending side projects it away so the bytes
- * never travel. So removing one is a purely local change — no tombstone, no seq bump, nothing to converge.
+ * The vector does not replicate — `sync/local-only-fields.ts` is the list and names the mechanisms that hold
+ * it: no `Incoming*` schema declares it, so an arriving document, pushed or pulled, loses it to the one
+ * validation step (`sync/arrival-shape.ts`); the arrival writer drops it besides; and the sending side
+ * projects it away so the bytes never travel. So removing one is a purely local change — no tombstone, no seq
+ * bump, nothing to converge.
  *
  * This paragraph used to say `api/sync/docs.ts` *"strips `embedding` before sending, in all five places"*.
  * There was no such strip in that file and there never had been: the push path dropped it by OMISSION and
@@ -46,16 +47,25 @@
  * un-suppressed, or sweep a type whose schema deliberately opted out.
  */
 import { col, asFilter } from '../db/mongo.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
 import { TYPE_FIELD } from './ttl.js';
 import { recordNotSuppressedFilter, RECORD_SUPPRESS_FIELD } from './suppress-embeddings.js';
 import type { KnowledgeType, SpaceMeta } from '../config/types.js';
-import { spaceCollection } from '../db/space-collection.js';
+import { COLLECTION_SUFFIX } from '../config/types.js';
+import { spaceCollection, type SpacePart } from '../db/space-collection.js';
+import { READ_CHUNK, readStoredById } from '../db/read-by-id.js';
+import { inChunks } from '../util/chunks.js';
+import { UNSET_VECTOR } from '../sync/local-only-fields.js';
+import { retireEmbedJobs } from './embed-queue.js';
+import { MAX_ANCESTRY } from './embed-record.js';
+import { concreteSpaces } from '../spaces/proxy.js';
+import { createCoalescingRunner } from '../sync/coalescing-runner.js';
 
-/** The collection suffix for each record kind, in the one place that has to agree with the schema keys. */
-const COLLECTION: Record<KnowledgeType, string> = {
-  fact: 'facts', entity: 'entities', edge: 'edges', chrono: 'chrono',
-};
+/**
+ * The collection of each record kind: the shared map (`COLLECTION_SUFFIX`, derived from the knowledge map), never a
+ * hand copy of it — a fifth knowledge type would have been missing from the copy alone (bundle-30 I6, C14).
+ */
+const COLLECTION: Readonly<Record<KnowledgeType, SpacePart>> = COLLECTION_SUFFIX;
 
 /**
  * Records of `kind` that resolve to suppressed **and** still hold a vector.
@@ -101,23 +111,151 @@ export function suppressedWithVectorFilter(meta: SpaceMeta, kind: KnowledgeType)
  * about to un-embed, and the worker would write the vector straight back within seconds — the defect
  * returning by a different route, and one that would look like the sweep had simply not run.
  *
+ * **What it removes is the vector and its model** (`UNSET_VECTOR`) — never `matchedText`: the content did not
+ * change, and `matchedText` is the lexical channel's text, so removing it is a content decision, not a suppression
+ * one. It removed `embedding` alone until bundle-30, leaving the model name behind on a record with no vector.
+ *
+ * **Files and their derived rows are covered** (bundle-30): a file has two tiers, its own flag and the space, so the
+ * space tier reaches every file row and the record tier a flagged file and the rows derived from it, down to
+ * `MAX_ANCESTRY` (a caption chunk of an image extracted from a document is the document's too). It covered none.
+ *
+ * **Each kind in its own `try`**: one collection the store refuses must not leave every kind after it holding its
+ * vectors. A failure is collected and thrown once at the end, naming every kind that failed, for the caller's log.
+ *
  * Reported per kind at INFO when it did anything, silent when it did not: this runs on every meta write, and a
  * line per write for a space with nothing to sweep would train the reader to skip it.
  */
 export async function sweepSuppressedVectors(spaceId: string, meta: SpaceMeta): Promise<number> {
   let total = 0;
+  const failed: string[] = [];
+  const isolated = async (kind: string, sweep: () => Promise<string[]>): Promise<void> => {
+    try {
+      const ids = await sweep();
+      if (ids.length === 0) return;
+      total += ids.length;
+      log.info(`Suppression sweep: removed ${ids.length} ${peerText(kind)} vector(s) in ${peerText(spaceId)}`);
+    } catch (err) {
+      failed.push(`${kind} (${err instanceof Error ? err.message : String(err)})`);
+    }
+  };
   for (const kind of Object.keys(COLLECTION) as KnowledgeType[]) {
-    const filter = suppressedWithVectorFilter(meta, kind);
-    const coll = col<Record<string, unknown>>(`${spaceId}_${COLLECTION[kind]}`);
-    const ids = await coll.find(asFilter(filter), { projection: { _id: 1 } }).toArray();
-    if (ids.length === 0) continue;
-
-    await coll.updateMany(asFilter(filter), { $unset: { embedding: '' } });
-    await col(spaceCollection(spaceId, 'embedJobs')).deleteMany(
-      asFilter({ _id: { $in: ids.map(d => `${kind}:${String(d['_id'])}`) } }),
-    );
-    total += ids.length;
-    log.info(`Suppression sweep: removed ${ids.length} ${kind} vector(s) in ${spaceId}`);
+    await isolated(kind, async () => {
+      const filter = suppressedWithVectorFilter(meta, kind);
+      const coll = col<Record<string, unknown>>(spaceCollection(spaceId, COLLECTION[kind]));
+      const ids = (await coll.find(asFilter(filter), { projection: { _id: 1 } }).toArray()).map(d => String(d['_id']));
+      if (ids.length === 0) return [];
+      await coll.updateMany(asFilter(filter), { $unset: UNSET_VECTOR });
+      await retireEmbedJobs(spaceId, kind, ids);
+      return ids;
+    });
   }
+  await isolated('file', () => sweepFiles(spaceId, meta));
+  if (failed.length > 0) throw new Error(`the sweep failed for ${failed.join('; ')}`);
   return total;
+}
+
+/** The file rows the meta suppresses that still hold a vector — every one at the space tier, else the flagged
+ *  files and the rows derived from them. Returns their ids, vectors removed and jobs retired. */
+async function sweepFiles(spaceId: string, meta: SpaceMeta): Promise<string[]> {
+  const files = col<Record<string, unknown>>(spaceCollection(spaceId, 'files'));
+  if (meta.suppressEmbeddings !== true) {
+    // The record tier: a flagged file whether or not it holds a vector itself, since its derived rows may.
+    const flagged = await files.find(asFilter({ [RECORD_SUPPRESS_FIELD]: true }), { projection: { _id: 1 } }).toArray();
+    return dropFileVectors(spaceId, flagged.map(d => String(d['_id'])));
+  }
+  // The space tier reaches every file row, parents and derived alike: one write, no walk.
+  const ids = (await files.find(asFilter(WITH_VECTOR), { projection: { _id: 1 } }).toArray()).map(d => String(d['_id']));
+  if (ids.length === 0) return [];
+  await files.updateMany(asFilter(WITH_VECTOR), { $unset: UNSET_VECTOR });
+  await retireEmbedJobs(spaceId, 'file', ids);
+  return ids;
+}
+
+const WITH_VECTOR = { embedding: { $exists: true } };
+
+/**
+ * These files, and every row derived from them down to `MAX_ANCESTRY`, hold no vector afterwards; returns the ids
+ * that held one. The record tier of the sweep, and the arrival writer's for a file this instance suppresses on
+ * arrival (`Q-230`) — the file row's own fields go with its write, its chunks' here.
+ */
+export async function dropFileVectors(spaceId: string, fileIds: readonly string[]): Promise<string[]> {
+  if (fileIds.length === 0) return [];
+  const files = col<Record<string, unknown>>(spaceCollection(spaceId, 'files'));
+  const reached = new Set(fileIds);
+  let frontier = [...reached];
+  for (let depth = 0; depth < MAX_ANCESTRY && frontier.length > 0; depth++) {
+    const next: string[] = [];
+    for (const part of inChunks(frontier, READ_CHUNK)) {
+      const rows = await files.find(asFilter({ parentFileId: { $in: part } }), { projection: { _id: 1 } }).toArray();
+      for (const r of rows) { const id = String(r['_id']); if (!reached.has(id)) { reached.add(id); next.push(id); } }
+    }
+    frontier = next;
+  }
+  // The ones that hold a vector, through the one by-id reader.
+  const ids = [...(await readStoredById(spaceCollection(spaceId, 'files'), [...reached], {}, { filter: WITH_VECTOR })).keys()];
+  for (const part of inChunks(ids, READ_CHUNK)) {
+    await files.updateMany(asFilter({ _id: { $in: part } }), { $unset: UNSET_VECTOR });
+  }
+  await retireEmbedJobs(spaceId, 'file', ids);
+  return ids;
+}
+
+/**
+ * Sweep the vectors a meta write suppresses, without blocking the write on it; a failure is logged, since the sweep
+ * is idempotent and the next meta write repeats it. Asked for by `updateSpace` (`spaces/spaces.ts`) — the one writer
+ * of `space.meta`, so every meta change reaches it: an operator's edit, a schema route's, a passed vote's, and every
+ * recompute of the effective meta (a network layer arriving, a network left, a precedence change).
+ *
+ * **Once per change, against the latest meta.** One change is often several writes in one turn — a vote passing on
+ * a proposer that holds a layer writes its own definitions and then the layer, each through a recompute — and the
+ * callers used to sweep after each, plus once more on top (bundle-30 `I5`). So the sweep is coalesced per space
+ * (`createCoalescingRunner`): it starts once this turn's writes have landed and sweeps the LAST meta written; a write
+ * that lands while it runs queues one more, which sweeps that write's meta; a rerun with nothing newer does nothing.
+ *
+ * `meta` is undefined when the write carried no meta (a `textAnalysis`-only PATCH): suppression is read from meta
+ * alone, so there is nothing to sweep. Both callers cast it to `SpaceMeta` instead, and the sweep then failed on
+ * every such write with a warning that meant nothing (`Q-74`).
+ */
+export function sweepAfterMetaWrite(id: string, meta: SpaceMeta | undefined): void {
+  void queueSweep(id, meta);
+}
+
+/** Queue `id`'s coalesced sweep against `meta`, settling when it has run; nothing to sweep without a meta. */
+async function queueSweep(id: string, meta: SpaceMeta | undefined): Promise<void> {
+  if (meta === undefined) return;
+  nextSweep.set(id, meta);
+  await metaSweeps.run(id, () => sweepLatestMeta(id));
+}
+
+/** Per space, the meta its next sweep runs against: the last one written and not yet swept. */
+const nextSweep = new Map<string, SpaceMeta>();
+const metaSweeps = createCoalescingRunner<void>();
+
+/** One sweep of `id` against the latest meta written — after this turn's writes, so writes that land together sweep once. */
+async function sweepLatestMeta(id: string): Promise<void> {
+  await new Promise<void>(resolve => setImmediate(resolve));
+  const meta = nextSweep.get(id);
+  // A rerun the runner queued for a write this sweep already covered: nothing newer to sweep.
+  if (meta === undefined) return;
+  nextSweep.delete(id);
+  try {
+    await sweepSuppressedVectors(id, meta);
+  } catch (err) {
+    log.warn(`Suppression sweep failed for ${peerText(id)}: ${peerText(err)}`);
+  }
+}
+
+/**
+ * At boot, one sweep of every concrete space: vectors stored before this version swept files, removed the model
+ * name, or heard of a network's suppression are cleared once, without waiting for the next meta write. Local derived
+ * fields only — no seq, nothing replicated — so it is not a migration of synced data, and it is idempotent.
+ *
+ * **One space at a time** (bundle-30 I8): each sweep is an unindexed scan per record kind, and starting every space's
+ * at once put all of them in flight together on a large instance. Each is awaited before the next; a failure is the
+ * sweep's own warning (`sweepLatestMeta`) and never stops the walk. The bootstrap starts it once the server listens.
+ */
+export async function sweepEverySpaceAtBoot(): Promise<void> {
+  for (const space of concreteSpaces()) {
+    await queueSweep(space.id, space.meta);
+  }
 }

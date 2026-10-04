@@ -34,7 +34,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
-import { argumentsOf } from './_structural-window.mjs';
+import { argumentsOf, bodyOf } from './_structural-window.mjs';
 
 const MERGE = 'server/src/brain/merge.ts';
 const merge = stripComments(readFileSync(MERGE, 'utf8'));
@@ -120,12 +120,17 @@ describe('the merge path runs the write path validators', () => {
   });
 
   it('the automerge caller tells a refusal from a failure', () => {
+    // Re-anchored (bundle-30 `R12`): every merge door now classifies a refusal through ONE function,
+    // `mergeRefusal` in merge.ts, so the scanner asks it rather than spelling its own `instanceof` — and the
+    // function is what has to recognise the schema refusal.
     const scanner = stripComments(readFileSync('server/src/brain/dupe-scanner.ts', 'utf8'));
     assert.match(
-      scanner, /instanceof MergeSchemaViolation/,
+      scanner, /\bmergeRefusal\(/,
       'automerge runs unattended. Reporting a deliberate refusal as "Auto-merge failed" turns the strict '
       + 'ruling into an error nobody investigates.',
     );
+    assert.match(bodyOf(merge, 'mergeRefusal'), /instanceof MergeSchemaViolation/,
+      'the one refusal classifier does not recognise the schema refusal, so every door reports it as a failure');
   });
 
   it('the check runs BEFORE the survivor is written', () => {

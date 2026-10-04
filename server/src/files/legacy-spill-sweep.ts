@@ -4,8 +4,8 @@
  * A recall's remainder and an over-cap traversal used to be a root `_tmp/results-<uuid>.json` or
  * `_tmp/graph-<uuid>.json` with a `<space>_files` record. They replicated, and a pulled copy never expired
  * (`_expireAt` is local-only), so peers have accumulated them since spills existed. Spills now live in the
- * instance's read-spill store, sync carries this path shape in neither direction (`isInstanceLocalFile`,
- * `ingestFileMeta`, the manifest and the space hash), and this sweep removes what is left locally.
+ * instance's read-spill store, sync carries this path shape in neither direction (`isInstanceLocalFile`, the
+ * arrival writer's `isLegacyReadSpill`, the manifest and the space hash), and this sweep removes what is left locally.
  *
  * - **By PATH, not by tag**: metadata can arrive before its blob and a blob can outlive its record, so a sweep
  *   keyed on the FileMeta's tag leaves one half behind — and finds it again every run.
@@ -24,7 +24,7 @@ import { spaceRoot } from './sandbox.js';
 import { invalidateUsageCache } from '../quota/quota.js';
 import { col, asFilter } from '../db/mongo.js';
 import { spaceCollection } from '../db/space-collection.js';
-import { deleteStored } from './stored-bytes.js';
+import { deleteStored, isMissingPath } from './stored-bytes.js';
 import { SPILL_DIR, spillIdFromPath } from '../brain/spill-path.js';
 import { concreteSpaces } from '../spaces/proxy.js';
 import { logInternalAudit } from '../audit/audit.js';
@@ -62,8 +62,8 @@ export async function sweepLegacySpills(): Promise<LegacySpillSweep> {
     const removed: string[] = [];
     for (const rel of found) {
       try {
-        await deleteStored(path.join(dir, rel.slice(SPILL_DIR.length + 1))).catch((err: NodeJS.ErrnoException) => {
-          if (err?.code !== 'ENOENT') throw err;   // the blob never arrived, or is already gone
+        await deleteStored(path.join(dir, rel.slice(SPILL_DIR.length + 1))).catch((err: unknown) => {
+          if (!isMissingPath(err)) throw err;   // the blob never arrived, or is already gone
         });
         removed.push(rel);
       } catch (err) {

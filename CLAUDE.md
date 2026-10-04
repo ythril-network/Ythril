@@ -206,10 +206,12 @@ best case: the bad case is the loop.
 Found while shipping M-1 and finished by W-10, 2026-09-01. A rule rather than an incident because both halves
 are invisible from both ends.
 
-**Stripping.** `api/sync/_shared.ts` validates every PUSHED document with a bare `z.object({...})`, and **zod
-strips keys the schema does not declare.** The pull path validates nothing. So a field missing from its
-`Incoming*` twin is **kept when the record arrives by pull and deleted when the same record arrives by push** —
-same version of the code, same document, one direction, no error, no statistic, and a 200 on the way back.
+**Stripping.** Every arriving document — pushed or pulled — is validated against its `Incoming*` schema in
+`api/sync/_shared.ts`, through one step (`admitArrivals`, `sync/arrival-shape.ts`, Q-225), and **zod strips keys
+the schema does not declare.** Until bundle-30 the pull path validated nothing, so a field missing from its
+`Incoming*` twin was **kept when the record arrived by pull and deleted when the same record arrived by push** —
+same version of the code, same document, one direction, no error, no statistic, and a 200 on the way back. Both
+doors now strip (or refuse) alike, which is why a field missing from its schema is lost on EVERY door now.
 
 **The rule is "every `Incoming*` schema in `api/sync/_shared.ts`", and it is written that way on purpose.** This
 paragraph named four documents and there are six; the two it did not name arrived after it was written. **The
@@ -270,9 +272,9 @@ space has supressembeddings dont embed at all. if it should embed use the receiv
 
 **A vector never crosses the wire, and "no ingest schema declares it" is only HALF the reason — the half
 that covers one of the two ingest paths.** That sentence stood here alone and was believed; it is true of
-PUSH, which zod strips because no `Incoming*` schema declares the field. **Pull validates nothing.** It
-fetched `full=true` and `replaceOne`d what came back, so a pulled record carried the sender's vector and
-was stored with it, for as long as the sentence had been read as covering both.
+PUSH, which zod strips because no `Incoming*` schema declares the field. **Pull validated nothing** (until
+bundle-30). It fetched `full=true` and `replaceOne`d what came back, so a pulled record carried the sender's
+vector and was stored with it, for as long as the sentence had been read as covering both.
 
 **And the vector was not the expensive half.** The same five fields are excluded from the space hash, and
 two of them are the retention stamps — `_expireAt` and `_contentExpireAt`. `brain/ttl-sweep.ts` deletes
@@ -281,9 +283,12 @@ stamp let one instance decide when another deleted its data** — an operator wh
 retention losing records after the sender's seven days, with nothing logged on either side.
 
 **The list is `sync/local-only-fields.ts`, with one reason.** `merkle.ts` excludes them from the hash; the
-arrival writer drops them from whatever arrives, by push or by pull, and CARRIES the receiver's own values across
-the replace — a peer's edit used to erase this instance's vector and retention stamps. A restore keeps the
-record-tier half (`RESTORED_LOCAL_FIELDS`: the stamps and `syncBase`) and never the derived half. The
+arrival writer drops them from whatever arrives, by push or by pull, and decides per document what of the
+receiver's own values crosses the replace (`carriedFields`): every local-only field for an ordinary arrival (a
+peer's edit used to erase this instance's vector and retention stamps); the record tier only, no vector, model or
+`matchedText`, for an arrival this instance suppresses (Q-230); NOTHING from the replaced copy for a restore, which
+keeps the backup's own record-tier half (`RESTORED_LOCAL_FIELDS`: the stamps and `syncBase`) and never the derived
+half (Q-234). The
 equivalence that makes it ONE list is the rule two sections above — a field that is hashed must replicate — read backwards: a field that must not
 replicate must not be hashed, or every cycle reports a divergence for a space where nothing is wrong.
 
@@ -305,19 +310,27 @@ receiver's retention stamped, the seq write guard, failures classified per docum
 functions (`ingestBrainDoc` and the pull's `batchUpsertBySeq`) plus a raw `$setOnInsert`, which is how a pulled
 record was never queued and a new entity pushed singly was never embedded.
 `an-arrival-is-written-by-one-writer.test.js` holds that no door writes a record collection anywhere else.
+**And one accept decides what the writer is handed** (bundle-30, Q-204): push and pull both go through
+`acceptArrivingPage` (`sync/accept-page.ts`) — validate, plan (`planArrivals`: tombstone by author proof, seq
+compare, fork on equal-seq divergence), then `writeArrivals`. The one stated difference: an unknown chrono type is
+dropped on push only. `push-and-pull-decide-alike-db.test.js` holds both doors to the same verdict per row.
 
 - **The record type is an EXPLICIT argument at every call**, and `null` means *this kind has nothing to embed*.
   Links pass `null` — a link is a pair of ids, so there is no text. **A missing embed job on an arriving link is
   correct, not a bug.** A caller that embeds nothing has to say so out loud, at the call, where a reviewer sees it.
-- **File metadata is merged, not replaced**: the writer hands it to `ingestFileMeta`, which `$set`s the authored
-  keys and never `$unset`s, or the receiver would publish the sender's `sizeBytes` and `sha256` for bytes it does
-  not have. A peer's file is queued **only when this instance holds the blob**; a restore queues every file.
+- **File metadata is merged, not replaced**: the writer merges it itself (`fileMetaUpdate`: `$set` of the
+  authored keys, peer values inside `$literal`; it never `$unset`s an AUTHORED key, and removes only the local-only
+  fields `carriedFields` says not to carry — on a restore or a suppressed arrival) under the same seq write guard,
+  in one bulk write per page — the receiver would otherwise publish the sender's `sizeBytes` and `sha256` for bytes
+  it does not have. A peer's file is queued **only when this instance holds the blob** (`embedArrivedFiles`); a
+  restore queues every file; a file this instance suppresses loses its vectors instead.
 - **D-9, owner decision 2026-10-01: an arrival takes this instance's retention.** A record that carries no
   receiver stamp is stamped from its OWN `createdAt` by this instance's `schema > space` windows — never from now,
   never the sender's. A stamp already on the stored copy is carried, never recomputed. So an arrival older than
   the window is due at once, and the sweep deletes it through the normal path, whose tombstone travels to peers.
 - **An import is a restore, not a peer**: unguarded (a restore replaces), and it keeps the export's stamps and
-  `syncBase`, because those ARE the record's own state here.
+  `syncBase`, because those ARE the record's own state here — and never the replaced copy's; a stamp the export
+  lacks is D-9's (Q-234; whether a 'never expire' record should be an exception is parked as D-13).
 
 - **The record tier has to cross the wire for that to be true.** Both spellings of the suppression mark
   replicate. Stripped, a record its author retired from meaning-ranked search would re-enter it on every peer.

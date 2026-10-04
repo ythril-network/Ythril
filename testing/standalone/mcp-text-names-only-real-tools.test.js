@@ -61,7 +61,9 @@ before(async () => {
   const { INCOMPLETE_ROW_REASONS, WALK_STOPS } = await import('../../server/dist/brain/row-graphs.js');
   // And the `code` a network refusal carries (Q-133), from the one list of them.
   const { NETWORK_REFUSAL_CODES } = await import('../../server/dist/networks/refusal-codes.js');
-  ANSWER_VALUES = [...INCOMPLETE_ROW_REASONS, ...WALK_STOPS, ...NETWORK_REFUSAL_CODES];
+  // And the `code` a refused merge carries (bundle-30, Q-107 part 3a), from its one list.
+  const { MERGE_REFUSAL_CODES } = await import('../../server/dist/brain/merge.js');
+  ANSWER_VALUES = [...INCOMPLETE_ROW_REASONS, ...WALK_STOPS, ...NETWORK_REFUSAL_CODES, ...MERGE_REFUSAL_CODES];
   assert.ok(ANSWER_VALUES.length >= 2, 'the answer values were not read');
 });
 

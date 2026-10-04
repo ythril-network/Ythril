@@ -43,6 +43,19 @@ succeeded, delete it and upload it again.
 | Rename | Click **Rename** |
 | Delete | Click ✕ and confirm |
 
+**A delete or a rename that fails on a database outage says so — it never reports success.** When the failure
+comes before the file is touched, nothing changed: the file is still there under its old name, and trying again
+is safe. When it comes after the file itself was removed or moved, the list already shows that (the row is gone,
+or is under its new name without its status and tags) while the file's metadata is not finished; repeat the same
+delete or rename through the API (`DELETE` or `PATCH /api/files/:spaceId?path=…`) or the MCP `delete_file` /
+`move_file` tool once the database is back, and it completes. This page cannot repeat it for you, because it no
+longer has a row for the old path.
+
+**A file whose bytes were removed outside Ythril while its metadata stayed has no row here** — the list is read
+from disk — although the **Files** count still includes it. Delete it through the API
+(`DELETE /api/files/:spaceId?path=…`) or the MCP `delete_file` tool: the delete is completed, and synced peers are
+told to remove their copy too.
+
 **New folder:** Click **New folder** in the toolbar.
 
 **Navigation:** A breadcrumb bar (`root / docs / guides`) at the top lets you jump to any parent directory. The **tree sidebar** (toggle with **Show tree** / **Hide tree**) provides a full directory view.

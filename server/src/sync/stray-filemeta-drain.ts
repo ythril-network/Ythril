@@ -7,10 +7,15 @@
  * records, so they are never pulled again: a publisher's descriptions and tags never reached the subscriber's files.
  * 5.6.2 pulls into the right collection; this recovers what the old one left.
  *
- * - **Through the arrival writer with `fillOnly`**, never a copy loop: it keeps the shape refusal, the chunk refusal
- *   and the local-only drop, and hands each record to `fillFileMetaFromStray`, which fills a row this instance made by
- *   default and gives a peer-written row the normal seq accept — at the write, creating nothing. 5.6.2's drain used
- *   the seq-accepted merge, and a pre-5.6.0 receiver had stamped its own seq on those very rows, so it counted almost
+ * - **Through the one validation step and the arrival writer with `fillOnly`**, never a copy loop: each record's wire
+ *   keys pass `IncomingFileMetaDoc` as a FILL (`admitArrivals(…, { fill: true })`, `Q-225` — a `parentFileId` of any
+ *   type, a field of the wrong type is refused, never filled; a key the record LACKS is not required, because the
+ *   fill writes only what it carries, and a record without `tags` or `author` was otherwise lost); the writer keeps the shape refusal, the chunk refusal and the local-only drop,
+ *   and hands each record to `fillFileMetaFromStray`, which fills a row this instance made by default and gives a
+ *   peer-written row the normal seq accept — at the write, creating nothing. One write PER RECORD, deliberately,
+ *   where every other file arrival is a page of one bulk write (`Q-107` part 2): each row's own outcome (filled,
+ *   complete, newer, no file) is what the drain's summary line reports and what decides whether a record waits.
+ *   5.6.2's drain used the seq-accepted merge, and a pre-5.6.0 receiver had stamped its own seq on those very rows, so it counted almost
  *   every stray description as "older than the stored copy" and dropped it.
  * - **Bounded, and resumed by deletion.** At most `maxPages` pages per space per cycle. Each record the writer
  *   answered is deleted from the stray collection; the collection is dropped only when it is EMPTY, so it is never
@@ -29,22 +34,33 @@
  */
 import { concreteSpaces } from '../spaces/proxy.js';
 import { getDb, col, asFilter } from '../db/mongo.js';
-import { spaceCollection } from '../db/space-collection.js';
-import { writeArrivals } from './arrivals.js';
+import { tombstonedFilePaths } from '../files/tombstones.js';
+import { writeArrivals, warnArrivalsNotStored } from './arrivals.js';
+import { admitArrivals } from './arrival-shape.js';
+import { fileMetaForWire } from '../api/sync/_shared.js';
 import { logInternalAudit } from '../audit/audit.js';
 import { STRAY_FILEMETA_DRAIN_OPERATION } from '../audit/middleware.js';
 import { log, logSafe } from '../util/log.js';
+import { warnOnce } from '../util/warn-once.js';
+import { withinWriteBound } from '../db/write-bound.js';
 
 /** How long a record whose file has no row waits for the file's bytes before it is discarded. */
 const WAIT_DAYS = 30;
 /** How often one space's repeating failure is logged. */
 const REPORT_EVERY_MS = 10 * 60_000;
-/** One page read or delete; a stuck one must not hold the sweep cycle. */
-const STEP_MS = 30_000;
+/*
+ * A stuck read or write must not hold the sweep cycle: every step below runs inside the one write bound
+ * (`withinWriteBound`, `db/write-bound.ts`), which bounds each operation it issues — rather than a literal per call
+ * restating how long that is (bundle-30 I6, C5). Each record's own fill is bounded by `fillFileMetaFromStray`.
+ */
 
 type StrayDoc = { _id: string; keptSince?: string };
 
-const lastReported = new Map<string, number>();
+/** Who the drain's records came from, for the log lines. */
+const FROM = 'a 4.0-5.6.1 pull (stray filemeta collection)';
+
+/** One report per space per `REPORT_EVERY_MS` (`util/warn-once.ts`). */
+const failureReports = warnOnce<string>({ every: REPORT_EVERY_MS });
 
 /** Drain every space's stray file-metadata collection. Returns the spaces whose collection was dropped. */
 export async function drainStrayFileMeta({ pageSize = 500, maxPages = 20 }: { pageSize?: number; maxPages?: number } = {}): Promise<string[]> {
@@ -55,12 +71,8 @@ export async function drainStrayFileMeta({ pageSize = 500, maxPages = 20 }: { pa
     try {
       if (await drainSpace(space.id, pageSize, maxPages, step)) dropped.push(space.id);
     } catch (err) {
-      const now = Date.now();
-      if (now - (lastReported.get(space.id) ?? 0) >= REPORT_EVERY_MS) {
-        lastReported.set(space.id, now);
-        log.warn(`Stray file-metadata drain (${logSafe(space.id)}, ${step.name}): `
-          + `${logSafe(err instanceof Error ? err.message : String(err))}; the collection is kept for the next cycle (Q-219).`);
-      }
+      failureReports(space.id, () => log.warn(`Stray file-metadata drain (${logSafe(space.id)}, ${step.name}): `
+        + `${logSafe(err instanceof Error ? err.message : String(err))}; the collection is kept for the next cycle (Q-219).`));
     }
   }
   return dropped;
@@ -87,34 +99,42 @@ async function drainSpace(spaceId: string, pageSize: number, maxPages: number, s
         keptSince: waiting ? { $lt: cycleStart } : { $exists: false },
         ...(after === undefined ? {} : { _id: { $gt: after } }),
       };
-      const page = await stray.find(asFilter<StrayDoc>(filter as never), { maxTimeMS: STEP_MS })
-        .sort({ _id: 1 }).limit(pageSize).toArray();
+      const page = await withinWriteBound(() => stray.find(asFilter<StrayDoc>(filter as never))
+        .sort({ _id: 1 }).limit(pageSize).toArray());
       if (page.length === 0) break;
       pages++;
       after = page[page.length - 1]!._id;
       step.name = 'write';
-      const out = await writeArrivals(spaceId, 'files', 'file', page.map(({ keptSince: _k, ...doc }) => doc),
-        { from: 'a 4.0-5.6.1 pull (stray filemeta collection)', fillOnly: true });
+      // The one validation step every arrival passes (`Q-225`), over the record's WIRE keys: an old pull stored the
+      // peer's row whole, and what it held besides the wire keys was never the publisher's to give. A record its
+      // schema refuses — a `parentFileId` of any type, a field of the wrong type — is answered, and never filled. As a
+      // FILL: the keys present are checked and none is required, since the fill writes nothing a record lacks.
+      const { admitted, refused } = admitArrivals('filemeta', page.map(({ keptSince: _k, ...doc }) => fileMetaForWire(doc)), { fill: true });
+      warnArrivalsNotStored(FROM, spaceId, 'filemeta', 'refused', refused);
+      const out = await writeArrivals(spaceId, 'files', 'file', admitted.map(a => a.doc), { from: FROM, fillOnly: true });
       n.merged += out.updated.length + out.inserted.length;
       n.complete += out.complete.length;
       n.newer += out.newerLocal.length;
-      n.refused += out.refused.length + out.derived.length + out.duplicates.length;
+      n.refused += refused.length + out.refused.length + out.derived.length + out.duplicates.length;
       step.name = 'settle';
-      const { discard, wait } = await settleUnstored(spaceId, page, out.unstored);
+      const { discard, wait } = await withinWriteBound(async () => {
+        const settled = await settleUnstored(spaceId, page, out.unstored);
+        const unstored = new Set(out.unstored);
+        const answered = [...page.map(d => d._id).filter(id => !unstored.has(id)), ...settled.discard];
+        if (answered.length > 0) await stray.deleteMany(asFilter<StrayDoc>({ _id: { $in: answered } }));
+        if (settled.wait.length > 0) {
+          await stray.updateMany(asFilter<StrayDoc>({ _id: { $in: settled.wait }, keptSince: { $exists: false } } as never),
+            { $set: { keptSince: new Date().toISOString() } });
+        }
+        return settled;
+      });
       n.deleted += discard.length;
       n.waiting += wait.length;
-      const unstored = new Set(out.unstored);
-      const answered = [...page.map(d => d._id).filter(id => !unstored.has(id)), ...discard];
-      if (answered.length > 0) await stray.deleteMany(asFilter<StrayDoc>({ _id: { $in: answered } }), { maxTimeMS: STEP_MS });
-      if (wait.length > 0) {
-        await stray.updateMany(asFilter<StrayDoc>({ _id: { $in: wait }, keptSince: { $exists: false } } as never),
-          { $set: { keptSince: new Date().toISOString() } }, { maxTimeMS: STEP_MS });
-      }
     }
   }
 
   step.name = 'drop';
-  const empty = (await stray.countDocuments({}, { maxTimeMS: STEP_MS })) === 0;
+  const empty = (await withinWriteBound(() => stray.countDocuments({}))) === 0;
   if (empty) {
     await getDb().dropCollection(collName);
     logInternalAudit({ method: 'SWEEP', path: 'internal:stray-filemeta-drain', spaceId, operation: STRAY_FILEMETA_DRAIN_OPERATION, startedAt });
@@ -130,12 +150,12 @@ async function drainSpace(spaceId: string, pageSize: number, maxPages: number, s
 /**
  * Which of a page's records with no file row to discard, and which wait: discarded when a file tombstone holds the
  * path (the file was deleted here or by a peer) or the record has waited `WAIT_DAYS`; otherwise it waits for bytes.
+ * Read inside the caller's bound (`withinWriteBound`).
  */
 async function settleUnstored(spaceId: string, page: StrayDoc[], unstored: string[]): Promise<{ discard: string[]; wait: string[] }> {
   if (unstored.length === 0) return { discard: [], wait: [] };
-  const tombstoned = new Set((await col<{ _id: string; path: string }>(spaceCollection(spaceId, 'fileTombstones'))
-    .find(asFilter<{ _id: string; path: string }>({ path: { $in: unstored } }), { projection: { path: 1 }, maxTimeMS: STEP_MS })
-    .toArray()).map(t => t.path));
+  // Published tombstones only: a pending one names an act that may not happen (bundle-30 I15, `files/tombstones.ts`).
+  const tombstoned = await tombstonedFilePaths(spaceId, unstored);
   const since = new Map(page.map(d => [d._id, d.keptSince]));
   const expired = Date.now() - WAIT_DAYS * 86_400_000;
   const discard: string[] = [], wait: string[] = [];

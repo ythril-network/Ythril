@@ -36,6 +36,7 @@
  * stops firing inside a step it authorised.
  */
 import { log } from '../../util/log.js';
+import { warnOnce } from '../../util/warn-once.js';
 
 /**
  * Head-room over the longest hop. A stall timeout equal to the hop budget would fire in the same instant the
@@ -72,8 +73,11 @@ export function effectiveStallTimeoutMs(
   return { ms: floor, raised: { from: configuredMs, hop: worst.hop, hopMs: worst.hopMs } };
 }
 
-/** Remembers what has been warned about, so a sweep every 30 s does not print the same line forever. */
-let _lastWarned = '';
+/**
+ * Remembers what has been warned about, so a sweep every 30 s does not print the same line forever: one key, whose
+ * VERSION is the combination — a different combination is news (`util/warn-once.ts`).
+ */
+const stallWarnings = warnOnce<'stall-floor'>();
 
 /** The effective timeout, warning at most once per distinct combination. */
 export function stallTimeoutWithWarning(
@@ -83,19 +87,18 @@ export function stallTimeoutWithWarning(
   const { ms, raised } = effectiveStallTimeoutMs(configuredMs, hops);
   if (raised) {
     const key = `${raised.from}:${raised.hop}:${raised.hopMs}:${ms}`;
-    if (key !== _lastWarned) {
-      _lastWarned = key;
+    stallWarnings('stall-floor', () => {
       log.warn(`Stall detection: using ${ms} ms instead of the configured ${raised.from} ms, because `
         + `${raised.hop} allows a single step of ${raised.hopMs} ms. A step longer than the stall timeout `
         + `reports no progress while it runs, so the job would be re-queued mid-step, abandon its work, and `
         + `reach the same step again — a loop that never finishes. Raise stalledJobTimeoutMs above `
         + `${Math.ceil(raised.hopMs * STALL_FLOOR_FACTOR)} ms to silence this.`);
-    }
+    }, key);
   }
   return ms;
 }
 
 /** Test hook: forget what has been warned about. */
 export function _resetStallWarningForTests(): void {
-  _lastWarned = '';
+  stallWarnings.forget('stall-floor');
 }

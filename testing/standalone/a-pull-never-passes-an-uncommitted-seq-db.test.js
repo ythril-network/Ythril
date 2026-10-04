@@ -32,7 +32,7 @@
  * `nextSeq` returning a number cannot be released when its write settles — nothing tells the registry — so the
  * allocation must take the write with it. `util/seq.ts` must export:
  *
- *   - `withAllocatedSeqs(spaceId, n, write: (first: number) => Promise<T>): Promise<T>` — one `$inc: n`,
+ *   - `withAllocatedSeqs(spaceId, n, write: (first: number) => Promise<T>, holder): Promise<T>` — one `$inc: n`,
  *     registers `first .. first+n-1` as in flight BEFORE `write` runs, and releases them in a `finally`, so a
  *     write that throws cannot leave the horizon stuck (the guard a hand-written copy would drop).
  *   - `lowestUncommittedSeq(spaceId): number | undefined` — the lowest registered seq; every seq-paged pull
@@ -58,6 +58,7 @@ import path from 'node:path';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
 import { readTrackedSources } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
+import { parkWrites } from './_write-faults.mjs';
 import { statementFrom, bodyOf } from './_structural-window.mjs';
 
 const skip = await mongoSkipReason();
@@ -99,48 +100,12 @@ let mongo, fact, ents, edges, chrono, links, fileMeta, shared, seqMod;
 const routers = {};
 const coll = (n) => mongo.col(`${SPACE}_${n}`);
 
-// ── The hold: park the first write to one collection until the test opens the gate ─────────────────────────
-const WRITE_METHODS = ['insertOne', 'insertMany', 'updateOne', 'updateMany', 'replaceOne', 'bulkWrite',
-  'findOneAndUpdate', 'findOneAndReplace'];
-let armed = null; // { name, reached, gate }
-let originals = null;
-
-function seqCarriedBy(method, args) {
-  if (method === 'insertOne') return args[0]?.seq;
-  if (method === 'replaceOne' || method === 'findOneAndReplace') return args[1]?.seq;
-  if (method === 'updateOne' || method === 'findOneAndUpdate') return args[1]?.$set?.seq;
-  // A block write carries several seqs; the LOWEST is the one the horizon must stop below.
-  const seqs = method === 'insertMany' ? (args[0] ?? []).map(d => d?.seq)
-    : method === 'bulkWrite' ? (args[0] ?? []).map(op =>
-      op.insertOne?.document?.seq ?? op.replaceOne?.replacement?.seq ?? op.updateOne?.update?.$set?.seq)
-    : [];
-  const numbers = seqs.filter(s => typeof s === 'number');
-  return numbers.length > 0 ? Math.min(...numbers) : undefined;
-}
-
-function installHold(proto) {
-  originals = {};
-  for (const m of WRITE_METHODS) {
-    const orig = proto[m];
-    originals[m] = orig;
-    proto[m] = async function held(...args) {
-      if (armed && this.collectionName === armed.name) {
-        const a = armed; armed = null; // first write only; the second writer runs free
-        a.reached({ method: m, seq: seqCarriedBy(m, args) });
-        await a.gate;
-      }
-      return orig.apply(this, args);
-    };
-  }
-}
-
-function arm(collectionName) {
-  let reached, release;
-  const reachedP = new Promise(r => { reached = r; });
-  const gate = new Promise(r => { release = r; });
-  armed = { name: collectionName, reached, gate };
-  return { reached: reachedP, release };
-}
+// ── The hold: the first write to one collection parks until the test opens the gate (`_write-faults.mjs`) ──────
+/** Deletes run free, as they always did here: the hold is for a write carrying an allocated seq. */
+const SEQ_WRITE = (method) => !/delete/i.test(method);
+let park = null;
+/** Park the FIRST write to `collectionName` — the second writer runs free; `reached` names its method and seq. */
+const arm = (collectionName) => park.arm(collectionName, { when: SEQ_WRITE });
 
 /** Invoke a route's own handler in-process, past rate-limit and auth middleware the test does not exercise. */
 async function pull(route, query = {}) {
@@ -216,20 +181,18 @@ describe('a pull never passes an uncommitted seq', { skip }, () => {
       routers[r.router] = mod[r.router];
       assert.ok(routers[r.router], `${r.file} does not export ${r.router}`);
     }
-    installHold(Object.getPrototypeOf(mongo.col('probe')));
   });
 
   after(async () => {
-    if (originals) {
-      const proto = Object.getPrototypeOf(mongo.col('probe'));
-      for (const [m, f] of Object.entries(originals)) proto[m] = f;
-    }
+    park?.restore();
     await closeTestMongo();
     try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* best effort */ }
   });
 
   beforeEach(async () => {
-    armed = null;
+    // A fresh park per case, so a hold a failed case left armed cannot catch the next case's write.
+    park?.restore();
+    park = parkWrites(Object.getPrototypeOf(mongo.col('probe')));
     for (const c of ['entities', 'edges', 'facts', 'chrono', 'links', 'files', 'tombstones', 'embed_jobs']) {
       await coll(c).deleteMany({});
     }
@@ -321,7 +284,7 @@ describe('a pull never passes an uncommitted seq', { skip }, () => {
           { _id: 'held-a', spaceId: SPACE, fact: 'a', tags: [], seq: first },
           { _id: 'held-b', spaceId: SPACE, fact: 'b', tags: [], seq: first + 1 },
         ]);
-      });
+      }, 'test.held-block');
       const first = await inside;
       let during;
       try {
@@ -397,7 +360,7 @@ describe('a pull never passes an uncommitted seq', { skip }, () => {
 
     it('a write that throws releases its block, so the horizon cannot stick', async () => {
       assert.equal(typeof seqMod.withAllocatedSeqs, 'function', 'withAllocatedSeqs is not exported');
-      await assert.rejects(seqMod.withAllocatedSeqs(SPACE, 1, async () => { throw new Error('write failed'); }), /write failed/);
+      await assert.rejects(seqMod.withAllocatedSeqs(SPACE, 1, async () => { throw new Error('write failed'); }, 'test.failing-write'), /write failed/);
       assert.equal(seqMod.lowestUncommittedSeq(SPACE), undefined,
         'a failed write left its seq registered — every pull of this space would stall below it for ever');
     });

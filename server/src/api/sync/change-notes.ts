@@ -11,7 +11,7 @@ import { syncRateLimit } from '../../rate-limit/middleware.js';
 import { requireAuth, denyReadOnly } from '../../auth/middleware.js';
 import { callerPeerId } from './_shared.js';
 import { receiveChangeNotes } from '../../sync/change-notes.js';
-import { reportServerFailure } from '../../util/report-failure.js';
+import { sendCaughtFailure } from '../send-failure.js';
 
 export const syncChangeNotesRouter = Router();
 
@@ -24,7 +24,6 @@ syncChangeNotesRouter.post('/networks/:networkId/change-notes', syncRateLimit, r
     );
     res.status(r.status).json(r.body);
   } catch (err) {
-    reportServerFailure('sync POST /networks/:networkId/change-notes', err);
-    res.status(500).json({ error: 'Internal error' });
+    sendCaughtFailure(res, 'sync POST /networks/:networkId/change-notes', err);
   }
 });

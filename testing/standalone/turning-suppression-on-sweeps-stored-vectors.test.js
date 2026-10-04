@@ -45,6 +45,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
 import { bodyOf } from './_structural-window.mjs';
+import { readTrackedSources } from './_sources.mjs';
 
 let SWEEP = null;
 try { SWEEP = await import('../../server/dist/brain/suppression-sweep.js'); } catch { /* not built yet */ }
@@ -160,10 +161,34 @@ describe('an edge keys on LABEL, not on type', () => {
 });
 
 describe('the sweep runs where the flag is written', () => {
-  it('meta-update calls it', () => {
-    const body = src('server/src/spaces/meta-update.ts');
-    assert.match(body, /sweepSuppressedVectors\(/,
+  it('updateSpace — the one writer of space.meta — asks for it whenever the update carries a meta', () => {
+    // Re-anchored twice. Bundle-30 `R5` moved the trigger (`sweepAfterMetaWrite`) beside the sweep, because the
+    // effective-meta recompute — where a network's suppression lands — had to fire it too. Bundle-30 `I5` moved the
+    // CALL into `updateSpace`: meta-update and the recompute each asked for it, so a vote-applied change swept two or
+    // three times, and a schema route's edit of a space no network carries (`commitOwnMetaEdit`'s plain branch) swept
+    // not at all. `a-meta-write-goes-through-the-own-definitions` holds every meta write to `updateSpace`, so asking
+    // there is asking on every write; `a-meta-write-sweeps-once-wherever-it-lands-db` holds the behaviour.
+    assert.match(bodyOf(src('server/src/spaces/spaces.ts'), 'updateSpace'), /sweepAfterMetaWrite\(/,
       'nothing sweeps after a meta write, so the docs\' present tense is still a promise rather than behaviour');
+    const sweep = src('server/src/brain/suppression-sweep.ts');
+    // Re-anchored a third time (bundle-30 I8): the trigger and the boot sweep share `queueSweep`, which runs it.
+    assert.match(bodyOf(sweep, 'sweepAfterMetaWrite'), /\bqueueSweep\(/, 'the trigger no longer runs the sweep');
+    assert.match(bodyOf(sweep, 'queueSweep'), /\bsweepLatestMeta\(/, 'the trigger no longer runs the sweep');
+    assert.match(bodyOf(sweep, 'sweepLatestMeta'), /\bsweepSuppressedVectors\(/, 'the trigger no longer runs the sweep');
+  });
+
+  it('nothing else asks for it: one meta change is swept once, wherever it lands', () => {
+    // Derived, not listed: a caller added next year that sweeps after its own meta write is the double sweep again.
+    const allowed = new Map([
+      ['server/src/spaces/spaces.ts', 'updateSpace, the one writer of space.meta'],
+      ['server/src/brain/suppression-sweep.ts', 'the boot sweep of every space, which writes no meta'],
+    ]);
+    const askers = readTrackedSources('server/src')
+      .filter(({ text }) => /\bsweepAfterMetaWrite\(/.test(stripComments(text).replace(/export function sweepAfterMetaWrite\(/, '')))
+      .map(({ file }) => file);
+    assert.ok(askers.includes('server/src/spaces/spaces.ts'), 'the scan found no caller at all — it is looking in the wrong place');
+    assert.deepEqual(askers.filter(f => !allowed.has(f)), [],
+      'these sweep after a meta write of their own; updateSpace already asks for it, so the change is swept twice');
   });
 
   it('it does not bump seq, because the vector is not replicated', () => {
@@ -178,8 +203,12 @@ describe('the sweep runs where the flag is written', () => {
   it('it clears BOTH the field and any queued job to recompute it', () => {
     // Leaving a queued embed job behind would have the worker write the vector straight back, which is the
     // whole defect returning by a different route within seconds.
+    // Re-anchored (bundle-30, I4b): the sweep's own `deleteMany` on `'embedJobs'` moved onto the queue's one retire,
+    // `retireEmbedJobs` — so the rule is now read per path that removes a vector, not as a spelling anywhere in the file.
     const sweep = src('server/src/brain/suppression-sweep.ts');
-    assert.match(sweep, /'embedJobs'|cancelEmbedJobs|dequeue/i,
-      'a pending embed job would restore the vector the sweep just removed');
+    for (const fn of ['sweepSuppressedVectors', 'sweepFiles', 'dropFileVectors']) {
+      assert.match(bodyOf(sweep, fn), /\bretireEmbedJobs\(/,
+        `${fn}: a pending embed job would restore the vector the sweep just removed`);
+    }
   });
 });

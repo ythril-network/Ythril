@@ -8,7 +8,7 @@ import { entityDeleteBlockers } from '../../brain/entity-delete-guard.js';
 import { deleteEntityCascade } from '../../brain/entity-delete-cascade.js';
 // The shared write gate, imported rather than reimplemented — see the note in memory.ts.
 import { SchemaViolationError, type UpdateValidation } from '../../brain/write-validation.js';
-import { type PropertyResolution, type EndpointRuleWarning, applyResolutions, computeMergePlan, executeMerge, validateResolution } from '../../brain/merge.js';
+import { type PropertyResolution, type EndpointRuleWarning, mergeEntities, MERGE_MAX_RELINKS } from '../../brain/merge.js';
 import { getConfig } from '../../config/loader.js';
 import { isProxySpace, resolveMemberSpaces, resolveWriteTarget, findFirstAcrossMembers } from '../../spaces/proxy.js';
 import { resolveMetaRefs } from '../../spaces/schema-validation.js';
@@ -340,7 +340,8 @@ function appendEndpointRuleWarnings(lines: string[], warnings: readonly Endpoint
 export const graph_mergeTool: ToolHandler = {
   name: 'graph_merge',
   description: 'Merge two entities into one. IRREVERSIBLE: the survivor keeps its identity and id, every reference to the absorbed entity is relinked to it, and the absorbed record is then DELETED. There is no unmerge.\n\n'
-    + 'TWO-PHASE BY DESIGN, and the 409 is the feature rather than an error. Call it with an empty or partial `resolution` and you get a CONFLICT PLAN back with status 409: every property where the two disagree, with both values. Call it again with a fully resolved map and it executes. A 409 on the first call is the expected path — treat it as the question being asked, not as a failure to retry.\n\n'
+    + 'TWO-PHASE BY DESIGN, and the conflict plan is the feature rather than an error. Call it with an empty or partial `resolutions` and you get a CONFLICT PLAN back as an error result (status 422 on `POST /api/graph_merge`; the REST merge route answers the same plan 409): every property where the two disagree, with both values. Call it again with a fully resolved map and it executes. A plan on the first call is the expected path — treat it as the question being asked, not as a failure to retry.\n\n'
+    + 'REFUSED BEFORE ANYTHING IS WRITTEN, on every door alike: `merge_too_large` (status 422, with `relinks` and `bound` in structuredContent) when the absorbed entity has more edges, links and face labels than one merge relinks (' + MERGE_MAX_RELINKS + '), and status 400 when the merged survivor would break a `strict` space\'s schema. The `merge_too_large` text names both entities and what would fit: deleting edges or links the absorbed entity no longer needs (an edge cannot be moved; its ends are not editable), or merging the other way round, offered only when that merge fits the bound. A merge that runs relinks everything in ONE transaction: it lands whole or not at all.\n\n'
     + 'RESOLVE EVERY CONFLICT OR NOTHING HAPPENS. A partial map returns the plan again rather than merging what it can, because a half-merge would leave two records that are neither separate nor one.\n\n'
     + 'Per type: numeric properties accept `fn:avg|min|max|sum`, booleans accept `fn:and|or|xor`, and strings take "survivor", "absorbed", or "custom" with `customValue` — there is no function that can combine two strings sensibly, so you have to choose. Properties that do NOT conflict are carried over without appearing in the plan.\n\n'
     + 'IT CAN LEAVE AN EDGE BREAKING ITS LABEL\'S RULE, AND IT TELLS YOU WHICH. Relinking rewrites the ends of stored edges, so merging two entities of different types can move an edge onto an end its label forbids — and that is a legitimate thing to do, because a merge is how a mistyped record gets fixed. Any such edge is listed on both the plan and the result, naming the end that moved and what the label admits. It is REPORTED, not refused: a rule declared after the data existed must not make duplicates unmergeable. Fix them afterwards with `update_edge`/`delete_edge`, or widen the label\'s endpoints in the space schema.',
@@ -360,7 +361,7 @@ export const graph_mergeTool: ToolHandler = {
                 properties: {
                   key: {
                     type: 'string',
-                    description: 'The property name, exactly as the 409 conflict plan reported it. Only '
+                    description: 'The property name, exactly as the conflict plan reported it. Only '
                       + 'CONFLICTING properties appear there and only those need resolving — ones the two '
                       + 'records agree on, or that only one of them has, are carried over without being '
                       + 'listed and must not be sent here.',
@@ -409,19 +410,13 @@ export const graph_mergeTool: ToolHandler = {
       }
     }
 
-    const result = await computeMergePlan(wt.target, survivorId, absorbedId, resolutions);
-    if ('error' in result) throw new Error(result.error);
+    // The one merge sequence every door runs (`mergeEntities`). A refusal it throws (`merge_too_large`, a strict
+    // schema) is answered by `callTool` through `mergeRefusal`, with the status every door gives it.
+    const outcome = await mergeEntities(wt.target, survivorId, absorbedId, resolutions, ctx.actor);
+    if (outcome.kind === 'not-found' || outcome.kind === 'invalid-resolution') throw new Error(outcome.error);
 
-    const { plan, fullyResolved, survivor, absorbed } = result;
-
-    // Validate resolutions
-    for (const c of plan.propertyConflicts) {
-      if (!c.resolved) continue;
-      const err = validateResolution(c.resolution!, c.type, c.customValue !== undefined);
-      if (err) throw new Error(`Invalid resolution for '${c.key}': ${err}`);
-    }
-
-    if (!fullyResolved) {
+    if (outcome.kind === 'unresolved') {
+      const { plan } = outcome;
       const lines: string[] = ['Merge plan — unresolved conflicts remain:'];
       for (const c of plan.propertyConflicts) {
         const status = c.resolved ? '✓' : '✗';
@@ -446,17 +441,10 @@ export const graph_mergeTool: ToolHandler = {
       };
     }
 
-    // Execute merge
-    const mergedProperties = applyResolutions(
-      survivor.properties ?? {},
-      absorbed.properties ?? {},
-      plan.propertyConflicts,
-      plan.absorbedOnlyProperties,
-    );
-
+    const { plan, absorbed } = outcome;
     // Q-50: the one fact a merge makes unrecoverable, recorded as the REST route records it — see api/brain/entities.ts.
     ctx.recordChanges?.({ absorbedName: absorbed.name }, { absorbedName: null });
-    const mergeResult = await executeMerge(wt.target, survivor, absorbed, mergedProperties, ctx.actor);
+    const mergeResult = outcome;
     const mergedEntity = mergeResult.entity;
 
     const lines: string[] = [
@@ -501,7 +489,8 @@ export const graph_mergeTool: ToolHandler = {
 export const delete_entityTool: ToolHandler = {
   name: 'delete_entity',
   description: 'Delete an entity by id. IRREVERSIBLE, and it is a DELETE rather than a retire — if you want the record to stop appearing in semantic search while staying readable and traversable, set `suppressEmbeddings` on it instead.\n\n'
-    + 'A REFUSAL HERE IS USUALLY CORRECT. With `strictLinkage` on, an entity is refused while an edge, fact, chrono entry or file still references it, and the refusal names each one — for an EDGE, including which of its ends this entity is, because that is the end you have to clear. Note that BOTH ends count: an edge pointing FROM this entity blocks the delete exactly as one pointing at it does, since either would be left dangling. Resolve them first, or `graph_merge` into the record that should have held them. There is no cascade.\n\n'
+    + 'A REFUSAL HERE IS USUALLY CORRECT. With `strictLinkage` on, an entity is refused while an edge, fact, chrono entry or file still references it, and the refusal names each one — for an EDGE, including which of its ends this entity is, because that is the end you have to clear. Note that BOTH ends count: an edge pointing FROM this entity blocks the delete exactly as one pointing at it does, since either would be left dangling. Resolve them first, or `graph_merge` into the record that should have held them.\n\n'
+    + 'OR DELETE IT WITH ITS BLOCKING EDGES, in one call: pass the `token` from `delete_entity_preview` as `cascadeToken`. The cascade removes those edges, each with its tombstone, a chunk at a time — a chunk lands whole or not at all, so a failure never leaves an edge gone without the tombstone that tells peers — and then the entity. A fact, chrono entry or file that still names the entity refuses the cascade BEFORE anything is removed.\n\n'
     + 'It writes a TOMBSTONE, so the deletion propagates to peer instances on the next sync. A space that syncs will not quietly resurrect the record from a peer, and the tombstone is why.',
   mutating: true,
   spaceRequired: true,

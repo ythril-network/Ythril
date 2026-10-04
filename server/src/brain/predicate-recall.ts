@@ -45,7 +45,7 @@
  */
 import { col } from '../db/mongo.js';
 import { isMaxTimeExpired } from '../db/max-time.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
 import { inChunks } from '../util/chunks.js';
 import { andPredicates } from './recall-filter.js';
 import { FRESH_WINDOW_MS } from './fresh-writes.js';
@@ -255,7 +255,7 @@ async function stageTwo(args: PredicateRecallArgs, stageOneHits: Record<string, 
       try {
         for await (const d of cursor) {
           if (++total > MAX_PREDICATE_IDS) {
-            log.warn(`Filtered recall on ${collName}: more than ${MAX_PREDICATE_IDS} records match a filter the index `
+            log.warn(`Filtered recall on ${peerText(collName)}: more than ${MAX_PREDICATE_IDS} records match a filter the index `
               + 'cannot apply — answered from the first of them and flagged filter_window. Declare the filtered '
               + 'property in the space schema to keep this filter on the index.');
             collected = null;
@@ -279,18 +279,18 @@ async function stageTwo(args: PredicateRecallArgs, stageOneHits: Record<string, 
     }
   } catch (err) {
     if (isMaxTimeExpired(err)) {
-      log.warn(`Filtered recall on ${collName}: the budget ran out completing the answer — returning what was found`);
+      log.warn(`Filtered recall on ${peerText(collName)}: the budget ran out completing the answer — returning what was found`);
       return answer(['search_timeout']);
     }
     if (isIdFilterRefusal(err)) {
-      log.warn(`Filtered recall on ${collName}: ${indexName} cannot filter on _id yet (an index built before it `
+      log.warn(`Filtered recall on ${peerText(collName)}: ${peerText(indexName)} cannot filter on _id yet (an index built before it `
         + 'was declared, updating in place) — the answer may be missing matching records and says filter_window');
       return answer(['filter_window']);
     }
     // Anything else, after stage 1 answered: the collection is readable and the completion is not. Throwing would
     // discard stage 1's hits with it (the caller reads an unknown index error as an empty collection), so the
     // answer keeps them and says it is incomplete — and the reason reaches the log rather than vanishing.
-    log.warn(`Filtered recall on ${collName}: completing the answer failed (${err instanceof Error ? err.message : String(err)}) `
+    log.warn(`Filtered recall on ${peerText(collName)}: completing the answer failed (${peerText(err)}) `
       + '— returning what the first stage found, flagged filter_window');
     return answer(['filter_window']);
   }

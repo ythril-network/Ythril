@@ -18,7 +18,7 @@ import { requireSpaceAuthMfaScoped, denyReadOnly } from '../auth/middleware.js';
 
 import { getConfig } from '../config/loader.js';
 import { reembedSpace, REEMBED_MAX_LIMIT } from '../brain/reembed.js';
-import { log } from '../util/log.js';
+import { sendCaughtFailure } from './send-failure.js';
 
 /**
  * Body for the re-embed backfill. Every field optional — `POST` with no body sweeps everything at the default
@@ -60,9 +60,7 @@ export function registerReembedRoute(spacesRouter: Router): void {
       });
       res.json(out);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      log.error(`POST /api/spaces/${spaceId}/reembed: ${err}`);
-      res.status(500).json({ error: msg });
+      sendCaughtFailure(res, `POST /api/spaces/${spaceId}/reembed`, err, { error: err instanceof Error ? err.message : String(err) });
     }
   });
 }

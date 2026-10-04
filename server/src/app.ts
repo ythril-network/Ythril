@@ -1,5 +1,7 @@
 import { ReferenceRefusal } from './brain/entity-refs.js';
 import { WriteConflict } from './brain/write-plan/types.js';
+import { storeFailureAnswer } from './brain/store-failure.js';
+import { sendCaughtFailure, sendStoreFailure } from './api/send-failure.js';
 import express from 'express';
 import compression from 'compression';
 import { shouldCompress, staticCacheControl } from './util/transfer.js';
@@ -56,7 +58,7 @@ import { clearOidcCache } from './auth/oidc.js';
 import { initSpace, ensureGeneralSpace, wipeSpace, reconcilePendingSpaceOp, WIPE_COLLECTION_TYPES, type WipeCollectionType } from './spaces/lifecycle.js';
 import { concreteSpaces } from './spaces/proxy.js';
 import { col } from './db/mongo.js';
-import { log, runWithRequestId } from './util/log.js';
+import { log, peerText, runWithRequestId } from './util/log.js';
 import { rearmCronSchedulers } from './schedulers.js';
 import { getReadiness, classifyCheckError } from './ready.js';
 import { isShuttingDown } from './lifecycle.js';
@@ -211,7 +213,7 @@ export function createApp() {
       // A code, not the message. This endpoint is public by necessity — an orchestrator cannot carry a token —
       // and driver messages name internal hosts and addresses (`getaddrinfo ENOTFOUND mongo-a.internal`). The
       // detail is logged instead, which is also where it was missing entirely before. See `ready.ts`.
-      log.error(`Readiness check itself failed: ${err instanceof Error ? err.message : String(err)}`);
+      log.error('Readiness check itself failed:', err);
       res.status(503).json({
         ready: false,
         checks: {
@@ -405,8 +407,7 @@ export function createApp() {
       const deleted = await wipeSpace(spaceId, rawTypes);
       res.json({ deleted });
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      res.status(500).json({ error: msg });
+      sendCaughtFailure(res, 'POST /api/admin/spaces/:spaceId/wipe', err, { error: peerText(err instanceof Error ? err.message : String(err)) });
     }
   });
 
@@ -469,14 +470,14 @@ export function createApp() {
       await write('}');
       res.end();
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = peerText(err instanceof Error ? err.message : String(err));
       if (!res.headersSent) {
-        res.status(500).json({ error: msg });
+        sendCaughtFailure(res, 'GET /api/admin/spaces/:spaceId/export', err, { error: msg });
       } else {
         // We have already sent `200` and a partial body, so we cannot change the status.
         // Destroy the socket so the client sees a TRUNCATED/aborted response rather than a
         // syntactically-valid JSON that is silently missing documents.
-        log.error(`Space export for '${spaceId}' failed mid-stream: ${msg}`);
+        log.error(`Space export for '${peerText(spaceId)}' failed mid-stream: ${msg}`);
         res.destroy(err instanceof Error ? err : new Error(msg));
       }
     }
@@ -604,8 +605,7 @@ export function createApp() {
       await applyConfigFromDisk({ tokenId: req.authToken?.id ?? null, tokenLabel: req.authToken?.name ?? null, ip: req.ip ?? '-', method: 'POST', path: '/api/admin/reload-config' });
       res.json({ ok: true });
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      res.status(500).json({ error: msg });
+      sendCaughtFailure(res, 'POST /api/admin/reload-config', err, { error: peerText(err instanceof Error ? err.message : String(err)) });
     }
   });
 
@@ -639,8 +639,7 @@ export function createApp() {
       }
       res.json({ ok: true, signingPublicKey: result.publicKeyPem });
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      res.status(500).json({ error: msg });
+      sendCaughtFailure(res, 'POST /api/admin/rotate-signing-key', err, { error: peerText(err instanceof Error ? err.message : String(err)) });
     }
   });
 
@@ -691,7 +690,7 @@ export function createApp() {
   });
 
   // ── Global error handler ─────────────────────────────────────────────────
-  app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  app.use((err: unknown, req: express.Request, res: express.Response, _next: express.NextFunction) => {
     // Propagate HTTP-level errors from body-parser (e.g. 413 Payload Too Large)
     if (err && typeof err === 'object' && 'status' in err && typeof (err as { status: unknown }).status === 'number') {
       const httpErr = err as { status: number; message: string };
@@ -721,12 +720,25 @@ export function createApp() {
       res.status(409).json({ error: err.message });
       return;
     }
-    const message = err instanceof Error ? err.message : String(err);
+    /*
+     * The STORE's condition is the store's on every door (bundle-30, `R1`). A write the bound ended, a step-down, a
+     * dropped socket: retryable, `503` — the classification the MCP door and the read routes already answer from,
+     * so a REST write and the same write through a tool no longer disagree (this answered `500` while the tool
+     * door answered `503`). An unrecognised driver error is answered there too, as a `500` in our words and logged
+     * with its stack; everything else stays the `500` below.
+     */
+    // Named by method and path (never the query, which can carry a file path), as a route's own catch names itself.
+    const store = storeFailureAnswer(err, `${req.method} ${req.baseUrl}${req.path}`);
+    if (store) {
+      sendStoreFailure(res, store);
+      return;
+    }
     /*
      * The id is no longer spelled out here: every line emitted during a request carries it now, so writing it
-     * again produced it twice on the one line that already had it.
+     * again produced it twice on the one line that already had it. The error is the META argument, so the line
+     * keeps its stack and bounds its message (`fmt`) — interpolated, the stack was dropped (bundle-30 I6, C16).
      */
-    log.error(`Unhandled error: ${message}`);
+    log.error('Unhandled error:', err);
     res.status(500).json({ error: 'Internal server error' });
   });
 

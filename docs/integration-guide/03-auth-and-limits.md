@@ -87,13 +87,21 @@ of your request from a failure underneath us.** Every failure body from those th
 true or false, whether or not it bit:
 
 ```json
-{ "error": "Executor error during aggregate command on namespace: … :: caused by :: the store reported no
-           cause (this is a store-side failure, not a problem with your request — it can be retried)",
+{ "error": "A store-side failure stopped this operation. It did not complete as far as this server can confirm;
+           retry the request (store-side failure; retryable).",
   "retryable": true, "code": 8, "codeName": "InternalError" }
 ```
 
-A `503` also carries `Retry-After`. `code` and `codeName` are the store's own, present when it supplied them,
-and they are an operator's fastest route to the real condition.
+A `503` also carries `Retry-After`, on every HTTP door. `code` and `codeName` are the store's own, present when it
+supplied them, and they are an operator's fastest route to the real condition. **The error text is ours, on every
+door and for every caller, in one spelling**: the database driver's own message names internal hosts, addresses
+and ports, so it goes to the server log — once per request, as a `Store-side failure answered 503` warning that
+names the operation that failed, on every door: the route (`Store-side failure answered 503 (GET /api/conflicts): …`,
+or the method and path when the app's error handler answered it) or the MCP tool (`(tool delete_file)`) — and never
+into an answer. A driver error the server does not recognise as a store condition is not passed through
+either: it answers `500` with `retryable: false` and *"An internal database fault stopped this operation; its
+cause is in the server log."* What the database itself refused (a malformed query, a validation failure) is still
+a `400` in its own words.
 
 > **Why this exists, because the cost was not the confusing message.** Until this release those routes
 > answered **400 for every failure**, including a vector-search stage that had simply stopped answering. A
@@ -105,6 +113,17 @@ and they are an operator's fastest route to the real condition.
 **Read `retryable` rather than matching the prose**, and treat a `503` from these routes as transient: the
 conditions behind it (a search index re-initialising after a restart, a replica set stepping down, a search
 process that died) clear on their own, in seconds for a blip and in hours for a large reindex.
+
+**Writes answer the same way, on every door.** A write the database could not complete in time — every
+operation a write issues while it holds its sequence number is bounded (`YTHRIL_WRITE_TIMEOUT_MS`,
+`YTHRIL_HOLD_DEADLINE_MS`, see [Hosting](02-hosting.md)) — answers `503` with `retryable: true`, a `Retry-After`
+and a message of ours: the driver's text names internal collections and is never returned. The REST record routes,
+`POST /api/<tool>`, the MCP tools and the sync push routes classify it alike; until this release a REST write answered
+the same store failure `500` that the tool door answered `503`. Nothing was confirmed written, so retrying is
+the remedy. Any other store failure on a write (a step-down, a dropped connection, a connection pool the driver
+cleared) answers as a read does — the store's condition, with its `code` and `codeName` — on every REST route and
+on MCP alike; one function builds the answer and one sender puts it on the wire, so no route answers a store
+failure with a `500` of its own.
 
 **We do not retry internally, deliberately.** A transparent retry would turn a dead search process into slow
 successes and hide it from the operator who can fix it. You get told, and you decide.

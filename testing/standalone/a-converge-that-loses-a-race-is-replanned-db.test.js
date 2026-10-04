@@ -27,6 +27,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
+import { parkWrites } from './_write-faults.mjs';
 
 const skip = await mongoSkipReason();
 
@@ -40,17 +41,10 @@ const HOLD_TIMEOUT = 30_000;
 let mongo, fact, bulk, types;
 const coll = (n) => mongo.col(`${SPACE}_${n}`);
 
-let armed = null;
-let original = null;
+let park = null;
 
-/** Park the next `count` bulk writes to `name`; each waits for the gate. Returns when the first is reached. */
-function arm(name, count = 1) {
-  let reached, release;
-  const reachedP = new Promise(r => { reached = r; });
-  const gate = new Promise(r => { release = r; });
-  armed = { name, left: count, reached, gate };
-  return { reached: reachedP, release };
-}
+/** Park the next bulk write to `name` until released (`_write-faults.mjs`); `reached` resolves when it is parked. */
+const arm = (name) => park.arm(name, { when: (method) => method === 'bulkWrite' });
 
 describe('a converge that loses a race is re-planned', { skip }, () => {
   before(async () => {
@@ -63,28 +57,18 @@ describe('a converge that loses a race is re-planned', { skip }, () => {
     fact = await import('../../server/dist/brain/fact.js');
     bulk = await import('../../server/dist/brain/bulk.js');
     types = await import('../../server/dist/brain/write-plan/types.js');
-    const proto = Object.getPrototypeOf(mongo.col('probe'));
-    original = proto.bulkWrite;
-    proto.bulkWrite = async function held(...args) {
-      if (armed && this.collectionName === armed.name && armed.left > 0) {
-        const a = armed;
-        a.left -= 1;
-        if (a.left === 0) armed = null;
-        a.reached();
-        await a.gate;
-      }
-      return original.apply(this, args);
-    };
   });
 
   after(async () => {
-    if (original) Object.getPrototypeOf(mongo.col('probe')).bulkWrite = original;
+    park?.restore();
     await closeTestMongo();
     try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* best effort */ }
   });
 
   beforeEach(async () => {
-    armed = null;
+    // A fresh park per case, so a hold a failed case left armed cannot catch the next case's write.
+    park?.restore();
+    park = parkWrites(Object.getPrototypeOf(mongo.col('probe')));
     for (const c of ['facts', 'links', 'embed_jobs', 'tombstones']) await coll(c).deleteMany({});
   });
 

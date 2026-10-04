@@ -20,41 +20,36 @@
 import { Router } from 'express';
 import { toDocId } from '../util/paths.js';
 import fs from 'fs/promises';
-import { removeTree } from '../files/remove-tree.js';
 import path from 'path';
 import { requireSpaceAuth, denyReadOnly } from '../auth/middleware.js';
 import { globalRateLimit } from '../rate-limit/middleware.js';
 import { getConfig } from '../config/loader.js';
 import { log } from '../util/log.js';
-import { openStoredRead, statStored, StoredFileUnreadable } from '../files/stored-bytes.js';
+import { isMissingPath, openStoredRead, statStored, StoredFileUnreadable } from '../files/stored-bytes.js';
 import {
   listDir,
   createDir,
-  listFilesRecursive,
   type FileEntry,
 } from '../files/files.js';
 import { fetchJobProgress } from '../files/media/job-queue.js';
 import {
   getUploadReceived,
 } from '../files/chunks.js';
-import { invalidateUsageCache } from '../quota/quota.js';
 import { resolveSafePath, resolveSafePathChecked, assertNoSymlinkEscape, spaceRoot } from '../files/sandbox.js';
 import { col, asFilter } from '../db/mongo.js';
 import type { FileMetaDoc } from '../config/types.js';
-import { deleteFileMeta, deleteFileMetaByPrefix, markFileMetaDeletedByPrefix } from '../files/file-meta.js';
+import { NotFoundError } from '../util/errors.js';
 import { moveFileCascade } from '../files/move-cascade.js';
-import { writeFileTombstones } from '../files/tombstones.js';
-import { deleteFileCascade } from '../files/delete-cascade.js';
+import { deleteDirectoryCascade, deleteFileCascade, isUnfinishedDirectoryDelete } from '../files/delete-cascade.js';
 import { resolveWriteTarget } from '../spaces/proxy.js';
 import { memberSpacesForRequest } from '../spaces/proxy-scoped.js';
-import { deleteConversionArtifactsByPrefix } from '../files/converters/pipeline.js';
-import { cancelMediaJobsByPrefix } from '../files/media/job-queue.js';
 import { contentTypeForDownload } from '../files/mime.js';
 import { hideDerivedTrees } from '../files/derived-trees.js';
 import { registerUploadRoute } from './files-upload.js';
 import { webhookToken, requireQueryPath } from './files-request.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { answerSpillPath } from './brain/spills.js';
+import { sendCaughtFailure } from './send-failure.js';
 
 export const fileStoreRouter = Router();
 
@@ -338,9 +333,12 @@ fileStoreRouter.get('/:spaceId', globalRateLimit, requireSpaceAuth, async (req, 
     });
     body.pipe(res);
   } catch (err) {
-    log.warn(`readFileBytes error for space ${foundMid}, path ${normalised}: ${err}`);
-    if (err instanceof StoredFileUnreadable) { res.status(500).json({ error: err.message }); return; }
-    res.status(500).json({ error: 'Failed to read file' });
+    if (err instanceof StoredFileUnreadable) {
+      log.warn(`readFileBytes error for space ${foundMid}, path ${normalised}: ${err}`);
+      res.status(500).json({ error: err.message });
+      return;
+    }
+    sendCaughtFailure(res, `readFileBytes for space ${foundMid}, path ${normalised}`, err, { error: 'Failed to read file' });
   }
 });
 
@@ -373,8 +371,7 @@ fileStoreRouter.post(
         res.status(400).json({ error: err.message });
         return;
       }
-      log.warn(`createDir error for space ${targetSpace}, path ${dirPath}: ${err}`);
-      res.status(500).json({ error: 'Failed to create directory' });
+      sendCaughtFailure(res, `createDir for space ${targetSpace}, path ${dirPath}`, err, { error: 'Failed to create directory' });
     }
   },
 );
@@ -437,8 +434,10 @@ fileStoreRouter.post(
     }
 
     const { retryJob } = await import('../files/media/job-queue.js');
+    // The failure is KEPT, not logged and replaced by a token: a store failure here answers as every door answers it.
+    let failure: unknown;
     const result = await retryJob(targetSpace, normId).catch(err => {
-      log.warn(`retryJob error for ${targetSpace}/${normId}: ${err}`);
+      failure = err;
       return 'error' as const;
     });
 
@@ -453,7 +452,7 @@ fileStoreRouter.post(
         res.status(202).json({ queued: true });
         break;
       default:
-        res.status(500).json({ error: 'Internal error' });
+        sendCaughtFailure(res, `retryJob for ${targetSpace}/${normId}`, failure);
     }
   },
 );
@@ -486,35 +485,34 @@ fileStoreRouter.delete('/:spaceId', globalRateLimit, requireSpaceAuth, denyReadO
     return;
   }
 
-  let stat: Awaited<ReturnType<typeof fs.stat>> | null;
+  let stat: Awaited<ReturnType<typeof fs.stat>> | null = null;
   try {
     stat = await fs.stat(absPath);
   } catch (statErr: unknown) {
-    const code = (statErr as NodeJS.ErrnoException).code;
-    if (code === 'ENOENT') {
-      // Check for an orphaned meta record (file deleted externally, meta still exists).
-      // If there is one, clean it up and return 204 so the UI can remove it.
-      // If there is none, the path was never known — return 404.
-      const normalisedPath = toDocId(filePath);
-      const orphan = await col<FileMetaDoc>(spaceCollection(targetSpace, 'files')).findOne(
-        asFilter<FileMetaDoc>({ _id: normalisedPath }),
-      );
-      if (orphan) {
-        await deleteFileMeta(targetSpace, filePath).catch(err => {
-          log.warn(`deleteFileMeta (orphan cleanup) error for space ${targetSpace}, path ${filePath}: ${err}`);
-        });
-        res.status(204).end();
-        return;
-      }
+    // No bytes at this path. A metadata record whose file went missing (an ORPHAN) is completed by the cascade below
+    // — tombstone, record, jobs, artifacts — and a path with neither is its NotFoundError, answered 404 there. This
+    // branch used to clean the orphan's record itself and write no tombstone, so a peer re-pushed the file
+    // (bundle-30 I13).
+    if (!isMissingPath(statErr)) {
       res.status(404).json({ error: 'Path not found' });
       return;
     }
-    res.status(404).json({ error: 'Path not found' });
-    return;
   }
 
-  if (stat.isDirectory()) {
-    if (!req.body || req.body.confirm !== true) {
+  // A directory — or one whose tree a store failure left gone with its records still there, which only a delete the
+  // caller confirmed as a directory's may complete (bundle-30 I14).
+  const confirmed = req.body?.confirm === true;
+  let isDirectory = !!stat?.isDirectory();
+  if (!stat && confirmed) {
+    try {
+      isDirectory = await isUnfinishedDirectoryDelete(targetSpace, filePath);
+    } catch (err) {
+      sendCaughtFailure(res, `directory delete for space ${targetSpace}, path ${filePath}`, err, { error: 'Failed to delete directory' });
+      return;
+    }
+  }
+  if (isDirectory) {
+    if (!confirmed) {
       res.status(422).json({
         error:
           'Deleting a directory requires { "confirm": true } in the request body.',
@@ -526,46 +524,11 @@ fileStoreRouter.delete('/:spaceId', globalRateLimit, requireSpaceAuth, denyReadO
       return;
     }
     try {
-      // Enumerate every file about to be removed — the folder tree AND its conversion
-      // sidecars — BEFORE deleting, so we can write a sync tombstone for each. Without
-      // tombstones a peer would re-push the files on the next sync (resurrection).
-      const removedPaths = (await Promise.all([
-        listFilesRecursive(targetSpace, filePath),
-        listFilesRecursive(targetSpace, `_converted/${filePath}`),
-        listFilesRecursive(targetSpace, `_extracted/${filePath}`),
-      ])).flat();
-
-      await removeTree(absPath, { mustExist: true });   // a converter may still be writing under it
-      log.info(`Deleted directory ${absPath} (space: ${targetSpace})`);
-      invalidateUsageCache(); // freed disk — reflect it in the next quota check
-
-      // Metadata: soft-flag the user-visible file records (retain for audit) or hard-delete
-      // them, per the softDeleteFileMeta setting. Derived chunk records are always removed.
-      if (getConfig().softDeleteFileMeta === true) {
-        await markFileMetaDeletedByPrefix(targetSpace, filePath).catch(err => {
-          log.warn(`markFileMetaDeletedByPrefix error for space ${targetSpace}, path ${filePath}: ${err}`);
-        });
-      } else {
-        await deleteFileMetaByPrefix(targetSpace, filePath).catch(err => {
-          log.warn(`deleteFileMetaByPrefix error for space ${targetSpace}, path ${filePath}: ${err}`);
-        });
-      }
-      // Cancel any queued media/text jobs for files under this folder, or they would
-      // outlive their sources and retry forever against paths that no longer exist.
-      await cancelMediaJobsByPrefix(targetSpace, filePath).catch(err => {
-        log.warn(`cancelMediaJobsByPrefix error for space ${targetSpace}, path ${filePath}: ${err}`);
-      });
-      // Remove conversion sidecar records + on-disk files (`_converted/<path>`,
-      // `_extracted/<path>`), which live outside the folder prefix and would otherwise orphan.
-      await deleteConversionArtifactsByPrefix(targetSpace, filePath).catch(err => {
-        log.warn(`deleteConversionArtifactsByPrefix error for space ${targetSpace}, path ${filePath}: ${err}`);
-      });
-      // Propagate the deletion to sync peers.
-      await writeFileTombstones(targetSpace, removedPaths);
+      // Tombstones, tree, jobs, sidecars, metadata — in the order `files/delete-cascade.ts` explains.
+      await deleteDirectoryCascade(targetSpace, filePath);
       res.status(204).end();
     } catch (err) {
-      log.warn(`rm dir error for space ${targetSpace}, path ${filePath}: ${err}`);
-      res.status(500).json({ error: 'Failed to delete directory' });
+      sendCaughtFailure(res, `directory delete for space ${targetSpace}, path ${filePath}`, err, { error: 'Failed to delete directory' });
     }
     return;
   }
@@ -580,8 +543,11 @@ fileStoreRouter.delete('/:spaceId', globalRateLimit, requireSpaceAuth, denyReadO
       res.status(400).json({ error: err.message });
       return;
     }
-    log.warn(`deleteFile error for space ${targetSpace}, path ${filePath}: ${err}`);
-    res.status(500).json({ error: 'Failed to delete file' });
+    if (err instanceof NotFoundError) {
+      res.status(404).json({ error: 'Path not found' });
+      return;
+    }
+    sendCaughtFailure(res, `file delete for space ${targetSpace}, path ${filePath}`, err, { error: 'Failed to delete file' });
   }
 });
 
@@ -618,8 +584,11 @@ fileStoreRouter.patch('/:spaceId', globalRateLimit, requireSpaceAuth, denyReadOn
       res.status(400).json({ error: err.message });
       return;
     }
-    log.warn(`moveFile error for space ${targetSpace}, ${srcPath} → ${destination}: ${err}`);
-    res.status(500).json({ error: 'Failed to move path' });
+    if (err instanceof NotFoundError) {
+      res.status(404).json({ error: 'Path not found' });
+      return;
+    }
+    sendCaughtFailure(res, `file move for space ${targetSpace}, ${srcPath} → ${destination}`, err, { error: 'Failed to move path' });
   }
 });
 

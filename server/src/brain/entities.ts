@@ -1,6 +1,7 @@
 import { brainWriteSeqTotal } from '../metrics/registry.js';
 import { type ContradictionWarning } from './insert-contradictions.js';
 import { col, asFilter, asUpdate } from '../db/mongo.js';
+import { readRowsById } from '../db/read-by-id.js';
 import { withSeq } from '../util/seq.js';
 import { writeTombstone } from './tombstones.js';
 import { parseLimit, parseSkip } from '../util/pagination.js';
@@ -19,7 +20,7 @@ import type { RefKind } from '../config/types-knowledge.js';
 import { type SimilarMatch } from './recall.js';
 import type { DupeCheckOpts } from './write-options.js';
 import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
 import type { EntityDoc, EdgeDoc, FileMetaDoc } from '../config/types.js';
 import { PROPERTIES_SCAN_MAX_MS, textContains } from './tag-filter.js';
 import { spaceCollection } from '../db/space-collection.js';
@@ -76,7 +77,7 @@ async function unlabelFacesWhere(spaceId: string, match: Record<string, unknown>
     asUpdate<FileMetaDoc>({ $unset: { faceEntityId: '', faceScore: '' } }),
   );
   const n = res.modifiedCount ?? 0;
-  if (n > 0) log.info(`Unlabelled ${n} face record(s) in '${spaceId}' after entity deletion`);
+  if (n > 0) log.info(`Unlabelled ${n} face record(s) in '${peerText(spaceId)}' after entity deletion`);
   return n;
 }
 
@@ -164,11 +165,7 @@ export async function findEntitiesByName(spaceId: string, name: string): Promise
  * the likelier failure — but do not reach for it to build embed text. See `factEmbedText`.
  */
 export async function findEntitiesByIds(spaceId: string, ids: readonly string[]): Promise<EntityDoc[]> {
-  if (ids.length === 0) return [];
-  return col<EntityDoc>(spaceCollection(spaceId, 'entities'))
-    .find(asFilter<EntityDoc>({ _id: { $in: [...new Set(ids)] }, spaceId }),
-      { projection: NEVER_RETURNED_PROJECTION })
-    .toArray() as Promise<EntityDoc[]>;
+  return readRowsById<EntityDoc>(spaceCollection(spaceId, 'entities'), ids, 'all', { filter: { spaceId } });
 }
 
 /** Find an entity by exact ID */
@@ -283,7 +280,7 @@ export async function updateEntityById(
       asUpdate<EntityDoc>(updateOp),
       { returnDocument: 'before' },
     );
-  }) as EntityDoc | null;
+  }, 'entity.update') as EntityDoc | null;
   brainWriteSeqTotal.labels({
     collection: 'entities',
     outcome: writeOutcome(!!beforeWrite, ifMatchSeq !== undefined, !!beforeWrite && beforeWrite.seq !== existing.seq),

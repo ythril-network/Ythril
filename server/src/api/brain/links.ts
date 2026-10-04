@@ -35,6 +35,7 @@ import { getConfig } from '../../config/loader.js';
 import { resolveWriteTarget, isStrictLinkage, findFirstAcrossMembers } from '../../spaces/proxy.js';
 import { unknownFieldWarnings } from './unknown-fields.js';
 import { webhookToken } from './_shared.js';
+import { sendReadFailure } from './_read-failure.js';
 
 export const linksRouter = Router();
 
@@ -91,7 +92,8 @@ linksRouter.post('/spaces/:spaceId/links', globalRateLimit, requireSpaceAuth, de
       await assertRefsResolve(wt.target, 'from', fromKind as RefKind, [from]);
       await assertRefsResolve(wt.target, 'to', toKind as RefKind, [to]);
     } catch (err) {
-      res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+      // A missing reference is the caller's 400; a store failure under the lookup is the store's (bundle-30 I12).
+      sendReadFailure(res, 'brain POST /spaces/:spaceId/links (reference check)', err);
       return;
     }
   }

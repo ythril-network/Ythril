@@ -23,7 +23,7 @@ import { reportPushRefusals, refusedTransfers } from './push-refusals.js';
 import { deliverChangeNotes } from './change-notes.js';
 import { col, asFilter } from '../db/mongo.js';
 import { recordSyncResult, type SyncCounts } from './history.js';
-import { log, logSafe } from '../util/log.js';
+import { log, logSafe, peerText } from '../util/log.js';
 import { resolveWatermark, truncationWarn, type TransferOutcome } from './watermark.js';
 import { pullTombstones, pushTombstones } from './tombstone-transfer.js';
 import { applyConcludedSpaceRounds } from '../spaces/apply-wipe-round.js';
@@ -40,7 +40,8 @@ import { enqueueMediaJob } from '../files/media/job-queue.js';
 import { resolveInputFormat } from '../files/converters/pipeline.js';
 import { mimeTypeForPath } from '../files/mime.js';
 import { createCoalescingRunner } from './coalescing-runner.js';
-import { writeArrivals, arrivalId, type ArrivalOutcome } from './arrivals.js';
+import { acceptArrivingPage, type AcceptedFamily } from './accept-page.js';
+import { LinkageCheck } from './linkage-check.js';
 import { syncFiles } from './file-sync.js';
 import {
   syncCyclesTotal,
@@ -62,17 +63,13 @@ import { resolveSafePath } from '../files/sandbox.js';
 import type { FileMetaDoc } from '../config/types.js';
 import { acceptVoteCast, pinMemberSigningKey, castForWire } from '../util/signing.js';
 import { assertPeerAtFloor } from './peer-floor.js';
-import { REPLICATED_FAMILIES, RECORD_TYPE_OF, type PayloadKey, type ReplicatedFamily } from './replicated-families.js';
+import { REPLICATED_FAMILIES, type PayloadKey, type ReplicatedFamily } from './replicated-families.js';
+import { isRoundPrunable, pruneExpiredRounds } from './vote-round-retention.js';
 import { spaceCollection } from '../db/space-collection.js';
 
-// Timeout for every outbound fetch to a peer.
-// Without this, the OS TCP timeout (~75 s on Linux) applies, which means one
-// offline peer can block an entire sync cycle by that duration per attempt.
-const FETCH_TIMEOUT_MS = 10_000;
-
-// Longer timeout for batch push/pull payloads: 200 docs × a few KB each can be
-// several hundred KB over a slow WAN link.
-const BATCH_FETCH_TIMEOUT_MS = 60_000;
+// Every outbound fetch's budget, and the longer one for batch payloads — in their own module because the
+// receiver's hold deadline is derived from the batch one (`db/write-bound.ts`).
+import { FETCH_TIMEOUT_MS, BATCH_FETCH_TIMEOUT_MS } from './peer-timeouts.js';
 
 // Docs pushed per batch-upsert request (caps per-request payload size).
 const PUSH_BATCH_SIZE = 200;
@@ -114,33 +111,6 @@ function _setFailureCount(networkId: string, instanceId: string, value: number |
   return newValue;
 }
 
-// ── Vote-round retention ────────────────────────────────────────────────────
-
-/** A round is prunable once it is concluded AND past its deadline. After the deadline
- *  every peer concludes the round independently (the deadline path in
- *  `concludeRoundIfReady`), so such a round can no longer influence any decision and
- *  never needs re-serving or re-propagating. A malformed/unparseable deadline yields
- *  `NaN`, and `NaN < now` is false, so we keep the round rather than prune on doubt. */
-export function isRoundPrunable(
-  round: { concluded?: boolean; deadline: string },
-  now: number = Date.now(),
-): boolean {
-  return Boolean(round.concluded) && new Date(round.deadline).getTime() < now;
-}
-
-/** Drop concluded-and-expired rounds from a network's `pendingRounds` in place.
- *  `concludeRoundIfReady` marks a round `concluded` but never removes it, so without
- *  this `pendingRounds` grows for the life of the network — bloating `config.json`, the
- *  `GET /votes` scan, and gossip payloads. Returns the number of rounds removed. */
-export function pruneExpiredRounds(net: NetworkConfig, now: number = Date.now()): number {
-  const rounds = net.pendingRounds;
-  if (!rounds || rounds.length === 0) return 0;
-  const kept = rounds.filter(r => !isRoundPrunable(r, now));
-  const removed = rounds.length - kept.length;
-  if (removed > 0) net.pendingRounds = kept;
-  return removed;
-}
-
 // ── Per-network sync dedup lock ─────────────────────────────────────────────
 // Prevents concurrent sync cycles for the same network from competing for
 // bcrypt cache, MongoDB connections, and peer HTTP sockets.  When a trigger
@@ -152,8 +122,8 @@ export function pruneExpiredRounds(net: NetworkConfig, now: number = Date.now())
 // the one it holds, and a members-less cycle resolves in microtasks, so a queued rerun starts and
 // finishes before any caller resumes.
 const _syncRunner = createCoalescingRunner<{ synced: number; errors: number }>({
-  onQueued: (id) => log.debug(`Sync cycle already running for network ${id} — queuing rerun`),
-  onRerun: (id) => log.debug(`Rerun requested for network ${id} — starting`),
+  onQueued: (id) => log.debug(`Sync cycle already running for network ${peerText(id)} — queuing rerun`),
+  onRerun: (id) => log.debug(`Rerun requested for network ${peerText(id)} — starting`),
 });
 
 /** True while a sync cycle for the given network is in-flight. Cheap, in-memory —
@@ -181,7 +151,7 @@ async function _runSyncForNetworkImpl(networkId: string): Promise<{ synced: numb
   const pushed: SyncCounts = { facts: 0, entities: 0, edges: 0, files: 0, chrono: 0, links: 0 };
   const errorMessages: string[] = [];
 
-  log.info(`Starting sync cycle for network '${net.label}' (${net.members.length} members)`);
+  log.info(`Starting sync cycle for network '${peerText(net.label)}' (${net.members.length} members)`);
   let synced = 0; let errors = 0; let refusals = 0;
   const syncTimer = syncDurationSeconds.startTimer({ network: networkId });
 
@@ -208,30 +178,30 @@ async function _runSyncForNetworkImpl(networkId: string): Promise<{ synced: numb
       );
       for (const rc of reparentedChildren) {
         log.warn(
-          `REPARENT_REVERT_AVAILABLE: original parent '${member.label}' is back online. ` +
-          `'${rc.label}' (${rc.instanceId}) was temporarily re-parented during the outage. ` +
-          `To restore original topology: POST /api/networks/${net.id}/members/${rc.instanceId}/revert-parent. ` +
-          `To make the adoption permanent:  POST /api/networks/${net.id}/members/${rc.instanceId}/adopt.`,
+          `REPARENT_REVERT_AVAILABLE: original parent '${peerText(member.label)}' is back online. ` +
+          `'${peerText(rc.label)}' (${peerText(rc.instanceId)}) was temporarily re-parented during the outage. ` +
+          `To restore original topology: POST /api/networks/${peerText(net.id)}/members/${peerText(rc.instanceId)}/revert-parent. ` +
+          `To make the adoption permanent:  POST /api/networks/${peerText(net.id)}/members/${peerText(rc.instanceId)}/adopt.`,
         );
       }
     } catch (err) {
       const errMsg = `Sync failed for member ${member.label} (${member.instanceId}): ${err}`;
-      log.error(errMsg);
+      log.error(peerText(errMsg));
       errorMessages.push(errMsg);
       errors++;
       const failures = _setFailureCount(net.id, member.instanceId, 'increment');
       if (failures === STALE_FAILURE_THRESHOLD) {
         const hasChildren = net.type === 'braintree' && (member.children?.length ?? 0) > 0;
         log.warn(
-          `PEER UNREACHABLE: '${member.label}' in network '${net.label}' has failed ` +
-          `${failures} consecutive sync cycles. Last success: ${member.lastSyncAt ?? 'never'}. ` +
+          `PEER UNREACHABLE: '${peerText(member.label)}' in network '${peerText(net.label)}' has failed ` +
+          `${failures} consecutive sync cycles. Last success: ${peerText(member.lastSyncAt ?? 'never')}. ` +
           `Member has NOT been removed — manual action required.` +
           (hasChildren
             ? ` NOTE: this node has ${member.children!.length} child(ren) in a braintree network — its entire subtree is now partitioned from this brain until it comes back online.`
             : ''),
         );
       } else if (failures > STALE_FAILURE_THRESHOLD && failures % 10 === 0) {
-        log.warn(`PEER STILL UNREACHABLE: '${member.label}' (${failures} consecutive failures, last success: ${member.lastSyncAt ?? 'never'})`);
+        log.warn(`PEER STILL UNREACHABLE: '${peerText(member.label)}' (${failures} consecutive failures, last success: ${peerText(member.lastSyncAt ?? 'never')})`);
       }
     }
   }
@@ -239,7 +209,7 @@ async function _runSyncForNetworkImpl(networkId: string): Promise<{ synced: numb
   // Q-135: pair with every club member a peer introduced this cycle (or earlier, and not yet paired). Never throws.
   await pairIntroduced(networkId);
 
-  log.info(`Sync cycle complete for '${net.label}': ${synced} ok, ${errors} errors`);
+  log.info(`Sync cycle complete for '${peerText(net.label)}': ${synced} ok, ${errors} errors`);
   syncTimer();
 
   // Calculate status once and share between Prometheus and sync history
@@ -264,7 +234,7 @@ async function _runSyncForNetworkImpl(networkId: string): Promise<{ synced: numb
     pulled,
     pushed,
     ...(errorMessages.length > 0 ? { errors: errorMessages } : {}),
-  }).catch(err => log.error(`Failed to record sync history: ${err}`));
+  }).catch(err => log.error(`Failed to record sync history: ${peerText(err)}`));
 
   // ── Orphan detection (braintree only) ──────────────────────────────────
   // After the sync loop finishes, check if any member's parentInstanceId points to
@@ -284,8 +254,8 @@ async function _runSyncForNetworkImpl(networkId: string): Promise<{ synced: numb
         const me = freshNet.members.find(m => m.instanceId === freshCfg.instanceId);
         for (const orphan of orphans) {
           log.warn(
-            `ORPHAN DETECTED: '${orphan.label}' (${orphan.instanceId}) in '${freshNet.label}' ` +
-            `has parentInstanceId '${orphan.parentInstanceId}' which is not in the member list. ` +
+            `ORPHAN DETECTED: '${peerText(orphan.label)}' (${peerText(orphan.instanceId)}) in '${peerText(freshNet.label)}' ` +
+            `has parentInstanceId '${peerText(orphan.parentInstanceId)}' which is not in the member list. ` +
             `Auto-adopting as direct child of this instance.`,
           );
           orphan.parentInstanceId = freshCfg.instanceId;
@@ -311,7 +281,7 @@ async function _runSyncForNetworkImpl(networkId: string): Promise<{ synced: numb
     if (freshNet) {
       const removed = pruneExpiredRounds(freshNet);
       if (removed > 0) {
-        log.info(`Pruned ${removed} concluded+expired vote round(s) from network '${freshNet.label}'`);
+        log.info(`Pruned ${removed} concluded+expired vote round(s) from network '${peerText(freshNet.label)}'`);
         saveConfig(freshCfg);
       }
     }
@@ -348,7 +318,7 @@ export async function runSyncForPeer(
       networksSynced++;
       _setFailureCount(net.id, member.instanceId, 0);
     } catch (err) {
-      log.error(`network_sync failed for peer ${member.label} (${member.instanceId}) in network '${net.label}': ${err}`);
+      log.error(`network_sync failed for peer ${peerText(member.label)} (${peerText(member.instanceId)}) in network '${peerText(net.label)}': ${peerText(err)}`);
       errors++;
       _setFailureCount(net.id, member.instanceId, 'increment');
     }
@@ -369,7 +339,7 @@ async function runSyncForMember(
   const secrets = getSecrets();
   const peerToken = secrets.peerTokens[member.instanceId];
   if (!peerToken) {
-    log.warn(`No peer token for ${member.label} (${member.instanceId}) — skipping sync`);
+    log.warn(`No peer token for ${peerText(member.label)} (${peerText(member.instanceId)}) — skipping sync`);
     return { pulled, pushed, incomplete: ['no peer token for this member'], refused };
   }
 
@@ -437,7 +407,7 @@ async function runSyncForMember(
     await propagateVotesWithPeer(net, member, fetchOpts);
     await deliverChangeNotes(net, member, fetchOpts); // F-42: only to a member below us; never throws, undelivered stays queued
   } catch (err) {
-    log.warn(`Governance gossip with ${member.label} (${member.instanceId}): ${err}`);
+    log.warn(`Governance gossip with ${peerText(member.label)} (${peerText(member.instanceId)}): ${peerText(err)}`);
   }
 
   /*
@@ -460,7 +430,7 @@ async function runSyncForMember(
     // Skip spaces that don't exist in local config — prevents orphan data and collection access
     // for space IDs that were registered on the network but never created locally.
     if (!concreteSpaces().some(s => s.id === spaceId)) {
-      log.warn(`Skipping sync for space '${spaceId}' in network '${net.label}': space not in local config`);
+      log.warn(`Skipping sync for space '${peerText(spaceId)}' in network '${peerText(net.label)}': space not in local config`);
       continue;
     }
 
@@ -500,7 +470,7 @@ async function runSyncForMember(
               // Shared table. The inline copy here defaulted to `image/jpeg`, so a synced image whose
               // extension it did not list was mislabelled rather than left unknown.
               enqueueMediaJob(spaceId, p, mimeTypeForPath(p), 'image').catch(err =>
-                log.warn(`Face reprocess enqueue for ${spaceId}/${p}: ${err}`),
+                log.warn(`Face reprocess enqueue for ${peerText(spaceId)}/${peerText(p)}: ${peerText(err)}`),
               );
             }
           }
@@ -568,7 +538,7 @@ async function gossipWithPeer(
               let changed = false;
               if (peerSelf.url && peerSelf.url !== local.url) {
                 if (isPeerUrlAllowed(peerSelf.url)) { local.url = peerSelf.url; changed = true; }
-                else log.warn(`Gossip: rejected unsafe self-URL from ${member.label} (${member.instanceId}): ${peerSelf.url}`);
+                else log.warn(`Gossip: rejected unsafe self-URL from ${peerText(member.label)} (${peerText(member.instanceId)}): ${peerText(peerSelf.url)}`);
               }
               if (peerSelf.label && peerSelf.label !== local.label) { local.label = peerSelf.label; changed = true; }
               /*
@@ -596,7 +566,7 @@ async function gossipWithPeer(
               if (!local.versionCheckedAt) { local.versionCheckedAt = new Date().toISOString(); changed = true; }
               if (pinMemberSigningKey(local, peerSelf.signingPublicKey, peerSelf.signingKeyRotation)) changed = true;
               if (changed) {
-                log.info(`Gossip: updated ${member.label} via self-piggyback (${net.id})`);
+                log.info(`Gossip: updated ${peerText(member.label)} via self-piggyback (${peerText(net.id)})`);
                 saveConfig(freshCfg);
               }
             }
@@ -604,17 +574,17 @@ async function gossipWithPeer(
         }
       } catch { /* ignore JSON parse failures */ }
     } else {
-      log.warn(`Gossip self-push to ${member.label}: HTTP ${resp.status}`);
+      log.warn(`Gossip self-push to ${peerText(member.label)}: HTTP ${resp.status}`);
     }
   } catch (err) {
-    log.warn(`Gossip self-push to ${member.label}: ${err}`);
+    log.warn(`Gossip self-push to ${peerText(member.label)}: ${peerText(err)}`);
   }
 
   // 2. Pull peer's member view and merge into our config
   try {
     const resp = await peerSafeFetch(`${base}/members`, opts());
     if (!resp.ok) {
-      log.warn(`Gossip pull from ${member.label}: HTTP ${resp.status}`);
+      log.warn(`Gossip pull from ${peerText(member.label)}: HTTP ${resp.status}`);
       return;
     }
     const { members: peerView, removed: peerRemoved } = await boundedJson<{ members: Partial<NetworkMember>[]; removed?: unknown }>(resp, 'sync peer');
@@ -648,7 +618,7 @@ async function gossipWithPeer(
       }
       if (pinMemberSigningKey(local, peerRecord.signingPublicKey)) updated = true;
       if (updated) {
-        log.info(`Gossip: updated member ${local.label} (${local.instanceId}) in network ${net.id}`);
+        log.info(`Gossip: updated member ${peerText(local.label)} (${peerText(local.instanceId)}) in network ${peerText(net.id)}`);
         changed = true;
       }
     }
@@ -658,7 +628,7 @@ async function gossipWithPeer(
     if (changed || merged.changed) saveConfig(fresh);
     revokeRemoved(merged.removed);
   } catch (err) {
-    log.warn(`Gossip pull from ${member.label}: ${err}`);
+    log.warn(`Gossip pull from ${peerText(member.label)}: ${peerText(err)}`);
   }
 }
 
@@ -688,7 +658,7 @@ async function propagateVotesWithPeer(
   try {
     const resp = await peerSafeFetch(`${base}/votes`, opts());
     if (!resp.ok) {
-      log.warn(`Vote pull from ${member.label}: HTTP ${resp.status}`);
+      log.warn(`Vote pull from ${peerText(member.label)}: HTTP ${resp.status}`);
       return;
     }
     const { rounds: peerRounds } = await boundedJson<{ rounds: (Omit<VoteRound, 'concluded'>)[] }>(resp, 'sync peer');
@@ -708,7 +678,7 @@ async function propagateVotesWithPeer(
         // Nothing local is taken from it (S-7, S-9); votes are merged below, one cast at a time.
         local = adoptPeerRound(freshNet, peerRound as VoteRound);
         changed = true;
-        log.info(`Vote gossip: adopted round ${peerRound.roundId} (${peerRound.type}) from ${member.label}`);
+        log.info(`Vote gossip: adopted round ${peerText(peerRound.roundId)} (${peerRound.type}) from ${peerText(member.label)}`);
       }
       if (local.concluded) continue;
 
@@ -725,8 +695,8 @@ async function propagateVotesWithPeer(
         const decision = acceptVoteCast(freshNet, local, peerCast, member.instanceId);
         if (!decision.accept) {
           log.warn(
-            `Vote gossip: rejecting cast for '${peerCast.instanceId}' relayed by '${member.instanceId}' ` +
-            `(round ${peerRound.roundId}) — ${decision.reason}`,
+            `Vote gossip: rejecting cast for '${peerText(peerCast.instanceId)}' relayed by '${peerText(member.instanceId)}' ` +
+            `(round ${peerText(peerRound.roundId)}) — ${peerText(decision.reason)}`,
           );
           continue;
         }
@@ -756,7 +726,7 @@ async function propagateVotesWithPeer(
           }
           // A passed join: the credential holder admits, every other member of a voted network introduces (Q-154).
           if (justPassed && applyPassedJoin(freshNet, fresh.instanceId, round) === 'admitted') {
-            log.info(`Join round ${round.roundId} concluded via gossip — added ${round.subjectLabel} to network ${net.id}`);
+            log.info(`Join round ${peerText(round.roundId)} concluded via gossip — added ${peerText(round.subjectLabel)} to network ${peerText(net.id)}`);
           }
         }
       }
@@ -766,7 +736,7 @@ async function propagateVotesWithPeer(
       saveConfig(fresh);
     }
   } catch (err) {
-    log.warn(`Vote pull from ${member.label}: ${err}`);
+    log.warn(`Vote pull from ${peerText(member.label)}: ${peerText(err)}`);
   }
 
   // Push our votes to the peer (non-fatal 404 if the peer doesn't have the round yet).
@@ -796,11 +766,11 @@ async function propagateVotesWithPeer(
           // valid, relay this cast onward — signed casts are relay-safe.
           // Both signatures travel (Q-138): the one shape the relay route reads back.
           body: JSON.stringify(castForWire(cast)),
-        }).catch(err => log.warn(`Vote push (${round.roundId}) to ${member.label}: ${err}`));
+        }).catch(err => log.warn(`Vote push (${peerText(round.roundId)}) to ${peerText(member.label)}: ${peerText(err)}`));
       }
     }
   } catch (err) {
-    log.warn(`Vote push to ${member.label}: ${err}`);
+    log.warn(`Vote push to ${peerText(member.label)}: ${peerText(err)}`);
   }
 }
 
@@ -830,6 +800,11 @@ async function pullFromPeer(
 
   type PullResult = { count: number; highSeq: number; maxSeq: number } & TransferOutcome;
   /*
+   * What lands in this space's transfer is checked for strict linkage ONCE, after every family (below) — page by
+   * page, an edge to a chrono entry pulled later in the same cycle was recorded missing (bundle-30 I8).
+   */
+  const linkage = new LinkageCheck(spaceId, member.instanceId);
+  /*
    * NOT ALL BRAIN COLLECTIONS: `files` is absent because a file arrives as blob plus manifest, not as a
    * document on this path. `links` is present — a collection missing here is one a peer never sends us,
    * and nothing reports that, because a peer holding no links hashes none either.
@@ -853,7 +828,7 @@ async function pullFromPeer(
       const resp = await peerSafeFetch(`${member.url}/api/sync/${urlSuffix}?${params}`, batchOpts());
       if (!resp.ok) {
         truncated = true;
-        log.warn(truncationWarn(`Pull ${urlSuffix} from`, member.label ?? '', spaceId, resp.status, deliveredThrough));
+        log.warn(peerText(truncationWarn(`Pull ${urlSuffix} from`, member.label ?? '', spaceId, resp.status, deliveredThrough)));
         break;
       }
       const { items, nextCursor } = await boundedJson<{
@@ -862,31 +837,27 @@ async function pullFromPeer(
       // The page's documents; the tombstones riding in it were applied by `pullTombstones` above.
       const pageDocs = items.filter(item => !('deletedAt' in item && (item as { deletedAt?: string }).deletedAt)) as T[];
       /*
-       * THE RECEIVER DECIDES WHAT IT STORES, through the one arrival writer (`sync/arrivals.ts`): a malformed id
-       * or an implausible seq refused per document, the retag to the local space, a repeated id collapsed to its
-       * highest seq, the sender's local-only fields dropped and this instance's own carried across the replace,
-       * this instance's retention stamped (D-9), the guard against a newer stored copy, the counter bumped per
-       * landed chunk, and every landed record queued for embedding by THIS instance's rules (`Q-203` — a pulled
-       * record used to be stored and never queued at all).
+       * THE RECEIVER DECIDES WHAT IT STORES, by the push's own accept (`sync/accept-page.ts`, `Q-204`): the wire
+       * schema per document, held tombstones, forks within the caps, then the one arrival writer (`sync/arrivals.ts`)
+       * and its guards — the deliverer is the member this page was read from.
        *
        * A write the store could not do is a RECORD-WRITE failure, not an unreachable peer: the transfer stops,
        * holds `deliveredThrough` below the page, and fetches it again next cycle. It used to escape to the
        * member-level catch, which counts toward PEER UNREACHABLE and names the driver error and nothing else.
        */
-      let written: ArrivalOutcome;
+      let written: AcceptedFamily;
       try {
-        written = await writeArrivals(spaceId, family.collection, RECORD_TYPE_OF[family.collection], pageDocs,
-          { from: member.label ?? member.instanceId });
+        written = (await acceptArrivingPage(spaceId, { [urlSuffix]: pageDocs },
+          { door: 'pull', deliveredBy: member.instanceId, from: member.label ?? member.instanceId, linkage }))[urlSuffix];
       } catch (err) {
         truncated = true;
         log.warn(`Pull ${urlSuffix} from ${logSafe(member.label ?? member.instanceId)}: a record write failed in space `
-          + `'${spaceId}' (${logSafe(err instanceof Error ? err.message : String(err))}). This is this instance's database, not `
+          + `'${peerText(spaceId)}' (${logSafe(err instanceof Error ? err.message : String(err))}). This is this instance's database, not `
           + `the peer: the transfer holds at ${deliveredThrough} and the page is fetched again next cycle.`);
         break;
       }
-      const refused = new Set(written.refused.map(r => r._id));
-      for (const doc of pageDocs as FactDoc[]) {
-        if (refused.has(arrivalId(doc))) continue;
+      for (const [i, doc] of (pageDocs as FactDoc[]).entries()) {
+        if (written.verdicts[i] === 'rejected') continue;
         count++;
         if (doc.seq > maxSeq) maxSeq = doc.seq;
         if (doc.seq > highSeq && doc.author?.instanceId === member.instanceId) highSeq = doc.seq;
@@ -902,7 +873,7 @@ async function pullFromPeer(
     // transfer has more to give, so it must cap the watermark AND keep making progress.
     if (cur) {
       truncated = true;
-      log.warn(truncationWarn(`Pull ${urlSuffix} from`, member.label ?? '', spaceId, `${pg}-page cap`, deliveredThrough));
+      log.warn(peerText(truncationWarn(`Pull ${urlSuffix} from`, member.label ?? '', spaceId, `${pg}-page cap`, deliveredThrough)));
     }
     return { count, highSeq, maxSeq, deliveredThrough, truncated };
   }
@@ -913,8 +884,19 @@ async function pullFromPeer(
    * and interleaves the writes a truncated transfer's watermark has to reason about.
    */
   const pulled = {} as Record<PayloadKey, PullResult>;
-  for (const family of REPLICATED_FAMILIES) {
-    pulled[family.payloadKey] = await pullType(family);
+  try {
+    for (const family of REPLICATED_FAMILIES) {
+      pulled[family.payloadKey] = await pullType(family);
+    }
+  } finally {
+    /*
+     * What landed is checked even when a fetch REJECTS part-way (bundle-30 I13): edges that landed before it are
+     * re-served next cycle at an equal seq and plan as skipped, so they are never checked again. A family whose
+     * transfer stopped early, or never ran (the one that threw and every one after), may still hold a target: its
+     * ends are not judged missing this cycle.
+     */
+    await linkage.run({ stillToCome: REPLICATED_FAMILIES
+      .filter(f => pulled[f.payloadKey] === undefined || pulled[f.payloadKey].truncated).map(f => f.collection) });
   }
 
   pulledMemories = pulled.facts.count;
@@ -942,8 +924,8 @@ async function pullFromPeer(
     seqOf: (t) => t.highSeq,
     warn: log.warn,
   });
-  // No counter bump here: every record this pull handed over was bumped over by the arrival writer, per landed
-  // chunk (`writeArrivals`), and every tombstone by the one tombstone apply, per page (`applyPeerTombstones`).
+  // No counter bump here: every record this pull received was bumped over by the page accept, per page
+  // (`acceptArrivingPage`), and every tombstone by the one tombstone apply, per page (`applyPeerTombstones`).
 
   // Persist the high-water mark
   if (highestSeq > sinceSeq) {
@@ -1042,7 +1024,7 @@ async function pushToPeer(
        * free unless somebody is looking — and it is the one line that would have made six failed reproduction
        * attempts conclusive instead of inconclusive.
        */
-      log.debug(`Push ${payloadKey} to ${member.label ?? member.instanceId} space '${spaceId}': `
+      log.debug(`Push ${payloadKey} to ${peerText(member.label ?? member.instanceId)} space '${peerText(spaceId)}': `
         + `${batch.length} doc(s) with seq > ${seqCursor}`
         + (batch.length ? ` (through ${(batch[batch.length - 1] as FactDoc).seq})` : ''));
       if (batch.length === 0) break;
@@ -1052,7 +1034,7 @@ async function pushToPeer(
       });
       if (!resp.ok) {
         truncated = true;
-        log.warn(truncationWarn(`Batch push ${payloadKey} to`, member.label ?? '', spaceId, resp.status, seqCursor));
+        log.warn(peerText(truncationWarn(`Batch push ${payloadKey} to`, member.label ?? '', spaceId, resp.status, seqCursor)));
         break;
       }
       // A 200 does not mean every record landed: the peer can discard a fact whose fork chain is at its
@@ -1117,7 +1099,7 @@ async function pushToPeer(
    * nothing and the record is never offered again. That combination is invisible without both numbers in one
    * line, which is why they are logged together rather than at four separate call sites.
    */
-  log.debug(`Push cycle to ${member.label ?? member.instanceId} space '${spaceId}': watermark ${lastSeqPushed} -> `
+  log.debug(`Push cycle to ${peerText(member.label ?? member.instanceId)} space '${peerText(spaceId)}': watermark ${lastSeqPushed} -> `
     + `${maxSeqPushed}, pushed ${pushedMemories}m/${pushedEntities}e/${pushedEdges}g/${pushedChrono}c/${pushedLinks}l`);
 
   // Persist the push high-water mark so next sync only sends new/changed docs
@@ -1173,7 +1155,7 @@ async function checkMerkleWithPeer(
     ]);
 
     if (!peerResp.ok) {
-      log.warn(`Merkle check for space '${spaceId}' with peer '${member.label}': peer returned HTTP ${peerResp.status} — skipping`);
+      log.warn(`Merkle check for space '${peerText(spaceId)}' with peer '${peerText(member.label)}': peer returned HTTP ${peerResp.status} — skipping`);
       return;
     }
 
@@ -1181,22 +1163,22 @@ async function checkMerkleWithPeer(
     const peerRoot = peerResult.root;
 
     if (!peerRoot) {
-      log.warn(`Merkle check for space '${spaceId}' with peer '${member.label}': peer response missing 'root' field`);
+      log.warn(`Merkle check for space '${peerText(spaceId)}' with peer '${peerText(member.label)}': peer response missing 'root' field`);
       return;
     }
 
     if (localResult.root !== peerRoot) {
       log.warn(
-        `MERKLE_DIVERGENCE: space '${spaceId}', peer '${member.label}' (${member.instanceId}), ` +
-        `network '${net.label}'. ` +
-        `local root=${localResult.root} (${localResult.leafCount} leaves), ` +
-        `peer root=${peerRoot} (${peerResult.leafCount ?? '?'} leaves). ` +
+        `MERKLE_DIVERGENCE: space '${peerText(spaceId)}', peer '${peerText(member.label)}' (${peerText(member.instanceId)}), ` +
+        `network '${peerText(net.label)}'. ` +
+        `local root=${peerText(localResult.root)} (${localResult.leafCount} leaves), ` +
+        `peer root=${peerText(peerRoot)} (${peerResult.leafCount ?? '?'} leaves). ` +
         `The space contents differ after sync — possible data loss, concurrent write, or sync bug.`,
       );
     } else {
-      log.info(`Merkle OK: space '${spaceId}', peer '${member.label}' root=${localResult.root.slice(0, 12)}…`);
+      log.info(`Merkle OK: space '${peerText(spaceId)}', peer '${peerText(member.label)}' root=${peerText(localResult.root.slice(0, 12))}…`);
     }
   } catch (err) {
-    log.warn(`Merkle check for space '${spaceId}' with peer '${member.label}': ${err}`);
+    log.warn(`Merkle check for space '${peerText(spaceId)}' with peer '${peerText(member.label)}': ${peerText(err)}`);
   }
 }

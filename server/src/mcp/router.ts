@@ -43,7 +43,7 @@ import { spaceScopeSentence } from './space-scope-sentence.js';
  *
  * `undefined` therefore now means a record shape that predates both, not "the OIDC path".
  *
- * The same cast appears at every other rights call site (`middleware.ts`, the three `accessibleSpaces` helpers). It is
+ * The same cast appears at every other rights call site (`middleware.ts`, the rights-narrowed space helpers). It is
  * a narrowing the union cannot express, and writing it once here keeps this file from repeating it per transport.
  */
 function tokenRights(record: unknown): TokenRights | undefined {

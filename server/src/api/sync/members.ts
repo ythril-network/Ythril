@@ -8,8 +8,7 @@ import { syncRateLimit } from '../../rate-limit/middleware.js';
 import { getConfig, loadConfig, saveConfig } from '../../config/loader.js';
 import { requireAuth, denyReadOnly } from '../../auth/middleware.js';
 import { peerRelayCaller, PEER_RELAY_REFUSAL } from '../../auth/peer-relay.js';
-import { log } from '../../util/log.js';
-import { reportServerFailure } from '../../util/report-failure.js';
+import { log, peerText } from '../../util/log.js';
 import { isPeerUrlAllowed } from '../../sync/peer-fetch.js';
 import { pinMemberSigningKey, type SigningKeyRotation } from '../../util/signing.js';
 import { peerFloorRefusal } from '../../sync/peer-floor.js';
@@ -17,6 +16,7 @@ import type { NetworkMember } from '../../config/types.js';
 import { adoptAnnouncedSpaces, healAnnouncedAliases } from '../../networks/network-spaces.js';
 import { selfRecordFor } from '../../networks/self-record.js';
 import { rosterIsAuthority } from '../../networks/member-introductions.js';
+import { sendCaughtFailure } from '../send-failure.js';
 
 export const syncMembersRouter = Router();
 
@@ -54,8 +54,7 @@ syncMembersRouter.get('/networks/:networkId/members', syncRateLimit, requireAuth
     // Q-135: a club's removals travel beside its roster, so every member applies a removal made anywhere.
     res.json({ members: safeMembers, ...(rosterIsAuthority(net) ? { removed: net.removedMembers ?? [] } : {}), updatedAt: new Date().toISOString() });
   } catch (err) {
-    reportServerFailure('sync GET /networks/:networkId/members', err);
-    res.status(500).json({ error: 'Internal error' });
+    sendCaughtFailure(res, 'sync GET /networks/:networkId/members', err);
   }
 });
 
@@ -123,7 +122,7 @@ syncMembersRouter.post('/networks/:networkId/members', syncRateLimit, requireAut
         let nextUrl = freshNet.members[idx]!.url;
         if (incoming.url && incoming.url !== nextUrl) {
           if (isPeerUrlAllowed(incoming.url)) nextUrl = incoming.url;
-          else log.warn(`Member self-update: rejected unsafe URL from ${incoming.instanceId}: ${incoming.url}`);
+          else log.warn(`Member self-update: rejected unsafe URL from ${peerText(incoming.instanceId)}: ${peerText(incoming.url)}`);
         }
         /*
          * The announced version is stored here and NOWHERE ELSE, which is why this route is the one
@@ -153,7 +152,7 @@ syncMembersRouter.post('/networks/:networkId/members', syncRateLimit, requireAut
         };
         const belowFloor = peerFloorRefusal(updated.version, updated.versionCheckedAt);
         if (belowFloor) {
-          log.warn(`Member ${incoming.instanceId} on network ${net.id} is below the peer floor: ${belowFloor}`);
+          log.warn(`Member ${peerText(incoming.instanceId)} on network ${peerText(net.id)} is below the peer floor: ${peerText(belowFloor)}`);
         }
         // Trust-on-first-use pin; a change to a different key is accepted only
         // with a valid rotation proof carried on the self-record.
@@ -182,7 +181,6 @@ syncMembersRouter.post('/networks/:networkId/members', syncRateLimit, requireAut
     const liveNet = getConfig().networks.find(n => n.id === net.id) ?? net;
     res.status(200).json({ status: 'ok', self: selfRecordFor(cfg, liveNet, existing) });
   } catch (err) {
-    log.error(`sync POST members: ${err}`);
-    res.status(500).json({ error: 'Internal error' });
+    sendCaughtFailure(res, 'sync POST members', err);
   }
 });

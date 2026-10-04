@@ -34,6 +34,7 @@ import os from 'node:os';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 import { openTestMongo, closeTestMongo, testMongoUri } from './_mongo-harness.mjs';
+import { wipeParts, RECORD_PARTS } from './_space-snapshot.mjs';
 
 /** A peer-bound token that reaches every space by its own scope (an unknown peer falls through to space scope). */
 export const PEER_TOKEN = Object.freeze({
@@ -82,7 +83,8 @@ export const FAMILIES = Object.freeze({
  */
 export function familiesCarriedByBatch() {
   const src = fs.readFileSync('server/src/api/sync/docs.ts', 'utf8');
-  if (!/Array\.isArray\(body\?\.\[k\]\)/.test(src) || !/REPLICATED_FAMILIES\.map\(\(\{ payloadKey: k \}\)/.test(src)) {
+  // Re-anchored for bundle-30 §D: the route reads each family's array in a loop over the registry.
+  if (!/for \(const \{ payloadKey: (\w+) \} of REPLICATED_FAMILIES\) \{\s*const \w+ = Array\.isArray\(body\?\.\[\1\]\)/.test(src)) {
     throw new Error('batch-upsert no longer reads its body keys from REPLICATED_FAMILIES — re-anchor familiesCarriedByBatch');
   }
   const keys = REPLICATED_FAMILY_KEYS;
@@ -197,8 +199,10 @@ async function assemblePushDoor({ suite, spaces, monitorCommands, mongo, tmpDir 
     await new Promise((resolve, reject) => resolveNetworkSpaceAlias(req, {}, (e) => (e ? reject(e) : resolve())));
     const localSpace = req.query.spaceId;
     const res = {
-      code: 200, body: undefined, sent: false, counterAtResponse: undefined,
+      code: 200, body: undefined, sent: false, counterAtResponse: undefined, headers: {},
       status(c) { this.code = c; return this; },
+      // A door that answers a retryable 503 says when to retry (`Retry-After`, bundle-30).
+      setHeader(name, value) { this.headers[name.toLowerCase()] = value; return this; },
       json(b) {
         this.body = b; this.sent = true;
         this.counterAtResponse = landed.get(localSpace) ?? 0;
@@ -230,9 +234,7 @@ async function assemblePushDoor({ suite, spaces, monitorCommands, mongo, tmpDir 
   }
   async function wipe(space) {
     await settled();
-    for (const part of ['facts', 'entities', 'edges', 'chrono', 'links', 'files', 'tombstones', 'embed_jobs']) {
-      await coll(space, part).deleteMany({});
-    }
+    await wipeParts(mongo, space, RECORD_PARTS);
     await mongo.col('ythril_counters').deleteMany({ _id: space });
     landed.delete(space);
   }
