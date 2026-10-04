@@ -544,7 +544,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   written with a seq above the arrival that caused it.
 - **A peer's edit erased this instance's own vector and retention stamps.** A pushed or pulled update replaced the
   whole document, so the record stopped expiring here, dropped out of vector search until re-embedded, and was
-  re-embedded even when its text had not changed. They are now kept across the update.
+  re-embedded even when its text had not changed. They are now kept across the update — the vector only while this
+  instance still embeds the record: an arrival this instance suppresses (by the record's own mark, its type's
+  schema or the space) keeps no vector, model or matched text (`Q-230`, above).
 - **A record pushed under a `spaceMap` alias kept the sender's space id**, so every list and lookup on this
   instance missed it. It is now stored under the local space id, as a pulled record always was.
 - **A stale tombstone was deleted before the record that superseded it was written**, so a write that then failed
@@ -779,8 +781,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   caller's megabyte reference whole — and the count of the rest is now written `…(+N more)`, where it read
   ` (+N more)`. A key a door does not take is quoted by the same bound on both doors: a REST body's
   `Unknown field(s)` and `unrecognized_keys` name the first 10 unknown keys, and an MCP call's `unexpected property`
-  its key and path, each cut at 256 characters and escaped — both echoed a caller's key whole. A sync refusal that quotes a schema's issues or the driver's message (200 characters) now says where
-  it was cut and never splits a character in two.
+  its key and path, each cut at 256 characters and escaped — both echoed a caller's key whole. A sync refusal that
+  quotes a schema's issues or the driver's message (200 characters) now says where it was cut and never splits a
+  character in two.
   An error logged with its stack keeps the stack, escaped onto its line, with its message bounded.
   Error text that is STORED and read back goes through the same renderer: an embed job's `lastError`, a reindex
   run's `error`, a media job's error and a webhook delivery's `error`, and a supervised worker's child error, where
