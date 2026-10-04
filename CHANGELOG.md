@@ -352,6 +352,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **An error that names `maxTimeMS` because the option was misused is no longer read as a deadline the store
+  missed** (bundle-30). The deadline question matched the word `maxTimeMS` in any message, so the store's refusal of a
+  misplaced bound (`cannot set maxTimeMS on getMore …`, a `BadValue`) was answered as a retryable `503` timeout on a
+  write door and as "the search ran out of time" on recall, predicate recall, the row graphs and the face gallery.
+  A deadline is now code 50 or 262, or — only for an error that lost its code — the store's own "exceeded time limit"
+  wording.
+
 - **A pulled page is decided by the same rules as a pushed one (`Q-204`, `Q-225`).** The pull accepted whatever was
   newer by seq and validated nothing, so the same document delivered the other way round was decided differently:
   a record this instance holds a tombstone for was stored again, an equal-seq divergent fact lost one side instead of

@@ -77,6 +77,16 @@ const BOUND_MISUSE = [
     () => new MongoInvalidArgumentError('Cannot create a Timeout with a negative duration')],
 ];
 
+/**
+ * The STORE's refusal of a misplaced bound: it NAMES maxTimeMS because it was misused, and it is a BadValue, not code
+ * 50 — retried as a timeout it fails identically for ever (D1, bundle-30 I6). A cursor's getMore is a read, so the
+ * document-refusal half does not apply to it (a BadValue on a write stays a document's refusal).
+ */
+const BOUND_MISUSE_BY_STORE = [
+  ['MongoServerError 2 BadValue: maxTimeMS set on a getMore of a non-awaitData cursor',
+    () => serverError({ code: 2, codeName: 'BadValue', errmsg: 'cannot set maxTimeMS on getMore command for a non-awaitData cursor' })],
+];
+
 /** Failures that are not timeouts for other reasons — controls, so "everything is a timeout" cannot pass. */
 const NOT_TIMEOUTS = [
   ['a duplicate key (a document\'s outcome)', () => bulkError({ code: 11000, message: 'E11000 duplicate key error collection: x index: _id_ dup key: { _id: "x" }' })],
@@ -85,7 +95,7 @@ const NOT_TIMEOUTS = [
   ['a plain Error that says "timed out" (not the driver\'s)', () => new Error('upstream timed out')],
 ];
 
-let isWriteTimeout, isDocumentRefusal, loadError;
+let isWriteTimeout, isDocumentRefusal, isMaxTimeExpired, loadError;
 
 describe('a write timeout is told from every other failure', () => {
   before(async () => {
@@ -93,6 +103,7 @@ describe('a write timeout is told from every other failure', () => {
       ({ isWriteTimeout } = await import('../../server/dist/db/write-timeout.js'));
     } catch (err) { loadError = err; }
     ({ isDocumentRefusal } = await import('../../server/dist/db/write-errors.js'));
+    ({ isMaxTimeExpired } = await import('../../server/dist/db/max-time.js'));
   });
 
   it('db/write-timeout.ts exports isWriteTimeout', () => {
@@ -115,6 +126,18 @@ describe('a write timeout is told from every other failure', () => {
     assert.deepEqual({ asTimeout, asRefusal }, { asTimeout: [], asRefusal: [] },
       'an invalid argument raised by the bound is a defect in the bound: read as a timeout it is retried for ever, '
       + 'read as a document refusal the document is dropped from its sync page for good');
+  });
+
+  it('the readers\' deadline question agrees: a misused bound is not a deadline the store missed', () => {
+    // `isMaxTimeExpired` is what recall, predicate recall, the row graphs and the face gallery ask; a keyword match on
+    // "maxTimeMS" answered yes for the store's refusal of a misplaced bound, so a defect read as "the search ran out
+    // of time". The real deadline (code 50, and its message when a wrapper lost the code) still answers yes.
+    const misuse = [...BOUND_MISUSE, ...BOUND_MISUSE_BY_STORE];
+    const asWriteTimeout = misuse.filter(([, make]) => isWriteTimeout(make()) !== false).map(([label]) => label);
+    const asDeadline = misuse.filter(([, make]) => isMaxTimeExpired(make()) !== false).map(([label]) => label);
+    assert.deepEqual({ asWriteTimeout, asDeadline }, { asWriteTimeout: [], asDeadline: [] });
+    assert.equal(isMaxTimeExpired(serverError({ code: 50, codeName: 'MaxTimeMSExpired', errmsg: 'operation exceeded time limit' })), true);
+    assert.equal(isMaxTimeExpired(new Error('Executor error during find command :: caused by :: operation exceeded time limit')), true);
   });
 
   it('failures that are not timeouts are not called timeouts', () => {

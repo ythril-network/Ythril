@@ -68,8 +68,12 @@ const STORE_ERROR_NAMES = new Set([
  * `MongoServerError` codes that mean "not answerable right now", by code because the name cannot decide.
  *
  * The first five are the same set `db/mongo.ts` retries at connect time — a replica set stepping down under a
- * running query is the same condition as one stepping down during boot. The last two are what a saturated or
- * restarting search process produces.
+ * running query is the same condition as one stepping down during boot.
+ *
+ * The two deadline codes, 50 `MaxTimeMSExpired` and 262 `ExceededTimeLimit`, are NOT here, and the absence is
+ * deliberate: `isWriteTimeout` (the first branch of `classifyReadFailure`, through `db/max-time.ts`) answers both, so
+ * a row for them here could never be reached — and a reader who found one would believe a deadline is answered with
+ * the driver's text, which it is not (bundle-30 I6, D1). `store-failure-is-not-a-400` still holds both to a 503.
  */
 const STORE_ERROR_CODES = new Set([
   11600,  // InterruptedAtShutdown
@@ -77,8 +81,6 @@ const STORE_ERROR_CODES = new Set([
   11602,  // InterruptedDueToReplStateChange
   189,    // PrimarySteppedDown
   13436,  // NotPrimaryOrSecondary
-  50,     // MaxTimeMSExpired — a deadline the store could not meet
-  262,    // ExceededTimeLimit
 ]);
 
 /**
