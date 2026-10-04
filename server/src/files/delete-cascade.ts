@@ -37,7 +37,7 @@ import { col, asFilter } from '../db/mongo.js';
 import { spaceCollection } from '../db/space-collection.js';
 import type { FileMetaDoc } from '../config/types.js';
 import { resolveSafePathChecked } from './sandbox.js';
-import { bytesPresent, deleteStored } from './stored-bytes.js';
+import { bytesPresent, deleteStored, isMissingPath } from './stored-bytes.js';
 import { deleteFileMeta, deleteFileMetaByPrefix, fileRecordPaths, hasLiveFileRecordUnder, markFileMetaDeleted, markFileMetaDeletedByPrefix } from './file-meta.js';
 import { cancelMediaJob, cancelMediaJobsByPrefix } from './media/job-queue.js';
 import { deleteConversionArtifacts, deleteConversionArtifactsByPrefix } from './converters/pipeline.js';
@@ -47,8 +47,6 @@ import { actUnderPendingTombstones, writePendingFileTombstones } from './tombsto
 import { invalidateUsageCache } from '../quota/quota.js';
 import { unlessTheStoreFailed } from '../brain/store-failure.js';
 import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';
-
-const isMissing = (err: unknown): boolean => (err as NodeJS.ErrnoException | null)?.code === 'ENOENT';
 
 export async function deleteFileCascade(spaceId: string, filePath: string, actor?: WebhookActor): Promise<void> {
   const abs = await resolveSafePathChecked(spaceId, filePath);
@@ -63,7 +61,7 @@ export async function deleteFileCascade(spaceId: string, filePath: string, actor
   const pending = await writePendingFileTombstones(spaceId, [filePath]);
   // A concurrent delete that got there first has done this half; anything else is the caller's failure.
   await actUnderPendingTombstones(pending, async () => {
-    if (present) await deleteStored(abs).catch(err => { if (!isMissing(err)) throw err; });
+    if (present) await deleteStored(abs).catch(err => { if (!isMissingPath(err)) throw err; });
   });
   invalidateUsageCache(); // freed disk — reflect it in the next quota check
   const at = `for ${peerText(spaceId)}/${peerText(filePath)}`;

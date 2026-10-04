@@ -79,6 +79,22 @@ const SETTLE_BATCH = 500;
 
 const tombstonesOf = (spaceId: string) => col<StoredFileTombstone>(spaceCollection(spaceId, 'fileTombstones'));
 
+/**
+ * What publishing a tombstone writes: `pending` gone, and `deletedAt` stamped NOW — the real time, never a caller's
+ * clock — because `deletedAt` is the push position peers acknowledge, and a tombstone published under an older stamp
+ * could fall below a position acknowledged while it was pending and be pruned unsent. One builder for the three
+ * ways a tombstone is published (confirmed by its act, by a retried move, by the settle).
+ */
+const publishedNow = () => ({ $set: { deletedAt: new Date().toISOString() }, $unset: { pending: '' as const } });
+
+/** The marker a move writes on its tombstones, as a filter. */
+const moveMarker = (from: string, to: string) => ({ 'move.from': toDocId(from), 'move.to': toDocId(to) });
+
+/** Publish the pending tombstones `filter` selects. */
+async function publishPending(spaceId: string, filter: Record<string, unknown>): Promise<void> {
+  await tombstonesOf(spaceId).updateMany(asFilter<StoredFileTombstone>({ ...filter, pending: true }), asUpdate<StoredFileTombstone>(publishedNow()));
+}
+
 /** Drops still running, so a test (and nothing else) can wait for them: `whenPendingFileTombstoneDropsSettle`. */
 const drops = new DetachedWork('dropPendingFileTombstones');
 
@@ -121,13 +137,13 @@ export async function writePendingFileTombstones(
  */
 export async function confirmFileTombstones(pending: PendingFileTombstones): Promise<void> {
   if (pending.docs.length === 0) return;
-  const deletedAt = new Date().toISOString();
+  const { $set, $unset } = publishedNow();
   await unlessTheStoreFailed(`confirmFileTombstones for space ${peerText(pending.spaceId)} (${pending.docs.length})`,
     () => tombstonesOf(pending.spaceId).bulkWrite(pending.docs.map(d => ({
       updateOne: {
         filter: asFilter<StoredFileTombstone>({ _id: d._id }),
         update: asUpdate<StoredFileTombstone>({
-          $set: { spaceId: d.spaceId, path: d.path, deletedAt, ...(d.move ? { move: d.move } : {}) }, $unset: { pending: '' },
+          $set: { ...$set, spaceId: d.spaceId, path: d.path, ...(d.move ? { move: d.move } : {}) }, $unset,
         }),
         upsert: true,
       },
@@ -192,11 +208,8 @@ export async function settleStalePendingFileTombstones(spaceId: string, now: Dat
   }
   const tombstones = tombstonesOf(spaceId);
   if (drop.length > 0) await tombstones.deleteMany(asFilter<StoredFileTombstone>({ _id: { $in: drop }, pending: true }));
-  if (confirm.length > 0) {
-    // Stamped with the real time, never the sweep's `now`: `deletedAt` is the push position peers acknowledge.
-    await tombstones.updateMany(asFilter<StoredFileTombstone>({ _id: { $in: confirm }, pending: true }),
-      asUpdate<StoredFileTombstone>({ $set: { deletedAt: new Date().toISOString() }, $unset: { pending: '' } }));
-  }
+  // Stamped with the real time, never the sweep's `now` (`publishedNow`).
+  if (confirm.length > 0) await publishPending(spaceId, { _id: { $in: confirm } });
   if (drop.length + confirm.length > 0) {
     log.info(`File tombstones of ${peerText(spaceId)} settled from the disk: ${confirm.length} published (the path is gone), `
       + `${drop.length} dropped (the path still has its file)`);
@@ -208,8 +221,7 @@ export async function settleStalePendingFileTombstones(spaceId: string, now: Dat
 
 /** Whether a move from `from` to `to` was begun here — its tombstones written — and not yet finished. */
 export async function moveWasBegun(spaceId: string, from: string, to: string): Promise<boolean> {
-  const marker = { 'move.from': toDocId(from), 'move.to': toDocId(to) };
-  return (await tombstonesOf(spaceId).findOne(asFilter<StoredFileTombstone>(marker), { projection: { _id: 1 } })) !== null;
+  return (await tombstonesOf(spaceId).findOne(asFilter<StoredFileTombstone>(moveMarker(from, to)), { projection: { _id: 1 } })) !== null;
 }
 
 /**
@@ -217,10 +229,8 @@ export async function moveWasBegun(spaceId: string, from: string, to: string): P
  * which holds no handle on what the first attempt wrote. Fails as {@link confirmFileTombstones} fails.
  */
 export async function confirmBegunMove(spaceId: string, from: string, to: string): Promise<void> {
-  const marker = { 'move.from': toDocId(from), 'move.to': toDocId(to), pending: true };
   await unlessTheStoreFailed(`confirmBegunMove for space ${peerText(spaceId)}, ${peerText(from)} → ${peerText(to)}`,
-    () => tombstonesOf(spaceId).updateMany(asFilter<StoredFileTombstone>(marker),
-      asUpdate<StoredFileTombstone>({ $set: { deletedAt: new Date().toISOString() }, $unset: { pending: '' } })));
+    () => publishPending(spaceId, moveMarker(from, to)));
 }
 
 /**
@@ -229,8 +239,7 @@ export async function confirmBegunMove(spaceId: string, from: string, to: string
  * an act that happened.
  */
 export async function forgetFinishedMove(spaceId: string, from: string, to: string): Promise<void> {
-  const marker = { 'move.from': toDocId(from), 'move.to': toDocId(to) };
-  await tombstonesOf(spaceId).updateMany(asFilter<StoredFileTombstone>(marker), asUpdate<StoredFileTombstone>({ $unset: { move: '' } }))
+  await tombstonesOf(spaceId).updateMany(asFilter<StoredFileTombstone>(moveMarker(from, to)), asUpdate<StoredFileTombstone>({ $unset: { move: '' } }))
     .catch(err => log.warn(`forgetFinishedMove for space ${peerText(spaceId)}, ${peerText(from)} → ${peerText(to)}: ${peerText(err)}`));
 }
 

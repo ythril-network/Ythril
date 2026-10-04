@@ -188,10 +188,13 @@ export async function bytesPresent(abs: string): Promise<boolean> {
     await fsp.lstat(abs);
     return true;
   } catch (err) {
-    if ((err as NodeJS.ErrnoException | null)?.code === 'ENOENT') return false;
+    if (isMissingPath(err)) return false;
     throw err;
   }
 }
+
+/** Whether a filesystem failure says the path does not exist — the one failure {@link bytesPresent} reads as an answer. */
+export const isMissingPath = (err: unknown): boolean => (err as NodeJS.ErrnoException | null)?.code === 'ENOENT';
 
 /** Delete a stored file under its path lock. */
 export async function deleteStored(abs: string): Promise<void> {
