@@ -517,8 +517,8 @@ What it does is remove the record's embedding, not hide the record. So a suppres
 next to it — it simply stops competing on meaning. If a record you know exists never appears in a search, check
 these three levels before treating it as a fault.
 
-Turning it **on** removes the vectors already stored for what it now covers — whether you turned it on, or a
-network whose schema this space follows did — files and their passages included. A record's text is kept, so
+Turning it **on** removes the vectors already stored for what it now covers — whether you turned it on, for the
+space or in a type's schema, or a network whose schema this space follows did — files and their passages included. A record's text is kept, so
 **Lexical** search still finds it. A record that arrives from a peer while its type or space is suppressed here
 is stored without a vector, whatever this instance held for it before.
 

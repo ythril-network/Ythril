@@ -58,6 +58,7 @@ import { UNSET_VECTOR } from '../sync/local-only-fields.js';
 import { retireEmbedJobs } from './embed-queue.js';
 import { MAX_ANCESTRY } from './embed-record.js';
 import { concreteSpaces } from '../spaces/proxy.js';
+import { createCoalescingRunner } from '../sync/coalescing-runner.js';
 
 /** The collection suffix for each record kind, in the one place that has to agree with the schema keys. */
 const COLLECTION: Record<KnowledgeType, SpacePart> = {
@@ -199,10 +200,15 @@ export async function dropFileVectors(spaceId: string, fileIds: readonly string[
 
 /**
  * Sweep the vectors a meta write suppresses, without blocking the write on it; a failure is logged, since the sweep
- * is idempotent and the next meta write repeats it. The one trigger every meta change goes through: an operator's
- * edit (`spaces/meta-update.ts`) and every recompute of the effective meta (`spaces/effective-meta.ts` — a network
- * layer arriving by meta pull, meta round or space addition, a network left, a precedence change), moved here from
- * meta-update in bundle-30 because the recompute is where a network's suppression lands, and nothing swept there.
+ * is idempotent and the next meta write repeats it. Asked for by `updateSpace` (`spaces/spaces.ts`) — the one writer
+ * of `space.meta`, so every meta change reaches it: an operator's edit, a schema route's, a passed vote's, and every
+ * recompute of the effective meta (a network layer arriving, a network left, a precedence change).
+ *
+ * **Once per change, against the latest meta.** One change is often several writes in one turn — a vote passing on
+ * a proposer that holds a layer writes its own definitions and then the layer, each through a recompute — and the
+ * callers used to sweep after each, plus once more on top (bundle-30 `I5`). So the sweep is coalesced per space
+ * (`createCoalescingRunner`): it starts once this turn's writes have landed and sweeps the LAST meta written; a write
+ * that lands while it runs queues one more, which sweeps that write's meta; a rerun with nothing newer does nothing.
  *
  * `meta` is undefined when the write carried no meta (a `textAnalysis`-only PATCH): suppression is read from meta
  * alone, so there is nothing to sweep. Both callers cast it to `SpaceMeta` instead, and the sweep then failed on
@@ -210,8 +216,26 @@ export async function dropFileVectors(spaceId: string, fileIds: readonly string[
  */
 export function sweepAfterMetaWrite(id: string, meta: SpaceMeta | undefined): void {
   if (meta === undefined) return;
-  void sweepSuppressedVectors(id, meta)
-    .catch(err => log.warn(`Suppression sweep failed for ${peerText(id)}: ${err instanceof Error ? peerText(err.message) : peerText(String(err))}`));
+  nextSweep.set(id, meta);
+  void metaSweeps.run(id, () => sweepLatestMeta(id));
+}
+
+/** Per space, the meta its next sweep runs against: the last one written and not yet swept. */
+const nextSweep = new Map<string, SpaceMeta>();
+const metaSweeps = createCoalescingRunner<void>();
+
+/** One sweep of `id` against the latest meta written — after this turn's writes, so writes that land together sweep once. */
+async function sweepLatestMeta(id: string): Promise<void> {
+  await new Promise<void>(resolve => setImmediate(resolve));
+  const meta = nextSweep.get(id);
+  // A rerun the runner queued for a write this sweep already covered: nothing newer to sweep.
+  if (meta === undefined) return;
+  nextSweep.delete(id);
+  try {
+    await sweepSuppressedVectors(id, meta);
+  } catch (err) {
+    log.warn(`Suppression sweep failed for ${peerText(id)}: ${peerText(err)}`);
+  }
 }
 
 /**

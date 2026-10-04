@@ -9,6 +9,7 @@ import { log, peerText } from '../util/log.js';
 import type { SpaceConfig, SpaceMeta, DupeActionRule, DocExtractionMode, ImageLevel, AudioLevel, VideoLevel, TextLevel, RecordTtlWindows } from '../config/types.js';
 import { reconcileSpaceSearchIndexes } from './search-index-presence.js';
 import { syncSchemaFiles, META_VERSION_CAP } from './_shared.js';
+import { sweepAfterMetaWrite } from '../brain/suppression-sweep.js';
 
 /**
  * A space's MCP-facing directive, under the one name that still has a store behind it.
@@ -139,6 +140,13 @@ export function updateSpace(
   saveConfig(cfg);
   // Fire-and-forget schema file sync
   syncSchemaFiles(spaceId, space.meta).catch(err => log.warn(`syncSchemaFiles: ${peerText(err)}`));
+  /*
+   * What the new meta suppresses holds no vector afterwards — asked for HERE, by the one writer of `space.meta`, so
+   * no meta write can skip it (bundle-30 `I5`): a schema route's edit of a space no network carries wrote through
+   * here and swept nothing, while the callers that did sweep swept one vote-applied change two or three times. Not
+   * awaited, and coalesced per space (`sweepAfterMetaWrite`).
+   */
+  if (updates.meta !== undefined) sweepAfterMetaWrite(spaceId, space.meta);
   return space;
 }
 

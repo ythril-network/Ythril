@@ -51,7 +51,6 @@ import type { TypeSchemasZ } from './body-schemas.js';
 import type { z } from 'zod';
 import { isDeepStrictEqual } from 'node:util';
 // The trigger lives beside the sweep (bundle-30 `R5`): the effective-meta recompute fires it too.
-import { sweepAfterMetaWrite } from '../brain/suppression-sweep.js';
 
 /**
  * Deep-merge an incoming PATCH `meta` payload into the existing SpaceMeta.
@@ -484,10 +483,10 @@ export async function applySpaceMetaUpdate(plan: MetaUpdatePlan): Promise<MetaUp
 
       if (rounds.length > 0) return { outcome: 'vote_pending', rounds, ...kept };
 
-      // Every round passed on the proposer's own vote, so the meta is already written by the conclusion.
+      // Every round passed on the proposer's own vote, so the meta is already written by the conclusion — and swept by
+      // it: the conclusion writes through `updateSpace`, which asks for the sweep (a second one here swept it twice).
       const applied = getConfig().spaces.find(s => s.id === id);
       if (!applied) return { outcome: 'not_found' };
-      sweepAfterMetaWrite(id, applied.meta);
       return { outcome: 'applied', space: applied, ...kept };
     }
   }
@@ -506,15 +505,8 @@ export async function applySpaceMetaUpdate(plan: MetaUpdatePlan): Promise<MetaUp
     meta: mergedMeta,
     ...(plan.hasDocExtraction ? { documentExtraction: plan.documentExtraction } : {}),
   });
-  /*
-   * The stored vectors follow the flag, which is what the userguide has always said happens.
-   *
-   * Not awaited: this runs on every meta write and a space may hold many records, so blocking the PATCH on it
-   * would make an unrelated `purpose` edit feel slow. The sweep is idempotent and local — the vector does not
-   * replicate — so a failure costs nothing beyond the next meta write repeating it, which is why a rejection
-   * is logged rather than surfaced to the caller who was not asking about embeddings.
-   */
-  if (updated) sweepAfterMetaWrite(id, mergedMeta);
+  // The stored vectors follow the flag, which is what the userguide has always said happens: `updateSpace` asks for
+  // the sweep, not awaited — see `sweepAfterMetaWrite` for why a failure is logged rather than surfaced here.
   return updated ? { outcome: 'applied', space: updated } : { outcome: 'not_found' };
 }
 

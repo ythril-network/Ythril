@@ -386,7 +386,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Suppression that a network turns on removes the vectors already stored (`Q-230`).** A space whose type or
   space-level `suppressEmbeddings` arrived from a network — a meta pull, a meta round, a space addition, leaving a
   network or changing its precedence — reported its records suppressed and went on ranking them by meaning until
-  each was rewritten: only an operator's own edit swept. Every change of the effective meta now sweeps. The sweep
+  each was rewritten: only an operator's own edit swept. Every change of the effective meta now sweeps — and so
+  does a type schema saved on a space no network carries (`PUT /schema`, the per-type upsert and delete, a schema
+  library apply), which swept nothing while the same edit on a networked space did. One change is swept once: a meta
+  change applied by a vote was swept two or three times, each a pass over every collection of the space. The sweep
   also covers files and their derived passages (it covered none), removes the model name with the vector (it left
   it behind), keeps `matchedText` (the content did not change), and runs once at every start, so vectors stored
   before this version are cleared without waiting for the next edit.
