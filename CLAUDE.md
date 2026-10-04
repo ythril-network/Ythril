@@ -319,9 +319,10 @@ dropped on push only. `push-and-pull-decide-alike-db.test.js` holds both doors t
   Links pass `null` — a link is a pair of ids, so there is no text. **A missing embed job on an arriving link is
   correct, not a bug.** A caller that embeds nothing has to say so out loud, at the call, where a reviewer sees it.
 - **File metadata is merged, not replaced**: the writer merges it itself (`fileMetaUpdate`: `$set` of the
-  authored keys, peer values inside `$literal`, never `$unset`) under the same seq write guard, in one bulk write
-  per page — the receiver would otherwise publish the sender's `sizeBytes` and `sha256` for bytes it does not
-  have. A peer's file is queued **only when this instance holds the blob** (`embedArrivedFiles`); a restore queues
+  authored keys, peer values inside `$literal`; it never `$unset`s an AUTHORED key, and removes only the local-only
+  fields `carriedFields` says not to carry — on a restore or a suppressed arrival) under the same seq write guard,
+  in one bulk write per page — the receiver would otherwise publish the sender's `sizeBytes` and `sha256` for bytes
+  it does not have. A peer's file is queued **only when this instance holds the blob** (`embedArrivedFiles`); a restore queues
   every file; a file this instance suppresses loses its vectors instead.
 - **D-9, owner decision 2026-10-01: an arrival takes this instance's retention.** A record that carries no
   receiver stamp is stamped from its OWN `createdAt` by this instance's `schema > space` windows — never from now,
