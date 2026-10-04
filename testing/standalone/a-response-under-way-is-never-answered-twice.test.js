@@ -38,7 +38,7 @@ function logged(fn) {
 
 describe('a response under way is never answered twice', () => {
   for (const [name, err] of [
-    ['a store failure', new MongoNetworkError('connection 1 to 10.4.4.4:27017 closed')],
+    ['a store failure', new MongoNetworkError('connection 1 to 10.1.2.4:27017 closed')],
     ['any other failure', new Error('the export stream broke')],
   ]) {
     it(`${name}: nothing is written to the response, and the failure is reported`, () => {

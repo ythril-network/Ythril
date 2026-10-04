@@ -78,7 +78,7 @@ describe('a file tombstone is written before the bytes go', { skip }, () => {
     realInsertMany = proto.insertMany;
     proto.insertMany = async function maybeDown(...args) {
       if (failTombstones && this.collectionName === `${S}_file_tombstones`) {
-        throw new MongoNetworkError('connection 7 to 10.9.8.7:27017 closed');
+        throw new MongoNetworkError('connection 7 to 10.9.9.9:27017 closed');
       }
       return realInsertMany.apply(this, args);
     };

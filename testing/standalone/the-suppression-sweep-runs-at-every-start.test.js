@@ -61,7 +61,7 @@ describe('the suppression sweep runs at every start', () => {
     const handOff = inner.lastIndexOf('afterListening(', mentions[0]);
     assert.ok(handOff > -1, `the boot sweep is not handed to afterListening — it would compete with the boot (bundle-30 I8)`);
     assert.ok(unconditionalAt(inner, handOff),
-      `the afterListening hand-off is under a condition or inside another block: ${inner.slice(handOff, handOff + 80)}`);
+      `the afterListening hand-off is under a condition or inside another block: ${inner.slice(handOff).split('\n')[0]}`);
 
     // Level 2: the callback has a block body, and the sweep is a top-level statement of it.
     const call = inner.slice(handOff);
@@ -72,6 +72,6 @@ describe('the suppression sweep runs at every start', () => {
     const sweepAt = blockInner.search(new RegExp(`\\b${SWEEP}\\(`));
     assert.ok(sweepAt > -1, 'the afterListening callback does not start the sweep');
     assert.ok(unconditionalAt(blockInner, sweepAt),
-      `the boot sweep is started under a condition inside the afterListening callback: ${blockInner.trim().slice(0, 120)}`);
+      `the boot sweep is started under a condition inside the afterListening callback: ${blockInner.trim().split('\n')[0]}`);
   });
 });
