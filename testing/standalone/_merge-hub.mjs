@@ -38,9 +38,12 @@ export function vectorOf(dims, salt = 1) {
  * @param {number} [o.vectorDims]  give every edge an embedding of this size (0: none)
  * @param {number[]} [o.entityVector]  an embedding for both entities (the duplicate scanner compares these)
  * @param {number} [o.seqFrom]  first seq handed out; entities take the first two
- * @returns the ids, the targets each relinked record names, `relinks`, and the highest seq used
+ * @param {{ survivor: string, absorbed: string }} [o.names]  the two entities' names (both 'Hub' unless given), so a
+ *   case can tell which one a refusal names
+ * @returns the ids, the names, the targets each relinked record names, `relinks`, and the highest seq used
  */
-export async function seedHub({ coll, space, author, edges = 0, links = 0, faces = 0, vectorDims = 0, entityVector, seqFrom = 1 }) {
+export async function seedHub({ coll, space, author, edges = 0, links = 0, faces = 0, vectorDims = 0, entityVector, seqFrom = 1,
+  names = { survivor: 'Hub', absorbed: 'Hub' } }) {
   let seq = seqFrom;
   const survivorId = randomUUID();
   const absorbedId = randomUUID();
@@ -50,7 +53,7 @@ export async function seedHub({ coll, space, author, edges = 0, links = 0, faces
     ...(entityVector ? { embedding: entityVector, embeddingModel: 'seeded' } : {}),
   });
   // The survivor is the OLDER record (lower seq), which is who the duplicate routes pick under the default policy.
-  await coll('entities').insertMany([entity(survivorId, 'Hub'), entity(absorbedId, 'Hub')]);
+  await coll('entities').insertMany([entity(survivorId, names.survivor), entity(absorbedId, names.absorbed)]);
 
   const edgeTargets = [];
   const vector = vectorDims > 0 ? vectorOf(vectorDims, 0.37) : null;
@@ -91,7 +94,7 @@ export async function seedHub({ coll, space, author, edges = 0, links = 0, faces
     await coll('files').insertMany(rows, { ordered: false });
   }
 
-  return { survivorId, absorbedId, edgeTargets, linkSources, faceIds, relinks: edges + links + faces, maxSeq: seq - 1 };
+  return { survivorId, absorbedId, names, edgeTargets, linkSources, faceIds, relinks: edges + links + faces, maxSeq: seq - 1 };
 }
 
 /**

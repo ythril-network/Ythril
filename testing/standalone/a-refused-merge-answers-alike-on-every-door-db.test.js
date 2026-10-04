@@ -250,14 +250,34 @@ describe('a refused merge answers alike on every door', { skip }, () => {
 
   beforeEach(async () => { for (const s of [OPEN, STRICT]) await wipe(s); });
 
-  /** A hub in `space` relinking `n` records: one link, one face label, and the rest edges. */
+  /**
+   * A hub in `space` relinking `n` records: one link, one face label, and the rest edges. The two entities have
+   * different names, so a refusal can be checked for naming each one in its role.
+   */
   async function hubOf(space, n) {
     assert.ok(n >= 2, `a hub of ${n} relinks cannot carry a link and a face label`);
     const hub = await seedHub({ coll: coll(space), space, author: AUTHOR, edges: n - 2, links: 1, faces: 1,
-      entityVector: vectorOf(DIMS) });
+      entityVector: vectorOf(DIMS), names: { survivor: 'North Hub', absorbed: 'South Hub' } });
     assert.equal(hub.relinks, n);
     await bumpSeq(space, hub.maxSeq);
     return hub;
+  }
+
+  /**
+   * Every sentence of a too-large refusal refers to something its reader can see or do (bundle-30 I7). The Review page
+   * shows the pair by NAME and never by id, so the refusal names both entities, in their roles; no door can move an
+   * edge (an edge's ends are not patchable), so it never says to; and the other direction is offered only where it
+   * is true. In this hub the survivor relinks nothing, so merging the other way round fits the bound and is offered.
+   */
+  function refusalSaysWhatTheUserCanDo(door, text, hub) {
+    const { survivor, absorbed } = hub.names;
+    assert.match(text, new RegExp(`'${absorbed}'[^]*\\binto\\b[^]*'${survivor}'`),
+      `${door}: the refusal does not name the absorbed entity '${absorbed}' and the survivor '${survivor}' by name: ${text}`);
+    assert.match(text, /nothing was written/i, `${door}: the refusal does not say nothing was written: ${text}`);
+    assert.doesNotMatch(text, /\bmove\b/i, `${door}: the refusal suggests moving an edge, which no door can do: ${text}`);
+    assert.match(text, /\bdelete\b/i, `${door}: the refusal does not suggest deleting what the absorbed entity no longer needs: ${text}`);
+    assert.match(text, /other way round/i,
+      `${door}: merging the other way round relinks 0 records here, and the refusal does not say so: ${text}`);
   }
 
   it('every merge door has a driver here, and there are at least four', () => {
@@ -328,6 +348,7 @@ describe('a refused merge answers alike on every door', { skip }, () => {
             assert.match(out.text, new RegExp(`\\b${n}\\b`), `${door}: the refusal does not name ${n} (the count and the bound)`);
           }
         }
+        refusalSaysWhatTheUserCanDo(door, out.text, hub);
         assert.deepEqual(changed(before_, after_), [],
           `${door}: a merge over the bound changed the space — it must be refused before any write (the counter included)`);
       });
