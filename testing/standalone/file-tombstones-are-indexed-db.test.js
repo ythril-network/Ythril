@@ -9,6 +9,10 @@
  *     settleStalePendingFileTombstones  { pending: true, deletedAt <= t }  sort { deletedAt: 1 }   per space, every TTL cycle
  *     moveWasBegun / forgetFinishedMove { 'move.from': a, 'move.to': b }                          per move
  *
+ * and I17 a third, every time a tombstone is published (verify-drive-5 F1):
+ *
+ *     one tombstone per path            { path: { $in: paths } }                                     per publish
+ *
  * Each was a collection scan. And the collection is not small on the instances where it matters: a space with an
  * offline peer never prunes it, because a prune needs every peer's acknowledgement.
  *
@@ -44,11 +48,13 @@ function planStages(explain) {
   return names;
 }
 const keysOf = async () => (await coll.listIndexes().toArray()).map(ix => Object.keys(ix.key).join(',')).filter(k => k !== '_id');
-const WANTED = ['pending,deletedAt', 'move.from,move.to'];
+const WANTED = ['pending,deletedAt', 'move.from,move.to', 'path'];
 
 /** The two questions, as the module asks them. */
 const settleQuery = () => coll.find({ pending: true, deletedAt: { $lte: new Date().toISOString() } }).sort({ deletedAt: 1 }).limit(500);
 const markerQuery = () => coll.find({ 'move.from': 'a.txt', 'move.to': 'b.txt' });
+const pathQuery = () => coll.find({ path: { $in: ['x.txt', 'a.txt'] } });
+const QUESTIONS = [['settle', settleQuery], ['move marker', markerQuery], ['one per path', pathQuery]];
 
 describe('file tombstones are indexed', { skip }, () => {
   before(async () => {
@@ -64,23 +70,24 @@ describe('file tombstones are indexed', { skip }, () => {
   });
   after(async () => { await door?.close(); });
 
-  it('space initialisation creates both', async () => {
+  it('space initialisation creates each', async () => {
     const keys = await keysOf();
     for (const k of WANTED) assert.ok(keys.includes(k), `initSpace did not index ${k}: found ${keys.join(' | ') || 'none'}`);
   });
 
-  it('the settle and the move\'s marker are answered from them', async () => {
-    for (const [name, q] of [['settle', settleQuery], ['move marker', markerQuery]]) {
+  it('the settle, the move\'s marker and the one-per-path question are answered from them', async () => {
+    for (const [name, q] of QUESTIONS) {
       const stages = planStages(await q().explain('queryPlanner'));
       assert.ok(stages.includes('IXSCAN') && !stages.includes('COLLSCAN'), `${name}: ${stages.join(' > ')}`);
     }
     assert.deepEqual((await settleQuery().toArray()).map(t => t._id), ['pend'], 'the settle\'s question no longer finds its row');
     assert.deepEqual((await markerQuery().toArray()).map(t => t._id), ['mark'], 'the marker\'s question no longer finds its row');
+    assert.deepEqual((await pathQuery().toArray()).map(t => t._id).sort(), ['mark', 'pend'], 'the one-per-path question no longer finds its rows');
   });
 
   it('without them the same questions scan — the control — and the boot pass puts them back on an existing space', async () => {
     await coll.dropIndexes();
-    for (const [name, q] of [['settle', settleQuery], ['move marker', markerQuery]]) {
+    for (const [name, q] of QUESTIONS) {
       assert.ok(planStages(await q().explain('queryPlanner')).includes('COLLSCAN'), `${name}: an index answered it with none created`);
     }
     const { ensureQueryIndexes } = await import('../../server/dist/spaces/ensure-query-indexes.js');
