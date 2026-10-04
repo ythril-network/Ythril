@@ -300,6 +300,27 @@ describe('file metadata a 4.0-5.6.1 pull left in <space>_filemeta is recovered i
     assert.equal(await strayExists(LEGACY), false, 'a refused record was kept, though nothing can ever make it valid');
   });
 
+  it('the drain hands the one validation step WIRE keys: a key no version serves is dropped there, where a door refuses it (D4)', async () => {
+    /*
+     * Bundle-30 I6, D4 — the order decided, and a PIN (the drain already picked first; the arrival-shape docblock said
+     * "still refused, on both doors alike" without saying the drain is not a door). A stray record is a row an OLD
+     * pull stored whole, from a sender of any version since 4.0: a key that is neither a wire key nor part of today's
+     * file row is a retired field, and refusing the record for it would delete it as answered — the publisher's
+     * description lost, the loss I2b's fill exists to prevent. A live sender's page is refused for the same key,
+     * because the sender can still be fixed and send it again.
+     */
+    await door.coll(LEGACY, 'files').insertOne(stampedRow(LEGACY, 'retired-key.md', 710));
+    await door.coll(LEGACY, 'filemeta').insertOne(
+      legacyStray(LEGACY, 'retired-key.md', 40, { description: 'beside a retired key', aKeyNoVersionServes: 1 }));
+    await drainStrayFileMeta();
+    const filled = await stored(LEGACY, 'retired-key.md');
+    assert.equal(filled?.description, 'beside a retired key', 'a stray record was refused for a key no version serves');
+    assert.equal('aKeyNoVersionServes' in (filled ?? {}), false, 'the retired key was written to the row');
+    const { admitArrivals } = await import('../../server/dist/sync/arrival-shape.js');
+    const onTheDoor = admitArrivals('filemeta', [{ ...build.filemeta(LEGACY, 'retired-key.md', 41, { author: PEER }), aKeyNoVersionServes: 1 }]);
+    assert.deepEqual(onTheDoor.refused.map(r => r._id), ['retired-key.md'], 'a door stopped refusing an undeclared key');
+  });
+
   it('the fill\'s validation is the one validation step: present keys checked, strict, nothing else required', async () => {
     const { admitArrivals } = await import('../../server/dist/sync/arrival-shape.js');
     const { admitted, refused } = admitArrivals('filemeta', [

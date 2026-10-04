@@ -24,7 +24,14 @@
  * page is the sender's STORED row (a 5.6 peer serves it whole, less the local-only fields), so the sender's own
  * machinery — sizes, hashes, excerpts, the media pipeline's fields — is removed first (`fileMetaFromSender`, a list
  * the compiler holds complete); a key that is neither a wire key nor part of a file row is still refused, on both
- * doors alike.
+ * doors alike — push and pull.
+ *
+ * **The stray-filemeta drain is not a door, and hands this its records' WIRE keys only** (`fileMetaForWire`, before
+ * the call). Its records are rows an OLD pull stored whole, from senders of any version since 4.0, so a key that is
+ * neither is a field a version since retired. Refused, the record would be deleted as answered and the publisher's
+ * description lost for good — the loss the fill below exists to prevent — while a live sender refused for the same key
+ * can still be fixed and send again. Decided in bundle-30 I6 (D4); `a-stray-filemeta-collection-is-merged-db` holds
+ * both halves.
  *
  * ## A fill (`{ fill: true }`, file metadata only)
  *
