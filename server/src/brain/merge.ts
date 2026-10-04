@@ -503,32 +503,83 @@ export const MERGE_MAX_RELINKS = 2_500;
  */
 export const MERGE_REFUSAL_CODES = ['merge_too_large'] as const;
 
+/** What a merge relinks, by kind — the bound counts their sum (`relinkTally`). */
+export interface RelinkTally { edges: number; links: number; faces: number }
+
+const relinkTotal = (t: RelinkTally): number => t.edges + t.links + t.faces;
+
+/** What a too-large refusal is built from: both entities, the absorbed one's tally, and the other direction's count. */
+export interface MergeTooLargeFacts {
+  survivor: Pick<EntityDoc, '_id' | 'name'>;
+  absorbed: Pick<EntityDoc, '_id' | 'name'>;
+  spaceId: string;
+  tally: RelinkTally;
+  bound: number;
+  /** What merging the other way round — the survivor absorbed — would relink, counted the same way. */
+  reverseRelinks: number;
+}
+
 /**
  * A merge refused because it would relink more than `MERGE_MAX_RELINKS` records — refused before anything is
  * written, the seq counter included. `merge_too_large` is the code every door answers with, beside the count and
  * the bound, so a caller can tell how far over it is.
+ *
+ * The message is what the Review page's toast shows, so every sentence in it refers to something its reader can see
+ * or do (bundle-30 I7). It names both entities by NAME, because the page shows a pair by name and never by id (the
+ * ids follow in brackets, for an API caller). It suggests only what a door offers: deleting edges or links the
+ * absorbed entity no longer needs, and only when that can bring the merge under the bound (no door removes a face
+ * label); and merging the other way round, only when that merge fits — counted, never assumed. It used to say "move
+ * or delete some of its edges", and no door can move an edge: an edge's ends are not patchable.
  */
 export class MergeTooLarge extends Error {
   readonly code = MERGE_REFUSAL_CODES[0];
-  constructor(
-    readonly survivorId: string,
-    readonly absorbedId: string,
-    readonly spaceId: string,
-    readonly relinks: number,
-    readonly bound: number,
-  ) {
-    super(
-      `merge_too_large: merging '${absorbedId}' into '${survivorId}' in space '${spaceId}' would relink ${relinks} `
-      + `records (the absorbed entity's edges, links and face labels); one merge relinks at most ${bound}. Nothing `
-      + 'was written. Move or delete some of its edges first, then merge again.',
-    );
+  readonly survivorId: string;
+  readonly absorbedId: string;
+  readonly spaceId: string;
+  readonly relinks: number;
+  readonly bound: number;
+  constructor(facts: MergeTooLargeFacts) {
+    super(mergeTooLargeMessage(facts));
     this.name = 'MergeTooLarge';
+    this.survivorId = facts.survivor._id;
+    this.absorbedId = facts.absorbed._id;
+    this.spaceId = facts.spaceId;
+    this.relinks = relinkTotal(facts.tally);
+    this.bound = facts.bound;
   }
 
   /** What a door carries beside the message: the code, the count and the bound. */
   toStructured(): Record<string, unknown> {
     return { code: this.code, relinks: this.relinks, bound: this.bound };
   }
+}
+
+/** An entity's name as the refusal quotes it: bounded, and on one line (automerge logs the refusal as one line). */
+const nameOf = (e: Pick<EntityDoc, '_id' | 'name'>): string => `'${peerText(e.name, { max: 120 })}'`;
+
+/** The too-large refusal's text — see `MergeTooLarge` for why each sentence is there. */
+function mergeTooLargeMessage({ survivor, absorbed, spaceId, tally, bound, reverseRelinks }: MergeTooLargeFacts): string {
+  const relinks = relinkTotal(tally);
+  const over = relinks - bound;
+  // The ids follow each name once, for an API caller. A pair with ONE name (a duplicate usually is) keeps them on
+  // every mention, or "keep 'X' and absorb 'X'" would say nothing.
+  const withId = (e: Pick<EntityDoc, '_id' | 'name'>): string => `${nameOf(e)} [${peerText(e._id)}]`;
+  const sameName = absorbed.name === survivor.name;
+  const gone = sameName ? withId(absorbed) : nameOf(absorbed);
+  const kept = sameName ? withId(survivor) : nameOf(survivor);
+  const out = [
+    `merge_too_large: merging ${withId(absorbed)} into ${withId(survivor)} in space '${peerText(spaceId)}' would relink`
+    + ` ${relinks} records — the edges (${tally.edges}), links (${tally.links}) and face labels (${tally.faces}) of ${gone}`
+    + ` — and one merge relinks at most ${bound}.`,
+    'Nothing was written.',
+    tally.edges + tally.links >= over
+      ? `Delete at least ${over} of the edges or links of ${gone} that are no longer needed, then merge again.`
+      : `Deleting edges and links cannot bring this merge under the bound: the ${tally.faces} face labels of ${gone} alone exceed it.`,
+  ];
+  if (reverseRelinks <= bound) {
+    out.push(`Or merge the other way round — keep ${gone} and absorb ${kept}: that relinks ${reverseRelinks} records, within the bound.`);
+  }
+  return out.join(' ');
 }
 
 /**
@@ -558,7 +609,7 @@ export interface MergeRefusal {
 
 /**
  * What a merge of `absorbedId` relinks, as filters: its edges (either end), the links that point at it, and the face
- * labels that name it. ONE definition for the plan, the bound (`relinkCount`) and the writer (`relinkAndAbsorb`):
+ * labels that name it. ONE definition for the plan, the bound (`relinkTally`) and the writer (`relinkAndAbsorb`):
  * each spelled them by hand, and a bound counted by a filter the writer does not use is a bound on something else
  * (bundle-30 I6, C12).
  *
@@ -574,15 +625,15 @@ function relinkFilters(spaceId: string, absorbedId: string) {
   };
 }
 
-/** How many records a merge of `absorbedId` relinks, counted as the bound is: edges + links + face labels. */
-async function relinkCount(spaceId: string, absorbedId: string): Promise<number> {
+/** What a merge of `absorbedId` relinks, by kind, counted as the bound is: the bound is their sum. */
+async function relinkTally(spaceId: string, absorbedId: string): Promise<RelinkTally> {
   const relinked = relinkFilters(spaceId, absorbedId);
   const [edges, links, faces] = await Promise.all([
     col<EdgeDoc>(spaceCollection(spaceId, 'edges')).countDocuments(relinked.edges),
     col<LinkDoc>(spaceCollection(spaceId, 'links')).countDocuments(relinked.links),
     col<FileMetaDoc>(spaceCollection(spaceId, 'files')).countDocuments(relinked.faces),
   ]);
-  return edges + links + faces;
+  return { edges, links, faces };
 }
 
 /** What the merge transaction wrote, for the steps that run once it has committed. */
@@ -643,8 +694,12 @@ export async function executeMerge(
     );
   }
 
-  const relinks = await relinkCount(spaceId, absorbed._id);
-  if (relinks > MERGE_MAX_RELINKS) throw new MergeTooLarge(survivor._id, absorbed._id, spaceId, relinks, MERGE_MAX_RELINKS);
+  const tally = await relinkTally(spaceId, absorbed._id);
+  if (relinkTotal(tally) > MERGE_MAX_RELINKS) {
+    // The other direction is counted only here, on the refusal path, so the refusal offers it only when it is true.
+    const reverseRelinks = relinkTotal(await relinkTally(spaceId, survivor._id));
+    throw new MergeTooLarge({ survivor, absorbed, spaceId, tally, bound: MERGE_MAX_RELINKS, reverseRelinks });
+  }
 
   /*
    * The survivor's content changed, so its vector must be recomputed — UNLESS the type is suppressed.

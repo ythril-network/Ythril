@@ -102,10 +102,13 @@ afterwards, or widen the rule on the space's Schema tab.
 
 **A merge happens whole or not at all — and a very large one is refused before it starts.** Everything that
 pointed at the absorbed record moves in one step. If that record has more than **2500** links, relationships and
-face labels between them, the merge is refused with *merge_too_large*, naming how many there are, and nothing
-changes: a step that size would pause syncing of the whole space while it ran. Remove or move some of its
-relationships first, or keep the other record. A space set to **strict** likewise refuses a merge whose result
-would break its own rules, and says which.
+face labels between them, the merge is refused with *merge_too_large*, and nothing changes: a step that size
+would pause syncing of the whole space while it ran. The message names both records and how many of each kind
+the absorbed one has, and says what would fit: delete at least as many of its relationships or links as it is
+over — a relationship cannot be moved to another record, only deleted — or, when the message says so, keep the
+other record instead. On the Review page the record that is kept follows the space's **Merge survivor** setting
+(Settings → the space → **Duplicates**). A space set to **strict** likewise refuses a merge whose result would
+break its own rules, and says which.
 
 **Deleting:** Each row has an inline **✕ → confirm** flow.
 

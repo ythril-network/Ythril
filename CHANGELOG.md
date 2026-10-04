@@ -31,6 +31,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `relinks` and `bound`, on the REST merge route, `POST /api/duplicates/:id/merge` and the `graph_merge` tool
     alike, and automerge leaves such a pair open with one warning. Nothing is written, not even a sequence number.
     The bound is set from measurement: half of the largest merge that still committed on the test store.
+  - **The `merge_too_large` text says what its reader can see and do** (bundle-30). It named the two entities by
+    id, which the Review page never shows, and said to "move or delete some of its edges", although no door can
+    move an edge. It now names both entities by name (each id follows in brackets), states the absorbed entity's
+    edges, links and face labels separately, and suggests deleting at least as many edges or links as the merge
+    is over — or says the face labels alone exceed the bound — and merging the other way round only when that
+    merge fits, with what it would relink. `code`, `relinks` and `bound` are unchanged.
   - **A merge a `strict` space refuses answers `400` on every door.** The REST merge route answered `500`
     "Internal server error" and the duplicate route `500` "Internal error" while the tool answered `400`. The
     refusal is now decided before anything is written, so it no longer spends sequence numbers either.
