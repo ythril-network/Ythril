@@ -279,7 +279,7 @@ async function detectEndpointRuleBreaks(
 
   const edgeColl = col<EdgeDoc>(spaceCollection(spaceId, 'edges'));
   const moving = await edgeColl
-    .find(asFilter<EdgeDoc>({ spaceId, $or: [{ from: absorbedId }, { to: absorbedId }] }), { projection: PLAN_EDGE_PROJECTION })
+    .find(relinkFilters(spaceId, absorbedId).edges, { projection: PLAN_EDGE_PROJECTION })
     .toArray() as EdgeDoc[];
   if (moving.length === 0) return [];
 
@@ -344,7 +344,7 @@ async function detectDuplicateEdges(
 
   // All edges currently referencing the absorbed entity
   const absorbedEdges = await edgeColl
-    .find(asFilter<EdgeDoc>({ spaceId, $or: [{ from: absorbedId }, { to: absorbedId }] }), { projection: PLAN_EDGE_PROJECTION })
+    .find(relinkFilters(spaceId, absorbedId).edges, { projection: PLAN_EDGE_PROJECTION })
     .toArray() as EdgeDoc[];
 
   // All edges currently referencing the survivor entity
@@ -556,12 +556,31 @@ export interface MergeRefusal {
   body: Record<string, unknown>;
 }
 
+/**
+ * What a merge of `absorbedId` relinks, as filters: its edges (either end), the links that point at it, and the face
+ * labels that name it. ONE definition for the plan, the bound (`relinkCount`) and the writer (`relinkAndAbsorb`):
+ * each spelled them by hand, and a bound counted by a filter the writer does not use is a bound on something else
+ * (bundle-30 I6, C12).
+ *
+ * Not `findEntityReferences` (`brain/entities.ts`): that asks what still points at a record, by the target's kind,
+ * to refuse a delete — a different question with a different kind rule, and herding the two together would make the
+ * merge's bound depend on the delete's needs.
+ */
+function relinkFilters(spaceId: string, absorbedId: string) {
+  return {
+    edges: asFilter<EdgeDoc>({ spaceId, $or: [{ from: absorbedId }, { to: absorbedId }] }),
+    links: asFilter<LinkDoc>({ spaceId, to: absorbedId, toKind: 'entity' }),
+    faces: asFilter<FileMetaDoc>({ spaceId, faceEntityId: absorbedId }),
+  };
+}
+
 /** How many records a merge of `absorbedId` relinks, counted as the bound is: edges + links + face labels. */
 async function relinkCount(spaceId: string, absorbedId: string): Promise<number> {
+  const relinked = relinkFilters(spaceId, absorbedId);
   const [edges, links, faces] = await Promise.all([
-    col<EdgeDoc>(spaceCollection(spaceId, 'edges')).countDocuments(asFilter<EdgeDoc>({ spaceId, $or: [{ from: absorbedId }, { to: absorbedId }] })),
-    col<LinkDoc>(spaceCollection(spaceId, 'links')).countDocuments(asFilter<LinkDoc>({ spaceId, to: absorbedId, toKind: 'entity' })),
-    col<FileMetaDoc>(spaceCollection(spaceId, 'files')).countDocuments(asFilter<FileMetaDoc>({ spaceId, faceEntityId: absorbedId })),
+    col<EdgeDoc>(spaceCollection(spaceId, 'edges')).countDocuments(relinked.edges),
+    col<LinkDoc>(spaceCollection(spaceId, 'links')).countDocuments(relinked.links),
+    col<FileMetaDoc>(spaceCollection(spaceId, 'files')).countDocuments(relinked.faces),
   ]);
   return edges + links + faces;
 }
@@ -703,7 +722,7 @@ async function relinkAndAbsorb(
   // first, then the documents by id in chunks: inside the transaction a read must come back in one batch
   // (`db/write-bound.ts`), and a hub's edges with their vectors are far more than one batch holds.
   const absorbedIds = (await edgeColl
-    .find(asFilter<EdgeDoc>({ spaceId, $or: [{ from: absorbed._id }, { to: absorbed._id }] }), { session, projection: { _id: 1 } })
+    .find(relinkFilters(spaceId, absorbed._id).edges, { session, projection: { _id: 1 } })
     .toArray() as Array<Pick<EdgeDoc, '_id'>>).map(e => e._id);
   const absorbedEdges = [...(await readStoredById<EdgeDoc>(spaceCollection(spaceId, 'edges'), absorbedIds, 'carried', { session })).values()];
   // Their IDENTITY only — the five fields the unique index is over, never the vector.
@@ -779,7 +798,7 @@ async function relinkAndAbsorb(
    */
   const fileColl = col<FileMetaDoc>(spaceCollection(spaceId, 'files'));
   const affectedFiles = await fileColl
-    .find(asFilter<FileMetaDoc>({ spaceId, faceEntityId: absorbed._id }), { session, projection: { _id: 1 } })
+    .find(relinkFilters(spaceId, absorbed._id).faces, { session, projection: { _id: 1 } })
     .toArray() as Array<Pick<FileMetaDoc, '_id'>>;
   if (affectedFiles.length > 0) {
     await withAllocatedSeqs(spaceId, affectedFiles.length, (first) => fileColl.bulkWrite(asBulk<FileMetaDoc>(affectedFiles.map((f, i) => ({
@@ -802,7 +821,7 @@ async function relinkAndAbsorb(
    */
   const linkColl = col<LinkDoc>(spaceCollection(spaceId, 'links'));
   const affectedLinks = await linkColl
-    .find(asFilter<LinkDoc>({ spaceId, to: absorbed._id, toKind: 'entity' }), { session })
+    .find(relinkFilters(spaceId, absorbed._id).links, { session })
     .toArray() as LinkDoc[];
   if (affectedLinks.length > 0) {
     const linkMoves = affectedLinks.map(link => ({ link, newId: linkIdFor(link.from, link.fromKind, survivor._id, 'entity') }));
