@@ -19,8 +19,9 @@
  * cleaning up after "a deleted source" — which, mid-move, would delete what the move is carrying. Then the held jobs
  * are re-keyed to the new path and released, so the moved file is processed where it now is.
  *
- * The tombstones for every path left behind are written FIRST, pending, before a byte moves, and published only once
- * the bytes have moved — dropped if they did not (bundle-30 I13, I15, see `files/tombstones.ts`). The bytes move or
+ * The tombstones for every path left behind are written FIRST, pending, before a byte moves, and each is published
+ * only once ITS bytes have moved — the file's with the rename, a sidecar's after its own move — and dropped if they
+ * did not (bundle-30 I13, I15, I16, see `files/tombstones.ts`). The bytes move or
  * the call throws. Everything after them survives its own failure, logged — but not the STORE's (bundle-30 I14): with
  * the store paused, a move used to carry the bytes, fail every record step and answer `200`, its metadata left at a
  * path with no file. Now that answers `503`, the metadata record is renamed last, and the retried move finds the
@@ -36,7 +37,7 @@ import { holdJobsForMove, releaseMoveHold, rekeyJobsForMove } from './media/job-
 import { movedId, movedSidecars, parentIdsUnder } from './moved-paths.js';
 import { resolveSafePathChecked } from './sandbox.js';
 import { bytesPresent } from './stored-bytes.js';
-import { actUnderPendingTombstones, confirmBegunMove, forgetFinishedMove, moveWasBegun, writePendingFileTombstones } from './tombstones.js';
+import { actUnderPendingTombstones, forgetFinishedMove, moveWasBegun, pendingAmong, settleBegunMove, writePendingFileTombstones } from './tombstones.js';
 import { NotFoundError } from '../util/errors.js';
 import { col, asFilter, asDoc } from '../db/mongo.js';
 import { spaceCollection } from '../db/space-collection.js';
@@ -56,18 +57,19 @@ const exists = async (spaceId: string, relPath: string): Promise<boolean> =>
   bytesPresent(await resolveSafePathChecked(spaceId, relPath));
 
 /**
- * Every file path the move takes away, for the tombstones: the files themselves and their sidecars. Sync has no rename
+ * Every file path the move takes away, for the tombstones: the files themselves (`moved`, gone with the rename) and
+ * their sidecars (`sidecars`, gone only once `afterTheBytesMoved` moves them, which can fail). Sync has no rename
  * detection, so a path without a tombstone is still advertised by a peer's manifest and comes back on the next pull.
  */
-async function pathsLeaving(spaceId: string, src: string, dst: string): Promise<string[]> {
+async function pathsLeaving(spaceId: string, src: string, dst: string): Promise<{ moved: string[]; sidecars: string[] }> {
   const children = await listFilesRecursive(spaceId, src);
-  const out = children.length > 0 ? children : [src];
+  const sidecars: string[] = [];
   for (const { from } of movedSidecars(src, dst)) {
     const under = await listFilesRecursive(spaceId, from);
-    if (under.length > 0) out.push(...under);
-    else if (await exists(spaceId, from)) out.push(from);
+    if (under.length > 0) sidecars.push(...under);
+    else if (await exists(spaceId, from)) sidecars.push(from);
   }
-  return out;
+  return { moved: children.length > 0 ? children : [src], sidecars };
 }
 
 /**
@@ -111,19 +113,20 @@ export async function moveFileCascade(spaceId: string, src: string, dst: string,
     // but only a move begun HERE, which its marker says. Without it this is an orphan `src` beside whatever `dst` is.
     const owed = await exists(spaceId, dst) && await moveWasBegun(spaceId, src, dst) && await hasLiveFileRecordAt(spaceId, src);
     if (!owed) throw new NotFoundError(`Path '${src}' not found in space '${spaceId}'`);
-    // Its tombstones were written before those bytes moved; publish any its first attempt could not.
-    await confirmBegunMove(spaceId, src, dst);
+    // Its tombstones were written before those bytes moved; `afterTheBytesMoved` settles any its first attempt left
+    // pending, once the sidecars have had their turn.
     await afterTheBytesMoved(spaceId, src, dst, await holdJobsForMove(spaceId, src));
     emitWebhookEvent({ event: 'file.updated', spaceId, entry: { path: dst, previousPath: src }, ...(actor ?? {}) });
     return;
   }
-  const leaving = await pathsLeaving(spaceId, src, dst);
+  const { moved, sidecars } = await pathsLeaving(spaceId, src, dst);
 
   // The tombstones BEFORE the bytes move, pending (bundle-30 I13, I15, `files/tombstones.ts`): a store failure here
   // leaves the source where it was, so the retry repeats the move — written after, the retry found no source and the
-  // paths left behind were never tombstoned. Published once the bytes have moved; dropped if they did not, since
-  // nobody asked for those paths to go — and pending, no peer is told of them meanwhile.
-  const pending = await writePendingFileTombstones(spaceId, leaving, { from: src, to: dst });
+  // paths left behind were never tombstoned. Each is published once ITS bytes have moved — the file's with the rename,
+  // a sidecar's only after its own move (bundle-30 I16, preship-4 P4-3) — and dropped if they did not, since nobody
+  // asked for those paths to go. Pending, no peer is told of them meanwhile.
+  const pending = await writePendingFileTombstones(spaceId, [...moved, ...sidecars], { from: src, to: dst });
   let held: string[] = [];
   await actUnderPendingTombstones(pending, async () => {
     try {
@@ -133,7 +136,7 @@ export async function moveFileCascade(spaceId: string, src: string, dst: string,
       await releaseMoveHold(spaceId, held).catch(e => log.warn(`releaseMoveHold error for ${peerText(spaceId)}/${peerText(src)}: ${peerText(why(e))}`));
       throw err;
     }
-  });
+  }, pendingAmong(pending, moved));
   await afterTheBytesMoved(spaceId, src, dst, held);
   emitWebhookEvent({ event: 'file.updated', spaceId, entry: { path: dst, previousPath: src }, ...(actor ?? {}) });
 }
@@ -150,6 +153,10 @@ async function afterTheBytesMoved(spaceId: string, src: string, dst: string, hel
     await moveFile(spaceId, sidecar.from, sidecar.to).catch(err =>
       log.warn(`move sidecar error for ${peerText(spaceId)}, ${peerText(sidecar.from)} → ${peerText(sidecar.to)}: ${peerText(why(err))}`));
   }
+  // Every byte this move will carry has moved, or failed to: the tombstones it left pending — the sidecars', and on a
+  // retry any of the file's — are settled from the disk. A sidecar that could not move is still here, so its tombstone
+  // is dropped rather than published (preship-4 P4-3).
+  await settleBegunMove(spaceId, src, dst);
   const at = `for ${peerText(spaceId)}, ${peerText(src)} → ${peerText(dst)}`;
   await unlessTheStoreFailed(`rekeyJobsForMove error ${at}`, () => rekeyJobsForMove(spaceId, src, dst, held));
   await unlessTheStoreFailed(`relocateDerivedFileMeta error ${at}`, () => relocateDerivedFileMeta(spaceId, src, dst));

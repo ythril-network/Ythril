@@ -362,7 +362,7 @@ export const move_fileTool: ToolHandler = {
     + 'file sits.\n\n'
     + 'A FAILED MOVE IS SAFE TO RETRY with the same `src` and `dst`. A store failure is a retryable error, never a '
     + 'success. Before the bytes move nothing changes, and no peer is told of the tombstones it wrote (they are '
-    + 'published only once the bytes have moved); after they move, the metadata is still at `src`, and the retry '
+    + 'published only once the bytes each one names have moved — a conversion sidecar\'s after the sidecar\'s own move); after they move, the metadata is still at `src`, and the retry '
     + 'finds the file at `dst` and completes the move. Only a move begun with that same `src` and `dst` is '
     + 'completed: a `src` whose bytes are gone for any other reason is not found, and `dst` is left alone.\n\n'
     + 'PARAMETERS:\n'

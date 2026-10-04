@@ -65,10 +65,14 @@ describe('the settle reaches every stale pending file tombstone', { skip }, () =
     await acts.door.coll(S, 'file_tombstones').insertMany(Array.from({ length: batch }, (_, i) => (
       { _id: `locked-${i}`, spaceId: S, path: `locked/${i}.txt`, deletedAt: at(-3_600_000 + i), pending: true })));
     await acts.door.coll(S, 'file_tombstones').insertOne({ _id: 'gone', spaceId: S, path: 'gone.txt', deletedAt: at(-1_800_000), pending: true });
+    // Older than all of them and stored last: oldest first reaches it in the first cycle; stored order never does.
+    await acts.door.coll(S, 'file_tombstones').insertOne({ _id: 'oldest', spaceId: S, path: 'oldest.txt', deletedAt: at(-7_200_000), pending: true });
 
     await tombstones.settleStalePendingFileTombstones(S, new Date(now));
+    assert.deepEqual((await acts.served()).map(t => t.path), ['oldest.txt'],
+      'the settle did not take the oldest first: the longest-waiting tombstone of a file that is gone waits behind newer ones');
     await tombstones.settleStalePendingFileTombstones(S, new Date(now + 60_000));
-    assert.deepEqual(await acts.published(), { served: ['gone.txt'], pushed: ['gone.txt'] },
+    assert.deepEqual(await acts.published(), { served: ['gone.txt', 'oldest.txt'], pushed: ['gone.txt', 'oldest.txt'] },
       'a batch of paths the settle cannot look at came back first every cycle, and the file that IS gone was never published');
 
     const pending = await acts.door.coll(S, 'file_tombstones').countDocuments({ pending: true });

@@ -14,8 +14,10 @@
  * then the tombstone is written PENDING, then the bytes go, then the tombstone is CONFIRMED — see
  * `files/tombstones.ts` for why it is written before and published only after. A store failure on the write throws
  * with the file untouched, so the retry repeats the whole cascade. **An unlink that fails for any other reason** (a
- * directory, a permission) drops the pending tombstone and throws: the file is still here, and no peer is told
- * otherwise — it used to keep the tombstone, and the TTL sweep wrote another every cycle (preship-3 P3-3).
+ * directory, a permission) settles the pending tombstone from the disk and throws: the file is still here, so it is
+ * dropped and no peer is told otherwise — it used to keep the tombstone, and the TTL sweep wrote another every cycle
+ * (preship-3 P3-3). A directory's tree removal that stops part way publishes the files it did remove (preship-4 P4-2),
+ * and its sidecars' tombstones wait for their own removal (P4-3).
  *
  * **After the bytes, a store failure still fails the delete** (bundle-30 I14, verify-drive-4 D1). The job, the
  * artifacts and the metadata each used to be `.catch(log.warn)`: with the store paused, a delete unlinked the bytes,
@@ -43,7 +45,7 @@ import { cancelMediaJob, cancelMediaJobsByPrefix } from './media/job-queue.js';
 import { deleteConversionArtifacts, deleteConversionArtifactsByPrefix } from './converters/pipeline.js';
 import { listFilesRecursive } from './files.js';
 import { removeTree } from './remove-tree.js';
-import { actUnderPendingTombstones, writePendingFileTombstones } from './tombstones.js';
+import { actUnderPendingTombstones, pendingAmong, settlePendingFileTombstones, writePendingFileTombstones } from './tombstones.js';
 import { invalidateUsageCache } from '../quota/quota.js';
 import { unlessTheStoreFailed } from '../brain/store-failure.js';
 import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';
@@ -96,29 +98,34 @@ export async function isUnfinishedDirectoryDelete(spaceId: string, dirPath: stri
 export async function deleteDirectoryCascade(spaceId: string, dirPath: string): Promise<void> {
   const abs = await resolveSafePathChecked(spaceId, dirPath);
   const present = await bytesPresent(abs);
-  // Every file about to go — the folder tree AND its conversion sidecars — or, with the tree gone, every record under
-  // it, so each gets its tombstone. Without them a peer re-pushes the files on the next sync (resurrection).
-  const removedPaths = present
-    ? (await Promise.all([
-      listFilesRecursive(spaceId, dirPath),
-      listFilesRecursive(spaceId, `_converted/${dirPath}`),
-      listFilesRecursive(spaceId, `_extracted/${dirPath}`),
-    ])).flat()
+  // Every file about to go — the folder tree (or, with the tree gone, every record under it) AND its conversion
+  // sidecars — so each gets its tombstone. Without them a peer re-pushes the files on the next sync (resurrection).
+  const tree = present
+    ? await listFilesRecursive(spaceId, dirPath)
     : (await fileRecordPaths(spaceId, dirPath)).filter(p => p !== toDocId(dirPath));
+  const sidecars = (await Promise.all([
+    listFilesRecursive(spaceId, `_converted/${dirPath}`),
+    listFilesRecursive(spaceId, `_extracted/${dirPath}`),
+  ])).flat();
   // BEFORE the tree goes, pending (bundle-30 I13, I15, `files/tombstones.ts`): a store failure here leaves the tree in
   // place and the retry repeats the delete; written after, the retry answered 404 and no tombstone was ever written.
-  const pending = await writePendingFileTombstones(spaceId, removedPaths);
+  // The tree's are published once the tree has gone, the sidecars' once THEY have — a later step, below (I16, P4-3) —
+  // and a removal that stops part way publishes the files it did remove (P4-2): see `actUnderPendingTombstones`.
+  const pending = await writePendingFileTombstones(spaceId, [...tree, ...sidecars]);
   await actUnderPendingTombstones(pending, async () => {
     if (!present) return;
     await removeTree(abs, { mustExist: true });   // a converter may still be writing under it
     log.info(`Deleted directory ${peerText(dirPath)} (space: ${peerText(spaceId)})`);
-  });
+  }, pendingAmong(pending, tree));
   invalidateUsageCache(); // freed disk — reflect it in the next quota check
   const at = `for space ${peerText(spaceId)}, path ${peerText(dirPath)}`;
   // Queued jobs under the folder would outlive their sources and retry forever against paths that no longer exist.
   await unlessTheStoreFailed(`cancelMediaJobsByPrefix error ${at}`, () => cancelMediaJobsByPrefix(spaceId, dirPath));
   // Sidecar records and files (`_converted/<path>`, `_extracted/<path>`) live outside the folder prefix.
   await unlessTheStoreFailed(`deleteConversionArtifactsByPrefix error ${at}`, () => deleteConversionArtifactsByPrefix(spaceId, dirPath));
+  // That removal survives its own failure, so the sidecars' tombstones are settled from the disk: published where the
+  // bytes went, dropped where they are still here.
+  await settlePendingFileTombstones(pendingAmong(pending, sidecars));
   // LAST, as for one file: the records under the folder are what tell a retry this delete is still owed. Soft-flag
   // the user-visible file records (retain for audit) or hard-delete them; derived chunk records are always removed.
   if (getConfig().softDeleteFileMeta === true) {

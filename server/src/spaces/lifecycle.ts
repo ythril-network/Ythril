@@ -26,6 +26,7 @@ import { forgetMerkleLeaves } from '../brain/merkle.js';
 import { forgetSpaceShape } from '../brain/space-shape.js';
 import { ensureMediaJobIndexes } from '../files/media/job-queue.js';
 import { ensureEmbedJobIndexes } from '../brain/embed-queue.js';
+import { ensureFileTombstoneIndexes } from '../files/tombstones.js';
 import { LINK_INDEXES } from '../brain/link-adjacency.js';
 import { FORK_INDEXES } from '../sync/upsert-plan.js';
 import { RECORD_TYPE_OF } from '../sync/replicated-families.js';
@@ -205,6 +206,8 @@ export async function initSpace(
 
   await ensureMediaJobIndexes(spaceId);
   await ensureEmbedJobIndexes(spaceId);
+  // The file tombstones' settle and move-marker questions (bundle-30 I16), created by the module that owns them.
+  await ensureFileTombstoneIndexes(spaceId);
 
   // Lexical retrieval index — the BM25-family half of hybrid search (`brain/lexical-search.ts`).
   //

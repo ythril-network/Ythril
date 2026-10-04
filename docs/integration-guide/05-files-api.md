@@ -303,13 +303,17 @@ in MCP — it used to answer `204` or `200` when it came after the bytes, with t
 - **Before the bytes.** The tombstone is written BEFORE the bytes are removed or moved, so a failure there
   leaves the file exactly where it was, and the retry repeats the whole act. **A peer is never told to delete
   a file that is still here**, because the tombstone is written *pending* and published — served on
-  `GET /api/sync/file-tombstones` and pushed by a sync cycle — only once the bytes are gone or moved. A peer
+  `GET /api/sync/file-tombstones` and pushed by a sync cycle — only once ITS path's bytes are gone or moved.
+  That is per path, not per act: a move's or a directory delete's conversion sidecars (`_converted/…`,
+  `_extracted/…`) go after the file, and each sidecar's tombstone waits for its own move or removal. A peer
   that is sent a tombstone deletes its copy and passes the tombstone on, back to this instance too, so a
-  tombstone for an act that failed would delete the only copy here; a pending one is sent to nobody. An act
-  that fails (a store failure, or an unlink or rename that fails for any other reason) drops its pending
-  tombstone, and one that outlives its act — a write the store reported failed that landed later, a drop
-  that failed, a restart in between — is settled by the record TTL sweep from the disk within minutes:
-  dropped while the path still has its file, published once it has none.
+  tombstone for bytes still here would delete the only copy; a pending one is sent to nobody. An act that
+  fails (a store failure, or an unlink, rename or tree removal that fails for any other reason) settles its
+  pending tombstones from the disk at once — published for a path whose file is gone, dropped for one whose
+  file is still there — so a directory delete that stops part way still tells peers about the files it did
+  remove. One that outlives its act — a write the store reported failed that landed later, a settle that
+  failed, a restart in between — is settled the same way by the record TTL sweep within minutes, oldest
+  first; one whose path cannot be looked at is tried again on a later sweep, behind the rest.
 - **After the bytes.** The metadata record is removed (or, for a move, re-keyed) LAST, so it is still there,
   and the same request retried completes the act. A delete completes as an orphan, as above. A move finds
   the file at `destination`, the record at the old path and the mark its first attempt left with its

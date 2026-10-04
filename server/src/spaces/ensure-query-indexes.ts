@@ -29,6 +29,7 @@ import { col } from '../db/mongo.js';
 import { COLLECTION_SUFFIX } from '../config/types-knowledge.js';
 import { LINK_INDEXES } from '../brain/link-adjacency.js';
 import { FORK_INDEXES } from '../sync/upsert-plan.js';
+import { ensureFileTombstoneIndexes } from '../files/tombstones.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { concreteSpaces } from './proxy.js';
 import { log } from '../util/log.js';
@@ -83,6 +84,13 @@ export async function ensureQueryIndexes(): Promise<number> {
       } catch (err) {
         log.warn(`ensureQueryIndexes: ${space.id} links ${Object.keys(ix.keys).join(',')} index: ${err}`);
       }
+    }
+    // The file tombstones' indexes, the same call `initSpace` makes (bundle-30 I16).
+    try {
+      await ensureFileTombstoneIndexes(space.id);
+      issued++;
+    } catch (err) {
+      log.warn(`ensureQueryIndexes: ${space.id} file tombstone indexes: ${err}`);
     }
     // The fork caps' indexes, for a space `initSpace` never revisits — the same list it creates (`FORK_INDEXES`).
     for (const ix of FORK_INDEXES) {

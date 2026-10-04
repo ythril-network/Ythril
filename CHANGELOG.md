@@ -469,10 +469,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   withdrew it, and the TTL sweep added another every cycle. Now the tombstone is written PENDING and confirmed once
   the bytes are gone or moved; nothing that serves, pushes, prunes or counts file tombstones sees a pending one
   (`GET /api/sync/file-tombstones`, the sync push, the prune, the stray-metadata drain all read them through
-  `files/tombstones.ts`). A failed act drops its own; one that outlives its act is settled by the TTL sweep from the
-  disk — dropped while the path still has its file, published once it has none. `pending` never crosses the wire:
-  served tombstones carry `_id`, `spaceId`, `path` and `deletedAt` only, and a confirmed one is stamped with the
-  time it was confirmed.
+  `files/tombstones.ts`). A failed act settles its own from the disk at once, and one that outlives its act is
+  settled the same way by the TTL sweep — dropped while the path still has its file, published once it has none.
+  `pending` never crosses the wire: served tombstones carry `_id`, `spaceId`, `path` and `deletedAt` only, and a
+  confirmed one is stamped with the time it was confirmed.
+
+  **Per path, not per act (bundle-30 I16).** One act's paths lose their bytes at different steps, and a tombstone is
+  now published only after its own path's: a move's and a directory delete's conversion sidecars (`_converted/…`,
+  `_extracted/…`) are published after the sidecar itself moved or went, and dropped when that step failed, where they
+  used to be published with the file — so a sidecar still here was deleted back by every peer. A directory delete
+  whose tree removal stopped part way dropped every tombstone, including those of the files it HAD removed, and the
+  retry lists only what remains, so peers pushed those back; a failed step is now settled per path from the disk. The
+  TTL sweep settles the oldest first, and one whose path it cannot look at goes to the back of the queue rather than
+  coming back first every cycle and starving the rest of the space. `<space>_file_tombstones` gains the two indexes
+  those questions need (the settle's, partial on `pending`, and the move marker's), on new and existing spaces.
 
   **A retried move completes only a move it began (bundle-30 I15).** The completion took any source with records and
   no bytes beside an existing destination for a move still owed — so moving an orphan `a.txt` (its file gone out of
@@ -480,7 +490,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `200`. A move's tombstones now carry a mark of the move, the completion requires it, and without it the move is
   `404` and `b.txt` is untouched. "Are the bytes here" has one answer (`bytesPresent`): only a path that does not
   exist is absent, and a failure to look (a permission) is an error rather than an absent source sent down that
-  path. The completions ask the store for one record instead of loading every record id under a folder.
+  path. The completions ask the store for one record instead of loading every record id under a folder. **A path
+  through a regular file (`a.txt/x`) is a path that does not exist (bundle-30 I16):** Linux answers it `ENOTDIR`,
+  not `ENOENT`, so MCP `move_file` and `delete_file` of one answered `400` carrying the server's absolute data path,
+  REST answered `500`, and the TTL sweep kept such a tombstone pending for ever — all now `404`, and published. Every
+  "does this path exist" test in the server reads the one predicate, `isMissingPath`, and a gate holds it there. The
+  media worker's "was the source deleted mid-job" check read ANY failure to look as "deleted" and removed what the
+  job wrote; it now asks `bytesPresent`, and the conversion's and the manifest's own swallowed stats are gone too.
 
 - **A pulled page is decided by the same rules as a pushed one (`Q-204`, `Q-225`).** The pull accepted whatever was
   newer by seq and validated nothing, so the same document delivered the other way round was decided differently:
