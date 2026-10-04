@@ -32,7 +32,7 @@
  * It only RECORDS, never throws: sync ingest is validated, counted and let in, and a refusal would hold the
  * watermark and stop the channel. A failure to record is logged once per run.
  */
-import { createHash } from 'node:crypto';
+import { derivedV4Id } from '../util/derived-id.js';
 import { col } from '../db/mongo.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { outsideWriteBound, withinWriteBound } from '../db/write-bound.js';
@@ -82,11 +82,13 @@ function targetsOf(key: 'edges' | 'links', doc: Arrived): Target[] {
     ...(isWellFormedRef(kind, id) ? {} : { malformed: `${field} contains non-UUID value '${id}'` }) }];
 }
 
-/** A violation's id, derived from what it says, so the same dangling end is one record however often it is checked. */
+/**
+ * A violation's id, derived from what it says, so the same dangling end is one record however often it is checked.
+ * Through `util/derived-id.ts`: the target is a peer's text, and parts joined with a separator let a crafted target
+ * collide two violations into one record (bundle-30 I13).
+ */
 function violationId(t: Target): string {
-  const h = createHash('sha256').update(`${t.docType}\u0000${t.docId}\u0000${t.field}\u0000${t.id}`).digest('hex');
-  // Shaped as a v4 UUID, which is what the type and every reader of a violation id expect.
-  return `${h.slice(0, 8)}-${h.slice(8, 12)}-4${h.slice(13, 16)}-${'89ab'[parseInt(h[16]!, 16) % 4]}${h.slice(17, 20)}-${h.slice(20, 32)}`;
+  return derivedV4Id('ythril.link-violation', t.docType, t.docId, t.field, t.id);
 }
 
 /**

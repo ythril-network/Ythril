@@ -32,8 +32,8 @@
  * belongs to `localSpaceId` by definition.
  */
 
-import { createHash } from 'node:crypto';
-import { idPart, edgeIdFor } from '../brain/edge-id.js';
+import { edgeIdFor } from '../brain/edge-id.js';
+import { derivedV4Id } from '../util/derived-id.js';
 import { linkIdFor } from '../brain/link-id.js';
 import type { BrainCollection, RefKind } from '../config/types-knowledge.js';
 
@@ -217,17 +217,12 @@ export interface ArrivalPlan<T extends ArrivalDoc> {
  * two peers forking the same divergence arrive at one id.
  *
  * Shaped as a v4 UUID (version and variant bits set) rather than v5, because a fork id is a fact id and every
- * reader that validates one — link endpoints, the fork-id response — expects that shape. The encoding is
- * `edge-id.ts`'s length-prefixed parts, so no text can forge a separator. The namespace is fixed for ever.
+ * reader that validates one — link endpoints, the fork-id response — expects that shape. Derived by
+ * `util/derived-id.ts`, whose length-prefixed parts no text can forge a separator in, byte-for-byte what it was
+ * before it moved there (pinned by `a-derived-id-is-shaped-in-one-place.test.js`). The namespace is fixed for ever.
  */
 export function forkIdFor(parentId: string, seq: number, text: string): string {
-  const h = createHash('sha256')
-    .update(`ythril.fork-identity${idPart(parentId)}${idPart(String(seq))}${idPart(text)}`)
-    .digest();
-  h[6] = (h[6]! & 0x0f) | 0x40;
-  h[8] = (h[8]! & 0x3f) | 0x80;
-  const x = h.subarray(0, 16).toString('hex');
-  return `${x.slice(0, 8)}-${x.slice(8, 12)}-${x.slice(12, 16)}-${x.slice(16, 20)}-${x.slice(20, 32)}`;
+  return derivedV4Id('ythril.fork-identity', parentId, String(seq), text);
 }
 
 /**
