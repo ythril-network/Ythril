@@ -364,6 +364,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   merge removed the replaced copy's retention stamps but kept its `embedding`, `embeddingModel` and `matchedText`.
   The merge now asks the arrival writer's own rule for what the stored row keeps.
 
+- **A peer's file bytes landing here follow this instance's suppression** (bundle-30). The bytes writer queued the
+  file for embedding directly, so a file this instance suppresses (its own flag, or the space) was queued, claimed
+  and discarded, and kept any vector it had. It now takes the same step as arriving file metadata: a suppressed
+  file holds no vector, any other is queued.
+
 - **A pulled page is decided by the same rules as a pushed one (`Q-204`, `Q-225`).** The pull accepted whatever was
   newer by seq and validated nothing, so the same document delivered the other way round was decided differently:
   a record this instance holds a tombstone for was stored again, an equal-seq divergent fact lost one side instead of

@@ -22,6 +22,7 @@ import { linksStartingFrom } from '../brain/link-adjacency.js';
 import { withSeq } from '../util/seq.js';
 import { expiryForCreate } from '../brain/ttl.js';
 import { enqueueEmbedJob, EMBED_PRIORITY } from '../brain/embed-queue.js';
+import { embedArrivedFiles } from '../sync/file-meta-write.js';
 import { mergePropertiesOrKeep } from '../brain/merge-fields.js';
 
 /**
@@ -178,8 +179,10 @@ export async function recordArrivedFile(
     } as never),
     { upsert: true },
   );
-  // A peer's bytes, not a local write: nobody here is waiting on it, so it yields to the writes that are.
-  await enqueueEmbedJob(spaceId, 'file', normalised, { priority: EMBED_PRIORITY.background });
+  // A peer's bytes, not a local write: queued in the background lane, and by the RECEIVER's rules — the same step
+  // every arriving file's metadata takes, so a file this instance suppresses is not queued and holds no vector
+  // (bundle-30 I6, D3: this called `enqueueEmbedJob` directly, past the suppression check).
+  await embedArrivedFiles(spaceId, [normalised]);
 }
 
 /**

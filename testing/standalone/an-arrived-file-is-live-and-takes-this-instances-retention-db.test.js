@@ -62,6 +62,24 @@ describe('a file whose bytes arrive is live here and takes this instance\'s rete
     assert.equal(d.author?.instanceId, PEER.instanceId);
   });
 
+  it('bytes for a file this instance suppresses are not queued, and its vector goes (D3, bundle-30 I6)', async () => {
+    // The bytes writer queued the file with `enqueueEmbedJob` directly, past the receiver's `record > space`
+    // resolution — the shape `file-meta-write.ts` says it removed from the drain. A control file is queued.
+    const queued = async (id) => !!(await door.coll(SPACE, 'embed_jobs').findOne({ _id: `file:${id}` }));
+    await door.coll(SPACE, 'files').insertOne({
+      ...build.filemeta(SPACE, 'quiet.md', 5, { author: PEER }), suppressEmbeddings: true,
+      embedding: [0.5, 0.25], embeddingModel: 'a-model',
+    });
+    await door.coll(SPACE, 'files').insertOne({ ...build.filemeta(SPACE, 'loud.md', 5, { author: PEER }) });
+    await recordArrivedFile(SPACE, 'quiet.md', 10, 'hash-quiet', PEER);
+    await recordArrivedFile(SPACE, 'loud.md', 10, 'hash-loud', PEER);
+    const quiet = await stored('quiet.md');
+    assert.deepEqual({ queued: await queued('quiet.md'), embedding: quiet?.embedding, model: quiet?.embeddingModel },
+      { queued: false, embedding: undefined, model: undefined },
+      'a file whose own flag suppresses it was queued (claimed and discarded) or kept a vector');
+    assert.equal(await queued('loud.md'), true, 'control: a file nothing suppresses is queued when its bytes land');
+  });
+
   it('an expiry already stored is never re-slid by arriving bytes', async () => {
     const kept = new Date('2027-01-01T00:00:00.000Z');
     await door.coll(SPACE, 'files').insertOne({ ...build.filemeta(SPACE, 'kept.md', 7, { author: PEER }), _expireAt: kept });
