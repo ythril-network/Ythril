@@ -1,121 +1,26 @@
 /**
  * Shared machinery for the /api/sync sub-routers: the incoming-document schemas, peer/space
- * authorisation, cursor codec, fork-depth and implausible-seq guards, and the strict-linkage
- * violation recorders.
+ * authorisation, cursor codec, and the fork-depth and implausible-seq guards.
  */
 import { z } from 'zod';
-import { v4 as uuidv4 } from 'uuid';
-import { col, asFilter, asDoc } from '../../db/mongo.js';
 import { getConfig } from '../../config/loader.js';
 import { reachesSpace } from '../../auth/space-reach.js';
 import { isInstanceAdmin } from '../../auth/instance-admin.js';
 import { REF_KINDS } from '../../config/types-knowledge.js';
 import type { KnowledgeType } from '../../config/types-knowledge.js';
-import { isWellFormedRef, collectionForRefKind, edgeEndpointKind } from '../../brain/entity-refs.js';
 import type { TokenRights } from '../../config/rights-shape.js';
-import { log, peerText } from '../../util/log.js';
 import { MAX_SYNC_SEQ } from '../../util/seq.js';
-import { isStrictLinkage } from '../../spaces/proxy.js';
 import type { FileMetaDoc, AuthorRef } from '../../config/types.js';
-import { emitWebhookEvent } from '../../webhooks/dispatcher.js';
 import { LOCAL_ONLY_FIELDS } from '../../sync/local-only-fields.js';
-import type { EdgeDoc, LinkViolationDoc } from '../../config/types.js';
 
 export const UUID_V4_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 
 
-/**
- * Record a link violation detected during sync ingest.
- * Fire-and-forget: violations are informational, never block sync.
+/*
+ * What a landed edge or link points at that is not here is `sync/linkage-check.ts`'s question (bundle-30 I8): checked
+ * once a transfer is whole, and recorded once per dangling end.
  */
-export async function recordLinkViolation(
-  spaceId: string,
-  docId: string,
-  docType: LinkViolationDoc['docType'],
-  field: string,
-  reason: string,
-  peerInstanceId: string,
-): Promise<void> {
-  try {
-    const doc: LinkViolationDoc = {
-      _id: uuidv4(),
-      spaceId,
-      docId,
-      docType,
-      field,
-      reason,
-      peerInstanceId,
-      detectedAt: new Date().toISOString(),
-    };
-    await col<LinkViolationDoc>(spaceCollection(spaceId, 'linkViolations')).insertOne(asDoc<LinkViolationDoc>(doc));
-    emitWebhookEvent({ event: 'link_violation.created', spaceId, entry: doc as unknown as Record<string, unknown> });
-  } catch (err) {
-    log.error(`Failed to record link violation for ${docType} ${peerText(docId)}: ${peerText(err)}`);
-  }
-}
-
-/**
- * Validate an edge's from/to references against strict linkage rules.
- * Records violations but never blocks the ingest.
- *
- * Each endpoint is checked against the kind it DECLARES, with shape and collection taken from
- * `brain/entity-refs.ts` — assuming entity would record a legitimate file endpoint as two violations.
- */
-export async function checkEdgeLinkViolations(
-  spaceId: string,
-  edge: EdgeDoc,
-  peerInstanceId: string,
-): Promise<void> {
-  if (!isStrictLinkage(spaceId)) return;
-
-  for (const field of ['from', 'to'] as const) {
-    const val = edge[field];
-    const kind = edgeEndpointKind(field === 'from' ? edge.fromKind : edge.toKind);
-    if (!isWellFormedRef(kind, val)) {
-      await recordLinkViolation(spaceId, edge._id, 'edge', field,
-        `${field} '${val}' is not a valid ${kind} reference`, peerInstanceId);
-    } else {
-      const coll = `${spaceId}_${collectionForRefKind(kind)}`;
-      const exists = await col<{ _id: string }>(coll).findOne(asFilter<{ _id: string }>({ _id: val }));
-      if (!exists) {
-        await recordLinkViolation(spaceId, edge._id, 'edge', field,
-          `${field} references non-existent ${kind} '${val}'`, peerInstanceId);
-      }
-    }
-  }
-}
-
-/**
- * Record what an arriving LINK points at that is not there.
- *
- * It only RECORDS, never throws: sync ingest is validated, counted and let in, and a refusal would hold
- * the watermark and stop the channel. An operator reads an empty violation list as "all fine", so every
- * `fromKind` is checked — no narrowing to a list of kinds here.
- *
- * A file is keyed by its path, not a UUID, so the UUID check skips `file` targets; otherwise every
- * legitimate file reference would be logged as malformed.
- */
-export async function checkLinkViolations(
-  spaceId: string,
-  link: { _id: string; from: string; fromKind: RefKind; to: string; toKind: string } | undefined,
-  peerInstanceId: string,
-): Promise<void> {
-  if (!isStrictLinkage(spaceId) || !link) return;
-
-  const field = `${link.fromKind}.${link.toKind}`;
-  if (link.toKind !== 'file' && !UUID_V4_RE.test(link.to)) {
-    await recordLinkViolation(spaceId, link.from, link.fromKind, field,
-      `${field} contains non-UUID value '${link.to}'`, peerInstanceId);
-    return;
-  }
-  const coll = `${spaceId}_${collectionForRefKind(link.toKind as RefKind)}`;
-  const exists = await col<{ _id: string }>(coll).findOne(asFilter<{ _id: string }>({ _id: link.to }));
-  if (!exists) {
-    await recordLinkViolation(spaceId, link.from, link.fromKind, field,
-      `${field} references non-existent ${link.toKind} '${link.to}'`, peerInstanceId);
-  }
-}
 
 /*
  * An arriving brain document is written by `writeArrivals` (`sync/arrivals.ts`, `Q-107` part 1), which replaced
@@ -135,11 +40,9 @@ export { MAX_FORK_DEPTH } from '../../sync/upsert-plan.js';
 
 // ── Incoming document schemas (Zod validation for peer-submitted docs) ─────
 
-import type { RefKind } from '../../config/types-knowledge.js';
 import { CHRONO_STATUSES } from '../../config/types.js';
 import { validateEntity, validateEdge, validateChrono, validateFact, getSpaceMeta, type SchemaViolation }
   from '../../spaces/schema-validation.js';
-import { spaceCollection } from '../../db/space-collection.js';
 import { MAX_FACT_LENGTH, MAX_TAGS } from '../../util/request-bounds.js';
 
 export const AuthorRefSchema = z.object({

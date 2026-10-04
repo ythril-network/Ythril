@@ -41,6 +41,7 @@ import { resolveInputFormat } from '../files/converters/pipeline.js';
 import { mimeTypeForPath } from '../files/mime.js';
 import { createCoalescingRunner } from './coalescing-runner.js';
 import { acceptArrivingPage, type AcceptedFamily } from './accept-page.js';
+import { LinkageCheck } from './linkage-check.js';
 import { syncFiles } from './file-sync.js';
 import {
   syncCyclesTotal,
@@ -825,6 +826,11 @@ async function pullFromPeer(
 
   type PullResult = { count: number; highSeq: number; maxSeq: number } & TransferOutcome;
   /*
+   * What lands in this space's transfer is checked for strict linkage ONCE, after every family (below) — page by
+   * page, an edge to a chrono entry pulled later in the same cycle was recorded missing (bundle-30 I8).
+   */
+  const linkage = new LinkageCheck(spaceId, member.instanceId);
+  /*
    * NOT ALL BRAIN COLLECTIONS: `files` is absent because a file arrives as blob plus manifest, not as a
    * document on this path. `links` is present — a collection missing here is one a peer never sends us,
    * and nothing reports that, because a peer holding no links hashes none either.
@@ -868,7 +874,7 @@ async function pullFromPeer(
       let written: AcceptedFamily;
       try {
         written = (await acceptArrivingPage(spaceId, { [urlSuffix]: pageDocs },
-          { door: 'pull', deliveredBy: member.instanceId, from: member.label ?? member.instanceId }))[urlSuffix];
+          { door: 'pull', deliveredBy: member.instanceId, from: member.label ?? member.instanceId, linkage }))[urlSuffix];
       } catch (err) {
         truncated = true;
         log.warn(`Pull ${urlSuffix} from ${logSafe(member.label ?? member.instanceId)}: a record write failed in space `
@@ -907,6 +913,8 @@ async function pullFromPeer(
   for (const family of REPLICATED_FAMILIES) {
     pulled[family.payloadKey] = await pullType(family);
   }
+  // A family whose transfer stopped early may still hold a target: its ends are not judged missing this cycle.
+  await linkage.run({ stillToCome: REPLICATED_FAMILIES.filter(f => pulled[f.payloadKey].truncated).map(f => f.collection) });
 
   pulledMemories = pulled.facts.count;
   pulledEntities = pulled.entities.count;

@@ -51,11 +51,11 @@ import { getAllowedChronoTypes } from '../spaces/schema-validation.js';
 import { getConfig } from '../config/loader.js';
 import { log, peerList, peerText } from '../util/log.js';
 import { withAllocatedSeqs } from '../util/seq.js';
-import { withinWriteBound, outsideWriteBound } from '../db/write-bound.js';
+import { withinWriteBound } from '../db/write-bound.js';
 import { advanceCounterPast } from './counter-after-page.js';
 import { TOMBSTONE_TYPE_OF } from '../config/types.js';
-import type { EdgeDoc } from '../config/types.js';
-import { checkEdgeLinkViolations, checkLinkViolations, MAX_FORK_DEPTH } from '../api/sync/_shared.js';
+import { MAX_FORK_DEPTH } from '../api/sync/_shared.js';
+import type { LinkageCheck } from './linkage-check.js';
 import { writeArrivals, warnArrivalsNotStored, type ArrivalOutcome, type ArrivalRefusal } from './arrivals.js';
 import { admitArrivals } from './arrival-shape.js';
 import { planArrivals, type ArrivalDoc, type ArrivalDoor, type ArrivalVerdict, type PlannedFamily } from './upsert-plan.js';
@@ -87,6 +87,11 @@ export interface AcceptOptions {
   deliveredBy: string | undefined;
   /** Who sent it, for the log lines (a member's label); `deliveredBy` when absent. */
   from?: string;
+  /**
+   * Collects the edges and links that land, for the door to check once its transfer is whole (`sync/linkage-check.ts`).
+   * Required, so no door can accept a page without deciding when its references are checked.
+   */
+  linkage: LinkageCheck;
 }
 
 /** The families this accept plans, by their wire key: every replicated family. */
@@ -224,15 +229,9 @@ export async function acceptArrivingPage(
     warnArrivalsNotStored(where, spaceId, 'facts', 'DROPPED — divergent content at an equal seq whose fork chain or '
       + `fan-out is at its cap (MAX_FORK_DEPTH=${MAX_FORK_DEPTH}); the sender will not offer them again. Resolve the `
       + 'fork chain to accept them', droppedForks);
-    // Records, never blocks: what a landed edge or link points at that is not here (strict linkage only), named by the
-    // peer the door proves.
-    const sender = deliveredBy ?? 'unknown';
-    outsideWriteBound(() => {
-      for (const { key, doc } of landed) {
-        if (key === 'edges') void checkEdgeLinkViolations(spaceId, doc as unknown as EdgeDoc, sender).catch(() => {});
-        if (key === 'links') void checkLinkViolations(spaceId, doc as never, sender).catch(() => {});
-      }
-    });
+    // What landed is handed to the door's linkage check, which checks it once the door's transfer is whole — never
+    // here, page by page, where a target later in the same transfer would be recorded missing (bundle-30 I8).
+    for (const { key, doc } of landed) opts.linkage.add(key, doc);
     log.debug(`${peerText(where)}: page accepted for space '${peerText(spaceId)}': ${peerList(REPLICATED_FAMILIES.map(({ payloadKey: k }) =>
       `${k} ${summary(results[k].verdicts)}`), '; ')}`);
     return results;

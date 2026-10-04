@@ -358,6 +358,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A strict-linkage violation is no longer recorded for a target later in the same transfer, nor twice for one
+  dangling end** (bundle-30). Edges and links received by pull or batch push were checked right after each page
+  landed, and a pull lands its families one page at a time — edges before chrono entries, links and files — so an
+  edge to a chrono entry created in the same interval was recorded as pointing at nothing. Each record had a fresh
+  id, so every re-delivery of the edge added another. A transfer's references are now checked once it is whole (a
+  pull after every family of the space, a push after the request), with one existence read per target kind instead
+  of one or two per record, a family whose transfer stopped early is not judged, and a violation's id is derived from
+  what it says, so the same dangling end is one record and one `link_violation.created`.
+
 - **An error that names `maxTimeMS` because the option was misused is no longer read as a deadline the store
   missed** (bundle-30). The deadline question matched the word `maxTimeMS` in any message, so the store's refusal of a
   misplaced bound (`cannot set maxTimeMS on getMore …`, a `BadValue`) was answered as a retryable `503` timeout on a

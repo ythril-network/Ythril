@@ -21,6 +21,7 @@ import type { FileMetaDoc } from '../../config/types.js';
 import { LOCAL_ONLY_EXCLUSION } from '../../sync/local-only-fields.js';
 import { MAX_FORK_DEPTH, encodeCursor, decodeCursor, callerPeerId, spaceAllowed, pushAllowed, violationsAgainstLocalSchema, withSchemaViolations } from './_shared.js';
 import { acceptArrivingPage, type AcceptedFamily } from '../../sync/accept-page.js';
+import { LinkageCheck } from '../../sync/linkage-check.js';
 import type { ArrivalVerdict } from '../../sync/upsert-plan.js';
 import { REPLICATED_FAMILIES, RECORD_TYPE_OF, familyOf, type PayloadKey } from '../../sync/replicated-families.js';
 import { KNOWLEDGE_TYPES, type KnowledgeType } from '../../config/types.js';
@@ -215,7 +216,10 @@ const refusedError = (r: AcceptedFamily) => ({ error: r.reasons[0] ?? 'the docum
  */
 async function acceptOne(req: Request, res: Response, key: PushKey, kind: string): Promise<{ r: AcceptedFamily; doc: Record<string, unknown> } | null> {
   const { spaceId } = req.query as Record<string, string>;
-  const r = (await acceptArrivingPage(spaceId, { [key]: [req.body] }, { door: 'push', deliveredBy: pusherOf(req) }))[key];
+  // The request is this door's whole transfer, so its references are checked once it has landed (bundle-30 I8).
+  const linkage = new LinkageCheck(spaceId, pusherOf(req) ?? 'unknown');
+  const r = (await acceptArrivingPage(spaceId, { [key]: [req.body] }, { door: 'push', deliveredBy: pusherOf(req), linkage }))[key];
+  await linkage.run();
   if (r.invalid[0]) { res.status(400).json({ error: `Invalid ${kind} document` }); return null; }
   return { r, doc: r.docs[0] ?? {} };
 }
@@ -365,7 +369,10 @@ syncDocsRouter.post('/batch-upsert', syncRateLimit, requireAuth, denyReadOnly, a
       page[key] = sent.slice(0, BATCH_FAMILY_CAP);
     }
 
-    const out = await acceptArrivingPage(spaceId, page, { door: 'push', deliveredBy: pusherOf(req) });
+    // Every family of the request lands before its references are checked, once (bundle-30 I8).
+    const linkage = new LinkageCheck(spaceId, pusherOf(req) ?? 'unknown');
+    const out = await acceptArrivingPage(spaceId, page, { door: 'push', deliveredBy: pusherOf(req), linkage });
+    await linkage.run();
 
     const parsed = (key: PushKey) => out[key].docs.filter((d): d is NonNullable<typeof d> => d !== undefined);
     // P-21 = C: validated against THIS space's schema, counted, and let in — never refused for it.
