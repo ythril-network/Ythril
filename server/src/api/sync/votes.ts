@@ -9,13 +9,12 @@ import { getConfig, loadConfig, saveConfig } from '../../config/loader.js';
 import { requireAuth, denyReadOnly } from '../../auth/middleware.js';
 import { peerRelayCaller, PEER_RELAY_REFUSAL } from '../../auth/peer-relay.js';
 import { log, peerText } from '../../util/log.js';
-import { reportServerFailure } from '../../util/report-failure.js';
 import { applyConcludedSpaceRounds } from '../../spaces/apply-wipe-round.js';
 import { roundForPeer } from '../../networks/round-local-state.js';
 import { acceptVoteCast, castFromBody } from '../../util/signing.js';
 import { concludeRoundIfReady, sendMemberRemovedNotify } from '../../sync/governance.js';
 import { applyPassedJoin } from '../../networks/member-introductions.js';
-import { sendSyncWriteFailure } from './write-failure.js';
+import { sendCaughtFailure } from '../send-failure.js';
 
 export const syncVotesRouter = Router();
 
@@ -47,8 +46,7 @@ syncVotesRouter.get('/networks/:networkId/votes', syncRateLimit, requireAuth, as
       });
     res.json({ rounds: open });
   } catch (err) {
-    reportServerFailure('sync GET /networks/:networkId/votes', err);
-    res.status(500).json({ error: 'Internal error' });
+    sendCaughtFailure(res, 'sync GET /networks/:networkId/votes', err);
   }
 });
 
@@ -135,6 +133,6 @@ syncVotesRouter.post('/networks/:networkId/votes/:roundId', syncRateLimit, requi
     saveConfig(cfg);
     res.status(200).json({ status: 'ok' });
   } catch (err) {
-    sendSyncWriteFailure(res, 'sync POST votes', err);
+    sendCaughtFailure(res, 'sync POST votes', err);
   }
 });

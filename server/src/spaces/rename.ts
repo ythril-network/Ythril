@@ -17,6 +17,7 @@ import { repairStaleSpaceIds, beginSpaceOp, endSpaceOp } from './_shared.js';
 import { RenameSpaceBody } from './body-schemas.js';
 import { isProxy } from './proxy.js';
 import type { NetworkRefusalCode } from '../networks/refusal-codes.js';
+import { throwIfStoreSide } from '../brain/store-failure.js';
 
 /** Physically move a space's MongoDB collections and file directories from
  *  {oldId}_* / files/oldId to {newId}_* / files/newId. Idempotent — after a partial
@@ -332,6 +333,8 @@ export async function renameSpaceAct(oldId: string, body: unknown): Promise<Rena
     if (msg.includes('not found')) return { status: 404, error: msg };
     if (msg.includes('already exists')) return { status: 409, error: msg };
     if (msg.includes('built-in')) return { status: 400, error: msg };
+    // The store's failure is not a refusal: each door answers it as every door does (bundle-30 I12).
+    throwIfStoreSide(err);
     return { status: 500, error: msg };
   }
 }

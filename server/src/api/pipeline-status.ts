@@ -45,6 +45,7 @@ import { localInferenceState } from '../brain/local-inference.js';
 import type { WorkerPhase, WorkerState } from '../util/supervised-worker.js';
 import { assistBackend, assistBudgetStatus, type AssistBudget } from '../config/assist-backend.js';
 import type { ChatWire } from '../util/model-chat.js';
+import { sendCaughtFailure } from './send-failure.js';
 
 export const pipelineStatusRouter = Router();
 
@@ -699,7 +700,6 @@ pipelineStatusRouter.get('/', requireAdmin, async (_req, res) => {
   try {
     res.json(await getPipelineStatus());
   } catch (err) {
-    log.warn(`pipeline-status failed: ${err instanceof Error ? err.message : String(err)}`);
-    res.status(500).json({ error: 'Failed to collect pipeline status' });
+    sendCaughtFailure(res, 'GET /api/admin/pipeline-status', err, { error: 'Failed to collect pipeline status' });
   }
 });

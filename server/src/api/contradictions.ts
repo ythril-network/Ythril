@@ -21,7 +21,6 @@ import { Router } from 'express';
 import { requireAuth, denyReadOnly, requireAuthMfa } from '../auth/middleware.js';
 import { globalRateLimit } from '../rate-limit/middleware.js';
 import { col, asFilter, asUpdate } from '../db/mongo.js';
-import { log } from '../util/log.js';
 import { pairContentHash } from '../brain/dupe-scanner.js';
 import { scanSpace } from '../brain/contradiction-scanner.js';
 import { nliConfigured } from '../brain/nli-client.js';
@@ -33,6 +32,7 @@ import type { ContradictionCandidateDoc } from '../config/types.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { pageMemberList } from '../brain/list-page.js';
 import { defaultBudgetChars } from '../brain/result-budget.js';
+import { sendCaughtFailure } from './send-failure.js';
 
 export const contradictionsRouter = Router();
 
@@ -121,8 +121,7 @@ contradictionsRouter.get('/', globalRateLimit, requireAuth, async (req, res) => 
     // model-judged pass is among the ones that run.
     res.json({ contradictions: page.rows.map(toRecord), ...page.fields, nliConfigured: nliConfigured() });
   } catch (err) {
-    log.error(`GET /api/contradictions: ${err}`);
-    res.status(500).json({ error: 'Internal error' });
+    sendCaughtFailure(res, `GET /api/contradictions`, err);
   }
 });
 
@@ -146,8 +145,7 @@ contradictionsRouter.post('/:id/dismiss', globalRateLimit, requireAuth, denyRead
     }
     res.status(404).json({ error: 'Contradiction candidate not found' });
   } catch (err) {
-    log.error(`POST /api/contradictions/:id/dismiss: ${err}`);
-    res.status(500).json({ error: 'Internal error' });
+    sendCaughtFailure(res, `POST /api/contradictions/:id/dismiss`, err);
   }
 });
 
@@ -165,8 +163,7 @@ contradictionsRouter.post('/:id/reopen', globalRateLimit, requireAuth, denyReadO
     }
     res.status(404).json({ error: 'Dismissed contradiction candidate not found' });
   } catch (err) {
-    log.error(`POST /api/contradictions/:id/reopen: ${err}`);
-    res.status(500).json({ error: 'Internal error' });
+    sendCaughtFailure(res, `POST /api/contradictions/:id/reopen`, err);
   }
 });
 
@@ -298,8 +295,7 @@ contradictionsRouter.post('/:id/resolve', globalRateLimit, requireAuth, denyRead
     }
     res.status(404).json({ error: 'Contradiction candidate not found' });
   } catch (err) {
-    log.error(`POST /api/contradictions/:id/resolve: ${err}`);
-    res.status(500).json({ error: 'Internal error' });
+    sendCaughtFailure(res, `POST /api/contradictions/:id/resolve`, err);
   }
 });
 
@@ -327,7 +323,6 @@ contradictionsRouter.post('/scan', globalRateLimit, requireAuthMfa, denyReadOnly
     // short of a judge's own counter.
     res.json({ scannedSpaces: spaces.length, scanned, found, judgedPairs, modelCalls, nliStalled, budgetExhausted });
   } catch (err) {
-    log.error(`POST /api/contradictions/scan: ${err}`);
-    res.status(500).json({ error: 'Internal error' });
+    sendCaughtFailure(res, `POST /api/contradictions/scan`, err);
   }
 });

@@ -6,11 +6,11 @@
 import { Router } from 'express';
 import { syncRateLimit } from '../../rate-limit/middleware.js';
 import { requireAuth } from '../../auth/middleware.js';
-import { log, peerText } from '../../util/log.js';
 import { buildFileManifest } from '../../files/manifest.js';
 import { isInstanceLocalFile } from '../../sync/file-conflict.js';
 import { computeMerkleRoot } from '../../brain/merkle.js';
 import { spaceAllowed } from './_shared.js';
+import { sendCaughtFailure } from '../send-failure.js';
 
 export const syncManifestRouter = Router();
 
@@ -37,8 +37,7 @@ syncManifestRouter.get('/manifest', syncRateLimit, requireAuth, async (req, res)
     // peer addresses the plain file routes by it (Q-68, `sync/space-map.ts` peerFileSpaceId).
     res.json({ manifest, spaceId });
   } catch (err) {
-    log.error(`sync GET manifest: ${peerText(err)}`);
-    res.status(500).json({ error: 'Internal error' });
+    sendCaughtFailure(res, `sync GET manifest`, err);
   }
 });
 
@@ -69,7 +68,6 @@ syncManifestRouter.get('/merkle', syncRateLimit, requireAuth, async (req, res) =
     const result = await computeMerkleRoot(spaceId);
     res.json({ ...result, networkId: networkId ?? null });
   } catch (err) {
-    log.error(`sync GET merkle: ${peerText(err)}`);
-    res.status(500).json({ error: 'Internal error' });
+    sendCaughtFailure(res, `sync GET merkle`, err);
   }
 });

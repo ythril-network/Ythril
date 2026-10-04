@@ -48,6 +48,7 @@ import { validateStoredEdges } from '../spaces/validate-stored-edges.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { pageList } from '../brain/list-page.js';
 import { defaultBudgetChars } from '../brain/result-budget.js';
+import { sendCaughtFailure } from './send-failure.js';
 
 export const spacesRouter = Router();
 
@@ -78,9 +79,7 @@ spacesRouter.post('/:id/rebuild-indexes', globalRateLimit, requireSpaceAuthMfaSc
     await reconcileSpaceSearchIndexes(spaceId, { waitForReady: false, force: true });
     res.json({ ok: true, spaceId, status: 'rebuilding' });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    log.error(`POST /api/spaces/${spaceId}/rebuild-indexes: ${err}`);
-    res.status(500).json({ error: msg });
+    sendCaughtFailure(res, `POST /api/spaces/${spaceId}/rebuild-indexes`, err, { error: err instanceof Error ? err.message : String(err) });
   }
 });
 
@@ -782,8 +781,7 @@ spacesRouter.delete('/:id', globalRateLimit, requireAdminMfaScoped('id'), async 
       return;
     }
     const ok = await removeSpace(id).catch((err: unknown) => {
-      const msg = err instanceof Error ? err.message : String(err);
-      res.status(500).json({ error: msg });
+      sendCaughtFailure(res, `DELETE /api/spaces/${id}`, err, { error: err instanceof Error ? err.message : String(err) });
       return null;
     });
     if (ok === null) return; // error already sent

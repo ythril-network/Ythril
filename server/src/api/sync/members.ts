@@ -9,7 +9,6 @@ import { getConfig, loadConfig, saveConfig } from '../../config/loader.js';
 import { requireAuth, denyReadOnly } from '../../auth/middleware.js';
 import { peerRelayCaller, PEER_RELAY_REFUSAL } from '../../auth/peer-relay.js';
 import { log, peerText } from '../../util/log.js';
-import { reportServerFailure } from '../../util/report-failure.js';
 import { isPeerUrlAllowed } from '../../sync/peer-fetch.js';
 import { pinMemberSigningKey, type SigningKeyRotation } from '../../util/signing.js';
 import { peerFloorRefusal } from '../../sync/peer-floor.js';
@@ -17,7 +16,7 @@ import type { NetworkMember } from '../../config/types.js';
 import { adoptAnnouncedSpaces, healAnnouncedAliases } from '../../networks/network-spaces.js';
 import { selfRecordFor } from '../../networks/self-record.js';
 import { rosterIsAuthority } from '../../networks/member-introductions.js';
-import { sendSyncWriteFailure } from './write-failure.js';
+import { sendCaughtFailure } from '../send-failure.js';
 
 export const syncMembersRouter = Router();
 
@@ -55,8 +54,7 @@ syncMembersRouter.get('/networks/:networkId/members', syncRateLimit, requireAuth
     // Q-135: a club's removals travel beside its roster, so every member applies a removal made anywhere.
     res.json({ members: safeMembers, ...(rosterIsAuthority(net) ? { removed: net.removedMembers ?? [] } : {}), updatedAt: new Date().toISOString() });
   } catch (err) {
-    reportServerFailure('sync GET /networks/:networkId/members', err);
-    res.status(500).json({ error: 'Internal error' });
+    sendCaughtFailure(res, 'sync GET /networks/:networkId/members', err);
   }
 });
 
@@ -183,6 +181,6 @@ syncMembersRouter.post('/networks/:networkId/members', syncRateLimit, requireAut
     const liveNet = getConfig().networks.find(n => n.id === net.id) ?? net;
     res.status(200).json({ status: 'ok', self: selfRecordFor(cfg, liveNet, existing) });
   } catch (err) {
-    sendSyncWriteFailure(res, 'sync POST members', err);
+    sendCaughtFailure(res, 'sync POST members', err);
   }
 });

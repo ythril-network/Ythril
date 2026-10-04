@@ -27,11 +27,11 @@ import { checkQuota, QuotaError } from '../quota/quota.js';
 import { storeFile, recordStoredFile, type StoreFileMeta } from '../files/store-file.js';
 import { isMediaFormat, type InputFormat } from '../files/converters/pipeline.js';
 import { resolveWriteTarget } from '../spaces/proxy.js';
-import { log } from '../util/log.js';
 import { primitivePropertyError } from '../brain/property-values.js';
 import { webhookToken, parseTtlDaysQuery, requireQueryPath, enforceSizeLimit } from './files-request.js';
 import { callerPeerAuthor } from './sync/_shared.js';
 import { tagsError } from '../util/request-bounds.js';
+import { sendCaughtFailure } from './send-failure.js';
 
 /**
  * Attach the upload route to the file-store router.
@@ -147,8 +147,7 @@ export function registerUploadRoute(router: Router): void {
             res.status(400).json({ error: (err as Error).message });
             return;
           }
-          log.warn(`Chunked upload error for space ${targetSpace}, path ${filePath}: ${err}`);
-          res.status(500).json({ error: 'Chunked upload failed' });
+          sendCaughtFailure(res, `Chunked upload error for space ${targetSpace}, path ${filePath}`, err, { error: 'Chunked upload failed' });
         }
         return;
       }
@@ -238,8 +237,7 @@ export function registerUploadRoute(router: Router): void {
           res.status(400).json({ error: err.message });
           return;
         }
-        log.warn(`writeFile error for space ${targetSpace}, path ${filePath}: ${err}`);
-        res.status(500).json({ error: 'Failed to write file' });
+        sendCaughtFailure(res, `writeFile error for space ${targetSpace}, path ${filePath}`, err, { error: 'Failed to write file' });
       }
     },
   );

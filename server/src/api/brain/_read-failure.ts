@@ -6,21 +6,13 @@
  * produces most, and the reason this is a function rather than three edits.
  *
  * The classification itself lives in `brain/store-failure.ts`, which is where the reasoning and the two
- * independent reports are recorded. This file is only the HTTP half: status, `Retry-After`, and a body that
- * says `retryable` in a field rather than in prose.
+ * independent reports are recorded. This file is only the HTTP half of a READ: a body that says `retryable` in a
+ * field rather than in prose. The store failure itself is put on the wire by `sendStoreFailure` (`api/send-failure.ts`),
+ * the one sender every door uses.
  */
 import type express from 'express';
-import { storeFailureAnswer, type StoreFailureAnswer } from '../../brain/store-failure.js';
-
-/**
- * Put a store failure's answer on the wire: status, `Retry-After`, body — every HTTP door's one sender (the read
- * routes, the REST error handler, the sync push doors), so none of them can drop the header or the field
- * (bundle-30 I6, `C1`). What the answer SAYS is `storeFailureAnswer`'s.
- */
-export function sendStoreFailure(res: express.Response, answer: StoreFailureAnswer): void {
-  res.setHeader('Retry-After', String(answer.retryAfterSeconds));
-  res.status(answer.status).json(answer.body);
-}
+import { storeFailureAnswer } from '../../brain/store-failure.js';
+import { sendStoreFailure } from '../send-failure.js';
 
 /**
  * Answer a read failure with the truth about whose fault it is.

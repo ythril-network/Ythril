@@ -9,10 +9,10 @@ import { Router } from 'express';
 import { syncRateLimit } from '../../rate-limit/middleware.js';
 import { requireAuth } from '../../auth/middleware.js';
 import { getConfig } from '../../config/loader.js';
-import { reportServerFailure } from '../../util/report-failure.js';
 import { metaForNetwork, replicatedMetaOf } from '../../sync/replicated-meta.js';
 import { spaceAllowed } from './_shared.js';
 import { inlineResolvableRefs } from '../../spaces/schema-validation.js';
+import { sendCaughtFailure } from '../send-failure.js';
 
 export const syncMetaRouter = Router();
 
@@ -30,7 +30,6 @@ syncMetaRouter.get('/meta', syncRateLimit, requireAuth, (req, res) => {
     // Q-60: library references written inline where this instance can resolve them — a peer's library is its own.
     res.json({ meta: inlineResolvableRefs(replicatedMetaOf(metaForNetwork(own, layer ? { networkId, meta: layer } : undefined))) });
   } catch (err) {
-    reportServerFailure('sync GET /meta', err);
-    res.status(500).json({ error: 'Internal error' });
+    sendCaughtFailure(res, 'sync GET /meta', err);
   }
 });

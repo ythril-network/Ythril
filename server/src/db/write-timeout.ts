@@ -29,8 +29,10 @@
  * ## Wrappers are looked through
  *
  * Our own wrappers carry the driver's error as `underlying` (`ArrivalWriteError`, the counter error) and the driver
- * nests one as `cause`. A timeout wrapped by a writer is still a timeout to the door that must answer it.
+ * nests one as `cause`. A timeout wrapped by a writer is still a timeout to the door that must answer it. The walk is
+ * `errorChain`'s, shared with the store-failure classifier.
  */
+import { errorChain } from './error-chain.js';
 import { isMaxTimeExpired } from './max-time.js';
 import { writeErrorCode } from './write-errors.js';
 
@@ -41,9 +43,15 @@ import { writeErrorCode } from './write-errors.js';
  */
 /**
  * The one sentence every store failure ends with, on every door and in this error alike: what the caller may rely on
- * (nothing was confirmed written) and what to do (retry). Three spellings of it had grown (bundle-30 I6, C1).
+ * and what to do (retry). Three spellings of it had grown (bundle-30 I6, C1).
+ *
+ * **True of a read as of a write (bundle-30 I12).** It said *"Nothing was confirmed written by it"*, which is the
+ * guarantee a save needs and describes nothing the reader of a failed list load or search did — and the same sentence
+ * answers both, since the REST error handler cannot tell them apart. So it states the one thing true of each: the
+ * operation is not known to have completed (a read returned nothing; a write may or may not have landed, and was not
+ * confirmed), and retrying is the remedy.
  */
-export const STORE_RETRY_SENTENCE = 'Nothing was confirmed written by it; retry the request (store-side failure; retryable).';
+export const STORE_RETRY_SENTENCE = 'It did not complete as far as this server can confirm; retry the request (store-side failure; retryable).';
 
 export class StoreTimeout extends Error {
   constructor(what = 'the database operation') {
@@ -55,19 +63,10 @@ export class StoreTimeout extends Error {
 /** The `MongoBulkWriteError` messages a `timeoutMS` produces, by which side of the socket fired first (probe P1). */
 const BULK_TIMEOUT_MESSAGE = /^(Timed out during socket read|Server reported a timeout error)/;
 const WRITE_CONFLICT = 112;
-/** How far down `underlying` / `cause` to look: our wrappers nest at most one level over the driver's two. */
-const MAX_DEPTH = 4;
 
-/** True when this error, or one it wraps, is a bound ending the operation. */
+/** True when this error, or one it wraps (`errorChain`), is a bound ending the operation. */
 export function isWriteTimeout(err: unknown): boolean {
-  let e: unknown = err;
-  for (let depth = 0; depth < MAX_DEPTH && e && typeof e === 'object'; depth++) {
-    if (isTimeoutItself(e)) return true;
-    const next = (e as { underlying?: unknown; cause?: unknown }).underlying ?? (e as { cause?: unknown }).cause;
-    if (next === e) break;
-    e = next;
-  }
-  return false;
+  return errorChain(err).some(isTimeoutItself);
 }
 
 function isTimeoutItself(e: object): boolean {

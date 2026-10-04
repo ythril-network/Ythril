@@ -19,23 +19,25 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import path from 'node:path';
 import { stripComments } from './_strip-comments.mjs';
 
 const { storeFailureAnswer } = await import('../../server/dist/brain/store-failure.js');
 const { sendReadFailure } = await import('../../server/dist/api/brain/_read-failure.js');
-const { sendSyncWriteFailure } = await import('../../server/dist/api/sync/write-failure.js');
+// The sync push doors answer a caught failure through the one sender every route catch uses (bundle-30 I12).
+const { sendCaughtFailure } = await import('../../server/dist/api/send-failure.js');
 const { log } = await import('../../server/dist/util/log.js');
-
-const mongoErr = (name, fields = {}) => Object.assign(new Error(fields.message ?? 'boom'), { name, ...fields });
+// Real driver errors, from the driver the server loads: the classifier recognises the CLASS (bundle-30 I12).
+const { MongoNetworkError, MongoServerSelectionError, MongoServerError } = createRequire(path.resolve('server/package.json'))('mongodb');
 
 /** Driver failures as the driver shapes them, each naming an internal host, address or port. */
 const LEAKS = [
-  ['a dropped socket', mongoErr('MongoNetworkError', { message: 'connection 5 to 172.16.0.9:27017 closed' })],
-  ['no server to select', mongoErr('MongoServerSelectionError', { message: 'getaddrinfo ENOTFOUND mongo-a.internal' })],
-  ['a step-down', mongoErr('MongoServerError', {
-    message: 'Executor error during find command :: caused by :: not primary',
-    code: 189, codeName: 'PrimarySteppedDown', cause: new Error('connection 9 to mongo-b.internal:27018 closed'),
-  })],
+  ['a dropped socket', new MongoNetworkError('connection 5 to 172.16.0.9:27017 closed')],
+  ['no server to select', new MongoServerSelectionError('getaddrinfo ENOTFOUND mongo-a.internal', {})],
+  ['a step-down', Object.assign(new MongoServerError({
+    errmsg: 'Executor error during find command :: caused by :: not primary', code: 189, codeName: 'PrimarySteppedDown',
+  }), { cause: new Error('connection 9 to mongo-b.internal:27018 closed') })],
 ];
 const HOSTLIKE = /172\.16\.0\.9|27017|27018|mongo-a\.internal|mongo-b\.internal|ENOTFOUND|caused by/;
 
@@ -77,7 +79,7 @@ describe('no door answers with the driver\'s text', () => {
     });
 
     it(`${what}: the sync push doors answer without it`, () => {
-      const { out } = withLog(() => sent((res, e) => sendSyncWriteFailure(res, 'test push', e), err));
+      const { out } = withLog(() => sent((res, e) => sendCaughtFailure(res, 'test push', e), err));
       assert.equal(out.status, 503);
       assert.doesNotMatch(JSON.stringify(out.body), HOSTLIKE);
     });

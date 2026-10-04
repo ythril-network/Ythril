@@ -5,7 +5,6 @@
  */
 import { Router } from 'express';
 import { shapeError } from '../../brain/write-shape.js';
-import { reportServerFailure } from '../../util/report-failure.js';
 import { requireSpaceAuth, denyReadOnly } from '../../auth/middleware.js';
 import { unknownFieldWarnings } from './unknown-fields.js';
 import { globalRateLimit } from '../../rate-limit/middleware.js';
@@ -23,6 +22,7 @@ import { SchemaViolationError, type UpdateValidation } from '../../brain/write-v
 import { parseRecordSuppression } from '../../brain/suppress-embeddings.js';
 import { parseRecordSuperseded } from '../../brain/record-flag.js';
 import { connectionInputError, assertConnections, applyConnections, CONNECTION_BODY_KEYS, desiredLinksFrom, edgeInputsFrom } from '../../brain/write-connections.js';
+import { sendCaughtFailure } from '../send-failure.js';
 
 export const entitiesRouter = Router();
 
@@ -174,8 +174,7 @@ entitiesRouter.post('/spaces/:spaceId/entities', globalRateLimit, requireSpaceAu
     }
     // The body stays flat and generic — `public-probes-leak-nothing.test.js` pins that, and a write route is
     // the last place to start echoing an exception back. The operator gets the cause; the caller gets a code.
-    reportServerFailure('brain POST /spaces/:spaceId/entities', err);
-    res.status(500).json({ error: 'Internal server error' });
+    sendCaughtFailure(res, 'brain POST /spaces/:spaceId/entities', err);
   }
 });
 

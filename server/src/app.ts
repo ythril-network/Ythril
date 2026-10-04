@@ -1,7 +1,7 @@
 import { ReferenceRefusal } from './brain/entity-refs.js';
 import { WriteConflict } from './brain/write-plan/types.js';
 import { storeFailureAnswer } from './brain/store-failure.js';
-import { sendStoreFailure } from './api/brain/_read-failure.js';
+import { sendCaughtFailure, sendStoreFailure } from './api/send-failure.js';
 import express from 'express';
 import compression from 'compression';
 import { shouldCompress, staticCacheControl } from './util/transfer.js';
@@ -407,8 +407,7 @@ export function createApp() {
       const deleted = await wipeSpace(spaceId, rawTypes);
       res.json({ deleted });
     } catch (err) {
-      const msg = peerText(err instanceof Error ? err.message : String(err));
-      res.status(500).json({ error: msg });
+      sendCaughtFailure(res, 'POST /api/admin/spaces/:spaceId/wipe', err, { error: peerText(err instanceof Error ? err.message : String(err)) });
     }
   });
 
@@ -473,7 +472,7 @@ export function createApp() {
     } catch (err) {
       const msg = peerText(err instanceof Error ? err.message : String(err));
       if (!res.headersSent) {
-        res.status(500).json({ error: msg });
+        sendCaughtFailure(res, 'GET /api/admin/spaces/:spaceId/export', err, { error: msg });
       } else {
         // We have already sent `200` and a partial body, so we cannot change the status.
         // Destroy the socket so the client sees a TRUNCATED/aborted response rather than a
@@ -606,8 +605,7 @@ export function createApp() {
       await applyConfigFromDisk({ tokenId: req.authToken?.id ?? null, tokenLabel: req.authToken?.name ?? null, ip: req.ip ?? '-', method: 'POST', path: '/api/admin/reload-config' });
       res.json({ ok: true });
     } catch (err) {
-      const msg = peerText(err instanceof Error ? err.message : String(err));
-      res.status(500).json({ error: msg });
+      sendCaughtFailure(res, 'POST /api/admin/reload-config', err, { error: peerText(err instanceof Error ? err.message : String(err)) });
     }
   });
 
@@ -641,8 +639,7 @@ export function createApp() {
       }
       res.json({ ok: true, signingPublicKey: result.publicKeyPem });
     } catch (err) {
-      const msg = peerText(err instanceof Error ? err.message : String(err));
-      res.status(500).json({ error: msg });
+      sendCaughtFailure(res, 'POST /api/admin/rotate-signing-key', err, { error: peerText(err instanceof Error ? err.message : String(err)) });
     }
   });
 
@@ -727,7 +724,8 @@ export function createApp() {
      * The STORE's condition is the store's on every door (bundle-30, `R1`). A write the bound ended, a step-down, a
      * dropped socket: retryable, `503` — the classification the MCP door and the read routes already answer from,
      * so a REST write and the same write through a tool no longer disagree (this answered `500` while the tool
-     * door answered `503`). Everything the classifier does not positively identify stays the `500` below.
+     * door answered `503`). An unrecognised driver error is answered there too, as a `500` in our words and logged
+     * with its stack; everything else stays the `500` below.
      */
     const store = storeFailureAnswer(err);
     if (store) {

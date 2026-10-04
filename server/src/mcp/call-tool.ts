@@ -40,7 +40,7 @@ import { toolIsVisible } from './tool-visibility.js';
 import { createSpacesRefusal } from '../auth/create-spaces.js';
 import type { TokenRights } from '../config/rights-shape.js';
 import { memberSpacesWithin } from '../spaces/proxy-scoped.js';
-import { storeFailureAnswer } from '../brain/store-failure.js';
+import { storeFailureAnswer, type StoreFailureAnswer } from '../brain/store-failure.js';
 import { SchemaViolationError } from '../brain/write-validation.js';
 import { NotFoundError } from '../util/errors.js';
 import { WriteConflict } from '../brain/write-plan/types.js';
@@ -80,6 +80,12 @@ export interface ToolCallOutcome {
   status: number;
   /** The first space the call resolved to, for the caller's own logging. Empty for instance-level tools. */
   callSpace: string;
+  /**
+   * The store's answer, when the call failed on the store's side — so a door with a status line puts it on the wire
+   * whole (`sendToolAnswer`): the `Retry-After` the tool's own transport has no place for was dropped by every REST
+   * door that delegates here until bundle-30 I12. MCP carries the same answer in `structuredContent`.
+   */
+  storeFailure?: StoreFailureAnswer;
 }
 
 /** A refusal, with the status the REST door should use. Prose is identical on both doors, by construction. */
@@ -300,7 +306,14 @@ export async function callTool(req: ToolCallRequest): Promise<ToolCallOutcome> {
     return { result, status, callSpace };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    log.warn(`tool '${peerText(name)}' error in space '${peerText(callSpace || 'global')}': ${peerText(message)}`);
+    /*
+     * Classified FIRST, because classifying a store failure logs the driver's text (`storeFailureAnswer`) — and this
+     * line logged it as well, so every failed call wrote it twice (bundle-30 I12, verify-drive-2 finding 4). The line
+     * still names the tool and the space; for the store's failure it says so instead of repeating the text. None of
+     * the refusals below is a driver error, so classifying before them changes none of their answers.
+     */
+    const store = storeFailureAnswer(err);
+    log.warn(`tool '${peerText(name)}' error in space '${peerText(callSpace || 'global')}': ${store ? `store-side failure, answered ${store.status}` : peerText(message)}`);
     /*
      * Classified HERE, once, rather than in each tool — every write funnels through this catch, and the
      * alternative was editing a dozen throw sites, which is how the introduced/pre-existing split came to
@@ -335,16 +348,17 @@ export async function callTool(req: ToolCallRequest): Promise<ToolCallOutcome> {
       return { result: { content: [{ type: 'text' as const, text: `Error: ${message}` }], isError: true }, status: 409, callSpace };
     }
     // The store's condition, answered as every door answers it (`storeFailureAnswer`, bundle-30 I6 `C1`); this
-    // transport has no status line to carry it, so `storeSideFailure: true` says it in the body.
-    const store = storeFailureAnswer(err);
+    // transport has no status line to carry it, so `storeSideFailure: true` says it in the body. The text is the
+    // answer's message EXACTLY — no `Error: ` before it — so `/api/<tool>`, `/api/brain/recall` and MCP spell one
+    // failure one way (bundle-30 I12, verify-drive-2 finding 5).
     if (store) {
       return {
         result: {
-          content: [{ type: 'text' as const, text: `Error: ${store.body.error}` }],
+          content: [{ type: 'text' as const, text: store.body.error }],
           isError: true,
           structuredContent: { ...store.body, storeSideFailure: true },
         },
-        status: store.status, callSpace,
+        status: store.status, callSpace, storeFailure: store,
       };
     }
     return { result: { content: [{ type: 'text' as const, text: `Error: ${message}` }], isError: true }, status: 400, callSpace };

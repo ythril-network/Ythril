@@ -13,12 +13,14 @@ import { toDocId } from '../util/paths.js';
 import { col, asDoc } from '../db/mongo.js';
 import type { FileTombstoneDoc } from '../config/types.js';
 import { log, peerText } from '../util/log.js';
+import { throwIfStoreSide } from '../brain/store-failure.js';
 import { spaceCollection } from '../db/space-collection.js';
 
 /**
  * Insert a sync tombstone for each of `paths` so peers remove the files too.
  * Paths are normalised (forward slashes, no leading slash) and deduped.
- * Best-effort — logs on failure rather than throwing, so a delete still returns success.
+ * Best-effort for a failure that is not the store's (logged, the delete still returns success); a STORE failure is
+ * thrown, so the door answers it as every door answers one and the caller knows to retry (bundle-30 I12).
  */
 export async function writeFileTombstones(spaceId: string, paths: string[]): Promise<void> {
   const unique = [...new Set(paths.map(toDocId))].filter(Boolean);
@@ -28,6 +30,13 @@ export async function writeFileTombstones(spaceId: string, paths: string[]): Pro
   try {
     await col<FileTombstoneDoc>(spaceCollection(spaceId, 'fileTombstones')).insertMany(docs.map(d => asDoc<FileTombstoneDoc>(d)));
   } catch (err) {
+    /*
+     * A STORE failure is the caller's to answer, as `delete-cascade.ts` documents ("the tombstone write may throw"):
+     * swallowed, a delete through a store outage answered `200 deleted` with no tombstone, so a peer's manifest
+     * re-pushed the file — and the caller was told nothing to retry (bundle-30 I12, the every-door gate). Thrown, the
+     * door answers 503 and a retried delete — idempotent by contract — writes the tombstone it missed.
+     */
+    throwIfStoreSide(err);
     log.warn(`writeFileTombstones error for space ${peerText(spaceId)} (${unique.length} paths): ${peerText(err)}`);
   }
 }

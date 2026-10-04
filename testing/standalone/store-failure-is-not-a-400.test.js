@@ -18,12 +18,30 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { dispatchSource } from './_tool-dispatch.mjs';
 import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import path from 'node:path';
 import { stripComments } from './_strip-comments.mjs';
 
 const { classifyReadFailure, storeFailureDetail } = await import('../../server/dist/brain/store-failure.js');
 
-/** A driver error, shaped the way the MongoDB node driver actually shapes one. */
+// The driver the SERVER loads: since bundle-30 I12 a store failure is recognised by its CLASS, so an error built to
+// look like one (a plain Error carrying a driver name) is exactly what the classifier must no longer be fooled by.
+const driver = createRequire(path.resolve('server/package.json'))('mongodb');
+
+/** A driver error, shaped the way the MongoDB node driver actually shapes one — a message-only shape, by name. */
 const mongoErr = (name, fields = {}) => Object.assign(new Error(fields.message ?? 'boom'), { name, ...fields });
+
+/** A REAL driver error of the named class: a server error from its response document, any other from a message. */
+function realErr(name, fields = {}) {
+  const C = driver[name];
+  if (C === driver.MongoServerError || C.prototype instanceof driver.MongoServerError) {
+    return new C({ errmsg: fields.message ?? 'boom', ...fields });
+  }
+  // A system error (server selection) takes the topology description it gave up on as its second argument.
+  const made = C === driver.MongoSystemError || C.prototype instanceof driver.MongoSystemError
+    ? new C(fields.message ?? 'boom', {}) : new C(fields.message ?? 'boom');
+  return Object.assign(made, fields.code !== undefined ? { code: fields.code } : {});
+}
 
 describe('the reported condition, verbatim from both reports', () => {
   /**
@@ -86,7 +104,7 @@ describe('the store cases, each identified positively', () => {
   for (const name of ['MongoNetworkError', 'MongoNetworkTimeoutError', 'MongoServerSelectionError',
     'MongoTopologyClosedError', 'MongoNotConnectedError']) {
     it(`${name} is the store`, () => {
-      const f = classifyReadFailure(mongoErr(name));
+      const f = classifyReadFailure(realErr(name));
       assert.equal(f.status, 503, `${name} means the store did not answer`);
       assert.equal(f.retryable, true);
     });
@@ -96,14 +114,14 @@ describe('the store cases, each identified positively', () => {
     [11602, 'InterruptedDueToReplStateChange'], [189, 'PrimarySteppedDown'],
     [13436, 'NotPrimaryOrSecondary'], [50, 'MaxTimeMSExpired'], [262, 'ExceededTimeLimit']]) {
     it(`MongoServerError code ${code} (${why}) is the store`, () => {
-      const f = classifyReadFailure(mongoErr('MongoServerError', { code }));
+      const f = classifyReadFailure(realErr('MongoServerError', { code }));
       assert.equal(f.status, 503, `${why} is not answerable right now, and will be`);
       assert.equal(f.retryable, true);
     });
   }
 
   it('a $vectorSearch failure is the store even without a recognised code', () => {
-    const f = classifyReadFailure(mongoErr('MongoServerError',
+    const f = classifyReadFailure(realErr('MongoServerError',
       { message: 'PlanExecutor error :: $vectorSearch index not queryable' }));
     assert.equal(f.status, 503);
   });
@@ -130,8 +148,8 @@ describe('everything we refuse ourselves is UNCHANGED — the direction that mus
     });
   }
 
-  it('a MongoServerError with an unlisted code stays 400 — the name is not enough', () => {
-    const f = classifyReadFailure(mongoErr('MongoServerError',
+  it('a MongoServerError with an unlisted code stays 400 — the class is not enough', () => {
+    const f = classifyReadFailure(realErr('MongoServerError',
       { code: 18, message: 'Authentication failed.' }));
     assert.equal(f.status, 400, 'AuthenticationFailed will never succeed on a retry');
     assert.equal(f.retryable, false);
@@ -214,7 +232,7 @@ describe('both doors, and all three routes', () => {
       sendReadFailure(res, err);
       return out;
     };
-    const store = sent(mongoErr('MongoNetworkError', { message: 'socket closed' }));
+    const store = sent(realErr('MongoNetworkError', { message: 'socket closed' }));
     const own = sent(new Error('unknown operator $nope'));
     assert.deepEqual([store.status, store.body?.retryable, store.headers['Retry-After'] !== undefined], [503, true, true]);
     assert.deepEqual([own.status, own.body?.retryable], [400, false],

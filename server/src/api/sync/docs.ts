@@ -13,8 +13,7 @@ import { getConfig } from '../../config/loader.js';
 import { listTombstones } from '../../brain/tombstones.js';
 import { requireAuth, denyReadOnly } from '../../auth/middleware.js';
 import { log, logSafe, peerText } from '../../util/log.js';
-import { reportServerFailure } from '../../util/report-failure.js';
-import { sendSyncWriteFailure } from './write-failure.js';
+import { sendCaughtFailure } from '../send-failure.js';
 import { settledSeqRange } from '../../util/seq.js';
 import type { FactDoc, EntityDoc, EdgeDoc, ChronoEntry, LinkDoc } from '../../config/types.js';
 import type { FileMetaDoc } from '../../config/types.js';
@@ -107,8 +106,7 @@ function pageBySeq<T extends { _id: string; seq: number }>(
 
       res.json({ items: [...items, ...tombs].sort((a, b) => (a as { seq: number }).seq - (b as { seq: number }).seq), nextCursor });
     } catch (err) {
-      reportServerFailure(`sync GET /${collection}`, err);
-      res.status(500).json({ error: 'Internal error' });
+      sendCaughtFailure(res, `sync GET /${collection}`, err);
     }
   };
 }
@@ -138,8 +136,7 @@ function oneById<T extends { _id: string }>(collection: string) {
       if (!doc) { res.status(404).json({ error: 'Not found' }); return; }
       res.json(doc);
     } catch (err) {
-      reportServerFailure(`sync GET /${collection}/:id`, err);
-      res.status(500).json({ error: 'Internal error' });
+      sendCaughtFailure(res, `sync GET /${collection}/:id`, err);
     }
   };
 }
@@ -246,7 +243,7 @@ syncDocsRouter.post('/facts', syncRateLimit, requireAuth, denyReadOnly, async (r
     if (verdict === 'rejected') { res.status(400).json(refusedError(facts)); return; }
     res.status(200).json({ status: 'skipped' });
   } catch (err) {
-    sendSyncWriteFailure(res, 'sync POST facts', err);
+    sendCaughtFailure(res, 'sync POST facts', err);
   }
 });
 
@@ -267,7 +264,7 @@ syncDocsRouter.post('/entities', syncRateLimit, requireAuth, denyReadOnly, async
     if (verdict === 'rejected') { res.status(400).json(refusedError(entities)); return; }
     res.status(200).json(withSchemaViolations({ status: 'ok' }, violationsAgainstLocalSchema(spaceId, 'entity', doc)));
   } catch (err) {
-    sendSyncWriteFailure(res, 'sync POST entities', err);
+    sendCaughtFailure(res, 'sync POST entities', err);
   }
 });
 
@@ -290,7 +287,7 @@ syncDocsRouter.post('/edges', syncRateLimit, requireAuth, denyReadOnly, async (r
     res.status(200).json(withSchemaViolations({ status: verdict === 'duplicate' ? 'duplicate' : 'ok' },
       violationsAgainstLocalSchema(spaceId, 'edge', doc)));
   } catch (err) {
-    sendSyncWriteFailure(res, 'sync POST edges', err);
+    sendCaughtFailure(res, 'sync POST edges', err);
   }
 });
 
@@ -321,7 +318,7 @@ syncDocsRouter.post('/chrono', syncRateLimit, requireAuth, denyReadOnly, async (
     if (verdict === 'rejected') { res.status(400).json(refusedError(chrono)); return; }
     res.status(200).json(withSchemaViolations({ status: 'ok' }, violationsAgainstLocalSchema(spaceId, 'chrono', doc)));
   } catch (err) {
-    sendSyncWriteFailure(res, 'sync POST chrono', err);
+    sendCaughtFailure(res, 'sync POST chrono', err);
   }
 });
 
@@ -424,6 +421,6 @@ syncDocsRouter.post('/batch-upsert', syncRateLimit, requireAuth, denyReadOnly, a
       filemeta: { ...fileMetaStats, rejected: rejected('filemeta') },
     });
   } catch (err) {
-    sendSyncWriteFailure(res, 'sync POST batch-upsert', err);
+    sendCaughtFailure(res, 'sync POST batch-upsert', err);
   }
 });

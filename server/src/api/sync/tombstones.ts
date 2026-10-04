@@ -12,8 +12,7 @@ import { syncRateLimit } from '../../rate-limit/middleware.js';
 import { getDataRoot } from '../../config/loader.js';
 import { listTombstones } from '../../brain/tombstones.js';
 import { requireAuth, denyReadOnly, isInstanceAdmin } from '../../auth/middleware.js';
-import { log, peerText } from '../../util/log.js';
-import { sendSyncWriteFailure } from './write-failure.js';
+import { sendCaughtFailure } from '../send-failure.js';
 import { withinWriteBound } from '../../db/write-bound.js';
 import { applyPeerTombstones, MAX_TOMBSTONES_PER_REQUEST } from '../../sync/tombstone-apply.js';
 import { deleteStored } from '../../files/stored-bytes.js';
@@ -69,8 +68,7 @@ syncTombstonesRouter.get('/tombstones', syncRateLimit, requireAuth, async (req, 
     recordServedSeq(callerPeerId(req.authToken as Record<string, unknown>), spaceId, since);
     res.json(grouped);
   } catch (err) {
-    log.error(`sync GET tombstones: ${peerText(err)}`);
-    res.status(500).json({ error: 'Internal error' });
+    sendCaughtFailure(res, `sync GET tombstones`, err);
   }
 });
 
@@ -114,7 +112,7 @@ syncTombstonesRouter.post('/tombstones', syncRateLimit, requireAuth, denyReadOnl
     // `applied` keeps its meaning — every element admitted by shape and seq — and `refused` is additive.
     res.status(200).json({ applied: out.admitted, refused: out.refused.length });
   } catch (err) {
-    sendSyncWriteFailure(res, 'sync POST tombstones', err);
+    sendCaughtFailure(res, 'sync POST tombstones', err);
   }
 });
 
@@ -144,8 +142,7 @@ syncTombstonesRouter.get('/file-tombstones', syncRateLimit, requireAuth, async (
       .toArray();
     res.json({ tombstones });
   } catch (err) {
-    log.error(`sync GET file-tombstones: ${peerText(err)}`);
-    res.status(500).json({ error: 'Internal error' });
+    sendCaughtFailure(res, `sync GET file-tombstones`, err);
   }
 });
 
@@ -198,6 +195,6 @@ syncTombstonesRouter.post('/file-tombstones', syncRateLimit, requireAuth, denyRe
 
     res.json({ applied });
   } catch (err) {
-    sendSyncWriteFailure(res, 'sync POST file-tombstones', err);
+    sendCaughtFailure(res, 'sync POST file-tombstones', err);
   }
 });

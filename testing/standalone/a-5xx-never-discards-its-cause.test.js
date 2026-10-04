@@ -64,7 +64,13 @@ function routeFiles() {
   return trackedSources('server/src/api', { untracked: true, floor: 10 });
 }
 
-const FIVE_XX = /res\.status\((5\d\d)\)/g;
+/*
+ * A 5xx written by hand, OR handed to the one sender a route's catch answers through (`sendCaughtFailure`, bundle-30
+ * I12). Forty-odd catches moved from the first to the second; a scan of the first alone would have read that as the
+ * sites disappearing, when they are the same catches answering the same failures — and the sender is handed the
+ * binding, so the rule below (the binding is read) holds for it as for a hand-written one.
+ */
+const FIVE_XX = /res\.status\((5\d\d)\)|(sendCaughtFailure)\(/g;
 
 /*
  * Both spellings of catching, because both discard a cause the same way.
@@ -95,7 +101,7 @@ function catchesAnswering5xx() {
       const block = enclosingBlockMatching(src, at, CATCH_HEAD, `${file} @${at}`);
       if (block === null) continue;                         // not in a catch — a deliberate status, not a swallow
       const binding = CATCH_BINDING.exec(block)?.[1] ?? null;
-      out.push({ file, status: m[1], binding, block });
+      out.push({ file, status: m[1] ?? m[2], binding, block });
     }
   }
   return out;

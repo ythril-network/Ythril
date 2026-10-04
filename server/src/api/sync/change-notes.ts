@@ -11,7 +11,7 @@ import { syncRateLimit } from '../../rate-limit/middleware.js';
 import { requireAuth, denyReadOnly } from '../../auth/middleware.js';
 import { callerPeerId } from './_shared.js';
 import { receiveChangeNotes } from '../../sync/change-notes.js';
-import { sendSyncWriteFailure } from './write-failure.js';
+import { sendCaughtFailure } from '../send-failure.js';
 
 export const syncChangeNotesRouter = Router();
 
@@ -24,6 +24,6 @@ syncChangeNotesRouter.post('/networks/:networkId/change-notes', syncRateLimit, r
     );
     res.status(r.status).json(r.body);
   } catch (err) {
-    sendSyncWriteFailure(res, 'sync POST /networks/:networkId/change-notes', err);
+    sendCaughtFailure(res, 'sync POST /networks/:networkId/change-notes', err);
   }
 });

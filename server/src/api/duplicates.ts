@@ -17,7 +17,6 @@ import { findWhereTokenMay } from '../auth/find-where-token-may.js';
 import { readStoredById } from '../db/read-by-id.js';
 import { getConfig } from '../config/loader.js';
 import { concreteSpaces } from '../spaces/proxy.js';
-import { log } from '../util/log.js';
 import { scanSpace, pairContentHash } from '../brain/dupe-scanner.js';
 import { mergeEntities, mergeRefusal } from '../brain/merge.js';
 import { nliConfigured } from '../brain/nli-client.js';
@@ -25,6 +24,7 @@ import type { DupeCandidateDoc, ContradictionCandidateDoc } from '../config/type
 import { spaceCollection } from '../db/space-collection.js';
 import { pageMemberList } from '../brain/list-page.js';
 import { defaultBudgetChars } from '../brain/result-budget.js';
+import { sendCaughtFailure } from './send-failure.js';
 
 /**
  * The canonical key both candidate collections use for a pair: the two ids, lower first.
@@ -219,8 +219,7 @@ duplicatesRouter.get('/', globalRateLimit, requireAuth, async (req, res) => {
       ...page.fields,
     });
   } catch (err) {
-    log.error(`GET /api/duplicates: ${err}`);
-    res.status(500).json({ error: 'Internal error' });
+    sendCaughtFailure(res, `GET /api/duplicates`, err);
   }
 });
 
@@ -240,8 +239,7 @@ duplicatesRouter.post('/:id/dismiss', globalRateLimit, requireAuth, denyReadOnly
     );
     res.json({ status: 'dismissed' });
   } catch (err) {
-    log.error(`POST /api/duplicates/:id/dismiss: ${err}`);
-    res.status(500).json({ error: 'Internal error' });
+    sendCaughtFailure(res, `POST /api/duplicates/:id/dismiss`, err);
   }
 });
 
@@ -261,8 +259,7 @@ duplicatesRouter.post('/:id/reopen', globalRateLimit, requireAuth, denyReadOnly,
     }
     res.status(404).json({ error: 'Dismissed duplicate candidate not found' });
   } catch (err) {
-    log.error(`POST /api/duplicates/:id/reopen: ${err}`);
-    res.status(500).json({ error: 'Internal error' });
+    sendCaughtFailure(res, `POST /api/duplicates/:id/reopen`, err);
   }
 });
 
@@ -336,7 +333,6 @@ duplicatesRouter.post('/scan', globalRateLimit, requireAuthMfa, denyReadOnly, as
     }
     res.json({ scannedSpaces: targets.length, scanned, pairs });
   } catch (err) {
-    log.error(`POST /api/duplicates/scan: ${err}`);
-    res.status(500).json({ error: 'Internal error' });
+    sendCaughtFailure(res, `POST /api/duplicates/scan`, err);
   }
 });

@@ -2,6 +2,7 @@ import { Router } from 'express';
 import crypto from 'node:crypto';
 import { register, beginScrape, endScrape } from '../metrics/registry.js';
 import { requireAdmin } from '../auth/middleware.js';
+import { sendCaughtFailure } from './send-failure.js';
 
 export const metricsRouter = Router();
 
@@ -72,8 +73,9 @@ metricsRouter.get('/', metricsAuth, async (_req, res) => {
     res.setHeader('Content-Type', register.contentType);
     res.send(metrics);
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    res.status(500).send(`# Error collecting metrics: ${msg}\n`);
+    // The one sender: the exception's message used to be the body, and a collector reading the store put the
+    // driver's text — internal hosts and ports — in front of a scraper (bundle-30 I12).
+    sendCaughtFailure(res, 'GET /metrics', err);
   } finally {
     endScrape();
   }

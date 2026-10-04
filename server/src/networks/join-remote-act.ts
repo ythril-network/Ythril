@@ -23,6 +23,7 @@ import { getConfig, saveConfig, getSecrets, saveSecrets } from '../config/loader
 import { createToken, revokeToken, adoptPeerToken } from '../auth/tokens.js';
 import { peerTokenSpaces } from '../auth/peer-token-scope.js';
 import { createSpace } from '../spaces/lifecycle.js';
+import { throwIfStoreSide } from '../brain/store-failure.js';
 import { log, peerText } from '../util/log.js';
 import type { NetworkConfig, NetworkMember } from '../config/types.js';
 import { mergePeerRoster } from './member-introductions.js';
@@ -234,6 +235,8 @@ export async function joinRemoteAct(caller: Caller, input: unknown): Promise<Net
         createdSpaces.push(localId);
         log.info(`join-remote: auto-created space '${peerText(localId)}'${localId !== remoteId ? ` (alias for remote '${peerText(remoteId)}')` : ''} for network ${peerText(networkId)}`);
       } catch (err) {
+        // The store's failure is answered by the door, in our words — `${err}` put the driver's text here (bundle-30 I12).
+        throwIfStoreSide(err);
         return { status: 500, error: `Failed to create space '${localId}': ${err}` };
       }
     }

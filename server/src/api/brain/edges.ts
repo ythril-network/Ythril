@@ -25,6 +25,7 @@ import { webhookToken, ttlDaysFromBody, ttlDaysError, ifMatchFromRequest, precon
 import { SchemaViolationError, type UpdateValidation } from '../../brain/write-validation.js';
 import { parseRecordSuppression } from '../../brain/suppress-embeddings.js';
 import { parseRecordSuperseded } from '../../brain/record-flag.js';
+import { sendReadFailure } from './_read-failure.js';
 
 export const edgesRouter = Router();
 
@@ -82,7 +83,8 @@ edgesRouter.post('/spaces/:spaceId/edges', globalRateLimit, requireSpaceAuth, de
       await assertRefsResolve(wt.target, 'from', edgeEndpointKind(fromKind as RefKind | undefined), [from as string]);
       await assertRefsResolve(wt.target, 'to', edgeEndpointKind(toKind as RefKind | undefined), [to as string]);
     } catch (err) {
-      res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+      // A missing reference is the caller's 400; a store failure under the lookup is the store's (bundle-30 I12).
+      sendReadFailure(res, err);
       return;
     }
   }
@@ -289,7 +291,8 @@ edgesRouter.patch('/spaces/:spaceId/edges/:id', globalRateLimit, requireSpaceAut
           await assertRefsResolve(wt.target, 'to', updates.toKind, [stored.to]);
         }
       } catch (err) {
-        res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+        // A missing reference is the caller's 400; a store failure under the lookup is the store's (bundle-30 I12).
+        sendReadFailure(res, err);
         return;
       }
     }

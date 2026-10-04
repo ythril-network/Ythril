@@ -55,6 +55,7 @@ import { registerUploadRoute } from './files-upload.js';
 import { webhookToken, requireQueryPath } from './files-request.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { answerSpillPath } from './brain/spills.js';
+import { sendCaughtFailure } from './send-failure.js';
 
 export const fileStoreRouter = Router();
 
@@ -338,9 +339,12 @@ fileStoreRouter.get('/:spaceId', globalRateLimit, requireSpaceAuth, async (req, 
     });
     body.pipe(res);
   } catch (err) {
-    log.warn(`readFileBytes error for space ${foundMid}, path ${normalised}: ${err}`);
-    if (err instanceof StoredFileUnreadable) { res.status(500).json({ error: err.message }); return; }
-    res.status(500).json({ error: 'Failed to read file' });
+    if (err instanceof StoredFileUnreadable) {
+      log.warn(`readFileBytes error for space ${foundMid}, path ${normalised}: ${err}`);
+      res.status(500).json({ error: err.message });
+      return;
+    }
+    sendCaughtFailure(res, `readFileBytes for space ${foundMid}, path ${normalised}`, err, { error: 'Failed to read file' });
   }
 });
 
@@ -373,8 +377,7 @@ fileStoreRouter.post(
         res.status(400).json({ error: err.message });
         return;
       }
-      log.warn(`createDir error for space ${targetSpace}, path ${dirPath}: ${err}`);
-      res.status(500).json({ error: 'Failed to create directory' });
+      sendCaughtFailure(res, `createDir error for space ${targetSpace}, path ${dirPath}`, err, { error: 'Failed to create directory' });
     }
   },
 );
@@ -437,8 +440,10 @@ fileStoreRouter.post(
     }
 
     const { retryJob } = await import('../files/media/job-queue.js');
+    // The failure is KEPT, not logged and replaced by a token: a store failure here answers as every door answers it.
+    let failure: unknown;
     const result = await retryJob(targetSpace, normId).catch(err => {
-      log.warn(`retryJob error for ${targetSpace}/${normId}: ${err}`);
+      failure = err;
       return 'error' as const;
     });
 
@@ -453,7 +458,7 @@ fileStoreRouter.post(
         res.status(202).json({ queued: true });
         break;
       default:
-        res.status(500).json({ error: 'Internal error' });
+        sendCaughtFailure(res, `retryJob for ${targetSpace}/${normId}`, failure);
     }
   },
 );
@@ -564,8 +569,7 @@ fileStoreRouter.delete('/:spaceId', globalRateLimit, requireSpaceAuth, denyReadO
       await writeFileTombstones(targetSpace, removedPaths);
       res.status(204).end();
     } catch (err) {
-      log.warn(`rm dir error for space ${targetSpace}, path ${filePath}: ${err}`);
-      res.status(500).json({ error: 'Failed to delete directory' });
+      sendCaughtFailure(res, `rm dir error for space ${targetSpace}, path ${filePath}`, err, { error: 'Failed to delete directory' });
     }
     return;
   }
@@ -580,8 +584,7 @@ fileStoreRouter.delete('/:spaceId', globalRateLimit, requireSpaceAuth, denyReadO
       res.status(400).json({ error: err.message });
       return;
     }
-    log.warn(`deleteFile error for space ${targetSpace}, path ${filePath}: ${err}`);
-    res.status(500).json({ error: 'Failed to delete file' });
+    sendCaughtFailure(res, `deleteFile error for space ${targetSpace}, path ${filePath}`, err, { error: 'Failed to delete file' });
   }
 });
 
@@ -618,8 +621,7 @@ fileStoreRouter.patch('/:spaceId', globalRateLimit, requireSpaceAuth, denyReadOn
       res.status(400).json({ error: err.message });
       return;
     }
-    log.warn(`moveFile error for space ${targetSpace}, ${srcPath} → ${destination}: ${err}`);
-    res.status(500).json({ error: 'Failed to move path' });
+    sendCaughtFailure(res, `moveFile error for space ${targetSpace}, ${srcPath} → ${destination}`, err, { error: 'Failed to move path' });
   }
 });
 

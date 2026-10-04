@@ -28,6 +28,8 @@ import { createSpace, type SpaceCreator } from './lifecycle.js';
 import { CreateSpaceBody, TypeSchemasZ, findBrokenLibraryRefs, brokenRefsError, stripServerOwnedSpace } from './body-schemas.js';
 import { refuseRemovedDescription } from './spaces.js';
 import { isProxy, isWildcardProxy } from './proxy.js';
+import { throwIfStoreSide } from '../brain/store-failure.js';
+import { log } from '../util/log.js';
 
 /** A refusal, carrying the status the contract suite pins. */
 export type SpaceCreateRefusal = {
@@ -149,6 +151,10 @@ export async function applySpaceCreate(plan: SpaceCreatePlan, creator: SpaceCrea
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     if (msg.includes('already exists')) return { outcome: 'conflict', error: msg };
+    // The store's failure is not this function's to word: each door answers it as every door does (bundle-30 I12).
+    throwIfStoreSide(err);
+    // Anything else keeps its generic sentence — and is logged, where it used to be discarded with nothing left behind.
+    log.error('space create failed:', err);
     return { outcome: 'failed', error: 'Failed to create space' };
   }
 }

@@ -12,12 +12,12 @@ import { syncHistoryAct } from '../../networks/vote-acts.js';
 import { sendAct } from './_shared.js';
 import { unknownPeerRefusal } from '../../sync/peer-target.js';
 import { triggerNetworkSync, triggerPeerSync, syncTimeoutMs } from '../../sync/trigger.js';
-import { log, peerText } from '../../util/log.js';
 import { attachSyncNote, changeNotesAct } from '../../sync/change-notes.js';
 import {
   networkView, readNetworkAct, createNetworkAct, updateNetworkAct, leaveNetworkAct, addNetworkSpaceAct, 
   CreateNetworkBody, UpdateNetworkBody, AddNetworkSpaceBody, ResolvePendingSpaceBody, resolvePendingSpaceAct,
 } from '../../networks/network-acts.js';
+import { sendCaughtFailure } from '../send-failure.js';
 
 export const crudRouter = Router();
 
@@ -47,8 +47,7 @@ crudRouter.get('/:id/sync-history', globalRateLimit, requireAdmin, async (req, r
   try {
     sendAct(res, await syncHistoryAct(req.params['id'] as string, req.query['limit']));
   } catch (err) {
-    log.error(`GET /api/networks/:id/sync-history: ${peerText(err)}`);
-    res.status(500).json({ error: 'Internal error' });
+    sendCaughtFailure(res, `GET /api/networks/:id/sync-history`, err);
   }
 });
 
@@ -88,8 +87,7 @@ crudRouter.get('/:id/change-notes', globalRateLimit, requireAdmin, async (req, r
   try {
     sendAct(res, await changeNotesAct(req.params['id'] as string, req.query['direction'], req.query['limit']));
   } catch (err) {
-    log.error(`GET /api/networks/:id/change-notes: ${peerText(err)}`);
-    res.status(500).json({ error: 'Internal error' });
+    sendCaughtFailure(res, `GET /api/networks/:id/change-notes`, err);
   }
 });
 

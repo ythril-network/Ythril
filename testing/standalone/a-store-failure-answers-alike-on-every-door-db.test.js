@@ -112,6 +112,14 @@ let door, base, adminKey, callTool, ADMIN, server, TOOLS, schemaOf, log;
 const failedByRequest = new Map();
 /** Request ids whose status line has been written: the answer is decided from that moment. */
 const answered = new Set();
+/** Every log line while the doors run, and how many there were when each request was answered. */
+const lines = [];
+const linesAtAnswer = new Map();
+const markAnswered = (id) => {
+  if (answered.has(id)) return;
+  answered.add(id);
+  linesAtAnswer.set(id, lines.length);
+};
 let failing = false;
 const realCommand = Server.prototype.command;
 const realWriteHead = http.ServerResponse.prototype.writeHead;
@@ -121,6 +129,16 @@ const realWriteHead = http.ServerResponse.prototype.writeHead;
  * log, which is where the driver's text is SUPPOSED to go.
  */
 const SERVES_THE_LOG = new Set(['GET /api/about/logs', 'GET /api/about/logs/stream']);
+
+/**
+ * Doors whose answer REPORTS the store's state rather than failing on it — held to the leak check, not to the 503.
+ * Each reason is the door's own contract; a door added here without one is the defect this gate exists to find.
+ */
+const REPORTS_THE_STORE = new Map([
+  ['GET /metrics', 'a scrape answers what its collectors could gather — partial beats nothing (the budget in metrics/registry.ts)'],
+  ['GET /api/admin/pipeline-status', 'a status report: a failing store is one of the conditions it reports, in its body'],
+  ['GET /ready', 'a readiness probe: its 503 and `{ready: false, checks}` ARE its contract with the orchestrator'],
+]);
 
 describe('a store failure answers alike on every door', { skip }, () => {
   before(async () => {
@@ -143,7 +161,7 @@ describe('a store failure answers alike on every door', { skip }, () => {
 
     http.ServerResponse.prototype.writeHead = function answeredHere(...args) {
       const id = log.currentRequestId();
-      if (id) answered.add(id);
+      if (id) markAnswered(id);
       return realWriteHead.apply(this, args);
     };
     Server.prototype.command = async function storeDown(...args) {
@@ -184,6 +202,7 @@ describe('a store failure answers alike on every door', { skip }, () => {
       const requestId = `mcp-${d.tool}-${Math.random().toString(36).slice(2)}`;
       const out = await log.runWithRequestId(requestId, () => callTool({ name: d.tool, args: d.args,
         caller: { rights: ADMIN, ip: '127.0.0.1', authMethod: 'pat', oidcSubject: null, transport: 'mcp', tokenId: 't', tokenLabel: 't' } }));
+      markAnswered(requestId);
       const text = (out.result.content ?? []).map(c => c.text ?? '').join('\n');
       const sc = out.result.structuredContent ?? {};
       return { requestId, status: out.result.isError ? (sc.storeSideFailure ? 503 : out.status) : 200, retryAfter: null,
@@ -209,9 +228,8 @@ describe('a store failure answers alike on every door', { skip }, () => {
       retryable, error: typeof body?.error === 'string' ? body.error : null, raw };
   }
 
-  it('every door that reached the failing store answers 503, Retry-After, retryable, one message, no driver text', { timeout: 30 * 60_000 }, async () => {
+  it('every door that reached the failing store answers 503, Retry-After, retryable, one message, no driver text', { timeout: 30 * 60_000 }, async (t) => {
     const all = doors();
-    const lines = [];
     const stop = log.subscribeLogLines(l => lines.push(l));
     const saved = { log: console.log, warn: console.warn, error: console.error };
     console.log = console.warn = console.error = () => {};
@@ -235,22 +253,25 @@ describe('a store failure answers alike on every door', { skip }, () => {
       if (a.timedOut && !(a.streaming && a.status === 200)) wrong.push(`${d.name}: no answer within ${PER_DOOR_MS} ms of a store failure`);
     }
     for (const { d, a } of reached) {
-      if (a.streaming) continue;
+      if (a.streaming || REPORTS_THE_STORE.has(d.name)) continue;
       const why = [];
       if (a.status !== 503) why.push(`status ${a.status}`);
       if (d.kind === 'rest' && !(Number(a.retryAfter) > 0)) why.push('no Retry-After');
       if (a.retryable !== true) why.push(`retryable ${a.retryable}`);
       if (typeof a.error !== 'string' || a.error.startsWith('Error:')) why.push(`error ${JSON.stringify(a.error)?.slice(0, 80)}`);
       else messages.set(a.error, [...(messages.get(a.error) ?? []), d.name]);
-      // The operator's log: the driver's text once for this request, not once per layer that saw it.
-      const logged = lines.filter(l => l.includes(a.requestId) && l.includes(`${ADDRESS}:27017 timed out`)).length;
-      if (logged > 1) why.push(`driver text logged ${logged} times`);
+      // The operator's log: the driver's text once for this request's answer, not once per layer that saw it. Lines
+      // after the answer belong to other operations (the audit row a finished request writes logs its own failure).
+      const logged = lines.slice(0, linesAtAnswer.get(a.requestId) ?? lines.length)
+        .filter(l => l.includes(a.requestId) && l.includes(`${ADDRESS}:27017 timed out`));
+      if (logged.length > 1) why.push(`driver text logged ${logged.length} times: ${logged.map(l => l.slice(0, 140)).join(' | ')}`);
       if (why.length) wrong.push(`${d.name}: ${why.join(', ')} — ${a.raw.slice(0, 160)}`);
     }
     if (messages.size > 1) {
       wrong.push(`one failure, ${messages.size} spellings: ${[...messages].map(([m, ds]) => `${JSON.stringify(m)} (${ds.length} doors, e.g. ${ds[0]})`).join(' | ')}`);
     }
 
+    t.diagnostic(`${all.length} doors from the mounts and the tool registry; ${reached.length} reached the failing store before answering`);
     assert.ok(reached.length >= REACHED_FLOOR,
       `only ${reached.length} of ${all.length} doors reached the failing store — the fault or the probe bodies stopped `
       + 'working, and a short list concludes nothing');
