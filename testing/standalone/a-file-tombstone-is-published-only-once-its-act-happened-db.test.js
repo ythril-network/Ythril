@@ -33,34 +33,24 @@ import { describe, it, before, after, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import express from 'express';
 import { mongoSkipReason } from './_mongo-harness.mjs';
-import { openPushDoor, build } from './_push-door.mjs';
+import { build } from './_push-door.mjs';
+import { openFileActDoors, NOTHING, WIRE_KEYS } from './_file-act-doors.mjs';
 import { driverWriteFailures, failWrites } from './_write-faults.mjs';
-import { privateHostAddress, privateAddressSkipReason } from './_private-address.mjs';
+import { privateAddressSkipReason } from './_private-address.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
-process.env['YTHRIL_MODELS_OFFLINE'] = '1';
-process.env['SYNC_ALLOW_PRIVATE_PEERS'] = 'true';
-process.env['SYNC_ALLOW_INSECURE_PEERS'] = 'true';
 
 const S = 'tombpub';
 const T0 = '2026-09-01T00:00:00.000Z';
-/** The fields a file tombstone has on the wire — what a peer's `POST /file-tombstones` stores. */
-const WIRE_KEYS = ['_id', 'deletedAt', 'path', 'spaceId'];
 
-let door, files, tombstones, ttl, cascade, syncFiles, drainStrayFileMeta, pruneFileTombstonesToFloor;
-let F, handlers, callTool, ADMIN, faults, peer, peerUrl;
-const received = [];
+let acts, door, files, tombstones, ttl, cascade, drainStrayFileMeta, pruneFileTombstonesToFloor;
+let F, faults;
 
-const root = () => path.join(process.env['DATA_ROOT'], 'files', S);
-const onDisk = (p) => fs.existsSync(path.join(root(), p));
-const raw = () => door.coll(S, 'file_tombstones').find({}).toArray();
-
-async function seed(p, extra = {}) {
-  await files.writeFile(S, p, `content of ${p}`);
-  await door.coll(S, 'files').insertOne({ _id: p, spaceId: S, path: p, sizeBytes: 10, tags: [], createdAt: T0, updatedAt: T0, ...extra });
-}
+const root = () => acts.root();
+const onDisk = (p) => acts.onDisk(p);
+const raw = () => acts.raw();
+const seed = (p, extra) => acts.seed(p, extra);
 /** A directory with a file in it, at `p` — what an unlink of `p` fails on, for a reason that is not the store's. */
 const directoryAt = (p) => fs.mkdirSync(path.join(root(), p, 'inside'), { recursive: true });
 
@@ -69,89 +59,33 @@ const cleanUpNeverRuns = () => faults.fail('deleteMany', `${S}_file_tombstones`,
   new Error('the clean-up never ran: the process restarted'), { times: Infinity });
 const cleanUpsSettled = () => tombstones.whenPendingFileTombstoneDropsSettle?.();
 
-/** What the `GET /api/sync/file-tombstones` door serves a peer. */
-async function served() {
-  const body = await door.pull('/file-tombstones', { spaceId: S });
-  return body.tombstones;
-}
-/** What a sync cycle pushes to a peer. */
-async function pushed() {
-  received.length = 0;
-  const member = { instanceId: 'tombpub-peer', label: 'Tombpub peer', url: peerUrl };
-  await syncFiles(member, S, S, 'tombpub-net', {}, () => ({ headers: { 'content-type': 'application/json' } }), false, true);
-  return [...received];
-}
-/** Both, by path — every way a peer learns of a tombstone. */
-async function published() {
-  const paths = (list) => list.map(t => t.path).sort();
-  return { served: paths(await served()), pushed: paths(await pushed()) };
-}
-const NOTHING = { served: [], pushed: [] };
-
-async function rest(method, query, body = {}) {
-  const req = { method, params: { spaceId: S }, query, body, authToken: { name: 'test' }, get: () => undefined, headers: {} };
-  const res = { code: 200, body: undefined, headers: {}, headersSent: false,
-    status(c) { this.code = c; return this; }, setHeader(k, v) { this.headers[k.toLowerCase()] = v; return this; },
-    json(b) { this.body = b; this.headersSent = true; return this; }, end() { this.headersSent = true; return this; } };
-  await handlers[method](req, res);
-  return res;
-}
-async function mcp(tool, args) {
-  const out = await callTool({ name: tool, args: { space: S, ...args },
-    caller: { rights: ADMIN, ip: '127.0.0.1', authMethod: 'pat', oidcSubject: null, transport: 'mcp', tokenId: 't', tokenLabel: 't' } });
-  const text = (out.result.content ?? []).map(c => c.text ?? '').join('\n');
-  return { status: out.status, isError: !!out.result.isError, text, sc: out.result.structuredContent ?? {} };
-}
-const move = (via, src, dst) => (via === 'REST' ? rest('PATCH', { path: src }, { destination: dst }) : mcp('move_file', { src, dst }));
-const del = (via, p) => (via === 'REST' ? rest('DELETE', { path: p }) : mcp('delete_file', { path: p }));
-const failed = (a) => ('code' in a ? a.code >= 400 : a.isError);
+const served = () => acts.served();
+const pushed = () => acts.pushed();
+const published = () => acts.published();
+const mcp = (tool, args) => acts.mcp(tool, args);
+const move = (via, src, dst) => acts.move(via, src, dst);
+const del = (via, p) => acts.del(via, p);
+const failed = (a) => acts.failed(a);
 
 describe('a file tombstone is published only once its act happened', { skip }, () => {
   before(async () => {
-    door = await openPushDoor({ suite: 'tombpub', spaces: [{ id: S, label: S, folders: [], meta: { suppressEmbeddings: true } }] });
+    acts = await openFileActDoors({ suite: 'tombpub', space: S });
+    ({ door, files } = acts);
     F = await driverWriteFailures('ythril_harness_tombpub');
-    files = await import('../../server/dist/files/files.js');
     tombstones = await import('../../server/dist/files/tombstones.js');
     cascade = await import('../../server/dist/files/delete-cascade.js');
     ttl = await import('../../server/dist/brain/ttl-sweep.js');
-    ({ syncFiles } = await import('../../server/dist/sync/file-sync.js'));
     ({ drainStrayFileMeta } = await import('../../server/dist/sync/stray-filemeta-drain.js'));
     ({ pruneFileTombstonesToFloor } = await import('../../server/dist/brain/tombstone-prune.js'));
-    ({ callTool } = await import('../../server/dist/mcp/call-tool.js'));
-    const { SPACE_AREAS } = await import('../../server/dist/config/rights-shape.js');
-    ADMIN = { instanceAdmin: true, createSpaces: true, perSpace: {}, floor: Object.fromEntries(SPACE_AREAS.map(a => [a, 'admin'])) };
-    const { fileStoreRouter } = await import('../../server/dist/api/files.js');
-    const handlerOf = (m) => {
-      const layer = fileStoreRouter.stack.find(l => l.route?.path === '/:spaceId' && l.route.methods[m]);
-      assert.ok(layer, `no ${m.toUpperCase()} /:spaceId on the file router — re-anchor this test`);
-      return layer.route.stack.at(-1).handle;
-    };
-    handlers = { DELETE: handlerOf('delete'), PATCH: handlerOf('patch') };
     faults = failWrites(Object.getPrototypeOf(door.mongo.col('probe')), ['insertMany', 'deleteMany']);
-
-    // A peer that records the tombstones a sync cycle pushes it, and holds no files of its own.
-    const app = express();
-    app.post('/api/sync/file-tombstones', express.json({ limit: '10mb' }), (req, res) => {
-      const page = Array.isArray(req.body?.tombstones) ? req.body.tombstones : [];
-      received.push(...page);
-      res.json({ applied: page.length });
-    });
-    app.get('/api/sync/manifest', (_req, res) => res.json({ manifest: [], spaceId: S }));
-    app.use((_req, res) => res.json({}));
-    const host = privateHostAddress();
-    peer = await new Promise(r => { const s = app.listen(0, host, () => r(s)); });
-    peerUrl = `http://${host}:${peer.address().port}`;
   });
   after(async () => {
     faults?.restore();
-    await new Promise(r => (peer ? peer.close(r) : r()));
-    await door?.close();
+    await acts?.close();
   });
   beforeEach(async () => {
     faults.clear();
-    for (const part of ['files', 'file_tombstones', 'filemeta']) await door.coll(S, part).deleteMany({});
-    fs.rmSync(root(), { recursive: true, force: true });
-    fs.mkdirSync(root(), { recursive: true });
+    await acts.reset();
   });
   afterEach(() => { faults.clear(); });
 
