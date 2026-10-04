@@ -49,7 +49,7 @@ export interface ReadWant {
   nameTypes?: ReadonlyArray<{ name: string; type: string }>;
 }
 
-/** Per read, at most this many ids or clauses. Well under every bound the probe measured. */
+/** Per read, at most this many `$or` clauses (a by-id read is chunked by its reader). Well under every bound the probe measured. */
 const CHUNK = 500;
 
 /** A triplet's key is the edge's own id — an end stated as `entity` and one left unstated are one key. */
@@ -73,11 +73,12 @@ export class ReadSet {
     for (const [kind, ids] of Object.entries(want.records ?? {}) as Array<[ReadKind, readonly string[]]>) {
       const held = this.recordsOf(kind);
       const missing = [...new Set(ids)].filter(id => !held.has(id));
-      for (const chunk of inChunks(missing, CHUNK)) {
-        const docs = await this.read<StoredRecord>(spaceCollection(this.spaceId, RECORD_COLLECTION[kind]), chunk);
-        for (const id of chunk) held.set(id, null);
-        for (const d of docs) held.set(String(d._id), d);
-      }
+      // Unchunked here: the by-id reader chunks (and bounds) its own reads — a second loop around it only split
+      // one read set into more round trips (bundle-30 I6, C2).
+      if (missing.length === 0) continue;
+      const docs = await this.read<StoredRecord>(spaceCollection(this.spaceId, RECORD_COLLECTION[kind]), missing);
+      for (const id of missing) held.set(id, null);
+      for (const d of docs) held.set(String(d._id), d);
     }
 
     // An end this batch minted has no stored edge, so its triplet and its subject are answered without a read —
