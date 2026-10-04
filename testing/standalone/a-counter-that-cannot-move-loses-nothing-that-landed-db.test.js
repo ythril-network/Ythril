@@ -130,6 +130,9 @@ describe('a counter that cannot move loses nothing that landed', { skip }, () =>
       const unqueued = [];
       for (const d of docs) if (!(await queued(S, 'fact', d._id))) unqueued.push(d._id);
       assert.deepEqual(unqueued, [], 'restored records that landed were never queued for embedding');
+      // The promise `admin-import.ts` makes beside the result (bundle-30 I8): a counter left behind what it restored
+      // is SAID, because the next local write would take a seq a restored record already holds.
+      assert.equal(r.counterBehind, true, `the import does not say its counter is behind what it restored: ${JSON.stringify(r)}`);
     });
   });
 

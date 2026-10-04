@@ -111,5 +111,8 @@ export function forgetSpaceShape(spaceId: string): void {
   cache.delete(spaceId);
 }
 
+/** Whether a shape is kept for `spaceId`. A test seam: the test that holds a deleted space to leaving no entry. */
+export function _shapeCached(spaceId: string): boolean { return cache.get(spaceId) !== undefined; }
+
 /** How many times the expensive read has run. For the test that holds the cache to caching. */
 export function _shapeBuildCount(): number { return builds; }
