@@ -29,12 +29,15 @@
  * whether it read the record a moment earlier.
  */
 
+import { atReadSeq } from '../db/at-read-seq.js';
+
 /**
  * The filter for an update's own write. `ifMatchSeq === undefined` gives the unconditional filter
- * this code has always used, byte for byte.
+ * this code has always used, byte for byte; a seq gives `atReadSeq`'s — the one spelling of "still at the
+ * version I read" (`null`: still carrying none), which the write plan's converge uses too (bundle-30 I6, C3).
  */
-export function writeFilterFor(id: string, ifMatchSeq?: number): Record<string, unknown> {
-  return ifMatchSeq === undefined ? { _id: id } : { _id: id, seq: ifMatchSeq };
+export function writeFilterFor(id: string, ifMatchSeq?: number | null): Record<string, unknown> {
+  return ifMatchSeq === undefined ? { _id: id } : atReadSeq(id, ifMatchSeq);
 }
 
 /**

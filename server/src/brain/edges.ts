@@ -36,6 +36,7 @@ export { syntheticEdgeId } from './edge-id.js';
 import { syntheticEdgeId } from './edge-id.js';
 export type { TraverseEdge } from './traverse-subgraph.js';
 import type { TraverseEdge } from './traverse-subgraph.js';
+import { atReadSeq } from '../db/at-read-seq.js';
 
 export interface TraverseNode {
   _id: string;
@@ -368,7 +369,7 @@ export async function updateEdgeById(
     const moved: EdgeRekey | null = await inHeldTransaction(spaceId, 'edge.relabel',
       (session) => rekeyEdge(spaceId, existing, { label: newLabel }, carried, Object.keys($unset), session),
       { landed: async (r) => r === null || (await collection.countDocuments(
-        asFilter<EdgeDoc>({ _id: r.edge._id, seq: r.edge.seq }), { limit: 1 })) === 1 });
+        asFilter<EdgeDoc>(atReadSeq(r.edge._id, r.edge.seq)), { limit: 1 })) === 1 });
     if (moved) {
       // The queue AFTER the write, and here rather than inside `rekeyEdge` — see `embedQueueWorkFor`. There
       // is no transaction on this path, so the write is already durable. The embed text is built from the

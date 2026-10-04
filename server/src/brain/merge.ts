@@ -34,6 +34,7 @@ import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';
 import type { EntityDoc, EdgeDoc, FileMetaDoc, LinkDoc, PropertySchema } from '../config/types.js';
 import { writeTombstone, writeTombstones } from './tombstones.js';
 import { spaceCollection } from '../db/space-collection.js';
+import { atReadSeq } from '../db/at-read-seq.js';
 
 // ── Public types ───────────────────────────────────────────────────────────
 
@@ -652,7 +653,7 @@ export async function executeMerge(
       now, session, set: { properties: mergedProperties, tags: mergedTags, updatedAt: now, ...embeddingFields },
     }),
     // A commit whose answer was lost may have landed: the survivor at the seq this transaction gave it IS the commit.
-    { landed: async (w) => (await entityColl.countDocuments(asFilter<EntityDoc>({ _id: survivor._id, seq: w.seq }), { limit: 1 })) === 1 });
+    { landed: async (w) => (await entityColl.countDocuments(asFilter<EntityDoc>(atReadSeq(survivor._id, w.seq)), { limit: 1 })) === 1 });
 
   Object.assign(survivor, { properties: mergedProperties, tags: mergedTags, updatedAt: now, seq: written.seq, ...embeddingFields });
 
