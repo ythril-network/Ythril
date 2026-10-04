@@ -43,7 +43,7 @@
  * would make every reader of a collection depend on the index lifecycle.
  */
 import type { Collection, Db } from 'mongodb';
-import { BOUNDED_OPTIONS_ARGUMENT, boundArguments } from './write-bound.js';
+import { BOUNDED_OPTIONS_ARGUMENT, RETURNS_CURSOR, boundArguments } from './write-bound.js';
 
 /** What a method does to the set of records in its collection. */
 export interface MethodEffect {
@@ -133,8 +133,24 @@ function transactionSessionOf(args: unknown[]): SessionLike | null {
   return null;
 }
 
-/** The bounded methods that hand back a cursor synchronously: a refused bound throws, it cannot reject. */
-const RETURNS_CURSOR = new Set(['find', 'aggregate']);
+/**
+ * The bound's argument table is checked against this one at load (bundle-30 I6, C4), because the two tables answer
+ * different questions about one method list and could drift apart silently: a method bounded but never classified is
+ * a driver method this file does not know, and a method that writes but is not bounded is a write a seq hold cannot
+ * end. The bulk-op BUILDERS are the stated exception — their write happens at `execute`, which an argument index
+ * cannot express (`write-bound.ts`). `drop` and `rename` forget a collection and are not issued inside a hold.
+ */
+{
+  const UNBOUNDABLE = new Set(['initializeOrderedBulkOp', 'initializeUnorderedBulkOp', 'drop', 'rename']);
+  const unclassified = Object.keys(BOUNDED_OPTIONS_ARGUMENT).filter(m => !(m in COLLECTION_METHOD_EFFECT));
+  const unbounded = Object.entries(COLLECTION_METHOD_EFFECT)
+    .filter(([m, e]) => e !== 'read' && !UNBOUNDABLE.has(m) && BOUNDED_OPTIONS_ARGUMENT[m] === undefined).map(([m]) => m);
+  const cursorUnbounded = [...RETURNS_CURSOR].filter(m => BOUNDED_OPTIONS_ARGUMENT[m] === undefined);
+  if (unclassified.length > 0 || unbounded.length > 0 || cursorUnbounded.length > 0) {
+    throw new Error(`the write bound's method table disagrees with COLLECTION_METHOD_EFFECT: bounded but unclassified `
+      + `[${unclassified}], writing but unbounded [${unbounded}], cursor methods unbounded [${cursorUnbounded}]`);
+  }
+}
 
 /**
  * Wrap `db` so the collections `isObserved` names report each write to `listener` — and so EVERY collection's

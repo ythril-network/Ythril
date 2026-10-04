@@ -129,6 +129,13 @@ export const BOUNDED_OPTIONS_ARGUMENT: Readonly<Record<string, number>> = {
   findOne: 1, find: 1, aggregate: 1, countDocuments: 1, estimatedDocumentCount: 0, distinct: 2,
 };
 
+/**
+ * The bounded methods that hand back a CURSOR, synchronously: a refused bound throws rather than rejects for them,
+ * and a cursor in a timed transaction is the one that must not `getMore`. One set for both questions (bundle-30 I6,
+ * C4: the observer and `inTimedTransactionCursor` each spelled it).
+ */
+export const RETURNS_CURSOR: ReadonlySet<string> = new Set(['find', 'aggregate']);
+
 /** The first batch a cursor in a timed transaction asks for: everything, up to the server's own 16 MB per batch. */
 const IN_TRANSACTION_BATCH = 1_000_000;
 
@@ -144,7 +151,7 @@ const IN_TRANSACTION_BATCH = 1_000_000;
  * id chunks instead (`readStoredById`). A caller's own `batchSize` is kept.
  */
 function inTimedTransactionCursor(method: string, args: unknown[], at: number, options: Record<string, unknown>): unknown[] {
-  if (method !== 'find' && method !== 'aggregate') return args;
+  if (!RETURNS_CURSOR.has(method)) return args;
   const session = options['session'] as { inTransaction?: () => boolean; timeoutMS?: number } | undefined;
   if (!session?.inTransaction?.() || typeof session.timeoutMS !== 'number' || options['batchSize'] !== undefined) return args;
   const out = [...args];
