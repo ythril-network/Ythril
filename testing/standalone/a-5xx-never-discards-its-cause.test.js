@@ -137,16 +137,25 @@ describe('a 5xx never discards the exception that caused it', () => {
     );
   });
 
-  it('the helper reports the stack, not only the message', () => {
+  it('the helper reports the stack, not only the message', async () => {
     // "Cannot read properties of undefined" without a stack sends the reader back to grep for which of eleven
     // `undefined`s it was — and the reader is an operator on another team who cannot grep this source at all.
-    const helper = stripComments(readFileSync('server/src/util/report-failure.ts', 'utf8'));
-    assert.match(helper, /cause\.stack/, 'reportServerFailure must include the stack');
-    assert.match(helper, /log\.error\(/, 'a 5xx is an error, not a warning — it must be findable at that level');
-    assert.match(
-      helper, /\$\{where\}/,
-      'the report must name the operation, or an operator greping for the route they called finds nothing',
-    );
+    // Re-anchored (bundle-30, B4): the helper hands its cause to the logger as the meta argument, where `fmt` keeps
+    // an Error's stack and bounds its message — so the rule is read off the LINE it writes, not off a spelling.
+    const { reportServerFailure } = await import('../../server/dist/util/report-failure.js');
+    const { subscribeLogLines } = await import('../../server/dist/util/log.js');
+    const lines = [];
+    const stop = subscribeLogLines(l => lines.push(l));
+    const saved = console.error;
+    console.error = () => {};
+    try { reportServerFailure('revoke token', new Error('Cannot read properties of undefined')); } finally { console.error = saved; stop(); }
+    assert.equal(lines.length, 1, 'reportServerFailure must write exactly one line');
+    const [line] = lines;
+    assert.match(line, /\[ERROR\]/, 'a 5xx is an error, not a warning — it must be findable at that level');
+    assert.match(line, /revoke token failed with a 5xx/,
+      'the report must name the operation, or an operator greping for the route they called finds nothing');
+    assert.match(line, /Cannot read properties of undefined/, 'reportServerFailure must include the message');
+    assert.match(line, /\\n {4}at /, 'reportServerFailure must include the stack (its frames, escaped onto the line)');
   });
 
   it('the revoke route reports its unreachable branch', () => {
