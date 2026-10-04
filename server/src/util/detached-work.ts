@@ -4,9 +4,10 @@
  * ## Why a module
  *
  * Two acts start work behind their answer: a push door's strict-linkage check, which only records and must not hold
- * the answer while the store stalls (`sync/linkage-check.ts`, bundle-30 I13), and the withdrawal of a file tombstone
- * whose write was reported failed, which retries until the store takes it (`files/tombstones.ts`, bundle-30 I14). Each
- * kept a set of what it had started so a test could wait for it to finish; the second is where a copy becomes a rule.
+ * the answer while the store stalls (`sync/linkage-check.ts`, bundle-30 I13), and the drop of a failed act's pending
+ * file tombstones, which must not make the act's `503` wait on the store a second time (`files/tombstones.ts`,
+ * bundle-30 I14, I15). Each kept a set of what it had started so a test could wait for it to finish; the second is
+ * where a copy becomes a rule.
  *
  * ## The part a hand-written copy drops
  *

@@ -17,6 +17,7 @@ import { deleteEntity } from './entities.js';
 import { deleteEdge } from './edges.js';
 import { deleteChrono } from './chrono.js';
 import { deleteFileCascade } from '../files/delete-cascade.js';
+import { settleStalePendingFileTombstones } from '../files/tombstones.js';
 import { runExclusive } from '../util/single-flight.js';
 import { sweepChronoRetention } from './chrono-redaction.js';
 import { sweepLegacySpills } from '../files/legacy-spill-sweep.js';
@@ -65,6 +66,14 @@ export async function sweepExpired(now: Date = new Date()): Promise<number> {
     }
   }
   if (total > 0) log.info(`TTL sweep deleted ${total} expired record(s)`);
+
+  // File tombstones still pending after their act should have finished: its drop failed, its write landed after it
+  // was reported failed, or a restart came between. Settled from the disk (bundle-30 I15, `files/tombstones.ts`):
+  // never served while pending, so nothing waits on this but the record of a removal that did happen.
+  for (const space of concreteSpaces()) {
+    await settleStalePendingFileTombstones(space.id, now)
+      .catch(err => log.warn(`TTL sweep: settling pending file tombstones in ${space.id}: ${err}`));
+  }
 
   // Per-chrono-type retention rides the same cycle: its backfill and content-redaction passes are the same
   // shape of work on the same clock, and running them here means one timer rather than two doing housekeeping

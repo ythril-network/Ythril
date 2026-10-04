@@ -93,17 +93,6 @@ export async function listDir(spaceId: string, dirPath: string): Promise<FileEnt
   return result;
 }
 
-/** True if a regular file exists at the given space-relative path. */
-export async function fileExists(spaceId: string, filePath: string): Promise<boolean> {
-  try {
-    const abs = await resolveSafePathChecked(spaceId, filePath);
-    const st = await fs.stat(abs);
-    return st.isFile();
-  } catch {
-    return false;
-  }
-}
-
 /** Create a directory (including parents) */
 export async function createDir(spaceId: string, dirPath: string): Promise<void> {
   const abs = await resolveSafePathChecked(spaceId, dirPath);

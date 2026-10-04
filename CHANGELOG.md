@@ -456,11 +456,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   carried the bytes, failed to re-key its records and answered `200`. Each step's own failure is still survived,
   but the store's answers `503` on REST and MCP, and the metadata record goes last, so the same request retried
   completes the act: a delete as an orphan, a move by finding the file at its destination and the record at the
-  old path, a directory delete (`confirm: true`) by finding records under a folder whose tree is gone. A tombstone
-  write the store reports failed is withdrawn by ids allocated before it was sent, retried until the store takes
-  it — the write could land when the store came back, and a failed move left peers told to delete a file that
-  was still here. A move that fails after its tombstones were written withdraws them the same way. The
+  old path, a directory delete (`confirm: true`) by finding records under a folder whose tree is gone. The
   directory delete's cascade moved from the REST route into `files/delete-cascade.ts`.
+
+  **A file tombstone is published only once the file is gone (bundle-30 I15).** Written before the bytes, a
+  tombstone was served and pushed at once, and a peer that receives one deletes its copy, keeps the tombstone and
+  serves it back — so when the delete or move then failed, the next cycles deleted this instance's own copy, the
+  only one left. Withdrawing it afterwards (retried in memory) lost that race to a sync cycle, and to a restart
+  outright; a delete whose unlink failed for a reason that was not the store's (a directory, a permission) never
+  withdrew it, and the TTL sweep added another every cycle. Now the tombstone is written PENDING and confirmed once
+  the bytes are gone or moved; nothing that serves, pushes, prunes or counts file tombstones sees a pending one
+  (`GET /api/sync/file-tombstones`, the sync push, the prune, the stray-metadata drain all read them through
+  `files/tombstones.ts`). A failed act drops its own; one that outlives its act is settled by the TTL sweep from the
+  disk — dropped while the path still has its file, published once it has none. `pending` never crosses the wire:
+  served tombstones carry `_id`, `spaceId`, `path` and `deletedAt` only, and a confirmed one is stamped with the
+  time it was confirmed.
+
+  **A retried move completes only a move it began (bundle-30 I15).** The completion took any source with records and
+  no bytes beside an existing destination for a move still owed — so moving an orphan `a.txt` (its file gone out of
+  band) onto an unrelated `b.txt` replaced `b.txt`'s jobs, chunks and sidecars, lost `a.txt`'s record and answered
+  `200`. A move's tombstones now carry a mark of the move, the completion requires it, and without it the move is
+  `404` and `b.txt` is untouched. "Are the bytes here" has one answer (`bytesPresent`): only a path that does not
+  exist is absent, and a failure to look (a permission) is an error rather than an absent source sent down that
+  path. The completions ask the store for one record instead of loading every record id under a folder.
 
 - **A pulled page is decided by the same rules as a pushed one (`Q-204`, `Q-225`).** The pull accepted whatever was
   newer by seq and validated nothing, so the same document delivered the other way round was decided differently:

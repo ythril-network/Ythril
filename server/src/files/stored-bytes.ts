@@ -173,6 +173,26 @@ async function pipeUnlocked(abs: string, source: Readable | AsyncIterable<Buffer
 // moved while the migration rewrote it would otherwise come back at its old path when the rename landed — and the
 // next sync would push the resurrected file to every peer.
 
+/**
+ * Whether anything is on disk at `abs` — the one answer to "are the bytes here" (bundle-30 I15, preship-3 P3-6).
+ *
+ * **Only "the path does not exist" is `false`; any other failure to look is thrown.** A cascade acts on this answer:
+ * a move whose source reads as absent takes its completion path, which re-roots the destination's derived records,
+ * and a delete whose file reads as absent completes an orphan. So a permission refused, or a path the filesystem
+ * will not look at, must reach the caller as the failure it is. Two copies of this question answered it two ways,
+ * one of them swallowing every error into `false`; `are-the-bytes-here-has-one-answer.test.js` holds the rest of
+ * the tree to this one.
+ */
+export async function bytesPresent(abs: string): Promise<boolean> {
+  try {
+    await fsp.lstat(abs);
+    return true;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException | null)?.code === 'ENOENT') return false;
+    throw err;
+  }
+}
+
 /** Delete a stored file under its path lock. */
 export async function deleteStored(abs: string): Promise<void> {
   await withPathLock(abs, () => fsp.unlink(abs));

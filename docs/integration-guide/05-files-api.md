@@ -301,15 +301,22 @@ failure anywhere in the act answers `503` (retryable) on REST, and an error resu
 in MCP — it used to answer `204` or `200` when it came after the bytes, with the metadata left behind.
 
 - **Before the bytes.** The tombstone is written BEFORE the bytes are removed or moved, so a failure there
-  leaves the file exactly where it was, and the retry repeats the whole act. A tombstone write the store
-  reported failed may still land when the store comes back, so it is withdrawn by ids allocated before it
-  was sent, retried until the store takes it: a peer is never told to delete a file that is still here.
-  A move that fails after writing its tombstones withdraws them too.
+  leaves the file exactly where it was, and the retry repeats the whole act. **A peer is never told to delete
+  a file that is still here**, because the tombstone is written *pending* and published — served on
+  `GET /api/sync/file-tombstones` and pushed by a sync cycle — only once the bytes are gone or moved. A peer
+  that is sent a tombstone deletes its copy and passes the tombstone on, back to this instance too, so a
+  tombstone for an act that failed would delete the only copy here; a pending one is sent to nobody. An act
+  that fails (a store failure, or an unlink or rename that fails for any other reason) drops its pending
+  tombstone, and one that outlives its act — a write the store reported failed that landed later, a drop
+  that failed, a restart in between — is settled by the record TTL sweep from the disk within minutes:
+  dropped while the path still has its file, published once it has none.
 - **After the bytes.** The metadata record is removed (or, for a move, re-keyed) LAST, so it is still there,
   and the same request retried completes the act. A delete completes as an orphan, as above. A move finds
-  the file at `destination` and the record at the old path, and finishes the record, its derived records
-  and its jobs. A directory delete sent with `{ "confirm": true }` finds records under a folder whose tree
-  is gone, tombstones their paths and removes them.
+  the file at `destination`, the record at the old path and the mark its first attempt left with its
+  tombstones, and finishes the record, its derived records and its jobs; without that mark — an old path
+  whose file went missing for another reason — it is `404`, and nothing at `destination` is touched. A
+  directory delete sent with `{ "confirm": true }` finds records under a folder whose tree is gone,
+  tombstones their paths and removes them.
 
 > **Removed at 5.0.** A `DELETE` on the file-meta path purged a metadata record without
 > touching disk, guarded by a `409` when the file was still there. It was a second door onto half of one

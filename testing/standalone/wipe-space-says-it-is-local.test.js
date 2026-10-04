@@ -87,13 +87,14 @@ describe('the claim matches the implementation', () => {
       'file tombstones are cleared');
     const at = LIFECYCLE.indexOf('export async function wipeSpace');
     const body = LIFECYCLE.slice(at, LIFECYCLE.indexOf('\nexport ', at + 10));
-    assert.doesNotMatch(body, /writeFileTombstones|writeTombstone/,
+    assert.doesNotMatch(body, /writePendingFileTombstones|writeFileTombstones|writeTombstone/,
       'wipeSpace started writing tombstones — it now propagates, so delete the warning');
   });
 
   it('and the per-record deletes really do write them, which is the contrast drawn', () => {
     const cascade = stripComments(readFileSync('server/src/files/delete-cascade.ts', 'utf8'));
-    assert.match(cascade, /writeFileTombstones\(/,
+    // Written pending, published once the bytes are gone (bundle-30 I15): both halves are the tombstone.
+    assert.match(cascade, /writePendingFileTombstones\([^]*actUnderPendingTombstones\(/,
       'if the delete tools stop tombstoning too, the contrast in this description is wrong');
   });
 

@@ -66,7 +66,7 @@ describe('delete_file describes the cascade it really performs', () => {
     // set-claim: the functions the delete cascade calls, pinned so the tool's PROSE cannot outlive them.
     // Both halves are literal on purpose: the case exists to compare a description against an implementation.
     // Pinned to the implementation: prose about a cascade is worthless if the cascade changed underneath it.
-    for (const fn of ['writeFileTombstones', 'cancelMediaJob', 'deleteConversionArtifacts',
+    for (const fn of ['writePendingFileTombstones', 'actUnderPendingTombstones', 'cancelMediaJob', 'deleteConversionArtifacts',
       'invalidateUsageCache', 'emitWebhookEvent']) {
       assert.match(CASCADE, new RegExp(`${fn}\\(`), `${fn} left the cascade — the description now overclaims`);
     }
@@ -95,7 +95,7 @@ describe('delete_file describes the cascade it really performs', () => {
     assert.match(stripComments(end === -1 ? handler : handler.slice(0, end)), /await deleteFileCascade\([^)]*\);\s*return \{/,
       'delete_file decides something itself before the cascade — the description describes the cascade');
     const notFound = CASCADE.indexOf('throw new NotFoundError(');
-    const tombstone = CASCADE.indexOf('writeFileTombstones(');
+    const tombstone = CASCADE.indexOf('writePendingFileTombstones(');
     const unlink = CASCADE.indexOf('deleteStored(');
     assert.ok(notFound > -1, 'the cascade no longer answers a missing path as not found');
     assert.ok(notFound < tombstone && tombstone < unlink,

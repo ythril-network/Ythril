@@ -8,11 +8,14 @@
  * it lives here so both — and the TTL sweep (F12) — clean up identically and no path orphans bytes, jobs
  * or artifacts. A directory's delete is the same cascade over a tree (`deleteDirectoryCascade`), REST only.
  *
- * ## The order, and what each failure leaves (bundle-30 I13, I14)
+ * ## The order, and what each failure leaves (bundle-30 I13, I14, I15)
  *
  * The path is resolved first (a path outside the space is the caller's `RangeError`, before anything is written),
- * then the TOMBSTONE, then the bytes — see `files/tombstones.ts` for why the tombstone must not come after. A store
- * failure on it throws with the file untouched, so the retry repeats the whole cascade.
+ * then the tombstone is written PENDING, then the bytes go, then the tombstone is CONFIRMED — see
+ * `files/tombstones.ts` for why it is written before and published only after. A store failure on the write throws
+ * with the file untouched, so the retry repeats the whole cascade. **An unlink that fails for any other reason** (a
+ * directory, a permission) drops the pending tombstone and throws: the file is still here, and no peer is told
+ * otherwise — it used to keep the tombstone, and the TTL sweep wrote another every cycle (preship-3 P3-3).
  *
  * **After the bytes, a store failure still fails the delete** (bundle-30 I14, verify-drive-4 D1). The job, the
  * artifacts and the metadata each used to be `.catch(log.warn)`: with the store paused, a delete unlinked the bytes,
@@ -26,7 +29,6 @@
  * ever. **A path with neither bytes nor metadata** is a `NotFoundError`: `404` on REST, on `/api/delete_file` and in
  * MCP's error result — it used to reach MCP as the filesystem's `ENOENT`, carrying the absolute data path.
  */
-import fs from 'fs/promises';
 import { getConfig } from '../config/loader.js';
 import { log, peerText } from '../util/log.js';
 import { NotFoundError } from '../util/errors.js';
@@ -35,29 +37,18 @@ import { col, asFilter } from '../db/mongo.js';
 import { spaceCollection } from '../db/space-collection.js';
 import type { FileMetaDoc } from '../config/types.js';
 import { resolveSafePathChecked } from './sandbox.js';
-import { deleteStored } from './stored-bytes.js';
-import { deleteFileMeta, deleteFileMetaByPrefix, fileRecordPaths, markFileMetaDeleted, markFileMetaDeletedByPrefix } from './file-meta.js';
+import { bytesPresent, deleteStored } from './stored-bytes.js';
+import { deleteFileMeta, deleteFileMetaByPrefix, fileRecordPaths, hasLiveFileRecordUnder, markFileMetaDeleted, markFileMetaDeletedByPrefix } from './file-meta.js';
 import { cancelMediaJob, cancelMediaJobsByPrefix } from './media/job-queue.js';
 import { deleteConversionArtifacts, deleteConversionArtifactsByPrefix } from './converters/pipeline.js';
 import { listFilesRecursive } from './files.js';
 import { removeTree } from './remove-tree.js';
-import { writeFileTombstones } from './tombstones.js';
+import { actUnderPendingTombstones, writePendingFileTombstones } from './tombstones.js';
 import { invalidateUsageCache } from '../quota/quota.js';
 import { unlessTheStoreFailed } from '../brain/store-failure.js';
 import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';
 
 const isMissing = (err: unknown): boolean => (err as NodeJS.ErrnoException | null)?.code === 'ENOENT';
-
-/** Whether the bytes are on disk. Only "not there" is an answer; any other failure to look is the caller's to see. */
-async function bytesPresent(abs: string): Promise<boolean> {
-  try {
-    await fs.lstat(abs);
-    return true;
-  } catch (err) {
-    if (isMissing(err)) return false;
-    throw err;
-  }
-}
 
 export async function deleteFileCascade(spaceId: string, filePath: string, actor?: WebhookActor): Promise<void> {
   const abs = await resolveSafePathChecked(spaceId, filePath);
@@ -67,10 +58,13 @@ export async function deleteFileCascade(spaceId: string, filePath: string, actor
       .findOne(asFilter<FileMetaDoc>({ _id: toDocId(filePath) }), { projection: { _id: 1 } });
     if (!known) throw new NotFoundError(`File '${filePath}' not found in space '${spaceId}'`);
   }
-  // BEFORE the bytes go: a peer's manifest re-pushes a file it has no tombstone for, and nothing writes it later.
-  await writeFileTombstones(spaceId, [filePath]);
+  // BEFORE the bytes go, pending; published once they have: a peer's manifest re-pushes a file it has no tombstone
+  // for, and a peer told of a file still here deletes it and tells us back.
+  const pending = await writePendingFileTombstones(spaceId, [filePath]);
   // A concurrent delete that got there first has done this half; anything else is the caller's failure.
-  if (present) await deleteStored(abs).catch(err => { if (!isMissing(err)) throw err; });
+  await actUnderPendingTombstones(pending, async () => {
+    if (present) await deleteStored(abs).catch(err => { if (!isMissing(err)) throw err; });
+  });
   invalidateUsageCache(); // freed disk — reflect it in the next quota check
   const at = `for ${peerText(spaceId)}/${peerText(filePath)}`;
   // Cancel any queued media/text job so it cannot outlive the file and retry forever.
@@ -92,7 +86,7 @@ export async function deleteFileCascade(spaceId: string, filePath: string, actor
  * the caller confirmed as a directory's.
  */
 export async function isUnfinishedDirectoryDelete(spaceId: string, dirPath: string): Promise<boolean> {
-  return (await fileRecordPaths(spaceId, dirPath)).some(p => p !== toDocId(dirPath));
+  return hasLiveFileRecordUnder(spaceId, dirPath);
 }
 
 /**
@@ -113,13 +107,14 @@ export async function deleteDirectoryCascade(spaceId: string, dirPath: string): 
       listFilesRecursive(spaceId, `_extracted/${dirPath}`),
     ])).flat()
     : (await fileRecordPaths(spaceId, dirPath)).filter(p => p !== toDocId(dirPath));
-  // BEFORE the tree goes (bundle-30 I13, `files/tombstones.ts`): a store failure here leaves the tree in place and the
-  // retry repeats the delete; written after, the retry answered 404 and no tombstone was ever written.
-  await writeFileTombstones(spaceId, removedPaths);
-  if (present) {
+  // BEFORE the tree goes, pending (bundle-30 I13, I15, `files/tombstones.ts`): a store failure here leaves the tree in
+  // place and the retry repeats the delete; written after, the retry answered 404 and no tombstone was ever written.
+  const pending = await writePendingFileTombstones(spaceId, removedPaths);
+  await actUnderPendingTombstones(pending, async () => {
+    if (!present) return;
     await removeTree(abs, { mustExist: true });   // a converter may still be writing under it
     log.info(`Deleted directory ${peerText(dirPath)} (space: ${peerText(spaceId)})`);
-  }
+  });
   invalidateUsageCache(); // freed disk — reflect it in the next quota check
   const at = `for space ${peerText(spaceId)}, path ${peerText(dirPath)}`;
   // Queued jobs under the folder would outlive their sources and retry forever against paths that no longer exist.

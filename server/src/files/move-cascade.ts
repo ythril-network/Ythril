@@ -19,21 +19,24 @@
  * cleaning up after "a deleted source" — which, mid-move, would delete what the move is carrying. Then the held jobs
  * are re-keyed to the new path and released, so the moved file is processed where it now is.
  *
- * The tombstones for every path left behind are written FIRST, before a byte moves (bundle-30 I13, see
- * `files/tombstones.ts`), and withdrawn if the move then fails. The bytes move or the call throws. Everything after
- * them survives its own failure, logged — but not the STORE's (bundle-30 I14): with the store paused, a move used to
- * carry the bytes, fail every record step and answer `200`, its metadata left at a path with no file. Now that answers
- * `503`, the metadata record is renamed last, and the retried move finds the bytes at `dst` and the record at `src`
- * and completes the steps it owes (`afterTheBytesMoved`). A source that is not there, and owes nothing, is a
- * `NotFoundError` (404 on both doors), checked before anything is written.
+ * The tombstones for every path left behind are written FIRST, pending, before a byte moves, and published only once
+ * the bytes have moved — dropped if they did not (bundle-30 I13, I15, see `files/tombstones.ts`). The bytes move or
+ * the call throws. Everything after them survives its own failure, logged — but not the STORE's (bundle-30 I14): with
+ * the store paused, a move used to carry the bytes, fail every record step and answer `200`, its metadata left at a
+ * path with no file. Now that answers `503`, the metadata record is renamed last, and the retried move finds the
+ * bytes at `dst`, the record at `src` and the MARKER its first attempt wrote with its tombstones, and completes the
+ * steps it owes (`afterTheBytesMoved`). The marker is what makes it a move still owed: no bytes at `src` and a file
+ * at `dst` is also an orphan `src` beside an unrelated file, which this used to "complete" by overwriting that file's
+ * jobs, chunks and sidecars (preship-3 P3-2). A source that is not there, and owes nothing, is a `NotFoundError` (404
+ * on both doors), checked before anything is written.
  */
-import fs from 'fs/promises';
 import { moveFile, listFilesRecursive } from './files.js';
-import { fileRecordPaths, renameFileMeta, renameFileMetaByPrefix } from './file-meta.js';
+import { hasLiveFileRecordAt, renameFileMeta, renameFileMetaByPrefix } from './file-meta.js';
 import { holdJobsForMove, releaseMoveHold, rekeyJobsForMove } from './media/job-queue.js';
 import { movedId, movedSidecars, parentIdsUnder } from './moved-paths.js';
 import { resolveSafePathChecked } from './sandbox.js';
-import { writeFileTombstones, withdrawFileTombstones } from './tombstones.js';
+import { bytesPresent } from './stored-bytes.js';
+import { actUnderPendingTombstones, confirmBegunMove, forgetFinishedMove, moveWasBegun, writePendingFileTombstones } from './tombstones.js';
 import { NotFoundError } from '../util/errors.js';
 import { col, asFilter, asDoc } from '../db/mongo.js';
 import { spaceCollection } from '../db/space-collection.js';
@@ -44,15 +47,13 @@ import { log, peerText } from '../util/log.js';
 
 const why = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
-/** Whether a space-relative path exists on disk. A path outside the sandbox does not, for this purpose. */
-async function exists(spaceId: string, relPath: string): Promise<boolean> {
-  try {
-    await fs.stat(await resolveSafePathChecked(spaceId, relPath));
-    return true;
-  } catch {
-    return false;
-  }
-}
+/**
+ * Whether a space-relative path has bytes on disk (`bytesPresent`): a path outside the sandbox is the caller's
+ * `RangeError`, and a failure to look is thrown — never read as "absent", which would send a move into its
+ * completion path (preship-3 P3-6).
+ */
+const exists = async (spaceId: string, relPath: string): Promise<boolean> =>
+  bytesPresent(await resolveSafePathChecked(spaceId, relPath));
 
 /**
  * Every file path the move takes away, for the tombstones: the files themselves and their sidecars. Sync has no rename
@@ -106,30 +107,33 @@ export async function moveFileCascade(spaceId: string, src: string, dst: string,
   await resolveSafePathChecked(spaceId, src);
   await resolveSafePathChecked(spaceId, dst);
   if (!(await exists(spaceId, src))) {
-    // The bytes already moved and the records did not: a move a store failure stopped after its bytes, completed. Its
-    // tombstones were written before those bytes moved, so none is owed here.
-    const owed = await exists(spaceId, dst) ? await fileRecordPaths(spaceId, src) : [];
-    if (owed.length === 0) throw new NotFoundError(`Path '${src}' not found in space '${spaceId}'`);
+    // The bytes already moved and the records did not: a move a store failure stopped after its bytes, completed —
+    // but only a move begun HERE, which its marker says. Without it this is an orphan `src` beside whatever `dst` is.
+    const owed = await exists(spaceId, dst) && await moveWasBegun(spaceId, src, dst) && await hasLiveFileRecordAt(spaceId, src);
+    if (!owed) throw new NotFoundError(`Path '${src}' not found in space '${spaceId}'`);
+    // Its tombstones were written before those bytes moved; publish any its first attempt could not.
+    await confirmBegunMove(spaceId, src, dst);
     await afterTheBytesMoved(spaceId, src, dst, await holdJobsForMove(spaceId, src));
     emitWebhookEvent({ event: 'file.updated', spaceId, entry: { path: dst, previousPath: src }, ...(actor ?? {}) });
     return;
   }
   const leaving = await pathsLeaving(spaceId, src, dst);
 
-  // The tombstones BEFORE the bytes move (bundle-30 I13, `files/tombstones.ts`): a store failure here leaves the
-  // source where it was, so the retry repeats the move — written after, the retry found no source and the paths left
-  // behind were never tombstoned. A failed write withdraws its own; a move that fails after it withdraws these:
-  // nobody asked for those paths to go.
-  const tombstones = await writeFileTombstones(spaceId, leaving);
+  // The tombstones BEFORE the bytes move, pending (bundle-30 I13, I15, `files/tombstones.ts`): a store failure here
+  // leaves the source where it was, so the retry repeats the move — written after, the retry found no source and the
+  // paths left behind were never tombstoned. Published once the bytes have moved; dropped if they did not, since
+  // nobody asked for those paths to go — and pending, no peer is told of them meanwhile.
+  const pending = await writePendingFileTombstones(spaceId, leaving, { from: src, to: dst });
   let held: string[] = [];
-  try {
-    held = await holdJobsForMove(spaceId, src);
-    await moveFile(spaceId, src, dst);
-  } catch (err) {
-    withdrawFileTombstones(spaceId, tombstones);
-    await releaseMoveHold(spaceId, held).catch(e => log.warn(`releaseMoveHold error for ${peerText(spaceId)}/${peerText(src)}: ${peerText(why(e))}`));
-    throw err;
-  }
+  await actUnderPendingTombstones(pending, async () => {
+    try {
+      held = await holdJobsForMove(spaceId, src);
+      await moveFile(spaceId, src, dst);
+    } catch (err) {
+      await releaseMoveHold(spaceId, held).catch(e => log.warn(`releaseMoveHold error for ${peerText(spaceId)}/${peerText(src)}: ${peerText(why(e))}`));
+      throw err;
+    }
+  });
   await afterTheBytesMoved(spaceId, src, dst, held);
   emitWebhookEvent({ event: 'file.updated', spaceId, entry: { path: dst, previousPath: src }, ...(actor ?? {}) });
 }
@@ -153,4 +157,6 @@ async function afterTheBytesMoved(spaceId: string, src: string, dst: string, hel
     renameFileMeta(spaceId, src, dst),
     renameFileMetaByPrefix(spaceId, src, dst),
   ]));
+  // Finished: nothing is owed, so its marker must not make a later orphan at `src` look like this move.
+  await forgetFinishedMove(spaceId, src, dst);
 }

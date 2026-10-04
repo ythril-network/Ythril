@@ -1764,6 +1764,12 @@ export interface TombstoneDoc {
   originalSeq?: number;
 }
 
+/**
+ * A file tombstone as it crosses the wire — served by `GET /api/sync/file-tombstones`, pushed by a sync cycle, and
+ * stored by a receiver's `POST`. This instance also stores fields that never leave it (whether the act is still
+ * `pending`, and a move's marker), declared beside the one module that reads and writes the collection,
+ * `files/tombstones.ts` (bundle-30 I15).
+ */
 export interface FileTombstoneDoc {
   _id: string;         // UUID
   spaceId: string;

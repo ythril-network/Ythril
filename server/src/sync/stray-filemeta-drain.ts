@@ -34,7 +34,7 @@
  */
 import { concreteSpaces } from '../spaces/proxy.js';
 import { getDb, col, asFilter } from '../db/mongo.js';
-import { spaceCollection } from '../db/space-collection.js';
+import { tombstonedFilePaths } from '../files/tombstones.js';
 import { writeArrivals, warnArrivalsNotStored } from './arrivals.js';
 import { admitArrivals } from './arrival-shape.js';
 import { fileMetaForWire } from '../api/sync/_shared.js';
@@ -154,9 +154,8 @@ async function drainSpace(spaceId: string, pageSize: number, maxPages: number, s
  */
 async function settleUnstored(spaceId: string, page: StrayDoc[], unstored: string[]): Promise<{ discard: string[]; wait: string[] }> {
   if (unstored.length === 0) return { discard: [], wait: [] };
-  const tombstoned = new Set((await col<{ _id: string; path: string }>(spaceCollection(spaceId, 'fileTombstones'))
-    .find(asFilter<{ _id: string; path: string }>({ path: { $in: unstored } }), { projection: { path: 1 } })
-    .toArray()).map(t => t.path));
+  // Published tombstones only: a pending one names an act that may not happen (bundle-30 I15, `files/tombstones.ts`).
+  const tombstoned = await tombstonedFilePaths(spaceId, unstored);
   const since = new Map(page.map(d => [d._id, d.keptSince]));
   const expired = Date.now() - WAIT_DAYS * 86_400_000;
   const discard: string[] = [], wait: string[] = [];

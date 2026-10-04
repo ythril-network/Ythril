@@ -11,13 +11,15 @@
  *   store step — the metadata, the job, the artifacts — swallowed its own failure and logged it.
  * - **D2.** A move whose tombstone insert was REPORTED failed answered `503` with the file in place — and the insert
  *   landed when the store came back. `writeFileTombstones` had returned no ids, so nothing was withdrawn, and the
- *   tombstone told peers to delete a file that still exists here.
+ *   tombstone told peers to delete a file that still exists here. (Since bundle-30 I15 the tombstone is written
+ *   PENDING and published only once the act happened, so a landed write is served to no peer whatever becomes of it.)
  *
  * ## What is asserted, on REST and on MCP
  *
  * - A tombstone write that fails as the driver fails it changes nothing: `503`, bytes and metadata in place.
- * - One that is reported failed AND landed leaves no tombstone behind, whether it landed before the withdrawal or
- *   after the withdrawal's first attempt was itself refused.
+ * - One that is reported failed AND landed publishes no tombstone, whether it landed before the act's clean-up or
+ *   after that clean-up was itself refused — and the TTL sweep's settle removes what is left.
+ * - "Published" is what `GET /api/sync/file-tombstones` serves a peer.
  * - A store step that fails AFTER the bytes went (delete) or moved (move) answers `503`, and the same request,
  *   retried, completes the act: bytes, metadata and tombstone each where a finished act leaves them.
  *
@@ -44,7 +46,8 @@ let door, files, tombstones, F, handlers, callTool, ADMIN, faults;
 const root = () => path.join(process.env['DATA_ROOT'], 'files', S);
 const onDisk = (p) => fs.existsSync(path.join(root(), p));
 const meta = (p) => door.mongo.col(`${S}_files`).findOne({ _id: p });
-const tombstoned = async () => (await door.mongo.col(`${S}_file_tombstones`).find({}).toArray()).map(t => t.path).sort();
+/** The paths a peer is told are gone: what the `GET /api/sync/file-tombstones` door serves. */
+const tombstoned = async () => (await door.pull('/file-tombstones', { spaceId: S })).tombstones.map(t => t.path).sort();
 
 async function seed(p) {
   await files.writeFile(S, p, `content of ${p}`);
@@ -133,7 +136,7 @@ describe('a file act answers true in an outage, and its retry repairs it', { ski
       const a = via === 'REST' ? await restDelete('kept.txt') : await mcp('delete_file', { path: 'kept.txt' });
       assertStoreAnswer(`${via} delete`, a);
       assert.ok(onDisk('kept.txt') && await meta('kept.txt'), 'the file did not stay where it was');
-      await tombstones.whenFileTombstoneWithdrawalsSettle?.();
+      await tombstones.whenPendingFileTombstoneDropsSettle();
       assert.deepEqual(await tombstoned(), [], 'a tombstone names a file that is still here — peers delete it');
     });
 
@@ -149,13 +152,13 @@ describe('a file act answers true in an outage, and its retry repairs it', { ski
       assert.ok((await tombstoned()).includes('b.txt'), 'no tombstone names the deleted file');
     });
 
-    it(`${via}: a move whose tombstone is reported failed but landed answers 503 and withdraws it`, async () => {
+    it(`${via}: a move whose tombstone is reported failed but landed answers 503 and publishes none`, async () => {
       await seed('src.txt');
       fail('insertMany', 'file_tombstones', F.storeGone.bulk, { land: true });
       const a = via === 'REST' ? await restMove('src.txt', 'dst.txt') : await mcp('move_file', { src: 'src.txt', dst: 'dst.txt' });
       assertStoreAnswer(`${via} move`, a);
       assert.ok(onDisk('src.txt') && !onDisk('dst.txt'), 'the file did not stay where it was');
-      await tombstones.whenFileTombstoneWithdrawalsSettle?.();
+      await tombstones.whenPendingFileTombstoneDropsSettle();
       assert.deepEqual(await tombstoned(), [], 'a failed move left a tombstone for a file that did not move (D2)');
     });
 
@@ -187,9 +190,7 @@ describe('a file act answers true in an outage, and its retry repairs it', { ski
     assert.deepEqual([...new Set(await tombstoned())], ['dir/one.txt', 'dir/two.txt']);
   });
 
-  it('a tombstone that lands after its withdrawal was first refused is still withdrawn', async () => {
-    assert.equal(typeof tombstones.whenFileTombstoneWithdrawalsSettle, 'function',
-      'files/tombstones.js has no whenFileTombstoneWithdrawalsSettle — a withdrawal that has to wait cannot be awaited');
+  it('a tombstone that lands after its clean-up was refused is never published, and the sweep\'s settle removes it', async () => {
     await seed('late.txt');
     fail('insertMany', 'file_tombstones', F.storeGone.bulk, { lateMs: 400 });
     fail('deleteMany', 'file_tombstones', F.storeGone.single);
@@ -197,8 +198,11 @@ describe('a file act answers true in an outage, and its retry repairs it', { ski
     assertStoreAnswer('REST move', a);
     assert.ok(await eventually(async () => (await door.mongo.col(`${S}_file_tombstones`).countDocuments()) > 0, 2_000),
       'the late insert never landed — the case is not the one the drive saw');
-    await tombstones.whenFileTombstoneWithdrawalsSettle();
-    assert.deepEqual(await tombstoned(), [], 'a tombstone the store applied after the withdrawal\'s first try survives');
+    await tombstones.whenPendingFileTombstoneDropsSettle();
+    assert.deepEqual(await tombstoned(), [], 'a tombstone the store applied after the act failed is served to peers');
     assert.ok(onDisk('late.txt'));
+    await tombstones.settleStalePendingFileTombstones(S, new Date(Date.now() + 24 * 3_600_000));
+    assert.equal(await door.mongo.col(`${S}_file_tombstones`).countDocuments(), 0,
+      'the settle kept a pending tombstone for a file that is still here');
   });
 });

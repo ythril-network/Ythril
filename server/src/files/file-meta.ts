@@ -46,6 +46,7 @@ export const DELETABLE_FILE_META_FIELDS: readonly string[] = [
 ];
 import { applyDeleteFields } from '../brain/delete-fields.js';
 import type { FileMetaDoc, AuthorRef } from '../config/types.js';
+import type { Filter } from 'mongodb';
 import { spaceCollection } from '../db/space-collection.js';
 
 
@@ -519,18 +520,44 @@ export async function deleteFileMetaByPrefix(
  * remove it last.
  */
 export async function fileRecordPaths(spaceId: string, path: string): Promise<string[]> {
-  const norm = toDocId(path).replace(/\/?$/, '');
-  if (!norm) return []; // guard: empty path would match everything
-  const under = '^' + escapeRegex(norm + '/');
-  const rows = await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).find(
-    asFilter<FileMetaDoc>({
-      $or: [{ _id: norm }, { _id: { $regex: under } }],
-      parentFileId: { $exists: false },
-      deletedAt: { $exists: false },
-    }),
-    { projection: { _id: 1 } },
-  ).toArray();
+  const filter = liveFileRecords(path, { self: true });
+  if (!filter) return [];
+  const rows = await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).find(filter, { projection: { _id: 1 } }).toArray();
   return rows.map(r => String(r._id));
+}
+
+/**
+ * Whether any live file record is at `path` or under `path/` — the yes/no form of {@link fileRecordPaths}, read as one
+ * record (bundle-30 I15, preship-3 P3-7). A retried move asks it of its source; the list it used to load held every
+ * record id under a folder to answer one bit.
+ */
+export async function hasLiveFileRecordAt(spaceId: string, path: string): Promise<boolean> {
+  return anyLiveFileRecord(spaceId, liveFileRecords(path, { self: true }));
+}
+
+/** Whether any live file record is strictly under `dir/` — what a directory delete a store failure stopped still owes. */
+export async function hasLiveFileRecordUnder(spaceId: string, dir: string): Promise<boolean> {
+  return anyLiveFileRecord(spaceId, liveFileRecords(dir, { self: false }));
+}
+
+async function anyLiveFileRecord(spaceId: string, filter: Filter<FileMetaDoc> | null): Promise<boolean> {
+  if (!filter) return false;
+  return (await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).findOne(filter, { projection: { _id: 1 } })) !== null;
+}
+
+/**
+ * The live FILE records under `path/` (and at `path`, with `self`): never a derived record, never a soft-deleted one.
+ * `null` for an empty path, which would match everything.
+ */
+function liveFileRecords(path: string, { self }: { self: boolean }): Filter<FileMetaDoc> | null {
+  const norm = toDocId(path).replace(/\/?$/, '');
+  if (!norm) return null;
+  const under = { _id: { $regex: '^' + escapeRegex(norm + '/') } };
+  return asFilter<FileMetaDoc>({
+    ...(self ? { $or: [{ _id: norm }, under] } : under),
+    parentFileId: { $exists: false },
+    deletedAt: { $exists: false },
+  });
 }
 
 /**

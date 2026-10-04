@@ -9,7 +9,7 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { v4 as uuidv4 } from 'uuid';
 import { getDataRoot } from '../config/loader.js';
-import type { NetworkMember, FileTombstoneDoc, ConflictDoc, FileMetaDoc } from '../config/types.js';
+import type { NetworkMember, ConflictDoc, FileMetaDoc } from '../config/types.js';
 import { col, asFilter, asDoc, asUpdate } from '../db/mongo.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { boundedJson } from '../util/bounded-read.js';
@@ -19,6 +19,7 @@ import { buildFileManifest } from '../files/manifest.js';
 import { readStored, writeStored, deleteStored } from '../files/stored-bytes.js';
 import { resolveSafePathChecked } from '../files/sandbox.js';
 import { deleteFileMeta, recordArrivedFile } from '../files/file-meta.js';
+import { publishedFileTombstones } from '../files/tombstones.js';
 import { peerSafeFetch, transferInit, PEER_TRANSFER_TIMEOUT_MS } from './peer-fetch.js';
 import { recordFileTombstoneAck, ackedPositionFrom } from './file-tombstone-ack.js';
 import { decideFilePull, decideFilePush, conflictCopyPath, isInstanceLocalFile } from './file-conflict.js';
@@ -70,9 +71,8 @@ export async function syncFiles(
     // ── 1b. Push our file tombstones to the peer ──────────────────────────
     // Files we deleted locally must be propagated to the peer so they disappear there too.
     if (doPush) try {
-      const ourTombstones = await col<FileTombstoneDoc>(spaceCollection(spaceId, 'fileTombstones'))
-        .find(asFilter<FileTombstoneDoc>({ spaceId }))
-        .toArray();
+      // Published ones only: a tombstone whose act has not happened is pushed to no peer (bundle-30 I15).
+      const ourTombstones = await publishedFileTombstones(spaceId);
       if (ourTombstones.length > 0) {
         const ackResp = await peerSafeFetch(
           `${member.url}/api/sync/file-tombstones?networkId=${encodeURIComponent(networkId)}`,
