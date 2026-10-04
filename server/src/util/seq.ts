@@ -239,8 +239,9 @@ export function warnStalledHolds(now = Date.now()): void {
     for (const h of s.holds) {
       const age = now - h.since;
       if (age < holdWarnMs()) continue;
-      holdWarnings(h, () => log.warn(`seq horizon held ${(age / 1000).toFixed(1)}s and still open: space=${spaceId} `
-        + `seq=${h.seq} holder=${h.holder} — every seq-paged reader of the space is held below it until it ends`));
+      // The space id and the holder through `peerText`, as the release line names them (bundle-30 I6, C8).
+      holdWarnings(h, () => log.warn(`seq horizon held ${(age / 1000).toFixed(1)}s and still open: space=${peerText(spaceId)} `
+        + `seq=${h.seq} holder=${peerText(h.holder)} — every seq-paged reader of the space is held below it until it ends`));
     }
   }
 }

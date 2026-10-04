@@ -59,7 +59,7 @@ import { checkEdgeLinkViolations, checkLinkViolations, MAX_FORK_DEPTH } from '..
 import { writeArrivals, warnArrivalsNotStored, type ArrivalOutcome, type ArrivalRefusal } from './arrivals.js';
 import { admitArrivals } from './arrival-shape.js';
 import { planArrivals, type ArrivalDoc, type ArrivalDoor, type ArrivalVerdict, type PlannedFamily } from './upsert-plan.js';
-import { REPLICATED_FAMILIES, RECORD_TYPE_OF, type PayloadKey } from './replicated-families.js';
+import { REPLICATED_FAMILIES, RECORD_TYPE_OF, familyOf, type PayloadKey } from './replicated-families.js';
 import { readPageTombstones, readPushStored, readForkContext, deleteSupersededTombstones } from './push-reads.js';
 
 type Arrived = Record<string, unknown> & ArrivalDoc;
@@ -90,7 +90,6 @@ export interface AcceptOptions {
 }
 
 /** The families this accept plans, by their wire key: every replicated family. */
-const FAMILY_BY_KEY = new Map(REPLICATED_FAMILIES.map(f => [f.payloadKey, f]));
 
 /** Accept one page — see the module docblock. Throws when the page could not be written; never for one document. */
 export async function acceptArrivingPage(
@@ -242,7 +241,7 @@ export async function acceptArrivingPage(
 
 /** Store one family's documents through the arrival writer, with the family's own record type (`null`: links). */
 async function writePage(spaceId: string, key: PayloadKey, docs: readonly Arrived[], opts: { from: string; deferEnqueue?: boolean }): Promise<ArrivalOutcome> {
-  const { collection } = FAMILY_BY_KEY.get(key)!;
+  const { collection } = familyOf(key);
   return await writeArrivals(spaceId, collection, RECORD_TYPE_OF[collection], docs, opts);
 }
 

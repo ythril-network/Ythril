@@ -22,7 +22,7 @@ import { LOCAL_ONLY_EXCLUSION } from '../../sync/local-only-fields.js';
 import { MAX_FORK_DEPTH, encodeCursor, decodeCursor, callerPeerId, spaceAllowed, pushAllowed, violationsAgainstLocalSchema, withSchemaViolations } from './_shared.js';
 import { acceptArrivingPage, type AcceptedFamily } from '../../sync/accept-page.js';
 import type { ArrivalVerdict } from '../../sync/upsert-plan.js';
-import { REPLICATED_FAMILIES, RECORD_TYPE_OF, type PayloadKey } from '../../sync/replicated-families.js';
+import { REPLICATED_FAMILIES, RECORD_TYPE_OF, familyOf, type PayloadKey } from '../../sync/replicated-families.js';
 import { KNOWLEDGE_TYPES, type KnowledgeType } from '../../config/types.js';
 
 export const syncDocsRouter = Router();
@@ -331,7 +331,7 @@ const BATCH_FAMILY_CAP = 500;
 
 /** The knowledge type a family's documents are checked against in this space's schema, or none (links, files). */
 const schemaKindOf = (key: PushKey): KnowledgeType | undefined => {
-  const family = REPLICATED_FAMILIES.find(f => f.payloadKey === key)!;
+  const family = familyOf(key);
   const rt = RECORD_TYPE_OF[family.collection];
   return rt !== null && (KNOWLEDGE_TYPES as readonly string[]).includes(rt) ? rt as KnowledgeType : undefined;
 };

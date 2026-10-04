@@ -67,6 +67,18 @@ export const REPLICATED_FAMILIES: readonly ReplicatedFamily[] = [
 /** A family's payload key. One declaration, on the row type, so the union cannot drift from the rows. */
 export type PayloadKey = ReplicatedFamily['payloadKey'];
 
+const FAMILY_BY_KEY: ReadonlyMap<string, ReplicatedFamily> = new Map(REPLICATED_FAMILIES.map(f => [f.payloadKey, f]));
+/**
+ * The family a payload key names — THROWS for a key that is not one, where the two hand lookups it replaced answered
+ * `undefined` behind a `!` (bundle-30 I6, C9): a typo there failed later and elsewhere, as a read of `collection` on
+ * nothing.
+ */
+export function familyOf(key: PayloadKey): ReplicatedFamily {
+  const f = FAMILY_BY_KEY.get(key);
+  if (!f) throw new Error(`'${String(key)}' is not a replicated family's payload key`);
+  return f;
+}
+
 /**
  * The record type each replicated collection holds — what the embed queue, the type schema and the retention
  * bucket are keyed by — or `null` for a collection whose documents carry nothing to embed.
