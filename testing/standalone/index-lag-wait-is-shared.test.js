@@ -34,6 +34,12 @@
  * is asserted here for the same reason as the first: the next person who needs it will otherwise write a
  * fifth copy, and a copy that asks the wrong one of the two is invisible until CI is red for a day.
  *
+ * ## The polls are built on the one wait
+ *
+ * Both polls wait through `testing/_shared/wait-for.mjs` now, and say so below. What stays in `helpers.js` is the
+ * QUESTION each asks (which route, which ids, what a bare failure means), which is why those pins stay here rather
+ * than moving to the module's own test.
+ *
  * Run: node --test testing/standalone/index-lag-wait-is-shared.test.js
  */
 import { describe, it } from 'node:test';
@@ -69,6 +75,38 @@ describe('the vector-index wait is shared, and its deadline is the measured one'
     // number costs nothing on a healthy runner and a smaller one buys nothing but earlier failure on a slow one.
     assert.ok(ms >= 240_000,
       `the index-lag deadline is ${ms}ms, but the lag has been measured at 150s — this is the bug, not a tuning knob`);
+  });
+
+  it('both index polls are built on the one wait, not on a loop of their own', () => {
+    /*
+     * The deadline, what is said at it, and the probe that is cut off at it are `testing/_shared/wait-for.mjs`'s
+     * decisions. A poll here that ran its own `while (Date.now() < deadline)` would have a deadline the module cannot
+     * bound and a message nobody else words alike — which is the drift this file exists to stop, one level down.
+     * Each function's BODY is read, so a call to `waitFor` somewhere else in the file does not stand in for it.
+     */
+    const src = readFileSync(join(ROOT, HELPERS), 'utf8');
+    assert.match(src, /from '\.\.\/_shared\/wait-for\.mjs'/, `${HELPERS} must import the one wait`);
+    const bodies = ['waitForIndexed', 'waitForSimilarityIndex'].map(name => {
+      const at = src.indexOf(`export async function ${name}(`);
+      assert.ok(at >= 0, `${name} is not exported from ${HELPERS}`);
+      const next = src.indexOf('\nexport ', at + 10);
+      return { name, body: src.slice(at, next < 0 ? undefined : next) };
+    });
+    for (const { name, body } of bodies) {
+      assert.match(body, /\bwaitFor\(/, `${name} does not wait through waitFor`);
+      assert.doesNotMatch(body, /\b(while|for)\s*\([^)]*Date\.now\(\)/,
+        `${name} still loops on the clock itself — the deadline belongs to the module`);
+    }
+  });
+
+  it('the index polls keep what makes them the index polls: ids, types, and what each says when it gives up', () => {
+    // The wait is the module's; the QUESTION is still this file's. A refactor onto the module that dropped the
+    // distinction between "recall never answered 200" and "recall answered and never listed them" would keep every
+    // assertion above green and put the old bare "timed out waiting for indexing" back.
+    const src = readFileSync(join(ROOT, HELPERS), 'utf8');
+    assert.match(src, /not index lag/,
+      'a recall that never returned 200 must still be reported as itself, not as lag');
+    assert.match(src, /api\/brain\/similar/, 'the similarity poll must still ask the capability that needs the index');
   });
 
   it('accepts both result shapes, because the old copies disagreed', () => {

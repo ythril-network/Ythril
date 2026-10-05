@@ -36,14 +36,22 @@
  * A negative assertion — "wait a fixed time, then prove it did NOT arrive" — is deliberately not this shape and
  * must not be converted. See the note in `pubsub-topology.test.js`.
  *
+ * ## Where the wait itself lives
+ *
+ * `syncUntil` is built on the one wait, `testing/_shared/wait-for.mjs`, and hands it `what` so the module words the
+ * timeout. Both halves are exercised here rather than read: the helper is run against a fetch that answers, so the
+ * rule — a timeout names what it waited for and what the trigger did — is checked where a reader sees it, and a
+ * future rewrite of the helper's internals cannot keep the sentence in a comment while losing it in the message.
+ *
  * Run: node --test testing/standalone/sync-waits-retrigger-and-diagnose.test.js
  */
-import { describe, it } from 'node:test';
+import { describe, it, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { balancedFrom } from './_structural-window.mjs';
+import { syncUntil } from '../sync/helpers.js';
 
 const ROOT = process.cwd();
 
@@ -96,8 +104,65 @@ describe('a sync wait re-triggers and explains its own timeout', () => {
     // All three defects, so a future "simplification" cannot quietly drop one.
     assert.match(src, /makeTriggerProbe\(/, 'syncUntil must use the probe, or a rejected trigger is invisible again');
     assert.match(src, /setInterval\(/, 'syncUntil must re-trigger while polling, or one fire races the gossip cycle');
-    assert.match(src, /waiting for \$\{what\}/, 'the timeout message must name what was awaited');
+    assert.match(src, /from '\.\.\/_shared\/wait-for\.mjs'/,
+      'syncUntil must wait through the one module — a loop of its own is a second wait that can drift');
     assert.match(src, /clearInterval\(/, 'the re-trigger interval must be cleared, or the test process never exits');
+  });
+
+  describe('its timeout, exercised', () => {
+    const realFetch = globalThis.fetch;
+    after(() => { globalThis.fetch = realFetch; });
+
+    /** A fetch whose first `answers` calls come back 200 and every later one comes back `then`. */
+    function fetchAnswering(answers, then) {
+      let n = 0;
+      globalThis.fetch = async () => new Response(JSON.stringify({}), { status: n++ < answers ? 200 : then });
+    }
+
+    it('names what it was waiting for, and blames the peer when every trigger landed', async () => {
+      fetchAnswering(Infinity, 200);
+      await assert.rejects(
+        () => syncUntil('http://peer.invalid', 'tok', 'net', async () => false, 'the tombstone to reach B',
+          { timeoutMs: 150, interval: 20, retriggerMs: 40, label: 'B' }),
+        (err) => {
+          assert.match(err.message, /waiting for the tombstone to reach B/, 'the timeout must name what was awaited');
+          assert.match(err.message, /sync triggers to B all succeeded/, 'and blame the peer, not the trigger');
+          return true;
+        });
+    });
+
+    it('says the TRIGGER was being refused when it was — a stall and a rejection no longer read alike', async () => {
+      fetchAnswering(1, 429); // the first trigger lands; every re-trigger is rate-limited
+      await assert.rejects(
+        () => syncUntil('http://peer.invalid', 'tok', 'net', async () => false, 'the record to reach B',
+          { timeoutMs: 250, interval: 20, retriggerMs: 30, label: 'B' }),
+        (err) => {
+          assert.match(err.message, /waiting for the record to reach B/);
+          assert.match(err.message, /every sync trigger to B was failing/);
+          assert.match(err.message, /triggerSync failed: 429/, `expected the real cause, got: ${err.message}`);
+          return true;
+        });
+    });
+
+    it('appends what onTimeout found, and survives an onTimeout that throws', async () => {
+      fetchAnswering(Infinity, 200);
+      await assert.rejects(
+        () => syncUntil('http://peer.invalid', 'tok', 'net', async () => false, 'a watermark',
+          { timeoutMs: 100, interval: 20, retriggerMs: 1_000, label: 'B', onTimeout: async () => 'the sender holds it at seq 7' }),
+        /waiting for a watermark.*the sender holds it at seq 7$/);
+      await assert.rejects(
+        () => syncUntil('http://peer.invalid', 'tok', 'net', async () => false, 'a watermark',
+          { timeoutMs: 100, interval: 20, retriggerMs: 1_000, label: 'B', onTimeout: async () => { throw new Error('HTTP 500'); } }),
+        /waiting for a watermark.*diagnostic failed: HTTP 500$/,
+        'a diagnostic that fails must not replace the timeout it describes');
+    });
+
+    it('returns once the condition holds, re-triggering on the way', async () => {
+      fetchAnswering(Infinity, 200);
+      let polls = 0;
+      assert.equal(await syncUntil('http://peer.invalid', 'tok', 'net', async () => ++polls >= 3, 'it to arrive',
+        { timeoutMs: 2_000, interval: 20, retriggerMs: 1_000, label: 'B' }), true);
+    });
   });
 
   it('the test that actually flaked uses it', () => {

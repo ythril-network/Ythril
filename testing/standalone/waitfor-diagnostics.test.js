@@ -8,7 +8,9 @@
  * timeout.
  *
  * These tests pin the guard so that failure mode cannot silently return:
- *  - waitFor appends its `diagnose` output to the timeout message
+ *  - waitFor — the one wait, `testing/_shared/wait-for.mjs` — appends its `diagnose` output to the timeout message
+ *  - the stack helper's `waitFor` (`testing/sync/helpers.js`) is that wait, so the same holds at every call site
+ *    that imports it from there
  *  - makeTriggerProbe tolerates failures (one bad poll must not fail a test) but
  *    REMEMBERS the last one and reports it
  *
@@ -19,7 +21,8 @@
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { INSTANCES, waitFor, makeTriggerProbe } from '../sync/helpers.js';
+import { INSTANCES, waitFor as stackWaitFor, makeTriggerProbe } from '../sync/helpers.js';
+import { waitFor } from '../_shared/wait-for.mjs';
 
 describe('waitFor — timeout diagnostics', () => {
   it('appends the diagnose string to the timeout message', async () => {
@@ -47,6 +50,17 @@ describe('waitFor — timeout diagnostics', () => {
   it('still resolves normally when the condition passes (no diagnosis emitted)', async () => {
     const ok = await waitFor(async () => true, 1000, 50, 'should never be seen');
     assert.equal(ok, true);
+  });
+
+  it('the stack helper appends it too — it is the same wait, not a copy that can drift', async () => {
+    await assert.rejects(
+      () => stackWaitFor(async () => false, 300, 100, 'because the widget never arrived'),
+      (err) => {
+        assert.match(err.message, /timed out after 300ms/);
+        assert.match(err.message, /because the widget never arrived/);
+        return true;
+      },
+    );
   });
 });
 
