@@ -1,0 +1,115 @@
+/**
+ * The test code in this repository, parsed — where its tests are and what a branch of one does.
+ *
+ * ## Why it is a module
+ *
+ * Four gates ask a question about how a TEST ends or skips (`a-test-that-finds-its-input-absent-says-so`,
+ * `a-skip-that-expects-ci-lives-in-a-listed-file`, `a-test-needing-the-embedder-asks-requireembedding`,
+ * `a-private-address-skip-is-one-module`). A regular expression over the text answers them wrongly in both
+ * directions: it reads a quoted fixture as code (the gate that polices `expected-in-ci:` would refuse its own
+ * fixtures), and it cannot tell a `return` that ends a TEST from one that ends a helper inside it. The syntax
+ * tree can, so the parse is written once and every one of them reads through it.
+ *
+ * ## The floor is inside
+ *
+ * An empty listing, or a parse that finds no tests, passes every loop written over it and reports success
+ * about nothing. `testSources` and `testBodies` throw on an implausibly small answer rather than returning it.
+ */
+import ts from 'typescript';
+import { readTrackedSources } from './_sources.mjs';
+
+/** Every tracked test file (`*.test.js` under `testing/`, `*.spec.ts` under `client/src/`), read. */
+export function testFiles() {
+  const out = readTrackedSources(['testing', 'client/src'], { ext: ['.test.js', '.spec.ts'], floor: 800 });
+  return out;
+}
+
+/** Every tracked file that can hold test code or the helper a test skips through — tests AND their `.mjs` helpers. */
+export function testAndHelperFiles() {
+  return readTrackedSources(['testing', 'client/src'], { ext: ['.test.js', '.spec.ts', '.mjs'], floor: 800 });
+}
+
+export function parseSource(file, text) {
+  const kind = /\.tsx?$/.test(file) ? ts.ScriptKind.TS : ts.ScriptKind.JS;
+  return ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, kind);
+}
+
+/** The text of a call's callee: `t.skip`, `assert.equal`, `it`. */
+export const calleeText = (call) => call.expression.getText();
+
+/** The last name of a call's callee: `skip` for `t.skip(...)`, `requireEmbedding` for `requireEmbedding(...)`. */
+export function calleeName(call) {
+  const e = call.expression;
+  if (ts.isPropertyAccessExpression(e)) return e.name.text;
+  if (ts.isIdentifier(e)) return e.text;
+  return e.getText();
+}
+
+/**
+ * Visit `node` and what it holds, NOT entering a nested function: a `return` inside a callback ends the
+ * callback, never the test that contains it. `visit` returns `true` to stop and say "found".
+ */
+export function walkOwnCode(node, visit) {
+  if (visit(node) === true) return true;
+  let found = false;
+  ts.forEachChild(node, (child) => {
+    if (found || ts.isFunctionLike(child)) return;
+    if (walkOwnCode(child, visit)) found = true;
+  });
+  return found;
+}
+
+/**
+ * The bodies of the tests a file registers: the callback of `it(...)`, `test(...)`, `it.only(...)` and of
+ * `t.test(...)` / `ctx.test(...)` (node:test subtests). `it.skip` is left out on purpose — its callback never runs.
+ *
+ * @returns {Array<{ name: string, fn: ts.FunctionLikeDeclaration }>}
+ */
+export function testBodies(sf) {
+  const out = [];
+  const visit = (n) => {
+    if (ts.isCallExpression(n)) {
+      const callee = calleeText(n);
+      if (/^(it|test)(\.only)?$/.test(callee) || /\.test$/.test(callee)) {
+        const fn = [...n.arguments].reverse().find(a => ts.isArrowFunction(a) || ts.isFunctionExpression(a));
+        const first = n.arguments[0];
+        if (fn) out.push({ name: first && ts.isStringLiteralLike(first) ? first.text : '(unnamed)', fn });
+      }
+    }
+    ts.forEachChild(n, visit);
+  };
+  visit(sf);
+  return out;
+}
+
+/**
+ * The text a string-ish node says without its substitutions: a plain literal's text, or a template's literal
+ * parts joined. What a gate reads when it asks "does this reason name the cause".
+ */
+export function staticText(node) {
+  if (ts.isStringLiteralLike(node)) return node.text;
+  if (ts.isTemplateExpression(node)) return node.head.text + node.templateSpans.map(s => s.literal.text).join('');
+  return null;
+}
+
+/**
+ * A node sits where its value becomes a skip reason or a skip condition: an argument of `skip(...)`, the value of
+ * a `skip:` option, a binding or a helper whose name says skip (`const skip = …`, `function corpusSkipReason()`).
+ *
+ * The climb ends at the first statement that is not a `return`: what a string sits in further up is not what it is
+ * FOR. That is what keeps a fixture, a message or a docblock that merely MENTIONS a skip reason from being read as one.
+ */
+export function inSkipPosition(node) {
+  for (let p = node.parent; p; p = p.parent) {
+    if (ts.isExpressionStatement(p) || ts.isIfStatement(p) || ts.isForOfStatement(p) || ts.isForStatement(p)) return false;
+    if (ts.isCallExpression(p) && calleeName(p) === 'skip') return true;
+    if (ts.isPropertyAssignment(p) && /^skip/i.test(p.name.getText())) return true;
+    if (ts.isShorthandPropertyAssignment(p) && /^skip/i.test(p.name.getText())) return true;
+    if (ts.isVariableDeclaration(p) && /skip/i.test(p.name.getText())) return true;
+    if (ts.isFunctionDeclaration(p) && /skip/i.test(p.name?.text ?? '')) return true;
+  }
+  return false;
+}
+
+/** The 1-based line a node starts on. */
+export const lineOf = (sf, node) => sf.getLineAndCharacterOfPosition(node.getStart()).line + 1;
