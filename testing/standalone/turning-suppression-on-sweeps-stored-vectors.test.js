@@ -45,6 +45,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
 import { bodyOf } from './_structural-window.mjs';
+import { trackedSources } from './_sources.mjs';
 
 let SWEEP = null;
 try { SWEEP = await import('../../server/dist/brain/suppression-sweep.js'); } catch { /* not built yet */ }
@@ -160,10 +161,29 @@ describe('an edge keys on LABEL, not on type', () => {
 });
 
 describe('the sweep runs where the flag is written', () => {
-  it('meta-update calls it', () => {
-    const body = src('server/src/spaces/meta-update.ts');
-    assert.match(body, /sweepSuppressedVectors\(/,
-      'nothing sweeps after a meta write, so the docs\' present tense is still a promise rather than behaviour');
+  it('updateSpace — the one writer of space.meta — asks for it, through what it imports from the sweep module', () => {
+    // Q-361 item 11. The trigger lives in `updateSpace`, so EVERY effective-meta write asks for it: an operator's edit,
+    // a schema route's (including a space no network carries), a passed vote's, and every recompute of the effective
+    // meta (a network layer arriving). The callers used to ask for themselves — meta-update twice, the recompute not
+    // at all — so a vote swept twice and a layer swept not at all. Name-free: the symbols are read off the import.
+    const spaces = src('server/src/spaces/spaces.ts');
+    const imported = [...spaces.matchAll(/import\s*\{([^}]*)\}\s*from\s*'[^']*brain\/suppression-sweep\.js'/g)]
+      .flatMap(m => m[1].split(',').map(x => x.trim().split(/\s+as\s+/).pop()).filter(Boolean));
+    assert.ok(imported.length > 0, 'spaces.ts imports nothing from the sweep module, so updateSpace cannot ask for a sweep');
+    const body = bodyOf(spaces, 'updateSpace');
+    assert.ok(imported.some(name => new RegExp(`\\b${name}\\(`).test(body)),
+      `updateSpace calls none of ${imported.join(', ')}: nothing sweeps after a meta write, so the docs' present tense is still a promise rather than behaviour`);
+  });
+
+  it('nothing else that writes a space\'s meta asks for it: one change is swept once, wherever it lands', () => {
+    // Derived, not listed: every file that calls updateSpace with a `meta` (a floor on the set), bar the one writer
+    // itself. A caller that sweeps after its own meta write is the double sweep again.
+    const writers = trackedSources('server/src', { floor: 100 })
+      .filter(f => f !== 'server/src/spaces/spaces.ts')
+      .filter(f => /\bupdateSpace\(\s*[^,()]+,\s*\{[^}]*\bmeta\b/.test(stripComments(readFileSync(f, 'utf8'))));
+    assert.ok(writers.length >= 2, `only ${writers.length} meta writer(s) found — the scan is looking in the wrong place: ${writers}`);
+    const askers = writers.filter(f => /brain\/suppression-sweep\.js/.test(stripComments(readFileSync(f, 'utf8'))));
+    assert.deepEqual(askers, [], 'these write meta AND sweep after it; updateSpace already asks for it, so the change is swept twice');
   });
 
   it('it does not bump seq, because the vector is not replicated', () => {
