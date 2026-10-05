@@ -25,6 +25,8 @@
  * the count. It holds no lock of its own across calls — `lock()` hands back `holdDocumentLock`'s handle, and the
  * caller releases it.
  */
+import http from 'node:http';
+import { listenOnLoopback } from '../_shared/local-server.mjs';
 import { openPushDoor, build } from './_push-door.mjs';
 import { holdDocumentLock } from './_write-faults.mjs';
 
@@ -57,13 +59,14 @@ export const holdForkLock = (mongo, plan, space, factId) => holdDocumentLock(mon
  * @param {string} o.suite  harness database slug (unique per file: `a-db-harness-name-is-unique`)
  * @param {string[]} o.spaces  space ids to register
  * @param {number} [o.mongoPort]  connect through a relay on this port instead of the stack's
+ * @param {string} [o.mongoQuery]  extra `MONGO_URI` options for the server's client, e.g. `'&timeoutMS=300'`
  * @returns {Promise<{ env: object, close: () => Promise<void> }>}
  */
-export async function openStalledWriteDoors({ suite, spaces, mongoPort }) {
+export async function openStalledWriteDoors({ suite, spaces, mongoPort, mongoQuery }) {
   // A merge embeds its survivor inline unless the space suppresses it; never let a test fetch a model.
   process.env['YTHRIL_MODELS_OFFLINE'] = '1';
   const door = await openPushDoor({
-    mongoPort,
+    mongoPort, mongoQuery,
     // `completeLinkage`: a space's links are converted, as every space's are after its first boot — a holder case that cascades
     // an entity reads its references through the link records, which refuse a space that was never converted.
     suite, spaces: spaces.map(id => ({ id, label: id, folders: [], completeLinkage: true, meta: { suppressEmbeddings: true } })),
@@ -77,18 +80,17 @@ export async function openStalledWriteDoors({ suite, spaces, mongoPort }) {
     const tokens = await import('../../server/dist/auth/tokens.js');
     const adminKey = (await tokens.createToken({ name: 'admin', admin: true })).plaintext;
     const { createApp } = await import('../../server/dist/app.js');
-    server = createApp().listen(0, '127.0.0.1');
-    await new Promise(r => server.once('listening', r));
-    const base = `http://127.0.0.1:${server.address().port}`;
+    server = await listenOnLoopback(http.createServer(createApp()));
+    const base = server.url;
     return {
       env: { door, plan, callTool, ADMIN, adminKey, base },
       async close() {
-        await new Promise(r => server.close(r));
+        await server.close();
         await door.close();
       },
     };
   } catch (err) {
-    await new Promise(r => (server ? server.close(r) : r()));
+    await server?.close();
     await door.close();
     throw err;
   }

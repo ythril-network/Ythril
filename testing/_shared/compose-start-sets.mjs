@@ -29,7 +29,7 @@
  * One question per module: which services start together. It holds no budget — each gate states its own rule over
  * the sets, so a rule and the derivation of its subjects never share a reason to change.
  */
-import { jobEntries, shellOf, stepsOf } from './ci-workflow.mjs';
+import { jobEntries, shellOf, stepsOf, shellCommands } from './ci-workflow.mjs';
 
 /** `docker compose` global options that take a value as the NEXT word (`--opt=value` carries its own). */
 const GLOBAL_OPTS_WITH_VALUE = new Set(['-p', '--project-name', '-f', '--file', '--profile', '--env-file', '--project-directory', '--ansi', '--progress', '--parallel']);
@@ -46,21 +46,19 @@ const unquote = (w) => w.replace(/^(['"])(.*)\1$/, '$2');
  */
 function composeUps(script) {
   const out = [];
-  for (const line of String(script).split('\n')) {
-    for (const part of line.split(/&&|\|\||;|\||&/)) {
-      const words = part.trim().split(/\s+/).filter(Boolean).map(unquote);
-      const at = words.findIndex((w, i) => (w === 'docker' && words[i + 1] === 'compose') || w === 'docker-compose');
-      if (at < 0) continue;
-      let i = at + (words[at] === 'docker' ? 2 : 1);
-      const profiles = [];
-      for (; i < words.length && words[i].startsWith('-'); i++) {
-        const [flag, inline] = words[i].split(/=(.*)/s);
-        const takes = GLOBAL_OPTS_WITH_VALUE.has(flag);
-        const value = inline ?? (takes ? words[++i] : undefined);
-        if (flag === '--profile') profiles.push(value);
-      }
-      if (words[i] === 'up') out.push({ part: part.trim(), profiles, after: words.slice(i + 1) });
+  for (const part of shellCommands(script)) {
+    const words = part.split(/\s+/).filter(Boolean).map(unquote);
+    const at = words.findIndex((w, i) => (w === 'docker' && words[i + 1] === 'compose') || w === 'docker-compose');
+    if (at < 0) continue;
+    let i = at + (words[at] === 'docker' ? 2 : 1);
+    const profiles = [];
+    for (; i < words.length && words[i].startsWith('-'); i++) {
+      const [flag, inline] = words[i].split(/=(.*)/s);
+      const takes = GLOBAL_OPTS_WITH_VALUE.has(flag);
+      const value = inline ?? (takes ? words[++i] : undefined);
+      if (flag === '--profile') profiles.push(value);
     }
+    if (words[i] === 'up') out.push({ part, profiles, after: words.slice(i + 1) });
   }
   return out;
 }
@@ -82,6 +80,7 @@ export function upCommands(script) {
         if (inline === undefined && UP_OPTS_WITH_VALUE.has(flag)) i++;
         continue;
       }
+      if (/^(?:\d*|&)[<>]/.test(w)) continue; // a redirection (`2>&1`, `>log`), not a service
       if (/[$`]/.test(w)) throw new Error(`cannot read which service \`${w}\` names in: ${part}`);
       services.push(w);
     }

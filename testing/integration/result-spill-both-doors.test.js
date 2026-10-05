@@ -49,7 +49,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post, waitForEmbedQueueEmpty } from '../sync/helpers.js';
+import { INSTANCES, post, waitForEmbedQueueEmpty, waitForSimilarityIndex } from '../sync/helpers.js';
 import { openMcpSession } from '../sync/mcp-session.js';
 import { requireEmbedding } from '../_shared/embedding-required.mjs';
 
@@ -480,21 +480,22 @@ describe('REST: a tight budget returns a prefix and a way to reach the rest', ()
     };
 
     /*
-     * A ranking that moved is not a result, it is a walk to take again: the index finishes ingesting and the
-     * fresh-write channel hands over, after which the ranking holds still. This used to log "the identity
-     * assertions below do not apply" and return, which ended the test green on exactly the runs where it had
-     * proven the least — the one outcome neither a pass nor a failure. Three walks, a pause between, and then it
-     * is a REAL skip (counted, and refused as unexpected on CI) rather than a quiet pass.
+     * THE WAIT THAT MAKES THE PREMISE TRUE, then ONE walk. The ranking moves while the vector index is still
+     * ingesting the 28 records: a record is scored by the fresh-write scan on one call and by `$vectorSearch` on the
+     * next, and the two do not score alike. The embed queue being empty (the `before` hook) says the records HAVE
+     * vectors, not that the index has them — so this waits for `$vectorSearch` itself to list every record (the
+     * question `waitForSimilarityIndex` answers: a seed's stored vector drives the search, so a match can only come
+     * from the index). This used to take the walk up to three times with a pause and then `t.skip`, which is a
+     * test that proves nothing on exactly the runs where the state was unsettled, and CI refuses such a skip. A wait
+     * for the state the test states as its premise fails, naming what never indexed, instead of skipping over it.
      */
-    let walk = await pageThrough();
-    for (let attempt = 2; !walk.held && attempt <= 3; attempt++) {
-      await new Promise((resolve) => setTimeout(resolve, 3000));
-      walk = await pageThrough();
-    }
-    if (!walk.held) {
-      return t.skip('the ranking kept moving across three walks of the pages (the index was still ingesting), so '
-        + 'the identity assertions have nothing stable to compare against; the paging arithmetic passed on every walk');
-    }
+    for (const id of ids.slice(1)) await waitForSimilarityIndex(INSTANCES.a, token(), SPACE, ids[0], 'entity', id);
+    const walk = await pageThrough();
+    // After the wait above the ranking has nothing left to move for. A walk that still saw it move is a finding about the
+    // ranking (two channels scoring one record differently, or an order with no tie-break), so it FAILS here: a skip would
+    // hide it, and CI refuses a skip that hides a state nobody settled.
+    assert.ok(walk.held, 'the ranking moved during one walk of the pages although every seeded record was already in the '
+      + 'vector index and the embed queue was empty — the identity assertions have nothing stable to compare against');
     const { before, seen, pages } = walk;
 
     /*

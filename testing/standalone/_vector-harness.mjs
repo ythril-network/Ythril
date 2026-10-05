@@ -24,6 +24,7 @@
  */
 import http from 'node:http';
 import { waitFor, waitForReading } from '../_shared/wait-for.mjs';
+import { listenOnLoopback } from '../_shared/local-server.mjs';
 
 /** A unit vector at `deg` degrees from axis 0, in the axis-0/axis-2 plane. */
 export function unitAt(deg, dims) {
@@ -55,9 +56,9 @@ export async function startStubEmbedder(vectorFor) {
       res.end(JSON.stringify({ data: texts.map((t, index) => ({ index, embedding: vectorFor(String(t)) })) }));
     });
   });
-  await new Promise(r => server.listen(0, '127.0.0.1', r));
-  process.env['EMBEDDING_URL'] = `http://127.0.0.1:${server.address().port}`;
-  return { close: () => new Promise(r => server.close(r)) };
+  const { url, close } = await listenOnLoopback(server);
+  process.env['EMBEDDING_URL'] = url;
+  return { close };
 }
 
 /**

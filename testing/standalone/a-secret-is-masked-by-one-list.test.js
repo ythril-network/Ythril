@@ -70,6 +70,16 @@ const ROWS = [
   ['an Authorization header carrying Basic', 'Authorization: Basic dXNlcjpwYXNzd29yZA==', 'Authorization: ***'],
   ['a JWT', `token ${JWT} end`, 'token *** end'],
   ['several in one line', `ythril_${B62} and ghp_abcdefghijklmnopqrstuvwxyz0123456789`, '*** and ***'],
+  // A connection string carries its credential as URL userinfo (`scheme://user:pass@host`): the user and the password
+  // are masked together, the host and path stay (`mongodb://` + the throwaway test password is what a failure line
+  // from the harness can carry).
+  ['a mongodb connection string with user and password', 'failed mongodb://ythril:ythril-test-pw@127.0.0.1:27017/db?x=1 here', 'failed mongodb://***@127.0.0.1:27017/db?x=1 here'],
+  ['a mongodb+srv connection string', 'mongodb+srv://admin:s3cret@cluster0.example.net/app', 'mongodb+srv://***@cluster0.example.net/app'],
+  ['a password that contains an @', 'mongodb://u:p@ss@host:27017/db', 'mongodb://***@host:27017/db'],
+  ['URL userinfo with a token and no password', 'cloned https://tokenvalue123@example.com/org/repo.git', 'cloned https://***@example.com/org/repo.git'],
+  ['a URL with no userinfo', 'GET https://example.com/path/a@b?q=1', 'GET https://example.com/path/a@b?q=1'],
+  ['a host and port with no scheme', 'mongo-a:27017/db', 'mongo-a:27017/db'],
+  ['an email address', 'mail someone@example.com', 'mail someone@example.com'],
   // What only LOOKS like one stays whole.
   ['a bare prefix', 'ghp_', 'ghp_'],
   ['the product name', 'ythril and ythril_', 'ythril and ythril_'],
@@ -137,11 +147,12 @@ describe('every door that masks answers by that list', () => {
   });
 });
 
-describe('no other file keeps a list of token families', () => {
+describe('no other file re-writes the token regexes this gate knows', () => {
   /*
    * Derived, never listed: every tracked source of the maintainer scripts and the test tooling, tests and fixtures
-   * excepted (a fixture may be literal). The shapes are what a hand-written copy contains: the prefix with its
-   * character class, in a regex literal or in a string that builds one.
+   * excepted (a fixture may be literal). The SUBJECTS are derived; the shapes are not: they are the regexes of the
+   * families named below, written out, so what this checks is a copy of THOSE, not "a list of token families" in
+   * general. A family the masking module gains and no row here names is not looked for.
    */
   const SHAPES = [
     /ythril_\[A-Za-z0-9/,

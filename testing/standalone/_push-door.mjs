@@ -103,12 +103,13 @@ const REPLICATED_FAMILY_KEYS = (await import('../../server/dist/sync/replicated-
  * @param {object[]} o.spaces  config `spaces` entries
  * @param {object[]} [o.networks]
  * @param {number} [o.mongoPort]  connect through a relay on this port instead of the stack's (`_delayed-write-relay.mjs`)
+ * @param {string} [o.mongoQuery]  extra `MONGO_URI` options for the server's client, e.g. `'&timeoutMS=300'` (applied after the door is open; not with `monitorCommands`)
  * @param {boolean} [o.monitorCommands]  reconnect with command monitoring, for `commandsDuring`
  * @param {object} [o.secrets]  a `secrets.json` to write beside the config BEFORE it is loaded — the loader reads
  *   it once, at `loadConfig`, so a door whose engine calls out to a peer (`_pull-door.mjs`) must hand its peer
  *   tokens in here rather than write them afterwards
  */
-export async function openPushDoor({ suite, spaces, networks = [], monitorCommands = false, secrets, mongoPort }) {
+export async function openPushDoor({ suite, spaces, networks = [], monitorCommands = false, secrets, mongoPort, mongoQuery }) {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), `ythril-${suite}-`));
   process.env['CONFIG_PATH'] = path.join(tmpDir, 'config.json');
   // The space's files land under DATA_ROOT, whose default is /data: a directory Windows lets any process create at
@@ -122,7 +123,17 @@ export async function openPushDoor({ suite, spaces, networks = [], monitorComman
 
   const mongo = await openTestMongo(suite, { port: mongoPort });
   try {
-    return await assemblePushDoor({ suite, spaces, monitorCommands, mongo, tmpDir });
+    const door = await assemblePushDoor({ suite, spaces, monitorCommands, mongo, tmpDir });
+    if (mongoQuery) {
+      // The option is the SUBJECT of the test that passes it, not of the setup: the door's own setup (dropping the database,
+      // creating each space's indexes) is slow on a loaded Mongo and would be ended by a short client clock before the test
+      // began. So the server's client is reconnected with it once the door is open, as `monitorCommands` is.
+      await mongo.closeMongo();
+      process.env['MONGO_URI'] = testMongoUri(`ythril_harness_${suite}`, { port: mongoPort, query: mongoQuery });
+      mongo._resetDbName?.();
+      await mongo.connectMongo();
+    }
+    return door;
   } catch (err) {
     // A setup that throws after the connect must still close it: an open client keeps this test process alive,
     // and node's runner waits on the file for ever instead of reporting it failed (PR #1475's hung Build & Test).

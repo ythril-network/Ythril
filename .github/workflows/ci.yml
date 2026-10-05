@@ -89,6 +89,13 @@ jobs:
         # vitest never sees them (no report is written, and the upload then fails on an empty folder).
         run: npm run test --workspace=client -- --reporter=default --reporter=json --outputFile.json=../test-results/client.json
 
+      - name: Mask the client report
+        # The report holds every failure message in full (stack, diff, runner paths); the folder is uploaded below as a
+        # public artifact. Masked IN PLACE, always (a failing test is when it holds a failure), and a report that
+        # cannot be read is removed rather than uploaded raw (scripts/mask-client-report.mjs).
+        if: always()
+        run: node scripts/mask-client-report.mjs test-results/client.json
+
       - name: Build client (production)
         # Not redundant with the unit tests. Measured by injecting a template reference to a non-existent member: in
         # a component that HAS a render spec, Vitest catches it; in a component with NO spec, Vitest passes green and

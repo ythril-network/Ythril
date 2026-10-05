@@ -81,7 +81,7 @@ import { isSeqImplausible } from '../util/seq.js';
 import { advanceCounterPast, CounterBehindError } from './counter-after-page.js';
 import { PageStoppedError } from './page-stopped.js';
 import { isWriteTimeout } from '../db/write-timeout.js';
-import { inChunks } from '../util/chunks.js';
+import { inOneCommandChunks, operationBytes } from '../db/one-command.js';
 import { log, logSafe, peerList, peerText } from '../util/log.js';
 import { BRAIN_COLLECTIONS } from '../config/types.js';
 import type { BrainCollection, BrainEmbedRecordType } from '../config/types.js';
@@ -362,7 +362,14 @@ export async function writeArrivals(
     behind = await advanceCounterPast(spaceId, top, where);
     if (!behind) bumped = top;
   };
-  for (const chunk of inChunks(toWrite, READ_CHUNK)) {
+  // A chunk is ONE wire command (`db/one-command.ts`): a bulk write the driver splits is several commands with a deadline
+  // of their own each, and the write bound ends a call by the first one's. By bytes as well as by count, because a page
+  // is a peer's and 500 documents of 32 KiB already pass the driver's 16 MiB batch limit.
+  const chunks = inOneCommandChunks(toWrite, {
+    maxItems: READ_CHUNK,
+    bytesOf: (d) => (fillOnly ? 0 : operationBytes({ filter: filterOf(d), update: updateOf(d) })),
+  });
+  for (const chunk of chunks) {
     const landed: Doc[] = [];
     const dupes: Doc[] = [];
     const inserted = new Set<string>();

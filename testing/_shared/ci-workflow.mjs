@@ -124,6 +124,22 @@ export function shellOf(step, { root = REPO_ROOT } = {}) {
   return scriptOf(step, root, []);
 }
 
+/**
+ * The simple commands of a shell script (as `shellOf` returns it), trimmed, in order, none empty. THE splitter: the two
+ * readers of a workflow script (`scripts/unrun-tests.mjs`: which tests CI selects; `compose-start-sets.mjs`: which
+ * services a job starts) each wrote one, and disagreed about `&`.
+ *
+ * What it prevents: a `&` that is part of a redirection (`2>&1`, `>&2`, `&>file`, `<&3`) read as a separator, which tore
+ * `docker compose up -d app 2>&1` into `… app 2>` and `1` and made `2>` a service name; and the opposite, a backgrounded
+ * command (`a & b`) read as one. A trailing `&` ends its command and leaves no empty one behind.
+ */
+export function shellCommands(script) {
+  return String(script ?? '')
+    .split(/&&|\|\||;|\||(?<![<>&|])&(?![>&])|\n/)
+    .map((part) => part.trim())
+    .filter((part) => part !== '');
+}
+
 /** `{ action, ref }` for a `uses:` step (`actions/cache/save@v4`), else null. */
 export function usesOf(step) {
   if (typeof step.uses !== 'string') return null;

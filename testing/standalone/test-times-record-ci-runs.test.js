@@ -172,6 +172,33 @@ describe('--record-ci', () => {
     });
   });
 
+  it('a run recorded only PARTLY is completed by the next pass — the records it has are kept, the ones it lacks are written', async () => {
+    await withWorld(async ({ ythril, dir, env }) => {
+      await runTimes(['--record-ci'], { cwd: dir, env });
+      // The recorder died part-way through its walk (newest run first: 1007, then 1001): run 1007 reached the instance not at
+      // all and run 1001 with only one of its two jobs. The walk records newest first, so the partial run is the frontier.
+      const drop = (key) => {
+        const at = ythril.store.findIndex(e => e.properties.recordKey === key);
+        assert.ok(at >= 0, `the fixture lost nothing: the first pass did not record ${key}`);
+        ythril.store.splice(at, 1);
+      };
+      drop('ci:1001:1:integration:integration');
+      drop('ci:1007:1:build-and-test:standalone');
+      const kept = ythril.store.map(e => e._id);
+      assert.equal(kept.length, 1);
+      const savesBefore = ythril.callsTo('save_chrono').length;
+      const r = await runTimes(['--record-ci'], { cwd: dir, env });
+      assert.equal(r.code, 0, everything(r));
+      assert.deepEqual(Object.keys(records(ythril)).sort(), [
+        'ci:1001:1:integration:integration', 'ci:1001:1:standalone-pure:standalone', 'ci:1007:1:build-and-test:standalone',
+      ], 'a record of the partly recorded run 1001 was not written back — a run with one record counts as recorded');
+      assert.equal(ythril.callsTo('save_chrono').length, savesBefore + 2, 'exactly the two missing records were written');
+      assert.ok(ythril.store.some(e => e._id === kept[0]), 'the record the run already had was removed or replaced');
+      assert.equal(ythril.callsTo('update_chrono').length, 0, 'a record the run already had was written again instead of left alone');
+      assert.equal(ythril.store.length, 3, 'a record was duplicated');
+    });
+  });
+
   it('keeps the two tokens apart and prints neither', async () => {
     await withWorld(async ({ github, ythril, dir, env }) => {
       const r = await runTimes(['--record-ci'], { cwd: dir, env });

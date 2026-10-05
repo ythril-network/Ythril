@@ -18,14 +18,15 @@
  */
 import { spawn, spawnSync } from 'node:child_process';
 import { readFileSync, existsSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { REPO_ROOT } from './_sources.mjs';
 import { timingReporterFlags } from '../_shared/timing-reporter-flags.mjs';
 import { testChildEnv } from '../_shared/test-child-env.mjs';
 
 export { SECRETS, LONG_FIRST_LINE, READY } from './_fixtures/timing-constants.mjs';
 
-export const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
+export const ROOT = REPO_ROOT;
 export const FIXTURE_DIR = 'testing/standalone/_fixtures';
 
 /** The repo-relative path of a fixture, as the reporter must record it in `file`. */

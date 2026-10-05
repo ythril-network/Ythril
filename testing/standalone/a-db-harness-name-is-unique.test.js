@@ -35,7 +35,7 @@ function harnessNames() {
     // A wrapper that opens the harness for its caller (`_push-door.mjs`, and `_stalled-write-doors.mjs` over it) takes the
     // name as `suite:`, and a name it is handed claims a database exactly as a direct call does — left out, those files
     // were never checked.
-    for (const m of stripComments(text).matchAll(/(?:openTestMongo\(\s*|(?:openPushDoor|openStalledWriteDoors)\(\s*\{[^}]*?\bsuite:\s*)'([^']+)'/g)) {
+    for (const m of stripComments(text).matchAll(/(?:openTestMongo\(\s*|(?:openPushDoor|openStalledWriteDoors|defineLandingExperiment)\(\s*\{[^}]*?\bsuite:\s*)'([^']+)'/g)) {
       found.push({ file: file.replace(/\\/g, '/'), name: m[1] });
     }
   }

@@ -22,6 +22,10 @@
  *   `_`/`-`-joined runs after it, so a typed test token with underscores is masked whole; `gh[pousr]_` + 16 or more of
  *   `A-Za-z0-9`; `github_pat_` + 16 or more of `A-Za-z0-9_`. Not anchored to a word start: a token glued to a name is
  *   still a token.
+ * - URL userinfo, `scheme://user:password@host`, written `scheme://***@host` (the user and the password are both masked; the
+ *   host, port and path stay). A connection string (`mongodb://`, `mongodb+srv://`) is the case that matters: a failure line
+ *   from a harness can carry one. The userinfo runs to the LAST `@` before the first `/`, so a password that contains an
+ *   `@` is masked whole. A URL with no userinfo, an email address and a bare `host:port/path` are untouched.
  * - `Bearer` and the next word, whatever it is, written `Bearer ***` (the word stays, to say what kind of thing was masked).
  * - A JWT: three dot-separated runs of 8 or more, the first starting `eyJ`.
  *
@@ -51,6 +55,7 @@
  */
 const SHAPES = Object.freeze([
   [/\bAuthorization:\s*(?:(?:Bearer|Basic|Digest|Token)\s+)?\S+/gi, 'Authorization: ***'],
+  [/\b([a-z][a-z0-9+.-]*:\/\/)[^\s/]+@/gi, '$1***@'],
   [/ythril_[A-Za-z0-9]{8,}(?:[_-][A-Za-z0-9]+)*/g, '***'],
   [/gh[pousr]_[A-Za-z0-9]{16,}/g, '***'],
   [/github_pat_[A-Za-z0-9_]{16,}/g, '***'],

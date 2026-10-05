@@ -29,6 +29,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { REPO_ROOT } from './_sources.mjs';
+import { runScript } from './_run-script.mjs';
 import { readFlags } from '../../scripts/_shared/script-cli.mjs';
 import { repoRelative, slashPath } from '../../scripts/_shared/repo-path.mjs';
 import { timingResultFiles } from '../../scripts/_shared/timing-results.mjs';
@@ -39,9 +40,12 @@ import { testChildEnv } from '../_shared/test-child-env.mjs';
 
 const CLI = pathToFileURL(join(REPO_ROOT, 'scripts', '_shared', 'script-cli.mjs')).href;
 
-/** Run node with `args`, without the parent test runner's context (a nested run would be misread as part of this one). */
-function node(args, { cwd = REPO_ROOT } = {}) {
-  const r = spawnSync(process.execPath, args, { cwd, env: testChildEnv(), encoding: 'utf8', timeout: 60_000 });
+/**
+ * Run `node -e …`: the one case here with no script file, so `runScript` (which takes a script path) cannot run it. The
+ * child environment is still `testChildEnv` (a nested run would be misread as part of this one).
+ */
+function nodeEval(args) {
+  const r = spawnSync(process.execPath, args, { cwd: REPO_ROOT, env: testChildEnv(), encoding: 'utf8', timeout: 60_000 });
   return { status: r.status, out: `${r.stdout}${r.stderr}` };
 }
 
@@ -73,17 +77,17 @@ describe('isEntryPoint', () => {
   after(() => rmSync(dir, { recursive: true, force: true }));
 
   it('true for the module the process was started with', () => {
-    assert.match(node([join(dir, 'who.mjs')]).out, /^ran/);
+    assert.match(runScript(join(dir, 'who.mjs')).out, /^ran/);
   });
 
   it('false for the same module imported by another', () => {
-    const { out } = node([join(dir, 'importer.mjs')]);
+    const { out } = runScript(join(dir, 'importer.mjs'));
     assert.match(out, /imported:false/);
     assert.doesNotMatch(out, /\bran\b/);
   });
 
   it('false, and no throw, when there is no script path at all (node -e)', () => {
-    const { status, out } = node(['--input-type=module', '-e',
+    const { status, out } = nodeEval(['--input-type=module', '-e',
       `import { isEntryPoint } from ${JSON.stringify(CLI)}; console.log('answer:' + isEntryPoint(${JSON.stringify(CLI)}));`]);
     assert.equal(status, 0, out);
     assert.match(out, /answer:false/);
@@ -224,7 +228,7 @@ describe('where two copies differed: a flag with no value is a usage error on ev
   ];
   for (const [name, args] of cases) {
     it(`${name}: exit 2 with the usage line`, () => {
-      const { status, out } = node(args);
+      const { status, out } = runScript(join(REPO_ROOT, args[0]), args.slice(1));
       assert.equal(status, 2, out);
       assert.match(out, /usage: node scripts\//);
     });

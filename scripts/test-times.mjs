@@ -38,10 +38,12 @@
  *
  * ## Decisions the plan left open
  *
- * - **Backfill** (`--record-ci`) walks the completed, trusted runs newest first and stops at the FIRST run that
- *   already has a record, or after {@link BACKFILL_RUNS} runs. A run partly recorded (the instance went away
- *   between its records) counts as recorded; `--rewrite <recordKey>` repairs it. An older run past the horizon
- *   that was never recorded is reported once and written as nothing.
+ * - **Backfill** (`--record-ci`) walks the completed, trusted runs newest first and stops at the FIRST run that is
+ *   recorded COMPLETELY (the instance holds every record the run's artifacts produce), or after {@link BACKFILL_RUNS}
+ *   runs. A run recorded only partly (the instance went away between its records) is not the stop: the records it
+ *   lacks are written, the ones it has are left alone, and the walk goes on to older runs. Because the walk records
+ *   newest first, a partial run is always at the frontier. An older run past the horizon that was never recorded is
+ *   reported once and written as nothing.
  * - **A trusted run with no usable artifact** (none uploaded, or expired) is recorded once with
  *   `measurements: 'none'`, job `workflow`, suite `ci`, scope `subset` (so no baseline is drawn from it), its
  *   `ms` the run's wall time, so the walk never fetches it again.
@@ -61,7 +63,7 @@ import { readCappedBody } from './_shared/capped-body.mjs';
 import { isEntryPoint } from './_shared/script-cli.mjs';
 import { repoRelative } from './_shared/repo-path.mjs';
 import { timingResultFiles } from './_shared/timing-results.mjs';
-import { readTimingLog, TIMING_RESULTS_FOLDER } from '../testing/_shared/timing-reporter.mjs';
+import { readTimingLog, TIMING_RESULTS_FOLDER, MESSAGE_CAP } from '../testing/_shared/timing-reporter.mjs';
 import { maskSecrets } from '../testing/_shared/secret-masking.mjs';
 import { holdsWithin } from '../testing/_shared/wait-for.mjs';
 import { ciSignal } from '../testing/_shared/running-under-ci.mjs';
@@ -119,6 +121,33 @@ export const TEST_RUN_SCHEMA = Object.freeze({
   measurements: { type: 'string', required: true, doc: 'JSON: every file\'s ms, tests, skips and failures, and the slowest tests; `none` when the run had no usable artifact.' },
   measurementsChars: { type: 'number', required: false, doc: 'The length of `measurements`, so a reader can ask for it whole.' },
 });
+
+/** How long a `Test-Run` entry is kept on the instance, in days: the retention `--type-schema` declares. */
+export const TEST_RUN_RETENTION_DAYS = 365;
+
+/** The chrono types a space has before it declares its own; declaring one without them closes the space to them. */
+const DEFAULT_CHRONO_TYPES = Object.freeze(['event', 'deadline', 'plan', 'prediction', 'milestone']);
+
+/**
+ * The arguments of the `schema_update` call that declares the `Test-Run` chrono type on {@link SPACE}, generated from
+ * {@link TEST_RUN_SCHEMA}: the writer and the declaration cannot disagree about a field, and the retention the guide
+ * promises exists only because this was sent. Printed by `--type-schema`.
+ */
+export function testRunTypeDeclaration() {
+  const propertySchemas = {};
+  for (const [key, f] of Object.entries(TEST_RUN_SCHEMA)) {
+    propertySchemas[key] = { type: f.type, ...(f.values ? { enum: [...f.values] } : {}), ...(f.required ? { required: true } : {}), description: f.doc };
+  }
+  const chrono = Object.fromEntries(DEFAULT_CHRONO_TYPES.map(t => [t, {}]));
+  chrono[CHRONO_TYPE] = {
+    description: 'One suite of one test run (local or CI), written by scripts/test-times.mjs. Found by date and filter, never by meaning: embeddings are suppressed. A passed date means nothing here. Kept one year.',
+    suppressEmbeddings: true,
+    whenDuePasses: 'nothing',
+    retention: { days: TEST_RUN_RETENTION_DAYS },
+    propertySchemas,
+  };
+  return { space: SPACE, typeSchemas: { chrono }, typeSchemasMode: 'merge' };
+}
 
 /** The ceiling on `measurements`, in characters; a run past it keeps per-file figures and drops the detail. */
 const MAX_MEASUREMENTS_CHARS = 400_000;
@@ -280,18 +309,18 @@ const HOME_PATHS = [
 
 /**
  * A line of text safe to store: first line only, secrets (the ONE list, `secret-masking.mjs`) and home paths masked,
- * at most 300 characters. The home paths are this module's own: where a file lives is not a token shape.
+ * at most `MESSAGE_CAP` characters (the reporter's, one number for both). The home paths are this module's own: where a file lives is not a token shape.
  */
 export function maskText(text) {
   let out = maskSecrets(String(text ?? '').split(/\r?\n/)[0]);
   for (const [source, flags] of HOME_PATHS) out = out.replace(new RegExp(source, flags), '<home>');
-  return out.slice(0, 300);
+  return out.slice(0, MESSAGE_CAP);
 }
 
 /** A test file's path as stored: repo-relative with forward slashes; an absolute path outside the repo is masked. */
 function storedPath(file, root) {
   const rel = repoRelative(file, root);
-  return rel === null ? maskText(String(file ?? '')) : rel.slice(0, 300);
+  return rel === null ? maskText(String(file ?? '')) : rel.slice(0, MESSAGE_CAP);
 }
 
 /** The suite a results file belongs to: what its lines say, else the part of its name before the first `-`. */
@@ -430,15 +459,21 @@ async function recordPayload(api, payload) {
   return api.call('update_chrono', { space, id: keep._id, ...rest, suppressEmbeddings: true });
 }
 
-/** True when the run already has any record on the instance. */
-async function runIsRecorded(api, runId) {
+/**
+ * The record keys the instance already holds for one CI run. The question the stop rule asks is "is this run recorded
+ * COMPLETELY", and that is answered by comparing these with the keys the run's artifacts would produce: one record of
+ * the run is not enough (a recorder that died after the first job's record left the rest unrecorded for good, because
+ * any record of the run read as "recorded" and the walk stopped there).
+ */
+async function recordedKeysOfRun(api, runId) {
   const answer = await api.call('filter', {
     space: SPACE, collection: 'chrono', filter: { type: CHRONO_TYPE, 'properties.source': 'ci', 'properties.runId': String(runId) },
-    projection: { 'properties.measurements': 0 }, limit: 5, maxChars: PAGE_MAX_CHARS,
+    projection: { 'properties.measurements': 0 }, limit: 100, maxChars: PAGE_MAX_CHARS,
   });
   const rows = answer?.data?.results;
   if (!Array.isArray(rows)) throw new YthrilApiError('filter: the answer carried no results', { tool: 'filter' });
-  return rows.some(r => r?.properties?.source === 'ci' && r?.properties?.runId === String(runId));
+  return new Set(rows.filter(r => r?.properties?.source === 'ci' && r?.properties?.runId === String(runId)
+    && typeof r?.properties?.recordKey === 'string').map(r => r.properties.recordKey));
 }
 
 // ---- one writer per machine ---------------------------------------------------------------------------------------
@@ -767,8 +802,13 @@ async function recordCi({ rewriteKey } = {}) {
     let stoppedAtRecorded = false;
     for (const run of runs) {
       try {
-        if (!rewriteKey && await runIsRecorded(dest.api, run.id)) { stoppedAtRecorded = true; break; }
-        const { payloads, problems } = await ciPayloads(gh, run);
+        const have = rewriteKey ? new Set() : await recordedKeysOfRun(dest.api, run.id);
+        const built = await ciPayloads(gh, run);
+        const { problems } = built;
+        // A run with every record it would produce is the stop. A run with SOME is completed: only the missing ones are
+        // written (a record the run already has is left as it is; `--rewrite <recordKey>` replaces one on purpose).
+        const payloads = built.payloads.filter(p => !have.has(p.properties.recordKey));
+        if (!rewriteKey && have.size > 0 && payloads.length === 0 && problems.length === 0) { stoppedAtRecorded = true; break; }
         for (const p of problems) { console.log(`test-times: run ${run.id}: ${p}`); exit = 1; }
         if (rewriteKey && payloads.every(p => p.properties.measurements === 'none')) {
           console.error(`test-times: run ${run.id} has no artifacts left; the record is not overwritten with nothing`); exit = 1; continue;
@@ -1060,7 +1100,9 @@ export const HELP = `usage: node scripts/test-times.mjs <command>
   --record                 record the run in test-results/ (one Test-Run entry per suite); exits 0 whenever it
                            could not record, and keeps the payload in test-results/unrecorded/ for the next one
   --record-ci              record the completed CI runs (push to main of ${REPO}, ci.yml) not yet recorded;
-                           walks newest first and stops at the first recorded run or after ${BACKFILL_RUNS} runs
+                           walks newest first and stops at the first completely recorded run or after ${BACKFILL_RUNS} runs
+  --type-schema            print the schema_update arguments that declare the Test-Run chrono type on the instance
+                           (generated from the recorder's own field list, with its one-year retention)
   --rewrite <recordKey>    record one run again from its own results (ci:<runId>:<attempt>:<job>:<suite>
                            or the key of a local suite in test-results/)
   --trend [--last N] [--flags]
@@ -1085,6 +1127,7 @@ Recording is refused when GITHUB_ACTIONS or CI is set: CI never holds the write 
 async function main(argv) {
   const [command, ...rest] = argv;
   if (command === '--help' || command === '-h') { console.log(HELP); return 0; }
+  if (command === '--type-schema' && !rest.length) { console.log(JSON.stringify(testRunTypeDeclaration(), null, 2)); return 0; }
   if (command === '--record' && !rest.length) return recordLocal();
   if (command === '--record-ci' && !rest.length) return recordCi();
   if (command === '--rewrite' && rest.length === 1) return rewriteLocal(rest[0]);

@@ -27,7 +27,8 @@
  *     always earlier than the server's — by the connection wait and the send, which is only milliseconds on a
  *     quiet machine and as much as a busy one makes it. Measured with the command held back 80 ms on the wire:
  *     `maxTimeMS` AND `timeoutMS` together still answered at the client's deadline, because the driver's derived
- *     value wins over the explicit one. So the driver's `timeoutMS` is not used for a write.
+ *     value wins over the explicit one. So the driver's `timeoutMS` is not used for a write — and one the CLIENT carries
+ *     (`MONGO_URI`) is switched off for it (`timeoutMS: 0`, see `planBound`), because the driver inherits it otherwise.
  *  2. **The client later, as the backstop.** The caller is answered `StoreTimeout` at `bound +
  *     SERVER_FIRST_MARGIN_MS`, and the driver call is aborted (`signal`): a command not yet sent is dropped, one in
  *     flight loses its connection. This is for a server that cannot answer — and there is one: an UPSERT blocked
@@ -37,6 +38,17 @@
  *     cannot land. The margin must exceed how late a command reaches the server; it is below the 1 s the hold
  *     deadline's ceiling keeps under what a sender waits (`config/env-num.ts`), so the `503` still precedes the
  *     sender's give-up.
+ *
+ * ### What "cannot land" covers: ONE wire command
+ *
+ * `maxTimeMS` is per wire command. The driver splits a bulk write into several commands when its batch passes the server's
+ * `maxBsonObjectSize` (16 MiB) or `maxWriteBatchSize` operations; each gets the same `maxTimeMS`, armed when IT reaches
+ * the server, while the backstop is armed once. A second command can arrive after the caller was answered and the hold
+ * released, and land. So the guarantee is for a call that is ONE command: every single-document write, and a bulk the
+ * writer keeps under the limit (`db/one-command.ts`, used by `sync/arrivals.ts`, whose page is a peer's). The other bounded
+ * bulk writers take a quantity a request caps (a 10 MiB body, `BULK_MAX_PER_TYPE` items per array, `ROWS_PER_BULK_COMMAND`
+ * rows a chunk) — under the limit for any real record, not for an adversarial one. `a-bounded-bulk-write-is-one-command`
+ * pins those caps and the premise on the real driver.
  *
  * A READ keeps the driver's `timeoutMS`: it lands nothing, so the order does not matter, and its cursor needs the
  * driver's deadline across batches. An operation that is a transaction's (a SESSION) is bounded by the session
@@ -68,8 +80,8 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { envInt } from '../config/env-num.js';
 import { BATCH_FETCH_TIMEOUT_MS } from '../sync/peer-timeouts.js';
-import { StoreTimeout } from './write-timeout.js';
-import { isMaxTimeExpired } from './max-time.js';
+import { log, peerText } from '../util/log.js';
+import { StoreTimeout, isWriteTimeout } from './write-timeout.js';
 
 /** The per-operation bound when `YTHRIL_WRITE_TIMEOUT_MS` is unset. */
 const DEFAULT_WRITE_TIMEOUT_MS = 30_000;
@@ -220,7 +232,7 @@ interface BoundedCall {
  * `undefined` when there is nothing to bound (no scope, an unbounded method). THROWS `StoreTimeout` when the scope's
  * deadline has passed: the operation is not sent.
  */
-function planBound(method: string, args: unknown[]): BoundedCall | undefined {
+function planBound(method: string, args: unknown[], inheritedTimeoutMs: number | undefined): BoundedCall | undefined {
   const at = BOUNDED_OPTIONS_ARGUMENT[method];
   if (at === undefined) return undefined;
   const scope = activeScope();
@@ -239,6 +251,14 @@ function planBound(method: string, args: unknown[]): BoundedCall | undefined {
     // The server's deadline, and no `timeoutMS`: the driver would derive the wire value from its own earlier clock.
     const carried = [options['maxTimeMS'], options['timeoutMS']].filter((v): v is number => typeof v === 'number' && v > 0);
     delete amended['timeoutMS'];
+    // A `timeoutMS` the CLIENT carries (`MONGO_URI`, a client option) is inherited by every operation that sets none of its
+    // own (`options?.timeoutMS ?? parent?.timeoutMS`, driver `utils.js`), and would arm the driver's clock — which ends the
+    // write before the server's deadline, so the 503 and the hold's release can precede a live write: the defect above,
+    // for any operator who sets one. `0` is the driver's "no client deadline" for THIS operation: its context then has an
+    // infinite remaining time, derives no `maxTimeMS` of its own, and the explicit one stays on the wire (probed on every
+    // method of `PLAIN_WRITE_METHODS`, with the client's `timeoutMS` below the bound: answered by the server at the bound).
+    // Only when one is inherited: with none, the operation carries no `timeoutMS` at all, as it always did.
+    if (inheritedTimeoutMs !== undefined && inheritedTimeoutMs > 0) amended['timeoutMS'] = 0;
     const serverMs = Math.min(bound, ...carried);
     amended['maxTimeMS'] = serverMs;
     out[at] = amended;
@@ -263,8 +283,10 @@ function planBound(method: string, args: unknown[]): BoundedCall | undefined {
  * dropped. A result that arrives after that is ignored; it cannot be a landing, because the server's deadline is past.
  * THROWS `StoreTimeout` when the scope's deadline has passed: the operation is not sent.
  */
-export function callBounded(method: string, args: unknown[], call: (args: unknown[]) => unknown): unknown {
-  const plan = planBound(method, args);
+export function callBounded(
+  method: string, args: unknown[], call: (args: unknown[]) => unknown, inheritedTimeoutMs?: number,
+): unknown {
+  const plan = planBound(method, args, inheritedTimeoutMs);
   if (!plan) return call(args);
   if (plan.backstopMs === undefined) return call(plan.args);
   const { backstopMs, options, at } = plan;
@@ -279,6 +301,11 @@ export function callBounded(method: string, args: unknown[], call: (args: unknow
       // The default reason (a `DOMException`, whose `name` is an enumerable accessor) and our `StoreTimeout` (which sets
       // its own `name`) both make the abandoned call fail with a `TypeError` about that instead of the abort.
       abort.abort(new Error('the write bound\'s backstop fired'));
+      // Said once, here, and only here: the server's own answer (code 50) is an ordinary timeout and says nothing. The
+      // backstop is the other state — the server could not answer by its own deadline (an upsert behind another
+      // session's uncommitted insert is the one measured) — and the caller's 503 does not tell an operator which.
+      log.warn(`Write bound: the server did not answer ${peerText(method)} by its own deadline (${backstopMs - SERVER_FIRST_MARGIN_MS} ms); the client backstop `
+        + `ended it ${SERVER_FIRST_MARGIN_MS} ms later, answered the caller a retryable timeout and aborted the driver call. A write blocked behind another session's uncommitted insert does this.`);
       reject(new StoreTimeout());
     }, backstopMs);
     timer.unref();
@@ -288,7 +315,7 @@ export function callBounded(method: string, args: unknown[], call: (args: unknow
       (value) => { clearTimeout(timer); resolve(value); },
       // The server answering first is the bound ending the write, as the backstop is: one error for both, so a caller
       // never has to know which clock won. The driver's own error stays reachable as the cause.
-      (err: unknown) => { clearTimeout(timer); reject(plan.ourDeadline && isMaxTimeExpired(err) ? new StoreTimeout(undefined, { cause: err }) : err); },
+      (err: unknown) => { clearTimeout(timer); reject(plan.ourDeadline && isWriteTimeout(err) ? new StoreTimeout(undefined, { cause: err }) : err); },
     );
   });
 }

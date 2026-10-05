@@ -36,7 +36,7 @@ import { fileURLToPath } from 'node:url';
 import { trackedSources, trackedTestFiles, isTestFile } from '../testing/standalone/_sources.mjs';
 import { isEntryPoint, readFlags } from './_shared/script-cli.mjs';
 import { stripComments } from '../testing/standalone/_strip-comments.mjs';
-import { CI_WORKFLOW, loadCi, jobEntries, stepsOf, shellOf } from '../testing/_shared/ci-workflow.mjs';
+import { CI_WORKFLOW, loadCi, jobEntries, stepsOf, shellOf, shellCommands } from '../testing/_shared/ci-workflow.mjs';
 
 /** A glob as a regular expression over repo-relative paths (`*`, `**`, `?`, `{a,b}`; nothing else is special). */
 export function globToRegExp(glob) {
@@ -72,9 +72,8 @@ function workflowCommands(root) {
 
 /** One shell script (already read as the shell reads it) as separate simple commands, each an array of words. */
 function simpleCommands(script) {
-  return String(script)
-    .split(/&&|\|\||;|\||\n/)
-    .map(seg => seg.trim().split(/\s+/).filter(Boolean))
+  return shellCommands(script)
+    .map(seg => seg.split(/\s+/).filter(Boolean))
     .map(words => {
       while (words.length && (/^[A-Za-z_]\w*=/.test(words[0]) || words[0] === 'cross-env')) words.shift();
       return words;

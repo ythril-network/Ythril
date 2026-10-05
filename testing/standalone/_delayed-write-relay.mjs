@@ -33,6 +33,7 @@
  * only what happens to the client's bytes on their way: framing, the delay, and the order.
  */
 import { startTcpRelay } from './_tcp-relay.mjs';
+import { sleep } from '../_shared/sleep.mjs';
 
 const OP_MSG = 2013;
 /** The commands a bound can end: a delay on a read would only slow the test down. */
@@ -76,7 +77,7 @@ export async function startDelayedWriteRelay({ host, port }) {
           pending = pending.subarray(message.length);
           const wait = delayFor(message);
           if (wait > 0) delayed += 1;
-          chain = chain.then(() => (wait > 0 ? new Promise(r => setTimeout(r, wait)) : undefined))
+          chain = chain.then(() => (wait > 0 ? sleep(wait) : undefined))
             .then(() => forward(message));
         }
       };

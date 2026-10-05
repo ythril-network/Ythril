@@ -179,13 +179,15 @@ export function observeRecordWrites(db: Db, isObserved: (name: string) => boolea
     get(target, prop, receiver) {
       if (prop !== 'collection') return Reflect.get(target, prop, receiver);
       return (name: string, options?: object) =>
-        observeCollection(target.collection(name, options as never), name, isObserved(name) ? listener : null);
+        // `target.timeoutMS` is the `timeoutMS` every operation of this database inherits (the client's, from `MONGO_URI`), which
+        // a bounded plain write has to neutralise (`db/write-bound.ts`).
+        observeCollection(target.collection(name, options as never), name, isObserved(name) ? listener : null, target.timeoutMS);
     },
   });
 }
 
 function observeCollection<T extends object>(
-  coll: Collection<T>, name: string, listener: RecordWriteListener | null,
+  coll: Collection<T>, name: string, listener: RecordWriteListener | null, inheritedTimeoutMs: number | undefined,
 ): Collection<T> {
   return new Proxy(coll, {
     get(target, prop, receiver) {
@@ -197,12 +199,11 @@ function observeCollection<T extends object>(
       if (!bounded && !reports) return value;
       const effect = classified === 'read' ? UNKNOWN_EFFECT : classified ?? UNKNOWN_EFFECT;
       return (...given: unknown[]) => {
-        const args = given;
-        const call = (a: unknown[]): unknown => (value as (...x: unknown[]) => unknown).apply(target, a);
+        const call =(a: unknown[]): unknown => (value as (...x: unknown[]) => unknown).apply(target, a);
         let out: unknown;
         if (bounded) {
           // A hold whose time is spent refuses the operation unsent; nothing was written, so nothing is reported.
-          try { out = callBounded(prop, given, call); } catch (err) {
+          try { out = callBounded(prop, given, call, inheritedTimeoutMs); } catch (err) {
             if (RETURNS_CURSOR.has(prop)) throw err;
             return Promise.reject(err);
           }
@@ -212,7 +213,7 @@ function observeCollection<T extends object>(
         if (!reports || listener === null) return out;
         const heard = listener;
         const report = (): void => {
-          const session = transactionSessionOf(args);
+          const session = transactionSessionOf(given);
           if (session) reportWhenEnded(session, () => safely(heard, name, effect));
           else safely(heard, name, effect);
         };

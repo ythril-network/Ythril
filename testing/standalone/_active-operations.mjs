@@ -19,6 +19,7 @@
 
 import assert from 'node:assert/strict';
 import { waitFor, holdsWithin } from '../_shared/wait-for.mjs';
+import { sleep } from '../_shared/sleep.mjs';
 
 /** Command names a `command` operation carries when it is a write (`findAndModify` is the one that is reported as a command). */
 const WRITE_COMMANDS = new Set(['findAndModify', 'findandmodify', 'insert', 'update', 'delete']);
@@ -81,7 +82,7 @@ export async function sawLiveWrite(mongo, collName, done) {
   let saw = false;
   while (!done()) {
     if (!saw && (await activeOperations(mongo, collName)).length > 0) saw = true;
-    await new Promise(r => setTimeout(r, 50));
+    await sleep(50);
   }
   return saw;
 }

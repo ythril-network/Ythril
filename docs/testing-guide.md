@@ -18,7 +18,7 @@ Run `npm run preflight` first, always. It runs every structural check that needs
 |---|---|---|
 | Client unit tests (Vitest + jsdom) | nothing | `npm run test:client`, and `npm run build:client` (it catches template errors in components that have no spec) |
 | Standalone, all of it | `server/dist`, a test MongoDB, the test stack | `npm run build:server`, `npm run test:up`, `npm run test:standalone` |
-| Standalone, the pure third | `server/dist` | `npm run test:standalone:pure` |
+| Standalone, the pure third | `server/dist`, and a built client for the one case that reads it (CI's job builds both; locally that case skips without one) | `npm run test:standalone:pure` |
 | Standalone, the database third | `server/dist`, the test MongoDB | `npm run test:standalone:db` |
 | Standalone, the instance third | `server/dist`, the instances it drives | `npm run test:standalone:instance` |
 | Integration | the test stack | `npm run test:up`, `npm run test:integration` |
@@ -38,7 +38,8 @@ narrowed like that is recorded as a subset, never as the whole suite.
 
 `testing/standalone` is one folder and three kinds of file, and the kind decides what it needs and how it runs:
 
-- **pure**: needs nothing but `server/dist`. Runs at node's default width.
+- **pure**: needs `server/dist` and nothing else, except that `no-external-assets` reads a client build: CI's job
+  makes one, and a local run without one skips that case (`npm run build:client` makes it). Runs at node's default width.
 - **database**: opens the test MongoDB through `testing/standalone/_mongo-harness.mjs`, directly or through a helper that
   does. Runs a few files at a time, because every one of them shares one database and the full width ran it out of memory.
   The kind is derived from the imports, never from the file's name.
@@ -101,6 +102,9 @@ Four things to know when you read a file:
 - **A failure is read from the failure events**, never from a count: a file whose `before` hook throws shows `fail 0` in
   node's tail and exit status 1.
 - **A failure message is stored as its first line, capped, with token-shaped strings masked.** No stack, no diff.
+  The client's Vitest report (`client.json`) is the other half of a run's artifacts, and holds full messages; the
+  client job rewrites it through the same masking, in place, before it uploads it (`scripts/mask-client-report.mjs`),
+  and removes a report it cannot read rather than upload it raw.
 
 The recording is attached to a `node --test` run only by `testing/_shared/timing-reporter-flags.mjs`. It makes the
 destination directory first (node exits 7 when it is missing), names the default reporter beside ours so the console
@@ -185,7 +189,11 @@ What the recorder guarantees, and why each is there:
 - **The connection is guarded in one place**, `scripts/_shared/ythril-api.mjs`: a URL that is not `https` or loopback is
   refused at construction, redirects are errors, a request times out, and an error never contains the token or the URL's
   credentials. `benchmarks/` uses the same module.
-- **Entries expire** under the retention the chrono type declares on the instance, so the history is bounded.
+- **Entries expire** under the retention the chrono type declares on the instance, so the history is bounded. The
+  declaration is not written by hand: `node scripts/test-times.mjs --type-schema` prints the `schema_update` arguments
+  (the `Test-Run` type, one year of retention, embeddings suppressed, and the five default chrono types beside it,
+  in merge mode), generated from the same list the recorder writes its records by. Send them with `schema_update` on
+  `y-proj-ythril` once, and read the type back with `space_meta`; without that, nothing bounds the history.
 
 ## Skips
 
@@ -230,6 +238,7 @@ and whether a timer is left armed. They are made once, in
 | Wait until a condition holds; throw, naming what never held and the last value, if it does not | `waitFor(condition, timeout, interval, diagnose, { what, thinMargin, tolerate })` |
 | The same wait, answering `true` or `false` at the deadline | `holdsWithin(…)` |
 | The same wait, answering the value the condition held with | `waitForValue(…)` |
+| Wait until a state was read that you accept, and get that reading back (the timeout names the last one read) | `waitForReading(read, accept, timeout, interval, options)` |
 | Wait for one operation for at most a time, without abandoning it, and learn whether it finished | `settleWithin(promise, ms)` in `testing/standalone/_write-faults.mjs` |
 
 Use `holdsWithin` in a `before` hook that lets the tests decide: a throw there cancels the whole file, where a verdict

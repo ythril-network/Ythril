@@ -28,19 +28,18 @@
  *      The unknown wins over a finding: a partial list is never reported as the list.
  */
 import { readFileSync, existsSync } from 'node:fs';
-import { join, resolve, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join, resolve } from 'node:path';
 import { readTimingResults } from './_shared/timing-results.mjs';
 import { isEntryPoint, readFlags } from './_shared/script-cli.mjs';
 import { repoRelative, slashPath } from './_shared/repo-path.mjs';
 import { isExpectedInCiSkip } from '../testing/_shared/expected-in-ci.mjs';
+import { REPO_ROOT } from '../testing/standalone/_sources.mjs';
 
 /** The client's report inside the results folder: written by ci.yml's client job, downloaded beside the node results. */
 export const CLIENT_RESULTS = 'client.json';
 
-/** The repository the script lives in; a vitest report names absolute paths, and a reader wants repo-relative ones. */
-const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-
+// REPO_ROOT (the repository the script lives in) is `_sources.mjs`'s: a vitest report names absolute paths, and a reader
+// wants repo-relative ones.
 /** Forward-slash path, relative to the repository when it lies inside it (one outside it is kept as it came). */
 const repoPath = (file) => repoRelative(file, REPO_ROOT) ?? slashPath(file);
 
