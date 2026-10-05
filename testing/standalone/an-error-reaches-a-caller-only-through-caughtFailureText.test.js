@@ -58,7 +58,9 @@ const EXEMPT = {};
 
 const sources = new Map(trackedSources('server/src', { floor: 400, specs: false })
   .map(f => [f, readFileSync(join(REPO_ROOT, f), 'utf8')]));
-const { exits, env } = analyse(sources, { sanitizers: SANITIZERS });
+/** The predicate a failure's text is decided by: a function that asks it has decided what to say. */
+const DECIDERS = ['isDriverSide'];
+const { exits, env } = analyse(sources, { sanitizers: SANITIZERS, deciders: DECIDERS });
 const keyOf = e => `${e.file}: ${e.text}`;
 
 describe('the derivation works', () => {
@@ -72,10 +74,9 @@ describe('the derivation works', () => {
     assert.ok(new Set(exits.map(e => e.file)).size >= 20, 'the exits sit in fewer than twenty files');
   });
 
-  it('derived the stored-failure writers and the sanitizing senders', () => {
+  it('derived the stored-failure writers and the classes the repo declares', () => {
     assert.ok([...env.writers.keys()].length >= 2, `only ${[...env.writers.keys()]} write a lastError — expected the embed and media job failures`);
     assert.ok(env.ownClasses.size >= 20, `only ${env.ownClasses.size} classes declared under server/src`);
-    assert.ok(env.sanitizers.has('sendReadFailure'), 'the read sender is not derived as a sanitizer — a function taking res that calls the classifier');
   });
 
   it('caughtFailureText is a top-level function of the server — the sanitizer the rule names exists', () => {
@@ -107,8 +108,8 @@ describe('every exit of an error\'s text passes through a sanitizer, is one of o
 describe('the walk sees each form — each seen red on a fixture, and each negative control passes', () => {
   /** One file of source, analysed alone with the same sanitizers. */
   const flaggedIn = (src, extra = {}) => analyse(new Map([['fixture.ts', src], ...Object.entries(extra)]),
-    { sanitizers: SANITIZERS }).exits.filter(e => e.flagged).map(e => e.form);
-  const populationIn = (src) => analyse(new Map([['fixture.ts', src]]), { sanitizers: SANITIZERS }).exits.length;
+    { sanitizers: SANITIZERS, deciders: DECIDERS }).exits.filter(e => e.flagged).map(e => e.form);
+  const populationIn = (src) => analyse(new Map([['fixture.ts', src]]), { sanitizers: SANITIZERS, deciders: DECIDERS }).exits.length;
 
   const FORMS = {
     'a response built from err.message': 'async function h(req, res) { try { await f(); } catch (err) { res.status(500).json({ error: err.message }); } }',
@@ -150,6 +151,23 @@ describe('the walk sees each form — each seen red on a fixture, and each negat
     const src = 'function sendCaught(res, err, op) { res.status(500).json({ error: caughtFailureText(err, op) }); }\n'
       + 'async function h(req, res) { try { await f(); } catch (err) { sendCaught(res, err, "doing f"); } }';
     assert.deepEqual(flaggedIn(src), []);
+  });
+
+  it('a text-maker that decides with isDriverSide is a sanitizer: storing what it returns passes', () => {
+    const src = [
+      'function storedText(err) { return isDriverSide(err) ? "The store could not complete this request." : String(err.message); }',
+      'async function failJob(id, errorMessage) { await jobs.updateOne({ _id: id }, { $set: { lastError: errorMessage } }); }',
+      'async function run() { try { await f(); } catch (err) { await failJob(1, storedText(err)); } }',
+    ].join('\n');
+    assert.deepEqual(flaggedIn(src), []);
+  });
+
+  it('a sanitizing sender is counted in the population, so a floor over it notices the walk going blind', () => {
+    const src = [
+      'function sendCaught(res, err, op) { res.status(500).json({ error: caughtFailureText(err, op) }); }',
+      'async function h(req, res) { try { await f(); } catch (err) { sendCaught(res, err, "doing f"); } }',
+    ].join('\n');
+    assert.equal(populationIn(src), 1, 'the sender call is not in the population');
   });
 
   it('the builtin Error is no proof of ownership: err instanceof Error still answers the driver\'s text', () => {

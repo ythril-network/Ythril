@@ -59,8 +59,16 @@
  *
  * ## Seen red
  *
- * On 0b066822 (main before bundle-30): `peerText` and `peerList` do not exist, `fmt` appends the meta argument
- * unbounded, and the slot rule reports the raw sites it lists (the count is in the failure message).
+ * On 6eb5a333 (v5.6.3, the base of the 5.6.4 patch): `peerText` and `peerList` do not exist, `fmt` appends the meta
+ * argument unbounded, and the slot rule reports 490 raw slots reading 274 defining sites (the count is in the failure
+ * message). The gate is main's, carried over the release line's doors: nothing in it was re-derived by hand, so the
+ * doors, the sinks and the slots are the ones the base tree has. The sweep that makes it green is the patch's own — every
+ * raw interpolation it names goes through `peerText` / `peerList` where the value enters the text — and the LOCAL table
+ * stays EMPTY unless a site is shown to be this instance's own, with the reason (a reviewer reads each entry).
+ *
+ * Mutation-checked for the form it newly covers on this line: changing one `${logSafe(where)}` in
+ * `sync/tombstone-apply.ts` to `${where}` raised the report from 490 to 491 slots and named the line; the original
+ * spelling was put back by hand.
  *
  * Run: node --test testing/standalone/a-steerable-value-reaches-a-log-line-only-bounded.test.js
  * (requires a prior `npm run build` in server/ — the import door is found through the compiled route tables)

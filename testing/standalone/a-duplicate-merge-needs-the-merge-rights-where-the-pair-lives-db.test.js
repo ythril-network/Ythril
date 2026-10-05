@@ -52,6 +52,8 @@ const NEWER = 'aaaaaaaa-0000-4000-8000-0000000000b2';
 const CANDIDATE = `entity:${OLDER}:${NEWER}`;
 
 let mongo, spaceCollection, SPACE_AREAS, stack;
+/** The other two doors that act on a candidate by id: their layers, found by the same rule. */
+const stacks = {};
 
 const coll = (space, kind) => mongo.col(spaceCollection(space, kind));
 
@@ -69,7 +71,8 @@ function rights(perSpace) {
  * bearer into `req.authToken` and the rate limiter counts; the token is put on the request directly instead, and
  * every other layer — `denyReadOnly` included — runs as it does in production.
  */
-async function merge(id, tokenRights) {
+async function merge(id, tokenRights) { return act(stack, id, tokenRights); }
+async function act(layers, id, tokenRights) {
   const res = {
     statusCode: 200, body: undefined, sent: false,
     status(c) { this.statusCode = c; return this; },
@@ -80,7 +83,7 @@ async function merge(id, tokenRights) {
     params: { id }, query: {}, body: {}, headers: {}, ip: '127.0.0.1',
     authToken: { id: 'tok-dupe-merge', name: 'dupe merge test', rights: tokenRights },
   };
-  for (const layer of stack) {
+  for (const layer of layers) {
     if (res.sent) break;
     let advanced = false;
     await layer.handle(req, res, () => { advanced = true; });
@@ -109,6 +112,11 @@ describe('a duplicate merge needs the merge rights where the pair lives', { skip
     // added to the chain later runs here rather than being skipped by position.
     stack = layer.route.stack.filter(l => !['requireAuth', 'globalRateLimit'].includes(l.name));
     assert.ok(stack.some(l => l.name === 'denyReadOnly'), 'the merge route no longer runs denyReadOnly — re-read this test');
+    for (const door of ['dismiss', 'reopen']) {
+      const l = duplicatesRouter.stack.find(x => x.route?.path === `/:id/${door}` && x.route.methods?.post);
+      assert.ok(l, `POST /api/duplicates/:id/${door} is gone or moved — re-anchor this test`);
+      stacks[door] = l.route.stack.filter(x => !['requireAuth', 'globalRateLimit'].includes(x.name));
+    }
   });
 
   after(async () => {
@@ -172,5 +180,34 @@ describe('a duplicate merge needs the merge rights where the pair lives', { skip
     const after = await untouched();
     assert.deepEqual(after.ids, [OLDER], 'the absorbed entity must be gone after a merge');
     assert.equal(after.status, 'resolved');
+  });
+
+  /*
+   * The doors beside the merge, and the guard in front of all three. The merge's walk moves onto the shared `findWhereTokenMay`
+   * with the rung named at the call, and dismiss/reopen move onto it with the rung they always walked at (write): neither
+   * door's behaviour changes, and these hold that, so a rewrite of the lookup cannot swap a guard out unseen
+   * (`pitfall-admin-guard-swap-drops-read-only`: `denyReadOnly` stays in front, and a read-only token is a case of its own).
+   */
+  it('PIN: a read-only token is refused by denyReadOnly, and the merge touches nothing', async () => {
+    const readOnly = rights({ [S]: Object.fromEntries(SPACE_AREAS.map(a => [a, 'read'])), [T]: Object.fromEntries(SPACE_AREAS.map(a => [a, 'read'])) });
+    const out = await merge(CANDIDATE, readOnly);
+    assert.equal(out.status, 403, JSON.stringify(out.body));
+    assert.deepEqual(await untouched(), { ids: [OLDER, NEWER], status: 'open' });
+  });
+
+  for (const door of ['dismiss', 'reopen']) {
+    it(`PIN: ${door} refuses as not found a token holding dataQuality only at 'read' in the pair's space (write in another)`, async () => {
+      if (door === 'reopen') await coll(S, 'dupeCandidates').updateOne({ _id: CANDIDATE }, { $set: { status: 'dismissed' } });
+      const before = (await coll(S, 'dupeCandidates').findOne({ _id: CANDIDATE })).status;
+      const out = await act(stacks[door], CANDIDATE, rights({ [S]: { dataQuality: 'read' }, [T]: { dataQuality: 'write' } }));
+      assert.equal(out.status, 404, JSON.stringify(out.body));
+      assert.equal((await coll(S, 'dupeCandidates').findOne({ _id: CANDIDATE })).status, before, 'the candidate changed');
+    });
+  }
+
+  it("PIN: dismiss acts for a token holding dataQuality 'write' in the pair's space", async () => {
+    const out = await act(stacks['dismiss'], CANDIDATE, rights({ [S]: { dataQuality: 'write' } }));
+    assert.equal(out.status, 200, JSON.stringify(out.body));
+    assert.equal((await coll(S, 'dupeCandidates').findOne({ _id: CANDIDATE })).status, 'dismissed');
   });
 });

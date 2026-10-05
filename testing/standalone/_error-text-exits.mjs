@@ -88,7 +88,7 @@ const writesLastError = node => has(node.body ?? node, n =>
  * one of them proves the error is ours), the sanitizers (the named ones, and every sender that calls one), and the
  * functions that store a failure.
  */
-export function readSources(sources, { sanitizers: named }) {
+export function readSources(sources, { sanitizers: named, deciders = [] }) {
   const files = new Map();
   const ownClasses = new Set();
   for (const [file, text] of sources) {
@@ -103,14 +103,18 @@ export function readSources(sources, { sanitizers: named }) {
   const functions = new Map();
   for (const sf of files.values()) for (const [name, f] of topLevelFunctions(sf)) functions.set(name, f);
 
-  // Senders: a function that takes `res` and calls a sanitizer. Two rounds is enough for a sender of a sender.
+  // Derived sanitizers, three rounds (a sender of a sender, a text-maker built on a text-maker): a top-level function that
+  // calls a sanitizer or a DECIDER (`isDriverSide`, the predicate a text is chosen by) mediates what it is handed — whether it
+  // takes `res` and answers (a sender) or returns the text a failure is stored with (a text-maker, which is also the shape of
+  // a writer that renders the error itself before it stores it).
   const sanitizers = new Set(named);
+  const decisive = new Set([...named, ...deciders]);
   for (let round = 0; round < 3; round++) {
     for (const [name, f] of functions) {
-      if (sanitizers.has(name)) continue;
-      const takesRes = f.params.some(p => ts.isIdentifier(p.name) && /^res(ponse)?$/.test(p.name.text));
-      if (takesRes && has(f.node, n => ts.isCallExpression(n) && ts.isIdentifier(n.expression) && sanitizers.has(n.expression.text))) {
+      if (sanitizers.has(name) || decisive.has(name)) continue;
+      if (has(f.node, n => ts.isCallExpression(n) && ts.isIdentifier(n.expression) && (sanitizers.has(n.expression.text) || deciders.includes(n.expression.text)))) {
         sanitizers.add(name);
+        decisive.add(name);
       }
     }
   }
@@ -239,6 +243,9 @@ export function exitsIn(file, env) {
           const root = rootOf(callee.expression);
           if (root && /^res(ponse)?$/.test(root.text)) for (const a of n.arguments) record(n, 'response', a);
         }
+        // a sanitizing sender: counted in the population, never flagged
+        if (ts.isIdentifier(callee) && env.sanitizers.has(callee.text)
+          && n.arguments.some(a => ts.isIdentifier(a) && /^res(ponse)?$/.test(a.text))) record(n, 'sanitized sender', n);
         // a call handed `res` itself: a sender
         if (ts.isIdentifier(callee) && !env.sanitizers.has(callee.text)
           && n.arguments.some(a => ts.isIdentifier(a) && /^res(ponse)?$/.test(a.text))) {
