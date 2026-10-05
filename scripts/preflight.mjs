@@ -126,7 +126,10 @@ for (const [i, r] of runs.entries()) {
   if (runs.length > 1) console.log(`  batch ${i + 1}/${runs.length} — ${r.files.length} ${r.kind} file(s)`);
   batchesOfKind[r.kind] = (batchesOfKind[r.kind] ?? 0) + 1;
   const flags = timingReporterFlags({ suite: 'preflight', batch: `${r.kind}-${batchesOfKind[r.kind]}`, scope: 'subset' });
-  try { run(`node --test ${[...r.args, ...flags.args, ...r.files].join(' ')}`, { env: testChildEnv(flags.env) }); } catch {
+  // An argument array and no shell: through cmd.exe the line is capped at 8 191 characters, and the reporter's flags
+  // on top of a budget-sized batch went over it ("The command line is too long", no test output). CreateProcess
+  // allows 32 767, which is the limit the batch budget is sized under.
+  try { execFileSync('node', ['--test', ...r.args, ...flags.args, ...r.files], { stdio: 'inherit', env: testChildEnv(flags.env) }); } catch {
     // Keep going: one batch failing must not hide a second failure in a later batch, which is exactly the
     // information a single all-or-nothing invocation used to give.
     standaloneFailed = true;

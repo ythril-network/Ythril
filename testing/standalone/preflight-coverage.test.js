@@ -169,6 +169,30 @@ describe('preflight invokes the offline subset within the platform limit', () =>
     assert.match(script, /standaloneFailed = true/);
   });
 
+  it('every batch\'s WHOLE command line, the timing reporter\'s flags included, fits the launcher it goes through', async () => {
+    /*
+     * The batch budget measures the FILES; the reporter's flags (a file URL, two destinations) ride after them.
+     * Through a shell, cmd.exe refuses a line over 8 191 characters with "The command line is too long" and no test
+     * output — which is what bundle-56's first preflight printed for six batches. Launched without a shell, the
+     * limit is CreateProcess's 32 767. So: measure the real line, against the limit of the real launcher.
+     */
+    const { offlineRuns, splitStandalone } = await import('../_shared/standalone-split.mjs');
+    const { timingReporterFlags } = await import('../_shared/timing-reporter-flags.mjs');
+    const runs = offlineRuns(splitStandalone());
+    assert.ok(runs.length >= 2, `the offline plan has ${runs.length} batch(es); expected the pure and db halves`);
+    const flags = timingReporterFlags({ suite: 'preflight', batch: 'pure-99', scope: 'subset' });   // as preflight calls it
+    const longest = Math.max(...runs.map(r => ['node', '--test', ...r.args, ...flags.args, ...r.files].join(' ').length));
+    const code = stripComments(script);
+    const viaShell = /run\(`node --test \$\{\[\.\.\.r\.args, \.\.\.flags\.args/.test(code);
+    // cmd.exe's 8 191 less what Node wraps the line in (`cmd.exe /d /s /c "…"`): measured, a line the budget let
+    // through at under 8 191 was still refused.
+    const limit = viaShell ? 8_000 : WINDOWS_LIMIT;
+    assert.ok(longest < limit, `the longest batch is ${longest} characters, over the ${limit} its launcher allows`
+      + (viaShell ? ' (launched through a shell: cmd.exe\'s limit)' : ''));
+    assert.match(code, /execFileSync\('node', \['--test', \.\.\.r\.args, \.\.\.flags\.args, \.\.\.r\.files\]/,
+      'preflight launches its batches with execFileSync and an argument array — no shell, no 8 191-character cap');
+  });
+
   it('would actually exceed the limit unbatched — the guard is not theoretical', () => {
     const oneLine = files.map(f => ` ${f}`).join('');
     assert.ok(oneLine.length * 4 > WINDOWS_LIMIT / 8,
