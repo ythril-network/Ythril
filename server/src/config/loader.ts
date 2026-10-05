@@ -168,7 +168,7 @@ export function migrateStateFilesAtRest(): void {
     fs.writeFileSync(tmp, enc, { encoding: 'utf8', mode: 0o600 });
     fs.renameSync(tmp, p);
     try { fs.chmodSync(p, 0o600); } catch { /* non-POSIX host */ }
-    log.info(`Encrypted ${path.basename(p)} at rest`);
+    log.info(`Encrypted ${peerText(path.basename(p))} at rest`);
   }
 }
 

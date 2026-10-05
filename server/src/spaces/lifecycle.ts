@@ -13,6 +13,7 @@ import { getConfig, saveConfig, mutateConfig, getEmbeddingConfig, getDataRoot } 
 import { ensureSpaceFilesDir } from '../files/files.js';
 import { invalidateUsageCache } from '../quota/quota.js';
 import { log, peerText, peerList } from '../util/log.js';
+import { messageOf } from '../util/errors.js';
 import type { SpaceConfig, SpaceMeta, FactDoc } from '../config/types.js';
 import { VECTOR_INDEXED_COLLECTIONS, buildSpaceVectorIndexes, finalizeSpaceIndexReady } from './vector-index.js';
 import { SPACE_COLLECTIONS, repairStaleSpaceIds, dropLegacyPrefixedIndexes, dropSupersededEdgeIdentityIndex, pendingOpConflictMessage, pendingOpStillFailingMessage, setReindexNeeded, beginSpaceOp, endSpaceOp, spaceOpsInFlight } from './_shared.js';
@@ -296,7 +297,7 @@ export async function initAllSpaces(): Promise<void> {
   const spaceIds = concreteSpaces().map(s => s.id);
 
   for (const spaceId of spaceIds) {
-    log.debug(`Initialising space: ${spaceId}`);
+    log.debug(`Initialising space: ${peerText(spaceId)}`);
     // Collections, regular indexes and the vector-index create/update all still happen here and are
     // still awaited. Only the READY *poll* is deferred — the schema work must be done before the
     // instance serves traffic, and it is fast.
@@ -336,7 +337,7 @@ async function confirmSpaceIndexesInBackground(spaceIds: readonly string[]): Pro
       }
     } catch (err) {
       failed.push(spaceId);
-      log.warn(`Space '${spaceId}': index readiness check failed: ${err instanceof Error ? err.message : String(err)}`);
+      log.warn(`Space '${peerText(spaceId)}': index readiness check failed: ${peerText(messageOf(err))}`);
     }
   });
 
@@ -351,7 +352,7 @@ async function confirmSpaceIndexesInBackground(spaceIds: readonly string[]): Pro
   } else {
     log.warn(
       `Vector indexes did not reach ready for ${failed.length} of ${spaceIds.length} space(s): ` +
-      `${failed.join(', ')}. Recall may still work — check the per-index lines above for what was ` +
+      `${peerList(failed)}. Recall may still work — check the per-index lines above for what was ` +
       'actually observed, and Settings → Space → Danger Zone can rebuild them.',
     );
   }

@@ -9,7 +9,7 @@ import { v4 as uuidv4 } from 'uuid';
 import type { Filter, UpdateFilter, Sort } from 'mongodb';
 import { col } from '../db/mongo.js';
 import { ensureExpiryIndex } from '../db/expiry-index.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
 import { encryptSecret, decryptSecret, isEncrypted } from '../util/crypto.js';
 import type { WebhookSubscription, WebhookDelivery, WebhookEventType } from './types.js';
 
@@ -130,7 +130,7 @@ export async function createWebhook(input: CreateWebhookInput): Promise<{ subscr
   // `as any` — MongoDB driver's OptionalUnlessRequiredId<T> doesn't match T directly
   await col<WebhookSubscription>(COLLECTION).insertOne(sub as any);
   invalidateCache();
-  log.info(`Webhook created: ${id} → ${input.url}`);
+  log.info(`Webhook created: ${peerText(id)} → ${peerText(input.url)}`);
 
   return { subscription: stripSecret(sub), id };
 }

@@ -39,7 +39,8 @@
  */
 import { col, asFilter, asUpdate } from '../db/mongo.js';
 import { getConfig } from '../config/loader.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
+import { messageOf } from '../util/errors.js';
 import {
   recordExpiry, recordContentExpiry, needsContentRedaction, REDACTED_CHRONO_FIELDS, declaredRetention,
   type RetentionSpace,
@@ -129,9 +130,9 @@ export async function backfillTypedExpiry(
     const key = `${spaceId}|${collection}|${type ?? ''}`;
     if (!announced.has(key)) {
       announced.add(key);
-      log.info(`Retention: '${spaceId}' ${collection}/${type} is being stamped from its schema window`
-        + `${expireAt ? ` — delete at ${expireAt.toISOString()} for the oldest in this batch` : ''}`
-        + `${contentAt ? `, detail dropped at ${contentAt.toISOString()}` : ''}`);
+      log.info(`Retention: '${peerText(spaceId)}' ${collection}/${peerText(type)} is being stamped from its schema window`
+        + `${expireAt ? ` — delete at ${peerText(expireAt.toISOString())} for the oldest in this batch` : ''}`
+        + `${contentAt ? `, detail dropped at ${peerText(contentAt.toISOString())}` : ''}`);
     }
     await col(name).updateOne(asFilter({ _id: r._id }), asUpdate({ $set }));
     stamped++;
@@ -191,7 +192,7 @@ export async function sweepChronoRetention(now: Date = new Date()): Promise<Chro
       }
       result.redacted += await redactLapsedChronoContent(s.id, now);
     } catch (err) {
-      log.warn(`Chrono retention (${s.id}): ${err instanceof Error ? err.message : String(err)}`);
+      log.warn(`Chrono retention (${peerText(s.id)}): ${peerText(messageOf(err))}`);
     }
   }
 

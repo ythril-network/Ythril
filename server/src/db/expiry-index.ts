@@ -18,7 +18,8 @@
  * MongoDB. A different question.
  */
 import { getDb } from './mongo.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
+import { messageOf } from '../util/errors.js';
 
 export async function ensureExpiryIndex(
   collection: string,
@@ -34,7 +35,7 @@ export async function ensureExpiryIndex(
     try {
       await db.command({ collMod: collection, index: { keyPattern: { [field]: 1 }, expireAfterSeconds } });
     } catch (err) {
-      log.warn(`Could not ensure the TTL index on ${collection}.${field}: ${err instanceof Error ? err.message : String(err)}`);
+      log.warn(`Could not ensure the TTL index on ${peerText(collection)}.${peerText(field)}: ${peerText(messageOf(err))}`);
     }
   }
 }

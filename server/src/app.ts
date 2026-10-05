@@ -54,7 +54,8 @@ import { clearTokenCache } from './auth/tokens.js';
 import { clearOidcCache } from './auth/oidc.js';
 import { initSpace, ensureGeneralSpace, wipeSpace, reconcilePendingSpaceOp, WIPE_COLLECTION_TYPES, type WipeCollectionType } from './spaces/lifecycle.js';
 import { col } from './db/mongo.js';
-import { log, peerText, runWithRequestId } from './util/log.js';
+import { log, peerList, peerText, runWithRequestId } from './util/log.js';
+import { messageOf } from './util/errors.js';
 import { caughtFailureText } from './brain/store-failure.js';
 import { rearmCronSchedulers } from './schedulers.js';
 import { getReadiness, classifyCheckError } from './ready.js';
@@ -119,7 +120,7 @@ export function createApp() {
   if (trustProxy === true) {
     log.warn('trust proxy = true trusts the ENTIRE X-Forwarded-For chain (client-spoofable). Set it to the exact proxy hop count instead.');
   } else {
-    log.debug(`trust proxy = ${JSON.stringify(trustProxy)}`);
+    log.debug(`trust proxy = ${peerText(JSON.stringify(trustProxy))}`);
   }
 
   // ── Response compression ─────────────────────────────────────────────────
@@ -209,7 +210,7 @@ export function createApp() {
       // A code, not the message. This endpoint is public by necessity — an orchestrator cannot carry a token —
       // and driver messages name internal hosts and addresses (`getaddrinfo ENOTFOUND mongo-a.internal`). The
       // detail is logged instead, which is also where it was missing entirely before. See `ready.ts`.
-      log.error(`Readiness check itself failed: ${err instanceof Error ? err.message : String(err)}`);
+      log.error(`Readiness check itself failed: ${peerText(messageOf(err))}`);
       res.status(503).json({
         ready: false,
         checks: {
@@ -537,7 +538,7 @@ export function createApp() {
       const diff = reloadSpaceDiff(beforeSpaces, cfg);
       if (diff.kept.length) {
         cfg.spaces.push(...diff.kept);
-        log.warn(`config.json no longer lists space(s) ${diff.kept.map(s => s.id).join(', ')}; kept them. `
+        log.warn(`config.json no longer lists space(s) ${peerList(diff.kept.map(s => s.id))}; kept them. `
           + 'To remove a space by editing the file, list its id in "removeSpaces".');
       }
       if (diff.kept.length || cfg.removeSpaces) {
@@ -715,12 +716,12 @@ export function createApp() {
       res.status(400).json({ error: err.message });
       return;
     }
-    const message = err instanceof Error ? err.message : String(err);
+    const message = messageOf(err);
     /*
      * The id is no longer spelled out here: every line emitted during a request carries it now, so writing it
      * again produced it twice on the one line that already had it.
      */
-    log.error(`Unhandled error: ${message}`);
+    log.error(`Unhandled error: ${peerText(message)}`);
     res.status(500).json({ error: 'Internal server error' });
   });
 

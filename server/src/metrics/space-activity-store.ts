@@ -26,7 +26,8 @@
  */
 import { col, asFilter } from '../db/mongo.js';
 import { ensureExpiryIndex } from '../db/expiry-index.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
+import { messageOf } from '../util/errors.js';
 import { drainSpaceActivity, hourBucket, activityDocId, type CallClass } from './space-activity.js';
 
 /** The collection is instance-wide, not per space: comparing spaces means reading them together. */
@@ -123,7 +124,7 @@ export async function flushSpaceActivity(now = Date.now()): Promise<number> {
     // The counts are already drained, so they are gone. Say what was lost rather than failing a timer.
     const calls = rows.reduce((sum, r) => sum + r.totals.n, 0);
     log.warn(`Space activity: dropped a flush of ${calls} call(s) across ${ops.length} space(s): `
-      + `${err instanceof Error ? err.message : String(err)}`);
+      + `${peerText(messageOf(err))}`);
     return 0;
   }
 }

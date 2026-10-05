@@ -33,7 +33,8 @@
  */
 
 import { getDocumentProcessingConfig } from '../../config/loader.js';
-import { log } from '../../util/log.js';
+import { log, peerText } from '../../util/log.js';
+import { messageOf } from '../../util/errors.js';
 import { assistBackend, viaAssist, type AssistEndpoint } from '../../config/assist-backend.js';
 import { isLocalModelEndpoint } from '../../config/model-egress-policy.js';
 import { describeDocumentText } from './vlm-client.js';
@@ -184,12 +185,12 @@ export async function describeDocument(
     if (described) return { text: described, source: 'generated', excerpt };
     log.debug('Describe: the model returned nothing usable — keeping the document\'s own opening text');
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    const message = messageOf(err);
     // A timeout here is far more often a budget that does not fit this host than a broken model, and the two
     // read identically in a log. Name the setting on the line, so the next person does not have to guess
     // whether their model is wrong or their deadline is.
     const timedOut = /abort|timeout|timed out|deadline/i.test(message);
-    log.warn(`Describe: ${message} — keeping the document's own opening text.`
+    log.warn(`Describe: ${peerText(message)} — keeping the document's own opening text.`
       + (timedOut
         ? ` The budget was ${describeTimeoutMs(getDocumentProcessingConfig())} ms`
           + ` (documentProcessing.describeTimeoutMs / DOC_DESCRIBE_TIMEOUT_MS). A backend that swaps models`

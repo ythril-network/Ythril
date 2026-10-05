@@ -10,7 +10,7 @@ import { requireAdmin, requireAdminMfa } from '../auth/middleware.js';
 import { globalRateLimit } from '../rate-limit/middleware.js';
 import { queryAuditLog, streamAuditEntries, type AuditQueryParams } from '../audit/audit.js';
 import { getConfig } from '../config/loader.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
 import { caughtFailureText } from '../brain/store-failure.js';
 
 export const auditRouter = Router();
@@ -108,7 +108,7 @@ auditRouter.get('/export', globalRateLimit, requireAdminMfa, async (req, res) =>
     // 200 and a partial body are already sent, so the status cannot be changed. Destroying the socket makes the
     // client see a TRUNCATED response rather than a well-formed file that is silently missing entries — which for
     // an audit record is the worst possible failure, because it looks complete.
-    log.error(`Audit log export failed after ${count} entries: ${msg}`);
+    log.error(`Audit log export failed after ${count} entries: ${peerText(msg)}`);
     res.destroy(err instanceof Error ? err : new Error(msg));
   }
 });

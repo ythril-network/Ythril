@@ -24,7 +24,8 @@
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { getDataRoot } from '../config/loader.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
+import { messageOf } from '../util/errors.js';
 import { caughtFailureText } from '../brain/store-failure.js';
 import { activeSecret, encryptInPlace, isStoredEncrypted } from './stored-bytes.js';
 import { seedFileHash } from './manifest.js';
@@ -63,7 +64,7 @@ export function startAtRestMigration(): void {
   started = true;
   void runAtRestMigration().catch(err => {
     state = { ...state, phase: 'stopped', stoppedBecause: caughtFailureText(err, 'migrate stored files at rest') };
-    log.error(`Files at rest: the background pass failed: ${state.stoppedBecause}`);
+    log.error(`Files at rest: the background pass failed: ${peerText(state.stoppedBecause)}`);
   });
 }
 
@@ -107,7 +108,7 @@ export async function runAtRestMigration(): Promise<AtRestMigrationState> {
         if (meta?.sha256 && meta.sha256 !== r.sha256) {
           // Not a reason to stop: the file on disk is what it is, and it is now encrypted as it is. It does mean the
           // record and the bytes disagree, which predates this pass and is worth an operator knowing.
-          log.warn(`Files at rest: ${spaceId}/${rel} does not match the hash its record carries (it changed outside Ythril)`);
+          log.warn(`Files at rest: ${peerText(spaceId)}/${peerText(rel)} does not match the hash its record carries (it changed outside Ythril)`);
         }
       } catch (err) {
         state.plaintextLeft++;
@@ -116,7 +117,7 @@ export async function runAtRestMigration(): Promise<AtRestMigrationState> {
           log.error(`Files at rest: stopped because the disk is full. ${state.encrypted} encrypted; the rest stay plaintext until the next start.`);
           continue;
         }
-        log.warn(`Files at rest: could not encrypt ${spaceId}/${rel}: ${err instanceof Error ? err.message : String(err)}`);
+        log.warn(`Files at rest: could not encrypt ${peerText(spaceId)}/${peerText(rel)}: ${peerText(messageOf(err))}`);
       }
     }
   }

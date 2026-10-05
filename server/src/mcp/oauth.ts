@@ -39,7 +39,8 @@ import { getConfig, saveConfig } from '../config/loader.js';
 import { getPublicBaseUrl } from '../config/public-url.js';
 import { createOAuthToken, findMatchingToken } from '../auth/tokens.js';
 import { authRateLimit } from '../rate-limit/middleware.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
+import { messageOf } from '../util/errors.js';
 import { isInstanceAdmin } from '../auth/instance-admin.js';
 import { envInt } from '../config/env-num.js';
 import type { TokenRecord } from '../config/types.js';
@@ -96,7 +97,7 @@ const clientsStore: OAuthRegisteredClientsStore = {
     // Evict oldest beyond the cap.
     cfg.oauthClients = next.slice(-MAX_OAUTH_CLIENTS);
     saveConfig(cfg);
-    log.info(`Registered MCP OAuth client ${full.client_id} (${client.client_name ?? 'unnamed'})`);
+    log.info(`Registered MCP OAuth client ${peerText(full.client_id)} (${peerText(client.client_name ?? 'unnamed')})`);
     return full;
   },
 };
@@ -186,7 +187,7 @@ const provider: OAuthServerProvider = {
       ttlMs: OAUTH_TOKEN_TTL_MS,
       maxTokens: MAX_OAUTH_TOKENS,
     });
-    log.info(`Issued MCP OAuth access token for client ${client.client_id} (admin=${entry.identity.admin}, readOnly=${entry.identity.readOnly}, ttlDays=${OAUTH_TOKEN_TTL_DAYS || 'never'})`);
+    log.info(`Issued MCP OAuth access token for client ${peerText(client.client_id)} (admin=${entry.identity.admin}, readOnly=${entry.identity.readOnly}, ttlDays=${OAUTH_TOKEN_TTL_DAYS || 'never'})`);
 
     // We rotate one PAT per client and issue no refresh token. When the PAT
     // expires the client re-runs the authorization flow (re-consent) rather than
@@ -376,13 +377,13 @@ export function buildMcpOAuthRouter(): Router | null {
   try {
     issuerUrl = new URL(base);
   } catch {
-    log.warn(`MCP OAuth disabled: publicUrl "${base}" is not a valid URL.`);
+    log.warn(`MCP OAuth disabled: publicUrl "${peerText(base)}" is not a valid URL.`);
     return null;
   }
   const isLoopback = issuerUrl.hostname === 'localhost' || issuerUrl.hostname === '127.0.0.1';
   if (issuerUrl.protocol !== 'https:' && !isLoopback) {
     log.warn(
-      `MCP OAuth disabled: the OAuth flow requires an HTTPS publicUrl (got "${base}"). ` +
+      `MCP OAuth disabled: the OAuth flow requires an HTTPS publicUrl (got "${peerText(base)}"). ` +
       'Browser connectors will not be able to authorize. Set config.publicUrl (or PUBLIC_BASE_URL) ' +
       'to your external https:// URL. Static bearer-token MCP access is unaffected.',
     );
@@ -401,7 +402,7 @@ export function buildMcpOAuthRouter(): Router | null {
       }),
     );
   } catch (err) {
-    log.warn(`MCP OAuth disabled: failed to initialise authorization server (${err instanceof Error ? err.message : String(err)}).`);
+    log.warn(`MCP OAuth disabled: failed to initialise authorization server (${peerText(messageOf(err))}).`);
     return null;
   }
 
@@ -413,7 +414,7 @@ export function buildMcpOAuthRouter(): Router | null {
     });
   });
 
-  log.info(`MCP OAuth authorization server enabled (issuer ${base}).`);
+  log.info(`MCP OAuth authorization server enabled (issuer ${peerText(base)}).`);
   return router;
 }
 

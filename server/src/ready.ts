@@ -10,7 +10,7 @@
  */
 
 import { getMongo } from './db/mongo.js';
-import { log } from './util/log.js';
+import { log, peerText } from './util/log.js';
 
 const TIMEOUT_MS = 2_000;
 const CACHE_TTL_MS = 2_000;
@@ -83,10 +83,10 @@ function logTransition(check: string, reason: CheckReason | 'ok', detail?: strin
   const was = _lastState.get(check);
   _lastState.set(check, key);
   if (reason === 'ok') {
-    if (was !== undefined) log.info(`Readiness: ${check} recovered`);
+    if (was !== undefined) log.info(`Readiness: ${peerText(check)} recovered`);
     return;
   }
-  log.warn(`Readiness: ${check} is failing (${reason})${detail ? ` — ${detail}` : ''}`);
+  log.warn(`Readiness: ${peerText(check)} is failing (${reason})${detail ? ` — ${peerText(detail)}` : ''}`);
 }
 
 export interface ReadinessResult {

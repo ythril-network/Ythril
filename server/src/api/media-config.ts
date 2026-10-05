@@ -24,7 +24,7 @@ import {
   allowPrivateForSlot, isLocalModelEndpoint, privateAddressHint, type EgressSlot,
 } from '../config/model-egress-policy.js';
 import { listUrlFor, type VlmWire } from '../files/converters/vlm-endpoint.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
 import { caughtFailureText } from '../brain/store-failure.js';
 import { providerSignature, getActiveProviderSignature } from '../files/media/worker.js';
 import { MAX_PASSAGES_PER_REQUEST_MIN, MAX_PASSAGES_PER_REQUEST_MAX } from '../brain/rerank-client.js';
@@ -824,7 +824,7 @@ mediaConfigRouter.patch('/', requireAdminMfa, (req, res) => {
     respBody['decisionModel'] = decisionModelView();
     res.json({ ok: true, config: respBody });
   } catch (err) {
-    log.warn(`Failed to save media config: ${err}`);
+    log.warn(`Failed to save media config: ${peerText(err)}`);
     res.status(500).json({ error: 'Failed to save configuration' });
   }
 });

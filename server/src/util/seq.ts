@@ -1,6 +1,6 @@
 import { col, asFilter, asUpdate } from '../db/mongo.js';
 import { getConfig, saveConfig } from '../config/loader.js';
-import { log, peerText } from './log.js';
+import { log, peerText, peerList } from './log.js';
 import type { SpaceCounterDoc } from '../config/types.js';
 import { spaceCollection, type SpacePart } from '../db/space-collection.js';
 
@@ -330,7 +330,7 @@ export async function resetStaleWatermarksIfNeeded(): Promise<void> {
     log.warn(
       `Seq counters absent but ${cleared.length} watermark map(s) were set — reset (bind-mount/volume mismatch `
       + `recovery). Local seqs restart at 1, so a retained watermark would describe numbers about to be reused: `
-      + `${cleared.join(', ')}`,
+      + `${peerList(cleared)}`,
     );
   }
 }

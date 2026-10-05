@@ -15,7 +15,7 @@ import { col, asFilter, asUpdate } from '../db/mongo.js';
 import { spacesWhereTokenMay, holdsRung } from '../auth/reachable-spaces.js';
 import { findWhereTokenMay } from '../auth/find-where-token-may.js';
 import { getConfig } from '../config/loader.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
 import { scanSpace, pairContentHash, pairByAge } from '../brain/dupe-scanner.js';
 import { computeMergePlan, applyResolutions, executeMerge } from '../brain/merge.js';
 import { nliConfigured } from '../brain/nli-client.js';
@@ -212,7 +212,7 @@ duplicatesRouter.get('/', globalRateLimit, requireAuth, async (req, res) => {
       duplicates: results.slice(0, 500).map(c => toRecord(c, signals.get(c.spaceId)?.get(pairKey(c)))),
     });
   } catch (err) {
-    log.error(`GET /api/duplicates: ${err}`);
+    log.error(`GET /api/duplicates: ${peerText(err)}`);
     res.status(500).json({ error: 'Internal error' });
   }
 });
@@ -233,7 +233,7 @@ duplicatesRouter.post('/:id/dismiss', globalRateLimit, requireAuth, denyReadOnly
     );
     res.json({ status: 'dismissed' });
   } catch (err) {
-    log.error(`POST /api/duplicates/:id/dismiss: ${err}`);
+    log.error(`POST /api/duplicates/:id/dismiss: ${peerText(err)}`);
     res.status(500).json({ error: 'Internal error' });
   }
 });
@@ -254,7 +254,7 @@ duplicatesRouter.post('/:id/reopen', globalRateLimit, requireAuth, denyReadOnly,
     }
     res.status(404).json({ error: 'Dismissed duplicate candidate not found' });
   } catch (err) {
-    log.error(`POST /api/duplicates/:id/reopen: ${err}`);
+    log.error(`POST /api/duplicates/:id/reopen: ${peerText(err)}`);
     res.status(500).json({ error: 'Internal error' });
   }
 });
@@ -296,7 +296,7 @@ duplicatesRouter.post('/:id/merge', globalRateLimit, requireAuth, denyReadOnly, 
     );
     res.json({ status: 'merged', survivorId: result.entity._id });
   } catch (err) {
-    log.error(`POST /api/duplicates/:id/merge: ${err}`);
+    log.error(`POST /api/duplicates/:id/merge: ${peerText(err)}`);
     res.status(500).json({ error: 'Internal error' });
   }
 });
@@ -325,7 +325,7 @@ duplicatesRouter.post('/scan', globalRateLimit, requireAuthMfa, denyReadOnly, as
     }
     res.json({ scannedSpaces: targets.length, scanned, pairs });
   } catch (err) {
-    log.error(`POST /api/duplicates/scan: ${err}`);
+    log.error(`POST /api/duplicates/scan: ${peerText(err)}`);
     res.status(500).json({ error: 'Internal error' });
   }
 });

@@ -1,4 +1,4 @@
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
 
 /**
  * Environment variables that USED to work and no longer do, refused at boot rather than ignored.
@@ -57,7 +57,7 @@ export function assertNoRemovedEnvVarsOrExit(): void {
   if (problems.length === 0) return;
   log.error(`Refusing to start: ${problems.length} environment variable${problems.length === 1 ? '' : 's'} `
     + 'in this environment was removed in a major release.');
-  for (const p of problems) log.error(`  • ${p}`);
+  for (const p of problems) log.error(`  • ${peerText(p)}`);
   log.error('Continuing would be worse than stopping: the value would configure nothing, the built-in default '
     + 'would take its place, and nothing would say so — a vision or speech endpoint silently pointing at the '
     + 'wrong host. Rename the variable(s) above; both spellings worked in every 3.x build, so the rename is '

@@ -5,7 +5,7 @@ import { configExists, saveConfig, saveSecrets, loadSecrets, loadConfig } from '
 import { createToken } from '../auth/tokens.js';
 import { ensureInstanceKeypair } from '../util/signing.js';
 import { startConfiguredInstanceServices } from '../bootstrap.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
 import type { Config, SecretsFile } from '../config/types.js';
 
 /**
@@ -101,13 +101,13 @@ setupRouter.post('/json', authRateLimit, async (req, res) => {
   try {
     await startConfiguredInstanceServices();
   } catch (err) {
-    log.warn(`Could not start background services during JSON setup: ${err}`);
+    log.warn(`Could not start background services during JSON setup: ${peerText(err)}`);
   }
 
   // Create the initial admin PAT so the Angular app can log in immediately
   const { record, plaintext } = await createToken({ name: 'Admin', admin: true, expiresAt: null });
 
-  log.info(`Setup complete (JSON). Brain ID: ${instanceId}`);
+  log.info(`Setup complete (JSON). Brain ID: ${peerText(instanceId)}`);
 
   const { hash: _h, ...safeRecord } = record;
   res.status(201).json({ token: safeRecord, plaintext });

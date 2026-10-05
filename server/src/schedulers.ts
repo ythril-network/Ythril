@@ -30,7 +30,8 @@
  *
  * The distinction is exactly "is the schedule captured at start, or read per run" — not "is it a scheduler".
  */
-import { log } from './util/log.js';
+import { log, peerText } from './util/log.js';
+import { messageOf } from './util/errors.js';
 
 /**
  * Re-arm every scheduler whose cron expression is captured at start time.
@@ -63,8 +64,8 @@ export async function rearmCronSchedulers(): Promise<void> {
     try {
       await run();
     } catch (err) {
-      log.error(`Config reload: re-arming the ${name} failed, so it is still on its previous schedule: `
-        + `${err instanceof Error ? err.message : String(err)}`);
+      log.error(`Config reload: re-arming the ${peerText(name)} failed, so it is still on its previous schedule: `
+        + `${peerText(messageOf(err))}`);
     }
   }
 }

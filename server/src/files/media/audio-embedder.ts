@@ -21,7 +21,7 @@ import { embed } from '../../brain/embedding.js';
 import type { FileMetaDoc } from '../../config/types.js';
 import type { SttProvider, SttSegment } from './providers.js';
 import { extForMimeType } from '../mime.js';
-import { log } from '../../util/log.js';
+import { log, peerText } from '../../util/log.js';
 import { AUDIO_STEPS, type MediaProgressOpts } from './progress.js';
 import { spaceCollection } from '../../db/space-collection.js';
 
@@ -217,7 +217,7 @@ export async function embedAudio(
     // Step 1: total duration
     const totalDurationS = await getDurationSeconds(inputPath);
     if (totalDurationS <= 0) {
-      log.warn(`Audio embedder: could not determine duration for ${fileId}, treating as single chunk`);
+      log.warn(`Audio embedder: could not determine duration for ${peerText(fileId)}, treating as single chunk`);
     }
 
     // Step 2: silence detection
@@ -248,7 +248,7 @@ export async function embedAudio(
       // Before the call, not after: afterwards this run has already spent a full STT budget producing a chunk
       // the recovering run is about to overwrite.
       if (opts?.shouldStop?.()) {
-        log.warn(`Audio embedder: lease lost after ${i}/${chunks.length} chunks for ${fileId} — stopping `
+        log.warn(`Audio embedder: lease lost after ${i}/${chunks.length} chunks for ${peerText(fileId)} — stopping `
           + 'rather than competing with the run that recovered this job');
         break;
       }
@@ -306,7 +306,7 @@ export async function embedAudio(
       } catch (err) {
         failed++;
         lastError = err instanceof Error ? err.message : String(err);
-        log.warn(`Audio embedder: chunk ${i} of ${fileId} failed: ${lastError}`);
+        log.warn(`Audio embedder: chunk ${i} of ${peerText(fileId)} failed: ${peerText(lastError)}`);
         // Continue processing remaining chunks — a partial transcript beats none. The COUNT is what the
         // caller needs, though: without it the worker marked the job `complete` over audio that was
         // never transcribed, which is a silent loss and worse than the error that caused it.

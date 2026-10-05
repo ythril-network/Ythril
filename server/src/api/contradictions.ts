@@ -21,7 +21,7 @@ import { Router } from 'express';
 import { requireAuth, denyReadOnly, requireAuthMfa } from '../auth/middleware.js';
 import { globalRateLimit } from '../rate-limit/middleware.js';
 import { col, asFilter, asUpdate } from '../db/mongo.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
 import { pairContentHash } from '../brain/dupe-scanner.js';
 import { scanSpace } from '../brain/contradiction-scanner.js';
 import { nliConfigured } from '../brain/nli-client.js';
@@ -119,7 +119,7 @@ contradictionsRouter.get('/', globalRateLimit, requireAuth, async (req, res) => 
     // model-judged pass is among the ones that run.
     res.json({ contradictions: results.slice(0, 500).map(toRecord), nliConfigured: nliConfigured() });
   } catch (err) {
-    log.error(`GET /api/contradictions: ${err}`);
+    log.error(`GET /api/contradictions: ${peerText(err)}`);
     res.status(500).json({ error: 'Internal error' });
   }
 });
@@ -144,7 +144,7 @@ contradictionsRouter.post('/:id/dismiss', globalRateLimit, requireAuth, denyRead
     }
     res.status(404).json({ error: 'Contradiction candidate not found' });
   } catch (err) {
-    log.error(`POST /api/contradictions/:id/dismiss: ${err}`);
+    log.error(`POST /api/contradictions/:id/dismiss: ${peerText(err)}`);
     res.status(500).json({ error: 'Internal error' });
   }
 });
@@ -163,7 +163,7 @@ contradictionsRouter.post('/:id/reopen', globalRateLimit, requireAuth, denyReadO
     }
     res.status(404).json({ error: 'Dismissed contradiction candidate not found' });
   } catch (err) {
-    log.error(`POST /api/contradictions/:id/reopen: ${err}`);
+    log.error(`POST /api/contradictions/:id/reopen: ${peerText(err)}`);
     res.status(500).json({ error: 'Internal error' });
   }
 });
@@ -296,7 +296,7 @@ contradictionsRouter.post('/:id/resolve', globalRateLimit, requireAuth, denyRead
     }
     res.status(404).json({ error: 'Contradiction candidate not found' });
   } catch (err) {
-    log.error(`POST /api/contradictions/:id/resolve: ${err}`);
+    log.error(`POST /api/contradictions/:id/resolve: ${peerText(err)}`);
     res.status(500).json({ error: 'Internal error' });
   }
 });
@@ -325,7 +325,7 @@ contradictionsRouter.post('/scan', globalRateLimit, requireAuthMfa, denyReadOnly
     // short of a judge's own counter.
     res.json({ scannedSpaces: spaces.length, scanned, found, judgedPairs, modelCalls, nliStalled, budgetExhausted });
   } catch (err) {
-    log.error(`POST /api/contradictions/scan: ${err}`);
+    log.error(`POST /api/contradictions/scan: ${peerText(err)}`);
     res.status(500).json({ error: 'Internal error' });
   }
 });

@@ -19,7 +19,8 @@ import { getModelSlots, getMediaEmbeddingConfig } from '../config/loader.js';
 import { boundedJson } from '../util/bounded-read.js';
 import { allowPrivateForSlot, isLocalModelEndpoint as isLocalEndpoint } from '../config/model-egress-policy.js';
 import { ssrfSafeFetch } from '../util/ssrf.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
+import { messageOf } from '../util/errors.js';
 import { slotTimeoutMs } from '../config/model-slots.js';
 
 export type NliLabel = 'entailment' | 'neutral' | 'contradiction';
@@ -67,7 +68,7 @@ function logUnknownLabel(rawLabel: string): void {
   if (_warnedLabels.has(key)) return;
   _warnedLabels.add(key);
   log.warn(
-    `NLI judge returned the label '${key}', which is not one of entailment / neutral / contradiction ` +
+    `NLI judge returned the label '${peerText(key)}', which is not one of entailment / neutral / contradiction ` +
     '(or LABEL_0..2). The contradiction scanner will treat every pair as unjudged, which looks identical ' +
     'to an unreachable endpoint. The most common cause is a 2-class head such as a zeroshot/NLI model ' +
     "emitting 'not_entailment' — this feature needs a 3-class MNLI head.",
@@ -137,7 +138,7 @@ export async function classify(premise: string, hypothesis: string): Promise<Nli
     return parseVerdict(await boundedJson(res, 'NLI'));
   } catch (err) {
     // Deliberately does not include the pair text: it is record content, and this line goes to the log.
-    log.warn(`NLI classify failed — treating as no verdict: ${err instanceof Error ? err.message : String(err)}`);
+    log.warn(`NLI classify failed — treating as no verdict: ${peerText(messageOf(err))}`);
     return null;
   }
 }

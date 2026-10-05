@@ -402,7 +402,7 @@ dataRouter.post('/restore', requireAdminMfa, async (req, res) => {
         await buildSpaceVectorIndexes(space.id, false, { force: true });
         return { id: space.id, ok: true as const };
       } catch (err) {
-        log.error(`restore: failed to rebuild vector indexes for space '${space.id}': ${err}`);
+        log.error(`restore: failed to rebuild vector indexes for space '${peerText(space.id)}': ${peerText(err)}`);
         return { id: space.id, ok: false as const };
       }
     });

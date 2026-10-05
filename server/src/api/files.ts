@@ -25,7 +25,8 @@ import path from 'path';
 import { requireSpaceAuth, denyReadOnly } from '../auth/middleware.js';
 import { globalRateLimit } from '../rate-limit/middleware.js';
 import { getConfig } from '../config/loader.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
+import { messageOf } from '../util/errors.js';
 import { openStoredRead, statStored, StoredFileUnreadable } from '../files/stored-bytes.js';
 import {
   listDir,
@@ -334,12 +335,12 @@ fileStoreRouter.get('/:spaceId', globalRateLimit, requireSpaceAuth, async (req, 
      * hand the client a truncated file that looks complete; destroying it makes the client see a failed transfer.
      */
     body.on('error', err => {
-      log.warn(`download of ${foundMid}/${normalised} failed mid-stream: ${err instanceof Error ? err.message : String(err)}`);
+      log.warn(`download of ${peerText(foundMid)}/${peerText(normalised)} failed mid-stream: ${peerText(messageOf(err))}`);
       res.destroy(err instanceof Error ? err : undefined);
     });
     body.pipe(res);
   } catch (err) {
-    log.warn(`readFileBytes error for space ${foundMid}, path ${normalised}: ${err}`);
+    log.warn(`readFileBytes error for space ${peerText(foundMid)}, path ${peerText(normalised)}: ${peerText(err)}`);
     if (err instanceof StoredFileUnreadable) { res.status(500).json({ error: err.message }); return; }
     res.status(500).json({ error: 'Failed to read file' });
   }
@@ -374,7 +375,7 @@ fileStoreRouter.post(
         res.status(400).json({ error: caughtFailureText(err, 'create a directory') });
         return;
       }
-      log.warn(`createDir error for space ${targetSpace}, path ${dirPath}: ${err}`);
+      log.warn(`createDir error for space ${peerText(targetSpace)}, path ${peerText(dirPath)}: ${peerText(err)}`);
       res.status(500).json({ error: 'Failed to create directory' });
     }
   },
@@ -439,7 +440,7 @@ fileStoreRouter.post(
 
     const { retryJob } = await import('../files/media/job-queue.js');
     const result = await retryJob(targetSpace, normId).catch(err => {
-      log.warn(`retryJob error for ${targetSpace}/${normId}: ${err}`);
+      log.warn(`retryJob error for ${peerText(targetSpace)}/${peerText(normId)}: ${peerText(err)}`);
       return 'error' as const;
     });
 
@@ -502,7 +503,7 @@ fileStoreRouter.delete('/:spaceId', globalRateLimit, requireSpaceAuth, denyReadO
       );
       if (orphan) {
         await deleteFileMeta(targetSpace, filePath).catch(err => {
-          log.warn(`deleteFileMeta (orphan cleanup) error for space ${targetSpace}, path ${filePath}: ${err}`);
+          log.warn(`deleteFileMeta (orphan cleanup) error for space ${peerText(targetSpace)}, path ${peerText(filePath)}: ${peerText(err)}`);
         });
         res.status(204).end();
         return;
@@ -537,35 +538,35 @@ fileStoreRouter.delete('/:spaceId', globalRateLimit, requireSpaceAuth, denyReadO
       ])).flat();
 
       await removeTree(absPath, { mustExist: true });   // a converter may still be writing under it
-      log.info(`Deleted directory ${absPath} (space: ${targetSpace})`);
+      log.info(`Deleted directory ${peerText(absPath)} (space: ${peerText(targetSpace)})`);
       invalidateUsageCache(); // freed disk — reflect it in the next quota check
 
       // Metadata: soft-flag the user-visible file records (retain for audit) or hard-delete
       // them, per the softDeleteFileMeta setting. Derived chunk records are always removed.
       if (getConfig().softDeleteFileMeta === true) {
         await markFileMetaDeletedByPrefix(targetSpace, filePath).catch(err => {
-          log.warn(`markFileMetaDeletedByPrefix error for space ${targetSpace}, path ${filePath}: ${err}`);
+          log.warn(`markFileMetaDeletedByPrefix error for space ${peerText(targetSpace)}, path ${peerText(filePath)}: ${peerText(err)}`);
         });
       } else {
         await deleteFileMetaByPrefix(targetSpace, filePath).catch(err => {
-          log.warn(`deleteFileMetaByPrefix error for space ${targetSpace}, path ${filePath}: ${err}`);
+          log.warn(`deleteFileMetaByPrefix error for space ${peerText(targetSpace)}, path ${peerText(filePath)}: ${peerText(err)}`);
         });
       }
       // Cancel any queued media/text jobs for files under this folder, or they would
       // outlive their sources and retry forever against paths that no longer exist.
       await cancelMediaJobsByPrefix(targetSpace, filePath).catch(err => {
-        log.warn(`cancelMediaJobsByPrefix error for space ${targetSpace}, path ${filePath}: ${err}`);
+        log.warn(`cancelMediaJobsByPrefix error for space ${peerText(targetSpace)}, path ${peerText(filePath)}: ${peerText(err)}`);
       });
       // Remove conversion sidecar records + on-disk files (`_converted/<path>`,
       // `_extracted/<path>`), which live outside the folder prefix and would otherwise orphan.
       await deleteConversionArtifactsByPrefix(targetSpace, filePath).catch(err => {
-        log.warn(`deleteConversionArtifactsByPrefix error for space ${targetSpace}, path ${filePath}: ${err}`);
+        log.warn(`deleteConversionArtifactsByPrefix error for space ${peerText(targetSpace)}, path ${peerText(filePath)}: ${peerText(err)}`);
       });
       // Propagate the deletion to sync peers.
       await writeFileTombstones(targetSpace, removedPaths);
       res.status(204).end();
     } catch (err) {
-      log.warn(`rm dir error for space ${targetSpace}, path ${filePath}: ${err}`);
+      log.warn(`rm dir error for space ${peerText(targetSpace)}, path ${peerText(filePath)}: ${peerText(err)}`);
       res.status(500).json({ error: 'Failed to delete directory' });
     }
     return;
@@ -581,7 +582,7 @@ fileStoreRouter.delete('/:spaceId', globalRateLimit, requireSpaceAuth, denyReadO
       res.status(400).json({ error: caughtFailureText(err, 'delete a file') });
       return;
     }
-    log.warn(`deleteFile error for space ${targetSpace}, path ${filePath}: ${err}`);
+    log.warn(`deleteFile error for space ${peerText(targetSpace)}, path ${peerText(filePath)}: ${peerText(err)}`);
     res.status(500).json({ error: 'Failed to delete file' });
   }
 });
@@ -619,7 +620,7 @@ fileStoreRouter.patch('/:spaceId', globalRateLimit, requireSpaceAuth, denyReadOn
       res.status(400).json({ error: caughtFailureText(err, 'move a file') });
       return;
     }
-    log.warn(`moveFile error for space ${targetSpace}, ${srcPath} → ${destination}: ${err}`);
+    log.warn(`moveFile error for space ${peerText(targetSpace)}, ${peerText(srcPath)} → ${peerText(destination)}: ${peerText(err)}`);
     res.status(500).json({ error: 'Failed to move path' });
   }
 });

@@ -22,7 +22,7 @@
  */
 
 import { getConfig } from './loader.js';
-import { log } from '../util/log.js';
+import { log, peerText, peerList } from '../util/log.js';
 
 /** True if `raw` is an exact, scheme-qualified origin we are willing to trust. */
 export function isValidEmbedOrigin(raw: unknown): raw is string {
@@ -72,7 +72,7 @@ export function getAllowedEmbedOrigins(): string[] {
       valid.push(new URL(entry.trim()).origin);
     } else {
       log.warn(
-        `embed.allowedOrigins: ignoring invalid entry ${JSON.stringify(entry)} — ` +
+        `embed.allowedOrigins: ignoring invalid entry ${peerText(JSON.stringify(entry))} — ` +
         `expected an exact https origin with no path (e.g. "https://portal.example.com"); ` +
         `wildcards are not supported.`,
       );
@@ -93,7 +93,7 @@ export function warnIfEmbeddingEnabled(): void {
   if (origins.length === 0) return;
   log.warn(
     `EMBEDDING ENABLED: cross-origin framing and runtime theming are permitted for ` +
-    `${origins.join(', ')}. These origins can iframe this instance and restyle its UI. ` +
+    `${peerList(origins)}. These origins can iframe this instance and restyle its UI. ` +
     `Ensure you control them.`,
   );
 }

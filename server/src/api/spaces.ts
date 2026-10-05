@@ -392,7 +392,7 @@ spacesRouter.put('/:id/schema', globalRateLimit, requireSpaceAuthMfaScoped('id')
       const backupContent = JSON.stringify({ typeSchemas: previousTypeSchemas }, null, 2);
       await writeSpaceFile(id, `_schema-backup-${backupTimestamp}.json`, backupContent);
     } catch (err) {
-      log.warn(`PUT /${id}/schema: could not write schema backup: ${err}`);
+      log.warn(`PUT /${peerText(id)}/schema: could not write schema backup: ${peerText(err)}`);
       // Non-fatal — proceed with replacement
     }
   }
@@ -883,7 +883,7 @@ spacesRouter.delete('/:id', globalRateLimit, requireAdminMfaScoped('id'), async 
           data: { spaceId: id, spaceLabel: space.label },
         }),
         signal: AbortSignal.timeout(5_000),
-      }).catch(err => log.warn(`notify ${member.label} of space_deletion_pending: ${err}`));
+      }).catch(err => log.warn(`notify ${peerText(member.label)} of space_deletion_pending: ${peerText(err)}`));
     }
   }
 

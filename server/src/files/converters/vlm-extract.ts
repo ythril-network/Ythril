@@ -12,7 +12,8 @@
  * content before falling back to OCR. Consensus (`verify`) and the external hosted-VLM egress path
  * (with ssrfSafeFetch) are later phases.
  */
-import { log } from '../../util/log.js';
+import { log, peerList, peerText } from '../../util/log.js';
+import { messageOf } from '../../util/errors.js';
 import { assistBackend, viaAssist } from '../../config/assist-backend.js';
 import { getDocumentProcessingConfig } from '../../config/loader.js';
 import type { DocExtractionMode } from '../../config/types.js';
@@ -39,7 +40,7 @@ function explainMissing(vlm: VlmEndpoint, verify: VlmEndpoint, render: boolean):
   else if (!vlm.baseUrl) missing.push('no VLM endpoint resolved — set DOC_VLM_URL, or configure the vision provider it falls back to');
   if (!render) missing.push('the page renderer is unavailable (RENDER_SIDECAR_URL)');
   if (verify.model && !verify.baseUrl) missing.push('documentProcessing.verifyModel is set but no endpoint resolved');
-  return missing.length > 0 ? ` — ${missing.join('; ')}` : '';
+  return missing.length > 0 ? ` — ${peerList(missing, '; ')}` : '';
 }
 
 /**
@@ -93,14 +94,14 @@ export async function vlmExtractDocument(
     ocr = await new UnstructuredConverter().convertRich(fileBytes, fileName);
   } catch (err) {
     if (route.ocrOnly) throw err; // no VLM path to fall through to — surface the OCR error as today
-    log.warn(`VLM extract: OCR evidence unavailable (${err instanceof Error ? err.message : err}) — VLM will run ungrounded`);
+    log.warn(`VLM extract: OCR evidence unavailable (${peerText(messageOf(err))}) — VLM will run ungrounded`);
   }
 
   if (route.ocrOnly) {
     // Name the evidence, not just the verdict. "mode 'vlm' needs vlm; fell back to OCR" cost a reporter a
     // hunt through nine configured endpoints to discover a tenth they had never set — the message knew
     // which gate closed and did not say. Now it names the setting and what was found there.
-    if (route.fallbackReason) log.info(`VLM extract: ${route.fallbackReason}${explainMissing(vlmEp, verifyEp, render)}`);
+    if (route.fallbackReason) log.info(`VLM extract: ${peerText(route.fallbackReason)}${explainMissing(vlmEp, verifyEp, render)}`);
     return { ...(ocr as UnstructuredResult), extractionPath: 'ocr' };
   }
 
@@ -182,7 +183,7 @@ export async function vlmExtractDocument(
       // must still be loud.
       markdown += `\n\n<!-- document truncated to ${pagesRead} of ${totalPages} pages -->`;
       log.warn(
-        `VLM extract: '${fileName}' truncated — read ${pagesRead} of ${totalPages} pages ` +
+        `VLM extract: '${peerText(fileName)}' truncated — read ${pagesRead} of ${totalPages} pages ` +
         `(documentProcessing.maxTotalPages = ${pageBudget}). The rest was NOT indexed.`,
       );
     }
@@ -200,19 +201,19 @@ export async function vlmExtractDocument(
       // require every window's buffers alive at once. Not a regression either: before segmentation a long
       // document was truncated to one window, so consensus never saw more than this anyway.
       if (segmented && route.stages.includes('verify') && cfg.verifyModel) {
-        log.info(`VLM extract: '${fileName}' was read in segments — skipping the consensus pass (it would re-transcribe all ${pagesRead} pages).`);
+        log.info(`VLM extract: '${peerText(fileName)}' was read in segments — skipping the consensus pass (it would re-transcribe all ${pagesRead} pages).`);
       }
       if (!segmented && route.stages.includes('verify') && cfg.verifyModel && evidence.trim()) {
         const consensus = await runConsensus(firstWindowPages, markdown, evidence, cfg, verifyEp, repairEp).catch(err => {
-          log.warn(`VLM extract: consensus pass errored (${err instanceof Error ? err.message : err}) — keeping primary`);
+          log.warn(`VLM extract: consensus pass errored (${peerText(messageOf(err))}) — keeping primary`);
           return null;
         });
         if (consensus && consensus.text !== markdown) {
-          log.debug(`VLM extract: accepted ${ranLabel}+verify (coverage ${(consensus.coverage * 100).toFixed(0)}%)`);
+          log.debug(`VLM extract: accepted ${ranLabel}+verify (coverage ${peerText((consensus.coverage * 100).toFixed(0))}%)`);
           return { markdown: consensus.text, extractedImages: ocr?.extractedImages ?? [], extractionPath: `${ranLabel}+verify` };
         }
       }
-      log.debug(`VLM extract: accepted ${ranLabel} (${pagesRead} pages, coverage ${(v.coverage * 100).toFixed(0)}%)`);
+      log.debug(`VLM extract: accepted ${ranLabel} (${pagesRead} pages, coverage ${peerText((v.coverage * 100).toFixed(0))}%)`);
       return { markdown, extractedImages: ocr?.extractedImages ?? [], extractionPath: ranLabel };
     }
 
@@ -232,7 +233,7 @@ export async function vlmExtractDocument(
       const assist = assistBackend('repair');
       const repairModel = assist ? assist.model : (cfg.repairModel || cfg.vlmModel);
       try {
-        log.info(`VLM extract: validation failed (${v.issues.join('; ')}) — repairing with ${assist ? `the assist model's ${assist.which} ` : ''}${repairModel}`);
+        log.info(`VLM extract: validation failed (${peerList(v.issues, '; ')}) — repairing with ${assist ? `the assist model's ${assist.which} ` : ''}${peerText(repairModel)}`);
         const r = assist
           ? await viaAssist('repair', assist, async ep => {
               const out = await repairMarkdownExternal({
@@ -248,23 +249,23 @@ export async function vlmExtractDocument(
         const repaired = r.text.trim();
         const rv = validateExtraction(repaired, evidence, { finishReason: r.truncated ? 'length' : undefined });
         if (rv.ok) {
-          log.debug(`VLM extract: accepted ${ranLabel}+repair (coverage ${(rv.coverage * 100).toFixed(0)}%)`);
+          log.debug(`VLM extract: accepted ${ranLabel}+repair (coverage ${peerText((rv.coverage * 100).toFixed(0))}%)`);
           return { markdown: repaired, extractedImages: ocr.extractedImages ?? [], extractionPath: `${ranLabel}+repair` };
         }
-        log.info(`VLM extract: repair still below threshold (${rv.issues.join('; ')}) — falling back to OCR`);
+        log.info(`VLM extract: repair still below threshold (${peerList(rv.issues, '; ')}) — falling back to OCR`);
       } catch (err) {
-        log.warn(`VLM extract: repair errored (${err instanceof Error ? err.message : err}) — falling back to OCR`);
+        log.warn(`VLM extract: repair errored (${peerText(messageOf(err))}) — falling back to OCR`);
       }
     }
 
     if (ocr) {
-      if (!route.stages.includes('repair')) log.info(`VLM extract: validation failed (${v.issues.join('; ')}) — falling back to OCR`);
+      if (!route.stages.includes('repair')) log.info(`VLM extract: validation failed (${peerList(v.issues, '; ')}) — falling back to OCR`);
       return { ...ocr, extractionPath: `${ranLabel}→ocr` };
     }
     throw new Error(`VLM output rejected and no OCR evidence to fall back to: ${v.issues.join('; ')}`);
   } catch (err) {
     if (ocr) {
-      log.warn(`VLM extract failed (${err instanceof Error ? err.message : err}) — falling back to OCR`);
+      log.warn(`VLM extract failed (${peerText(messageOf(err))}) — falling back to OCR`);
       return { ...ocr, extractionPath: `${route.label}→ocr` };
     }
     throw err; // nothing produced a result — let the pipeline surface the failure as today
@@ -310,7 +311,7 @@ async function runConsensus(
       const reconciled = r.text.trim();
       if (reconciled) candidates.push({ text: reconciled, label: 'consensus' });
     } catch (err) {
-      log.warn(`VLM extract: consensus reconcile errored (${err instanceof Error ? err.message : err}) — arbitrating on the drafts`);
+      log.warn(`VLM extract: consensus reconcile errored (${peerText(messageOf(err))}) — arbitrating on the drafts`);
     }
   }
 

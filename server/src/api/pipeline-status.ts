@@ -37,7 +37,8 @@ import { resolveVlmEndpoint } from '../files/converters/vlm-endpoint.js';
 import { getDb } from '../db/mongo.js';
 import { faceRecognitionAllowed } from '../files/converters/media-level.js';
 import { VECTOR_INDEXED_COLLECTIONS } from '../spaces/vector-index.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
+import { messageOf } from '../util/errors.js';
 import { caughtFailureText } from '../brain/store-failure.js';
 import { assistBackend, assistBudgetStatus, type AssistBudget } from '../config/assist-backend.js';
 import type { ChatWire } from '../util/model-chat.js';
@@ -505,7 +506,7 @@ async function indexStatus(): Promise<{ spaces: SpaceIndexStatus[]; unavailable?
           }
         } catch (err) {
           listingFailed = true;
-          log.debug(`pipeline-status: could not list search indexes for ${space.id}_${collection}: ${err instanceof Error ? err.message : String(err)}`);
+          log.debug(`pipeline-status: could not list search indexes for ${peerText(space.id)}_${peerText(collection)}: ${peerText(messageOf(err))}`);
           for (const e of entries) collections.push({ ...e, status: null });
         }
       }));
@@ -605,7 +606,7 @@ pipelineStatusRouter.get('/', requireAdmin, async (_req, res) => {
   try {
     res.json(await getPipelineStatus());
   } catch (err) {
-    log.warn(`pipeline-status failed: ${err instanceof Error ? err.message : String(err)}`);
+    log.warn(`pipeline-status failed: ${peerText(messageOf(err))}`);
     res.status(500).json({ error: 'Failed to collect pipeline status' });
   }
 });

@@ -39,6 +39,7 @@ import { col, asFilter, getMongo } from '../../db/mongo.js';
 import type { MediaJobDoc } from '../../config/types.js';
 import { spaceCollection } from '../../db/space-collection.js';
 import { isSpaceNotWritable } from '../../spaces/space-write-gate.js';
+import { peerText } from '../../util/log.js';
 
 /** A fresh claim token. Random rather than time-based: two pods claiming in the same millisecond must differ. */
 export function newClaimToken(): string {
@@ -182,11 +183,11 @@ export function stalledJobWarning(job: {
   const quietMs = since ? Math.max(0, nowMs - Date.parse(since)) : NaN;
   const quiet = Number.isFinite(quietMs) ? `${Math.round(quietMs / 1000)}s` : 'unknown time';
   const where = job.progress?.step
-    ? `${job.progress.step}${job.progress.done !== undefined ? ` ${job.progress.done}/${job.progress.total ?? '?'}` : ''}`
+    ? `${peerText(job.progress.step)}${job.progress.done !== undefined ? ` ${job.progress.done}/${job.progress.total ?? '?'}` : ''}`
     : 'no step reported';
   const size = sizeBytes !== undefined && Number.isFinite(sizeBytes)
-    ? `${(sizeBytes / 1024).toFixed(0)} KiB` : 'unknown size';
-  return `Media worker: re-queued ${job.spaceId ?? '?'}/${job.filePath ?? job._id ?? '?'} after ${quiet}`
+    ? `${peerText((sizeBytes / 1024).toFixed(0))} KiB` : 'unknown size';
+  return `Media worker: re-queued ${peerText(job.spaceId ?? '?')}/${peerText(job.filePath ?? job._id ?? '?')} after ${quiet}`
     + ` with no progress (${size}, last step: ${where}, attempt ${job.attempts ?? '?'}/${job.maxAttempts ?? '?'}).`
     + ` If the file is large and the instance is CPU-bound this is a slow job being killed, not a stuck one:`
     + ` raise stalledJobTimeoutMs or lower embedding.embedConcurrency.`;

@@ -20,7 +20,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
 
 const CONFIG_PATH = process.env['CONFIG_PATH'] ?? '/config/config.json';
 
@@ -117,7 +117,7 @@ export function loadBackupConfig(): BackupConfig | null {
   try {
     raw = fs.readFileSync(BACKUP_CONFIG_PATH, 'utf8');
   } catch (err) {
-    log.warn(`backup.json: read error — ${err} — backup config ignored`);
+    log.warn(`backup.json: read error — ${peerText(err)} — backup config ignored`);
     return null;
   }
 
@@ -131,7 +131,7 @@ export function loadBackupConfig(): BackupConfig | null {
 
   const result = BackupConfigSchema.safeParse(parsed);
   if (!result.success) {
-    log.warn(`backup.json: invalid schema — ${result.error.message} — backup config ignored`);
+    log.warn(`backup.json: invalid schema — ${peerText(result.error.message)} — backup config ignored`);
     return null;
   }
 

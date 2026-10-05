@@ -53,7 +53,7 @@
  * both ids and left alone, exactly as the collection rename treats a both-exist pair.
  */
 import { getDb } from './mongo.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
 import { edgeIdFor } from '../brain/edge-id.js';
 import { linkIdFor } from '../brain/links.js';
 import type { RefKind } from '../config/types-knowledge.js';
@@ -129,7 +129,7 @@ export async function rekeyMemoryKindToFact(): Promise<KindRekeyOutcome> {
       const taken = await coll.findOne({ _id: newId }, { projection: { _id: 1 } });
       if (taken) {
         out.collisions.push(`${name}:${row._id}`);
-        log.warn(`Re-key skipped in ${name}: ${row._id} now derives ${newId}, which another row already `
+        log.warn(`Re-key skipped in ${peerText(name)}: ${peerText(row._id)} now derives ${peerText(newId)}, which another row already `
           + 'holds. Both describe the same connection and merging them is a decision this code cannot '
           + 'make — remove one by hand.');
         continue;

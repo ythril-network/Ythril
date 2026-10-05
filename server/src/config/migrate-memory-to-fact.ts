@@ -26,7 +26,7 @@
  * Idempotent: a config that has already been upgraded has no `memory` keys left to find.
  */
 import type { SpaceConfig } from './types.js';
-import { log } from '../util/log.js';
+import { log, peerList } from '../util/log.js';
 
 export interface ConfigRenameOutcome {
   /** Spaces whose `recordTtlDays.memory` became `recordTtlDays.fact`. */
@@ -59,7 +59,7 @@ export function migrateMemoryToFact(spaces: SpaceConfig[] | undefined): ConfigRe
 
   if (out.ttlWindows.length > 0) {
     log.info(`Retention: renamed recordTtlDays.memory to .fact in ${out.ttlWindows.length} space(s): `
-      + `${out.ttlWindows.join(', ')}. The window was unread after the type rename, so those records would `
+      + `${peerList(out.ttlWindows)}. The window was unread after the type rename, so those records would `
       + 'have been kept for ever.');
   }
   return out;

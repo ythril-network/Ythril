@@ -33,6 +33,7 @@ import { vlmExtractDocument } from './vlm-extract.js';
 import type { FileMetaDoc, DocExtractionMode, TextLevel } from '../../config/types.js';
 import type { StepProgress } from './types.js';
 import { log, peerText } from '../../util/log.js';
+import { messageOf } from '../../util/errors.js';
 import { enqueueMediaJob } from '../media/job-queue.js';
 import { embedConcurrency } from './embed-concurrency.js';
 import { JobLeaseLostError, isLeaseLost, shouldHeartbeat, writeUnderClaim, type JobClaim } from '../media/lease.js';
@@ -365,7 +366,7 @@ export async function storeConversionResults(
   const MAX_EXTRACTED_IMAGES = 50;
   const MAX_EXTRACTED_IMAGE_BYTES = 100 * 1024 * 1024;
   if (extractedImages.length > MAX_EXTRACTED_IMAGES) {
-    log.warn(`Conversion of ${spaceId}/${originalId} extracted ${extractedImages.length} images; storing only the first ${MAX_EXTRACTED_IMAGES}`);
+    log.warn(`Conversion of ${peerText(spaceId)}/${peerText(originalId)} extracted ${extractedImages.length} images; storing only the first ${MAX_EXTRACTED_IMAGES}`);
     extractedImages = extractedImages.slice(0, MAX_EXTRACTED_IMAGES);
   }
   let extractedBytesTotal = 0;
@@ -376,7 +377,7 @@ export async function storeConversionResults(
       try {
         const imgBytes = Buffer.from(img.base64, 'base64');
         if (extractedBytesTotal + imgBytes.length > MAX_EXTRACTED_IMAGE_BYTES) {
-          log.warn(`Extracted-image size budget (${MAX_EXTRACTED_IMAGE_BYTES} bytes) reached for ${spaceId}/${originalId}; skipping remaining images`);
+          log.warn(`Extracted-image size budget (${MAX_EXTRACTED_IMAGE_BYTES} bytes) reached for ${peerText(spaceId)}/${peerText(originalId)}; skipping remaining images`);
           break;
         }
         extractedBytesTotal += imgBytes.length;
@@ -399,10 +400,10 @@ export async function storeConversionResults(
         imageJobs.push({ path: imgPath, mimeType: `image/${img.ext === 'jpg' ? 'jpeg' : img.ext}` });
       } catch (err) {
         // Non-fatal: log and continue; other images and chunks still processed
-        log.warn(`Failed to store extracted image ${imgId}: ${err instanceof Error ? err.message : String(err)}`);
+        log.warn(`Failed to store extracted image ${peerText(imgId)}: ${peerText(messageOf(err))}`);
       }
     }
-    log.info(`Stored ${extractedImages.length} extracted image(s) from ${spaceId}/${originalId}`);
+    log.info(`Stored ${extractedImages.length} extracted image(s) from ${peerText(spaceId)}/${peerText(originalId)}`);
   }
 
   // 3. Embed and insert chunk records.
@@ -462,7 +463,7 @@ export async function storeConversionResults(
       };
     } catch (err) {
       embedFailures++;
-      log.warn(`Chunk embed failed for ${spaceId}/${chunkId}: ${err instanceof Error ? err.message : String(err)}`);
+      log.warn(`Chunk embed failed for ${peerText(spaceId)}/${peerText(chunkId)}: ${peerText(messageOf(err))}`);
     }
 
     // Hand the event loop a turn between chunks.
@@ -526,7 +527,7 @@ export async function storeConversionResults(
 
   for (const job of imageJobs) {
     await enqueueMediaJob(spaceId, job.path, job.mimeType, 'image').catch(err =>
-      log.warn(`Failed to enqueue extracted image ${spaceId}/${job.path}: ${err instanceof Error ? err.message : String(err)}`),
+      log.warn(`Failed to enqueue extracted image ${peerText(spaceId)}/${peerText(job.path)}: ${peerText(messageOf(err))}`),
     );
   }
 
@@ -591,5 +592,5 @@ export async function deleteConversionArtifactsByPrefix(
   await rmArtifactPath(spaceId, `_converted/${dir}`);
   await rmArtifactPath(spaceId, `_extracted/${dir}`);
 
-  log.info(`Deleted conversion artifacts under ${spaceId}/${dir}/`);
+  log.info(`Deleted conversion artifacts under ${peerText(spaceId)}/${peerText(dir)}/`);
 }

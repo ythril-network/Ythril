@@ -25,7 +25,7 @@
  */
 import { col, asFilter } from '../db/mongo.js';
 import { getConfig } from '../config/loader.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
 
 /**
  * IMPORTED, not spelled again.
@@ -119,7 +119,7 @@ export async function redactExpiredChanges(now: number = Date.now()): Promise<nu
       { $unset: { changes: '' }, $set: { changesRedacted: true } },
     );
     const n = res.modifiedCount ?? 0;
-    if (n > 0) log.info(`Audit: redacted changes on ${n} record-edit entr${n === 1 ? 'y' : 'ies'} older than ${cutoff.toISOString()}`);
+    if (n > 0) log.info(`Audit: redacted changes on ${n} record-edit entr${n === 1 ? 'y' : 'ies'} older than ${peerText(cutoff.toISOString())}`);
     // The FIRST sweep of a process reports even when it redacted nothing, and names the collection and how
     // many candidate entries it can see.
     //
@@ -140,7 +140,7 @@ export async function redactExpiredChanges(now: number = Date.now()): Promise<nu
     }
     return n;
   } catch (err) {
-    log.warn(`Audit change-retention sweep: ${err}`);
+    log.warn(`Audit change-retention sweep: ${peerText(err)}`);
     return 0;
   }
 }

@@ -6,7 +6,7 @@ import path from 'path';
 import { requireAuth, requireAdmin, denyReadOnly } from '../auth/middleware.js';
 import { globalRateLimit } from '../rate-limit/middleware.js';
 import { col, asFilter, asDoc } from '../db/mongo.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
 import { caughtFailureText } from '../brain/store-failure.js';
 import { resolveSafePath, spaceRoot } from '../files/sandbox.js';
 import { deleteStored, moveStored } from '../files/stored-bytes.js';
@@ -125,7 +125,7 @@ conflictsRouter.get('/', globalRateLimit, requireAuth, async (req, res) => {
       truncated,
     });
   } catch (err) {
-    log.error(`GET /api/conflicts: ${err}`);
+    log.error(`GET /api/conflicts: ${peerText(err)}`);
     res.status(500).json({ error: 'Internal error' });
   }
 });
@@ -154,7 +154,7 @@ conflictsRouter.get('/link-violations', globalRateLimit, requireAuth, async (_re
     if (results.length > MAX_TOTAL) { results.length = MAX_TOTAL; truncated = true; }
     res.json({ violations: results, returned: results.length, truncated });
   } catch (err) {
-    log.error(`GET /api/conflicts/link-violations: ${err}`);
+    log.error(`GET /api/conflicts/link-violations: ${peerText(err)}`);
     res.status(500).json({ error: 'Internal error' });
   }
 });
@@ -173,7 +173,7 @@ conflictsRouter.delete('/link-violations/:id', globalRateLimit, requireAuth, den
     }
     res.status(404).json({ error: 'Link violation not found' });
   } catch (err) {
-    log.error(`DELETE /api/conflicts/link-violations/:id: ${err}`);
+    log.error(`DELETE /api/conflicts/link-violations/:id: ${peerText(err)}`);
     res.status(500).json({ error: 'Internal error' });
   }
 });
@@ -189,7 +189,7 @@ conflictsRouter.delete('/link-violations', globalRateLimit, requireAuth, denyRea
     }
     res.json({ dismissed: total });
   } catch (err) {
-    log.error(`DELETE /api/conflicts/link-violations: ${err}`);
+    log.error(`DELETE /api/conflicts/link-violations: ${peerText(err)}`);
     res.status(500).json({ error: 'Internal error' });
   }
 });
@@ -213,7 +213,7 @@ conflictsRouter.get('/:id', globalRateLimit, requireAuth, async (req, res) => {
     }
     res.status(404).json({ error: 'Conflict not found' });
   } catch (err) {
-    log.error(`GET /api/conflicts/:id: ${err}`);
+    log.error(`GET /api/conflicts/:id: ${peerText(err)}`);
     res.status(500).json({ error: 'Internal error' });
   }
 });
@@ -263,7 +263,7 @@ conflictsRouter.post('/bulk-resolve', globalRateLimit, requireAuth, denyReadOnly
 
     res.json({ resolved, failed });
   } catch (err) {
-    log.error(`POST /api/conflicts/bulk-resolve: ${err}`);
+    log.error(`POST /api/conflicts/bulk-resolve: ${peerText(err)}`);
     res.status(500).json({ error: 'Internal error' });
   }
 });
@@ -299,7 +299,7 @@ conflictsRouter.post('/seed', globalRateLimit, requireAdmin, denyReadOnly, async
     await col<ConflictDoc>(spaceCollection(spaceId, 'conflicts')).insertOne(asDoc<ConflictDoc>(doc));
     res.status(201).json({ id: _id });
   } catch (err) {
-    log.error(`POST /api/conflicts/seed: ${err}`);
+    log.error(`POST /api/conflicts/seed: ${peerText(err)}`);
     res.status(500).json({ error: 'Internal error' });
   }
 });
@@ -336,7 +336,7 @@ conflictsRouter.post('/:id/resolve', globalRateLimit, requireAuth, denyReadOnly,
     await executeResolve(found.doc, found.spaceId, action, rename, targetSpaceId);
     res.status(200).json({ status: 'resolved' });
   } catch (err) {
-    log.error(`POST /api/conflicts/:id/resolve: ${err}`);
+    log.error(`POST /api/conflicts/:id/resolve: ${peerText(err)}`);
     res.status(500).json({ error: 'Internal error' });
   }
 });
