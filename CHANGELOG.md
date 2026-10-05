@@ -358,6 +358,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Paging through a recall answer no longer repeats some matches and drops others when their text scores tie.**
+  Records written from one template score exactly alike in the keyword channel, and the database ordered that tie
+  differently on every call. That order is part of the fused ranking, and `skip`/`nextSkip` re-run the search for
+  each page, so two identical recalls could rank the same records differently. Ties now break by id, as every other
+  ranking step already did. This affects both doors, `recall` on MCP and `POST /api/brain/recall` on REST.
+
 - **A write answered "timed out, retry" can no longer land after the answer** (Q-372). The bound on one database
   write was the driver's own timer, which starts before the command is even sent, so the client gave up first: the
   `503` went out and the space's seq hold was released while the operation was still alive on the server, and it
