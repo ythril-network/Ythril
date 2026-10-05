@@ -37,7 +37,7 @@ const UPLOAD_RESULTS = (job) => `
           if-no-files-found: error
           retention-days: 30`;
 
-/** A stack job: restore the image, start the stack from it without building or pulling, run, upload. */
+/** A stack job: full history, build the server its tests import, restore the image, start the stack from it without building or pulling, run, upload. */
 const STACK_JOB = (id, name, script = id) => `
   ${id}:
     name: ${name}
@@ -46,10 +46,14 @@ const STACK_JOB = (id, name, script = id) => `
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
           cache: npm${NPM_CI}
+      - name: Build server
+        run: npm run build:server
       - uses: actions/download-artifact@v4
         with:
           name: ythril-test-image-@{{ github.run_attempt }}
@@ -89,6 +93,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: '22'

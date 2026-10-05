@@ -106,19 +106,23 @@ describe('a bulk write past the driver\'s batch limit is several commands; a sli
     assert.equal(hello.maxWriteBatchSize, MONGO_MAX_WRITE_BATCH_SIZE, 'the constant is not the server\'s write batch size');
     assert.equal(ONE_COMMAND_MAX_OPERATIONS, hello.maxWriteBatchSize - 1, 'a command the driver sends holds maxWriteBatchSize - 1 operations; the cap is not that');
     await coll().deleteMany({});
-    const ops = Array.from({ length: ONE_COMMAND_MAX_OPERATIONS + 1 }, (_, i) => ({ insertOne: { document: { _id: `b${i}` } } }));
-    // The premise first: handed to the driver whole, one operation over the cap is two insert commands.
-    const whole = (await commandsDuring(() => coll().bulkWrite(ops, { ordered: false }))).filter(c => c === 'insert').length;
-    assert.equal(whole, 2, `${ops.length} tiny inserts were sent as ${whole} insert command(s): the driver no longer batches at maxWriteBatchSize - 1`);
-    // Then the module: its slices are the cap and the rest, and EACH is exactly one insert command.
-    await coll().deleteMany({});
+    await coll().insertOne({ _id: 'kept' });
+    // DELETES OF ABSENT IDS, not inserts: the driver batches by operation count whatever the operation is, so a batch of
+    // deletes that match nothing reaches the server as the same number of commands while writing nothing. The first form of
+    // this case inserted 200 000 documents, and in CI the database container was shut down under it mid-run ("interrupted at
+    // shutdown"), taking the next file's cases with it.
+    const ops = Array.from({ length: ONE_COMMAND_MAX_OPERATIONS + 1 }, (_, i) => ({ deleteOne: { filter: { _id: `absent${i}` } } }));
+    // The premise first: handed to the driver whole, one operation over the cap is two delete commands.
+    const whole = (await commandsDuring(() => coll().bulkWrite(ops, { ordered: false }))).filter(c => c === 'delete').length;
+    assert.equal(whole, 2, `${ops.length} deletes were sent as ${whole} delete command(s): the driver no longer batches at maxWriteBatchSize - 1`);
+    // Then the module: its slices are the cap and the rest, and EACH is exactly one delete command.
     const perSlice = await writeInOneCommands(ops, async (slice, { ordered }) => {
       const sent = await commandsDuring(() => coll().bulkWrite(slice, { ordered }));
-      return { operations: slice.length, inserts: sent.filter(c => c === 'insert').length };
+      return { operations: slice.length, deletes: sent.filter(c => c === 'delete').length };
     }, { ordered: false });
-    assert.deepEqual(perSlice, [{ operations: ONE_COMMAND_MAX_OPERATIONS, inserts: 1 }, { operations: 1, inserts: 1 }],
+    assert.deepEqual(perSlice, [{ operations: ONE_COMMAND_MAX_OPERATIONS, deletes: 1 }, { operations: 1, deletes: 1 }],
       `the slices the module makes were sent as ${JSON.stringify(perSlice)}`);
-    assert.equal(await coll().countDocuments({}), ops.length, 'a slice did not land');
+    assert.deepEqual(await coll().find({}).toArray(), [{ _id: 'kept' }], 'a delete of an absent id removed something');
   });
 
   it('an UNORDERED bulk of mixed operation types is one command per type per slice; sliced by type, every slice is one command', async () => {

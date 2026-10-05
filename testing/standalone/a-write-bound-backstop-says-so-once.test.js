@@ -48,8 +48,15 @@ async function bounded(method, driver, target = TARGET) {
 const backstopLines = (lines) => lines.filter(l => /backstop/i.test(l));
 
 describe('the write bound\'s backstop says so, once', () => {
-  before(() => setWriteBoundForTest(BOUND));
-  after(() => setWriteBoundForTest(null));
+  /*
+   * The driver calls here never answer, and the backstop's timer is `unref`'d on purpose (a stalled write must not keep a
+   * server from exiting). So while a case waits for it, nothing holds the event loop open, and on Linux the runner ends the
+   * file with "Promise resolution is still pending but the event loop has already resolved" (CI, the first run of the split
+   * jobs; Windows kept the loop alive by other means). A ref'd timer for the length of the file is the case's own handle.
+   */
+  let holdTheLoop;
+  before(() => { setWriteBoundForTest(BOUND); holdTheLoop = setInterval(() => {}, 60_000); });
+  after(() => { setWriteBoundForTest(null); clearInterval(holdTheLoop); });
 
   it('the backstop firing is ONE warn line naming the method and the bound', async () => {
     const { lines, result } = await logLinesDuring(async () => {

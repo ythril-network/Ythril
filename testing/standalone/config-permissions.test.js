@@ -6,6 +6,8 @@
  *  - Still allows loading after the fix
  *  - Does NOT crash the server on auto-fixable permission issues
  *
+ * @needs-instance drives instance A (reload-config) and its config file on the test stack.
+ *
  * These tests ONLY run on POSIX (Linux/macOS) inside the Docker test stack.
  * On Windows `checkPermissions()` is a no-op, so these tests skip automatically.
  *

@@ -66,6 +66,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # Tests read tags and history (the retired-tool sweep, git log): a shallow clone fails them.
+          fetch-depth: 0
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -122,6 +125,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # Tests read tags and history (the retired-tool sweep, git log): a shallow clone fails them.
+          fetch-depth: 0
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -163,6 +169,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # Tests read tags and history (the retired-tool sweep, git log): a shallow clone fails them.
+          fetch-depth: 0
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -304,6 +313,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # Tests read tags and history (the retired-tool sweep, git log): a shallow clone fails them.
+          fetch-depth: 0
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -374,6 +386,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # Tests read tags and history (the retired-tool sweep, git log): a shallow clone fails them.
+          fetch-depth: 0
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -466,6 +481,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # Tests read tags and history (the retired-tool sweep, git log): a shallow clone fails them.
+          fetch-depth: 0
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -533,6 +551,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # Tests read tags and history (the retired-tool sweep, git log): a shallow clone fails them.
+          fetch-depth: 0
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -544,6 +565,10 @@ jobs:
         run: npm ci --workspace=server --include-workspace-root
         env:
           ONNXRUNTIME_NODE_INSTALL_CUDA: skip
+
+      - name: Build server
+        # Required by the red-team files that import server/dist/ (the shared token-rights helper does).
+        run: npm run build:server
 
       - name: Download the test image
         uses: actions/download-artifact@v4
@@ -561,15 +586,16 @@ jobs:
           wait "$pull"
 
       - name: Start test containers
-        # A, B and D with their databases: infra-managed-migration drives D, db-migration-disabled drives B.
+        # Every instance the red-team files reach (read from them by ci-workflow-is-sound): infra-managed-migration
+        # drives D, db-migration-disabled drives B, the token brute-force cases drive C.
         run: |
           node testing/_init/reset-test-configs.mjs
           # Ensure config bind-mount dirs are writable by the node user (uid 1000) inside the container
           mkdir -p testing/sync/configs/a testing/sync/configs/b testing/sync/configs/c testing/sync/configs/d
           chmod 777 testing/sync/configs/a testing/sync/configs/b testing/sync/configs/c testing/sync/configs/d
           docker compose -p ythril-test -f testing/docker-compose.test.yml up -d --wait --wait-timeout 300 \
-            --no-build --pull never ythril-a ythril-b ythril-d
-          node testing/sync/setup.js a b d
+            --no-build --pull never ythril-a ythril-b ythril-c ythril-d
+          node testing/sync/setup.js a b c d
 
       - name: Run red-team tests
         run: npm run test:redteam

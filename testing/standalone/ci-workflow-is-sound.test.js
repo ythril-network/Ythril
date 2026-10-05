@@ -46,7 +46,9 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { REPO_ROOT } from './_sources.mjs';
+import { REPO_ROOT, trackedSources } from './_sources.mjs';
+import { stripComments } from './_strip-comments.mjs';
+import { splitStandalone } from '../_shared/standalone-split.mjs';
 import {
   MERGE_GATE_NAME, loadCi, parseWorkflow, jobEntries, stepsOf, shellOf, usesOf, isCommitPinned, stepsUsing,
   runsNpmCi, expressionOf, transitiveNeeds, isAdvisory, isTrue,
@@ -551,6 +553,105 @@ function advisorySummaryViolations(doc) {
   return v;
 }
 
+/**
+ * A job that runs tests checks out the whole history. Tests read it: `no-live-text-names-a-retired-tool` finds the last
+ * release of the previous major among the tags, and the source sweeps read `git log`. A shallow clone (the checkout's
+ * default, `fetch-depth: 1`, no tags) makes such a test fail, or, written less carefully, find nothing and pass. Before
+ * the jobs were split only one job checked out, with `fetch-depth: 0`; the first run of the split failed the retired-tool
+ * test in the no-services job for exactly this. The jobs are the ones whose steps run a suite runner (`RUNNER`).
+ */
+function historyViolations(doc) {
+  const v = [];
+  for (const { id, job: j } of jobEntries(doc)) {
+    const steps = stepsOf(j);
+    if (!steps.some((s) => runnersIn(shellOf(s)).length > 0)) continue;
+    const checkouts = steps.filter((s) => usesOf(s)?.action === 'actions/checkout');
+    if (checkouts.length === 0) { v.push(`${id}: runs tests with no checkout`); continue; }
+    for (const c of checkouts) {
+      if (String(c.with?.['fetch-depth'] ?? '1') !== '0') v.push(`${id}: runs tests from a shallow checkout (fetch-depth ${c.with?.['fetch-depth'] ?? 'default 1'}); tests read tags and history, so it must be 0`);
+    }
+  }
+  return v;
+}
+
+/** A step that runs a suite on the host with node (the client's vitest suite is the one that imports no server code). */
+const runsServerSuite = (s) => runnersIn(shellOf(s)).some((r) => !/vitest/.test(r)) && !/--workspace[= ]client\b/.test(shellOf(s));
+
+/**
+ * A job that runs a suite on the host builds the server first. The test files import `server/dist` (the shared helpers do:
+ * `legacy-token-rights.mjs` imports `server/dist/auth/rights-migration.js`), and the test image a stack job loads carries
+ * the server INSIDE a container, not on the runner. The first run of the split jobs failed fifteen red-team files with
+ * ERR_MODULE_NOT_FOUND: that job alone had no build step.
+ */
+function serverBuildViolations(doc) {
+  const v = [];
+  for (const { id, job: j } of jobEntries(doc)) {
+    const steps = stepsOf(j);
+    const first = steps.findIndex(runsServerSuite);
+    if (first < 0) continue;
+    const build = steps.findIndex((s) => /\bnpm run build:server\b/.test(shellOf(s)));
+    if (build < 0 || build > first) v.push(`${id}: runs tests that import server/dist with no \`npm run build:server\` before them`);
+  }
+  return v;
+}
+
+/** The instance letters (`INSTANCES.a`…) a set of test files reach, read from their code, comments stripped. */
+function instancesReached(files) {
+  const found = new Set();
+  for (const f of files) {
+    for (const m of stripComments(readFileSync(join(REPO_ROOT, f), 'utf8')).matchAll(/\bINSTANCES\.([a-z])\b/g)) found.add(m[1]);
+  }
+  return found;
+}
+
+/** The test files the runner command of a step runs, read from `package.json` and the suite table — or null when it is not a stack suite. */
+function suiteFilesOf(runner, scripts) {
+  const name = scriptNamed(runner);
+  const body = name ? String(scripts[name] ?? '') : runner;
+  const suite = /run-suite\.mjs\s+(\w+)/.exec(body)?.[1];
+  if (suite) {
+    const table = readFileSync(join(REPO_ROOT, 'testing/_init/run-suite.mjs'), 'utf8');
+    const dir = new RegExp(`\\b${suite}:\\s*\\{\\s*dir:\\s*'([^']+)'`).exec(table)?.[1];
+    if (!dir) throw new Error(`run-suite.mjs has no folder for the suite ${suite}: re-anchor this rule`);
+    return trackedSources([dir], { ext: ['.js'], floor: 5 }).filter((f) => f.endsWith('.test.js'));
+  }
+  if (/run-standalone\.mjs\b.*--only=instance/.test(body)) {
+    return splitStandalone({ root: REPO_ROOT }).needsInstance.map((f) => `testing/standalone/${String(f).split(/[\\/]/).pop()}`);
+  }
+  return null;
+}
+
+/**
+ * A stack job starts every instance its suite talks to. A job may start a subset of the stack (what its suite needs, so the
+ * runner's memory goes where it is used), and the subset is written by hand in the compose command — so a test that reaches
+ * an instance the job did not start fails with `fetch failed`, which reads like a flaky network. The first run of the split
+ * jobs failed the red-team brute-force cases exactly so: they drive instance C, and the job started A, B and D. The
+ * instances a suite reaches are read from its files (`INSTANCES.c`), never listed; a compose up that names no service
+ * starts them all.
+ */
+function stackInstanceViolations(doc, scripts = packageScripts()) {
+  const v = [];
+  for (const { id, job: j } of jobEntries(doc)) {
+    const steps = stepsOf(j);
+    const up = steps.map((s) => shellOf(s)).find((sh) => /docker compose\b[\s\S]*\bup\b/.test(sh));
+    if (!up) continue;
+    const upLine = up.slice(up.search(/\bup\b/));
+    const named = [...upLine.matchAll(/\bythril-([a-z])\b/g)].map((m) => m[1]);
+    const started = named.length === 0 ? null : new Set(named);
+    for (const s of steps) {
+      for (const runner of runnersIn(shellOf(s))) {
+        const files = suiteFilesOf(runner, scripts);
+        if (!files) continue;
+        const reached = instancesReached(files);
+        if (reached.size === 0) v.push(`${id}: ${runner} reaches no instance — the suite's files were not read`);
+        const missing = started ? [...reached].filter((x) => !started.has(x)) : [];
+        if (missing.length) v.push(`${id}: ${runner} reaches instance(s) ${missing.join(', ')} that the job does not start (it starts ${[...started].join(', ')})`);
+      }
+    }
+  }
+  return v;
+}
+
 // ───────────────────────────────────────── the rules, and how each is held ─────────────────────────────────────────
 
 const RULES = {
@@ -566,6 +667,9 @@ const RULES = {
   'permissions': permissionViolations,
   'concurrency': concurrencyViolations,
   'stack jobs': stackJobViolations,
+  'test jobs read history': historyViolations,
+  'test jobs build the server': serverBuildViolations,
+  'stack jobs start what their suite reaches': stackInstanceViolations,
 };
 
 const job = (doc, id) => doc.jobs[id];
@@ -793,6 +897,25 @@ const BREAKAGES = [
     second.with.name = 'test-results-sync-again-@{{ github.run_attempt }}';
     job(d, 'sync').steps.push(second);
   }, 'one suite per results artifact', /2 results artifacts from one job/],
+  ['a test job checks out shallow', (d) => {
+    delete stepWhere(job(d, 'sync'), (x) => usesOf(x)?.action === 'actions/checkout').with;
+  }, 'test jobs read history', /sync: runs tests from a shallow checkout/],
+  ['a test job checks out with a depth of one', (d) => {
+    stepWhere(job(d, 'sync'), (x) => usesOf(x)?.action === 'actions/checkout').with = { 'fetch-depth': 1 };
+  }, 'test jobs read history', /sync: runs tests from a shallow checkout/],
+  ['a stack job runs its suite with no server build', (d) => {
+    job(d, 'sync').steps = stepsOf(job(d, 'sync')).filter((x) => !/build:server/.test(shellOf(x)));
+  }, 'test jobs build the server', /sync: runs tests that import server\/dist/],
+  ['a stack job builds the server only after its suite ran', (d) => {
+    const steps = stepsOf(job(d, 'sync'));
+    const i = steps.findIndex((x) => /build:server/.test(shellOf(x)));
+    const [build] = steps.splice(i, 1);
+    steps.push(build);
+  }, 'test jobs build the server', /sync: runs tests that import server\/dist/],
+  ['a stack job starts fewer instances than its suite reaches', (d) => {
+    const s = stepWhere(job(d, 'sync'), (x) => /compose[\s\S]*\bup\b/.test(x.run ?? ''));
+    s.run = s.run.replace(/--pull never/, '--pull never ythril-a');
+  }, 'stack jobs start what their suite reaches', /sync: npm run test:sync reaches instance\(s\) .*b.* that the job does not start/],
   ['a stack job is added without the flags', (d) => {
     d.jobs.redteam = clone(job(d, 'sync'));
     stepWhere(job(d, 'redteam'), (x) => /compose/.test(x.run ?? '')).run = 'docker compose -f testing/docker-compose.test.yml up -d --wait';
