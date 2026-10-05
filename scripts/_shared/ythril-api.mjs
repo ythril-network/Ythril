@@ -33,7 +33,12 @@
  * `scripts/test-times.mjs` (the Test-Run recorder). `benchmarks/bench.mjs` and `benchmarks/tier0.mjs` take the URL
  * guard from here; the benchmark client keeps its own transport (its retry policy, 60 s timeout and brain routes are
  * a different question - see `benchmarks/writer/ythril-client.mjs`).
+ *
+ * The two things every script that handles a token would otherwise write for itself live in their own modules: the
+ * capped read of a body (`capped-body.mjs`) and the masking of token-shaped text (`testing/_shared/secret-masking.mjs`).
  */
+import { readCappedBody } from './capped-body.mjs';
+import { maskSecrets } from '../../testing/_shared/secret-masking.mjs';
 
 /** How long one request may take before it is abandoned. */
 export const REQUEST_TIMEOUT_MS = 10_000;
@@ -83,25 +88,21 @@ export function assertBearerSafeUrl(url, what = 'Ythril URL') {
   return u.origin + u.pathname.replace(/\/+$/, '');
 }
 
-/** The server's own one-line sentence from a failed answer, with anything token-shaped scrubbed. */
+/**
+ * The server's own one-line sentence from a failed answer, with the token this client holds removed wherever it sits
+ * and anything else token-shaped masked by the one list.
+ */
 function sentenceOf(body, token) {
   const raw = body !== null && typeof body === 'object' && typeof body.error === 'string' ? body.error : '';
-  return raw.split(/\r?\n/)[0]
-    .split(token).join('***')
-    .replace(/Bearer\s+\S+/gi, 'Bearer ***')
-    .slice(0, MAX_SENTENCE_CHARS);
+  return maskSecrets(raw.split(/\r?\n/)[0].split(token).join('***')).slice(0, MAX_SENTENCE_CHARS);
 }
 
 /** Read an answer, refusing one larger than `MAX_ANSWER_BYTES`. */
 async function readText(res, tool) {
-  const chunks = [];
-  let size = 0;
-  for await (const chunk of res.body ?? []) {
-    size += chunk.length;
-    if (size > MAX_ANSWER_BYTES) throw new YthrilApiError(`${tool}: answer larger than ${MAX_ANSWER_BYTES} bytes`, { tool });
-    chunks.push(chunk);
-  }
-  return Buffer.concat(chunks).toString('utf8');
+  const bytes = await readCappedBody(res, MAX_ANSWER_BYTES, {
+    refuse: (cap) => new YthrilApiError(`${tool}: answer larger than ${cap} bytes`, { tool }),
+  });
+  return bytes.toString('utf8');
 }
 
 /**

@@ -32,8 +32,9 @@
  * ## The contract this gate pins (the implementation did not exist when it was written)
  *
  * `testing/_shared/timing-reporter.mjs` exports: the reporter as `default`; `TIMING_SCHEMA` (field name to
- * `{ type, nullable?, values?, doc }`, the ONE description of a line); `maskSecrets(text)`;
- * `readTimingLog(text)` -> `{ lines, complete }`. `testing/_shared/timing-reporter-flags.mjs` exports
+ * `{ type, nullable?, values?, doc }`, the ONE description of a line); `readTimingLog(text)` -> `{ lines, complete }`.
+ * What it masks is `maskSecrets` of `testing/_shared/secret-masking.mjs`, the one list (its floors are pinned by
+ * `a-secret-is-masked-by-one-list.test.js`). `testing/_shared/timing-reporter-flags.mjs` exports
  * `timingReporterFlags({ suite, batch, dir, stdoutIsTTY })` -> `{ args, env, destination }`; the reporter reads
  * the destination, suite and batch from the `env` the helper returns and appends to the destination itself.
  *
@@ -45,11 +46,12 @@ import { mkdtempSync, rmSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, relative, resolve } from 'node:path';
 import * as reporterModule from '../_shared/timing-reporter.mjs';
+import { maskSecrets } from '../_shared/secret-masking.mjs';
 import {
   ROOT, SECRETS, LONG_FIRST_LINE, READY, fixture, runTimed, runPlain, readJsonl, startTimed,
 } from './_timing-runs.mjs';
 
-const { TIMING_SCHEMA, maskSecrets, readTimingLog } = reporterModule;
+const { TIMING_SCHEMA, readTimingLog } = reporterModule;
 
 const MAIN = ['timing-pass', 'timing-skips', 'timing-hook-fail', 'timing-load-throw', 'timing-failure-messages'];
 const mainFiles = MAIN.map(fixture);
@@ -315,7 +317,7 @@ describe('a failure message is its first line, capped, no stack, no secrets', ()
 
 describe('maskSecrets', () => {
   it('masks every token shape and nothing around it', () => {
-    assert.equal(typeof maskSecrets, 'function', 'timing-reporter.mjs must export maskSecrets');
+    assert.equal(typeof maskSecrets, 'function', 'secret-masking.mjs must export maskSecrets');
     for (const [what, secret] of Object.entries(SECRETS)) {
       const out = maskSecrets(`before ${secret} after`);
       assert.ok(!out.includes(secret.slice(-20)), `${what} survived: ${out}`);
@@ -324,10 +326,16 @@ describe('maskSecrets', () => {
   });
 
   it('leaves what only looks like one', () => {
-    for (const text of [
-      'ythril_harness_standalone_recall_filtered', 'ghp_', 'Bearer token missing', 'the Bearers of news',
-      'ythril_test', 'a plain sentence', '',
-    ]) assert.equal(maskSecrets(text), text, `"${text}" is not a secret`);
+    for (const text of ['ghp_', 'the Bearers of news', 'ythril_test', 'a plain sentence', '']) {
+      assert.equal(maskSecrets(text), text, `"${text}" is not a secret`);
+    }
+  });
+
+  it('masks a name that starts like a credential, as the recorder always did: the price of a floor that catches a typed token', () => {
+    // These two were pinned as "not secrets" while the reporter kept looser floors than the recorder, which wrote
+    // them masked into every Test-Run anyway; one list means one answer, and it is the stricter.
+    assert.equal(maskSecrets('ythril_harness_standalone_recall_filtered'), '***');
+    assert.equal(maskSecrets('Bearer token missing'), 'Bearer *** missing');
   });
 
   it('is idempotent', () => {

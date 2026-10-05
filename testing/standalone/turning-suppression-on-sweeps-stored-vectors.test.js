@@ -46,6 +46,7 @@ import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
 import { bodyOf } from './_structural-window.mjs';
 import { readTrackedSources } from './_sources.mjs';
+import { matchesFilter } from '../_shared/filter-matcher.mjs';
 
 let SWEEP = null;
 try { SWEEP = await import('../../server/dist/brain/suppression-sweep.js'); } catch { /* not built yet */ }
@@ -54,26 +55,8 @@ const suppressedWithVectorFilter = SWEEP?.suppressedWithVectorFilter
 
 const src = (p) => stripComments(readFileSync(p, 'utf8'));
 
-/** Does `doc` satisfy the filter? A tiny evaluator — enough for `$or`, `$in`, `$nin`, `$ne`, `$exists`. */
-function matches(doc, filter) {
-  return Object.entries(filter).every(([k, v]) => {
-    if (k === '$or') return v.some(sub => matches(doc, sub));
-    const actual = doc[k];
-    if (v && typeof v === 'object' && !Array.isArray(v)) {
-      return Object.entries(v).every(([op, operand]) => {
-        if (op === '$exists') return (actual !== undefined) === operand;
-        if (op === '$ne') return actual !== operand;
-        if (op === '$in') return operand.includes(actual);
-        if (op === '$nin') return !operand.includes(actual);
-        throw new Error(`unsupported operator ${op}`);
-      });
-    }
-    return actual === v;
-  });
-}
-
 const withVector = (d) => ({ embedding: [0.1], ...d });
-const swept = (meta, kind, doc) => matches(doc, suppressedWithVectorFilter(meta, kind));
+const swept = (meta, kind, doc) => matchesFilter(doc, suppressedWithVectorFilter(meta, kind));
 
 describe('a record with no vector is never selected', () => {
   it('there is nothing to strip', () => {

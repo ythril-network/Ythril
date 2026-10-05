@@ -15,8 +15,9 @@
  *   (`… created (ID <uuid>, seq N).`) with `data: null`, because that is what the tool returns.
  * - `update_chrono` MERGES `properties` key by key and REPLACES every other field it is given; an unknown id is
  *   a 404 `{ok:false, error}`.
- * - `filter` supports dotted-path equality plus `$in`, `$eq`, `$ne`, `$gt`, `$gte`, `$lt`, `$lte` and `$and`; any
- *   other operator is a 400, so a script that reaches for one fails loudly here rather than matching nothing.
+ * - `filter` evaluates its predicate with the tests' one matcher (`filter-matcher.mjs`: dotted-path equality, `$eq`,
+ *   `$ne`, `$gt`, `$gte`, `$lt`, `$lte`, `$in`, `$nin`, `$exists`, `$and`, `$or`); any other operator is a 400, so a
+ *   script that reaches for one fails loudly here rather than matching nothing.
  *   `projection` EXCLUSIONS are applied (a path set to 0 is removed from every row), `sort`/`dir`/`limit`/`skip`
  *   are honoured, and the page carries `{collection, results, count, total, limit, skip}` in `data`.
  * - Only the space `y-proj-ythril` exists; any other is a 404, so a write that lands in the wrong space is red.
@@ -35,19 +36,11 @@
  */
 import http from 'node:http';
 import { randomUUID } from 'node:crypto';
+import { matchesFilter, readPath, UnsupportedFilterError } from './filter-matcher.mjs';
+import { listenOnLoopback } from './local-server.mjs';
 
 export const FAKE_SPACE = 'y-proj-ythril';
 export const FAKE_TOKEN = 'ythril_testtoken_0123456789abcdef';
-
-/** Dotted-path read. */
-function readPath(doc, path) {
-  let cur = doc;
-  for (const part of path.split('.')) {
-    if (cur === null || cur === undefined || typeof cur !== 'object') return undefined;
-    cur = cur[part];
-  }
-  return cur;
-}
 
 /** Remove a dotted path from a copy of the row. */
 function withoutPath(doc, path) {
@@ -62,39 +55,9 @@ function withoutPath(doc, path) {
   return copy;
 }
 
-const OPS = {
-  $eq: (v, x) => v === x,
-  $ne: (v, x) => v !== x,
-  $gt: (v, x) => v > x,
-  $gte: (v, x) => v >= x,
-  $lt: (v, x) => v < x,
-  $lte: (v, x) => v <= x,
-  $in: (v, x) => Array.isArray(x) && x.includes(v),
-};
-
-function matches(doc, filter) {
-  for (const [key, cond] of Object.entries(filter ?? {})) {
-    if (key === '$and') {
-      if (!Array.isArray(cond) || !cond.every(f => matches(doc, f))) return false;
-      continue;
-    }
-    if (key.startsWith('$')) throw Object.assign(new Error(`filter operator ${key} is not supported by the fake`), { status: 400 });
-    const value = readPath(doc, key);
-    if (cond !== null && typeof cond === 'object' && !Array.isArray(cond)) {
-      for (const [op, operand] of Object.entries(cond)) {
-        const fn = OPS[op];
-        if (!fn) throw Object.assign(new Error(`filter operator ${op} is not supported by the fake`), { status: 400 });
-        if (!fn(value, operand)) return false;
-      }
-    } else if (value !== cond) return false;
-  }
-  return true;
-}
-
 export async function startFakeYthril({ token = FAKE_TOKEN, delayMs = 0, respond } = {}) {
   const calls = [];
   const store = [];
-  const sockets = new Set();
   let inFlight = 0;
   let maxInFlight = 0;
   let hanging = false;
@@ -164,7 +127,11 @@ export async function startFakeYthril({ token = FAKE_TOKEN, delayMs = 0, respond
           }
           case 'filter': {
             if (body.collection !== 'chrono') return send(400, { ok: false, error: 'the fake holds chrono only', data: null });
-            let rows = store.filter(e => matches(e, body.filter));
+            let rows;
+            try { rows = store.filter(e => matchesFilter(e, body.filter)); } catch (err) {
+              if (err instanceof UnsupportedFilterError) return send(400, { ok: false, error: err.message, data: null });
+              throw err;
+            }
             const total = rows.length;
             const field = body.sort ?? 'createdAt';
             const dir = body.sort ? (body.dir === 'asc' ? 1 : -1) : -1;
@@ -198,9 +165,7 @@ export async function startFakeYthril({ token = FAKE_TOKEN, delayMs = 0, respond
       }
     });
   });
-  server.on('connection', s => { sockets.add(s); s.on('close', () => sockets.delete(s)); });
-  await new Promise(r => server.listen(0, '127.0.0.1', r));
-  const url = `http://127.0.0.1:${server.address().port}`;
+  const { url, close } = await listenOnLoopback(server);
 
   return {
     url, token, calls, store,
@@ -217,9 +182,6 @@ export async function startFakeYthril({ token = FAKE_TOKEN, delayMs = 0, respond
       store.push(doc);
       return doc;
     },
-    async close() {
-      for (const s of sockets) s.destroy();
-      await new Promise(r => server.close(r));
-    },
+    close,
   };
 }

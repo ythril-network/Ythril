@@ -28,8 +28,11 @@
  * It does not change what the server does with a command, and it does not touch replies. It only reads the wire format
  * far enough to name the command and see whether `maxTimeMS` is on it; a message it cannot read (the handshake, a
  * compressed one) is passed on at once.
+ *
+ * The relay itself (listen, dial the store, pipe both ways, reset on close) is `_tcp-relay.mjs`; what is written here is
+ * only what happens to the client's bytes on their way: framing, the delay, and the order.
  */
-import net from 'node:net';
+import { startTcpRelay } from './_tcp-relay.mjs';
 
 const OP_MSG = 2013;
 /** The commands a bound can end: a delay on a read would only slow the test down. */
@@ -43,7 +46,6 @@ const WRITE_COMMANDS = new Set(['insert', 'update', 'delete', 'findAndModify', '
  */
 export async function startDelayedWriteRelay({ host, port }) {
   const { BSON } = await import('mongodb');
-  const sockets = new Set();
   let delayMs = 0;
   let delayed = 0;
 
@@ -60,34 +62,30 @@ export async function startDelayedWriteRelay({ host, port }) {
     }
   }
 
-  const server = net.createServer((inbound) => {
-    const outbound = net.connect(port, host);
-    for (const s of [inbound, outbound]) { sockets.add(s); s.on('error', () => {}); s.on('close', () => sockets.delete(s)); }
-    outbound.pipe(inbound);
-    let pending = Buffer.alloc(0);
-    let chain = Promise.resolve();
-    inbound.on('data', (chunk) => {
-      pending = Buffer.concat([pending, chunk]);
-      while (pending.length >= 4 && pending.length >= pending.readInt32LE(0)) {
-        const message = pending.subarray(0, pending.readInt32LE(0));
-        pending = pending.subarray(message.length);
-        const wait = delayFor(message);
-        if (wait > 0) delayed += 1;
-        chain = chain.then(() => (wait > 0 ? new Promise(r => setTimeout(r, wait)) : undefined))
-          .then(() => { if (!outbound.destroyed) outbound.write(message); });
-      }
-    });
-    inbound.on('close', () => outbound.destroy());
-    outbound.on('close', () => inbound.destroy());
+  const relay = await startTcpRelay({
+    host,
+    port,
+    // Built per connection: the framing buffer and the ordering chain belong to ONE client's stream.
+    clientToServer: (forward) => {
+      let pending = Buffer.alloc(0);
+      let chain = Promise.resolve();
+      return (chunk) => {
+        pending = Buffer.concat([pending, chunk]);
+        while (pending.length >= 4 && pending.length >= pending.readInt32LE(0)) {
+          const message = pending.subarray(0, pending.readInt32LE(0));
+          pending = pending.subarray(message.length);
+          const wait = delayFor(message);
+          if (wait > 0) delayed += 1;
+          chain = chain.then(() => (wait > 0 ? new Promise(r => setTimeout(r, wait)) : undefined))
+            .then(() => forward(message));
+        }
+      };
+    },
   });
-  await new Promise(r => server.listen(0, '127.0.0.1', r));
   return {
-    port: server.address().port,
+    port: relay.port,
     setDelay(ms) { delayMs = ms; },
     delayedWrites: () => delayed,
-    async close() {
-      for (const s of sockets) s.destroy();
-      await new Promise(r => server.close(r));
-    },
+    close: relay.close,
   };
 }

@@ -57,8 +57,10 @@ import { execFileSync } from 'node:child_process';
 import { join, isAbsolute, relative, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createYthrilApi, assertBearerSafeUrl, YthrilApiError } from './_shared/ythril-api.mjs';
-import { readTimingLog, maskSecrets } from '../testing/_shared/timing-reporter.mjs';
 import { CI_WORKFLOW } from '../testing/_shared/ci-workflow-path.mjs';
+import { readCappedBody } from './_shared/capped-body.mjs';
+import { readTimingLog } from '../testing/_shared/timing-reporter.mjs';
+import { maskSecrets } from '../testing/_shared/secret-masking.mjs';
 import { holdsWithin } from '../testing/_shared/wait-for.mjs';
 import { ciSignal } from '../testing/_shared/running-under-ci.mjs';
 import { isExpectedInCiSkip } from '../testing/_shared/expected-in-ci.mjs';
@@ -272,19 +274,13 @@ const HOME_PATHS = [
   ['/(?:home|Users)/[^/\\s]+(?:/\\S*)?', 'g'],
   ['/root(?=[/\\s]|$)(?:/\\S*)?', 'g'],
 ];
-/** Credentials the reporter's own list may not know: stricter on purpose, this is the last stop before a write. */
-const CREDENTIALS = [
-  ['\\bythril_[A-Za-z0-9_-]{8,}', 'g'],
-  ['\\b(?:gh[pousr]_[A-Za-z0-9]{16,}|github_pat_[A-Za-z0-9_]{16,})', 'g'],
-  ['\\bBearer\\s+\\S+', 'gi'],
-  ['\\bAuthorization:\\s*\\S+', 'gi'],
-  ['\\beyJ[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]{8,}', 'g'],
-];
 
-/** A line of text safe to store: first line only, secrets and home paths masked, at most 300 characters. */
+/**
+ * A line of text safe to store: first line only, secrets (the ONE list, `secret-masking.mjs`) and home paths masked,
+ * at most 300 characters. The home paths are this module's own: where a file lives is not a token shape.
+ */
 export function maskText(text) {
   let out = maskSecrets(String(text ?? '').split(/\r?\n/)[0]);
-  for (const [source, flags] of CREDENTIALS) out = out.replace(new RegExp(source, flags), '***');
   for (const [source, flags] of HOME_PATHS) out = out.replace(new RegExp(source, flags), '<home>');
   return out.slice(0, 300);
 }
@@ -649,14 +645,7 @@ function githubClient() {
     }
     if (res.status >= 300 && res.status < 400) return { res, bytes: null };
     if (!res.ok) { await res.body?.cancel().catch(() => {}); throw new Error(`${what}: GitHub answered ${res.status}`); }
-    const chunks = [];
-    let size = 0;
-    for await (const chunk of res.body ?? []) {
-      size += chunk.length;
-      if (size > cap) throw new Error(`${what}: answer larger than ${cap} bytes`);
-      chunks.push(chunk);
-    }
-    return { res, bytes: Buffer.concat(chunks) };
+    return { res, bytes: await readCappedBody(res, cap, { refuse: (limit) => new Error(`${what}: answer larger than ${limit} bytes`) }) };
   }
 
   const authorised = { authorization: `Bearer ${token}`, accept: 'application/vnd.github+json' };

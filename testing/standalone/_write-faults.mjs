@@ -48,6 +48,7 @@ import { randomUUID } from 'node:crypto';
 import { ASYNC_MUTATORS } from './_document-mutators.mjs';
 import { holdsWithin } from '../_shared/wait-for.mjs';
 import { drainWrites } from './_active-operations.mjs';
+import { startTcpRelay } from './_tcp-relay.mjs';
 
 // ── A real lock ──────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -277,18 +278,10 @@ export function parkWrites(proto) {
  *   `host:port`, which the driver's text names and no answer may
  */
 export async function driverWriteFailures(dbName) {
-  const net = await import('node:net');
   const { MongoClient } = await import('mongodb');
   const { testMongoUri, TEST_MONGO_HOST, TEST_MONGO_PORT } = await import('./_mongo-harness.mjs');
-  const sockets = new Set();
-  const relay = net.createServer((inbound) => {
-    const outbound = net.connect(TEST_MONGO_PORT, TEST_MONGO_HOST);
-    for (const s of [inbound, outbound]) { sockets.add(s); s.on('error', () => {}); }
-    inbound.pipe(outbound);
-    outbound.pipe(inbound);
-  });
-  await new Promise(r => relay.listen(0, '127.0.0.1', r));
-  const address = `127.0.0.1:${relay.address().port}`;
+  const relay = await startTcpRelay({ host: TEST_MONGO_HOST, port: TEST_MONGO_PORT });
+  const { address } = relay;
   const uri = testMongoUri(dbName).replace(`${TEST_MONGO_HOST}:${TEST_MONGO_PORT}`, address);
   // Short, so a failed selection is reached in under a second; the shapes do not depend on the durations.
   const client = new MongoClient(uri, { serverSelectionTimeoutMS: 800, heartbeatFrequencyMS: 500, connectTimeoutMS: 500 });
@@ -311,8 +304,7 @@ export async function driverWriteFailures(dbName) {
       // A driver-side refusal raised inside the bulk write's operation, so the driver wraps it like a transport one.
       expired: await failed('insertMany on an ended session', () => coll.insertMany([{ _id: 'late' }], { session: ended })),
     };
-    relay.close();
-    for (const s of sockets) s.destroy();
+    await relay.close();
     const unknown = await eventually(() => [...(client.topology?.description.servers.values() ?? [])]
       .every(s => s.type === 'Unknown'), 10_000, 50);
     if (!unknown) throw new Error('driverWriteFailures: the client never noticed the store had gone — no outage to produce errors in');
@@ -327,8 +319,7 @@ export async function driverWriteFailures(dbName) {
       driverSide: { bulk: healthy.expired },
     };
   } finally {
-    relay.close();
-    for (const s of sockets) s.destroy();
+    await relay.close();
     await client.close(true).catch(() => {});
   }
 }

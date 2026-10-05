@@ -25,6 +25,7 @@
  * Binds 127.0.0.1 only; nothing here reaches github.com.
  */
 import http from 'node:http';
+import { listenOnLoopback } from './local-server.mjs';
 
 export const FAKE_GH_TOKEN = 'ghp_fakeTestToken0123456789abcdefghijklmn';
 
@@ -33,7 +34,6 @@ export const FAKE_GH_TOKEN = 'ghp_fakeTestToken0123456789abcdefghijklmn';
  */
 export async function startFakeGithub({ runs, jobsByRun = {}, artifactsByRun = {}, token = FAKE_GH_TOKEN }) {
   const requests = [];
-  const sockets = new Set();
   const artifactById = new Map();
   for (const list of Object.values(artifactsByRun)) for (const a of list) artifactById.set(String(a.id), a);
 
@@ -68,11 +68,10 @@ export async function startFakeGithub({ runs, jobsByRun = {}, artifactsByRun = {
     }
     return json(404, { message: 'Not Found' });
   });
-  server.on('connection', s => { sockets.add(s); s.on('close', () => sockets.delete(s)); });
-  await new Promise(r => server.listen(0, '127.0.0.1', r));
+  const { url, close } = await listenOnLoopback(server);
 
   return {
-    url: `http://127.0.0.1:${server.address().port}`,
+    url,
     token,
     requests,
     /** Run ids whose jobs, artifacts or artifact bytes were ever requested. */
@@ -86,9 +85,6 @@ export async function startFakeGithub({ runs, jobsByRun = {}, artifactsByRun = {
       }
       return ids;
     },
-    async close() {
-      for (const s of sockets) s.destroy();
-      await new Promise(r => server.close(r));
-    },
+    close,
   };
 }

@@ -47,9 +47,9 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import net from 'node:net';
 import { join } from 'node:path';
 import { startFakeYthril, FAKE_SPACE } from '../_shared/fake-ythril-tool-server.mjs';
+import { closedLoopbackPort } from '../_shared/closed-port.mjs';
 import { waitFor } from '../_shared/wait-for.mjs';
 import { makeWorkdir, writeResults, runTimes, spawnTimes, everything } from '../_shared/test-times-harness.mjs';
 
@@ -391,10 +391,7 @@ describe('a record that cannot be written is kept, said so in exact words, and n
   it('an instance that cannot be reached: keeps the payload, prints the line, exits 0', async () => {
     await withRun({}, async ({ dir }) => {
       writeStandard(dir);
-      const probe = net.createServer();
-      await new Promise(r => probe.listen(0, '127.0.0.1', r));
-      const { port } = probe.address();
-      await new Promise(r => probe.close(r));
+      const port = await closedLoopbackPort();
       const r = await runTimes(['--record'], { cwd: dir, env: { YTHRIL_TEST_RUNS_URL: `http://127.0.0.1:${port}`, YTHRIL_TEST_RUNS_TOKEN: 'ythril_some_token_value_123' } });
       assert.equal(r.code, 0, everything(r));
       assert.equal(unrecordedFiles(dir).length, 2);

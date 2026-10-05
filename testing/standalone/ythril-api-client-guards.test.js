@@ -37,11 +37,11 @@
  */
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import net from 'node:net';
 import { inspect } from 'node:util';
 import { pathToFileURL } from 'node:url';
 import { resolve } from 'node:path';
 import { startFakeYthril, FAKE_TOKEN, FAKE_SPACE } from '../_shared/fake-ythril-tool-server.mjs';
+import { closedLoopbackPort } from '../_shared/closed-port.mjs';
 
 const MODULE = pathToFileURL(resolve(import.meta.dirname, '..', '..', 'scripts', '_shared', 'ythril-api.mjs')).href;
 let loaded;
@@ -62,14 +62,6 @@ async function rejection(promise) {
   assert.fail('expected the call to reject');
 }
 
-/** A port nothing listens on: bind, note the number, release. */
-async function closedPort() {
-  const s = net.createServer();
-  await new Promise(r => s.listen(0, '127.0.0.1', r));
-  const { port } = s.address();
-  await new Promise(r => s.close(r));
-  return port;
-}
 
 describe('the URL the client will send a token to', () => {
   const refused = [
@@ -218,7 +210,7 @@ describe('no error prints the token, the URL userinfo or a header', () => {
       return { s, run: () => mod.createYthrilApi({ url: s.url, token: FAKE_TOKEN }).call('filter', { space: FAKE_SPACE, collection: 'chrono' }) };
     },
     'a refused connection': async (mod) => {
-      const port = await closedPort();
+      const port = await closedLoopbackPort();
       return { s: null, run: () => mod.createYthrilApi({ url: `http://127.0.0.1:${port}`, token: FAKE_TOKEN }).call('filter', { space: FAKE_SPACE, collection: 'chrono' }) };
     },
     'a redirect': async (mod) => {

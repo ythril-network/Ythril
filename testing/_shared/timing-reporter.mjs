@@ -37,6 +37,8 @@
 import { openSync, writeSync, closeSync } from 'node:fs';
 import { dirname, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+// The token shapes a failure, a test name or a skip reason may carry are masked by the ONE list (`secret-masking.mjs`).
+import { maskSecrets } from './secret-masking.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
@@ -100,21 +102,6 @@ export const TIMING_END_SCHEMA = Object.freeze({
   endedAt: { type: 'string', doc: 'ISO 8601 UTC time the sentinel was written, i.e. when the run\'s last event had arrived.' },
   scope: { type: 'string', values: TIMING_SCOPES, doc: 'full, subset or files, as the runner declared it; subset when it did not.' },
 });
-
-/** Token shapes a failure, a test name or a skip reason may carry. Each is the unguessable run, not the prefix. */
-const SECRET_PATTERNS = [
-  /github_pat_[A-Za-z0-9_]{20,}/g,
-  /gh[pousr]_[A-Za-z0-9]{30,}/g,
-  /ythril_[A-Za-z0-9]{32,}/g,
-  /Bearer\s+[A-Za-z0-9._~+/=-]{16,}/g,
-];
-
-/** `text` with every token-shaped string replaced by `***`, and nothing around it changed. Idempotent. */
-export function maskSecrets(text) {
-  let out = String(text);
-  for (const p of SECRET_PATTERNS) out = out.replace(p, '***');
-  return out;
-}
 
 /**
  * Read a timing file back, saying whether it is WHOLE.
