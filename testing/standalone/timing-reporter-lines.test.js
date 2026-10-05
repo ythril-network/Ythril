@@ -353,10 +353,16 @@ describe('concurrent files keep their own events', () => {
       assert.equal(l.file, fixture(`timing-concurrent-${owner}`), `"${l.test}" recorded under ${l.file}`);
     }
     const fileLine = (n) => concLines.find(l => l.type === 'file' && l.file === fixture(`timing-concurrent-${n}`));
-    assert.ok(fileLine('a').ms >= 400, `a waited 400 ms and its file took ${fileLine('a').ms}`);
-    assert.ok(fileLine('b').ms >= 170, `b waited 170 ms and its file took ${fileLine('b').ms}`);
-    assert.ok(concLines.find(l => l.test === 'concurrent a slow').ms >= 400);
-    assert.ok(concLines.find(l => l.test === 'concurrent b medium').ms >= 150);
+    // A timer may fire a little EARLY by the clock the runner measures with (CI read 149.x ms for a 150 ms sleep), so each
+    // floor is the fixture's wait less a few milliseconds. What is asserted is attribution — b carries b's figure, which is
+    // far from a's 400 — not the timer's precision.
+    const EARLY_MS = 5;
+    const testMs = (name) => concLines.find(l => l.test === name).ms;
+    assert.ok(fileLine('a').ms >= 400 - EARLY_MS, `a waited 400 ms and its file took ${fileLine('a').ms}`);
+    assert.ok(fileLine('b').ms >= 170 - EARLY_MS, `b waited 170 ms and its file took ${fileLine('b').ms}`);
+    assert.ok(testMs('concurrent a slow') >= 400 - EARLY_MS, `a's test took ${testMs('concurrent a slow')}`);
+    assert.ok(testMs('concurrent b medium') >= 150 - EARLY_MS && testMs('concurrent b medium') < 400,
+      `b's test took ${testMs('concurrent b medium')} ms: under its own 150 ms wait, or carrying a's 400`);
   });
 });
 
