@@ -13,10 +13,12 @@
  * ## Which semantics won, and why
  *
  * The recorder's. Its floors were written "stricter on purpose, this is the last stop before a write", and for every
- * family they are the lower (so the wider) of the two; the reporter's list is a subset of it. The cost is the one
- * the old reporter row pinned against: a test NAME that merely starts like a credential (`ythril_http_requests_total`,
- * a metric name; `Bearer token missing`) is now masked in the reporter's file, exactly as it already was in the
- * recorded `Test-Run`. A leaked credential in a public artifact outweighs a hidden metric name in a title.
+ * family they are the lower (so the wider) of the two; the reporter's list is a subset of it. The `ythril_` family
+ * follows the real token's shape (`ythril_` + base62, `auth/tokens.ts`): a first run of 8 or more base62 characters,
+ * and any `_`/`-`-joined runs after it. So a metric or harness name (`ythril_http_requests_total`, first run `http`)
+ * stays readable in a timing record, while a typed test token with underscores is masked whole. `Bearer` still masks
+ * the word after it whatever it is (`Bearer token missing`) — a leaked credential in a public artifact outweighs a
+ * hidden word in a title.
  *
  * ## What the server's `redactSecrets` is, and why it stays separate
  *
@@ -71,6 +73,8 @@ const ROWS = [
   // What only LOOKS like one stays whole.
   ['a bare prefix', 'ghp_', 'ghp_'],
   ['the product name', 'ythril and ythril_', 'ythril and ythril_'],
+  ['a metric name: its first run after ythril_ is short, so it is not a token', 'ythril_http_requests_total', 'ythril_http_requests_total'],
+  ['a harness database name', 'ythril_harness_standalone_recall_filtered', 'ythril_harness_standalone_recall_filtered'],
   ['the word Bearer inside another word', 'the Bearers of news', 'the Bearers of news'],
   ['a plain sentence', 'a plain sentence', 'a plain sentence'],
   ['nothing', '', ''],

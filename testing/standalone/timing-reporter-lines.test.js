@@ -331,10 +331,11 @@ describe('maskSecrets', () => {
     }
   });
 
-  it('masks a name that starts like a credential, as the recorder always did: the price of a floor that catches a typed token', () => {
-    // These two were pinned as "not secrets" while the reporter kept looser floors than the recorder, which wrote
-    // them masked into every Test-Run anyway; one list means one answer, and it is the stricter.
-    assert.equal(maskSecrets('ythril_harness_standalone_recall_filtered'), '***');
+  it('leaves a metric or harness name readable, and masks a Bearer value whatever word it is', () => {
+    // A real token is `ythril_` + base62 (auth/tokens.ts): a name whose first run is short is not one, and a timing
+    // record must be able to show it.
+    assert.equal(maskSecrets('ythril_harness_standalone_recall_filtered'), 'ythril_harness_standalone_recall_filtered');
+    assert.equal(maskSecrets('includes ythril_http_requests_total counter'), 'includes ythril_http_requests_total counter');
     assert.equal(maskSecrets('Bearer token missing'), 'Bearer *** missing');
   });
 

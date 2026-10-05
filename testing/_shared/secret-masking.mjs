@@ -18,8 +18,10 @@
  * every shorter one.
  *
  * - `Authorization:` and its value (with a scheme word, `Bearer` or `Basic`, in front of it), written `Authorization: ***`.
- * - `ythril_` + 8 or more of `A-Za-z0-9_-`; `gh[pousr]_` + 16 or more of `A-Za-z0-9`; `github_pat_` + 16 or more of
- *   `A-Za-z0-9_`. Not anchored to a word start: a token glued to a name is still a token.
+ * - `ythril_` + a run of 8 or more base62 characters (a real token is `ythril_` + base62, `auth/tokens.ts`), and any
+ *   `_`/`-`-joined runs after it, so a typed test token with underscores is masked whole; `gh[pousr]_` + 16 or more of
+ *   `A-Za-z0-9`; `github_pat_` + 16 or more of `A-Za-z0-9_`. Not anchored to a word start: a token glued to a name is
+ *   still a token.
  * - `Bearer` and the next word, whatever it is, written `Bearer ***` (the word stays, to say what kind of thing was masked).
  * - A JWT: three dot-separated runs of 8 or more, the first starting `eyJ`.
  *
@@ -27,9 +29,10 @@
  *
  * ## What it costs, said once
  *
- * A test NAME that only starts like a credential is masked too (`ythril_http_requests_total`, a metric name). That is
- * the price of a floor low enough to catch a typed token, and the recorder already paid it for every `Test-Run` it
- * wrote.
+ * A name whose first run after `ythril_` is short is NOT a token and stays readable — a metric
+ * (`ythril_http_requests_total`) or a harness database (`ythril_harness_…`) is what a timing record must be able to
+ * show. A name whose first run is 8 or more base62 characters is masked like a token; and `Bearer` masks the word
+ * after it whatever it is (`Bearer token missing` reads `Bearer *** missing`): the price of catching a typed value.
  *
  * ## What it is not
  *
@@ -48,7 +51,7 @@
  */
 const SHAPES = Object.freeze([
   [/\bAuthorization:\s*(?:(?:Bearer|Basic|Digest|Token)\s+)?\S+/gi, 'Authorization: ***'],
-  [/ythril_[A-Za-z0-9_-]{8,}/g, '***'],
+  [/ythril_[A-Za-z0-9]{8,}(?:[_-][A-Za-z0-9]+)*/g, '***'],
   [/gh[pousr]_[A-Za-z0-9]{16,}/g, '***'],
   [/github_pat_[A-Za-z0-9_]{16,}/g, '***'],
   [/\bBearer\s+\S+/gi, 'Bearer ***'],
