@@ -102,6 +102,11 @@ describe('an entity cascade removes a hub by the chunk', { skip }, () => {
       const { hub } = await hubWith(n);
       return door.commandsDuring(() => runCascade(hub));
     };
+    // One unmeasured cascade first: the space's seq state is seeded from the store on its first allocation in a process
+    // (one read per seq-carrying collection), and whichever hub is measured first would pay for it — so this case only
+    // passed when another case of the file had run before it.
+    await runCascade((await hubWith(2)).hub);
+    await door.wipe(S);
     const smaller = await cost(1_001);
     await door.wipe(S);
     const larger = await cost(1_499);

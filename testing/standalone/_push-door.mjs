@@ -170,6 +170,9 @@ async function assemblePushDoor({ suite, spaces, monitorCommands, mongo, tmpDir 
   const { resolveNetworkSpaceAlias } = await import('../../server/dist/api/sync/space-alias.js');
   const { initSpace } = await import('../../server/dist/spaces/lifecycle.js');
   for (const s of spaces) await initSpace(s.id, { waitForVectorReady: false });
+  const { searchIndexPresenceSettled } = await import('../../server/dist/spaces/search-index-presence.js');
+  /** Every search-index presence reconcile queued so far on the door's spaces has finished. */
+  const presenceSettled = () => Promise.all(spaces.map(s => searchIndexPresenceSettled(s.id)));
 
   // ── The counter probe: the highest value a COMPLETED counter write left, per space ─────────────────────────
   const landed = new Map();
@@ -260,12 +263,27 @@ async function assemblePushDoor({ suite, spaces, monitorCommands, mongo, tmpDir 
     await mongo.col('ythril_counters').deleteMany({ _id: space });
     landed.delete(space);
   }
-  /** Commands the harness database saw while `fn` ran, minus the driver's own housekeeping. */
+  /**
+   * Commands the harness database saw while `fn` ran, minus the driver's own housekeeping.
+   *
+   * The window is closed on both edges against the one thing that runs after a write on its own: the search-index
+   * presence reconcile every record-collection write schedules (`spaces/search-index-presence.ts`), one or more commands,
+   * asynchronously. Before the window opens, what earlier writes scheduled is drained, so it cannot land inside; after
+   * `fn`, what `fn`'s own writes scheduled is awaited INSIDE the window, so it is counted every time rather than when it
+   * happens to beat the close. Four cost tests wrote that settle by hand and the fifth that did not read one hub cascade
+   * as 38 commands and an identical one as 35 (b56). It lives here so no caller can leave it out.
+   */
   async function commandsDuring(fn) {
     assert.ok(monitorCommands, 'commandsDuring needs openPushDoor({ monitorCommands: true })');
+    await settled();
+    await presenceSettled();
     commands = [];
     counting = true;
-    try { await fn(); } finally { counting = false; }
+    try {
+      await fn();
+      await settled();
+      await presenceSettled();
+    } finally { counting = false; }
     return commands.filter(c => !/^(hello|isMaster|ping|endSessions|saslContinue|saslStart) /.test(c));
   }
 

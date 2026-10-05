@@ -44,7 +44,7 @@ const S = 'filemetacost';
 /** The family under test, read from the push door's table so its body key and collection are not re-spelled. */
 const FILEMETA = Object.entries(FAMILIES).find(([, f]) => f.coll === 'files');
 
-let door, searchIndexPresenceSettled;
+let door;
 let seq = 0;
 /** New, distinct, top-level files (no `parentFileId`): what a peer offers. Seqs rise so every one is newer. */
 const page = (n, tag) => Array.from({ length: n }, (_, i) =>
@@ -55,11 +55,8 @@ async function cost(deliver, n, tag) {
   const scope = new Set([`${S}_files`, `${S}_tombstones`, `${S}_embed_jobs`, 'ythril_counters']);
   const docs = page(n, tag);
   const seen = await door.commandsDuring(async () => {
+    // `commandsDuring` counts the presence reconcile this write schedules, on both edges of the window.
     await deliver(docs);
-    await door.settled();
-    // The presence reconcile a write schedules runs after it; awaited inside the window so every page counts it
-    // alike (see the brain-family twin of this file for the 7-versus-8 it otherwise produces).
-    await searchIndexPresenceSettled(S);
   });
   // Every document landed: a page that wrote nothing would cost the same at any size and pass vacuously.
   const stored = await door.coll(S, 'files').countDocuments({ _id: { $in: docs.map(d => d._id) } });
@@ -78,9 +75,7 @@ const viaPull = async (docs) => {
 
 describe('a page of file metadata costs the same at any size', { skip }, () => {
   before(async () => {
-    door = await openPullDoor({ suite: 'filemetacost', spaces: [S], monitorCommands: true });
-    ({ searchIndexPresenceSettled } = await import('../../server/dist/spaces/search-index-presence.js'));
-  });
+    door = await openPullDoor({ suite: 'filemetacost', spaces: [S], monitorCommands: true });  });
   after(async () => { await door?.close(); });
 
   it('the family is the files collection and monitoring sees its commands', async () => {
