@@ -20,8 +20,13 @@
  *    call that is handed `res` itself (a sender: `sendThing(res, 500, msg)`);
  *  - **an act's answer**: the `error` property of an object literal that is RETURNED (`return { status: 502, error: ... }`,
  *    the shape the join and rename acts answer in) or handed to a response;
- *  - **a list of failures**: `.push(...)` onto a list named `errors`, `error` or `errorMessages` (a sync cycle's
- *    history keeps its failures there);
+ *  - **a list of failures**: an argument of ANY `.push(...)`, whatever the list is called — `errors.push(...)`,
+ *    `failed.push({ id, error: err.message })`, `results.push(...)` — when the argument reads the binding or an alias of it:
+ *    `err.message`, `String(err)`, `${err}`, `err` itself, an alias of any of those, or an object literal with such a value.
+ *    A list a caller reads or a record stores later (a sync cycle's history, a bulk answer's `failed`) is never named
+ *    for what it holds. This used to be recognised by the list's NAME (`errors`, `error`, `errorMessages`), which is how
+ *    a bulk-resolve's `failed.push({ id, error: err.message })` went unseen; a push that only collects text for a log
+ *    line is flagged too and needs its reason in `EXEMPT`, the price of not trusting a name;
  *  - **a stored failure**: an argument of a call to a function that WRITES a `lastError` — derived, not named: any
  *    function whose body has a `lastError` property gets its error-ish parameter (`errorMessage`, `msg`, `err`) read as
  *    the stored text.
@@ -46,7 +51,6 @@ const require = createRequire(path.resolve('package.json'));
 const ts = require('typescript');
 
 const RESPONSE_METHODS = new Set(['json', 'send', 'end']);
-const LIST_NAMES = /^(?:errors?|errorMessages)$/;
 const ERROR_PARAM = /^(?:err|error|errorMessage|errMsg|msg|message)$/i;
 
 const lineOf = (sf, node) => sf.getLineAndCharacterOfPosition(node.getStart()).line + 1;
@@ -251,9 +255,10 @@ export function exitsIn(file, env) {
           && n.arguments.some(a => ts.isIdentifier(a) && /^res(ponse)?$/.test(a.text))) {
           for (const a of n.arguments) if (!(ts.isIdentifier(a) && /^res(ponse)?$/.test(a.text))) record(n, 'sender', a);
         }
-        // a list of failures
-        if (ts.isPropertyAccessExpression(callee) && callee.name.text === 'push' && ts.isIdentifier(callee.expression)
-          && LIST_NAMES.test(callee.expression.text)) for (const a of n.arguments) record(n, 'failure list', a);
+        // a list of failures: ANY `.push(...)`, whatever the list is called (see the docblock)
+        if (ts.isPropertyAccessExpression(callee) && callee.name.text === 'push') {
+          for (const a of n.arguments) record(n, 'failure list', a);
+        }
         // a stored failure
         if (ts.isIdentifier(callee) && env.writers.has(callee.text)) {
           const a = n.arguments[env.writers.get(callee.text)];

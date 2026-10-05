@@ -10,7 +10,8 @@
  * are served later (a job's `lastError`, a sync cycle's error list). Some forty catches in thirty-odd files, found by
  * reading, which is how the forty-first gets missed. So this derives them (`_error-text-exits.mjs`): every catch scope in
  * every tracked server source, every use of the caught binding or of anything computed from it, and where the use GOES —
- * a response, an act's answer, a list of failures, a function that writes a `lastError`.
+ * a response, an act's answer, a list of failures (ANY `.push(...)`, whatever the list is called: it was recognised by
+ * the name `errors` until a bulk answer's `failed` went unseen), a function that writes a `lastError`.
  *
  * A use passes when it goes through a SANITIZER (`caughtFailureText`, the classifier `classifyReadFailure`, and every sender
  * derived from them: a function that takes `res` and calls one), or when it sits inside `err instanceof OwnClass` for a
@@ -60,6 +61,13 @@ const EXEMPT = {
   'server/src/db/conn-test.ts: error: err instanceof Error ? err.message : String(err)':
     'the text is about the candidate Mongo URI an administrator (MFA) typed to be tested, not this instance\'s store: '
     + 'the reason it did not connect is the answer the test exists to give, and the host in it is the one they supplied',
+  // Collected failures that are only ever JOINED INTO A LOG LINE: the list is local, never returned, answered or stored.
+  'server/src/brain/links-convert-on-boot.ts: failures.push(`${space.id} (${err instanceof Error ? err.message : String(err)})`)':
+    'the boot link conversion collects each failed space\'s text in a local array that is only joined into one log.error '
+    + 'line; it is never returned, answered or stored, and a log is where the driver\'s text is supposed to go',
+  'server/src/brain/suppression-sweep.ts: failed.push(`${kind} (${err instanceof Error ? err.message : String(err)})`)':
+    'the sweep collects each failed kind\'s text and throws it once; its only callers (sweepLatestMeta and the boot walk) '
+    + 'log it through peerText and never answer or store it, and a log is where the driver\'s text is supposed to go',
   // A separate process with no store: it never opens a database, so no error it catches can be a driver's.
   'server/src/local-agent-connector/index.ts: res.status(500).json({ error: msg })':
     'the local agent connector is a separate process that never connects to MongoDB (it drives cloudflared on the '
@@ -130,6 +138,9 @@ describe('the walk sees each form — each seen red on a fixture, and each negat
     'an act answering { status, error }': 'async function act() { try { await f(); } catch (err) { return { status: 502, error: `Could not reach the publisher: ${err}` }; } }',
     'a sender handed res and the text': 'function sendIt(res, status, text) { res.status(status).json({ error: text }); }\nasync function h(req, res) { try { await f(); } catch (err) { sendIt(res, 500, err.message); } }',
     'a failure pushed onto errors': 'async function cycle() { const errors = []; try { await f(); } catch (err) { errors.push(`Sync failed: ${String(err)}`); } return errors; }',
+    'a failure pushed onto a list with any name, as an object (a bulk answer\'s `failed`)': 'async function bulk(ids) { const failed = []; for (const id of ids) { try { await f(id); } catch (err) { failed.push({ id, error: err instanceof Error ? err.message : "Unknown error" }); } } return failed; }',
+    'a failure pushed onto a list named for something else': 'async function walk() { const unreadable = []; try { await f(); } catch (err) { unreadable.push(`${err}`); } return unreadable; }',
+    'a failure pushed after String(err) held in an alias': 'async function walk() { const out = []; try { await f(); } catch (err) { const why = String(err); out.push({ why }); } return out; }',
     'a failure pushed onto errorMessages': 'async function cycle() { const errorMessages = []; try { await f(); } catch (err) { const errMsg = `failed: ${err}`; errorMessages.push(errMsg); } }',
     'a stored lastError, through the function that writes it':
       'async function failJob(id, errorMessage) { await jobs.updateOne({ _id: id }, { $set: { lastError: errorMessage } }); }\nasync function run() { try { await f(); } catch (err) { await failJob(1, err instanceof Error ? err.message : String(err)); } }',
@@ -151,6 +162,8 @@ describe('the walk sees each form — each seen red on a fixture, and each negat
       'class Refusal extends Error {}\nasync function h(req, res) { try { await f(); } catch (err) { if (err instanceof Refusal) { res.status(400).json({ error: err.message }); return; } throw err; } }',
     'one of our own errors, in a conditional':
       'class Refusal extends Error {}\nasync function h(req, res) { try { await f(); } catch (err) { res.status(400).json({ error: err instanceof Refusal ? err.message : "Internal error" }); } }',
+    'a failure pushed onto any list after caughtFailureText': 'async function bulk(ids) { const failed = []; for (const id of ids) { try { await f(id); } catch (err) { failed.push({ id, error: caughtFailureText(err, "resolve") }); } } return failed; }',
+    'a push that does not read the error': 'async function walk() { const seen = []; try { await f(); } catch (err) { seen.push("f failed"); } return seen; }',
     'the error only logged': 'async function h(req, res) { try { await f(); } catch (err) { log.warn(`failed: ${err}`); res.status(500).json({ error: "Internal error" }); } }',
   };
   for (const [form, src] of Object.entries(CLEAN)) {
