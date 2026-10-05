@@ -1213,7 +1213,7 @@ async function getEntryEmbedding(
   const collName = `${spaceId}_${collSuffix}`;
   const doc = await col(collName).findOne(
     asFilter({ _id: entryId, spaceId }),
-    { projection: { embedding: 1, _id: 1, spaceId: 1, name: 1, fact: 1, label: 1, title: 1, path: 1, type: 1, description: 1 } },
+    { projection: { embedding: 1, _id: 1, spaceId: 1, seq: 1, name: 1, fact: 1, label: 1, title: 1, path: 1, type: 1, description: 1 } },
   ) as Record<string, unknown> | null;
   if (!doc) return null;
   const vector = doc['embedding'] as number[] | undefined;

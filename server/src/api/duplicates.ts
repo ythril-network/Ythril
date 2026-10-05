@@ -16,7 +16,7 @@ import { spacesWhereTokenMay } from '../auth/reachable-spaces.js';
 import type { TokenRights, Rung } from '../config/rights-shape.js';
 import { getConfig } from '../config/loader.js';
 import { log } from '../util/log.js';
-import { scanSpace, pairContentHash } from '../brain/dupe-scanner.js';
+import { scanSpace, pairContentHash, pairByAge } from '../brain/dupe-scanner.js';
 import { computeMergePlan, applyResolutions, executeMerge } from '../brain/merge.js';
 import { nliConfigured } from '../brain/nli-client.js';
 import type { DupeCandidateDoc, ContradictionCandidateDoc } from '../config/types.js';
@@ -297,8 +297,7 @@ duplicatesRouter.post('/:id/merge', globalRateLimit, requireAuth, denyReadOnly, 
     if (doc.type !== 'entity') { res.status(400).json({ error: 'Merge is only supported for entity candidates' }); return; }
 
     const pref = getConfig().spaces.find(s => s.id === spaceId)?.dupeMergeSurvivor ?? 'older';
-    const olderId = doc.aSeq <= doc.bSeq ? doc.aId : doc.bId;
-    const newerId = doc.aSeq <= doc.bSeq ? doc.bId : doc.aId;
+    const { olderId, newerId } = await pairByAge(spaceId, doc);
     const survivorId = pref === 'newer' ? newerId : olderId;
     const absorbedId = pref === 'newer' ? olderId : newerId;
 
