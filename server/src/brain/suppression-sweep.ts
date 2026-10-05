@@ -151,7 +151,7 @@ export async function sweepSuppressedVectors(spaceId: string, meta: SpaceMeta): 
       const removed = await sweep();
       if (removed === 0) return;
       total += removed;
-      log.info(`Suppression sweep: removed ${removed} ${kind} vector(s) in ${peerText(spaceId)}`);
+      log.info(`Suppression sweep: removed ${removed} ${peerText(kind)} vector(s) in ${peerText(spaceId)}`);
     } catch (err) {
       failed.push(`${kind} (${err instanceof Error ? err.message : String(err)})`);
     }

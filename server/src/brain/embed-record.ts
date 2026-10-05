@@ -166,7 +166,10 @@ export interface EmbedStoredRecordOptions {
  * correct — no counter fires, and no `If-Match` precondition would have been violated.
  *
  * `embedStoredRecord` cannot have that bug. It re-reads the document AFTER the write, so the text it embeds
- * is by construction the text of the record as it actually stands, whoever else wrote to it in between.
+ * is by construction the text of the record as it stood when it read it, whoever else wrote to it before. What
+ * can still arrive is a NEWER copy while the model is being called — the slow step — and every write the job
+ * makes therefore lands only on the version it read (`atReadSeq`): the newer copy is not touched, the outcome is
+ * `superseded`, and the newer copy's own arrival queued the embedding it is owed.
  *
  * Two things fall out of the change that are worth knowing before "simplifying" it back:
  *
