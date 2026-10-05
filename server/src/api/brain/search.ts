@@ -531,7 +531,7 @@ searchRouter.post('/similar', globalRateLimit, requireBodyScopedSpace('knowledge
     if (err instanceof NotFoundError) {
       res.status(404).json({ error: err.message });
     } else {
-      sendReadFailure(res, err);
+      sendReadFailure(res, 'find similar records', err);
     }
   }
 });

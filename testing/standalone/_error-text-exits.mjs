@@ -66,7 +66,7 @@ const lineOf = (sf, node) => sf.getLineAndCharacterOfPosition(node.getStart()).l
 const snippet = node => node.getText().replace(/\s+/g, ' ').slice(0, 120);
 
 /** Reporters whose whole job is to write a failure to the log: the text goes where a driver's text is supposed to go. */
-const LOG_REPORTERS = new Set(['reportServerFailure', 'reportDriverFailure']);
+const LOG_REPORTERS = new Set(['reportServerFailure', 'reportDriverFailure', 'reportRecurringDriverFailure']);
 
 /** Is this callee a logger — `log.warn`, `logger.error`, `console.log`, or one of `LOG_REPORTERS`? */
 function isLogger(callee) {

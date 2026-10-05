@@ -68,17 +68,27 @@ describe('a pull refuses what corrupts and reports what it stores', { skip }, ()
   beforeEach(async () => { await door.reset(); });
 
   describe('what corrupts the receiver is refused, and the position advances past it', () => {
-    for (const bad of [5, 0, false, null, {}, ['x']]) {
+    // One id per case: a refused id is named once per window (`refusalIsNews`), and the cases share the process.
+    for (const [n, bad] of [5, 0, false, null, {}, ['x']].entries()) {
       it(`a file row whose parentFileId is ${JSON.stringify(bad)} is not stored; the rest of the page is`, async () => {
         const { lines } = await pull('filemeta', [
-          FAMILIES.filemeta.make('docs/bad.md', 8, { parentFileId: bad }),
+          FAMILIES.filemeta.make(`docs/bad-${n}.md`, 8, { parentFileId: bad }),
           FAMILIES.filemeta.make('docs/ok.md', 9),
         ]);
         assert.deepEqual(await storedIds('files'), ['docs/ok.md'], 'a corrupt parentFileId was stored, or the control was not');
-        assert.ok(naming(lines, 'docs/bad.md').length >= 1, `nothing names the refused row: ${JSON.stringify(lines)}`);
+        assert.ok(naming(lines, `docs/bad-${n}.md`).length >= 1, `nothing names the refused row: ${JSON.stringify(lines)}`);
         assert.ok(watermark() >= 9, `the position stayed at ${watermark()}: a refused document holds the transfer`);
       });
     }
+
+    it('a refused document moves the position and is named once per window, not by every cycle that is offered it', async () => {
+      const page = [FAMILIES.filemeta.make('docs/offered-twice.md', 12, { parentFileId: 5 })];
+      const first = await pull('filemeta', page);
+      assert.ok(naming(first.lines, 'docs/offered-twice.md').length >= 1, `not named the first time: ${JSON.stringify(first.lines)}`);
+      assert.ok(watermark() >= 12, `the position stayed at ${watermark()}: a refused document holds the transfer`);
+      const again = await pull('filemeta', page);
+      assert.deepEqual(naming(again.lines, 'docs/offered-twice.md'), [], 'named again within the window');
+    });
 
     for (const [why, doc] of [
       ['a numeric _id', { _id: 12345, spaceId: S, fact: 'x', tags: [], author: PEER_AUTHOR, seq: 7 }],

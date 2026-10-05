@@ -16,6 +16,7 @@ import { col } from '../db/mongo.js';
 import { getConfig } from '../config/loader.js';
 import { ssrfSafeFetch } from '../util/ssrf.js';
 import { log, peerText } from '../util/log.js';
+import { storedFailureText } from '../brain/store-failure.js';
 import { publishBrainChange } from '../brain/brain-events.js';
 import type { WebhookEventType, WebhookEventPayload, WebhookDelivery, WebhookSubscription } from './types.js';
 import { withJitter } from '../util/backoff.js';
@@ -84,14 +85,14 @@ async function processRetryQueue(): Promise<void> {
         await markWebhookSuccess(sub.id);
       } else if (job.attempt < MAX_ATTEMPTS) {
         await enqueueRetry(job.webhookId, job.body, job.event, job.spaceId, job.deliveryId, job.attempt + 1);
-        log.warn(`Webhook retry ${job.attempt}/${MAX_ATTEMPTS} failed for ${job.webhookId}: ${result.error ?? `HTTP ${result.responseStatus}`}`);
+        log.warn(`Webhook retry ${job.attempt}/${MAX_ATTEMPTS} failed for ${peerText(job.webhookId)}: ${peerText(result.error ?? `HTTP ${result.responseStatus}`)}`);
       } else {
         await markWebhookFailure(sub.id);
-        log.error(`Webhook ${sub.id} marked as failing after ${MAX_ATTEMPTS} delivery attempts`);
+        log.error(`Webhook ${peerText(sub.id)} marked as failing after ${MAX_ATTEMPTS} delivery attempts`);
       }
     }
   } catch (err) {
-    log.warn(`Webhook retry queue error: ${err}`);
+    log.warn(`Webhook retry queue error: ${peerText(err)}`);
   }
 }
 
@@ -227,7 +228,7 @@ export async function deliverToWebhook(
   if (result.success) {
     await markWebhookSuccess(sub.id);
   } else {
-    log.warn(`Test webhook delivery failed for ${sub.id}: ${result.error ?? `HTTP ${result.responseStatus}`}`);
+    log.warn(`Test webhook delivery failed for ${peerText(sub.id)}: ${peerText(result.error ?? `HTTP ${result.responseStatus}`)}`);
   }
 }
 
@@ -300,7 +301,9 @@ async function attemptDelivery(
     }
   } catch (err) {
     delivery.latencyMs = Date.now() - start;
-    delivery.error = err instanceof Error ? err.message : String(err);
+    // Stored and served with the delivery history: a failure of the store is its sentence, a refused or failed
+    // delivery keeps its own words.
+    delivery.error = storedFailureText(err, 'deliver a webhook');
   }
 
   // Record delivery — fire and forget

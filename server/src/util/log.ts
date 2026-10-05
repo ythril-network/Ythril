@@ -124,13 +124,17 @@ export function redactSecrets(msg: string): string {
 /** Every character that can end, rewind or hide a log line: C0 controls, DEL, C1 controls, and U+2028/U+2029. */
 const LINE_BREAKING = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g;
 
+/** `LINE_BREAKING` for one character, and for "any at all" — neither global, so neither keeps a `lastIndex`. */
+const LINE_BREAKING_ONE = new RegExp(`^(?:${LINE_BREAKING.source})$`);
+const LINE_BREAKING_ANY = new RegExp(LINE_BREAKING.source);
+
 /** The escapes an operator reads at a glance; every other line-breaking character is written `\uXXXX`. */
 const SHORT_ESCAPE: Readonly<Record<string, string>> = { '\r': '\\r', '\n': '\\n', '\t': '\\t' };
 
 /** One line-breaking character, written as the escape an operator reads. */
 const escapeChar = (ch: string): string => SHORT_ESCAPE[ch] ?? `\\u${ch.charCodeAt(0).toString(16).padStart(4, '0')}`;
 
-/** `text` with every line-breaking character escaped — the one place `LINE_BREAKING` is applied. */
+/** `text` with every line-breaking character escaped — the one place a line-breaking character is replaced. */
 function escapeLineBreaks(text: string): string {
   return text.replace(LINE_BREAKING, escapeChar);
 }
@@ -217,10 +221,6 @@ function render(text: string, max: number): string {
   const omitted = (redacted.length - i) + (text.length - window.length);
   return omitted > 0 ? `${out}…(+${omitted} chars)` : out;
 }
-
-/** `LINE_BREAKING` for one character, and for "any at all" — neither global, so neither keeps a `lastIndex`. */
-const LINE_BREAKING_ONE = new RegExp(`^(?:${LINE_BREAKING.source})$`);
-const LINE_BREAKING_ANY = new RegExp(LINE_BREAKING.source);
 
 /**
  * A value from OUTSIDE this instance — a peer's document id, a reason built from its content, a peer's label, a

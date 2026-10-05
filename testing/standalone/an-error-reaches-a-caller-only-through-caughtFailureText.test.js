@@ -67,7 +67,7 @@ const EXEMPT = {
   'server/src/brain/links-convert-on-boot.ts: failures.push(`${space.id} (${err instanceof Error ? err.message : String(err)})`)':
     'the boot link conversion collects each failed space\'s text in a local array that is only joined into one log.error '
     + 'line; it is never returned, answered or stored, and a log is where the driver\'s text is supposed to go',
-  'server/src/brain/suppression-sweep.ts: failed.push(`${kind} (${err instanceof Error ? err.message : String(err)})`)':
+  'server/src/brain/suppression-sweep.ts: failed.push(`${kind} (${messageOf(err)})`)':
     'the sweep collects each failed kind\'s text and throws it once; its only callers (sweepLatestMeta and the boot walk) '
     + 'log it through peerText and never answer or store it, and a log is where the driver\'s text is supposed to go',
   // A number, never a message: the HTTP status an embedding endpoint answered, read off the error as a metric label.

@@ -340,12 +340,20 @@ async function applyPushVerdict<S extends { seq?: number }>(
 const forkIdOf = (incoming: FactDoc): string => forkIdFor(incoming._id, incoming.seq, incoming.fact);
 
 /**
- * The stored copy of a fact as it is NOW. The verdict's copy was read before the write, and a write that came back
- * `diverged` found a same-seq copy with other text stored in between (`Q-232`), so the fork rules judge the copy that
- * is there, not the one the race replaced. `null` when it is gone.
+ * Does `incoming` FORK from the copy of its fact stored now — the same seq, other text? The one question both push doors
+ * ask of a fact the verdict left unlanded, so the single route and the batch loop cannot judge it differently.
+ *
+ * The verdict's copy was read before the write, and a write that came back `diverged` found a same-seq copy with other
+ * text stored in between (`Q-232`), so the fork rules judge the copy that is there, not the one the race replaced
+ * (`verdictCopy` is used only when the write did not say `diverged`). A copy that is gone is no divergence.
  */
-async function currentFact(spaceId: string, id: string): Promise<FactDoc | null> {
-  return await col<FactDoc>(spaceCollection(spaceId, 'facts')).findOne(asFilter<FactDoc>({ _id: id })) as FactDoc | null;
+async function forksFromStoredCopy(
+  spaceId: string, incoming: FactDoc, landing: Landing | null, verdictCopy: FactDoc | null,
+): Promise<boolean> {
+  const stored = landing === 'diverged'
+    ? await col<FactDoc>(spaceCollection(spaceId, 'facts')).findOne(asFilter<FactDoc>({ _id: incoming._id })) as FactDoc | null
+    : verdictCopy;
+  return divergesFrom(stored, incoming);
 }
 
 /**
@@ -414,14 +422,12 @@ syncDocsRouter.post('/facts', syncRateLimit, requireAuth, denyReadOnly, async (r
         : await applyPushVerdict(spaceId, 'facts', verdict, incoming, pushedBy(req));
       // A write that found a same-seq copy with other text stored meanwhile (`diverged`) goes the way a planned fork
       // does, judged against the copy that is stored now — by the same re-send check and the same caps.
-      const stored = landing === 'diverged' ? await currentFact(spaceId, incoming._id)
-        : verdict.kind === 'tombstoned' ? null : verdict.stored;
       if (verdict.kind === 'tombstoned') {
         answer = { code: 200, body: { status: 'tombstoned' } };
       } else if (landing !== null && landing !== 'diverged') {
         failOnStoreRefusal(landing, 'facts', incoming._id);
         if (landed(landing)) answer = { code: 200, body: withSchemaViolations({ status: landing }, violations) };
-      } else if (divergesFrom(stored, incoming)) {
+      } else if (await forksFromStoredCopy(spaceId, incoming, landing, verdict.stored)) {
         const resent = await heldFork(spaceId, incoming);
         if (resent !== null) {
           answer = { code: 200, body: withSchemaViolations({ status: 'forked', forkId: resent }, violations) };
@@ -812,8 +818,7 @@ syncDocsRouter.post('/batch-upsert', syncRateLimit, requireAuth, denyReadOnly, a
       }
       // `diverged`: the write found a same-seq copy with other text stored meanwhile (`Q-232`) — forked by the rules below,
       // judged against the copy stored now (the verdict's was read before the race).
-      const stored = landing === 'diverged' ? await currentFact(spaceId, incoming._id) : verdict.stored;
-      if (divergesFrom(stored, incoming)) {
+      if (await forksFromStoredCopy(spaceId, incoming, landing, verdict.stored)) {
         // A re-send of a fork already made is delivered, not a new fork: counted before any cap (`Q-218` R9).
         if (await heldFork(spaceId, incoming) !== null) { memStats.forked++; continue; }
         // Cap fork chains to prevent unbounded growth. Depth only on this door — no fan-out cap (cut `C1`, as 5.6.1).

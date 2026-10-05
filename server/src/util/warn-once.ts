@@ -3,10 +3,12 @@
  *
  * ## Why a module
  *
- * It serves the warn-once needs this patch added (today the pulled page's diverged facts, `sync/pull-page.ts`). The
- * latches that already existed (`sync/peer-fetch.ts`, `brain/nli-client.ts`, `files/media/stall-floor.ts`,
- * `files/unreadable-files.ts`, `sync/stray-filemeta-drain.ts`, `brain/fresh-writes.ts`) are untouched: a patch carries
- * fixes only, so moving them onto this is a decision for a release, not for this module's docblock to have made.
+ * A warning that must be said once, and not once per cycle or per call, asks this: the pulled page's diverged and refused
+ * ids (`sync/pull-page.ts`) and a driver failure that recurs at the rate of its callers (`util/report-failure.ts`). A
+ * hand-written latch (a `Set` of reported keys) is the copy to replace when it is next touched, not a second spelling to
+ * add; the older ones (`sync/peer-fetch.ts`, `brain/nli-client.ts`, `files/media/stall-floor.ts`,
+ * `files/unreadable-files.ts`, `sync/stray-filemeta-drain.ts`, `brain/fresh-writes.ts`) are moved in a release, not in a
+ * patch, which carries fixes only.
  *
  * ## What a hand-written copy drops
  *

@@ -22,6 +22,7 @@ import { embedStoredRecord } from './embed-record.js';
 import { getConfig } from '../config/loader.js';
 import { log, peerText } from '../util/log.js';
 import { storedFailureText } from './store-failure.js';
+import { messageOf } from '../util/errors.js';
 
 /** Idle sleep. Work announces itself, so this is only the backstop for a missed announcement. */
 const IDLE_POLL_MS = 30_000;
@@ -64,7 +65,7 @@ export async function runOneEmbedJob(): Promise<boolean> {
       .then(m => m.evaluateRecordForDuplicates(job.spaceId, job.recordType, job.recordId))
       .catch(() => { /* best-effort, exactly as it was on the write path */ });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg = messageOf(err);
     // `transientFailures` comes from the job the worker already holds — no second read, and no
     // `findOneAndUpdate` to recover a post-increment value.
     //
@@ -74,7 +75,8 @@ export async function runOneEmbedJob(): Promise<boolean> {
     await failEmbedJob(job.spaceId, job.recordType, job.recordId, job.attempts, storedFailureText(err, 'embed a record'),
       job.transientFailures ?? 0, job.claimToken, isTransientEmbedError(msg));
     // debug, not warn: an embedder that is down produces one of these per queued record, and a
-    // thousand warnings say nothing the first one did not. The failed count is the signal.
+    // thousand warnings say nothing the first one did not. The failed count is the signal. A store-side failure's
+    // text is the one warning, once per window for each kind (`storedFailureText` above).
     log.debug(`Embed job ${peerText(job._id)} in ${peerText(job.spaceId)} failed (attempt ${job.attempts}): ${peerText(msg)}`);
   }
   return true;
@@ -105,7 +107,7 @@ export function startBrainEmbeddingWorker(): void {
   // restart holding a claim. Sweeping at startup with a zero timeout returns them immediately rather
   // than making the first records of the new run wait out the stall window.
   void resetStalledEmbedJobs(spaceIds(), 0).catch(err =>
-    log.warn(`Brain embedding worker: startup stall sweep failed: ${err}`));
+    log.warn(`Brain embedding worker: startup stall sweep failed: ${peerText(err)}`));
 
   // One clean attempt per VERSION for anything that went terminally `failed` under an older one. A systemic
   // outage — an embedder unreachable for a quarter of an hour during an upgrade — spends every job's whole
@@ -113,12 +115,12 @@ export function startBrainEmbeddingWorker(): void {
   // "after updating all space indexing failed and since has not been retried automatically."
   // Logged at INFO with a count, because a silent mass requeue is indistinguishable from nothing happening.
   void reviveFailedEmbedJobs(spaceIds(), SERVER_VERSION)
-    .then(n => { if (n > 0) log.info(`Brain embedding worker: re-queued ${n} job(s) that failed under an earlier version (now ${SERVER_VERSION})`); })
-    .catch(err => log.warn(`Brain embedding worker: startup revive sweep failed: ${err}`));
+    .then(n => { if (n > 0) log.info(`Brain embedding worker: re-queued ${n} job(s) that failed under an earlier version (now ${peerText(SERVER_VERSION)})`); })
+    .catch(err => log.warn(`Brain embedding worker: startup revive sweep failed: ${peerText(err)}`));
 
   stallTimer = setInterval(() => {
     void resetStalledEmbedJobs(spaceIds(), STALL_TIMEOUT_MS).catch(err =>
-      log.warn(`Brain embedding worker: stall sweep failed: ${err}`));
+      log.warn(`Brain embedding worker: stall sweep failed: ${peerText(err)}`));
   }, STALL_SWEEP_MS);
   if (typeof stallTimer.unref === 'function') stallTimer.unref();
 

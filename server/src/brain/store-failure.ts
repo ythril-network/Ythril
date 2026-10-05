@@ -60,8 +60,8 @@
  */
 import { MongoError, MongoServerError } from 'mongodb';
 import { errorChain, wrapsAThrownError } from '../db/error-chain.js';
-import { StoreCapabilityError } from '../util/errors.js';
-import { reportDriverFailure } from '../util/report-failure.js';
+import { StoreCapabilityError, messageOf } from '../util/errors.js';
+import { reportDriverFailure, reportRecurringDriverFailure } from '../util/report-failure.js';
 
 /**
  * What an answer says about a store failure of its own — three sentences, each in one spelling, and never the driver's
@@ -178,15 +178,6 @@ export function isDriverSide(err: unknown): boolean {
   }
 }
 
-/** The text of whatever was thrown, as the answers have always taken it — never throwing on a hostile value. */
-function messageOf(err: unknown): string {
-  try {
-    return err instanceof Error ? err.message : String(err);
-  } catch {
-    return STORE_INCOMPLETE_MESSAGE;
-  }
-}
-
 /**
  * Every scrap the driver attached that `message` does not already say, in the order an operator would want it.
  *
@@ -208,7 +199,7 @@ function causeOf(err: unknown, message: string): string | undefined {
   }
   // `cause` is where a driver puts the wrapped error, and it is the field the empty `caused by ::` was hiding.
   const nested = e['cause'];
-  if (nested) add(nested instanceof Error ? nested.message : String(nested));
+  if (nested) add(messageOf(nested));
   const info = e['errInfo'];
   if (info && typeof info === 'object') {
     try { add(JSON.stringify(info)); } catch { /* unserialisable — skip rather than throw in a catch */ }
@@ -312,14 +303,36 @@ export function classifyReadFailure(err: unknown): ReadFailure {
 }
 
 /**
+ * What kind of store failure this is, for a window that treats two of one kind as one condition: the driver error's
+ * `codeName`, else its `code`, else its class name — never its text, which names a host and changes with every
+ * occurrence. Never throws.
+ */
+function failureKind(err: unknown): string {
+  try {
+    const driverError = (errorChain(err).find(e => e instanceof MongoError) ?? err) as
+      { codeName?: unknown; code?: unknown; name?: unknown } | null;
+    const code = numeric(driverError?.code);
+    return text(driverError?.codeName) ?? (code !== undefined ? `code ${code}` : undefined) ?? text(driverError?.name) ?? 'unknown';
+  } catch {
+    return 'unknown';
+  }
+}
+
+/**
  * `classifyReadFailure`, and the driver's text logged ONCE when the answer replaced it — for the doors that answer a
  * failure from its classification (`sendReadFailure`) and the text-only twin below. The forgettable half is the log:
  * an answer in our words that left the driver's text nowhere would hide the one thing an operator came to read.
  * `operation` is what was being done, as the operator will search for it. Never throws.
+ *
+ * `recurring` is for a door whose failures arrive at the rate of its callers (a read route): the text is then logged
+ * once per window for each (operation, kind of failure), not once per call (`reportRecurringDriverFailure`).
  */
-export function classifyAndReportFailure(err: unknown, operation: string): ReadFailure {
+export function classifyAndReportFailure(err: unknown, operation: string, { recurring = false }: { recurring?: boolean } = {}): ReadFailure {
   const failure = classifyReadFailure(err);
-  if (failure.error !== messageOf(err)) reportDriverFailure(operation, storeFailureDetail(err));
+  if (failure.error !== messageOf(err)) {
+    if (recurring) reportRecurringDriverFailure(operation, failureKind(err), storeFailureDetail(err));
+    else reportDriverFailure(operation, storeFailureDetail(err));
+  }
   return failure;
 }
 
@@ -327,7 +340,7 @@ export function classifyAndReportFailure(err: unknown, operation: string): ReadF
  * The text a catch that ANSWERS an error says — `res.status(n).json({ error: caughtFailureText(err, '…') })`, an act's
  * `{ status, error }`, a failure pushed onto a list a caller reads.
  *
- * One function for the forty-odd catches that used to answer `err.message`: a driver's message names the host, the port
+ * One function for every catch that answers an error's text: a driver's message names the host, the port
  * and the namespace it failed on, and the doors they answer reach callers who may be anonymous. What this says is what
  * `classifyReadFailure` says, so every door answers a failure in the same words: our own error and the server's refusal
  * are their own text, unchanged (the caller reads what to fix), and anything the driver raised on its own side — anywhere
@@ -351,12 +364,14 @@ export function caughtFailureText(err: unknown, operation: string): string {
  * a media job, a sync cycle's failure list): an own error keeps its message — an embedder that is down says so in its own
  * words and an operator reads which — and a driver-side failure is `STORE_INCOMPLETE_MESSAGE` plus the error's class, which
  * is stable, so records that group by their text (`failedByReason`) still group two outages of one kind against different
- * hosts. The driver's text goes to the log, as `caughtFailureText` does.
+ * hosts. The driver's text goes to the log, as `caughtFailureText` does — but once per window for each (operation, kind
+ * of failure), because a stored failure is one per job and an outage fails every job: a thousand warnings say nothing
+ * the first one did not (`reportRecurringDriverFailure`).
  */
 export function storedFailureText(err: unknown, operation: string): string {
   try {
     if (!isDriverSide(err)) return messageOf(err);
-    reportDriverFailure(operation, storeFailureDetail(err));
+    reportRecurringDriverFailure(operation, failureKind(err), storeFailureDetail(err));
     const driverError = errorChain(err).find(e => e instanceof MongoError);
     const label = text((driverError as { codeName?: unknown } | undefined)?.codeName)
       ?? text((driverError as { name?: unknown } | undefined)?.name);

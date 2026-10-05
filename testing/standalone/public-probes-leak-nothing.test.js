@@ -163,7 +163,7 @@ describe('the detail goes to the log instead of being discarded', () => {
     const at = READY.indexOf('function logTransition');
     assert.ok(at > 0, 'the transition logger is gone');
     const fn = READY.slice(at, READY.indexOf('\n}', at));
-    assert.match(fn, /\$\{detail\}/, 'the log line must include the underlying message');
+    assert.match(fn, /\$\{(?:peerText\()?detail\)?\}/, 'the log line must include the underlying message');
   });
 
   it('it logs on TRANSITION, not on every poll', () => {

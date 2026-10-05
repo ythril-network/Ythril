@@ -602,7 +602,9 @@ async function firstMissingEnd(
     try {
       await assertRefsResolve(spaceId, field, kind, [value]);
     } catch (err) {
-      return err instanceof Error ? err.message : String(err);
+      // The reason is the bulk answer's, read by the caller: our own refusal says what to fix, a store failure in the
+      // lookup is the store's sentence and not the driver's text.
+      return caughtFailureText(err, 'resolve a bulk edge end');
     }
   }
   return null;

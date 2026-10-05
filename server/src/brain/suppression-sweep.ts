@@ -69,6 +69,7 @@
  */
 import { col, asFilter } from '../db/mongo.js';
 import { log, peerText } from '../util/log.js';
+import { messageOf } from '../util/errors.js';
 import { TYPE_FIELD } from './ttl.js';
 import { recordNotSuppressedFilter, RECORD_SUPPRESS_FIELD } from './suppress-embeddings.js';
 import type { BrainEmbedRecordType, KnowledgeType, SpaceMeta } from '../config/types.js';
@@ -86,7 +87,15 @@ import { createCoalescingRunner } from '../sync/coalescing-runner.js';
 const COLLECTION = COLLECTION_SUFFIX;
 
 /** Ids read, updated and retired per page of a sweep. */
-export const SWEEP_PAGE = 1_000;
+const SWEEP_PAGE = 1_000;
+
+/**
+ * "Holds a derived vector field" as one filter term per field — the fields `UNSET_VECTOR` removes, read from it. A row
+ * with a model name and no vector is stranded the same as one with a vector (the model name says an embedding exists),
+ * and a filter on `embedding` alone left it for good. One term per field and not an `$or` of their own, so a caller
+ * can fold it into the tier clauses of its own `$or`.
+ */
+const VECTOR_FIELDS_HELD = Object.keys(UNSET_VECTOR).map(field => ({ [field]: { $exists: true } }));
 
 /**
  * Records of `kind` that resolve to suppressed **and** still hold a vector.
@@ -122,7 +131,8 @@ export function suppressedWithVectorFilter(meta: SpaceMeta, kind: KnowledgeType)
     or.push({ [field]: { $nin: stated }, ...recordNotSuppressedFilter() });
   }
 
-  return { embedding: { $exists: true }, $or: or };
+  // Each tier clause, once per derived field the row may hold: no `$and`, so the filter stays one `$or` of plain clauses.
+  return { $or: or.flatMap(tier => VECTOR_FIELDS_HELD.map(held => ({ ...tier, ...held }))) };
 }
 
 /**
@@ -153,7 +163,7 @@ export async function sweepSuppressedVectors(spaceId: string, meta: SpaceMeta): 
       total += removed;
       log.info(`Suppression sweep: removed ${removed} ${peerText(kind)} vector(s) in ${peerText(spaceId)}`);
     } catch (err) {
-      failed.push(`${kind} (${err instanceof Error ? err.message : String(err)})`);
+      failed.push(`${kind} (${messageOf(err)})`);
     }
   };
   for (const kind of Object.keys(COLLECTION) as KnowledgeType[]) {
@@ -202,7 +212,8 @@ async function forEachPage(
   }
 }
 
-const WITH_VECTOR = { embedding: { $exists: true } };
+/** A file row holding a derived vector field: the one filter for the space tier and for the rows reached from a flagged file. */
+const WITH_VECTOR = { $or: VECTOR_FIELDS_HELD };
 
 /**
  * The file rows the meta suppresses that still hold a vector: every one at the space tier (parents and derived rows

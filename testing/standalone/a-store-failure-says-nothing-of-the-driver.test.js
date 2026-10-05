@@ -28,7 +28,7 @@
  *
  * ## Pins (green on the base, kept — the statuses the patch must not change)
  *
- * The five by-name store classes answer `503`; the seven by-code server errors answer `503`; every other driver class and
+ * Every by-name store class answers `503`; every by-code server error the classifier lists answers `503`; every other driver class and
  * every unlisted server code answers `400`; our own error answers `400` with its text. Built from real driver classes.
  *
  * ## Seen red

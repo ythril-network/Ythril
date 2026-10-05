@@ -4,8 +4,8 @@
  *
  * ## Why a module
  *
- * It serves `util/warn-once.ts`, whose map of reported keys is keyed by what a peer or a model sent and so must be
- * bounded. The hand spelling of this is `delete` + `set` to move an entry to the end and `keys().next()` to drop the
+ * A map keyed by what a peer, a model or a caller sent must be bounded, and `util/warn-once.ts` keeps its reported keys in
+ * one. The hand spelling of this is `delete` + `set` to move an entry to the end and `keys().next()` to drop the
  * first. Two halves a hand copy drops, and each copy is one edit from dropping them:
  *
  *  - **the touch on use** — without the re-insert, the entry evicted is the oldest INSERTED, so the one key read on

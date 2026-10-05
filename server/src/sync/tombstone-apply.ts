@@ -58,6 +58,7 @@ import { TOMBSTONE_TYPES, TOMBSTONE_COLLECTION } from '../config/types.js';
 import type { TombstoneDoc } from '../config/types.js';
 import { bumpSeq, seqRefusal } from '../util/seq.js';
 import { log, logSafe, peerList } from '../util/log.js';
+import { messageOf } from '../util/errors.js';
 import { arrivalId, warnArrivalsNotStored, type ArrivalRefusal } from './arrivals.js';
 import { retagToLocalSpace, tombstoneGoverns } from './upsert-plan.js';
 
@@ -128,12 +129,10 @@ export interface TombstoneApplyOutcome {
 export class TombstoneCounterError extends Error {
   constructor(readonly spaceId: string, readonly seq: number, readonly underlying: unknown) {
     super(`the seq counter of space '${spaceId}' could not be advanced to ${seq}, past the tombstones a peer `
-      + `delivered: ${underlying instanceof Error ? underlying.message : String(underlying)}`);
+      + `delivered: ${messageOf(underlying)}`);
     this.name = 'TombstoneCounterError';
   }
 }
-
-const messageOf = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
 /**
  * Apply a page of tombstones a peer delivered, to the space the door ADMITTED — see the module docblock.

@@ -12,6 +12,7 @@ import { getConfig, getEmbeddingConfig, getFaceRecognitionConfig } from '../conf
 import { mutateConfigRetrying } from '../config/mutate-config-retrying.js';
 import { resolveMetaRefs } from './schema-validation.js';
 import { log, peerText, peerList } from '../util/log.js';
+import { messageOf } from '../util/errors.js';
 import type { KnowledgeType } from '../config/types.js';
 import { spaceCollection } from '../db/space-collection.js';
 
@@ -330,7 +331,7 @@ export async function ensureVectorSearchIndex(
     }
   }
 
-  log.debug(`Creating vector search index ${peerText(indexName)} (${numDimensions}d, ${peerText(similarity)}, path: ${peerText(vectorPath)},${filterFields.length} filter field(s))`);
+  log.debug(`Creating vector search index ${peerText(indexName)} (${numDimensions}d, ${peerText(similarity)}, path: ${peerText(vectorPath)}, ${filterFields.length} filter field(s))`);
   try {
     await coll.createSearchIndex(asDoc({
       name: indexName,
@@ -338,7 +339,7 @@ export async function ensureVectorSearchIndex(
       definition,
     }));
   } catch (err) {
-    log.warn(`Failed to create vector search index ${peerText(indexName)}: ${peerText(err)}.Semantic recall will be unavailable.`);
+    log.warn(`Failed to create vector search index ${peerText(indexName)}: ${peerText(err)}. Semantic recall will be unavailable.`);
     return;
   }
 
@@ -987,9 +988,9 @@ export async function faceDescriptorDimsFor(spaceId: string): Promise<number> {
       faceDimsBySpace.set(spaceId, dims);
       return dims;
     }
-    log.debug(`Face index ${indexName} reports no dimension; using the built-in default this call only`);
+    log.debug(`Face index ${peerText(indexName)} reports no dimension; using the built-in default this call only`);
   } catch (err) {
-    log.debug(`Could not read ${indexName} (${err instanceof Error ? err.message : String(err)}); `
+    log.debug(`Could not read ${peerText(indexName)} (${peerText(messageOf(err))}); `
       + 'using the built-in default this call only');
   }
   return FACE_DESCRIPTOR_DIMS;

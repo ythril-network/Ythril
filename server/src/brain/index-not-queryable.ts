@@ -33,6 +33,8 @@
  *
  * Matched on the MESSAGE, because a code-8 `UnknownError` says nothing; the wording is what mongot gives us.
  */
+import { messageOf } from '../util/errors.js';
+
 const NOT_QUERYABLE_YET = new RegExp([
   /index.*not.*found/.source,
   /no.*such.*index/.source,
@@ -43,8 +45,16 @@ const NOT_QUERYABLE_YET = new RegExp([
   /\bindex\b.*\bnot initiali[sz]ed\b/.source,
 ].join('|'), 'i');
 
+/**
+ * How much of a message is read for the match. The alternatives above are unanchored and chained with `.*`, so the
+ * time to match grows with the square or cube of the text, and a driver's message can quote a caller's filter at any
+ * length (12 KB took 1.7 s of event loop; a kilobyte takes about a millisecond). mongot's own wordings are one short
+ * sentence behind the namespace, which fits with room to spare; a message long enough to reach this bound is a quoted
+ * filter, not one of them.
+ */
+const MESSAGE_READ_MAX = 1024;
+
 /** True when `err` (an error or its message) says the vector index is absent or not serving yet. */
 export function isIndexNotQueryableYet(err: unknown): boolean {
-  const msg = err instanceof Error ? err.message : String(err);
-  return NOT_QUERYABLE_YET.test(msg);
+  return NOT_QUERYABLE_YET.test(messageOf(err).slice(0, MESSAGE_READ_MAX));
 }

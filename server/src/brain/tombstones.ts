@@ -31,6 +31,18 @@ export async function listTombstones(
 }
 
 /**
+ * A tombstone as the writers take it. `originalSeq` is a REQUIRED key whose value may be `undefined`: the deleted
+ * record's seq is the half `tombstoneDoc` calls forgettable, and a writer that let the key be omitted is how a
+ * tombstone ships without it. A caller that has no seq to give says so out loud, at the call.
+ */
+export interface IssuedTombstone {
+  _id: string;
+  type: TombstoneDoc['type'];
+  originalSeq: number | undefined;
+  deletedAt?: string;
+}
+
+/**
  * The tombstone THIS instance issues for a record it removed — every local delete writes it here.
  *
  * It was hand-written nine times, each allocating its seq separately from the write. Two things a copy
@@ -38,10 +50,7 @@ export async function listTombstones(
  * deleted record had one — the pull filters a tombstone out for a peer whose watermark never reached the
  * record, and without it that peer is sent deletions for records it never had.
  */
-export function tombstoneDoc(
-  spaceId: string, seq: number,
-  t: { _id: string; type: TombstoneDoc['type']; originalSeq?: number | undefined; deletedAt?: string },
-): TombstoneDoc {
+export function tombstoneDoc(spaceId: string, seq: number, t: IssuedTombstone): TombstoneDoc {
   return {
     _id: t._id, type: t.type, spaceId, deletedAt: t.deletedAt ?? new Date().toISOString(),
     instanceId: getConfig().instanceId, seq,
@@ -52,7 +61,7 @@ export function tombstoneDoc(
 /** Issue one local tombstone: allocate its seq at the write and upsert it (see `tombstoneDoc`). */
 export async function writeTombstone(
   spaceId: string,
-  t: { _id: string; type: TombstoneDoc['type']; originalSeq?: number | undefined; deletedAt?: string },
+  t: IssuedTombstone,
   session?: ClientSession,
 ): Promise<void> {
   await withSeq(spaceId, (seq) => col<TombstoneDoc>(spaceCollection(spaceId, 'tombstones')).replaceOne(

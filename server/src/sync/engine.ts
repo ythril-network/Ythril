@@ -42,7 +42,7 @@ import { resolveInputFormat } from '../files/converters/pipeline.js';
 import { mimeTypeForPath } from '../files/mime.js';
 import { createCoalescingRunner } from './coalescing-runner.js';
 import { writeArrivals, type ArrivalOutcome } from './arrivals.js';
-import { settlePulledPage } from './pull-page.js';
+import { settlePulledPage, refusalIsNews } from './pull-page.js';
 import { syncFiles } from './file-sync.js';
 import {
   syncCyclesTotal,
@@ -851,7 +851,7 @@ async function pullFromPeer(
       let written: ArrivalOutcome;
       try {
         written = await writeArrivals(spaceId, family.collection, RECORD_TYPE_OF[family.collection], pageDocs,
-          { from: member.label ?? member.instanceId });
+          { from: member.label ?? member.instanceId, namedOnce: id => refusalIsNews(spaceId, family.collection, id) });
       } catch (err) {
         truncated = true;
         log.warn(`sync pull ${logSafe(spaceId)} ${family.collection}: record write failed: `
@@ -877,7 +877,7 @@ async function pullFromPeer(
         break;
       }
       // What the page said about itself (`sync/pull-page.ts`): the reports an operator reads and what it adds to the
-      // transfer's totals and position — a refused document is counted in nothing, a kept-local one only moves the position.
+      // transfer's totals and position — a refused or kept-local document is counted in nothing and still moves the position.
       const seen = settlePulledPage(spaceId, family, pageDocs, written, member);
       count += seen.count;
       maxSeq = Math.max(maxSeq, seen.maxSeq);

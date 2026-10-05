@@ -29,7 +29,7 @@ import { col, asFilter, asUpdate, isVectorSearchAvailable } from '../db/mongo.js
 import { getConfig } from '../config/loader.js';
 import { needsReindex } from '../spaces/_shared.js';
 import { ssrfSafeFetch } from '../util/ssrf.js';
-import { log } from '../util/log.js';
+import { log, peerText, peerList } from '../util/log.js';
 import {
   findSimilar,
   DEFAULT_DUPE_THRESHOLD,
@@ -108,7 +108,7 @@ const knownSeq = (seq: unknown): seq is number => typeof seq === 'number' && seq
  * the row knows can say the record moved; the row then converges as each pair is next scanned (`handlePair` stores the
  * real seqs).
  */
-export function pairSeqsChanged(stored: Pick<DupeCandidateDoc, 'aSeq' | 'bSeq'>, aSeq: number, bSeq: number): boolean {
+function pairSeqsChanged(stored: Pick<DupeCandidateDoc, 'aSeq' | 'bSeq'>, aSeq: number, bSeq: number): boolean {
   return (knownSeq(stored.aSeq) && stored.aSeq !== aSeq) || (knownSeq(stored.bSeq) && stored.bSeq !== bSeq);
 }
 
@@ -215,7 +215,7 @@ async function tryAutoMerge(spaceId: string, seed: RecallResult, match: RecallRe
     if (!fullyResolved) return false;   // a property value conflict — not lossless, leave for review
     const mergedProps = applyResolutions(survivor.properties ?? {}, absorbed.properties ?? {}, plan.propertyConflicts, plan.absorbedOnlyProperties);
     await executeMerge(spaceId, survivor, absorbed, mergedProps, { tokenLabel: 'dupe-scanner' });
-    log.info(`Auto-merged entity ${absorbed._id} → ${survivor._id} in '${spaceId}' (score ${(match.score ?? 0).toFixed(3)})`);
+    log.info(`Auto-merged entity ${peerText(absorbed._id)} → ${peerText(survivor._id)} in '${peerText(spaceId)}' (score ${peerText((match.score ?? 0).toFixed(3))})`);
     return true;
   } catch (err) {
     /*
@@ -229,14 +229,14 @@ async function tryAutoMerge(spaceId: string, seed: RecallResult, match: RecallRe
      */
     if (err instanceof MergeSchemaViolation) {
       log.warn(
-        `Auto-merge REFUSED in '${spaceId}': the merged survivor would violate the space's schema, so `
-        + `'${err.absorbedId}' and '${err.survivorId}' remain as separate records. `
-        + `${err.violations.map(v => `${v.field}: ${v.reason}`).join('; ')}. `
+        `Auto-merge REFUSED in '${peerText(spaceId)}': the merged survivor would violate the space's schema, so `
+        + `'${peerText(err.absorbedId)}' and '${peerText(err.survivorId)}' remain as separate records. `
+        + `${peerList(err.violations.map(v => `${v.field}: ${v.reason}`), '; ')}. `
         + 'Resolve by hand, or relax the rule the merge would have broken.',
       );
       return false;
     }
-    log.warn(`Auto-merge failed in '${spaceId}': ${err}`);
+    log.warn(`Auto-merge failed in '${peerText(spaceId)}': ${peerText(err)}`);
     return false;
   }
 }
@@ -268,7 +268,7 @@ async function fireNotify(spaceId: string, type: DupeScanType, a: RecallResult, 
       });
       resp.body?.cancel?.();
     } catch (err) {
-      log.warn(`Dupe notify (override URL) failed for '${spaceId}': ${err}`);
+      log.warn(`Dupe notify (override URL) failed for '${peerText(spaceId)}': ${peerText(err)}`);
     }
   } else {
     emitWebhookEvent({ event: 'duplicate.detected', spaceId, entry });
@@ -442,9 +442,9 @@ export async function runDupeScanAllSpaces(): Promise<void> {
     if (s.proxyFor) continue;
     try {
       const r = await scanSpace(s.id);
-      if (r.scanned > 0) log.info(`Dupe scan '${s.id}': scanned ${r.scanned}, pairs ${r.pairs}`);
+      if (r.scanned > 0) log.info(`Dupe scan '${peerText(s.id)}': scanned ${r.scanned}, pairs ${r.pairs}`);
     } catch (err) {
-      log.warn(`Dupe scan '${s.id}' failed: ${err}`);
+      log.warn(`Dupe scan '${peerText(s.id)}' failed: ${peerText(err)}`);
     }
   }
 }
@@ -463,14 +463,14 @@ export function startDupeScanner(): void {
   stopDupeScanner();
   if (cron === null) return;
   if (!validate(cron)) {
-    log.warn(`Invalid dupeScanner.schedule '${cron}' — duplicate scanner not started`);
+    log.warn(`Invalid dupeScanner.schedule '${peerText(cron)}' — duplicate scanner not started`);
     return;
   }
   _task = schedule(cron, () => {
     void runExclusive('Dupe scan', () => runDupeScanAllSpaces());
   });
   _armed.note(ARMED, cron);
-  log.info(`Duplicate scanner scheduled (${cron})`);
+  log.info(`Duplicate scanner scheduled (${peerText(cron)})`);
 }
 
 export function stopDupeScanner(): void {

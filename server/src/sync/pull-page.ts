@@ -25,20 +25,38 @@
  *
  * ## What the page adds to the totals and the position
  *
- * A document the writer refused is counted in nothing and moves nothing. A document the receiver KEPT its own copy over
+ * A document the writer refused is counted in nothing but does move the position (by a seq the counter could carry): a
+ * corrupting shape is refused by every cycle that fetches it, so a position held below it only fetches it again. Its
+ * id is named once per window, like a kept-local one (`refusalIsNews`). A document the receiver KEPT its own copy over
  * is not counted as pulled (its text is stored nowhere) but does move the position, as a document already held always
  * has. Every other document is counted and moves both.
  */
-import { warnArrivalsNotStored, arrivalId, type ArrivalOutcome, type ArrivalVerdict } from './arrivals.js';
+import { warnArrivalsNotStored, arrivalId, plausibleSeq, type ArrivalOutcome, type ArrivalVerdict } from './arrivals.js';
 import { schemaMisses } from './arrival-shape.js';
 import type { ReplicatedFamily } from './replicated-families.js';
 import type { NetworkMember } from '../config/types.js';
 import { warnOnce } from '../util/warn-once.js';
+import { peerText } from '../util/log.js';
 
-/** How long an id already named as a kept-local divergence is not named again. */
-const DIVERGED_REPORT_WINDOW_MS = 10 * 60_000;
-/** The ids already named, by space, family and id — bounded inside `warnOnce`, because an id is a peer's text. */
-const divergedNamed = warnOnce<string>({ every: DIVERGED_REPORT_WINDOW_MS });
+/** How long an id already named as a kept-local divergence or a refusal is not named again. */
+const REPORT_WINDOW_MS = 10 * 60_000;
+/** The most of a space id or a document id a window key holds: an id is a peer's text, and the key must not be as large as it. */
+const KEY_PART_MAX = 256;
+/** The ids already named, by space, family and id — bounded inside `warnOnce` in count, and by `namedKey` in size. */
+const divergedNamed = warnOnce<string>({ every: REPORT_WINDOW_MS });
+const refusedNamed = warnOnce<string>({ every: REPORT_WINDOW_MS });
+
+/** The window key of one document of one family in one space, built of bounded parts so no id makes a large key. */
+const namedKey = (spaceId: string, collection: string, id: string): string =>
+  `${peerText(spaceId, { max: KEY_PART_MAX })}\u0000${collection}\u0000${peerText(id, { max: KEY_PART_MAX })}`;
+
+/**
+ * Is this refused document news — not named within the window? Asked once for each refused id by the arrival writer
+ * (`ArrivalOptions.namedOnce`), which names only the ids for which it answers `true`.
+ */
+export function refusalIsNews(spaceId: string, collection: string, id: string): boolean {
+  return refusedNamed(namedKey(spaceId, collection, id), () => undefined);
+}
 
 const KEPT_LOCAL: ArrivalVerdict = (n) => `kept the local copy; ${n} document(s) arrived at the same seq with different text`;
 const STORED_NOT_MATCHING: ArrivalVerdict = (n) => `stored ${n} document(s) that do not match their schema`;
@@ -59,17 +77,19 @@ export function settlePulledPage(
   warnArrivalsNotStored(where, spaceId, family.collection, STORED_NOT_MATCHING,
     schemaMisses(family.payloadKey, docs).filter(m => stored.has(m._id)));
   warnArrivalsNotStored(where, spaceId, family.collection, KEPT_LOCAL,
-    written.diverged.filter(id => divergedNamed(`${spaceId}\u0000${family.collection}\u0000${id}`, () => undefined)));
+    written.diverged.filter(id => divergedNamed(namedKey(spaceId, family.collection, id), () => undefined)));
 
   const refused = new Set(written.refused.map(r => r._id));
   const keptLocal = new Set(written.diverged);
   let count = 0, maxSeq = 0, highSeq = 0;
   for (const doc of docs) {
     const id = arrivalId(doc);
-    if (refused.has(id)) continue;
-    if (!keptLocal.has(id)) count++;
-    if (doc.seq > maxSeq) maxSeq = doc.seq;
-    if (doc.seq > highSeq && doc.author?.instanceId === member.instanceId) highSeq = doc.seq;
+    // A refused document is counted as nothing but still moves the position, by a seq the counter could carry: it is
+    // refused again by every cycle that fetches it, so a position held below it only fetches it again.
+    const seq = plausibleSeq(doc.seq);
+    if (seq !== undefined && seq > maxSeq) maxSeq = seq;
+    if (seq !== undefined && seq > highSeq && doc.author?.instanceId === member.instanceId) highSeq = seq;
+    if (!refused.has(id) && !keptLocal.has(id)) count++;
   }
   return { count, maxSeq, highSeq };
 }

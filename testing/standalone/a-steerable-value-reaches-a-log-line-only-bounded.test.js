@@ -60,14 +60,14 @@
  * ## Seen red
  *
  * On 6eb5a333 (v5.6.3, the base of the 5.6.4 patch): `peerText` and `peerList` do not exist, `fmt` appends the meta
- * argument unbounded, and the slot rule reports 490 raw slots reading 274 defining sites (the count is in the failure
- * message). The gate is main's, carried over the release line's doors: nothing in it was re-derived by hand, so the
+ * argument unbounded, and the slot rule reports every raw slot and the defining sites it reads (the counts are in the
+ * failure message, and nowhere else). The gate is main's, carried over the release line's doors: nothing in it was re-derived by hand, so the
  * doors, the sinks and the slots are the ones the base tree has. The sweep that makes it green is the patch's own — every
  * raw interpolation it names goes through `peerText` / `peerList` where the value enters the text — and the LOCAL table
  * stays EMPTY unless a site is shown to be this instance's own, with the reason (a reviewer reads each entry).
  *
  * Mutation-checked for the form it newly covers on this line: changing one `${logSafe(where)}` in
- * `sync/tombstone-apply.ts` to `${where}` raised the report from 490 to 491 slots and named the line; the original
+ * `sync/tombstone-apply.ts` to `${where}` raised the report by one slot and named the line; the original
  * spelling was put back by hand.
  *
  * Run: node --test testing/standalone/a-steerable-value-reaches-a-log-line-only-bounded.test.js
@@ -530,10 +530,9 @@ const VIOLATIONS = (() => {
 // ---------------------------------------------------------------------------------------------------------------
 
 /*
- * Floors on every enumeration, set a little under what the tree held at 0b066822 (sync 32, networks 23, invite 5,
- * brain 36, import 1, POST /mcp 1, tools 73, engine 13, file sync 3; 1 497 functions in 365 files reached; 393 sink
- * calls). Raise them as the tree grows; a run below one means the derivation stopped matching, and a thin set makes
- * every door clean.
+ * Floors on every enumeration, set a little under what the tree held when they were written (the values are the
+ * constants below, and the only copy of them). Raise them as the tree grows; a run below one means the derivation
+ * stopped matching, and a thin set makes every door clean.
  */
 describe('the derivation works', () => {
   it('found the doors in every area (floors)', () => {

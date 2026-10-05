@@ -290,7 +290,7 @@ describe('both doors, and all three routes', () => {
      */
     const src = stripComments(readFileSync('server/src/api/brain/search.ts', 'utf8'));
     const catches = (src.match(/\}\s*catch\s*\(/g) ?? []).length;
-    const delegated = (src.match(/sendReadFailure\(res, err\)/g) ?? []).length;
+    const delegated = (src.match(/sendReadFailure\(res, [^)]*\berr\)/g) ?? []).length;
     // A floor of ONE, down from two at 3c: `/filter`'s hand-written twin caught its own failures and is
     // gone. The floor exists so an empty scan cannot pass the equality below — it is not a count of the
     // routes, and lowering it as the surface collapses onto `callTool` is this rule succeeding.

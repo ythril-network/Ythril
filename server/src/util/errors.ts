@@ -34,3 +34,26 @@ export class StoreCapabilityError extends Error {
     );
   }
 }
+
+/** What `messageOf` says for a value whose text cannot be read (a hostile getter, a throwing `toString`). */
+const UNREADABLE_ERROR = '[unreadable error]';
+
+/**
+ * The text of whatever was thrown: an `Error`'s message, anything else as `String` says it.
+ *
+ * The one place a `catch` turns a caught value into text, so the rule is not rewritten as
+ * `err instanceof Error ? err.message : String(err)` at every site that needs it — each copy is a place a thrown
+ * non-Error could be handled differently. It never throws: it runs inside
+ * `catch` blocks, where a throw replaces the failure being handled with one nobody reads, and a Proxy whose
+ * `message` getter throws, or an object whose `toString` does, answers `UNREADABLE_ERROR` instead.
+ *
+ * This is the RAW text. Text that reaches a log line goes through `peerText`, and text that reaches a caller
+ * through `caughtFailureText` (`brain/store-failure.ts`); neither is this function's business.
+ */
+export function messageOf(err: unknown): string {
+  try {
+    return err instanceof Error ? err.message : String(err);
+  } catch {
+    return UNREADABLE_ERROR;
+  }
+}
