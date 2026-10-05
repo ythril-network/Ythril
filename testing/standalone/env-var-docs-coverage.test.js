@@ -1,5 +1,16 @@
 /**
- * Every environment variable the code reads is documented, and every one the docs name exists.
+ * Every environment variable the SERVER reads is documented, and every one the docs name is read there or is listed as
+ * not a setting.
+ *
+ * ## What "the code" is here, and what it is not
+ *
+ * The scan reads `server/src`, the sidecars, the root compose file and the Dockerfile. It does not read `scripts/`,
+ * `testing/`, the test compose file or the benchmarks, so it says nothing about the variables the maintainer tooling
+ * reads. They were undocumented for as long as they existed, with this gate green throughout, because its title said
+ * "the code" and its body read the server. Those variables are held by their own gate,
+ * `scripts-and-test-runners-document-their-env-vars`, which derives them from `scripts/` and `testing/_init/` and
+ * requires each on `docs/testing-guide.md`. The testing guide names them, so the reverse check below meets them and
+ * needs a `NOT_A_SETTING` row for each: that is the reverse check working, not a hole in it.
  *
  * Written during the pre-release doc audit, and kept as a gate rather than thrown away: the audit
  * found seven user-facing local-connector settings (token, port, tunnel name, cloudflared path…) that
@@ -64,6 +75,20 @@ const AMBIENT = new Set([
   'CI', 'GITHUB_TOKEN', 'GITHUB_ACTIONS', 'FORCE_JAVASCRIPT_ACTIONS_TO_NODE24',
 ]);
 
+const TOOLING_REASON = 'read by the test and maintenance tooling (scripts/, testing/, the test compose file), never by the server; '
+  + 'named in docs/testing-guide.md, where scripts-and-test-runners-document-their-env-vars requires the ones scripts/ and '
+  + 'testing/_init/ read, and this gate (which scans the server) cannot see them';
+/** Variables the testing guide names that this gate's scan does not read. Each is a row below, with the reason above. */
+const TOOLING_VARS = [
+  'YTHRIL_TEST_MONGO_HOST', 'YTHRIL_TEST_MONGO_PORT', 'YTHRIL_TEST_WAIT_TIMING_FILE',
+  'YTHRIL_TEST_RUNS_URL', 'YTHRIL_TEST_RUNS_TOKEN', 'GH_TOKEN', 'GITHUB_API_URL', 'GITHUB_STEP_SUMMARY',
+  'YTHRIL_TEST_APP_CPUS', 'YTHRIL_TEST_APP_MEM', 'YTHRIL_TEST_APP_A_MEM',
+  'YTHRIL_TEST_MONGO_CPUS', 'YTHRIL_TEST_MONGO_MEM', 'YTHRIL_TEST_MONGO_A_MEM', 'YTHRIL_TEST_MONGOT_A_HEAP',
+  'YTHRIL_TEST_DOCRENDER_CPUS', 'YTHRIL_TEST_DOCRENDER_MEM', 'YTHRIL_TEST_DOCRENDER_PIDS',
+  'YTHRIL_TEST_DOCOFFICE_CPUS', 'YTHRIL_TEST_DOCOFFICE_MEM', 'YTHRIL_TEST_DOCOFFICE_PIDS',
+  'BENCH_REPEATS', 'TODO_CHECK_DIR',
+];
+
 /**
  * `SCREAMING_CASE` in the docs that is deliberately **not** a setting of ours.
  *
@@ -72,6 +97,12 @@ const AMBIENT = new Set([
  * below asserts exactly that, so an entry added to silence a genuine finding fails.
  */
 const NOT_A_SETTING = new Map([
+  ...TOOLING_VARS.map((name) => [name, TOOLING_REASON]),
+  // Source identifiers of the test tooling, named in prose where the guide points at the one description of a record.
+  ['TIMING_SCHEMA', 'an exported constant of testing/_shared/timing-reporter.mjs: the one description of a timing line'],
+  ['TIMING_END_SCHEMA', 'an exported constant of testing/_shared/timing-reporter.mjs: the one description of the closing line'],
+  ['TEST_RUN_SCHEMA', 'an exported constant of scripts/test-times.mjs: the one description of a Test-Run entry'],
+  ['ONNXRUNTIME_NODE_INSTALL_CUDA', "a third-party package's install-time variable, set to skip by every npm ci in CI (docs/testing-guide.md says why); the server never reads it"],
   // API error codes, documented so a client can branch on them.
   ['INFRA_MANAGED', 'API error code'],
   ['FEATURE_DISABLED', 'API error code'],
@@ -256,7 +287,7 @@ const OWNER_PAGES = {
   'MONGO_': ['integration-guide/02-hosting.md', 'dependencies.md'],
 };
 
-describe('env vars — docs and code agree', () => {
+describe('server env vars — docs and the server\'s code agree', () => {
   const used = collectUsage();
   const documented = collectDocumented(used);
 

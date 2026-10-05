@@ -16,8 +16,8 @@
 
 <!-- How was this tested? Which test suites cover it? Were new tests added? -->
 
-- [ ] Existing test suite passes (`npm run test:all:core`)
-- [ ] New tests added (if behaviour changed or new feature)
+- [ ] `npm run preflight` passes, then the suites the change reaches (see `docs/testing-guide.md`)
+- [ ] New tests added and tracked by git (if behaviour changed or new feature)
 - [ ] Manual testing notes (if applicable)
 
 ## Breaking changes

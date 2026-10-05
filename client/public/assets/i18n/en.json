@@ -88,6 +88,7 @@
   "help.doc.ui-primitives": "UI primitives",
   "help.doc.dependencies": "Dependencies & licences",
   "help.doc.contribution-guide": "Contributing",
+  "help.doc.testing-guide": "Testing and CI",
   "about.card.help": "Documentation",
   "about.card.helpDesc": "The full guides, bundled with this instance and readable without leaving it.",
   "about.openHelp": "Open Help",

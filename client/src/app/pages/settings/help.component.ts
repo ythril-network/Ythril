@@ -119,6 +119,7 @@ export const HELP_DOCS = [
   { id: 'ui-primitives', file: 'ui-primitives.md' },
   { id: 'dependencies', file: 'dependencies.md' },
   { id: 'contribution-guide', file: 'contribution-guide.md' },
+  { id: 'testing-guide', file: 'testing-guide.md' },
 ] as const satisfies ReadonlyArray<{ id: string; file: string; parts?: readonly string[] }>;
 
 export type HelpDocId = typeof HELP_DOCS[number]['id'];

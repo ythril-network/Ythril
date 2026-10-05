@@ -964,6 +964,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Internal
 
+- **CI runs as parallel jobs behind one gate, every run measures itself, a skip is refused unless it was expected, every
+  test file is reached, and there is one way to wait (bundle-56: `Q-370`, `Q-272`, `Q-283`, `Q-319`).** Nothing in the
+  product changes; this is how the tests that guard it are run and trusted. What a contributor will notice:
+  - **Parallel CI.** `Build & Test` is a gate-only job that waits for the rest and fails unless each succeeded; the
+    client tests, the pure and the database-backed standalone files start at once, and the jobs that drive a running
+    instance wait for one `prepare` job that builds the test image, each starting only the services its suite needs.
+    Only a push to `main` writes a cache. Release lines keep their single-job workflow. The new `docs/testing-guide.md`
+    (also offered in the in-app Help) describes the job graph, the caches and the stack's per-job budget.
+  - **Timing records.** A `node:test` reporter writes one line per test, suite and file to `test-results/` for every
+    standalone, stack and preflight run, and each CI job uploads its folder; a file without its closing line is
+    incomplete, never passed. `scripts/test-times.mjs` can record the runs to a Ythril instance you point it at and
+    read the trend back (optional, for maintainers).
+  - **Skips are refused unless expected.** An input a test needs goes through one module that skips on a laptop and
+    throws on CI; a skip CI expects carries `expected-in-ci:` and one cause, from a listed file; print-and-return
+    skips and silent exits became real skips or assertions, and the embedder skips go through `requireEmbedding`.
+  - **Every test file is reached.** `scripts/unrun-tests.mjs` subtracts what CI selects from the tracked test files,
+    `scripts/executed-tests.mjs` subtracts what produced a test event, and a nested standalone test file is refused.
+  - **One wait helper.** `testing/_shared/wait-for.mjs` decides what a timeout says, whether a thrown probe ends the
+    wait, whether a hung probe can outlast the deadline and that no timer is left armed; hand-written polls moved onto
+    it and a gate refuses a new one unless it says `// waits-differently:` and why.
+  - **The test Mongo's search heap is explicit** (`YTHRIL_TEST_MONGOT_A_HEAP`, with a larger limit for the first
+    database), and the test stack's budget is held per set of services one `compose up` starts. The document sidecars
+    in the test stack are hardened like production and bound to loopback, and `doc-office` joins the integration job.
+  - The suite READMEs and the contribution guide no longer carry hand-written file lists or container counts.
 - **The test database no longer runs out of memory by the time CI reaches the standalone suite.** MongoDB keeps a
   dropped collection open for five minutes for snapshot reads, and the suites drop thousands in that window: after
   the integration suite alone, `ythril-mongo-a` held 9 766 dropped collections and 25 714 open storage handles over
