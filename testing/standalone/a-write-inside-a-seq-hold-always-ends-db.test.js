@@ -49,11 +49,12 @@ import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { mongoSkipReason } from './_mongo-harness.mjs';
-import { openPushDoor, build } from './_push-door.mjs';
+import { openPushDoor } from './_push-door.mjs';
 import { trackedSources } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import { topLevelFunctionSpans } from './_call-graph.mjs';
 import { holdDocumentLock, holdCounterLock, settleWithin, eventually, setWriteBoundForTest } from './_write-faults.mjs';
+import { holderCases, loadHolderModules, seedHolderSpace, F } from './_seq-hold-cases.mjs';
 
 const skip = await mongoSkipReason();
 // A merge embeds its survivor inline unless the space suppresses it; never let a test fetch a model.
@@ -68,17 +69,6 @@ const SLACK_MS = 1500;
 const CAP_MS = BOUND.holdDeadlineMs + SLACK_MS;
 /** How long a case may take to REACH its stall (the hold registered) before the fixture is called broken. */
 const ENTER_MS = 5000;
-
-const AUTHOR = { instanceId: 'push-door-peer', instanceLabel: 'Peer' };
-const T0 = '2026-09-01T00:00:00.000Z';
-const E1 = 'aaaaaaaa-0000-4000-8000-0000000000e1';
-const E2 = 'aaaaaaaa-0000-4000-8000-0000000000e2';
-const F = 'bbbbbbbb-0000-4000-8000-0000000000f1';
-const ED = 'cccccccc-0000-4000-8000-0000000000ed';
-const C = 'dddddddd-0000-4000-8000-0000000000c1';
-const HELD_FILE = 'held.md';
-const LEGACY_FILE = 'legacy.md';
-const DIVERGENT = 'the same fact, said differently by the peer';
 
 // ── The derivation: every holder of a seq hold ───────────────────────────────────────────────────────────────
 const PRIMITIVE = /\b(withAllocatedSeqs|withSeqHorizonHeld|withSeq)\s*\(/g;
@@ -99,109 +89,9 @@ function holders() {
 const HOLDERS = holders();
 
 let door, seq, mods;
-
-/**
- * One or more stalled runs per holder: what to call, and what to lock. `lock: 'counter'` locks the space's
- * counter row; a function returns its own lock. Fixtures are literal on purpose — the derivation decides a case
- * is owed, not this table.
- */
-const CASES = {
-  // Re-anchored (bundle-30 §D, Q-204): the push's page accept moved to `sync/accept-page.ts` and serves the pull too;
-  // the case still drives it through the push door, which forks the same way.
-  'server/src/sync/accept-page.ts:acceptArrivingPage': [{
-    label: 'a pushed fact that forks: the fork write, inside its block hold',
-    lock: async () => holdDocumentLock(door.mongo, `${S}_facts`,
-      { insert: { _id: mods.plan.forkIdFor(F, 3, DIVERGENT), spaceId: S, fact: 'lock', seq: 0 } }),
-    run: () => door.push('/facts', build.fact(S, F, 3, { fact: DIVERGENT }), { spaceId: S }),
-  }],
-  'server/src/brain/chrono.ts:updateChrono': [{
-    label: 'a chrono update', lock: 'counter',
-    run: () => mods.chrono.updateChrono(S, C, { title: 'changed' }),
-  }],
-  // Re-keyed (bundle-30, Q-107 part 3a): the re-key's block is in `rekeyEdges`, one implementation for one edge or a batch.
-  'server/src/brain/edge-rekey.ts:rekeyEdges': [{
-    label: 'an edge re-keyed by a label change (its block, inside the update\'s transaction)', lock: 'counter',
-    run: () => mods.edges.updateEdgeById(S, ED, { label: 'renamed' }),
-  }],
-  // Re-anchored (bundle-30 §A4): the edge label change's transaction is `inHeldTransaction`'s hold now, so the
-  // derivation finds the holder there; driven through the edge label change, its first caller.
-  'server/src/brain/held-transaction.ts:inHeldTransaction': [
-    { label: 'an edge label change: the transaction under the horizon hold', lock: 'counter',
-      run: () => mods.edges.updateEdgeById(S, ED, { label: 'renamed_again' }) },
-    // Its second caller since bundle-30 §B3: one chunk of an entity cascade (delete + tombstones) per transaction.
-    { label: 'an entity cascade chunk: the transaction under the horizon hold', lock: 'counter',
-      run: async () => mods.cascade.deleteEntityCascade(S, E1, (await mods.cascade.previewEntityCascade(S, E1)).token) },
-  ],
-  'server/src/brain/edges.ts:updateEdgeById': [
-    { label: 'an edge updated in place', lock: 'counter',
-      run: () => mods.edges.updateEdgeById(S, ED, { tags: ['changed'] }) },
-  ],
-  'server/src/brain/entities.ts:updateEntityById': [{
-    label: 'an entity update', lock: 'counter',
-    run: () => mods.entities.updateEntityById(S, E1, { description: 'changed' }),
-  }],
-  'server/src/brain/fact.ts:updateFact': [{
-    label: 'a fact update', lock: 'counter',
-    run: () => mods.fact.updateFact(S, F, { fact: 'changed' }),
-  }],
-  'server/src/brain/links-conversion.ts:stampFileMetaSeqs': [{
-    label: 'a legacy file record stamped with a seq', lock: 'counter',
-    run: () => mods.conversion.stampFileMetaSeqs(S),
-  }],
-  // Re-keyed (bundle-30 §A4/§B2): the merge runs in `inHeldTransaction`, and its seq blocks are taken in the
-  // transaction's callback, `relinkAndAbsorb`; driven through `executeMerge`, its one caller.
-  'server/src/brain/merge.ts:relinkAndAbsorb': [{
-    label: 'a merge: the relink seq blocks, inside its held transaction', lock: 'counter',
-    run: async () => mods.merge.executeMerge(S, await door.coll(S, 'entities').findOne({ _id: E1 }),
-      await door.coll(S, 'entities').findOne({ _id: E2 }), {}),
-  }],
-  // Re-keyed (bundle-30): `writeTombstone` is one tombstone through `writeTombstones`, whose block this is.
-  'server/src/brain/tombstones.ts:writeTombstones': [{
-    label: 'a tombstone write', lock: 'counter',
-    run: () => mods.tombstones.writeTombstone(S, { _id: 'deleted-fact', type: 'fact' }),
-  }],
-  'server/src/brain/write-plan/commit.ts:writeStage': [{
-    label: 'a planned create (save)', lock: 'counter',
-    run: () => mods.fact.saveFact(S, 'a new fact', [], [], undefined, undefined, 'note'),
-  }],
-  'server/src/brain/write-plan/commit.ts:reconcileLinkRows': [{
-    label: 'link rows reconciled', lock: 'counter',
-    run: () => mods.commit.reconcileLinkRows(S, [{ from: F, fromKind: 'fact', desired: { entity: [E1] }, author: AUTHOR, minted: true }]),
-  }],
-  'server/src/files/file-meta.ts:upsertFileMeta': [{
-    label: 'a file record created', lock: 'counter',
-    run: () => mods.fileMeta.upsertFileMeta(S, 'new.md', 10),
-  }],
-  'server/src/files/file-meta.ts:setDerivedDescriptionIfUnset': [{
-    label: 'a derived file description', lock: 'counter',
-    run: () => mods.fileMeta.setDerivedDescriptionIfUnset(S, HELD_FILE, 'derived'),
-  }],
-  'server/src/files/file-meta.ts:updateFileMeta': [{
-    label: 'a file record updated', lock: 'counter',
-    run: () => mods.fileMeta.updateFileMeta(S, HELD_FILE, { description: 'changed' }),
-  }],
-  'server/src/files/file-meta.ts:markFileMetaDeleted': [{
-    label: 'a file record marked deleted', lock: 'counter',
-    run: () => mods.fileMeta.markFileMetaDeleted(S, HELD_FILE),
-  }],
-};
-
-async function seed(space) {
-  await door.wipe(space);
-  await door.coll(space, 'entities').insertMany([
-    { _id: E1, spaceId: space, name: 'One', type: 'thing', tags: [], properties: {}, author: AUTHOR, createdAt: T0, updatedAt: T0, seq: 1 },
-    { _id: E2, spaceId: space, name: 'Two', type: 'thing', tags: [], properties: {}, author: AUTHOR, createdAt: T0, updatedAt: T0, seq: 2 },
-  ]);
-  await door.coll(space, 'facts').insertOne(build.fact(space, F, 3));
-  await door.coll(space, 'edges').insertOne({ _id: ED, spaceId: space, from: E1, to: E2, fromKind: 'entity', toKind: 'entity',
-    label: 'knows', tags: [], author: AUTHOR, createdAt: T0, updatedAt: T0, seq: 4 });
-  await door.coll(space, 'chrono').insertOne(build.chrono(space, C, 5));
-  await door.coll(space, 'files').insertMany([
-    { _id: HELD_FILE, spaceId: space, path: HELD_FILE, tags: [], sizeBytes: 1, createdAt: T0, updatedAt: T0, seq: 6 },
-    { _id: LEGACY_FILE, spaceId: space, path: LEGACY_FILE, tags: [], sizeBytes: 1, createdAt: T0, updatedAt: T0 },
-  ]);
-  await door.setCounter(space, 6);
-}
+/** Filled by `before`; the cases (`_seq-hold-cases.mjs`) read it when they run. */
+const ctx = {};
+const CASES = holderCases(ctx, S);
 
 /**
  * Run `run` with its write stalled by `lock`, and report what happened while the lock was STILL held: whether the
@@ -234,23 +124,12 @@ describe('a write inside a seq hold always ends', { skip }, () => {
     // reads an entity's references through the link records, which refuse a space that was never converted.
     door = await openPushDoor({ suite: 'holdends', spaces: [S, R].map(id => ({ id, label: id, folders: [], completeLinkage: true, meta: { suppressEmbeddings: true } })) });
     seq = await import('../../server/dist/util/seq.js');
-    mods = {
-      plan: await import('../../server/dist/sync/upsert-plan.js'),
-      chrono: await import('../../server/dist/brain/chrono.js'),
-      edges: await import('../../server/dist/brain/edges.js'),
-      entities: await import('../../server/dist/brain/entities.js'),
-      fact: await import('../../server/dist/brain/fact.js'),
-      conversion: await import('../../server/dist/brain/links-conversion.js'),
-      merge: await import('../../server/dist/brain/merge.js'),
-      cascade: await import('../../server/dist/brain/entity-delete-cascade.js'),
-      tombstones: await import('../../server/dist/brain/tombstones.js'),
-      commit: await import('../../server/dist/brain/write-plan/commit.js'),
-      fileMeta: await import('../../server/dist/files/file-meta.js'),
-    };
+    mods = await loadHolderModules();
+    Object.assign(ctx, { door, mods });
     try { restoreBound = await setWriteBoundForTest(BOUND); } catch (err) { seamError = err; }
   });
   after(async () => { restoreBound(); await door?.close(); });
-  beforeEach(async () => { await seed(S); });
+  beforeEach(async () => { await seedHolderSpace(door, S); });
 
   it('the derivation finds the holders, so an empty set cannot pass', () => {
     assert.ok(HOLDERS.size >= 10, `only ${HOLDERS.size} holder(s) of a seq hold derived — the sweep is broken: ${[...HOLDERS.keys()]}`);
@@ -283,7 +162,7 @@ describe('a write inside a seq hold always ends', { skip }, () => {
   }
 
   it('a pull resumes past a hold whose write the bound ended, while the lock is still held', { timeout: ENTER_MS + CAP_MS + 30_000 }, async () => {
-    await seed(R);
+    await seedHolderSpace(door, R);
     const lock = await holdDocumentLock(door.mongo, `${R}_facts`, { filter: { _id: F } });
     let report;
     try {

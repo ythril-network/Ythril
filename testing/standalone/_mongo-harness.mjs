@@ -47,9 +47,12 @@ export const TEST_MONGO_PORT = Number(process.env['YTHRIL_TEST_MONGO_PORT'] ?? 2
  */
 const CREDS = process.env['YTHRIL_TEST_MONGO_CREDS'] ?? 'ythril:ythril-test-pw';
 
-/** Connection URI for a dedicated harness database. */
-export function testMongoUri(dbName) {
-  return `mongodb://${CREDS ? `${CREDS}@` : ''}${TEST_MONGO_HOST}:${TEST_MONGO_PORT}/${dbName}` +
+/**
+ * Connection URI for a dedicated harness database. `port` names a relay standing in front of the test Mongo
+ * (`_delayed-write-relay.mjs`); the default is the stack's own.
+ */
+export function testMongoUri(dbName, { port = TEST_MONGO_PORT } = {}) {
+  return `mongodb://${CREDS ? `${CREDS}@` : ''}${TEST_MONGO_HOST}:${port}/${dbName}` +
     `?directConnection=true${CREDS ? '&authSource=admin' : ''}`;
 }
 
@@ -121,10 +124,11 @@ let _mongo = null;
  * the harness needs no test-only branch inside production code.
  *
  * @param suite short slug — becomes the database name, so two suites never share state.
+ * @param port  connect through a relay on this port instead of the stack's (`_delayed-write-relay.mjs`).
  * @returns the live `db/mongo.js` module namespace (`col`, `asFilter`, `asUpdate`, `getDb`, …).
  */
-export async function openTestMongo(suite) {
-  process.env['MONGO_URI'] = testMongoUri(`ythril_harness_${suite}`);
+export async function openTestMongo(suite, { port } = {}) {
+  process.env['MONGO_URI'] = testMongoUri(`ythril_harness_${suite}`, { port });
 
   const mongo = await import('../../server/dist/db/mongo.js');
   mongo._resetDbName?.();

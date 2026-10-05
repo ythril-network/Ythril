@@ -33,96 +33,37 @@
 import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { mongoSkipReason } from './_mongo-harness.mjs';
-import { openPushDoor, build } from './_push-door.mjs';
-import { holdDocumentLock, settleWithin, setWriteBoundForTest } from './_write-faults.mjs';
+import { settleWithin, setWriteBoundForTest } from './_write-faults.mjs';
+import { openStalledWriteDoors, seedDoorSpace, stalledWriteDoors } from './_stalled-write-doors.mjs';
 
 const skip = await mongoSkipReason();
-process.env['YTHRIL_MODELS_OFFLINE'] = '1';
 
 const S = 'timeout503';
-const F = 'bbbbbbbb-0000-4000-8000-0000000000f3';
-const DIVERGENT = 'the same fact, as the peer tells it';
 const BOUND = { writeTimeoutMs: 2000, holdDeadlineMs: 2000 };
 const CAP_MS = BOUND.holdDeadlineMs + 2500;
 
 /** What the driver says about a write the bound ended — none of it may reach a caller. */
 const DRIVER_TEXT = /Mongo\w*Error|MaxTimeMS|maxTimeMS|exceeded time limit|Timed out during|Server reported a timeout|WriteConflict|timeout503_facts|E11000/;
 
-let door, base, adminKey, callTool, ADMIN, server, plan;
-
-/** Each door: how to stall it, and how to call it — answering `{ status, body, text }`. */
-const DOORS = [
-  {
-    name: 'sync push POST /facts (a fork)',
-    lock: () => holdDocumentLock(door.mongo, `${S}_facts`, { insert: { _id: plan.forkIdFor(F, 3, DIVERGENT), spaceId: S, fact: 'lock', seq: 0 } }),
-    call: async () => {
-      const r = await door.push('/facts', build.fact(S, F, 3, { fact: DIVERGENT }), { spaceId: S });
-      return { status: r.code, body: r.body, text: JSON.stringify(r.body) };
-    },
-  },
-  {
-    name: 'sync push POST /batch-upsert (a fork)',
-    lock: () => holdDocumentLock(door.mongo, `${S}_facts`, { insert: { _id: plan.forkIdFor(F, 3, DIVERGENT), spaceId: S, fact: 'lock', seq: 0 } }),
-    call: async () => {
-      const r = await door.push('/batch-upsert', { facts: [build.fact(S, F, 3, { fact: DIVERGENT })] }, { spaceId: S });
-      return { status: r.code, body: r.body, text: JSON.stringify(r.body) };
-    },
-  },
-  {
-    name: 'REST PATCH /api/brain/spaces/:spaceId/facts/:id',
-    lock: () => holdDocumentLock(door.mongo, `${S}_facts`, { filter: { _id: F } }),
-    call: async () => {
-      const r = await fetch(`${base}/api/brain/spaces/${S}/facts/${F}`, {
-        method: 'PATCH', headers: { Authorization: `Bearer ${adminKey}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fact: 'an edit the store cannot take in time' }),
-      });
-      const text = await r.text();
-      let body; try { body = JSON.parse(text); } catch { body = text; }
-      return { status: r.status, body, text };
-    },
-  },
-  {
-    name: 'MCP update_fact (callTool)',
-    lock: () => holdDocumentLock(door.mongo, `${S}_facts`, { filter: { _id: F } }),
-    call: async () => {
-      const out = await callTool({
-        name: 'update_fact', args: { space: S, id: F, fact: 'an edit the store cannot take in time' },
-        caller: { rights: ADMIN, ip: '127.0.0.1', authMethod: 'pat', oidcSubject: null, transport: 'mcp', tokenId: 't', tokenLabel: 't' },
-      });
-      const text = (out.result.content ?? []).map(c => c.text ?? '').join('\n');
-      return { status: out.status, body: out.result.structuredContent ?? {}, text };
-    },
-  },
-];
+/** Filled by `before`; the doors (`_stalled-write-doors.mjs`, the one table `a-write-the-bound-ended-never-lands-db` walks too) read it. */
+const env = {};
+const DOORS = stalledWriteDoors(env, S);
 
 describe('a write timeout answers 503 on every door', { skip }, () => {
   let seamError = null;
   let restoreBound = () => {};
+  let doors;
 
   before(async () => {
-    door = await openPushDoor({ suite: 'timeout503', spaces: [{ id: S, label: S, folders: [], meta: { suppressEmbeddings: true } }] });
-    plan = await import('../../server/dist/sync/upsert-plan.js');
-    ({ callTool } = await import('../../server/dist/mcp/call-tool.js'));
-    const { SPACE_AREAS } = await import('../../server/dist/config/rights-shape.js');
-    ADMIN = { instanceAdmin: true, createSpaces: true, perSpace: {}, floor: Object.fromEntries(SPACE_AREAS.map(a => [a, 'admin'])) };
-    const tokens = await import('../../server/dist/auth/tokens.js');
-    adminKey = (await tokens.createToken({ name: 'admin', admin: true })).plaintext;
-    const { createApp } = await import('../../server/dist/app.js');
-    server = createApp().listen(0, '127.0.0.1');
-    await new Promise(r => server.once('listening', r));
-    base = `http://127.0.0.1:${server.address().port}`;
+    doors = await openStalledWriteDoors({ suite: 'timeout503', spaces: [S] });
+    Object.assign(env, doors.env);
     try { restoreBound = await setWriteBoundForTest(BOUND); } catch (err) { seamError = err; }
   });
   after(async () => {
     restoreBound();
-    await new Promise(r => server?.close(r));
-    await door?.close();
+    await doors?.close();
   });
-  beforeEach(async () => {
-    await door.wipe(S);
-    await door.coll(S, 'facts').insertOne(build.fact(S, F, 3));
-    await door.setCounter(S, 3);
-  });
+  beforeEach(async () => { await seedDoorSpace(env.door, S); });
 
   it('the write bound has a test seam (db/write-bound.ts setWriteBoundForTest)', () => {
     assert.equal(seamError, null, seamError?.message);
@@ -130,8 +71,7 @@ describe('a write timeout answers 503 on every door', { skip }, () => {
 
   it('control: unstalled, every door writes (so a 503 below is the stall, not the fixture)', async () => {
     for (const d of DOORS) {
-      await door.wipe(S);
-      await door.coll(S, 'facts').insertOne(build.fact(S, F, 3));
+      await seedDoorSpace(env.door, S);
       const r = await d.call();
       assert.equal(r.status, 200, `${d.name} answered ${r.status} with nothing stalled: ${r.text.slice(0, 300)}`);
     }

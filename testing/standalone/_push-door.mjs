@@ -101,12 +101,13 @@ const REPLICATED_FAMILY_KEYS = (await import('../../server/dist/sync/replicated-
  * @param {string} o.suite  harness database slug
  * @param {object[]} o.spaces  config `spaces` entries
  * @param {object[]} [o.networks]
+ * @param {number} [o.mongoPort]  connect through a relay on this port instead of the stack's (`_delayed-write-relay.mjs`)
  * @param {boolean} [o.monitorCommands]  reconnect with command monitoring, for `commandsDuring`
  * @param {object} [o.secrets]  a `secrets.json` to write beside the config BEFORE it is loaded — the loader reads
  *   it once, at `loadConfig`, so a door whose engine calls out to a peer (`_pull-door.mjs`) must hand its peer
  *   tokens in here rather than write them afterwards
  */
-export async function openPushDoor({ suite, spaces, networks = [], monitorCommands = false, secrets }) {
+export async function openPushDoor({ suite, spaces, networks = [], monitorCommands = false, secrets, mongoPort }) {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), `ythril-${suite}-`));
   process.env['CONFIG_PATH'] = path.join(tmpDir, 'config.json');
   // The space's files land under DATA_ROOT, whose default is /data: a directory Windows lets any process create at
@@ -118,7 +119,7 @@ export async function openPushDoor({ suite, spaces, networks = [], monitorComman
   }, null, 2), { mode: 0o600 });
   if (secrets) fs.writeFileSync(path.join(tmpDir, 'secrets.json'), JSON.stringify(secrets), { mode: 0o600 });
 
-  const mongo = await openTestMongo(suite);
+  const mongo = await openTestMongo(suite, { port: mongoPort });
   try {
     return await assemblePushDoor({ suite, spaces, monitorCommands, mongo, tmpDir });
   } catch (err) {

@@ -52,3 +52,50 @@ export function changedParts(before, after, { ignore = [] } = {}) {
   assert.ok(keys.length > 0, 'two empty snapshots compare equal whatever happened');
   return keys.filter(k => !ignore.includes(k) && JSON.stringify(before[k]) !== JSON.stringify(after[k]));
 }
+
+/**
+ * WHICH documents differ between two snapshots, by identity: `["<part> <_id>: added|removed|changed", …]`, sorted.
+ * `changedParts` says that a part differs; a test that has to say what LANDED — a write the caller was told had not
+ * completed, arriving afterwards — names the document, since a count passes when one landed and another went.
+ *
+ * A part present in only one of the snapshots is an error, not an empty part: comparing a snapshot with something it
+ * does not hold would report every document of the other as added.
+ */
+export function changedDocuments(before, after) {
+  assert.deepEqual(Object.keys(before).sort(), Object.keys(after).sort(), 'two snapshots of different parts are not comparable');
+  assert.ok(Object.keys(before).length > 0, 'two empty snapshots compare equal whatever happened');
+  const out = [];
+  for (const part of Object.keys(before)) {
+    const was = new Map(before[part].map(d => [d._id, JSON.stringify(d)]));
+    const now = new Map(after[part].map(d => [d._id, JSON.stringify(d)]));
+    for (const [id, json] of now) {
+      if (!was.has(id)) out.push(`${part} ${id}: added`);
+      else if (was.get(id) !== json) out.push(`${part} ${id}: changed`);
+    }
+    for (const id of was.keys()) if (!now.has(id)) out.push(`${part} ${id}: removed`);
+  }
+  return out.sort();
+}
+
+/**
+ * `snapshotParts` plus the space's counter row, in ONE round trip: `{ [part]: doc[], counter: doc[] }`.
+ *
+ * For a test that reads a space while something else may be writing to it and has to take that read at a chosen
+ * moment — `snapshotParts` reads one part after another, so a read begun just before a write lands straddles it, and
+ * a read of many parts at once from many spaces at once exhausts the driver's pool and starves the very writes under
+ * test (`Q-372`: 22 spaces x 9 reads made the doors fail "connection checkout"). One aggregation (`$unionWith` over every
+ * part, from the counter collection, which always exists) is one connection and one answer.
+ */
+export async function snapshotSpaceInOneRead(mongo, space, parts) {
+  assert.ok(parts.length > 0, 'a snapshot of no parts compares equal whatever happened');
+  const tagged = (part) => ({ $project: { _id: 0, part: { $literal: part }, doc: '$$ROOT' } });
+  const rows = await mongo.col('ythril_counters').aggregate([
+    { $match: { _id: space } },
+    tagged('counter'),
+    ...parts.map(p => ({ $unionWith: { coll: `${space}_${p}`, pipeline: [tagged(p)] } })),
+    { $sort: { part: 1, 'doc._id': 1 } },
+  ]).toArray();
+  const out = Object.fromEntries([...parts, 'counter'].map(p => [p, []]));
+  for (const r of rows) out[r.part].push(r.doc);
+  return out;
+}
