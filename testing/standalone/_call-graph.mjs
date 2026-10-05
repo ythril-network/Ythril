@@ -303,7 +303,7 @@ export function withoutNestedClosures(body) {
       const brace = body.indexOf('{', i);
       const end = matchFrom(body, brace, '{', '}');
       if (end < 0) break;
-      out += '=>{}';
+      out += body.slice(i, brace + 1) + blanked(body.slice(brace + 1, end)) + '}';
       i = end;
       continue;
     }
@@ -313,13 +313,55 @@ export function withoutNestedClosures(body) {
       const brace = close < 0 ? -1 : body.indexOf('{', close);
       const end = brace < 0 ? -1 : matchFrom(body, brace, '{', '}');
       if (end < 0) { out += body[i]; continue; }
-      out += 'function(){}';
+      out += `function${blanked(body.slice(i + 'function'.length, brace))}{${blanked(body.slice(brace + 1, end))}}`;
       i = end;
       continue;
     }
     out += body[i];
   }
   return out;
+}
+
+/**
+ * `text` with every character but a line break turned into a space.
+ *
+ * What a cut closure is replaced BY, so the text a call scan reads keeps every offset of the body it was cut
+ * from: an offset found in it is an offset into the real body. (Ported from main, for Q-304's derived gate.)
+ */
+function blanked(text) {
+  return text.replace(/[^\r\n]/g, ' ');
+}
+
+/**
+ * Every bare `name(` this body calls when it runs, as `{ name, at, paren }` in source order — `at` the offset of
+ * the name and `paren` of its bracket, both offsets into `body` itself. Less the keywords, less anything reached
+ * through a dot, and less everything inside a closure it merely hands to somebody else.
+ *
+ * **It matches by LOOKBEHIND and `callsIn` below does not (`Q-309`).** The consumed-prefix form
+ * `(^|[^.\w$])name\(` eats the `(` that a call written as the FIRST ARGUMENT of another call needs as its
+ * prefix, so `new Set(accessibleSpaces(req, 'write'))` showed the scan no call at all, and the scan route read
+ * as enforced by nothing. `callsIn` keeps its old spelling on purpose: re-pointing it changes the edges of every
+ * call-graph gate, which is not what this patch asks.
+ */
+export function callSitesIn(body, { closures = false } = {}) {
+  const sites = [];
+  for (const m of callableText(body, closures).matchAll(/(?<![.\w$])([A-Za-z_$][\w$]*)\s*(?:<[^>(;]*>)?\s*\(/g)) {
+    if (!NOT_A_CALL.has(m[1])) sites.push({ name: m[1], at: m.index, paren: m.index + m[0].length - 1 });
+  }
+  return sites;
+}
+
+/**
+ * Every `obj.prop(` this body calls, as `{ obj, prop, at, paren }` in source order — `obj` a bare identifier,
+ * never itself reached through a dot, so `a.b.c()` is not read as `b.c()`. Optional chaining counts. Offsets as in
+ * `callSitesIn`, and matched by lookbehind for the same reason.
+ */
+export function memberCallSitesIn(body, { closures = false } = {}) {
+  const sites = [];
+  for (const m of callableText(body, closures).matchAll(/(?<![.\w$?])([A-Za-z_$][\w$]*)\s*\??\.\s*([A-Za-z_$][\w$]*)\s*(?:<[^>(;]*>)?\s*\(/g)) {
+    sites.push({ obj: m[1], prop: m[2], at: m.index, paren: m.index + m[0].length - 1 });
+  }
+  return sites;
 }
 
 /**
@@ -370,7 +412,8 @@ export function referencesIn(body) {
  * covered the whole boot.
  */
 function callableText(body, closures) {
-  return (closures ? body : withoutNestedClosures(body)).replace(/\bfunction\s*\*?\s*[A-Za-z_$][\w$]*\s*\(/g, 'function (');
+  return (closures ? body : withoutNestedClosures(body))
+    .replace(/(\bfunction\s*\*?\s*)([A-Za-z_$][\w$]*)(?=\s*\()/g, (_, kw, name) => kw + blanked(name));
 }
 
 /**

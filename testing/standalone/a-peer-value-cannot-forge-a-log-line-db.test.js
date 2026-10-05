@@ -18,7 +18,8 @@
  * 2. **Source, over the whole set** (R6): a sample proves two paths and says nothing about the next one, which is how
  *    raw `member.label`, `round.roundId`, `remote.path` and `${err}` interpolations survived the first pass. So in
  *    EVERY file on the push, pull, import and gossip paths, every `${…}` inside a `log.*(…)` call is either wrapped
- *    whole in `logSafe(…)` or is on `LOCAL_VALUES` — a short list of values this instance owns (a validated space id,
+ *    whole in `logSafe(…)` / `peerText(…)` / `peerList(…)` (the same rule under three names, the last two also
+ *    cutting) or is on `LOCAL_VALUES` — a short list of values this instance owns (a validated space id,
  *    a family name, a number). The file set is DERIVED: every tracked file under `server/src/sync`,
  *    `server/src/api/sync` and `server/src/networks` (where gossip's acts log what a peer told it), and every file
  *    that calls `writeArrivals(`, with floors. Comments are blanked before reading (so a comment
@@ -192,8 +193,15 @@ function interpolations(src, from, to) {
   }
   return out;
 }
-/** `logSafe(…)` wrapping the WHOLE expression, not a part of it. */
-const wholeLogSafe = (e) => /^logSafe\(/.test(e) && closing(e, e.indexOf('(')) === e.length - 1;
+/**
+ * The renderers of `util/log.ts` that escape a value for a line: `logSafe` and its bounded successors `peerText` (one
+ * value) and `peerList` (a joined list), which cut as well (`Q-231`, `Q-270`). `logSafe` IS `peerText` — an alias pin
+ * in `a-peer-value-is-rendered-escaped-redacted-and-bounded` — so accepting all three accepts one rule under three
+ * names, and a slot rewritten from `logSafe(x)` to `peerText(x)` is no reason for this gate to go red.
+ */
+const BOUNDING_CALL = /^(?:logSafe|peerText|peerList)\(/;
+/** `logSafe(…)` / `peerText(…)` / `peerList(…)` wrapping the WHOLE expression, not a part of it. */
+const wholeLogSafe = (e) => BOUNDING_CALL.test(e) && closing(e, e.indexOf('(')) === e.length - 1;
 /**
  * An expression whose every possible VALUE is a string literal: a literal, or a ternary choosing between literals (its
  * condition is never printed). A nested template counts as a literal here because its own `${…}` are checked on
@@ -225,7 +233,7 @@ describe('every interpolation in a log call on the arrival paths is escaped or l
         for (const { expr, at } of interpolations(src, open + 1, closing(src, open))) {
           if (wholeLogSafe(expr) || LOCAL_VALUES.has(expr) || NUMERIC.test(expr) || literalsOnly(expr)
             || derivedLocal(expr) || joinedSafe(expr)) continue;
-          if (/^logSafe\(/.test(expr) === false && /\blogSafe\(/.test(expr) && interpolationsOnlySafe(expr)) continue;
+          if (BOUNDING_CALL.test(expr) === false && /\b(?:logSafe|peerText|peerList)\(/.test(expr) && interpolationsOnlySafe(expr)) continue;
           raw.push(`${f}:${src.slice(0, at).split('\n').length}: \${${expr}}`);
         }
       }
@@ -236,11 +244,11 @@ describe('every interpolation in a log call on the arrival paths is escaped or l
   });
 });
 
-/** A conditional or concatenation whose every value-bearing operand is a `logSafe(…)` call or a string literal. */
+/** A conditional or concatenation whose every value-bearing operand is a bounding-renderer call or a string literal. */
 function interpolationsOnlySafe(expr) {
   let rest = expr;
   for (;;) {
-    const at = rest.search(/\blogSafe\(/);
+    const at = rest.search(/\b(?:logSafe|peerText|peerList)\(/);
     if (at < 0) break;
     const open = rest.indexOf('(', at);
     rest = `${rest.slice(0, at)}''${rest.slice(closing(rest, open) + 1)}`;

@@ -1,5 +1,6 @@
 /**
- * A failure of the STORE answers 503 and says it is retryable; a bad request still answers 400.
+ * A failure of the STORE answers 503 and says it is retryable; a bad request still answers 400 — and neither says the
+ * driver's words (`Q-361`: rewritten when the answers stopped echoing the driver's text; the statuses are unchanged).
  *
  * ## What this pins, and why the unsafe direction is the one to test hardest
  *
@@ -12,6 +13,17 @@
  * malformed filter for ever. So the assertions below are weighted that way — a handful prove the store case
  * becomes a 503, and the rest prove that everything we refuse ourselves is untouched.
  *
+ * ## What this file USED to assert, and does not
+ *
+ * It asserted the ECHO: that the dangling `caused by ::` was closed with "the store reported no cause", that the
+ * driver's `errmsg` reached the caller, and that a nested `cause`'s text (`10.1.2.3:27017`) was in the body. Those were the
+ * defect read as a feature — the same text names the host, the port and the namespace to whoever asks, and a global
+ * handler cannot tell an operator from an anonymous caller — so they now assert the opposite: **the answer is our sentence
+ * and says nothing of the driver's message, while `status`, `retryable`, `Retry-After`, `code` and `codeName` stay.**
+ * Its errors were also plain `Error`s wearing a driver's `name`, which only a classifier that asks what an error is CALLED
+ * can be shown to handle; they are now the driver's own classes (`_store-failure-fixtures.mjs`, derived with a floor).
+ * `a-store-failure-says-nothing-of-the-driver` holds the same rule over every class the driver exports.
+ *
  * Run: node --test testing/standalone/store-failure-is-not-a-400.test.js
  */
 import { describe, it } from 'node:test';
@@ -19,11 +31,17 @@ import assert from 'node:assert/strict';
 import { dispatchSource } from './_tool-dispatch.mjs';
 import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
+import { LEAK, STORE_SIDE, STORE_SIDE_NAMES, driverSideErrors, serverError, driver } from './_store-failure-fixtures.mjs';
 
 const { classifyReadFailure } = await import('../../server/dist/brain/store-failure.js');
 
-/** A driver error, shaped the way the MongoDB node driver actually shapes one. */
-const mongoErr = (name, fields = {}) => Object.assign(new Error(fields.message ?? 'boom'), { name, ...fields });
+const DRIVER_SIDE = driverSideErrors();
+const driverError = (name, message) => {
+  const made = DRIVER_SIDE.find(d => d.name === name);
+  assert.ok(made, `the driver exports no ${name}`);
+  const err = made.make();
+  return message === undefined ? err : Object.assign(err, { message });
+};
 
 describe('the reported condition, verbatim from both reports', () => {
   /**
@@ -32,55 +50,56 @@ describe('the reported condition, verbatim from both reports', () => {
    */
   const REPORTED = 'Executor error during aggregate command on namespace: '
     + 'ythril_the fleet integrator.orchestrator_facts :: caused by :: ';
+  const reported = (extra = {}) => new driver.MongoServerError({ ok: 0, code: 8, codeName: 'InternalError', errmsg: REPORTED, ...extra });
 
   it('is a 503, is retryable, and stops reading as a complaint about the request', () => {
-    const f = classifyReadFailure(mongoErr('MongoServerError', { message: REPORTED }));
+    const f = classifyReadFailure(reported());
     assert.equal(f.status, 503, 'a store failure is not a client error');
     assert.equal(f.retryable, true);
     assert.ok(f.retryAfterSeconds > 0, 'and it must say how long to wait');
   });
 
-  it('closes the dangling `caused by ::` rather than shipping a half sentence', () => {
-    // THE symptom: the message ends mid-sentence, which a caller reads as a truncated complaint about their
-    // own request. An operator could not tell whether the gap was the store's or our logging.
-    const f = classifyReadFailure(mongoErr('MongoServerError', { message: REPORTED }));
+  it('says it is the store\'s and can be retried, in our words — not a half sentence ending at `caused by ::`', () => {
+    // THE symptom: the message ends mid-sentence, which a caller reads as a truncated complaint about their own
+    // request. The answer is now OUR sentence, which names whose fault it is because the status alone is not read by a human.
+    const f = classifyReadFailure(reported());
     assert.doesNotMatch(f.error, /caused by ::\s*$/, 'the message must not still end at `caused by ::`');
-    assert.match(f.error, /the store reported no cause/,
-      'when nothing was attached, say so — that is the answer to "is the gap yours or ours?"');
-    assert.match(f.error, /not a problem with your request/i,
-      'and say whose fault it is, because the status alone is not read by a human');
+    assert.match(f.error, STORE_SIDE, 'say whose fault it is');
+    assert.match(f.error, /retried|retryable/i, 'and that retrying is the right response');
   });
 
-  it('fills the cause in from the driver when there IS one', () => {
-    const f = classifyReadFailure(mongoErr('MongoServerError', {
-      message: REPORTED,
-      errmsg: 'mongot connection closed',
-      codeName: 'InternalError',
-      code: 8,
-    }));
-    assert.match(f.error, /mongot connection closed/, 'the real reason must reach the caller');
-    assert.equal(f.code, 8, 'and the code, which is an operator\'s fastest route to the condition');
+  it('says nothing of the namespace, the executor or the driver\'s cause', () => {
+    const f = classifyReadFailure(reported({ errmsg: `${REPORTED}mongot connection closed`, codeName: 'InternalError' }));
+    assert.doesNotMatch(f.error, LEAK);
+    assert.doesNotMatch(f.error, /orchestrator_facts|mongot connection closed/, 'the store\'s words are the operator\'s, in the log');
+  });
+
+  it('keeps the store\'s code and codeName — stable, and an operator\'s fastest route to the condition', () => {
+    const f = classifyReadFailure(reported());
+    assert.equal(f.code, 8);
     assert.equal(f.codeName, 'InternalError');
-    assert.doesNotMatch(f.error, /the store reported no cause/,
-      'that phrase is for an EMPTY cause and would be a lie next to a real one');
   });
 
-  it('reads a nested `cause`, which is where the empty one was hiding', () => {
-    const f = classifyReadFailure(mongoErr('MongoServerError', {
-      message: 'Executor error during find command',
-      cause: new Error('connection 4 to 10.1.2.3:27017 closed'),
-    }));
-    assert.match(f.error, /connection 4 to 10\.1\.2\.3:27017 closed/);
+  it('a nested `cause` of a driver error is not in the answer either', () => {
+    const f = classifyReadFailure(Object.assign(driverError('MongoServerSelectionError'), { cause: new Error('connection 4 to 10.1.2.3:27017 closed') }));
+    assert.equal(f.status, 503);
+    assert.doesNotMatch(f.error, /10\.1\.2\.3|27017/);
   });
 });
 
-describe('the store cases, each identified positively', () => {
-  for (const name of ['MongoNetworkError', 'MongoNetworkTimeoutError', 'MongoServerSelectionError',
-    'MongoTopologyClosedError', 'MongoNotConnectedError']) {
+describe('the store cases, each identified positively — by the driver\'s own classes', () => {
+  it('built from the driver\'s classes (floor), not from names on plain Errors', () => {
+    assert.ok(DRIVER_SIDE.length >= 25, `only ${DRIVER_SIDE.length} driver classes built`);
+    for (const name of STORE_SIDE_NAMES) assert.ok(driverError(name) instanceof driver.MongoError, `${name} is not a MongoError`);
+  });
+
+  for (const name of STORE_SIDE_NAMES) {
     it(`${name} is the store`, () => {
-      const f = classifyReadFailure(mongoErr(name));
+      const f = classifyReadFailure(driverError(name));
       assert.equal(f.status, 503, `${name} means the store did not answer`);
       assert.equal(f.retryable, true);
+      assert.match(f.error, STORE_SIDE);
+      assert.doesNotMatch(f.error, LEAK);
     });
   }
 
@@ -88,16 +107,19 @@ describe('the store cases, each identified positively', () => {
     [11602, 'InterruptedDueToReplStateChange'], [189, 'PrimarySteppedDown'],
     [13436, 'NotPrimaryOrSecondary'], [50, 'MaxTimeMSExpired'], [262, 'ExceededTimeLimit']]) {
     it(`MongoServerError code ${code} (${why}) is the store`, () => {
-      const f = classifyReadFailure(mongoErr('MongoServerError', { code }));
+      const f = classifyReadFailure(serverError(code, why, `${why}: connection 9 to mongo-b.internal:27018 closed`));
       assert.equal(f.status, 503, `${why} is not answerable right now, and will be`);
       assert.equal(f.retryable, true);
+      assert.doesNotMatch(f.error, LEAK);
     });
   }
 
-  it('a $vectorSearch failure is the store even without a recognised code', () => {
-    const f = classifyReadFailure(mongoErr('MongoServerError',
-      { message: 'PlanExecutor error :: $vectorSearch index not queryable' }));
+  it('a $vectorSearch failure from the STORE is the store even without a recognised code', () => {
+    // On a real MongoServerError: the pattern is read from what the DRIVER raised. An error of ours that merely says the
+    // same words is a refusal (`a-store-failure-says-nothing-of-the-driver`).
+    const f = classifyReadFailure(serverError(8, 'UnknownError', 'PlanExecutor error :: $vectorSearch index not queryable'));
     assert.equal(f.status, 503);
+    assert.doesNotMatch(f.error, /PlanExecutor|queryable/);
   });
 });
 
@@ -109,11 +131,8 @@ describe('everything we refuse ourselves is UNCHANGED — the direction that mus
     'entryId must be a valid UUID v4',
     'topK must be a number',
     'Space \'nope\' not found',
-    // A MongoServerError with a code that is NOT on the allowlist: a bad regex, a projection conflict.
-    // The name alone must not be enough, or every caller mistake becomes "retry for ever".
-    null,
   ];
-  for (const msg of clientErrors.filter(Boolean)) {
+  for (const msg of clientErrors) {
     it(`stays 400: ${msg.slice(0, 44)}`, () => {
       const f = classifyReadFailure(new Error(msg));
       assert.equal(f.status, 400, 'a refusal the caller can fix must stay a refusal');
@@ -122,17 +141,24 @@ describe('everything we refuse ourselves is UNCHANGED — the direction that mus
     });
   }
 
-  it('a MongoServerError with an unlisted code stays 400 — the name is not enough', () => {
-    const f = classifyReadFailure(mongoErr('MongoServerError',
-      { code: 18, message: 'Authentication failed.' }));
+  it('a MongoServerError with an unlisted code stays 400, in the server\'s own words — the name is not enough', () => {
+    const f = classifyReadFailure(serverError(18, 'AuthenticationFailed', 'Authentication failed.'));
     assert.equal(f.status, 400, 'AuthenticationFailed will never succeed on a retry');
     assert.equal(f.retryable, false);
+    assert.equal(f.error, 'Authentication failed.');
+  });
+
+  it('a malformed query the SERVER refused keeps the server\'s words — they are how a caller fixes it', () => {
+    const f = classifyReadFailure(serverError(51091, 'Location51091', 'Regular expression is invalid: missing closing parenthesis'));
+    assert.equal(f.status, 400);
+    assert.equal(f.error, 'Regular expression is invalid: missing closing parenthesis');
   });
 
   it('a plain Error with no name and no code stays 400', () => {
     const f = classifyReadFailure(new Error('something went wrong'));
     assert.equal(f.status, 400);
     assert.equal(f.retryable, false);
+    assert.equal(f.error, 'something went wrong');
   });
 
   it('a non-Error throw does not crash the classifier', () => {
