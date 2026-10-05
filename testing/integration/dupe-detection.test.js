@@ -23,6 +23,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'url';
 import { INSTANCES, post, get, waitForIndexed as waitForIndexedShared, ensureReindexed } from '../sync/helpers.js';
 import { openMcpSession } from '../sync/mcp-session.js';
+import { requireEmbedding } from '../_shared/embedding-required.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, '..', 'sync', 'configs');
@@ -67,7 +68,7 @@ after(async () => {
 
 describe('Duplicate detection — remember', () => {
   it('flags a near-identical memory as a possible duplicate', async (t) => {
-    if (!embeddingAvailable) return t.skip('embedding unavailable');
+    if (!requireEmbedding(t, embeddingAvailable)) return;
     const first = 'The Vault service stores secrets and rotates authentication tokens on a schedule.';
     const dup = 'The Vault service stores secrets and rotates authentication tokens on a fixed schedule.';
 
@@ -85,7 +86,7 @@ describe('Duplicate detection — remember', () => {
   });
 
   it('does not flag a clearly distinct memory', async (t) => {
-    if (!embeddingAvailable) return t.skip('embedding unavailable');
+    if (!requireEmbedding(t, embeddingAvailable)) return;
     const r = await session.callTool('save_fact', { space: SPACE, fact: 'Ripe bananas are a yellow tropical fruit rich in potassium.' });
     const text = r?.content?.[0]?.text ?? '';
     assert.ok(idFrom(text), 'distinct memory stored');
@@ -93,7 +94,7 @@ describe('Duplicate detection — remember', () => {
   });
 
   it('skips the check when checkDuplicates:false', async (t) => {
-    if (!embeddingAvailable) return t.skip('embedding unavailable');
+    if (!requireEmbedding(t, embeddingAvailable)) return;
     const dup = 'The Vault service stores secrets and rotates authentication tokens on a schedule.';
     const r = await session.callTool('save_fact', { space: SPACE, fact: dup, checkDuplicates: false });
     const text = r?.content?.[0]?.text ?? '';
@@ -104,7 +105,7 @@ describe('Duplicate detection — remember', () => {
 
 describe('Duplicate detection — upsert_entity', () => {
   it('flags a semantically duplicate entity insert', async (t) => {
-    if (!embeddingAvailable) return t.skip('embedding unavailable');
+    if (!requireEmbedding(t, embeddingAvailable)) return;
     const desc = 'Central telemetry aggregation pipeline collecting metrics from downstream collectors.';
     const r1 = await session.callTool('save_entity', { space: SPACE, name: `Telemetry Aggregator ${RUN}`, type: 'service', description: desc });
     const id1 = idFrom(r1?.content?.[0]?.text);
@@ -119,7 +120,7 @@ describe('Duplicate detection — upsert_entity', () => {
   });
 
   it('skips the check when checkDuplicates:false', async (t) => {
-    if (!embeddingAvailable) return t.skip('embedding unavailable');
+    if (!requireEmbedding(t, embeddingAvailable)) return;
     const desc = 'Central telemetry aggregation pipeline collecting metrics from downstream collectors.';
     const r = await session.callTool('save_entity', { space: SPACE, name: `Telemetry Something Else ${RUN}`, type: 'service', description: desc, checkDuplicates: false });
     const text = r?.content?.[0]?.text ?? '';

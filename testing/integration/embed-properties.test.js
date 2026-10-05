@@ -23,6 +23,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { INSTANCES, post, get, readRecord } from '../sync/helpers.js';
 import { holdsWithin } from '../_shared/wait-for.mjs';
+import { requireEmbedding } from '../_shared/embedding-required.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, '..', 'sync', 'configs');
@@ -105,7 +106,7 @@ describe('Property keys are embedded (B4)', () => {
   });
 
   it('memory embedding text includes the property key (REST create, via shared saveFact())', async (t) => {
-    if (!embeddingAvailable) return t.skip('Embedding not available');
+    if (!requireEmbedding(t, embeddingAvailable)) return;
     const r = await post(INSTANCES.a, token, `/api/brain/spaces/${SPACE}/facts`,
       { fact: `MemPropKey-${RUN}`, properties: { occupation: 'pilot' } });
     assert.equal(r.status, 201, JSON.stringify(r.body));
@@ -120,7 +121,7 @@ describe('Property keys are embedded (B4)', () => {
   });
 
   it('entity embedding text includes the property key', async (t) => {
-    if (!embeddingAvailable) return t.skip('Embedding not available');
+    if (!requireEmbedding(t, embeddingAvailable)) return;
     const r = await post(INSTANCES.a, token, `/api/brain/spaces/${SPACE}/entities`,
       { name: `EntPropKey-${RUN}`, type: 'concept', properties: { occupation: 'engineer' } });
     assert.equal(r.status, 201, JSON.stringify(r.body));
@@ -131,7 +132,7 @@ describe('Property keys are embedded (B4)', () => {
   });
 
   it('chrono embedding text includes the property key (previously omitted entirely)', async (t) => {
-    if (!embeddingAvailable) return t.skip('Embedding not available');
+    if (!requireEmbedding(t, embeddingAvailable)) return;
     const r = await post(INSTANCES.a, token, `/api/brain/spaces/${SPACE}/chrono`, {
       title: `ChronoPropKey-${RUN}`, type: 'event', startsAt: new Date(RUN).toISOString(),
       properties: { venue: 'stadium' },
@@ -168,7 +169,7 @@ describe('Property keys are embedded (B4)', () => {
    * queue's throughput.
    */
   it('edge embedding text includes the property key (previously omitted entirely)', async (t) => {
-    if (!embeddingAvailable) return t.skip('Embedding not available');
+    if (!requireEmbedding(t, embeddingAvailable)) return;
     const from = `EdgeFrom-${RUN}`;
     const to = `EdgeTo-${RUN}`;
     const a = await post(INSTANCES.a, token, `/api/brain/spaces/${SPACE}/entities`, { name: from, type: 'concept' });

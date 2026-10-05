@@ -17,15 +17,16 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import os from 'node:os';
 import { ssrfSafeFetch } from '../../server/dist/util/ssrf.js';
+import { privateHostAddress, privateAddressSkipReason } from './_private-address.mjs';
 
-const lanIp = Object.values(os.networkInterfaces()).flat()
-  .find(a => a && a.family === 'IPv4' && !a.internal)?.address;
+const lanIp = privateHostAddress();
 
 describe('ssrfSafeFetch — real undici path reconstructs null-body statuses', () => {
   it('returns 204 without throwing, and preserves a 200 body', async (t) => {
-    if (!lanIp) { t.skip('no non-loopback IPv4 to bind a reachable private target'); return; }
+    // A skip on a laptop with no private address; a throw on CI (where a skip would read as a pass).
+    const noLan = privateAddressSkipReason();
+    if (noLan) return t.skip(noLan);
 
     const server = http.createServer((req, res) => {
       if (req.url === '/notify') { res.writeHead(204); res.end(); return; }        // null-body status

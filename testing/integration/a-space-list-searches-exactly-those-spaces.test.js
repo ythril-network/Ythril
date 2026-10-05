@@ -29,7 +29,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { INSTANCES, post, get, del, readCollection, filterRest } from '../sync/helpers.js';
+import { INSTANCES, post, get, del, filterRest } from '../sync/helpers.js';
 import { openMcpSession } from '../sync/mcp-session.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -159,19 +159,24 @@ describe('recall and similar take it too, not just filter', () => {
      * ran last, so the case failed with `entryId must be a valid UUID v4` — a refusal about the ID,
      * reported as `similar refused a list outright`, which is the opposite of what it is testing.
      *
-     * The subject is the SPACE LIST being parsed, so any valid id will do and having none is a skip.
+     * The subject is the SPACE LIST being parsed, so any valid id will do — and the test WRITES its own rather
+     * than hoping `general` holds one. It used to end quietly when no UUID-keyed fact was lying about, which
+     * is a test that asserts nothing exactly when the space is empty.
      */
-    const seed = await readCollection(INSTANCES.a, token, 'general', 'facts', { limit: 50 });
-    const id = (seed.results ?? [])
-      .map(r => r._id)
-      .find(v => /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v));
-    if (!id) return;   // no UUID-keyed fact in this run; the parse is what matters and recall covered it
-    const rest = await post(INSTANCES.a, token, '/api/brain/similar', {
-      entryId: id, entryType: 'fact', space: ['general'],
-    });
-    assert.notEqual(rest.status, 400, `similar refused a list outright: ${JSON.stringify(rest.body)}`);
-    const mcp = await session.callTool('similar', { entryId: id, entryType: 'fact', space: ['general'] });
-    assert.doesNotMatch(mcp?.content?.[0]?.text ?? '', /not a list|must be a space name/i,
-      'similar rejected the list at the parse, which is the one failure this case is for');
+    const seeded = await post(INSTANCES.a, token, '/api/brain/spaces/general/facts', { fact: `space-list similar seed ${RUN}` });
+    const id = seeded.body?._id;
+    assert.match(String(id), /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+      `the seed fact was not written under a UUID v4 id, so similar has nothing to start from: ${JSON.stringify(seeded.body)}`);
+    try {
+      const rest = await post(INSTANCES.a, token, '/api/brain/similar', {
+        entryId: id, entryType: 'fact', space: ['general'],
+      });
+      assert.notEqual(rest.status, 400, `similar refused a list outright: ${JSON.stringify(rest.body)}`);
+      const mcp = await session.callTool('similar', { entryId: id, entryType: 'fact', space: ['general'] });
+      assert.doesNotMatch(mcp?.content?.[0]?.text ?? '', /not a list|must be a space name/i,
+        'similar rejected the list at the parse, which is the one failure this case is for');
+    } finally {
+      await del(INSTANCES.a, token, `/api/brain/spaces/general/facts/${id}`).catch(() => {});
+    }
   });
 });

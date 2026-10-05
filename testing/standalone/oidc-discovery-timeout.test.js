@@ -27,7 +27,7 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import { privateHostAddress } from './_private-address.mjs';
+import { privateHostAddress, privateAddressSkipReason } from './_private-address.mjs';
 
 let getDiscoveryDoc;
 let clearOidcCache;
@@ -38,6 +38,9 @@ let blackHole;
 let blackHoleHost;
 let blackHolePort;
 const heldSockets = [];
+
+/** False when this host has a private address to bind; a reason on a laptop without one; a throw on CI. */
+const noPrivateAddress = privateAddressSkipReason();
 
 const ENV_KEY = 'YTHRIL_OIDC_ALLOW_PRIVATE_ISSUER';
 let savedEnv;
@@ -76,7 +79,7 @@ describe('OIDC discovery — timeout', () => {
     );
   });
 
-  it('rejects instead of hanging when the IdP never responds', { skip: !privateHostAddress() && 'no non-loopback IPv4 on this host' }, async () => {
+  it('rejects instead of hanging when the IdP never responds', { skip: noPrivateAddress }, async () => {
     clearOidcCache();
     const started = Date.now();
     await assert.rejects(
@@ -96,7 +99,7 @@ describe('OIDC discovery — timeout', () => {
     );
   });
 
-  it('reports an unreachable IdP as a discovery failure too', { skip: !privateHostAddress() && 'no non-loopback IPv4 on this host' }, async () => {
+  it('reports an unreachable IdP as a discovery failure too', { skip: noPrivateAddress }, async () => {
     clearOidcCache();
     // Port 1: connection refused immediately — the other half of the same failure mode.
     await assert.rejects(

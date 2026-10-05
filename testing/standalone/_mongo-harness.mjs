@@ -34,6 +34,7 @@
  */
 
 import net from 'node:net';
+import { absentInputReason } from '../_shared/absent-input.mjs';
 
 /** Host/port of the published test Mongo. Override for a non-default stack. */
 export const TEST_MONGO_HOST = process.env['YTHRIL_TEST_MONGO_HOST'] ?? '127.0.0.1';
@@ -79,14 +80,11 @@ export async function isTestMongoUp(timeoutMs = 1500) {
 export async function mongoSkipReason() {
   if (await isTestMongoUp()) return false;
   const where = `${TEST_MONGO_HOST}:${TEST_MONGO_PORT}`;
-  if (process.env['CI']) {
-    throw new Error(
-      `Database-level test harness cannot reach MongoDB at ${where}, but CI is set. ` +
-      'The test stack must be up for standalone tests in CI — refusing to skip and report green. ' +
-      'Check that testing/docker-compose.test.yml still publishes the ythril-mongo-a port.',
-    );
-  }
-  return `needs the test MongoDB at ${where} — run \`npm run test:up\``;
+  return absentInputReason(
+    `needs the test MongoDB at ${where} — run \`npm run test:up\``,
+    'The test stack must be up for standalone tests in CI. Check that testing/docker-compose.test.yml still '
+    + 'publishes the ythril-mongo-a port.',
+  );
 }
 
 /**

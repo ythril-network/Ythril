@@ -94,8 +94,21 @@ function importedNames(src) {
  * not follow, and a db file missed here runs uncapped, which is the failure the split exists for.
  */
 export function splitStandalone() {
-  const tracked = execFileSync('git', ['ls-files', 'testing/standalone'], { encoding: 'utf8' })
-    .split('\n').map(f => f.split('/').pop()).filter(Boolean);
+  const listed = execFileSync('git', ['ls-files', 'testing/standalone'], { encoding: 'utf8' }).split('\n').filter(Boolean);
+  /*
+   * A test file one directory deeper is REFUSED, not mapped by its basename. The rest of this module reads and runs
+   * `testing/standalone/<name>`, so a nested `sub/x.test.js` would be read at a path nobody wrote (an ENOENT naming a
+   * file that does not exist), and one whose basename matches a top-level file would list THAT file twice and never
+   * run the nested one — a tracked test in no batch, with nothing saying so. Whether nesting should be supported is a
+   * separate question; until it is, the split names the file's real path.
+   */
+  const nested = listed.filter(f => f.endsWith('.test.js') && f.slice('testing/standalone/'.length).includes('/'));
+  if (nested.length > 0) {
+    throw new Error(`nested standalone test file(s) in a subdirectory of testing/standalone: ${nested.join(', ')}. `
+      + 'The standalone runners address a test as testing/standalone/<name>, so a nested file would be misread or never run — '
+      + 'move it up one level (helpers and fixtures may live in subdirectories as .mjs, not as *.test.js).');
+  }
+  const tracked = listed.map(f => f.split('/').pop());
   const all = tracked.filter(f => f.endsWith('.test.js')).sort();
   const read = (f) => readFileSync(`testing/standalone/${f}`, 'utf8');
   const offline = all.filter(f => !NEEDS_INSTANCE.test(read(f)));

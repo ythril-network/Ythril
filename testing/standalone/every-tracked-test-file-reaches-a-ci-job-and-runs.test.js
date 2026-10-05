@@ -35,8 +35,11 @@
  * Interface the scripts are held to (the one thing here that is a choice rather than a consequence):
  * `node scripts/unrun-tests.mjs [--root <dir>]`, `node scripts/executed-tests.mjs [--root <dir>] --results <dir>`;
  * stdout/stderr name the offending files by repo-relative path, exit 0 only when there are none. The results
- * directory holds `*.jsonl`, one JSON object per line, test events as `{ type: 'test:pass' | 'test:fail', file, ... }`
- * with `file` repo-relative, and a closing `{ type: 'end', events: N }`.
+ * directory holds `*.jsonl` in the timing reporter's own shape (`testing/_shared/timing-reporter.mjs`: `TIMING_SCHEMA`,
+ * `readTimingLog`): one JSON object per line, a test as `{ type: 'test', file, status: 'pass' | 'fail', ... }` with `file`
+ * repo-relative, a file that merely loaded as `{ type: 'file', file }`, and a closing sentinel `{ type: 'end', events: N, ... }`.
+ * A first draft of this file named the events after node's (`test:pass`, `test:summary`); the reporter's `type` is the kind
+ * of line, not node's event name, so the script follows the reporter and not the other way round.
  *
  * Run: node --test testing/standalone/every-tracked-test-file-reaches-a-ci-job-and-runs.test.js
  */
@@ -138,6 +141,12 @@ describe('scripts/executed-tests.mjs — a tracked test file with no test event'
 
   const isTestFile = (f) => (/^testing\/.*\.test\.js$/.test(f)) || (/^client\/src\/.*\.spec\.ts$/.test(f));
 
+  /** One line of the timing reporter's JSONL, with every key its schema has (`TIMING_SCHEMA`), so a reader is held to the real shape. */
+  const line = (over) => ({
+    suite: 'standalone', batch: '1', nesting: 0, skip: false, todo: false, reason: null, message: null,
+    ...over,
+  });
+
   /**
    * Write a results directory for the copy: one passing test event per tracked test file, spread over two JSONL
    * files (the union is what counts), except as `without` and `summaryOnly` say.
@@ -153,16 +162,16 @@ describe('scripts/executed-tests.mjs — a tracked test file with no test event'
       if (without.includes(file)) return;
       const lines = halves[i % 2];
       if (summaryOnly.includes(file)) {
-        lines.push({ type: 'test:summary', file, ms: 3, tests: 0 });
+        lines.push(line({ type: 'file', file, test: file, ms: 3, status: 'pass' }));
       } else if (failedOnly.includes(file)) {
-        lines.push({ type: 'test:fail', file, test: 'registers', nesting: 0, ms: 2, status: 'fail' });
+        lines.push(line({ type: 'test', file, test: 'registers', ms: 2, status: 'fail', message: 'boom' }));
       } else {
-        lines.push({ type: 'test:pass', file, test: 'registers', nesting: 0, ms: 2, status: 'pass' });
+        lines.push(line({ type: 'test', file, test: 'registers', ms: 2, status: 'pass' }));
       }
     });
     halves.forEach((lines, i) => {
       mkdirSync(dir, { recursive: true });
-      const all = [...lines, { type: 'end', events: lines.length }];
+      const all = [...lines, { type: 'end', events: lines.length, startedAt: '2026-10-05T00:00:00.000Z', endedAt: '2026-10-05T00:00:01.000Z', scope: 'full' }];
       writeFileSync(join(dir, `standalone-${i}.jsonl`), `${all.map(l => JSON.stringify(l)).join('\n')}\n`);
     });
     return dir;

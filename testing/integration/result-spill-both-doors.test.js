@@ -441,40 +441,61 @@ describe('REST: a tight budget returns a prefix and a way to reach the rest', ()
       });
       return r.status === 200 && r.body.truncated === false ? r.body.results.map(x => x.record?._id).join(',') : null;
     };
-    const before = await orderOf();
-    const total = await totalNow();
-
-    const seen = [];
-    let skip = 0;
-    let pages = 0;
-    /*
-     * Checked BEFORE EVERY PAGE, not only around the loop. CI (#1460, 2026-09-30) served 27 slots with 25 distinct
-     * records while `before` and `after` agreed: the ranking moved between two pages and moved back — a record
-     * leaving the fresh-write channel for the index mid-loop — so an order checked only at the ends certified a
-     * stretch it never looked at. A page is only comparable to the others if the ranking it was cut from is.
+    /**
+     * One full walk of the pages, with the ranking read before, after and before every page. The arithmetic
+     * assertions inside it hold whatever the ranking does, so they run on every walk.
      */
-    let movedDuringPaging = false;
-    for (;;) {
-      if (skip > 0 && (await orderOf()) !== before) movedDuringPaging = true;
-      const r = await recall({ query: QUERY, types: ['entity'], topK: COUNT, maxBytes: tightBytes, skip });
-      assert.equal(r.status, 200, JSON.stringify(r.body).slice(0, 300));
-      assert.equal(r.body.count, total, 'count stays the FULL total on every page, never the post-skip total');
-      seen.push(...r.body.results.map(x => x.record?._id));
-      pages++;
-      assert.ok(pages <= COUNT, 'a page that returns nothing and still says truncated would loop forever');
-      if (!r.body.truncated) { assert.equal(r.body.nextSkip, undefined, 'and the last page offers no next'); break; }
-      assert.ok(r.body.returned > 0, 'a truncated page that returned nothing would never advance');
-      assert.equal(r.body.nextSkip, skip + r.body.returned, 'nextSkip is absolute, not relative to the page');
-      skip = r.body.nextSkip;
-    }
-    assert.ok(pages > 1, `the budget must actually bite or this proves nothing — ${pages} page(s)`);
+    const pageThrough = async () => {
+      const before = await orderOf();
+      const total = await totalNow();
 
-    const after = await orderOf();
-    if (before === null || after === null || before !== after || movedDuringPaging) {
-      t.diagnostic('the ranking moved while paging (the index was still ingesting) — the identity assertions '
-        + 'below do not apply, and the feature does not promise a snapshot. The arithmetic above still passed.');
-      return;
+      const seen = [];
+      let skip = 0;
+      let pages = 0;
+      /*
+       * Checked BEFORE EVERY PAGE, not only around the loop. CI (#1460, 2026-09-30) served 27 slots with 25 distinct
+       * records while `before` and `after` agreed: the ranking moved between two pages and moved back — a record
+       * leaving the fresh-write channel for the index mid-loop — so an order checked only at the ends certified a
+       * stretch it never looked at. A page is only comparable to the others if the ranking it was cut from is.
+       */
+      let movedDuringPaging = false;
+      for (;;) {
+        if (skip > 0 && (await orderOf()) !== before) movedDuringPaging = true;
+        const r = await recall({ query: QUERY, types: ['entity'], topK: COUNT, maxBytes: tightBytes, skip });
+        assert.equal(r.status, 200, JSON.stringify(r.body).slice(0, 300));
+        assert.equal(r.body.count, total, 'count stays the FULL total on every page, never the post-skip total');
+        seen.push(...r.body.results.map(x => x.record?._id));
+        pages++;
+        assert.ok(pages <= COUNT, 'a page that returns nothing and still says truncated would loop forever');
+        if (!r.body.truncated) { assert.equal(r.body.nextSkip, undefined, 'and the last page offers no next'); break; }
+        assert.ok(r.body.returned > 0, 'a truncated page that returned nothing would never advance');
+        assert.equal(r.body.nextSkip, skip + r.body.returned, 'nextSkip is absolute, not relative to the page');
+        skip = r.body.nextSkip;
+      }
+      assert.ok(pages > 1, `the budget must actually bite or this proves nothing — ${pages} page(s)`);
+
+      const after = await orderOf();
+      const held = before !== null && after !== null && before === after && !movedDuringPaging;
+      return { before, seen, pages, held };
+    };
+
+    /*
+     * A ranking that moved is not a result, it is a walk to take again: the index finishes ingesting and the
+     * fresh-write channel hands over, after which the ranking holds still. This used to log "the identity
+     * assertions below do not apply" and return, which ended the test green on exactly the runs where it had
+     * proven the least — the one outcome neither a pass nor a failure. Three walks, a pause between, and then it
+     * is a REAL skip (counted, and refused as unexpected on CI) rather than a quiet pass.
+     */
+    let walk = await pageThrough();
+    for (let attempt = 2; !walk.held && attempt <= 3; attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+      walk = await pageThrough();
     }
+    if (!walk.held) {
+      return t.skip('the ranking kept moving across three walks of the pages (the index was still ingesting), so '
+        + 'the identity assertions have nothing stable to compare against; the paging arithmetic passed on every walk');
+    }
+    const { before, seen, pages } = walk;
 
     /*
      * THE UNION SIZE IS CHECKED HERE, NOT ABOVE, AND AGAINST THE MEASURED LENGTH — NOT AGAINST `COUNT`.

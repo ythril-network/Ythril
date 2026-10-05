@@ -31,6 +31,7 @@ import { fileURLToPath } from 'url';
 import { INSTANCES, post, get, reqJson } from '../sync/helpers.js';
 import { openMcpSession as openSharedMcpSession } from '../sync/mcp-session.js';
 import { legacyRights } from '../_shared/legacy-token-rights.mjs';
+import { requireInput } from '../_shared/absent-input.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, '..', 'sync', 'configs');
@@ -227,14 +228,13 @@ describe('MCP security — authentication', () => {
 // ── recall_global scope leak ───────────────────────────────────────────────
 
 describe('MCP security — recall_global scope isolation', () => {
-  it('recall_global must not return memories outside the token\'s allowed spaces', async () => {
-    // This test requires two spaces: 'general' (accessible) plus a private space.
-    // We use the space-B token from the multi-instance setup if available.
-    // If only one space is configured, we skip this test gracefully.
+  it('recall_global must not return memories outside the token\'s allowed spaces', async (t) => {
+    // This test requires two instances: A (the caller) and B (where the secret is written), so it needs B's token
+    // from the multi-instance setup. On a laptop with only A set up it skips, with a reason; on CI, which always
+    // sets B up, a missing token is a broken setup and fails — it used to `return` and report a pass.
     const tokenBPath = path.join(CONFIGS, 'b', 'token.txt');
-    if (!fs.existsSync(tokenBPath)) {
-      return; // skip: single-space setup — B not configured
-    }
+    if (!requireInput(t, fs.existsSync(tokenBPath), `instance B is not set up (${tokenBPath} is missing)`,
+      'Run testing/sync/setup.js against the full stack: this test needs instance B.')) return;
     const tokenB = fs.readFileSync(tokenBPath, 'utf8').trim();
 
     // Write a secret memory into instance B's space using tokenB

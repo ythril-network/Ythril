@@ -266,10 +266,11 @@ describe('File sync — cross-instance', () => {
       return false;
     }, 60_000, 2000, { what: 'the sync to generate a conflict copy' });
 
-    if (!conflictFound) {
-      console.log('  [SKIP] Conflict not generated — file sync peers may not be fully wired in test stack');
-      return;
-    }
+    // An assertion, not a skip: the stack wires file sync (the cases above prove files reach B), so a conflict that
+    // never appears is the defect this case exists to catch. It used to log "[SKIP]" and return, which reported a pass
+    // whenever the conflict copy was not made. CI's last runs find the conflict on the first poll (~2 s).
+    assert.ok(conflictFound, 'No conflict was recorded within 60 s of A pulling a different version of the same path from B — '
+      + 'the receiving side must keep its own file and list the incoming copy in GET /api/conflicts');
 
     // The original file on A must still contain A's version (local is never overwritten)
     const check = await downloadFile(INSTANCES.a, tokenA, SPACE, filePath);

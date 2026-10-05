@@ -33,6 +33,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'url';
 import { INSTANCES, post, get, waitForSimilarityIndex } from '../sync/helpers.js';
 import { openMcpSession } from '../sync/mcp-session.js';
+import { requireEmbedding } from '../_shared/embedding-required.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, '..', 'sync', 'configs');
@@ -150,7 +151,7 @@ describe('REST find-similar refuses a bad value rather than coercing it', () => 
 
 describe('REST find-similar traverse actually expands', () => {
   it('traverse: 0 answers in the tool\'s shape, the same JSON as at every depth', async (t) => {
-    if (!embeddingAvailable || !sourceId) return t.skip('embedding unavailable');
+    if (!requireEmbedding(t, Boolean(embeddingAvailable && sourceId), 'embedding unavailable, or the records it needs were not seeded')) return;
     const r = await findSimilar({ entryId: sourceId, entryType: 'entity', topK: 5 });
     assert.equal(r.status, 200, JSON.stringify(r.body));
     // Q-89: `source` is {type, id, summary} and each hit {score, spaceId, type, record}, as on MCP.
@@ -161,7 +162,7 @@ describe('REST find-similar traverse actually expands', () => {
   });
 
   it('traverse: 1 nests the unembedded neighbour under the match that reached it', async (t) => {
-    if (!embeddingAvailable || !sourceId || !matchId) return t.skip('embedding unavailable');
+    if (!requireEmbedding(t, Boolean(embeddingAvailable && sourceId && matchId), 'embedding unavailable, or the records it needs were not seeded')) return;
     const r = await findSimilar({ entryId: sourceId, entryType: 'entity', topK: 5, traverse: 1 });
     assert.equal(r.status, 200, JSON.stringify(r.body));
     assert.equal(r.body.traverseDepth, 1);
@@ -185,7 +186,7 @@ describe('REST find-similar traverse actually expands', () => {
 
 describe('both doors answer the same question the same way', () => {
   it('MCP find_similar with traverse reaches the same neighbour', async (t) => {
-    if (!embeddingAvailable || !sourceId) return t.skip('embedding unavailable');
+    if (!requireEmbedding(t, Boolean(embeddingAvailable && sourceId), 'embedding unavailable, or the records it needs were not seeded')) return;
     const session = await openMcpSession(token());
     try {
       const res = await session.callTool('similar', {

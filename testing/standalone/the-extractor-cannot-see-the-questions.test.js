@@ -86,7 +86,9 @@ for (const corpus of CORPORA) {
   const pin = JSON.parse(readFileSync(corpus.pin, 'utf8'));
   const dataPath = join(repoRoot, pin.datasets[corpus.dataset].cachePath);
   const fetched = existsSync(dataPath);
-  const skip = fetched ? false : `${corpus.name} is not fetched`;
+  // `expected-in-ci:` — the one prefix CI's unexpected-skip check lets through, allowed in this file because the
+  // corpus is fetched by URL and never present on a runner.
+  const skip = fetched ? false : 'expected-in-ci: corpus not fetched';
   const histories = fetched ? await corpus.load(dataPath) : [];
 
   describe(`${corpus.name}: what extraction is handed`, { skip }, () => {

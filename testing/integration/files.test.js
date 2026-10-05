@@ -1027,17 +1027,17 @@ describe('Media embedding — GET /api/admin/media-config', () => {
     assert.equal(r.status, 400, `Expected 400 for unknown field, got ${r.status}`);
   });
 
-  it('PATCH media-config with valid body returns updated config', async () => {
+  it('PATCH media-config with valid body returns updated config', async (t) => {
     // Read current config first
     const getR = await fetch(`${INSTANCES.a}/api/admin/media-config`, {
       headers: { 'Authorization': `Bearer ${tokenA}` },
     });
     const original = await getR.json();
 
-    // Only patch if the field is not locked
+    // A field an environment variable locks cannot be patched, so the PATCH below has nothing to prove. That is a
+    // real skip, not an early return: the runner counts it, and CI refuses an unexpected one.
     if (original.lockedByInfra?.includes('workerConcurrency')) {
-      // Skip if locked by env var
-      return;
+      return t.skip('workerConcurrency is locked by an environment variable on this stack, so the PATCH cannot be exercised');
     }
 
     const newConcurrency = (original.workerConcurrency ?? 2) === 2 ? 3 : 2;
