@@ -16,13 +16,13 @@
  * logged and never stops the work after it or surfaces as an unhandled rejection — it is background work, and a boot
  * that crashed over a scan would be the cost of asking for one.
  */
-import { log } from './log.js';
+import { log, peerText } from './log.js';
 
 let listening = false;
 const held: Array<() => unknown> = [];
 
 function run(work: () => unknown): void {
-  const failed = (err: unknown): void => { log.error(`Work started once the server listens failed: ${err instanceof Error ? err.message : String(err)}`); };
+  const failed = (err: unknown): void => { log.error(`Work started once the server listens failed: ${peerText(err)}`); };
   try {
     const result = work();
     if (result && typeof (result as Promise<unknown>).then === 'function') (result as Promise<unknown>).then(undefined, failed);

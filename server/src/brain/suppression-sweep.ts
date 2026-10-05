@@ -68,7 +68,7 @@
  *   which would exceed the command size limit — at once. The cost, stated: one scan per record kind per start.
  */
 import { col, asFilter } from '../db/mongo.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
 import { TYPE_FIELD } from './ttl.js';
 import { recordNotSuppressedFilter, RECORD_SUPPRESS_FIELD } from './suppress-embeddings.js';
 import type { BrainEmbedRecordType, KnowledgeType, SpaceMeta } from '../config/types.js';
@@ -151,7 +151,7 @@ export async function sweepSuppressedVectors(spaceId: string, meta: SpaceMeta): 
       const removed = await sweep();
       if (removed === 0) return;
       total += removed;
-      log.info(`Suppression sweep: removed ${removed} ${kind} vector(s) in ${spaceId}`);
+      log.info(`Suppression sweep: removed ${removed} ${kind} vector(s) in ${peerText(spaceId)}`);
     } catch (err) {
       failed.push(`${kind} (${err instanceof Error ? err.message : String(err)})`);
     }
@@ -294,7 +294,7 @@ async function sweepLatestMeta(id: string): Promise<void> {
   try {
     await sweepSuppressedVectors(id, meta);
   } catch (err) {
-    log.warn(`Suppression sweep failed for ${id}: ${err instanceof Error ? err.message : String(err)}`);
+    log.warn(`Suppression sweep failed for ${peerText(id)}: ${peerText(err)}`);
   }
 }
 
