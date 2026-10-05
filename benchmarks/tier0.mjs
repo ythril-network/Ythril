@@ -11,7 +11,7 @@
  *
  * ## Usage
  *
- *   YTHRIL_URL=… YTHRIL_TOKEN=… node benchmarks/tier0.mjs prepare [runId]
+ *   YTHRIL_URL=… YTHRIL_TOKEN=… node benchmarks/tier0.mjs prepare [runId]   (the URL: https, or http to loopback)
  *   node benchmarks/tier0.mjs status [runId]
  *   node benchmarks/tier0.mjs record <conv> <memory|baseline> <answers.json> [runId]
  *   node benchmarks/tier0.mjs score [runId]
@@ -32,6 +32,7 @@ import {
 } from './harness/file-run.mjs';
 import { f1Scores, judgeScores } from './harness/score.mjs';
 import { makeYthril } from './writer/ythril-client.mjs';
+import { assertBearerSafeUrl } from '../scripts/_shared/ythril-api.mjs';
 
 const RETRIEVAL = { topK: 10, traverse: 1 };
 const die = (msg) => { console.error(msg); process.exit(1); };
@@ -49,6 +50,7 @@ async function prepare(runId) {
   const baseUrl = process.env.YTHRIL_URL;
   const token = process.env.YTHRIL_TOKEN;
   if (!baseUrl || !token) die('prepare needs YTHRIL_URL and YTHRIL_TOKEN');
+  try { assertBearerSafeUrl(baseUrl, 'YTHRIL_URL'); } catch (err) { die(err.message); }
   const client = makeYthril({ baseUrl, token });
   // retrieve.mjs takes one request object; the client takes the space apart from the parameters.
   const ythril = { recall: ({ space, ...params }) => client.recall(space, params) };

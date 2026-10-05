@@ -30,7 +30,8 @@
  *   node benchmarks/bench.mjs merge part1.json part2.json [> conv-49.json]
  *   node benchmarks/bench.mjs write benchmarks/locomo/extractions/conv-49.json <space-id>
  *
- * `write` needs `YTHRIL_URL` and `YTHRIL_TOKEN`. It is the only verb that talks to an instance.
+ * `write` needs `YTHRIL_URL` and `YTHRIL_TOKEN`. It is the only verb that talks to an instance. The URL must be https,
+ * or http to 127.0.0.1, localhost or [::1]: the token is not sent anywhere else (`scripts/_shared/ythril-api.mjs`).
  */
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
 
@@ -43,6 +44,7 @@ import { extractionMatchesConversation } from './writer/extraction-matches-conve
 import { resumePoint } from './writer/extraction-parts.mjs';
 import { writeSpace, loadSpaceDefinition } from './writer/write-space.mjs';
 import { makeYthril } from './writer/ythril-client.mjs';
+import { assertBearerSafeUrl } from '../scripts/_shared/ythril-api.mjs';
 
 const EXTRACTIONS = 'benchmarks/locomo/extractions';
 const PROMPT = 'benchmarks/prompt/extraction.md';
@@ -291,6 +293,7 @@ async function write(path, space) {
   const baseUrl = process.env.YTHRIL_URL;
   const token = process.env.YTHRIL_TOKEN;
   if (!baseUrl || !token) die('write needs YTHRIL_URL and YTHRIL_TOKEN in the environment');
+  try { assertBearerSafeUrl(baseUrl, 'YTHRIL_URL'); } catch (err) { die(err.message); }
   const extraction = JSON.parse(readFileSync(path, 'utf8'));
   const { records, sourceTurns } = await writeSpace({ extraction, ythril: makeYthril({ baseUrl, token }), space });
   console.log(`wrote ${records} records into ${space}; sourceTurns held for ${sourceTurns.size} of them, stored for none`);

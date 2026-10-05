@@ -50,6 +50,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import net from 'node:net';
 import { join } from 'node:path';
 import { startFakeYthril, FAKE_SPACE } from '../_shared/fake-ythril-tool-server.mjs';
+import { waitFor } from '../_shared/wait-for.mjs';
 import { makeWorkdir, writeResults, runTimes, spawnTimes, everything } from '../_shared/test-times-harness.mjs';
 
 const envFor = (server, extra = {}) => ({ YTHRIL_TEST_RUNS_URL: server.url, YTHRIL_TEST_RUNS_TOKEN: server.token, ...extra });
@@ -331,9 +332,7 @@ describe('one record per key, however often and however many at once', () => {
     await withRun({ server: { delayMs: 4000 } }, async ({ server, dir }) => {
       writeStandard(dir);
       const doomed = spawnTimes(['--record'], { cwd: dir, env: envFor(server) });
-      const deadline = Date.now() + 15_000;
-      while (server.calls.length === 0 && Date.now() < deadline) await new Promise(r => setTimeout(r, 50));
-      assert.ok(server.calls.length > 0, 'the first recorder reached the server');
+      await waitFor(() => server.calls.length > 0, 15_000, 50, undefined, { what: 'the first recorder to reach the server' });
       doomed.child.kill('SIGKILL');
       await doomed.done;
       server.delayMs = 0;
