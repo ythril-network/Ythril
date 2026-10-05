@@ -12,8 +12,7 @@
  * ## What changes and what does not
  *
  * The TEXT: the answer says one of our sentences (`caughtFailureText`), the driver's message goes to the log
- * (`Synchronous trigger … failed`) — asserted present, and once (the once-cases are `todo` while the trigger logs it
- * twice, see below). The STATUS stays `500`: main answers `503` and `Retry-After` for a store
+ * once, through `caughtFailureText`'s line naming the network or peer — asserted present, and once. The STATUS stays `500`: main answers `503` and `Retry-After` for a store
  * failure, a change of status that a patch (D-10, fixes only) does not take. Pinned, so the fix cannot drift into it.
  *
  * Run: node --test testing/standalone/a-sync-trigger-answers-a-store-failure-in-our-words.test.js
@@ -78,12 +77,10 @@ describe('a sync trigger answers a store failure in our words', () => {
     assert.ok(logged.every(l => l.includes('net-down-log')), `a line does not name the network: ${logged}`);
   });
 
-  // `triggerNetworkSync` / `triggerPeerSync` log the throw themselves (`log.error(… String(err))`) and then answer through
-  // `caughtFailureText`, which logs the driver's text again at warn: two lines for one failure. Found by writing this
-  // case (Q-361 round R). Left `todo` until `sync/trigger.ts` logs the cause once; it turns into a plain pass then.
-  const DOUBLE_LOG = { todo: 'sync/trigger.ts logs the driver\'s cause twice: its own log.error and caughtFailureText\'s warn' };
-
-  it('the network trigger: the driver\'s text is in the log ONCE', DOUBLE_LOG, async () => {
+  // The triggers used to log a driver-side throw themselves and then answer through `caughtFailureText`, which logs
+  // it again: two lines for one failure (found writing this case, Q-361 round R). They now leave a driver-side
+  // failure to `caughtFailureText` and log only an own error themselves.
+  it('the network trigger: the driver\'s text is in the log ONCE', async () => {
     const { lines } = await triggered('net-down-once', res => trigger.triggerNetworkSync(res, 'net-down-once', { wait: true, timeoutMs: 5_000 }));
     const logged = lines.filter(l => LEAK.test(l));
     assert.equal(logged.length, 1, `the operator reads the cause once: ${JSON.stringify(lines.map(l => l.slice(0, 160)))}`);
@@ -107,7 +104,7 @@ describe('a sync trigger answers a store failure in our words', () => {
     assert.ok(logged.every(l => l.includes('any-peer-log')), `a line does not name the peer: ${logged}`);
   });
 
-  it('the peer trigger: the driver\'s text is in the log ONCE', DOUBLE_LOG, async () => {
+  it('the peer trigger: the driver\'s text is in the log ONCE', async () => {
     const { lines } = await triggered('net-down-peer-once', res => trigger.triggerPeerSync(res, 'any-peer-once', { wait: true }));
     const logged = lines.filter(l => LEAK.test(l));
     assert.equal(logged.length, 1, `the operator reads the cause once: ${JSON.stringify(lines.map(l => l.slice(0, 160)))}`);
