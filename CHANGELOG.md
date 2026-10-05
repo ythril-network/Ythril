@@ -9,19 +9,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [5.6.4] — 2026-10-05
 
+**A patch release: every fix PR #1483 made on `main` for a defect present in 5.6.3, and nothing else.** It follows
+the owner's decision that a patch on the 5.6 line carries fixes only: what `main` changed in behaviour, wire or
+defaults alongside them stays on `main` and is named at the end. The ones to take first are the Security fixes: a
+duplicate merge could delete a record in a space where the token could only read data quality, a store failure was
+answered in the driver's own words (its host, its port, its collection), and a value a peer or a caller chose reached
+a log line or a refusal at any length and across lines. It also makes the suppression sweep reach files and run at
+every start, keeps both texts of two divergent same-seq pushes, and makes an entity cascade that is going to be
+refused remove nothing.
+
 | What changes on upgrade | What to do |
 |---|---|
-| Every start, once the server listens, sweeps the stored vectors of everything a space suppresses — records, files and file chunks — one space at a time; a space with no `meta` is swept by its records' own flags | Nothing; expect one scan per record kind per space at each start, and `Suppression sweep: removed N <kind> vector(s) in <space>` where it removed anything |
+| Every start, once the server listens, sweeps the stored vectors of everything a space suppresses — records, files and file chunks — one space at a time; a space with no `meta` is swept by its records' own flags | Nothing; expect one scan per record kind per space at each start, and `Suppression sweep: removed N <kind> vector(s) in <space>` where it removed anything (for files N counts rows, chunks and passages included) |
+| Every log line is one line: a stack is written on one line with its breaks as `\n`; an `Error` passed to the log is rendered by its message and frames, without the `Error:` prefix; a string passed as the extra argument is no longer JSON-quoted | Match a stack on the single line, not across lines |
+| A value in a log line is cut at 4096 characters, a list at 100 items, and the line says how much was left out (`…(+N chars)`, `…(+N more)`) | Nothing; a value that fits is written exactly as before |
+| A store failure's `error` text is one of our own sentences, at the status the failure already had; the driver's message is in the server log under the operation that failed | Read `retryable`, not the prose; an operator greps the log for the operation named in the failure line |
+| Two statuses move with that text: an error of ours that merely names the store (a path such as `notes/mongot-setup.md`) answers as the refusal it is, no longer as a retryable `503`; and a failure underneath a space rename or create that used to read as a `404` or `409` because the driver's words matched now answers `500` | Nothing; a pooled connection cleared under a command keeps its `400`, now with `The store is not available right now.` |
+| A refusal that lists references or unknown keys cuts each at 256 characters and ends `…(+N more)` where it read `(+N more)` | Nothing for a client that reads the list; a client matching the old tail text must match the new one |
+| A search right after a space's first write answers `200` and empty, not `503` | Nothing; retry logic that waited on that `503` can stop |
+| A duplicate merge needs `knowledge` write, and `dataQuality` write, in the space where the pair lives; a pair elsewhere answers `404` | Grant the rights to a token that merges, or merge with one that has them |
 | A fork written from now on keeps the divergent copy's `createdAt` and `updatedAt`; a fork already stored keeps the stamps it has | Nothing; on a network of mixed versions the same fork differs in its timestamps until every member runs 5.6.4 |
 | A link violation 5.6.3 stored under a random id gets one derived twin on the next delivery of its document, and the twin announces `link_violation.created` once | Nothing; dismiss the older row if you do not want both |
 | A duplicate pair stored with a seq of `0` (or none) is not re-fired by the first scan; its real seqs are stored as each pair is next scanned | Nothing; a merge that keeps the older record now keeps it whichever end the scan started from |
 | A pull names, once per page, a document it kept its own copy over (same seq, other text) and a document it stored that does not match its schema | Nothing; the lines are in the receiver's log |
+| The reindex INFO line gains a field: `Reindex completed for space '<id>': reindexed=N, suppressed=N, superseded=N, errors=N` | A script reading that line reads the new field; the others keep their place |
+| A failed sync cycle's entry in the sync history reads the error's message, without the error class in front of it | Nothing |
 
-Documents changed in this release (group B's part): `docs/sync-protocol.md`, `docs/integration-guide/02-hosting.md`,
-`docs/integration-guide/04b-graph-api.md`, `docs/integration-guide/06a-schema-api.md`,
-`docs/integration-guide/09-sync-api.md`, `docs/integration-guide/10-mfa-and-conflicts.md`,
-`docs/integration-guide/14-duplicates-and-webhooks.md`, `docs/integration-guide/16-mcp.md`,
-`docs/userguide/02-brain.md` and `docs/userguide/05-storage-data-and-audit.md`.
+Documents changed in this release: `docs/sync-protocol.md`, `docs/integration-guide/02-hosting.md`,
+`docs/integration-guide/03-auth-and-limits.md`, `docs/integration-guide/04b-graph-api.md`,
+`docs/integration-guide/06a-schema-api.md`, `docs/integration-guide/09-sync-api.md`,
+`docs/integration-guide/10-mfa-and-conflicts.md`, `docs/integration-guide/14-duplicates-and-webhooks.md`,
+`docs/integration-guide/15-about-and-embedding.md`, `docs/integration-guide/16-mcp.md`,
+`docs/userguide/02-brain.md`, `docs/userguide/04-settings.md` and `docs/userguide/05-storage-data-and-audit.md`,
+and `CLAUDE.md`, whose claims about what a pull validates and what file metadata unsets now match the code.
 
 ### Security
 
@@ -36,17 +56,27 @@ Documents changed in this release (group B's part): `docs/sync-protocol.md`, `do
 - **A store failure is answered in our words, never the driver's.** A driver's own message names the host, the port and
   the collection it failed on, and the doors that answered it handed it to whoever asked. Every door that answered an
   error's own text — the read routes, the MCP dispatcher, the admin, data, file and space routes, the sync triggers, the
-  join and rename acts — now answers one of three sentences when the failure is on the driver's side, at the status it
+  join and rename acts — now answers a fixed sentence of ours when the failure is on the driver's side, at the status it
   already had; what the server refused in its own words (a malformed regular expression) and what this server refused
-  keep their text. The driver's message goes to the server log, once, under the operation that failed. An embed or media
-  job that failed on the store stores that sentence and the error's class in the `lastError` a read token is served,
-  and a sync cycle's failure list says it the same way.
-- **A refusal or a log line no longer carries a megabyte a peer or caller chose.** Every value already escaped for a log
-  line is now also cut at 4096 characters, the line saying how much (`…(+N chars)`); every log line is one line — a value's
-  line breaks, and a stack's, are written as escapes — and every raw interpolation of an outside value a request,
-  a peer or a backup can reach into a log line goes through the one renderer. The refusals that quoted a caller's
+  keep their text, and so does the `$vectorSearch is not supported` sentence that tells an operator to upgrade
+  MongoDB. The driver's message goes to the server log, once, under the operation that failed. An embed or media job
+  that failed on the store stores that sentence and the error's class in the `lastError` a read token is served, and a
+  sync cycle's failure list says it the same way, without the class in front of the message. A driver-side failure
+  underneath a space rename or create, which a mapping read as `404` or `409` when the driver's words matched, answers
+  `500`. A pooled connection cleared under a command keeps its `400` and says `The store is not available right
+  now.`, with no "try again", since `retryable` is `false` there; `main` answers that case `503`, which stays on
+  `main`.
+- **A refusal or a log line no longer carries a megabyte a peer or caller chose, or a line break.** 5.6.2's notes said
+  every value a peer sends that reaches a log line was written with its control characters escaped. It was escaped, but
+  not bounded, and some slots were raw: a value a request, a peer or a backup could reach was interpolated as it came,
+  and a stack ran across lines. Every value already escaped for a log line is now also cut at 4096 characters, the line
+  saying how much (`…(+N chars)`), and a list at 100 items; every log line is one line — a value's line breaks, and a
+  stack's, are written as escapes; an `Error` is rendered by its message and frames; and every raw interpolation of an
+  outside value a request, a peer or a backup can reach into a log line goes through the one renderer, which a
+  structural gate now derives from the mounted routes and the start-up code. The refusals that quoted a caller's
   reference, an unknown key or a fork-capped `_id` cut each at 256 characters and name the rest with `…(+N more)`
-  (it read ` (+N more)`); `unrecognized_keys` keeps every key. A model server's own error text is quoted at 200.
+  (it read `(+N more)`); `unrecognized_keys` keeps every key, each cut at 256. A model server's own error text is
+  quoted at 200.
 - **Credentials in a URL are redacted in linear time.** The URL pattern backtracked over a run of scheme characters, so
   a long run of letters in a peer's id took seconds of event loop to log. It is now linear and redacts exactly what it
   did, including a scheme that follows digits (`9https://u:pw@h`).
@@ -61,8 +91,7 @@ Documents changed in this release (group B's part): `docs/sync-protocol.md`, `do
 - **An error of ours that mentions the store is no longer a retryable store failure.** A refusal quoting a path such as
   `notes/mongot-setup.md` answered `503` and told the client to retry it for ever; the message patterns are now read
   only from errors the driver raised, and our own `$vectorSearch is not supported` sentence is a typed error that stays
-  `503`.
-
+  `503`. The refusal answers with its own text at `400`, where it answered `503`.
 - **Two peers pushing different text for one fact at one seq could lose one of the texts (`Q-232`).** Each push is
   planned against what is stored; when neither is stored yet, both plan an insert, the first write lands, and the
   second write's read-back compared only the seq — so it counted itself landed with its text stored nowhere, and the
@@ -140,6 +169,22 @@ Documents changed in this release (group B's part): `docs/sync-protocol.md`, `do
   `cascadeToken` parameter offered one. It now says `cascadeToken` turns the call into a cascade, and that a refused
   cascade removes nothing; `delete_entity_preview` says the same of a refusal.
 
+### Not carried — stays on `main`
+
+Each of these shipped beside the fixes above in PR #1483 and changes behaviour, a wire shape or a default, so it waits
+for the next minor.
+
+- **The write bound and its environment defaults:** a bound on each write and on how long the seq horizon is held, set
+  by environment variables, whose expiry answers `503`.
+- **The seq-horizon gauge:** the per-space metric and warning that make a stalled hold visible.
+- **The pull's tombstone and fork semantics (`Q-204`):** a pull here keeps the local copy at a same-seq divergence and does not fork.
+- **The merkle hash change:** the space hash keeps the fields it hashes in 5.6.3.
+- **The file-tombstone pending model:** a file tombstone reaches peers only once its act happened, with the `404` and `503` answers that come with it.
+- **The merge cap of 2500 records:** a merge that would relink more answers `422`.
+- **The strict-merge refusal status:** a refused strict merge keeps the status it has.
+- **The push family order and the timing of linkage checks:** a push applies its families in the order 5.6.3 does.
+- **The pool-cleared `400` becoming `503`:** the status of that failure stays `400`, with `retryable` `false`.
+- **`Retry-After` on every `503`:** it stays on the brain read routes that carry it today.
 
 ## [5.6.3] — 2026-10-03
 
