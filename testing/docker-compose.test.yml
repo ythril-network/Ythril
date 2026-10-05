@@ -370,15 +370,15 @@ services:
   # rootfs, no capabilities, no-new-privileges, a process ceiling. Held, derived from the production service, by
   # `the-test-stacks-document-sidecars-are-hardened-like-production.test.js`.
   #
-  # The CPU and memory DEFAULTS are the smallest the machine-room budget leaves (`the-test-stack-leaves-the-machine-room`
-  # sums every default in this file, started or not, against the development VM). A runner with room raises them by
-  # the same variables, as the integration job of ci.yml does.
+  # The CPU and memory DEFAULTS are a working size: half of production's, which the machine-room gate holds
+  # (`the-test-stack-leaves-the-machine-room`) as the floor under any budget. They are raisable by the variables below.
+  # sums the defaults of every set one `docker compose up` starts together against the development VM).
   doc-render:
     build: ../sidecars/doc-render
     image: ythril-doc-render:0.1.0
     container_name: ythril-doc-render-test
-    cpus: "${YTHRIL_TEST_DOCRENDER_CPUS:-0.25}"
-    mem_limit: "${YTHRIL_TEST_DOCRENDER_MEM:-256m}"
+    cpus: "${YTHRIL_TEST_DOCRENDER_CPUS:-0.5}"
+    mem_limit: "${YTHRIL_TEST_DOCRENDER_MEM:-512m}"
     pids_limit: "${YTHRIL_TEST_DOCRENDER_PIDS:-128}"
     read_only: true
     security_opt:
@@ -406,16 +406,16 @@ services:
   # makes the shipped capability tested instead of skipped (`integration/doc-office-sidecar.test.js`, :8101).
   #
   # Same hardening as production, plus the tmpfs LibreOffice's per-request profile needs; loopback-bound like
-  # doc-render. Its defaults are the leftover of the machine-room budget, deliberately far below production's
-  # (2 CPUs, 2g) — a LibreOffice conversion at these ceilings is slow and may not fit, so the integration job raises
-  # them with YTHRIL_TEST_DOCOFFICE_{CPUS,MEM}, and so must anyone running the profile on a small machine.
+  # doc-render. Its defaults are a working size for LibreOffice (1 CPU, 1.5g, under production's 2 CPUs and 2g);
+  # the profile keeps it out of the default set, so the machine-room gate counts it only for the CI job that asks for
+  # it. Raise them with YTHRIL_TEST_DOCOFFICE_{CPUS,MEM} on a runner with room.
   doc-office:
     profiles: ["office"]
     build: ../sidecars/doc-office
     image: ythril-doc-office:0.1.0
     container_name: ythril-doc-office-test
-    cpus: "${YTHRIL_TEST_DOCOFFICE_CPUS:-0.25}"
-    mem_limit: "${YTHRIL_TEST_DOCOFFICE_MEM:-320m}"
+    cpus: "${YTHRIL_TEST_DOCOFFICE_CPUS:-1.0}"
+    mem_limit: "${YTHRIL_TEST_DOCOFFICE_MEM:-1536m}"
     pids_limit: "${YTHRIL_TEST_DOCOFFICE_PIDS:-512}"
     read_only: true
     tmpfs:

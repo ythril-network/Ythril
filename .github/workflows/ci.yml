@@ -417,14 +417,9 @@ jobs:
           cache-from: type=gha,scope=ythril-doc-office
 
       - name: Start test containers
-        # A and B with their databases and the two document sidecars. The sidecars' defaults in the compose file are
-        # the smallest the machine-room budget allows; this runner has the room, so they get the production-like
-        # ceilings LibreOffice and a PDF renderer need.
-        env:
-          YTHRIL_TEST_DOCRENDER_CPUS: '0.5'
-          YTHRIL_TEST_DOCRENDER_MEM: 512m
-          YTHRIL_TEST_DOCOFFICE_CPUS: '1.0'
-          YTHRIL_TEST_DOCOFFICE_MEM: 1g
+        # A and B with their databases and the two document sidecars, at the compose file's defaults: this set is one
+        # of those the machine-room gate sums (the-test-stack-leaves-the-machine-room), and the sidecars' defaults are
+        # a working size for a PDF renderer and LibreOffice.
         run: |
           node testing/_init/reset-test-configs.mjs
           # Ensure config bind-mount dirs are writable by the node user (uid 1000) inside the container
