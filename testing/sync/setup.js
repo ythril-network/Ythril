@@ -20,12 +20,29 @@ import { waitFor } from '../_shared/wait-for.mjs';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS_DIR = path.join(__dirname, 'configs');
 
-const INSTANCES = [
+const ALL_INSTANCES = [
   { name: 'a', container: 'ythril-a', url: 'http://127.0.0.1:3200', port: 3200 },
   { name: 'b', container: 'ythril-b', url: 'http://127.0.0.1:3201', port: 3201 },
   { name: 'c', container: 'ythril-c', url: 'http://127.0.0.1:3202', port: 3202 },
   { name: 'd', container: 'ythril-d', url: 'http://127.0.0.1:3203', port: 3203 },
 ];
+
+/**
+ * Which instances to set up: every one by default, or the ones named on the command line (`node setup.js a b`).
+ * A CI job starts only the services its suite drives, and an instance that was never started is not "not ready" —
+ * so a job names the instances it started instead of this script waiting two minutes for the others and failing.
+ * An unknown name throws: a typo would otherwise set up nothing and report success about it.
+ */
+function instancesFromArgs(args) {
+  if (args.length === 0) return ALL_INSTANCES;
+  const unknown = args.filter(n => !ALL_INSTANCES.some(i => i.name === n));
+  if (unknown.length > 0) {
+    throw new Error(`unknown instance(s) ${unknown.join(', ')}; the instances are ${ALL_INSTANCES.map(i => i.name).join(', ')}`);
+  }
+  return ALL_INSTANCES.filter(i => args.includes(i.name));
+}
+
+const INSTANCES = instancesFromArgs(process.argv.slice(2));
 
 /** An instance that is still starting refuses connections, so every thrown probe is ridden out until the deadline. */
 async function waitForHealth(url, timeout = 120_000) {

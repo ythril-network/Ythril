@@ -37,7 +37,7 @@ services:
     # CPU too, and the SUM is the rule (Q-57, 2026-09-25): nine memory ceilings of 3 GB added up to more than the
     # 24 GB VM, no CPU ceiling let a sync run take 602%, and the owner's editor was killed. The defaults total
     # 8.5 CPUs and 16 GB — two thirds of the VM at most — and every one is raised by its env var on a bigger
-    # runner (YTHRIL_TEST_{APP,MONGO,DOCRENDER}_{CPUS,MEM}, and _APP_A_MEM / _MONGO_A_MEM for instance A).
+    # runner (YTHRIL_TEST_{APP,MONGO,DOCRENDER,DOCOFFICE}_{CPUS,MEM}, and _APP_A_MEM / _MONGO_A_MEM for instance A).
     # Instance A gets the larger share because it carries the standalone and integration suites: measured at
     # 1.6 GB (app, embedding model loaded) and 0.8 GB (mongo) at rest, and at 2 GB / 1.5 GB both were killed
     # mid-run in CI. That 1.6 GB was measured when the model ran inside the server process; it now runs in a child
@@ -120,7 +120,12 @@ services:
     # A ceiling for TESTS, not a sizing guide: a space of 44 000 records ran the database out of memory at this
     # limit, and 5 GB held. Raise YTHRIL_TEST_MONGO_A_MEM for a test that seeds tens of thousands of records. The
     # production knob is YTHRIL_MONGO_MEM_LIMIT (default 4g, unmeasured at that size); see docs/contribution-guide.md.
-    mem_limit: "${YTHRIL_TEST_MONGO_A_MEM:-2560m}"
+    # 3072m with mongot's heap set to 1280m below: the harness Mongo carries every suite in CI's order, and its search
+    # process (mongot, a JVM) defaults to a quarter of the container — 640 MiB at the old 2560m — which the live
+    # vector indexes of standalone's concurrent db batches, on top of what the earlier suites left, exhausted:
+    # `OutOfMemoryError: Java heap space`, then the runner stops mongod cleanly and every later test is refused
+    # (PR #1484's CI, 2026-10-05). The +512m is taken from mongo-b/c/d's default so the stack's sum stays in budget.
+    mem_limit: "${YTHRIL_TEST_MONGO_A_MEM:-3072m}"
     # Published so standalone tests can assert database-LEVEL behaviour — that MongoDB actually agrees
     # with a query rule, not merely that a JS matcher does. Until this existed, rules like
     # `stalledJobFilter` were only ever checked against hand-built document fixtures, which cannot see
@@ -139,6 +144,12 @@ services:
       # Ythril actually works against an authenticated MongoDB (see S7 / .env.example).
       MONGODB_INITDB_ROOT_USERNAME: ythril
       MONGODB_INITDB_ROOT_PASSWORD: ythril-test-pw
+      # mongot's heap, explicit: see mem_limit above. Raise it with the limit on a bigger runner.
+      JAVA_TOOL_OPTIONS: "-Xmx${YTHRIL_TEST_MONGOT_A_HEAP:-1280m}"
+      # mongot's and the runner's own logs go to /dev/null by default, so a mongot death showed only as the
+      # runner's SIGTERM to mongod. CI's failure dump prints these files.
+      MONGOT_LOG_FILE: /tmp/mongot.log
+      RUNNER_LOG_FILE: /tmp/runner.log
     healthcheck:
       test: ["CMD", "mongosh", "--quiet", "-u", "ythril", "-p", "ythril-test-pw", "--authenticationDatabase", "admin", "--eval", "db.adminCommand({replSetGetStatus:1}).myState===1 ? 1 : quit(1)"]
       interval: 10s
@@ -201,7 +212,9 @@ services:
     image: mongodb/mongodb-atlas-local:latest@sha256:1cd040bb201bb7f910c7c6ab7f6cb8ab9dd79331f6a213f37025adc6804e96aa
     container_name: ythril-mongo-b
     cpus: "${YTHRIL_TEST_MONGO_CPUS:-1.0}"
-    mem_limit: "${YTHRIL_TEST_MONGO_MEM:-1536m}"
+    # 1344m (was 1536m): the 512m mongo-a needs for mongot's heap comes from b, c and d, whose peaks in the full CI
+    # order were measured at 1092, 733 and 715 MiB (2026-10-05), so the stack's sum stays in budget.
+    mem_limit: "${YTHRIL_TEST_MONGO_MEM:-1344m}"
     volumes:
       - ythril-mongo-b-data:/data/db
       - ythril-mongo-b-configdb:/data/configdb
@@ -210,6 +223,9 @@ services:
       # Ythril actually works against an authenticated MongoDB (see S7 / .env.example).
       MONGODB_INITDB_ROOT_USERNAME: ythril
       MONGODB_INITDB_ROOT_PASSWORD: ythril-test-pw
+      # mongot's and the runner's own logs to a file, so CI's failure dump can print a mongot death (see mongo-a).
+      MONGOT_LOG_FILE: /tmp/mongot.log
+      RUNNER_LOG_FILE: /tmp/runner.log
     healthcheck:
       test: ["CMD", "mongosh", "--quiet", "-u", "ythril", "-p", "ythril-test-pw", "--authenticationDatabase", "admin", "--eval", "db.adminCommand({replSetGetStatus:1}).myState===1 ? 1 : quit(1)"]
       interval: 10s
@@ -257,7 +273,7 @@ services:
     image: mongodb/mongodb-atlas-local:latest@sha256:1cd040bb201bb7f910c7c6ab7f6cb8ab9dd79331f6a213f37025adc6804e96aa
     container_name: ythril-mongo-c
     cpus: "${YTHRIL_TEST_MONGO_CPUS:-1.0}"
-    mem_limit: "${YTHRIL_TEST_MONGO_MEM:-1536m}"
+    mem_limit: "${YTHRIL_TEST_MONGO_MEM:-1344m}"   # see mongo-b
     volumes:
       - ythril-mongo-c-data:/data/db
       - ythril-mongo-c-configdb:/data/configdb
@@ -266,6 +282,8 @@ services:
       # Ythril actually works against an authenticated MongoDB (see S7 / .env.example).
       MONGODB_INITDB_ROOT_USERNAME: ythril
       MONGODB_INITDB_ROOT_PASSWORD: ythril-test-pw
+      MONGOT_LOG_FILE: /tmp/mongot.log   # see mongo-a
+      RUNNER_LOG_FILE: /tmp/runner.log
     healthcheck:
       test: ["CMD", "mongosh", "--quiet", "-u", "ythril", "-p", "ythril-test-pw", "--authenticationDatabase", "admin", "--eval", "db.adminCommand({replSetGetStatus:1}).myState===1 ? 1 : quit(1)"]
       interval: 10s
@@ -324,7 +342,7 @@ services:
     image: mongodb/mongodb-atlas-local:latest@sha256:1cd040bb201bb7f910c7c6ab7f6cb8ab9dd79331f6a213f37025adc6804e96aa
     container_name: ythril-mongo-d
     cpus: "${YTHRIL_TEST_MONGO_CPUS:-1.0}"
-    mem_limit: "${YTHRIL_TEST_MONGO_MEM:-1536m}"
+    mem_limit: "${YTHRIL_TEST_MONGO_MEM:-1344m}"   # see mongo-b
     volumes:
       - ythril-mongo-d-data:/data/db
       - ythril-mongo-d-configdb:/data/configdb
@@ -333,6 +351,8 @@ services:
       # Ythril actually works against an authenticated MongoDB (see S7 / .env.example).
       MONGODB_INITDB_ROOT_USERNAME: ythril
       MONGODB_INITDB_ROOT_PASSWORD: ythril-test-pw
+      MONGOT_LOG_FILE: /tmp/mongot.log   # see mongo-a
+      RUNNER_LOG_FILE: /tmp/runner.log
     healthcheck:
       test: ["CMD", "mongosh", "--quiet", "-u", "ythril", "-p", "ythril-test-pw", "--authenticationDatabase", "admin", "--eval", "db.adminCommand({replSetGetStatus:1}).myState===1 ? 1 : quit(1)"]
       interval: 10s
@@ -343,24 +363,76 @@ services:
       - ythril-test
 
   # F11 page-render sidecar — shared by all four instances (RENDER_SIDECAR_URL=http://doc-render:8100).
-  # Light PyMuPDF service; lets the render-sidecar integration test exercise real PDF rasterization in CI.
+  # Light PDF-rendering service (pypdfium2); lets the render-sidecar integration test exercise real PDF
+  # rasterization in CI.
+  #
+  # It parses UNTRUSTED documents, so it carries the hardening production gives it (docker-compose.yml): read-only
+  # rootfs, no capabilities, no-new-privileges, a process ceiling. Held, derived from the production service, by
+  # `the-test-stacks-document-sidecars-are-hardened-like-production.test.js`.
+  #
+  # The CPU and memory DEFAULTS are the smallest the machine-room budget leaves (`the-test-stack-leaves-the-machine-room`
+  # sums every default in this file, started or not, against the development VM). A runner with room raises them by
+  # the same variables, as the integration job of ci.yml does.
   doc-render:
     build: ../sidecars/doc-render
     image: ythril-doc-render:0.1.0
     container_name: ythril-doc-render-test
-    cpus: "${YTHRIL_TEST_DOCRENDER_CPUS:-0.5}"
-    mem_limit: "${YTHRIL_TEST_DOCRENDER_MEM:-512m}"
+    cpus: "${YTHRIL_TEST_DOCRENDER_CPUS:-0.25}"
+    mem_limit: "${YTHRIL_TEST_DOCRENDER_MEM:-256m}"
+    pids_limit: "${YTHRIL_TEST_DOCRENDER_PIDS:-128}"
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     restart: unless-stopped
     # Published to the host in the TEST stack only, so the render-sidecar integration test (which runs on
-    # the host, not through ythril) can hit it directly. The workstation compose keeps it internal-only.
+    # the host, not through ythril) can hit it directly. The workstation compose keeps it internal-only. Bound to
+    # LOOPBACK: a bare `8100:8100` listens on every interface of the machine that runs the suite, which put an
+    # untrusted-document parser on the network of every CI runner and developer machine.
     ports:
-      - "8100:8100"
+      - "127.0.0.1:8100:8100"
     healthcheck:
       test: ["CMD", "python3", "-c", "import urllib.request,sys; urllib.request.urlopen('http://localhost:8100/health',timeout=3).read() or sys.exit(1)"]
       interval: 10s
       timeout: 5s
       retries: 10
       start_period: 20s
+    networks:
+      - ythril-test
+
+  # F11-a office-render sidecar (LibreOffice -> PDF -> page PNGs) — OPT-IN: the `office` profile, so `up` without
+  # `--profile office` (or naming it) never starts it. Only the integration job of ci.yml enables it: that is what
+  # makes the shipped capability tested instead of skipped (`integration/doc-office-sidecar.test.js`, :8101).
+  #
+  # Same hardening as production, plus the tmpfs LibreOffice's per-request profile needs; loopback-bound like
+  # doc-render. Its defaults are the leftover of the machine-room budget, deliberately far below production's
+  # (2 CPUs, 2g) — a LibreOffice conversion at these ceilings is slow and may not fit, so the integration job raises
+  # them with YTHRIL_TEST_DOCOFFICE_{CPUS,MEM}, and so must anyone running the profile on a small machine.
+  doc-office:
+    profiles: ["office"]
+    build: ../sidecars/doc-office
+    image: ythril-doc-office:0.1.0
+    container_name: ythril-doc-office-test
+    cpus: "${YTHRIL_TEST_DOCOFFICE_CPUS:-0.25}"
+    mem_limit: "${YTHRIL_TEST_DOCOFFICE_MEM:-320m}"
+    pids_limit: "${YTHRIL_TEST_DOCOFFICE_PIDS:-512}"
+    read_only: true
+    tmpfs:
+      - /tmp:size=512m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8101:8100"
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request,sys; urllib.request.urlopen('http://localhost:8100/health',timeout=3).read() or sys.exit(1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
     networks:
       - ythril-test
 

@@ -48,7 +48,7 @@ function stripComments(source, kind) {
   if (kind === 'powershell') {
     return source.replace(/<#[\s\S]*?#>/g, '').replace(/^[ \t]*#.*$/gm, '');
   }
-  return source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^[ \t]*\/\/.*$/gm, '');
+  return source.replace(/^[ \t]*\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
 }
 
 /** The kind of source a path is, by extension; null for anything this module does not read. */
