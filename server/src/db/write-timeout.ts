@@ -11,6 +11,7 @@
  * |---|---|
  * | a single-document write + `timeoutMS` | `MongoOperationTimeoutError`, no code |
  * | any write + `maxTimeMS` | code 50 `MaxTimeMSExpired`, as `MongoServerError` OR `MongoBulkWriteError` |
+ * | a plain write + the bound (`db/write-bound.ts`: `maxTimeMS`, no `timeoutMS`) | `StoreTimeout` whichever clock ended it: the server answering code 50 is rethrown as one, with the driver's error as its `cause`; the client backstop, when the server cannot answer, is one |
  * | `bulkWrite` / `insertMany` + `timeoutMS` | `MongoBulkWriteError`, NO code, message `Timed out during socket read (…)` or `Server reported a timeout error` |
  * | `withTransaction` under a session timeout | the LAST attempt's error: 112 `WriteConflict`, labelled `TransientTransactionError` |
  * | a hold whose deadline passed before the operation was sent | `StoreTimeout`, ours |
@@ -54,8 +55,9 @@ import { writeErrorCode } from './write-errors.js';
 export const STORE_RETRY_SENTENCE = 'It did not complete as far as this server can confirm; retry the request (store-side failure; retryable).';
 
 export class StoreTimeout extends Error {
-  constructor(what = 'the database operation') {
-    super(`${what} could not be completed in time. ${STORE_RETRY_SENTENCE}`);
+  /** `cause`: the driver's own error, when the server's deadline is what ended the write (`db/write-bound.ts`). */
+  constructor(what = 'the database operation', options?: { cause?: unknown }) {
+    super(`${what} could not be completed in time. ${STORE_RETRY_SENTENCE}`, options);
     this.name = 'StoreTimeout';
   }
 }

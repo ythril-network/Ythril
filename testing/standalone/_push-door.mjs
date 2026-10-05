@@ -35,6 +35,7 @@ import path from 'node:path';
 import assert from 'node:assert/strict';
 import { openTestMongo, closeTestMongo, testMongoUri } from './_mongo-harness.mjs';
 import { wipeParts, RECORD_PARTS } from './_space-snapshot.mjs';
+import { drainWrites } from './_active-operations.mjs';
 
 /** A peer-bound token that reaches every space by its own scope (an unknown peer falls through to space scope). */
 export const PEER_TOKEN = Object.freeze({
@@ -233,8 +234,15 @@ async function assemblePushDoor({ suite, spaces, monitorCommands, mongo, tmpDir 
   async function setCounter(space, seq) {
     await mongo.col('ythril_counters').updateOne({ _id: space }, { $set: { seq } }, { upsert: true });
   }
-  async function wipe(space) {
+  /**
+   * Empty the space and its counter row — once nothing that could write to them is still running. The tracked counter
+   * writes are awaited (client promises), and then the SERVER is asked: a write whose client gave up (a bound that
+   * fired first) or that still waits behind a lock has no promise here, and would land after the clear (`Q-372`).
+   * Throws, naming the collection, when a write does not end within `drainMs`.
+   */
+  async function wipe(space, { drainMs } = {}) {
     await settled();
+    await drainWrites(mongo, [...RECORD_PARTS.map(p => `${space}_${p}`), 'ythril_counters'], { drainMs });
     await wipeParts(mongo, space, RECORD_PARTS);
     await mongo.col('ythril_counters').deleteMany({ _id: space });
     landed.delete(space);

@@ -43,7 +43,7 @@
  * would make every reader of a collection depend on the index lifecycle.
  */
 import type { Collection, Db } from 'mongodb';
-import { BOUNDED_OPTIONS_ARGUMENT, RETURNS_CURSOR, boundArguments } from './write-bound.js';
+import { BOUNDED_OPTIONS_ARGUMENT, PLAIN_WRITE_METHODS, RETURNS_CURSOR, callBounded } from './write-bound.js';
 
 /** What a method does to the set of records in its collection. */
 export interface MethodEffect {
@@ -146,9 +146,18 @@ function transactionSessionOf(args: unknown[]): SessionLike | null {
   const unbounded = Object.entries(COLLECTION_METHOD_EFFECT)
     .filter(([m, e]) => e !== 'read' && !UNBOUNDABLE.has(m) && BOUNDED_OPTIONS_ARGUMENT[m] === undefined).map(([m]) => m);
   const cursorUnbounded = [...RETURNS_CURSOR].filter(m => BOUNDED_OPTIONS_ARGUMENT[m] === undefined);
-  if (unclassified.length > 0 || unbounded.length > 0 || cursorUnbounded.length > 0) {
+  // A write has TWO bound steps (the server's deadline, then the client's backstop — `write-bound.ts`), and a read has
+  // one. A write missing from `PLAIN_WRITE_METHODS` would be bounded by the driver's `timeoutMS`, whose client clock
+  // fires first: the write could land after the answer (`Q-372`). A read inside it would lose its cursor's deadline.
+  const writesWithoutServerFirstBound = Object.entries(COLLECTION_METHOD_EFFECT)
+    .filter(([m, e]) => e !== 'read' && BOUNDED_OPTIONS_ARGUMENT[m] !== undefined && !PLAIN_WRITE_METHODS.has(m)).map(([m]) => m);
+  const readsBoundedAsWrites = [...PLAIN_WRITE_METHODS].filter(m => COLLECTION_METHOD_EFFECT[m] === 'read' || COLLECTION_METHOD_EFFECT[m] === undefined);
+  if (unclassified.length > 0 || unbounded.length > 0 || cursorUnbounded.length > 0
+    || writesWithoutServerFirstBound.length > 0 || readsBoundedAsWrites.length > 0) {
     throw new Error(`the write bound's method table disagrees with COLLECTION_METHOD_EFFECT: bounded but unclassified `
-      + `[${unclassified}], writing but unbounded [${unbounded}], cursor methods unbounded [${cursorUnbounded}]`);
+      + `[${unclassified}], writing but unbounded [${unbounded}], cursor methods unbounded [${cursorUnbounded}], `
+      + `writing but without the server-first bound [${writesWithoutServerFirstBound}], `
+      + `server-first bound on a method that does not write [${readsBoundedAsWrites}]`);
   }
 }
 
@@ -162,7 +171,7 @@ function transactionSessionOf(args: unknown[]): SessionLike | null {
  * inside it — the counter `$inc`, the tombstones, the embed jobs, not only the record collections this observer
  * reports on. A second wrapper would be a second door, which the gate refuses; so the door gained a second
  * duty, and each duty stays in its own module: what a bound IS, and which argument carries it, is
- * `write-bound.ts`'s; this file only applies it. Outside a scope `boundArguments` hands the arguments back
+ * `write-bound.ts`'s; this file only applies it. Outside a scope `callBounded` calls with the arguments
  * unchanged, so an unobserved collection pays a closure per method call and nothing else.
  */
 export function observeRecordWrites(db: Db, isObserved: (name: string) => boolean, listener: RecordWriteListener): Db {
@@ -188,15 +197,18 @@ function observeCollection<T extends object>(
       if (!bounded && !reports) return value;
       const effect = classified === 'read' ? UNKNOWN_EFFECT : classified ?? UNKNOWN_EFFECT;
       return (...given: unknown[]) => {
-        let args = given;
+        const args = given;
+        const call = (a: unknown[]): unknown => (value as (...x: unknown[]) => unknown).apply(target, a);
+        let out: unknown;
         if (bounded) {
           // A hold whose time is spent refuses the operation unsent; nothing was written, so nothing is reported.
-          try { args = boundArguments(prop, given); } catch (err) {
+          try { out = callBounded(prop, given, call); } catch (err) {
             if (RETURNS_CURSOR.has(prop)) throw err;
             return Promise.reject(err);
           }
+        } else {
+          out = call(given);
         }
-        const out = (value as (...a: unknown[]) => unknown).apply(target, args);
         if (!reports || listener === null) return out;
         const heard = listener;
         const report = (): void => {

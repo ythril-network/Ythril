@@ -47,6 +47,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { ASYNC_MUTATORS } from './_document-mutators.mjs';
 import { holdsWithin } from '../_shared/wait-for.mjs';
+import { drainWrites } from './_active-operations.mjs';
 
 // ── A real lock ──────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -59,7 +60,18 @@ import { holdsWithin } from '../_shared/wait-for.mjs';
  * @param {object} [o.filter]  lock an EXISTING document by updating it (the update adds a field nothing reads)
  * @param {object} [o.insert]  lock an id that does not exist yet, by inserting it uncommitted: an insert or an
  *   upsert of the same `_id` waits behind it
- * @returns {Promise<{ release: () => Promise<void> }>} `release` aborts the transaction; safe to call twice
+ * @returns {Promise<{ release: (o?: { drainMs?: number }) => Promise<void> }>} `release` aborts the transaction, THEN
+ *   waits until the server has no write alive on `collName` and THROWS (naming it) when it does not within `drainMs`;
+ *   safe to call twice
+ *
+ * ## `release` resolves when the SERVER has gone quiet, not when the lock has
+ *
+ * A write that waited behind the lock does not end the moment the lock goes: inside the server it retries a write
+ * conflict, sleeping between attempts, and lands up to ~100 ms later. A caller that moved on at the abort then raced
+ * that write — in main's CI run 37231507558 the late fork landed after the next case's wipe and the case after it
+ * failed with `E11000` on its own lock (`Q-372`). So `release` drains (`_active-operations.mjs`), and a drain that
+ * does not finish THROWS rather than hand back a clean-looking collection over a live write. The lock is let go
+ * first either way: a throwing drain must not leave the transaction holding.
  */
 export async function holdDocumentLock(mongo, collName, { filter, insert } = {}) {
   assert.ok(!!filter !== !!insert, 'holdDocumentLock takes exactly one of filter or insert');
@@ -67,11 +79,15 @@ export async function holdDocumentLock(mongo, collName, { filter, insert } = {})
   session.startTransaction();
   const coll = mongo.getDb().collection(collName);
   let released = false;
-  const release = async () => {
+  const letGo = async () => {
     if (released) return;
     released = true;
     try { await session.abortTransaction(); } catch { /* already ended */ }
     await session.endSession();
+  };
+  const release = async ({ drainMs } = {}) => {
+    await letGo();
+    await drainWrites(mongo, [collName], { drainMs });
   };
   try {
     if (insert) {
@@ -84,7 +100,7 @@ export async function holdDocumentLock(mongo, collName, { filter, insert } = {})
       }
     }
   } catch (err) {
-    await release();
+    await letGo();
     throw err;
   }
   return { release };

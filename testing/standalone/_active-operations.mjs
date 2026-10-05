@@ -17,6 +17,9 @@
  * and `activeOperations` is exercised against a real stalled write by the tests that use it (`a-released-lock-leaves-no-live-write-db`).
  */
 
+import assert from 'node:assert/strict';
+import { waitFor } from '../_shared/wait-for.mjs';
+
 /** Command names a `command` operation carries when it is a write (`findAndModify` is the one that is reported as a command). */
 const WRITE_COMMANDS = new Set(['findAndModify', 'findandmodify', 'insert', 'update', 'delete']);
 
@@ -32,6 +35,31 @@ export async function activeOperations(mongo, collName) {
   const r = await mongo.getMongo().db('admin').command({ currentOp: 1, active: true, ns });
   return r.inprog.filter(o => ['insert', 'update', 'remove'].includes(o.op)
     || (o.op === 'command' && WRITE_COMMANDS.has(Object.keys(o.command ?? {})[0])));
+}
+
+/** How long a drain waits for the server to go quiet before it throws, unless the caller says otherwise. */
+export const DEFAULT_DRAIN_MS = 5000;
+
+/**
+ * Wait until no write is alive on ANY of `collNames`, or THROW naming the collections and what was still running.
+ *
+ * ## What it prevents
+ *
+ * A caller that releases a lock, or wipes a space, and moves on while a write it stalled is still alive in the server:
+ * the write lands after the caller's next step (`Q-372`). Two helpers needed the wait (`_write-faults.mjs` `release`,
+ * `_push-door.mjs` `wipe`); this is the one copy, and it is where the forgettable half lives — **it throws**. A drain
+ * that gave up quietly would hand back a clean-looking collection over a live write, which is the defect.
+ *
+ * @param {object} mongo  the server's `db/mongo.js` module
+ * @param {readonly string[]} collNames  at least one — a drain over nothing waits for nothing
+ * @param {{ drainMs?: number }} [o]
+ */
+export async function drainWrites(mongo, collNames, { drainMs = DEFAULT_DRAIN_MS } = {}) {
+  assert.ok(collNames.length > 0, 'a drain over no collections waits for nothing');
+  const alive = async () => (await Promise.all(collNames.map(async c => (await activeOperations(mongo, c)).map(o => ({ ...o, collName: c }))))).flat();
+  await waitFor(async () => (await alive()).length === 0, drainMs, 25,
+    async () => `still alive: ${describeOperations(await alive())}`,
+    { what: `no write alive on ${collNames.join(', ')} in ${mongo.getDb().databaseName}` });
 }
 
 /** One line per operation, for a failure message. */
