@@ -200,11 +200,11 @@ export function removeSpaceFromNetwork(networkId: string, localId: string, why: 
   }
   if (net.pendingSpaces?.some(p => p.localId === localId)) net.pendingSpaces = net.pendingSpaces.filter(p => p.localId !== localId);
   saveConfig(cfg);
-  log.info(`Network ${networkId}: space '${logSafe(localId)}' left the network (${logSafe(why)}); this instance keeps it as a local space`);
+  log.info(`Network ${logSafe(networkId)}: space '${logSafe(localId)}' left the network (${logSafe(why)}); this instance keeps it as a local space`);
   if (hadLayer) {
     void import('../spaces/effective-meta.js')
       .then(({ recomputeEffectiveMeta }) => recomputeEffectiveMeta(localId, true))
-      .catch((err: unknown) => log.warn(`Network ${networkId}: schema of '${logSafe(localId)}' not rebuilt after it left: ${logSafe(String(err))}`));
+      .catch((err: unknown) => log.warn(`Network ${logSafe(networkId)}: schema of '${logSafe(localId)}' not rebuilt after it left: ${logSafe(String(err))}`));
   }
   return true;
 }
@@ -405,7 +405,7 @@ export function applySpaceAdditionRound(net: NetworkConfig, round: VoteRound, wh
   const target = spaceAdditionTarget(net, round, cfg.instanceId, cfg.spaces.map(s => s.id));
   if (!target) return false;
   if ('skip' in target) {
-    log.warn(`space_addition round ${logSafe(round.roundId)} on network ${net.id} passed (${logSafe(where)}) but was not applied: ${logSafe(target.skip)}`);
+    log.warn(`space_addition round ${logSafe(round.roundId)} on network ${logSafe(net.id)} passed (${logSafe(where)}) but was not applied: ${logSafe(target.skip)}`);
     return false;
   }
   const entry = { networkId: round.spaceId!, localId: target.localId };

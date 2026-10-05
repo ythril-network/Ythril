@@ -16,7 +16,7 @@
  * on its own terms (400, 413, 422) says nothing about whether it is up, and cooling down on it would switch off a
  * working endpoint for a caller's mistake.
  */
-import { log } from './log.js';
+import { log, peerText } from './log.js';
 
 export interface EndpointCooldown {
   /** Whether a call now should skip the endpoint. */
@@ -44,10 +44,10 @@ export function endpointCooldown(name: string, opts: { baseMs: number; maxMs: nu
       const ms = Math.min(opts.baseMs * 2 ** streak, opts.maxMs);
       streak++;
       downUntil = now + ms;
-      log.warn(`${name}: unavailable — passed over for ${Math.round(ms / 1000)} s`);
+      log.warn(`${peerText(name)}: unavailable — passed over for ${Math.round(ms / 1000)} s`);
     },
     succeeded() {
-      if (downUntil !== undefined) log.info(`${name}: answering again`);
+      if (downUntil !== undefined) log.info(`${peerText(name)}: answering again`);
       downUntil = undefined;
       streak = 0;
     },

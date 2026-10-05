@@ -263,7 +263,7 @@ export async function retireEmbedJob(
 }
 
 /** Job ids named by one delete of `cancelEmbedJobs`: a hub's thousands of ids are never one `$in`. */
-const SWEEP_BATCH = 500;
+export const SWEEP_BATCH = 500;
 
 /**
  * Cancel the jobs of many records of one kind that STILL EXIST — what the suppression sweep does for a page of records

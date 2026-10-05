@@ -451,7 +451,7 @@ export function rejectImplausibleSeq(
   const why = seqRefusal(seq, { optional: false });
   if (why === null) return false;
   log.warn(
-    `Refused document with implausible seq ${logSafe(seq)} for space '${spaceId}' ` +
+    `Refused document with implausible seq ${logSafe(seq)} for space '${logSafe(spaceId)}' ` +
     `from peer '${logSafe(peerInstanceId ?? 'unknown')}' (max ingest seq ${MAX_INGEST_SEQ}).`,
   );
   res.status(400).json({ error: why });

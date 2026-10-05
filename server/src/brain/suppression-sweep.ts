@@ -87,7 +87,7 @@ import { createCoalescingRunner } from '../sync/coalescing-runner.js';
 const COLLECTION = COLLECTION_SUFFIX;
 
 /** Ids read, updated and retired per page of a sweep. */
-const SWEEP_PAGE = 1_000;
+export const SWEEP_PAGE = 1_000;
 
 /**
  * "Holds a derived vector field" as one filter term per field — the fields `UNSET_VECTOR` removes, read from it. A row
