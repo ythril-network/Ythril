@@ -61,8 +61,8 @@ export function readJsonl(path) {
  *
  * @returns {{ status: number|null, stdout: string, stderr: string, destination: string, flags: object, oracle: object[] }}
  */
-export function runTimed(files, { suite = 'fixture', batch = 1, dir, tty = false, oracle = false, extraArgs = [], cwd = ROOT, env = {} } = {}) {
-  const flags = timingReporterFlags({ suite, batch, dir, stdoutIsTTY: tty });
+export function runTimed(files, { suite = 'fixture', batch = 1, dir, tty = false, oracle = false, extraArgs = [], cwd = ROOT, env = {}, scope } = {}) {
+  const flags = timingReporterFlags({ suite, batch, dir, stdoutIsTTY: tty, ...(scope === undefined ? {} : { scope }) });
   const oracleOut = oracle ? resolve(dir, `oracle-${suite}-${batch}.jsonl`) : null;
   const oracleArgs = oracle ? [`--test-reporter=${pathToFileURL(resolve(ROOT, ORACLE)).href}`, `--test-reporter-destination=${oracleOut}`] : [];
   const r = runNodeTest([...flags.args, ...oracleArgs, ...extraArgs, ...files], { cwd, env: { ...flags.env, ...env } });

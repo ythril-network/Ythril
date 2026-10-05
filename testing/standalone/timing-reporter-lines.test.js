@@ -354,9 +354,40 @@ describe('concurrent files keep their own events', () => {
 describe('the sentinel says the file is whole', () => {
   it('ends with one `end` line carrying the count of the lines before it', () => {
     const all = readJsonl(main.destination);
-    assert.deepEqual(all.at(-1), { type: 'end', events: all.length - 1 });
+    const { startedAt, endedAt, scope, ...rest } = all.at(-1);
+    assert.deepEqual(rest, { type: 'end', events: all.length - 1 });
+    assert.deepEqual(Object.keys(all.at(-1)).sort(), ['endedAt', 'events', 'scope', 'startedAt', 'type'], 'the sentinel has exactly these fields');
     assert.equal(all.filter(l => l.type === 'end').length, 1);
     assert.ok(all.length - 1 >= 20);
+  });
+
+  const ISO_UTC = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+
+  it('says when the run started and ended, in ISO UTC, within the time the run took', () => {
+    const before = Date.now();
+    const r = runTimed([fixture('timing-pass')], { dir: tmp, suite: 'lines', batch: 'times' });
+    const after = Date.now();
+    const end = readJsonl(r.destination).at(-1);
+    assert.match(end.startedAt, ISO_UTC);
+    assert.match(end.endedAt, ISO_UTC);
+    const [s, e] = [Date.parse(end.startedAt), Date.parse(end.endedAt)];
+    assert.ok(before <= s && s <= e && e <= after, `startedAt ${end.startedAt}, endedAt ${end.endedAt}, run between ${before} and ${after}`);
+    assert.ok(e - s >= 50, `a fixture that waits 60 ms is recorded as lasting ${e - s} ms`);
+  });
+
+  it('says the scope the helper was given, and a run that was not told is a subset — never full', () => {
+    for (const scope of ['full', 'subset', 'files']) {
+      const r = runTimed([fixture('timing-pass')], { dir: tmp, suite: 'lines', batch: `scope-${scope}`, scope });
+      assert.equal(readJsonl(r.destination).at(-1).scope, scope);
+    }
+    assert.equal(readJsonl(main.destination).at(-1).scope, 'subset', 'main was run with no scope stated');
+  });
+
+  it('is read back with its sentinel, whole', () => {
+    const log = readTimingLog(mainText);
+    assert.equal(log.complete, true);
+    assert.deepEqual(log.end, readJsonl(main.destination).at(-1));
+    assert.equal(readTimingLog('').end, null);
   });
 
   it('is read back as complete, with the data lines', () => {

@@ -43,6 +43,8 @@ import { spawnSync } from 'node:child_process';
 import { statSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { splitStandalone, batched, offlineRuns, DB_TEST_CONCURRENCY } from '../_shared/standalone-split.mjs';
+import { timingReporterFlags, clearTimingResults } from '../_shared/timing-reporter-flags.mjs';
+import { testChildEnv } from '../_shared/test-child-env.mjs';
 
 /**
  * REFUSE a stale `server/dist`, rather than testing the wrong build and reporting either answer.
@@ -94,20 +96,32 @@ console.log(`standalone: ${all.length} files — ${offline.length} offline (para
 let failed = 0;
 const t0 = Date.now();
 
-/** The pure files at node's default width (one worker per core); the database-backed ones capped. */
-for (const run of offlineRuns(split)) {
-  const r = spawnSync('node', ['--test', ...run.args, ...run.files], { stdio: 'inherit' });
+/**
+ * One `node --test` batch, with the timing reporter attached by the shared helper: one destination per batch
+ * (`test-results/standalone-<kind>-<n>.jsonl`), the flags AFTER the plan's own args so the plan stays about the
+ * files, and the child's environment without the recorder's credentials. A batch that did not exit 0 counts as
+ * failed, a signal-killed one (no status) included.
+ */
+const nextBatch = {};
+function runBatch(kind, args, files) {
+  nextBatch[kind] = (nextBatch[kind] ?? 0) + 1;
+  // Every batch of the plan is part of a whole run: this runner takes no file or pattern arguments.
+  const flags = timingReporterFlags({ suite: 'standalone', batch: `${kind}-${nextBatch[kind]}`, scope: 'full' });
+  const r = spawnSync('node', ['--test', ...args, ...flags.args, ...files], { stdio: 'inherit', env: testChildEnv(flags.env) });
   if (r.status !== 0) failed++;
 }
+
+// Results of an earlier run are not this run's: a plan that shrank would leave its higher-numbered batches behind.
+clearTimingResults('standalone');
+
+/** The pure files at node's default width (one worker per core); the database-backed ones capped. */
+for (const run of offlineRuns(split)) runBatch(run.kind, run.args, run.files);
 
 /*
  * ONE AT A TIME, and against the live stack. These drive :3200, so two of them at once would interleave
  * writes to one instance — the failure the concurrency flag was added for in the first place.
  */
-for (const batch of batched(needsInstance.map(path))) {
-  const r = spawnSync('node', ['--test', '--test-concurrency=1', ...batch], { stdio: 'inherit' });
-  if (r.status !== 0) failed++;
-}
+for (const batch of batched(needsInstance.map(path))) runBatch('instance', ['--test-concurrency=1'], batch);
 
 console.log(`standalone finished in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
 if (failed > 0) {

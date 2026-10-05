@@ -117,6 +117,20 @@ describe('timingReporterFlags: the flags', () => {
     }
   });
 
+  it('passes the run\'s scope to the reporter in env: full, subset or files, subset when not told, nothing else', () => {
+    const dir = join(tmp, 'scope');
+    const envOf = (scope) => timingReporterFlags({ suite: 'scope', batch: 1, dir, stdoutIsTTY: false, ...(scope === undefined ? {} : { scope }) }).env;
+    const seen = new Set();
+    for (const scope of ['full', 'subset', 'files']) {
+      const value = Object.values(envOf(scope)).filter(v => v === scope);
+      assert.equal(value.length, 1, `the scope ${scope} is not in env: ${JSON.stringify(envOf(scope))}`);
+      seen.add(scope);
+    }
+    assert.equal(seen.size, 3);
+    assert.deepEqual(envOf(), envOf('subset'), 'a runner that does not say is a subset, never full');
+    for (const bad of ['', 'everything', 'FULL', null, 3]) assert.throws(() => envOf(bad), `scope ${JSON.stringify(bad)}`);
+  });
+
   it('gives each invocation its own destination', () => {
     const dir = join(tmp, 'distinct');
     const seen = new Map();
@@ -247,6 +261,23 @@ describe('every runner attaches the reporter through the helper', () => {
       const src = stripComments(readFileSync(resolve(ROOT, f), 'utf8'));
       assert.ok(/from\s+['"][^'"]*timing-reporter-flags\.mjs['"]/.test(src), `${f} runs batches and does not import the helper`);
       assert.ok(/\btimingReporterFlags\(/.test(src), `${f} imports the helper and never calls it`);
+    }
+  });
+
+  it('every call of the helper says what its run covers, so no runner leaves the default to speak for it', () => {
+    const callers = tracked('scripts', 'testing/_init').filter(f => f.endsWith('.mjs'))
+      .filter(f => /\btimingReporterFlags\(/.test(stripComments(readFileSync(resolve(ROOT, f), 'utf8'))));
+    assert.ok(callers.length >= 3, `only ${callers.length} caller(s) found — run-suite, run-standalone and preflight call the helper`);
+    for (const f of callers) {
+      const src = stripComments(readFileSync(resolve(ROOT, f), 'utf8'));
+      // The argument list up to its closing parenthesis (a template literal in it holds braces of its own).
+      const calls = [...src.matchAll(/\btimingReporterFlags\(/g)].map(m => {
+        let depth = 1; let i = m.index + m[0].length;
+        for (; i < src.length && depth > 0; i++) depth += src[i] === '(' ? 1 : src[i] === ')' ? -1 : 0;
+        return src.slice(m.index, i);
+      });
+      assert.ok(calls.length >= 1, `${f}: could not read a call of the helper`);
+      for (const c of calls) assert.match(c, /\bscope\b/, `${f} calls the helper and does not state its scope: ${c}`);
     }
   });
 

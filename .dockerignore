@@ -5,3 +5,4 @@ dist/
 config/config.json
 config/secrets.json
 testing/
+test-results/
