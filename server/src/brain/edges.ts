@@ -35,6 +35,7 @@ import { PROPERTIES_SCAN_MAX_MS } from './tag-filter.js';
 import { writeFilterFor, writeOutcome } from './write-precondition.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { subgraphEdges } from './traverse-subgraph.js';
+import { log, peerText } from '../util/log.js';
 // `syntheticEdgeId` moved to `edge-id.ts`, beside `edgeIdFor`: its own docblock says the id format is a
 // fact about EDGES rather than about either walk, and this file is frozen at its size.
 export { syntheticEdgeId } from './edge-id.js';
@@ -361,22 +362,42 @@ export async function listEdges(
     .toArray() as Promise<EdgeDoc[]>;
 }
 
-/** Delete an edge by ID and write tombstone */
+/**
+ * Delete an edge by ID and write its tombstone — the tombstone FIRST (`Q-361` item 13).
+ *
+ * It deleted the edge, retired the job and only then wrote the tombstone, so a tombstone that failed to write (a store
+ * refusal, a step-down, a dropped socket) left the edge gone HERE and alive on every peer that held it: no tombstone ever
+ * travelled, and the next pull from any of them brought the edge back — the operator's deletion undone, silently.
+ *
+ * **No transaction and no hold on the seq horizon**, deliberately: the cost of one on this hot path is a stall that
+ * freezes every peer's pull. The order is the whole fix. A tombstone that cannot be written fails the delete BEFORE
+ * anything is removed, and a retry completes it. A delete that fails AFTER the tombstone landed leaves a tombstone beside
+ * a LIVE edge — which a retry completes (the tombstone is replaced by id) and which can never resurrect a deleted edge on
+ * a peer, the direction the defect was about. At no point are both the edge and its tombstone absent.
+ *
+ * The embed job's retirement and the webhook run after both writes and cannot fail the delete: the edge is deleted and
+ * tombstoned, and a job that outlives it is the worker's to find gone.
+ *
+ * The other deletes (an entity, a fact, a chrono entry, a link) keep their order of delete-then-tombstone; this is the
+ * edge's.
+ */
 export async function deleteEdge(spaceId: string, edgeId: string, actor?: WebhookActor): Promise<boolean> {
-  const existing = await col<EdgeDoc>(spaceCollection(spaceId, 'edges'))
-    .findOne(asFilter<EdgeDoc>({ _id: edgeId, spaceId }), { projection: { seq: 1 } }) as { seq?: number } | null;
-  const result = await col<EdgeDoc>(spaceCollection(spaceId, 'edges')).deleteOne({
-    _id: edgeId,
-    spaceId,
-  });
+  const edges = col<EdgeDoc>(spaceCollection(spaceId, 'edges'));
+  const existing = await edges.findOne(asFilter<EdgeDoc>({ _id: edgeId, spaceId }), { projection: { seq: 1 } }) as { seq?: number } | null;
+  if (!existing) return false;
+  await writeTombstone(spaceId, { _id: edgeId, type: 'edge', originalSeq: existing.seq });
+  const result = await edges.deleteOne({ _id: edgeId, spaceId });
   if (result.deletedCount === 0) return false;
   // The record is gone, so its embed job has nothing left to embed. Eager rather than left to the worker: the
   // worker only claims `pending` jobs, so a job that had already gone terminal `failed` would never be claimed
   // again and would outlive the record for ever — visible since #861 as a permanent failure naming a recordId
   // that 404s.
-  await retireEmbedJob(spaceId, 'edge', edgeId);
-
-  await writeTombstone(spaceId, { _id: edgeId, type: 'edge', originalSeq: existing?.seq });
+  try {
+    await retireEmbedJob(spaceId, 'edge', edgeId);
+  } catch (err) {
+    log.warn(`Edge '${peerText(edgeId)}' was deleted and tombstoned in space '${peerText(spaceId)}', but its embed job `
+      + `could not be retired: ${peerText(err)}`);
+  }
   if (actor) emitWebhookEvent({ event: 'edge.deleted', spaceId, entry: { _id: edgeId }, ...actor });
   return true;
 }

@@ -536,7 +536,7 @@ export async function executeMerge(
         if (survivorKeys.has(postKey)) {
           // This absorbed edge would collide — delete it as a duplicate.
           await edgeColl.deleteOne(asFilter<EdgeDoc>({ _id: edge._id }), { session });
-          await writeTombstone(spaceId, { _id: edge._id, type: 'edge', deletedAt: now }, session);
+          await writeTombstone(spaceId, { _id: edge._id, type: 'edge', originalSeq: edge.seq, deletedAt: now }, session);
           deletedDuplicateEdgeIds.push(edge._id);
         } else {
           edgesToRelink.push(edge);
@@ -690,7 +690,7 @@ export async function executeMerge(
         ));
         if (newId !== link._id) {
           await linkColl.deleteOne(asFilter<LinkDoc>({ _id: link._id, spaceId }), { session });
-          await writeTombstone(spaceId, { _id: link._id, type: 'link', deletedAt: now }, session);
+          await writeTombstone(spaceId, { _id: link._id, type: 'link', originalSeq: link.seq, deletedAt: now }, session);
         }
       }
 
@@ -779,7 +779,7 @@ export async function executeMerge(
 
       // ── 5. Delete absorbed entity + write tombstone ────────────────────
       await entityColl.deleteOne(asFilter<EntityDoc>({ _id: absorbed._id, spaceId }), { session });
-      await writeTombstone(spaceId, { _id: absorbed._id, type: 'entity', deletedAt: now }, session);
+      await writeTombstone(spaceId, { _id: absorbed._id, type: 'entity', originalSeq: absorbed.seq, deletedAt: now }, session);
 
       // Store result on survivor for return
       Object.assign(survivor, {
