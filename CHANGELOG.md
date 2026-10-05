@@ -358,6 +358,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A write answered "timed out, retry" can no longer land after the answer** (Q-372). The bound on one database
+  write was the driver's own timer, which starts before the command is even sent, so the client gave up first: the
+  `503` went out and the space's seq hold was released while the operation was still alive on the server, and it
+  could land a moment later. The bound is now the server's own deadline (`maxTimeMS`), so the server ends the write
+  and answers; a client backstop 500 ms later covers the one wait the server does not interrupt (an upsert queued
+  behind another session's uncommitted insert of the same record — a sync push fork). Reads keep the driver timer.
+  For integrators: the same retryable `503`; a write blocked in that one state is answered up to 500 ms later than
+  the bound. No new database privilege is needed.
 - **A recall straight after a space's first write no longer answers 503 while its search index initialises**
   (Q-325). A collection's vector index is built after its first record, and until it serves the search service
   refuses queries in several wordings. Recall, `similar` and the write-time duplicate check answer that refusal as
