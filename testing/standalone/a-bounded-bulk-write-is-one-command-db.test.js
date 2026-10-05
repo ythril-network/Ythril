@@ -38,8 +38,10 @@ describe('a bulk write past the driver\'s batch limit is several commands; a sli
 
   before(async () => {
     mongo = await openTestMongo(SUITE, { query: '&monitorCommands=true' });
+    // Only the commands aimed at the probe collection: anything else the server's modules send to this database in the
+    // window (a background delete was seen) is not the bulk write under count.
     mongo.getMongo().on('commandStarted', (ev) => {
-      if (counting && ev.databaseName === DB) commands.push(ev.commandName);
+      if (counting && ev.databaseName === DB && ev.command?.[ev.commandName] === 'probe') commands.push(ev.commandName);
     });
   });
   after(async () => { await closeTestMongo(); });
