@@ -129,11 +129,23 @@ describe('a timeout says what never held', () => {
   });
 
   it('reports the LAST value, not the first — a condition that moves says where it stopped', async () => {
-    const seen = [null, 0, undefined];
-    let i = 0;
+    // A reading that changes on every poll, and the message must name the one the FINAL poll returned. Which one that is
+    // depends on how many polls fit in the window, so the assertion reads it back rather than assuming three fit: under
+    // preflight's load two did, and a fixed "undefined" read the timing, not the rule.
+    // Every reading is falsy, so the wait never ends early; the first (NaN) is one no later poll returns.
+    const later = [null, 0, false, undefined];
+    let polls = 0;
+    let lastReturned;
     await assert.rejects(
-      () => waitFor(async () => seen[Math.min(i++, seen.length - 1)], 120, 10, undefined, { what: 'the count to arrive' }),
-      /waiting for the count to arrive \(last value: undefined\)$/);
+      () => waitFor(async () => { lastReturned = polls === 0 ? NaN : later[(polls - 1) % later.length]; polls++; return lastReturned; },
+        120, 10, undefined, { what: 'the count to arrive' }),
+      (e) => {
+        assert.ok(polls >= 2, `only ${polls} poll(s) ran, so first and last cannot be told apart`);
+        assert.ok(e.message.endsWith(`waiting for the count to arrive (last value: ${String(lastReturned)})`),
+          `the message does not name the last reading (${String(lastReturned)}): ${e.message}`);
+        assert.ok(!e.message.includes('(last value: NaN)'), `the message names the first reading, not the last: ${e.message}`);
+        return true;
+      });
     await assert.rejects(() => waitFor(async () => 0, 40, 10, undefined, { what: 'a number' }), /\(last value: 0\)$/);
     await assert.rejects(() => waitFor(async () => null, 40, 10, undefined, { what: 'a thing' }), /\(last value: null\)$/);
   });
