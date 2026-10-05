@@ -26,7 +26,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { INSTANCES, post, createTestSpace, mirroredNetwork, waitFor } from './helpers.js';
+import { INSTANCES, post, createTestSpace, mirroredNetwork, waitFor, waitForEmbedQueueEmpty } from './helpers.js';
 import { spaceFootprint, spillRows } from '../_shared/space-footprint.mjs';
 import { requireEmbedding } from '../_shared/embedding-required.mjs';
 
@@ -76,6 +76,9 @@ before(async () => {
     if (r.status === 201) written++;
   }
   embeddingAvailable = written === 6;
+  // The recall below has to find enough of the seed to overflow 1000 bytes and spill; a REST write does not embed
+  // inline, so wait for the queue that does (Q-99: it no longer keeps pace by blocking the server).
+  if (embeddingAvailable) await waitForEmbedQueueEmpty(INSTANCES.a, tokenA, space.id);
 });
 
 after(async () => {
