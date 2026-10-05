@@ -41,12 +41,11 @@
  * Run: node scripts/scan-set-claiming-gates.mjs
  */
 import { readFileSync } from 'node:fs';
-import { execFileSync } from 'node:child_process';
+import { trackedTestFiles } from '../testing/standalone/_sources.mjs';
 
-// `git ls-files` rather than a directory walk: a gitignored file is not part of this repo's suite, and
-// reading one would report a suspicion nobody can act on.
-const files = execFileSync('git', ['ls-files', '-z', 'testing'], { encoding: 'utf8' })
-  .split(String.fromCharCode(0)).map(s => s.trim()).filter(f => f.endsWith('.test.js'));
+// The tracked listing rather than a directory walk: a gitignored file is not part of this repo's suite, and
+// reading one would report a suspicion nobody can act on. Its floor is inside, so a broken listing throws.
+const files = trackedTestFiles({ dirs: ['testing'], floor: 500 });
 
 /** Words that make a title a claim about a whole set rather than about one case. */
 const CLAIMS = /\b(every|all|each|no|nothing|never|any)\b/i;

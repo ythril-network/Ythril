@@ -28,9 +28,11 @@
  *      The unknown wins over a finding: a partial list is never reported as the list.
  */
 import { readFileSync, existsSync } from 'node:fs';
-import { join, resolve, dirname, relative, isAbsolute } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { join, resolve, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { readTimingResults } from './_shared/timing-results.mjs';
+import { isEntryPoint, readFlags } from './_shared/script-cli.mjs';
+import { repoRelative, slashPath } from './_shared/repo-path.mjs';
 import { isExpectedInCiSkip } from '../testing/_shared/expected-in-ci.mjs';
 
 /** The client's report inside the results folder: written by ci.yml's client job, downloaded beside the node results. */
@@ -39,13 +41,8 @@ export const CLIENT_RESULTS = 'client.json';
 /** The repository the script lives in; a vitest report names absolute paths, and a reader wants repo-relative ones. */
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
-/** Forward-slash path, relative to the repository when it lies inside it. */
-function repoPath(file) {
-  const abs = String(file);
-  if (!isAbsolute(abs)) return abs.replace(/\\/g, '/');
-  const rel = relative(REPO_ROOT, abs);
-  return (rel.startsWith('..') || isAbsolute(rel) ? abs : rel).replace(/\\/g, '/');
-}
+/** Forward-slash path, relative to the repository when it lies inside it (one outside it is kept as it came). */
+const repoPath = (file) => repoRelative(file, REPO_ROOT) ?? slashPath(file);
 
 /**
  * The client's vitest JSON report as the tests that did not run to a verdict.
@@ -93,21 +90,19 @@ export function unexpectedSkips(dir) {
   const client = readClientResults(dir);
   const skipped = lines.filter(l => l.skip === true);
   const unexpected = skipped
-    .filter(l => !isExpectedInCiSkip(String(l.file ?? '').replace(/\\/g, '/').replace(/^\.\//, ''), l.reason))
+    .filter(l => !isExpectedInCiSkip(slashPath(l.file), l.reason))
     .map(l => ({ file: String(l.file ?? ''), test: String(l.test ?? ''), reason: typeof l.reason === 'string' ? l.reason : '' }));
   return { unexpected: [...unexpected, ...client.unexpected], skips: skipped.length, logs, events, clientTests: client.tests };
 }
 
-const entry = process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url;
-if (entry) {
-  const argv = process.argv.slice(2);
-  const valueOf = (flag) => { const i = argv.indexOf(flag); return i >= 0 ? argv[i + 1] : undefined; };
-  if (!valueOf('--results') || argv.some(a => a !== '--results' && a !== valueOf('--results'))) {
+if (isEntryPoint(import.meta.url)) {
+  const { values, stray } = readFlags(process.argv.slice(2), ['--results']);
+  if (!values['--results'] || stray.length > 0) {
     console.error('usage: node scripts/unexpected-skips.mjs --results <dir>');
     process.exit(2);
   }
   try {
-    const { unexpected, skips, logs, events, clientTests } = unexpectedSkips(resolve(valueOf('--results')));
+    const { unexpected, skips, logs, events, clientTests } = unexpectedSkips(resolve(values['--results']));
     if (unexpected.length > 0) {
       console.error(`unexpected-skips: ${unexpected.length} skipped test(s) CI did not expect:`);
       for (const u of unexpected) console.error(`  ${u.file}  ${JSON.stringify(u.test)}  ${u.reason === '' ? '(no reason given)' : JSON.stringify(u.reason)}`);

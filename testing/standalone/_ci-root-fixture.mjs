@@ -21,15 +21,14 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, copyFileSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { REPO_ROOT } from './_sources.mjs';
+import { REPO_ROOT, trackedSources } from './_sources.mjs';
 
-const NUL = String.fromCharCode(0);
+/** Every tracked file of a checkout, floor inside: the copy is meant to hold the real layout, so a short listing proves nothing. */
+const trackedIn = (root) => trackedSources(['.'], { ext: null, floor: 500, root });
 
 /** The tracked files a copy needs: the test layout and what decides which of it runs. */
 function filesToCopy() {
-  const listed = execFileSync('git', ['ls-files', '-z'], { cwd: REPO_ROOT, maxBuffer: 64 * 1024 * 1024 })
-    .toString('utf8').split(NUL).filter(Boolean);
-  return listed.filter(f => f.startsWith('testing/') || f.startsWith('.github/') || f.startsWith('scripts/')
+  return trackedIn(REPO_ROOT).filter(f => f.startsWith('testing/') || f.startsWith('.github/') || f.startsWith('scripts/')
     || f === 'package.json' || f === 'client/package.json' || /^client\/(vitest|vite)[^/]*\.[mc]?[jt]s$/.test(f)
     || /^client\/src\/.*(\.spec\.ts|test-setup\.ts)$/.test(f));
 }
@@ -42,7 +41,7 @@ const git = (cwd, ...args) => execFileSync('git', ['-c', 'core.autocrlf=false', 
 export function makeCiRoot() {
   const root = mkdtempSync(join(tmpdir(), 'ythril-ci-root-'));
   const files = filesToCopy();
-  if (files.length < 500) throw new Error(`only ${files.length} files to copy — the listing is broken, so the copy would prove nothing`);
+  if (files.length < 500) throw new Error(`only ${files.length} files to copy — the layout filter matched too little, so the copy would prove nothing`);
   for (const f of files) {
     mkdirSync(dirname(join(root, f)), { recursive: true });
     copyFileSync(join(REPO_ROOT, f), join(root, f));
@@ -50,7 +49,7 @@ export function makeCiRoot() {
   git(root, 'init', '-q');
   git(root, 'add', '-A');
 
-  const tracked = () => git(root, 'ls-files', '-z').toString('utf8').split(NUL).filter(Boolean);
+  const tracked = () => trackedIn(root);
   return {
     root,
     tracked,

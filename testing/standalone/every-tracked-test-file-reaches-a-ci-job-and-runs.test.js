@@ -49,9 +49,10 @@ import { spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { REPO_ROOT } from './_sources.mjs';
+import { REPO_ROOT, isTestFile } from './_sources.mjs';
 import { makeCiRoot } from './_ci-root-fixture.mjs';
 import { runScript } from './_run-script.mjs';
+import { timingLine, wholeJsonl } from '../_shared/test-times-harness.mjs';
 
 const script = (name) => join(REPO_ROOT, 'scripts', name);
 
@@ -136,13 +137,7 @@ describe('scripts/executed-tests.mjs — a tracked test file with no test event'
   before(() => { ci = makeCiRoot(); });
   after(() => { ci.dispose(); for (const d of resultsDirs) rmSync(d, { recursive: true, force: true }); });
 
-  const isTestFile = (f) => (/^testing\/.*\.test\.js$/.test(f)) || (/^client\/src\/.*\.spec\.ts$/.test(f));
-
-  /** One line of the timing reporter's JSONL, with every key its schema has (`TIMING_SCHEMA`), so a reader is held to the real shape. */
-  const line = (over) => ({
-    suite: 'standalone', batch: '1', nesting: 0, skip: false, todo: false, reason: null, message: null,
-    ...over,
-  });
+  const line = timingLine;
 
   /**
    * Write a results directory for the copy: one passing test event per tracked test file, spread over two JSONL
@@ -168,8 +163,7 @@ describe('scripts/executed-tests.mjs — a tracked test file with no test event'
     });
     halves.forEach((lines, i) => {
       mkdirSync(dir, { recursive: true });
-      const all = [...lines, { type: 'end', events: lines.length, startedAt: '2026-10-05T00:00:00.000Z', endedAt: '2026-10-05T00:00:01.000Z', scope: 'full' }];
-      writeFileSync(join(dir, `standalone-${i}.jsonl`), `${all.map(l => JSON.stringify(l)).join('\n')}\n`);
+      writeFileSync(join(dir, `standalone-${i}.jsonl`), wholeJsonl(lines));
     });
     return dir;
   }

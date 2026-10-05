@@ -46,6 +46,7 @@ import { bareImports, importClosure } from './_import-closure.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import { runTimed, fixture } from './_timing-runs.mjs';
 import { runScript } from './_run-script.mjs';
+import { timingLine, wholeJsonl } from '../_shared/test-times-harness.mjs';
 
 const SCRIPT = join(REPO_ROOT, 'scripts', 'unexpected-skips.mjs');
 const PREFIX = 'expected-in-ci:';
@@ -58,20 +59,12 @@ function run(args) {
   return runScript(SCRIPT, args);
 }
 
-/** One data line in the timing reporter's shape (`TIMING_SCHEMA`), every key present. */
-function line(over) {
-  return {
-    suite: 'standalone', batch: 'pure-1', file: LISTED, test: 'a test', nesting: 0, type: 'test', ms: 1, status: 'pass',
-    skip: false, todo: false, reason: null, message: null, ...over,
-  };
-}
+/** One data line in the timing reporter's shape (`TIMING_SCHEMA`), every key present, a test of the listed file. */
+const line = (over) => timingLine({ batch: 'pure-1', file: LISTED, test: 'a test', ...over });
 const skipLine = (over) => line({ skip: true, reason: `${PREFIX} ${REASON}`, ...over });
 
-/** The sentinel the reporter closes a whole file with. */
-const endLine = (events) => ({ type: 'end', events, startedAt: '2026-10-05T10:00:00.000Z', endedAt: '2026-10-05T10:00:01.000Z', scope: 'full' });
-
-/** A whole JSONL: the data lines and the matching sentinel. */
-const whole = (lines) => `${[...lines, endLine(lines.length)].map(o => JSON.stringify(o)).join('\n')}\n`;
+/** A whole JSONL: the data lines and the matching sentinel (the harness writes the sentinel, as the reporter does). */
+const whole = (lines) => wholeJsonl(lines);
 
 /** A vitest JSON report (`--reporter=json`): one file, the given assertion statuses. */
 const vitest = (assertions, file = `${REPO_ROOT}/client/src/app/x.spec.ts`) => JSON.stringify({
@@ -180,7 +173,7 @@ describe('scripts/unexpected-skips.mjs — the truth table', () => {
   // ── the set cannot answer ──
 
   it('a JSONL without its sentinel is INCOMPLETE: exit 2, never 0', () => {
-    const cut = `${JSON.stringify(line({}))}\n${JSON.stringify(line({ test: 'b' }))}\n`;
+    const cut = wholeJsonl([line({}), line({ test: 'b' })], { sentinel: 'missing' });
     const { status, out } = verdict({ 'standalone-pure-1.jsonl': cut });
     assert.equal(status, 2, `a cut-off run was read as clean:\n${out}`);
     assert.match(out, /standalone-pure-1\.jsonl/, 'the incomplete file is not named');
@@ -192,14 +185,14 @@ describe('scripts/unexpected-skips.mjs — the truth table', () => {
   });
 
   it('a sentinel whose count disagrees with the lines is INCOMPLETE: exit 2', () => {
-    const bad = `${[line({}), line({ test: 'b' }), endLine(5)].map(o => JSON.stringify(o)).join('\n')}\n`;
+    const bad = wholeJsonl([line({}), line({ test: 'b' })], { sentinel: 'miscount' });
     assert.equal(verdict({ 'standalone-pure-1.jsonl': bad }).status, 2);
   });
 
   it('one damaged file beside whole ones: exit 2, even when a readable file holds an unexpected skip', () => {
     const { status, out } = verdict({
       'standalone-pure-1.jsonl': whole([line({}), skipLine({ reason: 'unexpected', test: 'visible skip' })]),
-      'sync-1.jsonl': `${JSON.stringify(line({ file: 'testing/sync/y.test.js' }))}\n`,
+      'sync-1.jsonl': wholeJsonl([line({ file: 'testing/sync/y.test.js' })], { sentinel: 'missing' }),
     });
     assert.equal(status, 2, `a partial list was reported as the list:\n${out}`);
   });

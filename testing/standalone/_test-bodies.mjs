@@ -16,17 +16,23 @@
  * about nothing. `testSources` and `testBodies` throw on an implausibly small answer rather than returning it.
  */
 import ts from 'typescript';
-import { readTrackedSources } from './_sources.mjs';
+import { readTrackedSources, TEST_FILE_SUFFIXES } from './_sources.mjs';
 
-/** Every tracked test file (`*.test.js` under `testing/`, `*.spec.ts` under `client/src/`), read. */
+/**
+ * Where the parsed gates look for test code. What makes a file a TEST file is `_sources.mjs`'s; this is only where
+ * these gates read, and the floor is theirs: far more tests live here than the whole-repository floor asks for.
+ */
+const TEST_FOLDERS = ['testing', 'client/src'];
+const BODY_FLOOR = 800;
+
+/** Every tracked test file under {@link TEST_FOLDERS}, read. */
 export function testFiles() {
-  const out = readTrackedSources(['testing', 'client/src'], { ext: ['.test.js', '.spec.ts'], floor: 800 });
-  return out;
+  return readTrackedSources(TEST_FOLDERS, { ext: [...TEST_FILE_SUFFIXES], floor: BODY_FLOOR });
 }
 
 /** Every tracked file that can hold test code or the helper a test skips through — tests AND their `.mjs` helpers. */
 export function testAndHelperFiles() {
-  return readTrackedSources(['testing', 'client/src'], { ext: ['.test.js', '.spec.ts', '.mjs'], floor: 800 });
+  return readTrackedSources(TEST_FOLDERS, { ext: [...TEST_FILE_SUFFIXES, '.mjs'], floor: BODY_FLOOR });
 }
 
 export function parseSource(file, text) {

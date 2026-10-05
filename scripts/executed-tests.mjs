@@ -25,12 +25,11 @@
  * test event at all each EXIT 2 with the cause, never 0. Exit 1 means files were named; exit 0 means none.
  */
 import { resolve, dirname } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { trackedTestFiles } from './_shared/tracked-test-files.mjs';
+import { fileURLToPath } from 'node:url';
+import { trackedTestFiles } from '../testing/standalone/_sources.mjs';
 import { readTimingResults } from './_shared/timing-results.mjs';
-
-/** A reporter's `file` as the repository-relative, forward-slash path this script compares. */
-const normal = (f) => String(f).replace(/\\/g, '/').replace(/^\.\//, '');
+import { isEntryPoint, readFlags } from './_shared/script-cli.mjs';
+import { slashPath } from './_shared/repo-path.mjs';
 
 /**
  * The files that reported at least one test, across every `*.jsonl` in `dir`.
@@ -44,29 +43,26 @@ export function executedFiles(dir) {
   const { lines, logs, events } = readTimingResults(dir);
   const executed = new Set(lines
     .filter(l => l.type === 'test' && typeof l.file === 'string' && l.file !== '')
-    .map(l => normal(l.file)));
+    .map(l => slashPath(l.file)));
   return { executed, logs, events };
 }
 
 /** @returns {{ missing: string[], total: number, logs: number }} */
 export function unexecutedTests(root, resultsDir) {
-  const files = trackedTestFiles(root);
+  const files = trackedTestFiles({ root });
   const { executed, logs } = executedFiles(resultsDir);
   return { missing: files.filter(f => !executed.has(f)), total: files.length, logs };
 }
 
-const entry = process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url;
-if (entry) {
-  const argv = process.argv.slice(2);
-  const valueOf = (flag) => { const i = argv.indexOf(flag); return i >= 0 ? argv[i + 1] : undefined; };
-  const known = new Set(['--root', '--results', valueOf('--root'), valueOf('--results')]);
-  if (!valueOf('--results') || argv.some(a => !known.has(a))) {
+if (isEntryPoint(import.meta.url)) {
+  const { values, stray } = readFlags(process.argv.slice(2), ['--root', '--results']);
+  if (!values['--results'] || stray.length > 0) {
     console.error('usage: node scripts/executed-tests.mjs [--root <dir>] --results <dir>');
     process.exit(2);
   }
-  const root = valueOf('--root') ? resolve(valueOf('--root')) : resolve(dirname(fileURLToPath(import.meta.url)), '..');
+  const root = values['--root'] ? resolve(values['--root']) : resolve(dirname(fileURLToPath(import.meta.url)), '..');
   try {
-    const { missing, total, logs } = unexecutedTests(root, resolve(valueOf('--results')));
+    const { missing, total, logs } = unexecutedTests(root, resolve(values['--results']));
     if (missing.length > 0) {
       console.error(`executed-tests: ${missing.length} of ${total} tracked test file(s) produced no test event in ${logs} results file(s):`);
       for (const f of missing) console.error(`  ${f}`);

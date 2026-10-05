@@ -32,8 +32,9 @@
  */
 import { readFileSync, existsSync } from 'node:fs';
 import { join, resolve, dirname } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { trackedFiles, trackedTestFiles, TEST_FILE } from './_shared/tracked-test-files.mjs';
+import { fileURLToPath } from 'node:url';
+import { trackedSources, trackedTestFiles, isTestFile } from '../testing/standalone/_sources.mjs';
+import { isEntryPoint, readFlags } from './_shared/script-cli.mjs';
 import { stripComments } from '../testing/standalone/_strip-comments.mjs';
 import { CI_WORKFLOW, loadCi, jobEntries, stepsOf, shellOf } from '../testing/_shared/ci-workflow.mjs';
 
@@ -100,7 +101,7 @@ export function ciSelections(root) {
     }
     return pkgCache.get(dir);
   };
-  const tracked = trackedFiles(root);
+  const tracked = trackedSources(['.'], { ext: null, root });
   const select = (glob, why) => selections.push({ re: globToRegExp(glob), why });
 
   /** The suite table of `run-suite.mjs`: `name: { dir: '…' }`. */
@@ -169,7 +170,7 @@ export function ciSelections(root) {
           // `node --test <files, globs or directories>`: every word that names test files.
           for (const w of args) {
             const path = w.replace(/^\.\//, '');
-            if (TEST_FILE.test(path) || /[*?{]/.test(path)) select(dir ? `${dir}/${path}` : path, `${via}: node --test`);
+            if (isTestFile(path) || /[*?{]/.test(path)) select(dir ? `${dir}/${path}` : path, `${via}: node --test`);
             else if (tracked.some(f => f.startsWith(`${path.replace(/\/$/, '')}/`))) {
               select(`${path.replace(/\/$/, '')}/**`, `${via}: node --test (directory)`);
             }
@@ -196,7 +197,7 @@ export function ciSelections(root) {
 
 /** @returns {{ unrun: string[], total: number, selections: number }} */
 export function unrunTests(root) {
-  const files = trackedTestFiles(root);
+  const files = trackedTestFiles({ root });
   const selections = ciSelections(root);
   if (selections.length === 0) {
     throw new Error(`no test selection could be derived from ${CI_WORKFLOW} and the package scripts it runs under ${root}. `
@@ -207,15 +208,13 @@ export function unrunTests(root) {
   return { unrun, total: files.length, selections: selections.length };
 }
 
-const entry = process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url;
-if (entry) {
-  const argv = process.argv.slice(2);
-  const at = argv.indexOf('--root');
-  if (argv.some(a => a !== '--root' && !(at >= 0 && argv[at + 1] === a))) {
+if (isEntryPoint(import.meta.url)) {
+  const { values, stray } = readFlags(process.argv.slice(2), ['--root']);
+  if (stray.length > 0) {
     console.error('usage: node scripts/unrun-tests.mjs [--root <dir>]');
     process.exit(2);
   }
-  const root = at >= 0 ? resolve(argv[at + 1] ?? '') : resolve(dirname(fileURLToPath(import.meta.url)), '..');
+  const root = values['--root'] ? resolve(values['--root']) : resolve(dirname(fileURLToPath(import.meta.url)), '..');
   try {
     const { unrun, total, selections } = unrunTests(root);
     if (unrun.length > 0) {

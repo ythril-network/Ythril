@@ -30,8 +30,9 @@
  * Run: node testing/_init/run-suite.mjs integration
  */
 import { spawnSync } from 'node:child_process';
-import { relative, resolve } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { relative } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { isEntryPoint } from '../../scripts/_shared/script-cli.mjs';
 import { timingReporterFlags, clearTimingResults } from '../_shared/timing-reporter-flags.mjs';
 import { testChildEnv } from '../_shared/test-child-env.mjs';
 import { runningUnderCi } from '../_shared/running-under-ci.mjs';
@@ -106,8 +107,7 @@ export function runSuite(suite, passthrough = []) {
   return { status: r.status === 0 ? 0 : 1, files: files.length };
 }
 
-const entry = process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url;
-if (entry) {
+if (isEntryPoint(import.meta.url)) {
   const [suite, ...passthrough] = process.argv.slice(2);
   if (!suite) {
     console.error(`usage: node ${relative(REPO_ROOT, fileURLToPath(import.meta.url))} <${Object.keys(SUITES).join('|')}> [node --test flags]`);

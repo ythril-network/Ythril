@@ -54,18 +54,20 @@
 import { inflateRawSync, crc32 } from 'node:zlib';
 import { readFileSync, readdirSync, writeFileSync, appendFileSync, mkdirSync, existsSync, unlinkSync, openSync, closeSync, statSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { join, isAbsolute, relative, resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { join, resolve } from 'node:path';
 import { createYthrilApi, assertBearerSafeUrl, YthrilApiError } from './_shared/ythril-api.mjs';
 import { CI_WORKFLOW } from '../testing/_shared/ci-workflow-path.mjs';
 import { readCappedBody } from './_shared/capped-body.mjs';
-import { readTimingLog } from '../testing/_shared/timing-reporter.mjs';
+import { isEntryPoint } from './_shared/script-cli.mjs';
+import { repoRelative } from './_shared/repo-path.mjs';
+import { timingResultFiles } from './_shared/timing-results.mjs';
+import { readTimingLog, TIMING_RESULTS_FOLDER } from '../testing/_shared/timing-reporter.mjs';
 import { maskSecrets } from '../testing/_shared/secret-masking.mjs';
 import { holdsWithin } from '../testing/_shared/wait-for.mjs';
 import { ciSignal } from '../testing/_shared/running-under-ci.mjs';
 import { isExpectedInCiSkip } from '../testing/_shared/expected-in-ci.mjs';
 import { readClientResults } from './unexpected-skips.mjs';
-import { renderRunSummary } from './_shared/run-summary.mjs';
+import { renderRunSummary, seconds } from './_shared/run-summary.mjs';
 
 // ---- what is recorded, and where ----------------------------------------------------------------------------------
 
@@ -78,7 +80,8 @@ export const FORMAT_VERSION = 1;
 /** Runs `--record-ci` examines in one walk. */
 export const BACKFILL_RUNS = 30;
 
-const RESULTS_DIR = 'test-results';
+/** Relative to the working directory: the recorder reads the checkout it is run in. */
+const RESULTS_DIR = TIMING_RESULTS_FOLDER;
 const UNRECORDED_DIR = join(RESULTS_DIR, 'unrecorded');
 const LOCK_FILE = join(RESULTS_DIR, '.record.lock');
 
@@ -286,27 +289,15 @@ export function maskText(text) {
 }
 
 /** A test file's path as stored: repo-relative with forward slashes; an absolute path outside the repo is masked. */
-function repoRelative(file, root) {
-  const text = String(file ?? '');
-  const slashed = text.replaceAll('\\', '/');
-  if (isAbsolute(text) || /^[A-Za-z]:\//.test(slashed)) {
-    const rel = relative(root, text).replaceAll('\\', '/');
-    if (rel && !rel.startsWith('..') && !isAbsolute(rel)) return rel.slice(0, 300);
-    return maskText(text);
-  }
-  return slashed.slice(0, 300);
-}
-
-/** The `end` line of a results file, if the last line is one. */
-function endLineOf(text) {
-  const last = text.trimEnd().split('\n').at(-1);
-  try { const o = JSON.parse(last); return o !== null && typeof o === 'object' && o.type === 'end' ? o : null; } catch { return null; }
+function storedPath(file, root) {
+  const rel = repoRelative(file, root);
+  return rel === null ? maskText(String(file ?? '')) : rel.slice(0, 300);
 }
 
 /** The suite a results file belongs to: what its lines say, else the part of its name before the first `-`. */
 export function suiteOf(text, fileName) {
-  const { lines } = readTimingLog(text);
-  const said = lines.find(l => typeof l?.suite === 'string' && SUITE_NAME.test(l.suite))?.suite ?? endLineOf(text)?.suite;
+  const { lines, end } = readTimingLog(text);
+  const said = lines.find(l => typeof l?.suite === 'string' && SUITE_NAME.test(l.suite))?.suite ?? end?.suite;
   if (typeof said === 'string' && SUITE_NAME.test(said)) return said;
   const named = fileName.replace(/\.jsonl$/, '').split('-')[0];
   return SUITE_NAME.test(named) ? named : null;
@@ -326,14 +317,14 @@ const isCount = (n) => typeof n === 'number' && Number.isFinite(n) && n >= 0;
  * @param {{ texts: string[], root: string }} input
  */
 export function summariseSuite({ texts, root }) {
-  const logs = texts.map(text => ({ ...readTimingLog(text), end: endLineOf(text) }));
+  const logs = texts.map(text => readTimingLog(text));
   let malformed = 0;
   const byFile = new Map();
   for (const log of logs) {
     for (const l of log.lines) {
       const ok = l !== null && typeof l === 'object' && ['test', 'suite', 'file'].includes(l.type) && typeof l.file === 'string' && l.file !== '' && isCount(l.ms);
       if (!ok) { malformed++; continue; }
-      const file = repoRelative(l.file, root);
+      const file = storedPath(l.file, root);
       if (!byFile.has(file)) byFile.set(file, []);
       byFile.get(file).push(l);
     }
@@ -554,16 +545,14 @@ async function drainUnrecorded(api, shownUrl) {
 /** The local run in `test-results/`, one payload per suite. */
 function localPayloads() {
   const root = process.cwd();
-  const names = existsSync(RESULTS_DIR) ? readdirSync(RESULTS_DIR).filter(n => n.endsWith('.jsonl')).sort() : [];
-  if (!names.length) return [];
+  const results = timingResultFiles(RESULTS_DIR);
+  if (!results.length) return [];
   const commit = git('rev-parse', 'HEAD');
   const branch = git('rev-parse', '--abbrev-ref', 'HEAD');
   const dirty = git('status', '--porcelain').length > 0;
 
   const bySuite = new Map();
-  for (const name of names) {
-    const path = join(RESULTS_DIR, name);
-    const text = readFileSync(path, 'utf8');
+  for (const { name, path, text } of results) {
     const suite = suiteOf(text, name);
     if (!suite) { console.log(`test-times: skipped ${path}: no suite name`); continue; }
     if (!bySuite.has(suite)) bySuite.set(suite, []);
@@ -866,7 +855,6 @@ export function flagSuites(judged, history) {
 // ---- --trend ------------------------------------------------------------------------------------------------------
 
 const TREND_RUNS = 30;
-const seconds = (ms) => `${(ms / 1000).toFixed(1)} s`;
 
 /** Entries of the trend population only: the predicate is asked of the server and checked again here. */
 const trendPredicate = { type: CHRONO_TYPE, 'properties.branch': 'main', 'properties.scope': 'full', 'properties.outcome': 'passed' };
@@ -1043,9 +1031,9 @@ async function summaryBaseline(figures) {
 /** `--summary --results <dir>`: the run's page. Markdown to $GITHUB_STEP_SUMMARY when set, and to stdout always. */
 async function summarise({ results }) {
   const dir = resolve(results);
-  const names = existsSync(dir) ? readdirSync(dir).filter(f => f.endsWith('.jsonl')).sort() : [];
-  if (!names.length) { console.error(`test-times: no results to summarise: ${dir} ${existsSync(dir) ? 'holds no *.jsonl' : 'does not exist'}`); return 1; }
-  const figures = suitesOf(names.map(name => ({ name, text: readFileSync(join(dir, name), 'utf8') })), process.cwd());
+  const found = timingResultFiles(dir);
+  if (!found.length) { console.error(`test-times: no results to summarise: ${dir} ${existsSync(dir) ? 'holds no *.jsonl' : 'does not exist'}`); return 1; }
+  const figures = suitesOf(found, process.cwd());
 
   let client = null;
   let clientNote = '';
@@ -1115,6 +1103,6 @@ async function main(argv) {
   return 1;
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+if (isEntryPoint(import.meta.url)) {
   process.exitCode = await main(process.argv.slice(2)).catch((err) => { console.error(`test-times: ${String(err?.message ?? err).split('\n')[0]}`); return 1; });
 }

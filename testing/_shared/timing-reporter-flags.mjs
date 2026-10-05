@@ -41,13 +41,13 @@
 import { mkdirSync, readdirSync, rmSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { TIMING_ENV, TIMING_SCOPES, DEFAULT_TIMING_SCOPE } from './timing-reporter.mjs';
+import { TIMING_ENV, TIMING_SCOPES, DEFAULT_TIMING_SCOPE, TIMING_RESULTS_FOLDER } from './timing-reporter.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPORTER_URL = pathToFileURL(join(HERE, 'timing-reporter.mjs')).href;
 
 /** Where timing files go by default; gitignored. */
-export const TIMING_RESULTS_DIR = resolve(HERE, '..', '..', 'test-results');
+export const TIMING_RESULTS_DIR = resolve(HERE, '..', '..', TIMING_RESULTS_FOLDER);
 
 /** A plain name: it becomes part of a file name and must not be able to leave the folder. */
 const PLAIN_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;

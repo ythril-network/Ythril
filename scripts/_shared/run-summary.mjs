@@ -18,7 +18,8 @@
  *    A baseline that could not be read is a line here, never a missing page.
  */
 
-const seconds = (ms) => `${(ms / 1000).toFixed(1)} s`;
+/** A duration as the run's pages and the trend print it: `12.3 s`. One spelling, so a figure reads alike on every page. */
+export const seconds = (ms) => `${(ms / 1000).toFixed(1)} s`;
 /** A table cell: no pipe or newline may break the row. */
 const cell = (v) => String(v ?? '').replace(/\r?\n/g, ' ').replace(/\|/g, '\\|');
 const row = (...cells) => `| ${cells.map(cell).join(' | ')} |`;

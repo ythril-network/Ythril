@@ -46,6 +46,7 @@
  */
 import { execSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
+import { isEntryPoint } from './_shared/script-cli.mjs';
 
 const ORDERED = 'todo/_TODO-ORDERED.md';
 /** The authority for what is parked. A tier in the ordered file is bookkeeping; this is what the owner reads. */
@@ -168,7 +169,7 @@ function dirtySource() {
 }
 
 // Only the CLI renders a verdict; the test imports the two pure helpers above.
-if (process.argv[1] && process.argv[1].replace(/\\/g, '/').endsWith('scripts/loop-check.mjs')) main();
+if (isEntryPoint(import.meta.url)) main();
 
 function main() {
   const rows = openRows();

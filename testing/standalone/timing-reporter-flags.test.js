@@ -42,10 +42,11 @@ import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { timingReporterFlags } from '../_shared/timing-reporter-flags.mjs';
-import { readTimingLog } from '../_shared/timing-reporter.mjs';
+import { readTimingLog, TIMING_RESULTS_FOLDER } from '../_shared/timing-reporter.mjs';
 import { splitStandalone, offlineRuns } from '../_shared/standalone-split.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import { loadAllWorkflows, jobEntries, stepsOf, shellOf } from '../_shared/ci-workflow.mjs';
+import { trackedSources } from './_sources.mjs';
 import {
   ROOT, fixture, runTimed, runPlain, runNodeTest, normaliseConsole, readJsonl,
 } from './_timing-runs.mjs';
@@ -169,7 +170,7 @@ describe('timingReporterFlags: the directory', () => {
   });
 
   it('is ignored by git, so a run never dirties the tree', () => {
-    execFileSync('git', ['check-ignore', '-q', 'test-results/standalone-1.jsonl'], { cwd: ROOT });
+    execFileSync('git', ['check-ignore', '-q', `${TIMING_RESULTS_FOLDER}/standalone-1.jsonl`], { cwd: ROOT });
   });
 });
 
@@ -252,10 +253,11 @@ describe('two invocations do not overwrite each other', () => {
 });
 
 describe('every runner attaches the reporter through the helper', () => {
-  const tracked = (...paths) => execFileSync('git', ['ls-files', ...paths], { cwd: ROOT, encoding: 'utf8' }).split('\n').filter(Boolean);
+  /** The tracked files with these suffixes under these paths: the one listing, floor inside, so a broken scan throws. */
+  const tracked = (paths, ext, floor) => trackedSources(paths, { ext, floor, root: ROOT });
 
   it('a file that runs suite batches (`offlineRuns(` or `batched(`) builds its flags with timingReporterFlags', () => {
-    const runners = tracked('scripts', 'testing/_init').filter(f => f.endsWith('.mjs'))
+    const runners = tracked(['scripts', 'testing/_init'], ['.mjs'], 10)
       .filter(f => /\b(offlineRuns|batched)\(/.test(stripComments(readFileSync(resolve(ROOT, f), 'utf8'))));
     assert.ok(runners.length >= 2, `only ${runners.length} runner(s) found — preflight and run-standalone both run batches`);
     for (const f of runners) {
@@ -266,7 +268,7 @@ describe('every runner attaches the reporter through the helper', () => {
   });
 
   it('every call of the helper says what its run covers, so no runner leaves the default to speak for it', () => {
-    const callers = tracked('scripts', 'testing/_init').filter(f => f.endsWith('.mjs'))
+    const callers = tracked(['scripts', 'testing/_init'], ['.mjs'], 10)
       .filter(f => /\btimingReporterFlags\(/.test(stripComments(readFileSync(resolve(ROOT, f), 'utf8'))));
     assert.ok(callers.length >= 3, `only ${callers.length} caller(s) found — run-suite, run-standalone and preflight call the helper`);
     for (const f of callers) {

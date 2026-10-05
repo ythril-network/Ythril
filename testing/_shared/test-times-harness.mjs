@@ -30,6 +30,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { testChildEnv } from './test-child-env.mjs';
+import { TIMING_RESULTS_FOLDER } from './timing-reporter.mjs';
 
 export const SCRIPT = resolve(import.meta.dirname, '..', '..', 'scripts', 'test-times.mjs');
 
@@ -38,7 +39,7 @@ export function makeWorkdir({ dirty = false, untracked = false, branch = 'main' 
   const dir = mkdtempSync(join(tmpdir(), 'test-times-'));
   const git = (...args) => execFileSync('git', ['-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', '-c', 'commit.gpgsign=false', ...args], { cwd: dir, encoding: 'utf8' }).trim();
   git('init', '-q', '-b', branch);
-  writeFileSync(join(dir, '.gitignore'), 'test-results/\n');
+  writeFileSync(join(dir, '.gitignore'), `${TIMING_RESULTS_FOLDER}/\n`);
   writeFileSync(join(dir, 'a.txt'), 'one\n');
   git('add', '-A');
   git('commit', '-q', '-m', 'initial');
@@ -77,18 +78,44 @@ export function jsonlFor({ suite, batch, files, sentinel = 'ok', truncated = fal
     lines.push({ suite, batch, file: f.file, test: f.file, nesting: 0, type: 'file', ms: f.ms, status: failed || f.fail || (f.tests ?? []).some(t => t.suiteFail) ? 'fail' : 'pass' });
   }
   lines.push(...extra);
-  const events = lines.length;
-  let text = lines.map(l => JSON.stringify(l)).join('\n') + '\n';
+  return wholeJsonl(lines, { suite, batch, sentinel, truncated, scope, startedAt, endedAt });
+}
+
+/**
+ * One data line of the reporter's JSONL with EVERY key the schema has (`TIMING_SCHEMA`), so a reader is held to the
+ * real shape. The defaults are an ordinary passing test; `over` says what differs.
+ */
+export const timingLine = (over = {}) => ({
+  suite: 'standalone', batch: '1', file: '', test: '', nesting: 0, type: 'test', ms: 1, status: 'pass',
+  skip: false, todo: false, reason: null, message: null, ...over,
+});
+
+/**
+ * A results file from RAW data lines, closed the way the reporter closes one — the one place that writes the sentinel.
+ * {@link jsonlFor} builds its lines from per-file specs and ends here; a test that needs a line the spec cannot say
+ * (a skip with no reason, a line for a file that has no `file` line) writes the lines and ends here too, so no test
+ * keeps its own copy of the sentinel shape that the recorder reads.
+ *
+ * @param {object[]} lines
+ * @param {object} [o]
+ * @param {'ok' | 'missing' | 'miscount'} [o.sentinel]  `missing` writes none; `miscount` writes one whose `events` is wrong
+ * @param {boolean} [o.truncated]  cut the last line mid-object, as a killed process leaves it
+ * @param {'full' | 'subset' | 'files' | null} [o.scope]  `null` leaves the key out
+ */
+export function wholeJsonl(lines, { suite, batch, sentinel = 'ok', truncated = false, scope = 'full',
+  startedAt = '2026-10-05T10:00:00.000Z', endedAt = '2026-10-05T10:07:30.000Z' } = {}) {
+  const rows = lines.map(l => JSON.stringify(l));
   if (sentinel !== 'missing') {
-    text += JSON.stringify({ type: 'end', suite, batch, events: sentinel === 'miscount' ? events + 3 : events, startedAt, endedAt, ...(scope === null ? {} : { scope }) }) +'\n';
+    const events = sentinel === 'miscount' ? lines.length + 3 : lines.length;
+    rows.push(JSON.stringify({ type: 'end', suite, batch, events, startedAt, endedAt, ...(scope === null ? {} : { scope }) }));
   }
-  if (truncated) text = text.slice(0, text.lastIndexOf('{') + 12); // mid-object, no closing brace, no newline
-  return text;
+  const text = `${rows.join('\n')}\n`;
+  return truncated ? text.slice(0, text.lastIndexOf('{') + 12) : text; // mid-object, no closing brace, no newline
 }
 
 /** Write one results file into `<dir>/test-results/<suite>-<batch>.jsonl` and return its path. */
 export function writeResults(dir, spec) {
-  const out = join(dir, 'test-results');
+  const out = join(dir, TIMING_RESULTS_FOLDER);
   mkdirSync(out, { recursive: true });
   const path = join(out, `${spec.suite}-${spec.batch}.jsonl`);
   writeFileSync(path, jsonlFor(spec));

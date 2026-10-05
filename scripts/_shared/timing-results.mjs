@@ -23,6 +23,23 @@ import { join } from 'node:path';
 import { readTimingLog } from '../../testing/_shared/timing-reporter.mjs';
 
 /**
+ * The `*.jsonl` files of a results folder, sorted by name, each read: the ONE listing of a results folder.
+ *
+ * Tolerant on purpose and nothing else: a folder that is not there, or holds none, is `[]`, because the recorder and the
+ * summary page report on whatever is there (an `incomplete` record, a line saying nothing was found) where the two
+ * checks over the same folder refuse. {@link readTimingResults} is the refusing reader and is built on this; no caller
+ * lists the folder itself, so the two cannot disagree about which files are the run's.
+ *
+ * @param {string} dir
+ * @returns {Array<{ name: string, path: string, text: string }>}
+ */
+export function timingResultFiles(dir) {
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir).filter(f => f.endsWith('.jsonl')).sort()
+    .map(name => ({ name, path: join(dir, name), text: readFileSync(join(dir, name), 'utf8') }));
+}
+
+/**
  * Every data line of every `*.jsonl` in `dir`, the sentinels left out.
  *
  * @param {string} dir
@@ -31,12 +48,13 @@ import { readTimingLog } from '../../testing/_shared/timing-reporter.mjs';
  */
 export function readTimingResults(dir) {
   if (!existsSync(dir)) throw new Error(`the results directory ${dir} does not exist — nothing ran, or nothing was kept`);
-  const names = readdirSync(dir).filter(f => f.endsWith('.jsonl')).sort();
-  if (names.length === 0) throw new Error(`no *.jsonl results in ${dir}. An empty run is not a clean one`);
+  const files = timingResultFiles(dir);
+  if (files.length === 0) throw new Error(`no *.jsonl results in ${dir}. An empty run is not a clean one`);
+  const names = files.map(f => f.name);
   const lines = [];
   const incomplete = [];
-  for (const name of names) {
-    const log = readTimingLog(readFileSync(join(dir, name), 'utf8'));
+  for (const { name, text } of files) {
+    const log = readTimingLog(text);
     if (!log.complete) { incomplete.push(name); continue; }
     lines.push(...log.lines);
   }

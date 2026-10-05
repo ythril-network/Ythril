@@ -30,8 +30,9 @@
  * it introduces (a new server-driving test that forgets the marker) is the loud one that was already
  * handled.
  */
-import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { trackedSources, TEST_FILE_SUFFIXES } from '../standalone/_sources.mjs';
 
 /**
  * Anchored to a HEADER line, never a bare substring.
@@ -93,8 +94,9 @@ function importedNames(src) {
  * derived from the imports rather than from a `-db` suffix, because a suffix is a convention four such files do
  * not follow, and a db file missed here runs uncapped, which is the failure the split exists for.
  */
-export function splitStandalone() {
-  const listed = execFileSync('git', ['ls-files', 'testing/standalone'], { encoding: 'utf8' }).split('\n').filter(Boolean);
+export function splitStandalone({ root = process.cwd() } = {}) {
+  // The checkout the runner is run in (`root`, the working directory), listed through the one tracked-file listing.
+  const listed = trackedSources('testing/standalone', { ext: [...TEST_FILE_SUFFIXES], floor: 100, root });
   /*
    * A test file one directory deeper is REFUSED, not mapped by its basename. The rest of this module reads and runs
    * `testing/standalone/<name>`, so a nested `sub/x.test.js` would be read at a path nobody wrote (an ENOENT naming a
@@ -102,22 +104,21 @@ export function splitStandalone() {
    * run the nested one — a tracked test in no batch, with nothing saying so. Whether nesting should be supported is a
    * separate question; until it is, the split names the file's real path.
    */
-  const nested = listed.filter(f => f.endsWith('.test.js') && f.slice('testing/standalone/'.length).includes('/'));
+  const nested = listed.filter(f => f.slice('testing/standalone/'.length).includes('/'));
   if (nested.length > 0) {
     throw new Error(`nested standalone test file(s) in a subdirectory of testing/standalone: ${nested.join(', ')}. `
       + 'The standalone runners address a test as testing/standalone/<name>, so a nested file would be misread or never run — '
       + 'move it up one level (helpers and fixtures may live in subdirectories as .mjs, not as *.test.js).');
   }
-  const tracked = listed.map(f => f.split('/').pop());
-  const all = tracked.filter(f => f.endsWith('.test.js')).sort();
-  const read = (f) => readFileSync(`testing/standalone/${f}`, 'utf8');
+  // The standalone runner's own glob is `*.test.js`; any other test suffix in this folder is `unrun-tests`'s to name.
+  const all = listed.map(f => f.split('/').pop()).filter(f => f.endsWith('.test.js')).sort();
+  const read = (f) => readFileSync(join(root, 'testing/standalone', f), 'utf8');
   const offline = all.filter(f => !NEEDS_INSTANCE.test(read(f)));
   const needsInstance = all.filter(f => !offline.includes(f));
   // The helpers that open it for their caller: any tracked `.mjs` beside the tests or in `testing/_shared`.
-  const helpers = execFileSync('git', ['ls-files', 'testing/standalone', 'testing/_shared'], { encoding: 'utf8' })
-    .split('\n').filter(f => f.endsWith('.mjs'));
+  const helpers = trackedSources(['testing/standalone', 'testing/_shared'], { ext: ['.mjs'], floor: 20, root });
   const dbModules = new Set([DB_HARNESS, ...helpers
-    .filter(f => importedNames(readFileSync(f, 'utf8')).includes(DB_HARNESS)).map(f => f.split('/').pop())]);
+    .filter(f => importedNames(readFileSync(join(root, f), 'utf8')).includes(DB_HARNESS)).map(f => f.split('/').pop())]);
   const offlineDb = offline.filter(f => importedNames(read(f)).some(m => dbModules.has(m)));
   const offlinePure = offline.filter(f => !offlineDb.includes(f));
   /*

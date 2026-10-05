@@ -42,6 +42,14 @@ import { maskSecrets } from './secret-masking.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
+/**
+ * The folder the timing files go in, by name, relative to a checkout — gitignored, uploaded by CI as `test-results/`.
+ * The helper resolves it against the repository, the recorder against its working directory, and the test harness
+ * against a scratch repository: three roots, one spelling, so a rename cannot leave one of them writing where the
+ * others do not look.
+ */
+export const TIMING_RESULTS_FOLDER = 'test-results';
+
 /** Env names the helper sets and this reporter reads — one place, so the two cannot drift. */
 export const TIMING_ENV = Object.freeze({
   destination: 'YTHRIL_TIMING_DESTINATION',
