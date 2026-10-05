@@ -15,9 +15,11 @@
  * retention stamps; and a pulled file-metadata page went to a collection nothing reads. The door that skips a guard
  * is always the weaker one, so a guard that lives at a door is a guard some door does not have:
  *
- *  1. **Shape, per document** (`arrivalRefusal`): a string `_id`, and — for a peer's arrival — a seq that is a
+ *  1. **Shape, per document** (`arrivalRefusal`): a string `_id`, a `parentFileId` that is a string when a file row
+ *     has one (any other type makes a half-derived row), and — for a peer's arrival — a seq that is a
  *     non-negative integer the counter can carry (absent only for file metadata older than seqs). A refusal is
- *     that document's, never the page's. A RESTORE checks the id only (cut `C7`: 5.6.1 stored whatever seq a backup
+ *     that document's, never the page's. This is ALL a pull refuses: it stores a document that fails its schema as
+ *     received and reports it (`sync/pull-page.ts`), because a pull cannot tell its sender; a push refuses it. A RESTORE checks the id only (cut `C7`: 5.6.1 stored whatever seq a backup
  *     held, and a patch keeps that) — but an implausible restored seq never moves the counter (`F14`).
  *  2. **Retag** to the local space, unconditionally: under a `spaceMap` alias the sender's id names another space.
  *  3. **Collapse** a repeated `_id` to its highest seq (equal: the earlier, `isNewerCopy`). An unordered bulk write
@@ -246,7 +248,7 @@ export function warnArrivalsNotStored(
   const shown = items.slice(0, NAMED_IN_SUMMARY)
     .map(i => (typeof i === 'string' ? logSafe(i) : `${logSafe(i._id)} (${logSafe(i.reason)})`));
   const verdict = typeof what === 'string' ? `${items.length} ${family} record(s) ${what} in space '${spaceId}'` : what(items.length);
-  log.warn(`${logSafe(where)}: ${verdict}: ${shown.join(', ')}`
+  log.warn(`${logSafe(where)}: ${logSafe(verdict)}: ${shown.join(', ')}`
     + (items.length > shown.length ? `, and ${items.length - shown.length} more` : ''));
 }
 

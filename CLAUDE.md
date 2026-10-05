@@ -207,7 +207,9 @@ Found while shipping M-1 and finished by W-10, 2026-09-01. A rule rather than an
 are invisible from both ends.
 
 **Stripping.** `api/sync/_shared.ts` validates every PUSHED document with a bare `z.object({...})`, and **zod
-strips keys the schema does not declare.** The pull path validates nothing. So a field missing from its
+strips keys the schema does not declare.** The pull path parses each document too but stores it AS RECEIVED —
+it refuses only a shape that would corrupt the receiver (a non-string `parentFileId`, a wrong-typed `_id` or `seq`)
+and reports one that fails its schema, because a pull cannot tell its sender. So a field missing from its
 `Incoming*` twin is **kept when the record arrives by pull and deleted when the same record arrives by push** —
 same version of the code, same document, one direction, no error, no statistic, and a 200 on the way back.
 
@@ -270,9 +272,10 @@ space has supressembeddings dont embed at all. if it should embed use the receiv
 
 **A vector never crosses the wire, and "no ingest schema declares it" is only HALF the reason — the half
 that covers one of the two ingest paths.** That sentence stood here alone and was believed; it is true of
-PUSH, which zod strips because no `Incoming*` schema declares the field. **Pull validates nothing.** It
-fetched `full=true` and `replaceOne`d what came back, so a pulled record carried the sender's vector and
-was stored with it, for as long as the sentence had been read as covering both.
+PUSH, which zod strips because no `Incoming*` schema declares the field. **Pull stores what it is served** (it
+parses a document, and refuses only a shape that corrupts the receiver). It fetched `full=true` and
+`replaceOne`d what came back, so a pulled record carried the sender's vector and was stored with it, for as
+long as the sentence had been read as covering both.
 
 **And the vector was not the expensive half.** The same five fields are excluded from the space hash, and
 two of them are the retention stamps — `_expireAt` and `_contentExpireAt`. `brain/ttl-sweep.ts` deletes

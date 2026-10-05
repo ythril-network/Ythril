@@ -315,7 +315,7 @@ row survives its own tool being built, so the list cannot keep advertising a gap
 | `space_meta` | Return the space's DECLARED schema, purpose, usage notes, stats, `needsReindex`, and `actualSchema` — what the space really holds, in the declared schema's own format, so a type can be promoted into it. Absorbed `er_model` at 5.0 — the field to poll after `space_reindex`, which returns as soon as the job starts |
 | `save_entity` | Create or update a named entity (with optional properties) |
 | `update_entity` | Update an existing entity by ID (name, type, description, tags, properties, `suppressEmbeddings`); supports `deleteFields` for field removal |
-| `delete_entity` | Delete an entity by ID. Refused when the space has `strictLinkage` and another record still references it — the same rule the REST route enforces. Face labels are unlabelled rather than blocking |
+| `delete_entity` | Delete an entity by ID. Refused when the space has `strictLinkage` and another record still references it — the same rule the REST route enforces. With `cascadeToken` it removes the blocking edges first, but refuses before removing anything when something other than an edge still names the entity. Face labels are unlabelled rather than blocking |
 | `delete_entity_preview` | What deleting an entity would remove, and the token that lets you do it. Reads only. `delete_entity` takes that token as `cascadeToken` and refuses it if the list has changed since — so a record created after you looked cannot be deleted by a decision taken before it existed |
 | `graph_merge` | Merge two entities — relink all references and resolve per-property conflicts |
 | `save_edge` | Create or update a directed relationship |

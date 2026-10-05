@@ -115,7 +115,9 @@ are about to come off, but it never stops the delete — the labels are removed 
 **You can also delete it together with what points at it, in one action.** The refusal opens a
 confirmation that tells you **how many** records would go, counted by kind, so a hub record announces
 itself as *"127 relationships"* before anything is removed. Clearing them by hand first is still perfectly
-good, and is what to do when you only meant to remove some of them.
+good, and is what to do when you only meant to remove some of them. If a fact, a chrono entry or a file also
+names the entity, the confirmation does not go through and **nothing is removed — none of the relationships
+either**; edit those records first.
 
 **Nothing at the other end is deleted.** A link that runs from this entity to another is removed; the
 record it pointed at stays exactly as it is. That is the whole of what the cascade does — it clears what
@@ -486,7 +488,7 @@ knowing the tier exists, because a record with no embedding and nothing suppress
 set that way through the API. It is meant for records that are **state rather than prose**: a row whose text never changes while its
 numbers are updated constantly, which would otherwise be re-embedded on every write for no gain.
 
-What it does is remove the record's embedding, not hide the record. So a suppressed record is still returned by
+What it does is remove the record's embedding, not hide the record. Turning suppression on removes the embeddings already stored — for records, files and the pieces of a file — after every change to the space's settings, however it was made (including one a network sends), and again each time the server starts; a record or file that arrives from another instance while this one suppresses it is stored without one. So a suppressed record is still returned by
 **Advanced Query**, still opens from its tab, still exports, and is still reached by **Graph hops** from a match
 next to it — it simply stops competing on meaning. If a record you know exists never appears in a search, check
 these three levels before treating it as a fault.
@@ -727,7 +729,7 @@ findings to see the rest.
 
 **Duplicates** surfaces near-duplicate records found by the background semantic-duplicate scanner, **for that space**. A duplicate pair only ever means something *inside* one space, so it lives beside that space's data. (The `/settings/duplicates` link redirects to the Brain.)
 
-A summary row at the top shows how many pairs are **open**, the **average match confidence**, and how many are **shown**, alongside a **search box**, a status filter (**open / dismissed / all**) and a **Scan now** button. The search box narrows the list by record summary, type, or space — handy once a **dismissed** pile has grown. Each duplicate pair is a **comparison card**: the space and record type, a **confidence meter** (the similarity as a coloured percentage), when it was detected, and record **A** shown side-by-side with record **B**. For an entity pair you can **Merge** the two records (the older one is kept); any open pair can be **Dismiss**ed — dismissing asks for confirmation first, since it removes the pair from the open list.
+A summary row at the top shows how many pairs are **open**, the **average match confidence**, and how many are **shown**, alongside a **search box**, a status filter (**open / dismissed / all**) and a **Scan now** button. The search box narrows the list by record summary, type, or space — handy once a **dismissed** pile has grown. Each duplicate pair is a **comparison card**: the space and record type, a **confidence meter** (the similarity as a coloured percentage), when it was detected, and record **A** shown side-by-side with record **B**. For an entity pair you can **Merge** the two records (the older one is kept — the one written first, whichever of the two the scan started from); any open pair can be **Dismiss**ed — dismissing asks for confirmation first, since it removes the pair from the open list.
 
 **Dismissed pairs stay dismissed** — a routine re-embed, a peer re-sync, or an index rebuild does not drag them back onto the list. A dismissed pair **only resurfaces on its own when its content materially changes** (a real edit to one of the records); a re-write that leaves the content the same keeps it dismissed. To bring one back for review sooner, switch the filter to **dismissed** (or **all**) and use **Re-rate** on the card.
 

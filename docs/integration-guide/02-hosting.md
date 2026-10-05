@@ -121,8 +121,7 @@ An **empty** value means "not set" and uses the documented default, which is the
 compose file. Surrounding whitespace is ignored, so a YAML block scalar cannot break a value.
 
 This is deliberately a refusal rather than a fallback, because **a typo is never a preference.** These were read
-with an unchecked `Number()`, so a mistyped value became `NaN` — and `NaN` does not fail, it quietly changes
-behaviour. Measured:
+with an unchecked `Number()`, so a mistyped value became `NaN` — and `NaN` does not fail, it quietly changes behaviour. Measured:
 
 | a typo in | did | so |
 |---|---|---|
@@ -176,8 +175,7 @@ matters the moment you change it.
 
 Without the flag, the underlying library (`@huggingface/transformers`) allows remote model loading by
 default. A cache **miss** is then a download from `huggingface.co`, which carries **your instance's IP
-address and the model id it asked for** to a third party. Nothing configured it and nothing announced it.
-That is the behaviour the flag turns off.
+address and the model id it asked for** to a third party. Nothing configured it and nothing announced it. That is the behaviour the flag turns off.
 
 What each situation does now:
 
@@ -251,16 +249,14 @@ GET /api/about/health        # admin token
 
 Levels are `pass` / `warn` / `fail` (`fail` = actively broken, e.g. `requireEncryptedTransport` on without
 `trustProxy`, so requests would 403). Set **`security.strict`** (config) or **`YTHRIL_SECURITY_STRICT=true`**
-to make any `fail` finding abort boot — the aggregate "don't start if misconfigured" switch, on top of the
-individual `require*` flags.
+to make any `fail` finding abort boot — the aggregate "don't start if misconfigured" switch, on top of the individual `require*` flags.
 
 ### Diagnosing a Misconfiguration
 
 *New in 2.1.*
 
 Most deployment problems here are **configuration that looks correct and is refused**, not crashes. The
-instance is designed so you never have to guess which: three endpoints answer three different questions,
-and every refusal names the setting that would permit it.
+instance is designed so you never have to guess which: three endpoints answer three different questions, and every refusal names the setting that would permit it.
 
 #### Start here, in this order
 
@@ -308,8 +304,7 @@ it on every failed poll would bury everything else:
 
 Before this, the driver's message was returned in the response and logged **nowhere** — so the detail went to
 whoever probed the endpoint, including anyone who could reach it, and an operator watching the logs of a failing
-pod saw silence. A code is also the more useful thing for a probe: it is stable enough to alert on, which a driver
-message never was.
+pod saw silence. A code is also the more useful thing for a probe: it is stable enough to alert on, which a driver message never was.
 
 #### The single most useful habit: read the posture block
 
@@ -788,6 +783,11 @@ still there, the retention pass now fills the descriptions and tags into the fil
 builds one index per space on its tombstones (`type`, `seq`), and the first pulls after a long absence carry more
 deletions per cycle than before: up to 5000 per kind per request and 200 requests per cycle, until they have caught
 up. A peer still on 5.6.2 or earlier pulls at most 1000 per kind from you until it upgrades.
+
+**Upgrading to 5.6.4 or later sweeps the stored vectors of everything a space suppresses, at every start.** Once the server
+listens, one space at a time, it removes the vector and model of each record, file and file chunk its own flag, type schema
+or space says not to embed and cancels their queued embed jobs — one scan per record kind per space, no marker; each kind
+that lost any logs `Suppression sweep: removed N <kind> vector(s) in <space>` (a file counts its rows).
 
 ### Rolling Back
 

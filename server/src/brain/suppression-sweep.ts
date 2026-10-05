@@ -21,13 +21,15 @@
  *
  * So the rule is a state, not an event: after a meta write, nothing suppressed still has a vector. Idempotent,
  * cheap when there is nothing to do, and it converges the historical backlog on the next meta write of any
- * kind — the self-healing shape this codebase's migration rule asks for rather than a one-shot boot migration.
+ * kind — the self-healing shape this codebase's migration rule asks for. Since 5.6.4 it also runs at every start
+ * (`sweepEverySpaceAtBoot`): not a one-shot boot migration, which would need a done-marker and so new local state, but
+ * the same idempotent state-sweep, so the repair does not wait for a meta write that may never come.
  *
  * ## Why this is local, and takes no seq
  *
  * The vector does not replicate — `sync/local-only-fields.ts` is the list and names the three mechanisms
  * that hold it: no `Incoming*` schema declares it, so a PUSHED document loses it to zod; the pull path
- * strips it explicitly, because it validates nothing; and the sending side projects it away so the bytes
+ * strips it explicitly, because it stores a document as received; and the sending side projects it away so the bytes
  * never travel. So removing one is a purely local change — no tombstone, no seq bump, nothing to converge.
  *
  * This paragraph used to say `api/sync/docs.ts` *"strips `embedding` before sending, in all five places"*.

@@ -7,6 +7,101 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.6.4] — unreleased
+
+| What changes on upgrade | What to do |
+|---|---|
+| Every start, once the server listens, sweeps the stored vectors of everything a space suppresses — records, files and file chunks — one space at a time; a space with no `meta` is swept by its records' own flags | Nothing; expect one scan per record kind per space at each start, and `Suppression sweep: removed N <kind> vector(s) in <space>` where it removed anything |
+| A fork written from now on keeps the divergent copy's `createdAt` and `updatedAt`; a fork already stored keeps the stamps it has | Nothing; on a network of mixed versions the same fork differs in its timestamps until every member runs 5.6.4 |
+| A link violation 5.6.3 stored under a random id gets one derived twin on the next delivery of its document, and the twin announces `link_violation.created` once | Nothing; dismiss the older row if you do not want both |
+| A duplicate pair stored with a seq of `0` (or none) is not re-fired by the first scan; its real seqs are stored as each pair is next scanned | Nothing; a merge that keeps the older record now keeps it whichever end the scan started from |
+| A pull names, once per page, a document it kept its own copy over (same seq, other text) and a document it stored that does not match its schema | Nothing; the lines are in the receiver's log |
+
+Documents changed in this release (group B's part): `docs/sync-protocol.md`, `docs/integration-guide/02-hosting.md`,
+`docs/integration-guide/04b-graph-api.md`, `docs/integration-guide/06a-schema-api.md`,
+`docs/integration-guide/09-sync-api.md`, `docs/integration-guide/10-mfa-and-conflicts.md`,
+`docs/integration-guide/14-duplicates-and-webhooks.md`, `docs/integration-guide/16-mcp.md`,
+`docs/userguide/02-brain.md` and `docs/userguide/05-storage-data-and-audit.md`.
+
+### Fixed
+
+- **Two peers pushing different text for one fact at one seq could lose one of the texts (`Q-232`).** Each push is
+  planned against what is stored; when neither is stored yet, both plan an insert, the first write lands, and the
+  second write's read-back compared only the seq — so it counted itself landed with its text stored nowhere, and the
+  sender was told it had been delivered. The writer now compares the text too. A copy that finds another at its own seq
+  with different text is a divergence on every push door, forked by the same rules as a planned one (the fork already
+  made, and the fork caps), never `inserted`. A **pull** does not fork on 5.6.x: it keeps the local copy, advances past
+  the document, and names its id once per window in one line per page — `kept the local copy; N document(s) arrived at
+  the same seq with different text` — where it used to say nothing. The pulled text of such a document is not stored.
+- **A fork carried the moment this instance made it instead of the moment its text was written.** It now keeps the
+  divergent copy's `createdAt` and `updatedAt`: stamped "now" it was a record whose age was this instance's sync
+  schedule — a fresh retention window however old the text — and two receivers forking one divergence on different days
+  stored two different documents under one id. Forks written from now on keep them; forks already stored keep theirs.
+- **An older copy of a file's metadata could overwrite a newer one.** The merge's write filtered on the id alone, so a
+  copy stored between the accept read and the write was overwritten, with a `200` on the way back. The write now
+  carries the seq condition every other family's does, in the filter, with no extra read.
+- **An embed job could write a vector onto a newer copy of its record (`Q-230`).** The job reads a record, calls the
+  model — the slow step — and wrote the vector, the model and the matched text by id alone, so a peer's newer copy
+  that landed inside the model call got the old text's vector, or a vector this instance suppresses. Every write the job
+  makes now lands only on the version it read; one that matched nothing ends as the new outcome `superseded`, which is
+  done, never retried, and counted by a reindex as done. The media and pipeline derived-vector writers are not changed.
+- **Suppression did not reach files, network layers, or vectors stored before it was set (`Q-230`).** The
+  stored-vector sweep ran after a PATCH of a space and nowhere else, covered four record kinds, removed the vector and
+  left its model name, stopped at the first kind the store refused, and removed its queued jobs with one delete over
+  every id. A network's schema layer, a schema route on a space no network carries, and the schema library's apply swept
+  nothing; and a peer's file metadata, which is merged rather than replaced, kept this instance's vector on a file
+  it suppresses (and its chunks theirs). The sweep now runs after every write of a space's meta, however it was made,
+  coalesced per space; covers files and their chunk and passage rows; removes the vector and its model, never the matched
+  text; isolates each kind, naming the ones that failed in one warning; and works in pages, so a large space is never
+  one delete. It runs again at every start, once the server listens, one space at a time. A file arrival this instance
+  suppresses — by its own flag, the stored one, or the space — now lands with no vector, model or matched text, and its
+  chunks lose theirs before the row is written. 5.6.2's notes said an arrival this instance suppresses keeps no
+  vector; that held for records and not for files. A schema layer that turns suppression on removes this instance's local
+  vectors: that is the receiver applying its own effective suppression.
+- **A refused entity cascade had already removed every blocking edge.** A fact, chrono entry or file that names the
+  entity blocks the delete, and a cascade does not remove those; it refused after it had deleted the edges, written
+  their tombstones and spread those removals to every peer. The refusal is now decided on the preview before anything is
+  removed, and answers with the list it decided on.
+- **An edge delete could leave the edge gone here and alive on every peer.** The edge was deleted first and its
+  tombstone written after, so a tombstone that failed to write (a refusal, a step-down, a dropped socket) left nothing for
+  a peer to learn the deletion from, and the next pull brought the edge back. The tombstone is now written first, then
+  the edge deleted — with no transaction and no hold on the seq horizon. A failure between the two leaves a tombstone
+  beside a live edge, which a retry completes; the retirement of the edge's embed job and the webhook follow both and
+  cannot fail the delete. The edge is read for its seq, tombstoned and deleted by id, the same window every other delete
+  has. This is the edge delete only: an entity, a fact, a chrono entry and a link still delete before they tombstone.
+- **Merge and link tombstones named no seq (`originalSeq`).** The duplicate edge a merge drops, the link it moves off the
+  absorbed entity, the absorbed entity, and a link a reconcile removes were tombstoned without the seq of the record they
+  delete, so a peer that never held the record was offered the deletion. Each carries it now.
+- **The duplicate scanner read one end of a pair at seq 0.** The seed of a pair was read without its seq, so which
+  record counted as older depended on which end started the scan: an automerge kept the newer record under
+  `dupeMergeSurvivor: 'older'`, a pair was stored with a `0` for the seed, a pair the space refuses (a strict schema)
+  was merged and refused again from each end on every scan, and the manual merge door followed the ids. Both records
+  are read at their real seq. The survivor is now the configured one — the older record by default, which is what the
+  setting is documented to do — whichever end started the merge. A stored seq of `0` or none is unknown, not changed, so
+  a pair a 5.6.3 scan stored is not re-fired or re-opened by it, and its real seqs are stored as it is next scanned;
+  the manual merge reads both records' current seqs while a stored one is unknown. The seq is never in the answer of
+  `similar`.
+- **A strict-linkage violation was recorded again on every delivery.** Each record had a fresh random id, and the
+  single `POST /api/sync/edges` checks an arriving edge on every delivery, so one dangling end became one more
+  record — and one more `link_violation.created` — each time its edge was re-sent or edited. The id is now derived from the
+  document type, the document, the field and the target, the record is written once, and the announcement fires only
+  for one that was inserted. Two different dangling ends stay two records. A record 5.6.3 stored under a random id gets one
+  derived twin on the next delivery of its document, with one announcement, and no more after it. What is stored of the
+  reason, which quotes the target a peer sent, is now bounded.
+- **A pull stored a document whatever its shape (`Q-225`, the 5.6.x half).** It now parses each document against the
+  schema a push holds it to — through one table and one parse shared with the push doors — and refuses only a shape that
+  would corrupt the receiver: a `parentFileId` that is present and not a string (it turns a file into a half-derived
+  row), and the id and seq refusals the writer already made. Everything else is stored as received, as 5.6.3 stored
+  it, and each stored document that fails its schema is named, once per page, with its reason (`stored N document(s)
+  that do not match their schema`). Refusing them, as a push does, stays on `main`: a pull cannot tell its sender from what the
+  sender's own copy was.
+
+### Changed
+
+- **`delete_entity` no longer says "There is no cascade."** Its description named the cascade nowhere while its own
+  `cascadeToken` parameter offered one. It now says `cascadeToken` turns the call into a cascade, and that a refused
+  cascade removes nothing; `delete_entity_preview` says the same of a refusal.
+
 ## [5.6.3] — 2026-10-03
 
 **A patch release: sync's tombstone and file-metadata fixes from `main`, and five defects found in 5.6.2, and

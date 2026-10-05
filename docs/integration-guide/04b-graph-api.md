@@ -192,7 +192,11 @@ and is unlabelled, which an ordinary delete already does.
 
 **What it does NOT remove:** a fact, chrono entry or file that names the entity. Those are records of
 their own rather than relationships, and they still block — the refusal names them, and you edit them to
-drop the reference.
+drop the reference. **A refused cascade removes nothing.** The refusal is decided from the preview before the
+first edge is removed, so an entity still named by a fact, chrono entry or file keeps every one of its edges and
+no tombstone is written; the refusal answers with the list it decided on. Since 5.6.4 an edge's tombstone is written
+before the edge is deleted, so a failure part-way leaves a tombstone beside a live edge that a retry completes, and
+never an edge that is gone here and still alive on every peer.
 
 **An empty list still needs the token.** Nothing would be removed today, and a delete that skipped the
 token when the list was empty would behave differently depending on a race.
