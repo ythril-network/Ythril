@@ -1,5 +1,5 @@
 /**
- * The test stack's document sidecars carry the hardening production gives them, and listen on loopback only.
+ * The test stack's document sidecars carry the hardening production gives them, and EVERY port the test stack publishes is on loopback.
  *
  * ## What this prevents
  *
@@ -26,11 +26,18 @@
  * `127.0.0.1`. The ports are there so the render and office tests, which run on the host, can reach the service
  * directly; that is a reason to publish them to the host, not to the network.
  *
+ * **Every service, not only the sidecars** (bundle-56 round S): the app instances published ports 3200 to 3203 on every
+ * interface while the sidecars and the database beside them were on loopback, so a CI runner or a developer's machine ran
+ * four instances with known tokens and a known database password reachable from its network. The host-side suites reach
+ * them by 127.0.0.1 (`testing/sync/helpers.js`, `testing/sync/setup.js`) and the containers reach each other by name on the
+ * compose network, so nothing needs the other interfaces. The set is every service of the test compose that publishes a
+ * port, read out of the file, with a floor.
+ *
  * Run: node --test testing/standalone/the-test-stacks-document-sidecars-are-hardened-like-production.test.js
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { loadCompose, resolveDefaults } from '../_shared/compose-file.mjs';
+import { loadCompose, exposedPorts } from '../_shared/compose-file.mjs';
 
 const PRODUCTION = loadCompose('docker-compose.yml');
 const TEST = loadCompose('testing/docker-compose.test.yml');
@@ -77,18 +84,6 @@ function hardeningShortfalls(name, production, test) {
   return v;
 }
 
-/** The host address a published port binds, or null for "every interface". */
-function boundAddress(port) {
-  if (typeof port === 'object' && port !== null) return port.host_ip ?? null;
-  const parts = resolveDefaults(port).replace(/\/(tcp|udp)$/, '').split(':');
-  return parts.length >= 3 ? parts[0] : null;
-}
-
-/** Every published port of a service that is not bound to loopback. */
-function exposedPorts(service) {
-  return (service.ports ?? []).filter((p) => boundAddress(p) !== '127.0.0.1').map((p) => JSON.stringify(p));
-}
-
 describe('the test stack\'s document sidecars, held to production', () => {
   for (const name of DOCUMENT_SIDECARS) {
     describe(name, () => {
@@ -112,6 +107,23 @@ describe('the test stack\'s document sidecars, held to production', () => {
         assert.ok((svc.ports ?? []).length >= 1, `${name} publishes no port: the host-side tests cannot reach it`);
         assert.deepEqual(exposedPorts(svc), [], `${name} listens on every interface of the machine that runs the suite`);
       });
+    });
+  }
+});
+
+describe('every port the test stack publishes is on loopback', () => {
+  const publishing = Object.entries(TEST.services).filter(([, svc]) => (svc.ports ?? []).length > 0);
+
+  it('the scan finds the services that publish a port (a floor: an empty scan holds nothing)', () => {
+    assert.ok(publishing.length >= 6, `only ${publishing.length} service(s) publish a port: ${publishing.map(([n]) => n)}`);
+    for (const name of ['ythril-a', 'ythril-b', 'ythril-c', 'ythril-d']) {
+      assert.ok(publishing.some(([n]) => n === name), `${name} is not among the services that publish a port: the scan or the stack has changed`);
+    }
+  });
+
+  for (const [name, svc] of publishing) {
+    it(`${name}: every published port is bound to 127.0.0.1`, () => {
+      assert.deepEqual(exposedPorts(svc), [], `${name} listens on every interface of the machine that runs the suite`);
     });
   }
 });

@@ -39,11 +39,14 @@
  * ## Decisions the plan left open
  *
  * - **Backfill** (`--record-ci`) walks the completed, trusted runs newest first and stops at the FIRST run that is
- *   recorded COMPLETELY (the instance holds every record the run's artifacts produce), or after {@link BACKFILL_RUNS}
- *   runs. A run recorded only partly (the instance went away between its records) is not the stop: the records it
- *   lacks are written, the ones it has are left alone, and the walk goes on to older runs. Because the walk records
- *   newest first, a partial run is always at the frontier. An older run past the horizon that was never recorded is
- *   reported once and written as nothing.
+ *   recorded COMPLETELY (the instance holds a record of it and of every job whose results artifact the run still lists;
+ *   decided from the artifact list and the held keys, so no zip is downloaded for a job already recorded), or after
+ *   {@link BACKFILL_RUNS} runs. A run recorded only partly (the instance went away between its records) is not the stop:
+ *   the records it lacks are written, the ones it has are left alone, and the walk goes on to older runs. Because the
+ *   walk records newest first, a partial run is always at the frontier. A recorded run whose remaining artifacts can
+ *   never be read (not a zip, past the size cap) is the stop and is said without failing the pass; a download that
+ *   failed is tried again. A recorded run whose artifacts have all expired is recorded, and gets no `none` row. An
+ *   older run past the horizon that was never recorded is reported once and written as nothing.
  * - **A trusted run with no usable artifact** (none uploaded, or expired) is recorded once with
  *   `measurements: 'none'`, job `workflow`, suite `ci`, scope `subset` (so no baseline is drawn from it), its
  *   `ms` the run's wall time, so the walk never fetches it again.
@@ -64,7 +67,7 @@ import { isEntryPoint } from './_shared/script-cli.mjs';
 import { repoRelative } from './_shared/repo-path.mjs';
 import { timingResultFiles } from './_shared/timing-results.mjs';
 import { readTimingLog, TIMING_RESULTS_FOLDER, MESSAGE_CAP } from '../testing/_shared/timing-reporter.mjs';
-import { maskSecrets } from '../testing/_shared/secret-masking.mjs';
+import { maskText } from './_shared/mask-text.mjs';
 import { holdsWithin } from '../testing/_shared/wait-for.mjs';
 import { ciSignal } from '../testing/_shared/running-under-ci.mjs';
 import { isExpectedInCiSkip } from '../testing/_shared/expected-in-ci.mjs';
@@ -72,6 +75,9 @@ import { readClientResults } from './unexpected-skips.mjs';
 import { renderRunSummary, seconds } from './_shared/run-summary.mjs';
 
 // ---- what is recorded, and where ----------------------------------------------------------------------------------
+
+// The recorder's mask is `scripts/_shared/mask-text.mjs`'s; it stays importable from here for the callers that took it from the recorder.
+export { maskText };
 
 export const REPO = 'ythril-network/Ythril';
 export const WORKFLOW_PATH = CI_WORKFLOW;
@@ -299,23 +305,6 @@ function parseRecordKey(key) {
 const SUITE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/;
 const isoOrNull = (s) => (typeof s === 'string' && ISO.test(s) && Number.isFinite(Date.parse(s)) ? new Date(s).toISOString() : null);
-
-/** Home directories in a message: a Windows drive path, a POSIX home, root's. Built fresh per use. */
-const HOME_PATHS = [
-  ['[A-Za-z]:[\\\\/]+(?:Users|Documents and Settings)[\\\\/]+[^\\\\/\\s]+(?:[\\\\/]+\\S*)?', 'gi'],
-  ['/(?:home|Users)/[^/\\s]+(?:/\\S*)?', 'g'],
-  ['/root(?=[/\\s]|$)(?:/\\S*)?', 'g'],
-];
-
-/**
- * A line of text safe to store: first line only, secrets (the ONE list, `secret-masking.mjs`) and home paths masked,
- * at most `MESSAGE_CAP` characters (the reporter's, one number for both). The home paths are this module's own: where a file lives is not a token shape.
- */
-export function maskText(text) {
-  let out = maskSecrets(String(text ?? '').split(/\r?\n/)[0]);
-  for (const [source, flags] of HOME_PATHS) out = out.replace(new RegExp(source, flags), '<home>');
-  return out.slice(0, MESSAGE_CAP);
-}
 
 /** A test file's path as stored: repo-relative with forward slashes; an absolute path outside the repo is masked. */
 function storedPath(file, root) {
@@ -721,11 +710,23 @@ function latestResultArtifacts(artifacts, run) {
   return latest;
 }
 
+/** The `attempt` and `job` of each key of one run that the instance holds, as one string each: what "this job is recorded" compares. */
+const recordedJobsOf = (have) => new Set([...have].map(parseRecordKey).filter(Boolean).map(p => JSON.stringify([p.attempt, p.job])));
+
 /**
  * The payloads of one trusted, completed run. Identity (`runId`, `attempt`, `commit`, `branch`, `source`, `dirty`,
  * `layout`) is the run object's and the jobs' - the artifact supplies figures and a suite name, nothing else.
+ *
+ * `have` is the record keys the instance already holds for this run. A job whose artifact the run still lists and that
+ * has a record in `have` is NOT downloaded: the question this answers for the walk is "is the run recorded", decided from
+ * the artifact LIST and those keys (the zip of a job already recorded proves nothing the record does not). A run whose
+ * artifacts are all expired but which has records is recorded, so it yields no `none` row either.
+ *
+ * `problems` are artifacts that could not be read, each `{ text, persistent }`: persistent is a file that is not what it
+ * says (not a zip, past the size cap, no suite), which the next pass will find the same way; a download that failed is
+ * not, and is tried again.
  */
-async function ciPayloads(gh, run) {
+async function ciPayloads(gh, run, have = new Set()) {
   const runId = runIdOf(run);
   const startsAt = startedOf(run);
   const endsAt = isoOrNull(run.updated_at) ?? startsAt;
@@ -742,15 +743,19 @@ async function ciPayloads(gh, run) {
 
   const payloads = [];
   const problems = [];
+  const recordedJobs = recordedJobsOf(have);
   for (const [job, found] of latest) {
-    if (Number.isFinite(found.size) && found.size > GITHUB_ZIP_CAP) { problems.push(`${job}: the artifact is larger than ${GITHUB_ZIP_CAP} bytes`); continue; }
+    if (recordedJobs.has(JSON.stringify([String(found.attempt), job]))) continue;
+    if (Number.isFinite(found.size) && found.size > GITHUB_ZIP_CAP) { problems.push({ text: `${job}: the artifact is larger than ${GITHUB_ZIP_CAP} bytes`, persistent: true }); continue; }
+    let bytes;
+    try { bytes = await gh.zip(`/repos/${REPO}/actions/artifacts/${found.id}/zip`); } catch (err) { problems.push({ text: `${job}: ${err.message}`, persistent: false }); continue; }
     let entries;
-    try { entries = parseArtifact(await gh.zip(`/repos/${REPO}/actions/artifacts/${found.id}/zip`)); } catch (err) { problems.push(`${job}: ${err.message}`); continue; }
+    try { entries = parseArtifact(bytes); } catch (err) { problems.push({ text: `${job}: ${err.message}`, persistent: true }); continue; }
     const bySuite = new Map();
     for (const e of entries.filter(e => e.name.endsWith('.jsonl'))) {
       const text = e.data.toString('utf8');
       const suite = suiteOf(text, e.name.split('/').at(-1));
-      if (!suite) { problems.push(`${job}: ${e.name} names no suite`); continue; }
+      if (!suite) { problems.push({ text: `${job}: ${e.name} names no suite`, persistent: true }); continue; }
       if (!bySuite.has(suite)) bySuite.set(suite, []);
       bySuite.get(suite).push(text);
     }
@@ -762,8 +767,10 @@ async function ciPayloads(gh, run) {
     }
   }
 
-  // A run that left nothing measurable is recorded once as that, so it is not fetched again.
-  if (!latest.size) {
+  // A run that left nothing measurable is recorded once as that, so it is not fetched again — unless the instance already
+  // holds records of it: a run whose artifacts have since expired is recorded, and a row of "nothing" beside its real ones
+  // would say it was never read.
+  if (!latest.size && have.size === 0) {
     const summary = { outcome: outcomeOfConclusion(run.conclusion), scope: 'subset', ms: 0, fileCount: 0, tests: 0, passed: 0, failed: 0, cancelled: 0, skipped: 0, todo: 0, measurements: 'none' };
     const wall = Date.parse(endsAt) - Date.parse(startsAt);
     payloads.push(buildPayload({ ...common, attempt: run.run_attempt, job: 'workflow', suite: 'ci', summary: { ...summary, ms: Math.max(0, wall) }, wallMs: Math.max(0, wall) }));
@@ -803,13 +810,19 @@ async function recordCi({ rewriteKey } = {}) {
     for (const run of runs) {
       try {
         const have = rewriteKey ? new Set() : await recordedKeysOfRun(dest.api, run.id);
-        const built = await ciPayloads(gh, run);
+        const built = await ciPayloads(gh, run, have);
         const { problems } = built;
-        // A run with every record it would produce is the stop. A run with SOME is completed: only the missing ones are
-        // written (a record the run already has is left as it is; `--rewrite <recordKey>` replaces one on purpose).
+        // A recorded run is the stop: the instance holds records of it and nothing the run still lists is missing one. A run
+        // with SOME is completed: only the missing ones are written (a record the run already has is left as it is;
+        // `--rewrite <recordKey>` replaces one on purpose). What cannot be read for good (a file that is not a zip) does
+        // not keep a recorded run from being the stop, and is said without failing the pass: it would fail every pass.
         const payloads = built.payloads.filter(p => !have.has(p.properties.recordKey));
-        if (!rewriteKey && have.size > 0 && payloads.length === 0 && problems.length === 0) { stoppedAtRecorded = true; break; }
-        for (const p of problems) { console.log(`test-times: run ${run.id}: ${p}`); exit = 1; }
+        if (!rewriteKey && have.size > 0 && payloads.length === 0 && problems.every(p => p.persistent)) {
+          for (const p of problems) console.log(`test-times: run ${run.id}: ${p.text} (recorded without it; nothing to read there)`);
+          stoppedAtRecorded = true;
+          break;
+        }
+        for (const p of problems) { console.log(`test-times: run ${run.id}: ${p.text}`); exit = 1; }
         if (rewriteKey && payloads.every(p => p.properties.measurements === 'none')) {
           console.error(`test-times: run ${run.id} has no artifacts left; the record is not overwritten with nothing`); exit = 1; continue;
         }

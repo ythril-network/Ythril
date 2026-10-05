@@ -20,7 +20,7 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
-import { ONE_COMMAND_BYTES, inOneCommandChunks, operationBytes } from '../../server/dist/db/one-command.js';
+import { MONGO_MAX_WRITE_BATCH_SIZE, ONE_COMMAND_BYTES, ONE_COMMAND_MAX_OPERATIONS, bulkCommandOf, inOneCommandChunks, operationBytes, writeInOneCommands } from '../../server/dist/db/one-command.js';
 
 const skip = await mongoSkipReason();
 const SUITE = 'bulkonecommand';
@@ -99,5 +99,41 @@ describe('a bulk write past the driver\'s batch limit is several commands; a sli
     assert.equal(inOneCommandChunks(ops, { maxItems: 500, bytesOf: bytesOfOp }).length, 1, 'the slicer would split a slice at the limit');
     const n = await updatesDuring(() => coll().bulkWrite(ops, { ordered: false }));
     assert.equal(n, 1, `a batch at ONE_COMMAND_BYTES was sent as ${n} update commands: the limit leaves too little room for the command's framing`);
+  });
+
+  it('the slice the module makes by default IS one command at the cap, which is one fewer than the server\'s maxWriteBatchSize (the driver\'s `size + 1 >= max` batching)', async () => {
+    const hello = await mongo.getMongo().db('admin').command({ hello: 1 });
+    assert.equal(hello.maxWriteBatchSize, MONGO_MAX_WRITE_BATCH_SIZE, 'the constant is not the server\'s write batch size');
+    assert.equal(ONE_COMMAND_MAX_OPERATIONS, hello.maxWriteBatchSize - 1, 'a command the driver sends holds maxWriteBatchSize - 1 operations; the cap is not that');
+    await coll().deleteMany({});
+    const ops = Array.from({ length: ONE_COMMAND_MAX_OPERATIONS + 1 }, (_, i) => ({ insertOne: { document: { _id: `b${i}` } } }));
+    // The premise first: handed to the driver whole, one operation over the cap is two insert commands.
+    const whole = (await commandsDuring(() => coll().bulkWrite(ops, { ordered: false }))).filter(c => c === 'insert').length;
+    assert.equal(whole, 2, `${ops.length} tiny inserts were sent as ${whole} insert command(s): the driver no longer batches at maxWriteBatchSize - 1`);
+    // Then the module: its slices are the cap and the rest, and EACH is exactly one insert command.
+    await coll().deleteMany({});
+    const perSlice = await writeInOneCommands(ops, async (slice, { ordered }) => {
+      const sent = await commandsDuring(() => coll().bulkWrite(slice, { ordered }));
+      return { operations: slice.length, inserts: sent.filter(c => c === 'insert').length };
+    }, { ordered: false });
+    assert.deepEqual(perSlice, [{ operations: ONE_COMMAND_MAX_OPERATIONS, inserts: 1 }, { operations: 1, inserts: 1 }],
+      `the slices the module makes were sent as ${JSON.stringify(perSlice)}`);
+    assert.equal(await coll().countDocuments({}), ops.length, 'a slice did not land');
+  });
+
+  it('an UNORDERED bulk of mixed operation types is one command per type per slice; sliced by type, every slice is one command', async () => {
+    await coll().deleteMany({});
+    const mixed = [
+      { insertOne: { document: { _id: 'm1' } } }, { updateOne: { filter: { _id: 'm1' }, update: { $set: { x: 1 } }, upsert: true } },
+      { insertOne: { document: { _id: 'm2' } } }, { deleteOne: { filter: { _id: 'm1' } } },
+    ];
+    const all = await commandsDuring(() => coll().bulkWrite(mixed, { ordered: false }));
+    assert.ok(all.filter(c => ['insert', 'update', 'delete'].includes(c)).length >= 3, `one slice of three operation types was sent as ${JSON.stringify(all)}`);
+    await coll().deleteMany({});
+    const answers = await writeInOneCommands(mixed, async (slice, { ordered }) => {
+      const sent = await commandsDuring(() => coll().bulkWrite(slice, { ordered }));
+      return sent.filter(c => ['insert', 'update', 'delete'].includes(c)).length;
+    }, { ordered: false, commandKindOf: bulkCommandOf });
+    assert.deepEqual(answers, [1, 1, 1], `a slice of one operation type was sent as ${JSON.stringify(answers)} command(s)`);
   });
 });

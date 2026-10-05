@@ -52,8 +52,11 @@ services:
     # `the-test-stack-leaves-the-machine-room.test.js`.
     cpus: "${YTHRIL_TEST_APP_CPUS:-1.0}"
     mem_limit: "${YTHRIL_TEST_APP_A_MEM:-2560m}"
+    # The four instances publish on loopback only, like the database and the sidecars: their tokens and the database
+    # password are in this file. The host-side suites reach them by 127.0.0.1 (`testing/sync/helpers.js`), the
+    # containers reach each other by name. Held by `the-test-stacks-document-sidecars-are-hardened-like-production`.
     ports:
-      - "3200:3200"
+      - "127.0.0.1:3200:3200"
     volumes:
       - ./sync/configs/a:/config
       - ythril-data-a:/data
@@ -174,7 +177,7 @@ services:
     cpus: "${YTHRIL_TEST_APP_CPUS:-1.0}"
     mem_limit: "${YTHRIL_TEST_APP_MEM:-2g}"
     ports:
-      - "3201:3200"
+      - "127.0.0.1:3201:3200"
     volumes:
       - ./sync/configs/b:/config
       - ythril-data-b:/data
@@ -250,7 +253,7 @@ services:
     cpus: "${YTHRIL_TEST_APP_CPUS:-1.0}"
     mem_limit: "${YTHRIL_TEST_APP_MEM:-2g}"
     ports:
-      - "3202:3200"
+      - "127.0.0.1:3202:3200"
     volumes:
       - ./sync/configs/c:/config
       - ythril-data-c:/data
@@ -310,7 +313,7 @@ services:
     cpus: "${YTHRIL_TEST_APP_CPUS:-1.0}"
     mem_limit: "${YTHRIL_TEST_APP_MEM:-2g}"
     ports:
-      - "3203:3200"
+      - "127.0.0.1:3203:3200"
     volumes:
       - ./sync/configs/d:/config
       - ythril-data-d:/data

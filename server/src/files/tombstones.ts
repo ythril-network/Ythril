@@ -64,6 +64,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import { toDocId } from '../util/paths.js';
 import { col, asBulk, asDoc, asFilter, asUpdate } from '../db/mongo.js';
+import { bulkCommandOf, writeInOneCommands } from '../db/one-command.js';
 import type { FileTombstoneDoc } from '../config/types.js';
 import { log, peerText } from '../util/log.js';
 import { throwIfStoreSide, unlessTheStoreFailed } from '../brain/store-failure.js';
@@ -159,7 +160,7 @@ async function publishOnePerPath(spaceId: string, docs: readonly ToPublish[]): P
     { projection: { _id: 1, path: 1, deletedAt: 1, pending: 1 } }).toArray();
   const alreadyPublished = new Set(stored.filter(t => !t.pending).map(t => t._id));
   const { $set, $unset } = publishedNow();
-  const ops: unknown[] = [];
+  const ops: object[] = [];
   /** Pending tombstones a newer publication for their path already covers: dropped, not published. */
   const superseded: string[] = [];
   let published = 0;
@@ -181,7 +182,9 @@ async function publishOnePerPath(spaceId: string, docs: readonly ToPublish[]): P
       superseded.push(...candidates.map(d => d._id));
     }
   }
-  if (ops.length > 0) await tombstones.bulkWrite(asBulk<StoredFileTombstone>(ops), { ordered: false });
+  // An update and a delete per path: sliced by type, so each slice is one command (`bulkCommandOf`).
+  await writeInOneCommands(ops, (slice, { ordered }) => tombstones.bulkWrite(asBulk<StoredFileTombstone>(slice), { ordered }),
+    { ordered: false, commandKindOf: bulkCommandOf });
   if (superseded.length > 0) await tombstones.deleteMany(asFilter<StoredFileTombstone>({ _id: { $in: superseded }, pending: true }));
   return { published, dropped: dropped + superseded.length };
 }
@@ -213,7 +216,8 @@ export async function writePendingFileTombstones(
   const pending = { spaceId, docs: unique.map(p => ({ _id: uuidv4(), spaceId, path: p, deletedAt: now, pending: true as const, ...marker })) };
   if (pending.docs.length === 0) return pending;
   try {
-    await tombstonesOf(spaceId).insertMany(pending.docs.map(d => asDoc<StoredFileTombstone>(d)));
+    const stored = tombstonesOf(spaceId);
+    await writeInOneCommands(pending.docs.map(d => asDoc<StoredFileTombstone>(d)), (slice, { ordered }) => stored.insertMany(slice, { ordered }), { ordered: true });
     return pending;
   } catch (err) {
     // A write reported failed is not known NOT to have landed: a paused store applies it when it comes back.

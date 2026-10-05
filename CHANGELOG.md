@@ -364,6 +364,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   could land a moment later. The bound is now the server's own deadline (`maxTimeMS`), so the server ends the write
   and answers; a client backstop 500 ms later covers the one wait the server does not interrupt (an upsert queued
   behind another session's uncommitted insert of the same record — a sync push fork). Reads keep the driver timer.
+  A `timeoutMS` in `MONGO_URI` no longer cuts this short either: the driver would hand it to every write that sets
+  none of its own and end the write before the server's deadline, so a bounded write is now sent with its own
+  `timeoutMS` of 0 beside the server deadline. A page a peer pushes or pulls, and a page of peer tombstones, is
+  written in chunks sized so that each chunk is one command to the database (a larger batch is split by the driver
+  into several, each with a deadline of its own), and the page's size no longer decides whether a late second command
+  can land. The bulk writes whose size is the store's own, not a request's — an entity merge relinking a hub's edges,
+  files and links, a directory move, file tombstones, the file hash cache and the usage counters — are written the
+  same way, in chunks of at most 99 999 operations (one fewer than the server's write batch size of 100 000, because the
+  driver itself cuts a batch there) and 16 MiB, so a set under those limits is the one command it was before; a bulk that
+  mixes inserts, updates and deletes is sliced by type, in the order the driver sends them (inserts, updates, deletes),
+  because the driver sends one command per type, and an unordered one still attempts every chunk and reports every chunk
+  that failed in one error, whose cause is the first failure. The entity merge writes its relinked edges, files and links in
+  its transaction, which the server aborts at the first error, so it stops at the first failed chunk and answers with that
+  failure as the driver would. When the client backstop does end a write, the log line now says which collection and space it was, and
+  the server warns once at boot if `MONGO_URI` carries a `socketTimeoutMS` below the write bound, which the server
+  cannot neutralise (leave it unset or above `YTHRIL_WRITE_TIMEOUT_MS`).
   For integrators: the same retryable `503`; a write blocked in that one state is answered up to 500 ms later than
   the bound. No new database privilege is needed.
 - **A recall straight after a space's first write no longer answers 503 while its search index initialises**
@@ -995,6 +1011,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **The test Mongo's search heap is explicit** (`YTHRIL_TEST_MONGOT_A_HEAP`, with a larger limit for the first
     database), and the test stack's budget is held per set of services one `compose up` starts. The document sidecars
     in the test stack are hardened like production and bound to loopback, and `doc-office` joins the integration job.
+  - **The recorder's declaration and the published reports.** `node scripts/test-times.mjs --type-schema` prints the
+    `schema_update` call that declares the `Test-Run` type with its one-year retention, so the retention is something a
+    maintainer can send rather than something that depends on someone having once typed it. The client's test report
+    is masked (first line, token shapes, home paths, 300 characters) before the CI job uploads it, as the node
+    suites' lines already were; a report the step cannot read is removed rather than uploaded. The masker handles a
+    long line in time proportional to its length. `--record-ci` stops at the first run already recorded without
+    downloading its artifacts, does not write an empty row for a recorded run whose artifacts have expired, and does
+    not fail every pass over one artifact that can never be read.
+  - The test stack's four app instances now publish their ports on `127.0.0.1` only, like the database and the sidecars.
+  - The in-app Help no longer shows links that go nowhere: the dependencies, contribution and testing guides named
+    repository files (`LICENSE`, `NOTICE`, package manifests) as links, and now name them as code, with a gate over every page
+    Help lists. A link from one part of a split guide to a sibling part (`](02-hosting.md)`, 42 of them in the integration
+    and user guides) opened a dead tab; Help now resolves a link against the directory of the guide it is read in, so it
+    opens in Help and the guides stay correct on GitHub. Inside one guide such a link takes the reader to the start of the
+    page it names (every part of a split guide has an anchor at its start; a link to the guide itself goes to its top) and
+    moves keyboard focus to the heading there, as a link to a heading does. A heading whose id is a property of `document`
+    (`## Links`) lost its id to the sanitizer's DOM-clobbering protection and could not be linked to; it now has the
+    `user-content-` form of the id, and a link to `#links` finds it. A heading with an `&` in it (`## Duplicate Scanner & Action Rules`)
+    got the id `…-amp-…` instead of the GitHub one every link and help control uses, so linking to it scrolled nowhere;
+    the id is now slugged from the heading's text. The gate now replays both rules over every link and `#anchor`.
   - The suite READMEs and the contribution guide no longer carry hand-written file lists or container counts.
 - **The test database no longer runs out of memory by the time CI reaches the standalone suite.** MongoDB keeps a
   dropped collection open for five minutes for snapshot reads, and the suites drop thousands in that window: after

@@ -12,7 +12,7 @@
  *
  * ## What it does
  *
- * - every failure message (`failureMessages[]`, a suite's `message`) becomes the recorder's `maskText`: first line,
+ * - every failure message (`failureMessages[]`, a suite's `message`) becomes `maskText` (`scripts/_shared/mask-text.mjs`): first line,
  *   the one list of token shapes (`testing/_shared/secret-masking.mjs`), home paths, 300 characters;
  * - `failureDetails` (objects carrying the stack) is dropped;
  * - a spec's `name` becomes its repo-relative path (an absolute path outside the checkout is masked as text);
@@ -35,7 +35,7 @@ import { readFileSync, writeFileSync, existsSync, unlinkSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { isEntryPoint } from './_shared/script-cli.mjs';
 import { repoRelative } from './_shared/repo-path.mjs';
-import { maskText } from './test-times.mjs';
+import { maskText } from './_shared/mask-text.mjs';
 import { maskSecrets } from '../testing/_shared/secret-masking.mjs';
 
 /** Keys whose value is a failure message: first line, masked, capped. */

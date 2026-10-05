@@ -33,8 +33,10 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { pathToFileURL } from 'node:url';
-import { resolve } from 'node:path';
-import { readFileSync } from 'node:fs';
+import { resolve, join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { readFileSync, mkdtempSync, rmSync } from 'node:fs';
+import timingReporter, { TIMING_ENV } from '../_shared/timing-reporter.mjs';
 import { trackedSources, REPO_ROOT } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import { startFakeYthril, FAKE_TOKEN, FAKE_SPACE } from '../_shared/fake-ythril-tool-server.mjs';
@@ -97,7 +99,7 @@ let server;
 
 before(async () => {
   ({ maskSecrets: mask } = await import(url(MASKING)));
-  ({ maskText } = await import(url('scripts/test-times.mjs')));
+  ({ maskText } = await import(url('scripts/_shared/mask-text.mjs')));
   ({ createYthrilApi } = await import(url('scripts/_shared/ythril-api.mjs')));
   server = await startFakeYthril();
 });
@@ -147,6 +149,79 @@ describe('every door that masks answers by that list', () => {
   });
 });
 
+describe('masking takes time in proportion to the text, whatever the text is (every door)', () => {
+  /*
+   * Why this is a row of its own: the masker runs over UNTRUSTED text before any cap (the reporter's `firstLine` and the
+   * recorder's `maskText` mask the whole first line and slice afterwards; the client report masks every string). A
+   * pattern whose cost grows with the SQUARE of the text it does not match is a self-inflicted slowdown there, and the
+   * server's own redactor is held to linear time for the same reason (CHANGELOG, the `redactSecrets` entry). The URL
+   * userinfo pattern was exactly that: `\b` lets a scheme start again after every `-`, `.` and `+`, and each start read
+   * the rest of the run before failing to find `://`. Measured on 40 000 characters of `a-`: 368 ms, and 4x per doubling.
+   *
+   * The input is a run of the separators a scheme may contain, and long enough (100 000 characters) that a quadratic
+   * pattern costs seconds where a linear one costs milliseconds, so a slow CI machine cannot make the wrong one pass:
+   * the budget is 250 ms, and the answer must still be the input unchanged (nothing in it is a credential).
+   */
+  const LONG_UNITS = [['a-', 'a hyphen'], ['a.', 'a dot'], ['a+', 'a plus']];
+  const LONG_CHARS = 100_000;
+  const BUDGET_MS = 250;
+  const longInput = (unit) => unit.repeat(LONG_CHARS / unit.length);
+  const timed = async (fn) => { const t0 = performance.now(); const out = await fn(); return { out, ms: performance.now() - t0 }; };
+
+  for (const [unit, what] of LONG_UNITS) {
+    it(`maskSecrets over ${LONG_CHARS} characters of ${what}-separated letters is fast, and leaves them alone`, async () => {
+      const text = longInput(unit);
+      const { out, ms } = await timed(() => mask(text));
+      assert.ok(ms < BUDGET_MS, `${ms.toFixed(0)} ms for ${LONG_CHARS} characters: a masking pattern is not linear-time`);
+      assert.equal(out, text);
+    });
+
+    it(`the recorder's maskText over ${LONG_CHARS} characters of ${what}-separated letters is fast`, async () => {
+      const { ms } = await timed(() => maskText(longInput(unit)));
+      assert.ok(ms < BUDGET_MS, `${ms.toFixed(0)} ms`);
+    });
+
+    it(`the Ythril client's error sentence over ${LONG_CHARS} characters of ${what}-separated letters is fast`, async () => {
+      server.respond = () => ({ status: 500, body: { ok: false, error: longInput(unit), data: null } });
+      try {
+        const api = createYthrilApi({ url: server.url, token: FAKE_TOKEN });
+        const { ms } = await timed(() => assert.rejects(api.call('filter', { space: FAKE_SPACE, collection: 'chrono' }), /HTTP 500/));
+        assert.ok(ms < BUDGET_MS * 4, `${ms.toFixed(0)} ms`); // a round trip is in it too
+      } finally { server.respond = undefined; }
+    });
+
+    it(`the timing reporter's failure line over ${LONG_CHARS} characters of ${what}-separated letters is fast`, async () => {
+      const dir = mkdtempSync(join(tmpdir(), 'mask-linear-'));
+      const saved = { ...process.env };
+      process.env[TIMING_ENV.destination] = join(dir, 'x.jsonl');
+      process.env[TIMING_ENV.suite] = 'mask';
+      process.env[TIMING_ENV.batch] = 'linear';
+      try {
+        const event = { type: 'test:fail', data: { name: 't', file: join(REPO_ROOT, 'testing/standalone/x.test.js'), nesting: 1, details: { duration_ms: 1, error: { message: longInput(unit) } } } };
+        const { ms } = await timed(async () => { for await (const _ of timingReporter((async function* () { yield event; })())) { /* the reporter yields nothing */ } });
+        assert.ok(ms < BUDGET_MS, `${ms.toFixed(0)} ms`);
+        const written = readFileSync(join(dir, 'x.jsonl'), 'utf8');
+        assert.ok(written.includes('"status":"fail"'), 'the reporter wrote no failure line, so nothing was measured');
+      } finally {
+        for (const k of Object.keys(process.env)) if (!(k in saved)) delete process.env[k];
+        Object.assign(process.env, saved);
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it(`the client report mask over ${LONG_CHARS} characters of ${what}-separated letters is fast`, async () => {
+      const { maskClientReport } = await import(url('scripts/mask-client-report.mjs'));
+      const report = { testResults: [{ name: 'client/src/x.spec.ts', message: longInput(unit), assertionResults: [{ title: longInput(unit), failureMessages: [longInput(unit)] }] }] };
+      const { ms } = await timed(() => maskClientReport(report, REPO_ROOT));
+      assert.ok(ms < BUDGET_MS * 3, `${ms.toFixed(0)} ms for three long strings`);
+    });
+  }
+
+  it('the userinfo rows still read right when the scheme starts after a separator, as a URL in prose does', () => {
+    assert.equal(mask('see (https://u:p@host/x) and a-b.c+d://x:y@h'), 'see (https://***@host/x) and a-b.c+d://***@h');
+  });
+});
+
 describe('no other file re-writes the token regexes this gate knows', () => {
   /*
    * Derived, never listed: every tracked source of the maintainer scripts and the test tooling, tests and fixtures
@@ -175,7 +250,7 @@ describe('no other file re-writes the token regexes this gate knows', () => {
   });
 
   it('the masking module is read by the three doors that used to keep their own', () => {
-    for (const f of ['testing/_shared/timing-reporter.mjs', 'scripts/test-times.mjs', 'scripts/_shared/ythril-api.mjs']) {
+    for (const f of ['testing/_shared/timing-reporter.mjs', 'scripts/_shared/mask-text.mjs', 'scripts/_shared/ythril-api.mjs']) {
       assert.match(readFileSync(resolve(REPO_ROOT, f), 'utf8'), /secret-masking\.mjs/, `${f} does not import the masking module`);
     }
   });

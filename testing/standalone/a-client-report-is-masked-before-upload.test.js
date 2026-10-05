@@ -28,7 +28,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { REPO_ROOT } from './_sources.mjs';
+import { REPO_ROOT, trackedSources } from './_sources.mjs';
 import { runScript } from './_run-script.mjs';
 import { loadCi, stepsOf, shellOf, usesOf } from '../_shared/ci-workflow.mjs';
 import { readClientResults } from '../../scripts/unexpected-skips.mjs';
@@ -55,6 +55,37 @@ const report = () => ({
       },
     ],
   }],
+});
+
+describe('the question "mask one line" has a module of its own, and no command line is imported for it', () => {
+  /*
+   * `maskText` (first line, the one list of token shapes, home paths, the cap) lived in `scripts/test-times.mjs`, a
+   * recorder with its own `main`, and this script imported all of it for one function: a change to the recorder's
+   * imports or load-time work became this script's, in a CI step whose failure leaves the report unmasked. The subjects
+   * are derived (every module this script imports by a relative path), and a module that is a COMMAND (it asks whether it
+   * is the entry point) is not one it may import.
+   */
+  const source = (rel) => readFileSync(join(REPO_ROOT, rel), 'utf8');
+  const importsOf = (rel) => [...source(rel).matchAll(/^import\s[^;]*?from\s+'(\.[^']+)'/gm)].map(m => m[1]);
+
+  it('imports no module that is itself a command line', () => {
+    const imports = importsOf('scripts/mask-client-report.mjs');
+    assert.ok(imports.length >= 3, `the scan found ${imports.length} relative imports: the pattern is wrong`);
+    const commands = imports.filter(spec => /\bif\s*\(\s*isEntryPoint\(/.test(readFileSync(join(REPO_ROOT, 'scripts', spec), 'utf8')));
+    assert.deepEqual(commands, [], 'mask-client-report.mjs imports a command line for a function: give the function a module of its own');
+  });
+
+  it('`maskText` is defined in one module, and the recorder and this script both take it from there', () => {
+    const defining = trackedSources(['scripts', 'testing', 'benchmarks'], { ext: ['.mjs', '.js'], floor: 100 })
+      .filter(f => /^export\s+function\s+maskText\s*\(/m.test(source(f)));
+    assert.equal(defining.length, 1, `maskText is defined in ${defining.length} module(s): ${defining.join(', ')}`);
+    const home = defining[0];
+    assert.notEqual(home, 'scripts/test-times.mjs', 'maskText is still defined in the recorder, which is a command line');
+    for (const user of ['scripts/test-times.mjs', 'scripts/mask-client-report.mjs']) {
+      const stem = home.split('/').at(-1);
+      assert.match(source(user), new RegExp(`from\\s+'[^']*${stem.replace('.', '\\.')}'`), `${user} does not take maskText from ${home}`);
+    }
+  });
 });
 
 describe('maskClientReport', () => {

@@ -101,9 +101,11 @@ before(async () => {
   // trails them by a few seconds, and recall answered 4 of 28. ~2 s for 28 records with the inference threads sized
   // to the container, so the 300-second worry below no longer applies to this wait.
   if (ids.length === COUNT) await waitForEmbedQueueEmpty(INSTANCES.a, token(), SPACE);
-  // NO wait for the vector index. Every recall also scans the newest records straight from the collection
-  // since 5.0, so the test does not depend on index lag. This used to pass
-  // `includeFreshWrites: true` for the same reason; the flag is gone because the scan is unconditional.
+  // NO wait for the vector index HERE, and the cases that use these records without one do not need it: every recall also
+  // scans the newest records straight from the collection since 5.0, so they do not depend on index lag. This used to pass
+  // `includeFreshWrites: true` for the same reason; the flag is gone because the scan is unconditional. The ONE case that
+  // does need the index — the ranking-stability walk of the pages, whose premise is that no record is still moving from
+  // the fresh-write scan to `$vectorSearch` — waits for `$vectorSearch` itself to list every record, inside that case.
   //
   // IT DOES DEPEND ON `DUPE_FRESH_WINDOW_MS`, which `testing/docker-compose.test.yml` sets to ten minutes —
   // the maximum `env-num.ts` accepts, and it refuses anything higher at boot rather than clamping.

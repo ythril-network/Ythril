@@ -5,7 +5,7 @@
  *
  * "What of this text may not be stored or printed because it looks like a credential?" - asked by the timing reporter
  * (a failure message, a test name, a skip reason: the file it writes is uploaded as a public CI artifact), by the
- * recorder before a `Test-Run` is written (`scripts/test-times.mjs`), and by the Ythril client before an error carries
+ * recorder before a `Test-Run` is written (`scripts/_shared/mask-text.mjs`, which the recorder and the client-report mask both use), and by the Ythril client before an error carries
  * the server's sentence (`scripts/_shared/ythril-api.mjs`).
  *
  * ## What it prevents
@@ -42,7 +42,7 @@
  *
  * Not the server's `redactSecrets` (`server/src/util/log.ts`): that answers "what must not reach a server log line"
  * (URL userinfo, credential query parameters, a `Bearer` value), runs linear-time over untrusted peer text, and ships
- * in the server image, which holds no `testing/`. And not a home-path scrub (`scripts/test-times.mjs` keeps that: it
+ * in the server image, which holds no `testing/`. And not a home-path scrub (`scripts/_shared/mask-text.mjs` keeps that: it
  * is about where a file lives, not about a secret).
  *
  * `a-secret-is-masked-by-one-list.test.js` pins every floor with a truth table and fails on a token-family pattern
@@ -55,7 +55,11 @@
  */
 const SHAPES = Object.freeze([
   [/\bAuthorization:\s*(?:(?:Bearer|Basic|Digest|Token)\s+)?\S+/gi, 'Authorization: ***'],
-  [/\b([a-z][a-z0-9+.-]*:\/\/)[^\s/]+@/gi, '$1***@'],
+  // The scheme starts only where a scheme can: not after a character it may itself contain. Without that anchor (`\b` was
+  // it) a scheme could start again after every `-`, `.` and `+` of a long run, and each start read the rest of the run
+  // before failing to find `://`: quadratic in the length of text nothing in which is a credential. With it, each run is
+  // read from its start once, so the cost is linear in the text (held, over 100 000 characters, by the gate named above).
+  [/(?<![a-z0-9+.-])([a-z][a-z0-9+.-]*:\/\/)[^\s/]+@/gi, '$1***@'],
   [/ythril_[A-Za-z0-9]{8,}(?:[_-][A-Za-z0-9]+)*/g, '***'],
   [/gh[pousr]_[A-Za-z0-9]{16,}/g, '***'],
   [/github_pat_[A-Za-z0-9_]{16,}/g, '***'],

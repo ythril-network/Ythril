@@ -43,7 +43,7 @@
  * would make every reader of a collection depend on the index lifecycle.
  */
 import type { Collection, Db } from 'mongodb';
-import { BOUNDED_OPTIONS_ARGUMENT, PLAIN_WRITE_METHODS, RETURNS_CURSOR, callBounded } from './write-bound.js';
+import { BOUNDED_OPTIONS_ARGUMENT, PLAIN_WRITE_METHODS, RETURNS_CURSOR, callBounded, type BoundTarget } from './write-bound.js';
 
 /** What a method does to the set of records in its collection. */
 export interface MethodEffect {
@@ -181,13 +181,14 @@ export function observeRecordWrites(db: Db, isObserved: (name: string) => boolea
       return (name: string, options?: object) =>
         // `target.timeoutMS` is the `timeoutMS` every operation of this database inherits (the client's, from `MONGO_URI`), which
         // a bounded plain write has to neutralise (`db/write-bound.ts`).
-        observeCollection(target.collection(name, options as never), name, isObserved(name) ? listener : null, target.timeoutMS);
+        observeCollection(target.collection(name, options as never), name, isObserved(name) ? listener : null,
+          { collection: name, inheritedTimeoutMs: target.timeoutMS });
     },
   });
 }
 
 function observeCollection<T extends object>(
-  coll: Collection<T>, name: string, listener: RecordWriteListener | null, inheritedTimeoutMs: number | undefined,
+  coll: Collection<T>, name: string, listener: RecordWriteListener | null, boundTarget: BoundTarget,
 ): Collection<T> {
   return new Proxy(coll, {
     get(target, prop, receiver) {
@@ -199,11 +200,11 @@ function observeCollection<T extends object>(
       if (!bounded && !reports) return value;
       const effect = classified === 'read' ? UNKNOWN_EFFECT : classified ?? UNKNOWN_EFFECT;
       return (...given: unknown[]) => {
-        const call =(a: unknown[]): unknown => (value as (...x: unknown[]) => unknown).apply(target, a);
+        const call = (a: unknown[]): unknown => (value as (...x: unknown[]) => unknown).apply(target, a);
         let out: unknown;
         if (bounded) {
           // A hold whose time is spent refuses the operation unsent; nothing was written, so nothing is reported.
-          try { out = callBounded(prop, given, call, inheritedTimeoutMs); } catch (err) {
+          try { out = callBounded(prop, given, call, boundTarget); } catch (err) {
             if (RETURNS_CURSOR.has(prop)) throw err;
             return Promise.reject(err);
           }

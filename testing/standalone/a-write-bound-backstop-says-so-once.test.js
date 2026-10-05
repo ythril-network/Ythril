@@ -27,16 +27,20 @@ import assert from 'node:assert/strict';
 import { logLinesDuring } from './_log-lines.mjs';
 import { callBounded, withinWriteBound, setWriteBoundForTest, SERVER_FIRST_MARGIN_MS } from '../../server/dist/db/write-bound.js';
 import { StoreTimeout } from '../../server/dist/db/write-timeout.js';
+import { observeRecordWrites } from '../../server/dist/db/record-write-observer.js';
 
 /** The bound the cases run at: small, so the backstop (bound + the margin) is a fraction of a second away. */
 const BOUND_MS = 40;
 const BOUND = { writeTimeoutMs: BOUND_MS, holdDeadlineMs: 5000 };
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
+/** Where the calls go: a space's collection (the space is read from its name), and what the client inherits (nothing here). */
+const TARGET = { collection: 'sp1_facts', inheritedTimeoutMs: undefined };
+
 /** Run one bounded write through `withinWriteBound`, with `driver` as the driver call; what it settled with. */
-async function bounded(method, driver) {
+async function bounded(method, driver, target = TARGET) {
   return withinWriteBound(async () => {
-    try { return { ok: true, value: await callBounded(method, [{ _id: 'x' }, {}], driver) }; } catch (error) { return { ok: false, error }; }
+    try { return { ok: true, value: await callBounded(method, [{ _id: 'x' }, {}], driver, target) }; } catch (error) { return { ok: false, error }; }
   });
 }
 
@@ -60,6 +64,35 @@ describe('the write bound\'s backstop says so, once', () => {
     assert.match(said[0], /WARN/, 'the line is a warning');
     assert.match(said[0], /insertOne/, 'the line names the method that was ended');
     assert.ok(said[0].includes(String(BOUND_MS)), `the line names the bound (${BOUND_MS} ms) the write was armed for: ${said[0]}`);
+  });
+
+  it('the line names the collection and the space it was going to, so an operator can tell WHERE the server stalled', async () => {
+    const { lines } = await logLinesDuring(() => bounded('updateOne', () => new Promise(() => {})));
+    const said = backstopLines(lines);
+    assert.equal(said.length, 1);
+    assert.match(said[0], /sp1_facts/, `the line does not name the collection: ${said[0]}`);
+    assert.match(said[0], /\bsp1\b/, `the line does not name the space: ${said[0]}`);
+  });
+
+  it('a collection that belongs to no space is named without one', async () => {
+    const { lines } = await logLinesDuring(() => bounded('updateOne', () => new Promise(() => {}), { collection: 'counters', inheritedTimeoutMs: undefined }));
+    const said = backstopLines(lines);
+    assert.equal(said.length, 1);
+    assert.match(said[0], /counters/);
+    assert.doesNotMatch(said[0], /space/i, `the line names a space that is not known: ${said[0]}`);
+  });
+
+  it('through the one door every collection is reached by, the line carries the collection and space it was called with', async () => {
+    // `observeRecordWrites` is where the collection name is known; what it hands the bound is what the line says.
+    const stalled = { updateOne: () => new Promise(() => {}), timeoutMS: undefined };
+    const db = observeRecordWrites({ collection: () => stalled, timeoutMS: undefined }, () => false, () => {});
+    const { lines } = await logLinesDuring(async () => {
+      await withinWriteBound(async () => { try { await db.collection('spaceq_facts').updateOne({ _id: 'x' }, {}); } catch { /* the backstop answers StoreTimeout */ } });
+    });
+    const said = backstopLines(lines);
+    assert.equal(said.length, 1);
+    assert.match(said[0], /spaceq_facts/, said[0]);
+    assert.match(said[0], /\bspaceq\b/, said[0]);
   });
 
   it('every method the bound covers says so, not only the one that was tried first', async () => {

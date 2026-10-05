@@ -38,7 +38,7 @@ const UPLOAD_RESULTS = (job) => `
           retention-days: 30`;
 
 /** A stack job: restore the image, start the stack from it without building or pulling, run, upload. */
-const STACK_JOB = (id, name) => `
+const STACK_JOB = (id, name, script = id) => `
   ${id}:
     name: ${name}
     needs: prepare
@@ -60,7 +60,7 @@ const STACK_JOB = (id, name) => `
           docker compose -p ythril-test -f testing/docker-compose.test.yml up -d --wait \\
             --no-build --pull never
       - name: Run ${id}
-        run: npm run test:${id}${UPLOAD_RESULTS(id)}`;
+        run: npm run test:${script}${UPLOAD_RESULTS(id)}`;
 
 export const NEEDED_JOBS = ['client-tests', 'prepare', 'standalone', 'integration', 'sync'];
 
@@ -131,7 +131,7 @@ jobs:
             server/dist
           if-no-files-found: error
           retention-days: 1
-          compression-level: 0${STACK_JOB('standalone', 'Standalone')}${STACK_JOB('integration', 'Integration')}${STACK_JOB('sync', 'Sync')}
+          compression-level: 0${STACK_JOB('standalone', 'Standalone', 'standalone:instance')}${STACK_JOB('integration', 'Integration')}${STACK_JOB('sync', 'Sync')}
   ci-advisory:
     name: CI advisory
     needs: [standalone, integration, sync]

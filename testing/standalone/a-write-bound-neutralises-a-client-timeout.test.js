@@ -31,13 +31,15 @@ import { StoreTimeout } from '../../server/dist/db/write-timeout.js';
 
 const BOUND_MS = 4000;
 const CLIENT_TIMEOUT_MS = 300;
+/** The target a call states: where it goes, and the `timeoutMS` the client carries (`undefined` for none). */
+const targetOf = (inheritedTimeoutMs) => ({ collection: 'sp_memories', inheritedTimeoutMs });
 
 /** What the driver is called with: the arguments of the one call, captured; answers `result`. */
 async function calledWith(method, inherited, { result = { ok: true } } = {}) {
   let seen;
   const args = Array.from({ length: BOUNDED_OPTIONS_ARGUMENT[method] + 1 }, () => ({}));
   const out = await withinWriteBound(async () => {
-    const returned = callBounded(method, args, (a) => { seen = a; return Promise.resolve(result); }, inherited);
+    const returned = callBounded(method, args, (a) => { seen = a; return Promise.resolve(result); }, targetOf(inherited));
     return returned;
   });
   assert.equal(out, result, `${method}: the driver's answer was not handed back`);
@@ -68,7 +70,7 @@ describe('a bounded plain write and a timeoutMS the client carries', () => {
 
   it('a caller\'s own timeoutMS still lowers the server\'s deadline and is not passed on to the driver as a clock', async () => {
     let seen;
-    await withinWriteBound(async () => callBounded('updateOne', [{}, {}, { timeoutMS: 1500 }], (a) => { seen = a; return Promise.resolve(1); }, CLIENT_TIMEOUT_MS));
+    await withinWriteBound(async () => callBounded('updateOne', [{}, {}, { timeoutMS: 1500 }], (a) => { seen = a; return Promise.resolve(1); }, targetOf(CLIENT_TIMEOUT_MS)));
     assert.equal(seen[2].maxTimeMS, 1500);
     assert.equal(seen[2].timeoutMS, 0);
   });
@@ -81,14 +83,14 @@ describe('a bounded plain write and a timeoutMS the client carries', () => {
 
   it('a write outside any scope is called as it came, whatever the client carries', () => {
     let seen;
-    callBounded('insertOne', [{ a: 1 }, { w: 1 }], (a) => { seen = a; return 1; }, CLIENT_TIMEOUT_MS);
+    callBounded('insertOne', [{ a: 1 }, { w: 1 }], (a) => { seen = a; return 1; }, targetOf(CLIENT_TIMEOUT_MS));
     assert.deepEqual(seen, [{ a: 1 }, { w: 1 }]);
   });
 
   it('the timeout the driver reports with timeoutMS 0 (no code 50) is answered as StoreTimeout, the driver\'s error its cause', async () => {
     const driverError = Object.assign(new Error('Server reported a timeout error'), { name: 'MongoOperationTimeoutError' });
     const err = await withinWriteBound(async () => {
-      try { await callBounded('updateOne', [{}, {}, {}], () => Promise.reject(driverError), CLIENT_TIMEOUT_MS); } catch (e) { return e; }
+      try { await callBounded('updateOne', [{}, {}, {}], () => Promise.reject(driverError), targetOf(CLIENT_TIMEOUT_MS)); } catch (e) { return e; }
       return null;
     });
     assert.ok(err instanceof StoreTimeout, `answered ${err}`);

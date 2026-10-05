@@ -12,6 +12,7 @@
 import type { ClientSession } from 'mongodb';
 import { col, asFilter, asUpdate, asBulk } from '../db/mongo.js';
 import { withSeq, withAllocatedSeqs } from '../util/seq.js';
+import { writeInOneCommands } from '../db/one-command.js';
 import { readStoredById } from '../db/read-by-id.js';
 import { inHeldTransaction } from './held-transaction.js';
 import { NUMERIC_MERGE_FNS, BOOLEAN_MERGE_FNS } from '../config/types-knowledge.js';
@@ -869,12 +870,15 @@ async function relinkAndAbsorb(
     { updatedAt: now }, [], session);
   const inPlace = edgesToRelink.filter((_, i) => moved[i] === null);
   if (inPlace.length > 0) {
-    await withAllocatedSeqs(spaceId, inPlace.length, (first) => edgeColl.bulkWrite(asBulk<EdgeDoc>(inPlace.map((r, i) => {
+    // A hub's count is the store's, so the write is sliced to one command each (`db/one-command.ts`), inside the one hold.
+    // `ordered: true` here and at the two writes below: they run in the merge's transaction, which the server aborts at the
+    // first error, so going on to the next slice would only send it into a dead transaction and bury the real failure.
+    await withAllocatedSeqs(spaceId, inPlace.length, (first) => writeInOneCommands(inPlace.map((r, i) => {
       const updates: Record<string, unknown> = { updatedAt: now, seq: first + i };
       if (r.edge.from === absorbed._id) updates['from'] = survivor._id;
       if (r.edge.to === absorbed._id) updates['to'] = survivor._id;
       return { updateOne: { filter: { _id: r.edge._id }, update: { $set: updates } } };
-    })), { ordered: false, session }), 'entity.merge.edge');
+    }), (slice, { ordered }) => edgeColl.bulkWrite(asBulk<EdgeDoc>(slice), { ordered, session }), { ordered: true }), 'entity.merge.edge');
   }
 
   /*
@@ -899,9 +903,9 @@ async function relinkAndAbsorb(
     .find(relinkFilters(spaceId, absorbed._id).faces, { session, projection: { _id: 1 } })
     .toArray() as Array<Pick<FileMetaDoc, '_id'>>;
   if (affectedFiles.length > 0) {
-    await withAllocatedSeqs(spaceId, affectedFiles.length, (first) => fileColl.bulkWrite(asBulk<FileMetaDoc>(affectedFiles.map((f, i) => ({
+    await withAllocatedSeqs(spaceId, affectedFiles.length, (first) => writeInOneCommands(affectedFiles.map((f, i) => ({
       updateOne: { filter: { _id: f._id }, update: { $set: { faceEntityId: survivor._id, updatedAt: now, seq: first + i } } },
-    }))), { ordered: false, session }), 'entity.merge.file');
+    })), (slice, { ordered }) => fileColl.bulkWrite(asBulk<FileMetaDoc>(slice), { ordered, session }), { ordered: true }), 'entity.merge.file');
   }
 
   /*
@@ -930,13 +934,13 @@ async function relinkAndAbsorb(
       linkMoves.map(({ link }) => ({ _id: link._id, type: 'link' as const, deletedAt: now, originalSeq: link.seq })),
       { session, filter: { spaceId } });
     if (fresh.length > 0) {
-      await withAllocatedSeqs(spaceId, fresh.length, (first) => linkColl.bulkWrite(asBulk<LinkDoc>(fresh.map(({ link, newId }, i) => ({
+      await withAllocatedSeqs(spaceId, fresh.length, (first) => writeInOneCommands(fresh.map(({ link, newId }, i) => ({
         replaceOne: {
           filter: { _id: newId, spaceId },
           replacement: { ...link, _id: newId, to: survivor._id, updatedAt: now, seq: first + i },
           upsert: true,
         },
-      }))), { ordered: false, session }), 'entity.merge.link');
+      })), (slice, { ordered }) => linkColl.bulkWrite(asBulk<LinkDoc>(slice), { ordered, session }), { ordered: true }), 'entity.merge.link');
     }
   }
 

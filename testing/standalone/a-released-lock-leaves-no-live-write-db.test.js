@@ -120,6 +120,33 @@ describe('a released lock leaves no live write', { skip }, () => {
     });
   }
 
+  it('an insert lock holds the write behind it even when the collection does not exist yet', { timeout: REPS * 10_000 }, async () => {
+    /*
+     * A transaction that inserts into a collection that is not there creates it INSIDE the transaction, and what a
+     * transaction created is invisible to every other session until it commits. The plain insert of the same id then
+     * creates the collection itself and lands at once: the lock held nothing, and the case above that "proved" the stall by
+     * seeing the write alive passed on how long that insert happened to take (found as `the write behind the lock was never
+     * active` in a full -db batch: its first repetition runs in a database that was dropped on entry). The helper has to
+     * make the collection exist before it locks.
+     */
+    const landedEarly = [];
+    for (let rep = 0; rep < REPS; rep++) {
+      await mongo.getDb().collection(COLL).drop().catch(() => {});
+      const lock = await holdDocumentLock(mongo, COLL, { insert: { _id: 'locked-id', v: 'lock' } });
+      const waiting = items.insertOne({ _id: 'locked-id', v: 'the write that waited' }).then(() => null, err => err);
+      try {
+        const early = await settleWithin(waiting, 700);
+        if (early.settled) landedEarly.push(`#${rep}: answered after ${early.elapsedMs} ms with ${early.value ? early.value.message : 'a landed insert'}`);
+      } finally {
+        await lock.release();
+      }
+      assert.equal(await waiting, null, 'fixture: the write that waited behind the lock failed instead of landing');
+    }
+    assert.deepEqual(landedEarly, [],
+      `the write behind an insert lock was answered while the lock was still held in ${landedEarly.length} of ${REPS} repetitions — `
+      + 'the lock stalled nothing, so every case built on it that goes on to "release" it is checking a stall that was not there');
+  });
+
   it('a release with nothing alive resolves at once, and releasing twice is safe', async () => {
     const lock = await holdDocumentLock(mongo, COLL, { insert: { _id: 'quiet', v: 'lock' } });
     const started = Date.now();

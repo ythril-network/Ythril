@@ -53,6 +53,26 @@ import { startTcpRelay } from './_tcp-relay.mjs';
 // ── A real lock ──────────────────────────────────────────────────────────────────────────────────────────────
 
 /**
+ * Make `collName` exist, so a transaction's insert into it locks an id instead of creating the collection.
+ *
+ * ## What it prevents
+ *
+ * A transaction that inserts into a collection that is not there creates the collection INSIDE the transaction, and what a
+ * transaction created is invisible to every other session until it commits: the plain insert of the same id creates the
+ * collection itself and lands at once, with the lock still held. An insert lock over an absent collection therefore stalls
+ * nothing — the "lock that locked nothing" below, reached by the one door `filter` cannot reach — and whatever a test then
+ * "proved" about the stall it saw was a race against how long that insert took (a full -db batch, a database dropped on
+ * entry: `the write behind the lock was never active`).
+ */
+async function ensureCollection(mongo, collName) {
+  try {
+    await mongo.getDb().createCollection(collName);
+  } catch (err) {
+    if (err?.codeName !== 'NamespaceExists' && err?.code !== 48) throw err;
+  }
+}
+
+/**
  * Hold a document lock with another session's open, uncommitted transaction until `release()`.
  *
  * @param {object} mongo  the server's `db/mongo.js` module (as `openTestMongo` / `openPushDoor().mongo` hand it)
@@ -76,6 +96,7 @@ import { startTcpRelay } from './_tcp-relay.mjs';
  */
 export async function holdDocumentLock(mongo, collName, { filter, insert } = {}) {
   assert.ok(!!filter !== !!insert, 'holdDocumentLock takes exactly one of filter or insert');
+  if (insert) await ensureCollection(mongo, collName);
   const session = mongo.getMongo().startSession();
   session.startTransaction();
   const coll = mongo.getDb().collection(collName);

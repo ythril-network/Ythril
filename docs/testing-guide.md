@@ -91,7 +91,7 @@ invocation: `test-results/<suite>-<batch>.jsonl`.
 
 One JSON object per test, per `describe` block and per file, then one closing line that says the file is whole. The
 fields and their meanings are one exported description, `TIMING_SCHEMA`, and the closing line's is `TIMING_END_SCHEMA`,
-both in [`testing/_shared/timing-reporter.mjs`](../testing/_shared/timing-reporter.mjs). This page does not repeat them:
+both in `testing/_shared/timing-reporter.mjs`. This page does not repeat them:
 a second list is a list that drifts. A test builds a real line and diffs its keys against the schema.
 
 Four things to know when you read a file:
@@ -174,6 +174,11 @@ What the recorder guarantees, and why each is there:
   sends what was kept.
 - **One record per run.** The identity is `recordKey` (`source:runId:attempt:job:suite`). The recorder finds by it, then
   updates or inserts, under a lock so one machine has one writer, and collapses duplicates of a key to the newest.
+- **The CI walk stops at the first recorded run.** `--record-ci` goes newest run first and stops at a run the instance holds a
+  record of for every job whose results artifact the run still lists, deciding that from the artifact list and the keys it
+  holds, with no download. A run recorded in part is completed (only the jobs it lacks are written), a recorded run whose
+  artifacts have expired is left as it is, and a recorded run with an artifact that can never be read (not a zip, past the
+  size cap) is said once per pass and does not fail it.
 - **Only trusted CI runs are read.** `--record-ci`, the baselines and `--trend` start from one function that admits a
   push to `main` of this repository through `ci.yml`, decided from the run object the Actions API returns and from nothing
   an artifact says about itself. A pull request, a fork or another workflow is never recorded. Artifact bytes are read as
@@ -191,7 +196,7 @@ What the recorder guarantees, and why each is there:
   credentials. `benchmarks/` uses the same module.
 - **Entries expire** under the retention the chrono type declares on the instance, so the history is bounded. The
   declaration is not written by hand: `node scripts/test-times.mjs --type-schema` prints the `schema_update` arguments
-  (the `Test-Run` type, one year of retention, embeddings suppressed, and the five default chrono types beside it,
+  (the `Test-Run` type, one year of retention, embeddings suppressed, and the server's default chrono types beside it,
   in merge mode), generated from the same list the recorder writes its records by. Send them with `schema_update` on
   `y-proj-ythril` once, and read the type back with `space_meta`; without that, nothing bounds the history.
 
@@ -231,7 +236,7 @@ naming the cause, so one root cause is one red and not a cascade of "prior test 
 A wait has four decisions in it that hand-written copies each got differently, and each has cost a red CI run: what is
 said at the deadline, whether a thrown probe ends the wait, whether a probe that never answers can outlast the deadline,
 and whether a timer is left armed. They are made once, in
-[`testing/_shared/wait-for.mjs`](../testing/_shared/wait-for.mjs); read its header for the full contract.
+`testing/_shared/wait-for.mjs`; read its header for the full contract.
 
 | Need | Use |
 |---|---|

@@ -44,7 +44,9 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { REPO_ROOT } from './_sources.mjs';
 import {
   MERGE_GATE_NAME, loadCi, parseWorkflow, jobEntries, stepsOf, shellOf, usesOf, isCommitPinned, stepsUsing,
   runsNpmCi, expressionOf, transitiveNeeds, isAdvisory, isTrue,
@@ -226,6 +228,69 @@ function uploadViolations(doc) {
     }
   }
   if (seen < UPLOAD_FLOOR) v.push(`only ${seen} upload step(s) (floor ${UPLOAD_FLOOR}): the run's measurements and image are not kept, or the derivation is broken`);
+  return v;
+}
+
+// ───────────────────────────────────────── one suite per results artifact ─────────────────────────────────────────
+
+/**
+ * `scripts/test-times.mjs` records a CI run per JOB, by that job's `test-results-<job>` artifact: a job whose artifact is
+ * recorded is not downloaded again, so a job whose artifact held TWO suites would be read as recorded after the first and
+ * the second would never be written (round S+T, S7). Holding that needs a fact about the workflow, not about the script:
+ * each job that uploads results RUNS one suite, by one runner command that is not an aggregate. The runner commands are read
+ * out of the steps (`npm run test…`, `npm test` and `npm t`, `node … --test`, a `testing/_init/run-…` script, `vitest`) and the
+ * aggregates out of `package.json` (a `test…` script that runs several suites in one command: its body chains two runner
+ * commands with `&&` or `;`, or it is one of the two runners that are aggregates by design), so a new aggregate script is
+ * refused without being named here. A spelling `RUNNER` does not know (`npx jest`) is the one thing left that counts as no suite.
+ */
+const RUNNER = /\bnpm run test(?::[\w-]+)*\b|\bnpm (?:test|t)\b|\bnode\s+(?:\.\/)?testing\/_init\/run-[\w-]+\.mjs\b|\bnode\b[^\n;&|]*\s--test\b|\bvitest\b/g;
+const RESULTS_JOB_FLOOR = 3;
+const runnersIn = (text) => [...String(text).matchAll(new RegExp(RUNNER.source, 'g'))].map((m) => m[0]);
+
+/** The `npm` script a runner command runs: `npm run test:x` is `test:x`, `npm test` and `npm t` are `test`; any other spelling names none. */
+const scriptNamed = (runner) => /^npm run (\S+)$/.exec(runner)?.[1] ?? (/^npm (?:test|t)$/.test(runner) ? 'test' : undefined);
+
+const packageScripts = () => JSON.parse(readFileSync(join(REPO_ROOT, 'package.json'), 'utf8')).scripts;
+
+/**
+ * The `npm run` names of the scripts that run more than one suite in one command, derived from the script bodies: a body
+ * that chains two runner commands (`&&`, `;`, in whatever spelling `RUNNER` reads), the two runners that are aggregates by
+ * design, and the standalone runner without `--only`.
+ */
+function aggregateTestScripts(allScripts = packageScripts()) {
+  const scripts = Object.entries(allScripts).filter(([name]) => name.startsWith('test'));
+  const chainsTwoRunners = (cmd) => cmd.split(/&&|;/).reduce((n, part) => n + runnersIn(part).length, 0) >= 2;
+  const aggregates = new Set(scripts.filter(([, cmd]) => /run-all-core|run-test-all/.test(cmd) || chainsTwoRunners(cmd)
+    || (/run-standalone\.mjs/.test(cmd) && !/--only=/.test(cmd))).map(([name]) => name));
+  // An alias of an aggregate (`test:all:keep` runs `test:all:core`) is one.
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const [name, cmd] of scripts) {
+      const target = /^npm run ([\w:-]+)\s*$/.exec(cmd)?.[1];
+      if (target && aggregates.has(target) && !aggregates.has(name)) { aggregates.add(name); grew = true; }
+    }
+  }
+  return [...aggregates];
+}
+
+function oneSuitePerResultsArtifactViolations(doc, scripts = packageScripts()) {
+  const v = [];
+  const aggregates = aggregateTestScripts(scripts);
+  let jobsWithResults = 0;
+  for (const { id, job } of jobEntries(doc)) {
+    const uploads = stepsUsing(job, 'actions/upload-artifact').filter((u) => /^test-results/.test(String(u.with?.name ?? '')));
+    if (uploads.length === 0) continue;
+    jobsWithResults++;
+    if (uploads.length > 1) v.push(`${id}: ${uploads.length} results artifacts from one job`);
+    const runners = stepsOf(job).flatMap((st) => runnersIn(st.run ?? ''));
+    if (runners.length !== 1) v.push(`${id}: uploads results and carries ${runners.length} suite runner command(s) (${runners.join('; ') || 'none'}): its artifact must hold exactly one suite`);
+    for (const r of runners) {
+      const name = scriptNamed(r);
+      if (name && aggregates.includes(name)) v.push(`${id}: \`${r}\` runs several suites in one command; its results are one artifact`);
+    }
+  }
+  if (jobsWithResults < RESULTS_JOB_FLOOR) v.push(`only ${jobsWithResults} job(s) upload results (floor ${RESULTS_JOB_FLOOR}): the derivation is broken, or the results are not kept`);
+  if (aggregates.length < 1) v.push('no aggregate test script found in package.json: the derivation of "runs several suites" is broken');
   return v;
 }
 
@@ -495,6 +560,7 @@ const RULES = {
   'merge gate': mergeGateViolations,
   'job timeouts': timeoutViolations,
   'artifact uploads': uploadViolations,
+  'one suite per results artifact': oneSuitePerResultsArtifactViolations,
   'caches': cacheViolations,
   'runtime token': runtimeTokenViolations,
   'permissions': permissionViolations,
@@ -700,6 +766,33 @@ const BREAKAGES = [
     const s = stepWhere(job(d, 'client-tests'), (x) => /npm run test/.test(x.run ?? ''));
     s.run = s.run.replace('--reporter=default ', '');
   }, 'client report', /console log is gone/],
+  ['a results job runs a second suite (its artifact would hold two)', (d) => {
+    job(d, 'sync').steps.splice(-2, 0, { name: 'Run the red team too', run: 'npm run test:redteam' });
+  }, 'one suite per results artifact', /carries 2 suite runner/],
+  ['a results job runs an aggregate of suites', (d) => {
+    stepWhere(job(d, 'sync'), (x) => /npm run test:sync/.test(x.run ?? '')).run = 'npm run test:all:core';
+  }, 'one suite per results artifact', /runs several suites in one command/],
+  ['a results job runs the standalone runner without --only (all of its suites)', (d) => {
+    stepWhere(job(d, 'sync'), (x) => /npm run test:sync/.test(x.run ?? '')).run = 'npm run test:standalone';
+  }, 'one suite per results artifact', /runs several suites in one command/],
+  ['a results job runs a second suite spelled `node --test`', (d) => {
+    job(d, 'sync').steps.splice(-2, 0, { name: 'Run a file too', run: 'node --test testing/standalone/some.test.js' });
+  }, 'one suite per results artifact', /carries 2 suite runner/],
+  ['a results job runs a second suite spelled `node --import x --test`', (d) => {
+    job(d, 'sync').steps.splice(-2, 0, { name: 'Run a file too', run: 'node --import ./setup.mjs --test testing/standalone/some.test.js' });
+  }, 'one suite per results artifact', /carries 2 suite runner/],
+  ['a results job runs a second suite spelled `npm test`', (d) => {
+    job(d, 'sync').steps.splice(-2, 0, { name: 'Run the tests too', run: 'npm test' });
+  }, 'one suite per results artifact', /carries 2 suite runner/],
+  ['a results job runs a second suite spelled `npm t`', (d) => {
+    job(d, 'sync').steps.splice(-2, 0, { name: 'Run the tests too', run: 'npm t -- --reporter=dot' });
+  }, 'one suite per results artifact', /carries 2 suite runner/],
+  ['a results job uploads two results artifacts', (d) => {
+    const u = stepWhere(job(d, 'sync'), (x) => usesOf(x)?.action === 'actions/upload-artifact');
+    const second = clone(u);
+    second.with.name = 'test-results-sync-again-@{{ github.run_attempt }}';
+    job(d, 'sync').steps.push(second);
+  }, 'one suite per results artifact', /2 results artifacts from one job/],
   ['a stack job is added without the flags', (d) => {
     d.jobs.redteam = clone(job(d, 'sync'));
     stepWhere(job(d, 'redteam'), (x) => /compose/.test(x.run ?? '')).run = 'docker compose -f testing/docker-compose.test.yml up -d --wait';
@@ -757,6 +850,45 @@ describe('ci.yml — the rules, held against a conforming miniature and against 
         `the ${rule} rule did not fire on "${what}" (wanted ${expected}); it returned ${JSON.stringify(found)}`);
     });
   }
+});
+
+describe('ci.yml — which package.json test scripts are aggregates of suites (derived from the script body, not from a name)', () => {
+  const scripts = {
+    'test:up': 'docker compose up -d && node testing/_init/reset-test-configs.mjs && node testing/sync/setup.js',
+    'test:one': 'node testing/_init/run-suite.mjs integration',
+    'test:chain-and': 'node --test a.test.js && node --test b.test.js',
+    'test:chain-semi': 'npm run test:one; npm run test:two',
+    'test:chain-mixed': 'npm run test:one && node testing/_init/run-suite.mjs sync',
+    'test:single-then-prune': 'npm run test:one && docker image prune -f',
+    'test:alias': 'npm run test:chain-and',
+    'test:standalone-all': 'node testing/_init/run-standalone.mjs',
+    'test:standalone-some': 'node testing/_init/run-standalone.mjs --only=pure',
+    'build': 'tsc && node --test x.js && node --test y.js',
+  };
+
+  it('a `test*` script that chains two suite runners with `&&` or `;` is an aggregate, whatever the runners are spelled', () => {
+    const found = aggregateTestScripts(scripts);
+    for (const name of ['test:chain-and', 'test:chain-semi', 'test:chain-mixed']) assert.ok(found.includes(name), `${name} chains two suites and is not an aggregate`);
+  });
+
+  it('one runner beside setup or a prune is not an aggregate; a script that is not a test script is not read', () => {
+    const found = aggregateTestScripts(scripts);
+    for (const name of ['test:up', 'test:one', 'test:single-then-prune', 'test:standalone-some']) assert.ok(!found.includes(name), `${name} runs one suite and was called an aggregate`);
+    assert.ok(!found.includes('build'), 'a script that does not start with test was read');
+  });
+
+  it('an alias of an aggregate is one, and the standalone runner without --only is one', () => {
+    const found = aggregateTestScripts(scripts);
+    assert.ok(found.includes('test:alias'));
+    assert.ok(found.includes('test:standalone-all'));
+  });
+
+  it('a results job that runs a chained script is refused', () => {
+    const d = clone(GOOD);
+    stepWhere(job(d, 'sync'), (x) => /npm run test:sync/.test(x.run ?? '')).run = 'npm run test:chain-and';
+    const found = oneSuitePerResultsArtifactViolations(d, scripts);
+    assert.ok(found.some((m) => /runs several suites in one command/.test(m)), JSON.stringify(found));
+  });
 });
 
 describe('ci.yml — other ways of writing the same rule are accepted, so the gate holds the property and not the spelling', () => {

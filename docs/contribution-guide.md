@@ -524,9 +524,9 @@ Use conventional-commit-style prefixes:
 
 ## License and contributor agreement
 
-Ythril is distributed under the **PolyForm Small Business License 1.0.0**. See [LICENSE](../LICENSE) for the full text.
+Ythril is distributed under the **PolyForm Small Business License 1.0.0**. See `LICENSE` for the full text.
 
-**Contributing requires signing the [Contributor License Agreement](../CLA.md).** It is a licence, not an assignment: **you keep the copyright in everything you write.** What you grant is a licence broad enough for the project to be maintained, redistributed, and — this is the operative part — **licensed to others under different terms in future**, whether commercial, a different open licence, or both.
+**Contributing requires signing the Contributor License Agreement (`CLA.md` in the repository root).** It is a licence, not an assignment: **you keep the copyright in everything you write.** What you grant is a licence broad enough for the project to be maintained, redistributed, and — this is the operative part — **licensed to others under different terms in future**, whether commercial, a different open licence, or both.
 
 Signing is one click on your first pull request, via a bot, and it covers every contribution you make afterwards. There is nothing to print and nothing to repeat.
 

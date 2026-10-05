@@ -30,7 +30,10 @@ import { listenOnLoopback } from './local-server.mjs';
 export const FAKE_GH_TOKEN = 'ghp_fakeTestToken0123456789abcdefghijklmn';
 
 /**
- * @param {{ runs: object[], jobsByRun?: Record<string, object[]>, artifactsByRun?: Record<string, Array<{id: number, name: string, zip: Buffer}>>, token?: string }} opts
+ * An artifact is `{ id, name, zip, expired? }`; `expired: true` is what the API says of an artifact past its retention (the list
+ * still names it, and its bytes are gone). The lists are read live, so a test can expire one between two passes.
+ *
+ * @param {{ runs: object[], jobsByRun?: Record<string, object[]>, artifactsByRun?: Record<string, Array<{id: number, name: string, zip: Buffer, expired?: boolean}>>, token?: string }} opts
  */
 export async function startFakeGithub({ runs, jobsByRun = {}, artifactsByRun = {}, token = FAKE_GH_TOKEN }) {
   const requests = [];
@@ -58,7 +61,7 @@ export async function startFakeGithub({ runs, jobsByRun = {}, artifactsByRun = {
       return json(200, { total_count: list.length, jobs: page > 1 ? [] : list });
     }
     if ((m = u.pathname.match(/\/actions\/runs\/(\d+)\/artifacts$/))) {
-      const list = (artifactsByRun[m[1]] ?? []).map(a => ({ id: a.id, name: a.name, size_in_bytes: a.zip.length, expired: false }));
+      const list = (artifactsByRun[m[1]] ?? []).map(a => ({ id: a.id, name: a.name, size_in_bytes: a.zip.length, expired: a.expired === true }));
       return json(200, { total_count: list.length, artifacts: page > 1 ? [] : list });
     }
     if ((m = u.pathname.match(/\/actions\/artifacts\/(\d+)\/zip$/))) {

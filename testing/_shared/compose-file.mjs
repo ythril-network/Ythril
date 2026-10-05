@@ -39,6 +39,21 @@ export function loadCompose(rel, root = REPO_ROOT) {
 /** `${VAR:-default}` resolved to its default wherever it stands in the value — a port or option written with a variable means what its default says. */
 export const resolveDefaults = (value) => String(value).replace(/\$\{[A-Za-z0-9_]+:-([^}]*)\}/g, '$1');
 
+/**
+ * The host address a published port binds, or null for "every interface" (a port with no host address binds 0.0.0.0).
+ * Reads both spellings compose has — the short string and the long object — and resolves a `${VAR:-default}` to its default.
+ */
+export function boundAddress(port) {
+  if (typeof port === 'object' && port !== null) return port.host_ip ?? null;
+  const parts = resolveDefaults(port).replace(/\/(tcp|udp)$/, '').split(':');
+  return parts.length >= 3 ? parts[0] : null;
+}
+
+/** Every published port of a service that is not bound to loopback, as JSON: what a gate over "listens on this machine only" reports. */
+export function exposedPorts(service) {
+  return (service.ports ?? []).filter((p) => boundAddress(p) !== '127.0.0.1').map((p) => JSON.stringify(p));
+}
+
 /** Is the whole value one `${VAR:-default}` — a ceiling a bigger runner can raise without editing the file? */
 export const isOverridable = (value) => /^\$\{[A-Z0-9_]+:-[^}]+\}$/.test(String(value).trim());
 

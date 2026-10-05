@@ -17,7 +17,7 @@
  *   carried over (derived by iterating the schema, so a field added there is in the declaration with no edit here);
  * - the type suppresses embeddings, never acts when a date passes, and keeps a record the number of days
  *   `TEST_RUN_RETENTION_DAYS` says (one year);
- * - the five default chrono types are in the payload (a space with no chrono types of its own would otherwise be closed to
+ * - the server's default chrono types (read from the build, not re-listed) are in the payload (a space with no chrono types of its own would otherwise be closed to
  *   them by declaring one), in MERGE mode;
  * - the server's own validator for `typeSchemas` accepts it, so a payload the instance would refuse is a red here;
  * - the testing guide names the command where it describes the retention, and `--help` lists it.
@@ -32,6 +32,7 @@ import { REPO_ROOT } from './_sources.mjs';
 import { runScript } from './_run-script.mjs';
 import { TEST_RUN_SCHEMA, CHRONO_TYPE, SPACE, TEST_RUN_RETENTION_DAYS, testRunTypeDeclaration, HELP } from '../../scripts/test-times.mjs';
 import { TypeSchemasZ } from '../../server/dist/spaces/body-schemas.js';
+import { getAllowedChronoTypes } from '../../server/dist/spaces/schema-validation.js';
 
 const SCRIPT = join(REPO_ROOT, 'scripts', 'test-times.mjs');
 const printed = () => {
@@ -67,9 +68,14 @@ describe('--type-schema', () => {
     assert.ok(Number.isInteger(TEST_RUN_RETENTION_DAYS) && TEST_RUN_RETENTION_DAYS > 0, 'a retention of nothing is no bound');
   });
 
-  it('keeps the five default chrono types beside it, so declaring one does not close the space to the others', () => {
+  it('keeps the server\'s default chrono types beside it, so declaring one does not close the space to the others', () => {
+    // The set is the SERVER's (`getAllowedChronoTypes` of a space with no chrono types of its own), read from the build, not
+    // re-listed here: a type the server gains or drops is a red here, where a list typed twice would agree with itself.
+    const defaults = [...getAllowedChronoTypes(undefined)];
+    assert.ok(defaults.length >= 5, `the server reports ${defaults.length} default chrono type(s): the read is broken`);
     const chrono = testRunTypeDeclaration().typeSchemas.chrono;
-    for (const t of ['event', 'deadline', 'plan', 'prediction', 'milestone']) assert.ok(t in chrono, `${t} is missing`);
+    assert.deepEqual(Object.keys(chrono).filter(t => t !== CHRONO_TYPE).sort(), defaults.sort(),
+      'the declaration\'s other chrono types are not the server\'s defaults: scripts/test-times.mjs DEFAULT_CHRONO_TYPES has drifted');
     assert.ok(CHRONO_TYPE in chrono);
   });
 

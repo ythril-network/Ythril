@@ -5,6 +5,7 @@ import { dbNameFromUri } from './db-name.js';
 import { backoffDelayMs } from '../util/backoff.js';
 import { envInt } from '../config/env-num.js';
 import { observeRecordWrites, EVERY_COLLECTION, type RecordWriteListener } from './record-write-observer.js';
+import { warnIfSocketTimeoutBelowWriteBound } from './write-bound.js';
 
 let _client: MongoClient | null = null;
 let _dbName = 'ythril';
@@ -107,6 +108,8 @@ export async function connectMongo(): Promise<MongoClient> {
       await _client.connect();
       if (attempt > 1) log.info(`MongoDB connected after ${attempt} attempts.`);
       else log.debug('MongoDB connected');
+      // Once per connection, after it works: a string that cannot connect has a worse thing to say.
+      warnIfSocketTimeoutBelowWriteBound(uri);
       return _client;
     } catch (err) {
       // Close the failed client before making another, or each retry leaks its topology and its timers.

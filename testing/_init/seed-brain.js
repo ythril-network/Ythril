@@ -26,7 +26,7 @@ import { fileURLToPath } from 'url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const PORT  = process.argv[2] ?? '3200';
-const BASE  = `http://localhost:${PORT}`;
+const BASE  = `http://127.0.0.1:${PORT}`;
 const TOKEN = process.argv[3] ?? readTokenFile();
 
 function readTokenFile() {

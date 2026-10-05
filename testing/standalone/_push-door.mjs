@@ -36,6 +36,7 @@ import assert from 'node:assert/strict';
 import { openTestMongo, closeTestMongo, testMongoUri } from './_mongo-harness.mjs';
 import { wipeParts, RECORD_PARTS } from './_space-snapshot.mjs';
 import { drainWrites } from './_active-operations.mjs';
+import { refuseConflictingPushDoorOptions } from './_push-door-options.mjs';
 
 /** A peer-bound token that reaches every space by its own scope (an unknown peer falls through to space scope). */
 export const PEER_TOKEN = Object.freeze({
@@ -103,13 +104,14 @@ const REPLICATED_FAMILY_KEYS = (await import('../../server/dist/sync/replicated-
  * @param {object[]} o.spaces  config `spaces` entries
  * @param {object[]} [o.networks]
  * @param {number} [o.mongoPort]  connect through a relay on this port instead of the stack's (`_delayed-write-relay.mjs`)
- * @param {string} [o.mongoQuery]  extra `MONGO_URI` options for the server's client, e.g. `'&timeoutMS=300'` (applied after the door is open; not with `monitorCommands`)
+ * @param {string} [o.mongoQuery]  extra `MONGO_URI` options for the server's client, e.g. `'&timeoutMS=300'` (applied after the door is open; refused together with `monitorCommands`, see `_push-door-options.mjs`)
  * @param {boolean} [o.monitorCommands]  reconnect with command monitoring, for `commandsDuring`
  * @param {object} [o.secrets]  a `secrets.json` to write beside the config BEFORE it is loaded — the loader reads
  *   it once, at `loadConfig`, so a door whose engine calls out to a peer (`_pull-door.mjs`) must hand its peer
  *   tokens in here rather than write them afterwards
  */
 export async function openPushDoor({ suite, spaces, networks = [], monitorCommands = false, secrets, mongoPort, mongoQuery }) {
+  refuseConflictingPushDoorOptions({ monitorCommands, mongoQuery });
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), `ythril-${suite}-`));
   process.env['CONFIG_PATH'] = path.join(tmpDir, 'config.json');
   // The space's files land under DATA_ROOT, whose default is /data: a directory Windows lets any process create at

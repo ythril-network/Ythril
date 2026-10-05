@@ -8,9 +8,9 @@ status of each, and why Ythril's PolyForm Small Business License obligations are
 ## Node.js packages
 
 Ythril is an npm-workspaces monorepo: the **root** `package.json` declares no runtime
-dependencies of its own — they live in [`server/package.json`](../server/package.json)
-and [`client/package.json`](../client/package.json). The attribution-requiring packages
-across both workspaces are reproduced in [NOTICE](../NOTICE). They are MIT, Apache 2.0,
+dependencies of its own — they live in `server/package.json`
+and `client/package.json`. The attribution-requiring packages
+across both workspaces are reproduced in `NOTICE`. They are MIT, Apache 2.0,
 0BSD, BSD-3-Clause, or ISC licensed.
 
 **Two packages are dual-licensed with a copyleft arm**, and Ythril elects the permissive arm in both. A dual grant
@@ -47,7 +47,7 @@ are checked in as files and shipped by the bundler, and they carry licences of t
 **To refresh them:** `npm i -D @fontsource/inter@<version>`, copy
 `node_modules/@fontsource/inter/files/inter-latin-{300,400,500,600}-normal.woff2` into
 `client/src/assets/fonts/`, remove the dependency again, and update the version in the table above and in
-[NOTICE](../NOTICE). The package is not kept as a dependency because nothing imports it — the four files are the
+`NOTICE`. The package is not kept as a dependency because nothing imports it — the four files are the
 whole of what ships, and an unused dependency in the manifest is a worse record than this paragraph.
 
 **They are served by the instance, deliberately.** The UI previously fetched its font from a public font CDN on
@@ -199,7 +199,7 @@ They do not extend to `mongod`, `mongot`, or the `mongodb/mongodb-atlas-local` i
 The semantic recall feature has a runtime dependency on a proprietary binary
 (`mongot`). A deployment of Ythril with full functionality is therefore not a
 fully open-source stack. This is an accepted constraint, documented here and in
-[NOTICE](../NOTICE). It does not affect compliance, but it is worth knowing if
+`NOTICE`. It does not affect compliance, but it is worth knowing if
 you are evaluating Ythril for an environment where fully open-source runtime
 stacks are required.
 
@@ -247,12 +247,12 @@ Legal principle that runtime infrastructure must be listed with its licensing im
 | `ollama/ollama` | Vision model host — captions uploaded images (default `moondream`) for the media pipeline. | MIT (the Ollama runtime). Models are pulled separately; the default `moondream` is Apache 2.0. |
 | `fedirz/faster-whisper-server` | Speech-to-text — transcribes uploaded/segmented audio via an OpenAI-compatible endpoint. | MIT (the server). Whisper models are pulled separately and are Apache 2.0. |
 | `unstructured-io/unstructured-api` | Server-side PDF / DOCX / EPUB conversion (`hi_res` OCR + layout detection, table and embedded-image extraction). | Apache 2.0. |
-| `ythril-doc-render` (first-party, built from `sidecars/doc-render`) | Renders PDF pages to PNG images for the F11 VLM document-extraction path (`documentProcessing.mode` `vlm`/`auto`/`max`). | Apache-2.0. Wraps **PDFium** via `pypdfium2` (Apache-2.0 / BSD-3-Clause) + Pillow (HPND) — all permissive. Deliberately **not** PyMuPDF (AGPL-3.0). See [`sidecars/doc-render/LICENSES.md`](../sidecars/doc-render/LICENSES.md). |
-| `ythril-doc-office` (first-party, built from `sidecars/doc-office`) — **optional** | Renders **office** docs (DOCX/EPUB/…) to PNG images for the same VLM path: LibreOffice converts to PDF, then PDFium rasterizes. Opt-in via the compose `office` profile. | LibreOffice is **MPL-2.0 / LGPL-3.0** (not AGPL), invoked as a **separate process** (not linked); PDFium/Pillow permissive. See [`sidecars/doc-office/LICENSES.md`](../sidecars/doc-office/LICENSES.md). |
+| `ythril-doc-render` (first-party, built from `sidecars/doc-render`) | Renders PDF pages to PNG images for the F11 VLM document-extraction path (`documentProcessing.mode` `vlm`/`auto`/`max`). | Apache-2.0. Wraps **PDFium** via `pypdfium2` (Apache-2.0 / BSD-3-Clause) + Pillow (HPND) — all permissive. Deliberately **not** PyMuPDF (AGPL-3.0). See `sidecars/doc-render/LICENSES.md`. |
+| `ythril-doc-office` (first-party, built from `sidecars/doc-office`) — **optional** | Renders **office** docs (DOCX/EPUB/…) to PNG images for the same VLM path: LibreOffice converts to PDF, then PDFium rasterizes. Opt-in via the compose `office` profile. | LibreOffice is **MPL-2.0 / LGPL-3.0** (not AGPL), invoked as a **separate process** (not linked); PDFium/Pillow permissive. See `sidecars/doc-office/LICENSES.md`. |
 | `ythril-doc-nlp` (first-party, built from `sidecars/doc-nlp`) | Finds the candidate mentions the conversation extractor (`F-31`) builds entities from: spaCy's `en_core_web_trf` named entities and noun phrases. Bundled; `DOC_NLP_REPLICAS=0` leaves it out. | MIT (spaCy, the model, RoBERTa-base, spacy-transformers), Apache-2.0 (Transformers), BSD-3-Clause (PyTorch CPU). See `sidecars/doc-nlp/LICENSES.md`. |
 
 **Where they are referenced.** `ollama`, `whisper`, `unstructured`, and `doc-render` are all services in
-[`docker-compose.yml`](../docker-compose.yml). `ollama`/`whisper` also have matching Kubernetes manifests
+`docker-compose.yml`. `ollama`/`whisper` also have matching Kubernetes manifests
 (`kubernetes/manifests/{ollama,whisper}-deploy.yaml`); the `unstructured-api` sidecar is
 in `kubernetes/manifests/ythril-deployment.yaml`, pod-local. `ollama`/`whisper` form the
 media-embedding stack; `unstructured` is the bundled document-conversion sidecar, and `doc-render`

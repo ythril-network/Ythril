@@ -18,6 +18,7 @@ import { HttpClient } from '@angular/common/http';
 import { ActivatedRoute, Router } from '@angular/router';
 import { getTranslocoModule } from '../../testing/transloco-testing';
 import { HelpComponent, HELP_DOCS } from './help.component';
+import { partAnchorId } from './help-links';
 import { MarkdownRenderService } from '../../shared/markdown-render.service';
 
 function setup(opts: { doc?: string | null; fragment?: string | null; get?: unknown; render?: (t: string) => Promise<string> } = {}) {
@@ -180,6 +181,122 @@ describe('HelpComponent', () => {
       const ev = clickLink(s.f);
       expect(ev.defaultPrevented).toBe(true);
       expect(s.c.active()).toBe('integration-guide');
+    });
+
+    describe('a relative link is resolved against the guide it is read in (round V, S4)', () => {
+      // A part of a split guide links to its sibling as `](02-hosting.md)`: that is what resolves on GitHub, where the page
+      // sits beside it. The view joins the parts into one document, so the link has to be resolved against the guide's own
+      // directory before it is looked up — read as `02-hosting.md` it matched nothing and opened a dead tab, 42 times over.
+      const clickIn = async (doc: string, href: string) => {
+        const open = vi.spyOn(window, 'open').mockImplementation(() => null);
+        const s = withHtml(`<a href="${href}">go</a>`, { doc });
+        await flush();
+        s.f.detectChanges();
+        const ev = clickLink(s.f);
+        const opened = open.mock.calls.map(c => c[0]);
+        open.mockRestore();
+        return { s, ev, opened };
+      };
+
+      it('a sibling part, no fragment, opens in the view and not in a tab', async () => {
+        const { s, ev, opened } = await clickIn('integration-guide', '02-hosting.md');
+        expect(ev.defaultPrevented).toBe(true);
+        expect(opened).toEqual([]);
+        expect(s.c.active()).toBe('integration-guide');
+      });
+
+      describe('inside one guide, a link to a page of it TAKES the reader there (round W, V2)', () => {
+        // The parts are one joined document, so the page a link names is already on screen — far away. A click that kept
+        // the reader where they were was a silent no-op: not a dead tab any more, and not a link either.
+        const guideHtml = '<a href="LINK">go</a>'
+          + `<div id="${partAnchorId('integration-guide/02-hosting.md')}"></div><h2 id="hosting">Hosting</h2><p>x</p>`
+          + `<div id="${partAnchorId('integration-guide/04-brain-api.md')}"></div><h2 id="brain">Brain</h2>`;
+
+        const clickWith = async (href: string, doc = 'integration-guide') => {
+          const s = setup({ render: () => Promise.resolve(guideHtml.replace('LINK', href)), doc });
+          await flush();
+          s.f.detectChanges();
+          const root = s.f.nativeElement as HTMLElement;
+          const scrolled: string[] = [];
+          for (const el of Array.from(root.querySelectorAll<HTMLElement>('.doc article, .doc article [id]'))) {
+            el.scrollIntoView = vi.fn(() => { scrolled.push(el.id || '(article)'); });
+          }
+          const open = vi.spyOn(window, 'open').mockImplementation(() => null);
+          const ev = clickLink(s.f);
+          const opened = open.mock.calls.map(c => c[0]);
+          open.mockRestore();
+          return { s, ev, scrolled, opened, root };
+        };
+
+        it('a sibling part with no fragment scrolls to the start of that part and moves focus to its heading', async () => {
+          const { ev, scrolled, opened, root } = await clickWith('02-hosting.md');
+          expect(ev.defaultPrevented).toBe(true);
+          expect(opened).toEqual([]);
+          expect(scrolled).toEqual([partAnchorId('integration-guide/02-hosting.md')]);
+          const heading = root.querySelector<HTMLElement>('#hosting')!;
+          expect(document.activeElement).toBe(heading);
+          expect(heading.getAttribute('tabindex')).toBe('-1');
+        });
+
+        it('another sibling part is another place', async () => {
+          const { scrolled, root } = await clickWith('04-brain-api.md');
+          expect(scrolled).toEqual([partAnchorId('integration-guide/04-brain-api.md')]);
+          expect(document.activeElement).toBe(root.querySelector('#brain'));
+        });
+
+        it('the guide itself (`../integration-guide.md`) scrolls to the top of the document and focuses its first heading', async () => {
+          const { scrolled, opened, root } = await clickWith('../integration-guide.md');
+          expect(opened).toEqual([]);
+          expect(scrolled).toEqual(['(article)']);
+          expect(document.activeElement).toBe(root.querySelector('#hosting'));
+        });
+
+        it('a fragment moves focus to the heading it scrolls to, for the keyboard and the screen reader', async () => {
+          const { scrolled, root } = await clickWith('#brain');
+          expect(scrolled).toEqual(['brain']);
+          expect(document.activeElement).toBe(root.querySelector('#brain'));
+        });
+
+        it('a link to a heading whose id the sanitizer namespaced (`#links`) finds it', async () => {
+          const s = setup({ render: () => Promise.resolve('<a href="#links">go</a><h2 id="user-content-links">Links</h2>') });
+          await flush();
+          s.f.detectChanges();
+          const heading = (s.f.nativeElement as HTMLElement).querySelector<HTMLElement>('#user-content-links')!;
+          heading.scrollIntoView = vi.fn();
+          clickLink(s.f);
+          expect(heading.scrollIntoView).toHaveBeenCalled();
+          expect(document.activeElement).toBe(heading);
+        });
+
+        it('a link whose target is not in the document moves nothing and throws nothing', async () => {
+          const { scrolled } = await clickWith('#nowhere');
+          expect(scrolled).toEqual([]);
+        });
+      });
+
+      it('a sibling part with a fragment stays in the guide and scrolls', async () => {
+        const { s, opened } = await clickIn('integration-guide', '04a-recall-api.md#recall');
+        expect(opened).toEqual([]);
+        expect(s.c.active()).toBe('integration-guide');
+      });
+
+      it('a link up and over into another guide\'s directory opens that guide', async () => {
+        const { s, opened } = await clickIn('integration-guide', '../userguide/02-brain.md#facts');
+        expect(opened).toEqual([]);
+        expect(s.c.active()).toBe('userguide');
+      });
+
+      it('a link from a single-file guide to a guide beside it opens that guide', async () => {
+        const { s, opened } = await clickIn('dependencies', 'userguide.md');
+        expect(opened).toEqual([]);
+        expect(s.c.active()).toBe('userguide');
+      });
+
+      it('a sibling of a part that is not a page of the guide is still a tab on the raw document, never the router', async () => {
+        const { ev, opened } = await clickIn('integration-guide', '99-nothing-here.md');
+        expect(ev.defaultPrevented).toBe(true);
+        expect(opened).toEqual(['assets/docs/99-nothing-here.md']);
+      });
     });
 
     it('a link to a document the page does not offer opens in a new tab, never in the router', async () => {

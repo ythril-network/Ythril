@@ -54,7 +54,7 @@ import { trackedSources } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import { topLevelFunctionSpans } from './_call-graph.mjs';
 import { holdDocumentLock, holdCounterLock, settleWithin, eventually, setWriteBoundForTest } from './_write-faults.mjs';
-import { holderCases, loadHolderModules, seedHolderSpace, F } from './_seq-hold-cases.mjs';
+import { holderCases, loadHolderModules, seedHolderSpace, heldSeqAllocated, F } from './_seq-hold-cases.mjs';
 
 const skip = await mongoSkipReason();
 // A merge embeds its survivor inline unless the space suppresses it; never let a test fetch a model.
@@ -105,6 +105,8 @@ async function stalled(space, { lock, run }) {
     let done = false;
     const op = Promise.resolve().then(run).finally(() => { done = true; });
     const entered = await eventually(() => done || seq.lowestUncommittedSeq(space) !== undefined, ENTER_MS);
+    // The floor, not an allocated seq, and that is enough: `heldAt` only goes into a message here, and most of these locks
+    // are on the counter row itself, so the allocation is exactly what never answers (`heldSeqAllocated` is for a case that ACTS on the seq).
     const heldAt = seq.lowestUncommittedSeq(space);
     const res = await settleWithin(op, CAP_MS);
     report = { entered: entered && heldAt !== undefined, heldAt, res, after: seq.lowestUncommittedSeq(space) };
@@ -166,11 +168,10 @@ describe('a write inside a seq hold always ends', { skip }, () => {
     const lock = await holdDocumentLock(door.mongo, `${R}_facts`, { filter: { _id: F } });
     let report;
     try {
-      let done = false;
-      const op = Promise.resolve().then(() => mods.fact.updateFact(R, F, { fact: 'stalled edit' })).finally(() => { done = true; });
-      const entered = await eventually(() => done || seq.lowestUncommittedSeq(R) !== undefined, ENTER_MS);
-      const heldAt = seq.lowestUncommittedSeq(R);
-      assert.ok(entered && heldAt !== undefined, 'fixture: the fact update never entered its seq hold');
+      const op = Promise.resolve().then(() => mods.fact.updateFact(R, F, { fact: 'stalled edit' }));
+      // The hold registers before the update's counter `$inc` is answered; the later save's own `$inc` must not be able to
+      // overtake it (the save would take the update's seq, and "committed above the held seq" would not be true).
+      const heldAt = await heldSeqAllocated(door, R, { ms: ENTER_MS });
       await mods.fact.saveFact(R, 'committed above the stalled edit', [], [], undefined, undefined, 'note');
       const later = await door.coll(R, 'facts').find({ seq: { $gt: heldAt } }).sort({ seq: -1 }).limit(1).next();
       assert.ok(later, 'fixture: the later fact did not commit above the held seq');

@@ -16,6 +16,7 @@
  */
 import { build } from './_push-door.mjs';
 import { holdForkLock, DIVERGENT } from './_stalled-write-doors.mjs';
+import { waitFor } from '../_shared/wait-for.mjs';
 
 export const AUTHOR = { instanceId: 'push-door-peer', instanceLabel: 'Peer' };
 export const T0 = '2026-09-01T00:00:00.000Z';
@@ -44,6 +45,70 @@ export async function loadHolderModules() {
   };
 }
 
+/**
+ * The value `seedHolderSpace` leaves the space's counter at: the highest seed record's seq. Exported so a case that has to
+ * tell "the stalled write has been given its seq" from "nothing has been allocated yet" compares against the seed instead of
+ * repeating the number.
+ */
+export const SEEDED_COUNTER = 6;
+
+/** How long the failure message of `heldSeqAllocated` waits for the counter before saying it could not read it. */
+const DIAGNOSIS_COUNTER_MS = 1500;
+
+/**
+ * The counter for a failure MESSAGE, which must never be what keeps a failed wait from failing: `door.counter` waits for every
+ * counter write already started, and a counter-row lock leaves one pending for ever. So the read is bounded and a read that
+ * does not finish is reported as such (round W, V10).
+ */
+async function counterForDiagnosis(door, space) {
+  let timer;
+  try {
+    return await Promise.race([
+      Promise.resolve().then(() => door.counter(space)),
+      new Promise(resolve => { timer = setTimeout(() => resolve(`unreadable: a counter write did not answer within ${DIAGNOSIS_COUNTER_MS} ms (a counter-row lock? this wait is for a stall that is NOT on the counter row)`), DIAGNOSIS_COUNTER_MS); }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * The seq a stalled write holds, once the store has GIVEN it one: waits until the seq hold is registered AND the space's
+ * counter has moved past `SEEDED_COUNTER`, then answers `lowestUncommittedSeq(space)`.
+ *
+ * ## What it prevents
+ *
+ * `withAllocatedSeqs` registers its hold BEFORE it sends the counter's `$inc` (the seq is unknown until the reply, so the
+ * hold is a floor at `maxSeen + 1`). A fixture that treats "a hold exists" as "its seq is allocated" then acts on the
+ * floor while the `$inc` is still in flight — and a second writer's `$inc` sent in that window (a later `saveFact`, to
+ * show a pull passes the stalled write) can be applied FIRST, so the stalled write gets 8 and the later one 7, and the
+ * premise "the later record is committed above the held seq" is false. Found by a probe under background Mongo load:
+ * 9 of 50 iterations inverted; on a quiet machine the two commands are applied in send order and the case never failed.
+ *
+ * Every case that reads the held seq to act on it goes through here, so none can forget the second half.
+ *
+ * ## What it is for, and what it is not
+ *
+ * A stall that is NOT on the counter row (a document lock on the record: the fact, the fork), where the `$inc` completes
+ * and the write behind it stalls — so the counter moving is the observable proof that the allocation was answered. A
+ * counter-row lock (`lock: 'counter'`) stalls the `$inc` itself: the counter never moves past the seed and this waits for
+ * nothing, so those cases keep reading the floor, which is all their messages use. Called for one anyway it still ENDS —
+ * at its deadline, with a message that says the counter was unreadable (`counterForDiagnosis`), never at the runner's. It assumes ONE allocator in flight, as
+ * the cases are: a second would make "the counter moved" ambiguous about whose allocation it was.
+ *
+ * @param {{ counter: (space: string) => Promise<number> }} door  the push door (`openPushDoor`)
+ * @returns {Promise<number>} the held seq; THROWS (naming what it saw) when the hold or the allocation never appeared
+ */
+export async function heldSeqAllocated(door, space, { ms = 5000 } = {}) {
+  const seq = await import('../../server/dist/util/seq.js');
+  await waitFor(async () => seq.lowestUncommittedSeq(space) !== undefined && (await door.counter(space)) > SEEDED_COUNTER, ms, 5,
+    async () => `hold ${seq.lowestUncommittedSeq(space)}, counter ${await counterForDiagnosis(door, space)} (seeded at ${SEEDED_COUNTER})`,
+    { what: `a seq hold on '${space}' whose allocation the store has answered` });
+  const held = seq.lowestUncommittedSeq(space);
+  if (held === undefined) throw new Error(`heldSeqAllocated: the hold on '${space}' ended before it could be read — the write was not stalled`);
+  return held;
+}
+
 /** The space every case of `holderCases(…, space)` runs in, seeded from nothing. */
 export async function seedHolderSpace(door, space) {
   await door.wipe(space);
@@ -59,7 +124,7 @@ export async function seedHolderSpace(door, space) {
     { _id: HELD_FILE, spaceId: space, path: HELD_FILE, tags: [], sizeBytes: 1, createdAt: T0, updatedAt: T0, seq: 6 },
     { _id: LEGACY_FILE, spaceId: space, path: LEGACY_FILE, tags: [], sizeBytes: 1, createdAt: T0, updatedAt: T0 },
   ]);
-  await door.setCounter(space, 6);
+  await door.setCounter(space, SEEDED_COUNTER);
 }
 
 /**
