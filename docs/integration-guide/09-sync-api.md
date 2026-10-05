@@ -434,7 +434,7 @@ on the push path. A pull fetches whole documents and stores them as received, so
 sender's vector — and, more expensively, the sender's `_expireAt`, which the receiving instance's retention sweep
 then acted on. A pull still stores what it is served, and since 5.6.4 it parses each document against the same
 schema, refuses only a shape that would corrupt the receiver (a non-string `parentFileId`, a wrong-typed `_id` or
-`seq`) and names every stored document that fails its schema, once per page, in the receiver's log. Both directions now drop the fields `sync/local-only-fields.ts` lists (the vector, its model, the
+`seq`) and names the stored documents that fail its schema (up to a bounded list, then how many more), once per page, in the receiver's log. Both directions now drop the fields `sync/local-only-fields.ts` lists (the vector, its model, the
 matched text, the two retention stamps and a file's sync base), and the serving side leaves them out of the page
 altogether, so a sync page is materially smaller than it was.
 
@@ -444,9 +444,9 @@ replaced the whole document, so the record stopped expiring here and was re-embe
 changed. The vector, its model and the matched text are kept only while this instance still embeds the record: an
 update this instance suppresses — by the record's own `suppressEmbeddings`, its type's schema, or the space —
 lands with none of them, as before 5.6.2, because the embed queue skips a suppressed record and nothing would ever
-remove a vector carried onto it. A file's metadata is merged, so this held for the other families only until 5.6.4:
-a file this instance suppresses (its own flag, the stored one, or the space) now lands with none either, and its
-chunk and passage rows lose theirs.
+remove a vector carried onto it. A file's metadata is merged, so until 5.6.4 this held for the other families
+and not for files: a file this instance suppresses (its own flag, the stored one, or the space) now lands with none
+either, and its chunk and passage rows lose theirs.
 
 **The receiver embeds what it accepts, on its own terms.** Every accepted document is queued for embedding
 against the receiving instance's own model, at the moment it is written, whether it arrived by push (batch or

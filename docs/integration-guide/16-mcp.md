@@ -33,8 +33,9 @@ On connect, the server sends global instructions listing all available space IDs
 > longer fitted uneditable until an unrelated field was repaired in the same request.
 >
 > **A STORE failure is machine-readable too, and it is the one to branch on hardest.** When a read fails
-> because the store could not answer — a search index re-initialising after a restart, a replica set stepping
-> down, a search process that died — the result carries:
+> because the store could not answer — a replica set stepping down, a search process that died or stopped
+> answering — the result carries (a search index that is merely absent or still building answers with nothing
+> from the meaning channel yet, not as a failure):
 >
 > ```json
 > { "retryable": true, "storeSideFailure": true,
@@ -44,7 +45,9 @@ On connect, the server sends global instructions listing all available space IDs
 >
 > **Retry it.** The REST doors answer these with `503` and `Retry-After`; this transport answers `200` with
 > `isError: true` and has no status to correct, so the classification lives in `structuredContent` instead —
-> the same information in the envelope this transport has. The text is ours and names no host, port or collection; the driver's own words go to the server log, and any other driver-side failure reads `Error: The store could not complete this request.`
+> the same information in the envelope this transport has. The text is ours and names no host, port or
+> collection; the driver's own words go to the server log, and any other driver-side failure reads
+> `Error: The store could not complete this request.`
 >
 > Why it matters more than a clearer message: until this release these failed as an ordinary tool error with a
 > message that ended mid-sentence at `caused by ::`. An agent fleet built correctly around "continue on
