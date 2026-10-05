@@ -1,6 +1,6 @@
 ﻿import fs from 'node:fs';
 import path from 'node:path';
-import { log } from '../util/log.js';
+import { log, peerText, peerList } from '../util/log.js';
 import { numericEnvOrExit } from './setting-bounds.js';
 import { pinnedFieldsFromEnv } from './pinned-fields.js';
 import type { Config, SecretsFile, SchemaLibraryEntry, SchemaCatalog } from './types.js';
@@ -49,15 +49,15 @@ function checkPermissions(filePath: string): void {
         try {
           fs.chmodSync(filePath, 0o600);
           log.warn(
-            `SECURITY: ${filePath} had loose permissions (mode ${mode.toString(8)}); ` +
+            `SECURITY: ${peerText(filePath)} had loose permissions (mode ${peerText(mode.toString(8))}); ` +
             `auto-fixed to 0600.`,
           );
           return;
         } catch { /* fall through to hard exit if chmod fails */ }
       }
       log.error(
-        `SECURITY: ${filePath} is world/group-readable (mode ${mode.toString(8)}). ` +
-        `Fix with: chmod 600 ${filePath}`,
+        `SECURITY: ${peerText(filePath)} is world/group-readable (mode ${peerText(mode.toString(8))}). ` +
+        `Fix with: chmod 600 ${peerText(filePath)}`,
       );
       process.exit(1);
     }
@@ -305,7 +305,7 @@ function normaliseLoadedConfig(parsed: Config): void {
   for (const space of parsed.spaces) {
     if (Array.isArray(space.proxyFor) && space.proxyFor.length === 0) {
       delete space.proxyFor;
-      log.warn(`config.json: space '${space.id}' has an empty proxyFor — treated as a real space. `
+      log.warn(`config.json: space '${peerText(space.id)}' has an empty proxyFor — treated as a real space. `
         + 'A proxy names at least one member; remove the key to silence this.');
     }
   }
@@ -338,7 +338,7 @@ export function loadConfig(): Config {
       saveConfig(_config);
       log.info('Migrated mediaEmbedding.enabled → per-class levels (media-embedding master switch removed)');
     } catch (err) {
-      log.warn(`Could not persist mediaEmbedding master-switch migration (will retry next boot): ${err}`);
+      log.warn(`Could not persist mediaEmbedding master-switch migration (will retry next boot): ${peerText(err)}`);
     }
   }
   // A provider API key left in config.json moves to secrets.json (0o600) and is deleted from the config.
@@ -352,7 +352,7 @@ export function loadConfig(): Config {
       saveConfig(_config);
       log.info('Migrated space description → meta.purpose (one field, and it is the editable one)');
     } catch (err) {
-      log.warn(`Could not persist space description migration (will retry next boot): ${err}`);
+      log.warn(`Could not persist space description migration (will retry next boot): ${peerText(err)}`);
     }
   }
   // A joined network that never stated a schedule — joined before the join default existed — gets the default, or it
@@ -363,9 +363,9 @@ export function loadConfig(): Config {
       try {
         saveConfig(_config);
         log.info(`Scheduled ${scheduled.length} joined network(s) that had no sync schedule on '${DEFAULT_JOIN_SYNC_SCHEDULE}': `
-          + `${scheduled.join(', ')} — clear the schedule under Settings → Networks for manual sync`);
+          + `${peerList(scheduled)} — clear the schedule under Settings → Networks for manual sync`);
       } catch (err) {
-        log.warn(`Could not persist the join sync schedule default (will retry next boot): ${err}`);
+        log.warn(`Could not persist the join sync schedule default (will retry next boot): ${peerText(err)}`);
       }
     }
   }
@@ -379,14 +379,14 @@ export function loadConfig(): Config {
         saveConfig(_config);
         log.info('Migrated legacy syncSchedule shorthand(s) to cron (same schedule, the spelling that still runs)');
       } catch (err) {
-        log.warn(`Could not persist syncSchedule migration (will retry next boot): ${err}`);
+        log.warn(`Could not persist syncSchedule migration (will retry next boot): ${peerText(err)}`);
       }
     }
     // Not a migration failure: these never resolved to anything, so the network has been on manual sync
     // since the day the value was set — and nothing has said so except a startup line about a value the
     // operator no longer remembers typing. Naming them is the first time such an instance is told.
     for (const { networkId, schedule } of unrunnable) {
-      log.warn(`Network ${networkId} has syncSchedule '${schedule}', which has never been runnable — it is `
+      log.warn(`Network ${peerText(networkId)} has syncSchedule '${peerText(schedule)}', which has never been runnable — it is `
         + 'outside the range cron accepts, so this network syncs only when triggered by hand. Set a cron expression '
         + 'under Settings → Networks to schedule it.');
     }
@@ -399,7 +399,7 @@ export function loadConfig(): Config {
       saveConfig(_config);
       log.info('Re-keyed network schema layers / membership origins left under renamed spaces\' old ids');
     } catch (err) {
-      log.warn(`Could not persist the network space-key migration (will retry next boot): ${err}`);
+      log.warn(`Could not persist the network space-key migration (will retry next boot): ${peerText(err)}`);
     }
   }
 
@@ -410,7 +410,7 @@ export function loadConfig(): Config {
       saveConfig(_config);
       log.info('Migrated mediaEmbedding.faceRecognition.enabled → image ladder (face switch removed; env pin retained)');
     } catch (err) {
-      log.warn(`Could not persist face-recognition switch migration (will retry next boot): ${err}`);
+      log.warn(`Could not persist face-recognition switch migration (will retry next boot): ${peerText(err)}`);
     }
   }
   return _config;
@@ -437,7 +437,7 @@ export function reloadConfig(): Config {
   try {
     parsed = JSON.parse(decodeStateFile(raw, 'config.json')) as Config;
   } catch (err) {
-    log.error(`reloadConfig: config.json has invalid JSON — keeping current config: ${err}`);
+    log.error(`reloadConfig: config.json has invalid JSON — keeping current config: ${peerText(err)}`);
     throw new Error('config.json contains invalid JSON; current configuration unchanged');
   }
   normaliseLoadedConfig(parsed);
@@ -628,7 +628,7 @@ export function startConfigWatcher(
          * outcome is reported as a CONDITION and not only as an event.
          */
         onReloadOutcome?.(false);
-        log.error(`Reload after external config change failed; keeping current config: ${err}`);
+        log.error(`Reload after external config change failed; keeping current config: ${peerText(err)}`);
       });
   });
 }
@@ -649,7 +649,7 @@ export function saveConfigSoon(config: Config): void {
     _flushChain = _flushChain
       .catch(() => { /* a prior flush failure must not break the chain */ })
       .then(() => writeConfigAsync())
-      .catch(err => log.error(`Async config flush failed: ${err}`));
+      .catch(err => log.error(`Async config flush failed: ${peerText(err)}`));
   });
 }
 
@@ -735,7 +735,7 @@ export function loadSchemaLibrary(): SchemaLibraryEntry[] {
     const raw = fs.readFileSync(SCHEMA_LIB_PATH, 'utf8');
     _schemaLibrary = JSON.parse(decodeStateFile(raw, 'schema-library.json')) as SchemaLibraryEntry[];
   } catch (err) {
-    log.warn(`schema-library.json could not be loaded — treating as empty: ${err}`);
+    log.warn(`schema-library.json could not be loaded — treating as empty: ${peerText(err)}`);
     _schemaLibrary = [];
   }
   return _schemaLibrary;
@@ -772,7 +772,7 @@ export function loadSchemaCatalogs(): SchemaCatalog[] {
     const raw = fs.readFileSync(SCHEMA_CATALOGS_PATH, 'utf8');
     _schemaCatalogs = JSON.parse(decodeStateFile(raw, 'schema-catalogs.json')) as SchemaCatalog[];
   } catch (err) {
-    log.warn(`schema-catalogs.json could not be loaded — treating as empty: ${err}`);
+    log.warn(`schema-catalogs.json could not be loaded — treating as empty: ${peerText(err)}`);
     _schemaCatalogs = [];
   }
   return _schemaCatalogs;
@@ -869,7 +869,7 @@ export function getStorageConfig(): ResolvedStorageConfig | undefined {
           out.lockedByInfra.push(`${area}.${field}`);
           continue;
         }
-        log.warn(`${storageEnvName(area, tier)}="${raw}" is not a non-negative number — ignoring it and falling back to config.json.`);
+        log.warn(`${peerText(storageEnvName(area, tier))}="${peerText(raw)}" is not a non-negative number — ignoring it and falling back to config.json.`);
       }
       const fromConfig = base[area]?.[field];
       if (fromConfig !== undefined) resolved[field] = fromConfig;

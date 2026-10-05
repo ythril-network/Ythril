@@ -33,7 +33,7 @@ GET /api/about/logs?lines=200
 Authorization: Bearer <admin-token>   # admin required
 ```
 
-Returns recent log lines from the in-memory ring buffer. **Requires an admin token** — logs may contain space IDs, peer URLs, and internal error details.
+Returns recent log lines from the in-memory ring buffer. **Requires an admin token** — logs may contain space IDs, peer URLs, and internal error details. **Every entry is one line:** a value a caller or a peer supplied (a document id, a label, an error's text) has its line breaks and control characters written as escapes (`\n`, `\u001b`) and is cut at 4096 characters, the line saying how much (`…(+N chars)`), so no value can start a line of its own or make a megabyte one. A stack trace is one line too, with its frames separated by `\n`.
 
 **Response** `200`:
 

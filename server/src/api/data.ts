@@ -32,7 +32,8 @@ import { buildSpaceVectorIndexes } from '../spaces/vector-index.js';
 import { concreteSpaces } from '../spaces/proxy.js';
 import { testConnection } from '../db/conn-test.js';
 import { isSsrfSafeMongoUri } from '../util/ssrf.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
+import { caughtFailureText } from '../brain/store-failure.js';
 import { mapLimit } from '../util/map-limit.js';
 
 export const dataRouter = Router();
@@ -143,8 +144,7 @@ dataRouter.get('/config', (_req, res) => {
     const migrationEnabled = isDbMigrationEnabled();
     res.json({ source, mongoUriRedacted, migrationEnabled });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    res.status(500).json({ error: msg });
+    res.status(500).json({ error: caughtFailureText(err, 'GET /api/admin/data/config') });
   }
 });
 
@@ -161,8 +161,7 @@ dataRouter.post('/config/test', requireAdminMfa, async (req, res) => {
     const result = await testConnection(validation.uri);
     res.json(result);
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    res.status(500).json({ error: msg });
+    res.status(500).json({ error: caughtFailureText(err, 'POST /api/admin/data/config/test') });
   }
 });
 
@@ -206,9 +205,8 @@ dataRouter.post('/backup', requireAdminMfa, async (_req, res) => {
       ...(result.offsite ? { offsite: result.offsite } : {}),
     });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    log.error(`POST /api/admin/data/backup: ${err}`);
-    res.status(500).json({ error: msg });
+    log.error(`POST /api/admin/data/backup: ${peerText(err)}`);
+    res.status(500).json({ error: caughtFailureText(err, 'POST /api/admin/data/backup') });
   }
 });
 
@@ -219,8 +217,7 @@ dataRouter.get('/backups', (_req, res) => {
     const backups = listBackups();
     res.json({ backups });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    res.status(500).json({ error: msg });
+    res.status(500).json({ error: caughtFailureText(err, 'GET /api/admin/data/backups') });
   }
 });
 
@@ -297,8 +294,7 @@ dataRouter.get('/browse-dirs', (req, res) => {
     dirs.sort();
     res.json({ path: normalized, dirs });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    res.status(400).json({ error: msg });
+    res.status(400).json({ error: caughtFailureText(err, 'GET /api/admin/data/browse') });
   }
 });
 
@@ -353,8 +349,7 @@ dataRouter.put('/backup-config', requireAdminMfa, (req, res) => {
     startBackupScheduler();
     res.json({ ok: true, config: cfg });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    res.status(500).json({ error: msg });
+    res.status(500).json({ error: caughtFailureText(err, 'PUT /api/admin/data/backup-config') });
   }
 });
 
@@ -418,9 +413,8 @@ dataRouter.post('/restore', requireAdminMfa, async (req, res) => {
     }
     res.json({ ok: true, vectorIndexes: { rebuilding: rebuilt, failed } });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    log.error(`POST /api/admin/data/restore: ${err}`);
-    res.status(500).json({ error: msg });
+    log.error(`POST /api/admin/data/restore: ${peerText(err)}`);
+    res.status(500).json({ error: caughtFailureText(err, 'POST /api/admin/data/restore') });
   } finally {
     setMaintenanceActive(wasMaintenance);
   }
@@ -532,8 +526,7 @@ dataRouter.post('/migrate', requireAdminMfa, async (req, res) => {
     setMaintenanceActive(false);
     // If the marker was written before the error, clean it up
     try { if (fs.existsSync(migrationMarkerPath())) fs.unlinkSync(migrationMarkerPath()); } catch { /* best-effort */ }
-    const msg = err instanceof Error ? err.message : String(err);
-    log.error(`POST /api/admin/data/migrate: ${err}`);
-    res.status(500).json({ error: msg });
+    log.error(`POST /api/admin/data/migrate: ${peerText(err)}`);
+    res.status(500).json({ error: caughtFailureText(err, 'POST /api/admin/data/migrate') });
   }
 });

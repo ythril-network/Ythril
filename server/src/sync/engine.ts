@@ -24,6 +24,7 @@ import { deliverChangeNotes } from './change-notes.js';
 import { col, asFilter } from '../db/mongo.js';
 import { recordSyncResult, type SyncCounts } from './history.js';
 import { log, logSafe } from '../util/log.js';
+import { caughtFailureText } from '../brain/store-failure.js';
 import { resolveWatermark, truncationWarn, type TransferOutcome } from './watermark.js';
 import { pullTombstones, pushTombstones } from './tombstone-transfer.js';
 import { TombstoneCounterError } from './tombstone-apply.js';
@@ -185,12 +186,12 @@ async function _runSyncForNetworkImpl(networkId: string): Promise<{ synced: numb
         log.warn(
           `REPARENT_REVERT_AVAILABLE: original parent '${logSafe(member.label)}' is back online. ` +
           `'${logSafe(rc.label)}' (${logSafe(rc.instanceId)}) was temporarily re-parented during the outage. ` +
-          `To restore original topology: POST /api/networks/${net.id}/members/${logSafe(rc.instanceId)}/revert-parent. ` +
-          `To make the adoption permanent:  POST /api/networks/${net.id}/members/${logSafe(rc.instanceId)}/adopt.`,
+          `To restore original topology: POST /api/networks/${logSafe(net.id)}/members/${logSafe(rc.instanceId)}/revert-parent. ` +
+          `To make the adoption permanent:  POST /api/networks/${logSafe(net.id)}/members/${logSafe(rc.instanceId)}/adopt.`,
         );
       }
     } catch (err) {
-      const errMsg = `Sync failed for member ${logSafe(member.label)} (${logSafe(member.instanceId)}): ${logSafe(String(err))}`;
+      const errMsg = `Sync failed for member ${logSafe(member.label)} (${logSafe(member.instanceId)}): ${logSafe(caughtFailureText(err, `sync member ${member.instanceId}`))}`;
       log.error(errMsg);
       errorMessages.push(errMsg);
       errors++;
@@ -433,7 +434,7 @@ async function runSyncForMember(
     // for space IDs that were registered on the network but never created locally.
     const cfg = getConfig();
     if (!cfg.spaces.some(s => s.id === spaceId && !s.proxyFor)) {
-      log.warn(`Skipping sync for space '${spaceId}' in network '${logSafe(net.label)}': space not in local config`);
+      log.warn(`Skipping sync for space '${logSafe(spaceId)}' in network '${logSafe(net.label)}': space not in local config`);
       continue;
     }
 
@@ -473,7 +474,7 @@ async function runSyncForMember(
               // Shared table. The inline copy here defaulted to `image/jpeg`, so a synced image whose
               // extension it did not list was mislabelled rather than left unknown.
               enqueueMediaJob(spaceId, p, mimeTypeForPath(p), 'image').catch(err =>
-                log.warn(`Face reprocess enqueue for ${spaceId}/${logSafe(p)}:${logSafe(String(err))}`),
+                log.warn(`Face reprocess enqueue for ${logSafe(spaceId)}/${logSafe(p)}:${logSafe(String(err))}`),
               );
             }
           }
@@ -569,7 +570,7 @@ async function gossipWithPeer(
               if (!local.versionCheckedAt) { local.versionCheckedAt = new Date().toISOString(); changed = true; }
               if (pinMemberSigningKey(local, peerSelf.signingPublicKey, peerSelf.signingKeyRotation)) changed = true;
               if (changed) {
-                log.info(`Gossip: updated ${logSafe(member.label)} via self-piggyback (${net.id})`);
+                log.info(`Gossip: updated ${logSafe(member.label)} via self-piggyback (${logSafe(net.id)})`);
                 saveConfig(freshCfg);
               }
             }
@@ -621,7 +622,7 @@ async function gossipWithPeer(
       }
       if (pinMemberSigningKey(local, peerRecord.signingPublicKey)) updated = true;
       if (updated) {
-        log.info(`Gossip: updated member ${logSafe(local.label)} (${logSafe(local.instanceId)}) in network ${net.id}`);
+        log.info(`Gossip: updated member ${logSafe(local.label)} (${logSafe(local.instanceId)}) in network ${logSafe(net.id)}`);
         changed = true;
       }
     }
@@ -724,7 +725,7 @@ async function propagateVotesWithPeer(
             sendMemberRemovedNotify(round.subjectUrl, round.subjectInstanceId, net.id);
           }
           if (justPassed && admitPassedJoin(freshNet, fresh.instanceId, round)) {
-            log.info(`Join round ${logSafe(round.roundId)} concluded via gossip — added ${logSafe(round.subjectLabel)} to network ${net.id}`);
+            log.info(`Join round ${logSafe(round.roundId)} concluded via gossip — added ${logSafe(round.subjectLabel)} to network ${logSafe(net.id)}`);
           }
         }
       }
@@ -852,7 +853,7 @@ async function pullFromPeer(
           { from: member.label ?? member.instanceId });
       } catch (err) {
         truncated = true;
-        log.warn(`sync pull ${spaceId} ${family.collection}: record write failed: `
+        log.warn(`sync pull ${logSafe(spaceId)} ${family.collection}: record write failed: `
           + `${logSafe(err instanceof Error ? err.message : String(err))} (from ${logSafe(member.label ?? member.instanceId)}). `
           + `This is this instance's database, not the peer: the transfer holds at ${logSafe(deliveredThrough)} and the page `
           + 'is fetched again next cycle.');
@@ -861,7 +862,7 @@ async function pullFromPeer(
       if (written.counterBehind) {
         // `Q-218` R3: the page is stored, but this counter may be behind it, so the position is not vouched for.
         truncated = true;
-        log.warn(`sync pull ${spaceId} ${family.collection}: record write failed: the seq counter could not be moved `
+        log.warn(`sync pull ${logSafe(spaceId)} ${family.collection}: record write failed: the seq counter could not be moved `
           + `past the page from ${logSafe(member.label ?? member.instanceId)}. The transfer holds at ${logSafe(deliveredThrough)} `
           + 'and the page is fetched again next cycle.');
         break;
@@ -869,7 +870,7 @@ async function pullFromPeer(
       if (written.storeRefused.length > 0) {
         truncated = true;
         // The documents are named once, by the writer's own summary (`warnArrivalsNotStored`); this says what it costs.
-        log.warn(`sync pull ${spaceId} ${family.collection}: record write failed: the store refused `
+        log.warn(`sync pull ${logSafe(spaceId)} ${family.collection}: record write failed: the store refused `
           + `${written.storeRefused.length} document(s) from ${logSafe(member.label ?? member.instanceId)}. The `
           + `transfer holds at ${logSafe(deliveredThrough)} and the page is fetched again next cycle.`);
         break;
@@ -1047,7 +1048,7 @@ async function pushToPeer(
        * free unless somebody is looking — and it is the one line that would have made six failed reproduction
        * attempts conclusive instead of inconclusive.
        */
-      log.debug(`Push ${payloadKey} to ${logSafe(member.label ?? member.instanceId)} space '${spaceId}': `
+      log.debug(`Push ${payloadKey} to ${logSafe(member.label ?? member.instanceId)} space '${logSafe(spaceId)}': `
         + `${batch.length} doc(s) with seq > ${logSafe(seqCursor)}`
         + (batch.length ? ` (through ${logSafe((batch[batch.length - 1] as FactDoc).seq)})` : ''));
       if (batch.length === 0) break;
@@ -1122,7 +1123,7 @@ async function pushToPeer(
    * nothing and the record is never offered again. That combination is invisible without both numbers in one
    * line, which is why they are logged together rather than at four separate call sites.
    */
-  log.debug(`Push cycle to ${logSafe(member.label ?? member.instanceId)} space '${spaceId}': watermark ${logSafe(lastSeqPushed)} -> `
+  log.debug(`Push cycle to ${logSafe(member.label ?? member.instanceId)} space '${logSafe(spaceId)}': watermark ${logSafe(lastSeqPushed)} -> `
     + `${logSafe(maxSeqPushed)}, pushed ${logSafe(pushedMemories)}m/${logSafe(pushedEntities)}e/${logSafe(pushedEdges)}g/${logSafe(pushedChrono)}c/${logSafe(pushedLinks)}l`);
 
   // Persist the push high-water mark so next sync only sends new/changed docs
@@ -1178,7 +1179,7 @@ async function checkMerkleWithPeer(
     ]);
 
     if (!peerResp.ok) {
-      log.warn(`Merkle check for space '${spaceId}' with peer '${logSafe(member.label)}': peer returned HTTP ${logSafe(peerResp.status)} — skipping`);
+      log.warn(`Merkle check for space '${logSafe(spaceId)}' with peer '${logSafe(member.label)}': peer returned HTTP ${logSafe(peerResp.status)} — skipping`);
       return;
     }
 
@@ -1186,22 +1187,22 @@ async function checkMerkleWithPeer(
     const peerRoot = peerResult.root;
 
     if (!peerRoot) {
-      log.warn(`Merkle check for space '${spaceId}' with peer '${logSafe(member.label)}': peer response missing 'root' field`);
+      log.warn(`Merkle check for space '${logSafe(spaceId)}' with peer '${logSafe(member.label)}': peer response missing 'root' field`);
       return;
     }
 
     if (localResult.root !== peerRoot) {
       log.warn(
-        `MERKLE_DIVERGENCE: space '${spaceId}', peer '${logSafe(member.label)}' (${logSafe(member.instanceId)}), ` +
+        `MERKLE_DIVERGENCE: space '${logSafe(spaceId)}', peer '${logSafe(member.label)}' (${logSafe(member.instanceId)}), ` +
         `network '${logSafe(net.label)}'. ` +
         `local root=${logSafe(localResult.root)} (${logSafe(localResult.leafCount)} leaves), ` +
         `peer root=${logSafe(peerRoot)} (${logSafe(peerResult.leafCount ?? '?')} leaves). ` +
         `The space contents differ after sync — possible data loss, concurrent write, or sync bug.`,
       );
     } else {
-      log.info(`Merkle OK: space '${spaceId}', peer '${logSafe(member.label)}' root=${logSafe(localResult.root.slice(0, 12))}…`);
+      log.info(`Merkle OK: space '${logSafe(spaceId)}', peer '${logSafe(member.label)}' root=${logSafe(localResult.root.slice(0, 12))}…`);
     }
   } catch (err) {
-    log.warn(`Merkle check for space '${spaceId}' with peer '${logSafe(member.label)}': ${logSafe(String(err))}`);
+    log.warn(`Merkle check for space '${logSafe(spaceId)}' with peer '${logSafe(member.label)}': ${logSafe(String(err))}`);
   }
 }

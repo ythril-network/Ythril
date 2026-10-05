@@ -18,6 +18,7 @@ import { col, asFilter } from '../db/mongo.js';
 import { REF_KINDS } from '../config/types-knowledge.js';
 import type { RefKind } from '../config/types-knowledge.js';
 import type { SpacePart } from '../db/space-collection.js';
+import { peerList } from '../util/log.js';
 
 /** Canonical UUID v4 matcher. The only copy — import it, never re-declare it. */
 export const UUID_V4_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -79,6 +80,24 @@ export function isWellFormedRef(kind: RefKind, value: unknown): boolean {
   return kind === 'file' ? isSpaceRelativeFilePath(value) : isUuidV4(value);
 }
 
+/** How many references a refusal names before it counts the rest. */
+const REFS_NAMED = 5;
+/**
+ * How much of ONE reference a refusal quotes: a UUID or any honest file path whole, and short enough that one
+ * oversized reference cannot take the list's whole budget and leave the others it names unnamed.
+ */
+const REF_QUOTED = 256;
+
+/**
+ * The references a refusal names: the first `REFS_NAMED`, JSON-quoted, each cut at `REF_QUOTED`, then `…(+N more)` —
+ * through `peerList`, so a caller's megabyte reference comes back bounded and a line-breaking one escaped
+ * (bundle-30 `I5`, `Q-270`). It was `slice(0, 5)` + `(+N more)` written twice in this file, bounding the count and
+ * never the element, so the 400 on the REST and MCP write doors echoed whatever the caller sent. The tail is the
+ * renderer's, `…(+N more)`, as every other bounded list in the product has it.
+ */
+const quotedRefs = (values: readonly string[]): string =>
+  peerList(values.map(v => JSON.stringify(v)), ', ', { count: REFS_NAMED, each: REF_QUOTED });
+
 /** The values of a reference field that are the wrong SHAPE for the kind it points at. */
 function malformedRefs(kind: RefKind, values: readonly string[]): string[] {
   return values.filter(v => !isWellFormedRef(kind, v));
@@ -97,15 +116,14 @@ export function invalidRefsMessage(field: string, kind: RefKind, values: readonl
   if (!values || values.length === 0) return null;
   const bad = malformedRefs(kind, values);
   if (bad.length === 0) return null;
-  const shown = bad.slice(0, 5).map(v => JSON.stringify(v)).join(', ');
-  const more = bad.length > 5 ? ` (+${bad.length - 5} more)` : '';
-  // The UUID wording is byte-for-byte what it has always been: several suites assert that literal, and a
-  // reworded refusal breaks them in waves — an assertion on its ABSENCE going vacuous rather than red.
+  const shown = quotedRefs(bad);
+  // The UUID wording is what it has always been but for the list (`quotedRefs`): several suites assert that literal,
+  // and a reworded refusal breaks them in waves — an assertion on its ABSENCE going vacuous rather than red.
   if (kind === 'file') {
-    return `\`${field}\` expects ${REF_NOUN[kind]}s (space-relative, forward slashes), got ${shown}${more}. ` +
+    return `\`${field}\` expects ${REF_NOUN[kind]}s (space-relative, forward slashes), got ${shown}. ` +
       `A file is referenced by its path inside the space, without a leading slash and without '..'.`;
   }
-  return `\`${field}\` expects ${REF_NOUN[kind]}s (UUID v4), got ${shown}${more}. ` +
+  return `\`${field}\` expects ${REF_NOUN[kind]}s (UUID v4), got ${shown}. ` +
     `Look the record up by name first and pass its id — a name is not a reference.`;
 }
 
@@ -264,11 +282,10 @@ export async function assertRefsResolve(
   const found = new Set(docs.map(d => d._id));
   const missing = unique.filter(id => !found.has(id));
   if (missing.length === 0) return;
-  const shown = missing.slice(0, 5).map(v => JSON.stringify(v)).join(', ');
-  const more = missing.length > 5 ? ` (+${missing.length - 5} more)` : '';
+  const shown = quotedRefs(missing);
   throw new ReferenceRefusal(
     `\`${field}\` references ${missing.length} ${REF_NOUN[kind]}${missing.length === 1 ? '' : 's'} that ` +
-    `do${missing.length === 1 ? 'es' : ''} not exist in space '${spaceId}': ${shown}${more}. ` +
+    `do${missing.length === 1 ? 'es' : ''} not exist in space '${spaceId}': ${shown}. ` +
     `Create the record first, then link it — the write was refused rather than stored with a dead link.`,
   );
 }

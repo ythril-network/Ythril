@@ -2,7 +2,7 @@
 import bcrypt from 'bcrypt';
 import { v4 as uuidv4 } from 'uuid';
 import { getConfig, saveConfig, mutateConfig, getSecrets, saveSecrets } from '../config/loader.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
 import type { TokenRecord, Config } from '../config/types.js';
 import { migrateToken } from './rights-migration.js';
 import { withInstanceAdminGrants } from './instance-admin-grants.js';
@@ -142,7 +142,7 @@ function healPrefix(record: TokenRecord, prefix: string): void {
       const live = cfg.tokens.find(t => t.id === record.id);
       if (live) live.prefix = prefix;
     });
-    log.info(`Migrated lookup prefix for token '${record.name}' (${record.id}) on first use.`);
+    log.info(`Migrated lookup prefix for token '${peerText(record.name)}' (${peerText(record.id)}) on first use.`);
   } catch { /* best-effort — will persist on the next config save */ }
 }
 
@@ -435,7 +435,7 @@ export async function adoptPeerToken(tokenId: string): Promise<void> {
   // same peer can overlap — and revoking it would hand the peer a dead token; it expires by itself if it never lands.
   const replaced = getConfig().tokens.filter(x => x.peerInstanceId === t.peerInstanceId && x.id !== tokenId && x.expiresAt === null);
   for (const old of replaced) {
-    if (await revokeToken(old.id)) log.info(`Revoked peer PAT '${old.name}' (${old.id}) — replaced by a newer handshake`);
+    if (await revokeToken(old.id)) log.info(`Revoked peer PAT '${peerText(old.name)}' (${peerText(old.id)}) — replaced by a newer handshake`);
   }
 }
 
@@ -521,7 +521,7 @@ export async function revokePeerCredentialsIfOrphaned(instanceId: string): Promi
   for (const t of inbound) {
     if (await revokeToken(t.id)) {
       revoked = true;
-      log.info(`Revoked peer PAT '${t.name}' (${t.id}) — instance ${instanceId} is no longer a member of any network`);
+      log.info(`Revoked peer PAT '${peerText(t.name)}' (${peerText(t.id)}) — instance ${peerText(instanceId)} is no longer a member of any network`);
     }
   }
   const secrets = getSecrets();
@@ -529,7 +529,7 @@ export async function revokePeerCredentialsIfOrphaned(instanceId: string): Promi
     delete secrets.peerTokens[instanceId];
     saveSecrets(secrets);
     revoked = true;
-    log.info(`Dropped outbound peer token for departed instance ${instanceId}`);
+    log.info(`Dropped outbound peer token for departed instance ${peerText(instanceId)}`);
   }
   return revoked;
 }

@@ -33,7 +33,7 @@
  * whichever door its author was not using that day.
  */
 import { getConfig } from '../config/loader.js';
-import { log, currentRequestId } from '../util/log.js';
+import { log, peerText, currentRequestId } from '../util/log.js';
 import { reachableSpaceIds } from '../auth/space-reach.js';
 import { toolRightsRefusal, spaceAdminRefusal } from './tool-rights-guard.js';
 import { toolIsVisible } from './tool-visibility.js';
@@ -296,7 +296,7 @@ export async function callTool(req: ToolCallRequest): Promise<ToolCallOutcome> {
     return { result, status, callSpace };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    log.warn(`tool '${name}' error in space '${callSpace || 'global'}': ${message}`);
+    log.warn(`tool '${peerText(name)}' error in space '${peerText(callSpace || 'global')}': ${peerText(message)}`);
     /*
      * Classified HERE, once, rather than in each tool — every write funnels through this catch, and the
      * alternative was editing a dozen throw sites, which is how the introduced/pre-existing split came to
@@ -327,7 +327,9 @@ export async function callTool(req: ToolCallRequest): Promise<ToolCallOutcome> {
         status: 503, callSpace,
       };
     }
-    return { result: { content: [{ type: 'text' as const, text: `Error: ${message}` }], isError: true }, status: 400, callSpace };
+    // `readFailure.error` is the error's own text unless it is the driver's own condition (`Q-361`): the line above
+    // already carries the driver's text for the operator, once, so no second line is written for the answer.
+    return { result: { content: [{ type: 'text' as const, text: `Error: ${readFailure.error}` }], isError: true }, status: 400, callSpace };
   }
 }
 

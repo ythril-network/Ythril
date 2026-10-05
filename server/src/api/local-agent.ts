@@ -9,7 +9,8 @@ import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 import { globalRateLimit } from '../rate-limit/middleware.js';
 import { requireAdminMfa } from '../auth/middleware.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
+import { caughtFailureText } from '../brain/store-failure.js';
 import { isLoopbackHost, LOCAL_AGENT_DEFAULT_URL } from './local-agent-url.js';
 import { envInt } from '../config/env-num.js';
 
@@ -273,8 +274,8 @@ localAgentRouter.post('/bootstrap', globalRateLimit, requireAdminMfa, async (req
     res.json({ ok: true, message: 'Local connector bootstrapped and reachable.' });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    log.warn(`local-agent bootstrap failed: ${msg}`);
-    res.status(502).json({ error: `Local agent bootstrap failed: ${msg}` });
+    log.warn(`local-agent bootstrap failed: ${peerText(msg)}`);
+    res.status(502).json({ error: `Local agent bootstrap failed: ${caughtFailureText(err, 'bootstrap the local agent')}` });
   }
 });
 
@@ -339,12 +340,11 @@ localAgentRouter.get('/status', globalRateLimit, requireAdminMfa, async (_req, r
       agent: body,
     });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
     res.json({
       configured: true,
       reachable: false,
       canExecute: false,
-      message: `Local agent unreachable: ${msg}`,
+      message: `Local agent unreachable: ${caughtFailureText(err, 'reach the local agent')}`,
     });
   }
 });
@@ -398,7 +398,7 @@ localAgentRouter.post('/enable-networks/execute', globalRateLimit, requireAdminM
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    log.warn(`local-agent execute failed: ${msg}`);
-    res.status(502).json({ error: `Local agent execution failed: ${msg}` });
+    log.warn(`local-agent execute failed: ${peerText(msg)}`);
+    res.status(502).json({ error: `Local agent execution failed: ${caughtFailureText(err, 'run the local agent')}` });
   }
 });

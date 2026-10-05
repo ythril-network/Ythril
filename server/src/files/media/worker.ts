@@ -35,6 +35,7 @@ import { toSafeRelPath } from '../../util/paths.js';
 import { isProxySpace } from '../../spaces/proxy.js';
 import type { MediaJobDoc } from '../../config/types.js';
 import { log } from '../../util/log.js';
+import { storedFailureText } from '../../brain/store-failure.js';
 import { createMediaProviders } from './providers.js';
 import type { MediaProviderBundle } from './providers.js';
 import { claimNextJob, completeJob, failJob, resetStalledJobs, cancelMediaJob, currentWorkEpoch, waitForWork, wakeWorkers, touchJobProgress , releaseClaimedJob } from './job-queue.js';
@@ -688,7 +689,9 @@ async function processJob(
     } else {
       mediaJobsRetriedTotal.labels({ space: spaceId, media_type: mediaType }).inc();
     }
-    await failJob(spaceId, fileId, permanent ? maxAttempts : attempts, maxAttempts, message).catch(innerErr =>
+    // What is stored is served later (`mediaJobError`, `lastError`): a driver's message names a host and a port, so a
+    // failure on the store's side is stored as our sentence and the error's class (`Q-361`).
+    await failJob(spaceId, fileId, permanent ? maxAttempts : attempts, maxAttempts, storedFailureText(err, 'run a media job')).catch(innerErr =>
       log.warn(`Media worker: failJob error: ${innerErr instanceof Error ? innerErr.message : String(innerErr)}`),
     );
   } finally {

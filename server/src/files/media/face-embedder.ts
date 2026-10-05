@@ -38,7 +38,7 @@ import { getDataRoot, getFaceRecognitionConfig } from '../../config/loader.js';
 import { faceRecognitionAllowed } from '../converters/media-level.js';
 import { updateFileMeta } from '../file-meta.js';
 import { linksStartingFrom } from '../../brain/link-adjacency.js';
-import { log } from '../../util/log.js';
+import { log, peerText } from '../../util/log.js';
 import { isUsableDescriptor } from './face-descriptor.js';
 import { faceDescriptorDimsFor, liveIndexName } from '../../spaces/vector-index.js';
 import type { FileMetaDoc, EntityDoc } from '../../config/types.js';
@@ -464,8 +464,8 @@ export async function propagateFaceLabel(
     );
   } catch (err) {
     log.warn(
-      `Face recogniser: propagateFaceLabel failed for ${spaceId}/${fileId}: ` +
-      `${err instanceof Error ? err.message : String(err)}`,
+      `Face recogniser: propagateFaceLabel failed for ${peerText(spaceId)}/${peerText(fileId)}: ` +
+      `${peerText(err)}`,
     );
   }
 }

@@ -11,7 +11,7 @@ import { FACE_DESCRIPTOR_DIMS } from '../files/media/face-descriptor.js';
 import { getConfig, getEmbeddingConfig, getFaceRecognitionConfig } from '../config/loader.js';
 import { mutateConfigRetrying } from '../config/mutate-config-retrying.js';
 import { resolveMetaRefs } from './schema-validation.js';
-import { log } from '../util/log.js';
+import { log, peerText, peerList } from '../util/log.js';
 import type { KnowledgeType } from '../config/types.js';
 import { spaceCollection } from '../db/space-collection.js';
 
@@ -158,7 +158,7 @@ export async function searchAvailable(
     }
     log.warn(
       `Database search (\`mongot\`) did not answer after ${ATTEMPTS} attempts ` +
-        `(${Math.round((ATTEMPTS * BACKOFF_MS) / 1000)}s): ${lastErr instanceof Error ? lastErr.message : String(lastErr)}. ` +
+        `(${Math.round((ATTEMPTS * BACKOFF_MS) / 1000)}s): ${peerText(lastErr)}. ` +
         `SEMANTIC RECALL WILL RETURN EMPTY until vector indexes are built — rebuild them from ` +
         `Settings → Space → Danger Zone, or POST /api/spaces/<space>/rebuild-indexes. ` +
         `Use mongodb/mongodb-atlas-local for $vectorSearch support.`,
@@ -229,9 +229,9 @@ export async function ensureVectorSearchIndex(
     // actually failed. The old message hardcoded `_facts` for all five, which sent the diagnosis
     // in the wrong direction for a long time.
     log.warn(
-      `Could not list search indexes for ${spaceId}_${collectionSuffix}: ${err instanceof Error ? err.message : String(err)}. ` +
+      `Could not list search indexes for ${peerText(spaceId)}_${collectionSuffix}: ${peerText(err)}. ` +
         `Semantic recall will return empty for it until the index is built — rebuild from ` +
-        `Settings → Space → Danger Zone, or POST /api/spaces/${spaceId}/rebuild-indexes.`,
+        `Settings → Space → Danger Zone, or POST /api/spaces/${peerText(spaceId)}/rebuild-indexes.`,
     );
     return;
   }
@@ -255,7 +255,7 @@ export async function ensureVectorSearchIndex(
     // moments later. Result: no index, no error, nothing logged, and recall silently returns empty
     // forever. Measured: that is exactly what happened on the first attempt at the restore fix.
     if (dimsMatch && filtersMatch && !opts.force) {
-      log.debug(`Vector search index ${indexName} already up to date`);
+      log.debug(`Vector search index ${peerText(indexName)} already up to date`);
       return;
     }
 
@@ -273,7 +273,7 @@ export async function ensureVectorSearchIndex(
     // re-embedding every face, which is a decision about the data, not a config edit.
     if (existing && !dimsMatch && opts.refuseWidthChange) {
       log.error(
-        `REFUSING to change ${indexName} from ${existingDims} to ${numDimensions} dimensions. `
+        `REFUSING to change ${peerText(indexName)} from ${existingDims} to ${numDimensions} dimensions. `
         + `The vectors already stored in this space are ${existingDims}-wide and nothing re-derives them, `
         + `so rebuilding the index at ${numDimensions} would leave every similarity score wrong with no `
         + `error reported. The index keeps its current width. To move a populated gallery, re-embed its `
@@ -291,7 +291,7 @@ export async function ensureVectorSearchIndex(
     // Definition changed (dimensions or filter fields). Prefer an in-place update — Atlas keeps
     // serving the old definition until the rebuilt one is READY, so recall never goes dark.
     log.warn(
-      `Updating vector search index ${indexName} (dims ${existingDims}→${numDimensions}, ` +
+      `Updating vector search index ${peerText(indexName)} (dims ${existingDims}→${numDimensions}, ` +
       `filter fields ${existingFilters.size}→${desiredFilters.size})`,
     );
     try {
@@ -299,7 +299,7 @@ export async function ensureVectorSearchIndex(
       if (waitForReady) {
         const ready = await pollVectorIndexReady(spaceId, collectionSuffix, indexName,
           { vectorPath, dims: numDimensions });
-        if (!ready) log.warn(`Vector search index ${indexName} did not reach READY within 60s after update`);
+        if (!ready) log.warn(`Vector search index ${peerText(indexName)} did not reach READY within 60s after update`);
       }
       return;
     } catch (err) {
@@ -311,7 +311,7 @@ export async function ensureVectorSearchIndex(
       if (keptWidth != null && keptWidth === existingDims) {
         // mongodb-atlas-local refuses every spelling of an in-place vector index update ("mappings" is
         // required), so on that backend the change is made by a SWAP instead — see `swapIndexDefinition`.
-        log.warn(`updateSearchIndex failed for ${indexName} (${err}); swapping the definition in without a gap`);
+        log.warn(`updateSearchIndex failed for ${peerText(indexName)} (${peerText(err)}); swapping the definition in without a gap`);
         const swap = swapIndexDefinition(spaceId, collectionSuffix, indexName, definition, vectorPath, keptWidth);
         if (waitForReady) await swap; else void swap;
         return;
@@ -320,17 +320,17 @@ export async function ensureVectorSearchIndex(
       // back to drop + recreate. This one path DOES leave a brief INITIAL_SYNC gap during which
       // recall on this collection returns empty (handled by the recall error-swallow), which is
       // acceptable for the rare dims change.
-      log.warn(`updateSearchIndex failed for ${indexName} (${err}); dropping and recreating`);
+      log.warn(`updateSearchIndex failed for ${peerText(indexName)} (${peerText(err)}); dropping and recreating`);
       try {
         await coll.dropSearchIndex(indexName);
         await new Promise(r => setTimeout(r, 2000));
       } catch (dropErr) {
-        log.warn(`Failed to drop vector search index ${indexName}: ${dropErr}`);
+        log.warn(`Failed to drop vector search index ${peerText(indexName)}: ${peerText(dropErr)}`);
       }
     }
   }
 
-  log.debug(`Creating vector search index ${indexName} (${numDimensions}d, ${similarity}, path: ${vectorPath}, ${filterFields.length} filter field(s))`);
+  log.debug(`Creating vector search index ${peerText(indexName)} (${numDimensions}d, ${peerText(similarity)}, path: ${peerText(vectorPath)},${filterFields.length} filter field(s))`);
   try {
     await coll.createSearchIndex(asDoc({
       name: indexName,
@@ -338,7 +338,7 @@ export async function ensureVectorSearchIndex(
       definition,
     }));
   } catch (err) {
-    log.warn(`Failed to create vector search index ${indexName}: ${err}. Semantic recall will be unavailable.`);
+    log.warn(`Failed to create vector search index ${peerText(indexName)}: ${peerText(err)}.Semantic recall will be unavailable.`);
     return;
   }
 
@@ -346,7 +346,7 @@ export async function ensureVectorSearchIndex(
   if (waitForReady) {
     const ready = await pollVectorIndexReady(spaceId, collectionSuffix, indexName,
       { vectorPath, dims: numDimensions });
-    if (!ready) log.warn(`Vector search index ${indexName} did not reach READY state within 60 seconds`);
+    if (!ready) log.warn(`Vector search index ${peerText(indexName)} did not reach READY state within 60 seconds`);
   }
 }
 
@@ -393,7 +393,7 @@ async function swapIndexDefinition(
   };
   try {
     if (!await build(standIn)) {
-      log.warn(`Vector index swap for ${indexName}: the stand-in did not come up; the current definition keeps serving`);
+      log.warn(`Vector index swap for ${peerText(indexName)}: the stand-in did not come up; the current definition keeps serving`);
       await coll.dropSearchIndex(standIn).catch(() => {});
       return;
     }
@@ -401,14 +401,14 @@ async function swapIndexDefinition(
     await coll.dropSearchIndex(indexName);
     await new Promise(r => setTimeout(r, 2000));
     if (!await build(indexName)) {
-      log.warn(`Vector index swap for ${indexName}: the rebuilt index did not come up; its stand-in keeps serving until the next build`);
+      log.warn(`Vector index swap for ${peerText(indexName)}: the rebuilt index did not come up; its stand-in keeps serving until the next build`);
       return;
     }
     liveIndexNames.delete(indexName);
     await coll.dropSearchIndex(standIn).catch(() => {});
-    log.info(`Vector index ${indexName} now has its new definition, with no gap in search`);
+    log.info(`Vector index ${peerText(indexName)} now has its new definition, with no gap in search`);
   } catch (err) {
-    log.warn(`Vector index swap for ${indexName} stopped (${err instanceof Error ? err.message : String(err)}); searches stay on ${liveIndexName(indexName)}`);
+    log.warn(`Vector index swap for ${peerText(indexName)} stopped (${peerText(err)}); searches stay on ${peerText(liveIndexName(indexName))}`);
   } finally {
     swapsInFlight.delete(indexName);
   }
@@ -643,7 +643,7 @@ export async function pollVectorIndexReady(
      * already committed.
      */
     if (!spaceStillExists(spaceId)) {
-      log.debug(`Vector search index ${indexName}: space '${spaceId}' no longer exists — abandoning the poll`);
+      log.debug(`Vector search index ${peerText(indexName)}: space '${peerText(spaceId)}' no longer exists — abandoning the poll`);
       return false;
     }
     try {
@@ -685,9 +685,9 @@ export async function pollVectorIndexReady(
         if (all.length > 0) absentFor++;
         if (absentFor >= ABSENT_IS_TERMINAL_AFTER) {
           log.warn(
-            `Vector search index ${indexName} does not exist and nothing here creates it — giving up after `
+            `Vector search index ${peerText(indexName)} does not exist and nothing here creates it — giving up after `
             + `${absentFor}s instead of ${attempts}s. The backend is answering: it listed `
-            + `${all.map(i => i.name).join(', ')} on this collection. Something refused or failed to create `
+            + `${peerList(all.map(i => i.name))} on this collection. Something refused or failed to create `
             + `this index; look upstream for a "Failed to create vector search index" or "REFUSING to change" `
             + `line, or rebuild from Settings → Space → Danger Zone.`,
           );
@@ -699,7 +699,7 @@ export async function pollVectorIndexReady(
         // `queryable` counts as ready too: it is the property recall actually depends on, and a
         // deployment whose mongot reports it without a READY status would otherwise poll forever.
         if (current.status === 'READY' || current.queryable === true) {
-          log.debug(`Vector search index ${indexName} is READY (${lastSeen})`);
+          log.debug(`Vector search index ${peerText(indexName)} is READY (${peerText(lastSeen)})`);
           return true;
         }
 
@@ -727,7 +727,7 @@ export async function pollVectorIndexReady(
         if (current.status === undefined && current.queryable === undefined) {
           const probe = await indexServes(coll, indexName, target);
           if (probe.serves) {
-            log.debug(`Vector search index ${indexName} serves queries (no lifecycle fields on this backend)`);
+            log.debug(`Vector search index ${peerText(indexName)} serves queries (no lifecycle fields on this backend)`);
             return true;
           }
           // A rejected QUERY is not an unready index. Waiting cannot fix it, and the previous version spent
@@ -736,7 +736,7 @@ export async function pollVectorIndexReady(
           // evidence of absence, which is the rule this whole probe exists to honour.
           if (probe.permanent) {
             log.warn(
-              `Vector search index ${indexName}: cannot be probed on this backend — ${probe.error}. `
+              `Vector search index ${peerText(indexName)}: cannot be probed on this backend — ${peerText(probe.error)}. `
               + 'Treating it as usable: the index exists and this deployment reports no lifecycle fields, '
               + 'so there is nothing left to wait for. Recall will report the truth if it is not.',
             );
@@ -753,10 +753,10 @@ export async function pollVectorIndexReady(
     // reported only "did not reach READY within 60s", which is why two rounds of this bug produced no
     // evidence about WHY — the operator could see the cost and never the cause.
     if (attempt === 4 || attempt % 30 === 29) {
-      log.warn(`Vector search index ${indexName}: still waiting after ${attempt + 1}s — ${lastSeen}`);
+      log.warn(`Vector search index ${peerText(indexName)}: still waiting after ${attempt + 1}s — ${peerText(lastSeen)}`);
     }
   }
-  log.warn(`Vector search index ${indexName}: gave up after ${attempts}s — last seen: ${lastSeen}`);
+  log.warn(`Vector search index ${peerText(indexName)}: gave up after ${attempts}s — last seen: ${peerText(lastSeen)}`);
   return false;
 }
 
@@ -854,7 +854,7 @@ export async function waitForSpaceIndexesReady(
     const faceReady = await face.catch(() => false);
     if (!faceReady) {
       log.warn(
-        `Space '${spaceId}': the optional face gallery index (${faceIndexName}) is not ready. This does NOT `
+        `Space '${peerText(spaceId)}': the optional face gallery index (${peerText(faceIndexName)}) is not ready. This does NOT `
         + `affect recall, traversal or text search, and the space's index status is unchanged by it. Face `
         + `recognition is enabled for this instance; if that was not intended, unset FACE_RECOGNITION_ENABLED, `
         + `and if it was, note that a face vector also needs either faceRecognition.externalModel or the model `
@@ -876,7 +876,7 @@ export async function finalizeSpaceIndexReady(
   try {
     ok = await waitForSpaceIndexesReady(spaceId, opts);
   } catch (err) {
-    log.warn(`Space '${spaceId}': error awaiting vector index readiness: ${err instanceof Error ? err.message : String(err)}`);
+    log.warn(`Space '${peerText(spaceId)}': error awaiting vector index readiness: ${peerText(err)}`);
   }
   // Re-read before writing: the poll above may have run for a minute, and saving the
   // snapshot we started with would erase anything written to config.json since — a
@@ -891,7 +891,7 @@ export async function finalizeSpaceIndexReady(
     space.indexStatus = ok ? 'ready' : 'failed';
   });
   if (!found) return ok;
-  log.info(`Space '${spaceId}': vector indexes ${ok ? 'ready' : 'did not reach READY (marked failed)'}`);
+  log.info(`Space '${peerText(spaceId)}': vector indexes ${ok ? 'ready' : 'did not reach READY (marked failed)'}`);
   // Returned so the caller's summary can state what actually happened. It used to return void and
   // print `readiness confirmed for all spaces` unconditionally — directly after this line had said
   // the opposite about two of them.
@@ -965,8 +965,8 @@ export async function faceIndexWidth(spaceId: string): Promise<number | null> {
     const dims = fields.find(f => f.type === 'vector')?.numDimensions ?? fields[0]?.numDimensions;
     return typeof dims === 'number' && dims > 0 ? dims : null;
   } catch (err) {
-    log.debug(`Could not read ${indexName} to establish its width `
-      + `(${err instanceof Error ? err.message : String(err)}); treating it as absent`);
+    log.debug(`Could not read ${peerText(indexName)} to establish its width `
+      + `(${peerText(err)}); treating it as absent`);
     return null;
   }
 }

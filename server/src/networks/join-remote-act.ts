@@ -34,6 +34,7 @@ import { resolveJoinSpaces } from './join-spaces.js';
 import { recordSpaceAlias } from '../sync/space-map.js';
 import { joinedSyncSchedule, syncScheduleRefusal } from '../sync/schedule.js';
 import { scheduleSyncForNetwork } from '../sync/scheduler.js';
+import { caughtFailureText } from '../brain/store-failure.js';
 
 /** How long the token minted for the inviter lives before the handshake completes and `adoptPeerToken` lifts it. */
 const JOIN_TOKEN_TTL_MS = 10 * 60_000;
@@ -137,7 +138,7 @@ export async function joinRemoteAct(caller: Caller, input: unknown): Promise<Net
     });
   } catch (err) {
     log.warn(`join-remote: could not reach ${logSafe(inviteUrl)}: ${logSafe(String(err))}`);
-    return { status: 502, error: `Could not reach inviting brain: ${err}` };
+    return { status: 502, error: `Could not reach inviting brain: ${caughtFailureText(err, 'join a network: reach the inviting brain')}` };
   }
 
   if (!applyRes.ok) {
@@ -224,9 +225,9 @@ export async function joinRemoteAct(caller: Caller, input: unknown): Promise<Net
         // Credited to the joining token, which then administers what the join created (Q-134).
         await createSpace({ id: localId, label: localId.charAt(0).toUpperCase() + localId.slice(1) }, { tokenId: caller.id ?? null });
         createdSpaces.push(localId);
-        log.info(`join-remote: auto-created space '${logSafe(localId)}'${localId !== remoteId ? ` (alias for remote '${logSafe(remoteId)}')` : ''} for network ${networkId}`);
+        log.info(`join-remote: auto-created space '${logSafe(localId)}'${localId !== remoteId ? ` (alias for remote '${logSafe(remoteId)}')` : ''} for network ${logSafe(networkId)}`);
       } catch (err) {
-        return { status: 500, error: `Failed to create space '${localId}': ${err}` };
+        return { status: 500, error: `Failed to create space '${localId}': ${caughtFailureText(err, 'join a network: create a space')}` };
       }
     }
   }
@@ -260,7 +261,7 @@ export async function joinRemoteAct(caller: Caller, input: unknown): Promise<Net
     });
   } catch (err) {
     await revokeToken(tokenForARecord.id);
-    return { status: 502, error: `Could not finalize with inviting brain: ${err}` };
+    return { status: 502, error: `Could not finalize with inviting brain: ${caughtFailureText(err, 'join a network: finalize with the inviting brain')}` };
   }
 
   if (!finalizeRes.ok) {
@@ -324,7 +325,7 @@ export async function joinRemoteAct(caller: Caller, input: unknown): Promise<Net
     for (const s of allNetworkSpaces) if (!net.spaces.includes(s)) net.spaces.push(s);
     for (const [remote, local] of Object.entries(spaceMap)) {
       const why = recordSpaceAlias(net, remote, local);
-      if (why) log.warn(`join-remote: network ${networkId}: alias '${logSafe(remote)}' -> '${logSafe(local)}' not recorded: ${logSafe(why)}`);
+      if (why) log.warn(`join-remote: network ${logSafe(networkId)}: alias '${logSafe(remote)}' -> '${logSafe(local)}' not recorded: ${logSafe(why)}`);
     }
   }
   // Who established each membership, so the leave rule can tell this token's own from another's.
@@ -351,7 +352,7 @@ export async function joinRemoteAct(caller: Caller, input: unknown): Promise<Net
   widenPeerTokensOf(freshCfg, [applyData.instanceId], allNetworkSpaces);
   saveConfig(freshCfg);
   if (armSchedule) scheduleSyncForNetwork(networkId, armSchedule);
-  log.info(`join-remote: joined '${logSafe(applyData.networkLabel)}' (${networkId}) via RSA handshake`);
+  log.info(`join-remote: joined '${logSafe(applyData.networkLabel)}' (${logSafe(networkId)}) via RSA handshake`);
 
   return { status: 200, body: {
     status: finalizeData.status ?? 'joined',
@@ -404,7 +405,7 @@ export async function joinByInviteKeyAct(caller: Caller, input: unknown): Promis
     });
   } catch (err) {
     log.warn(`join-by-key: could not reach ${logSafe(redeemUrl)}: ${logSafe(String(err))}`);
-    return { status: 502, error: `Could not reach the publisher: ${err}` };
+    return { status: 502, error: `Could not reach the publisher: ${caughtFailureText(err, 'join by key: reach the publisher')}` };
   }
   if (!r.ok) return relay(r);
   const bundle = await boundedJson<{ handshakeId?: string; inviteUrl?: string; rsaPublicKeyPem?: string; networkId?: string }>(r, 'invite redeem')

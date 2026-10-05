@@ -57,7 +57,9 @@ Authorization: Bearer <instance-admin token>
 
 Both answer the same shape: `{ "ok": true, "status": "triggered", ... }` when fire-and-forget, and with
 `?wait=true` either `completed`, `504 timeout` (still running) or `500 error`. `ok` is the one-bit summary
-and `status` the detail.
+and `status` the detail. A `500 error` carries our own error text, and for a failure on the database's side one of
+the fixed sentences of [03-auth-and-limits](03-auth-and-limits.md) — never the driver's message, which is in the
+server log.
 
 `?timeoutMs` (default `30000`, clamped `1000`–`120000`) bounds the WAIT on the network door only. A peer
 cycle is already bounded by that peer's own request timeouts, so racing it would report a timeout for

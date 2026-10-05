@@ -60,7 +60,7 @@
  * `embeddingSuppressedFor` encodes by skipping the middle tier for files.
  */
 import { BRAIN_COLLECTIONS, KNOWLEDGE_TYPES } from '../config/types.js';
-import { log, logSafe } from '../util/log.js';
+import { log, logSafe, peerList } from '../util/log.js';
 import type { SchemaViolation } from '../spaces/schema-validation.js';
 import { violationsAgainstLocalSchema } from './sync/_shared.js';
 import type { KnowledgeType } from '../config/types.js';
@@ -177,7 +177,7 @@ export async function importDocuments(spaceId: string, payload: Record<string, u
     if (written) derivedRemoved += written.derivedReplaced;
     if (failure !== undefined) {
       const err = failure;
-      log.warn(`Import into space '${spaceId}': ${t} could not be written: ${logSafe(String(err))}`);
+      log.warn(`Import into space '${logSafe(spaceId)}': ${t} could not be written: ${logSafe(String(err))}`);
       const partial = err instanceof ArrivalWriteError ? err.partial : undefined;
       if (!partial || partial.counterBehind) {
         /*
@@ -186,7 +186,7 @@ export async function importDocuments(spaceId: string, payload: Record<string, u
          * (`Q-252`): reporting those chunks as restored would hide that the next local write can sort below them.
          */
         if (partial?.counterBehind) {
-          log.warn(`Import into space '${spaceId}': ${t} stopped part-way with the seq counter behind the records it `
+          log.warn(`Import into space '${logSafe(spaceId)}': ${t} stopped part-way with the seq counter behind the records it `
             + 'had already restored, so every document is counted as an error; re-running the import repairs it '
             + '(a restore replaces).');
         }
@@ -206,12 +206,12 @@ export async function importDocuments(spaceId: string, payload: Record<string, u
   }
 
   log.info(
-    `Import into space '${spaceId}': `
-    + IMPORT_TYPES.map(t => {
+    `Import into space '${logSafe(spaceId)}': `
+    + peerList(IMPORT_TYPES.map(t => {
       const r = results[t];
       const v = r.schemaViolations?.length ?? 0;
       return `${t}: +${logSafe(r.inserted)} ~${logSafe(r.updated)} !${logSafe(r.errors)}${v > 0 ? ` ?${logSafe(v)}` : ''}`;
-    }).join(', ')
+    }))
     + (derivedRemoved > 0 ? `; removed ${logSafe(derivedRemoved)} derived file row(s) the backup does not hold` : ''),
   );
 

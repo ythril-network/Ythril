@@ -46,7 +46,7 @@ import { col, asFilter } from '../db/mongo.js';
 import { COLLECTION, embedStoredRecord } from './embed-record.js';
 import { clearReindexFlag } from '../spaces/_shared.js';
 import { reindexInProgress } from '../metrics/registry.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
 import type { SpaceConfig, BrainEmbedRecordType } from '../config/types.js';
 import { spaceCollection, type SpacePart } from '../db/space-collection.js';
 
@@ -186,9 +186,9 @@ export function startReindex(plan: ReindexPlan): void {
 
           clearReindexFlag(mid);
         }
-        log.info(`Reindex completed for space '${spaceId}': reindexed=${reindexed}, suppressed=${suppressed}, errors=${errors}`);
+        log.info(`Reindex completed for space '${peerText(spaceId)}': reindexed=${reindexed}, suppressed=${suppressed}, errors=${errors}`);
       } catch (err) {
-        log.error(`Reindex job failed for space '${spaceId}': ${String(err)}`);
+        log.error(`Reindex job failed for space '${peerText(spaceId)}': ${peerText(err)}`);
       } finally {
         reindexJobRunning = false;
         reindexInProgress.set(0);

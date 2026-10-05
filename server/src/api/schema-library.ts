@@ -41,6 +41,7 @@ import rateLimit from 'express-rate-limit';
 import type { SchemaLibraryEntry, SchemaCatalog } from '../config/types.js';
 import { KNOWLEDGE_TYPES } from '../config/types.js';
 import { EndpointMemberZ } from '../spaces/body-schemas.js';
+import { caughtFailureText } from '../brain/store-failure.js';
 
 export const schemaLibraryRouter = Router();
 
@@ -811,8 +812,7 @@ async function proxyCatalogFetch(url: string, accessToken?: string): Promise<{ o
     return { ok: resp.ok, status: resp.status, body };
   } catch (err: unknown) {
     clearTimeout(timer);
-    const message = err instanceof Error ? err.message : String(err);
-    return { ok: false, status: 502, body: { error: `Catalog fetch failed: ${message}` } };
+    return { ok: false, status: 502, body: { error: `Catalog fetch failed: ${caughtFailureText(err, 'fetch a foreign catalog')}` } };
   }
 }
 

@@ -7,6 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.6.4] — 2026-10-05
+
+### Security
+
+- **A duplicate merge needs the merge rights where the pair lives (`Q-304`).** `POST /api/duplicates/:id/merge` looked
+  its candidate up in every space the token could READ data quality in, and the guard in front of it asks only whether
+  the token may write anywhere — so a token with `dataQuality` read in one space and write in another merged a pair in
+  the first, deleting an entity where it could only read. The lookup now walks only the spaces where the token holds
+  `dataQuality` write (the rung its rights row names), and a merge, which deletes a record, also needs `knowledge` write
+  in the pair's space, as the entity merge and `graph_merge` do. A candidate in a space where the token lacks either
+  answers `404`, as dismiss and reopen do. Contradictions and conflicts keep the rungs they had (a resolve there still
+  acts on `dataQuality` write alone); the three copies of the space list each router wrote are gone.
+- **A store failure is answered in our words, never the driver's.** A driver's own message names the host, the port and
+  the collection it failed on, and the doors that answered it handed it to whoever asked. Every door that answered an
+  error's own text — the read routes, the MCP dispatcher, the admin, data, file and space routes, the sync triggers, the
+  join and rename acts — now answers one of three sentences when the failure is on the driver's side, at the status it
+  already had; what the server refused in its own words (a malformed regular expression) and what this server refused
+  keep their text. The driver's message goes to the server log, once, under the operation that failed. An embed or media
+  job that failed on the store stores that sentence and the error's class in the `lastError` a read token is served,
+  and a sync cycle's failure list says it the same way.
+- **A refusal or a log line no longer carries a megabyte a peer or caller chose.** Every value already escaped for a log
+  line is now also cut at 4096 characters, the line saying how much (`…(+N chars)`); every log line is one line — a value's
+  line breaks, and a stack's, are written as escapes — and every raw interpolation of an outside value a request,
+  a peer or a backup can reach into a log line goes through the one renderer. The refusals that quoted a caller's
+  reference, an unknown key or a fork-capped `_id` cut each at 256 characters and name the rest with `…(+N more)`
+  (it read ` (+N more)`); `unrecognized_keys` keeps every key. A model server's own error text is quoted at 200.
+- **Credentials in a URL are redacted in linear time.** The URL pattern backtracked over a run of scheme characters, so
+  a long run of letters in a peer's id took seconds of event loop to log. It is now linear and redacts exactly what it
+  did, including a scheme that follows digits (`9https://u:pw@h`).
+
+### Fixed
+
+- **A search right after a space's first write answers `200` and empty, not `503` (`Q-325`).** The vector index is built
+  after the first record and mongot refuses a query against it with `Index <name> not initialized`, a wording recall did
+  not know. One recogniser now knows every wording the store uses.
+- **A search is no longer reported as out of time because its error names `maxTimeMS`.** The store names the option
+  whenever it refuses a misplaced one, which is a defect in the bound, not a deadline.
+- **An error of ours that mentions the store is no longer a retryable store failure.** A refusal quoting a path such as
+  `notes/mongot-setup.md` answered `503` and told the client to retry it for ever; the message patterns are now read
+  only from errors the driver raised, and our own `$vectorSearch is not supported` sentence is a typed error that stays
+  `503`.
+
 ## [5.6.3] — 2026-10-03
 
 **A patch release: sync's tombstone and file-metadata fixes from `main`, and five defects found in 5.6.2, and

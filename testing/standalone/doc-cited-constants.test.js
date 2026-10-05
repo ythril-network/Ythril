@@ -62,6 +62,13 @@ const read = (rel) => {
  */
 const CITED = [
   {
+    what: 'the most characters of one outside value a log line carries (peerText)',
+    source: 'server/src/util/log.ts',
+    code: /export const LOG_VALUE_MAX = ([0-9_]+);/,
+    doc: 'docs/integration-guide.md',
+    text: (v) => new RegExp(`is cut at ${v} characters, the line saying how much`),
+  },
+  {
     what: 'sync peer request timeout',
     source: 'server/src/sync/engine.ts',
     code: /const FETCH_TIMEOUT_MS = ([0-9_]+);/,

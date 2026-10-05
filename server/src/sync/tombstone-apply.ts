@@ -57,7 +57,7 @@ import { readStoredById } from '../db/read-by-id.js';
 import { TOMBSTONE_TYPES, TOMBSTONE_COLLECTION } from '../config/types.js';
 import type { TombstoneDoc } from '../config/types.js';
 import { bumpSeq, seqRefusal } from '../util/seq.js';
-import { log, logSafe } from '../util/log.js';
+import { log, logSafe, peerList } from '../util/log.js';
 import { arrivalId, warnArrivalsNotStored, type ArrivalRefusal } from './arrivals.js';
 import { retagToLocalSpace, tombstoneGoverns } from './upsert-plan.js';
 
@@ -164,7 +164,7 @@ export async function applyPeerTombstones(
   }
   if (out.unknownTypes.length > 0) {
     log.warn(`${logSafe(where)}: a page carried tombstone type(s) this instance does not know `
-      + `(${logSafe([...new Set(out.unknownTypes)].slice(0, 5).map(logSafe).join(', '))}) for space '${logSafe(localSpaceId)}' — nothing `
+      + `(${peerList(new Set(out.unknownTypes), ', ', { count: 5 })}) for space '${logSafe(localSpaceId)}' — nothing `
       + 'of it was applied, so the sender holds it and re-sends once this instance knows the type.');
     return out;
   }

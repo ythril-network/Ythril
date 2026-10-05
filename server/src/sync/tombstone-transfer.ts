@@ -180,12 +180,12 @@ export async function pullTombstones(opts: {
         const out = await applyPeerTombstones(spaceId, fresh, { peerInstanceId: member.instanceId }, where, noteAdmitted);
         return out.unknownTypes.length > 0 ? 'a tombstone type this instance does not know' : null;
       },
-      stopped: (why, heldAt) => log.warn(`Pull tombstones from ${logSafe(peer)} for space '${spaceId}' stopped: ${logSafe(why)} — `
+      stopped: (why, heldAt) => log.warn(`Pull tombstones from ${logSafe(peer)} for space '${logSafe(spaceId)}' stopped: ${logSafe(why)} — `
         + `delivered through seq ${logSafe(heldAt)}, so the receive watermark is held there and the rest is asked for next cycle.`),
     });
   } catch (err) {
     outcome.truncated = true;
-    log.warn(`Pull tombstones from ${logSafe(peer)} for space '${spaceId}' failed: `
+    log.warn(`Pull tombstones from ${logSafe(peer)} for space '${logSafe(spaceId)}' failed: `
       + `${logSafe(err instanceof Error ? err.message : String(err))} — delivered through seq `
       + `${logSafe(outcome.deliveredThrough)}, so the receive watermark is held there.`);
   }
@@ -207,7 +207,7 @@ export async function pushTombstones(opts: {
   const endpoint = `${member.url}/api/sync/tombstones?spaceId=${encodeURIComponent(remoteSpaceId)}`
     + `&networkId=${encodeURIComponent(networkId)}`;
   let refused = 0;
-  const stopped = (why: string, heldAt: number): void => log.warn(`Push tombstones to ${logSafe(peer)} for space '${spaceId}' `
+  const stopped = (why: string, heldAt: number): void => log.warn(`Push tombstones to ${logSafe(peer)} for space '${logSafe(spaceId)}' `
     + `stopped: ${logSafe(why)} — delivered through seq ${logSafe(heldAt)}, so the push watermark is held there.`);
   // A throw (an unreachable peer, this instance's own store) fails the member's sync, as it always has.
   await pageTombstones({
@@ -228,7 +228,7 @@ export async function pushTombstones(opts: {
     stopped,
   });
   if (refused > 0) {
-    log.warn(`Push tombstones to ${logSafe(peer)} for space '${spaceId}': the peer refused ${logSafe(refused)} tombstone(s) by shape or `
+    log.warn(`Push tombstones to ${logSafe(peer)} for space '${logSafe(spaceId)}': the peer refused ${logSafe(refused)} tombstone(s) by shape or `
       + 'seq; its own log names them.');
   }
   return outcome;

@@ -144,7 +144,8 @@ describe('a 5xx never discards the exception that caused it', () => {
     assert.match(helper, /cause\.stack/, 'reportServerFailure must include the stack');
     assert.match(helper, /log\.error\(/, 'a 5xx is an error, not a warning — it must be findable at that level');
     assert.match(
-      helper, /\$\{where\}/,
+      // `where` is named through the bounded renderer (`peerText`, `Q-231`): the same operation, one rule under two spellings.
+      helper, /\$\{(?:peerText\()?where\)?\}/,
       'the report must name the operation, or an operator greping for the route they called finds nothing',
     );
   });

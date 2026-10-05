@@ -184,9 +184,9 @@ export async function queueGeneratedNote(networkId: string, note: string, spaces
     const net = getConfig().networks.find(n => n.id === networkId);
     if (!net || changeNoteRefusal(net)) return;
     const r = await queueChangeNote(net, { note, spaces, author: 'generated', generated: true });
-    if ('refusal' in r) log.warn(`Network ${networkId}: generated change note not queued: ${logSafe(r.refusal)}`);
+    if ('refusal' in r) log.warn(`Network ${logSafe(networkId)}: generated change note not queued: ${logSafe(r.refusal)}`);
   } catch (err) {
-    log.warn(`Network ${networkId}: generated change note not queued: ${logSafe(String(err))}`);
+    log.warn(`Network ${logSafe(networkId)}: generated change note not queued: ${logSafe(String(err))}`);
   }
 }
 

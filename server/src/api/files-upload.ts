@@ -31,6 +31,7 @@ import { log } from '../util/log.js';
 import { primitivePropertyError } from '../brain/property-values.js';
 import { webhookToken, parseTtlDaysQuery, requireQueryPath, enforceSizeLimit } from './files-request.js';
 import { callerPeerAuthor } from './sync/_shared.js';
+import { caughtFailureText } from '../brain/store-failure.js';
 
 /**
  * Attach the upload route to the file-store router.
@@ -143,7 +144,7 @@ export function registerUploadRoute(router: Router): void {
           }
         } catch (err) {
           if (err instanceof RangeError) {
-            res.status(400).json({ error: (err as Error).message });
+            res.status(400).json({ error: caughtFailureText(err, 'upload a file chunk') });
             return;
           }
           log.warn(`Chunked upload error for space ${targetSpace}, path ${filePath}: ${err}`);
@@ -171,7 +172,7 @@ export function registerUploadRoute(router: Router): void {
           try {
             decoded = decodeContent(req.body.content as string, req.body.encoding);
           } catch (err) {
-            res.status(400).json({ error: (err as Error).message });
+            res.status(400).json({ error: caughtFailureText(err, 'decode an uploaded file') });
             return;
           }
         } else {
@@ -229,7 +230,7 @@ export function registerUploadRoute(router: Router): void {
         res.status(statusCode).json(response);
       } catch (err) {
         if (err instanceof RangeError) {
-          res.status(400).json({ error: err.message });
+          res.status(400).json({ error: caughtFailureText(err, 'upload a file') });
           return;
         }
         log.warn(`writeFile error for space ${targetSpace}, path ${filePath}: ${err}`);

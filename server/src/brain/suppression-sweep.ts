@@ -46,7 +46,7 @@
  * un-suppressed, or sweep a type whose schema deliberately opted out.
  */
 import { col, asFilter } from '../db/mongo.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
 import { TYPE_FIELD } from './ttl.js';
 import { recordNotSuppressedFilter, RECORD_SUPPRESS_FIELD } from './suppress-embeddings.js';
 import type { KnowledgeType, SpaceMeta } from '../config/types.js';
@@ -117,7 +117,7 @@ export async function sweepSuppressedVectors(spaceId: string, meta: SpaceMeta): 
       asFilter({ _id: { $in: ids.map(d => `${kind}:${String(d['_id'])}`) } }),
     );
     total += ids.length;
-    log.info(`Suppression sweep: removed ${ids.length} ${kind} vector(s) in ${spaceId}`);
+    log.info(`Suppression sweep: removed ${ids.length} ${kind} vector(s) in ${peerText(spaceId)}`);
   }
   return total;
 }

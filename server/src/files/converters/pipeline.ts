@@ -32,7 +32,7 @@ import { getConfig, getDocumentProcessingConfig, getEmbeddingConfig } from '../.
 import { vlmExtractDocument } from './vlm-extract.js';
 import type { FileMetaDoc, DocExtractionMode, TextLevel } from '../../config/types.js';
 import type { StepProgress } from './types.js';
-import { log } from '../../util/log.js';
+import { log, peerText } from '../../util/log.js';
 import { enqueueMediaJob } from '../media/job-queue.js';
 import { embedConcurrency } from './embed-concurrency.js';
 import { JobLeaseLostError, isLeaseLost, shouldHeartbeat, writeUnderClaim, type JobClaim } from '../media/lease.js';
@@ -539,7 +539,7 @@ async function rmArtifactPath(spaceId: string, relPath: string): Promise<void> {
     const abs = await resolveSafePathChecked(spaceId, relPath);
     await removeTree(abs);
   } catch (err) {
-    log.warn(`Failed to remove conversion artifact path ${spaceId}/${relPath}: ${err instanceof Error ? err.message : String(err)}`);
+    log.warn(`Failed to remove conversion artifact path ${peerText(spaceId)}/${peerText(relPath)}: ${peerText(err)}`);
   }
 }
 
@@ -564,7 +564,7 @@ export async function deleteConversionArtifacts(
   await rmArtifactPath(spaceId, `_converted/${originalId}.md`);
   await rmArtifactPath(spaceId, `_extracted/${originalId}`);
 
-  log.info(`Deleted conversion artifacts for ${spaceId}/${originalId}`);
+  log.info(`Deleted conversion artifacts for ${peerText(spaceId)}/${peerText(originalId)}`);
 }
 
 /**

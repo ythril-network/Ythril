@@ -10,7 +10,7 @@ import type { Collection } from 'mongodb';
 import { v4 as uuidv4 } from 'uuid';
 import { getDb } from '../db/mongo.js';
 import { writeFile as writeSpaceFile } from '../files/files.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
 import type { SpaceMeta, KnowledgeType, PendingSpaceOp } from '../config/types.js';
 import { KNOWLEDGE_TYPES } from '../config/types.js';
 
@@ -40,7 +40,7 @@ export async function syncSchemaFiles(spaceId: string, meta: SpaceMeta | undefin
       }
     }
   } catch (err) {
-    log.warn(`syncSchemaFiles(${spaceId}): ${err}`);
+    log.warn(`syncSchemaFiles(${peerText(spaceId)}): ${peerText(err)}`);
   }
 }
 
@@ -123,7 +123,7 @@ export async function repairStaleSpaceIds(spaceId: string): Promise<number> {
       .map(c => c.name)
       .filter(n => n.startsWith(prefix));
   } catch (err) {
-    log.warn(`Stale-spaceId repair: could not list collections for '${spaceId}': ${err}`);
+    log.warn(`Stale-spaceId repair: could not list collections for '${peerText(spaceId)}': ${peerText(err)}`);
     return 0;
   }
 
@@ -143,13 +143,13 @@ export async function repairStaleSpaceIds(spaceId: string): Promise<number> {
       repaired += res.modifiedCount ?? 0;
     } catch (err) {
       // Never let a repair failure block startup — the space is still usable.
-      log.warn(`Stale-spaceId repair failed for ${name}: ${err}`);
+      log.warn(`Stale-spaceId repair failed for ${peerText(name)}: ${peerText(err)}`);
     }
   }
 
   if (repaired > 0) {
     log.warn(
-      `Space '${spaceId}': repaired ${repaired} document(s) carrying a stale spaceId ` +
+      `Space '${peerText(spaceId)}': repaired ${repaired} document(s) carrying a stale spaceId ` +
       `(left behind by a space rename, a cross-space import, or an aliased sync). They were ` +
       `present but invisible to list/lookup queries; they are now visible again.`,
     );
@@ -177,7 +177,7 @@ export async function dropLegacyPrefixedIndexes(coll: Collection): Promise<void>
       try {
         await coll.dropIndex(idx.name);
       } catch (err) {
-        log.warn(`P10: could not drop legacy index ${idx.name} on ${coll.collectionName}: ${err}`);
+        log.warn(`P10: could not drop legacy index ${peerText(idx.name)} on ${peerText(coll.collectionName)}: ${peerText(err)}`);
       }
     }
   }
@@ -219,9 +219,9 @@ export async function dropSupersededEdgeIdentityIndex(coll: Collection): Promise
     if (keys.length === 3 && keys[0] === 'from' && keys[1] === 'to' && keys[2] === 'label') {
       try {
         await coll.dropIndex(idx.name);
-        log.info(`M-3: dropped superseded edge identity index ${idx.name} on ${coll.collectionName}`);
+        log.info(`M-3: dropped superseded edge identity index ${peerText(idx.name)} on ${peerText(coll.collectionName)}`);
       } catch (err) {
-        log.warn(`M-3: could not drop superseded index ${idx.name} on ${coll.collectionName}: ${err}`);
+        log.warn(`M-3: could not drop superseded index ${peerText(idx.name)} on ${peerText(coll.collectionName)}: ${peerText(err)}`);
       }
     }
   }

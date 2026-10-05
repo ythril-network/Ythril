@@ -141,7 +141,7 @@ export function removeMemberAct(networkId: string, instanceId: string): NetworkA
     const round = removeRound();
     openRoundHere(net, round);
     saveConfig(cfg);
-    log.info(`Opened remove vote round ${logSafe(round.roundId)} for ${logSafe(subject.label)} in network ${net.id}`);
+    log.info(`Opened remove vote round ${logSafe(round.roundId)} for ${logSafe(subject.label)} in network ${logSafe(net.id)}`);
     return { status: 202, body: { status: 'vote_pending', roundId: round.roundId } };
   }
 
@@ -164,11 +164,11 @@ export function removeMemberAct(networkId: string, instanceId: string): NetworkA
     // Ancestor path is only [self] → removed at once (concludeRoundIfReady spliced the member)
     saveConfig(cfg);
     sendMemberRemovedNotify(round.subjectUrl, round.subjectInstanceId, net.id);
-    log.info(`Braintree remove immediate: removed ${logSafe(subject.label)} (${logSafe(subject.instanceId)}) from network ${net.id}`);
+    log.info(`Braintree remove immediate: removed ${logSafe(subject.label)} (${logSafe(subject.instanceId)}) from network ${logSafe(net.id)}`);
     return { status: 204 };
   }
   saveConfig(cfg);
-  log.info(`Opened braintree remove round ${logSafe(round.roundId)} for ${logSafe(subject.label)} (${logSafe(subject.instanceId)}) in network ${net.id}`);
+  log.info(`Opened braintree remove round ${logSafe(round.roundId)} for ${logSafe(subject.label)} (${logSafe(subject.instanceId)}) in network ${logSafe(net.id)}`);
   return { status: 202, body: { status: 'vote_pending', roundId: round.roundId } };
 }
 

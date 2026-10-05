@@ -421,7 +421,7 @@ syncDocsRouter.post('/facts', syncRateLimit, requireAuth, denyReadOnly, async (r
           const siblingCount = depth >= MAX_FORK_DEPTH ? 0 : await col<FactDoc>(spaceCollection(spaceId, 'facts'))
             .countDocuments(asFilter<FactDoc>({ forkOf: incoming._id }), { limit: MAX_FORK_DEPTH + 1 });
           if (depth >= MAX_FORK_DEPTH || siblingCount >= MAX_FORK_DEPTH) {
-            answer = { code: 400, body: { error: `Fork depth limit (${MAX_FORK_DEPTH}) exceeded for _id '${incoming._id}'` } };
+            answer = { code: 400, body: { error: `Fork depth limit (${MAX_FORK_DEPTH}) exceeded for _id '${logSafe(incoming._id)}'` } };
           } else {
             toFork = true;
           }
@@ -700,11 +700,11 @@ syncDocsRouter.post('/batch-upsert', syncRateLimit, requireAuth, denyReadOnly, a
         const id = (d as { _id?: unknown })?._id;
         // The id, the peer and the issues are a peer's text: `logSafe`, so none can start a log line of its own.
         log.warn(
-          `batch-upsert: REJECTED ${kind} '${typeof id === 'string' ? logSafe(id) : '(no id)'}' for space '${spaceId}' `
+          `batch-upsert: REJECTED ${logSafe(kind)} '${typeof id === 'string' ? logSafe(id) : '(no id)'}' for space '${logSafe(spaceId)}' `
           + `from peer '${logSafe(callerPeerId(req.authToken as Record<string, unknown>) ?? 'unknown')}' — it did not `
-          + `match ${kind === 'fact' ? 'IncomingFactDoc' : `Incoming${kind[0]!.toUpperCase()}${kind.slice(1)}Doc`}. `
+          + `match ${kind === 'fact' ? 'IncomingFactDoc' : `Incoming${logSafe(kind[0]!.toUpperCase())}${logSafe(kind.slice(1))}Doc`}. `
           + `The sender will advance past it and not offer it again. Issues: `
-          + `${logSafe(JSON.stringify(r.error?.issues ?? []).slice(0, 400))}`,
+          + `${logSafe(JSON.stringify(r.error?.issues ?? []), { max: 400 })}`,
         );
         return [];
       });
@@ -736,8 +736,8 @@ syncDocsRouter.post('/batch-upsert', syncRateLimit, requireAuth, denyReadOnly, a
         if (seqRefusal(d.seq, { optional: false }) === null) return true;
         drop(kind);
         log.warn(
-          `batch-upsert: dropped ${kind} '${logSafe(d._id)}' with implausible seq ${logSafe(d.seq)} ` +
-          `for space '${spaceId}' (max ingest seq ${MAX_INGEST_SEQ}) from peer ` +
+          `batch-upsert: dropped ${logSafe(kind)} '${logSafe(d._id)}' with implausible seq ${logSafe(d.seq)} ` +
+          `for space '${logSafe(spaceId)}' (max ingest seq ${MAX_INGEST_SEQ}) from peer ` +
           `'${logSafe(callerPeerId(req.authToken as Record<string, unknown>) ?? 'unknown')}'.`,
         );
         return false;
@@ -820,7 +820,7 @@ syncDocsRouter.post('/batch-upsert', syncRateLimit, requireAuth, denyReadOnly, a
            * every cycle. The fix is visibility, exactly as the media-worker swallow was.
            */
           memStats.forkDepthRefused++;
-          log.warn(`sync batch-upsert: DROPPED fact ${logSafe(incoming._id)} in '${spaceId}' — divergent content at `
+          log.warn(`sync batch-upsert: DROPPED fact ${logSafe(incoming._id)} in '${logSafe(spaceId)}' — divergent content at `
             + `seq ${logSafe(incoming.seq)} and the fork chain is already ${logSafe(depth)} deep (MAX_FORK_DEPTH=${MAX_FORK_DEPTH}). `
             + 'The sender will not offer it again. Resolve the fork chain to accept it.');
           continue;
@@ -969,7 +969,7 @@ syncDocsRouter.post('/batch-upsert', syncRateLimit, requireAuth, denyReadOnly, a
      */
     const range = (docs: { seq?: number }[]): string =>
       docs.length === 0 ? '-' : `${Math.min(...docs.map(d => d.seq ?? 0))}..${Math.max(...docs.map(d => d.seq ?? 0))}`;
-    log.debug(`Batch-upsert accepted for space '${spaceId}': `
+    log.debug(`Batch-upsert accepted for space '${logSafe(spaceId)}': `
       + `facts ${logSafe(JSON.stringify(memStats))} seq ${logSafe(range(facts))}; `
       + `entities ${logSafe(JSON.stringify(entStats))} seq ${logSafe(range(entities))}; `
       + `edges ${logSafe(JSON.stringify(edgeStats))} seq ${logSafe(range(edges))}; `
@@ -1001,7 +1001,7 @@ syncDocsRouter.post('/batch-upsert', syncRateLimit, requireAuth, denyReadOnly, a
      */
     if (storeRefused.length > 0) {
       // The documents are named once, by the writer's own summary (`warnArrivalsNotStored`); this says what it costs.
-      log.error(`sync POST batch-upsert: the store refused ${storeRefused.length} document(s) in space '${spaceId}'; `
+      log.error(`sync POST batch-upsert: the store refused ${storeRefused.length} document(s) in space '${logSafe(spaceId)}'; `
         + 'every other document of the page was written, and the page answers 500 so the sender keeps its watermark.');
       res.status(500).json({ error: 'Internal error' });
       return;

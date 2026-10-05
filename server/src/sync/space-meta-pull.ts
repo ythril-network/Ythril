@@ -16,7 +16,7 @@
 import type { NetworkConfig, NetworkMember, SpaceMeta } from '../config/types.js';
 import { withoutBrokenLibraryRefs } from '../spaces/body-schemas.js';
 import { storeNetworkLayer } from '../spaces/effective-meta.js';
-import { log, logSafe } from '../util/log.js';
+import { log, logSafe, peerList } from '../util/log.js';
 import { boundedJson } from '../util/bounded-read.js';
 import { upstreamOf } from '../networks/network-spaces.js';
 import { mergeReplicatedMeta } from './replicated-meta.js';
@@ -35,13 +35,13 @@ export async function pullSpaceMetaFromUpstream(
     const q = new URLSearchParams({ spaceId: remoteSpaceId, networkId: net.id });
     const resp = await peerSafeFetch(`${member.url}/api/sync/meta?${q}`, opts());
     if (!resp.ok) {
-      log.warn(`Schema from ${logSafe(member.label)} for '${spaceId}': HTTP ${logSafe(resp.status)}`);
+      log.warn(`Schema from ${logSafe(member.label)} for '${logSafe(spaceId)}': HTTP ${logSafe(resp.status)}`);
       return false;
     }
     const { meta: incoming } = await boundedJson<{ meta?: unknown }>(resp, 'sync peer');
     return acceptNetworkLayer(net.id, spaceId, incoming, `upstream ${member.label}`);
   } catch (err) {
-    log.warn(`Schema from ${logSafe(member.label)} for '${spaceId}': ${logSafe(String(err))}`);
+    log.warn(`Schema from ${logSafe(member.label)} for '${logSafe(spaceId)}': ${logSafe(String(err))}`);
     return false;
   }
 }
@@ -59,7 +59,7 @@ export function acceptNetworkLayer(networkId: string, spaceId: string, incoming:
     const merged = mergeReplicatedMeta({}, incoming);
     if (merged.invalid) {
       // `from` names the peer, and `invalid` / `dropped` quote names the peer chose: every one through `logSafe`.
-      log.warn(`Schema from ${logSafe(from)} for '${spaceId}' refused whole, nothing merged: ${logSafe(merged.invalid)}`);
+      log.warn(`Schema from ${logSafe(from)} for '${logSafe(spaceId)}' refused whole, nothing merged: ${logSafe(merged.invalid)}`);
       return false;
     }
     // Q-60: a type naming a library entry this instance lacks is left out, and only it. The sender inlines every
@@ -67,15 +67,15 @@ export function acceptNetworkLayer(networkId: string, spaceId: string, incoming:
     // schema for it cost the member every other type and the space's posture.
     const kept = withoutBrokenLibraryRefs(merged.meta.typeSchemas as Record<string, Record<string, unknown> | undefined> | undefined);
     if (kept.dropped.length) {
-      log.warn(`Schema from ${logSafe(from)} for '${spaceId}': left out ${kept.dropped.map(d => logSafe(d)).join(', ')}, which reference schema library entries neither side holds; the rest is merged`);
+      log.warn(`Schema from ${logSafe(from)} for '${logSafe(spaceId)}': left out ${peerList(kept.dropped)}, which reference schema library entries neither side holds; the rest is merged`);
     }
     const layer = { ...merged.meta, ...(merged.meta.typeSchemas ? { typeSchemas: kept.typeSchemas } : {}) } as SpaceMeta;
     // Kept as this network's layer; the effective meta is rebuilt from own ⊕ layers in precedence.
     const changed = storeNetworkLayer(networkId, spaceId, layer);
-    if (changed) log.info(`Schema for '${spaceId}' merged from ${logSafe(from)} (network ${networkId})`);
+    if (changed) log.info(`Schema for '${logSafe(spaceId)}' merged from ${logSafe(from)} (network ${logSafe(networkId)})`);
     return changed;
   } catch (err) {
-    log.warn(`Schema from ${logSafe(from)} for '${spaceId}': ${logSafe(String(err))}`);
+    log.warn(`Schema from ${logSafe(from)} for '${logSafe(spaceId)}': ${logSafe(String(err))}`);
     return false;
   }
 }

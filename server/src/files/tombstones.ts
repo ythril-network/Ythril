@@ -12,7 +12,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { toDocId } from '../util/paths.js';
 import { col, asDoc } from '../db/mongo.js';
 import type { FileTombstoneDoc } from '../config/types.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
 import { spaceCollection } from '../db/space-collection.js';
 
 /**
@@ -28,6 +28,6 @@ export async function writeFileTombstones(spaceId: string, paths: string[]): Pro
   try {
     await col<FileTombstoneDoc>(spaceCollection(spaceId, 'fileTombstones')).insertMany(docs.map(d => asDoc<FileTombstoneDoc>(d)));
   } catch (err) {
-    log.warn(`writeFileTombstones error for space ${spaceId} (${unique.length} paths): ${err instanceof Error ? err.message : String(err)}`);
+    log.warn(`writeFileTombstones error for space ${peerText(spaceId)} (${unique.length} paths): ${peerText(err)}`);
   }
 }

@@ -38,14 +38,13 @@ On connect, the server sends global instructions listing all available space IDs
 >
 > ```json
 > { "retryable": true, "storeSideFailure": true,
->   "error": "Executor error during aggregate command … :: caused by :: the store reported no cause (this is a
->            store-side failure, not a problem with your request — it can be retried)",
+>   "error": "A store-side failure stopped this operation; it is not a problem with your request and can be retried.",
 >   "code": 8, "codeName": "InternalError" }
 > ```
 >
 > **Retry it.** The REST doors answer these with `503` and `Retry-After`; this transport answers `200` with
 > `isError: true` and has no status to correct, so the classification lives in `structuredContent` instead —
-> the same information in the envelope this transport has.
+> the same information in the envelope this transport has. The text is ours and names no host, port or collection; the driver's own words go to the server log, and any other driver-side failure reads `Error: The store could not complete this request.`
 >
 > Why it matters more than a clearer message: until this release these failed as an ordinary tool error with a
 > message that ended mid-sentence at `caused by ::`. An agent fleet built correctly around "continue on

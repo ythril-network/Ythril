@@ -1,6 +1,6 @@
 import { col, asFilter, asUpdate } from '../db/mongo.js';
 import { getConfig, saveConfig } from '../config/loader.js';
-import { log } from './log.js';
+import { log, peerText } from './log.js';
 import type { SpaceCounterDoc } from '../config/types.js';
 import { spaceCollection, type SpacePart } from '../db/space-collection.js';
 
@@ -243,7 +243,7 @@ export function seqRefusal(seq: unknown, { optional }: { optional: boolean }): s
 export async function bumpSeq(spaceId: string, minSeq: number): Promise<void> {
   if (minSeq > MAX_INGEST_SEQ) {
     log.warn(
-      `Clamped seq bump for space '${spaceId}': requested ${minSeq} exceeds ` +
+      `Clamped seq bump for space '${peerText(spaceId)}': requested ${minSeq} exceeds ` +
       `MAX_INGEST_SEQ (${MAX_INGEST_SEQ}) — advancing to the ceiling reserve instead.`,
     );
     minSeq = MAX_INGEST_SEQ;

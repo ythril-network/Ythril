@@ -2,6 +2,7 @@ import { Router } from 'express';
 import crypto from 'node:crypto';
 import { register, beginScrape, endScrape } from '../metrics/registry.js';
 import { requireAdmin } from '../auth/middleware.js';
+import { caughtFailureText } from '../brain/store-failure.js';
 
 export const metricsRouter = Router();
 
@@ -72,8 +73,7 @@ metricsRouter.get('/', metricsAuth, async (_req, res) => {
     res.setHeader('Content-Type', register.contentType);
     res.send(metrics);
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    res.status(500).send(`# Error collecting metrics: ${msg}\n`);
+    res.status(500).send(`# Error collecting metrics: ${caughtFailureText(err, 'collect metrics')}\n`);
   } finally {
     endScrape();
   }

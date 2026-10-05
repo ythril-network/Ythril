@@ -37,6 +37,7 @@ import { storeFile } from '../../files/store-file.js';
 import { updateFileMeta } from '../../files/file-meta.js';
 import { assertWritable, type SchemaEntry } from '../validate-extraction.js';
 import type { Extraction } from './assemble.js';
+import { caughtFailureText } from '../../brain/store-failure.js';
 
 export interface ExtractionWriters {
   bulk: (spaceId: string, input: BulkInput) => Promise<Pick<BulkResult, 'errors' | 'refs'>>;
@@ -166,7 +167,7 @@ export async function writeExtraction(
       }
       written.transcripts++;
     } catch (err) {
-      errors.push({ phase: 'transcripts', key: sessionKey, reason: err instanceof Error ? err.message : String(err) });
+      errors.push({ phase: 'transcripts', key: sessionKey, reason: caughtFailureText(err, 'store a conversation transcript') });
     }
   }
 

@@ -149,16 +149,16 @@ export async function addSpacesToNetwork(
     for (const e of entries) {
       if (e.localId === e.networkId || !added.includes(e.localId)) continue;
       const why = recordSpaceAlias(net, e.networkId, e.localId);
-      if (why) log.warn(`Network ${networkId}: alias '${logSafe(e.networkId)}' -> '${logSafe(e.localId)}' not recorded: ${logSafe(why)}`);
+      if (why) log.warn(`Network ${logSafe(networkId)}: alias '${logSafe(e.networkId)}' -> '${logSafe(e.localId)}' not recorded: ${logSafe(why)}`);
     }
     net.spaces.push(...added);
     clearSettledProposals(net, entries.filter(e => added.includes(e.localId)).map(e => e.networkId));
     widenPeerTokens(cfg, net, added);
     saveConfig(cfg);
-    log.info(`Network ${networkId}: added space(s) ${logSafe(added.join(', '))} (${logSafe(why)})`);
+    log.info(`Network ${logSafe(networkId)}: added space(s) ${logSafe(added.join(', '))} (${logSafe(why)})`);
     return added;
   } catch (err) {
-    log.warn(`Network ${networkId}: could not add space(s) (${logSafe(why)}): ${logSafe(String(err))}`);
+    log.warn(`Network ${logSafe(networkId)}: could not add space(s) (${logSafe(why)}): ${logSafe(String(err))}`);
     return [];
   }
 }
@@ -267,7 +267,7 @@ function holdAsPending(
   const at = new Date().toISOString();
   net.pendingSpaces = [...(net.pendingSpaces ?? []), ...fresh.map(p => ({ ...p, from, at }))];
   saveConfig(cfg);
-  log.warn(`Network ${net.id}: ${what} ${logSafe(fresh.map(p => p.networkId).join(', '))}; held as pending, not adopted (${logSafe(fresh[0]!.why)})`);
+  log.warn(`Network ${logSafe(net.id)}: ${logSafe(what)} ${logSafe(fresh.map(p => p.networkId).join(', '))}; held as pending, not adopted (${logSafe(fresh[0]!.why)})`);
 }
 
 /**
@@ -352,20 +352,20 @@ export async function healAnnouncedAliases(networkId: string, fromInstanceId: st
     const heals = healSpaceAliases(net, fromInstanceId, announced, spaceNames);
     const recorded = heals.filter(h => {
       const why = recordSpaceAlias(net, h.networkId, h.localId);
-      if (why) log.warn(`Network ${networkId}: heal of '${logSafe(h.networkId)}' -> '${logSafe(h.localId)}' not recorded: ${logSafe(why)}`);
+      if (why) log.warn(`Network ${logSafe(networkId)}: heal of '${logSafe(h.networkId)}' -> '${logSafe(h.localId)}' not recorded: ${logSafe(why)}`);
       return why === null;
     });
     if (!recorded.length) return;
     clearSettledProposals(net, recorded.map(h => h.networkId));
     saveConfig(cfg);
     for (const h of recorded) {
-      log.info(`Network ${networkId}: healed the alias '${logSafe(h.networkId)}' -> '${logSafe(h.localId)}' from upstream ${logSafe(fromInstanceId)}`);
+      log.info(`Network ${logSafe(networkId)}: healed the alias '${logSafe(h.networkId)}' -> '${logSafe(h.localId)}' from upstream ${logSafe(fromInstanceId)}`);
       logInternalAudit({
         method: 'SYNC', path: 'internal:space-alias-heal', spaceId: h.localId, operation: SPACE_ALIAS_HEAL_OPERATION,
       });
     }
   } catch (err) {
-    log.warn(`Network ${networkId}: alias heal from ${logSafe(fromInstanceId)} failed: ${logSafe(String(err))}`);
+    log.warn(`Network ${logSafe(networkId)}: alias heal from ${logSafe(fromInstanceId)} failed: ${logSafe(String(err))}`);
   }
 }
 

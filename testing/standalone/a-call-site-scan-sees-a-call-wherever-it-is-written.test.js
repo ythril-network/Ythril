@@ -80,7 +80,7 @@ describe('a positioned scan points at the name it found', () => {
     const sites = callSitesIn(src);
     const after = sites.find(s => s.name === 'after');
     assert.ok(after, `after() not found among ${names(sites)}`);
-    assert.equal(src.slice(after.at, after.at + 5), 'after', 'the offset does not point at the real body');
+    assert.ok(src.startsWith('after', after.at), 'the offset does not point at the real body');
     assert.ok(!names(sites).includes('hidden'), 'a cut closure\'s call must not be seen when closures are cut');
   });
 });

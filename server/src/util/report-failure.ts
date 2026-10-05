@@ -42,7 +42,7 @@
  * whole point is that the next person reading this line is an operator on another team who cannot grep our
  * source at all.
  */
-import { log } from './log.js';
+import { log, peerText } from './log.js';
 
 /**
  * Record the cause of a 5xx the route is about to send.
@@ -54,5 +54,22 @@ export function reportServerFailure(where: string, cause: unknown): void {
   const detail = cause instanceof Error
     ? (cause.stack ?? `${cause.name}: ${cause.message}`)
     : String(cause);
-  log.error(`${where} failed with a 5xx: ${detail}`);
+  // Through `peerText`: the stack is kept (this server's frames), as one escaped line, and its message — which a
+  // driver may have built from a peer's `_id` — is bounded like any value.
+  log.error(`${peerText(where)} failed with a 5xx: ${peerText(detail)}`);
+}
+
+/**
+ * Record, once, the driver's text an answer WITHHELD (`caughtFailureText` in `brain/store-failure.ts`, `sendReadFailure`).
+ *
+ * A driver error's message names the host, the port and the namespace it failed on, so no answer carries it (`Q-361`) —
+ * and the operator who needs it reads it here, at the level they watch, under the operation the caller named. The
+ * counterpart of `reportServerFailure` for a failure the door answers in OUR words: that one is for a 5xx a route
+ * decides to send and logs the stack; this one is for the text an answer replaced, and logs the driver's account.
+ *
+ * `detail` is the driver's own text (`storeFailureDetail`), rendered through `peerText` like any value that did not
+ * originate here: a driver's message can carry a caller's input, and it is bounded and escaped.
+ */
+export function reportDriverFailure(operation: string, detail: string): void {
+  log.warn(`${peerText(operation)} failed: ${peerText(detail)}`);
 }

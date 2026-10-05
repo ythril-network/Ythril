@@ -9,7 +9,7 @@
  */
 import { col } from '../db/mongo.js';
 import { getConfig } from '../config/loader.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
 import { recordExpiry, recordContentExpiry, type RetentionSpace } from './chrono-retention.js';
 import type { KnowledgeType, TtlBucket } from '../config/types.js';
 import { COLLECTION_SUFFIX, BRAIN_COLLECTIONS, RECORD_COLLECTION } from '../config/types.js';
@@ -169,7 +169,7 @@ export async function ensureTtlIndex(spaceId: string): Promise<void> {
     try {
       await col(`${spaceId}_${c}`).createIndex({ _expireAt: 1 }, { name: 'ttl_expireAt', sparse: true });
     } catch (err) {
-      log.warn(`ensureTtlIndex ${spaceId}_${c}: ${err}`);
+      log.warn(`ensureTtlIndex ${peerText(spaceId)}_${c}: ${peerText(err)}`);
     }
   }));
   // Chrono only: the content-redaction pass has its own sweep query, and without an index it would scan the
@@ -177,6 +177,6 @@ export async function ensureTtlIndex(spaceId: string): Promise<void> {
   try {
     await col(spaceCollection(spaceId, 'chrono')).createIndex({ _contentExpireAt: 1 }, { name: 'ttl_contentExpireAt', sparse: true });
   } catch (err) {
-    log.warn(`ensureTtlIndex ${spaceCollection(spaceId, 'chrono')} content: ${err}`);
+    log.warn(`ensureTtlIndex ${peerText(spaceCollection(spaceId, 'chrono'))} content: ${peerText(err)}`);
   }
 }

@@ -128,7 +128,10 @@ describe('a megabyte from a peer makes a bounded line and a bounded answer', { s
     // each of any length. The list is `peerList`'s question, and a type is as steerable as an id.
     const { lines, result: r } = await boundedLinesDuring(() =>
       door.push('/tombstones', { tombstones: [build.tombstone(S, 'doc-1', `t${'9'.repeat(MEGA)}`, 5)] }, { spaceId: S }));
-    assert.equal(r.code, 200, JSON.stringify(r.body).slice(0, 300));
+    // 400, as the release line has always answered a page that carries a type this instance does not know (`api/sync/
+    // tombstones.ts`: the sender holds the page and re-sends after the receiver upgrades) — the answer is the generic
+    // `Invalid tombstone format`, bounded by being a constant; what this case holds is the LOG line below.
+    assert.equal(r.code, 400, JSON.stringify(r.body).slice(0, 300));
     assert.ok(lines.some(l => l.includes('does not know') || l.includes('tombstone type')),
       `fixture check: the unknown type was not logged at all: ${JSON.stringify(r.body).slice(0, 300)}`);
     assertBoundedAnswer(r.body, 'the tombstone push answer');

@@ -41,6 +41,7 @@
  */
 import type { Response } from 'express';
 import { log, logSafe } from '../util/log.js';
+import { caughtFailureText } from '../brain/store-failure.js';
 
 /** Distinguishes "the race timed out" from "the cycle threw", which need different status codes. */
 const TIMEOUT = Symbol('sync-trigger-timeout');
@@ -66,7 +67,7 @@ export async function triggerNetworkSync(
 
   if (!opts.wait) {
     void runSyncForNetwork(networkId)
-      .catch(err => log.error(`Triggered sync for network ${networkId} failed: ${logSafe(String(err))}`));
+      .catch(err => log.error(`Triggered sync for network ${logSafe(networkId)} failed: ${logSafe(String(err))}`));
     res.json({ ok: true, status: 'triggered', networkId, ...note });
     return;
   }
@@ -84,8 +85,8 @@ export async function triggerNetworkSync(
       // looking for a fault that does not exist.
       res.status(504).json({ ok: false, status: 'timeout', networkId, timeoutMs: opts.timeoutMs, ...note });
     } else {
-      log.error(`Synchronous trigger for network ${networkId} failed: ${logSafe(String(err))}`);
-      res.status(500).json({ ok: false, status: 'error', networkId, error: err instanceof Error ? err.message : String(err), ...note });
+      log.error(`Synchronous trigger for network ${logSafe(networkId)} failed: ${logSafe(String(err))}`);
+      res.status(500).json({ ok: false, status: 'error', networkId, error: caughtFailureText(err, `Synchronous trigger for network ${networkId}`), ...note });
     }
   } finally {
     clearTimeout(timer);
@@ -113,6 +114,6 @@ export async function triggerPeerSync(
     res.json({ ok: true, status: 'completed', peerId, networksSynced: r.networksSynced, errors: r.errors });
   } catch (err) {
     log.error(`Synchronous trigger for peer ${logSafe(peerId)} failed: ${logSafe(String(err))}`);
-    res.status(500).json({ ok: false, status: 'error', peerId, error: err instanceof Error ? err.message : String(err) });
+    res.status(500).json({ ok: false, status: 'error', peerId, error: caughtFailureText(err, `Synchronous trigger for peer ${peerId}`) });
   }
 }

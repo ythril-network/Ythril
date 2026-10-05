@@ -74,7 +74,7 @@ import { readStoredById, READ_CHUNK } from '../db/read-by-id.js';
 import { bulkWriteFailures, DUPLICATE_KEY, isDocumentRefusal, isDocumentRefusalCode, writeErrorCode } from '../db/write-errors.js';
 import { bumpSeq, noteSeqStored, seqRefusal } from '../util/seq.js';
 import { inChunks } from '../util/chunks.js';
-import { log, logSafe } from '../util/log.js';
+import { log, logSafe, peerList } from '../util/log.js';
 import { BRAIN_COLLECTIONS } from '../config/types.js';
 import type { BrainCollection, BrainEmbedRecordType } from '../config/types.js';
 import { RESTORED_LOCAL_FIELDS, DERIVED_LOCAL_FIELDS } from './local-only-fields.js';
@@ -227,10 +227,11 @@ export function warnArrivalsNotStored(
   where: string, spaceId: string, family: string, what: string, items: ReadonlyArray<string | ArrivalRefusal>,
 ): void {
   if (items.length === 0) return;
-  const shown = items.slice(0, NAMED_IN_SUMMARY)
-    .map(i => (typeof i === 'string' ? logSafe(i) : `${logSafe(i._id)} (${logSafe(i.reason)})`));
-  log.warn(`${logSafe(where)}: ${items.length} ${family} record(s) ${what} in space '${spaceId}': ${shown.join(', ')}`
-    + (items.length > shown.length ? `, and ${items.length - shown.length} more` : ''));
+  // Each item is rendered by `peerList`, which names the first `NAMED_IN_SUMMARY` and says how many more — never a slice
+  // before it and a hand-written tail after it, which bounded the count twice and the text not at all (bundle-30 I6, C15).
+  const named = items.map(i => (typeof i === 'string' ? i : `${i._id} (${i.reason})`));
+  log.warn(`${logSafe(where)}: ${items.length} ${logSafe(family)} record(s) ${logSafe(what)} in space '${logSafe(spaceId)}': `
+    + peerList(named, ', ', { count: NAMED_IN_SUMMARY }));
 }
 
 /** A seq the counter may carry, or `undefined` — what a restore's odd seq counts as, for the counter and collapse. */
@@ -446,7 +447,7 @@ export async function writeArrivals(
       if (bumped >= out.maxReceived) out.counterBehind = false;
     } catch (err) {
       out.counterBehind = true;
-      log.warn(`${logSafe(where)}: the seq counter of space '${spaceId}' could not be moved to ${logSafe(top)}: ${message(err)}`);
+      log.warn(`${logSafe(where)}: the seq counter of space '${logSafe(spaceId)}' could not be moved to ${logSafe(top)}: ${message(err)}`);
     }
   };
   /** What each document's replace carries from its stored copy — decided once per document. */
@@ -558,7 +559,7 @@ export async function writeArrivals(
           await enqueueIngestedRecords(spaceId, recordType!, landed);
         } catch (err) {
           log.warn(`${logSafe(where)}: ${landed.length} landed record(s) were not queued for embedding in space `
-            + `'${spaceId}': ${message(err)}`);
+            + `'${logSafe(spaceId)}': ${message(err)}`);
         }
       }
       // Over the file rows THIS chunk landed, so a write that failed deletes nothing; it never throws.

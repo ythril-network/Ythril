@@ -25,7 +25,7 @@ import { documentsAreOff } from './converters/extraction-level.js';
 import { mediaIsOff } from './converters/media-level.js';
 import { mimeTypeForPath } from './mime.js';
 import { toDocId } from '../util/paths.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
 import { spaceCollection } from '../db/space-collection.js';
 
 /** Embedding-pipeline state surfaced to the HTTP/MCP response after a write. */
@@ -109,7 +109,7 @@ export async function dispatchFileProcessing(
         asFilter<FileMetaDoc>({ _id: normId }),
       ) as FileMetaDoc | null;
       if (prior?.sha256 === input.sha256 && prior?.embeddingStatus === 'complete') {
-        log.debug(`Media file ${spaceId}/${filePath}: identical bytes already embedded — pipeline skipped`);
+        log.debug(`Media file ${peerText(spaceId)}/${peerText(filePath)}: identical bytes already embedded — pipeline skipped`);
         return { resolvedFormat, embeddingStatus: 'complete' };
       }
     }
@@ -122,7 +122,7 @@ export async function dispatchFileProcessing(
     // render; that status just has no producer now.)
     if (input.bytes > maxBytes) {
       await setMediaStatus('skipped');
-      log.info(`Media file ${spaceId}/${filePath} skipped: ${input.bytes} bytes exceeds maxFileSizeBytes (${maxBytes})`);
+      log.info(`Media file ${peerText(spaceId)}/${peerText(filePath)} skipped: ${input.bytes} bytes exceeds maxFileSizeBytes (${maxBytes})`);
       return { resolvedFormat, embeddingStatus: 'skipped' };
     }
     // This class is off for this space: store the file, analyse nothing, and say so terminally.
@@ -130,12 +130,12 @@ export async function dispatchFileProcessing(
     // from a stuck queue, and the reason recall comes back empty would be nowhere to be found.
     if (mediaIsOff(spaceId, mediaType)) {
       await setMediaStatus('skipped');
-      log.info(`Media file ${spaceId}/${filePath} not analysed: ${mediaType} analysis is off for this space`);
+      log.info(`Media file ${peerText(spaceId)}/${peerText(filePath)} not analysed: ${mediaType} analysis is off for this space`);
       return { resolvedFormat, embeddingStatus: 'skipped' };
     }
     await setMediaStatus('pending');
     await enqueueMediaJob(spaceId, filePath, mimeType, mediaType).catch(err => {
-      log.warn(`enqueueMediaJob error for ${spaceId}/${filePath}: ${err instanceof Error ? err.message : String(err)}`);
+      log.warn(`enqueueMediaJob error for ${peerText(spaceId)}/${peerText(filePath)}: ${peerText(err)}`);
     });
     return { resolvedFormat, embeddingStatus: 'pending' };
   }
@@ -151,17 +151,17 @@ export async function dispatchFileProcessing(
         asFilter<FileMetaDoc>({ _id: normId }),
         { $set: { embeddingStatus: 'skipped' } },
       );
-      log.info(`Document ${spaceId}/${filePath} not analysed: document extraction is off for this space`);
+      log.info(`Document ${peerText(spaceId)}/${peerText(filePath)} not analysed: document extraction is off for this space`);
       return { resolvedFormat, embeddingStatus: 'skipped' };
     }
     // Document (md/txt/html/pdf/docx/epub): always converted by the background worker.
     // Clear stale conversion artifacts first so overwriting a document does not leave
     // duplicate chunk records behind.
     await deleteConversionArtifacts(spaceId, filePath).catch(err => {
-      log.warn(`deleteConversionArtifacts error for ${spaceId}/${filePath}: ${err instanceof Error ? err.message : String(err)}`);
+      log.warn(`deleteConversionArtifacts error for ${peerText(spaceId)}/${peerText(filePath)}: ${peerText(err)}`);
     });
     await enqueueTextJob(spaceId, filePath, resolvedFormat, mimeType).catch(err => {
-      log.warn(`enqueueTextJob error for ${spaceId}/${filePath}: ${err instanceof Error ? err.message : String(err)}`);
+      log.warn(`enqueueTextJob error for ${peerText(spaceId)}/${peerText(filePath)}: ${peerText(err)}`);
     });
     return { resolvedFormat, embeddingStatus: 'pending' };
   }

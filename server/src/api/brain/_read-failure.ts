@@ -10,7 +10,7 @@
  * says `retryable` in a field rather than in prose.
  */
 import type express from 'express';
-import { classifyReadFailure } from '../../brain/store-failure.js';
+import { classifyAndReportFailure } from '../../brain/store-failure.js';
 
 /**
  * Answer a read failure with the truth about whose fault it is.
@@ -22,7 +22,8 @@ import { classifyReadFailure } from '../../brain/store-failure.js';
  * doing on the 4xx-shaped failures.
  */
 export function sendReadFailure(res: express.Response, err: unknown): void {
-  const f = classifyReadFailure(err);
+  // The answer is in OUR words when the error is the store's (`Q-361`); the driver's own text is logged, once, by this call.
+  const f = classifyAndReportFailure(err, 'A read');
   if (f.retryAfterSeconds !== undefined) res.setHeader('Retry-After', String(f.retryAfterSeconds));
   res.status(f.status).json({
     error: f.error,

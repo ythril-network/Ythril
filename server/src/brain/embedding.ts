@@ -5,7 +5,7 @@ import { getDataRoot, getEmbeddingConfig, getModelSlots } from '../config/loader
 import { ssrfSafeFetch } from '../util/ssrf.js';
 import { allowPrivateForSlot } from '../config/model-egress-policy.js';
 import { embeddingsUrlFor } from '../files/converters/vlm-endpoint.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
 import { embeddingDurationSeconds, embeddingQueueDepth, embeddingRetryTotal } from '../metrics/registry.js';
 import { slotTimeoutMs } from '../config/model-slots.js';
 
@@ -147,14 +147,14 @@ function getLocalPipeline(modelId: string): Promise<LocalPipeline> {
     if (offline) env.allowRemoteModels = false;
     else if (!cached) {
       log.warn(
-        `Embedding model '${modelId}' is not in the local cache (${cacheDir}), so loading it will DOWNLOAD it `
+        `Embedding model '${peerText(modelId)}' is not in the local cache (${peerText(cacheDir)}), so loading it will DOWNLOAD it `
         + 'from huggingface.co — roughly 274 MB, and that request carries this instance\'s IP address and the '
         + 'model id. Set HF_HUB_OFFLINE=1 (or YTHRIL_MODELS_OFFLINE=1) to forbid it, and bake the model into '
         + 'your image instead. The published Ythril image already ships with the flag set.',
       );
     }
 
-    log.info(`Loading embedding model ${modelId} (cache: ${cacheDir}${offline ? ', offline' : ''})`);
+    log.info(`Loading embedding model ${peerText(modelId)} (cache: ${peerText(cacheDir)}${offline ? ', offline' : ''})`);
     let pipe: unknown;
     try {
       pipe = await pipeline('feature-extraction', modelId);
@@ -173,7 +173,7 @@ function getLocalPipeline(modelId: string): Promise<LocalPipeline> {
       }
       throw err;
     }
-    log.info(`Embedding model ready: ${modelId}`);
+    log.info(`Embedding model ready: ${peerText(modelId)}`);
     return pipe as LocalPipeline;
   })();
   return _pipelineInit;
@@ -314,7 +314,7 @@ async function embedViaHttp(
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    log.warn(`Embedding endpoint unreachable (${cfg.baseUrl}): ${msg}`);
+    log.warn(`Embedding endpoint unreachable (${peerText(cfg.baseUrl)}): ${peerText(msg)}`);
     throw new Error(
       `Could not reach embedding endpoint at ${cfg.baseUrl}. ` +
       `Make sure an embedding server (e.g. Ollama) is running and configured.`,

@@ -35,6 +35,7 @@ import { getConfig } from '../../config/loader.js';
 import { resolveWriteTarget, isStrictLinkage, findFirstAcrossMembers } from '../../spaces/proxy.js';
 import { unknownFieldWarnings } from './unknown-fields.js';
 import { webhookToken } from './_shared.js';
+import { caughtFailureText } from '../../brain/store-failure.js';
 
 export const linksRouter = Router();
 
@@ -91,7 +92,7 @@ linksRouter.post('/spaces/:spaceId/links', globalRateLimit, requireSpaceAuth, de
       await assertRefsResolve(wt.target, 'from', fromKind as RefKind, [from]);
       await assertRefsResolve(wt.target, 'to', toKind as RefKind, [to]);
     } catch (err) {
-      res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+      res.status(400).json({ error: caughtFailureText(err, 'resolve the link endpoints') });
       return;
     }
   }
@@ -103,7 +104,7 @@ linksRouter.post('/spaces/:spaceId/links', globalRateLimit, requireSpaceAuth, de
     // The only failure `addLink` raises that is the caller's fault: the record the link would hang off is
     // not there. A missing `from` is a 404 about the record, not a 400 about the body.
     const msg = err instanceof Error ? err.message : String(err);
-    if (/not found$/.test(msg)) { res.status(404).json({ error: msg }); return; }
+    if (/not found$/.test(msg)) { res.status(404).json({ error: caughtFailureText(err, 'add a link') }); return; }
     throw err;
   }
 

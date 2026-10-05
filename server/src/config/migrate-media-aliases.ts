@@ -1,5 +1,5 @@
 import type { Config } from './types.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
 
 /**
  * The four legacy `mediaEmbedding` spellings, and the modern field each one moved to.
@@ -60,6 +60,6 @@ export function migrateMediaAliasesOnBoot(config: Config, saveConfig: (c: Config
     saveConfig(config);
     log.info('Migrated mediaEmbedding ollamaUrl/visionModel/whisperUrl/whisperModel → vision.*/stt.*');
   } catch (err) {
-    log.warn(`Could not persist mediaEmbedding alias migration (will retry next boot): ${err}`);
+    log.warn(`Could not persist mediaEmbedding alias migration (will retry next boot): ${peerText(err)}`);
   }
 }

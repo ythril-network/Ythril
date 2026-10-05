@@ -15,12 +15,13 @@
 
 import {
   claimNextEmbedJob, completeEmbedJob, failEmbedJob, resetStalledEmbedJobs, reviveFailedEmbedJobs,
-  currentEmbedWorkEpoch, waitForEmbedWork, wakeEmbedWorkers,
+  currentEmbedWorkEpoch, waitForEmbedWork, wakeEmbedWorkers, isTransientEmbedError,
 } from './embed-queue.js';
 import { SERVER_VERSION } from '../util/server-version.js';
 import { embedStoredRecord } from './embed-record.js';
 import { getConfig } from '../config/loader.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
+import { storedFailureText } from './store-failure.js';
 
 /** Idle sleep. Work announces itself, so this is only the backstop for a missed announcement. */
 const IDLE_POLL_MS = 30_000;
@@ -66,10 +67,15 @@ export async function runOneEmbedJob(): Promise<boolean> {
     const msg = err instanceof Error ? err.message : String(err);
     // `transientFailures` comes from the job the worker already holds — no second read, and no
     // `findOneAndUpdate` to recover a post-increment value.
-    await failEmbedJob(job.spaceId, job.recordType, job.recordId, job.attempts, msg, job.transientFailures ?? 0, job.claimToken);
+    //
+    // What is STORED is what `GET …/embedding-queue/records` and `list_embed_jobs` serve to a read token: a driver's
+    // message names the host, the port and the namespace, so a failure on the store's side is stored as our sentence and
+    // the error's class (`storedFailureText`), and our own error keeps its message (`Q-361`).
+    await failEmbedJob(job.spaceId, job.recordType, job.recordId, job.attempts, storedFailureText(err, 'embed a record'),
+      job.transientFailures ?? 0, job.claimToken, isTransientEmbedError(msg));
     // debug, not warn: an embedder that is down produces one of these per queued record, and a
     // thousand warnings say nothing the first one did not. The failed count is the signal.
-    log.debug(`Embed job ${job._id} in ${job.spaceId} failed (attempt ${job.attempts}): ${msg}`);
+    log.debug(`Embed job ${peerText(job._id)} in ${peerText(job.spaceId)} failed (attempt ${job.attempts}): ${peerText(msg)}`);
   }
   return true;
 }
@@ -82,7 +88,7 @@ async function loop(): Promise<void> {
     try {
       claimed = await runOneEmbedJob();
     } catch (err) {
-      log.warn(`Brain embedding worker: claim failed: ${err instanceof Error ? err.message : String(err)}`);
+      log.warn(`Brain embedding worker: claim failed: ${peerText(err)}`);
     }
     if (claimed) continue;
     await waitForEmbedWork(IDLE_POLL_MS, epoch);

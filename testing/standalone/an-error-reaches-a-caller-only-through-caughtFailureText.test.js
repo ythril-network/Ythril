@@ -54,7 +54,17 @@ const SANITIZERS = ['caughtFailureText', 'classifyReadFailure', 'classifyCheckEr
  *
  * @type {Record<string, string>}
  */
-const EXEMPT = {};
+const EXEMPT = {
+  // The one place the driver's text IS the answer: a connection TEST of the URI an administrator just typed. The store it
+  // names is the CANDIDATE, not this instance's own, and the whole point of the answer is why that URI did not connect.
+  'server/src/db/conn-test.ts: error: err instanceof Error ? err.message : String(err)':
+    'the text is about the candidate Mongo URI an administrator (MFA) typed to be tested, not this instance\'s store: '
+    + 'the reason it did not connect is the answer the test exists to give, and the host in it is the one they supplied',
+  // A separate process with no store: it never opens a database, so no error it catches can be a driver's.
+  'server/src/local-agent-connector/index.ts: res.status(500).json({ error: msg })':
+    'the local agent connector is a separate process that never connects to MongoDB (it drives cloudflared on the '
+    + 'operator\'s machine), so the error it answers cannot be a driver\'s, and importing the classifier would load the driver into it',
+};
 
 const sources = new Map(trackedSources('server/src', { floor: 400, specs: false })
   .map(f => [f, readFileSync(join(REPO_ROOT, f), 'utf8')]));

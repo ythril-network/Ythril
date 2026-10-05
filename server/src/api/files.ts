@@ -55,6 +55,7 @@ import { registerUploadRoute } from './files-upload.js';
 import { webhookToken, requireQueryPath } from './files-request.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { answerSpillPath } from './brain/spills.js';
+import { caughtFailureText } from '../brain/store-failure.js';
 
 export const fileStoreRouter = Router();
 
@@ -370,7 +371,7 @@ fileStoreRouter.post(
       res.status(201).json({ created: dirPath });
     } catch (err) {
       if (err instanceof RangeError) {
-        res.status(400).json({ error: err.message });
+        res.status(400).json({ error: caughtFailureText(err, 'create a directory') });
         return;
       }
       log.warn(`createDir error for space ${targetSpace}, path ${dirPath}: ${err}`);
@@ -432,7 +433,7 @@ fileStoreRouter.post(
       // Validate the path doesn't escape the space root
       resolveSafePath(targetSpace, filePath);
     } catch (err) {
-      res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+      res.status(400).json({ error: caughtFailureText(err, 'resolve a file path') });
       return;
     }
 
@@ -482,7 +483,7 @@ fileStoreRouter.delete('/:spaceId', globalRateLimit, requireSpaceAuth, denyReadO
     // path may stay under the root while a symlink component points outside it.
     await assertNoSymlinkEscape(targetSpace, absPath);
   } catch (err) {
-    res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+    res.status(400).json({ error: caughtFailureText(err, 'resolve a file path for delete') });
     return;
   }
 
@@ -577,7 +578,7 @@ fileStoreRouter.delete('/:spaceId', globalRateLimit, requireSpaceAuth, denyReadO
     res.status(204).end();
   } catch (err) {
     if (err instanceof RangeError) {
-      res.status(400).json({ error: err.message });
+      res.status(400).json({ error: caughtFailureText(err, 'delete a file') });
       return;
     }
     log.warn(`deleteFile error for space ${targetSpace}, path ${filePath}: ${err}`);
@@ -615,7 +616,7 @@ fileStoreRouter.patch('/:spaceId', globalRateLimit, requireSpaceAuth, denyReadOn
     res.json({ from: srcPath, to: destination });
   } catch (err) {
     if (err instanceof RangeError) {
-      res.status(400).json({ error: err.message });
+      res.status(400).json({ error: caughtFailureText(err, 'move a file') });
       return;
     }
     log.warn(`moveFile error for space ${targetSpace}, ${srcPath} → ${destination}: ${err}`);

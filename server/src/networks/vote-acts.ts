@@ -66,7 +66,7 @@ export function castVoteAct(id: string, roundId: string, input: unknown): Networ
   concludeRoundIfReady(net, round);
 
   if (admitPassedJoin(net, cfg.instanceId, round)) {
-    log.info(`Join vote ${logSafe(round.roundId)} passed — added member ${logSafe(round.subjectLabel)} to network ${net.id}`);
+    log.info(`Join vote ${logSafe(round.roundId)} passed — added member ${logSafe(round.subjectLabel)} to network ${logSafe(net.id)}`);
   }
   // Deletion, wipe and addition: the function all three conclusion sites call (X-5, F-38.4).
   applyConcludedSpaceRounds(net, [round], 'local vote');

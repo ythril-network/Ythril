@@ -36,6 +36,8 @@
  * capped transfer still makes a full page-set of progress each cycle.
  */
 
+import { peerText, peerList } from '../util/log.js';
+
 /** What one transfer within a cycle can vouch for. */
 export interface TransferOutcome {
   /**
@@ -93,8 +95,8 @@ export function truncatedTransfers(
 export function truncationWarn(
   what: string, peerLabel: string, spaceId: string, status: string | number, deliveredThrough: number,
 ): string {
-  return `${what} ${peerLabel}: ${status} — delivered through seq ${deliveredThrough}, so the watermark for `
-    + `space '${spaceId}' is held there rather than advanced past records that did not transfer.`;
+  return `${peerText(what)} ${peerText(peerLabel)}: ${peerText(status)} — delivered through seq ${deliveredThrough}, so the watermark for `
+    + `space '${peerText(spaceId)}' is held there rather than advanced past records that did not transfer.`;
 }
 
 /**
@@ -169,7 +171,7 @@ export function resolveWatermark<T extends TransferOutcome>(opts: {
   opts.heldBack?.push(...heldBack);
   if (heldBack.length > 0) {
     opts.warn(
-      `Sync ${opts.direction} from/to ${opts.peerLabel} space '${opts.spaceId}': ${heldBack.join(', ')} stopped `
+      `Sync ${opts.direction} from/to ${peerText(opts.peerLabel)} space '${peerText(opts.spaceId)}': ${peerList(heldBack)} stopped `
       + `early, so the ${opts.direction} watermark advances only to ${at}. The rest is retried next cycle.`,
     );
   }

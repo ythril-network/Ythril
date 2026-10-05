@@ -319,12 +319,18 @@ export async function failEmbedJob(
   errorMessage: string,
   transientFailures = 0,
   claimToken?: string | null,
+  /**
+   * Whether this failure is transient. Defaults to what `isTransientEmbedError` says of `errorMessage`; a caller that
+   * stores a SANITISED text (the worker: `storedFailureText`, `Q-361`) decides from the error's own message first,
+   * because the sentence stored in place of a driver's text names none of the words that classifier reads.
+   */
+  transient: boolean = isTransientEmbedError(errorMessage),
 ): Promise<void> {
   const now = new Date().toISOString();
   const filter = claimedBy(recordType, recordId, claimToken);
   const lastError = errorMessage.slice(0, 500);
 
-  if (isTransientEmbedError(errorMessage)) {
+  if (transient) {
     const failures = transientFailures + 1;
     await jobs(spaceId).updateOne(
       asFilter<BrainEmbedJobDoc>(filter),
@@ -665,8 +671,8 @@ export async function enqueueIngestedRecords(
     }))), { ordered: false });
     _signal.markSpaceMayHaveWork(spaceId);
   } catch (err) {
-    log.warn(`Embed enqueue failed for ${wanted.length} arriving ${recordType} record(s) in space '${spaceId}': `
+    log.warn(`Embed enqueue failed for ${wanted.length} arriving ${recordType} record(s) in space '${logSafe(spaceId)}': `
       + `${logSafe(err instanceof Error ? err.message : String(err))}. They are stored without a vector; `
-      + `POST /api/spaces/${spaceId}/reembed queues them again.`);
+      + `POST /api/spaces/${logSafe(spaceId)}/reembed queues them again.`);
   }
 }
