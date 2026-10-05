@@ -34,6 +34,7 @@ import { syncScheduleRefusal } from '../sync/schedule.js';
 import { MIN_PEER_VERSION, peerFloorRefusal } from '../sync/peer-floor.js';
 import { peerSafeFetch } from '../sync/peer-fetch.js';
 import { log, logSafe } from '../util/log.js';
+import { caughtFailureText } from '../brain/store-failure.js';
 import { networkRole } from './network-role.js';
 import { addSpacesToNetwork, widenPeerTokens } from './network-spaces.js';
 import { concludeRoundIfReady } from '../sync/governance.js';
@@ -396,7 +397,7 @@ export async function leaveNetworkAct(caller: Caller, id: string): Promise<Netwo
       });
       if (!r.ok) warnings.push(`${member.label}: HTTP ${r.status}`);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = caughtFailureText(err, 'tell a peer this instance left the network');
       log.warn(`member_departed to ${logSafe(member.label)}: ${logSafe(msg)}`);
       warnings.push(`${member.label}: ${msg}`);
     }

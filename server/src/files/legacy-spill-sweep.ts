@@ -31,6 +31,7 @@ import { isProxy } from '../spaces/proxy.js';
 import { logInternalAudit } from '../audit/audit.js';
 import { LEGACY_SPILL_SWEEP_OPERATION } from '../audit/middleware.js';
 import { log } from '../util/log.js';
+import { caughtFailureText } from '../brain/store-failure.js';
 
 
 export interface LegacySpillSweep {
@@ -69,7 +70,7 @@ export async function sweepLegacySpills(): Promise<LegacySpillSweep> {
         });
         removed.push(rel);
       } catch (err) {
-        const error = err instanceof Error ? err.message : String(err);
+        const error = caughtFailureText(err, 'remove a legacy read spill');
         out.failed.push({ spaceId, path: rel, error });
         log.warn(`Legacy spill sweep: could not remove ${spaceId}/${rel}: ${error}`);
       }
