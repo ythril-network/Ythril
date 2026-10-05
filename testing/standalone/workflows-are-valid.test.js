@@ -27,6 +27,8 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { load } from 'js-yaml';
+import { loadCi, parseWorkflow, triggersOf } from '../_shared/ci-workflow.mjs';
+import { GOOD_CI } from '../_shared/ci-workflow-fixture.mjs';
 
 const DIR = join(process.cwd(), '.github', 'workflows');
 const files = readdirSync(DIR).filter(f => f.endsWith('.yml') || f.endsWith('.yaml'));
@@ -78,5 +80,78 @@ describe('every workflow would start', () => {
       assert.match(raw, /\$\{\{\s*secrets\.[A-Z_]+\s*\}\}/,
         `${f}: references a token but never interpolates a secret`);
     }
+  });
+});
+
+// ───────────────────────────────────────── ci.yml: no privileged trigger, no secret ─────────────────────────────────────────
+
+/**
+ * The events that run a workflow in the BASE repository's context, with its secrets and a write token, on behalf of
+ * a pull request from anywhere. `ci.yml` installs and runs the code of the pull request it is triggered by — `npm ci`
+ * executes its install scripts, the suites execute its tests — so under either of these a fork's pull request would
+ * run its own code with this repository's credentials. `cla.yml` uses `pull_request_target` legitimately (it runs a
+ * pinned action and no repository code), which is why this is asked of `ci.yml` and not of every workflow.
+ */
+const PRIVILEGED_TRIGGERS = ['pull_request_target', 'workflow_run'];
+
+const privilegedTriggers = (doc) => [...triggersOf(doc)].filter((t) => PRIVILEGED_TRIGGERS.includes(t));
+
+/**
+ * Where a workflow reaches for a secret, or for the Test-Run recorder's variables, by key or by value.
+ *
+ * `ci.yml` holds no credential: the recorder's write token lives on a maintainer's machine and nowhere in GitHub, so a
+ * `secrets.` reference here is either a credential that should not be there or a step that would run recording from
+ * CI — which `YTHRIL_TEST_RUNS_*` (the recorder's URL and token) must never reach. Read from the parsed document, so a
+ * comment explaining the rule does not trip it and an `env:` key that does is found whatever the string around it.
+ */
+function secretReaches(doc) {
+  const found = [];
+  const walk = (node, path) => {
+    if (typeof node === 'string') {
+      if (/\bsecrets\s*\./.test(node)) found.push(`${path}: ${node.trim().slice(0, 80)}`);
+      if (/YTHRIL_TEST_RUNS/.test(node)) found.push(`${path}: ${node.trim().slice(0, 80)}`);
+    } else if (Array.isArray(node)) {
+      node.forEach((n, i) => walk(n, `${path}[${i}]`));
+    } else if (node && typeof node === 'object') {
+      for (const [k, v] of Object.entries(node)) {
+        if (k === 'secrets' || /YTHRIL_TEST_RUNS/.test(k)) found.push(`${path}.${k}`);
+        walk(v, `${path}.${k}`);
+      }
+    }
+  };
+  walk(doc, '$');
+  return found;
+}
+
+describe('ci.yml runs unprivileged and holds no credential', () => {
+  const CI = loadCi();
+
+  it('it is triggered by pull_request and push, and by neither pull_request_target nor workflow_run', () => {
+    assert.ok(triggersOf(CI).size >= 2, `ci.yml's triggers are ${[...triggersOf(CI)]}: the derivation is broken`);
+    assert.deepEqual(privilegedTriggers(CI), [],
+      'ci.yml would run a fork\'s code with the base repository\'s secrets and write token');
+  });
+
+  it('it reads no secret and never reaches the recorder\'s variables', () => {
+    const found = secretReaches(CI);
+    assert.deepEqual(found, [], `ci.yml reaches for a credential:\n  ${found.join('\n  ')}`);
+  });
+
+  it('the scanners fire on each shape they exist for, and not on the conforming workflow', () => {
+    const wf = (on, body = '') => parseWorkflow(`on: ${on}\njobs:\n  a:\n    runs-on: x\n${body}`, 'fixture');
+    for (const on of ['pull_request_target', '[push, workflow_run]', '{ workflow_run: { workflows: [CI] } }']) {
+      assert.ok(privilegedTriggers(wf(on)).length, `${on} was not flagged`);
+    }
+    for (const on of ['push', '[push, pull_request]', '{ pull_request: { branches: [main] } }']) {
+      assert.deepEqual(privilegedTriggers(wf(on)), [], `${on} was flagged`);
+    }
+    assert.ok(secretReaches(wf('push', "    env:\n      T: ${{ secrets.GITHUB_TOKEN }}\n")).length, 'a secrets. reference was not flagged');
+    assert.ok(secretReaches(wf('push', '    env:\n      YTHRIL_TEST_RUNS_URL: x\n')).length, 'the recorder\'s variable as a key was not flagged');
+    assert.ok(secretReaches(wf('push', "    steps:\n      - run: 'echo $YTHRIL_TEST_RUNS_TOKEN'\n")).length, 'the recorder\'s variable in a script was not flagged');
+    assert.ok(secretReaches(wf('push', '    secrets: inherit\n')).length, '`secrets:` was not flagged');
+    assert.deepEqual(secretReaches(wf('push', '    # secrets.X and YTHRIL_TEST_RUNS_URL are named in a comment\n    steps:\n      - run: echo hi\n')), [],
+      'a comment was read as code');
+    assert.deepEqual(secretReaches(parseWorkflow(GOOD_CI, 'fixture')), [], 'the conforming workflow was flagged');
+    assert.deepEqual(privilegedTriggers(parseWorkflow(GOOD_CI, 'fixture')), []);
   });
 });
