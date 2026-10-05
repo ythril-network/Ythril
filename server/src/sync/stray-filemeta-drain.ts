@@ -103,7 +103,7 @@ async function drainSpace(spaceId: string, pageSize: number, maxPages: number, s
         { from: 'a 4.0-5.6.1 pull (stray filemeta collection)', fillOnly: true });
       n.merged += out.updated.length + out.inserted.length;
       n.complete += out.complete.length;
-      n.newer += out.newerLocal.length;
+      n.newer += out.newerLocal.length + out.diverged.length;
       n.refused += out.refused.length + out.storeRefused.length + out.derived.length + out.duplicates.length;
       if (out.counterBehind) {
         // The writer stored what it could, but the counter may be behind it: keep the page, so nothing is answered
