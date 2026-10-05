@@ -234,8 +234,8 @@ export async function embedStoredRecord(
   // stored (`Q-94`). Left as it was, a suppressed record kept matching the text it held when suppression began — a
   // deleted property went on being found, and shown as the record's matched text.
   if (embeddingSuppressedFor(spaceId, recordType, doc) || (isDerived(doc) && await ancestorSuppressed(spaceId, doc))) {
-    return await writeIfUnchanged({ $set: { matchedText: text }, $unset: { embedding: '', embeddingModel: '' } })
-      ? 'excluded' : 'superseded';
+    if (!await writeIfUnchanged({ $set: { matchedText: text }, $unset: { embedding: '', embeddingModel: '' } })) return 'superseded';
+    return 'excluded';
   }
 
   // Every successful update enqueues an embed job, unconditionally and for good reasons — the enqueue is also
@@ -277,6 +277,6 @@ export async function embedStoredRecord(
   // `seq` is deliberately NOT advanced. An embedding is a DERIVED field — `merkle.ts` excludes it from
   // replication precisely because each peer computes its own — so bumping `seq` here would broadcast a
   // no-op change to every peer in every network the space belongs to, on every embedding, forever.
-  return await writeIfUnchanged({ $set: { embedding: result.vector, embeddingModel: result.model, matchedText: text } })
-    ? 'embedded' : 'superseded';
+  if (!await writeIfUnchanged({ $set: { embedding: result.vector, embeddingModel: result.model, matchedText: text } })) return 'superseded';
+  return 'embedded';
 }

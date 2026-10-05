@@ -448,9 +448,9 @@ export async function writeArrivals(
   const kept = arriving.filter(d => !writing.has(d));
   // A copy at the stored seq that is not the stored text is a divergence, not "newer here" (`Q-232`): a push door forks
   // it, a pull names it. Only an equal seq can diverge, so only those are read for their text — a rare read.
-  const sameSeq = family === 'facts' && !restore ? kept.filter(d => stored.get(d._id)?.seq === d.seq) : [];
-  const texts = sameSeq.length > 0
-    ? await readStoredById<Doc>(collName, sameSeq.map(d => d._id), { seq: 1, fact: 1 }) : new Map<string, Doc>();
+  const tied = family === 'facts' && !restore ? kept.filter(d => stored.get(d._id)?.seq === d.seq) : [];
+  const texts = tied.length > 0
+    ? await readStoredById<Doc>(collName, tied.map(d => d._id), { seq: 1, fact: 1 }) : new Map<string, Doc>();
   for (const d of kept) (divergesFrom(texts.get(d._id), d) ? out.diverged : out.newerLocal).push(d._id);
 
   // ── the write, a chunk at a time ──────────────────────────────────────────────────────────────────────────────

@@ -40,8 +40,8 @@ import { enqueueMediaJob } from '../files/media/job-queue.js';
 import { resolveInputFormat } from '../files/converters/pipeline.js';
 import { mimeTypeForPath } from '../files/mime.js';
 import { createCoalescingRunner } from './coalescing-runner.js';
-import { arrivalId } from './arrivals.js';
-import { writePulledPage } from './pull-page.js';
+import { writeArrivals, type ArrivalOutcome } from './arrivals.js';
+import { settlePulledPage } from './pull-page.js';
 import { syncFiles } from './file-sync.js';
 import {
   syncCyclesTotal,
@@ -63,7 +63,7 @@ import { resolveSafePath } from '../files/sandbox.js';
 import type { FileMetaDoc } from '../config/types.js';
 import { acceptVoteCast, pinMemberSigningKey, castForWire } from '../util/signing.js';
 import { assertPeerAtFloor } from './peer-floor.js';
-import { REPLICATED_FAMILIES, type PayloadKey, type ReplicatedFamily } from './replicated-families.js';
+import { REPLICATED_FAMILIES, RECORD_TYPE_OF, type PayloadKey, type ReplicatedFamily } from './replicated-families.js';
 import { spaceCollection } from '../db/space-collection.js';
 
 // Timeout for every outbound fetch to a peer.
@@ -847,22 +847,40 @@ async function pullFromPeer(
        * member-level catch, which counts toward PEER UNREACHABLE and names the driver error and nothing else. A
        * document the STORE refuses holds the position the same way (cut `C3`: never counted as delivered).
        */
-      const page = await writePulledPage(spaceId, family, pageDocs, member.label ?? member.instanceId, deliveredThrough);
-      if (page.held) { truncated = true; break; }
-      const { written } = page;
-      /*
-       * The position advances past a document the receiver decided about — a refused one (counted in no total) and a
-       * kept-local one (`diverged`: the same seq with other text, reported by `writePulledPage`; its text is not stored,
-       * so it is not counted as pulled either, but fetching it every cycle would change nothing).
-       */
-      const refused = new Set(written.refused.map(r => r._id));
-      const keptLocal = new Set(written.diverged);
-      for (const doc of pageDocs as FactDoc[]) {
-        if (refused.has(arrivalId(doc))) continue;
-        if (!keptLocal.has(doc._id)) count++;
-        if (doc.seq > maxSeq) maxSeq = doc.seq;
-        if (doc.seq > highSeq && doc.author?.instanceId === member.instanceId) highSeq = doc.seq;
+      let written: ArrivalOutcome;
+      try {
+        written = await writeArrivals(spaceId, family.collection, RECORD_TYPE_OF[family.collection], pageDocs,
+          { from: member.label ?? member.instanceId });
+      } catch (err) {
+        truncated = true;
+        log.warn(`sync pull ${spaceId} ${family.collection}: record write failed: `
+          + `${logSafe(err instanceof Error ? err.message : String(err))} (from ${logSafe(member.label ?? member.instanceId)}). `
+          + `This is this instance's database, not the peer: the transfer holds at ${logSafe(deliveredThrough)} and the page `
+          + 'is fetched again next cycle.');
+        break;
       }
+      if (written.counterBehind) {
+        // `Q-218` R3: the page is stored, but this counter may be behind it, so the position is not vouched for.
+        truncated = true;
+        log.warn(`sync pull ${spaceId} ${family.collection}: record write failed: the seq counter could not be moved `
+          + `past the page from ${logSafe(member.label ?? member.instanceId)}. The transfer holds at ${logSafe(deliveredThrough)} `
+          + 'and the page is fetched again next cycle.');
+        break;
+      }
+      if (written.storeRefused.length > 0) {
+        truncated = true;
+        // The documents are named once, by the writer's own summary (`warnArrivalsNotStored`); this says what it costs.
+        log.warn(`sync pull ${spaceId} ${family.collection}: record write failed: the store refused `
+          + `${written.storeRefused.length} document(s) from ${logSafe(member.label ?? member.instanceId)}. The `
+          + `transfer holds at ${logSafe(deliveredThrough)} and the page is fetched again next cycle.`);
+        break;
+      }
+      // What the page said about itself (`sync/pull-page.ts`): the reports an operator reads and what it adds to the
+      // transfer's totals and position — a refused document is counted in nothing, a kept-local one only moves the position.
+      const seen = settlePulledPage(spaceId, family, pageDocs, written, member);
+      count += seen.count;
+      maxSeq = Math.max(maxSeq, seen.maxSeq);
+      highSeq = Math.max(highSeq, seen.highSeq);
       // Only after the page is APPLIED. Recording it before the write would vouch for records that a throw
       // between the two would have lost.
       if (maxSeq > deliveredThrough) deliveredThrough = maxSeq;
